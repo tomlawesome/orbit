@@ -13,7 +13,9 @@ import type { ManagedPath } from "./install-transaction";
  * scripts/configuration.sh and scripts/engine-check.sh left the list with
  * #1210: the engine inside the image does their work now. The two
  * recovery-bundle scripts joined with #1212: an operator needs them in the
- * deployment, beside backup.sh.
+ * deployment, beside backup.sh. scripts/end-maintenance.sh is the emergency
+ * reopen path the administrator docs give, so it must be in the deployment,
+ * not only the source tree.
  */
 export const DEPLOYMENT_ASSETS: readonly string[] = [
   "docker-compose.yml",
@@ -27,6 +29,7 @@ export const DEPLOYMENT_ASSETS: readonly string[] = [
   "scripts/repair.sh",
   "scripts/export-recovery-bundle.sh",
   "scripts/import-recovery-bundle.sh",
+  "scripts/end-maintenance.sh",
 ];
 
 /** The bundled shell scripts: each must pass `bash -n` (guarantee #45; deployment-assets.test.ts checks the sources the image copies). */

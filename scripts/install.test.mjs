@@ -68,6 +68,7 @@ const deploymentAssets = [
   "scripts/repair.sh",
   "scripts/export-recovery-bundle.sh",
   "scripts/import-recovery-bundle.sh",
+  "scripts/end-maintenance.sh",
 ];
 
 // A release manifest handed over already verified, as get-orbit.sh or the
