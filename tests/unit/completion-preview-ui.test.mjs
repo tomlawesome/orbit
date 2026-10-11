@@ -50,20 +50,20 @@ describe("askCommand, the dry run read whole", () => {
   it("answers the engine's preview beside no refusal, sending the command with dryRun", async () => {
     answers.push({ status: 200, body: { preview: { nextDate: "2027-10-10" } } });
     const { askCommand } = await workspace();
-    await expect(askCommand(command)).resolves.toEqual({ refusal: null, preview: { nextDate: "2027-10-10" } });
+    await expect(askCommand(command)).resolves.toEqual({ refusal: null, refusalCode: null, preview: { nextDate: "2027-10-10" } });
     expect(sent).toEqual([{ ...command, dryRun: true }]);
   });
 
   it("answers no refusal and no preview for an empty verdict (a one-off, or another command)", async () => {
     answers.push({ status: 200, body: {} });
     const { askCommand } = await workspace();
-    await expect(askCommand(command)).resolves.toEqual({ refusal: null, preview: null });
+    await expect(askCommand(command)).resolves.toEqual({ refusal: null, refusalCode: null, preview: null });
   });
 
   it("answers the refusal's words and no preview when the engine refuses", async () => {
     answers.push({ status: 200, body: { refusal: { code: "date_in_future", message: "not yet — that day is still to come" } } });
     const { askCommand } = await workspace();
-    await expect(askCommand(command)).resolves.toEqual({ refusal: "not yet — that day is still to come", preview: null });
+    await expect(askCommand(command)).resolves.toEqual({ refusal: "not yet — that day is still to come", refusalCode: "date_in_future", preview: null });
   });
 
   it("answers null when the server cannot be heard, a failed call or a network error", async () => {

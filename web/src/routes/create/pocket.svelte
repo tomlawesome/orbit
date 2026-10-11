@@ -3,7 +3,7 @@
   import { beforeNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { WorkspaceError, applyCommand, attachItemDocument, readWorkspace } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand, attachItemDocument, checkDraftCommand, readWorkspace } from "$lib/data/workspace.js";
   import { saveProblem } from "$lib/data/metadata-status.js";
   import {
     CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
@@ -217,7 +217,7 @@
       ? createCommandOf($state.snapshot(entry), { householdId: household.id, currency: household.currency ?? "GBP", id: draftId })
       : null;
   }
-  const dryRun = dryRunner({ onanswer: (answer) => { refusal = answer; } });
+  const dryRun = dryRunner({ onanswer: (answer) => { refusal = answer; }, check: checkDraftCommand });
   let asked = false;
   $effect(() => {
     if (phase !== "ready") return;

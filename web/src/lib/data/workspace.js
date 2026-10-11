@@ -597,7 +597,7 @@ export async function applyCommand(command, { retryCsrf = true } = {}) {
  *
  * @param {object} command
  * @param {{ retryCsrf?: boolean }} [options]
- * @returns {Promise<{ refusal: string | null, preview: { nextDate: string } | null } | null>}
+ * @returns {Promise<{ refusal: string | null, refusalCode: string | null, preview: { nextDate: string } | null } | null>}
  */
 export async function askCommand(command, { retryCsrf = true } = {}) {
   try {
@@ -617,6 +617,7 @@ export async function askCommand(command, { retryCsrf = true } = {}) {
     const nextDate = body.preview?.nextDate;
     return {
       refusal: body.refusal?.message ?? null,
+      refusalCode: body.refusal?.code ?? null,
       preview: nextDate ? { nextDate } : null,
     };
   } catch {
@@ -634,6 +635,21 @@ export async function askCommand(command, { retryCsrf = true } = {}) {
  */
 export async function checkCommand(command) {
   return (await askCommand(command))?.refusal ?? null;
+}
+
+/**
+ * checkCommand for a create under a draft id. A draft id new to the server
+ * can only be answered version_required when an earlier send landed and its
+ * answer was lost, so that refuses nothing: the save swallows it the same way
+ * and carries on, and the entry can be retried.
+ *
+ * @param {object} command
+ * @returns {Promise<string | null>}
+ */
+export async function checkDraftCommand(command) {
+  const answer = await askCommand(command);
+  if (answer?.refusalCode === "version_required") return null;
+  return answer?.refusal ?? null;
 }
 
 /**

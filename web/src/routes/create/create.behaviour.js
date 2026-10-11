@@ -1,5 +1,5 @@
 import { goto } from "$app/navigation";
-import { WorkspaceError, activeHousehold, applyCommand, attachItemDocument } from "$lib/data/workspace.js";
+import { WorkspaceError, activeHousehold, applyCommand, attachItemDocument, checkDraftCommand } from "$lib/data/workspace.js";
 import {
   CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
   WHY_UNDRAWABLE, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
@@ -173,6 +173,7 @@ export function mountCreate() {
   }
   const dryRun = dryRunner({
     onanswer: (answer) => { refusal = answer; showRefusal(); },
+    check: checkDraftCommand,
   });
   /** Something changed: ask the engine again once the member pauses. */
   function updateRefusal() {
