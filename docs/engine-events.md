@@ -767,17 +767,20 @@ docker compose --env-file "$environment_file" \
 - The backup/restore lock is the engine's: a `flock` on
   `backups/.orbit-backup-restore.lock`, on the bind mount, so it excludes a
   second run on the same host kernel (a backups directory on NFS is not
-  supported). A run that finds the lock held refuses at once and exits `75`;
-  the shell then leaves `orbit-app` to the run that holds it.
+  supported). Only runs whose shell stopped `orbit-app` take it; a run that
+  finds it held refuses at once and exits `75`, and the shell then leaves
+  `orbit-app` to the run that holds it.
 - The shell stops and starts `orbit-app`; the engine never does. `backup.sh`
   stops it, runs `backup`, and starts it again. `restore.sh <bundle>` and
   `import-recovery-bundle.sh` validate first: while Orbit still runs, they
   run the engine once with `--preflight` (`restore --preflight` or
   `import-recovery-bundle --preflight`, standard input `/dev/null`, so `-T`
-  and no prompt; the passphrase is asked once, in the full run). It takes
-  and releases the same lock, creates no checkpoint or journal, drops its
-  stage database and scratch on exit, and prints nothing when the bundle
-  passes. Any refusal, or `75`, ends the script there with Orbit untouched
+  and no prompt; the passphrase is asked once, in the full run). It stops
+  nothing, so it takes no lock (the lock's holder owns `orbit-app`) and
+  leaves any killed run's checkpoint to the full run to remove; it creates
+  no checkpoint or journal, drops its stage database and scratch on exit,
+  and prints nothing when the bundle passes. Any refusal ends the script
+  there with Orbit untouched
   (amendment E3a on #1211: validate before taking the service down). Only
   then do they stop `orbit-app` and run the full command, which repeats
   every check; `restore.sh --recover` has no bundle and stops first. After

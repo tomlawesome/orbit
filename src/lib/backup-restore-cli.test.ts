@@ -551,26 +551,49 @@ describe("runRestore (restore.sh's main flow :897-933, including check_capacity 
       expect([...adapter.openStageDatabases]).toEqual([]);
     });
 
-    it("takes the same backup/restore lock as the full run", () => {
+    it("O2-F2: passes while another process holds the backup/restore lock (a preflight changes nothing, so it needs no lock)", () => {
       const { backupDirectory, restorePaths, adapter } = setup();
       const updateBundlePath = buildBundle(join(sandbox, "preflight-lock-source"), UPDATED_KEY, 22, LIVE_KEK, join(sandbox, "preflight-lock-backups"));
       const lockPath = join(backupDirectory, ".orbit-backup-restore.lock");
       const holder = holdLockInAnotherProcess(lockPath);
       try {
-        expect(() =>
-          runRestore({
-            backupTarPath: updateBundlePath,
-            documentKekHex: LIVE_KEK,
-            paths: restorePaths,
-            adapter,
-            workDir: mkdtempSync(join(sandbox, "restore-preflight-lock-")),
-            preflightOnly: true,
-            confirm: () => true,
-          }),
-        ).toThrow(expect.objectContaining({ code: "restore-locked" }));
+        const result = runRestore({
+          backupTarPath: updateBundlePath,
+          documentKekHex: LIVE_KEK,
+          paths: restorePaths,
+          adapter,
+          workDir: mkdtempSync(join(sandbox, "restore-preflight-lock-")),
+          preflightOnly: true,
+          confirm: () => true,
+        });
+        expect(result.outcome).toBe("preflight-passed");
+        expect(lockIsFree(lockPath)).toBe(false); // still the other process's
       } finally {
         killLockHolder(holder, lockPath);
       }
+    });
+
+    it("O2-F2: leaves a .preparing-marked orphan checkpoint untouched (only a full run may sweep it)", () => {
+      const { restorePaths, adapter } = setup();
+      const updateBundlePath = buildBundle(join(sandbox, "preflight-orphan-source"), UPDATED_KEY, 22, LIVE_KEK, join(sandbox, "preflight-orphan-backups"));
+      const orphan = join(restorePaths.restoreRoot, "checkpoint-AbC123");
+      mkdirSync(orphan, { recursive: true, mode: 0o700 });
+      writeFileSync(join(orphan, ".preparing"), "");
+      writeFileSync(join(orphan, "database.dump"), "a full-size dump");
+
+      const result = runRestore({
+        backupTarPath: updateBundlePath,
+        documentKekHex: LIVE_KEK,
+        paths: restorePaths,
+        adapter,
+        workDir: mkdtempSync(join(sandbox, "restore-preflight-orphan-")),
+        preflightOnly: true,
+        confirm: () => true,
+      });
+
+      expect(result.outcome).toBe("preflight-passed");
+      expect(existsSync(join(orphan, ".preparing"))).toBe(true);
+      expect(readFileSync(join(orphan, "database.dump"), "utf8")).toBe("a full-size dump");
     });
   });
 });
@@ -1232,18 +1255,34 @@ describe("runImportRecoveryBundle (import-recovery-bundle.sh's orchestration, li
       ).toThrow(expect.objectContaining({ code: "restore-journal-exists" }));
     });
 
-    it("takes the same backup/restore lock as the full run", () => {
+    it("O2-F2: passes while another process holds the backup/restore lock (a preflight changes nothing, so it needs no lock)", () => {
       const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, "correct horse battery staple");
       const { liveDocumentKekFile, backupDirectory, adapter } = importTarget("lock");
       const lockPath = join(backupDirectory, ".orbit-backup-restore.lock");
       const holder = holdLockInAnotherProcess(lockPath);
       try {
-        expect(() =>
-          runImportRecoveryBundle({ recoveryBundlePath, passphrase: "x", liveDocumentKekFile, backupDirectory, adapter, preflightOnly: true, importConfirmed: true, confirmRestore: () => true }),
-        ).toThrow(expect.objectContaining({ code: "restore-locked" }));
+        const result = runImportRecoveryBundle({ recoveryBundlePath, passphrase: "x", liveDocumentKekFile, backupDirectory, adapter, preflightOnly: true, importConfirmed: true, confirmRestore: () => true });
+        expect(result.outcome).toBe("preflight-passed");
+        expect(lockIsFree(lockPath)).toBe(false); // still the other process's
       } finally {
         killLockHolder(holder, lockPath);
       }
+    });
+
+    it("O2-F2: leaves a .preparing-marked orphan checkpoint untouched (only a full run may sweep it)", () => {
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, "correct horse battery staple");
+      const { liveDocumentKekFile, backupDirectory, adapter } = importTarget("orphan");
+      const paths = deriveRestorePaths(backupDirectory, liveDocumentKekFile);
+      const orphan = join(paths.restoreRoot, "checkpoint-AbC123");
+      mkdirSync(orphan, { recursive: true, mode: 0o700 });
+      writeFileSync(join(orphan, ".preparing"), "");
+      writeFileSync(join(orphan, "database.dump"), "a full-size dump");
+
+      const result = runImportRecoveryBundle({ recoveryBundlePath, passphrase: "x", liveDocumentKekFile, backupDirectory, adapter, preflightOnly: true, importConfirmed: true, confirmRestore: () => true });
+
+      expect(result.outcome).toBe("preflight-passed");
+      expect(existsSync(join(orphan, ".preparing"))).toBe(true);
+      expect(readFileSync(join(orphan, "database.dump"), "utf8")).toBe("a full-size dump");
     });
   });
 });

@@ -23,7 +23,9 @@ secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
 [[ "$secrets_directory" == /* ]] || secrets_directory="$repo_dir/$secrets_directory"
 readonly secrets_directory
 readonly journal_path="$backup_directory/.orbit-restore/restore.journal"
-readonly engine_locked_status=75 # another backup/restore holds the lock: that run owns orbit-app
+# 75: another backup/restore holds the lock. Only runs that stopped orbit-app take it (a preflight
+# takes none), so that run owns orbit-app.
+readonly engine_locked_status=75
 
 fail() { printf 'Orbit recovery import: %s\n' "$*" >&2; exit 1; }
 # --- Shared by backup.sh, restore.sh, export-recovery-bundle.sh and ----------

@@ -424,8 +424,11 @@ export function runRestore(options: RunRestoreOptions): RunRestoreResult {
   // O2-R7: taken before anything else, including the journal-exists check
   // below — the journal written at the end of checkpointing was the only
   // thing stopping two concurrent restores, and both could pass that check
-  // before either got far enough to write it.
-  const releaseLock = options.lockHeld ? () => undefined : acquireBackupRestoreLock(options.paths.backupDirectory);
+  // before either got far enough to write it. A preflight stops nothing, so
+  // it must not hold the lock the shells treat as owning orbit-app: a backup
+  // that met it would leave the app stopped for a run that never restarts it.
+  const takeLock = !options.lockHeld && !options.preflightOnly;
+  const releaseLock = takeLock ? acquireBackupRestoreLock(options.paths.backupDirectory) : () => undefined;
   try {
     return withScratchCleanupOnSignal(options.workDir, () => runRestoreLocked(options));
   } finally {
@@ -446,8 +449,11 @@ function runRestoreLocked(options: RunRestoreOptions): RunRestoreResult {
   refuseIfDocumentKekRotationOpen(options.paths.documentKekFile);
   // #1151 O2-R6/O2-R10: with the lock held and no journal, a checkpoint
   // directory still marked as being prepared can only be a killed run's
-  // leftover; remove it rather than leave a full dump on disk forever.
-  for (const orphan of listOrphanedCheckpoints(options.paths.restoreRoot)) removeOrphanedCheckpoint(options.paths.restoreRoot, orphan);
+  // leftover; remove it rather than leave a full dump on disk forever. A
+  // preflight holds no lock, so to it the marker could be a live run's.
+  if (!options.preflightOnly) {
+    for (const orphan of listOrphanedCheckpoints(options.paths.restoreRoot)) removeOrphanedCheckpoint(options.paths.restoreRoot, orphan);
+  }
 
   const stagingWorkDir = join(options.workDir, "staging");
   mkdirSync(stagingWorkDir, { recursive: true });
@@ -660,16 +666,8 @@ function renameSecretFileAcrossDevices(sourcePath: string, destinationPath: stri
  * distinctions, already fully handled inside runRestore()).
  */
 export function runImportRecoveryBundle(options: RunImportRecoveryBundleOptions): { outcome: "completed" } | { outcome: "preflight-passed" } {
-  if (options.preflightOnly) {
-    // The same lock as the full run, so a preflight that meets a running
-    // backup or restore exits 75 and the shell touches nothing (E3a).
-    const releaseLock = acquireBackupRestoreLock(options.backupDirectory);
-    try {
-      return importRecoveryBundleUnlocked(options);
-    } finally {
-      releaseLock();
-    }
-  }
+  // A preflight takes no lock: it stops nothing, and the shells treat the
+  // lock's holder as owning orbit-app. The full run takes it before the swap.
   return importRecoveryBundleUnlocked(options);
 }
 

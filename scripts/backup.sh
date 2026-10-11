@@ -23,7 +23,8 @@ secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
 [[ "$secrets_directory" == /* ]] || secrets_directory="$repo_dir/$secrets_directory"
 readonly secrets_directory
 # The engine's exit status when another backup or restore holds the
-# backup/restore lock: that run owns orbit-app, so this one leaves it alone.
+# backup/restore lock. Only runs that stopped orbit-app take it (a preflight
+# takes none), so that run owns orbit-app and this one leaves it alone.
 readonly engine_locked_status=75
 
 fail() {
