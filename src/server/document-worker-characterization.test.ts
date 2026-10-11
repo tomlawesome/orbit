@@ -822,7 +822,7 @@ describe("scanner recovery — fail-closed scanning order", () => {
     expectNoPublish();
   });
 
-  it("rejects a staged object under a key this instance does not hold instead of retrying it (#1260)", async () => {
+  it("retries a staged object under a key this instance does not hold as key_unavailable, keeping the stage (#1316)", async () => {
     armScanJob();
     mocks.executeRows.readOwnedScanRecord = [{ ...scanRecoveryRecord(), keyId: "key-this-instance-never-held" }];
 
@@ -830,9 +830,11 @@ describe("scanner recovery — fail-closed scanning order", () => {
 
     expect(mocks.decryptDocument).not.toHaveBeenCalled();
     expect(mocks.scanFile).not.toHaveBeenCalled();
-    expect(documentTransitions()).toEqual([
-      expect.objectContaining({ lifecycle: "rejected", scanStatus: "error", failureCode: "staging_object_invalid" }),
-    ]);
+    expect(documentTransitions()).toEqual([]);
+    expect(mocks.writes.some((write) => write.table === "document_staging_objects")).toBe(false);
+    expect(mocks.deleteStagingCiphertext).not.toHaveBeenCalled();
+    const jobWrite = mocks.writes.find((write) => write.table === "document_jobs" && write.operation === "update");
+    expect(jobWrite?.values).toMatchObject({ status: "retry", lastError: "key_unavailable" });
     expectNoPublish();
   });
 

@@ -190,6 +190,9 @@ no misleading success is written to the audit trail.
 - A failed scanner recovery job can be retried from attempt zero. Its recovery
   expiry does not change. A failed final stage purge can be retried as a
   deletion only; it never goes back into scanning.
+- A staged upload wrapped under a key this instance does not hold is never
+  deleted for that reason: its job retries as `key_unavailable` until you put
+  the key back, or until its recovery expiry rejects it.
 - A restore keeps a scanner job's attempt count and its failed or manual
   state; only live pending, retry or processing leases are put back in the
   queue.
