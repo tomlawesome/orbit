@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { utimes } from "node:fs/promises";
+import { join } from "node:path";
 import { and, eq, isNull, lte, lt, or, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { documents, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects } from "@/db/schema";
+import { reconcileDocumentStorage } from "@/server/document-maintenance/storage-reconciliation";
 import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import {
@@ -17,7 +20,7 @@ import {
 // a plain ImapIngestionConfig built from env-shaped values, which is exactly
 // what the renamed pure parser still does.
 import { parseImapIngestionConfigFromEnvironment as getImapIngestionConfig } from "@/server/mail-in/core/config";
-import { holdImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/imap-attachment-holding";
+import { holdImapAttachment, readHeldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/imap-attachment-holding";
 import { discardImapReviewItem, purgeExpiredImapStaging } from "@/server/imap-inbox";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { attributedHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor } from "./support/mail-in";
@@ -479,6 +482,42 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       expect(await new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot).ciphertextExists(held.storageKey)).toBe(false);
     } finally {
       setImapHoldingPurgeImplementationForTests(undefined);
+      await fixture.cleanup();
+    }
+  });
+
+  /* Release audit #1316: the document-storage sweep deletes any object older
+     than a day that no document row references. A mail attachment held for
+     review is referenced only by imap_ingestion_attachments, so a review that
+     waits past 24 hours must not lose its bytes to that sweep, while a
+     genuinely unreferenced object of the same age is still collected. */
+  it("keeps a held mail attachment older than a day through the document-storage sweep but still deletes an unreferenced object", async () => {
+    const fixture = await createIntegrationFixture("imap-held-survives-storage-sweep");
+    try {
+      const config = getDocumentConfig();
+      const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+      const objectFile = (storageKey: string) => join(config.storageRoot, "objects", storageKey.slice(0, 2), storageKey.slice(2, 4), `${storageKey}.bin`);
+      const twentyFiveHoursAgo = new Date(Date.now() - 25 * 60 * 60 * 1_000);
+
+      const plaintext = Buffer.from("held attachment awaiting review for more than a day");
+      const receiptId = randomUUID();
+      const held = await holdImapAttachment({ bytes: plaintext, displayName: "held.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+      await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: "held-sweep", mailboxUidValidity: "77", mailboxUid: 960, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "held-sweep", userId: fixture.users.member.id, status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "sent" });
+      await getDb().insert(imapIngestionAttachments).values({ id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored" });
+
+      const orphanKey = storage.createStorageKey();
+      await storage.writeCiphertext(orphanKey, Buffer.from("unreferenced ciphertext"));
+
+      await utimes(objectFile(held.storageKey), twentyFiveHoursAgo, twentyFiveHoursAgo);
+      await utimes(objectFile(orphanKey), twentyFiveHoursAgo, twentyFiveHoursAgo);
+
+      await reconcileDocumentStorage();
+
+      expect(await storage.ciphertextExists(held.storageKey)).toBe(true);
+      const bytes = await readHeldImapAttachment(held, { recipientUserId: fixture.users.member.id, receiptId });
+      expect(bytes.equals(plaintext)).toBe(true);
+      expect(await storage.ciphertextExists(orphanKey)).toBe(false);
+    } finally {
       await fixture.cleanup();
     }
   });
