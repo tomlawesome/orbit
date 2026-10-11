@@ -591,22 +591,30 @@
   }
   /** A completion stashed by a previous visit that never confirmed it sent
       (#1151 W1-S3): picked up here instead of staying lost with nothing
-      said. A version conflict means somebody already holds this change —
-      most likely the original send landing after all — so that alone is
-      treated as the stash's own success. Runs once, on mount: nothing it
-      reads is reactive state. */
+      said. The engine replays a completion it already recorded as success,
+      so a refusal — a version conflict included — means it was NOT
+      recorded, and will come back on every load: it is said once and the
+      entry dropped. A network or server failure keeps it for the next load.
+      Runs once, on mount: nothing it reads is reactive state. */
   $effect(() => {
-    for (const command of readHeldCompletionStash()) applyCommand(command).then(async () => {
-      clearHeldCompletionStash(command);
-      await onchanged?.();
-    }).catch((error) => {
-      if (error instanceof WorkspaceError && error.code === "version_conflict") {
-        clearHeldCompletionStash(command);
-        onchanged?.();
-        return;
+    for (const command of readHeldCompletionStash()) {
+      /* A stash written before ADR-0034 carried a next due date and the
+         activity's kind, which the engine now refuses; the completion is
+         still the member's, so it is sent in today's shape. */
+      /** @type {any} */
+      const sent = structuredClone(command);
+      if (sent.type === "item.complete") {
+        delete sent.nextDate;
+        if (sent.activity) { delete sent.activity.kind; delete sent.activity.nextDate; }
       }
-      wake(wordsOf(error, "couldn't complete it — try again"), { failure: true });
-    });
+      applyCommand(sent).then(async () => {
+        clearHeldCompletionStash(command);
+        await onchanged?.();
+      }).catch((error) => {
+        if (error instanceof WorkspaceError && (error.status ?? 0) >= 400 && (error.status ?? 0) < 500) clearHeldCompletionStash(command);
+        wake(wordsOf(error, "couldn't complete it — try again"), { failure: true });
+      });
+    }
   });
 
   /* `copy link`: the item's address, the desk's (+page.svelte addressOf),

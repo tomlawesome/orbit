@@ -79,17 +79,19 @@ describe("a held completion", () => {
     expect(readHeldCompletionStash(storage)).toEqual([{ itemId: "i1" }]);
   });
 
-  it("finishes a previous visit's stash, a version conflict counting as sent", async () => {
+  it("finishes a previous visit's stash; a version conflict is reported, not counted as sent (#1316)", async () => {
     const storage = memoryStorage();
     storage.setItem(HELD_COMPLETION_KEY, JSON.stringify([{ itemId: "i1" }, { itemId: "i2" }]));
     const conflict = Object.assign(new Error("conflict"), { code: "version_conflict" });
     const apply = vi.fn(async (command) => { if (command.itemId === "i2") throw conflict; });
     const onsent = vi.fn();
-    const held = createHeldCompletion({ apply, onsent, holdMs: 4000, storage });
+    const onfailed = vi.fn();
+    const held = createHeldCompletion({ apply, onsent, onfailed, holdMs: 4000, storage });
     held.retryStashed((error) => /** @type {any} */ (error)?.code === "version_conflict");
     await flush();
     expect(apply).toHaveBeenCalledTimes(2);
-    expect(onsent).toHaveBeenCalledTimes(2);
+    expect(onsent).toHaveBeenCalledTimes(1);
+    expect(onfailed).toHaveBeenCalledWith(conflict);
     expect(readHeldCompletionStash(storage)).toEqual([]);
   });
 
