@@ -167,14 +167,15 @@
    * about a second while the page is quiet, which is the owner's choice
    * (#1299). The folder drops it if a flight or a descent begins first: a
    * compile on the page's thread, started mid-flight, is a pause in the middle
-   * of it.
+   * of it. A speculative ask: no test frames (`prove: false`); the flight's own
+   * ask proves it fit.
    * @param {{ after?: number }} [how]  after: ms from now (orbit-site's four
    *   seconds when left out)
    * @returns {() => void} stops it, if the page is left first
    */
   export function readyAtLeisure(how = {}) {
     if (!journey || reduced() || savingData()) return () => {};
-    return journey.later(() => { readyWorld({ gentle: true, compile: true }); }, how);
+    return journey.later(() => { readyWorld({ gentle: true, compile: true, prove: false }); }, how);
   }
 
   /**

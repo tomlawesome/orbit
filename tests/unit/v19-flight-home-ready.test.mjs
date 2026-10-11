@@ -130,7 +130,14 @@ describe("the flight readies its world through the folder's journey (Flight.svel
   it("the unhurried ask is the folder's journey.later(), never under reduced motion or save-data", () => {
     const leisure = after(FLIGHT, "export function readyAtLeisure(");
     expect(leisure).toMatch(/if \(!journey \|\| reduced\(\) \|\| savingData\(\)\) return \(\) => \{\};/u);
-    expect(leisure).toMatch(/journey\.later\(\(\) => \{ readyWorld\(\{ gentle: true, compile: true \}\); \}, how\)/u);
+    expect(leisure).toMatch(/journey\.later\(\(\) => \{ readyWorld\(\{ gentle: true, compile: true, prove: false \}\); \}, how\)/u);
+  });
+
+  it("the unhurried ask is speculative: it never runs the GPU test frames (prove: false)", () => {
+    const leisure = after(FLIGHT, "export function readyAtLeisure(").split("\n  /**")[0];
+    const asks = [...leisure.matchAll(/readyWorld\(\{([^}]*)\}\)/gu)];
+    expect(asks).toHaveLength(1);
+    expect(asks[0][1]).toMatch(/\bprove:\s*false\b/u);
   });
 });
 
