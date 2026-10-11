@@ -39,6 +39,11 @@
        text, set by SignIn.svelte, that stands where the gate would */
     statePrimary = "",
     stateSub = "",
+    /* THE WORDMARK AS THE PAGE'S HEADING (the folder's `heading` option): true
+       writes it as the screen's <h1>; a page that already has its own <h1>
+       passes false, so every screen has exactly one. Read once, with the
+       markup, which is never rewritten. */
+    heading = true,
   } = $props();
 
   /** @param {string} text */
@@ -53,6 +58,7 @@
 
   // svelte-ignore state_referenced_locally
   const markup = dawnMarkup({
+    heading,
     image,
     lockup,
     gate: `<div class="state" role="status" aria-live="polite"><div class="state-primary">${esc(statePrimary)}</div><div class="state-sub">${esc(stateSub)}</div></div>`,

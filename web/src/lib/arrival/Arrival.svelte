@@ -441,7 +441,7 @@
        dawn, the lockup and (only on the door) the gate. The card and the
        newcomer's sky stand ON it, and the chrome is hidden by `showform` while
        they do — no wordmark, no glyph, no button, no footer. -->
-  <SignIn gate={stage === DOOR} dawnShown={!climbing} {title} />
+  <SignIn gate={stage === DOOR} dawnShown={!climbing} {title} heading={false} />
 
   {#if stage === NEWCOMER || stage === INVITED}
     <!-- #871: `showChooser` is false only for INVITED — no chooser drawn at

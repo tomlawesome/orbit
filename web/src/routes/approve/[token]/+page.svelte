@@ -123,7 +123,7 @@
   <h1 class="sr-only">Approve a sign-in to Orbit</h1>
 
   <div class="signin-stage" aria-hidden="true"></div>
-  <Dawn shown={true} />
+  <Dawn shown={true} heading={false} />
   <Grain slope={0.08} />
 
   <div class="bigring" aria-hidden="true">

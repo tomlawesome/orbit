@@ -1573,7 +1573,7 @@
 <!-- The flight's surfaces: the dawn the climb leaves from, the dusk the
      descent lands on, and the canvas, mark and void-name between them. Each
      is here only for the journey that needs it. -->
-{#if launching}<Dawn />{/if}
+{#if launching}<Dawn heading={false} />{/if}
 <Leave bind:this={leave} leaving={fixtureFlight === "down"} name={view?.household?.name ?? ""}
        homes={view && !view.emptySky ? othersOf(view.galaxy, view.primary) : []} />
 

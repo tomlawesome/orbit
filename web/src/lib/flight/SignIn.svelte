@@ -71,6 +71,9 @@
     /* One <title> per document: the arrival's stages stand on this surface, so
        they name it rather than adding a second one. */
     title = "Orbit — sign in",
+    /* The door's wordmark is the screen's <h1> unless the page standing on it
+       has its own (the arrival's stages do: `title` above is theirs). */
+    heading = true,
   } = $props();
 
   let leaving = false;
@@ -658,7 +661,7 @@
      a rule on <body>: a stylesheet that reached the document would follow the
      reader onto every other screen once its chunk had loaded. -->
 <div class="signin-stage" aria-hidden="true"></div>
-<Dawn bind:this={dawnView} shown={dawnShown} {statePrimary} {stateSub}>
+<Dawn bind:this={dawnView} shown={dawnShown} {statePrimary} {stateSub} {heading}>
   <!-- `Sign in`, the ratified word (08-14), and the word the sunset's own
        pill was reworded to match. The sheet's longer
        "Continue with your identity provider" belonged to the v18 chrome
