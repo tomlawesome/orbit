@@ -10,6 +10,7 @@ import {
   mkdirSync,
   mkdtempSync,
   openSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -226,14 +227,18 @@ function acquireBackupRestoreLock(backupDirectory: string): () => void {
 // calls outside this module) are out of this module's reach and still need
 // the same registration there.
 function withScratchCleanupOnSignal<T>(scratchDir: string, fn: () => T): T {
+  return withCleanupOnSignal(() => rmSafely(scratchDir), fn);
+}
+
+function withCleanupOnSignal<T>(cleanup: () => void, fn: () => T): T {
   let cleaned = false;
-  const cleanup = (): void => {
+  const cleanupOnce = (): void => {
     if (cleaned) return;
     cleaned = true;
-    rmSafely(scratchDir);
+    cleanup();
   };
   const onSignal = (signal: NodeJS.Signals): void => {
-    cleanup();
+    cleanupOnce();
     process.removeListener("SIGINT", onSignal);
     process.removeListener("SIGTERM", onSignal);
     process.kill(process.pid, signal);
@@ -331,9 +336,35 @@ export function runBackup(options: RunBackupOptions): CreateBackupBundleResult {
     // briefly absent.
     const documentKekHex = typeof options.documentKekHex === "function" ? options.documentKekHex() : options.documentKekHex;
     const finalTarPath = join(options.backupDirectory, `orbit-${formatBundleTimestamp(options.now)}.tar`);
-    return createBackupBundle(options.backupDirectory, finalTarPath, documentKekHex, options.adapter, formatManifestTimestamp(options.now));
+    sweepKilledBackupScratch(options.backupDirectory);
+    return withCleanupOnSignal(
+      () => sweepKilledBackupScratch(options.backupDirectory),
+      () => createBackupBundle(options.backupDirectory, finalTarPath, documentKekHex, options.adapter, formatManifestTimestamp(options.now)),
+    );
   } finally {
     releaseLock();
+  }
+}
+
+/**
+ * Removes createBackupBundle's scratch directory (`.orbit-backup.*`, holding
+ * a plaintext database dump) and unpublished `<bundle>.tar.installing` left
+ * by a killed run, which its own `finally` never got to. Called with the
+ * lock held, so nothing live can match. Recovery-bundle exports take no lock
+ * and stage `orbit-recovery-*.tar.installing` in the same directory, so
+ * those are left alone.
+ */
+function sweepKilledBackupScratch(backupDirectory: string): void {
+  let names: string[];
+  try {
+    names = readdirSync(backupDirectory);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const isBackupScratch = name.startsWith(".orbit-backup.");
+    const isBackupInstalling = name.endsWith(".tar.installing") && !name.startsWith("orbit-recovery-");
+    if (isBackupScratch || isBackupInstalling) rmSafely(join(backupDirectory, name));
   }
 }
 

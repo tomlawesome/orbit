@@ -354,6 +354,124 @@ describe("runBackup", () => {
 
     expect(existsSync(result.finalTarPath)).toBe(true);
   });
+
+  // #1316 O2-R3: a backup killed mid-run leaves its scratch directory
+  // (.orbit-backup.<random>) and possibly a half-installed
+  // <bundle>.tar.installing behind. The next run must sweep both, whatever
+  // they contain; today only the .installing file is swept and the stale
+  // directory survives (it holds a plaintext database dump).
+  it("O2-R3: removes a stale .orbit-backup.* scratch directory and a stale .tar.installing file left by an earlier killed run", () => {
+    const documentsRoot = join(sandbox, "docs-backup-stale");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "backup-stale-backups");
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    const staleDirectory = join(backupDirectory, ".orbit-backup.stale");
+    mkdirSync(staleDirectory, { mode: 0o700 });
+    writeFileSync(join(staleDirectory, "database.dump"), "partial dump");
+    const staleInstalling = join(backupDirectory, "orbit-x.tar.installing");
+    writeFileSync(staleInstalling, "half a bundle");
+
+    const result = runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") });
+
+    expect(existsSync(result.finalTarPath)).toBe(true);
+    expect(existsSync(staleDirectory)).toBe(false);
+    expect(existsSync(staleInstalling)).toBe(false);
+  });
+
+  // The backup runs in a real child process, signalled while the adapter is
+  // dumping (a blocking call stands in for pg_dump), as a supervisor's stop
+  // or Ctrl-C would. Whatever the process does with the signal, it must not
+  // leave its scratch directory behind.
+  it("O2-R3: a SIGTERM while the adapter is dumping leaves no .orbit-backup.* directory behind", async () => {
+    const documentsRoot = join(sandbox, "docs-backup-sigterm");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "backup-sigterm-backups");
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+
+    const srcLib = import.meta.dirname;
+    const childScript = join(sandbox, "backup-sigterm-child.mts");
+    writeFileSync(
+      childScript,
+      `import { spawnSync } from "node:child_process";
+import { writeFileSync, writeSync } from "node:fs";
+import { runBackup } from ${JSON.stringify(join(srcLib, "backup-restore-cli.ts"))};
+import { createTar } from ${JSON.stringify(join(srcLib, "recovery-bundle.ts"))};
+
+const config = JSON.parse(process.argv[2]);
+const reports = {
+  crypto: config.documentId + "|" + config.storageKey + "|10|available\\n",
+  visible: config.documentId + "|available|" + config.storageKey + "|10\\n",
+  attachments: "",
+  staging: "",
+  documentStaging: "",
+  transientCount: "0",
+};
+const adapter = {
+  stopApp: () => true,
+  startApp: () => true,
+  dumpDatabase: (output) => {
+    writeFileSync(output, JSON.stringify(reports));
+    writeSync(1, "dumping\\n");
+    spawnSync("sleep", ["1"]);
+  },
+  pgRestoreListOk: () => true,
+  collectDocumentsArchive: (output) => createTar(config.documentsRoot, output, ["."]),
+  recordRecoveryBundleExported: () => {},
+};
+runBackup({
+  backupDirectory: config.backupDirectory,
+  documentKekHex: config.kek,
+  adapter,
+  now: new Date("2026-03-04T05:06:07Z"),
+});
+`,
+    );
+
+    const { stdout, stderr, killedOnDeadline } = await new Promise<{ stdout: string; stderr: string; killedOnDeadline: boolean }>((resolvePromise, reject) => {
+      const child = spawn(
+        "node",
+        [
+          "--import",
+          "tsx",
+          childScript,
+          JSON.stringify({ documentId: DOCUMENT_ID, storageKey: ORIGINAL_KEY, documentsRoot, backupDirectory, kek: LIVE_KEK }),
+        ],
+        { cwd: process.cwd(), detached: true, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      let out = "";
+      let err = "";
+      let signalled = false;
+      let killedOnDeadline = false;
+      const deadline = setTimeout(() => {
+        killedOnDeadline = true;
+        process.kill(-child.pid!, "SIGKILL");
+      }, 15_000);
+      child.stdout.on("data", (chunk: Buffer) => {
+        out += chunk.toString();
+        if (!signalled && out.includes("dumping")) {
+          signalled = true;
+          // Let the blocking call start, then signal the backup process alone.
+          setTimeout(() => process.kill(child.pid!, "SIGTERM"), 300);
+        }
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        err += chunk.toString();
+      });
+      child.on("error", (error) => {
+        clearTimeout(deadline);
+        reject(error);
+      });
+      child.on("close", () => {
+        clearTimeout(deadline);
+        resolvePromise({ stdout: out, stderr: err, killedOnDeadline });
+      });
+    });
+
+    expect(stdout, `the child never reached the dump step (stderr: ${stderr})`).toContain("dumping");
+    expect(killedOnDeadline).toBe(false);
+    expect(readdirSync(backupDirectory).filter((name) => name.startsWith(".orbit-backup."))).toEqual([]);
+  });
 });
 
 describe("stageAndPreflightRestoreBundle (restore.sh's prepare_staged_bundle, guarantees #7-10)", () => {
