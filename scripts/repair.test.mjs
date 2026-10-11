@@ -1568,7 +1568,68 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).toContain("finding class=docker-unavailable target=database severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=application severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=image severity=info");
-    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=11 skipped=7");
+    expect(result.stdout).toContain("finding class=docker-unavailable target=configuration severity=info");
+    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=10 skipped=8");
+  });
+
+  // #1316: when Docker cannot answer the configuration check (daemon
+  // unreachable, or the pinned image not present locally) the check cannot run
+  // at all. That is "docker unavailable" (info), not a broken configuration,
+  // and a read-only --check must never `docker pull`.
+  function runRepairWithFakeDocker(targetDir, args, { dockerScript, engineOptions, argvLogPath }) {
+    const binDir = mkdtempSync(join(tmpdir(), "orbit-repair-fakebin-"));
+    scratchDirs.push(binDir);
+    let script = dockerScript;
+    if (script === undefined) {
+      const engineDir = mkdtempSync(join(tmpdir(), "orbit-repair-engine-"));
+      scratchDirs.push(engineDir);
+      const engineDockerPath = writeEngineDockerShim(engineDir, engineOptions);
+      script = dockerShimScript({ engineDockerPath, argvLogPath });
+    }
+    writeFileSync(join(binDir, "docker"), script);
+    chmodSync(join(binDir, "docker"), 0o755);
+    return failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "repair.sh"), ...args], {
+      cwd: targetDir,
+      encoding: "utf8",
+      env: repairChildEnv(binDir, {}),
+      ...processGuard(),
+    }), { label: "runRepairWithFakeDocker" });
+  }
+
+  function expectDockerUnavailableNotConfigurationFailure(result, argvLogPath) {
+    const argvLog = existsSync(argvLogPath) ? readFileSync(argvLogPath, "utf8") : "";
+    expect(argvLog).not.toMatch(/^pull(\s|$)/m);
+    expect(result.stdout).toContain("finding class=docker-unavailable target=configuration severity=info");
+    expect(result.stdout).not.toContain("configuration-invalid");
+    expect(result.stdout).not.toContain("configuration-incomplete");
+    expect(result.status).not.toBe(4);
+  }
+
+  it("records docker-unavailable, not configuration-invalid, and never pulls when the docker daemon is unreachable", () => {
+    const targetDir = makeFixture();
+    const argvLogPath = join(scratchDir(), "docker-argv.log");
+    const dockerScript = [
+      "#!/usr/bin/env bash",
+      `printf '%s\\n' "$*" >> '${argvLogPath}'`,
+      "exit 1",
+      "",
+    ].join("\n");
+
+    const result = runRepairWithFakeDocker(targetDir, ["--check"], { dockerScript, argvLogPath });
+
+    expectDockerUnavailableNotConfigurationFailure(result, argvLogPath);
+  });
+
+  it("records docker-unavailable, not configuration-invalid, and never pulls when the pinned image is absent locally", () => {
+    const targetDir = makeFixture();
+    const argvLogPath = join(scratchDir(), "docker-argv.log");
+
+    const result = runRepairWithFakeDocker(targetDir, ["--check"], {
+      engineOptions: { imagePresent: false, pullSucceeds: true },
+      argvLogPath,
+    });
+
+    expectDockerUnavailableNotConfigurationFailure(result, argvLogPath);
   });
 
   it("groups findings by the fixed class order regardless of discovery order", () => {
