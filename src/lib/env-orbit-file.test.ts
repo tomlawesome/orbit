@@ -39,10 +39,10 @@ describe("parseEnvOrbitContent value validation (#383)", () => {
 // the same way.
 describe("parseEnvOrbitContent removed-key classification (SQ1-Q1)", () => {
   it("classifies a retired IMAP_* key as configuration_removed_key, not configuration_unknown_key", () => {
-    expect(parseEnvOrbitContent("IMAP_ENABLED=true\n")).toEqual({ ok: false, code: "configuration_removed_key" });
+    expect(parseEnvOrbitContent("IMAP_ENABLED=true\n")).toEqual({ ok: false, code: "configuration_removed_key", key: "IMAP_ENABLED" });
   });
 
   it("still classifies a key that was never valid as configuration_unknown_key", () => {
-    expect(parseEnvOrbitContent("TOTALLY_MADE_UP_KEY=1\n")).toEqual({ ok: false, code: "configuration_unknown_key" });
+    expect(parseEnvOrbitContent("TOTALLY_MADE_UP_KEY=1\n")).toEqual({ ok: false, code: "configuration_unknown_key", key: "TOTALLY_MADE_UP_KEY" });
   });
 });

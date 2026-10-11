@@ -433,6 +433,32 @@ describe("runInstall: refusals inside the transaction roll back (#11, #56)", () 
     expect(snapshot(target)).toEqual(before);
   });
 
+  it("names a removed setting in the failure, with what to do about it (#1316)", async () => {
+    const target = recognised(["IMAP_HOST=mail.example.test"]);
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "configuration", reason: "configuration-failure" });
+    const message = outcome.status === "failed" ? outcome.message : "";
+    expect(message).toContain("IMAP_HOST");
+    expect(message).toMatch(/removed/i);
+    expect(message).toMatch(/Administration/);
+    expect(message).toMatch(/delete (the|that) line/i);
+    expect(message).toMatch(/re-?run/i);
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("names the conflicting pair when a secret and its _FILE twin are both set (#1316)", async () => {
+    const target = recognised(["SESSION_SECRET=direct-value", "SESSION_SECRET_FILE=/run/orbit-secrets/session-secret"]);
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "configuration", reason: "configuration-failure" });
+    const message = outcome.status === "failed" ? outcome.message : "";
+    expect(message).toContain("SESSION_SECRET");
+    expect(message).toContain("SESSION_SECRET_FILE");
+    expect(message).not.toBe("Configuration preflight failed; restoring the previous deployment.");
+    expect(snapshot(target)).toEqual(before);
+  });
+
   it("rolls back an update whose configuration does not pass the preflight (#50)", async () => {
     const target = recognised();
     writeFileSync(join(target, ".env-orbit"), "not an assignment\n", { mode: 0o600 });
