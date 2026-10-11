@@ -233,6 +233,25 @@ describe("whose files the engine writes (D5, #1258)", () => {
     const result = run(targetDir, ["--check"], { env: { ORBIT_IMAGE: LOCAL_IMAGE } });
     expect(runCall(result.calls)).not.toContain("--user");
   });
+
+  // #1316 O1-R7: when `docker info` fails there is no answer to "is this
+  // rootless?", and guessing "rootful" hands the files to the wrong owner.
+  it("refuses to guess who should own the files when `docker info` fails, and runs no engine (#1316 O1-R7)", () => {
+    const targetDir = makeFixture();
+    const docker = makeDocker();
+    writeFileSync(join(docker.binDir, "docker"), `#!/usr/bin/env node
+const { appendFileSync } = require("node:fs");
+const argv = process.argv.slice(2);
+if (process.env.ORBIT_FAKE_DOCKER_LOG) appendFileSync(process.env.ORBIT_FAKE_DOCKER_LOG, JSON.stringify(argv) + "\\n");
+process.exit(argv[0] === "info" ? 1 : 0);
+`, { mode: 0o755 });
+    const result = run(targetDir, ["--check"], { env: { ORBIT_IMAGE: LOCAL_IMAGE }, docker });
+    expect(result.calls.map((call) => call[0])).toContain("info");
+    expect(runCall(result.calls)).toBeUndefined();
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/could not tell whether Docker is rootless/i);
+    expect(result.stderr).toMatch(/refus\w* to guess/i);
+  });
 });
 
 describe("which image runs the engine (D2)", () => {

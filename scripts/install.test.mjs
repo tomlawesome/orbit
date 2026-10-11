@@ -260,6 +260,7 @@ switch (argv[0]) {
     break;
   }
   case "info":
+    if (env.FAKE_INFO_FAIL === "1") exit(1);
     out(env.FAKE_ROOTLESS === "1" ? "[name=seccomp,profile=builtin name=rootless]\\n" : "[name=seccomp,profile=builtin]\\n");
     exit(0);
     break;
@@ -726,6 +727,19 @@ describe("install.sh: the engine run", () => {
     // engine could not hand files to uid 0.
     const result = runInstall(makeTarget(), { FAKE_ROOTLESS: "1", FAKE_ENGINE_EXIT: "1" });
     expect(result.engineRuns[0].env).toMatchObject({ ORBIT_HOST_UID: "0", ORBIT_HOST_GID: "0" });
+  });
+
+  it("stops before the engine when `docker info` fails, refusing to guess who should own the files (#1316 O1-R7)", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+    const result = runInstall(targetDir, { FAKE_INFO_FAIL: "1" }, ["--install"]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/could not tell whether Docker is rootless/i);
+    expect(result.stderr).toMatch(/refus\w* to guess/i);
+    expect(result.engineRuns).toEqual([]);
+    // The image banner one-off runs earlier and writes nothing; no other run.
+    expect(result.calls.split("\n").filter((line) => line.startsWith("docker run ") && !line.endsWith(" --banner"))).toEqual([]);
+    expect(result.calls).toContain("docker info");
   });
 
   it("hands stdin to the engine only for machine prompts", () => {

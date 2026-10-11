@@ -552,7 +552,10 @@ gather_host_facts() {
 # Files the engine writes on the host belong to the operator (#1210 D5).
 engine_host_identity() {
   local security_options
-  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null || true)"
+  # Fail closed: a guessed "not rootless" hands the files to a uid the
+  # operator cannot reach.
+  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null)" ||
+    fail "Could not tell whether Docker is rootless, so refusing to guess who should own the deployment files. Check that 'docker info' works, then rerun."
   if [[ "$security_options" == *rootless* ]]; then
     host_uid=0
     host_gid=0
