@@ -1779,3 +1779,155 @@ describe("runRestore cross-process lock (O2-R7, shared file name #1151 RANGE-S4)
     }
   });
 });
+
+// #1316: orbit-db is a bundled Postgres. When the engine's environment names an
+// external database (DATABASE_URL or DATABASE_URL_FILE), pg_dump/pg_restore/psql
+// against orbit-db would dump or overwrite the wrong database and report
+// success, so backup, restore and export-recovery-bundle must refuse by name
+// before the adapter does anything (and so before orbit-app is stopped).
+describe("external database refusal (#1316)", { timeout: 20_000 }, () => {
+  const ENV_NAMES = ["DATABASE_URL", "DATABASE_URL_FILE"] as const;
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const name of ENV_NAMES) {
+      savedEnv[name] = process.env[name];
+      delete process.env[name];
+    }
+  });
+
+  afterEach(() => {
+    for (const name of ENV_NAMES) {
+      if (savedEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = savedEnv[name];
+    }
+  });
+
+  /** Wraps an adapter and records every method called on it. */
+  function recordCalls<T extends object>(adapter: T): { adapter: T; calls: string[] } {
+    const calls: string[] = [];
+    const proxy = new Proxy(adapter, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver) as unknown;
+        if (typeof value !== "function") return value;
+        return (...args: unknown[]) => {
+          calls.push(String(prop));
+          return (value as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      },
+    });
+    return { adapter: proxy, calls };
+  }
+
+  function setExternalDatabase(variable: (typeof ENV_NAMES)[number]): void {
+    // A made-up value: the refusal must key on presence, not on the value.
+    process.env[variable] = variable === "DATABASE_URL" ? "postgres://user:pw@db.example.invalid:5432/orbit" : join(sandbox, "database-url-secret");
+  }
+
+  function captureRefusal(run: () => unknown): BackupRestoreCliRefusal {
+    let caught: unknown;
+    try {
+      run();
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(BackupRestoreCliRefusal);
+    const refusal = caught as BackupRestoreCliRefusal;
+    // Named: the message says which setting caused the refusal, and never echoes its value.
+    expect(refusal.message).toMatch(/DATABASE_URL/);
+    expect(refusal.message).not.toContain("pw@db.example.invalid");
+    expect(refusal.code).toBe("database-url-unsupported");
+    return refusal;
+  }
+
+  for (const variable of ENV_NAMES) {
+    it(`runBackup refuses with ${variable} set, before the adapter dumps or stops anything`, () => {
+      const documentsRoot = join(sandbox, "docs-ext-backup");
+      buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+      const backupDirectory = join(sandbox, "ext-backup-backups");
+      const fake = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+      const { adapter, calls } = recordCalls(fake);
+      setExternalDatabase(variable);
+
+      captureRefusal(() => runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") }));
+
+      expect(calls).toEqual([]); // No pg_dump, no stopApp.
+      expect(fake.appRunning).toBe(true);
+      const tars = existsSync(backupDirectory) ? readdirSync(backupDirectory).filter((name) => name.endsWith(".tar")) : [];
+      expect(tars).toEqual([]); // No bundle reported as success.
+    });
+
+    it(`runRestore refuses with ${variable} set, before the adapter restores or stops anything`, () => {
+      const documentsRoot = join(sandbox, "live-docs-ext-restore");
+      const bundlePath = buildBundle(join(sandbox, "ext-restore-source"), UPDATED_KEY, 22, LIVE_KEK, join(sandbox, "ext-restore-source-backups"));
+      buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+      const backupDirectory = join(sandbox, "ext-restore-backups");
+      mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+      const documentKekFile = join(sandbox, "document-kek-ext-restore");
+      writeFileSync(documentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+      const fake = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+      const { adapter, calls } = recordCalls(fake);
+      const paths = deriveRestorePaths(backupDirectory, documentKekFile);
+      const workDir = mkdtempSync(join(sandbox, "ext-restore-run-"));
+      let confirmed = 0;
+      setExternalDatabase(variable);
+
+      captureRefusal(() =>
+        runRestore({
+          backupTarPath: bundlePath,
+          documentKekHex: LIVE_KEK,
+          paths,
+          adapter,
+          workDir,
+          confirm: () => {
+            confirmed += 1;
+            return true;
+          },
+        }),
+      );
+
+      expect(calls).toEqual([]); // No stage database, no psql/pg_restore, no stopApp.
+      expect(confirmed).toBe(0);
+      expect(fake.appRunning).toBe(true);
+      expect(existsSync(join(backupDirectory, ".orbit-restore"))).toBe(false); // No journal or checkpoint.
+    });
+
+    it(`runExportRecoveryBundle refuses with ${variable} set, before the adapter verifies or records anything`, () => {
+      const documentsRoot = join(sandbox, "docs-ext-export");
+      const sourceBundlePath = buildBundle(documentsRoot, ORIGINAL_KEY, 10, LIVE_KEK, join(sandbox, "ext-export-source-backups"));
+      const fake = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+      const { adapter, calls } = recordCalls(fake);
+      const recoveryDirectory = join(sandbox, "ext-export-recovery-backups");
+      const passphrase = "correct horse battery staple";
+      setExternalDatabase(variable);
+
+      captureRefusal(() =>
+        runExportRecoveryBundle({
+          sourceBundlePath,
+          documentKekHex: LIVE_KEK,
+          passphrase,
+          passphraseConfirmation: passphrase,
+          backupDirectory: recoveryDirectory,
+          adapter,
+          now: new Date("2026-02-02T00:00:00Z"),
+        }),
+      );
+
+      expect(calls).toEqual([]); // No pg_restore --list, no export record.
+      expect(fake.recordExportedCalls).toBe(0);
+      expect(existsSync(join(recoveryDirectory, "orbit-recovery-20260202-000000.tar"))).toBe(false);
+    });
+  }
+
+  it("control: with neither variable set, runBackup proceeds as before", () => {
+    const documentsRoot = join(sandbox, "docs-ext-control");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "ext-control-backups");
+    const { adapter, calls } = recordCalls(new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10));
+
+    const result = runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") });
+
+    expect(existsSync(result.finalTarPath)).toBe(true);
+    expect(calls).toContain("dumpDatabase");
+  });
+});

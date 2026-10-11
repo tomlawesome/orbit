@@ -90,7 +90,8 @@ export type BackupRestoreCliRefusalCode =
   | "app-stop-failed"
   | "rollback-conflict"
   | "test-failure-requested"
-  | "import-preflight-failed";
+  | "import-preflight-failed"
+  | "database-url-unsupported";
 
 /**
  * Thrown for every fail-closed refusal this orchestration layer itself
@@ -110,6 +111,19 @@ export class BackupRestoreCliRefusal extends Error {
 
 function refuse(code: BackupRestoreCliRefusalCode, message: string): never {
   throw new BackupRestoreCliRefusal(message, code);
+}
+
+/**
+ * The engine reaches only the bundled orbit-db (POSTGRES_* settings), so with
+ * an external DATABASE_URL a backup would dump, and a restore overwrite, the
+ * wrong database while reporting success. Refuse before anything is stopped.
+ */
+function refuseExternalDatabase(): void {
+  for (const name of ["DATABASE_URL", "DATABASE_URL_FILE"]) {
+    if (process.env[name]) {
+      refuse("database-url-unsupported", `preflight/configuration failed; ${name} is set in .env-orbit, but backup, restore and recovery export cover only the bundled orbit-db database. Back up an external database with its own tools.`);
+    }
+  }
 }
 
 function rmSafely(path: string): void {
@@ -294,6 +308,7 @@ export interface RunBackupOptions {
 }
 
 export function runBackup(options: RunBackupOptions): CreateBackupBundleResult {
+  refuseExternalDatabase();
   // #1151 RANGE-R6/RANGE-S3: taken before anything else, same as runRestore
   // — otherwise a backup's own stopApp/startApp (inside createBackupBundle)
   // can race a concurrent restore's document-tree/database cutover.
@@ -417,6 +432,7 @@ export interface RunRestoreOptions {
 export type RunRestoreResult = RestoreDisposeResult | { outcome: "completed" } | { outcome: "preflight-passed" };
 
 export function runRestore(options: RunRestoreOptions): RunRestoreResult {
+  refuseExternalDatabase();
   // O2-R7: taken before anything else, including the journal-exists check
   // below — the journal written at the end of checkpointing was the only
   // thing stopping two concurrent restores, and both could pass that check
@@ -582,6 +598,7 @@ export interface RunExportRecoveryBundleOptions {
 }
 
 export function runExportRecoveryBundle(options: RunExportRecoveryBundleOptions): { finalPath: string } {
+  refuseExternalDatabase();
   requireRegularNonSymlinkFile(options.sourceBundlePath, "Usage: orbit export-recovery-bundle <backup.tar>");
   ensurePrivateBackupDirectory(options.backupDirectory);
   const workDir = mkdtempSync(join(options.backupDirectory, ".orbit-recovery."));
