@@ -67,33 +67,11 @@ body.launching #dawn .lockup .glyph .tr{opacity:1;transition:none}
 #dawn #door .gate-wrap{position:relative;margin-top:calc(var(--R) * .03)}
 .gate-source{display:none}
 .gate-wrap > .gate-source{display:contents}
-/* THE PILL: a dark glass pill ringed like the logo, its edge cool at the top
-   and lit gold from the dawn below, a spark of the gold world running round
-   it. On the door it is the folder's own (html.rich); the goodbye's
-   "Sign back in" is the same rule with one word changed (/home renders it as
-   <a class="again">, /logout as <a class="gate">), and only its entrance
-   differs. On the door it arrives with first light: Orbit's door has no
-   flight of its own to wait for. */
-@property --ga{syntax:"<angle>";inherits:false;initial-value:0deg}
+/* THE PILL is the folder's own, on the door (html.rich) and on the goodbye's
+   "Sign back in" alike (`a.gate` in `#dusk.asdawn`, door.css): Orbit's goodbye
+   keeps Orbit's look, which is the sign-in's. On the door it arrives with
+   first light: Orbit's door has no flight of its own to wait for. */
 body.lit #dawn .gate{opacity:1;transform:none}
-.dusk-host #dusk .gate-wrap a{font:600 clamp(12px,calc(var(--R,400px) * .04),16px) var(--display);
-      color:#f3e5c4;border:1.5px solid transparent;border-radius:99px;padding:.86em 2.3em;cursor:pointer;
-      letter-spacing:.07em;text-decoration:none;display:inline-block;line-height:normal;
-      background:linear-gradient(180deg,#0d0d13,#19130e) padding-box,
-        conic-gradient(from var(--ga),rgba(255,214,140,0) 0deg 230deg,rgba(255,218,150,.9) 340deg,#fff4dc 356deg,rgba(255,214,140,0) 360deg) border-box,
-        linear-gradient(180deg,rgba(150,160,198,.45),rgba(240,212,160,.85)) border-box;
-      box-shadow:0 14px 34px -16px rgba(255,186,100,.6),inset 0 -12px 20px -14px rgba(255,196,120,.35);
-      animation:gate-orbit 7s linear infinite;
-      opacity:0;transform:translateY(10px);
-      transition:opacity .9s ease .6s,transform .9s ease .6s,filter .35s ease,box-shadow .3s ease}
-.dusk-host #dusk .gate-wrap a:hover,.dusk-host #dusk .gate-wrap a:focus-visible{
-      filter:none;color:#fffaf0;outline:0;
-      background:linear-gradient(180deg,#3d2d16,#6e4f22) padding-box,
-        conic-gradient(from var(--ga),rgba(255,214,140,0) 0deg 230deg,rgba(255,218,150,.9) 340deg,#fff4dc 356deg,rgba(255,214,140,0) 360deg) border-box,
-        linear-gradient(180deg,rgba(255,228,180,.7),#f3d39a) border-box;
-      box-shadow:0 16px 40px -14px rgba(255,186,100,.75),0 0 36px rgba(255,200,120,.25)}
-@keyframes gate-orbit{to{--ga:360deg}}
-body.farewell .dusk-host #dusk .gate-wrap a{opacity:1;transform:none}
 
 /* ══ THE LOCAL LOGIN LINE (#914, plan §2.7) ══════════════════════════════
    Mixed mode only. The ratified door is UNCHANGED and this is the one thing

@@ -14,10 +14,15 @@
    * The dusk itself is orbit-site's (#1371): its markup is the shared
    * folder's `duskMarkup`, its stars and glows are mounted by the folder's
    * `door.dusk()`, which decodes its pictures ahead of the beat that shows
-   * them (#1299), and its look is the folder's door.css. Orbit's own parts
-   * ride in its slots: the way back in (`gate`, markup the caller writes:
-   * the LOGIN'S OWN GATE, §15, 2026-08-17) and, where the goodbye is the
-   * screen, the one heading the screen-reader walk expects (#496, #843).
+   * them (#1299), and its look is the folder's door.css. Orbit's goodbye keeps
+   * Orbit's look (owner, 2026-10-10): it is the dusk dressed as the dawn
+   * (`asDawn`), so it matches the sign-in, with the lit ring, the gold planet
+   * and the Earth's photo, and the farewell hung under the way back in. The
+   * farewell is plain text, which the folder escapes. Orbit's own parts ride
+   * in its slots: the way back in (`gate`, markup the caller writes: the
+   * LOGIN'S OWN GATE, §15, 2026-08-17, an `a.gate` the folder styles) and,
+   * where the goodbye is the screen, the one heading the screen-reader walk
+   * expects (#496, #843).
    *
    * THE LANDMARK (#1371 spec item 9). /logout is the goodbye itself (`page`):
    * Orbit's own main landmark holds the dusk, with the visually hidden heading in the
@@ -36,10 +41,14 @@
     landmark = false,
   } = $props();
 
+  /* the goodbye's words, as text: the folder escapes them */
+  const SAID = "You are signed out.";
+  const SUB = "the sky keeps turning · your systems keep their orbits";
+
   // svelte-ignore state_referenced_locally
   const markup = page
     ? ""
-    : duskMarkup({ image, gate, foot: '<h1 class="sr-only" hidden>Orbit — signed out</h1>' });
+    : duskMarkup({ image, gate, farewell: { said: SAID, sub: SUB }, asDawn: true, foot: '<h1 class="sr-only" hidden>Orbit — signed out</h1>' });
 
   /** @type {HTMLElement | undefined} */
   let host = $state();
@@ -48,9 +57,17 @@
     const surface = /** @type {HTMLElement} */ (host?.querySelector("#dusk"));
     /* shown by the body's classes (showdusk), as the folder's sheet has it */
     surface.hidden = false;
+    /* the goodbye's lit look follows `html.rich`, as the dawn's does (the
+       folder's door.css); taken off again only if it was this that put it on */
+    const root = document.documentElement;
+    const addedRich = !root.classList.contains("rich");
+    root.classList.add("rich");
     const dusk = door.dusk(surface);
     dusk.start();
-    return () => dusk.destroy();
+    return () => {
+      dusk.destroy();
+      if (addedRich) root.classList.remove("rich");
+    };
   });
 
   $effect(() => {
@@ -63,7 +80,7 @@
   <!-- #843: one landmark and one heading, sr-only because the goodbye is told
        entirely by the dusk's own art, not by document text -->
   <!-- eslint-disable-next-line svelte/no-at-html-tags -- the shared door's own markup (markup.js, pure strings), with Orbit's slots: fixed markup and text escaped here (#1371) -->
-  <main class="dusk-host" bind:this={host}>{@html duskMarkup({ image, gate, foot: '<h1 class="sr-only">Orbit — signed out</h1>' })}</main>
+  <main class="dusk-host" bind:this={host}>{@html duskMarkup({ image, gate, farewell: { said: SAID, sub: SUB }, asDawn: true, foot: '<h1 class="sr-only">Orbit — signed out</h1>' })}</main>
 {:else}
   <!-- eslint-disable-next-line svelte/no-at-html-tags -- the shared door's own markup (markup.js, pure strings), with Orbit's slots: fixed markup and text escaped here (#1371) -->
   <div class="dusk-host" role={landmark ? "main" : undefined} bind:this={host}>{@html markup}</div>

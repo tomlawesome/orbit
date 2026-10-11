@@ -73,7 +73,7 @@
      and 15px type (--p-hit, --p-type-button), the label centred, and the
      site's horizontal proportion (2.3em) kept. Dawn's pill and the goodbye's
      "Sign back in" alike. */
-  #dawn .gate,.dusk-host #dusk .gate-wrap a{display:inline-flex;align-items:center;justify-content:center;
+  #dawn .gate,#dusk.asdawn .gate{display:inline-flex;align-items:center;justify-content:center;
         min-height:44px;font-size:15px;padding-block:0;padding-inline:2.3em}
   /* `incomplete` keeps the pill, so its words stand under the taller one */
   body[data-state="incomplete"] #dawn .state{margin-top:18px}
@@ -92,11 +92,10 @@
         font-size:var(--p-type-meta);line-height:1.7;letter-spacing:.03em;
         text-shadow:0 1px 5px rgba(4,6,14,.9)}
 
-  /* THE GOODBYE (§2.18, §5.1): the ring held the farewell where it held the
-     word, with the second line and `Sign back in` in one column under it.
-     #1371: not built on the shared dusk, whose farewell stands outside its
-     lockup (duskMarkup), so the phone's goodbye is the folder's own until
-     the owner decides it (#1371). */
+  /* THE GOODBYE (§2.18, §5.1): the folder's own (door.css, `#dusk.asdawn`): the
+     ring holds the farewell where it held the word, with the second line and
+     `Sign back in` in one column under it. It switches at the same size as the
+     folder's sign-in, which is the rule above (owner, 3c). */
 
   /* ══ A CARD ON THE DOOR (claim, sign in, first administrator, waiting,
      setup, approve) ══════════════════════════════════════════════════════

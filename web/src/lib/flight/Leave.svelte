@@ -113,7 +113,7 @@
        is what `rel="external"` says. Written as the dusk's gate markup (the
        shared door's slot, #1371), escaped, once: it is known before the
        sign-out mounts the dusk. -->
-  <Dusk landmark={farewelled} gate={`<a class="again" rel="external" href="${escapeAttr(backIn)}">Sign back in</a>`} />
+  <Dusk landmark={farewelled} gate={`<a class="gate" rel="external" href="${escapeAttr(backIn)}">Sign back in</a>`} />
 {/if}
 <!-- The flight is mounted with the page, not with the sign-out (#1371): the
      descent's world belongs to its journey now, and is readied at leisure
