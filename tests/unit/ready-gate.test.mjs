@@ -65,15 +65,15 @@ describe("the unhurried ask (readyWorldAtLeisure)", () => {
     return { stop, kept, later: vi.fn((fn, how) => { kept.push({ fn, how }); return stop; }) };
   };
 
-  it("is speculative: when it runs it asks gently, for a quiet moment, and never for the test frames", () => {
+  it("proves the world: when it runs it asks gently, for a quiet moment, with the test frames (a descent draws the world only once proved)", () => {
     const journey = fakeJourney();
     const ready = vi.fn();
     readyWorldAtLeisure({ journey, reduced: false, savingData: false, ready });
     expect(ready).not.toHaveBeenCalled();
     journey.kept[0].fn();
     expect(ready).toHaveBeenCalledOnce();
-    expect(ready.mock.calls[0][0]).toEqual({ gentle: true, compile: true, prove: false });
-    expect(LEISURE_ASK.prove).toBe(false);
+    expect(ready.mock.calls[0][0]).toEqual({ gentle: true, compile: true, prove: true });
+    expect(LEISURE_ASK.prove).toBe(true);
   });
 
   it("hands the wait to the folder's later(), and gives its stop back", () => {
@@ -137,7 +137,7 @@ describe("a descent beginning drops the leisure ask (the folder's journey, run f
     readyWorldAtLeisure({ journey, reduced: false, savingData: false, ready });
     await vi.advanceTimersByTimeAsync(10_000);
     expect(ready).toHaveBeenCalledOnce();
-    expect(ready.mock.calls[0][0].prove).toBe(false);
+    expect(ready.mock.calls[0][0].prove).toBe(true);
   });
 
   it("never runs it when a descent begins within the wait", async () => {

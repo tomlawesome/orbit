@@ -9,10 +9,12 @@
 /**
  * The unhurried ask home makes a few seconds after it has arrived: gentle, and
  * made even where the browser compiles on the page's own thread (the owner's
- * choice, #1299), but speculative -- no GPU test frames (`prove: false`). The
- * flight's own ask is the one that proves the world fit.
+ * choice, #1299), and it proves the world: the test frames run here. The
+ * folder draws a descent over the world only once a warm-up has proved it fit,
+ * and a descent never waits for one (its README, journey `descend` and `warm`),
+ * so a speculative ask here leaves every sign-out painted, never the world.
  */
-export const LEISURE_ASK = Object.freeze({ gentle: true, compile: true, prove: false });
+export const LEISURE_ASK = Object.freeze({ gentle: true, compile: true, prove: true });
 
 /**
  * Whether `readyWorld` goes on to ask the folder for the world.
