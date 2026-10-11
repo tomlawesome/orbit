@@ -90,8 +90,10 @@
     const list = [];
     if (!view) return list;
     const failing = view.services.filter(([tone]) => tone === "overdue" || tone === "warm");
-    for (const [tone, name] of failing.slice(0, 2)) {
-      list.push({ id: "ad-operations", word: `${name} ${tone === "overdue" ? "down" : "retrying"}` });
+    /* The row's detail leads with the state's own word (#1296): the tell
+       repeats it rather than assuming every warm row is retrying. */
+    for (const [tone, name, detail] of failing.slice(0, 2)) {
+      list.push({ id: "ad-operations", word: `${name} ${tone === "overdue" ? "down" : detail.split(" · ")[0]}` });
     }
     if (failing.length > 2) list.push({ id: "ad-operations", word: `${failing.length - 2} more failing` });
     const failedJobs = jobs.filter((job) => job.status === "failed").length;
