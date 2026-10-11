@@ -17,6 +17,7 @@ const MAX_IMAGE_DIMENSION = 20_000;
 const MAX_IMAGE_PIXELS = 40_000_000;
 export const PDF_STRUCTURE_MAX_PAGES = 1_000;
 export const PDF_STRUCTURE_INSPECTION_BUDGET_MS = 5_000;
+const MAX_PDF_XREF_ENTRIES = 1_250_000;
 /**
  * The parameters the installed pdf.js's own `getDocument` declares. Options
  * are checked against this with `satisfies`, so an option the pinned version
@@ -111,6 +112,41 @@ function isPasswordRequired(error: unknown): boolean {
 }
 
 /**
+ * Whether the cross-reference section startxref points at declares no more
+ * entries than the cap. pdf.js loops over every declared entry on this
+ * thread, where the time budget cannot interrupt it, and an xref stream's
+ * entries can take no bytes at all, so a tiny file can declare billions. Only
+ * a declared count over the cap refuses the file: with no readable startxref
+ * pdf.js rebuilds the table by scanning the file, which its size bounds.
+ */
+function hasPdfIndexBudget(bytes: Buffer): boolean {
+  // pdf.js takes the last startxref anywhere in the file, %%EOF or not.
+  const keyword = bytes.lastIndexOf("startxref");
+  if (keyword < 0) return true;
+  const offset = Number(bytes.subarray(keyword + 9, keyword + 64).toString("latin1").match(/^\s*(\d+)/u)?.[1]);
+  if (!Number.isSafeInteger(offset) || offset >= bytes.length) return true;
+  const head = bytes.subarray(offset, offset + 64).toString("latin1");
+  if (/^\s*xref(?:\s|$)/u.test(head)) {
+    const trailer = bytes.indexOf("trailer", offset);
+    const table = bytes.subarray(offset, trailer < 0 ? bytes.length : trailer).toString("latin1");
+    const subsectionCounts = table.match(/^\s*\d+\s+(\d+)\s*$/gmu) ?? [];
+    const total = subsectionCounts.reduce((sum, line) => sum + Number(line.match(/\d+\s*$/u)?.[0] ?? 0), 0);
+    return total <= MAX_PDF_XREF_ENTRIES;
+  }
+  if (!/^\s*\d+\s+\d+\s+obj\b/u.test(head)) return true;
+  // The dictionary runs to the stream keyword, so a nested << >> such as
+  // /DecodeParms cannot end it early; #xx escapes are decoded as pdf.js does.
+  const streamKeyword = bytes.indexOf("stream", offset);
+  const dictionary = bytes.subarray(offset, streamKeyword < 0 ? bytes.length : streamKeyword).toString("latin1")
+    .replace(/#([0-9A-Fa-f]{2})/gu, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+  const index = dictionary.match(/\/Index\s*\[([^\]]*)\]/u)?.[1]?.trim().split(/\s+/u).map(Number);
+  const total = index
+    ? index.reduce((sum, value, position) => sum + (position % 2 === 1 ? value : 0), 0)
+    : Number(dictionary.match(/\/Size\s+([+-]?\d+)/u)?.[1]);
+  return !(total > MAX_PDF_XREF_ENTRIES);
+}
+
+/**
  * Pattern E for PDFs (ADR-0033): pdf.js, the library that draws the file,
  * opens it with no password, within the page cap and the time budget, and
  * finds page one. Owner-password-only files open (pdf.js decrypts them
@@ -119,6 +155,9 @@ function isPasswordRequired(error: unknown): boolean {
  * contains: the renderer runs none of it.
  */
 async function classifyPdfStructure(bytes: Buffer): Promise<DocumentStructureReason> {
+  // A declared entry count pdf.js would loop over on this thread, bounded
+  // before it is opened (ADR-0033 item 3 resource limit).
+  if (!hasPdfIndexBudget(bytes)) return "unsupported_structure";
   let loadingTask: ReturnType<typeof getDocument> | undefined;
   let budgetTimer: ReturnType<typeof setTimeout> | undefined;
   try {
