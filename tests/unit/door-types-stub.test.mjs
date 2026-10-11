@@ -43,6 +43,60 @@ describe("the type check sees the shared door through a declaration stub (item 2
     expect(missing, `exported by web/src/lib/door/index.js but not declared in web/types/door/index.d.ts:\n${missing.join("\n")}`).toEqual([]);
   });
 
+  /**
+   * The members of the object a function returns at its end, from the folder's
+   * text: `name`, `name: value` and `get name()`. `from` is where the function
+   * starts, so the last `return { ... }` after it is found.
+   */
+  const returnedMembers = (text, from, until) => {
+    const start = text.indexOf(from);
+    expect(start, `${from} not found in the folder`).toBeGreaterThan(-1);
+    const end = until ? text.indexOf(until, start) : text.length;
+    const returns = [...text.slice(start, end).matchAll(/^\s*return \{(.*)\};?\s*$/gm)];
+    expect(returns.length, `no returned object after ${from}`).toBeGreaterThan(0);
+    const body = returns.at(-1)[1];
+    const members = new Set();
+    for (const m of body.matchAll(/get\s+([A-Za-z_$][\w$]*)\s*\(\)/g)) members.add(m[1]);
+    /* drop getters' bodies and call arguments before reading the plain members */
+    const flat = body.replace(/get\s+[A-Za-z_$][\w$]*\s*\(\)\s*\{[^}]*\}/g, "").replace(/\([^()]*(?:\([^()]*\)[^()]*)*\)/g, "()");
+    for (const part of flat.split(",")) {
+      const name = part.trim().match(/^([A-Za-z_$][\w$]*)\s*(?::|$)/)?.[1];
+      if (name) members.add(name);
+    }
+    return [...members].sort();
+  };
+  const interfaceBody = (name) => {
+    const m = stub.match(new RegExp(`export interface ${name}\\b[^{]*\\{([\\s\\S]*?)\\n\\}`));
+    expect(m, `interface ${name} in the stub`).not.toBeNull();
+    return m[1];
+  };
+  const declares = (name, member) => new RegExp(`^\\s*(?:readonly\\s+)?${member}\\??\\s*:`, "m").test(interfaceBody(name));
+
+  it("Dawn, Dusk and Journey declare every member the folder's objects carry", () => {
+    const dawn = read("web/src/lib/door/dawn.js");
+    const journey = read("web/src/lib/door/journey.js");
+    const cases = [
+      ["Dawn", returnedMembers(dawn, "export function mountDawn(", "export function mountDusk(")],
+      ["Dusk", returnedMembers(dawn, "export function mountDusk(")],
+      ["Journey", returnedMembers(journey, "export function createJourney(")],
+    ];
+    for (const [name, members] of cases) {
+      expect(members.length, name).toBeGreaterThan(3);
+      const missing = members.filter((member) => !declares(name, member));
+      expect(missing, `${name}: carried by the folder's object but not declared in the stub`).toEqual([]);
+    }
+  });
+
+  it("Journey.reduced is a value in the folder, so the stub does not declare a function", () => {
+    expect(read("web/src/lib/door/journey.js")).toMatch(/const reduced = matchMedia\(.*\)\.matches;/);
+    expect(interfaceBody("Journey")).toMatch(/^\s*reduced:\s*boolean;/m);
+  });
+
+  it("Dawn.held is a getter in the folder, and the stub declares it read-only", () => {
+    expect(read("web/src/lib/door/dawn.js")).toMatch(/get held\(\) \{ return \[\.\.\.held, \.\.\.rastered\.values\(\)\]; \}/);
+    expect(interfaceBody("Dawn")).toMatch(/^\s*readonly held:/m);
+  });
+
   const config = JSON.parse(read("web/tsconfig.check.json"));
 
   it("web/tsconfig.check.json maps $lib/door/* to the stub", () => {

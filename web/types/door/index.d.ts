@@ -73,6 +73,8 @@ export interface Dawn {
   light: (options?: LightOptions) => void;
   live: unknown;
   destroy: () => void;
+  /** a getter in the folder: the pictures decoded ahead, now */
+  readonly held: unknown;
   world: HTMLElement;
   host: HTMLElement;
 }
@@ -131,7 +133,8 @@ export interface Journey {
   reset: () => void;
   destroy: () => void;
   later: (fn: () => void, how?: { after?: number }) => () => void;
-  reduced: () => boolean;
+  /** a value, read once when the journey is made (not a function) */
+  reduced: boolean;
   warm: (how?: { prove?: boolean }) => Promise<unknown>;
   warmDocs: (how?: { prove?: boolean }) => Promise<unknown>;
   compiled: () => Promise<unknown>;
