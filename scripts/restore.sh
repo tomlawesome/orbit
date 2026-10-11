@@ -221,13 +221,30 @@ fi
 require_deployment health
 engine_host_identity
 [[ "$recover" == true ]] || run_engine "$backup_file" restore --preflight /orbit-input/bundle.tar </dev/null || exit $?
+keep_stopped_message='Orbit restore: recovery evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.'
+# A signal, a timeout or a fail() after the stop must not leave Orbit down: the engine's own
+# restart is a no-op in its container. A locked run (75) does not own the app; recovery
+# evidence keeps it stopped.
+app_stopped=false
+# shellcheck disable=SC2317  # run by the EXIT trap
+restart_app() {
+  [[ "$app_stopped" == true && "${status:-0}" != "$engine_locked_status" ]] || return 0
+  if [[ -f "$journal_path" ]]; then
+    printf '%s\n' "$keep_stopped_message" >&2
+    return 0
+  fi
+  compose start orbit-app >/dev/null 2>&1 || printf 'Orbit could not be started again.\n' >&2
+}
+trap restart_app EXIT
 compose stop orbit-app >/dev/null 2>&1 || fail 'checkpoint/stop failed; Orbit was not stopped for a consistent recovery point.'
+app_stopped=true
 status=0
 if [[ "$recover" == true ]]; then run_engine "" restore --recover || status=$?
 else run_engine "$backup_file" restore "${yes_flag[@]}" /orbit-input/bundle.tar || status=$?; fi
+app_stopped=false # the engine has returned: the lines below decide
 [[ "$status" != "$engine_locked_status" ]] || exit "$status"
 if [[ -f "$journal_path" ]]; then
-  printf 'Orbit restore: recovery evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.\n' >&2
+  printf '%s\n' "$keep_stopped_message" >&2
   exit "$((status == 0 ? 1 : status))"
 fi
 compose start orbit-app >/dev/null 2>&1 || fail 'health failed; Orbit could not be started again.'

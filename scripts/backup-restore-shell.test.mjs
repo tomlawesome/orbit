@@ -1,11 +1,11 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+import { PROCESS_DEADLINE_MS, PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
 
 // scripts/backup.sh, restore.sh, export-recovery-bundle.sh and
 // import-recovery-bundle.sh after #1211: thin shells that stop and start
@@ -47,6 +47,10 @@ function scratchDir(prefix) {
 // /dev/null. FAKE_ENGINE_IMPORT_ROLLBACK, when set, is a path the full run
 // creates: the previous key an interrupted import leaves beside the live
 // document key (<secrets dir>/document-kek.import-rollback, #1316 O2-R1).
+// FAKE_ENGINE_HANG_READY, when set, is a path the full run creates once its
+// other effects are done (journal included) before it blocks until a signal
+// kills it, so a test can signal the script while the engine is running
+// (#1316 O2-R2).
 const FAKE_DOCKER = `#!/usr/bin/env node
 const { appendFileSync, mkdirSync, writeFileSync } = require("node:fs");
 const { dirname } = require("node:path");
@@ -82,6 +86,11 @@ if (verb === "run") {
     writeFileSync(process.env.FAKE_ENGINE_IMPORT_ROLLBACK, "b".repeat(64) + "\\n");
   }
   if (process.env.FAKE_ENGINE_STDOUT) process.stdout.write(process.env.FAKE_ENGINE_STDOUT);
+  if (process.env.FAKE_ENGINE_HANG_READY) {
+    writeFileSync(process.env.FAKE_ENGINE_HANG_READY, "ready\\n");
+    setInterval(() => {}, 1000);
+    return;
+  }
   process.exit(Number(process.env.FAKE_ENGINE_STATUS || 0));
 }
 process.exit(1);
@@ -132,6 +141,55 @@ function run(deployment, script, args, { env = {}, input = "" } = {}) {
   const calls = existsSync(dockerLog) ? readFileSync(dockerLog, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
   const probes = existsSync(curlLog) ? readFileSync(curlLog, "utf8").trim().split("\n").filter(Boolean) : [];
   return { ...result, calls, probes };
+}
+
+/**
+ * Runs a script whose fake engine blocks (FAKE_ENGINE_HANG_READY), waits until
+ * the engine says it is running, sends SIGTERM to the script's whole process
+ * group (what a terminal hang-up or a service manager's stop does), and
+ * resolves once the script has ended, with the docker calls recorded.
+ */
+async function runSignalledMidEngine(deployment, script, args, { env = {} } = {}) {
+  const dockerLog = join(deployment.binDir, "docker.jsonl");
+  const ready = join(deployment.binDir, "engine-ready");
+  rmSync(dockerLog, { force: true });
+  rmSync(ready, { force: true });
+  const child = spawn("bash", [join(deployment.deployDir, "scripts", script), ...args], {
+    cwd: deployment.deployDir,
+    detached: true,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      PATH: `${deployment.binDir}:${process.env.PATH}`,
+      HOME: process.env.HOME ?? tmpdir(),
+      FAKE_DOCKER_LOG: dockerLog,
+      FAKE_CURL_LOG: join(deployment.binDir, "curl.log"),
+      FAKE_ENGINE_HANG_READY: ready,
+      ...env,
+    },
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  const ended = new Promise((resolve) => child.on("close", (status, signal) => resolve({ status, signal })));
+  const killGroup = (signal) => { try { process.kill(-child.pid, signal); } catch { /* already gone */ } };
+  const deadline = Date.now() + PROCESS_DEADLINE_MS / 2;
+  try {
+    while (!existsSync(ready)) {
+      if (Date.now() > deadline) throw new Error(`${script}: the fake engine never started; stderr: ${stderr}`);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    killGroup("SIGTERM");
+    const outcome = await Promise.race([
+      ended,
+      new Promise((resolve) => setTimeout(() => resolve("timeout"), PROCESS_DEADLINE_MS / 2)),
+    ]);
+    if (outcome === "timeout") throw new Error(`${script}: still running ${PROCESS_DEADLINE_MS / 2}ms after SIGTERM`);
+    const calls = existsSync(dockerLog) ? readFileSync(dockerLog, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
+    return { ...outcome, stdout, stderr, calls };
+  } finally {
+    killGroup("SIGKILL");
+  }
 }
 
 /**
@@ -459,6 +517,41 @@ describe("the stop / engine / start rule (E3)", () => {
     expect(result.status).toBe(ENGINE_LOCKED_EXIT);
     expect(verbs(result.calls)).toEqual(expected);
     expect(result.probes).toEqual([]);
+  });
+
+  // #1316 O2-R2: once backup.sh has stopped orbit-app, every way out except
+  // the engine's lock-held exit 75 must start it again.
+  it("backup.sh starts the app again when its backups directory cannot be made private (chmod fails after the stop)", () => {
+    const deployment = makeDeployment();
+    const backups = scratchDir("orbit-backups-");
+    writeFileSync(join(deployment.binDir, "chmod"), "#!/usr/bin/env bash\nexit 1\n");
+    chmodSync(join(deployment.binDir, "chmod"), 0o755);
+    const result = run(deployment, "backup.sh", [], { env: { ORBIT_BACKUP_DIR: backups } });
+    expect(result.status).toBe(1);
+    expect(verbs(result.calls)).toEqual(["stop", "start"]);
+  });
+
+  it("backup.sh starts the app again when it is sent SIGTERM while the engine runs", async () => {
+    const deployment = makeDeployment();
+    const result = await runSignalledMidEngine(deployment, "backup.sh", []);
+    expect(verbs(result.calls)).toEqual(["stop", "run", "start"]);
+  });
+
+  it("restore.sh with no journal starts the app again when it is sent SIGTERM while the engine runs", async () => {
+    const deployment = makeDeployment();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const result = await runSignalledMidEngine(deployment, "restore.sh", ["--yes", bundle]);
+    expect(verbs(result.calls)).toEqual(["run", "stop", "run", "start"]);
+  });
+
+  it("restore.sh with a journal left keeps the app stopped on SIGTERM while the engine runs, and points at --recover", async () => {
+    const deployment = makeDeployment();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const result = await runSignalledMidEngine(deployment, "restore.sh", ["--yes", bundle], { env: { FAKE_ENGINE_JOURNAL: deployment.journal } });
+    expect(verbs(result.calls)).toEqual(["run", "stop", "run"]);
+    expect(result.stderr).toContain("bash scripts/restore.sh --recover");
   });
 
   // A bundle is validated while Orbit runs (E3a); --recover has none, so it stops first as before.

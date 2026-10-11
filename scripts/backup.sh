@@ -233,9 +233,20 @@ elif [[ "$#" == 0 ]]; then
   # shellcheck disable=SC2119  # this script does not wait for health
   require_deployment
   engine_host_identity
+  # A signal, a timeout or a fail() after the stop must not leave Orbit down:
+  # the engine's own restart is a no-op in its container.
+  app_stopped=false
+  # shellcheck disable=SC2317  # run by the EXIT trap
+  restart_app() {
+    [[ "$app_stopped" == true && "${status:-0}" != "$engine_locked_status" ]] || return 0
+    compose start orbit-app >/dev/null 2>&1 || printf 'Orbit could not be started again after the backup.\n' >&2
+  }
+  trap restart_app EXIT
   compose stop orbit-app >/dev/null || fail "Orbit could not be stopped for a point-in-time backup."
+  app_stopped=true
   status=0
   run_engine "" backup || status=$?
+  app_stopped=false # the engine has returned: the lines below decide
   if [[ "$status" != "$engine_locked_status" ]]; then
     compose start orbit-app >/dev/null || fail "Orbit could not be started again after the backup."
   fi

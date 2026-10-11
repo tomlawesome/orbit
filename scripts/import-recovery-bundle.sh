@@ -216,20 +216,44 @@ recovery_bundle="$1"
 require_deployment health
 engine_host_identity
 run_engine "$recovery_bundle" import-recovery-bundle --preflight /orbit-input/bundle.tar </dev/null || exit $?
-compose stop orbit-app >/dev/null || fail "Orbit could not be stopped; the document KEK was not changed."
-status=0
-run_engine "$recovery_bundle" import-recovery-bundle /orbit-input/bundle.tar || status=$?
-[[ "$status" != "$engine_locked_status" ]] || exit "$status"
-if [[ -f "$journal_path" ]]; then
-  printf 'Orbit recovery import: the inner restore evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.\n' >&2
-  exit "$((status == 0 ? 1 : status))"
-fi
+keep_stopped_message='Orbit recovery import: the inner restore evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.'
 # A run killed after it swapped in the recovered key leaves the previous key here and no journal:
 # the live key no longer matches the database, so starting Orbit would serve it under the wrong key.
 rollback_key="$secrets_directory/document-kek.import-rollback"
-if [[ -e "$rollback_key" ]]; then
+rollback_key_message() {
   printf 'Orbit recovery import: the import was interrupted after it swapped the document key; the previous document key is preserved at %s. Keep Orbit stopped and move it back to %s by hand before starting Orbit.\n' \
     "$rollback_key" "$secrets_directory/document-kek" >&2
+}
+# A signal, a timeout or a fail() after the stop must not leave Orbit down: the engine's own
+# restart is a no-op in its container. A locked run (75) does not own the app; recovery
+# evidence keeps it stopped.
+app_stopped=false
+# shellcheck disable=SC2317  # run by the EXIT trap
+restart_app() {
+  [[ "$app_stopped" == true && "${status:-0}" != "$engine_locked_status" ]] || return 0
+  if [[ -f "$journal_path" ]]; then
+    printf '%s\n' "$keep_stopped_message" >&2
+    return 0
+  fi
+  if [[ -e "$rollback_key" ]]; then
+    rollback_key_message
+    return 0
+  fi
+  compose start orbit-app >/dev/null 2>&1 || printf 'Orbit could not be started again.\n' >&2
+}
+trap restart_app EXIT
+compose stop orbit-app >/dev/null || fail "Orbit could not be stopped; the document KEK was not changed."
+app_stopped=true
+status=0
+run_engine "$recovery_bundle" import-recovery-bundle /orbit-input/bundle.tar || status=$?
+app_stopped=false # the engine has returned: the lines below decide
+[[ "$status" != "$engine_locked_status" ]] || exit "$status"
+if [[ -f "$journal_path" ]]; then
+  printf '%s\n' "$keep_stopped_message" >&2
+  exit "$((status == 0 ? 1 : status))"
+fi
+if [[ -e "$rollback_key" ]]; then
+  rollback_key_message
   exit "$((status == 0 ? 1 : status))"
 fi
 compose start orbit-app >/dev/null 2>&1 || fail "Orbit could not be started again."
