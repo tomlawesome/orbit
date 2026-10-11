@@ -172,11 +172,14 @@ them.
 
 ### Markup (`markup.js`)
 
-`dawnMarkup({ image, lockup, gate, foot, indent })` and
+`dawnMarkup({ image, lockup, gate, foot, heading, indent })` and
 `duskMarkup({ image, gate, foot, farewell, asDawn, indent })` are pure string
 functions: the door's markup with the host's parts in the slots (`lockup`,
 between the glyph and the name; `gate`, inside `.gate-wrap`; `foot`, at the
-surface's foot). The site writes them into `index.html` with
+surface's foot). `heading` (dawn only, default `true`): whether the wordmark is
+the page's `<h1 class="name">`; `false` writes `<div class="name">` as the dusk
+does, for a page that has an h1 of its own (a docs page), styled the same
+(added 2026-10, #40; the default is unchanged). The site writes them into `index.html` with
 `node tools/door-markup.mjs` (the lint fails if the page differs); Orbit
 renders them in its components. `image` is the same resolver as the setting; what it answers is escaped where it
 goes into an attribute, so it cannot add an attribute or an element.
@@ -190,7 +193,7 @@ in them). `indent` is whitespace.
 and leaves it off, and without it the markup is byte for byte unchanged): the
 dawn's glyph (the lit ring and discs, their gradients' ids prefixed `d-`) with
 the gold planet on its trail, shown after the farewell beat; the dawn's Earth
-photo under the ember rim; the farewell hung under the way back in (inside the
+photo under the ember rim, and no `.shimmer` ring (left out on purpose, #41); the farewell hung under the way back in (inside the
 ring on a phone), as the last child of `.gate-wrap`, not beside the lockup. All
 of it hangs off `#dusk.asdawn` in `door.css`, so a dusk without the option
 matches none of it. Needs `img/dawn/planet-gold.webp`, `dawn-pre.webp` and

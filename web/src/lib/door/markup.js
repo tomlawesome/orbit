@@ -17,6 +17,8 @@
  *   farewell      the dusk's words: { said, sub }, TEXT: escaped, so a person's name in them is never markup. (lockup,
  *                 gate and foot are RAW HTML, put in as given: the host's own markup, never a person's words)
  *   asDawn        the dusk dressed as the sign-in (Orbit's goodbye): see duskMarkup. Off by default (the site's own)
+ *   heading       whether the wordmark is the page's <h1> (the default) or a plain <div class="name"> as the dusk's is,
+ *                 for a page that has an h1 of its own (a docs page); styled the same either way (dawnMarkup only)
  *   indent        the whitespace before each line (the page's own), "" for none
  *
  * A slot is put in as given, its own whitespace and all: the host indents it as it likes.
@@ -69,7 +71,7 @@ function lines(indent, items, depth = 0) {
 }
 
 /** the dawn: `<div id="door">…</div>` */
-export function dawnMarkup({ image: resolve = (p) => p, lockup = "", gate = "", foot = "", indent = "" } = {}) {
+export function dawnMarkup({ image: resolve = (p) => p, lockup = "", gate = "", foot = "", heading = true, indent = "" } = {}) {
   const image = (p) => attr(resolve(p));
   return lines(indent, [
     '<div id="door">',
@@ -136,7 +138,7 @@ export function dawnMarkup({ image: resolve = (p) => p, lockup = "", gate = "", 
           ],
           '</svg><i class="runner" aria-hidden="true"></i></div>',
           raw(lockup),
-          '<h1 class="name">orbit</h1>',
+          heading ? '<h1 class="name">orbit</h1>' : '<div class="name">orbit</div>',
           `<div class="gate-wrap">${gate}</div>`,
         ],
         "</div>",
@@ -197,7 +199,8 @@ export function duskMarkup({ image: resolve = (p) => p, gate = "", foot = "", fa
           `<circle${asDawn ? ' class="crisp"' : ""} cx="800" cy="3920" r="3000" fill="none" stroke="url(#d-rim)" stroke-width="1.8" stroke-opacity=".6"/>`,
         ],
         "</svg>",
-        layer("shimmerlayer", '<circle class="shimmer" pathLength="100" cx="800" cy="3920" r="3000" fill="none" stroke="#ffb37a" stroke-width="3" stroke-linecap="round"/>'),
+        /* (the goodbye dressed as the dawn has no shimmer: owner, 2026-10-11, #41) */
+        ...(asDawn ? [] : [layer("shimmerlayer", '<circle class="shimmer" pathLength="100" cx="800" cy="3920" r="3000" fill="none" stroke="#ffb37a" stroke-width="3" stroke-linecap="round"/>')]),
       ],
       "</div>",
       '<div class="loginchrome">',
