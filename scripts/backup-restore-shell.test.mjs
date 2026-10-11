@@ -238,6 +238,53 @@ describe("the one-off each script becomes (E1/E5)", () => {
     expect(statSync(backups).mode & 0o777).toBe(0o700);
   });
 
+  // O2-F1 (#1316): a relative ORBIT_BACKUP_DIR / ORBIT_SECRETS_DIR is relative to the
+  // deployment directory. One that names the default location adds no mount and no
+  // flag; any other becomes an absolute host path, never a bare relative mount source.
+  function bundleFor(script, deployment) {
+    if (script === "backup.sh") return [];
+    const bundle = join(deployment.deployDir, "rel-bundle.tar");
+    writeFileSync(bundle, "bundle");
+    return [bundle];
+  }
+
+  it.each(SCRIPTS)("%s treats ORBIT_BACKUP_DIR=backups as the default: no backups mount and no --backup-dir", (script) => {
+    const deployment = makeDeployment();
+    const result = run(deployment, script, bundleFor(script, deployment), { env: { ORBIT_BACKUP_DIR: "backups" } });
+    const engine = engineRun(result.calls);
+    expect(engine.volumes.filter((volume) => volume.includes("/orbit-backups"))).toEqual([]);
+    expect(engine.command).not.toContain("--backup-dir");
+  });
+
+  it.each(SCRIPTS)("%s resolves a relative ORBIT_BACKUP_DIR=elsewhere to the absolute <deployDir>/elsewhere", (script) => {
+    const deployment = makeDeployment();
+    const absolute = join(deployment.deployDir, "elsewhere");
+    const result = run(deployment, script, bundleFor(script, deployment), { env: { ORBIT_BACKUP_DIR: "elsewhere" } });
+    const engine = engineRun(result.calls);
+    expect(engine.volumes).toContain(`${absolute}:/orbit-backups:rw`);
+    expect(engine.env.ORBIT_HOST_BACKUP_DIR).toBe(absolute);
+    expect(engine.command).toEqual(expect.arrayContaining(["--backup-dir", "/orbit-backups"]));
+  });
+
+  it.each(SCRIPTS)("%s treats ORBIT_SECRETS_DIR=.orbit-secrets as the default: no secrets mount and no --secrets-dir", (script) => {
+    const deployment = makeDeployment();
+    const result = run(deployment, script, bundleFor(script, deployment), { env: { ORBIT_SECRETS_DIR: ".orbit-secrets" } });
+    const engine = engineRun(result.calls);
+    expect(engine.volumes.filter((volume) => volume.includes("/orbit-secrets"))).toEqual([]);
+    expect(engine.command).not.toContain("--secrets-dir");
+  });
+
+  it.each(SCRIPTS)("%s resolves a relative ORBIT_SECRETS_DIR=elsewhere-secrets to the absolute <deployDir>/elsewhere-secrets", (script) => {
+    const deployment = makeDeployment();
+    const absolute = join(deployment.deployDir, "elsewhere-secrets");
+    mkdirSync(absolute, { mode: 0o700 });
+    writeFileSync(join(absolute, "document-kek"), `${"a".repeat(64)}\n`, { mode: 0o600 });
+    const result = run(deployment, script, bundleFor(script, deployment), { env: { ORBIT_SECRETS_DIR: "elsewhere-secrets" } });
+    const engine = engineRun(result.calls);
+    expect(engine.volumes).toContain(`${absolute}:/orbit-secrets:rw`);
+    expect(engine.env.ORBIT_HOST_SECRETS_DIR).toBe(absolute);
+  });
+
   it("ORBIT_ENV_FILE is the env file compose reads", () => {
     const deployment = makeDeployment();
     writeFileSync(join(deployment.deployDir, "other.env"), "ORBIT_IMAGE=orbit-local:abcdef123456\n");

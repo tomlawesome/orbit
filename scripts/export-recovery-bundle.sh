@@ -13,8 +13,13 @@ repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_dir"
 
 readonly environment_file="${ORBIT_ENV_FILE:-.env-orbit}"
-readonly backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
-readonly secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
+# A relative directory is relative to the deployment directory; passed bare to -v it would be a named volume.
+backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
+[[ "$backup_directory" == /* ]] || backup_directory="$repo_dir/$backup_directory"
+readonly backup_directory
+secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
+[[ "$secrets_directory" == /* ]] || secrets_directory="$repo_dir/$secrets_directory"
+readonly secrets_directory
 
 fail() { printf 'Orbit recovery export: %s\n' "$*" >&2; exit 1; }
 # --- Shared by backup.sh, restore.sh, export-recovery-bundle.sh and ----------
