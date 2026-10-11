@@ -41,7 +41,6 @@ import {
   createTar,
   extractTar,
   isValidDocumentKekHex,
-  isValidPassphrase,
   requireMatchingPassphrase,
   requireValidPassphrase,
 } from "../lib/recovery-bundle";
@@ -360,8 +359,10 @@ function collectImportPassphrase(): string {
   const passphrase = isStdinLinePromptMode()
     ? readStdinAnswer("A recovery passphrase is required on standard input.")
     : readTtyMaskedLine("Recovery passphrase: ");
-  // As the original import-recovery-bundle.sh did: refused before any decryption is attempted.
-  if (!isValidPassphrase(passphrase)) fail("orbit: A recovery passphrase of at least 12 characters is required.");
+  // Only an empty answer is refused here: the length floor applies when a
+  // bundle is made, never when one is opened (password-length.ts), so a
+  // bundle made under an older count must still reach decryption.
+  if (passphrase.length === 0) fail("orbit: A recovery passphrase is required.");
   return passphrase;
 }
 

@@ -195,6 +195,39 @@ describe("collectMachineRecoveryPassphraseNoConfirm (import-recovery-bundle.sh: 
   });
 });
 
+describe("import takes any non-empty passphrase; export still enforces the minimum length (#1316)", () => {
+  const sixEmoji = "\u{1F600}\u{1F601}\u{1F602}\u{1F603}\u{1F604}\u{1F605}";
+
+  it("six emoji (12 UTF-16 units, 6 code points) is accepted for import and returned", () => {
+    expect(sixEmoji.length).toBe(12);
+    const { driver, lines } = scriptedDriver([sixEmoji]);
+    expect(collectMachineRecoveryPassphraseNoConfirm(driver)).toBe(sixEmoji);
+    expect(lines).toContain("prompt-accept field=RECOVERY_PASSPHRASE");
+    expect(lines.some((line) => line.startsWith("prompt-reject"))).toBe(false);
+  });
+
+  it("a short non-empty passphrase is accepted for import and returned", () => {
+    const { driver, lines } = scriptedDriver(["short"]);
+    expect(collectMachineRecoveryPassphraseNoConfirm(driver)).toBe("short");
+    expect(lines).toContain("prompt-accept field=RECOVERY_PASSPHRASE");
+    expect(lines.some((line) => line.startsWith("prompt-reject"))).toBe(false);
+  });
+
+  it("export's RECOVERY_PASSPHRASE field still rejects six emoji as too short", () => {
+    const { driver, lines } = scriptedDriver([sixEmoji, sixEmoji, sixEmoji]);
+    expect(() => collectMachineRecoveryPassphrase(driver)).toThrow(RecoveryPromptAbortedError);
+    expect(lines).toContain("prompt-reject field=RECOVERY_PASSPHRASE reason=too-short");
+    expect(lines).not.toContain("prompt-accept field=RECOVERY_PASSPHRASE");
+  });
+
+  it("export's RECOVERY_PASSPHRASE field still rejects a short passphrase as too short", () => {
+    const { driver, lines } = scriptedDriver(["short", "short", "short"]);
+    expect(() => collectMachineRecoveryPassphrase(driver)).toThrow(RecoveryPromptAbortedError);
+    expect(lines).toContain("prompt-reject field=RECOVERY_PASSPHRASE reason=too-short");
+    expect(lines).not.toContain("prompt-accept field=RECOVERY_PASSPHRASE");
+  });
+});
+
 describe("collectMachineImportConfirmation / collectMachineRestoreConfirmation", () => {
   it("accepts the exact IMPORT RECOVERY phrase", () => {
     const { driver } = scriptedDriver([IMPORT_CONFIRMATION_PHRASE]);
