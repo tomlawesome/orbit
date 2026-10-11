@@ -218,7 +218,8 @@ export function readEnvironmentValue(targetDir: string, key: string): string | u
   let value = "";
   for (const line of content.split("\n")) {
     if (line.startsWith(prefix)) {
-      value = line.slice(prefix.length);
+      // The engine writes CRLF lines into a CRLF file; drop the CR.
+      value = line.slice(prefix.length).replace(/\r$/, "");
       found = true;
     }
   }

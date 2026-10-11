@@ -248,6 +248,18 @@ describe("which image runs the engine (D2)", () => {
     expect(shape(runCall(result.calls)).image).toBe(LOCAL_IMAGE);
   });
 
+  it("reads the digest from a CRLF-terminated .env-orbit with no ORBIT_IMAGE in the environment (#1316 O1-F2)", () => {
+    const targetDir = makeFixture({
+      envFile: `ORBIT_CONFIG_SCHEMA_VERSION=1\r\nORBIT_IMAGE=${DIGEST_IMAGE}\r\nAPP_URL=https://orbit.delegation.invalid\r\n`,
+    });
+    const result = run(targetDir, ["--check"]);
+    expect(result.stderr).not.toContain("ORBIT_IMAGE must be an immutable registry digest");
+    expect(result.status).toBe(0);
+    const call = runCall(result.calls);
+    expect(call).toBeDefined();
+    expect(shape(call).image).toBe(DIGEST_IMAGE);
+  });
+
   it("--check-rollback can read the image from the rollback copy when .env-orbit has none", () => {
     const targetDir = makeFixture({ envFile: "APP_URL=\n" });
     writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), `ORBIT_IMAGE=${LOCAL_IMAGE}\n`, { mode: 0o600 });

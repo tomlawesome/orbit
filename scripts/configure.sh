@@ -60,6 +60,8 @@ resolve_engine_image() {
     [[ "$candidate" == "$environment_file" || "$flow" == --check-rollback ]] || continue
     if [[ -f "$candidate" && ! -L "$candidate" ]]; then
       image="$(sed -n 's/^ORBIT_IMAGE=//p' "$candidate" | tail -n 1)"
+      # The engine writes CRLF lines into a CRLF file; drop the CR.
+      image="${image%$'\r'}"
     fi
   done
   [[ -n "$image" ]] ||
