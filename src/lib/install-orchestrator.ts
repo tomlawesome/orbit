@@ -68,9 +68,10 @@ import {
 // the launcher its config tree (onConfigurationFailure, #1225). A failure's
 // own terminal `failed` event is the shell's to emit (docs/engine-events.md);
 // this module emits the progress events only. A leftover staging directory
-// from a hard kill is never rolled back by a later run: beside an otherwise
-// empty target validateTarget refuses it for the operator to remove (#383),
-// and beside a deployment it is repair.sh's to diagnose.
+// from a hard kill is never rolled back by a later run: validateTarget
+// refuses it, beside an otherwise empty target for the operator to remove
+// (#383) and beside a deployment for repair.sh to restore or the operator to
+// remove, so a rerun never stages over a half-updated tree.
 
 export interface InstallContext {
   /** The deployment directory, as the engine sees it (/orbit-deploy). */

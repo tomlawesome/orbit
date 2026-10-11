@@ -169,6 +169,18 @@ export function validateTarget(targetDir: string): ValidateTargetResult {
     isRegularNonSymlinkFile(composeFile) &&
     isRealNonSymlinkDirectory(secretsDirectory)
   ) {
+    // A staging directory left by a hard-killed update holds the real
+    // originals; a second transaction would snapshot the half-updated tree
+    // as its "original" and bury the first. The lone deploy lock is not
+    // checked here: it has its own stale-lock handling.
+    const staging = readdirSync(targetDir)
+      .filter((entry) => entry.startsWith(".orbit-install-staging."))
+      .sort();
+    if (staging.length > 0) {
+      throw new TargetValidationRefusal(
+        `A previous update was interrupted and left ${staging.join(" ")} behind in this deployment. If it holds a "committed" marker the update finished: remove it once you have confirmed the deployment is working. If it does not, run "bash scripts/repair.sh" to put the previous files back, then rerun.`,
+      );
+    }
     return { targetWasEmpty: false };
   }
 
