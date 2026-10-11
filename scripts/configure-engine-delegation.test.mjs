@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -251,6 +251,38 @@ process.exit(argv[0] === "info" ? 1 : 0);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toMatch(/could not tell whether Docker is rootless/i);
     expect(result.stderr).toMatch(/refus\w* to guess/i);
+  });
+});
+
+// #1316: a refusal inside the container names /orbit-deploy/..., which means
+// nothing on the host. The engine rewrites it to the host directory when it is
+// told that directory in ORBIT_HOST_DEPLOY_DIR (src/lib/host-paths.ts), so
+// configure.sh must pass the deployment directory's real path as -e NAME=value.
+describe("the host's name for the deployment directory (#1316)", () => {
+  const hostDeployDir = (calls) =>
+    shape(runCall(calls)).env.find((entry) => entry.startsWith("ORBIT_HOST_DEPLOY_DIR="));
+
+  it("passes ORBIT_HOST_DEPLOY_DIR set to the deployment directory's real path", () => {
+    const targetDir = makeFixture();
+    const result = run(targetDir, [], { env: { ORBIT_IMAGE: LOCAL_IMAGE } });
+    expect(result.status).toBe(0);
+    expect(hostDeployDir(result.calls)).toBe(`ORBIT_HOST_DEPLOY_DIR=${realpathSync(targetDir)}`);
+  });
+
+  it("passes it on a read-only flow too", () => {
+    const targetDir = makeFixture();
+    const result = run(targetDir, ["--check"], { env: { ORBIT_IMAGE: LOCAL_IMAGE } });
+    expect(hostDeployDir(result.calls)).toBe(`ORBIT_HOST_DEPLOY_DIR=${realpathSync(targetDir)}`);
+  });
+
+  it("resolves a symlinked deployment directory to its real path", () => {
+    const targetDir = makeFixture();
+    const linkParent = scratchDir("orbit-configure-delegation-link-");
+    const link = join(linkParent, "deploy-link");
+    symlinkSync(targetDir, link);
+    const result = run(link, [], { env: { ORBIT_IMAGE: LOCAL_IMAGE }, cwd: link });
+    expect(result.status, result.stderr).toBe(0);
+    expect(hostDeployDir(result.calls)).toBe(`ORBIT_HOST_DEPLOY_DIR=${realpathSync(targetDir)}`);
   });
 });
 

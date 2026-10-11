@@ -617,9 +617,12 @@ run_engine() {
     fi
   fi
 
+  # ORBIT_HOST_DEPLOY_DIR makes paths the engine prints host paths, as
+  # backup.sh does.
   docker_args+=(
     -e ORBIT_HOST_UID="$host_uid"
     -e ORBIT_HOST_GID="$host_gid"
+    -e ORBIT_HOST_DEPLOY_DIR="$target_dir"
     -e ORBIT_IMAGE="$resolved_reference"
     -e ORBIT_CHANNEL="$channel"
     -e ORBIT_INSTALLER_ELAPSED="$((SECONDS - installer_process_started_at))"

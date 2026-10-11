@@ -120,9 +120,12 @@ run_engine() {
       [[ -t 0 && -t 1 ]] || use_controlling_terminal=1
       ;;
   esac
+  # ORBIT_HOST_DEPLOY_DIR makes paths the engine prints host paths, as
+  # backup.sh does.
   docker_args+=(
     -e ORBIT_HOST_UID="$host_uid"
     -e ORBIT_HOST_GID="$host_gid"
+    -e ORBIT_HOST_DEPLOY_DIR="$repo_dir"
     -e ORBIT_IMAGE
     -e ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE
     -e ORBIT_CONFIGURE_PROMPTS
