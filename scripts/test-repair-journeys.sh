@@ -1487,7 +1487,7 @@ journey_successful_rollback() {
   # both from the deployment as paths the transaction had created.
   local managed
   for managed in docker-compose.yml docker-compose.mail.yml \
-      .env-orbit.example \
+      docker-compose.kek-rotation.yml .env-orbit.example \
       config/tika-config.json scripts/configure.sh scripts/installer-ui.sh \
       scripts/backup.sh scripts/restore.sh \
       scripts/repair.sh \

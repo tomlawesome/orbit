@@ -1445,6 +1445,7 @@ readonly -a rotate_database_credential_steps=(checkpoint rotate-credential updat
 readonly -a restore_transaction_paths=(
   docker-compose.yml
   docker-compose.mail.yml
+  docker-compose.kek-rotation.yml
   .env-orbit.example
   config/tika-config.json
   scripts/configure.sh

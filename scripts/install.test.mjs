@@ -59,6 +59,7 @@ const preflightSuccessLine =
 const deploymentAssets = [
   "docker-compose.yml",
   "docker-compose.mail.yml",
+  "docker-compose.kek-rotation.yml",
   ".env-orbit.example",
   "config/tika-config.json",
   "scripts/configure.sh",

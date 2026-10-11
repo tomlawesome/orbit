@@ -15,11 +15,13 @@ import type { ManagedPath } from "./install-transaction";
  * recovery-bundle scripts joined with #1212: an operator needs them in the
  * deployment, beside backup.sh. scripts/end-maintenance.sh is the emergency
  * reopen path the administrator docs give, so it must be in the deployment,
- * not only the source tree.
+ * not only the source tree. docker-compose.kek-rotation.yml likewise: the
+ * document-key rotation the docs describe is run from the deployment.
  */
 export const DEPLOYMENT_ASSETS: readonly string[] = [
   "docker-compose.yml",
   "docker-compose.mail.yml",
+  "docker-compose.kek-rotation.yml",
   ".env-orbit.example",
   "config/tika-config.json",
   "scripts/configure.sh",

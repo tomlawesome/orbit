@@ -254,6 +254,25 @@ describe("runInstall: target and action (guarantees #7, #21)", () => {
     expect(snapshot(target)).toEqual(before);
   });
 
+  // An open document-key rotation (the .orbit-secrets/document-kek-next
+  // overlay) must be finished or aborted before anything else changes the
+  // deployment (#1316).
+  it("refuses an update while a document-key rotation is open, before any file changes (#1316)", async () => {
+    const target = recognised();
+    writeFileSync(join(target, ".orbit-secrets", "document-kek-next"), `${"f".repeat(64)}\n`, { mode: 0o600 });
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+
+    expect(outcome.status).toBe("failed");
+    const message = outcome.status === "failed" ? outcome.message : "";
+    expect(message).toMatch(/document-key rotation is open/i);
+    expect(message).toMatch(/finish/i);
+    expect(message).toMatch(/rewrap/i);
+    expect(message).toMatch(/overlay/i);
+    expect(message).toMatch(/abort/i);
+    expect(snapshot(target)).toEqual(before);
+  });
+
   it("refuses an explicit install over a recognised deployment, and an explicit update of an empty target", async () => {
     expect((await run(recognised(), { requestedAction: "install" })).outcome).toMatchObject({
       status: "failed",

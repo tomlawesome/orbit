@@ -378,6 +378,17 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
   if (action === "update" && targetWasEmpty) {
     return fail("host", "host", "Update requires a recognized existing Orbit deployment.");
   }
+  // An open document-key rotation runs orbit-app through the kek-rotation
+  // overlay; recreating it here would bring it back without the next key,
+  // locking every row already rewrapped. Same refusal as restore's.
+  const documentKekNext = join(context.targetDir, SECRETS_DIRECTORY, "document-kek-next");
+  if (isRegularNonSymlinkFile(documentKekNext)) {
+    return fail(
+      "host",
+      "host",
+      `A document-key rotation is open (${documentKekNext} exists). Finish the rotation (complete the rewrap and remove the compose kek-rotation overlay) or abort it before updating.`,
+    );
+  }
 
   // verify_database_volume_safety, from the shell's Docker facts (#13-18, F3).
   let volumeState: DatabaseVolumeSafetyState = {
