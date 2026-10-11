@@ -187,6 +187,10 @@ type ProviderErrorDetails = {
   statusCode?: unknown;
 };
 
+function isRevokedPushStatus(statusCode: number | undefined): boolean {
+  return statusCode === 401 || statusCode === 403 || statusCode === 404 || statusCode === 410;
+}
+
 /**
  * Maps provider failures to the administrator-safe vocabulary before they are
  * persisted. Provider messages can contain addresses, hosts, or credentials.
@@ -207,7 +211,10 @@ export function categorizeProviderError(channel: "email" | "web_push", error: un
     return "unknown";
   }
 
-  if (statusCode === 404 || statusCode === 410) return "push_unsubscribed";
+  // 401/403 is what a push service answers for a subscription made with a
+  // different VAPID key (a recovered host generates a new pair): it will never
+  // succeed, so it is gone, not transient.
+  if (isRevokedPushStatus(statusCode)) return "push_unsubscribed";
   if (["ECONNREFUSED", "ECONNRESET", "ENETUNREACH", "ENOTFOUND", "ETIMEDOUT", "EHOSTUNREACH"].includes(code)
     || (statusCode !== undefined && statusCode >= 500)) {
     return "push_unavailable";
@@ -1065,7 +1072,7 @@ async function deliverClaimed(
                 delivered = true;
               } catch (error) {
                 const statusCode = (error as { statusCode?: number }).statusCode;
-                if (statusCode === 404 || statusCode === 410) {
+                if (isRevokedPushStatus(statusCode)) {
                   await transaction.update(pushSubscriptions).set({ revokedAt: now })
                     .where(and(eq(pushSubscriptions.id, subscription.id), isNull(pushSubscriptions.revokedAt)));
                   continue;

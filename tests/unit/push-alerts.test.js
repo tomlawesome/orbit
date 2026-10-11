@@ -240,6 +240,76 @@ describe("enableAlerts — already subscribed", () => {
     expect(writePushSubscription).toHaveBeenCalledExactlyOnceWith(subscriptionJson);
   });
 
+  it("unsubscribes a stale subscription made with a different server key and subscribes afresh (#1316)", async () => {
+    // The server's public key (VAPID) can change; a subscription bound to the
+    // old key can never receive a push, so reusing it leaves alerts silently dead.
+    const serverKey = "AQIDBA"; // base64url of bytes 1,2,3,4
+    const staleKeyBytes = new Uint8Array([9, 9, 9, 9]).buffer;
+    const staleJson = { endpoint: "https://push.example/stale", expirationTime: null, keys: { p256dh: "old", auth: "old" } };
+    const order = [];
+    const unsubscribe = vi.fn(async () => { order.push("unsubscribe"); return true; });
+    const stale = {
+      endpoint: staleJson.endpoint,
+      options: { applicationServerKey: staleKeyBytes },
+      unsubscribe,
+      toJSON: () => staleJson,
+    };
+    const freshJson = { endpoint: "https://push.example/fresh", expirationTime: null, keys: { p256dh: "new", auth: "new" } };
+    const fresh = { endpoint: freshJson.endpoint, toJSON: () => freshJson };
+    const subscribe = vi.fn(async (options) => {
+      order.push("subscribe");
+      expect(options.userVisibleOnly).toBe(true);
+      expect(Array.from(new Uint8Array(options.applicationServerKey))).toEqual([1, 2, 3, 4]);
+      return fresh;
+    });
+    const registration = fakeRegistration(stale, { subscribe });
+    const writePushSubscription = vi.fn(async () => ({ subscribed: true }));
+
+    const result = await enableAlerts({
+      scope: SUPPORTED_SCOPE,
+      getRegistration: vi.fn(async () => registration),
+      register: vi.fn(),
+      requestPermission: vi.fn(),
+      readPushConfig: vi.fn(async () => ({ publicKey: serverKey })),
+      writePushSubscription,
+    });
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["unsubscribe", "subscribe"]);
+    expect(result).toBe(fresh);
+    expect(writePushSubscription).toHaveBeenCalledExactlyOnceWith(freshJson);
+  });
+
+  it("reuses an existing subscription whose key matches the server's (#1316)", async () => {
+    const serverKey = "AQIDBA";
+    const json = { endpoint: "https://push.example/current", expirationTime: null, keys: { p256dh: "a", auth: "b" } };
+    const unsubscribe = vi.fn(async () => true);
+    const existing = {
+      endpoint: json.endpoint,
+      options: { applicationServerKey: new Uint8Array([1, 2, 3, 4]).buffer },
+      unsubscribe,
+      toJSON: () => json,
+    };
+    const subscribe = vi.fn();
+    const registration = fakeRegistration(existing, { subscribe });
+    const writePushSubscription = vi.fn(async () => ({ subscribed: true }));
+
+    const result = await enableAlerts({
+      scope: SUPPORTED_SCOPE,
+      getRegistration: vi.fn(async () => registration),
+      register: vi.fn(),
+      requestPermission: vi.fn(),
+      readPushConfig: vi.fn(async () => ({ publicKey: serverKey })),
+      writePushSubscription,
+    });
+
+    expect(result).toBe(existing);
+    expect(unsubscribe).not.toHaveBeenCalled();
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(writePushSubscription).toHaveBeenCalledExactlyOnceWith(json);
+  });
+
   it("propagates a failed server write instead of swallowing it", async () => {
     // So a device whose write failed once stays correctly "not confirmed
     // on" rather than the switch claiming success — the caller (the

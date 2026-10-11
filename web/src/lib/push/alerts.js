@@ -131,6 +131,20 @@ function applicationServerKeyOf(value) {
 }
 
 /**
+ * Whether a subscription's key is the server's current one. A browser that
+ * does not report the key (null) is given the benefit of the doubt.
+ *
+ * @param {ArrayBuffer | null | undefined} subscriptionKey
+ * @param {string} serverKey base64url
+ */
+function sameKey(subscriptionKey, serverKey) {
+  if (!subscriptionKey) return true;
+  const a = new Uint8Array(subscriptionKey);
+  const b = applicationServerKeyOf(serverKey);
+  return a.length === b.length && a.every((byte, index) => byte === b[index]);
+}
+
+/**
  * @param {object} [deps]
  * @param {*} [deps.scope]
  * @param {() => Promise<NotificationPermission>} [deps.requestPermission]
@@ -179,17 +193,24 @@ export async function enableAlerts(deps = {}) {
   const registration = (await d.getRegistration()) ?? (await d.register());
 
   const existing = await registration.pushManager.getSubscription();
+  let config;
   if (existing) {
-    await d.writePushSubscription(existing.toJSON());
-    return existing;
+    // A restored or re-keyed server needs a fresh subscription: one bound to
+    // the old VAPID key is refused by the push service, so it would read as
+    // on and never deliver. Permission was already granted to make it.
+    config = await d.readPushConfig();
+    if (!config?.publicKey || sameKey(existing.options?.applicationServerKey, config.publicKey)) {
+      await d.writePushSubscription(existing.toJSON());
+      return existing;
+    }
+    await existing.unsubscribe();
+  } else {
+    const permission = await d.requestPermission();
+    if (permission !== "granted") {
+      throw new AlertsError("Notification permission was not granted", { code: "permission_denied" });
+    }
+    config = await d.readPushConfig();
   }
-
-  const permission = await d.requestPermission();
-  if (permission !== "granted") {
-    throw new AlertsError("Notification permission was not granted", { code: "permission_denied" });
-  }
-
-  const config = await d.readPushConfig();
   if (!config?.publicKey) {
     throw new AlertsError("Web Push is not configured on this Orbit server", { code: "unconfigured" });
   }
