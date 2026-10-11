@@ -1,4 +1,8 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { CREDITS, FONTS, SIDECARS } from "../../web/src/lib/about/credits.js";
@@ -103,6 +107,35 @@ describe("creditsView (#1256)", () => {
     expect(entry?.changes).toBe(COMMONS_WORK.changes);
     expect(entry?.licence[0].text).toMatch(/commercial use of this picture needs ESA's permission/);
     expect(withCommons().groups[0].entries?.filter((one) => one.changes)).toHaveLength(CREDITS.filter((credit) => credit.changes).length + 1);
+  });
+
+  it("draws a work's change note on the page as \"changed: ...\" (Credit.svelte, rendered)", async () => {
+    /* The row is a .svelte file and this suite has no Svelte plugin, so it is
+       compiled for the server here, written to a temporary folder, and
+       rendered with the stand-in's entry. */
+    const web = createRequire(path.resolve(import.meta.dirname, "../../web/package.json"));
+    const { compile } = web("svelte/compiler");
+    const { render } = web("svelte/server");
+    const groupUrl = pathToFileURL(path.resolve(import.meta.dirname, "../../web/src/lib/about/group.js")).href;
+    const serverUrl = pathToFileURL(web.resolve("svelte/internal/server")).href;
+    const source = readFileSync(path.resolve(import.meta.dirname, "../../web/src/routes/about/Credit.svelte"), "utf8");
+    const code = compile(source, { generate: "server", filename: "Credit.svelte" }).js.code
+      .replace("'svelte/internal/server'", JSON.stringify(serverUrl))
+      .replace('"$lib/about/group.js"', JSON.stringify(groupUrl));
+    const dir = mkdtempSync(path.join(tmpdir(), "orbit-credit-"));
+    try {
+      const file = path.join(dir, "Credit.mjs");
+      writeFileSync(file, code);
+      const { default: Credit } = await import(/* @vite-ignore */ pathToFileURL(file).href);
+      const entry = withCommons().groups[0].entries?.find((one) => one.name.startsWith("A stand-in work"));
+      const { body } = render(Credit, { props: { entry } });
+      expect(body).toContain(`<small>changed: ${COMMONS_WORK.changes}</small>`);
+      const plain = withCommons().groups[0].entries?.find((one) => !one.changes);
+      expect(plain).toBeDefined();
+      expect(render(Credit, { props: { entry: plain } }).body).not.toContain("changed:");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("names each Creative Commons work by its title in the name the page shows (CC 3.0 section 4(c))", () => {
