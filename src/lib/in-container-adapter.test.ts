@@ -110,6 +110,7 @@ function newFixture(overrides: NodeJS.ProcessEnv = {}): Fixture {
 }
 
 const CONNECTION = ["--host=orbit-db", "--port=5432", "--username=orbit_user", "--no-password"];
+const RESET_SCHEMAS = "DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;";
 
 function setFake(fixture: Fixture, values: Record<string, string>): void {
   Object.assign(fixture.env, values);
@@ -175,11 +176,21 @@ describe("createInContainerAdapter: exact argv, password only in the environment
     const calls = fixture.calls();
     expect(calls.map((call) => [call.tool, ...call.argv])).toEqual([
       ["pg_restore", "--single-transaction", "--exit-on-error", "--no-owner", "--no-acl", ...CONNECTION, "--dbname=orbit_restore_stage_9"],
+      ["psql", ...CONNECTION, "--dbname=orbit_db", "--set=ON_ERROR_STOP=1", `--command=${RESET_SCHEMAS}`],
       ["pg_restore", "--single-transaction", "--clean", "--if-exists", "--no-owner", "--no-acl", "--exit-on-error", ...CONNECTION, "--dbname=orbit_db"],
     ]);
-    expect(calls.every((call) => call.stdinBytes === 3)).toBe(true);
+    expect(calls.filter((call) => call.tool === "pg_restore").every((call) => call.stdinBytes === 3)).toBe(true);
     setFake(fixture, { FAKE_PG_RESTORE_STATUS: "1" });
     expect(fixture.adapter.restoreActiveDatabase(dump)).toBe(false);
+  });
+
+  it("empties the live schemas before restoring, so tables added after the backup do not survive, and stops if that fails", () => {
+    const fixture = newFixture();
+    const dump = join(fixture.root, "x.dump");
+    writeFileSync(dump, "123");
+    setFake(fixture, { FAKE_PSQL_STATUS: "1" });
+    expect(fixture.adapter.restoreActiveDatabase(dump)).toBe(false);
+    expect(fixture.calls().map((call) => call.tool)).toEqual(["psql"]);
   });
 
   it("queryReport asks psql for the report and the terminator as two commands, and strips the terminator", () => {
@@ -325,7 +336,7 @@ describe("createInContainerAdapter: exact argv, password only in the environment
     fixture.adapter.recordRecoveryBundleExported();
     fixture.adapter.dropStageDatabase("s");
     const calls = fixture.calls();
-    expect(calls).toHaveLength(10);
+    expect(calls).toHaveLength(11);
     for (const call of calls) {
       expect(call.argv.join(" ")).not.toContain(PASSWORD);
       expect(call.pgpassword).toBe(PASSWORD);

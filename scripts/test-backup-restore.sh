@@ -23,6 +23,9 @@
 #     reopens it afterwards
 #   recovery-bundle export/import path          export/import-recovery-bundle.sh
 #     entries (Part 2)
+#   test_restore_removes_post_backup_table      restore.sh #8 (#1316): a table
+#     created after the backup point does not survive restoring it, Orbit
+#     boots healthy and the restore does not roll back.
 #   assert_credential_fixture_present            restore.sh #49 (authentication
 #     data and the revocation boundary, #917, ADR-0022 §6, ADR-0023 §7): a
 #     local credential and an unconsumed setup token seeded before the backup
@@ -151,6 +154,9 @@ readonly credential_setup_token_hash="606060606060606060606060606060606060606060
 readonly credential_identity_issuer="https://idp.backup-test.invalid/"
 readonly credential_identity_subject="backup-drill-subject"
 readonly credential_session_token_hash="7070707070707070707070707070707070707070707070707070707070707070"
+# #1316: a table that exists only after the backup point, standing in for a
+# later migration. Restoring the backup must remove it.
+readonly post_backup_table="orbit_drill_post_backup_table"
 backup_path=""
 recovery_bundle_path=""
 maintenance_backup_path=""
@@ -237,6 +243,7 @@ restore_deployment() {
   if [[ "$fixtures_seeded" == 1 && "$fixtures_removed" == 0 ]]; then
     remove_document_fixture >/dev/null 2>&1 || true
     remove_credential_fixture >/dev/null 2>&1 || true
+    drop_post_backup_table >/dev/null 2>&1 || true
   fi
   # The one-off container `compose run` starts is named, so it is found by name
   # and nothing else of the deployment's is touched.
@@ -966,6 +973,50 @@ test_restore_during_maintenance() {
   run_valid_restore
 }
 
+# The restore-removes-later-schema drill (#1316). A backup is taken, then a
+# table the backup has never heard of is created in the live database, as a
+# later migration would. Restoring that backup must leave the database exactly
+# as the backup had it: the table gone (pg_restore --clean only drops what the
+# archive names, so a table outside the archive survives it), Orbit healthy on
+# the restored data, and no rollback -- restore.sh exits 0 and leaves no
+# journal. A surviving table would make the migration that creates it fail on
+# boot with 'relation already exists', which the restore reads as a failed
+# cutover and rolls back.
+drop_post_backup_table() {
+  maintenance_sql "drop table if exists public.${post_backup_table};" >/dev/null
+}
+
+post_backup_table_exists() {
+  maintenance_sql "select to_regclass('public.${post_backup_table}') is not null;"
+}
+
+test_restore_removes_post_backup_table() {
+  local drill_backup_output drill_backup_path restore_status=0
+
+  drill_backup_output="$(bash scripts/backup.sh)"
+  drill_backup_path="${drill_backup_output#Orbit backup created: }"
+  [[ -f "$drill_backup_path" ]] || fail 'Backup for the post-backup table drill did not return a bundle path.'
+
+  maintenance_sql "drop table if exists public.${post_backup_table}; create table public.${post_backup_table} (id integer primary key);" >/dev/null
+  [[ "$(post_backup_table_exists)" == 't' ]] ||
+    fail 'The post-backup table was not created for the schema drill.'
+
+  ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$drill_backup_path" >/dev/null 2>&1 ||
+    restore_status=$?
+  rm -f -- "$drill_backup_path"
+
+  [[ "$restore_status" == 0 ]] ||
+    fail "Restoring a backup older than a later table exited $restore_status; the restore rolled back or failed."
+  [[ ! -f "$restore_state_directory/restore.journal" ]] ||
+    fail 'Restoring a backup older than a later table left a restore journal behind.'
+  wait_for_health
+  [[ "$(post_backup_table_exists)" == 'f' ]] || {
+    drop_post_backup_table
+    fail 'A table created after the backup survived the restore; the database is not as the backup had it.'
+  }
+  assert_fixture_present
+}
+
 test_local_key_rejections() {
   key_backup="$test_directory/document-kek.backup"
   cp -- "$live_kek" "$key_backup"
@@ -1272,11 +1323,13 @@ test_ordinary_rollback
 test_checkpoint_failure_recovery
 test_hard_interruption_recovery
 test_wrong_recovery_material
+test_restore_removes_post_backup_table
 test_restore_during_maintenance
 
 remove_document_fixture
 assert_fixture_absent
 remove_credential_fixture
+drop_post_backup_table
 fixtures_removed=1
 
 printf 'Orbit backup test: staged correspondence, rollback, interruption recovery, key handling, restore during maintenance, document/crypto round trip, and the authentication-data revocation boundary passed.\n'

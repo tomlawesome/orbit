@@ -1020,7 +1020,7 @@ and a separate `--recover` manual-recovery mode for crash safety.
 
 24. Document replacement removes the entire existing document tree and extracts the new tree in one container invocation, with a `documents_replaced` flag set beforehand so cleanup logic always knows this step was attempted.
     `restore.sh:568-576` — category: transactional/rollback — criticality: HIGH
-25. Live database replacement uses `pg_restore --single-transaction --clean --if-exists --exit-on-error`, an atomic all-or-nothing swap of live DB content.
+25. Live database replacement first drops the `drizzle` and `public` schemas and recreates an empty `public` (`psql` with `ON_ERROR_STOP`), because `--clean` drops only the objects the dump names and would leave tables added after the backup; it then applies `pg_restore --single-transaction --clean --if-exists --exit-on-error`, all-or-nothing. A failure between the two steps is rolled back from the checkpoint.
     `restore.sh:578-583` — category: transactional/rollback — criticality: HIGH
 26. After restore, scan jobs left in an inconsistent lease state are automatically requeued (if attempts remain) or marked failed (if attempts are exhausted) instead of being left permanently stuck.
     `restore.sh:585-589` — category: recovery — criticality: MEDIUM

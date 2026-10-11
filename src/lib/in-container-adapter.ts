@@ -282,6 +282,14 @@ export function createInContainerAdapter(options: InContainerAdapterOptions = {}
     },
 
     restoreActiveDatabase(dumpPath: string): boolean {
+      // --clean drops only the objects the dump names, so tables added after
+      // the backup (a later migration) would survive and break the older
+      // build's migrations. Empty the schemas first; the checkpoint covers a
+      // failure between this and pg_restore.
+      const reset = tools.psql(database, ["--set=ON_ERROR_STOP=1", "--command=DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;"], {
+        stdio: ["ignore", "ignore", "inherit"],
+      });
+      if (reset.status !== 0) return false;
       return restore(["--single-transaction", "--clean", "--if-exists", "--no-owner", "--no-acl", "--exit-on-error"], database, dumpPath);
     },
 
