@@ -710,9 +710,10 @@ async function finishMailboxApproval(
       return { receipt, claimed: false, expired: true, result: undefined };
     }
     const approvalResultId = randomUUID();
+    // draftVersion is left as-is: the claim is already fenced by approvalOperationId,
+    // and a retry reads this version back, so it must match the stored request hash.
     await transaction.update(imapIngestionMessages).set({
       status: "approving",
-      draftVersion: receipt.draftVersion + 1,
       approvalOperationId: input.operationId,
       approvalResultId,
       approvalRequestSha256: requestHash,
