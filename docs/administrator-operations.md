@@ -760,13 +760,12 @@ bash scripts/export-recovery-bundle.sh backups/orbit-<timestamp>.tar
 Run them from the deployment directory. Each runs the Orbit engine's own
 command (`orbit backup`, then `orbit export-recovery-bundle <backup.tar>`)
 inside the deployment, as a one-off container on the app service, so the host
-needs Docker and nothing else.
+needs Docker with Compose v2 and nothing else.
 
-`export-recovery-bundle.sh` asks for the passphrase twice, then locks the live
-`DOCUMENT_KEK` under it
-passphrase you choose (the passphrase is stretched with scrypt and the key
-encrypted with AES-256-GCM) and packages it with the backup you just made into
-one file, `orbit-recovery-<timestamp>.tar`.
+`export-recovery-bundle.sh` asks for a passphrase of your choice twice, then
+locks the live `DOCUMENT_KEK` under it (the passphrase is stretched with scrypt
+and the key encrypted with AES-256-GCM) and packages it with the backup you
+just made into one file, `orbit-recovery-<timestamp>.tar`.
 
 Keep its two parts apart: the bundle file on storage separate from this
 instance, and its passphrase in a password manager or on paper — never both

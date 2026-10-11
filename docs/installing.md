@@ -127,7 +127,7 @@ removed when it finishes. If anything goes wrong before Orbit starts, it puts
 the directory back exactly as it was.
 
 The installer then generates four separate secrets: one for sign-in
-sessions, the database password, the document encryption key, and a key
+sessions, the database password, the document encryption key, and the
 private key for browser alerts. They live in `.orbit-secrets/`, readable only by
 the user who ran the installer. Each container is given only the secret
 files it needs; secret values never go into container environment

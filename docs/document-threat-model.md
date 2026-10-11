@@ -137,7 +137,7 @@ recoverable state.
   scanning, then that it has moved on to generating the preview
   ([ADR-0033](adr/0033-document-safety-standard-patterns.md)).
 - The open check is pattern E of ADR-0033: the library that will draw the file
-  opens it and finds a page. For a PDF, PDF.js, the one PDF parser in Orbit,
+  opens it and finds a page. For a PDF, PDF.js, the one PDF parser inside Orbit's own process,
   opens it with no password and finds page one, within 1,000 pages and five
   seconds (`password_required` when it needs a password to open,
   `unsupported_structure` for anything else it cannot open). For a JPEG or

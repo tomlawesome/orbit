@@ -121,8 +121,8 @@ documents got through because they were reviewed one PDF at a time.
 
 ## Fonts
 
-`fetch-fonts.sh` downloads eleven files across eight families, all **SIL Open
-Font License 1.1**, into `scripts/corpus/fonts/` — which is **not committed**.
+`fetch-fonts.sh` downloads the typefaces it lists (about 120 files from roughly
+100 Google Fonts families), all **SIL Open Font License 1.1**, into `scripts/corpus/fonts/` — which is **not committed**.
 Fetching rather than vendoring keeps the project from redistributing copies
 and taking on the obligations that go with that. The corpus text is committed,
 so this is only needed to regenerate the fixtures.
@@ -132,8 +132,8 @@ served to a user, or is redistributed.
 
 Two traps, both of which have already cost a rebuild:
 
-- **Only ten fonts are installed on this host**, and anything else falls back
-  with no warning:
+- **Only ten usable text faces are installed on this host** (the rest are CJK,
+  Unifont and emoji fallbacks), and anything else falls back with no warning:
 
   ```
   Bitstream Charter   Courier 10 Pitch   Liberation Serif

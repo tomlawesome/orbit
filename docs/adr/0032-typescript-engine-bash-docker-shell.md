@@ -2,6 +2,11 @@
 
 **Status:** Accepted (owner, 2026-10-04, ratifying the 2026-08-13 direction
 on #295)
+**Note (2026-10-11):** #1210, #1211 and #1212 have all landed; the opt-in and
+the bash twins are gone. Context and Consequences describe the position on
+2026-10-04. The quoted constraint now sits in `docs/engine-events.md`, under
+"In-container engine invocation (v0)", subsection "Fail-closed guard: no
+Docker access from inside the engine container", not at line 613.
 **Date:** 2026-10-04
 **Relates to:** #295 (engine-delivery architecture, 2026-08-13); #1151
 (v1.3.0 release audit); #1210, #1211, #1212 (the flips this ADR orders);

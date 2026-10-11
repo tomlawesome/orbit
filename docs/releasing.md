@@ -194,8 +194,8 @@ which ai/orbit-base-image's `publish_signing` builds and scans; pin the
 digest from that job's `published-signing-digest.txt`. If the image's cosign
 is not exactly the version `scripts/ci/ensure-cosign.sh` pins, the job stops
 naming both versions rather than fetching one, so a cosign bump here means
-rebuilding that image and re-pinning. Until the first publish the pin is an
-all-zero placeholder and the job fails to pull its image.
+rebuilding that image and re-pinning. The pin is the digest from base-image's
+`publish_signing` run (first published 2026-10-10).
 
 **Key rotation:** generate a new pair, replace the two files on the runner
 host, commit the new `cosign.pub`. Attestations made under the old key stop

@@ -5,7 +5,7 @@
 **Relates to:** #1291 (ordinary PDF refused), #1292 (encrypted object streams
 refused), #1293 (checker and renderer can disagree), #1294 (`isEvalSupported`
 is a dead option); `docs/document-threat-model.md`; ADR-0010 (scanning);
-research note `pdf-safety-research.md` (paperless-ngx, Dangerzone, Docspell,
+research note [`pdf-safety-research.md`](../adr-notes/pdf-safety-research.md) (paperless-ngx, Dangerzone, Docspell,
 Mayan, Papermerge, Nextcloud, Stirling-PDF, Immich)
 
 ## Context

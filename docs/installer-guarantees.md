@@ -641,7 +641,7 @@ health is confirmed.
 
 `scripts/backup.sh` is now a thin shell: it stops orbit-app, runs `orbit backup` as a `docker compose run --rm --no-deps` one-off on orbit-app, and starts it again (`--verify` leaves the app running). The engine (`src/lib/backup-restore-cli.ts`, `src/lib/recovery-bundle.ts`, `src/lib/in-container-adapter.ts`) implements these guarantees. The `backup.sh:line` citations below point at the bash as of commit `6448f07e`. The tests that assert each guarantee now are in the table after entry 35.
 
-1. Refuses to run without Docker, Docker Compose v2, OpenSSL, sha256sum, tar, or the env file present.
+1. Refuses to run without Docker, Docker Compose v2, or the env file present (OpenSSL, sha256sum and tar are no longer needed on the host; the engine does that work).
    `backup.sh:34-41` — category: input-validation / refusal — criticality: MEDIUM
 2. Document KEK must be a regular file and must NOT be a symlink, or the run fails.
    `backup.sh:44-45` — category: secret-handling / refusal — criticality: HIGH
@@ -761,7 +761,7 @@ health is confirmed.
 
 1. Source bundle argument is required and must be an existing, regular, non-symlink file, or usage fails.
    `export-recovery-bundle.sh:50-51` — category: input-validation — criticality: MEDIUM
-2. Requires sha256sum, tar, docker, and the env file to be present before doing anything.
+2. Requires Docker, Docker Compose v2, and the env file to be present before doing anything (sha256sum and tar are no longer needed on the host; the engine does that work).
    `export-recovery-bundle.sh:52-55` — category: input-validation — criticality: MEDIUM
 3. Document KEK file must be a regular, non-symlink file or export refuses to run.
    `export-recovery-bundle.sh:56` — category: secret-handling / refusal — criticality: HIGH
@@ -822,7 +822,7 @@ health is confirmed.
 
 1. Recovery bundle argument required, must be an existing, regular, non-symlink file.
    `import-recovery-bundle.sh:44-45` — category: input-validation — criticality: MEDIUM
-2. Requires sha256sum, tar, docker, and the env file present before proceeding.
+2. Requires Docker, Docker Compose v2, and the env file present before proceeding, and curl for the health wait (sha256sum and tar are no longer needed on the host; the engine does that work).
    `import-recovery-bundle.sh:46-49` — category: input-validation — criticality: MEDIUM
 3. Secrets directory must be a regular directory (not a symlink) before any key material is touched.
    `import-recovery-bundle.sh:50` — category: secret-handling / permissions-ownership — criticality: HIGH
@@ -960,7 +960,7 @@ and a separate `--recover` manual-recovery mode for crash safety.
 
 **Preflight / tooling / bundle validation**
 
-1. Requires docker, compose v2, openssl, sha256sum, tar, find, stat, sync, curl, and the env file present before any state is touched.
+1. Requires Docker, Docker Compose v2, curl (for the health wait), and the env file present before any state is touched (openssl, sha256sum, tar, find, stat and sync are no longer needed on the host; the engine does that work).
    `restore.sh:40-51` — category: input-validation — criticality: MEDIUM
 2. Document KEK must be a regular, non-symlink file containing exactly 64 hex chars, checked before restore proceeds.
    `restore.sh:53-58` — category: secret-handling — criticality: HIGH

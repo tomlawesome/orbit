@@ -123,9 +123,9 @@ without them:
   It does not read text out of scanned images: that feature (OCR) is
   switched off.
 - **Ollama**, a private AI model server. With a model chosen, Orbit also
-  asks the model to suggest a document's title, provider and reference, and
-  checks the answer against its own rules. Either way, nothing is added
-  until you review it.
+  asks the model to suggest a document's provider, reference, type, cost, how
+  often it recurs and its dates, and checks the answer against its own
+  rules. Either way, nothing is added until you review it.
 
 To turn both on, add these lines to `.env-orbit`:
 
@@ -193,7 +193,8 @@ the whole restore, including the checks on the backup before anything is
 replaced, and starts again once it is done. If a restore is interrupted
 part-way, Orbit stays stopped and `bash scripts/restore.sh --recover` puts
 the previous state back. Both scripts run the Orbit engine inside the
-deployment, so the host needs Docker and nothing else; keep `backups/` on a
+deployment, so the host needs Docker with Compose v2; restore also needs
+`curl`, to wait for Orbit to answer (backup does not). Keep `backups/` on a
 local disk (a backups directory on NFS is not supported).
 
 A backup deliberately leaves out the document encryption key, so it is only
