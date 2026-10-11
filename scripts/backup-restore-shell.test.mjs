@@ -625,6 +625,40 @@ describe("the stop / engine / start rule (E3)", () => {
     expect(verbs(result.calls)).toEqual(["run", "stop", "run"]);
   });
 
+  // #1316 O2-S1 (owner decision, note 35310): a restore that exits 0 keeps its
+  // journal and checkpoint until the shell has seen Orbit healthy. Only then
+  // does the shell run `restore --finish`; if health never comes, Orbit is
+  // stopped again and the --recover line printed. There is no automatic rollback.
+  describe.each([
+    ["restore.sh", ["--yes"]],
+    ["import-recovery-bundle.sh", []],
+  ])("%s: a successful engine run that leaves its journal (#1316 O2-S1)", (script, flags) => {
+    function runWithJournal(env) {
+      const deployment = makeDeployment();
+      const bundle = join(deployment.deployDir, "b.tar");
+      writeFileSync(bundle, "bundle");
+      const result = run(deployment, script, [...flags, bundle], { env: { FAKE_ENGINE_JOURNAL: deployment.journal, ...env } });
+      return { deployment, result };
+    }
+
+    it("stops Orbit again, keeps the journal and prints the --recover line when health never passes", () => {
+      const { deployment, result } = runWithJournal({ FAKE_CURL_STATUS: "7", ORBIT_RESTORE_HEALTH_SECONDS: "1" });
+      expect(result.status).toBe(1);
+      expect(verbs(result.calls)).toEqual(["run", "stop", "run", "start", "stop"]);
+      expect(existsSync(deployment.journal)).toBe(true);
+      expect(result.stderr).toContain("bash scripts/restore.sh --recover");
+    });
+
+    it("runs `restore --finish` once health passes, and exits 0", () => {
+      const { result } = runWithJournal({});
+      expect(result.status).toBe(0);
+      expect(verbs(result.calls)).toEqual(["run", "stop", "run", "start", "run"]);
+      const finish = engineRuns(result.calls).at(-1);
+      expect(finish.command).toEqual(expect.arrayContaining(["restore", "--finish"]));
+      expect(finish.command.indexOf("--finish")).toBe(finish.command.indexOf("restore") + 1);
+    });
+  });
+
   it("restore.sh reports a restore that never became healthy, and fails", () => {
     const deployment = makeDeployment();
     const bundle = join(deployment.deployDir, "b.tar");

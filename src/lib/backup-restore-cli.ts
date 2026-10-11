@@ -56,6 +56,7 @@ import {
   checkRestoreCapacity,
   deriveRestorePaths,
   directoryUsageKib,
+  loadRestoreJournal,
   type RecoverRestoreOptions,
   filesystemAvailableKib,
   listOrphanedCheckpoints,
@@ -546,6 +547,32 @@ export function runRecoverRestore(options: RecoverRestoreOptions): RestoreDispos
   const releaseLock = acquireBackupRestoreLock(options.paths.backupDirectory);
   try {
     return recoverRestore(options);
+  } finally {
+    releaseLock();
+  }
+}
+
+/**
+ * `restore --finish`: the shell runs it once Orbit has started and passed
+ * its health check on the restored data, which is only then known to be
+ * servable. Until it does, the journal and checkpoint stay, so a restore
+ * the running image cannot serve can still be undone with `restore --recover`.
+ * No journal means nothing to finish. Only a completed restore's evidence is
+ * removed: any other state is an unfinished restore or failed rollback.
+ */
+export function runFinishRestore(options: { paths: RestorePaths }): void {
+  const releaseLock = acquireBackupRestoreLock(options.paths.backupDirectory);
+  try {
+    if (!existsSync(options.paths.journalPath)) return;
+    const { fields, checkpointDirectory } = loadRestoreJournal(options.paths.journalPath, options.paths.restoreRoot);
+    if (fields.state !== "database-restored") {
+      refuse(
+        "restore-unfinished",
+        "finish failed; the restore journal does not record a completed restore; keep Orbit stopped and run bash scripts/restore.sh --recover.",
+      );
+    }
+    rmSync(options.paths.journalPath, { force: true });
+    rmSync(checkpointDirectory, { recursive: true, force: true });
   } finally {
     releaseLock();
   }

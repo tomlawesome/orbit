@@ -784,9 +784,16 @@ docker compose --env-file "$environment_file" \
   (amendment E3a on #1211: validate before taking the service down). Only
   then do they stop `orbit-app` and run the full command, which repeats
   every check; `restore.sh --recover` has no bundle and stops first. After
-  the full run they start it and wait up to 45 seconds for `/api/health` —
-  unless `backups/.orbit-restore/restore.journal` exists afterwards, which
-  keeps Orbit stopped for `bash scripts/restore.sh --recover`. `backup.sh --verify` and `export-recovery-bundle.sh` leave it
+  the full run they start it and wait up to 45 seconds for `/api/health`.
+  A failed run that leaves `backups/.orbit-restore/restore.journal` keeps
+  Orbit stopped for `bash scripts/restore.sh --recover`. A successful
+  restore or import also leaves the journal and its checkpoint: the shell
+  starts Orbit, and only once health passes runs `restore --finish`
+  (standard input `/dev/null`), which removes them under the lock. If Orbit
+  never becomes healthy on the restored data (say, a bundle from a newer
+  build than the running image), the shell stops `orbit-app` again, prints
+  the `--recover` line and exits 1; nothing rolls back automatically.
+  `backup.sh --verify` and `export-recovery-bundle.sh` leave it
   running. The engine reports, once, on standard error, that it left the
   app's lifecycle to the shell:
   `phase=application component=application state=skipped reason=application-startup action=skip elapsed=0s`.

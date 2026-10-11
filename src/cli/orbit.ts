@@ -24,6 +24,7 @@ import {
   type RestoreOrchestrationTestHooks,
   runBackup,
   runExportRecoveryBundle,
+  runFinishRestore,
   runImportRecoveryBundle,
   runRecoverRestore,
   runRestore,
@@ -923,9 +924,10 @@ function commandRestore(deployDir: string, args: string[], directories: BackupRe
   const adapter = createInContainerAdapter();
   const { hooks, testHooks } = restoreTestHooksFromEnvironment();
 
-  const usage = "orbit: usage: orbit restore [--yes] <backup.tar> | orbit restore --preflight <backup.tar> | orbit restore --recover";
+  const usage = "orbit: usage: orbit restore [--yes] <backup.tar> | orbit restore --preflight <backup.tar> | orbit restore --recover | orbit restore --finish";
   let yesFlag = false;
   let recoverMode = false;
+  let finishMode = false;
   let preflightOnly = false;
   let backupFile: string | undefined;
   for (const arg of args) {
@@ -941,6 +943,10 @@ function commandRestore(deployDir: string, args: string[], directories: BackupRe
       preflightOnly = true;
       continue;
     }
+    if (arg === "--finish") {
+      finishMode = true;
+      continue;
+    }
     if (backupFile === undefined) {
       backupFile = arg;
       continue;
@@ -950,6 +956,13 @@ function commandRestore(deployDir: string, args: string[], directories: BackupRe
   // --preflight only validates (amendment E3a): it never asks, so --yes has
   // nothing to answer, and it never recovers.
   if (preflightOnly && (yesFlag || recoverMode)) fail("orbit: usage: --preflight accepts neither --yes nor --recover");
+
+  // The shell runs --finish once Orbit is healthy on the restored data.
+  if (finishMode) {
+    if (backupFile !== undefined || yesFlag || recoverMode || preflightOnly) fail("orbit: usage: --finish accepts no other arguments");
+    runFinishRestore({ paths: restorePaths });
+    process.exit(0);
+  }
 
   if (recoverMode) {
     if (backupFile !== undefined || yesFlag) fail("orbit: usage: --recover accepts no other arguments");

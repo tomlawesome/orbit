@@ -8,7 +8,9 @@ import {
   BackupRestoreCliRefusal,
   runBackup,
   runExportRecoveryBundle,
+  runFinishRestore,
   runImportRecoveryBundle,
+  runRecoverRestore,
   runRestore,
   stageAndPreflightRestoreBundle,
   verifyBackupBundle,
@@ -23,7 +25,7 @@ import {
   validateRecoveryManifestFormatVersion,
   verifyRecoveryBundleChecksums,
 } from "./recovery-bundle";
-import { CORRESPONDENCE_QUERIES, type CorrespondenceReports, type RestoreDockerAdapter, RestoreEngineRefusal, deriveRestorePaths } from "./restore-engine";
+import { CORRESPONDENCE_QUERIES, type CorrespondenceReports, type RestoreDockerAdapter, RestoreEngineRefusal, deriveRestorePaths, loadRestoreJournal } from "./restore-engine";
 
 // Orchestration coverage for issue #296 slice 4
 // (docs/adr-notes/296-backup-port-plan.md): every function in
@@ -511,7 +513,7 @@ describe("runRestore (restore.sh's main flow :897-933, including check_capacity 
     return { documentsRoot, backupDirectory, restorePaths, documentKekFile, adapter };
   }
 
-  it("completes end-to-end, replacing live content and leaving no journal/checkpoint", () => {
+  it("completes end-to-end, replacing live content (the journal and checkpoint stay until `restore --finish`, #1316 O2-S1)", () => {
     const { backupDirectory, restorePaths, adapter } = setup();
     const updatedDocumentsRoot = join(sandbox, "update-source");
     const updateBundlePath = buildBundle(updatedDocumentsRoot, UPDATED_KEY, 22, LIVE_KEK, join(sandbox, "update-backups"));
@@ -534,8 +536,81 @@ describe("runRestore (restore.sh's main flow :897-933, including check_capacity 
 
     expect(result.outcome).toBe("completed");
     expect(hooks).toEqual({ checkpoint: 1, docs: 1, db: 1 });
-    expect(existsSync(restorePaths.journalPath)).toBe(false);
-    expect(existsSync(join(backupDirectory, ".orbit-restore"))).toBe(true); // directory persists, just emptied of checkpoints
+    expect(existsSync(join(backupDirectory, ".orbit-restore"))).toBe(true);
+  });
+
+  // #1316 O2-S1 (owner decision, note 35310): the shell runs `restore --finish`
+  // only after Orbit has passed its health check, so a successful runRestore
+  // keeps the journal and checkpoint; a failed health check can then still be
+  // undone with `restore --recover`. runFinishRestore is the new `--finish`.
+  describe("the journal and checkpoint outlive a successful restore until --finish (#1316 O2-S1)", () => {
+    const PRE_RESTORE_KEY = "e".repeat(64);
+    const checkpointDirectories = (restoreRoot: string): string[] => readdirSync(restoreRoot).filter((name) => name.startsWith("checkpoint-"));
+
+    /** A restore that succeeded over a live key that is not the pre-restore one (an import swapped it in; the rollback file holds the old one). */
+    function restoreOverSwappedKey(): ReturnType<typeof setup> & { rollbackFile: string } {
+      const context = setup();
+      const rollbackFile = join(sandbox, "document-kek.import-rollback");
+      writeFileSync(rollbackFile, `${PRE_RESTORE_KEY}\n`, { mode: 0o600 });
+      const updateBundlePath = buildBundle(join(sandbox, "update-source-finish"), UPDATED_KEY, 22, LIVE_KEK, join(sandbox, "update-backups-finish"));
+      const result = runRestore({
+        backupTarPath: updateBundlePath,
+        documentKekHex: LIVE_KEK,
+        paths: context.restorePaths,
+        adapter: context.adapter,
+        workDir: mkdtempSync(join(sandbox, "restore-run-finish-")),
+        confirm: () => true,
+        rollbackDocumentKekFile: rollbackFile,
+      });
+      expect(result.outcome).toBe("completed");
+      return { ...context, rollbackFile };
+    }
+
+    it("a successful runRestore leaves the journal and the checkpoint directory on disk", () => {
+      const { restorePaths } = restoreOverSwappedKey();
+      expect(existsSync(restorePaths.journalPath)).toBe(true);
+      const { checkpointDirectory } = loadRestoreJournal(restorePaths.journalPath, restorePaths.restoreRoot);
+      expect(existsSync(checkpointDirectory)).toBe(true);
+      expect(checkpointDirectories(restorePaths.restoreRoot)).toHaveLength(1);
+    });
+
+    it("recoverRestore on them puts back the pre-restore database, documents and key", () => {
+      const { documentsRoot, restorePaths, adapter, documentKekFile } = restoreOverSwappedKey();
+      // The restore really did replace the live content first.
+      expect(adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toBe(reportsFor(UPDATED_KEY, 22).crypto);
+      expect(existsSync(join(documentsRoot, "objects", UPDATED_KEY.slice(0, 2), UPDATED_KEY.slice(2, 4), `${UPDATED_KEY}.bin`))).toBe(true);
+
+      const result = runRecoverRestore({ adapter, paths: restorePaths, workDir: mkdtempSync(join(sandbox, "recover-after-restore-")) });
+
+      expect(result.outcome).toBe("completed");
+      expect(adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toBe(reportsFor(ORIGINAL_KEY, 10).crypto);
+      expect(readFileSync(join(documentsRoot, "objects", ORIGINAL_KEY.slice(0, 2), ORIGINAL_KEY.slice(2, 4), `${ORIGINAL_KEY}.bin`))).toHaveLength(10);
+      expect(existsSync(join(documentsRoot, "objects", UPDATED_KEY.slice(0, 2), UPDATED_KEY.slice(2, 4), `${UPDATED_KEY}.bin`))).toBe(false);
+      expect(readFileSync(documentKekFile, "utf8").trim()).toBe(PRE_RESTORE_KEY);
+      expect(existsSync(restorePaths.journalPath)).toBe(false);
+    });
+
+    it("runFinishRestore removes the journal and the checkpoint directory and leaves the restored content alone", () => {
+      const { documentsRoot, restorePaths, adapter, documentKekFile } = restoreOverSwappedKey();
+
+      runFinishRestore({ paths: restorePaths });
+
+      expect(existsSync(restorePaths.journalPath)).toBe(false);
+      expect(checkpointDirectories(restorePaths.restoreRoot)).toEqual([]);
+      expect(adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toBe(reportsFor(UPDATED_KEY, 22).crypto);
+      expect(existsSync(join(documentsRoot, "objects", UPDATED_KEY.slice(0, 2), UPDATED_KEY.slice(2, 4), `${UPDATED_KEY}.bin`))).toBe(true);
+      expect(readFileSync(documentKekFile, "utf8").trim()).toBe(LIVE_KEK);
+    });
+
+    it("runFinishRestore is a no-op when there is no journal", () => {
+      const { restorePaths } = setup();
+      mkdirSync(restorePaths.restoreRoot, { recursive: true, mode: 0o700 });
+
+      expect(() => runFinishRestore({ paths: restorePaths })).not.toThrow();
+      expect(readdirSync(restorePaths.restoreRoot)).toEqual([]);
+      // Twice in a row is just as quiet (the shell may be re-run).
+      expect(() => runFinishRestore({ paths: restorePaths })).not.toThrow();
+    });
   });
 
   it("refuses (restore-journal-exists) before touching anything if a journal already exists", () => {
@@ -926,8 +1001,9 @@ describe("runImportRecoveryBundle (import-recovery-bundle.sh's orchestration, li
     expect(result.outcome).toBe("completed");
     const finalKek = readFileSync(liveDocumentKekFile, "utf8").trim();
     expect(finalKek).toBe(UPDATED_KEY);
+    // The inner restore's journal stays until the shell has seen Orbit healthy and run `restore --finish` (#1316 O2-S1).
     const paths = deriveRestorePaths(backupDirectory, liveDocumentKekFile);
-    expect(existsSync(paths.journalPath)).toBe(false);
+    expect(existsSync(paths.journalPath)).toBe(true);
   });
 
   // #1316 O2-S2: the full import must already hold the shared backup/restore

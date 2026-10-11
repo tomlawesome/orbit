@@ -246,6 +246,19 @@ if [[ "$recover" == true ]]; then run_engine "" restore --recover || status=$?
 else run_engine "$backup_file" restore "${yes_flag[@]}" /orbit-input/bundle.tar || status=$?; fi
 app_stopped=false # the engine has returned: the lines below decide
 [[ "$status" != "$engine_locked_status" ]] || exit "$status"
+# A restore that exits 0 keeps its journal and checkpoint until Orbit is healthy on the
+# restored data, so a bundle the running image cannot serve can still be recovered. There is
+# no automatic rollback: if health never comes, Orbit is stopped again for the operator.
+if [[ "$status" == 0 && -f "$journal_path" ]]; then
+  if compose start orbit-app >/dev/null 2>&1 && wait_for_health; then
+    run_engine "" restore --finish </dev/null ||
+      fail 'finish failed; Orbit is running the restored data, but the restore journal and checkpoint could not be removed.'
+    exit 0
+  fi
+  compose stop orbit-app >/dev/null 2>&1 || printf 'Orbit could not be stopped again.\n' >&2
+  printf '%s\n' "$keep_stopped_message" >&2
+  exit 1
+fi
 if [[ -f "$journal_path" ]]; then
   printf '%s\n' "$keep_stopped_message" >&2
   exit "$((status == 0 ? 1 : status))"

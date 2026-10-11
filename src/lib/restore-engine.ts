@@ -1299,7 +1299,7 @@ export class RestoreRun {
     writeRestoreJournal(this.paths, { restoreId: this.restoreId, state: "database-restored", ...this.checkpointDigests! }, this.hooks);
   }
 
-  /** restore.sh:927-932: re-validates active correspondence, waits for health, and only then marks the restore complete and purges the journal/checkpoint. */
+  /** restore.sh:927-932: re-validates active correspondence, waits for health, and marks the restore complete; the journal/checkpoint stay for `restore --finish`. */
   finalize(): void {
     let corresponds: boolean;
     try {
@@ -1316,7 +1316,9 @@ export class RestoreRun {
     }
     this.appStopped = false;
     this.completed = true;
-    this.removeJournalAndCheckpoint();
+    // The adapter's start and health wait are no-ops inside the engine's
+    // container: the shell starts Orbit and confirms health afterwards, so
+    // the evidence stays until it runs `restore --finish`.
   }
 
   /** rollback_checkpoint (restore.sh:764-770): reapplies the verified checkpoint. Never throws — returns whether it succeeded. */
