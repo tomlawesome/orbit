@@ -273,6 +273,9 @@ export function mountCreate() {
       so the documents route hands back the copy it already holds. */
   let attachmentId = "";
   function takeFile(/** @type {File | null | undefined} */ file) {
+    /* From the press until the server answers, the entry is the server's:
+       the file it holds cannot change under the save. */
+    if (saving) return;
     if (!file) return;
     attachmentId = crypto.randomUUID();
     attachment = file;
@@ -507,6 +510,7 @@ export function mountCreate() {
   /* "not this one": the file leaves the entry, with what it suggested, and
      the drop target is a drop target again. */
   on(dropFile, "click", () => {
+    if (saving) return; /* the entry is the server's until it answers (see takeFile) */
     dropDocument();
     clearSheet();
     document.body.classList.remove("doc");
