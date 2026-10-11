@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -475,5 +476,138 @@ describe("get-orbit.sh", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("refusing to swap the trust anchor");
     expect(() => readFileSync(launcherLog)).toThrow();
+  });
+
+  /*
+   * #1316 D1-F1: scripts/ci/write-release-manifest.sh writes the version as
+   * vX.Y.Z (the one form on every Orbit surface), so get-orbit.sh must accept
+   * that form in a signed manifest, pinned or not, and still run the launcher.
+   */
+  describe("manifest version written as vX.Y.Z (#1316 D1-F1)", () => {
+    const NO_VERSION = "the manifest has no valid version.";
+
+    function runVPrefixed({ pinned }) {
+      const dir = makeDir("get-orbit-");
+      const { privatePem, publicPem } = generateKeyPair(dir);
+      const baseUrl = buildRelease({
+        dir,
+        arch,
+        privatePem,
+        version: "v1.2.3",
+        routeDir: pinned ? "releases/download/v1.2.3" : "releases/latest/download",
+      });
+      const launcherLog = join(dir, "launcher.log");
+      const cache = makeDir("get-orbit-cache-");
+      const result = run({
+        baseUrl,
+        launcherLog,
+        env: {
+          XDG_CACHE_HOME: cache,
+          ...(pinned ? { ORBIT_VERSION: "v1.2.3" } : {}),
+          ORBIT_GET_TEST_PUBLIC_KEY_FILE: publicPem,
+          ORBIT_GET_TEST_ALLOW_KEY_OVERRIDE: "1",
+        },
+      });
+      return { result, launcherLog, cache };
+    }
+
+    function expectLauncherRanFromCache({ result, launcherLog, cache }) {
+      expect(result.stderr).not.toContain(NO_VERSION);
+      expect(result.status).toBe(0);
+      const logged = readFileSync(launcherLog, "utf8");
+      expect(logged).toMatch(new RegExp(`ORBIT_LAUNCHER_INSTALL_SCRIPT_PATH=${cache}/orbit/v?1\\.2\\.3/install\\.sh`, "u"));
+      expect(logged).toMatch(new RegExp(`ORBIT_RELEASE_MANIFEST=${cache}/orbit/v?1\\.2\\.3/orbit-release-manifest\\.json`, "u"));
+      expect(logged).toContain("install-script-contents=#!/usr/bin/env bash");
+    }
+
+    it("runs the launcher when ORBIT_VERSION=v1.2.3 is pinned and the manifest says v1.2.3", () => {
+      expectLauncherRanFromCache(runVPrefixed({ pinned: true }));
+    });
+
+    it("runs the launcher unpinned when the manifest says v1.2.3", () => {
+      expectLauncherRanFromCache(runVPrefixed({ pinned: false }));
+    });
+
+    it("still refuses a manifest for v1.0.0 when v1.2.3 is pinned, naming both versions", () => {
+      const dir = makeDir("get-orbit-");
+      const { privatePem, publicPem } = generateKeyPair(dir);
+      const baseUrl = buildRelease({ dir, arch, privatePem, version: "v1.0.0", routeDir: "releases/download/v1.2.3" });
+      const launcherLog = join(dir, "launcher.log");
+
+      const result = run({
+        baseUrl,
+        launcherLog,
+        env: {
+          XDG_CACHE_HOME: makeDir("get-orbit-cache-"),
+          ORBIT_VERSION: "v1.2.3",
+          ORBIT_GET_TEST_PUBLIC_KEY_FILE: publicPem,
+          ORBIT_GET_TEST_ALLOW_KEY_OVERRIDE: "1",
+        },
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("v1.2.3");
+      expect(result.stderr).toContain("v1.0.0");
+      expect(result.stderr).not.toContain(NO_VERSION);
+      expect(() => readFileSync(launcherLog)).toThrow();
+    });
+
+    it("accepts the real output of write-release-manifest.sh (cross-check)", () => {
+      const dir = makeDir("get-orbit-");
+      const { privatePem, publicPem } = generateKeyPair(dir);
+      const baseUrl = buildRelease({ dir, arch, privatePem, routeDir: "releases/download/v1.2.3" });
+      const assetsDir = join(dir, "releases", "download", "v1.2.3");
+
+      // Run a scratch copy of the real writer (it finds its root from
+      // BASH_SOURCE) over the very archives and install.sh the release serves.
+      const scratch = makeDir("get-orbit-writer-");
+      const scriptDir = join(scratch, "scripts", "ci");
+      mkdirSync(scriptDir, { recursive: true });
+      const ciDir = new URL("./ci/", import.meta.url).pathname;
+      copyFileSync(join(ciDir, "write-release-manifest.sh"), join(scriptDir, "write-release-manifest.sh"));
+      copyFileSync(join(ciDir, "channel-name.sh"), join(scriptDir, "channel-name.sh"));
+      copyFileSync(new URL("./release-metadata-patterns.sh", import.meta.url).pathname, join(scratch, "scripts", "release-metadata-patterns.sh"));
+      const archivePath = join(dir, `orbit-launcher_linux_${arch}.tar.gz`);
+      const otherArch = arch === "amd64" ? "arm64" : "amd64";
+      const otherArchive = join(scratch, `orbit-launcher_linux_${otherArch}.tar.gz`);
+      writeFileSync(otherArchive, "other arch bytes");
+      const getOrbitCopy = join(scratch, "get-orbit.sh");
+      copyFileSync(script, getOrbitCopy);
+      execFileSync("bash", [join(scriptDir, "write-release-manifest.sh"), "registry.example/ai/orbit", `sha256:${"1".repeat(64)}`], {
+        encoding: "utf8",
+        env: {
+          PATH: process.env.PATH,
+          CI_COMMIT_SHA: "a".repeat(40),
+          CI_COMMIT_BRANCH: "preview",
+          ORBIT_VERSION: "v1.2.3",
+          ORBIT_LAUNCHER_TAG: "v1.0.0",
+          ORBIT_LAUNCHER_COMMIT: "b".repeat(40),
+          ORBIT_LAUNCHER_AMD64_ARCHIVE: arch === "amd64" ? archivePath : otherArchive,
+          ORBIT_LAUNCHER_ARM64_ARCHIVE: arch === "arm64" ? archivePath : otherArchive,
+          ORBIT_INSTALL_SCRIPT: join(dir, "install.sh"),
+          ORBIT_GET_ORBIT_SCRIPT: getOrbitCopy,
+        },
+      });
+      const realManifest = readFileSync(join(scratch, ".orbit-supply-chain", "orbit-release-manifest.json"), "utf8");
+      expect(JSON.parse(realManifest).version).toBe("v1.2.3");
+
+      const manifestPath = join(assetsDir, "orbit-release-manifest.json");
+      writeFileSync(manifestPath, realManifest);
+      writeFileSync(join(assetsDir, "orbit-release-manifest.json.sig"), signBase64(manifestPath, privatePem));
+
+      const launcherLog = join(dir, "launcher.log");
+      const cache = makeDir("get-orbit-cache-");
+      const result = run({
+        baseUrl,
+        launcherLog,
+        env: {
+          XDG_CACHE_HOME: cache,
+          ORBIT_VERSION: "v1.2.3",
+          ORBIT_GET_TEST_PUBLIC_KEY_FILE: publicPem,
+          ORBIT_GET_TEST_ALLOW_KEY_OVERRIDE: "1",
+        },
+      });
+      expectLauncherRanFromCache({ result, launcherLog, cache });
+    });
   });
 });

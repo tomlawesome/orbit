@@ -112,6 +112,10 @@ fi
 # schema.
 manifest_value() { grep -F "\"$2\":" "$1" | sed -n 's/.*: *"\([^"]*\)".*/\1/p' | head -n1; }
 version="$(manifest_value "$manifest_json" version)"
+# The release manifest records the image label verbatim (vX.Y.Z); older
+# manifests wrote a bare X.Y.Z. Strip the v so both read the same, as
+# install.sh does.
+version="${version#v}"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || fail "the manifest has no valid version."
 # A validly signed manifest for a different release must not stand in for
 # the one asked for: an older signed release is still signed.
