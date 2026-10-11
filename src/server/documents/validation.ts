@@ -42,6 +42,10 @@ export const PDF_STRUCTURE_PARSER_OPTIONS = Object.freeze({
   enableXfa: false,
   isImageDecoderSupported: false,
   isOffscreenCanvasSupported: false,
+  // The same pixel cap image uploads already hold, applied to images a PDF
+  // carries; with stopAtErrors an over-cap image fails the page instead of
+  // being decoded.
+  maxImageSize: MAX_IMAGE_PIXELS,
   stopAtErrors: true,
   useSystemFonts: false,
   useWasm: false,

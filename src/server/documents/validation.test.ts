@@ -194,6 +194,11 @@ describe("structural document classification", () => {
     });
   });
 
+  it("caps the pixels pdf.js will decode for one embedded image at the same cap as a raster upload (#1316)", () => {
+    // MAX_IMAGE_PIXELS, 40M, which safeImageDimensions holds PNG and JPEG to.
+    expect(PDF_STRUCTURE_PARSER_OPTIONS).toHaveProperty("maxImageSize", 40_000_000);
+  });
+
   it("does not expose parser failure details to console output", async () => {
     const sentinel = "hostile-filename-provider-sentinel";
     let value = `%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Title (${sentinel}) >>\nendobj\n`;
