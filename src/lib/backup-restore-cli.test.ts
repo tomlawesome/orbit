@@ -930,6 +930,43 @@ describe("runImportRecoveryBundle (import-recovery-bundle.sh's orchestration, li
     expect(existsSync(paths.journalPath)).toBe(false);
   });
 
+  // #1316 O2-S2: the full import must already hold the shared backup/restore
+  // flock when it asks for the passphrase (a person may take minutes to
+  // type it), so a backup or restore started in that window is refused
+  // rather than racing the import. Today the lock is taken only after the
+  // passphrase is in, so another process gets it during the prompt.
+  it("O2-S2: already holds the backup/restore lock when it asks for the passphrase", () => {
+    const passphrase = "correct horse battery staple";
+    const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+
+    const liveDocumentsRoot = join(sandbox, "live-docs-import-s2");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const liveDocumentKekFile = join(sandbox, "live-document-kek-s2");
+    writeFileSync(liveDocumentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+    const backupDirectory = join(sandbox, "import-target-backups-s2");
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    const adapter = new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const lockPath = join(backupDirectory, ".orbit-backup-restore.lock");
+
+    const asks: boolean[] = []; // Per ask: could another process take the lock?
+    const result = runImportRecoveryBundle({
+      recoveryBundlePath,
+      passphrase: () => {
+        asks.push(lockIsFree(lockPath)); // `flock -n`, taking and dropping it at once if it can.
+        return passphrase;
+      },
+      liveDocumentKekFile,
+      backupDirectory,
+      adapter,
+      importConfirmed: true,
+      confirmRestore: () => true,
+    });
+
+    expect(asks).toEqual([false]); // Asked once, and the other process was refused.
+    expect(result.outcome).toBe("completed");
+    expect(lockIsFree(lockPath)).toBe(true); // Released when the run ends.
+  });
+
   // `workDir` (mkdtempSync(join(tmpdir(), ...))) and the live deployment
   // directory are the same filesystem in every other test in this file,
   // since both `sandbox` and the OS tmpdir live under `/tmp`. These two

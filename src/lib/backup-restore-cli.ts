@@ -698,7 +698,7 @@ function renameSecretFileAcrossDevices(sourcePath: string, destinationPath: stri
  */
 export function runImportRecoveryBundle(options: RunImportRecoveryBundleOptions): { outcome: "completed" } | { outcome: "preflight-passed" } {
   // A preflight takes no lock: it stops nothing, and the shells treat the
-  // lock's holder as owning orbit-app. The full run takes it before the swap.
+  // lock's holder as owning orbit-app. The full run takes it before the prompts.
   return importRecoveryBundleUnlocked(options);
 }
 
@@ -711,9 +711,9 @@ function importRecoveryBundleUnlocked(options: RunImportRecoveryBundleOptions): 
       "preflight/journal failed; an unfinished restore exists; run bash scripts/restore.sh --recover before importing another recovery bundle.",
     );
   }
-  // SS1-S3: never swap DOCUMENT_KEK under an open rotation. Checked here,
+  // SS1-S3: never swap DOCUMENT_KEK under an open rotation. Checked here and
   // again after the prompts (which can sit open for as long as the operator
-  // takes) and once more with the lock held, as import-recovery-bundle.sh did.
+  // takes), as import-recovery-bundle.sh did.
   refuseIfDocumentKekRotationOpen(options.liveDocumentKekFile);
 
   // O2-S3: staged inside the install's own directory (a sibling of the live
@@ -739,33 +739,33 @@ function importRecoveryBundleUnlocked(options: RunImportRecoveryBundleOptions): 
       preflightRecoveryBundle(options.recoveryBundlePath, extractedDir);
       if (options.preflightOnly) return { outcome: "preflight-passed" as const };
 
-      const passphrase = typeof options.passphrase === "function" ? options.passphrase() : options.passphrase;
-      const envelope = readFileSync(join(extractedDir, "document-kek.enc"));
-      // decryptDocumentKek already refuses (invalid-recovered-key) a plaintext
-      // that isn't a well-formed 64-hex document key, so no separate re-check
-      // is needed here.
-      let recoveredKekHex: string;
-      try {
-        recoveredKekHex = decryptDocumentKek(envelope, passphrase)
-          .toString("utf8")
-          .replace(/[\r\n]+$/, "");
-      } catch (error) {
-        if (error instanceof RecoveryBundleRefusal && error.code === "invalid-recovered-key") {
-          refuse("import-preflight-failed", "Recovery passphrase did not decrypt a valid document KEK.");
-        }
-        refuse("import-preflight-failed", "preflight/decryption failed; the recovery key could not be decrypted.");
-      }
-
-      const confirmed = typeof options.importConfirmed === "function" ? options.importConfirmed() : options.importConfirmed;
-      if (!confirmed) {
-        refuse("import-not-confirmed", "Recovery import cancelled.");
-      }
-      refuseIfDocumentKekRotationOpen(options.liveDocumentKekFile);
-      // Taken here, before the app stop and key swap, not left to the inner
-      // restore: a backup landing in that gap would otherwise encrypt a
-      // bundle with the swapped key (import-recovery-bundle.sh's own lock).
+      // Taken before the prompts, not just before the swap: the shell stopped
+      // the app before this started, and a backup landing while the operator
+      // answers would restart it and encrypt a bundle with the swapped key.
+      // Taken after the refusals above, so those leave nothing behind.
       const releaseLock = acquireBackupRestoreLock(options.backupDirectory);
       try {
+        const passphrase = typeof options.passphrase === "function" ? options.passphrase() : options.passphrase;
+        const envelope = readFileSync(join(extractedDir, "document-kek.enc"));
+        // decryptDocumentKek already refuses (invalid-recovered-key) a plaintext
+        // that isn't a well-formed 64-hex document key, so no separate re-check
+        // is needed here.
+        let recoveredKekHex: string;
+        try {
+          recoveredKekHex = decryptDocumentKek(envelope, passphrase)
+            .toString("utf8")
+            .replace(/[\r\n]+$/, "");
+        } catch (error) {
+          if (error instanceof RecoveryBundleRefusal && error.code === "invalid-recovered-key") {
+            refuse("import-preflight-failed", "Recovery passphrase did not decrypt a valid document KEK.");
+          }
+          refuse("import-preflight-failed", "preflight/decryption failed; the recovery key could not be decrypted.");
+        }
+
+        const confirmed = typeof options.importConfirmed === "function" ? options.importConfirmed() : options.importConfirmed;
+        if (!confirmed) {
+          refuse("import-not-confirmed", "Recovery import cancelled.");
+        }
         refuseIfDocumentKekRotationOpen(options.liveDocumentKekFile);
         requireRegularNonSymlinkFile(options.liveDocumentKekFile, "The current document KEK must be a regular file.");
         options.beforeRestore?.();
