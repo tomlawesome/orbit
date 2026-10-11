@@ -60,6 +60,8 @@ export class DrawerModes {
   preview = $state(null);
   /** Whether the cancel pill reads "discard changes?" (discard-guard.js). */
   discardArmed = $state(false);
+  /** Whether the screen is recording the completion (set around its applyCommand). */
+  recording = $state(false);
   /** The item snoozing or completing. @type {CommandItem | null} */
   #item = null;
   /** The rows as they opened, to tell a change. @type {unknown} */
@@ -165,6 +167,9 @@ export class DrawerModes {
    */
   cancel() {
     if (!this.edit.id && !this.completing) return true;
+    /* Rows whose save or record is in flight cannot be discarded: the
+       engine's answer decides, and a refusal needs the rows to read under. */
+    if (this.edit.busy || this.recording) return false;
     if (!this.#guard.ask(this.changed)) return false;
     this.closeChooser(false);
     this.edit.cancel();

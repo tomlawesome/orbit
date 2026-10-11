@@ -766,6 +766,7 @@
     const { item, fields } = out;
     footBusy = "complete";
     modes.completeProblem = null;
+    modes.recording = true;
     try {
       const nextDate = dueDateIn(await applyCommand(completeCommand(item, fields)), item.householdId, item.id);
       modes.cancelComplete();
@@ -778,6 +779,7 @@
       modes.completeProblem = wordsOf(error, "couldn't complete it — try again");
     } finally {
       footBusy = null;
+      modes.recording = false;
     }
   }
 

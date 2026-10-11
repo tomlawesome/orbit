@@ -67,6 +67,20 @@ describe("the drawer's modes and both screens go through it", () => {
     expect(modes).toMatch(/escape\(\) \{[\s\S]*?this\.cancel\(\)/u);
   });
 
+  /* #1316 W1-R6: a save in flight is not a way out. The second Escape (or the
+     cancel pill, or closing the row) must not discard rows whose save or
+     record is on its way; they stay, with the typing, so a refusal has rows
+     to read under. */
+  it("cancel() keeps the rows while an edit's save is in flight, before the guard is asked", () => {
+    expect(modes).toMatch(/cancel\(\) \{[\s\S]*?this\.edit\.busy[\s\S]*?return false;[\s\S]*?this\.#guard\.ask\(/u);
+  });
+
+  it("cancel() keeps a completion's rows while it is being recorded, before the guard is asked", () => {
+    expect(modes).toMatch(
+      /cancel\(\) \{[\s\S]*?(?:this\.recording|this\.completeBusy|this\.saving|this\.busy)[\s\S]*?return false;[\s\S]*?this\.#guard\.ask\(/u,
+    );
+  });
+
   it("the desk asks before closing the drawer or switching rows, and on the cancel pill", () => {
     expect(desk).toMatch(/function collapseRow\(\) \{[\s\S]*?modes\.cancel\(\)/u);
     expect(desk).toMatch(/function onRowClick[\s\S]*?modes\.cancel\(\)/u);

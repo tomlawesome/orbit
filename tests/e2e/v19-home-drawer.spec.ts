@@ -189,6 +189,33 @@ async function lifecycleOf(page: Page, householdId: string, itemId: string, docI
   return body.documents.find((one) => one.id === docId)?.lifecycle ?? null;
 }
 
+/** #1316 W1-R6: hold the item's save (`type` is the command, "item.upsert" for
+ *  an edit, "item.complete" for a completion) until `release()` answers it
+ *  with a refusal. Dry runs (`dryRun: true`) go through untouched. `held()`
+ *  counts the real saves caught. */
+async function holdTheSave(page: Page, type: "item.upsert" | "item.complete") {
+  let caught = 0;
+  let answer: () => void = () => {};
+  const gate = new Promise<void>((resolveGate) => { answer = resolveGate; });
+  await page.route("**/api/workspace/commands", async (route) => {
+    const request = route.request();
+    let body: { type?: string; dryRun?: boolean } = {};
+    try { body = request.postDataJSON() ?? {}; } catch { /* not ours */ }
+    if (request.method() !== "POST" || body.type !== type || body.dryRun) { await route.continue(); return; }
+    caught += 1;
+    await gate;
+    await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "the save failed" }) });
+  });
+  return { held: () => caught, release: () => answer() };
+}
+
+/** The rows' own focus-free double Escape: the first arms "discard changes?"
+ *  over changed rows, the second (inside the 4s hold) discards them. */
+async function escapeTwice(page: Page) {
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+}
+
 test.afterEach(async ({ page }) => {
   await households.sweep(page);
 });
@@ -454,6 +481,84 @@ test.describe("on the desk", () => {
     await expect.poll(async () => (await itemOf(page, householdId, itemId))?.provider ?? null).toBe("Northgate Services Ltd");
   });
 
+  /* #1316 W1-R6: Escape is not a way out of a save in flight. The second
+     Escape of the discard guard used to close the rows while the save was
+     still on its way, so a refusal had nowhere to read and the typing was
+     gone. The rows stay open, with what was typed, until the save answers. */
+  test("Escape twice during a save in flight keeps the rows; a refused save reads under them", async ({ page }) => {
+    test.setTimeout(60_000);
+    await signIn(page);
+    const { itemId } = await seedHouseholdWithItem(page);
+
+    await page.goto(`/home?item=${itemId}`);
+    const drawer = page.locator(`[id="${itemId}-view"]`);
+    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    const typed = "Drawer proving item, renamed";
+    await drawer.getByRole("button", { name: "Edit this item" }).click();
+    const title = page.locator(`[id="${itemId}"]`).getByRole("textbox", { name: "title" });
+    await expect(title).toBeFocused();
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type(typed);
+    await expect(title).toHaveText(typed);
+
+    const save = await holdTheSave(page, "item.upsert");
+    const editing = drawer.getByRole("group", { name: `Editing ${TITLE}` });
+    await editing.getByRole("button", { name: "save" }).click();
+    await expect(editing.getByRole("button", { name: "saving…" })).toBeVisible();
+    await expect.poll(save.held).toBe(1);
+
+    await escapeTwice(page);
+    /* the rows are still open and still hold the typing */
+    await expect(editing).toBeVisible();
+    await expect(title).toBeVisible();
+    await expect(title).toHaveText(typed);
+    await expect(drawer.getByRole("group", { name: `Actions for ${TITLE}` })).toHaveCount(0);
+
+    /* the save answers with a refusal: it reads under the rows, which stay */
+    save.release();
+    await expect(drawer.getByRole("alert")).toContainText(/not saved/, { timeout: 10_000 });
+    await expect(editing).toBeVisible();
+    await expect(title).toHaveText(typed);
+  });
+
+  test("Escape twice during a completion being recorded keeps the rows; a refused record reads under them", async ({ page }) => {
+    test.setTimeout(60_000);
+    await signIn(page);
+    const { itemId } = await seedHouseholdWithItem(page);
+
+    await page.goto(`/home?item=${itemId}`);
+    const drawer = page.locator(`[id="${itemId}-view"]`);
+    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    await drawer.getByRole("group", { name: `Actions for ${TITLE}` })
+      .getByRole("button", { name: `Complete ${TITLE}` }).click();
+    const completing = drawer.getByRole("group", { name: `Completing ${TITLE}` });
+    await expect(completing.getByRole("button")).toHaveText(["record", "cancel"]);
+    const notes = drawer.getByRole("textbox", { name: "notes" });
+    await expect(notes).toHaveText(NOTE);
+    await notes.click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" Bring the log book.");
+    const typed = `${NOTE} Bring the log book.`;
+    await expect(notes).toHaveText(typed);
+
+    const save = await holdTheSave(page, "item.complete");
+    await completing.getByRole("button", { name: "record" }).click();
+    await expect(completing.getByRole("button", { name: "recording…" })).toBeVisible();
+    await expect.poll(save.held).toBe(1);
+
+    await escapeTwice(page);
+    await expect(completing).toBeVisible();
+    await expect(notes).toBeVisible();
+    await expect(notes).toHaveText(typed);
+    await expect(drawer.getByRole("group", { name: `Actions for ${TITLE}` })).toHaveCount(0);
+
+    save.release();
+    await expect(drawer.getByRole("alert")).toBeVisible({ timeout: 10_000 });
+    await expect(drawer.getByRole("alert")).not.toHaveText("");
+    await expect(completing).toBeVisible();
+    await expect(notes).toHaveText(typed);
+  });
+
   /* #1316 W1-R3: undo is a promise; when the server refuses it the reader is
      told in the wake, not left with a silent nothing. The paper stays
      removed (the drawer may still list it, saying "removed"). */
@@ -548,6 +653,76 @@ test.describe("on the phone", () => {
     await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
     await expect(row.getByRole("heading", { name: /^documents$/i })).toBeVisible({ timeout: 20_000 });
     await expect(row.getByRole("button", { name: "Open archived-proving.pdf" })).toBeVisible();
+  });
+
+  /* #1316 W1-R6, on the phone's rows. */
+  test("Escape twice during a save in flight keeps the rows; a refused save reads under them", async ({ page }) => {
+    test.setTimeout(60_000);
+    await signIn(page);
+    const { itemId } = await seedHouseholdWithItem(page);
+
+    await page.goto(`/home?item=${itemId}`);
+    const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
+    await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+    const typed = "Drawer proving item, renamed";
+    await row.getByRole("button", { name: "Edit this item" }).tap();
+    const title = row.getByRole("textbox", { name: "title" });
+    await expect(title).toBeFocused();
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type(typed);
+    await expect(title).toHaveText(typed);
+
+    const save = await holdTheSave(page, "item.upsert");
+    const editing = row.getByRole("group", { name: `Editing ${TITLE}` });
+    await editing.getByRole("button", { name: "save" }).tap();
+    await expect(editing.getByRole("button", { name: "saving…" })).toBeVisible();
+    await expect.poll(save.held).toBe(1);
+
+    await escapeTwice(page);
+    await expect(editing).toBeVisible();
+    await expect(title).toHaveText(typed);
+    await expect(row).toHaveAttribute("data-open", "");
+
+    save.release();
+    await expect(row.getByRole("alert")).toContainText(/not saved/, { timeout: 10_000 });
+    await expect(editing).toBeVisible();
+    await expect(title).toHaveText(typed);
+  });
+
+  test("Escape twice during a completion being recorded keeps the rows; a refused record reads under them", async ({ page }) => {
+    test.setTimeout(60_000);
+    await signIn(page);
+    const { itemId } = await seedHouseholdWithItem(page);
+
+    await page.goto(`/home?item=${itemId}`);
+    const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
+    await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+    await row.getByRole("group", { name: `Actions for ${TITLE}` })
+      .getByRole("button", { name: `Complete ${TITLE}` }).tap();
+    const completing = row.getByRole("group", { name: `Completing ${TITLE}` });
+    await expect(completing.getByRole("button")).toHaveText(["record", "cancel"]);
+    const notes = row.getByRole("textbox", { name: "notes" });
+    await expect(notes).toHaveText(NOTE);
+    await notes.tap();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" Bring the log book.");
+    const typed = `${NOTE} Bring the log book.`;
+    await expect(notes).toHaveText(typed);
+
+    const save = await holdTheSave(page, "item.complete");
+    await completing.getByRole("button", { name: "record" }).tap();
+    await expect(completing.getByRole("button", { name: "recording…" })).toBeVisible();
+    await expect.poll(save.held).toBe(1);
+
+    await escapeTwice(page);
+    await expect(completing).toBeVisible();
+    await expect(notes).toHaveText(typed);
+    await expect(row).toHaveAttribute("data-open", "");
+
+    save.release();
+    await expect(row.getByRole("alert")).toBeVisible({ timeout: 10_000 });
+    await expect(completing).toBeVisible();
+    await expect(notes).toHaveText(typed);
   });
 
   /* #1316 W1-R3 / W1-R9: the same on the phone's sheet. */
