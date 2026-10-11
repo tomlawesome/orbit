@@ -78,5 +78,11 @@ export default defineConfig([
   // are one-off scripts that made the PNGs and panes the owner reviewed.
   // They are records of how the pictures were made, not shipped or imported
   // code, and they use require() like any throwaway Node script.
-  "design/**/*.cjs"]),
+  "design/**/*.cjs",
+  // The shared door's folder (#1371): orbit-site's code, copied in unchanged
+  // and held to its recorded tree hash (scripts/ci/check-door-unchanged.sh),
+  // so a lint fix cannot be made here; the site's own lint holds it. Its
+  // interface is what Orbit's code sees, through web/types/door/, which is
+  // linted.
+  "web/src/lib/door/**"]),
 ]);

@@ -8,7 +8,7 @@
     "dev": "vite dev",
     "build": "node scripts/collect-font-licences.mjs && vite build && node ../scripts/web-build-stamp.mjs write",
     "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "check": "svelte-check --tsconfig ./tsconfig.check.json",
     "scaffold": "node scripts/scaffold-screen.mjs",
     "fidelity": "playwright test --project=fidelity; a=$?; playwright test --project=pocket-measure; b=$?; [ $a -eq 0 ] && [ $b -eq 0 ]",
     "fidelity:webkit": "playwright test --project=pocket-webkit",
