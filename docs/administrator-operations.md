@@ -892,8 +892,12 @@ reached it yet. No maintenance window is needed at any step below.
    ```sh
    pnpm rewrap-kek --next-key-file .orbit-secrets/document-kek-next
    ```
-   It reports progress and keeps going until every `document_crypto`,
-   `metadata_keys` and `mail_in_secrets` row is under the next key. You can
+   It reports progress and keeps going until every row in all five places
+   that hold a wrapped key is under the next key: `document_crypto` (stored
+   documents), `metadata_keys`, `mail_in_secrets`,
+   `imap_ingestion_attachments` (mailed attachments waiting for a household)
+   and `document_staging_objects` (uploads held while the scanner was down).
+   You can
    stop it (Ctrl-C, a crash, a host reboot) and run it again; it carries on
    from where it was. Every row it has not reached is still readable under
    the current key, and every row it has moved is readable under the next
