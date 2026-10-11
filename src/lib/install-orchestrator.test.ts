@@ -478,6 +478,19 @@ describe("runInstall: refusals inside the transaction roll back (#11, #56)", () 
     expect(snapshot(target)).toEqual(before);
   });
 
+  it("names only session-ttl when SESSION_TTL_SECONDS is out of range in an otherwise complete deployment (#1316)", async () => {
+    const target = recognised(["SESSION_TTL_SECONDS=100"]);
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "configuration", reason: "configuration-failure" });
+    const message = outcome.status === "failed" ? outcome.message : "";
+    expect(message).toContain("session-ttl");
+    expect(message).not.toContain("APP_URL");
+    expect(message).not.toContain("ORBIT_IMAGE");
+    expect(message).not.toMatch(/OIDC_/);
+    expect(snapshot(target)).toEqual(before);
+  });
+
   it("rolls back an update whose configuration does not pass the preflight (#50)", async () => {
     const target = recognised();
     writeFileSync(join(target, ".env-orbit"), "not an assignment\n", { mode: 0o600 });

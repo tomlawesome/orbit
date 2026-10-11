@@ -416,6 +416,16 @@ App-managed groups — always reported as `app-managed <FIELD>`, never `ready`,
 imap
 ```
 
+Shape-checked fields — reported only as `missing <FIELD>`, and only when the
+value is present but invalid; nothing is printed when it is absent or valid:
+
+```
+session-ttl
+```
+
+`session-ttl` is `SESSION_TTL_SECONDS` set to anything other than a whole
+number of seconds from 900 to 2592000 (15 minutes to 30 days).
+
 ### Consumer guidance
 
 - orbit-launcher's `ConfigCheck.Missing` collects every field reported
