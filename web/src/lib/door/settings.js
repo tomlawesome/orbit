@@ -7,7 +7,8 @@
  *                  base; a bundler's host builds its own map (never from the module's own address: that leaks into server-
  *                  rendered pages and is unresolvable in a bundle, tested on Orbit's Vite 8 / SvelteKit 2)
  *   flags          the debug switches, as the site reads them from its address: door3d, rich, lean, level (0-2),
- *                  holdreveal, mainthread, ring ("stop" | "rush"), open ("late")
+ *                  holdreveal, mainthread, ring ("stop" | "rush"), open ("late"), gpu ("force": take the GPU
+ *                  gate's context although the renderer is software; fitness.js)
  *   storagePrefix  the first word of every localStorage key the folder writes ("orbit": "orbit-probe …")
  *   settle         timeline.js: ms after the landing at which the instrument arrives (the site's own amendment)
  *   typingWait     chores.js: an unhurried chore waits while someone is typing, this long after the last key (0: never)

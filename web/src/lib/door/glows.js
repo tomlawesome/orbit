@@ -157,8 +157,10 @@ const frame = (defs, body, w, h) =>
 /* Both surfaces fill the viewport, so the slice scale is the viewport's.
    The groups are drawn one at a time with a breath between each, so the
    first light's own fade (three seconds) covers their arrival and the page
-   stays answerable while they land; the result is kept per size. */
-export function mountRasters(world, groups, prefix) {
+   stays answerable while they land; the result is kept per size. Each
+   picture is handed to `drawn(url, name)` as it is set, for a host to
+   decode it ahead of showing it (the dawn's, #32). */
+export function mountRasters(world, groups, prefix, { until = () => null, drawn = () => {} } = {}) {
   let timer, run = 0;
   /* where the sunrise point (800, 920 in the slice) falls on screen, for the
      layers that turn about it */
@@ -181,9 +183,13 @@ export function mountRasters(world, groups, prefix) {
       const url = await (group === SUN ? paintSun(key, w, h) : rasterise(key, frame(group.defs, group.body, w, h), w, h));
       if (id !== run) return;
       world.querySelector(`image[data-raster="${name}"]`)?.setAttribute("href", url);
+      drawn(url, name);
       await new Promise((r) => setTimeout(r, 0));
       if (id !== run) return;
     }
+    /* "ready" is "drawn": the host may hold it for more (`until()`: a promise it never rejects; the dawn's Earth) */
+    await until();
+    if (id !== run) return;
     world.dataset.rasterised = "ready";
   }
   const rebuild = () => { clearTimeout(timer); timer = setTimeout(build, 120); };

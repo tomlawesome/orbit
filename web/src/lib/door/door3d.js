@@ -41,6 +41,7 @@ import { chore, fetchOnce, note, quiet, linked, counted, compilesAside } from ".
 import { flag } from "./settings.js";
 import { sceneHead, PASS_SWITCH, pictures, EURO, NEAR, BOXED, doorCamera, followDoor, sunTexture, theStrip, sharpStrip, cloudField, cityGlow, wantRich, compileRich } from "./voyage.js";
 import { probe, theDoorWeight, lateDoor, BUDGET, liveDoor as doorIsLiveHere } from "./capability.js";
+import { gpu } from "./fitness.js";
 import { uploadBanded } from "./upload.js";
 
 /* when this was loaded: how long the first compile then waited its turn is said (note) */
@@ -90,7 +91,8 @@ function context() {
   const canvas = document.createElement("canvas");
   canvas.className = "wl live";
   canvas.setAttribute("aria-hidden", "true");
-  const gl = canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false, powerPreference: "low-power" });
+  /* (a context of its own, with alpha, but only where the page may use the GPU at all: fitness.js) */
+  const gl = gpu() ? canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false, powerPreference: "low-power" }) : null;
   return (ctx = { canvas, gl, par: gl?.getExtension("KHR_parallel_shader_compile") || null, weights: {}, richFlight: null });
 }
 const shader = (gl, type, src) => { const sh = gl.createShader(type); gl.shaderSource(sh, src); gl.compileShader(sh); return sh; };

@@ -1,9 +1,12 @@
 /*
- * What this machine can carry, known at the page's start (CAPABILITIES.md: the probe).
+ * What this machine can carry, known before the live door is made (CAPABILITIES.md: the probe).
  *
- * probe(): one throwaway context, one small shader of the Earth's kind of arithmetic (PROBE), compiled and timed,
- * then drawn four times into 512x512 and timed: how long a compile takes here, and how fast the GPU draws (ms per
- * million pixels). Kept for a week in this browser (keyed by the browser and the screen), so a later visit skips it.
+ * probe(): only for the live door (?door3d) and only on a page the GPU gate accepted (fitness.js: gpu()), on that
+ * gate's own context, which it leaves as it found it and does not lose (the flight's world is built on it). One small
+ * shader of the Earth's kind of arithmetic (PROBE), compiled and timed, then drawn four times into 512x512 and timed:
+ * how long a compile takes here, and how fast the GPU draws (ms per million pixels). Kept for a week in this browser
+ * (keyed by the browser and the screen), so a later visit skips it. Otherwise it makes no context, draws nothing and
+ * resolves { ok: false }, so level() is 0 (ADR-0002).
  * level(): from that, the level this machine ships (CAPABILITIES.md: the ladder): 0 the still door, 1 the live door
  * lean, 2 the live door rich; liveDoor(): whether the door is live here (?door3d, and level 1 or 2).
  * doorWeight(): from that, the live door's weight (door3d.js): the rich Earth alone, the lean one alone, or both (the
@@ -11,6 +14,7 @@
  */
 import { note } from "./chores.js";
 import { settings, flag } from "./settings.js";
+import { gpu } from "./fitness.js";
 
 const VERT = `#version 300 es
 void main(){ vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2); gl_Position=vec4(p*2.0-1.0,0.0,1.0); }`;
@@ -61,18 +65,18 @@ function noise(gl, w, h, seed) {
   return t;
 }
 
-async function measure() {
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = 1;
-  const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, depth: false, stencil: false });
-  if (!gl) return FAILED;
+async function measure(gl) {
+  /* on the page's one context (fitness.js), which the flight's world is built on after: what the probe makes it lets
+     go of, and the state it set is put back, so the context is left as it was found */
+  const made = [];
+  const keep = (kind, thing) => { made.push([kind, thing]); return thing; };
   try {
     const par = gl.getExtension("KHR_parallel_shader_compile"), background = !!par;
     /* a program, timed to its link status (in the background: looked at once it is done, so the page never waits) */
     const compile = async () => {
       const t0 = performance.now();
-      const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
-      const p = gl.createProgram();
+      const sh = (type, src) => { const s = keep("Shader", gl.createShader(type)); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+      const p = keep("Program", gl.createProgram());
       gl.attachShader(p, sh(gl.VERTEX_SHADER, VERT)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, salted(PROBE))); gl.linkProgram(p);
       if (par) while (!gl.getProgramParameter(p, par.COMPLETION_STATUS_KHR)) await new Promise((r) => setTimeout(r, 4));
       if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) || "probe: no program");
@@ -81,14 +85,14 @@ async function measure() {
     /* in the background, twice, the second taken (a fresh context's first compile is 3-5x the rest on Safari); on the
        page's own thread once (each is a stall) */
     let pr = await compile();
-    if (background) { gl.deleteProgram(pr.p); pr = await compile(); }
+    if (background) pr = await compile();   /* (the first given back with the rest, below: once) */
     /* drawn four times into 512x512, each waited for (a pixel read back); the mean of the last three */
-    const A = noise(gl, 256, 128, 3), B = noise(gl, 256, 128, 7);
-    const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+    const A = keep("Texture", noise(gl, 256, 128, 3)), B = keep("Texture", noise(gl, 256, 128, 7));
+    const t = keep("Texture", gl.createTexture()); gl.bindTexture(gl.TEXTURE_2D, t);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 512, 512, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    const f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
-    gl.bindVertexArray(gl.createVertexArray()); gl.viewport(0, 0, 512, 512); gl.useProgram(pr.p);
+    const f = keep("Framebuffer", gl.createFramebuffer()); gl.bindFramebuffer(gl.FRAMEBUFFER, f); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+    gl.bindVertexArray(keep("VertexArray", gl.createVertexArray())); gl.viewport(0, 0, 512, 512); gl.useProgram(pr.p);
     const u = (n) => gl.getUniformLocation(pr.p, n);
     gl.uniform2f(u("uRes"), 512, 512); gl.uniform1f(u("uT"), 1);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, A); gl.uniform1i(u("uA"), 0);
@@ -102,21 +106,32 @@ async function measure() {
     console.warn("orbit: no probe", e);
     return FAILED;
   } finally {
-    try { gl.getExtension("WEBGL_lose_context")?.loseContext(); } catch { /* fine */ }
+    /* (the context is not lost: the flight's world is built on it) */
+    try {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.bindVertexArray(null); gl.useProgram(null);
+      gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+      for (const unit of [1, 0]) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, null); }
+      for (const [kind, thing] of made) gl[`delete${kind}`](thing);
+    } catch { /* fine */ }
   }
 }
 
 /* the result, once the probe has resolved (doorWeight reads it) */
 let got = null, memo = null;
 /** the probe, once a page view: { background, compileMs, msPerMpx, ok } (ok false, the rest null, where it could not be
-    had); a week's stored one where there is one */
+    had); a week's stored one where there is one. Only for the live door (the host's flag door3d, not under save-data)
+    on a page whose GPU gate accepted (fitness.js: gpu(), asked here if not yet), measured on that gate's context; otherwise nothing is
+    made or drawn and it resolves { ok: false } at once, without a line in the console (ADR-0002) */
 export function probe() {
   if (memo) return memo;
+  /* (under save-data the level is 0 whatever the probe finds, so it is not asked of the GPU either) */
+  const g = flag("door3d") && !navigator.connection?.saveData ? gpu() : null;
+  if (!g) { got = FAILED; return (memo = Promise.resolve(FAILED)); }
   return (memo = (async () => {
     let r = null, how = "fresh";
     try { const s = JSON.parse(localStorage.getItem(KEY()) || "null"); if (s?.r?.ok && Date.now() - s.t < WEEK) { r = s.r; how = "stored"; } } catch { /* probed afresh */ }
     if (!r) {
-      r = await measure().catch(() => FAILED);
+      r = await measure(g.gl).catch(() => FAILED);
       if (r.ok) try { localStorage.setItem(KEY(), JSON.stringify({ t: Date.now(), r })); } catch { /* this visit only */ }
     }
     got = r;
@@ -162,7 +177,7 @@ const DOOR3D = () => !!flag("door3d");
 const LEAN_MAX = 16;
 const NAMES = ["still", "live lean", "live rich"];
 /* the level, chosen once a page view, after the probe, and said with why (CAPABILITIES.md: the ladder). 0, still:
-   no WebGL2 or no probe, reduced motion or save-data, compiles on the page's own thread (each one stalls the page:
+   no WebGL2 or no probe (whatever ?level= says), reduced motion or save-data, compiles on the page's own thread (each one stalls the page:
    the live door's could go nowhere but under the ring, and its loops would then run beside a page that stalls on
    every later compile), or a lean frame predicted over 16 ms. Else 2, live rich, where the rich is predicted to fit
    the budget (40 ms), and 1, live lean, where it is not. ?level=0|1|2 says which, whatever the probe */
@@ -175,8 +190,9 @@ export function level() {
   const asked = /^[012]$/.test(String(flag("level"))) ? String(flag("level")) : null;
   const quiet = (() => { try { return matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; } })();
   const p = predicted(...band());
-  if (asked) { lvl = +asked; why = `?level=${asked}`; }
-  else if (!got.ok) { lvl = 0; why = "no WebGL2, or no probe"; }
+  /* (no probe, no level: ?level= chooses among the live door's weights once the GPU is accepted, it never grants it) */
+  if (!got.ok) { lvl = 0; why = navigator.connection?.saveData ? "save-data" : "no WebGL2, or no probe"; }
+  else if (asked) { lvl = +asked; why = `?level=${asked}`; }
   else if (quiet) { lvl = 0; why = "reduced motion"; }
   else if (navigator.connection?.saveData) { lvl = 0; why = "save-data"; }
   else if (p.lean > LEAN_MAX) { lvl = 0; why = `lean predicted ${Math.round(p.lean)} ms of ${LEAN_MAX}`; }

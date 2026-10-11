@@ -198,6 +198,15 @@ export const PROPS_UP = [
   { kind: "sys", t0: 2120, dur: 1350, ang: 108, z: 0.62, k: 5, spin: -0.16 },
 ];
 
+/* The other households passing on a flight (the demo's climb, Orbit's own): one "home" prop per household, each with
+   its items as bodies, entering a little after the last and bearing off at one of a few fixed angles and distances.
+   `homes` is [{ name, bodies:[[x,y,colour,r]] }]; a home's prop depends on its place in the list only. */
+const BEAR = [44, 136, 74, 106, 58, 122], ZED = [0.5, 0.42, 0.62, 0.46, 0.56, 0.4];
+/** @param {Array<{ name: string, bodies: Array<[number, number, string, number]> }>} homes @returns {Prop[]} */
+export function homeProps(homes) {
+  return homes.map((h, i) => ({ kind: "home", name: h.name, bodies: h.bodies, t0: 760 + i * 380, dur: 2000 + (i % 3) * 350, ang: BEAR[i % BEAR.length], z: ZED[i % ZED.length], spin: 0 }));
+}
+
 /* ── the two profiles ─────────────────────────────────────────────────────
    UP · 4800ms.  0–300 ignition (the ship is barely moving; the mark flares
    and the card dissolves) · 300–1350 hard acceleration out of the dawn ·
@@ -352,6 +361,15 @@ export function createFlight(canvas, options = {}) {
   /* made when the flight is first readied (warm), not when the page starts: the door's first light is never kept
      waiting by a GPU context and its shaders */
   let voyage = null;
+  /* the world as made (voyage.js), drawn only once it is proved fit (its `ready`): `voyage`, above, is the one the
+     flight under way draws with, chosen as a flight begins (prime), so a world that is too slow, or lost, or not yet
+     proved is never drawn, and the flight draws on this canvas as it always could */
+  let world3d = null;
+  /* a world that can no longer be drawn (its shaders would not link, its context lost or let go) is stopped as it is
+     dropped, so what it made is given back (voyage.js: stop) and nothing more of it is put on the context */
+  const letGo = () => { world3d.stop(); world3d = null; };
+  /* destroyed (journey.js: destroy): no world is made after it, and the one made is stopped */
+  let destroyed = false;
   /** @type {{ cx: number, cy: number, R: number, alpha: number, c: number } | null} */
   let worldGL = null;
 
@@ -1101,6 +1119,8 @@ export function createFlight(canvas, options = {}) {
   /** @param {number} now */
   function frame() {
     if (!flight) return;
+    /* a world lost on the way (its context): the flight goes on without it, drawn on this canvas from here */
+    if (voyage?.dead) voyage = null;
     /* the flight's own clock (options.now): the journey's, which a stall pauses rather than skips (journey.js) */
     const now = clock();
     const active = flight;
@@ -1120,6 +1140,11 @@ export function createFlight(canvas, options = {}) {
   /** @param {Profile} P */
   function prime(P) {
     rnd = seededRng(FLIGHT_SEED);
+    /* the world only if it has been proved fit, and is still alive (a world that was drawn by the flight before is
+       cleared if this one goes without it) */
+    const next = world3d?.ready ? world3d : null;
+    if (voyage && voyage !== next) voyage.clear();
+    voyage = next;
     const dpr = sizeCanvas();
     setCamera(P); seedStars(); seedSphere();
     for (const g of P.props) {
@@ -1138,43 +1163,52 @@ export function createFlight(canvas, options = {}) {
     voyage?.reset();
   }
 
-  let warmed = null, warmedDocs = null, compiled = null;
+  let warmed = null, proved = null, warmedDocs = null, provedDocs = null, compiled = null;
   return {
     /* when the flight's shaders are compiled (after warm has made its world); where compiles freeze the page, the docs'
        galaxy's too (voyage.js: a "compile" chore of its own, which main.js holds the door for with the rest) */
     compiled() { return compiled || Promise.resolve(); },
     /** whether a flight is under way with the WebGL world drawing it (journey.js: the clock's stall cap) */
     get drawingWorld() { return !!flight && !!voyage; },
-    /* everything the flight draws, fetched and made ready before it is wanted; resolves when it is */
-    warm() {
+    /* everything the flight draws, fetched and made ready before it is wanted; resolves when it is. Where the page may
+       not use the GPU (fitness.js: gpu()) there is no world, none of its pictures is fetched, and this is the Earth's
+       picture alone. `prove: false` (the door's, speculative): the world made and its pictures on the GPU, and no
+       frame drawn; the default proves the world (its test frames and the fitness test: voyage.js), which the host
+       asks at leisure once the door is lit, or a flight up asks if it is first; the world is drawn only once proved. */
+    warm({ prove = true } = {}) {
       if (!warmed) {
         if (earth && !earth.src) earth.src = image("dawn/dawn.webp");
-        /* its pictures asked for, and its world made (its shaders set compiling in the background), at once; what it then
-           puts on the GPU waits its turn as chores (voyage.js). Where the browser compiles on the page's own thread
-           (compilesAside false), the world is made as a chore ("compile", queued at once and run under the first
-           light's ring, before the door is lit; hurried with the flight's own), its shaders looked at in the same
-           chore (voyage.js: made) */
+        /* its pictures asked for (only if the GPU gate lets the page have a world: voyage.js), and its world made (its
+           shaders set compiling in the background), at once; what it then puts on the GPU waits its turn as chores
+           (voyage.js). Where the browser compiles on the page's own thread (compilesAside false), the world is made as
+           a chore ("compile", queued at once and run under the first light's ring, before the door is lit; hurried
+           with the flight's own), its shaders looked at in the same chore (voyage.js: made) */
         if (!options.plain) fetchVoyage();
         const make = () => {
-          try { voyage = createVoyage(canvas); voyage?.resize(W || innerWidth, H || innerHeight); } catch (e) { voyage = null; }
-          return voyage?.made;
+          if (destroyed) return undefined;
+          try { world3d = createVoyage(canvas); world3d?.resize(W || innerWidth, H || innerHeight); } catch (e) { world3d = null; }
+          return world3d?.made;
         };
         /* (where the door is live, its weight is chosen first, by the probe: the flight's Earth is compiled to match,
            voyage.js) */
         const first = DOOR3D() && !options.plain ? probe().catch(() => null) : Promise.resolve();
         const made = options.plain ? Promise.resolve() : compilesAside() ? first.then(() => { make(); })
           : first.then(() => chore(make, 20, ["compile", "flight"])).then(() => {}, () => {});
-        compiled = made.then(() => voyage?.made).then((ok) => (compilesAside() ? ok : Promise.resolve(voyage?.galaxy).then(() => ok)));
+        compiled = made.then(() => world3d?.made).then((ok) => (compilesAside() ? ok : Promise.resolve(world3d?.galaxy).then(() => ok)));
         /* if its shaders could not be made after all, the flight draws without it, as it always could */
-        warmed = Promise.all([earthReady, made.then(() => (voyage ? voyage.warm() : null))]).catch(() => {}).then(() => { if (voyage?.dead) voyage = null; if (!options.plain) { note("flight: ready"); noteChores("flight ready"); } });
+        warmed = Promise.all([earthReady, made.then(() => (world3d ? world3d.warm({ prove: false }) : null))]).catch(() => {}).then(() => { if (world3d?.dead) letGo(); if (!options.plain) { note("flight: ready"); noteChores("flight ready"); } });
       }
-      return warmed;
+      if (!prove) return warmed;
+      if (!proved) {
+        proved = warmed.then(() => (world3d ? world3d.warm() : null)).catch(() => {}).then(() => { if (world3d?.dead) letGo(); });
+      }
+      return proved;
     },
-    /* the docs' flight needs its galaxy too, readied after the flight itself */
-    warmDocs() {
-      this.warm();
-      if (!warmedDocs) warmedDocs = warmed.then(() => (voyage ? voyage.warmDocs() : null)).catch(() => {});
-      return warmedDocs;
+    /* the docs' flight needs its galaxy too, readied after the flight itself (`prove` as warm's) */
+    warmDocs({ prove = true } = {}) {
+      this.warm({ prove });
+      if (!prove) return (warmedDocs ??= warmed.then(() => (world3d ? world3d.warmDocs({ prove: false }) : null)).catch(() => {}));
+      return (provedDocs ??= proved.then(() => (world3d ? world3d.warmDocs() : null)).catch(() => {}));
     },
     /**
      * Fly. `at` pins the flight to one beat instead of running it: the
@@ -1189,7 +1223,8 @@ export function createFlight(canvas, options = {}) {
       prime(P);
       if (typeof at === "number") {
         if (flight) flight.pinned = true;
-        for (let t = 0; t <= at; t += PINNED_STEP) step(t, PINNED_STEP / 1000, t + PINNED_STEP > at);
+        /* from where the live flight starts (P.skip, its own time: the stretch it skips is never integrated) */
+        for (let t = Math.min(P.skip || 0, at); t <= at; t += PINNED_STEP) step(t, PINNED_STEP / 1000, t + PINNED_STEP > at);
         flight = null;
         return;
       }
@@ -1204,6 +1239,13 @@ export function createFlight(canvas, options = {}) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       voyage?.clear();
+    },
+    /* taken down with its journey: its world stopped, so a proof still under way never retires the page's one context
+       under a journey mounted after it (voyage.js: stop) */
+    destroy() {
+      this.stop();
+      destroyed = true;
+      world3d?.stop(); world3d = null; voyage = null;
     },
     /* a resize mid-flight re-seeds the field, as the mockup does */
     resize() {

@@ -9,6 +9,10 @@
  *   body.loading / .lit       first light (dawn.js); body.showdawn, .showwarp, .launching, .bare, .instrument,
  *                             .withdrawing, .dispersing, .showdusk, .farewell  the journey's beats (journey.js)
  *   #door.shown, #dusk        the surfaces shown; #warp, #launchname  the flight's canvas and the name on the void
+ *   #dusk.asdawn              the goodbye dressed as the sign-in (duskMarkup({ asDawn: true }), a host option: Orbit's).
+ *                             Every rule for it hangs off that one class, so a dusk without it matches none of them. It
+ *                             takes the dawn's measures and lit look (the dawn's rules above and below, widened to it),
+ *                             follows html.rich as the dawn does, and needs no more of the host than the dawn does
  * What it gives the host: the keyframes driftf, driftn (a tiled sky's drift) and spinback (a lap of the ring),
  * which the site's own sky and hub also use.
  */
@@ -96,19 +100,19 @@ body.lit #door .lockup .name{opacity:1;transform:none;filter:none}
 .loginchrome .lockup .glyph svg{width:min(420px,84vw);height:auto;overflow:visible}
 /* the door's measure: the ring's width sets where everything under it goes,
    so the line and the command clear the outermost orbit and its name */
-#door{--R:min(400px,80vw,46svh);--lift:4svh}
-@media (max-width:560px){
-  #door{--R:min(420px,68vw,46svh);--lift:2svh}
+#door,#dusk.asdawn{--R:min(400px,80vw,46svh);--lift:4svh}
+@media (max-width:599.98px),(max-height:479.98px){
+  #door,#dusk.asdawn{--R:min(420px,68vw,46svh);--lift:2svh}
 }
-#door .loginchrome{padding-bottom:calc(var(--lift) * 2)}
+#door .loginchrome,#dusk.asdawn .loginchrome{padding-bottom:calc(var(--lift) * 2)}
 /* one measure for the whole lockup: the name, the way in and the gap between them are all fractions of the
    ring, so they keep their proportions on every screen. The name sits at the ring's centre with room to
    breathe (about three fifths of its width); the way in sits below the outermost orbit, outside the system,
    so no planet ever crosses it; and the lockup is centred as a whole, which lifts the ring a little */
-#door .lockup .name{font-size:calc(var(--R) * .145);letter-spacing:.01em}
-#door .gate-wrap{grid-area:2/1;transform:none;margin-top:calc(var(--R) * .2)}
-#door .gate{font-size:clamp(12px,calc(var(--R) * .04),16px);padding:.86em 2.3em;letter-spacing:.05em}
-#door .loginchrome .lockup .glyph svg{width:var(--R)}
+#door .lockup .name,#dusk.asdawn .lockup .name{font-size:calc(var(--R) * .145);letter-spacing:.01em}
+#door .gate-wrap,#dusk.asdawn .gate-wrap{grid-area:2/1;transform:none;margin-top:calc(var(--R) * .2)}
+#door .gate,#dusk.asdawn .gate{font-size:clamp(12px,calc(var(--R) * .04),16px);padding:.86em 2.3em;letter-spacing:.05em}
+#door .loginchrome .lockup .glyph svg,#dusk.asdawn .loginchrome .lockup .glyph svg{width:var(--R)}
 .loginchrome .lockup .glyph .tr{animation:spinback 40s linear infinite;transform-origin:100px 100px}
 #login-glyph{position:relative}
 @keyframes spinback{to{transform:rotate(360deg)}}
@@ -154,9 +158,10 @@ body.showwarp #warp,body.showwarp #warpgl{opacity:1;transition:opacity .45s ease
 
 /* ══ THE DOOR, LIT (html.rich): the ring lit from the sunrise below, the name lit from beneath, the way in a dark glass
    pill ringed like the logo (the earlier, plainer door is kept on the site's classic-door branch) ══ */
-#door .lux{display:none}
-html.rich #door .lux{display:inline}
+#door .lux,#dusk.asdawn .lux{display:none}
+html.rich #door .lux,html.rich #dusk.asdawn .lux{display:inline}
 html.rich #door .ring:not(.lux){stroke:url(#ringlit);stroke-width:1.6}
+html.rich #dusk.asdawn .ring:not(.lux){stroke:url(#d-ringlit);stroke-width:1.6}
 /* the ring and the name are pictures: a planet behind them is still under the pointer */
 html.rich #door .lockup .glyph{position:relative;z-index:2;pointer-events:none}
 html.rich #door .lockup .name{position:relative;z-index:4;pointer-events:none}
@@ -165,19 +170,67 @@ html.rich #door .lockup .name{position:relative;z-index:4;pointer-events:none}
    and lit gold from the dawn below, a spark of the gold world running round it the way the gold world runs round the ring;
    reached, it fills with warm light */
 @property --ga{syntax:"<angle>";inherits:false;initial-value:0deg}
-html.rich #door .gate{color:#f3e5c4;border:1.5px solid transparent;letter-spacing:.07em;
+html.rich #door .gate,html.rich #dusk.asdawn .gate{color:#f3e5c4;border:1.5px solid transparent;letter-spacing:.07em;
   background:linear-gradient(180deg,#0d0d13,#19130e) padding-box,
     conic-gradient(from var(--ga),rgba(255,214,140,0) 0deg 230deg,rgba(255,218,150,.9) 340deg,#fff4dc 356deg,rgba(255,214,140,0) 360deg) border-box,
     linear-gradient(180deg,rgba(150,160,198,.45),rgba(240,212,160,.85)) border-box;
   box-shadow:0 14px 34px -16px rgba(255,186,100,.6),inset 0 -12px 20px -14px rgba(255,196,120,.35);
   animation:gate-orbit 7s linear infinite}
-html.rich #door .gate:hover,html.rich #door .gate:focus-visible{filter:none;color:#fffaf0;outline:0;
+html.rich #door .gate:hover,html.rich #door .gate:focus-visible,html.rich #dusk.asdawn .gate:hover,html.rich #dusk.asdawn .gate:focus-visible{filter:none;color:#fffaf0;outline:0;
   background:linear-gradient(180deg,#3d2d16,#6e4f22) padding-box,
     conic-gradient(from var(--ga),rgba(255,214,140,0) 0deg 230deg,rgba(255,218,150,.9) 340deg,#fff4dc 356deg,rgba(255,214,140,0) 360deg) border-box,
     linear-gradient(180deg,rgba(255,228,180,.7),#f3d39a) border-box;
   box-shadow:0 16px 40px -14px rgba(255,186,100,.75),0 0 36px rgba(255,200,120,.25)}
 @keyframes gate-orbit{to{--ga:360deg}}
-@media (prefers-reduced-motion:reduce){html.rich #door .gate{animation:none}}
+@media (prefers-reduced-motion:reduce){html.rich #door .gate,html.rich #dusk.asdawn .gate{animation:none}}
 html.rich #door .lockup .name{background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;
   filter:blur(6px) drop-shadow(0 0 0 rgba(255,206,140,0))}
 html.rich body.lit #door .lockup .name{filter:blur(0) drop-shadow(0 0 calc(var(--R) * .045) rgba(255,206,140,.2))}
+/* the goodbye dressed as the sign-in: the name's gradient and its settled glow, but not its blur-in (the goodbye's
+   words come with the beat, not with a first light) */
+html.rich #dusk.asdawn .lockup .name{background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 0 calc(var(--R) * .045) rgba(255,206,140,.2))}
+
+/* ══ THE GOODBYE AS THE SIGN-IN (#dusk.asdawn, a host option: duskMarkup({ asDawn: true })) ═════════════════════════
+   The measures and the lit look are the dawn's, above, widened to this one class. What is new is here: the planet
+   waits for the farewell beat, the Earth lies under the ember rim, and the farewell hangs off the way back in (inside
+   the ring on a phone). Orbit's flight.css and door-phone.css, with the dawn's gate margin (.2R) where Orbit's was .03R */
+#dusk.asdawn .gate-wrap{position:relative}
+/* the gold world keeps upright as its group turns: the same turn the other way round its own centre */
+#dusk.asdawn .lockup .glyph .world{transform-origin:163px 63.5px;animation:spinforth 40s linear infinite reverse}
+/* the planet and its wake are not on the screen until the farewell has set down (a goodbye standing alone shows them) */
+#dusk.asdawn .lockup .glyph .tr{transition:opacity .4s ease}
+body.showdusk:not(.farewell) #dusk.asdawn .lockup .glyph .tr{opacity:0}
+/* the Earth: each picture fades in when it has come, and the crisp rim gives way to the first (dawn.js: mountDusk) */
+#dusk.asdawn .earth image{opacity:0;transition:opacity 1.2s ease}
+#dusk.asdawn .earth image.in{opacity:1}
+#dusk.asdawn .crisp{transition:opacity 1s ease}
+#dusk.asdawn .world.earthy .crisp{opacity:0}
+#dusk.asdawn .gate{transition:opacity .9s ease .6s,transform .9s ease .6s,filter .35s ease,box-shadow .3s ease}
+/* the farewell hangs off the way back in's own box (the wrapper is position:relative, the farewell its last child and out
+   of flow), so it is the same gap under the pill at any height and the lockup is centred as the sign-in's is. Centring
+   is in `transform`, not `translate`: a lone translate is dropped by a build that lowers CSS */
+#dusk.asdawn .farewell{position:absolute;top:100%;left:50%;right:auto;bottom:auto;margin-top:22px;width:max-content;max-width:92vw;text-align:center;
+  opacity:0;transform:translate(-50%,9px)}
+body.farewell #dusk.asdawn .farewell{opacity:1;transform:translateX(-50%)}
+@media (prefers-reduced-motion:reduce){
+  #dusk.asdawn .lockup .glyph .tr,#dusk.asdawn .lockup .glyph .world{animation:none}
+  #dusk.asdawn .earth image{transition:none}
+  #dusk.asdawn .world.earthy .crisp{transition:none}
+}
+/* A phone: the ring holds the farewell where it held the word, and the second line and the way back in stand in one
+   column under it, on the axis: the line 26px under the ring, the way back in 24px under the line (two lines of 13px
+   at 1.7 are 44.2px). The ring stands where the sign-in's does: the line is out of flow and the way back in is moved by
+   `top`, not by a margin. The wrapper's top is m R under the glyph (m the gate's margin, .2), so the ring's centre is
+   (.5 + m)R above it and the ring's foot (.14 + m)R above it */
+@media (max-width:599.98px),(max-height:479.98px){
+  #dusk.asdawn .lockup .name{visibility:hidden}
+  #dusk.asdawn .farewell{top:0;margin-top:0;width:min(calc(100vw - 32px),376px)}
+  #dusk.asdawn .farewell .said{position:absolute;left:50%;top:calc(var(--R) * -.7);transform:translate(-50%,-50%);width:calc(var(--R) * .6);
+    font:600 min(22px,calc(var(--R) * .078))/1.2 var(--display);letter-spacing:.005em;color:#e9edf8}
+  html.rich #dusk.asdawn .farewell .said{background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 0 11px rgba(255,206,140,.2))}
+  #dusk.asdawn .farewell .sub{position:absolute;left:0;right:0;top:calc(26px - var(--R) * .34);margin:0;
+    font-size:13px;line-height:1.7;letter-spacing:.04em;color:#9aa0b8;text-shadow:0 1px 5px rgba(4,6,14,.9)}
+  #dusk.asdawn .gate{position:relative;top:calc(26px + 2 * 13px * 1.7 + 24px - var(--R) * .34)}
+}
