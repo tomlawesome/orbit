@@ -44,7 +44,9 @@ function scratchDir(prefix) {
 // that: it exits FAKE_PREFLIGHT_STATUS (default 0), as the engine's
 // preflight leaves no journal and prints nothing on success. Every run
 // appends to FAKE_ENGINE_STDIN_KIND_LOG whether its standard input was
-// /dev/null.
+// /dev/null. FAKE_ENGINE_IMPORT_ROLLBACK, when set, is a path the full run
+// creates: the previous key an interrupted import leaves beside the live
+// document key (<secrets dir>/document-kek.import-rollback, #1316 O2-R1).
 const FAKE_DOCKER = `#!/usr/bin/env node
 const { appendFileSync, mkdirSync, writeFileSync } = require("node:fs");
 const { dirname } = require("node:path");
@@ -74,6 +76,10 @@ if (verb === "run") {
   if (process.env.FAKE_ENGINE_JOURNAL) {
     mkdirSync(dirname(process.env.FAKE_ENGINE_JOURNAL), { recursive: true });
     writeFileSync(process.env.FAKE_ENGINE_JOURNAL, "state=checkpointed\\n");
+  }
+  if (process.env.FAKE_ENGINE_IMPORT_ROLLBACK) {
+    mkdirSync(dirname(process.env.FAKE_ENGINE_IMPORT_ROLLBACK), { recursive: true });
+    writeFileSync(process.env.FAKE_ENGINE_IMPORT_ROLLBACK, "b".repeat(64) + "\\n");
   }
   if (process.env.FAKE_ENGINE_STDOUT) process.stdout.write(process.env.FAKE_ENGINE_STDOUT);
   process.exit(Number(process.env.FAKE_ENGINE_STATUS || 0));
@@ -493,6 +499,28 @@ describe("the stop / engine / start rule (E3)", () => {
     expect(verbs(result.calls)).toEqual(engineVerbs);
     expect(result.probes).toEqual([]);
     expect(result.stderr).toContain("bash scripts/restore.sh --recover");
+  });
+
+  // #1316 O2-R1: an import interrupted (exit 130) after it swapped in the
+  // recovered key but before it could put the previous key back leaves that
+  // key in <secrets dir>/document-kek.import-rollback and no journal. The
+  // live key is then the recovered one, not the one the database was
+  // encrypted with, so starting Orbit would run it on the wrong key.
+  it("import-recovery-bundle.sh: a run that exits 130 leaving document-kek.import-rollback and no journal keeps Orbit stopped, names the file and says so", () => {
+    const deployment = makeDeployment();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const rollbackFile = join(deployment.deployDir, ".orbit-secrets", "document-kek.import-rollback");
+    const result = run(deployment, "import-recovery-bundle.sh", [bundle], {
+      env: { FAKE_ENGINE_STATUS: "130", FAKE_ENGINE_IMPORT_ROLLBACK: rollbackFile },
+    });
+    expect(existsSync(rollbackFile)).toBe(true);
+    expect(existsSync(deployment.journal)).toBe(false);
+    expect(result.status).not.toBe(0);
+    expect(verbs(result.calls)).toEqual(["run", "stop", "run"]);
+    expect(result.probes).toEqual([]);
+    expect(result.stderr).toContain("document-kek.import-rollback");
+    expect(result.stderr).toMatch(/keep Orbit stopped/i);
   });
 
   it("restore.sh: a hard-killed engine (exit 137) that left its journal keeps Orbit stopped", () => {

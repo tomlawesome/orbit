@@ -224,6 +224,14 @@ if [[ -f "$journal_path" ]]; then
   printf 'Orbit recovery import: the inner restore evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.\n' >&2
   exit "$((status == 0 ? 1 : status))"
 fi
+# A run killed after it swapped in the recovered key leaves the previous key here and no journal:
+# the live key no longer matches the database, so starting Orbit would serve it under the wrong key.
+rollback_key="$secrets_directory/document-kek.import-rollback"
+if [[ -e "$rollback_key" ]]; then
+  printf 'Orbit recovery import: the import was interrupted after it swapped the document key; the previous document key is preserved at %s. Keep Orbit stopped and move it back to %s by hand before starting Orbit.\n' \
+    "$rollback_key" "$secrets_directory/document-kek" >&2
+  exit "$((status == 0 ? 1 : status))"
+fi
 compose start orbit-app >/dev/null 2>&1 || fail "Orbit could not be started again."
 wait_for_health || fail "Orbit did not become healthy after the import."
 exit "$status"
