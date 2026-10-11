@@ -50,7 +50,7 @@ describe("#1262: the plain sign-out is one press", () => {
     // The descent is the shared Leave.svelte (#1253); home asks it to ready
     // its world, and it does so gently.
     expect(HOME).toMatch(/const readyDescent = \(\) => leave\?\.ready\(\);/u);
-    expect(body(LEAVE, "export function ready()")).toMatch(/readyFlight\(\{ hurry: true, gentle: true \}\)/u);
+    expect(body(LEAVE, "export function ready()")).toMatch(/flight\?\.readyWorld\(\{ hurry: true, gentle: true \}\)/u);
     expect(HOME).toMatch(/<button class="orb"[^>]*onclick=\{readyDescent\}/u);
   });
 });

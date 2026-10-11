@@ -7,238 +7,174 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * #1299: the descent never waits for its world, and the world was readied only
  * when sign-out was armed -- so it nearly always flew the fallback. Home now
  * readies it a few seconds after it has arrived, once its painted animations
- * are done, as orbit-site does on any page but the door. Shaped like
- * v19-flight-gpu-verdict.test.mjs (stub the page, reset modules per test).
+ * are done, as orbit-site does on any page but the door.
+ *
+ * #1371: the world, its test frames, the GPU verdict and the unhurried
+ * warming are the shared door's now (`journey.warm()`, `journey.later()`,
+ * `gpu()`: the folder, unchanged). What stays Orbit's is WHEN to ask: which
+ * pages ask, with what urgency, and never under reduced motion or save-data.
+ * The pages are read as text (a `.svelte` file needs the compiler this suite
+ * does not pull in); the one module that is plain JavaScript, fetch-ahead.js,
+ * is run with the page stubbed.
  */
-function stubPage({ parallel = true, saveData = false, reduced = false, animations = [] } = {}) {
-  const gpu = vi.fn(() => ({ parallel }));
-  const warm = vi.fn(() => Promise.resolve());
-  const voyageOnce = vi.fn(() => ({ warm, made: Promise.resolve(true) }));
-  const fetchVoyage = vi.fn();
-  const fetchOnce = vi.fn(() => Promise.resolve());
-  const hurryChores = vi.fn();
-  const openChores = vi.fn();
-  /* chores run at once: this test is about when home asks, not the queue */
-  const chore = vi.fn((fn) => Promise.resolve().then(fn));
-  vi.doMock("$lib/flight/chores.js", () => ({ chore, fetchOnce, hurryChores, openChores }));
-  vi.doMock("$lib/flight/voyage.js", () => ({ fetchVoyage, voyageOnce }));
-  vi.doMock("$lib/flight/fitness.js", () => ({ gpu }));
-  vi.stubGlobal("document", { getAnimations: () => animations });
-  vi.stubGlobal("navigator", { connection: { saveData } });
-  vi.stubGlobal("matchMedia", () => ({ matches: reduced }));
-  return { gpu, warm, voyageOnce, fetchVoyage, hurryChores, openChores };
-}
+const read = (path) => readFileSync(resolve(import.meta.dirname, "../..", path), "utf8");
+const FLIGHT = read("web/src/lib/flight/Flight.svelte");
+const LEAVE = read("web/src/lib/flight/Leave.svelte");
+const HOME = read("web/src/routes/home/+page.svelte");
+const ARRIVAL = read("web/src/lib/arrival/Arrival.svelte");
+const SIGN_IN = read("web/src/lib/flight/SignIn.svelte");
 
-/** a painted animation (its property is not compositor-only) that ends when told */
-function paintedAnimation() {
-  let end;
-  const finished = new Promise((r) => { end = r; });
-  return {
-    end,
-    animation: {
-      effect: { target: {}, getComputedTiming: () => ({ endTime: 1000 }), getKeyframes: () => [{ filter: "blur(4px)" }] },
-      finished,
-    },
-  };
-}
+/** @param {string} src @param {string} head */
+const after = (src, head) => src.slice(src.indexOf(head));
 
-const settle = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+describe("the pictures a page without a journey fetches ahead (fetch-ahead.js)", () => {
+  /** @param {{ granted?: boolean, saveData?: boolean, reduced?: boolean }} [how] */
+  function stubPage({ granted = true, saveData = false, reduced = false } = {}) {
+    const fetchOnce = vi.fn(() => Promise.resolve());
+    const hurryChores = vi.fn();
+    const openChores = vi.fn();
+    /* chores run at once: this test is about when the page asks, not the queue */
+    const chore = vi.fn((fn) => Promise.resolve().then(fn));
+    const gpu = vi.fn(() => (granted ? { parallel: true } : null));
+    vi.doMock("$lib/door-host.js", () => ({
+      chore, fetchOnce, hurryChores, openChores,
+      image: (p) => `/img/${p}`, flightPictures: () => ["/img/flight/a.webp", "/img/flight/b.webp"],
+    }));
+    vi.doMock("$lib/gpu.js", () => ({ gpu }));
+    vi.stubGlobal("document", {});
+    vi.stubGlobal("navigator", { connection: { saveData } });
+    vi.stubGlobal("matchMedia", () => ({ matches: reduced }));
+    return { fetchOnce, hurryChores, openChores, gpu };
+  }
+  const settle = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
 
-beforeEach(() => { vi.useFakeTimers(); });
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.doUnmock("$lib/flight/chores.js"); vi.doUnmock("$lib/flight/voyage.js"); vi.doUnmock("$lib/flight/fitness.js"); vi.resetModules(); });
+  beforeEach(() => { vi.resetModules(); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.doUnmock("$lib/door-host.js"); vi.doUnmock("$lib/gpu.js"); vi.resetModules(); });
 
-describe("home readies the flight's world once it has arrived (#1299)", () => {
-  it("does nothing at first, then readies it, gently and without test frames, after orbit-site's 4 s", async () => {
+  it("asks for the Earth's picture, then the flight's once the GPU verdict is in and the page may use it", async () => {
     const page = stubPage();
-    const { readyFlightAtLeisure } = await import("$lib/flight/warm.js");
-    readyFlightAtLeisure();
-    await vi.advanceTimersByTimeAsync(3900);
-    expect(page.gpu).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(200);
+    const { fetchFlightAhead } = await import("$lib/flight/fetch-ahead.js");
+    fetchFlightAhead();
+    await settle();
+    expect(page.fetchOnce.mock.calls.map((c) => c[0])).toEqual(["/img/dawn/dawn.webp", "/img/flight/a.webp", "/img/flight/b.webp"]);
+    expect(page.gpu).toHaveBeenCalledOnce();
+  });
+
+  it("fetches none of the world's pictures where the page may not use the GPU", async () => {
+    const page = stubPage({ granted: false });
+    const { fetchFlightAhead } = await import("$lib/flight/fetch-ahead.js");
+    fetchFlightAhead();
+    await settle();
+    expect(page.fetchOnce.mock.calls.map((c) => c[0])).toEqual(["/img/dawn/dawn.webp"]);
+  });
+
+  it("asks the GPU once however often it is called", async () => {
+    const page = stubPage();
+    const { fetchFlightAhead } = await import("$lib/flight/fetch-ahead.js");
+    fetchFlightAhead();
+    fetchFlightAhead({ hurry: true });
     await settle();
     expect(page.gpu).toHaveBeenCalledOnce();
-    expect(page.voyageOnce).toHaveBeenCalledOnce();
-    expect(page.warm).toHaveBeenCalledWith({ prove: false });
-    /* unhurried: the chores begin, but nothing is rushed */
+    expect(page.fetchOnce).toHaveBeenCalledTimes(3);
+  });
+
+  it("opens the chores, or hurries the flight's when it is wanted now", async () => {
+    const page = stubPage();
+    const { fetchFlightAhead } = await import("$lib/flight/fetch-ahead.js");
+    fetchFlightAhead();
+    expect(page.openChores).toHaveBeenCalledOnce();
     expect(page.hurryChores).not.toHaveBeenCalled();
-    expect(page.openChores).toHaveBeenCalled();
-  });
-
-  it("waits for the painted animations to finish before it asks", async () => {
-    const drawing = paintedAnimation();
-    const page = stubPage({ animations: [drawing.animation] });
-    const { readyFlightAtLeisure } = await import("$lib/flight/warm.js");
-    readyFlightAtLeisure();
-    await vi.advanceTimersByTimeAsync(10_000);
-    await settle();
-    expect(page.gpu).not.toHaveBeenCalled();
-    drawing.end();
-    await settle();
-    expect(page.gpu).toHaveBeenCalledOnce();
-  });
-
-  it("asks nothing when the page is left first", async () => {
-    const page = stubPage();
-    const { readyFlightAtLeisure } = await import("$lib/flight/warm.js");
-    const stop = readyFlightAtLeisure();
-    stop();
-    await vi.advanceTimersByTimeAsync(10_000);
-    await settle();
-    expect(page.gpu).not.toHaveBeenCalled();
-  });
-
-  it("makes the world on a browser that compiles on the page's own thread too, as orbit-site does (owner, #1299)", async () => {
-    const page = stubPage({ parallel: false });
-    const { readyFlightAtLeisure } = await import("$lib/flight/warm.js");
-    readyFlightAtLeisure();
-    await vi.advanceTimersByTimeAsync(4100);
-    await settle();
-    expect(page.gpu).toHaveBeenCalledOnce();
-    expect(page.voyageOnce).toHaveBeenCalledOnce();
-    expect(page.warm).toHaveBeenCalledWith({ prove: false });
-  });
-
-  it.each([["save-data", { saveData: true }], ["reduced motion", { reduced: true }]])("asks nothing under %s", async (_name, how) => {
-    const page = stubPage(how);
-    const { readyFlightAtLeisure } = await import("$lib/flight/warm.js");
-    readyFlightAtLeisure();
-    await vi.advanceTimersByTimeAsync(10_000);
-    await settle();
-    expect(page.gpu).not.toHaveBeenCalled();
-  });
-
-  it("does not ready twice when the sign-out has already started it", async () => {
-    const page = stubPage();
-    const { readyFlight, readyFlightAtLeisure } = await import("$lib/flight/warm.js");
-    readyFlight({ hurry: true, gentle: true });
-    readyFlightAtLeisure();
-    await vi.advanceTimersByTimeAsync(4100);
-    await settle();
-    expect(page.gpu).toHaveBeenCalledOnce();
-    expect(page.voyageOnce).toHaveBeenCalledOnce();
-  });
-});
-
-describe("a sign-out drops the leisure ask still to come (#1299)", () => {
-  /* Home's leisure ask is stopped only when home unmounts, and a sign-out
-     does not unmount home: signing out within about four seconds of
-     arriving let it fire mid-descent, a compile of over a second on a
-     browser that compiles on the page's own thread. */
-  it("asks nothing once the descent has begun before its 4 s are up", async () => {
-    const page = stubPage({ parallel: false });
-    const { readyFlightAtLeisure, stopLeisure } = await import("$lib/flight/warm.js");
-    readyFlightAtLeisure();
-    await vi.advanceTimersByTimeAsync(2000);
-    stopLeisure();
-    await vi.advanceTimersByTimeAsync(10_000);
-    await settle();
-    expect(page.gpu).not.toHaveBeenCalled();
-    expect(page.voyageOnce).not.toHaveBeenCalled();
-  });
-
-  it("asks nothing when the descent begins while it waits for the page's painted animations", async () => {
-    const drawing = paintedAnimation();
-    const page = stubPage({ parallel: false, animations: [drawing.animation] });
-    const { readyFlightAtLeisure, stopLeisure } = await import("$lib/flight/warm.js");
-    readyFlightAtLeisure();
-    await vi.advanceTimersByTimeAsync(4100);
-    stopLeisure();
-    drawing.end();
-    await settle();
-    expect(page.gpu).not.toHaveBeenCalled();
-  });
-
-  it("leaves an ask already made alone, and stopping twice is harmless", async () => {
-    const page = stubPage();
-    const { readyFlightAtLeisure, stopLeisure } = await import("$lib/flight/warm.js");
-    const stop = readyFlightAtLeisure();
-    await vi.advanceTimersByTimeAsync(4100);
-    await settle();
-    expect(page.gpu).toHaveBeenCalledOnce();
-    stopLeisure();
-    stop();
-    expect(page.voyageOnce).toHaveBeenCalledOnce();
-  });
-
-  it("Leave drops it first thing in descendFrom, before the descent starts", () => {
-    const leave = readFileSync(resolve(import.meta.dirname, "../../web/src/lib/flight/Leave.svelte"), "utf8");
-    expect(leave).toMatch(/import \{ readyFlight, stopLeisure \} from "\.\/warm\.js";/u);
-    const body = leave.slice(leave.indexOf("export async function descendFrom("));
-    expect(body.indexOf("stopLeisure();")).toBeGreaterThan(-1);
-    expect(body.indexOf("stopLeisure();")).toBeLessThan(body.indexOf("flight?.descend();"));
-  });
-});
-
-describe("home asks for it (#1299)", () => {
-  const HOME = readFileSync(resolve(import.meta.dirname, "../../web/src/routes/home/+page.svelte"), "utf8");
-  it("on mount, except on a launch, whose climb readies its own world; and stops if home is left", () => {
-    expect(HOME).toMatch(/import \{ readyFlightAtLeisure \} from "\$lib\/flight\/warm\.js";/u);
-    expect(HOME).toMatch(/onMount\(\(\) => \(launching \? undefined : readyFlightAtLeisure\(\)\)\);/u);
-  });
-});
-
-describe("a gentle ask that was refused a world does not shut out a later ask that may make it (#1299)", () => {
-  it("the flight's own ask makes the world after a plain gentle ask was refused on a no-parallel browser", async () => {
-    const page = stubPage({ parallel: false });
-    const { readyFlight } = await import("$lib/flight/warm.js");
-    await readyFlight({ gentle: true, prove: false });
-    expect(page.voyageOnce).not.toHaveBeenCalled();
-    await readyFlight({ hurry: true });
-    expect(page.voyageOnce).toHaveBeenCalledOnce();
-    expect(page.warm).toHaveBeenCalledWith({ prove: true });
-    expect(page.gpu).toHaveBeenCalledOnce();
-  });
-
-  it("holds when both asks are made before the GPU verdict is in", async () => {
-    const page = stubPage({ parallel: false });
-    const { readyFlight } = await import("$lib/flight/warm.js");
-    const gentle = readyFlight({ gentle: true });
-    const flight = readyFlight({ hurry: true });
-    await Promise.all([gentle, flight]);
-    expect(page.voyageOnce).toHaveBeenCalledOnce();
-  });
-
-  it("makes the world once however many asks may make it, and runs the test frames once when a later ask wants them", async () => {
-    const page = stubPage({ parallel: true });
-    const { readyFlight } = await import("$lib/flight/warm.js");
-    await readyFlight({ gentle: true, prove: false });
-    await readyFlight({ hurry: true, gentle: true });
-    await readyFlight({ hurry: true });
-    expect(page.voyageOnce).toHaveBeenCalledOnce();
-    expect(page.warm.mock.calls.map((c) => c[0].prove)).toEqual([false, true]);
-  });
-
-  it("a gentle ask under save-data still leaves the later flight ask free to make it", async () => {
-    const page = stubPage({ parallel: false, saveData: true });
-    const { readyFlight } = await import("$lib/flight/warm.js");
-    await readyFlight({ gentle: true });
-    await readyFlight({ hurry: true });
-    expect(page.voyageOnce).toHaveBeenCalledOnce();
-  });
-});
-
-describe("the door compiles behind its ring where the browser would stop the page (#1299)", () => {
-  it("knows to only where the GPU is usable, the compile is on the page's thread, and the reader asked for neither save-data nor reduced motion", async () => {
-    const check = async (how) => { vi.resetModules(); stubPage(how); return (await import("$lib/flight/warm.js")).compileStopsPage(); };
-    expect(await check({ parallel: false })).toBe(true);
-    expect(await check({ parallel: true })).toBe(false);
-    expect(await check({ parallel: false, saveData: true })).toBe(false);
-    expect(await check({ parallel: false, reduced: true })).toBe(false);
-  });
-
-  it("compileFlightNow makes the world hurried, without test frames, and resolves once its shaders are made", async () => {
-    const page = stubPage({ parallel: false });
-    const { compileFlightNow } = await import("$lib/flight/warm.js");
-    await compileFlightNow();
-    expect(page.voyageOnce).toHaveBeenCalledOnce();
-    expect(page.warm).toHaveBeenCalledWith({ prove: false });
+    fetchFlightAhead({ hurry: true });
     expect(page.hurryChores).toHaveBeenCalledWith("flight");
   });
 
-  it("SignIn holds first light's ring for it", () => {
-    const door = readFileSync(resolve(import.meta.dirname, "../../web/src/lib/flight/SignIn.svelte"), "utf8");
-    expect(door).toMatch(/const behindRing = compileStopsPage\(\);/u);
-    expect(door).toMatch(/compile: behindRing \? compileFlightNow : null,/u);
-    expect(door).toMatch(/isFirstVisit\(localStorage\) \|\| behindRing \? 1 : 0/u);
+  it("asks for nothing under save-data or reduced motion", async () => {
+    for (const how of [{ saveData: true }, { reduced: true }]) {
+      vi.resetModules();
+      const page = stubPage(how);
+      const { fetchFlightAhead } = await import("$lib/flight/fetch-ahead.js");
+      fetchFlightAhead({ hurry: true });
+      await settle();
+      expect(page.fetchOnce).not.toHaveBeenCalled();
+      expect(page.gpu).not.toHaveBeenCalled();
+      expect(page.hurryChores).not.toHaveBeenCalled();
+    }
+  });
+});
+
+describe("the flight readies its world through the folder's journey (Flight.svelte)", () => {
+  const ready = after(FLIGHT, "export function readyWorld(");
+
+  it("under reduced motion, or with no journey, nothing is readied", () => {
+    expect(ready).toMatch(/if \(!journey \|\| reduced\(\)\) return Promise\.resolve\(\);/u);
+  });
+
+  it("a gentle ask holds off under save-data and where the compile would stop the page, unless a quiet moment was chosen for it", () => {
+    expect(ready).toMatch(/if \(gentle && \(savingData\(\) \|\| \(!compilesAside\(\) && !compile\)\)\) return Promise\.resolve\(\);/u);
+  });
+
+  it("asks the folder's journey for the world, hurried or not", () => {
+    expect(ready).toMatch(/if \(hurry\) hurryChores\("flight"\); else openChores\(\);/u);
+    expect(ready).toMatch(/return journey\.warm\(\{ prove \}\)/u);
+  });
+
+  it("the climb readies it hurried, with the test frames, and holds on it; a pinned climb waits for nothing", () => {
+    expect(FLIGHT).toMatch(/const ready = reduced\(\) \|\| pinned \? null : readyWorld\(\{ hurry: true \}\);/u);
+  });
+
+  it("the descent asks for nothing: it flies the world if it is proved, and painted if not", () => {
+    const descend = after(FLIGHT, "export function descend(").slice(0, 700);
+    expect(descend).not.toMatch(/readyWorld|\.warm\(/u);
+  });
+
+  it("the unhurried ask is the folder's journey.later(), never under reduced motion or save-data", () => {
+    const leisure = after(FLIGHT, "export function readyAtLeisure(");
+    expect(leisure).toMatch(/if \(!journey \|\| reduced\(\) \|\| savingData\(\)\) return \(\) => \{\};/u);
+    expect(leisure).toMatch(/journey\.later\(\(\) => \{ readyWorld\(\{ gentle: true, compile: true \}\); \}, how\)/u);
+  });
+});
+
+describe("home and the menus ask for it (#1299)", () => {
+  it("Leave readies the descent's world, hurried and gently, when a menu opens", () => {
+    expect(after(LEAVE, "export function ready()")).toMatch(/flight\?\.readyWorld\(\{ hurry: true, gentle: true \}\)/u);
+    expect(HOME).toMatch(/const readyDescent = \(\) => leave\?\.ready\(\);/u);
+  });
+
+  it("home asks at leisure on mount, except on a launch, whose climb readies its own world; and stops if home is left", () => {
+    expect(HOME).toMatch(/onMount\(\(\) => \(launching \? undefined : leave\?\.readyAtLeisure\(\)\)\);/u);
+    expect(after(LEAVE, "export function readyAtLeisure(")).toMatch(/return flight\?\.readyAtLeisure\(how\);/u);
+  });
+
+  it("a sign-out within the leisure ask's four seconds does not let it fire mid-descent: the folder drops it as the descent begins", () => {
+    expect(FLIGHT).toMatch(/journey\.descend\(\{/u);
+    expect(LEAVE).not.toMatch(/stopLeisure|warm\.js/u);
+  });
+});
+
+describe("the arrival asks once it knows a launch is owed (#1222)", () => {
+  it("fetches the flight's pictures at once, hurried, while the session is still being asked", () => {
+    expect(ARRIVAL).toMatch(/if \(launchOwed\) fetchFlightAhead\(\{ hurry: true \}\);/u);
+  });
+
+  it("mounts the flight and readies its world, test frames and all, when the session says the reader flies here", () => {
+    expect(ARRIVAL).toMatch(/\{#if climbing \|\| flying\}/u);
+    const decide = after(ARRIVAL, "if (launchOwed) {\n        flying = true;");
+    expect(decide.slice(0, 260)).toMatch(/await tick\(\);[\s\S]*flight\?\.readyWorld\(\{ hurry: true, gentle: true \}\);/u);
+  });
+});
+
+describe("the door has no journey, so it fetches the flight's pictures and compiles nothing (#1299)", () => {
+  it("asks for them once the door is lit and its reveal done (the folder's onOpen), and once the door can open", () => {
+    expect(SIGN_IN).toMatch(/onOpen: \(\) => \{ opened = true; ask\(\); \}/u);
+    expect(SIGN_IN).toMatch(/function readyWhenDrawn\(\) \{\s*wanted = true;\s*ask\(\);/u);
+    expect(SIGN_IN).toMatch(/fetchFlightAhead\(\);/u);
+  });
+
+  it("the sign-in's press hurries them", () => {
+    expect(SIGN_IN).toMatch(/fetchFlightAhead\(\{ hurry: true \}\);/u);
+  });
+
+  it("holds the ring for no compile", () => {
+    expect(SIGN_IN).not.toMatch(/compileStopsPage|compileFlightNow|behindRing/u);
   });
 });

@@ -7,8 +7,8 @@
   import Identity from "./Identity.svelte";
   import Waiting from "./Waiting.svelte";
   import { clearLaunch, markLaunch } from "./arrival.js";
-  import { compileFlightNow, compileStopsPage, drawnIn, readyFlight, hurryFlight } from "./warm.js";
-  import { COMPILE_CAP_MS, isFirstVisit, within } from "./door-seen.js";
+  import { fetchFlightAhead } from "./fetch-ahead.js";
+  import { isFirstVisit } from "./door-seen.js";
   import {
     APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, STARTING, STARTING_BACKSTOP_MS, STARTING_POLL_MS,
     applyStartingBackstop, availabilityOf, cardMessageFor, claimFromHash, doorMessageFor,
@@ -282,7 +282,7 @@
    *  entered exactly as an identity provider's callback enters it. */
   async function submitCreate() {
     if (busy) return;
-    hurryFlight();
+    fetchFlightAhead({ hurry: true });
     if (await present("/api/auth/bootstrap/local", { email, displayName, password })) {
       password = "";
       markLaunch();
@@ -302,7 +302,7 @@
    */
   async function submitSignIn() {
     if (busy) return;
-    hurryFlight();
+    fetchFlightAhead({ hurry: true });
     const answer = await present("/api/auth/local/login", { email, password });
     if (!answer) return;
     password = "";
@@ -371,7 +371,7 @@
         /* The session is already in this browser's cookie jar: the poll route
            minted it for THIS tab and nobody else. The ratified launch plays
            from here exactly as it does after any other way in. */
-        hurryFlight();
+        fetchFlightAhead({ hurry: true });
         markLaunch();
         location.href = returnTo;
         return;
@@ -484,48 +484,41 @@
     const timers = [];
     /** @param {number} ms @param {() => void} fn */
     const after = (ms, fn) => timers.push(setTimeout(fn, ms));
-    /* first light: the dawn breaks once on load (CON-9, POL-13), as
-       orbit-site's door does it, by the shared door's own `dawn.light()`
-       (#1371): `lit` waits for the fonts and the Earth's first picture and,
-       on a first visit, for at least one lap of the ring's running light
-       (`body.loading`), which is on while the door waits and comes off in
-       the same frame that `lit` starts the ring's drawing.
-       #1299: where shaders compile on the page's own thread (Firefox,
-       Safari) the ring runs on, at least a lap, while the flight's world is
-       compiled behind it (capped here, as the folder asks of its host): a
-       pause better spent there than on the drawn door or on the descent. */
-    const behindRing = compileStopsPage();
-    /** @type {any} the folder's JSDoc types `after` by its default, () => null */
-    const afterRingUp = () => (behindRing ? within(compileFlightNow(), COMPILE_CAP_MS) : null);
-    dawnView?.light({ firstVisit: isFirstVisit(localStorage), wait: behindRing, after: afterRingUp });
-
     let disposed = false;
     /** @type {ReturnType<typeof setTimeout> | undefined} */
     let pollTimer;
 
     /*
-     * THE FLIGHT, READIED IN THE DOOR'S QUIET MOMENTS (#1253, warm.js). Only
-     * once the door can open and its face is showing, and only once first
-     * light has finished drawing in: the GPU work is queued as chores, done
-     * in idle moments, and paused while someone types. Waited for by each
-     * painted animation's own end, not a guess: what only moves or fades is
-     * carried by the compositor and nothing here can stutter it, but what is
-     * painted is drawn on this thread (orbit-site's main.js, `drawn`).
+     * THE FLIGHT'S PICTURES, ASKED FOR IN THE DOOR'S QUIET MOMENTS (#1253,
+     * fetch-ahead.js). Only once the door can open and its face is showing,
+     * and only once first light has finished drawing in (the folder's `onOpen`
+     * below: the chores are open, the painted animations have ended, which is
+     * what the door waited for by its own guess before #1371).
      */
+    let opened = false;
+    let wanted = false;
     let readying = false;
-    function readyWhenDrawn() {
-      if (readying) return;
+    function ask() {
+      if (!opened || !wanted || readying || disposed) return;
       readying = true;
-      const whenLit = () => {
-        if (disposed) return;
-        if (!document.body.classList.contains("lit")) { after(120, whenLit); return; }
-        /* two frames, so the lit sequence's transitions exist to be waited on */
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          drawnIn().then(() => { if (!disposed) readyFlight({ gentle: true, prove: false }); });
-        }));
-      };
-      whenLit();
+      fetchFlightAhead();
     }
+    function readyWhenDrawn() {
+      wanted = true;
+      ask();
+    }
+
+    /* first light: the dawn breaks once on load (CON-9, POL-13), as
+       orbit-site's door does it, by the shared door's own `dawn.light()`
+       (#1371): `lit` waits for the fonts and the Earth's first picture and,
+       on a first visit, for at least one lap of the ring's running light
+       (`body.loading`), which is on while the door waits and comes off in
+       the same frame that `lit` starts the ring drawing. The door has no
+       journey on it, so it has no world to compile behind the ring (the
+       folder's `wait`/`after`): the flight is the next page's. `onOpen`: the
+       door is lit and the painted part of its reveal done, which is when the
+       flight's pictures may be asked for (readyWhenDrawn, below). */
+    dawnView?.light({ firstVisit: isFirstVisit(localStorage), onOpen: () => { opened = true; ask(); } });
 
     /**
      * Shows a state other than the door: fixed words, styled to match it.
@@ -646,7 +639,7 @@
     const gate = /** @type {HTMLElement} */ (event.currentTarget);
     if (leaving) return;
     leaving = true;
-    hurryFlight();
+    fetchFlightAhead({ hurry: true });
     markLaunch();
     gate.classList.add("flash");
     location.href = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;

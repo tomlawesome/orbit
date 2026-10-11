@@ -2,7 +2,6 @@
   import { tick } from "svelte";
   import Flight from "./Flight.svelte";
   import Dusk from "./Dusk.svelte";
-  import { readyFlight, stopLeisure } from "./warm.js";
 
   /**
    * SIGNING OUT, ONE WAY EVERYWHERE (#1253; owner, 2026-10-07: "signing out
@@ -48,10 +47,22 @@
   const escapeAttr = (text) => text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c);
 
   /* #1253, #1262: the menu holds the sign-out, so when it opens the descent's
-     world is readied (never a compile that would stop the page: warm.js),
-     and it is there by the time the one press has revoked the session */
+     world is readied and proved (never a compile that would stop the page:
+     Flight.svelte readyWorld), and it is there by the time the one press has
+     revoked the session */
   export function ready() {
-    readyFlight({ hurry: true, gentle: true });
+    flight?.readyWorld({ hurry: true, gentle: true });
+  }
+
+  /**
+   * The unhurried readying, a few seconds after the page has arrived and its
+   * painted animations are done (#1299): a descent that waits for nothing finds
+   * its world already made. Home asks it on arriving.
+   * @param {{ after?: number }} [how]
+   * @returns {(() => void) | undefined} stops it, if the page is left first
+   */
+  export function readyAtLeisure(how) {
+    return flight?.readyAtLeisure(how);
   }
 
   /** The launch: the climb, from the page that has just been signed in to. */
@@ -72,8 +83,8 @@
    */
   export async function descendFrom(redirectTo) {
     /* #1299: the page's unhurried readying, if still to come, would land in
-       the middle of the descent (warm.js) */
-    stopLeisure();
+       the middle of the descent: the folder drops it as the descent begins
+       (journey.later, README.md) */
     providerLogout = redirectTo;
     leaving = true;
     await tick();
@@ -106,5 +117,5 @@
 {/if}
 <!-- The flight is mounted with the page, not with the sign-out (#1371): the
      descent's world belongs to its journey now, and is readied at leisure
-     (warm.js) only once there is a journey to ready. -->
+     (readyAtLeisure) only once there is a journey to ready. -->
 <Flight bind:this={flight} {name} onfarewell={onFarewell} {homes} />

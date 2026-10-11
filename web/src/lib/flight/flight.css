@@ -176,11 +176,14 @@ body.showwarp .grain{opacity:.26}
 
 /* ══ PINNED ══════════════════════════════════════════════════════════════
    A fixture asks for one millisecond of the flight and then holds it still,
-   so the transitions must not then play out. Fixture-only. (#1371: the pin
-   itself waits for ai/orbit-site#23, Flight.svelte.) */
+   so the transitions must not then play out. Fixture-only. The class is
+   Orbit's own: Flight.svelte puts it on the body around a pinned call (the
+   folder's `at` option does not). */
 body.pinned #dawn #door,body.pinned .dusk-host #dusk,body.pinned #warp,body.pinned #warpgl,
-body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate,body.pinned .dusk-host #dusk .gate-wrap a,
-body.pinned .farewell,body.pinned #dawn .lockup .name,body.pinned #dawn .lockup .glyph .tr{
+body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate,
+body.pinned .farewell,body.pinned #dawn .lockup .name,body.pinned #dawn .lockup .glyph .tr,
+body.pinned .dusk-host #dusk .lockup .glyph .tr,body.pinned .dusk-host #dusk .earth image,
+body.pinned .dusk-host #dusk .crisp{
   transition:none!important}
 
 /* ══ REDUCED MOTION ══════════════════════════════════════════════════════

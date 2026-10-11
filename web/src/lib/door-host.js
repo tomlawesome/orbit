@@ -36,10 +36,10 @@ export const image = (path) => byPath[path] ?? "/door/img/" + path;
 /** The door, made once for the page with Orbit's settings (README.md in the folder: the interface). */
 export const door = createDoor({ image, flags: {} });
 
-/** The folder's own names for the flight maps, as its voyage asks for them (warm.js fetches them ahead). */
+/** The folder's own names for the flight maps, as its voyage asks for them (fetch-ahead.js fetches them ahead). */
 export const flightPictures = () =>
   Object.keys(byPath).filter((path) => path.startsWith("flight/") || /^dawn\/[a-z]+-near\.webp$/.test(path)).map(image);
 
 export {
-  UP, PROPS_UP, chore, fetchOnce, hurryChores, openChores, dawnMarkup, duskMarkup,
+  UP, PROPS_UP, chore, fetchOnce, hurryChores, openChores, compilesAside, dawnMarkup, duskMarkup,
 } from "$lib/door/index.js";

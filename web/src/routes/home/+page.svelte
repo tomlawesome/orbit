@@ -6,7 +6,6 @@
   import { resolve } from "$app/paths";
   import { mountAccount, mountEmptySky, mountHome } from "./home.behaviour.js";
   import Leave from "$lib/flight/Leave.svelte";
-  import { readyFlightAtLeisure } from "$lib/flight/warm.js";
   import Sun from "$lib/sun/Sun.svelte";
   import { SUN_R } from "$lib/sun/furnace.js";
   import { swatchStyle } from "$lib/theme-swatches.js";
@@ -233,7 +232,7 @@
      the sign-out, a few seconds after home has arrived and its painted
      animations are done, as orbit-site does on any page but the door. The
      climb (a launch) readies its own world as it starts. */
-  onMount(() => (launching ? undefined : readyFlightAtLeisure()));
+  onMount(() => (launching ? undefined : leave?.readyAtLeisure()));
 
   async function tapSignOut() {
     /* One press (owner, 2026-10-06): the plain sign-out does not arm first. */

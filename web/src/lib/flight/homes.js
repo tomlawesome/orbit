@@ -9,6 +9,8 @@
  * (paintedHomes). How they fly is the folder's (homeProps).
  */
 
+import { homeProps } from "$lib/door/index.js";
+
 /** @typedef {{ name: string, bodies: Array<[number, number, string, number]> }} PassingHome */
 
 /**
@@ -42,16 +44,11 @@ export function paintedHomes(homes) {
   return homes.map((h) => ({ name: h.name, bodies: h.bodies.map((b) => /** @type {[number, number, string, number]} */ ([b[0], b[1], colour(b[2]), b[3]])) }));
 }
 
-/*
- * #1371: waits for ai/orbit-site#24 -- the folder exports homeProps (its
- * demoFlight's own), and this copy then goes: `import { homeProps } from
- * "$lib/door/index.js"`. Until then, Orbit's own, as it flew before the
- * import (the folder's engine draws a "home" prop as it always did).
- */
 /**
- * @param {PassingHome[]} homes
+ * The props the folder's flight draws for these households: one "home" prop
+ * each, passing on the climb. How they fly is the folder's.
+ * @param {PassingHome[]} homes  as paintedHomes gives them
  */
-export function homeProps(homes) {
-  const BEAR = [44, 136, 74, 106, 58, 122], ZED = [0.5, 0.42, 0.62, 0.46, 0.56, 0.4];
-  return homes.map((h, i) => ({ kind: "home", name: h.name, bodies: h.bodies, t0: 760 + i * 380, dur: 2000 + (i % 3) * 350, ang: BEAR[i % BEAR.length], z: ZED[i % ZED.length], spin: 0 }));
+export function passingHomes(homes) {
+  return homeProps(homes);
 }

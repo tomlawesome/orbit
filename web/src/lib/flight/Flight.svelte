@@ -1,8 +1,7 @@
 <script>
   import { onMount } from "svelte";
-  import { door, UP, PROPS_UP } from "$lib/door-host.js";
-  import { homeProps, paintedHomes } from "./homes.js";
-  import { readyFlight, useJourney } from "./warm.js";
+  import { door, UP, PROPS_UP, compilesAside, hurryChores, openChores } from "$lib/door-host.js";
+  import { passingHomes, paintedHomes } from "./homes.js";
   import "$lib/door/door.css";
   import "./flight.css";
 
@@ -111,9 +110,7 @@
       duskGlyph: () => document.querySelector("#dusk-glyph svg"),
     });
     journey = j;
-    const letGo = useJourney(j);
     return () => {
-      letGo();
       cancelCount();
       j.destroy();
       body().classList.remove("pinned", "counting", "belong");
@@ -128,38 +125,85 @@
     body().classList.remove("pinned", "counting", "belong", "holding");
   }
 
-  /*
-   * #1371: waits for ai/orbit-site#23 -- the folder's fly()/descend() take
-   * `at` and pin the journey at that moment; until then a fixture's `at` is
-   * flown live. When it lands: the folder does NOT add `body.pinned`, so this
-   * component adds it before the pinned call and removes it in reset()
-   * (Orbit's CSS turns transitions off with it: arrival.css, Chrome.svelte);
-   * and a pinned climb draws about 200 ms earlier than the port did for the
-   * same `at` (the door starts the engine at `at` less the warp beat, as the
-   * live flight does), which no fidelity screenshot covers.
+  /**
+   * Whether the speculative asks hold off: the reader has asked the browser to
+   * save data (orbit-site main.js:70). Only the gentle asks (the door's, home's
+   * on the sign-out's first tap): the flight itself, once it starts, still asks
+   * for what it needs.
    */
+  const savingData = () => !!(/** @type {any} */ (navigator)).connection?.saveData;
+
+  /**
+   * THE FLIGHT'S WORLD, READIED (#1253; the folder's `journey.warm()`, README.md:
+   * the journey). The world is the folder's: it makes it, puts its pictures on
+   * the GPU as chores, and proves it fit (a few test frames, each visit,
+   * nothing remembered: orbit-site ADR-0002). Under reduced motion there is no
+   * flight, so nothing is readied. This only decides WHEN, and returns a promise
+   * that settles when the folder has done.
+   *   hurry: the flight is wanted now, so what is queued for it goes first.
+   *   gentle: only where the compile cannot stop the page (the browser makes
+   *     its shaders off the page's thread), and never under save-data.
+   *   compile: with gentle, make the world even where the browser compiles on
+   *     the page's own thread (Firefox, Safari), for a caller that has chosen a
+   *     quiet moment for the pause (#1299).
+   *   prove: the test frames too; false is the speculative ask.
+   * @param {{ hurry?: boolean, gentle?: boolean, compile?: boolean, prove?: boolean }} [how]
+   * @returns {Promise<void>}
+   */
+  export function readyWorld({ hurry = false, gentle = false, compile = false, prove = true } = {}) {
+    if (!journey || reduced()) return Promise.resolve();
+    if (gentle && (savingData() || (!compilesAside() && !compile))) return Promise.resolve();
+    if (hurry) hurryChores("flight"); else openChores();
+    return journey.warm({ prove }).then(() => {}, () => {});
+  }
+
+  /**
+   * orbit-site's "a little later" (main.js: warmJourneys on arriving anywhere
+   * but the door), for a page that is not the door: the world is readied once
+   * the page has had a few seconds and its painted animations have finished
+   * (the folder's `journey.later()`), so the chores, which touch the GPU, never
+   * run under a reveal still being drawn (#1299). Where the browser compiles on
+   * the page's own thread (Firefox) it still makes the world: one pause of
+   * about a second while the page is quiet, which is the owner's choice
+   * (#1299). The folder drops it if a flight or a descent begins first: a
+   * compile on the page's thread, started mid-flight, is a pause in the middle
+   * of it.
+   * @param {{ after?: number }} [how]  after: ms from now (orbit-site's four
+   *   seconds when left out)
+   * @returns {() => void} stops it, if the page is left first
+   */
+  export function readyAtLeisure(how = {}) {
+    if (!journey || reduced() || savingData()) return () => {};
+    return journey.later(() => { readyWorld({ gentle: true, compile: true }); }, how);
+  }
 
   /**
    * THE LAUNCH.
-   * @param {{ at?: number }} [_options] a fixture's moment (above)
+   * @param {{ at?: number }} [options]  at: a fixture's moment, in ms into the
+   *   journey as it plays: the folder pins the journey there (README.md: `at`).
+   *   Orbit's own `pinned` class on the body turns the transitions off while it
+   *   stands (flight.css, arrival.css); reset() takes it off.
    */
-  export function ascend(_options = {}) {
+  export function ascend({ at } = {}) {
     if (!journey) return;
     cancelCount();
+    const pinned = typeof at === "number";
+    if (pinned) body().classList.add("pinned");
     /* "invited" flies the newcomer's own beats too: only landing "home" ends
        at the instrument */
     const newcomer = landing !== "home";
     /* #1253: the flight's world, readied now and hurried. If it is not ready
        yet the journey still starts at once, and the folder's clock holds just
        before the canvas comes up until it is, for up to eight seconds. A
-       machine refused the GPU has `ready` at once, so it never waits. */
+       machine refused the GPU has `ready` at once, so it never waits. A pinned
+       climb waits for nothing and asks for no world. */
     /** @type {any} the folder's JSDoc types `ready` by its default, null */
-    const ready = reduced() ? null : readyFlight({ hurry: true });
-    /* #1371: homeProps waits for ai/orbit-site#24 (homes.js) */
-    journey.fly({ ...UP, props: [...PROPS_UP, ...homeProps(paintedHomes(homes))] }, {
+    const ready = reduced() || pinned ? null : readyWorld({ hurry: true });
+    journey.fly({ ...UP, props: [...PROPS_UP, ...passingHomes(paintedHomes(homes))] }, {
       title: name,
       subtitle,
       ready,
+      at,
       on: {
         land: () => onland(),
         settled: () => { onsettled(); if (newcomer) count(); },
@@ -168,19 +212,27 @@
   }
 
   /**
-   * THE DESCENT — the launch played backwards, in the DOM as on the canvas.
-   * It never waits: home readied its world when the sign-out was armed, and
-   * if it is not ready by the warp the descent flies on its own canvas.
-   * #1371: the other households are not met on the way down. The folder's
-   * descent carries a climb's traffic only as `from`, which sets down on the
-   * dawn rather than the dusk (journey.js descentFrom): a gap in the folder.
-   * @param {{ at?: number }} [_options] a fixture's moment (ascend, above)
+   * THE DESCENT: the launch played backwards, in the DOM as on the canvas.
+   * It never waits: the world was readied when the sign-out was armed (or at
+   * leisure, well before), and if it is not proved by the warp the descent
+   * flies painted, on its own canvas (the folder decides at the warp). The
+   * other households are met again on the way down: this descent is not
+   * flown `from` a climb that carried them, so they are passed as `homes`
+   * (the folder's `journey.descend({ homes })`).
+   * @param {{ at?: number }} [options]  at: a fixture's moment (ascend, above)
    */
-  export function descend(_options = {}) {
+  export function descend({ at } = {}) {
     if (!journey) return;
     cancelCount();
-    readyFlight({ hurry: true, gentle: true });
-    journey.descend({ title: name, subtitle: "signing out", onto: "dusk", on: { farewell: () => onfarewell() } });
+    if (typeof at === "number") body().classList.add("pinned");
+    journey.descend({
+      title: name,
+      subtitle: "signing out",
+      onto: "dusk",
+      homes: paintedHomes(homes),
+      at,
+      on: { farewell: () => onfarewell() },
+    });
   }
 </script>
 
