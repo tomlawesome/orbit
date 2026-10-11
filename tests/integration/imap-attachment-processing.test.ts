@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { utimes } from "node:fs/promises";
 import { join } from "node:path";
 import { and, eq, isNull, lte, lt, or, sql } from "drizzle-orm";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { documents, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects } from "@/db/schema";
 import { reconcileDocumentStorage } from "@/server/document-maintenance/storage-reconciliation";
@@ -20,6 +20,7 @@ import {
 // a plain ImapIngestionConfig built from env-shaped values, which is exactly
 // what the renamed pure parser still does.
 import { parseImapIngestionConfigFromEnvironment as getImapIngestionConfig } from "@/server/mail-in/core/config";
+import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { holdImapAttachment, readHeldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/imap-attachment-holding";
 import { discardImapReviewItem, purgeExpiredImapStaging } from "@/server/imap-inbox";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
@@ -517,6 +518,57 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       const bytes = await readHeldImapAttachment(held, { recipientUserId: fixture.users.member.id, receiptId });
       expect(bytes.equals(plaintext)).toBe(true);
       expect(await storage.ciphertextExists(orphanKey)).toBe(false);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("attaches a mailbox attachment on the next approval when its first transfer failed writing ciphertext (#1316)", async () => {
+    const fixture = await createIntegrationFixture("imap-attachment-retry-after-transfer-failure");
+    try {
+      const receiptId = randomUUID();
+      const held = await holdImapAttachment({ bytes: syntheticPdf("mailbox transfer retry"), displayName: "retry.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+      await getDb().insert(imapIngestionMessages).values({
+        id: receiptId, mailbox: "private", mailboxUidValidity: "transfer-retry", mailboxUid: 970, contentSha256: randomUUID().replaceAll("-", ""),
+        recipientAliasSha256: "transfer-retry", userId: fixture.users.member.id, householdId: fixture.household.id,
+        status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
+      });
+      await getDb().insert(imapIngestionAttachments).values({
+        id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes,
+        contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
+      });
+      const input = {
+        operationId: randomUUID(),
+        source: { kind: "mailbox_draft" as const, receiptId, draftVersion: 1 },
+        householdId: fixture.household.id,
+        sectionId: fixture.section.id,
+        action: "create_separate" as const,
+        item: { title: "Mailbox transfer retry value", currency: "GBP", status: "active" },
+        attachmentIds: [held.id],
+      };
+
+      // The held copy is already written; only the transfer into a document
+      // fails, so the next write of ciphertext is the document's.
+      const writeFailure = vi.spyOn(LocalDocumentStorage.prototype, "writeCiphertext")
+        .mockRejectedValueOnce(new Error("synthetic ciphertext write outage"));
+      try {
+        const first = await approveReviewedIntake(fixture.users.member.id, input).then((result) => result, (error: unknown) => error);
+        expect(writeFailure).toHaveBeenCalledTimes(1);
+        if (!(first instanceof Error)) {
+          expect((first as { attachedAttachmentIds?: string[] }).attachedAttachmentIds ?? []).not.toContain(held.id);
+        }
+      } finally {
+        writeFailure.mockRestore();
+      }
+
+      const second = await approveReviewedIntake(fixture.users.member.id, input);
+      expect(second.outcome).toBe("approved");
+      expect(second.attachmentState).toBe("attached");
+      expect(second.attachedAttachmentIds).toContain(held.id);
+      const [staged] = await getDb().select({ assignedDocumentId: imapIngestionAttachments.assignedDocumentId }).from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, held.id));
+      expect(staged?.assignedDocumentId).toBeTruthy();
+      const [document] = await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, staged!.assignedDocumentId!));
+      expect(document?.lifecycle).toBe("available");
     } finally {
       await fixture.cleanup();
     }
