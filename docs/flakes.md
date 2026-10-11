@@ -425,10 +425,12 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-10 · cd964294 (!1052; since 8b9bf878, whose fidelity job 34065 passed, only e2e specs and one unit test changed) · pipeline 2341 / fidelity (job 34107) · row-snooze at 360x640, the same wait at `pocket-states.js:61` for Car MOT's opened panel ran to the 60 s test timeout; 487 others passed. Retried as job 34122. Second sighting.
 
 - 2026-10-10 · d80cf61b (!1054) · pipeline 2392 / fidelity (job 34627) · "/home · document-preview meets the pocket floors" at 390x664, the same wait at `pocket-states.js:61` for Car MOT's opened panel ran to the 60 s timeout; 487 others passed. Third sighting: filed as #1376.
+- 2026-10-10 · e0d5d796 (`dev`, merge of !1057; its head 327d32c1 passed fidelity in pipeline 2440, and the merge adds only `scripts/install.sh`, its test and `scripts/ci/repin-base-image.sh`) · pipeline 2461 / fidelity (job 35271) · "/home · row-complete meets the pocket floors" at 390x664, `locator.waitFor` ran to the 60 s test timeout; 487 of 488 passed.
 
 ## tour-pocket-webkit.spec.js:539 "plays through chapter 3 at 360x780 under normal motion" — chapters skipped
 
 - 2026-10-09 · abcb06f1 · pipeline 2301 / fidelity_webkit (job 33823) · the film reached only chapters 1 and 2 (`done` false, chapters `[0, 1]`) in 3.4 min. Neither of the next commits (63354fb6, 6afb412e) touches chapters 1–3; on 6afb412e, locally in the pinned image, it passed. First sighting.
+- 2026-10-10 · e0d5d796 (`dev`, merge of !1057; its head 327d32c1 passed fidelity_webkit in pipeline 2440, and the merge touches no web file) · pipeline 2461 / fidelity_webkit (job 35272) · at 390x844 this time: "the film plays as far as this phone watches it" false and "every chapter, in order, none skipped" short by two; 25 of 26 passed. Second sighting.
 
 ## install-orchestrator.test.ts "runInstall: success > installs a pre-provisioned target unattended: assets from the image, secrets, migration, digest (#6, #42, #45, #53)"
 
