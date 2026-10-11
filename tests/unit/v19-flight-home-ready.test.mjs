@@ -105,12 +105,9 @@ describe("the pictures a page without a journey fetches ahead (fetch-ahead.js)",
 describe("the flight readies its world through the folder's journey (Flight.svelte)", () => {
   const ready = after(FLIGHT, "export function readyWorld(");
 
-  it("under reduced motion, or with no journey, nothing is readied", () => {
-    expect(ready).toMatch(/if \(!journey \|\| reduced\(\)\) return Promise\.resolve\(\);/u);
-  });
-
-  it("a gentle ask holds off under save-data and where the compile would stop the page, unless a quiet moment was chosen for it", () => {
-    expect(ready).toMatch(/if \(gentle && \(savingData\(\) \|\| \(!compilesAside\(\) && !compile\)\)\) return Promise\.resolve\(\);/u);
+  it("decides whether to ask in ready-gate.js (tested as code in ready-gate.test.mjs), and returns at once when not", () => {
+    expect(FLIGHT).toMatch(/import \{[^}]*\bmayReadyWorld\b[^}]*\} from "\.\/ready-gate\.js";/u);
+    expect(ready).toMatch(/if \(!journey \|\| !mayReadyWorld\(\{ journey: true, reduced: reduced\(\), gentle, compile, savingData, compilesAside \}\)\) return Promise\.resolve\(\);/u);
   });
 
   it("asks the folder's journey for the world, hurried or not", () => {
@@ -127,17 +124,12 @@ describe("the flight readies its world through the folder's journey (Flight.svel
     expect(descend).not.toMatch(/readyWorld|\.warm\(/u);
   });
 
-  it("the unhurried ask is the folder's journey.later(), never under reduced motion or save-data", () => {
-    const leisure = after(FLIGHT, "export function readyAtLeisure(");
-    expect(leisure).toMatch(/if \(!journey \|\| reduced\(\) \|\| savingData\(\)\) return \(\) => \{\};/u);
-    expect(leisure).toMatch(/journey\.later\(\(\) => \{ readyWorld\(\{ gentle: true, compile: true, prove: false \}\); \}, how\)/u);
-  });
-
-  it("the unhurried ask is speculative: it never runs the GPU test frames (prove: false)", () => {
+  it("the unhurried ask goes through ready-gate.js's readyWorldAtLeisure, readying through readyWorld (its behaviour is in ready-gate.test.mjs)", () => {
+    expect(FLIGHT).toMatch(/import \{[^}]*\breadyWorldAtLeisure\b[^}]*\} from "\.\/ready-gate\.js";/u);
     const leisure = after(FLIGHT, "export function readyAtLeisure(").split("\n  /**")[0];
-    const asks = [...leisure.matchAll(/readyWorld\(\{([^}]*)\}\)/gu)];
-    expect(asks).toHaveLength(1);
-    expect(asks[0][1]).toMatch(/\bprove:\s*false\b/u);
+    expect(leisure).toMatch(/return readyWorldAtLeisure\(\{ journey, reduced: reduced\(\), savingData: savingData\(\), ready: readyWorld, how \}\);/u);
+    /* no timer of Orbit's own: the folder's later() drops it when a descent begins */
+    expect(leisure).not.toMatch(/setTimeout|requestIdleCallback/u);
   });
 });
 
@@ -150,11 +142,6 @@ describe("home and the menus ask for it (#1299)", () => {
   it("home asks at leisure on mount, except on a launch, whose climb readies its own world; and stops if home is left", () => {
     expect(HOME).toMatch(/onMount\(\(\) => \(launching \? undefined : leave\?\.readyAtLeisure\(\)\)\);/u);
     expect(after(LEAVE, "export function readyAtLeisure(")).toMatch(/return flight\?\.readyAtLeisure\(how\);/u);
-  });
-
-  it("a sign-out within the leisure ask's four seconds does not let it fire mid-descent: the folder drops it as the descent begins", () => {
-    expect(FLIGHT).toMatch(/journey\.descend\(\{/u);
-    expect(LEAVE).not.toMatch(/stopLeisure|warm\.js/u);
   });
 });
 

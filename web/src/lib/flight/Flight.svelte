@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { door, UP, PROPS_UP, compilesAside, hurryChores, openChores } from "$lib/door-host.js";
   import { passingHomes, paintedHomes } from "./homes.js";
+  import { mayReadyWorld, readyWorldAtLeisure } from "./ready-gate.js";
   import "$lib/door/door.css";
   import "./flight.css";
 
@@ -147,12 +148,12 @@
    *     the page's own thread (Firefox, Safari), for a caller that has chosen a
    *     quiet moment for the pause (#1299).
    *   prove: the test frames too; false is the speculative ask.
+   * Whether to ask at all is ready-gate.js's (tested as code).
    * @param {{ hurry?: boolean, gentle?: boolean, compile?: boolean, prove?: boolean }} [how]
    * @returns {Promise<void>}
    */
   export function readyWorld({ hurry = false, gentle = false, compile = false, prove = true } = {}) {
-    if (!journey || reduced()) return Promise.resolve();
-    if (gentle && (savingData() || (!compilesAside() && !compile))) return Promise.resolve();
+    if (!journey || !mayReadyWorld({ journey: true, reduced: reduced(), gentle, compile, savingData, compilesAside })) return Promise.resolve();
     if (hurry) hurryChores("flight"); else openChores();
     return journey.warm({ prove }).then(() => {}, () => {});
   }
@@ -174,8 +175,7 @@
    * @returns {() => void} stops it, if the page is left first
    */
   export function readyAtLeisure(how = {}) {
-    if (!journey || reduced() || savingData()) return () => {};
-    return journey.later(() => { readyWorld({ gentle: true, compile: true, prove: false }); }, how);
+    return readyWorldAtLeisure({ journey, reduced: reduced(), savingData: savingData(), ready: readyWorld, how });
   }
 
   /**
