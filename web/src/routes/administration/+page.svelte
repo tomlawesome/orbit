@@ -709,10 +709,17 @@
     uploadLimitProblem = null;
     try {
       await commandUploadLimit({ ...partial, expectedVersion: current.version });
-      view = await readAdminScreen();
-      editingUploadLimit = false;
     } catch (error) {
       uploadLimitProblem = wordsOf(error);
+      uploadLimitBusy = false;
+      return;
+    }
+    editingUploadLimit = false;
+    // The command landed; a failed re-read must not read back as a failed command.
+    try {
+      view = await readAdminScreen();
+    } catch {
+      uploadLimitProblem = "done — Orbit could not refresh this screen, so reload to see the new version";
     } finally {
       uploadLimitBusy = false;
     }

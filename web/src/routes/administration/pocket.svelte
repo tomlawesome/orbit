@@ -493,14 +493,22 @@
     mailBusy = label;
     mailProblem = null;
     mailOutcome = null;
+    let answer;
     try {
-      const answer = await commandMailbox(command);
-      await reread();
-      mailOutcome = answer.outcome ?? null;
-      if (!answer.outcome || answer.outcome === "verified") { editOpen = false; rotateOpen = false; }
-      mailPassword = "";
+      answer = await commandMailbox(command);
     } catch (error) {
       mailProblem = wordsOf(error);
+      mailBusy = null;
+      return;
+    }
+    mailOutcome = answer.outcome ?? null;
+    if (!answer.outcome || answer.outcome === "verified") { editOpen = false; rotateOpen = false; }
+    mailPassword = "";
+    // The command landed; a failed re-read must not read back as a failed command.
+    try {
+      await reread();
+    } catch {
+      mailProblem = "done — Orbit could not refresh this screen, so reload to see the new version";
     } finally {
       mailBusy = null;
     }
