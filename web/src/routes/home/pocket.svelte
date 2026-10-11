@@ -31,6 +31,7 @@
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
   import { BAND_VAR, tlabel } from "$lib/data/bands.js";
   import ItemDrawer from "./ItemDrawer.svelte";
+  import { attachIdFor } from "./attach-id.js";
   import SuggestionDrawer from "./SuggestionDrawer.svelte";
 
   /**
@@ -672,7 +673,7 @@
     footBusy = { id: one.id, kind: "attach" };
     delete rowProblem[one.id];
     try {
-      await attachItemDocument(householdId, one.id, file, crypto.randomUUID());
+      await attachItemDocument(householdId, one.id, file, attachIdFor(one.id, file));
       wake(`${file.name} attached`);
       await Promise.all([rereadPapers(), onchanged?.()]);
     } catch (error) {
