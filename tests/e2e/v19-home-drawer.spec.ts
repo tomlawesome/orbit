@@ -216,6 +216,64 @@ async function escapeTwice(page: Page) {
   await page.keyboard.press("Escape");
 }
 
+const OTHER_TITLE = "Zebra crossing proving";
+
+/** #1316 W1-S1: a second item in the same household, with one paper, so a
+ *  search pick or the dial's documents chip has another item to go to. */
+async function seedOtherItem(page: Page, householdId: string): Promise<string> {
+  const otherId = await page.evaluate(async ({ householdId, title, dueDate }) => {
+    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
+    const workspace = (await (await fetch("/api/workspace", { credentials: "same-origin", cache: "no-store" })).json()) as {
+      workspace: { households: { id: string; sections?: { id: string }[] }[] };
+    };
+    const sectionId = workspace.workspace.households.find((one) => one.id === householdId)?.sections?.[0]?.id;
+    const itemId = crypto.randomUUID();
+    const response = await fetch("/api/workspace/commands", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
+      body: JSON.stringify({
+        type: "item.upsert",
+        householdId,
+        kind: "service",
+        item: { id: itemId, sectionId, title, currency: "GBP", dueDate, recurrenceMonths: 12 },
+        activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
+      }),
+    });
+    if (!response.ok) throw new Error(`command failed: ${response.status} ${await response.text()}`);
+    return itemId;
+  }, { householdId, title: OTHER_TITLE, dueDate: householdDateFromToday(25) });
+  await uploadDocument(page, householdId, otherId, "other-proving.pdf");
+  return otherId;
+}
+
+/** #1316 W1-S1: open the first item's row from the list, press the pencil and
+ *  type onto its title, so the rows hold a change. */
+async function editTheTitle(page: Page, itemId: string) {
+  await page.goto("/home");
+  await expect(page.locator("body[data-home-ready]")).toBeAttached();
+  await page.locator(`a.item[id="${itemId}"]`).click();
+  const drawer = page.locator(`[id="${itemId}-view"]`);
+  await expect(drawer).toBeVisible({ timeout: 20_000 });
+  await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}$`));
+  await drawer.getByRole("button", { name: "Edit this item" }).click();
+  const title = page.locator(`[id="${itemId}"]`).getByRole("textbox", { name: "title" });
+  await expect(title).toBeFocused();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" renamed");
+  await expect(title).toHaveText(`${TITLE} renamed`);
+  return { drawer, title };
+}
+
+/** The drawer is still open on the edited item, the typed title is still in
+ *  the rows and the cancel pill has armed as "discard changes?". */
+async function expectHeldOpen(page: Page, itemId: string, drawer: Locator, title: Locator) {
+  await expect(drawer).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}$`));
+  await expect(title).toHaveText(`${TITLE} renamed`);
+  await expect(drawer.getByRole("group", { name: /^Editing / }).getByRole("button", { name: "discard changes?" })).toBeVisible();
+}
+
 test.afterEach(async ({ page }) => {
   await households.sweep(page);
 });
@@ -318,6 +376,65 @@ test.describe("on the desk", () => {
     /* nothing made up, anywhere on the screen */
     await expect(page.getByText("service-invoice-2026.pdf")).toHaveCount(0);
     await expect(page.locator("#docview")).toHaveCount(0);
+  });
+
+  /* #1316 W1-S1: leaving the drawer by any road but its own pills must not
+     drop an edit in progress. The first Back, search pick or documents chip
+     arms the cancel pill ("discard changes?") and keeps the drawer, the
+     rows and the typed title; a second one inside the hold is the answer. */
+  test("Back during an edit keeps the drawer and the typed title; a second Back inside the hold closes it", async ({ page }) => {
+    test.setTimeout(90_000);
+    await signIn(page);
+    const { itemId, householdId } = await seedHouseholdWithItem(page);
+    await seedOtherItem(page, householdId);
+    const { drawer, title } = await editTheTitle(page, itemId);
+
+    await page.goBack();
+    await expectHeldOpen(page, itemId, drawer, title);
+
+    await page.goBack();
+    await expect(drawer).toHaveCount(0);
+    await expect(page).toHaveURL(/\/home$/);
+  });
+
+  test("picking a search result for another item during an edit keeps the drawer and the typed title; a second pick inside the hold closes it", async ({ page }) => {
+    test.setTimeout(90_000);
+    await signIn(page);
+    const { itemId, householdId } = await seedHouseholdWithItem(page);
+    await seedOtherItem(page, householdId);
+    const { drawer, title } = await editTheTitle(page, itemId);
+
+    const explore = page.locator("#explore");
+    await explore.fill("zebra crossing");
+    await explore.press("Enter");
+    await expectHeldOpen(page, itemId, drawer, title);
+
+    await explore.fill("zebra crossing");
+    await explore.press("Enter");
+    await expect(drawer).toHaveCount(0);
+  });
+
+  test("the dial's documents chip for another item during an edit keeps the drawer and the typed title; a second use inside the hold closes it", async ({ page }) => {
+    test.setTimeout(90_000);
+    await signIn(page);
+    const { itemId, householdId } = await seedHouseholdWithItem(page);
+    const otherId = await seedOtherItem(page, householdId);
+    const { drawer, title } = await editTheTitle(page, itemId);
+
+    const useTheChip = async () => {
+      const body = page.locator(`.body-link[data-body="${otherId}"]`);
+      await expect(body).toHaveAttribute("data-docs", "1", { timeout: 20_000 });
+      await body.dispatchEvent("mouseenter");
+      const chip = page.locator(".callout.show .chip");
+      await expect(chip).toHaveText("◆ 1 document");
+      await chip.click();
+    };
+
+    await useTheChip();
+    await expectHeldOpen(page, itemId, drawer, title);
+
+    await useTheChip();
+    await expect(drawer).toHaveCount(0);
   });
 
   test("a document opens its preview beside the drawer; the page opens the reader; Escape walks back", async ({ page }) => {

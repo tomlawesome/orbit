@@ -1,5 +1,5 @@
 <script>
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { browser } from "$app/environment";
   import { afterNavigate, beforeNavigate, goto, pushState, replaceState } from "$app/navigation";
   import { page } from "$app/state";
@@ -352,9 +352,22 @@
   /** @type {string | null} */
   let revealTarget = null;
 
+  /* Back (or Forward) over the drawer's shallow entry reaches no
+     beforeNavigate, so only the effect below sees it: rows holding changes
+     put their row back and arm the cancel pill; a second press inside the
+     hold discards, as a close does. True when the row was put back. */
+  function holdRows() {
+    const held = untrack(() => modes.id);
+    if (!held || untrack(() => modes.cancel())) return false;
+    pushedEntry = true;
+    pushState(resolve(`/home?item=${encodeURIComponent(held)}`), { orbitItem: held });
+    return true;
+  }
+
   $effect(() => {
     const id = expanded;
     if (!id) {
+      if (holdRows()) return;
       pushedEntry = false;
       detailFor = null;
       detail = null;
@@ -364,6 +377,7 @@
       return;
     }
     if (detailFor === id) return;
+    if (holdRows()) return;
     previewDoc = null;
     modes.end();
     footProblem = null;
@@ -570,6 +584,8 @@
   function openSearchResult(id) {
     stripOpen = false;
     if (expanded === id) return;
+    /* rows holding changes are not thrown away by opening another row */
+    if (expanded !== null && modes.id === expanded && !modes.cancel()) { docsTarget = null; return; }
     revealTarget = id;
     if (expanded === null) {
       pushedEntry = true;
