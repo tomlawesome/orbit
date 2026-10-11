@@ -23,6 +23,7 @@ export const refusalWords = {
   name: "not yet — give it a name",
   section: "not yet — choose a section",
   cost: `not yet — ${COST_FORMAT_HINT}`,
+  kindNeeded: "not yet — choose a type",
   repeatNeedsDate: "not yet — a repeat needs a due date",
   reminderCount: `not yet — at most ${REMINDER_MAX} reminders`,
   reminderDays: `not yet — a reminder is at most ${REMINDER_DAYS_MAX} days before`,
@@ -37,6 +38,7 @@ export const refusalCodes: Record<RefusalRule, string> = {
   name: "item_name_missing",
   section: "item_section_missing",
   cost: "cost_format",
+  kindNeeded: "item_kind_missing",
   repeatNeedsDate: "repeat_needs_date",
   reminderCount: "too_many_reminders",
   reminderDays: "reminder_too_far_ahead",
@@ -84,12 +86,15 @@ export interface ItemIntentFacts {
  * The first reason an item cannot be saved yet, or null when it can. The
  * first only: one line beside the save button. The order is the browser's
  * before the rules moved -- name, section, cost, a repeat with no date, then
- * the reminders' two ceilings.
+ * the reminders' two ceilings -- with a missing type after the cost.
  */
 export function itemRefusal(item: ItemIntentFacts, kind: ItemKind | null | undefined): RefusalRule | null {
   if (typeof item.title !== "string" || !item.title.trim()) return "name";
   if (typeof item.sectionId !== "string" || !item.sectionId) return "section";
   if (typeof item.cost === "string" && Number.isNaN(costMinorOf(item.cost))) return "cost";
+  // With no type there is no schedule to store a date or repeat under, so it
+  // would be dropped on save; every item needs one.
+  if (!kind) return "kindNeeded";
   const months = typeof item.recurrenceMonths === "number" ? item.recurrenceMonths : 0;
   if (months > 0 && kind && kindRecurs(kind) && !item.dueDate) return "repeatNeedsDate";
   const days = Array.isArray(item.reminderDays) ? item.reminderDays : [];

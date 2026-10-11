@@ -391,6 +391,33 @@ describe("conflict-safe item lifecycle", () => {
     }
   });
 
+  it("refuses a dated item upsert with no type, leaving the stored item unchanged (#1316 A4-F3)", async () => {
+    const fixture = await createIntegrationFixture("item-upsert-no-kind");
+    const owner = await fixture.session("owner");
+    await getDb().update(items).set({ subtype: "Boiler" }).where(eq(items.id, fixture.item.id));
+    const before = await itemSnapshot(fixture);
+    const { dueDate: _dueDate, ...undated } = scheduledItem(fixture, before.item.version);
+    for (const item of [{ ...undated, dueDate: "2026-12-20" }, { ...undated, recurrenceMonths: 12 }, undated]) {
+      const refused = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "item.upsert",
+          householdId: fixture.household.id,
+          item,
+          activity: activity(fixture.item.id, "updated"),
+        }),
+      });
+      await expectError(refused, 422, "item_kind_missing");
+    }
+    expect(await itemSnapshot(fixture)).toEqual(before);
+    const reload = await json(await callRouteForSession(readWorkspace, owner, { url: workspaceUrl }));
+    const household = (reload.workspace as { households: Array<{ items: Array<Record<string, unknown>> }> }).households[0];
+    const stored = household.items.find((item) => item.id === fixture.item.id);
+    expect(stored).toBeDefined();
+    expect(stored).not.toHaveProperty("dueDate");
+  });
+
   it("refuses a next due date sent with a completion, without side effects (#1324)", async () => {
     const fixture = await createIntegrationFixture("item-completion-next-date");
     const owner = await fixture.session("owner");

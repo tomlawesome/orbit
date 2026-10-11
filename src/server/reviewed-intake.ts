@@ -28,7 +28,7 @@ import {
   type HomeItem,
   type ScheduleKind,
 } from "@/lib/domain";
-import { itemKinds, itemOfIntent, type ItemIntent } from "@/lib/item-kind";
+import { itemKinds, itemOfIntent, kindOfItem, type ItemIntent } from "@/lib/item-kind";
 import { isCurrencyCode } from "@/lib/platform-lists";
 import { costMinorOf, itemRefusal, Refusal } from "@/lib/refusals";
 import { workspaceItemSchema } from "@/lib/workspace";
@@ -233,7 +233,12 @@ export const clearedReviewDraftMetadata = {
 function canonicalItem(input: ReviewedIntakeApproval, itemId: string): HomeItem {
   const { kind, subtype, scheduleKind, status: _status, cost, ...intent } = input.item;
   const chosen = itemKinds.find((one) => one === kind);
-  const refused = itemRefusal({ ...intent, cost, sectionId: input.sectionId }, chosen);
+  // An approval that keeps the relay's own subtype and schedule has a type.
+  const effective = chosen ?? kindOfItem({
+    subtype: typeof subtype === "string" ? subtype : undefined,
+    scheduleKind: typeof scheduleKind === "string" ? scheduleKind : undefined,
+  });
+  const refused = itemRefusal({ ...intent, cost, sectionId: input.sectionId }, effective);
   if (refused) throw new Refusal(refused);
   const typedCost = typeof cost === "string" ? { costMinor: costMinorOf(cost) } : {};
   return workspaceItemSchema.parse(itemOfIntent({

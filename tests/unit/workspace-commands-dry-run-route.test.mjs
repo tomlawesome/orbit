@@ -111,6 +111,17 @@ describe("POST /api/workspace/commands with dryRun (ADR-0034 decision 3, amended
     expect(mocks.applyWorkspaceCommand).not.toHaveBeenCalled();
   });
 
+  it("answers a dated item with no type as a 200 verdict, in the member's words (#1316 A4-F3)", async () => {
+    const POST = await route();
+    const { kind: _kind, ...kindless } = upsert();
+    const response = await POST(post({ ...kindless, dryRun: true }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ refusal: { code: "item_kind_missing", message: "not yet — choose a type" } });
+    expect(mocks.checkWorkspaceCommand).not.toHaveBeenCalled();
+    expect(mocks.applyWorkspaceCommand).not.toHaveBeenCalled();
+  });
+
   it("answers the repository's own refusal as a 200 verdict, with the real call's code and words", async () => {
     const { AppError } = await import("orbit/lib/app-error");
     mocks.checkWorkspaceCommand.mockRejectedValue(new AppError("version_conflict", "That item changed under you", 409));

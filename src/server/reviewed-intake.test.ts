@@ -73,10 +73,10 @@ describe("reviewed intake contract", () => {
       householdId: "33333333-3333-4333-8333-333333333333",
       sectionId: "44444444-4444-4444-8444-444444444444",
       action: "create_separate" as const,
-      item: { title: "Reviewed", provider: "Provider", currency: "GBP", status: "active" },
+      item: { title: "Reviewed", provider: "Provider", currency: "GBP", status: "active", kind: "document" },
       attachmentIds: [],
     };
-    const reordered = { ...base, item: { status: "active", currency: "GBP", provider: "Provider", title: "Reviewed" } };
+    const reordered = { ...base, item: { kind: "document", status: "active", currency: "GBP", provider: "Provider", title: "Reviewed" } };
     expect(canonicalReviewedIntakeHash(reviewedIntakeApprovalSchema.parse(base))).toBe(
       canonicalReviewedIntakeHash(reviewedIntakeApprovalSchema.parse(reordered)),
     );
@@ -95,7 +95,7 @@ describe("reviewed intake contract", () => {
     const hash = (item: Record<string, unknown>) => canonicalReviewedIntakeHash(approval(item));
 
     it("reads a typed cost as the amount it names", () => {
-      expect(hash({ cost: "£199.99" })).toBe(hash({ costMinor: 19999 }));
+      expect(hash({ cost: "£199.99", kind: "renewal" })).toBe(hash({ costMinor: 19999, kind: "renewal" }));
     });
 
     it("refuses a cost that is not a sum, and a missing name, in the member's words", () => {
@@ -111,7 +111,10 @@ describe("reviewed intake contract", () => {
     });
 
     it("drops a schedule with no date, as the engine does for any item", () => {
-      expect(hash({ dueDate: undefined, scheduleKind: "renewal", recurrenceMonths: 12 })).toBe(hash({ dueDate: undefined }));
+      expect(hash({ dueDate: undefined, scheduleKind: "renewal" })).toBe(hash({ dueDate: undefined, scheduleKind: "service" }));
+      // The relay's schedule gives the item its type, so a repeat it read with
+      // no date is judged as any typed item's is.
+      expect(() => hash({ dueDate: undefined, scheduleKind: "renewal", recurrenceMonths: 12 })).toThrow("not yet — a repeat needs a due date");
     });
   });
 

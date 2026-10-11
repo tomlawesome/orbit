@@ -260,6 +260,22 @@ describe("household workspace", () => {
       expect(parseWorkspaceCommand(upsert())).toMatchObject({ type: "item.upsert", kind: "service", item: { title: "MOT" } });
     });
 
+    it("refuses an item with no kind, with or without a date or repeat (#1316 A4-F3)", () => {
+      const kindless = (item: Record<string, unknown> = {}) => {
+        const { kind: _kind, ...command } = upsert(item);
+        return command;
+      };
+      for (const item of [
+        { dueDate: "2026-11-02", recurrenceMonths: undefined },
+        { dueDate: undefined, recurrenceMonths: 12 },
+        { dueDate: undefined, recurrenceMonths: undefined },
+      ]) {
+        expect(refusalOf(kindless(item))).toMatchObject({ status: 422, code: "item_kind_missing", message: "not yet — choose a type" });
+      }
+      // A kind sent as null or empty is no kind.
+      expect(refusalOf({ ...upsert(), kind: null })).toMatchObject({ code: "item_kind_missing" });
+    });
+
     it.each(["scheduleKind", "subtype", "status"])("refuses a client-sent %s", (field) => {
       const sent = upsert({ [field]: field === "status" ? "active" : "service" });
       expect(refusalOf(sent)).toMatchObject({ code: "invalid_command", status: 400 });
