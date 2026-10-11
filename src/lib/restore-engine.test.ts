@@ -355,6 +355,50 @@ describe("checkCorrespondence (restore.sh:205-332,658-736, guarantee #9)", () =>
     expect(checkCorrespondence(reports, root)).toBe(true);
     rmSync(root, { recursive: true, force: true });
   });
+
+  // #1316: interrupted atomic writes leave `<name>.<16 hex>.tmp` files beside
+  // real objects; the storage sweep removes them later, so they must not be
+  // counted as orphans or abort the walk.
+  it("ignores a leftover <key>.bin.<hex>.tmp file beside a referenced object in objects/", () => {
+    const root = documentsRootWithObject();
+    const objectDir = join(root, "objects", STORAGE_KEY.slice(0, 2), STORAGE_KEY.slice(2, 4));
+    writeFileSync(join(objectDir, `${STORAGE_KEY}.bin.0123456789abcdef.tmp`), Buffer.alloc(4, 9));
+    expect(checkCorrespondence(baseReports(), root)).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("ignores a leftover <key>.bin.<hex>.tmp file beside a referenced object in staging/", () => {
+    const root = mkdtempSync(join(tmpdir(), "orbit-correspondence-staging-tmp-"));
+    mkdirSync(join(root, "objects"), { recursive: true });
+    mkdirSync(join(root, "staging"), { recursive: true });
+    writeFileSync(join(root, "staging", `${STORAGE_KEY}.bin`), CONTENT);
+    writeFileSync(join(root, "staging", `${STORAGE_KEY}.bin.0123456789abcdef.tmp`), Buffer.alloc(4, 9));
+    const reports: CorrespondenceReports = {
+      crypto: "",
+      visible: "",
+      attachments: "",
+      staging: "",
+      documentStaging: `${"1".repeat(36)}|${STORAGE_KEY}|pending|${CONTENT.length}\n`,
+      transientCount: "0",
+    };
+    expect(checkCorrespondence(reports, root)).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("ignores .tmp files in both objects/ and staging/ together", () => {
+    const root = documentsRootWithObject();
+    const objectDir = join(root, "objects", STORAGE_KEY.slice(0, 2), STORAGE_KEY.slice(2, 4));
+    writeFileSync(join(objectDir, `${STORAGE_KEY}.bin.0123456789abcdef.tmp`), Buffer.alloc(4, 9));
+    const stagedKey = "c".repeat(64);
+    writeFileSync(join(root, "staging", `${stagedKey}.bin`), CONTENT);
+    writeFileSync(join(root, "staging", `${stagedKey}.bin.0123456789abcdef.tmp`), Buffer.alloc(4, 9));
+    const reports: CorrespondenceReports = {
+      ...baseReports(),
+      documentStaging: `${"1".repeat(36)}|${stagedKey}|pending|${CONTENT.length}\n`,
+    };
+    expect(checkCorrespondence(reports, root)).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
 });
 
 describe("CORRESPONDENCE_QUERIES", () => {

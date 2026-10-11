@@ -650,6 +650,8 @@ export function checkCorrespondence(reports: CorrespondenceReports, documentsRoo
   }
 
   for (const entry of walkFiles(documentsRoot, "objects")) {
+    // A kill between the temp write and the rename leaves a .tmp; it was never a stored object.
+    if (entry.relativePath.endsWith(".tmp")) continue;
     const match = OBJECT_RELATIVE_PATTERN.exec(entry.relativePath);
     if (!match) return false;
     const [, dirA, dirB, objectKey] = match;
@@ -660,6 +662,7 @@ export function checkCorrespondence(reports: CorrespondenceReports, documentsRoo
     if (count !== 1) return false;
   }
   for (const entry of walkFiles(documentsRoot, "staging")) {
+    if (entry.relativePath.endsWith(".tmp")) continue;
     const match = STAGING_RELATIVE_PATTERN.exec(entry.relativePath);
     if (!match) return false;
     const objectKey = match[1];
