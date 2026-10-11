@@ -326,13 +326,14 @@
 
   /** #1151 W1-Q8: shared with the desk's own copy (home/+page.svelte) via
    *  pocket-search.js's readSearchDocuments, which also carries the
-   *  concurrency cap (#1151 W1-R9). */
+   *  concurrency cap (#1151 W1-R9). The open row's item is read whatever
+   *  its status, so a retired or expired item still shows its papers. */
   async function loadSearchDocuments() {
     const household = view?.household;
     const householdId = view?.primary;
     if (!household || !householdId || searchDocumentsFor === household) return;
     searchDocumentsFor = household;
-    const carrying = (household.items ?? []).filter((item) => item.status === "active" && (item.documentCount ?? 0) > 0);
+    const carrying = (household.items ?? []).filter((item) => (item.status === "active" || item.id === lit) && (item.documentCount ?? 0) > 0);
     // Additive: an item whose papers cannot be read loses its papers from the
     // results, not the search.
     const found = await readSearchDocuments(
@@ -468,7 +469,12 @@
     /* #1319: an open row is the one asked for, so an edit that moves it out
        of what the manifest lists (a new date past 30 days) keeps it drawn,
        open, in its new place in date order, not folded away (the Q1 rule). */
-    if (open) { lit = id; asked = id; loadSearchDocuments(); } else if (lit === id) lit = null;
+    /* Papers read before a non-active row opened left that item out, so
+       read them again with it included. */
+    if (open) {
+      lit = id; asked = id;
+      if (rawItems.get(id)?.status === "active") loadSearchDocuments(); else rereadPapers();
+    } else if (lit === id) lit = null;
   });
 
   /**

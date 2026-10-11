@@ -134,6 +134,31 @@ async function itemOf(page: Page, householdId: string, itemId: string) {
   }, { householdId, itemId });
 }
 
+/** Retire the item the way the app does (item.archive at the version the
+ *  server holds), so its status is "archived" and its papers stay. */
+async function archiveItem(page: Page, householdId: string, itemId: string) {
+  await page.evaluate(async ({ householdId, itemId }) => {
+    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
+    const workspace = (await (await fetch("/api/workspace", { credentials: "same-origin", cache: "no-store" })).json()) as {
+      workspace: { households: { id: string; items?: { id: string; version?: number }[] }[] };
+    };
+    const item = workspace.workspace.households.find((one) => one.id === householdId)?.items?.find((one) => one.id === itemId);
+    const response = await fetch("/api/workspace/commands", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
+      body: JSON.stringify({
+        type: "item.archive",
+        householdId,
+        itemId,
+        expectedVersion: item?.version ?? 1,
+        activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
+      }),
+    });
+    if (!response.ok) throw new Error(`archive failed: ${response.status} ${await response.text()}`);
+  }, { householdId, itemId });
+}
+
 test.afterEach(async ({ page }) => {
   await households.sweep(page);
 });
@@ -448,5 +473,23 @@ test.describe("on the phone", () => {
     await page.keyboard.press("Escape");
     await expect(row.getByRole("group", { name: `Actions for ${TITLE}` })).toBeVisible();
     await expect(row).toHaveAttribute("data-open", "");
+  });
+
+  /* #1316 W1-F7: the phone's papers are read only for active items, so an
+     archived item's drawer (opened by its address) had no Documents section.
+     The open row's item is read whatever its status. */
+  test("an archived item's drawer shows its Documents heading and the paper by name", async ({ page }) => {
+    test.setTimeout(90_000);
+    await signIn(page);
+    const { itemId, householdId } = await seedHouseholdWithItem(page);
+    await uploadDocument(page, householdId, itemId, "archived-proving.pdf");
+    await archiveItem(page, householdId, itemId);
+    expect((await itemOf(page, householdId, itemId))).not.toBeNull();
+
+    await page.goto(`/home?item=${itemId}`);
+    const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
+    await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+    await expect(row.getByRole("heading", { name: /^documents$/i })).toBeVisible({ timeout: 20_000 });
+    await expect(row.getByRole("button", { name: "Open archived-proving.pdf" })).toBeVisible();
   });
 });
