@@ -878,14 +878,15 @@ export function runConfigureApply(
 
   // #1151 RANGE-F1 (O1-S1/SS1-S2's "existing deployment" signal for
   // ensureSecretFile): a deployment is existing when any of the three
-  // generated secrets already exists before this run (a symlink counts).
-  // .env-orbit and the secrets directory are not signals: install.sh runs
-  // `configure.sh --init` (which writes .env-orbit) and then a bare
-  // configure in a second process. Checked once for the whole set, before
+  // generated secrets already exists before this run (a symlink counts), or
+  // when .env-orbit carries an applied-configuration stamp (below). The mere
+  // existence of .env-orbit or the secrets directory is not a signal:
+  // install.sh runs `configure.sh --init` (which writes .env-orbit) and then
+  // a bare configure in a second process. Checked once for the whole set, before
   // the first is generated, so writing one cannot make the next look existing.
   // hadEnvironmentFile is only for persist_orbit_image's rule below.
   const hadEnvironmentFile = pathInfo(join(deployDir, ENVIRONMENT_FILE_NAME)).existsFollowing;
-  const isFreshInstall = !GENERATED_SECRET_RELATIVE_PATHS.some((relativePath) => {
+  let isFreshInstall = !GENERATED_SECRET_RELATIVE_PATHS.some((relativePath) => {
     const info = pathInfo(join(deployDir, relativePath));
     return info.existsFollowing || info.isSymlink;
   });
@@ -902,6 +903,15 @@ export function runConfigureApply(
   }
   // Before anything is written, so a refused run changes nothing.
   refuseRetiredSecretsDirectory(deployDir);
+  // A stamped .env-orbit has finished an install (the stamp is written only
+  // after a successful configure), so an empty or missing secrets directory
+  // is a loss, not a first run. Read after preflight has validated the file.
+  if (
+    environmentKeyIsNonEmpty(deployDir, "ORBIT_CONFIG_APPLIED_VERSION") ||
+    environmentKeyIsNonEmpty(deployDir, "ORBIT_CONFIG_APPLIED_DIGEST")
+  ) {
+    isFreshInstall = false;
+  }
 
   // persist_orbit_image's rule (configure.sh): an existing deployment only
   // changes its pinned image through the installer, which says so with

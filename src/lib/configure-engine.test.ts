@@ -804,6 +804,55 @@ describe("runConfigureApply (bare flow, minus ensure_vapid_keys)", () => {
     expect(originalKek).toMatch(/^[0-9a-f]{64}\n$/);
   });
 
+  // #1316 (release audit): an upgraded deployment is recognised by its
+  // migrated .env-orbit (ORBIT_CONFIG_APPLIED_VERSION recorded), not only by
+  // an already generated secret. If .orbit-secrets is lost or empty, bare
+  // configure must refuse rather than mint a new session secret, database
+  // password and document KEK over live data.
+  describe("#1316: a migrated deployment whose .orbit-secrets is missing or empty", () => {
+    // A valid migrated file: applied version, matching digest, and an image
+    // pinned to that digest (provenance is all-or-nothing).
+    const digest = `sha256:${"a".repeat(64)}`;
+    function writeMigratedEnv(): void {
+      writeFileSync(
+        envPath(),
+        `${EXAMPLE_CONTENT.replace("ORBIT_IMAGE=\n", `ORBIT_IMAGE=registry.example.invalid/orbit@${digest}\n`)}ORBIT_CONFIG_APPLIED_VERSION=v0.3.0\nORBIT_CONFIG_APPLIED_DIGEST=${digest}\n`,
+        { mode: 0o600 },
+      );
+      expect(runConfigurePreflight(deployDir)).toEqual({ ok: true });
+    }
+
+    function expectSecretRefusalAndNothingGenerated(): void {
+      let thrown: unknown;
+      try {
+        runConfigureApply(deployDir, undefined);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(ConfigureEngineRefusal);
+      const message = (thrown as ConfigureEngineRefusal).message;
+      expect(message).toContain("missing on an existing Orbit deployment");
+      expect(message).toContain("session-secret");
+      expect(message).not.toContain("Generated .orbit-secrets/");
+
+      for (const name of ["session-secret", "postgres-password", "document-kek"]) {
+        expect(existsSync(join(deployDir, SECRETS_DIRECTORY_NAME, name))).toBe(false);
+      }
+    }
+
+    it("refuses and generates nothing when .orbit-secrets does not exist", () => {
+      writeMigratedEnv();
+      expect(existsSync(join(deployDir, SECRETS_DIRECTORY_NAME))).toBe(false);
+      expectSecretRefusalAndNothingGenerated();
+    });
+
+    it("refuses and generates nothing when .orbit-secrets exists but is empty", () => {
+      writeMigratedEnv();
+      mkdirSync(join(deployDir, SECRETS_DIRECTORY_NAME), { mode: 0o700 });
+      expectSecretRefusalAndNothingGenerated();
+    });
+  });
+
   // #1151 RANGE-F1: install.sh runs `configure.sh --init` (which writes
   // .env-orbit) and then a bare configure in a second process. .env-orbit
   // existing is not a sign of an existing deployment; only an already
