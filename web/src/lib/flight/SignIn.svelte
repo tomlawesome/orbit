@@ -518,7 +518,7 @@
        folder's `wait`/`after`): the flight is the next page's. `onOpen`: the
        door is lit and the painted part of its reveal done, which is when the
        flight's pictures may be asked for (readyWhenDrawn, below). */
-    dawnView?.light({ firstVisit: isFirstVisit(localStorage), onOpen: () => { opened = true; ask(); } });
+    dawnView?.light({ firstVisit: isFirstVisit(() => localStorage), onOpen: () => { opened = true; ask(); } });
 
     /**
      * Shows a state other than the door: fixed words, styled to match it.

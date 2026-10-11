@@ -15,12 +15,15 @@ export const SEEN_FRESH_MS = 36 * 3600e3;
 /**
  * Whether this is a first visit: nothing seen, or nothing seen for 36 hours
  * (the pictures are no longer kept, so the door has to come again). Records
- * this visit. A browser that will not say is a first visit.
- * @param {Pick<Storage, "getItem" | "setItem"> | undefined} storage
+ * this visit. A browser that will not say is a first visit. The storage may
+ * be given as a function returning it, which is called inside the protection:
+ * where site storage is blocked, reading `localStorage` itself throws (#1383).
+ * @param {(() => Pick<Storage, "getItem" | "setItem"> | undefined) | Pick<Storage, "getItem" | "setItem"> | undefined} source
  * @param {number} [now]
  */
-export function isFirstVisit(storage, now = Date.now()) {
+export function isFirstVisit(source, now = Date.now()) {
   try {
+    const storage = typeof source === "function" ? source() : source;
     if (!storage) return true;
     const seen = storage.getItem(SEEN_KEY);
     storage.setItem(SEEN_KEY, String(now));
