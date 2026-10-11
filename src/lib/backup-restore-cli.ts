@@ -114,8 +114,8 @@ function refuse(code: BackupRestoreCliRefusalCode, message: string): never {
 
 function rmSafely(path: string): void {
   try {
-    // recursive: withScratchCleanupOnSignal hands this a directory, and a
-    // non-recursive rmSync of one throws, which the catch below would hide.
+    // recursive: callers hand this directories, and a non-recursive rmSync
+    // of one throws, which the catch below would hide.
     rmSync(path, { force: true, recursive: true });
   } catch {
     // Best-effort, matching restore.sh/import-recovery-bundle.sh's own `|| true` cleanup.
@@ -213,46 +213,13 @@ function acquireBackupRestoreLock(backupDirectory: string): () => void {
   };
 }
 
-// --- Ctrl-C scratch-directory cleanup (O1-R1) -------------------------------
-//
-// SIGINT/SIGTERM during a long docker/pg operation (createCheckpoint's dump,
-// the recovery-bundle import's decrypt/restore) kills the process before any
-// `finally` block gets a turn, leaving sensitive scratch material — a
-// decrypted document KEK, a staged document tree — sitting in a private
-// directory forever. This registers best-effort signal handlers for the
-// lifetime of `fn` that remove `scratchDir` before re-raising the signal (so
-// the process still ends the way the operator expects), on top of the
-// ordinary `finally` cleanup already in place for a normal return or throw.
-// src/cli/orbit.ts's own top-level scratch directories (commandBackup's
-// --verify workDir, commandRestore's run workDir — both mkdtempSync(tmpdir())
-// calls outside this module) are out of this module's reach and still need
-// the same registration there.
-function withScratchCleanupOnSignal<T>(scratchDir: string, fn: () => T): T {
-  return withCleanupOnSignal(() => rmSafely(scratchDir), fn);
-}
-
-function withCleanupOnSignal<T>(cleanup: () => void, fn: () => T): T {
-  let cleaned = false;
-  const cleanupOnce = (): void => {
-    if (cleaned) return;
-    cleaned = true;
-    cleanup();
-  };
-  const onSignal = (signal: NodeJS.Signals): void => {
-    cleanupOnce();
-    process.removeListener("SIGINT", onSignal);
-    process.removeListener("SIGTERM", onSignal);
-    process.kill(process.pid, signal);
-  };
-  process.on("SIGINT", onSignal);
-  process.on("SIGTERM", onSignal);
-  try {
-    return fn();
-  } finally {
-    process.removeListener("SIGINT", onSignal);
-    process.removeListener("SIGTERM", onSignal);
-  }
-}
+// No signal handlers here: the engine is crash-only. Its docker/pg work runs
+// in spawnSync, so a JS listener could only run after the step finished, and
+// one removed in a `finally` drops the pending signal, turning Ctrl-C into
+// exit 0. A signal therefore ends the process by the signal (in the one-off
+// container Node is PID 1, so `docker stop` ends in SIGKILL anyway). Scratch
+// is swept by the next locked run (sweepKilledBackupScratch) and state is
+// recovered from the journal and checkpoint by `restore --recover`.
 
 /**
  * restore.sh:886-889 (guarantee #44): both the private backup directory and
@@ -338,10 +305,7 @@ export function runBackup(options: RunBackupOptions): CreateBackupBundleResult {
     const documentKekHex = typeof options.documentKekHex === "function" ? options.documentKekHex() : options.documentKekHex;
     const finalTarPath = join(options.backupDirectory, `orbit-${formatBundleTimestamp(options.now)}.tar`);
     sweepKilledBackupScratch(options.backupDirectory);
-    return withCleanupOnSignal(
-      () => sweepKilledBackupScratch(options.backupDirectory),
-      () => createBackupBundle(options.backupDirectory, finalTarPath, documentKekHex, options.adapter, formatManifestTimestamp(options.now)),
-    );
+    return createBackupBundle(options.backupDirectory, finalTarPath, documentKekHex, options.adapter, formatManifestTimestamp(options.now));
   } finally {
     releaseLock();
   }
@@ -462,7 +426,7 @@ export function runRestore(options: RunRestoreOptions): RunRestoreResult {
   const takeLock = !options.lockHeld && !options.preflightOnly;
   const releaseLock = takeLock ? acquireBackupRestoreLock(options.paths.backupDirectory) : () => undefined;
   try {
-    return withScratchCleanupOnSignal(options.workDir, () => runRestoreLocked(options));
+    return runRestoreLocked(options);
   } finally {
     releaseLock();
   }
@@ -546,9 +510,28 @@ function runRestoreLocked(options: RunRestoreOptions): RunRestoreResult {
 export function runRecoverRestore(options: RecoverRestoreOptions): RestoreDisposeResult {
   const releaseLock = acquireBackupRestoreLock(options.paths.backupDirectory);
   try {
-    return recoverRestore(options);
+    const result = recoverRestore(options);
+    if (result.outcome === "completed") removeSpentImportRollbackKey(options.paths.documentKekFile);
+    return result;
   } finally {
     releaseLock();
+  }
+}
+
+/**
+ * A recovery import killed after its checkpoint leaves the original key in
+ * `<key>.import-rollback`; recovery has just put that same key back live, so
+ * the copy is spent and would make the next import refuse. Removed only when
+ * it matches the live key: any other key there is the operator's to resolve.
+ */
+function removeSpentImportRollbackKey(documentKekFile: string): void {
+  const rollbackPath = `${documentKekFile}.import-rollback`;
+  if (isSymlinkPath(rollbackPath) || !existsSync(rollbackPath)) return;
+  const keyOf = (path: string): string => readFileSync(path, "utf8").replace(/[\r\n]+$/, "");
+  try {
+    if (keyOf(rollbackPath) === keyOf(documentKekFile)) rmSync(rollbackPath, { force: true });
+  } catch {
+    // Unreadable: leave it for the operator, as the import's refusal says.
   }
 }
 
@@ -604,39 +587,37 @@ export function runExportRecoveryBundle(options: RunExportRecoveryBundleOptions)
   const workDir = mkdtempSync(join(options.backupDirectory, ".orbit-recovery."));
   applyHostOwnership(workDir);
   try {
-    return withScratchCleanupOnSignal(workDir, () => {
-      // guarantee #4: the source backup bundle must pass full verification
-      // before a recovery bundle is produced from it.
-      verifyBackupBundle(options.sourceBundlePath, options.documentKekHex, join(workDir, "verify"), options.adapter);
+    // guarantee #4: the source backup bundle must pass full verification
+    // before a recovery bundle is produced from it.
+    verifyBackupBundle(options.sourceBundlePath, options.documentKekHex, join(workDir, "verify"), options.adapter);
 
-      const passphrase = options.collectPassphrase ? options.collectPassphrase() : (options.passphrase ?? "");
-      requireValidPassphrase(passphrase);
-      requireMatchingPassphrase(passphrase, options.collectPassphrase ? passphrase : (options.passphraseConfirmation ?? ""));
+    const passphrase = options.collectPassphrase ? options.collectPassphrase() : (options.passphrase ?? "");
+    requireValidPassphrase(passphrase);
+    requireMatchingPassphrase(passphrase, options.collectPassphrase ? passphrase : (options.passphraseConfirmation ?? ""));
 
-      const innerBundlePath = join(workDir, "orbit-backup.tar");
-      copyFileSync(options.sourceBundlePath, innerBundlePath);
+    const innerBundlePath = join(workDir, "orbit-backup.tar");
+    copyFileSync(options.sourceBundlePath, innerBundlePath);
 
-      const envelope = encryptDocumentKek(options.documentKekHex, passphrase);
-      const envelopePath = join(workDir, "document-kek.enc");
-      writeSecretFile(envelopePath, envelope, SECURE_FILE_MODE);
+    const envelope = encryptDocumentKek(options.documentKekHex, passphrase);
+    const envelopePath = join(workDir, "document-kek.enc");
+    writeSecretFile(envelopePath, envelope, SECURE_FILE_MODE);
 
-      const manifestPath = join(workDir, "manifest");
-      writeSecretFile(manifestPath, buildRecoveryManifest(), SECURE_FILE_MODE);
+    const manifestPath = join(workDir, "manifest");
+    writeSecretFile(manifestPath, buildRecoveryManifest(), SECURE_FILE_MODE);
 
-      const checksums = `${sha256File(innerBundlePath)}  orbit-backup.tar\n${sha256File(envelopePath)}  document-kek.enc\n`;
-      writeSecretFile(join(workDir, "checksums.sha256"), checksums, SECURE_FILE_MODE);
+    const checksums = `${sha256File(innerBundlePath)}  orbit-backup.tar\n${sha256File(envelopePath)}  document-kek.enc\n`;
+    writeSecretFile(join(workDir, "checksums.sha256"), checksums, SECURE_FILE_MODE);
 
-      const finalPath = join(options.backupDirectory, `orbit-recovery-${formatBundleTimestamp(options.now)}.tar`);
-      const temporaryPath = `${finalPath}.installing`;
-      createTar(workDir, temporaryPath, [...RECOVERY_BUNDLE_MEMBERS]);
-      publishBundleAtomically(temporaryPath, finalPath);
-      // #968: the bundle is on disk before the administration card can clear,
-      // never the other way round — a failed record here still leaves a
-      // usable bundle at finalPath, so this throws rather than swallowing the
-      // failure (RunExportRecoveryBundleOptions.adapter's own doc comment).
-      options.adapter.recordRecoveryBundleExported();
-      return { finalPath };
-    });
+    const finalPath = join(options.backupDirectory, `orbit-recovery-${formatBundleTimestamp(options.now)}.tar`);
+    const temporaryPath = `${finalPath}.installing`;
+    createTar(workDir, temporaryPath, [...RECOVERY_BUNDLE_MEMBERS]);
+    publishBundleAtomically(temporaryPath, finalPath);
+    // #968: the bundle is on disk before the administration card can clear,
+    // never the other way round — a failed record here still leaves a
+    // usable bundle at finalPath, so this throws rather than swallowing the
+    // failure (RunExportRecoveryBundleOptions.adapter's own doc comment).
+    options.adapter.recordRecoveryBundleExported();
+    return { finalPath };
   } finally {
     rmSync(workDir, { recursive: true, force: true });
   }
@@ -761,46 +742,44 @@ function importRecoveryBundleUnlocked(options: RunImportRecoveryBundleOptions): 
 
   const workDir = mkdtempSync(join(tmpdir(), "orbit-recovery-import-"));
   try {
-    return withScratchCleanupOnSignal(workDir, () => {
-      const extractedDir = join(workDir, "extracted");
-      preflightRecoveryBundle(options.recoveryBundlePath, extractedDir);
-      if (options.preflightOnly) return { outcome: "preflight-passed" as const };
+    const extractedDir = join(workDir, "extracted");
+    preflightRecoveryBundle(options.recoveryBundlePath, extractedDir);
+    if (options.preflightOnly) return { outcome: "preflight-passed" as const };
 
-      // Taken before the prompts, not just before the swap: the shell stopped
-      // the app before this started, and a backup landing while the operator
-      // answers would restart it and encrypt a bundle with the swapped key.
-      // Taken after the refusals above, so those leave nothing behind.
-      const releaseLock = acquireBackupRestoreLock(options.backupDirectory);
+    // Taken before the prompts, not just before the swap: the shell stopped
+    // the app before this started, and a backup landing while the operator
+    // answers would restart it and encrypt a bundle with the swapped key.
+    // Taken after the refusals above, so those leave nothing behind.
+    const releaseLock = acquireBackupRestoreLock(options.backupDirectory);
+    try {
+      const passphrase = typeof options.passphrase === "function" ? options.passphrase() : options.passphrase;
+      const envelope = readFileSync(join(extractedDir, "document-kek.enc"));
+      // decryptDocumentKek already refuses (invalid-recovered-key) a plaintext
+      // that isn't a well-formed 64-hex document key, so no separate re-check
+      // is needed here.
+      let recoveredKekHex: string;
       try {
-        const passphrase = typeof options.passphrase === "function" ? options.passphrase() : options.passphrase;
-        const envelope = readFileSync(join(extractedDir, "document-kek.enc"));
-        // decryptDocumentKek already refuses (invalid-recovered-key) a plaintext
-        // that isn't a well-formed 64-hex document key, so no separate re-check
-        // is needed here.
-        let recoveredKekHex: string;
-        try {
-          recoveredKekHex = decryptDocumentKek(envelope, passphrase)
-            .toString("utf8")
-            .replace(/[\r\n]+$/, "");
-        } catch (error) {
-          if (error instanceof RecoveryBundleRefusal && error.code === "invalid-recovered-key") {
-            refuse("import-preflight-failed", "Recovery passphrase did not decrypt a valid document KEK.");
-          }
-          refuse("import-preflight-failed", "preflight/decryption failed; the recovery key could not be decrypted.");
+        recoveredKekHex = decryptDocumentKek(envelope, passphrase)
+          .toString("utf8")
+          .replace(/[\r\n]+$/, "");
+      } catch (error) {
+        if (error instanceof RecoveryBundleRefusal && error.code === "invalid-recovered-key") {
+          refuse("import-preflight-failed", "Recovery passphrase did not decrypt a valid document KEK.");
         }
-
-        const confirmed = typeof options.importConfirmed === "function" ? options.importConfirmed() : options.importConfirmed;
-        if (!confirmed) {
-          refuse("import-not-confirmed", "Recovery import cancelled.");
-        }
-        refuseIfDocumentKekRotationOpen(options.liveDocumentKekFile);
-        requireRegularNonSymlinkFile(options.liveDocumentKekFile, "The current document KEK must be a regular file.");
-        options.beforeRestore?.();
-        return swapKeyAndRestore(options, paths, previousKekPath, recoveredKekHex, join(extractedDir, "orbit-backup.tar"), workDir);
-      } finally {
-        releaseLock();
+        refuse("import-preflight-failed", "preflight/decryption failed; the recovery key could not be decrypted.");
       }
-    });
+
+      const confirmed = typeof options.importConfirmed === "function" ? options.importConfirmed() : options.importConfirmed;
+      if (!confirmed) {
+        refuse("import-not-confirmed", "Recovery import cancelled.");
+      }
+      refuseIfDocumentKekRotationOpen(options.liveDocumentKekFile);
+      requireRegularNonSymlinkFile(options.liveDocumentKekFile, "The current document KEK must be a regular file.");
+      options.beforeRestore?.();
+      return swapKeyAndRestore(options, paths, previousKekPath, recoveredKekHex, join(extractedDir, "orbit-backup.tar"), workDir);
+    } finally {
+      releaseLock();
+    }
   } finally {
     rmSync(workDir, { recursive: true, force: true });
   }

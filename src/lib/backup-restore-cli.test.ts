@@ -383,9 +383,10 @@ describe("runBackup", () => {
 
   // The backup runs in a real child process, signalled while the adapter is
   // dumping (a blocking call stands in for pg_dump), as a supervisor's stop
-  // or Ctrl-C would. Whatever the process does with the signal, it must not
-  // leave its scratch directory behind.
-  it("O2-R3: a SIGTERM while the adapter is dumping leaves no .orbit-backup.* directory behind", async () => {
+  // or Ctrl-C would. The engine is crash-only (#1316 note 35314): it installs
+  // no signal handler, so the signal ends the process on the spot and the
+  // scratch directory is left behind; the NEXT backup sweeps it.
+  it("O2-R3: a SIGTERM while the adapter is dumping leaves the .orbit-backup.* scratch in place, and the next runBackup removes it", async () => {
     const documentsRoot = join(sandbox, "docs-backup-sigterm");
     buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
     const backupDirectory = join(sandbox, "backup-sigterm-backups");
@@ -430,7 +431,7 @@ runBackup({
 `,
     );
 
-    const { stdout, stderr, killedOnDeadline } = await new Promise<{ stdout: string; stderr: string; killedOnDeadline: boolean }>((resolvePromise, reject) => {
+    const { stdout, stderr, killedOnDeadline, status, signal } = await new Promise<{ stdout: string; stderr: string; killedOnDeadline: boolean; status: number | null; signal: NodeJS.Signals | null }>((resolvePromise, reject) => {
       const child = spawn(
         "node",
         [
@@ -464,15 +465,28 @@ runBackup({
         clearTimeout(deadline);
         reject(error);
       });
-      child.on("close", () => {
+      child.on("close", (closeStatus, closeSignal) => {
         clearTimeout(deadline);
-        resolvePromise({ stdout: out, stderr: err, killedOnDeadline });
+        resolvePromise({ stdout: out, stderr: err, killedOnDeadline, status: closeStatus, signal: closeSignal });
       });
     });
 
     expect(stdout, `the child never reached the dump step (stderr: ${stderr})`).toContain("dumping");
     expect(killedOnDeadline).toBe(false);
-    expect(readdirSync(backupDirectory).filter((name) => name.startsWith(".orbit-backup."))).toEqual([]);
+    const scratchDirectories = () => readdirSync(backupDirectory).filter((name) => name.startsWith(".orbit-backup."));
+    // The killed run left its scratch directory (with the plaintext dump) behind.
+    expect(scratchDirectories()).toHaveLength(1);
+    expect({ status, signal }).toEqual({ status: null, signal: "SIGTERM" });
+
+    // A following backup sweeps it, whatever it holds.
+    const result = runBackup({
+      backupDirectory,
+      documentKekHex: LIVE_KEK,
+      adapter: new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10),
+      now: new Date("2026-03-04T06:06:07Z"),
+    });
+    expect(existsSync(result.finalTarPath)).toBe(true);
+    expect(scratchDirectories()).toEqual([]);
   });
 });
 
@@ -1407,6 +1421,219 @@ describe("runImportRecoveryBundle (import-recovery-bundle.sh's orchestration, li
 
   // Amendment E3a: import-recovery-bundle.sh runs this while Orbit is still
   // up; the passphrase is asked once, in the full run that follows.
+  // #1316 O2-R1 (design decided, note 35314): the engine is crash-only. It
+  // installs no signal handler and undoes nothing in-process: a signal ends
+  // the process at once, and the next run recovers from what is on disk (the
+  // write-ahead journal and checkpoint, or the .import-rollback key file).
+  describe("O2-R1: a signal ends the import where it stands; recovery is the next run's job", () => {
+    /**
+     * Runs the import in a real child process that stops at `pauseAt` (a
+     * blocking call stands in for the docker/pg_restore work), signals it
+     * with `signal`, and reports how it closed. "staging" pauses the inner
+     * restore's staged-database step, with the recovered key already swapped
+     * in and no checkpoint yet; "checkpoint" pauses straight after the
+     * checkpoint is verified.
+     */
+    async function importKilledAt(
+      pauseAt: "staging" | "checkpoint",
+      signal: NodeJS.Signals,
+      names: { recoveryBundlePath: string; passphrase: string; liveDocumentsRoot: string; liveDocumentKekFile: string; backupDirectory: string },
+    ): Promise<{ stdout: string; stderr: string; killedOnDeadline: boolean; status: number | null; closeSignal: NodeJS.Signals | null }> {
+      const rollbackFile = `${names.liveDocumentKekFile}.import-rollback`;
+      const srcLib = import.meta.dirname;
+      const childScript = join(sandbox, `import-${pauseAt}-child.mts`);
+      writeFileSync(
+        childScript,
+        `import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
+import { runImportRecoveryBundle } from ${JSON.stringify(join(srcLib, "backup-restore-cli.ts"))};
+import { createTar, extractTar } from ${JSON.stringify(join(srcLib, "recovery-bundle.ts"))};
+import { CORRESPONDENCE_QUERIES } from ${JSON.stringify(join(srcLib, "restore-engine.ts"))};
+
+const config = JSON.parse(process.argv[2]);
+const reports = {
+  crypto: config.documentId + "|" + config.storageKey + "|10|available\\n",
+  visible: config.documentId + "|available|" + config.storageKey + "|10\\n",
+  attachments: "",
+  staging: "",
+  documentStaging: "",
+  transientCount: "0",
+};
+const field = (query) => Object.entries(CORRESPONDENCE_QUERIES).find(([, text]) => text === query)[0];
+let live = reports;
+let blocked = false;
+const stages = new Map();
+const adapter = {
+  stopApp: () => true,
+  startApp: () => true,
+  dumpDatabase: (output) => writeFileSync(output, JSON.stringify(live)),
+  pgRestoreListOk: () => true,
+  collectDocumentsArchive: (output) => createTar(config.documentsRoot, output, ["."]),
+  createStageDatabase: () => {},
+  dropStageDatabase: () => {},
+  restoreDumpToDatabase: (name, dumpPath) => {
+    if (config.pauseAt === "staging" && !blocked && existsSync(config.rollbackFile)) {
+      blocked = true;
+      // The step is a child that outlives the signal (docker stop signals
+      // only the one-off's PID 1, never its pg_restore child), so a process
+      // that handles the signal finishes the step with the signal pending.
+      writeSync(1, "paused\\n");
+      spawnSync("sleep", ["1"]);
+    }
+    stages.set(name, JSON.parse(readFileSync(dumpPath, "utf8")));
+    return true;
+  },
+  restoreActiveDatabase: (dumpPath) => { live = JSON.parse(readFileSync(dumpPath, "utf8")); return true; },
+  replaceDocumentsFromArchive: (archive) => {
+    rmSync(config.documentsRoot, { recursive: true, force: true });
+    mkdirSync(config.documentsRoot, { recursive: true });
+    extractTar(archive, config.documentsRoot);
+    return true;
+  },
+  resetScanRecoveryLeases: () => true,
+  queryReport: (name, query) => stages.get(name)[field(query)],
+  queryActiveReport: (query) => live[field(query)],
+  waitForHealth: () => true,
+  measureLiveDatabaseSizeBytes: () => 1024,
+  measureLiveDocumentTreeKib: () => 1,
+  measureDocumentVolumeAvailableKib: () => 1000000,
+  recordRecoveryBundleExported: () => {},
+};
+runImportRecoveryBundle({
+  recoveryBundlePath: config.recoveryBundlePath,
+  passphrase: config.passphrase,
+  liveDocumentKekFile: config.liveDocumentKekFile,
+  backupDirectory: config.backupDirectory,
+  adapter,
+  importConfirmed: true,
+  confirmRestore: () => true,
+  testHooks: {
+    afterCheckpoint: () => {
+      if (config.pauseAt !== "checkpoint") return;
+      writeSync(1, "paused\\n");
+      spawnSync("sleep", ["30"]);
+    },
+  },
+});
+`,
+      );
+
+      return new Promise((resolvePromise, reject) => {
+        const child = spawn(
+          "node",
+          [
+            "--import",
+            "tsx",
+            childScript,
+            JSON.stringify({ documentId: DOCUMENT_ID, storageKey: ORIGINAL_KEY, documentsRoot: names.liveDocumentsRoot, rollbackFile, pauseAt, ...names }),
+          ],
+          { cwd: process.cwd(), detached: true, stdio: ["ignore", "pipe", "pipe"] },
+        );
+        let out = "";
+        let err = "";
+        let signalled = false;
+        let killedOnDeadline = false;
+        const deadline = setTimeout(() => {
+          killedOnDeadline = true;
+          process.kill(-child.pid!, "SIGKILL");
+        }, 20_000);
+        child.stdout.on("data", (chunk: Buffer) => {
+          out += chunk.toString();
+          if (!signalled && out.includes("paused")) {
+            signalled = true;
+            // Let the blocking call start, then signal the import process
+            // alone, as docker stop does to the one-off's PID 1.
+            setTimeout(() => process.kill(child.pid!, signal), 300);
+          }
+        });
+        child.stderr.on("data", (chunk: Buffer) => {
+          err += chunk.toString();
+        });
+        child.on("error", (error) => {
+          clearTimeout(deadline);
+          reject(error);
+        });
+        child.on("close", (status, closeSignal) => {
+          clearTimeout(deadline);
+          // A grandchild (the blocking sleep) can outlive the child; reap it.
+          try {
+            process.kill(-child.pid!, "SIGKILL");
+          } catch {
+            // The group is already gone.
+          }
+          resolvePromise({ stdout: out, stderr: err, killedOnDeadline, status, closeSignal });
+        });
+      });
+    }
+
+    function importTarget(suffix: string): { liveDocumentsRoot: string; liveDocumentKekFile: string; backupDirectory: string; rollbackFile: string } {
+      const liveDocumentsRoot = join(sandbox, `live-docs-import-${suffix}`);
+      buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+      const liveDocumentKekFile = join(sandbox, `live-document-kek-${suffix}`);
+      writeFileSync(liveDocumentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+      const backupDirectory = join(sandbox, `import-target-backups-${suffix}`);
+      mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+      return { liveDocumentsRoot, liveDocumentKekFile, backupDirectory, rollbackFile: `${liveDocumentKekFile}.import-rollback` };
+    }
+
+    it("a SIGTERM while the inner restore is staging ends the import by the signal and leaves the original key in .import-rollback", async () => {
+      const passphrase = "correct horse battery staple";
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+      const { liveDocumentsRoot, liveDocumentKekFile, backupDirectory, rollbackFile } = importTarget("sigterm");
+
+      const { stdout, stderr, killedOnDeadline, status, closeSignal } = await importKilledAt("staging", "SIGTERM", {
+        recoveryBundlePath,
+        passphrase,
+        liveDocumentsRoot,
+        liveDocumentKekFile,
+        backupDirectory,
+      });
+
+      expect(stdout, `the child never reached the staging step (stderr: ${stderr})`).toContain("paused");
+      expect(killedOnDeadline).toBe(false);
+      // Ended by the signal itself, not by an exit code from a handler.
+      expect({ status, signal: closeSignal }).toEqual({ status: null, signal: "SIGTERM" });
+      // Nothing undid the swap in-process: the live key is the bundle's, the
+      // original sits in the rollback file, and no restore journal exists
+      // (the checkpoint had not been taken yet).
+      expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(UPDATED_KEY);
+      expect(readFileSync(rollbackFile, "utf8").trim()).toBe(LIVE_KEK);
+      expect(existsSync(deriveRestorePaths(backupDirectory, liveDocumentKekFile).journalPath)).toBe(false);
+    });
+
+    it("--recover after an import killed after the checkpoint restores the original key and removes .import-rollback", async () => {
+      const passphrase = "correct horse battery staple";
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+      const { liveDocumentsRoot, liveDocumentKekFile, backupDirectory, rollbackFile } = importTarget("recover");
+
+      const { stdout, stderr, killedOnDeadline, closeSignal } = await importKilledAt("checkpoint", "SIGKILL", {
+        recoveryBundlePath,
+        passphrase,
+        liveDocumentsRoot,
+        liveDocumentKekFile,
+        backupDirectory,
+      });
+
+      expect(stdout, `the child never reached the checkpoint (stderr: ${stderr})`).toContain("paused");
+      expect(killedOnDeadline).toBe(false);
+      expect(closeSignal).toBe("SIGKILL");
+      // The crash left the swapped key, the rollback file and a journal.
+      const paths = deriveRestorePaths(backupDirectory, liveDocumentKekFile);
+      expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(UPDATED_KEY);
+      expect(readFileSync(rollbackFile, "utf8").trim()).toBe(LIVE_KEK);
+      expect(existsSync(paths.journalPath)).toBe(true);
+
+      // `orbit restore --recover` (runRecoverRestore) in a later process.
+      const adapter = new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+      const result = runRecoverRestore({ adapter, paths, workDir: mkdtempSync(join(sandbox, "recover-after-import-kill-")) });
+
+      expect(result.outcome).toBe("completed");
+      expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(LIVE_KEK);
+      expect(existsSync(rollbackFile)).toBe(false);
+      expect(existsSync(paths.journalPath)).toBe(false);
+    });
+  });
+
   describe("preflightOnly (the shell's `import-recovery-bundle --preflight`, amendment E3a)", () => {
     function importTarget(suffix: string): { liveDocumentKekFile: string; backupDirectory: string; adapter: FakeAdapter } {
       const liveDocumentsRoot = join(sandbox, `live-docs-import-preflight-${suffix}`);

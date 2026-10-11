@@ -771,19 +771,12 @@ function commandConfigure(deployDir: string, args: string[]): never {
 // commandBackup's --verify branch and commandRestore's --recover and
 // <backup.tar> branches creates a private mkdtempSync workDir under
 // os.tmpdir() that can hold decrypted document bytes and database dumps
-// while the command runs. A try/finally alone misses two cases: (1) a
-// signal (Ctrl-C/SIGINT, or SIGTERM from a supervisor) does not unwind JS
-// try/finally at all by default, so the directory is orphaned in /tmp
-// forever; (2) the success path in each branch calls `process.exit(0)`
-// *inside* the try, and process.exit() terminates immediately without
-// running a pending `finally` — confirmed empirically, not merely assumed —
-// so a plain try/finally around a process.exit() call never actually ran
-// its cleanup either. withScratchDirectory fixes both: callers never call
-// process.exit() from inside the wrapped callback, and the same tracked-set
-// cleanup runs on normal completion, on a thrown error, and on SIGINT/SIGTERM.
-const activeScratchDirectories = new Set<string>();
-let scratchCleanupSignalHandlersInstalled = false;
-
+// while the command runs. The success path in each branch calls
+// `process.exit(0)`, which terminates immediately without running a pending
+// `finally`, so callers never call process.exit() from inside the wrapped
+// callback. No signal handler: the engine is crash-only, and a listener
+// could only run once the synchronous docker step returned, turning Ctrl-C
+// into exit 0. A signal ends the process by the signal.
 function removeScratchDirectory(workDir: string): void {
   try {
     rmSync(workDir, { recursive: true, force: true });
@@ -792,51 +785,27 @@ function removeScratchDirectory(workDir: string): void {
   }
 }
 
-function installScratchCleanupSignalHandlers(): void {
-  if (scratchCleanupSignalHandlersInstalled) return;
-  scratchCleanupSignalHandlersInstalled = true;
-  for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    process.on(signal, () => {
-      for (const workDir of activeScratchDirectories) removeScratchDirectory(workDir);
-      activeScratchDirectories.clear();
-      // 128 + signal number, the conventional shell-reported exit status
-      // (SIGINT=2, SIGTERM=15); matches the 130 already used for Ctrl-C
-      // during masked TTY entry above.
-      process.exit(signal === "SIGINT" ? 130 : 143);
-    });
-  }
-}
-
-/** Runs `run` with `workDir` tracked for signal cleanup, always removing it afterward — on normal return, on a thrown error, and (via the signal handlers above) on SIGINT/SIGTERM. `run` must never call process.exit() itself; callers call it, with the result of `run`, only after this returns. */
+/** Runs `run`, always removing `workDir` afterward, on normal return or a thrown error. `run` must never call process.exit() itself; callers call it, with the result of `run`, only after this returns. */
 function withScratchDirectory<T>(workDir: string, run: () => T): T {
-  installScratchCleanupSignalHandlers();
-  activeScratchDirectories.add(workDir);
   try {
     return run();
   } finally {
-    activeScratchDirectories.delete(workDir);
     removeScratchDirectory(workDir);
   }
 }
 
 // Hidden/experimental, mirroring __install-transaction-rehearse and
-// __restore-engine-rehearse above: exercises withScratchDirectory's signal
-// cleanup end-to-end for src/cli/orbit.test.ts, without needing a real
-// docker backup/restore run to create a window to signal during.
+// __restore-engine-rehearse above: exercises how a backup/restore command
+// ends on SIGINT/SIGTERM, end-to-end for src/cli/orbit.test.ts, without
+// needing a real docker backup/restore run to create a window to signal
+// during.
 //
 // Blocks the same way the real docker-compose adapters block (a
-// synchronous spawnSync call), rather than a pure-JS wait: that is not a
-// cosmetic choice. A tight synchronous loop (e.g. Atomics.wait) never
-// returns control to the event loop, so a signal arriving during one is
-// never actually delivered to a `process.on` listener until the loop is
-// unblocked some other way — proven directly against this file's own
-// mkdtempSync/spawnSync pattern before writing this comment. What actually
-// happens on a real Ctrl-C is: the terminal's SIGINT reaches the whole
-// foreground process group, so the blocked `docker` child dies from the
-// same signal, spawnSync returns, and only then does the event loop
-// deliver the pending SIGINT/SIGTERM callback registered below. Spawning a
-// real `sleep` child here, signalled as a process group, reproduces that
-// exact sequence instead of a shape nothing in production ever hits.
+// synchronous spawnSync call), rather than a pure-JS wait. On a real Ctrl-C
+// the terminal's SIGINT reaches the whole foreground process group, so the
+// blocked `docker` child and this process both receive it. Spawning a real
+// `sleep` child here, signalled as a process group, reproduces that
+// sequence; with no handler installed, the signal ends this process.
 function commandScratchDirectorySignalRehearse(sleepSeconds: string): never {
   const workDir = mkdtempSync(join(tmpdir(), "orbit-scratch-signal-rehearse-"));
   withScratchDirectory(workDir, () => {

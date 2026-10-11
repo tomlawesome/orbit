@@ -377,9 +377,9 @@ describe("backup/restore scratch directories are cleaned up on exit and on SIGIN
   });
 
   it.each([["SIGINT"], ["SIGTERM"]] as const)(
-    "removes the scratch directory, without needing SIGKILL, when %s is sent to the whole process group mid-run",
+    "ends by the signal itself, without needing SIGKILL, when %s is sent to the whole process group mid-run (crash-only: no handler, the next run sweeps the scratch directory)",
     async (signal) => {
-      const { workDir, killedOnDeadline } = await new Promise<{ workDir: string; killedOnDeadline: boolean }>((resolvePromise, reject) => {
+      const { killedOnDeadline, status, closeSignal } = await new Promise<{ killedOnDeadline: boolean; status: number | null; closeSignal: NodeJS.Signals | null }>((resolvePromise, reject) => {
         // detached: true gives this process its own process group (pgid ===
         // its own pid), matching src/lib/install-transaction.interruption.test.ts's
         // established convention — and matching the real mechanism a
@@ -434,20 +434,22 @@ describe("backup/restore scratch directories are cleaned up on exit and on SIGIN
           watchdog.stop();
           reject(error);
         });
-        child.on("close", () => {
+        child.on("close", (closeStatus, closeSignal) => {
           watchdog.stop();
           if (capturedWorkDir === undefined) {
             reject(new Error(`the rehearsal process closed before printing its workDir (stdout: ${stdout}; stderr: ${stderr})`));
             return;
           }
-          resolvePromise({ workDir: capturedWorkDir, killedOnDeadline });
+          resolvePromise({ killedOnDeadline, status: closeStatus, closeSignal });
         });
       });
-      // The point of this test: the process actually exits on its own —
-      // via withScratchDirectory's finally or the signal handler, either is
-      // a correct cleanup — rather than needing the watchdog's SIGKILL.
+      // The point of this test (#1316 note 35314, crash-only engine): the
+      // signal ends the process itself, with no in-process handler turning
+      // it into an exit code, and not the watchdog's SIGKILL. The scratch
+      // directory is left for the next run to sweep, so it is not asserted.
       expect(killedOnDeadline).toBe(false);
-      expect(existsSync(workDir)).toBe(false);
+      expect(status).toBeNull();
+      expect(closeSignal).toBe(signal);
     },
   );
 });
