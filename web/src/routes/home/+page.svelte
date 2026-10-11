@@ -461,7 +461,9 @@
     previewDoc = null;
     await rereadDetail();
     wake(`${doc.name} removed`, {
-      undo: () => { restoreDocument(doc.id).then(rereadDetail).catch(() => {}); },
+      // The removed wake is already gone by now, so a refused restore must
+      // say so or the paper silently stays removed.
+      undo: () => { restoreDocument(doc.id).then(rereadDetail).catch(() => wake(`couldn't restore ${doc.name} — try again`, { failure: true })); },
     });
   }
   /** @param {import('$lib/data/belt.js').BeltDocumentRow} doc */

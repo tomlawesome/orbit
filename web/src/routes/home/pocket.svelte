@@ -547,7 +547,9 @@
     previewPaper = null;
     await rereadPapers();
     wake(`${paper.name} removed`, {
-      undo: () => { restoreDocument(paper.id).then(rereadPapers).catch(() => {}); },
+      // The removed wake is already gone by now, so a refused restore must
+      // say so or the paper silently stays removed.
+      undo: () => { restoreDocument(paper.id).then(rereadPapers).catch(() => wake(`couldn't restore ${paper.name} — try again`, { failure: true })); },
     });
   }
   /** @param {{ id: string }} paper */

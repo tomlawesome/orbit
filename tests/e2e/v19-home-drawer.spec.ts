@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
@@ -157,6 +157,36 @@ async function archiveItem(page: Page, householdId: string, itemId: string) {
     });
     if (!response.ok) throw new Error(`archive failed: ${response.status} ${await response.text()}`);
   }, { householdId, itemId });
+}
+
+/** #1316 W1-R3: from the open preview, read the paper, remove it (the pill's
+ *  two taps), make the server refuse the restore, and press the wake's undo.
+ *  Returns once the undo is pressed. `readButton` is the preview's "Read
+ *  <name>" button; the reader is the dialog that opens over home. */
+async function removeThenFailTheUndo(page: Page, readButton: Locator, docId: string, name: string) {
+  await readButton.click();
+  const reader = page.getByRole("dialog", { name: `${name}, ${TITLE}` });
+  await expect(reader).toBeVisible();
+  await reader.getByRole("button", { name: `Remove ${name}` }).click();
+  await reader.getByRole("button", { name: `tap again to remove ${name}` }).click();
+
+  /* the paper goes and the wake offers it back */
+  await expect(page.getByRole("status").filter({ hasText: `${name} removed` })).toHaveText(`${name} removed`);
+  await expect(reader).toBeHidden();
+
+  /* the server refuses the restore, whatever the reason */
+  await page.route(`**/api/documents/${docId}/restore`, (route) =>
+    route.request().method() === "POST"
+      ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "restore failed" }) })
+      : route.continue());
+  await page.getByRole("button", { name: "undo", exact: true }).click();
+}
+
+/** The paper as the server holds it now (its lifecycle), from the item's list. */
+async function lifecycleOf(page: Page, householdId: string, itemId: string, docId: string) {
+  const response = await page.request.get(`/api/households/${householdId}/items/${itemId}/documents`);
+  const body = (await response.json()) as { documents: { id: string; lifecycle: string }[] };
+  return body.documents.find((one) => one.id === docId)?.lifecycle ?? null;
 }
 
 test.afterEach(async ({ page }) => {
@@ -423,6 +453,33 @@ test.describe("on the desk", () => {
     await expect(drawer.getByRole("alert")).toHaveCount(0);
     await expect.poll(async () => (await itemOf(page, householdId, itemId))?.provider ?? null).toBe("Northgate Services Ltd");
   });
+
+  /* #1316 W1-R3: undo is a promise; when the server refuses it the reader is
+     told in the wake, not left with a silent nothing. The paper stays
+     removed (the drawer may still list it, saying "removed"). */
+  test("undoing a removal the server refuses says so in a wake, and the paper stays removed", async ({ page }) => {
+    test.setTimeout(90_000);
+    await signIn(page);
+    const { itemId, householdId } = await seedHouseholdWithItem(page);
+    const doc = await uploadDocument(page, householdId, itemId, "undo-refused.pdf");
+
+    await page.goto(`/home?item=${itemId}`);
+    const drawer = page.locator(`[id="${itemId}-view"]`);
+    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    await drawer.getByRole("button", { name: "Open undo-refused.pdf" }).click();
+    const card = page.getByRole("dialog", { name: /^undo-refused\.pdf/ });
+    const readButton = card.getByRole("button", { name: "Read undo-refused.pdf" });
+    await expect(readButton).toBeEnabled({ timeout: 20_000 });
+
+    await removeThenFailTheUndo(page, readButton, doc.id, "undo-refused.pdf");
+
+    await expect(page.getByRole("alert").filter({ hasText: /couldn['\u2019]t restore undo-refused\.pdf \u2014 try again/ }))
+      .toBeVisible();
+    expect(await lifecycleOf(page, householdId, itemId, doc.id)).toBe("pending_deletion");
+    /* never listed as a live paper again */
+    await expect(drawer.getByRole("button", { name: "Open undo-refused.pdf" }).filter({ hasNotText: /removed/ }))
+      .toHaveCount(0);
+  });
 });
 
 test.describe("on the phone", () => {
@@ -491,5 +548,29 @@ test.describe("on the phone", () => {
     await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
     await expect(row.getByRole("heading", { name: /^documents$/i })).toBeVisible({ timeout: 20_000 });
     await expect(row.getByRole("button", { name: "Open archived-proving.pdf" })).toBeVisible();
+  });
+
+  /* #1316 W1-R3 / W1-R9: the same on the phone's sheet. */
+  test("undoing a removal the server refuses says so in a wake, and the paper stays removed", async ({ page }) => {
+    test.setTimeout(90_000);
+    await signIn(page);
+    const { itemId, householdId } = await seedHouseholdWithItem(page);
+    const doc = await uploadDocument(page, householdId, itemId, "undo-refused.pdf");
+
+    await page.goto(`/home?item=${itemId}`);
+    const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
+    await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+    await row.getByRole("button", { name: "Open undo-refused.pdf" }).tap();
+    const sheet = page.getByRole("dialog", { name: /^undo-refused\.pdf/ });
+    const readButton = sheet.getByRole("button", { name: "Read undo-refused.pdf" });
+    await expect(readButton).toBeEnabled({ timeout: 20_000 });
+
+    await removeThenFailTheUndo(page, readButton, doc.id, "undo-refused.pdf");
+
+    await expect(page.getByRole("alert").filter({ hasText: /couldn['\u2019]t restore undo-refused\.pdf \u2014 try again/ }))
+      .toBeVisible();
+    expect(await lifecycleOf(page, householdId, itemId, doc.id)).toBe("pending_deletion");
+    await expect(row.getByRole("button", { name: "Open undo-refused.pdf" }).filter({ hasNotText: /removed/ }))
+      .toHaveCount(0);
   });
 });
