@@ -230,8 +230,10 @@ bash scripts/deploy-container.sh --build
 
 It builds the image first, because `configure.sh` runs inside it, then
 refreshes the settings, takes a backup if the database is already running,
-starts everything and waits until it is healthy. Your existing `.env-orbit`,
-secrets and data are left as they are. `bash scripts/deploy-container.sh
+starts everything and waits until it is healthy. Your secrets and data are
+left as they are, and so is `.env-orbit` apart from `ORBIT_IMAGE`, which moves
+to the image just built or pulled so a later `docker compose --env-file
+.env-orbit up -d` starts the same build. `bash scripts/deploy-container.sh
 --pull` does the same with the published build named in `ORBIT_IMAGE`
 instead of building one: it pulls that digest first. Neither needs an
 existing `.env-orbit`: `configure.sh` creates it once the image exists. To

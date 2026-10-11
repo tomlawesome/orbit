@@ -44,7 +44,11 @@ else
   docker pull "$ORBIT_IMAGE"
 fi
 
-bash scripts/configure.sh
+# This run has just built or pulled the image it exports, so the pin in
+# .env-orbit moves with it, as the installer's does. Otherwise a later
+# compose up from a fresh shell would start the previous build against the
+# database this one migrated.
+ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 bash scripts/configure.sh
 
 # Prepare the remaining images before touching a running deployment.
 compose pull orbit-db
