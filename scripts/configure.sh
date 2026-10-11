@@ -215,6 +215,11 @@ case "$flow" in
     ;;
 esac
 
+# ORBIT_SECRETS_DIR is retired: the engine only uses ./.orbit-secrets, and a
+# value pointing elsewhere would leave Compose mounting different secrets.
+[[ -z "${ORBIT_SECRETS_DIR:-}" || "${ORBIT_SECRETS_DIR}" == ./.orbit-secrets || "${ORBIT_SECRETS_DIR}" == .orbit-secrets ]] ||
+  fail "ORBIT_SECRETS_DIR is set to ${ORBIT_SECRETS_DIR}, but Orbit no longer reads that setting: it keeps its secrets in ./.orbit-secrets beside .env-orbit. Move the secret files from ${ORBIT_SECRETS_DIR} into ./.orbit-secrets, remove the ORBIT_SECRETS_DIR setting, then run again."
+
 resolve_engine_image
 engine_host_identity
 

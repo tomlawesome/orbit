@@ -594,6 +594,26 @@ function rawEnvironmentKeyValue(deployDir: string, key: string): string | undefi
   return found ? value : undefined;
 }
 
+// ORBIT_SECRETS_DIR is retired: the engine only ever reads and writes
+// ./.orbit-secrets. A deployment still pointing it elsewhere would otherwise
+// look fresh here and get a new, unmounted set of secrets.
+const DEFAULT_SECRETS_DIRECTORY_VALUES = new Set([SECRETS_DIRECTORY_NAME, `./${SECRETS_DIRECTORY_NAME}`]);
+
+export function isRetiredSecretsDirectoryOverride(value: string | undefined): value is string {
+  return value !== undefined && value !== "" && !DEFAULT_SECRETS_DIRECTORY_VALUES.has(value);
+}
+
+export function retiredSecretsDirectoryMessage(value: string): string {
+  return `ORBIT_SECRETS_DIR is set to ${value}, but Orbit no longer reads that setting: it keeps its secrets in ./${SECRETS_DIRECTORY_NAME} beside ${ENVIRONMENT_FILE_NAME}. Move the secret files from ${value} into ./${SECRETS_DIRECTORY_NAME}, remove the ORBIT_SECRETS_DIR line, then run again.`;
+}
+
+export function refuseRetiredSecretsDirectory(deployDir: string): void {
+  const value = rawEnvironmentKeyValue(deployDir, "ORBIT_SECRETS_DIR")?.replace(/\r$/, "");
+  if (isRetiredSecretsDirectoryOverride(value)) {
+    refuse(retiredSecretsDirectoryMessage(value), "secrets-directory-invalid");
+  }
+}
+
 function environmentKeyIsNonEmpty(deployDir: string, key: string): boolean {
   const envPath = join(deployDir, ENVIRONMENT_FILE_NAME);
   const info = pathInfo(envPath);
@@ -880,6 +900,8 @@ export function runConfigureApply(
     }
     refuse("Configuration preflight failed; restoring the previous deployment.", preflight.code);
   }
+  // Before anything is written, so a refused run changes nothing.
+  refuseRetiredSecretsDirectory(deployDir);
 
   // persist_orbit_image's rule (configure.sh): an existing deployment only
   // changes its pinned image through the installer, which says so with

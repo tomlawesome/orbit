@@ -906,6 +906,10 @@ target_dir="$(pwd -P)" || fail "Could not resolve the installation directory."
 command -v docker >/dev/null 2>&1 || fail "Docker is required."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required."
 command -v timeout >/dev/null 2>&1 || fail "GNU timeout is required for bounded health checks."
+# ORBIT_SECRETS_DIR is retired: the engine only uses ./.orbit-secrets, and a
+# value pointing elsewhere would leave Compose mounting different secrets.
+[[ -z "${ORBIT_SECRETS_DIR:-}" || "${ORBIT_SECRETS_DIR}" == ./.orbit-secrets || "${ORBIT_SECRETS_DIR}" == .orbit-secrets ]] ||
+  fail "ORBIT_SECRETS_DIR is set to ${ORBIT_SECRETS_DIR}, but Orbit no longer reads that setting: it keeps its secrets in ./.orbit-secrets beside .env-orbit. Move the secret files from ${ORBIT_SECRETS_DIR} into ./.orbit-secrets, remove the ORBIT_SECRETS_DIR setting, then run again."
 installer_ui_event host host completed host-tools check
 
 # Resolve the release manifest (ADR-0031 #7) and pin the pull to the digest

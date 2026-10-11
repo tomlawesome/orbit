@@ -1,6 +1,7 @@
 import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
+import { isRetiredSecretsDirectoryOverride, retiredSecretsDirectoryMessage } from "./configure-engine";
 import { DEPLOY_LOCK_FILE_NAME } from "./deploy-lock";
 
 // Target and identity validation (issue #295 slice 2), ported from
@@ -173,6 +174,15 @@ export function validateTarget(targetDir: string): ValidateTargetResult {
 
   if (isPreprovisionedInput(targetDir)) {
     return { targetWasEmpty: true };
+  }
+
+  // A deployment whose secrets live elsewhere (the retired ORBIT_SECRETS_DIR)
+  // gets the reason, not the generic "not recognizable" refusal below.
+  if (isRegularNonSymlinkFile(environmentFile)) {
+    const secretsDirectoryValue = readEnvironmentValue(targetDir, "ORBIT_SECRETS_DIR");
+    if (isRetiredSecretsDirectoryOverride(secretsDirectoryValue)) {
+      throw new TargetValidationRefusal(retiredSecretsDirectoryMessage(secretsDirectoryValue));
+    }
   }
 
   // A leftover `.orbit-install-staging.*` means an earlier attempt was

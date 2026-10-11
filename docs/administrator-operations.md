@@ -502,7 +502,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `MIGRATE_ON_START` | Orbit | Applies pending database migrations at startup. Compose sets this to `true`. | `false` |
 | `WORKER_ENABLED` | Orbit | Runs the notification scheduler inside the application container. Compose sets this to `true`. | `false` |
 | `DRIZZLE_MIGRATIONS_PATH` | Orbit | Directory containing versioned SQL migrations. | `drizzle` |
-| `ORBIT_SECRETS_DIR` | Compose | Host directory containing files mounted as Compose secrets. | `./.orbit-secrets` |
+| `ORBIT_SECRETS_DIR` | Retired | The secrets directory is fixed at `./.orbit-secrets`. Configure and install refuse any other value; move the files there and remove the setting. | `./.orbit-secrets` |
 
 Inbound mail (the mailbox Orbit polls for incoming statements and documents)
 is not set here any more. An instance administrator sets it on the
@@ -533,7 +533,7 @@ deployment configuration.
 To configure inbound mail:
 
 1. Configure SMTP first, and deploy the mail overlay so the SMTP password is
-   mounted from `${ORBIT_SECRETS_DIR}/smtp-password`. Put it there from a
+   mounted from `.orbit-secrets/smtp-password`. Put it there from a
    secret manager or a private editor, not a command argument. The path must
    be a non-empty ordinary file, not a symbolic link, and readable only by the
    deployment operator.
