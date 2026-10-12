@@ -429,7 +429,11 @@ manifest signed under the current key only once the re-sign step above is
 done. A user who pins an older
 `ORBIT_VERSION` must also fetch `get-orbit.sh` from that version's own tag
 (`…/orbit/vX.Y.Z/scripts/get-orbit.sh`), which still carries the key that
-release was actually signed with.
+release was actually signed with. That holds only for releases left signed
+under their original key: the release that was `latest` at rotation was
+re-signed in "Key rotation" above and now verifies only with the current key,
+so its own tag's `get-orbit.sh` (old key) refuses it; pin that release with
+`main`'s `get-orbit.sh` instead.
 
 **A limit worth stating plainly:** on the `latest` channel there is no
 freshness check. Whoever controls what `get-orbit.sh` downloads from could
