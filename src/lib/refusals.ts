@@ -24,6 +24,9 @@ export const refusalWords = {
   section: "not yet — choose a section",
   cost: `not yet — ${COST_FORMAT_HINT}`,
   kindNeeded: "not yet — choose a type",
+  // A one-tap mail approval has no type chooser on its own screen; only
+  // review & amend does, so the words say where to go.
+  kindNeededInReview: "not yet — choose a type in review & amend",
   repeatNeedsDate: "not yet — a repeat needs a due date",
   reminderCount: `not yet — at most ${REMINDER_MAX} reminders`,
   reminderDays: `not yet — a reminder is at most ${REMINDER_DAYS_MAX} days before`,
@@ -39,6 +42,7 @@ export const refusalCodes: Record<RefusalRule, string> = {
   section: "item_section_missing",
   cost: "cost_format",
   kindNeeded: "item_kind_missing",
+  kindNeededInReview: "item_kind_missing",
   repeatNeedsDate: "repeat_needs_date",
   reminderCount: "too_many_reminders",
   reminderDays: "reminder_too_far_ahead",

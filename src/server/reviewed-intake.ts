@@ -239,7 +239,8 @@ function canonicalItem(input: ReviewedIntakeApproval, itemId: string): HomeItem 
     scheduleKind: typeof scheduleKind === "string" ? scheduleKind : undefined,
   });
   const refused = itemRefusal({ ...intent, cost, sectionId: input.sectionId }, effective);
-  if (refused) throw new Refusal(refused);
+  // The one-tap approval has no type chooser; review & amend does.
+  if (refused) throw new Refusal(refused === "kindNeeded" ? "kindNeededInReview" : refused);
   const typedCost = typeof cost === "string" ? { costMinor: costMinorOf(cost) } : {};
   return workspaceItemSchema.parse(itemOfIntent({
     ...intent,

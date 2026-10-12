@@ -7,6 +7,7 @@ import {
   sanitizeReviewDraftMetadata,
 } from "./reviewed-intake";
 import { COST_MINOR_MAX, RECURRENCE_MAX } from "@/lib/domain";
+import { itemRefusal, Refusal } from "@/lib/refusals";
 
 describe("reviewed intake contract", () => {
   // #1151 A3-Q8: this schema places no bound on `item` -- it is a plain
@@ -108,6 +109,57 @@ describe("reviewed intake contract", () => {
       expect(hash({ ...relay, kind: "renewal" })).toBe(hash(relay));
       expect(hash({ ...relay, kind: "service" })).toBe(hash({ subtype: "service", scheduleKind: "service", recurrenceMonths: 12 }));
       expect(hash({ ...relay, kind: "service" })).not.toBe(hash(relay));
+    });
+
+    /* #1316, owner decision 2026-10-12 (note 35391, option a): a one-tap mail
+       approval whose reading has no date and no kind stays refused, but the
+       refusal says where the chooser is. */
+    describe("a one-tap approval of a reading with no date and no kind (#1316)", () => {
+      const refusalOf = (run: () => unknown) => {
+        try {
+          run();
+        } catch (error) {
+          return error;
+        }
+        return undefined;
+      };
+      const mailApproval = () => reviewedIntakeApprovalSchema.parse({
+        operationId: "11111111-1111-4111-8111-111111111111",
+        source: { kind: "mailbox_draft", receiptId: "22222222-2222-4222-8222-222222222222", draftVersion: 1 },
+        householdId: "33333333-3333-4333-8333-333333333333",
+        sectionId: "44444444-4444-4444-8444-444444444444",
+        action: "create_separate",
+        // The proposal as the relay read it, approved without amendments: a title, no date, no kind.
+        item: { title: "Home insurance", currency: "GBP" },
+        attachmentIds: [],
+      });
+
+      it("is refused 422 item_kind_missing, naming where the chooser is", () => {
+        const refusal = refusalOf(() => canonicalReviewedIntakeHash(mailApproval()));
+        expect(refusal).toMatchObject({
+          status: 422,
+          code: "item_kind_missing",
+          message: "not yet — choose a type in review & amend",
+        });
+      });
+
+      it("is refused the same way when the reading carries a null or empty kind", () => {
+        for (const kind of [null, ""]) {
+          const approval = { ...mailApproval(), item: { ...mailApproval().item, kind } };
+          expect(refusalOf(() => canonicalReviewedIntakeHash(approval as never))).toMatchObject({
+            status: 422,
+            code: "item_kind_missing",
+            message: "not yet — choose a type in review & amend",
+          });
+        }
+      });
+
+      // Control: the create form has its own chooser, so its words stay plain.
+      it("leaves the create form's own refusal as the plain 'not yet — choose a type'", () => {
+        const rule = itemRefusal({ title: "Boiler", sectionId: "s", dueDate: undefined, recurrenceMonths: undefined }, undefined);
+        expect(rule).not.toBeNull();
+        expect(new Refusal(rule!)).toMatchObject({ status: 422, code: "item_kind_missing", message: "not yet — choose a type" });
+      });
     });
 
     it("drops a schedule with no date, as the engine does for any item", () => {
