@@ -611,3 +611,25 @@ describe("get-orbit.sh", () => {
     });
   });
 });
+
+describe("docs/releasing.md key rotation (#1316)", () => {
+  const releasingDoc = readFileSync(new URL("../docs/releasing.md", import.meta.url), "utf8");
+  const paragraphStartingWith = (prefix) => {
+    const paragraph = releasingDoc.split(/\n\s*\n/).find((p) => p.startsWith(prefix));
+    expect(paragraph, `paragraph starting ${prefix}`).toBeDefined();
+    return paragraph.replace(/\s+/g, " ");
+  };
+
+  it("Key rotation re-signs the published latest manifest and replaces its .sig asset", () => {
+    const rotation = paragraphStartingWith("**Key rotation:**");
+    expect(rotation).toContain("sign-blob");
+    expect(rotation).toContain("--clobber");
+    expect(rotation).toMatch(/latest/i);
+    expect(rotation).toContain(".sig");
+  });
+
+  it("launcher Rotation no longer claims latest unconditionally carries a current-key manifest", () => {
+    const rotation = paragraphStartingWith("**Rotation.**");
+    expect(rotation).not.toMatch(/`latest` always carries a manifest signed under the current key/);
+  });
+});

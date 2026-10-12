@@ -198,7 +198,24 @@ rebuilding that image and re-pinning. The pin is the digest from base-image's
 `publish_signing` run (first published 2026-10-10).
 
 **Key rotation:** generate a new pair, replace the two files on the runner
-host, commit the new `cosign.pub`. Attestations made under the old key stop
+host, commit the new `cosign.pub`, then re-sign the manifest that `latest`
+points at with the new key and replace its `.sig` asset. Until that third
+step is done the one-line installer refuses every install and update: the
+`get-orbit.sh` on `main` carries only the committed key, and nothing re-signs
+a published manifest by itself (signing only runs inside a release pipeline).
+On the runner host, as `gitlab-signer` (the key is readable only by it), with
+`vX.Y.Z` the current `latest` release, sign exactly as
+`scripts/ci/sign-release-manifest.sh` does and upload over the old signature:
+```sh
+gh release download vX.Y.Z -R tomlawesome/orbit -p orbit-release-manifest.json
+cosign sign-blob --key /etc/orbit-signing/cosign.key \
+  --tlog-upload=false --use-signing-config=false --yes \
+  --new-bundle-format=false \
+  --output-signature orbit-release-manifest.json.sig orbit-release-manifest.json
+gh release upload vX.Y.Z orbit-release-manifest.json.sig -R tomlawesome/orbit --clobber
+```
+The keyless `.sigstore.json` countersignature covers the manifest, not the
+`.sig`, so it is unaffected. Attestations made under the old key stop
 verifying, so any digest not yet published must go through validation again
 after a rotation.
 
@@ -402,8 +419,9 @@ SHA2-256(stdin)= ed183527165c366de2a4005d8b20c3df687ea2e35d488de7961806867c9d1a1
 
 **Rotation.** Follows "Key rotation" above, plus one thing specific to the
 launcher path: the scripts on `main` only accept manifests signed after the
-rotation, since they carry only the current key. `latest` always carries a
-manifest signed under the current key. A user who pins an older
+rotation, since they carry only the current key. `latest` carries a
+manifest signed under the current key only once the re-sign step above is
+done. A user who pins an older
 `ORBIT_VERSION` must also fetch `get-orbit.sh` from that version's own tag
 (`…/orbit/vX.Y.Z/scripts/get-orbit.sh`), which still carries the key that
 release was actually signed with.
