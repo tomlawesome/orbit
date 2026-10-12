@@ -589,6 +589,11 @@ export function mountCreate() {
     const label = save.textContent;
     save.textContent = "Adding…";
     let landed = false;
+    /* The save sends what was held at the press: a read refused while it is
+       in flight drops the document from the form, not from this save, so
+       the server's own refusal reaches the words below instead of the item
+       landing without its paper and nothing said. */
+    const held = { attachment, attachmentId };
 
     try {
       const active = household ?? await activeHousehold();
@@ -608,7 +613,7 @@ export function mountCreate() {
          lands in the catch below like any failed save: the entry is kept,
          and the next attempt re-sends both under the same ids, so neither
          is stored twice. */
-      if (attachment) await attachItemDocument(active.id, draftId, attachment, attachmentId);
+      if (held.attachment) await attachItemDocument(active.id, draftId, held.attachment, held.attachmentId);
 
       /* The server holds the entry, and its document, from here, so leaving
          must not ask about discarding them (#1151 W1-S1). */

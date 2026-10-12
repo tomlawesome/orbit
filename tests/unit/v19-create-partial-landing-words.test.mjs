@@ -47,6 +47,8 @@ let attaches = [];
 let itemAnswers = [];
 /** The document attach's statuses, in order; the last one repeats. @type {number[]} */
 let attachStatuses = [];
+/** When set, the item save and the document read wait here until the test answers them. */
+let held = /** @type {{ save: ((response: Response) => void) | null, read: ((response: Response) => void) | null } | null} */ (null);
 
 const workspace = {
   activeHouseholdId: "hh-1",
@@ -60,14 +62,19 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), { status
 function stubFetch() {
   saves = [];
   attaches = [];
+  held = null;
   vi.stubGlobal("fetch", vi.fn(async (url, init) => {
     const href = String(url);
+    if (held && href.endsWith("/item-document-inspection") && init?.method === "POST") {
+      return new Promise((answer) => { held.read = answer; });
+    }
     if (href.includes("/api/auth/session")) return json({ user: { id: "u1" }, csrfToken: "t1" });
     if (href.endsWith("/api/workspace") && !init?.method) return json({ workspace });
     if (href.includes("/api/workspace/commands") && init?.method === "POST") {
       const body = JSON.parse(String(init.body));
       if (body.dryRun) return json({});
       saves.push({ url: href, init });
+      if (held) return new Promise((answer) => { held.save = answer; });
       const answer = itemAnswers[Math.min(saves.length, itemAnswers.length) - 1];
       if (answer === "version_required") {
         return json({ error: { code: "version_required", message: "This item changed on another device; refresh and try again" } }, 409);
@@ -164,6 +171,42 @@ describe("#1316: the desk form's words when the item landed and its document was
       expectHalfLandedWords(/** @type {HTMLElement} */ (document.getElementById("save-note")).textContent ?? "");
     },
   );
+
+  it("a read refused while Add is pending does not skip the upload: the file held at submit is sent and the words are shown", async () => {
+    held = { save: null, read: null };
+    attachStatuses = [503];
+    const { mountCreate } = await import("../../web/src/routes/create/create.behaviour.js");
+    mounted = mountCreate();
+    await settle();
+    const name = /** @type {HTMLInputElement} */ (document.getElementById("f-name"));
+    name.value = "Boiler cover";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector("#sections button")?.dispatchEvent(new Event("click", { bubbles: true }));
+    const picker = /** @type {HTMLInputElement} */ (document.querySelector('#card input[type="file"]'));
+    Object.defineProperty(picker, "files", { value: [new File([new Uint8Array([37, 80, 68, 70])], "policy.pdf", { type: "application/pdf" })] });
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
+    await settle();
+    expect(held.read, "the read is still pending when Add is pressed").not.toBeNull();
+
+    document.getElementById("card")?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+    await settle();
+    expect(saves, "the item save is pending").toHaveLength(1);
+    expect(held.save, "applyCommand is waiting on its answer").not.toBeNull();
+
+    // While applyCommand is pending, the read is answered: refused.
+    held.read?.(json({ attachmentDisposition: "rejected", message: REFUSAL }));
+    await settle();
+    // Then the item save answers ok.
+    held.save?.(json({ workspace }));
+    await settle();
+
+    expect(attaches, "the upload was still attempted").toHaveLength(1);
+    const sent = /** @type {File} */ (attaches[0].init.body);
+    expect(sent.name, "with the file held at submit").toBe("policy.pdf");
+    expect(sent.size).toBe(4);
+    expect(goto, "the form does not navigate away silently").not.toHaveBeenCalled();
+    expectHalfLandedWords(/** @type {HTMLElement} */ (document.getElementById("save-note")).textContent ?? "");
+  });
 
   it("a second press of Add sends the item and the document again under the same ids", async () => {
     itemAnswers = ["ok", "version_required"];
