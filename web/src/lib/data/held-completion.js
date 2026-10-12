@@ -93,7 +93,7 @@ export function clearHeldCompletionStash(command, storage = defaultStorage()) {
  * @param {{
  *   apply: (command: object) => Promise<unknown>,
  *   onsent?: () => unknown,
- *   onfailed?: (error: unknown) => unknown,
+ *   onfailed?: (error: unknown, command: object) => unknown,
  *   holdMs: number,
  *   storage?: StashStorage | null,
  * }} options
@@ -112,7 +112,7 @@ export function createHeldCompletion({ apply, onsent = () => {}, onfailed = () =
       clearHeldCompletionStash(job.command, storage);
       await onsent();
     } catch (error) {
-      await onfailed(error);
+      await onfailed(error, job.command);
     }
   }
 
@@ -160,7 +160,8 @@ export function createHeldCompletion({ apply, onsent = () => {}, onfailed = () =
           await onsent();
         }).catch(async (error) => {
           if (isConflict(error) || isRefused(error)) clearHeldCompletionStash(command, storage);
-          await onfailed(error);
+          /* The command too, so the screen can name the item whose tick was lost. */
+          await onfailed(error, command);
         });
       }
     },
@@ -168,6 +169,16 @@ export function createHeldCompletion({ apply, onsent = () => {}, onfailed = () =
 }
 
 /** A 4xx: the engine will give the same answer however often it is asked. @param {unknown} error */
-function isRefused(error) {
+export function isRefused(error) {
   return error instanceof WorkspaceError && typeof error.status === "number" && error.status >= 400 && error.status < 500;
+}
+
+/**
+ * What the wake says when a completion was refused: it was NOT recorded and
+ * is already gone from the stash, so "refresh and try again" (the engine's
+ * words for a conflict) cannot bring it back; the member has to mark it again.
+ * @param {string} title
+ */
+export function droppedCompletionWords(title) {
+  return `${title}: that tick was not recorded — mark it as done again`;
 }

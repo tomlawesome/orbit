@@ -10,6 +10,7 @@
   import { sectionColourOf } from "$lib/option-colour.js";
   import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
+  import { droppedCompletionWords } from "$lib/data/held-completion.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf, manifestRowOf } from "$lib/data/chart.js";
   import { dayMonth, initials as initialsOf, money, MONTHS, plural } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
@@ -630,8 +631,12 @@
         clearHeldCompletionStash(command);
         await onchanged?.();
       }).catch((error) => {
-        if (error instanceof WorkspaceError && (error.status ?? 0) >= 400 && (error.status ?? 0) < 500) clearHeldCompletionStash(command);
-        wake(wordsOf(error, "couldn't complete it — try again"), { failure: true });
+        const refused = error instanceof WorkspaceError && (error.status ?? 0) >= 400 && (error.status ?? 0) < 500;
+        if (refused) clearHeldCompletionStash(command);
+        /* Not recorded and now dropped: name the item rather than echo the
+           engine's "refresh and try again", which cannot bring it back. */
+        const title = refused ? rawItems.get(sent.itemId)?.title : null;
+        wake(title ? droppedCompletionWords(title) : wordsOf(error, "couldn't complete it — try again"), { failure: true });
       });
     }
   });

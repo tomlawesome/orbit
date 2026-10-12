@@ -145,7 +145,7 @@ describe("#1316 W2-S1: a replayed completion refused with a version conflict is 
     held.retryStashed(isConflict);
     await settle();
     expect(onfailed).toHaveBeenCalledTimes(1);
-    expect(onfailed).toHaveBeenCalledWith(conflict);
+    expect(onfailed).toHaveBeenCalledWith(conflict, expect.objectContaining({ itemId: "i1" }));
     expect(onsent).not.toHaveBeenCalled();
     expect(readHeldCompletionStash(storage)).toEqual([]);
   });

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as heldCompletion from "../../web/src/lib/data/held-completion.js";
 import {
   HELD_COMPLETION_KEY, createHeldCompletion, readHeldCompletionStash,
 } from "../../web/src/lib/data/held-completion.js";
@@ -91,13 +92,52 @@ describe("a held completion", () => {
     await flush();
     expect(apply).toHaveBeenCalledTimes(2);
     expect(onsent).toHaveBeenCalledTimes(1);
-    expect(onfailed).toHaveBeenCalledWith(conflict);
+    expect(onfailed).toHaveBeenCalledWith(conflict, { itemId: "i2" });
     expect(readHeldCompletionStash(storage)).toEqual([]);
+  });
+
+  it("reports a dropped completion with the error and the dropped command, so the caller knows its itemId (#1316)", async () => {
+    const storage = memoryStorage();
+    storage.setItem(HELD_COMPLETION_KEY, JSON.stringify([{ type: "item.complete", itemId: "i2" }]));
+    const conflict = Object.assign(new Error("conflict"), { code: "version_conflict" });
+    const onfailed = vi.fn();
+    const held = createHeldCompletion({ apply: async () => { throw conflict; }, onfailed, holdMs: 4000, storage });
+    held.retryStashed((error) => /** @type {any} */ (error)?.code === "version_conflict");
+    await flush();
+    expect(onfailed).toHaveBeenCalledTimes(1);
+    expect(onfailed).toHaveBeenCalledWith(conflict, { type: "item.complete", itemId: "i2" });
+  });
+
+  it("reports a failed live send with the error and the command too (#1316)", async () => {
+    const storage = memoryStorage();
+    const boom = new Error("offline");
+    const onfailed = vi.fn();
+    const held = createHeldCompletion({ apply: async () => { throw boom; }, onfailed, holdMs: 10, storage });
+    held.hold({ type: "item.complete", itemId: "i1" });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(onfailed).toHaveBeenCalledWith(boom, { type: "item.complete", itemId: "i1" });
   });
 
   it("reads the older single-slot stash the belt once wrote", () => {
     const storage = memoryStorage();
     storage.setItem(HELD_COMPLETION_KEY, JSON.stringify({ command: { itemId: "i1" } }));
     expect(readHeldCompletionStash(storage)).toEqual([{ itemId: "i1" }]);
+  });
+});
+
+describe("the words for a dropped completion (#1316)", () => {
+  /* The screens' shared helper, held-completion.js's droppedCompletionWords(title). */
+  const wake = () => /** @type {any} */ (heldCompletion).droppedCompletionWords("Boiler service");
+
+  it("names the item and says the tick was not recorded and must be marked again", () => {
+    const words = String(wake());
+    expect(words).toContain("Boiler service");
+    expect(words).toMatch(/not recorded/i);
+    expect(words).toMatch(/mark(ed)? (it )?(as done )?again/i);
+  });
+
+  it("does not tell the user to refresh and try again", () => {
+    expect(String(wake())).not.toMatch(/refresh/i);
+    expect(String(wake())).not.toMatch(/try again/i);
   });
 });

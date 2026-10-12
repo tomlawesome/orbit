@@ -18,7 +18,7 @@
   import { markDoor } from "../household/[id]/door.js";
   import { applyCommand, approveWithOperation, attachItemDocument, dismissReceipt, dueDateIn, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
   import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
-  import { createHeldCompletion } from "$lib/data/held-completion.js";
+  import { createHeldCompletion, droppedCompletionWords, isRefused } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
   import { ago, agoLong, dayMonth, initials as initialsOf, money, MONTHS, plural, weekdayOf } from "$lib/format.js";
@@ -654,8 +654,11 @@
     apply: applyCommand,
     holdMs: WAKE_HOLD_MS,
     onsent: () => rereadAll().catch(() => {}),
-    onfailed: (error) => {
-      wake(wordsOf(error, "couldn't complete it — try again"), { failure: true });
+    onfailed: (error, command) => {
+      /* A refusal means the tick was not recorded: name the item, when home
+         still holds it, rather than echo the engine's "refresh and try again". */
+      const title = isRefused(error) ? rawItems.get(/** @type {any} */ (command)?.itemId)?.title : null;
+      wake(title ? droppedCompletionWords(title) : wordsOf(error, "couldn't complete it — try again"), { failure: true });
     },
   });
   beforeNavigate(() => { held.flush(); });
