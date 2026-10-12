@@ -156,6 +156,8 @@ export interface MarkupOptions {
 
 export interface DawnMarkupOptions extends MarkupOptions {
   lockup?: string;
+  /** the wordmark is the page's <h1> (default) or a plain div, for a page with its own h1 */
+  heading?: boolean;
 }
 
 export interface DuskMarkupOptions extends MarkupOptions {
