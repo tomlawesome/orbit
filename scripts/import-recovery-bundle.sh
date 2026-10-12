@@ -161,7 +161,7 @@ run_engine() {
   local -a run_args=(run --rm --no-deps -i) directory_args=()
   if [[ -t 0 && -t 1 ]]; then run_args+=(-t); else run_args+=(-T); fi
   run_args+=(-e "ORBIT_HOST_UID=$host_uid" -e "ORBIT_HOST_GID=$host_gid" -e "ORBIT_HOST_DEPLOY_DIR=$repo_dir")
-  for name in ORBIT_NONINTERACTIVE_RESTORE ORBIT_RECOVERY_TEST_MODE ORBIT_RESTORE_TEST_MODE ORBIT_RESTORE_TEST_SYNC_FAILURE_STAGE \
+  for name in ORBIT_NONINTERACTIVE_RESTORE ORBIT_RECOVERY_PROMPTS ORBIT_RECOVERY_TEST_MODE ORBIT_RESTORE_TEST_MODE ORBIT_RESTORE_TEST_SYNC_FAILURE_STAGE \
     ORBIT_RESTORE_TEST_FAILURE_STAGE ORBIT_RESTORE_TEST_CHECKPOINT_FAILURE ORBIT_RESTORE_TEST_HARD_INTERRUPT_STAGE; do
     [[ -z "${!name:-}" ]] || run_args+=(-e "$name=${!name}")
   done

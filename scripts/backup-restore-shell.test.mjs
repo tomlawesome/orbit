@@ -388,6 +388,38 @@ describe("the one-off each script becomes (E1/E5)", () => {
     expect(JSON.stringify(result.calls)).not.toContain(passphrase);
   });
 
+  // #1316 audit: ORBIT_RECOVERY_PROMPTS=machine tells the engine to use the
+  // machine prompt protocol; it has to reach the one-off like the other switches.
+  function recoveryPromptsArgs(script) {
+    return script === "backup.sh" ? [] : script === "restore.sh" ? ["--yes"] : [];
+  }
+
+  it.each(SCRIPTS)("%s forwards ORBIT_RECOVERY_PROMPTS=machine to the engine run as -e ORBIT_RECOVERY_PROMPTS=machine", (script) => {
+    const deployment = makeDeployment();
+    const bundle = join(deployment.deployDir, "p.tar");
+    writeFileSync(bundle, "bundle");
+    const args = script === "backup.sh" ? [] : [...recoveryPromptsArgs(script), bundle];
+    const result = run(deployment, script, args, { env: { ORBIT_RECOVERY_PROMPTS: "machine" } });
+    expect(result.status).toBe(0);
+    const engine = engineRun(result.calls);
+    expect(engine.env.ORBIT_RECOVERY_PROMPTS).toBe("machine");
+    const runCall = composeCalls(result.calls).filter((call) => call.verb === "run").at(-1).rest;
+    const flagIndex = runCall.findIndex((arg, index) => arg === "-e" && runCall[index + 1] === "ORBIT_RECOVERY_PROMPTS=machine");
+    expect(flagIndex).toBeGreaterThanOrEqual(0);
+  });
+
+  it.each(SCRIPTS)("%s does not pass ORBIT_RECOVERY_PROMPTS to the engine run when it is unset", (script) => {
+    const deployment = makeDeployment();
+    const bundle = join(deployment.deployDir, "p.tar");
+    writeFileSync(bundle, "bundle");
+    const args = script === "backup.sh" ? [] : [...recoveryPromptsArgs(script), bundle];
+    const result = run(deployment, script, args);
+    expect(result.status).toBe(0);
+    expect(engineRuns(result.calls).length).toBeGreaterThan(0);
+    for (const engine of engineRuns(result.calls)) expect(Object.keys(engine.env)).not.toContain("ORBIT_RECOVERY_PROMPTS");
+    expect(JSON.stringify(result.calls)).not.toContain("ORBIT_RECOVERY_PROMPTS");
+  });
+
   it.each(SCRIPTS)("%s passes the engine's exit status through", (script) => {
     const deployment = makeDeployment();
     const bundle = join(deployment.deployDir, "b.tar");

@@ -755,7 +755,7 @@ docker compose --env-file "$environment_file" \
   did; the "Machine prompts: backup/restore/recovery (v0)" grammar above is
   unchanged.
 - Switches travel as `-e NAME=value`, only when set: `ORBIT_NONINTERACTIVE_RESTORE`,
-  `ORBIT_RECOVERY_TEST_MODE`, and restore.sh's test switches
+  `ORBIT_RECOVERY_PROMPTS`, `ORBIT_RECOVERY_TEST_MODE`, and restore.sh's test switches
   (`ORBIT_RESTORE_TEST_*`, which `scripts/test-backup-restore.sh` sets). None
   is a secret; passphrases only ever travel on standard input.
 - `ORBIT_ENV_FILE` is the `--env-file`. `ORBIT_BACKUP_DIR` and
