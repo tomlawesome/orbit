@@ -2,7 +2,23 @@ import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// #1316 PR2-7: a test can make statfs report a small free space for one
+// directory tree (the work directory) and the truth everywhere else. Inert
+// unless `statfsOverride.directory` is set.
+const statfsOverride = vi.hoisted(() => ({ directory: undefined as string | undefined, freeKib: 0 }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    statfsSync: ((path: import("node:fs").PathLike, ...rest: unknown[]) => {
+      const real = (actual.statfsSync as (...args: unknown[]) => import("node:fs").StatsFs)(path, ...rest);
+      const directory = statfsOverride.directory;
+      return directory !== undefined && String(path).startsWith(directory) ? { ...real, bsize: 1024, bavail: statfsOverride.freeKib, bfree: statfsOverride.freeKib } : real;
+    }) as typeof actual.statfsSync,
+  };
+});
 
 import {
   BackupRestoreCliRefusal,
@@ -730,6 +746,62 @@ describe("runRestore (restore.sh's main flow :897-933, including check_capacity 
       expect([...adapter.openStageDatabases]).toEqual([]);
       expect(adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toBe(reportsFor(ORIGINAL_KEY, 10).crypto); // live database untouched
       expect(lockIsFree(join(backupDirectory, ".orbit-backup-restore.lock"))).toBe(true);
+    });
+
+    // #1316 PR2-7: the bundle used to be extracted into the work directory
+    // (tmpdir(), on the Docker data disk under the live database) and only
+    // then checked against free space. The free space of the work directory is
+    // injected by answering statfs for paths under it; the bundle itself is an
+    // ordinary small one whose listed member sizes exceed that answer.
+    it("#1316 PR2-7: refuses a bundle whose listed sizes exceed the work directory's free space before extracting, stopping the app or creating a stage database", () => {
+      const { restorePaths, adapter } = setup();
+      const bundlePath = buildBundle(join(sandbox, "preflight-space-source"), UPDATED_KEY, 64 * 1024, LIVE_KEK, join(sandbox, "preflight-space-backups"));
+      const workDir = mkdtempSync(join(sandbox, "restore-preflight-space-"));
+      // 8 KiB free under the work directory; everything else answers truthfully.
+      statfsOverride.directory = workDir;
+      statfsOverride.freeKib = 8;
+      let confirmCalled = false;
+      let error: unknown;
+      try {
+        runRestore({
+          backupTarPath: bundlePath,
+          documentKekHex: LIVE_KEK,
+          paths: restorePaths,
+          adapter,
+          workDir,
+          preflightOnly: true,
+          confirm: () => {
+            confirmCalled = true;
+            return true;
+          },
+        });
+      } catch (caught) {
+        error = caught;
+      } finally {
+        statfsOverride.directory = undefined;
+      }
+
+      expect(error, "the preflight accepted a bundle larger than the work directory's free space").toBeInstanceOf(Error);
+      // The bundle's own extraction refuses, not the later decrypt-step check
+      // ("Document archive decryption failed; not enough space ...").
+      expect((error as Error).message).toMatch(/^Bundle archive could not be extracted; not enough space to stage/i);
+      // Nothing was written into the work directory (empty directories do not count).
+      const leftovers: string[] = [];
+      const walk = (dir: string): void => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          if (entry.isDirectory()) walk(join(dir, entry.name));
+          else leftovers.push(join(dir, entry.name));
+        }
+      };
+      walk(workDir);
+      expect(leftovers).toEqual([]);
+      // Refused before the stage database and before anything live was touched.
+      expect(adapter.stageDatabasesCreated).toBe(0);
+      expect(adapter.stopCalls).toBe(0);
+      expect(adapter.appRunning).toBe(true);
+      expect(confirmCalled).toBe(false);
+      expect(existsSync(restorePaths.journalPath)).toBe(false);
+      expect(existsSync(restorePaths.restoreRoot)).toBe(false);
     });
 
     it("refuses a bundle sealed with another key with the full run's own message", () => {
