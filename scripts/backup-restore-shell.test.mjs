@@ -831,13 +831,27 @@ describe("the stop / engine / start rule (E3)", () => {
   // the restored data, so it must not be stopped or started.
   it("restore.sh --finish runs the engine once with `restore --finish` and neither stops nor starts orbit-app (#1316 R1-4)", () => {
     const deployment = makeDeployment();
-    const result = run(deployment, "restore.sh", ["--finish"]);
+    const result = run(deployment, "restore.sh", ["--finish"], { env: { FAKE_CURL_STATUS: "0", ORBIT_RESTORE_HEALTH_SECONDS: "1" } });
     expect(result.status, result.stderr).toBe(0);
     const runs = engineRuns(result.calls);
     expect(runs).toHaveLength(1);
     expect(runs[0].command).toEqual(["/opt/orbit/cli/orbit.js", "restore", "--finish", "--dir", "/orbit-deploy"]);
     expect(verbs(result.calls)).toEqual(["run"]);
     expect(result.calls.filter((call) => call.includes("stop") || call.includes("start"))).toEqual([]);
+  });
+
+  // #1316 (owner decision 3a): the rollback copy is only discarded once the
+  // restored data is proven to work. With Orbit unhealthy, --finish runs no
+  // engine command (journal and checkpoint stay), touches no container, and
+  // names --recover as the way back.
+  it("restore.sh --finish with an unhealthy Orbit fails, runs no engine command, stops/starts nothing and names --recover (#1316 3a)", () => {
+    const deployment = makeDeployment();
+    const result = run(deployment, "restore.sh", ["--finish"], { env: { FAKE_CURL_STATUS: "7", ORBIT_RESTORE_HEALTH_SECONDS: "1" } });
+    expect(result.status).not.toBe(0);
+    expect(engineRuns(result.calls)).toEqual([]);
+    expect(result.calls.filter((call) => call.includes("stop") || call.includes("start"))).toEqual([]);
+    expect(result.stderr).toMatch(/not healthy/i);
+    expect(result.stderr).toContain("bash scripts/restore.sh --recover");
   });
 
   it("restore.sh reports a restore that never became healthy, and fails", () => {
