@@ -1785,9 +1785,12 @@ read_compose_project_name() {
 # <env-file> that names one (configure.sh's own lookup order) is already
 # present locally. Naming no image also succeeds, because configure.sh then
 # refuses on its own before it touches Docker; that refusal is a
-# configuration finding, not a Docker one.
+# configuration finding, not a Docker one. An exported ORBIT_IMAGE wins, as
+# it does in configure.sh. A malformed image also succeeds: configure.sh
+# refuses it before Docker, so it is reported as configuration-invalid
+# rather than as a missing image.
 engine_image_present() {
-  local image="" file
+  local image="${ORBIT_IMAGE:-}" file
   [[ "$docker_available" == 1 ]] || return 1
   for file in "$@"; do
     [[ -z "$image" ]] || break
@@ -1796,6 +1799,8 @@ engine_image_present() {
     image="${image%$'\r'}"
   done
   [[ -n "$image" ]] || return 0
+  # Same shape as configure.sh's is_valid_orbit_image.
+  [[ "$image" =~ ^orbit-local:[0-9a-f]{12}$ || "$image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || return 0
   timeout "$docker_probe_timeout" docker image inspect "$image" >/dev/null 2>&1
 }
 

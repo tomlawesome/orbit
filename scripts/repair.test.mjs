@@ -1576,7 +1576,7 @@ describe("scripts/repair.sh --check", () => {
   // unreachable, or the pinned image not present locally) the check cannot run
   // at all. That is "docker unavailable" (info), not a broken configuration,
   // and a read-only --check must never `docker pull`.
-  function runRepairWithFakeDocker(targetDir, args, { dockerScript, engineOptions, argvLogPath }) {
+  function runRepairWithFakeDocker(targetDir, args, { dockerScript, engineOptions, argvLogPath, env = {} }) {
     const binDir = mkdtempSync(join(tmpdir(), "orbit-repair-fakebin-"));
     scratchDirs.push(binDir);
     let script = dockerScript;
@@ -1591,7 +1591,7 @@ describe("scripts/repair.sh --check", () => {
     return failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "repair.sh"), ...args], {
       cwd: targetDir,
       encoding: "utf8",
-      env: repairChildEnv(binDir, {}),
+      env: repairChildEnv(binDir, env),
       ...processGuard(),
     }), { label: "runRepairWithFakeDocker" });
   }
@@ -1630,6 +1630,67 @@ describe("scripts/repair.sh --check", () => {
     });
 
     expectDockerUnavailableNotConfigurationFailure(result, argvLogPath);
+  });
+
+  // #1316 (A): a tag pin is something configure.sh refuses outright. The
+  // image-absent shortcut must not hide that behind docker-unavailable: the
+  // pin is invalid whether or not the image is local, so it is a fail-level
+  // configuration-invalid finding, and still nothing is pulled.
+  it("records configuration-invalid (fail), not docker-unavailable, and never pulls when .env-orbit pins a tag instead of a digest — #1316", () => {
+    const targetDir = makeFixture();
+    writeDigestPinnedEnv(targetDir, "ghcr.io/tomlawesome/orbit:v0.3.0");
+    const argvLogPath = join(scratchDir(), "docker-argv.log");
+
+    const result = runRepairWithFakeDocker(targetDir, ["--check"], {
+      engineOptions: { imagePresent: false, pullSucceeds: true },
+      argvLogPath,
+    });
+
+    const argvLog = existsSync(argvLogPath) ? readFileSync(argvLogPath, "utf8") : "";
+    expect(argvLog).not.toMatch(/^pull(\s|$)/m);
+    expect(result.stdout).toContain("finding class=configuration-invalid target=configuration severity=fail");
+    expect(result.stdout).not.toContain("finding class=docker-unavailable target=configuration");
+  });
+
+  // #1316 (B): configure.sh runs the image in the ORBIT_IMAGE environment
+  // variable ahead of the one in .env-orbit. The presence check must look at
+  // that same image; checking the file's (present) one lets configure.sh go
+  // on to `docker pull` the exported (absent) one.
+  it("checks the exported ORBIT_IMAGE, not the file's, so an absent exported digest is docker-unavailable and never pulled — #1316", () => {
+    const targetDir = makeFixture();
+    const scratch = scratchDir();
+    const argvLogPath = join(scratch, "docker-argv.log");
+    const wrappedLogPath = join(scratch, "wrapped-docker-argv.log");
+    const engineDir = mkdtempSync(join(tmpdir(), "orbit-repair-engine-"));
+    scratchDirs.push(engineDir);
+    const engineDockerPath = writeEngineDockerShim(engineDir, { imagePresent: true, pullSucceeds: true });
+    const innerPath = join(scratch, "docker-inner");
+    writeFileSync(innerPath, dockerShimScript({ engineDockerPath, argvLogPath }));
+    chmodSync(innerPath, 0o755);
+    const exportedDigest = `sha256:${"e".repeat(64)}`;
+    // Only the image .env-orbit names (FIXTURE_IMAGE_DIGEST) is local; every
+    // other `docker image inspect` fails like an image that was never pulled.
+    const dockerScript = [
+      "#!/usr/bin/env bash",
+      `printf '%s\\n' "$*" >> '${wrappedLogPath}'`,
+      'if [ "$1" = image ] && [ "$2" = inspect ]; then',
+      `  case "$*" in *'${FIXTURE_IMAGE_DIGEST}'*) ;; *) exit 1 ;; esac`,
+      "fi",
+      `exec '${innerPath}' "$@"`,
+      "",
+    ].join("\n");
+
+    const result = runRepairWithFakeDocker(targetDir, ["--check"], {
+      dockerScript,
+      argvLogPath,
+      env: { ORBIT_IMAGE: `ghcr.io/tomlawesome/orbit@${exportedDigest}` },
+    });
+
+    const wrappedLog = existsSync(wrappedLogPath) ? readFileSync(wrappedLogPath, "utf8") : "";
+    expect(wrappedLog).not.toMatch(/^pull(\s|$)/m);
+    expect(result.stdout).toContain("finding class=docker-unavailable target=configuration severity=info");
+    expect(result.stdout).not.toContain("configuration-invalid");
+    expect(result.status).not.toBe(4);
   });
 
   it("groups findings by the fixed class order regardless of discovery order", () => {
