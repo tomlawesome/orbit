@@ -489,6 +489,10 @@ describe("runDocumentMaintenanceCycle — phase order", () => {
       // 6. Storage reconciliation, due because it has never run.
       "update:documents",
       "select:documents",
+      // Mail-ingestion attachments and their staged objects are a second
+      // stored population, reconciled before the storage listings (#1316).
+      "select:imap_ingestion_attachments",
+      "select:imap_ingestion_staging_objects",
       "storage.listCiphertextObjects",
       "select:document_staging_objects",
       "storage.listStagingObjects",
