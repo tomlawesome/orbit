@@ -8,10 +8,40 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // directory tree (the work directory) and the truth everywhere else. Inert
 // unless `statfsOverride.directory` is set.
 const statfsOverride = vi.hoisted(() => ({ directory: undefined as string | undefined, freeKib: 0 }));
+//
+// #1316 (publish durability): the same mock also records, in call order, every
+// fsync, link and unlink, with the path each fsync'd descriptor was opened
+// on. Everything still runs for real; the wrappers only observe.
+const fsEvents = vi.hoisted(() => ({
+  recording: false,
+  log: [] as { op: "fsync" | "link" | "unlink"; path: string }[],
+  fdPaths: new Map<number, string>(),
+}));
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
     ...actual,
+    openSync: ((path: import("node:fs").PathLike, ...rest: unknown[]) => {
+      const fd = (actual.openSync as (...args: unknown[]) => number)(path, ...rest);
+      fsEvents.fdPaths.set(fd, String(path));
+      return fd;
+    }) as typeof actual.openSync,
+    closeSync: ((fd: number) => {
+      fsEvents.fdPaths.delete(fd);
+      return actual.closeSync(fd);
+    }) as typeof actual.closeSync,
+    fsyncSync: ((fd: number) => {
+      if (fsEvents.recording) fsEvents.log.push({ op: "fsync", path: fsEvents.fdPaths.get(fd) ?? `<unknown fd ${fd}>` });
+      return actual.fsyncSync(fd);
+    }) as typeof actual.fsyncSync,
+    linkSync: ((existing: import("node:fs").PathLike, created: import("node:fs").PathLike) => {
+      if (fsEvents.recording) fsEvents.log.push({ op: "link", path: String(existing) });
+      return actual.linkSync(existing, created);
+    }) as typeof actual.linkSync,
+    unlinkSync: ((path: import("node:fs").PathLike) => {
+      if (fsEvents.recording) fsEvents.log.push({ op: "unlink", path: String(path) });
+      return actual.unlinkSync(path);
+    }) as typeof actual.unlinkSync,
     statfsSync: ((path: import("node:fs").PathLike, ...rest: unknown[]) => {
       const real = (actual.statfsSync as (...args: unknown[]) => import("node:fs").StatsFs)(path, ...rest);
       const directory = statfsOverride.directory;
@@ -918,6 +948,50 @@ describe("runExportRecoveryBundle (export-recovery-bundle.sh's orchestration)", 
     expect(isValidDocumentKekHex(recoveredHex)).toBe(true);
     // The inner bundle is a byte-identical copy of the source.
     expect(readFileSync(join(extractedDir, "orbit-backup.tar"))).toEqual(readFileSync(sourceBundlePath));
+  });
+
+  // #1316: a hard link and an unlink only reach the disk once the file's data
+  // and then the directory entry are flushed; without fsync a power cut right
+  // after "export complete" can leave a missing or empty recovery bundle.
+  it("fsyncs the .installing file before linking it into place, and the backups directory after the link and unlink (#1316)", () => {
+    const documentsRoot = join(sandbox, "docs-fsync");
+    const sourceBundlePath = buildBundle(documentsRoot, ORIGINAL_KEY, 10, LIVE_KEK, join(sandbox, "source-backups-fsync"));
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    const recoveryDirectory = join(sandbox, "recovery-backups-fsync");
+    const passphrase = "correct horse battery staple";
+
+    fsEvents.log.length = 0;
+    fsEvents.recording = true;
+    let finalPath: string;
+    try {
+      ({ finalPath } = runExportRecoveryBundle({
+        sourceBundlePath,
+        documentKekHex: LIVE_KEK,
+        passphrase,
+        passphraseConfirmation: passphrase,
+        backupDirectory: recoveryDirectory,
+        adapter,
+        now: new Date("2026-02-02T00:00:00Z"),
+      }));
+    } finally {
+      fsEvents.recording = false;
+    }
+    const log = fsEvents.log.splice(0);
+    const describeLog = JSON.stringify(log, null, 1);
+    const installingPath = `${finalPath}.installing`;
+
+    const linkIndex = log.findIndex((event) => event.op === "link" && event.path === installingPath);
+    expect(linkIndex, `linkSync of the .installing file not seen: ${describeLog}`).toBeGreaterThanOrEqual(0);
+    const unlinkIndex = log.findIndex((event, index) => index > linkIndex && event.op === "unlink" && event.path === installingPath);
+    expect(unlinkIndex, `unlinkSync of the .installing file not seen after the link: ${describeLog}`).toBeGreaterThan(linkIndex);
+
+    const fileSyncIndexes = log.flatMap((event, index) => (event.op === "fsync" && event.path === installingPath ? [index] : []));
+    expect(fileSyncIndexes.length, `no fsyncSync on a descriptor of ${installingPath}: ${describeLog}`).toBeGreaterThan(0);
+    expect(fileSyncIndexes.some((index) => index < linkIndex), `the .installing file was not fsynced before linkSync: ${describeLog}`).toBe(true);
+
+    const directorySyncIndexes = log.flatMap((event, index) => (event.op === "fsync" && event.path === recoveryDirectory ? [index] : []));
+    expect(directorySyncIndexes.some((index) => index > linkIndex), `the backups directory was not fsynced after linkSync: ${describeLog}`).toBe(true);
+    expect(directorySyncIndexes.some((index) => index > unlinkIndex), `the backups directory was not fsynced after the .installing unlink: ${describeLog}`).toBe(true);
   });
 
   it("records the export with the adapter once the bundle is published (#968: what clears the administration card)", () => {

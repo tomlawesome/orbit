@@ -4,6 +4,42 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// #1316 (publish durability): record, in call order, every fsync, link and
+// unlink on the real file system, with the path each fsync'd descriptor was
+// opened on. Everything still runs for real; the wrappers only observe.
+const fsEvents = vi.hoisted(() => ({
+  recording: false,
+  log: [] as { op: "fsync" | "link" | "unlink"; path: string }[],
+  fdPaths: new Map<number, string>(),
+}));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    openSync: ((path: import("node:fs").PathLike, ...rest: unknown[]) => {
+      const fd = (actual.openSync as (...args: unknown[]) => number)(path, ...rest);
+      fsEvents.fdPaths.set(fd, String(path));
+      return fd;
+    }) as typeof actual.openSync,
+    closeSync: ((fd: number) => {
+      fsEvents.fdPaths.delete(fd);
+      return actual.closeSync(fd);
+    }) as typeof actual.closeSync,
+    fsyncSync: ((fd: number) => {
+      if (fsEvents.recording) fsEvents.log.push({ op: "fsync", path: fsEvents.fdPaths.get(fd) ?? `<unknown fd ${fd}>` });
+      return actual.fsyncSync(fd);
+    }) as typeof actual.fsyncSync,
+    linkSync: ((existing: import("node:fs").PathLike, created: import("node:fs").PathLike) => {
+      if (fsEvents.recording) fsEvents.log.push({ op: "link", path: String(existing) });
+      return actual.linkSync(existing, created);
+    }) as typeof actual.linkSync,
+    unlinkSync: ((path: import("node:fs").PathLike) => {
+      if (fsEvents.recording) fsEvents.log.push({ op: "unlink", path: String(path) });
+      return actual.unlinkSync(path);
+    }) as typeof actual.unlinkSync,
+  };
+});
+
 import { PROCESS_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
 import {
   type BackupDockerAdapter,
@@ -136,6 +172,41 @@ describe("createBackupBundle (in-memory fake adapter, no process spawning)", () 
     extractTar(finalTarPath, extractedDir);
     const fields = validateBackupBundleContents(extractedDir, KEK_A, { pgRestoreListOk: () => true });
     expect(fields.documentKekSha256).toBe(documentKekFingerprint(KEK_A));
+  });
+
+  // #1316: a hard link and an unlink only reach the disk once the file's data
+  // and then the directory entry are flushed; without fsync a power cut right
+  // after "backup complete" can leave a missing or empty bundle.
+  it("fsyncs the .installing file before linking it into place, and the backups directory after the link and unlink (#1316)", () => {
+    const sandbox = newSandbox("orbit-create-bundle-fsync-");
+    const backupDirectory = join(sandbox, "backups");
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    const finalTarPath = join(backupDirectory, "orbit-20260813-000000.tar");
+    const installingPath = `${finalTarPath}.installing`;
+    const adapter = new FakeAdapter({ documentsTarBuilder: () => emptyDocumentsTar(sandbox) });
+
+    fsEvents.log.length = 0;
+    fsEvents.recording = true;
+    try {
+      createBackupBundle(backupDirectory, finalTarPath, KEK_A, adapter, "2026-08-13T00:00:00Z");
+    } finally {
+      fsEvents.recording = false;
+    }
+    const log = fsEvents.log.splice(0);
+    const describeLog = JSON.stringify(log, null, 1);
+
+    const linkIndex = log.findIndex((event) => event.op === "link" && event.path === installingPath);
+    expect(linkIndex, `linkSync of the .installing file not seen: ${describeLog}`).toBeGreaterThanOrEqual(0);
+    const unlinkIndex = log.findIndex((event, index) => index > linkIndex && event.op === "unlink" && event.path === installingPath);
+    expect(unlinkIndex, `unlinkSync of the .installing file not seen after the link: ${describeLog}`).toBeGreaterThan(linkIndex);
+
+    const fileSyncIndexes = log.flatMap((event, index) => (event.op === "fsync" && event.path === installingPath ? [index] : []));
+    expect(fileSyncIndexes.length, `no fsyncSync on a descriptor of ${installingPath}: ${describeLog}`).toBeGreaterThan(0);
+    expect(fileSyncIndexes.some((index) => index < linkIndex), `the .installing file was not fsynced before linkSync: ${describeLog}`).toBe(true);
+
+    const directorySyncIndexes = log.flatMap((event, index) => (event.op === "fsync" && event.path === backupDirectory ? [index] : []));
+    expect(directorySyncIndexes.some((index) => index > linkIndex), `the backups directory was not fsynced after linkSync: ${describeLog}`).toBe(true);
+    expect(directorySyncIndexes.some((index) => index > unlinkIndex), `the backups directory was not fsynced after the .installing unlink: ${describeLog}`).toBe(true);
   });
 
   // #383: createBackupBundle used to read the whole collected documents.tar

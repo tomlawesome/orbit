@@ -4,6 +4,7 @@ import {
   constants,
   fchmodSync,
   fstatSync,
+  fsyncSync,
   linkSync,
   lstatSync,
   mkdtempSync,
@@ -15,7 +16,7 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   createCipheriv,
   createDecipheriv,
@@ -491,6 +492,18 @@ export function createTar(workDir: string, outputPath: string, members: readonly
   const result = spawnSync("tar", ["-C", workDir, "-cf", outputPath, ...members], { encoding: "utf8" });
   if (result.status !== 0) {
     throw new Error(`tar failed to package the bundle: ${result.stderr ?? ""}`);
+  }
+  // tar's writes may still be only in the page cache; the data must be on
+  // disk before publishBundleAtomically gives it its final name.
+  fsyncPath(outputPath);
+}
+
+function fsyncPath(path: string): void {
+  const descriptor = openSync(path, constants.O_RDONLY);
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
   }
 }
 
@@ -1014,6 +1027,9 @@ export function publishBundleAtomically(temporaryPath: string, finalPath: string
     throw error;
   }
   unlinkSync(temporaryPath);
+  // A link is metadata: fsync the directory so the final name survives a
+  // power loss, not just the (already fsynced) data.
+  fsyncPath(dirname(finalPath));
 }
 
 export interface CreateBackupBundleResult {
