@@ -485,10 +485,21 @@ export function runConfigurationPreflight(environmentFile: string): Configuratio
   return { ok: true };
 }
 
+// An undecodable file is reported only as "not_utf8" on stdout, which the
+// installer never shows; without naming the encoding an operator whose editor
+// saved .env-orbit as cp1252 is rolled back with nothing to say why.
+export const NOT_UTF8_FAILURE_MESSAGE =
+  ".env-orbit is not valid UTF-8; re-save it as UTF-8 and run the install again (restoring the previous deployment).";
+
+export function isNotUtf8Failure(result: ConfigurationCommandResult): boolean {
+  return result.status !== 0 && result.stdout.startsWith("not_utf8");
+}
+
 // Names the offending line where the parser knows it: without the key an
 // operator whose file still carries a retired setting is rolled back with
 // nothing to say which line to fix, and stays blocked.
 function preflightFailureMessage(result: ConfigurationCommandResult): string {
+  if (isNotUtf8Failure(result)) return NOT_UTF8_FAILURE_MESSAGE;
   const { key } = result;
   if (key !== undefined) {
     switch (result.stderr.trim()) {
@@ -522,6 +533,7 @@ export function runConfigurationMigration(target: ConfigurationMigrationTarget):
 
 /** runConfigurationMigration's decision on one migration result. */
 export function classifyMigrationResult(result: ConfigurationCommandResult): ConfigurationMigrationOutcome {
+  if (isNotUtf8Failure(result)) return { ok: false, message: NOT_UTF8_FAILURE_MESSAGE };
   if (result.status !== 0) {
     return { ok: false, message: "Configuration migration failed; restoring the previous deployment." };
   }

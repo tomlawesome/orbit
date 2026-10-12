@@ -99,7 +99,10 @@ describe("migration of an .env-orbit that is not valid UTF-8 (#1316 O1-S1)", () 
     expect(result.stdout).not.toMatch(/^Orbit configuration: migrated/);
     const outcome = runConfigurationMigration(targetFor(dir));
     expect(outcome.ok).toBe(false);
-    expect(`${result.stderr}\n${result.stdout}\n${outcome.message}`).toMatch(/utf-?8/i);
+    // The message alone: it is what the installer shows the operator, and
+    // stdout is not. It must say what is wrong and which file.
+    expect(outcome.message).toMatch(/utf-?8/i);
+    expect(outcome.message).toContain(".env-orbit");
     const after = readFileSync(join(dir, ".env-orbit"));
     expect(after.equals(original)).toBe(true);
     expect(after.includes(Buffer.from([0xef, 0xbf, 0xbd]))).toBe(false);

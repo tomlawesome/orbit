@@ -183,6 +183,24 @@ describe("updateManagedKeys", () => {
     expect(after.includes(Buffer.from([0xef, 0xbf, 0xbd]))).toBe(false);
   });
 
+  it("#1316 O1-S1: runConfigureApply on a cp1252 .env-orbit refuses with a message naming UTF-8, leaving the bytes unchanged", () => {
+    const original = Buffer.concat([
+      Buffer.from("APP_URL=https://old.example.com\nSMTP_PASSWORD=caf", "utf8"),
+      Buffer.from([0xe9]),
+      Buffer.from("-secret\n", "utf8"),
+    ]);
+    writeFileSync(envPath(), original, { mode: 0o600 });
+    let refusal: unknown;
+    try {
+      runConfigureApply(deployDir, undefined);
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(ConfigureEngineRefusal);
+    expect((refusal as ConfigureEngineRefusal).message).toMatch(/utf-?8/i);
+    expect(readFileSync(envPath()).equals(original)).toBe(true);
+  });
+
   it("guarantee #7: appends a key with no existing assignment, in call order", () => {
     writeFileSync(envPath(), "OTHER=1\n", { mode: 0o600 });
     updateManagedKeys(deployDir, [

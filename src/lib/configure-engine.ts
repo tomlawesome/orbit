@@ -27,7 +27,7 @@ import {
 } from "./config-contract";
 import { acquireDeployLock as acquireSharedDeployLock } from "./deploy-lock";
 import { HostOwnershipError, applyHostOwnership } from "./host-ownership";
-import { preflightEnvironmentFile } from "./configuration-migration";
+import { NOT_UTF8_FAILURE_MESSAGE, isNotUtf8Failure, preflightEnvironmentFile } from "./configuration-migration";
 import { decodeUtf8Strict } from "./env-orbit-file";
 import { ensureVapidKeys } from "./vapid-keys";
 
@@ -839,7 +839,7 @@ export function setDeploymentProfile(deployDir: string, preset: string, model: s
 
 export type ConfigurePreflightOutcome =
   | { ok: true }
-  | { ok: false; code: "preflight-failed" | "configuration-migration-required" };
+  | { ok: false; code: "preflight-failed" | "configuration-migration-required"; message?: string };
 
 /**
  * run_configuration_preflight (configure.sh guarantee #2): an existing
@@ -852,6 +852,7 @@ export function runConfigurePreflight(deployDir: string): ConfigurePreflightOutc
   const envPath = join(deployDir, ENVIRONMENT_FILE_NAME);
   if (!pathInfo(envPath).existsFollowing && !pathInfo(envPath).isSymlink) return { ok: true };
   const result = preflightEnvironmentFile(envPath);
+  if (isNotUtf8Failure(result)) return { ok: false, code: "preflight-failed", message: NOT_UTF8_FAILURE_MESSAGE };
   if (result.status !== 0) return { ok: false, code: "preflight-failed" };
   if (/^safely_migratable ORBIT_CONFIG_SCHEMA_VERSION$/m.test(result.stdout)) {
     return { ok: false, code: "configuration-migration-required" };
@@ -910,7 +911,7 @@ export function runConfigureApply(
     if (preflight.code === "configuration-migration-required") {
       refuse("configuration_migration_required", preflight.code);
     }
-    refuse("Configuration preflight failed; restoring the previous deployment.", preflight.code);
+    refuse(preflight.message ?? "Configuration preflight failed; restoring the previous deployment.", preflight.code);
   }
   // Before anything is written, so a refused run changes nothing.
   refuseRetiredSecretsDirectory(deployDir);
