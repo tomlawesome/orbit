@@ -2,10 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "@/db";
-import { documents, items } from "@/db/schema";
+import { documents, items, sections } from "@/db/schema";
 import { decryptPortableArchive, encryptPortableArchive } from "@/server/portable-archive";
 import { createPortableArchive, importPortableArchive, readPortableArchive } from "@/server/portable-archive-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
+import { readWorkspace } from "@/server/workspace-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 
 const passphrase = "correct-horse-battery-staple";
@@ -169,5 +170,136 @@ describe("portable archive export access and document selection (#1049)", () => 
     const exportedIds = (payload.documents as Array<{ id: string }>).map((document) => document.id);
     expect(exportedIds).toContain(fixture.document.id);
     expect(exportedIds).not.toContain(pendingDeletion.id);
+  });
+});
+
+describe("portable archive import section bounds (#1316)", () => {
+  // The workspace reader (householdWorkspaceSchema, src/lib/workspace.ts)
+  // allows 1 to 12 sections per household and re-validates every stored
+  // section, so an import that pushes the total past that, or that stores a
+  // section name or icon the reader rejects, leaves a household that
+  // readWorkspace refuses to read forever. Owner decision (2026-10-12): refuse
+  // up front with a 422 naming the limit; never merge by name.
+  const SECTION_LIMIT = 12;
+
+  function archiveWithSections(sectionOverrides: Array<Record<string, unknown>>) {
+    const base = archivePayload({ sectionId: randomUUID(), itemId: randomUUID() });
+    const archiveSections = sectionOverrides.map((overrides, index) => {
+      const id = randomUUID();
+      return {
+        id,
+        slug: `imported-bound-${index}-${id.slice(0, 8)}`,
+        name: `Imported section ${index}`,
+        icon: "home",
+        accent: "blue",
+        position: index + 1,
+        visible: true,
+        ...overrides,
+      };
+    });
+    return {
+      ...base,
+      sections: archiveSections,
+      items: [{ ...base.items[0], sectionId: archiveSections[0].id }],
+    };
+  }
+
+  async function sectionCount(householdId: string) {
+    return (await getDb().select({ id: sections.id }).from(sections).where(eq(sections.householdId, householdId))).length;
+  }
+
+  async function importedItemCount(householdId: string) {
+    return (await getDb().select({ id: items.id }).from(items)
+      .where(and(eq(items.householdId, householdId), isNotNull(items.titleEnc), eq(items.status, "active")))).length;
+  }
+
+  it("refuses with a 422 naming the section limit when the import would take the household past it, writing nothing", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-import-section-limit");
+    // The fixture household already has one section; bring it to nine.
+    await getDb().insert(sections).values(Array.from({ length: 8 }, (_, index) => ({
+      householdId: fixture.household.id,
+      slug: `existing-${index}-${randomUUID().slice(0, 8)}`,
+      name: `Existing ${index}`,
+      position: index + 1,
+    })));
+    expect(await sectionCount(fixture.household.id)).toBe(9);
+    const itemsBefore = await importedItemCount(fixture.household.id);
+
+    // 9 existing + 4 new = 13, one over the limit of 12.
+    const archive = archiveWithSections([{}, {}, {}, {}]);
+    const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase);
+
+    const failure = await importPortableArchive({
+      userId: fixture.users.member.id,
+      householdId: fixture.household.id,
+      archive: encrypted,
+      passphrase,
+      conflictItemIds: [],
+    }).then(() => null, (error: unknown) => error);
+
+    expect(failure).toMatchObject({ status: 422 });
+    const message = (failure as Error).message;
+    expect(message).toMatch(/section/i);
+    expect(message).toContain(String(SECTION_LIMIT));
+
+    // Refused before writing anything: no section, no item.
+    expect(await sectionCount(fixture.household.id)).toBe(9);
+    expect(await importedItemCount(fixture.household.id)).toBe(itemsBefore);
+
+    // And the household is not bricked.
+    const session = await fixture.session("member");
+    const workspace = await readWorkspace(fixture.users.member.id, session.sessionId);
+    expect(workspace).toBeTruthy();
+  });
+
+  it("refuses an archive section whose name is 31 characters or more, at parse, as an unsupported archive", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-import-section-name");
+    const before = await sectionCount(fixture.household.id);
+    const archive = archiveWithSections([{ name: "n".repeat(31) }]);
+    const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase);
+
+    await expect(importPortableArchive({
+      userId: fixture.users.member.id,
+      householdId: fixture.household.id,
+      archive: encrypted,
+      passphrase,
+      conflictItemIds: [],
+    })).rejects.toMatchObject({ code: "archive_invalid", status: 422 });
+    expect(await sectionCount(fixture.household.id)).toBe(before);
+  });
+
+  it("refuses an archive section whose icon is not one of the workspace's icons, at parse, as an unsupported archive", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-import-section-icon");
+    const before = await sectionCount(fixture.household.id);
+    const archive = archiveWithSections([{ icon: "not-a-workspace-icon" }]);
+    const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase);
+
+    await expect(importPortableArchive({
+      userId: fixture.users.member.id,
+      householdId: fixture.household.id,
+      archive: encrypted,
+      passphrase,
+      conflictItemIds: [],
+    })).rejects.toMatchObject({ code: "archive_invalid", status: 422 });
+    expect(await sectionCount(fixture.household.id)).toBe(before);
+  });
+
+  it("still imports a section with a 30-character name and a workspace icon, within the limit", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-import-section-ok");
+    const before = await sectionCount(fixture.household.id);
+    const archive = archiveWithSections([{ name: "n".repeat(30), icon: "kite" }]);
+    const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase);
+
+    const result = await importPortableArchive({
+      userId: fixture.users.member.id,
+      householdId: fixture.household.id,
+      archive: encrypted,
+      passphrase,
+      conflictItemIds: [],
+    });
+    expect(result.importedItems).toBe(1);
+    expect(await sectionCount(fixture.household.id)).toBe(before + 1);
+    const session = await fixture.session("member");
+    await expect(readWorkspace(fixture.users.member.id, session.sessionId)).resolves.toBeTruthy();
   });
 });

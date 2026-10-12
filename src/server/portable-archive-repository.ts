@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import { auditLog, documentCrypto, documents, dueEvents, households, items, portableArchiveImports, portableArchives, reminderRules, sections, } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { CALENDAR_DATE_MESSAGE, calendarDate } from "@/lib/calendar-date";
-import { COST_MINOR_MAX, NOTES_MAX, PROVIDER_MAX, RECURRENCE_MAX, REFERENCE_MAX, SUBTYPE_MAX, TITLE_MAX } from "@/lib/domain";
+import { COST_MINOR_MAX, NOTES_MAX, PROVIDER_MAX, RECURRENCE_MAX, REFERENCE_MAX, sectionAccents, sectionIcons, SUBTYPE_MAX, TITLE_MAX } from "@/lib/domain";
 import { log, operationalDetail } from "@/lib/logger";
 import { MIN_PASSWORD_LENGTH, passwordLength } from "@/lib/password-length";
 import { currencyCode } from "@/lib/platform-lists";
@@ -23,7 +23,10 @@ import { acquireActiveHouseholdLock, requireHouseholdAccess } from "@/server/wor
 
 const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
 
-const importedSectionSchema = z.object({ id: z.string().uuid(), slug: z.string().trim().min(1).max(100), name: z.string().trim().min(1).max(100), icon: z.string().trim().min(1).max(50), accent: z.string().trim().min(1).max(50), position: z.number().int().min(0).max(10_000), visible: z.boolean(), archivedAt: z.string().nullable().optional() });
+// Name, icon and accent mirror `workspaceSectionSchema` (src/lib/workspace.ts)
+// for the same reason as the item caps below: the reader re-validates every
+// stored section, so a looser value here would make the household unreadable.
+const importedSectionSchema = z.object({ id: z.string().uuid(), slug: z.string().trim().min(1).max(100), name: z.string().trim().min(1).max(30), icon: z.enum(sectionIcons), accent: z.enum(sectionAccents), position: z.number().int().min(0).max(10_000), visible: z.boolean(), archivedAt: z.string().nullable().optional() });
 // Field caps deliberately mirror `workspaceItemSchema` (src/lib/workspace.ts):
 // the read path re-validates every persisted item against that schema, so an
 // imported field this schema accepts but the reader rejects would insert a
@@ -54,9 +57,11 @@ const importedItemSchema = z.object({
 // exported document field is carried for round-tripping and left untyped.
 const importedDocumentSchema = z.object({ id: z.string().uuid(), itemId: z.string().uuid().nullable(), displayName: z.string().trim().min(1), lifecycle: z.string() }).passthrough();
 const importedDocumentBytesSchema = z.object({ id: z.string().uuid(), contentBase64: z.string() });
-// `.max(500)` mirrors `householdWorkspaceSchema.items` so an archive that
-// parses cleanly here cannot still brick the household by count alone.
-const importedArchiveSchema = z.object({ format: z.literal("orbit-portable-archive"), version: z.literal(1), household: z.object({ name: z.string().trim().min(1).max(100) }), sections: z.array(importedSectionSchema).max(200), items: z.array(importedItemSchema).max(500), dueEvents: z.array(z.unknown()).optional(), reminderRules: z.array(z.unknown()).optional(), documents: z.array(importedDocumentSchema), documentBytes: z.array(importedDocumentBytesSchema).optional() });
+// `.max(12)` and `.max(500)` mirror `householdWorkspaceSchema.sections` and
+// `.items` so an archive that parses cleanly here cannot still brick the
+// household by count alone.
+const MAX_SECTIONS_PER_HOUSEHOLD = 12;
+const importedArchiveSchema = z.object({ format: z.literal("orbit-portable-archive"), version: z.literal(1), household: z.object({ name: z.string().trim().min(1).max(100) }), sections: z.array(importedSectionSchema).max(MAX_SECTIONS_PER_HOUSEHOLD), items: z.array(importedItemSchema).max(500), dueEvents: z.array(z.unknown()).optional(), reminderRules: z.array(z.unknown()).optional(), documents: z.array(importedDocumentSchema), documentBytes: z.array(importedDocumentBytesSchema).optional() });
 
 function storage(): PortableArchiveStorage {
   return new PortableArchiveStorage(`${getDocumentConfig().storageRoot}/portable-archives`);
@@ -598,7 +603,16 @@ export async function importPortableArchive(input: { userId: string; householdId
   const importStartedAt = new Date();
   const { imported, itemIdMap } = await getDb().transaction(async (transaction) => {
     await acquireActiveHouseholdLock(transaction, input.householdId);
-    const existingSections = await transaction.select({ id: sections.id, slug: sections.slug }).from(sections).where(eq(sections.householdId, input.householdId));
+    const existingSections = await transaction.select({ id: sections.id, slug: sections.slug, archivedAt: sections.archivedAt }).from(sections).where(eq(sections.householdId, input.householdId));
+    // Sections are matched by slug only, so most archive sections arrive as
+    // new rows. The reader refuses a household with more than 12 live
+    // sections, so refuse here, before anything is written, rather than
+    // leave a household no one can open. Archived sections are not read.
+    const liveExisting = existingSections.filter((section) => !section.archivedAt).length;
+    const liveAdded = archive.sections.filter((source) => !source.archivedAt && !existingSections.some((section) => section.slug === source.slug)).length;
+    if (liveExisting + liveAdded > MAX_SECTIONS_PER_HOUSEHOLD) {
+      throw new AppError("archive_sections_over_limit", `This archive would give the household more than ${MAX_SECTIONS_PER_HOUSEHOLD} sections; remove or merge some first`, 422);
+    }
     const sectionMap = new Map<string, string>();
     const createdSectionIds: string[] = [];
     for (const source of archive.sections) {
