@@ -1260,6 +1260,88 @@ describe("runExportRecoveryBundle (export-recovery-bundle.sh's orchestration)", 
     }
   });
 
+  // #1316 (backup-busy): a backup that meets a running export is not meeting
+  // another app-owning run. An export never stops orbit-app, so the shells must
+  // restart it (exit 75 means "leave the app to the run that holds the lock").
+  // The refusal therefore carries its own code, `backup-busy`, with a message
+  // that says an export is in progress and to retry when it finishes.
+  it("#1316: a backup started while an export waits at the passphrase prompt refuses with backup-busy, not restore-locked", () => {
+    const documentsRoot = join(sandbox, "docs-export-busy");
+    const sourceBundlePath = buildBundle(documentsRoot, ORIGINAL_KEY, 10, LIVE_KEK, join(sandbox, "source-backups-export-busy"));
+    const exportAdapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDocumentsRoot = join(sandbox, "docs-export-busy-backup");
+    buildDocumentTree(backupDocumentsRoot, ORIGINAL_KEY, 10);
+    const backupAdapter = new FakeAdapter(backupDocumentsRoot, ORIGINAL_KEY, 10);
+    const sharedBackupDirectory = join(sandbox, "recovery-backups-export-busy");
+    mkdirSync(sharedBackupDirectory, { recursive: true, mode: 0o700 });
+    const passphrase = "correct horse battery staple";
+
+    let caught: unknown;
+    let backupDirectoryDuringPrompt: string[] = [];
+    const result = runExportRecoveryBundle({
+      sourceBundlePath,
+      documentKekHex: LIVE_KEK,
+      collectPassphrase: () => {
+        // The export is paused here, holding the lock; the backup arrives now.
+        try {
+          runBackup({ backupDirectory: sharedBackupDirectory, documentKekHex: LIVE_KEK, adapter: backupAdapter, now: new Date("2026-03-04T05:06:07Z") });
+        } catch (error) {
+          caught = error;
+        }
+        backupDirectoryDuringPrompt = readdirSync(sharedBackupDirectory);
+        return passphrase;
+      },
+      backupDirectory: sharedBackupDirectory,
+      adapter: exportAdapter,
+      now: new Date("2026-02-02T00:00:00Z"),
+    });
+
+    expect(existsSync(result.finalPath)).toBe(true); // The export itself is undisturbed.
+    expect(caught).toBeInstanceOf(BackupRestoreCliRefusal);
+    expect((caught as BackupRestoreCliRefusal).code).not.toBe("restore-locked");
+    expect((caught as BackupRestoreCliRefusal).code).toBe("backup-busy");
+    const message = (caught as BackupRestoreCliRefusal).message.toLowerCase();
+    expect(message).toContain("export");
+    expect(message).toContain("in progress");
+    expect(message).toContain("retry");
+    expect(message).toContain("finishes");
+    expect(backupAdapter.stopCalls).toBe(0); // The backup never stopped the app.
+    expect(backupAdapter.appRunning).toBe(true);
+    expect(backupDirectoryDuringPrompt.some((name) => name.endsWith(".tar"))).toBe(false); // And wrote no bundle.
+  });
+
+  it("#1316: a second backup started while a backup holds the lock still refuses with restore-locked", () => {
+    const documentsRoot = join(sandbox, "docs-backup-busy-first");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const secondDocumentsRoot = join(sandbox, "docs-backup-busy-second");
+    buildDocumentTree(secondDocumentsRoot, ORIGINAL_KEY, 10);
+    const secondAdapter = new FakeAdapter(secondDocumentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "backup-busy-backups");
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+
+    let caught: unknown;
+    // The first backup owns the app (it stops it) and holds the lock while it
+    // dumps the database; the second backup arrives at that moment.
+    class FirstBackupAdapter extends FakeAdapter {
+      override dumpDatabase(outputPath: string): void {
+        try {
+          runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter: secondAdapter, now: new Date("2026-03-04T05:06:08Z") });
+        } catch (error) {
+          caught = error;
+        }
+        super.dumpDatabase(outputPath);
+      }
+    }
+    const firstAdapter = new FirstBackupAdapter(documentsRoot, ORIGINAL_KEY, 10);
+
+    const result = runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter: firstAdapter, now: new Date("2026-03-04T05:06:07Z") });
+
+    expect(existsSync(result.finalTarPath)).toBe(true);
+    expect(caught).toBeInstanceOf(BackupRestoreCliRefusal);
+    expect((caught as BackupRestoreCliRefusal).code).toBe("restore-locked");
+    expect(secondAdapter.stopCalls).toBe(0);
+  });
+
   it("refuses (guarantee #4) when the source bundle itself doesn't verify", () => {
     const documentsRoot = join(sandbox, "docs");
     const sourceBackupDirectory = join(sandbox, "source-backups-2");

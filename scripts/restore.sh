@@ -18,8 +18,9 @@ readonly secrets_directory
 # The engine one-off's container name: unique to this run, so the EXIT trap can `docker wait` for it.
 readonly engine_name="orbit-restore-engine-$$"
 readonly journal_path="$backup_directory/.orbit-restore/restore.journal"
-# 75: another backup/restore holds the lock. Only runs that stopped orbit-app take it (a preflight
-# takes none), so that run owns orbit-app.
+# 75: the lock is held by a run that stopped orbit-app (a backup or restore; a preflight takes
+# none), so that run owns orbit-app. A running export holds it without stopping the app: meeting
+# it is an ordinary failure, after which this run restarts orbit-app.
 readonly engine_locked_status=75
 readonly usage='usage failed; use bash scripts/restore.sh [--yes] <backup.tar> (--yes also needs ORBIT_NONINTERACTIVE_RESTORE=true) or bash scripts/restore.sh --recover.'
 

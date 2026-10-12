@@ -24,9 +24,11 @@ secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
 readonly secrets_directory
 # The engine one-off's container name: unique to this run, so the EXIT trap can `docker wait` for it.
 readonly engine_name="orbit-backup-engine-$$"
-# The engine's exit status when another backup or restore holds the
-# backup/restore lock. Only runs that stopped orbit-app take it (a preflight
-# takes none), so that run owns orbit-app and this one leaves it alone.
+# The engine's exit status when the backup/restore lock is held by a run that
+# stopped orbit-app (a backup or restore; a preflight takes no lock), so that
+# run owns orbit-app and this one leaves it alone. A running export also holds
+# the lock but never stops the app; meeting it is an ordinary failure, so this
+# run restarts orbit-app.
 readonly engine_locked_status=75
 
 fail() {

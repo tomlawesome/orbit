@@ -1905,7 +1905,9 @@ function main(): void {
     // no-leak sweep), so surfacing `error.message` directly here is safe;
     // anything else is a genuine bug and should keep its stack trace.
     // Another backup or restore holds the lock: a status of its own, so the
-    // shell leaves orbit-app to the run that owns it (#1211 E3).
+    // shell leaves orbit-app to the run that owns it (#1211 E3). A
+    // "backup-busy" refusal (an export holds the lock and never stopped the
+    // app) takes the ordinary failure path, so the shell restarts orbit-app.
     if (error instanceof BackupRestoreCliRefusal && error.code === "restore-locked") {
       process.stderr.write(`${displayHostPaths(`orbit: ${error.message}`)}\n`);
       process.exit(BACKUP_RESTORE_LOCKED_EXIT_CODE);

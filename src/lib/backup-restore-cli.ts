@@ -15,7 +15,9 @@ import {
   renameSync,
   rmSync,
   statSync,
+  ftruncateSync,
   unlinkSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -87,6 +89,7 @@ export type BackupRestoreCliRefusalCode =
   | "staging-failed"
   | "backup-directory-unsafe"
   | "restore-locked"
+  | "backup-busy"
   | "app-stop-failed"
   | "rollback-conflict"
   | "test-failure-requested"
@@ -189,7 +192,28 @@ function ensurePrivateBackupDirectory(backupDirectory: string): void {
   applyHostOwnership(backupDirectory);
 }
 
-function acquireBackupRestoreLock(backupDirectory: string): () => void {
+// Who holds the lock, written into the lock file once the flock is taken so a
+// contender can tell whether the holder stopped orbit-app. The shells read
+// exit 75 ("restore-locked") as "the holder stopped orbit-app and will start
+// it again", and skip their own restart; a holder that never stops the app
+// (an export) must not produce that status, or the app stays down.
+interface BackupRestoreLockHolder {
+  operation: "backup" | "restore" | "recover" | "finish" | "export" | "import";
+  ownsApp: boolean;
+}
+
+function lockHolderOwnsApp(lockPath: string): boolean {
+  try {
+    const record: unknown = JSON.parse(readFileSync(lockPath, "utf8"));
+    // Anything but an explicit `false` (empty, unreadable, a run killed before
+    // writing its record) is treated as owning the app: the conservative side.
+    return !(typeof record === "object" && record !== null && (record as { ownsApp?: unknown }).ownsApp === false);
+  } catch {
+    return true;
+  }
+}
+
+function acquireBackupRestoreLock(backupDirectory: string, holder: BackupRestoreLockHolder): () => void {
   ensurePrivateBackupDirectory(backupDirectory);
   const lockPath = join(backupDirectory, BACKUP_RESTORE_LOCK_FILE_NAME);
 
@@ -210,6 +234,12 @@ function acquireBackupRestoreLock(backupDirectory: string): () => void {
       );
     }
     if (result.status === 1) {
+      if (!lockHolderOwnsApp(lockPath)) {
+        refuse(
+          "backup-busy",
+          `An orbit recovery-bundle export is in progress against this backup directory (lock held at ${lockPath}); retry when it finishes.`,
+        );
+      }
       refuse(
         "restore-locked",
         `Another orbit backup or restore is already running against this backup directory (lock held at ${lockPath}). Wait for it to finish.`,
@@ -219,10 +249,24 @@ function acquireBackupRestoreLock(backupDirectory: string): () => void {
     refuse("restore-locked", `Could not take the orbit backup/restore lock at ${lockPath}: ${detail || `flock exited with status ${String(result.status)}`}.`);
   }
 
+  try {
+    ftruncateSync(fd, 0);
+    writeSync(fd, `${JSON.stringify({ pid: process.pid, ...holder })}\n`, 0);
+  } catch {
+    // A missing record reads as owning the app, the conservative side.
+  }
+
   let released = false;
   return () => {
     if (released) return;
     released = true;
+    // Cleared so the next holder's contenders never read this record in the
+    // moment between that holder's flock and its own write.
+    try {
+      ftruncateSync(fd, 0);
+    } catch {
+      // Best effort: the flock itself is released by the close below.
+    }
     closeSync(fd);
   };
 }
@@ -317,7 +361,7 @@ export function runBackup(options: RunBackupOptions): CreateBackupBundleResult {
   // #1151 RANGE-R6/RANGE-S3: taken before anything else, same as runRestore
   // — otherwise a backup's own stopApp/startApp (inside createBackupBundle)
   // can race a concurrent restore's document-tree/database cutover.
-  const releaseLock = acquireBackupRestoreLock(options.backupDirectory);
+  const releaseLock = acquireBackupRestoreLock(options.backupDirectory, { operation: "backup", ownsApp: true });
   try {
     // #1151 RANGE-R7: read only now, under the lock — an import's two-rename
     // key swap (taken under the same lock) can leave the live key file
@@ -452,7 +496,7 @@ export function runRestore(options: RunRestoreOptions): RunRestoreResult {
   // it must not hold the lock the shells treat as owning orbit-app: a backup
   // that met it would leave the app stopped for a run that never restarts it.
   const takeLock = !options.lockHeld && !options.preflightOnly;
-  const releaseLock = takeLock ? acquireBackupRestoreLock(options.paths.backupDirectory) : () => undefined;
+  const releaseLock = takeLock ? acquireBackupRestoreLock(options.paths.backupDirectory, { operation: "restore", ownsApp: true }) : () => undefined;
   try {
     return runRestoreLocked(options);
   } finally {
@@ -556,7 +600,7 @@ function dropLeftoverStageDatabases(adapter: Pick<RestoreDockerAdapter, "listSta
  * and start orbit-app while a recovery is reapplying a checkpoint.
  */
 export function runRecoverRestore(options: RecoverRestoreOptions): RestoreDisposeResult {
-  const releaseLock = acquireBackupRestoreLock(options.paths.backupDirectory);
+  const releaseLock = acquireBackupRestoreLock(options.paths.backupDirectory, { operation: "recover", ownsApp: true });
   try {
     dropLeftoverStageDatabases(options.adapter);
     const result = recoverRestore(options);
@@ -593,7 +637,7 @@ function removeSpentImportRollbackKey(documentKekFile: string): void {
  * removed: any other state is an unfinished restore or failed rollback.
  */
 export function runFinishRestore(options: { paths: RestorePaths }): void {
-  const releaseLock = acquireBackupRestoreLock(options.paths.backupDirectory);
+  const releaseLock = acquireBackupRestoreLock(options.paths.backupDirectory, { operation: "finish", ownsApp: true });
   try {
     if (!existsSync(options.paths.journalPath)) return;
     const { fields, checkpointDirectory } = loadRestoreJournal(options.paths.journalPath, options.paths.restoreRoot);
@@ -638,8 +682,9 @@ export function runExportRecoveryBundle(options: RunExportRecoveryBundleOptions)
   if (options.documentKekFile) refuseIfDocumentKekRotationOpen(options.documentKekFile);
   requireRegularNonSymlinkFile(options.sourceBundlePath, "Usage: orbit export-recovery-bundle <backup.tar>");
   // Held for the whole run so that scratch left by a killed export can be
-  // told from a live one's and swept here (or by the next backup).
-  const releaseLock = acquireBackupRestoreLock(options.backupDirectory);
+  // told from a live one's and swept here (or by the next backup). An export
+  // never stops orbit-app, so a backup or restore it turns away restarts it.
+  const releaseLock = acquireBackupRestoreLock(options.backupDirectory, { operation: "export", ownsApp: false });
   try {
     sweepKilledBackupScratch(options.backupDirectory);
     return exportRecoveryBundleLocked(options);
@@ -822,7 +867,7 @@ function importRecoveryBundleUnlocked(options: RunImportRecoveryBundleOptions): 
     // the app before this started, and a backup landing while the operator
     // answers would restart it and encrypt a bundle with the swapped key.
     // Taken after the refusals above, so those leave nothing behind.
-    const releaseLock = acquireBackupRestoreLock(options.backupDirectory);
+    const releaseLock = acquireBackupRestoreLock(options.backupDirectory, { operation: "import", ownsApp: true });
     try {
       const passphrase = typeof options.passphrase === "function" ? options.passphrase() : options.passphrase;
       const envelope = readFileSync(join(extractedDir, "document-kek.enc"));
