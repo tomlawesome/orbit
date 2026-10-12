@@ -176,5 +176,6 @@ export async function reconcileDocumentStorage(): Promise<void> {
   for (const quarantine of await storage.listQuarantineFiles()) {
     if (quarantine.modifiedAt.getTime() < orphanBoundary) await storage.discardQuarantine(quarantine.path);
   }
+  await storage.sweepTemporaryFiles(60 * 60 * 1_000);
   workerState.__orbitDocumentWorkerLastReconciliationAt = new Date().toISOString();
 }

@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, open, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -168,6 +168,86 @@ describe("local document storage", () => {
     expect((await storage.listStagingObjects()).map((entry) => entry.storageKey)).toEqual([key]);
     await storage.deleteStagingCiphertext(key);
     expect(await storage.stagingExists(key)).toBe(false);
+  });
+});
+
+// #1316 (PR1-10): a kill between a temporary write and its rename leaves a
+// `*.tmp` file that nothing else ever names. The sweep removes the stale ones
+// and must leave real content and in-flight (fresh) writes alone.
+describe("sweeping abandoned temporary files (#1316 PR1-10)", () => {
+  const HOUR_MS = 3_600_000;
+
+  async function plant(path: string, ageMs: number): Promise<void> {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, "unfinished write");
+    const when = new Date(Date.now() - ageMs);
+    await utimes(path, when, when);
+  }
+
+  async function exists(path: string): Promise<boolean> {
+    return stat(path).then(
+      () => true,
+      () => false,
+    );
+  }
+
+  async function seed() {
+    const { root, storage } = await createStorage();
+    await storage.initialize();
+    const objectKey = storage.createStorageKey();
+    const stagingKey = storage.createStorageKey();
+    await storage.writeCiphertext(objectKey, Buffer.from("real object"));
+    await storage.writeStagingCiphertext(stagingKey, Buffer.from("real staging"));
+    const documentId = randomUUID();
+    const recoveryPath = await storage.writeQuarantineBytes(documentId, Buffer.from("real recovery"));
+    const objectDir = join(root, "objects-root", "objects", objectKey.slice(0, 2), objectKey.slice(2, 4));
+    const stagingDir = join(root, "objects-root", "staging");
+    const quarantineDir = join(root, "quarantine");
+    return { root, storage, objectKey, stagingKey, documentId, recoveryPath, objectDir, stagingDir, quarantineDir };
+  }
+
+  it("removes tmp files older than the boundary from objects, staging and quarantine, keeping real content", async () => {
+    const s = await seed();
+    const staleObject = join(s.objectDir, `${s.objectKey}.bin.0123456789abcdef.tmp`);
+    const staleStaging = join(s.stagingDir, `${s.stagingKey}.bin.0123456789abcdef.tmp`);
+    const staleRecovery = join(
+      s.quarantineDir,
+      `${s.documentId}.0123456789abcdef0123456789abcdef.recovery.0123456789abcdef.tmp`,
+    );
+    for (const path of [staleObject, staleStaging, staleRecovery]) await plant(path, 2 * HOUR_MS);
+    const realUpload = join(s.quarantineDir, `${randomUUID()}.0123456789abcdef0123456789abcdef.upload`);
+    await plant(realUpload, 2 * HOUR_MS);
+
+    await s.storage.sweepTemporaryFiles(HOUR_MS);
+
+    expect(await exists(staleObject)).toBe(false);
+    expect(await exists(staleStaging)).toBe(false);
+    expect(await exists(staleRecovery)).toBe(false);
+    // Real content is never touched, however old.
+    expect(await s.storage.readCiphertext(s.objectKey, 1_024)).toEqual(Buffer.from("real object"));
+    expect(await s.storage.readStagingCiphertext(s.stagingKey, 1_024)).toEqual(Buffer.from("real staging"));
+    expect(await exists(s.recoveryPath)).toBe(true);
+    expect(await exists(realUpload)).toBe(true);
+  });
+
+  it("keeps a tmp file newer than the boundary, because its write may still be in flight", async () => {
+    const s = await seed();
+    const freshObject = join(s.objectDir, `${s.objectKey}.bin.fedcba9876543210.tmp`);
+    const freshStaging = join(s.stagingDir, `${s.stagingKey}.bin.fedcba9876543210.tmp`);
+    const freshRecovery = join(
+      s.quarantineDir,
+      `${s.documentId}.0123456789abcdef0123456789abcdef.recovery.fedcba9876543210.tmp`,
+    );
+    const staleObject = join(s.objectDir, `${s.objectKey}.bin.0123456789abcdef.tmp`);
+    for (const path of [freshObject, freshStaging, freshRecovery]) await plant(path, 60_000);
+    await plant(staleObject, 2 * HOUR_MS);
+
+    await s.storage.sweepTemporaryFiles(HOUR_MS);
+
+    expect(await exists(freshObject)).toBe(true);
+    expect(await exists(freshStaging)).toBe(true);
+    expect(await exists(freshRecovery)).toBe(true);
+    expect(await exists(staleObject)).toBe(false);
   });
 });
 

@@ -288,6 +288,7 @@ export async function reconcilePortableArchiveStorage(): Promise<void> {
       await storage().delete(object.storageKey);
     }
   }
+  await storage().sweepTemporaryFiles(60 * 60 * 1_000);
 }
 
 /** Decrypts and validates an archive in memory only; it never writes household data. */

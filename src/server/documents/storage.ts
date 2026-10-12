@@ -270,6 +270,39 @@ export class LocalDocumentStorage {
     return objects;
   }
 
+  /**
+   * Removes `*.tmp` files left in objects/, staging/ and the quarantine root
+   * by a process killed between a temporary write and its rename: nothing
+   * else ever names them. A younger one may be a write still in flight.
+   */
+  async sweepTemporaryFiles(olderThanMs: number): Promise<void> {
+    const boundary = Date.now() - olderThanMs;
+    const sweep = async (directory: string, recurse: boolean): Promise<void> => {
+      let entries;
+      try {
+        entries = await readdir(directory, { withFileTypes: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
+      }
+      for (const entry of entries) {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) {
+          if (recurse) await sweep(path, true);
+        } else if (entry.isFile() && entry.name.endsWith(".tmp")) {
+          const details = await stat(path).catch((error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return null;
+            throw error;
+          });
+          if (details && details.mtimeMs < boundary) await rm(path, { force: true });
+        }
+      }
+    };
+    await sweep(join(this.storageRoot, "objects"), true);
+    await sweep(join(this.storageRoot, "staging"), false);
+    await sweep(this.quarantineRoot, false);
+  }
+
   async deleteCiphertext(storageKey: string): Promise<void> {
     await rm(this.objectPath(storageKey), { force: true });
   }

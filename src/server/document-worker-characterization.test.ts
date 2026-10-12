@@ -69,6 +69,7 @@ const mocks = vi.hoisted(() => ({
   listCiphertextObjects: vi.fn(),
   listStagingObjects: vi.fn(),
   listQuarantineFiles: vi.fn(),
+  sweepTemporaryFiles: vi.fn(),
   purgeExpiredPortableArchives: vi.fn(),
   reconcilePortableArchiveStorage: vi.fn(),
   purgeExpiredHouseholds: vi.fn(),
@@ -267,6 +268,7 @@ vi.mock("@/server/documents/storage", async (importActual) => {
     listCiphertextObjects = mocks.listCiphertextObjects;
     listStagingObjects = mocks.listStagingObjects;
     listQuarantineFiles = mocks.listQuarantineFiles;
+    sweepTemporaryFiles = mocks.sweepTemporaryFiles;
   }
   return {
     ...actual,
