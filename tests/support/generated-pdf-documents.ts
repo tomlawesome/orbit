@@ -125,10 +125,64 @@ function classicCompressedPdf(content = pageContent()): Buffer {
   ]).bytes;
 }
 
-function xrefStreamPdf(): Buffer {
+export interface XrefStreamPdfOptions {
+  /** Raw dictionary entries standing in for the final section's `/Index [0 N]`. */
+  dictionary?: string;
+  /**
+   * Chain an earlier cross-reference stream carrying this raw dictionary entries (`/Size`, `/Index`, ...).
+   * "Prev": the final section is a small xref stream whose /Prev points at it.
+   * "XRefStm": the final section is a classic `xref` table whose trailer's /XRefStm points at it.
+   */
+  previous?: { dictionary: string; via: "Prev" | "XRefStm" };
+}
+
+function xrefStreamSection(id: number, offsets: Map<number, number>, selfOffset: number, dictionary: string, extra = ""): Buffer {
+  const entries = [xrefEntry(0, 0, 65535)];
+  for (let entryId = 1; entryId <= id; entryId += 1) {
+    entries.push(xrefEntry(1, entryId === id ? selfOffset : offsets.get(entryId)!, 0));
+  }
+  const compressed = deflateSync(Buffer.concat(entries));
+  return Buffer.concat([
+    text(`${id} 0 obj\n`),
+    streamObject(`/Type /XRef /Root 1 0 R /W [1 4 2] ${dictionary} ${extra} /Length ${compressed.length} /Filter /FlateDecode`, compressed),
+    text("\nendobj\n"),
+  ]);
+}
+
+/** A cross-reference-stream PDF; `options` shape the raw dictionary and chain a hostile earlier section. */
+export function xrefStreamPdf(options: XrefStreamPdfOptions = {}): Buffer {
   const content = pageContent();
   const objects = pageObjects(object(5, streamObject(`/Length ${content.length}`, content)));
-  return buildXrefStreamPdf(objects, 6);
+  if (!options.dictionary && !options.previous) return buildXrefStreamPdf(objects, 6);
+  let bytes = text("%PDF-1.7\n");
+  const offsets = new Map<number, number>();
+  for (const entry of objects) {
+    offsets.set(entry.id, bytes.length);
+    bytes = Buffer.concat([bytes, text(`${entry.id} 0 obj\n`), entry.body, text("\nendobj\n")]);
+  }
+  if (!options.previous) {
+    const offset = bytes.length;
+    return Buffer.concat([
+      bytes,
+      xrefStreamSection(6, offsets, offset, `/Size 7 ${options.dictionary}`),
+      text(`startxref\n${offset}\n%%EOF\n`),
+    ]);
+  }
+  const previousOffset = bytes.length;
+  offsets.set(6, previousOffset);
+  bytes = Buffer.concat([bytes, xrefStreamSection(6, offsets, previousOffset, options.previous.dictionary)]);
+  const finalOffset = bytes.length;
+  if (options.previous.via === "Prev") {
+    return Buffer.concat([
+      bytes,
+      xrefStreamSection(7, offsets, finalOffset, `/Size 8 ${options.dictionary ?? "/Index [0 8]"}`, `/Prev ${previousOffset}`),
+      text(`startxref\n${finalOffset}\n%%EOF\n`),
+    ]);
+  }
+  let table = "xref\n0 7\n0000000000 65535 f \n";
+  for (let id = 1; id <= 6; id += 1) table += `${String(offsets.get(id)).padStart(10, "0")} 00000 n \n`;
+  table += `trailer\n<< /Size 7 /Root 1 0 R /XRefStm ${previousOffset} >>\nstartxref\n${finalOffset}\n%%EOF\n`;
+  return Buffer.concat([bytes, text(table)]);
 }
 
 function objectStreamPdf(): Buffer {

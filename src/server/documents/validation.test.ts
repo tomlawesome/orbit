@@ -18,6 +18,7 @@ import {
   syntheticPdfActiveContent,
   syntheticPdfWithPages,
   syntheticStructurePdfFixtures,
+  xrefStreamPdf,
 } from "../../../tests/support/generated-pdf-documents";
 import { syntheticOwnerPasswordPdf, syntheticUserPasswordPdf } from "../../../tests/support/encrypted-pdf-documents";
 
@@ -80,6 +81,31 @@ describe("structural document classification", () => {
     it("accepts a cross-reference dictionary long enough to push /Type /XRef past its first 512 bytes", async () => {
       await expect(classifyDocumentStructure(syntheticModernPdf({ longIndex: true }), "application/pdf"))
         .resolves.toBe("supported_structure");
+    });
+  });
+
+  describe("a cross-reference stream that declares a huge entry count is refused (#1316)", () => {
+    it("refuses the control: one /Index subsection of two billion entries", async () => {
+      await expect(classifyDocumentStructure(xrefStreamPdf({ dictionary: "/Index [0 2000000000]" }), "application/pdf"))
+        .resolves.toBe("unsupported_structure");
+    });
+
+    it.each([
+      ["/Index subsections whose counts cancel out to zero", "/Index [0 2000000000 0 -2000000000]"],
+      ["/Index with a huge count followed by non-numeric pairs", "/Index [0 2000000000 /X /Y]"],
+      ["a nested /DecodeParms /Index ahead of the real huge /Index", "/DecodeParms << /Index [0 1] >> /Index [0 2000000000]"],
+    ])("refuses %s", async (_name, dictionary) => {
+      await expect(classifyDocumentStructure(xrefStreamPdf({ dictionary }), "application/pdf")).resolves.toBe("unsupported_structure");
+    });
+
+    it("refuses a small final xref stream whose /Prev is an xref stream with /Size 2000000000", async () => {
+      const bytes = xrefStreamPdf({ dictionary: "/Index [0 8]", previous: { dictionary: "/Size 2000000000 /Index [0 7]", via: "Prev" } });
+      await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");
+    });
+
+    it("refuses a classic xref table whose trailer /XRefStm is an xref stream with /Size 2000000000", async () => {
+      const bytes = xrefStreamPdf({ previous: { dictionary: "/Size 2000000000 /Index [0 7]", via: "XRefStm" } });
+      await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");
     });
   });
 
