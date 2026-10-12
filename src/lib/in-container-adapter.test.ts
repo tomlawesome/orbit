@@ -283,7 +283,7 @@ describe("createInContainerAdapter: exact argv, password only in the environment
     const fixture = newFixture();
     const archive = join(fixture.root, "documents.tar");
     fixture.adapter.collectDocumentsArchive(archive);
-    expect(fixture.calls()[0].argv).toEqual(["-C", fixture.documentsRoot, "--exclude=./portable-archives", "-cf", "-", "."]);
+    expect(fixture.calls()[0].argv).toEqual(["-C", fixture.documentsRoot, "--exclude=./portable-archives", "--exclude=*.tmp", "-cf", "-", "."]);
     const listing = spawnSync(realTar, ["-tf", archive], { encoding: "utf8" }).stdout;
     expect(listing).toContain(`./objects/ab/cd/abcd${"0".repeat(60)}.bin`);
     expect(listing).not.toContain("portable-archives");

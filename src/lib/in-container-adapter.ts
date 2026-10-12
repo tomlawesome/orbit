@@ -242,7 +242,8 @@ export function createInContainerAdapter(options: InContainerAdapterOptions = {}
       const descriptor = openPrivateOutput(outputPath);
       try {
         // SS2-S1: the household portable-archive export is not part of a backup.
-        const result = spawnSync("tar", ["-C", documentsRoot, "--exclude=./portable-archives", "-cf", "-", "."], { env, stdio: ["ignore", descriptor, "inherit"] });
+        // A *.tmp is an unfinished write the app left behind (killed before its rename), never a document.
+        const result = spawnSync("tar", ["-C", documentsRoot, "--exclude=./portable-archives", "--exclude=*.tmp", "-cf", "-", "."], { env, stdio: ["ignore", descriptor, "inherit"] });
         if (result.status !== 0) throw new RecoveryBundleRefusal("The document archive could not be collected.", "document-archive-collection-failed");
       } finally {
         closeSync(descriptor);

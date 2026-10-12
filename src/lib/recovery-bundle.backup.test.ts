@@ -50,10 +50,13 @@ import {
   documentKekFingerprint,
   encryptDocumentArchive,
   extractTar,
+  listTarEntriesVerbose,
   publishBundleAtomically,
   validateBackupBundleContents,
   validateBackupBundleLayout,
+  validateDocumentArchiveEntries,
 } from "./recovery-bundle";
+import { createInContainerAdapter } from "./in-container-adapter";
 
 // issue #296 slice 2: BackupDockerAdapter is the thin, injectable edge over
 // the handful of backup.sh operations that need a live Postgres deployment
@@ -339,6 +342,67 @@ describe("createBackupBundle (in-memory fake adapter, no process spawning)", () 
     expect((error as RecoveryBundleRefusal).code).toBe("bundle-already-exists");
     expect(readFileSync(finalTarPath, "utf8")).toBe("an already-existing backup, must not be overwritten");
     expect(existsSync(`${finalTarPath}.installing`)).toBe(false);
+  });
+});
+
+// #1316: the app writes `<name>.<16 hex>.tmp` beside a document while it is
+// being stored (objects/xx/yy/ and staging/). A backup taken at that moment
+// must leave those temporary files out; the archive validator (rightly)
+// refuses them, so a stray one used to make the whole backup fail.
+describe("createBackupBundle with in-flight temporary files in the document tree (#1316)", () => {
+  const OBJECT_KEY = "abcd".padEnd(64, "0");
+  const STAGED_KEY = "ef01".padEnd(64, "1");
+  const TMP_SUFFIX = ".bin.0123456789abcdef.tmp";
+
+  function documentTreeWithTemporaryFiles(root: string): string {
+    const documentsRoot = join(root, "documents");
+    const objectDir = join(documentsRoot, "objects", OBJECT_KEY.slice(0, 2), OBJECT_KEY.slice(2, 4));
+    mkdirSync(objectDir, { recursive: true });
+    mkdirSync(join(documentsRoot, "staging"), { recursive: true });
+    writeFileSync(join(objectDir, `${OBJECT_KEY}.bin`), "stored-object");
+    writeFileSync(join(documentsRoot, "staging", `${STAGED_KEY}.bin`), "staged-object");
+    writeFileSync(join(objectDir, `${OBJECT_KEY}${TMP_SUFFIX}`), "half-written-object");
+    writeFileSync(join(documentsRoot, "staging", `${STAGED_KEY}${TMP_SUFFIX}`), "half-written-staged");
+    return documentsRoot;
+  }
+
+  /** Collects the document archive from a real tree with the shipped adapter's own collector; everything else is the in-memory fake. */
+  class RealTreeAdapter extends FakeAdapter {
+    constructor(private readonly documentsRoot: string) {
+      super({ documentsTarBuilder: () => Buffer.alloc(0) });
+    }
+    override collectDocumentsArchive(outputPath: string): void {
+      createInContainerAdapter({ documentsRoot: this.documentsRoot, env: {}, emitEvent: () => undefined }).collectDocumentsArchive(outputPath);
+    }
+  }
+
+  function takeBackup(): { entries: string[]; entriesVerbose: ReturnType<typeof listTarEntriesVerbose> } {
+    const sandbox = newSandbox("orbit-create-bundle-tmp-files-");
+    const documentsRoot = documentTreeWithTemporaryFiles(sandbox);
+    const backupDirectory = join(sandbox, "backups");
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    const finalTarPath = join(backupDirectory, "orbit-20260813-000000.tar");
+
+    createBackupBundle(backupDirectory, finalTarPath, KEK_A, new RealTreeAdapter(documentsRoot), "2026-08-13T00:00:00Z");
+
+    const extractedDir = join(sandbox, "extracted");
+    mkdirSync(extractedDir);
+    extractTar(finalTarPath, extractedDir);
+    validateBackupBundleContents(extractedDir, KEK_A, { pgRestoreListOk: () => true });
+    const entriesVerbose = listTarEntriesVerbose(join(extractedDir, "documents.tar"));
+    return { entries: entriesVerbose.map((entry) => entry.name), entriesVerbose };
+  }
+
+  it("completes the backup and lists no .tmp entry in the document archive", () => {
+    const { entries } = takeBackup();
+    expect(entries.filter((name) => name.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("keeps the real objects, and the archive passes validateDocumentArchiveEntries", () => {
+    const { entries, entriesVerbose } = takeBackup();
+    expect(entries).toContain(`./objects/${OBJECT_KEY.slice(0, 2)}/${OBJECT_KEY.slice(2, 4)}/${OBJECT_KEY}.bin`);
+    expect(entries).toContain(`./staging/${STAGED_KEY}.bin`);
+    expect(() => validateDocumentArchiveEntries(entriesVerbose)).not.toThrow();
   });
 });
 
