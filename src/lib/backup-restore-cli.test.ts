@@ -381,6 +381,39 @@ describe("runBackup", () => {
     expect(existsSync(result.finalTarPath)).toBe(true);
   });
 
+  // #1316 R1-4: a restore that exited 0 keeps its journal until restore.sh has
+  // seen Orbit healthy and run `restore --finish`, and the lock is free during
+  // that wait. A scheduled backup landing then would take the lock and make
+  // --finish fail, so backup refuses while a journal exists, before the lock
+  // or any stop, and says how to finish it.
+  it("R1-4: refuses with restore-unfinished, naming `bash scripts/restore.sh --finish`, while a restore journal exists, before taking the lock or stopping anything", () => {
+    const documentsRoot = join(sandbox, "docs-backup-journal");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "backup-journal-backups");
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    const { journalPath } = deriveRestorePaths(backupDirectory, join(sandbox, "document-kek-backup-journal"));
+    expect(journalPath).toBe(join(backupDirectory, ".orbit-restore", "restore.journal"));
+    mkdirSync(join(backupDirectory, ".orbit-restore"), { recursive: true, mode: 0o700 });
+    writeFileSync(journalPath, "format_version=1\nstate=database-restored\n", { mode: 0o600 });
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+
+    let caught: unknown;
+    try {
+      runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(BackupRestoreCliRefusal);
+    expect((caught as BackupRestoreCliRefusal).code).toBe("restore-unfinished");
+    expect((caught as BackupRestoreCliRefusal).message).toContain("bash scripts/restore.sh --finish");
+    expect(adapter.stopCalls).toBe(0);
+    expect(adapter.appRunning).toBe(true);
+    expect(existsSync(journalPath)).toBe(true); // Left alone.
+    // Nothing written: no lock file taken, no bundle, no scratch directory.
+    expect(readdirSync(backupDirectory)).toEqual([".orbit-restore"]);
+  });
+
   it("holds the shared flock for the whole run and releases it afterwards, leaving the file in place", () => {
     const documentsRoot = join(sandbox, "docs-backup-lock-release");
     buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);

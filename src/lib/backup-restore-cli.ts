@@ -353,11 +353,28 @@ export interface RunBackupOptions {
   now: Date;
 }
 
+/**
+ * A restore that exited 0 keeps its journal until restore.sh has seen Orbit
+ * healthy and run `restore --finish`, and the lock is free during that wait.
+ * A backup or export taking the lock then would make --finish fail, so both
+ * refuse while any journal exists, before the lock or any stop.
+ */
+function refuseWhileRestoreUnfinished(backupDirectory: string): void {
+  const { journalPath } = deriveRestorePaths(backupDirectory, ""); // the key file plays no part in the journal path
+  if (existsSync(journalPath) || isSymlinkPath(journalPath)) {
+    refuse(
+      "restore-unfinished",
+      "A restore has not been finished; run bash scripts/restore.sh --finish once Orbit is healthy, or --recover to roll it back.",
+    );
+  }
+}
+
 export function runBackup(options: RunBackupOptions): CreateBackupBundleResult {
   refuseExternalDatabase();
   // While a rotation is open, new rows are wrapped under document-kek-next,
   // which a bundle does not carry: it could not bring them back.
   if (options.documentKekFile) refuseIfDocumentKekRotationOpen(options.documentKekFile);
+  refuseWhileRestoreUnfinished(options.backupDirectory);
   // #1151 RANGE-R6/RANGE-S3: taken before anything else, same as runRestore
   // — otherwise a backup's own stopApp/startApp (inside createBackupBundle)
   // can race a concurrent restore's document-tree/database cutover.
@@ -681,6 +698,7 @@ export function runExportRecoveryBundle(options: RunExportRecoveryBundleOptions)
   // Same reason as runBackup: the recovery bundle carries only the current key.
   if (options.documentKekFile) refuseIfDocumentKekRotationOpen(options.documentKekFile);
   requireRegularNonSymlinkFile(options.sourceBundlePath, "Usage: orbit export-recovery-bundle <backup.tar>");
+  refuseWhileRestoreUnfinished(options.backupDirectory);
   // Held for the whole run so that scratch left by a killed export can be
   // told from a live one's and swept here (or by the next backup). An export
   // never stops orbit-app, so a backup or restore it turns away restarts it.

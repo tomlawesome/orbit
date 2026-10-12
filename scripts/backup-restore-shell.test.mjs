@@ -54,6 +54,8 @@ function scratchDir(prefix) {
 // TERM and HUP and keeps running that long after the first, then appends an
 // ["engine-exited"] line to FAKE_DOCKER_LOG and exits; it writes
 // FAKE_ENGINE_JOURNAL_AFTER_SIGNAL (a journal path) only at that point.
+// FAKE_FINISH_STATUS, when set, is the exit status of a \`restore --finish\` run
+// alone, which then does nothing else (#1316 R1-4).
 // \`docker wait <name>\` and \`docker stop <name>\` are accepted and recorded
 // (wait blocks until the engine-exited marker when the engine is slow).
 const FAKE_DOCKER = `#!/usr/bin/env node
@@ -92,6 +94,7 @@ if (verb === "run") {
     appendFileSync(process.env.FAKE_ENGINE_STDIN_KIND_LOG, (stdin.isCharacterDevice() && stdin.rdev === devNull.rdev ? "devnull" : "other") + "\\n");
   }
   if (argv.includes("--preflight")) process.exit(Number(process.env.FAKE_PREFLIGHT_STATUS || 0));
+  if (argv.includes("--finish") && process.env.FAKE_FINISH_STATUS) process.exit(Number(process.env.FAKE_FINISH_STATUS));
   if (process.env.FAKE_ENGINE_STDIN_LOG) {
     let input = "";
     try { input = require("node:fs").readFileSync(0, "utf8"); } catch {}
@@ -802,6 +805,39 @@ describe("the stop / engine / start rule (E3)", () => {
       expect(finish.command).toEqual(expect.arrayContaining(["restore", "--finish"]));
       expect(finish.command.indexOf("--finish")).toBe(finish.command.indexOf("restore") + 1);
     });
+  });
+
+  // #1316 R1-4: the lock is free while the shell waits for health, so a
+  // scheduled backup can slip in and make `restore --finish` fail. The message
+  // must name the command that finishes the journal, not leave the operator
+  // with only --recover (which discards what members entered since).
+  it.each([
+    ["restore.sh", ["--yes"]],
+    ["import-recovery-bundle.sh", []],
+  ])("%s: a failed `restore --finish` names `bash scripts/restore.sh --finish` (#1316 R1-4)", (script, flags) => {
+    const deployment = makeDeployment();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const result = run(deployment, script, [...flags, bundle], {
+      env: { ...yesEnv(flags), FAKE_ENGINE_JOURNAL: deployment.journal, FAKE_FINISH_STATUS: "1" },
+    });
+    expect(result.status).not.toBe(0);
+    expect(engineRuns(result.calls).at(-1).command).toEqual(expect.arrayContaining(["restore", "--finish"]));
+    expect(result.stderr).toContain("bash scripts/restore.sh --finish");
+  });
+
+  // #1316 R1-4: restore.sh --finish finishes a journal left by an earlier
+  // restore whose own --finish never ran or failed. Orbit is already running
+  // the restored data, so it must not be stopped or started.
+  it("restore.sh --finish runs the engine once with `restore --finish` and neither stops nor starts orbit-app (#1316 R1-4)", () => {
+    const deployment = makeDeployment();
+    const result = run(deployment, "restore.sh", ["--finish"]);
+    expect(result.status, result.stderr).toBe(0);
+    const runs = engineRuns(result.calls);
+    expect(runs).toHaveLength(1);
+    expect(runs[0].command).toEqual(["/opt/orbit/cli/orbit.js", "restore", "--finish", "--dir", "/orbit-deploy"]);
+    expect(verbs(result.calls)).toEqual(["run"]);
+    expect(result.calls.filter((call) => call.includes("stop") || call.includes("start"))).toEqual([]);
   });
 
   it("restore.sh reports a restore that never became healthy, and fails", () => {

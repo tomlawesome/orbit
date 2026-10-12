@@ -22,7 +22,7 @@ readonly journal_path="$backup_directory/.orbit-restore/restore.journal"
 # none), so that run owns orbit-app. A running export holds it without stopping the app: meeting
 # it is an ordinary failure, after which this run restarts orbit-app.
 readonly engine_locked_status=75
-readonly usage='usage failed; use bash scripts/restore.sh [--yes] <backup.tar> (--yes also needs ORBIT_NONINTERACTIVE_RESTORE=true) or bash scripts/restore.sh --recover.'
+readonly usage='usage failed; use bash scripts/restore.sh [--yes] <backup.tar> (--yes also needs ORBIT_NONINTERACTIVE_RESTORE=true), bash scripts/restore.sh --finish or bash scripts/restore.sh --recover.'
 
 fail() { printf 'Orbit restore: %s\n' "$*" >&2; exit 1; }
 # --- Shared by backup.sh, restore.sh, export-recovery-bundle.sh and ----------
@@ -211,14 +211,25 @@ wait_for_health() {
 }
 # --- End of the shared functions. -------------------------------------------
 
-yes_flag=() && recover=false && backup_file=""
+yes_flag=() && recover=false && finish=false && backup_file=""
 for argument in "$@"; do
   case "$argument" in
     --yes) yes_flag=(--yes) ;;
     --recover) recover=true ;;
+    --finish) finish=true ;;
     *) [[ -z "$backup_file" ]] || fail "$usage"; backup_file="$argument" ;;
   esac
 done
+# --finish completes a restore whose own finish step never ran or failed: Orbit is already
+# running the restored data, so it is neither stopped nor started. The engine removes the
+# journal and checkpoint only for a restore it recorded as completed.
+if [[ "$finish" == true ]]; then
+  [[ "$#" == 1 ]] || fail 'usage failed; --finish takes no other argument.'
+  require_deployment
+  engine_host_identity
+  run_engine "" restore --finish </dev/null || exit $?
+  exit 0
+fi
 if [[ "$recover" == true ]]; then
   [[ -z "$backup_file" && "${#yes_flag[@]}" == 0 ]] || fail 'usage failed; --recover does not accept a new backup bundle.'
 else
@@ -263,7 +274,7 @@ app_stopped=false # the engine has returned: the lines below decide
 if [[ "$status" == 0 && -f "$journal_path" ]]; then
   if compose start orbit-app >/dev/null 2>&1 && wait_for_health; then
     run_engine "" restore --finish </dev/null ||
-      fail 'finish failed; Orbit is running the restored data, but the restore journal and checkpoint could not be removed.'
+      fail 'finish failed; Orbit is running the restored data, but the restore journal and checkpoint could not be removed; run bash scripts/restore.sh --finish.'
     exit 0
   fi
   compose stop orbit-app >/dev/null 2>&1 || printf 'Orbit could not be stopped again.\n' >&2

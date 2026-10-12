@@ -266,7 +266,7 @@ app_stopped=false # the engine has returned: the lines below decide
 if [[ "$status" == 0 && -f "$journal_path" ]]; then
   if compose start orbit-app >/dev/null 2>&1 && wait_for_health; then
     run_engine "" restore --finish </dev/null ||
-      fail 'finish failed; Orbit is running the restored data, but the restore journal and checkpoint could not be removed.'
+      fail 'finish failed; Orbit is running the restored data, but the restore journal and checkpoint could not be removed; run bash scripts/restore.sh --finish.'
     exit 0
   fi
   compose stop orbit-app >/dev/null 2>&1 || printf 'Orbit could not be stopped again.\n' >&2
