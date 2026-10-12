@@ -1256,7 +1256,8 @@
                 min={Math.round(limit.minBytes / 1048576)} max={Math.round(limit.ceilingBytes / 1048576)}
                 bind:value={uploadLimitDraft} required /></label>
               <p class="mailboxnote">From {megabytes(limit.minBytes)} to {megabytes(limit.ceilingBytes)}. It applies to the
-                next upload, from the create form, an item, or mail; documents already kept are unaffected.</p>
+                next upload from the create form or an item; mail-in keeps its own fixed cap of 25 MiB per message,
+                so a higher limit here does not raise what mail accepts. Documents already kept are unaffected.</p>
               <div class="placerow mailboxrow">
                 <button type="submit" disabled={uploadLimitBusy}>save</button>
                 {#if limit.overrideBytes !== null}
