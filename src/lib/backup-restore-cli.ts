@@ -327,12 +327,12 @@ export function runBackup(options: RunBackupOptions): CreateBackupBundleResult {
 }
 
 /**
- * Removes createBackupBundle's scratch directory (`.orbit-backup.*`, holding
- * a plaintext database dump) and unpublished `<bundle>.tar.installing` left
- * by a killed run, which its own `finally` never got to. Called with the
- * lock held, so nothing live can match. Recovery-bundle exports take no lock
- * and stage `orbit-recovery-*.tar.installing` in the same directory, so
- * those are left alone.
+ * Removes the scratch directories of createBackupBundle (`.orbit-backup.*`,
+ * holding a plaintext database dump) and of a recovery export
+ * (`.orbit-recovery.*`, holding a copy of the source bundle), and any
+ * unpublished `<bundle>.tar.installing`, left by a killed run whose own
+ * `finally` never got to them. Backup and export both call it with the lock
+ * held, so nothing live can match.
  */
 function sweepKilledBackupScratch(backupDirectory: string): void {
   let names: string[];
@@ -342,9 +342,8 @@ function sweepKilledBackupScratch(backupDirectory: string): void {
     return;
   }
   for (const name of names) {
-    const isBackupScratch = name.startsWith(".orbit-backup.");
-    const isBackupInstalling = name.endsWith(".tar.installing") && !name.startsWith("orbit-recovery-");
-    if (isBackupScratch || isBackupInstalling) rmSafely(join(backupDirectory, name));
+    const isScratch = name.startsWith(".orbit-backup.") || name.startsWith(".orbit-recovery.");
+    if (isScratch || name.endsWith(".tar.installing")) rmSafely(join(backupDirectory, name));
   }
 }
 
@@ -603,7 +602,18 @@ export interface RunExportRecoveryBundleOptions {
 export function runExportRecoveryBundle(options: RunExportRecoveryBundleOptions): { finalPath: string } {
   refuseExternalDatabase();
   requireRegularNonSymlinkFile(options.sourceBundlePath, "Usage: orbit export-recovery-bundle <backup.tar>");
-  ensurePrivateBackupDirectory(options.backupDirectory);
+  // Held for the whole run so that scratch left by a killed export can be
+  // told from a live one's and swept here (or by the next backup).
+  const releaseLock = acquireBackupRestoreLock(options.backupDirectory);
+  try {
+    sweepKilledBackupScratch(options.backupDirectory);
+    return exportRecoveryBundleLocked(options);
+  } finally {
+    releaseLock();
+  }
+}
+
+function exportRecoveryBundleLocked(options: RunExportRecoveryBundleOptions): { finalPath: string } {
   const workDir = mkdtempSync(join(options.backupDirectory, ".orbit-recovery."));
   applyHostOwnership(workDir);
   try {
@@ -630,8 +640,15 @@ export function runExportRecoveryBundle(options: RunExportRecoveryBundleOptions)
 
     const finalPath = join(options.backupDirectory, `orbit-recovery-${formatBundleTimestamp(options.now)}.tar`);
     const temporaryPath = `${finalPath}.installing`;
-    createTar(workDir, temporaryPath, [...RECOVERY_BUNDLE_MEMBERS]);
-    publishBundleAtomically(temporaryPath, finalPath);
+    try {
+      createTar(workDir, temporaryPath, [...RECOVERY_BUNDLE_MEMBERS]);
+      publishBundleAtomically(temporaryPath, finalPath);
+    } catch (error) {
+      // A refused publish (the name is taken) or a failed tar must not leave
+      // a full-size bundle copy behind.
+      rmSafely(temporaryPath);
+      throw error;
+    }
     // #968: the bundle is on disk before the administration card can clear,
     // never the other way round — a failed record here still leaves a
     // usable bundle at finalPath, so this throws rather than swallowing the

@@ -990,6 +990,102 @@ describe("runExportRecoveryBundle (export-recovery-bundle.sh's orchestration)", 
     expect(lstatSync(result.finalPath).mode & 0o777).toBe(0o600);
   });
 
+  // #1316: publishing is stage-then-rename. When the final name is already
+  // taken the publish refuses, and the staged <bundle>.installing file must
+  // not be left behind in the backups directory.
+  it("#1316: leaves no .installing file behind when the final bundle name already exists and publishing refuses", () => {
+    const documentsRoot = join(sandbox, "docs-export-exists");
+    const sourceBundlePath = buildBundle(documentsRoot, ORIGINAL_KEY, 10, LIVE_KEK, join(sandbox, "source-backups-export-exists"));
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    const recoveryDirectory = join(sandbox, "recovery-backups-export-exists");
+    mkdirSync(recoveryDirectory, { recursive: true, mode: 0o700 });
+    const existingFinal = join(recoveryDirectory, "orbit-recovery-20260202-000000.tar");
+    writeFileSync(existingFinal, "an earlier bundle");
+    const passphrase = "correct horse battery staple";
+
+    expect(() =>
+      runExportRecoveryBundle({
+        sourceBundlePath,
+        documentKekHex: LIVE_KEK,
+        passphrase,
+        passphraseConfirmation: passphrase,
+        backupDirectory: recoveryDirectory,
+        adapter,
+        now: new Date("2026-02-02T00:00:00Z"),
+      }),
+    ).toThrow();
+
+    expect(readFileSync(existingFinal, "utf8")).toBe("an earlier bundle"); // Not overwritten.
+    expect(readdirSync(recoveryDirectory).filter((name) => name.endsWith(".installing"))).toEqual([]);
+  });
+
+  // #1316: an export killed mid-run leaves its scratch directory
+  // (.orbit-recovery.<random>) and maybe a half-installed .tar.installing; the
+  // next successful export sweeps both.
+  it("#1316: removes a stale .orbit-recovery.* scratch directory and a stale .tar.installing file after a later successful export", () => {
+    const documentsRoot = join(sandbox, "docs-export-stale");
+    const sourceBundlePath = buildBundle(documentsRoot, ORIGINAL_KEY, 10, LIVE_KEK, join(sandbox, "source-backups-export-stale"));
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    const recoveryDirectory = join(sandbox, "recovery-backups-export-stale");
+    mkdirSync(recoveryDirectory, { recursive: true, mode: 0o700 });
+    const staleDirectory = join(recoveryDirectory, ".orbit-recovery.stale");
+    mkdirSync(staleDirectory, { mode: 0o700 });
+    writeFileSync(join(staleDirectory, "document-kek.enc"), "partial envelope");
+    const staleInstalling = join(recoveryDirectory, "orbit-recovery-0.tar.installing");
+    writeFileSync(staleInstalling, "half a bundle");
+    const passphrase = "correct horse battery staple";
+
+    const result = runExportRecoveryBundle({
+      sourceBundlePath,
+      documentKekHex: LIVE_KEK,
+      passphrase,
+      passphraseConfirmation: passphrase,
+      backupDirectory: recoveryDirectory,
+      adapter,
+      now: new Date("2026-02-02T00:00:00Z"),
+    });
+
+    expect(existsSync(result.finalPath)).toBe(true);
+    expect(existsSync(staleDirectory)).toBe(false);
+    expect(existsSync(staleInstalling)).toBe(false);
+  });
+
+  // #1316: export shares the backup/restore flock, so it cannot run while a
+  // backup or restore is in progress against the same backups directory.
+  it("#1316: refuses with restore-locked while another process holds the backup/restore lock", () => {
+    const documentsRoot = join(sandbox, "docs-export-lock");
+    const sourceBundlePath = buildBundle(documentsRoot, ORIGINAL_KEY, 10, LIVE_KEK, join(sandbox, "source-backups-export-lock"));
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    const recoveryDirectory = join(sandbox, "recovery-backups-export-lock");
+    mkdirSync(recoveryDirectory, { recursive: true, mode: 0o700 });
+    const lockPath = join(recoveryDirectory, ".orbit-backup-restore.lock");
+    const holder = holdLockInAnotherProcess(lockPath);
+    const passphrase = "correct horse battery staple";
+
+    try {
+      let caught: unknown;
+      try {
+        runExportRecoveryBundle({
+          sourceBundlePath,
+          documentKekHex: LIVE_KEK,
+          passphrase,
+          passphraseConfirmation: passphrase,
+          backupDirectory: recoveryDirectory,
+          adapter,
+          now: new Date("2026-02-02T00:00:00Z"),
+        });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(BackupRestoreCliRefusal);
+      expect((caught as BackupRestoreCliRefusal).code).toBe("restore-locked");
+      expect(adapter.recordExportedCalls).toBe(0);
+      expect(readdirSync(recoveryDirectory)).toEqual([".orbit-backup-restore.lock"]); // Nothing written.
+    } finally {
+      killLockHolder(holder, lockPath);
+    }
+  });
+
   it("refuses (guarantee #4) when the source bundle itself doesn't verify", () => {
     const documentsRoot = join(sandbox, "docs");
     const sourceBackupDirectory = join(sandbox, "source-backups-2");
