@@ -222,7 +222,8 @@ administrator and tries the control during maintenance gets the same bounded
 `503` as on any other path; from outside, the control cannot be found or
 used.
 
-Sign-in stays open during maintenance: the sign-in page and the OIDC login,
+Sign-in stays open during maintenance: the sign-in page, the emailed
+sign-in approval page, setup and recovery links, and the OIDC login,
 callback, session and logout routes are exempt. So the ordinary way back in
 is to sign in and end maintenance from the control.
 
