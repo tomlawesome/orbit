@@ -298,12 +298,22 @@
     if (!suggestion || !onamend) throw new Error("not added — this suggestion has gone");
     const { item: amended, sectionId } = amendedOf(item, edits);
     const problem = await onamend(suggestion, amended, sectionId);
-    if (problem && typeof problem === "object") throw new Error(problem.message);
+    if (problem && typeof problem === "object") {
+      /* A partial approval has filed the item: the rows close, or a corrected
+         re-send under the same operation id is refused for good. */
+      wake(problem.message, { failure: true });
+      landedPartial = true;
+      return;
+    }
     if (problem) throw new Error(`not added — ${problem}`);
   }
+  /* Set by addSuggestion when the add landed partly: addAmended then leaves
+     the recorded-but-pending sentence standing instead of "added". */
+  let landedPartial = false;
   async function addAmended() {
+    landedPartial = false;
     const title = modes.edit.draft?.title.trim() ?? "";
-    if (await modes.edit.commit()) wake(`added to your orbit · ${title}`);
+    if (await modes.edit.commit() && !landedPartial) wake(`added to your orbit · ${title}`);
   }
   /** What a suggestion's lines need while they are amended. @param {{ id: string }} s */
   const amendActsOf = (s) => ({

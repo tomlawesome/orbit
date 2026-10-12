@@ -973,12 +973,25 @@
     if (!suggestion) throw new Error("not added — this suggestion has gone");
     const { item: amended, sectionId } = amendedOf(item, edits);
     const problem = await amendReceipt(suggestion, amended, sectionId);
-    if (problem && typeof problem === "object") throw new Error(problem.message);
+    if (problem && typeof problem === "object") {
+      /* A partial approval has filed the item: the rows close, or a corrected
+         re-send under the same operation id is refused for good. The drawer
+         says what tapReceipt says of a partial, armed for the plain retry. */
+      armed = { id: suggestion.id, act: "approve" };
+      mailProblem = problem.message;
+      landedPartial = true;
+      return;
+    }
     if (problem) throw new Error(`not added — ${problem}`);
   }
+  /* Set by addSuggestion when the add landed partly: addAmended then leaves
+     the drawer open on the recorded-but-pending sentence instead. */
+  let landedPartial = false;
   async function addAmended() {
+    landedPartial = false;
     const title = modes.edit.draft?.title.trim() ?? "";
     if (await modes.edit.commit()) {
+      if (landedPartial) return;
       collapseRow();
       wake(`added to your orbit · ${title}`);
     }
@@ -1033,7 +1046,12 @@
     busyReceipt = suggestion.id;
     try {
       const result = await approveWithOperation(suggestion, operationIds, asView(view).primary, item, sectionId);
-      if ("partial" in result) return result;
+      if ("partial" in result) {
+        /* the item exists now: home shows it, and a failed re-read must not
+           turn what landed into a refusal */
+        view = await readHome().catch(() => view);
+        return result;
+      }
       view = await readHome();
       return null;
     } catch (error) {
