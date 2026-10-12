@@ -303,12 +303,17 @@ export interface RunBackupOptions {
   backupDirectory: string;
   /** The live key, or how to read it: a reader is called only once the lock is held (#1151 RANGE-R7, backup.sh's lock-then-read order). */
   documentKekHex: string | (() => string);
+  /** The live key file; the CLI always passes it so an open rotation is refused. */
+  documentKekFile?: string;
   adapter: BackupDockerAdapter;
   now: Date;
 }
 
 export function runBackup(options: RunBackupOptions): CreateBackupBundleResult {
   refuseExternalDatabase();
+  // While a rotation is open, new rows are wrapped under document-kek-next,
+  // which a bundle does not carry: it could not bring them back.
+  if (options.documentKekFile) refuseIfDocumentKekRotationOpen(options.documentKekFile);
   // #1151 RANGE-R6/RANGE-S3: taken before anything else, same as runRestore
   // — otherwise a backup's own stopApp/startApp (inside createBackupBundle)
   // can race a concurrent restore's document-tree/database cutover.
@@ -615,6 +620,8 @@ export function runFinishRestore(options: { paths: RestorePaths }): void {
 export interface RunExportRecoveryBundleOptions {
   sourceBundlePath: string;
   documentKekHex: string;
+  /** The live key file; the CLI always passes it so an open rotation is refused. */
+  documentKekFile?: string;
   /** Both entries, already collected; or `collectPassphrase` instead, called only once the source bundle has passed verification (export-recovery-bundle.sh's order). */
   passphrase?: string;
   passphraseConfirmation?: string;
@@ -627,6 +634,8 @@ export interface RunExportRecoveryBundleOptions {
 
 export function runExportRecoveryBundle(options: RunExportRecoveryBundleOptions): { finalPath: string } {
   refuseExternalDatabase();
+  // Same reason as runBackup: the recovery bundle carries only the current key.
+  if (options.documentKekFile) refuseIfDocumentKekRotationOpen(options.documentKekFile);
   requireRegularNonSymlinkFile(options.sourceBundlePath, "Usage: orbit export-recovery-bundle <backup.tar>");
   // Held for the whole run so that scratch left by a killed export can be
   // told from a live one's and swept here (or by the next backup).

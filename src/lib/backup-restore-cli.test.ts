@@ -2274,3 +2274,137 @@ describe("external database refusal (#1316)", { timeout: 20_000 }, () => {
     expect(calls).toContain("dumpDatabase");
   });
 });
+
+// #1316: restore and import already refuse while a document-KEK rotation is
+// open (a regular `document-kek-next` file next to the live key). Backup and
+// export-recovery-bundle must too: during a rotation the live key alone no
+// longer decrypts every document, so a bundle sealed with it would be one
+// that cannot be restored, and backup's stopApp would take down the app
+// that is running the rotation. They refuse before the adapter does anything.
+describe("an open document-KEK rotation (#1316)", { timeout: 20_000 }, () => {
+  /** Wraps an adapter and records every method called on it. */
+  function recordCalls<T extends object>(adapter: T): { adapter: T; calls: string[] } {
+    const calls: string[] = [];
+    const proxy = new Proxy(adapter, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver) as unknown;
+        if (typeof value !== "function") return value;
+        return (...args: unknown[]) => {
+          calls.push(String(prop));
+          return (value as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      },
+    });
+    return { adapter: proxy, calls };
+  }
+
+  /**
+   * A live key file in its own `.orbit-secrets` directory. The specification
+   * says "next to the live key" without naming how a caller points the
+   * function at that file, so the file is passed under both names the
+   * module's other entry points use; the unused one is ignored.
+   */
+  function liveKey(name: string, rotationOpen: boolean): { documentKekFile: string; liveDocumentKekFile: string } {
+    const secrets = join(sandbox, name, ".orbit-secrets");
+    mkdirSync(secrets, { recursive: true, mode: 0o700 });
+    const documentKekFile = join(secrets, "document-kek");
+    writeFileSync(documentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+    if (rotationOpen) writeFileSync(join(secrets, "document-kek-next"), `${"b".repeat(64)}\n`, { mode: 0o600 });
+    return { documentKekFile, liveDocumentKekFile: documentKekFile };
+  }
+
+  function captureRotationRefusal(run: () => unknown): void {
+    let caught: unknown;
+    try {
+      run();
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught, "expected a kek-rotation-open refusal, but the call returned").toBeInstanceOf(Error);
+    expect((caught as { code?: string }).code).toBe("kek-rotation-open");
+    expect((caught as Error).message).toMatch(/rotation/);
+  }
+
+  it("runBackup refuses with document-kek-next present, before the adapter stops the app or dumps the database", () => {
+    const documentsRoot = join(sandbox, "docs-rot-backup");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "rot-backup-backups");
+    const fake = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    const { adapter, calls } = recordCalls(fake);
+    const key = liveKey("rot-backup-open", true);
+
+    captureRotationRefusal(() => runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z"), ...key } as Parameters<typeof runBackup>[0]));
+
+    expect(calls).not.toContain("stopApp");
+    expect(calls).not.toContain("dumpDatabase");
+    expect(calls).toEqual([]);
+    expect(fake.appRunning).toBe(true);
+    const tars = existsSync(backupDirectory) ? readdirSync(backupDirectory).filter((name) => name.endsWith(".tar")) : [];
+    expect(tars).toEqual([]);
+  });
+
+  it("control: runBackup without document-kek-next stops the app and dumps the database as before", () => {
+    const documentsRoot = join(sandbox, "docs-rot-backup-control");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "rot-backup-control-backups");
+    const { adapter, calls } = recordCalls(new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10));
+    const key = liveKey("rot-backup-closed", false);
+
+    const result = runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z"), ...key } as Parameters<typeof runBackup>[0]);
+
+    expect(existsSync(result.finalTarPath)).toBe(true);
+    expect(calls).toContain("stopApp");
+    expect(calls).toContain("dumpDatabase");
+  });
+
+  it("runExportRecoveryBundle refuses with document-kek-next present, before the adapter verifies or records anything", () => {
+    const documentsRoot = join(sandbox, "docs-rot-export");
+    const sourceBundlePath = buildBundle(documentsRoot, ORIGINAL_KEY, 10, LIVE_KEK, join(sandbox, "rot-export-source-backups"));
+    const fake = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    const { adapter, calls } = recordCalls(fake);
+    const recoveryDirectory = join(sandbox, "rot-export-recovery-backups");
+    const passphrase = "correct horse battery staple";
+    const key = liveKey("rot-export-open", true);
+
+    captureRotationRefusal(() =>
+      runExportRecoveryBundle({
+        sourceBundlePath,
+        documentKekHex: LIVE_KEK,
+        passphrase,
+        passphraseConfirmation: passphrase,
+        backupDirectory: recoveryDirectory,
+        adapter,
+        now: new Date("2026-02-02T00:00:00Z"),
+        ...key,
+      } as Parameters<typeof runExportRecoveryBundle>[0]),
+    );
+
+    expect(calls).not.toContain("stopApp");
+    expect(calls).not.toContain("dumpDatabase");
+    expect(calls).toEqual([]); // No pg_restore --list, no export record.
+    expect(fake.recordExportedCalls).toBe(0);
+    expect(existsSync(join(recoveryDirectory, "orbit-recovery-20260202-000000.tar"))).toBe(false);
+  });
+
+  it("control: runExportRecoveryBundle without document-kek-next exports as before", () => {
+    const documentsRoot = join(sandbox, "docs-rot-export-control");
+    const sourceBundlePath = buildBundle(documentsRoot, ORIGINAL_KEY, 10, LIVE_KEK, join(sandbox, "rot-export-control-source-backups"));
+    const { adapter } = recordCalls(new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10));
+    const recoveryDirectory = join(sandbox, "rot-export-control-recovery-backups");
+    const passphrase = "correct horse battery staple";
+    const key = liveKey("rot-export-closed", false);
+
+    const result = runExportRecoveryBundle({
+      sourceBundlePath,
+      documentKekHex: LIVE_KEK,
+      passphrase,
+      passphraseConfirmation: passphrase,
+      backupDirectory: recoveryDirectory,
+      adapter,
+      now: new Date("2026-02-02T00:00:00Z"),
+      ...key,
+    } as Parameters<typeof runExportRecoveryBundle>[0]);
+
+    expect(existsSync(result.finalPath)).toBe(true);
+  });
+});

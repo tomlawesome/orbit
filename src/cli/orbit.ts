@@ -882,7 +882,13 @@ function commandBackup(deployDir: string, args: string[], directories: BackupRes
 
   if (args.length !== 0) fail("orbit: usage: orbit backup [--verify <backup.tar>]");
   preflightPostgresClient();
-  const result = runBackup({ backupDirectory: paths.backupDirectory, documentKekHex: () => readDocumentKekHex(paths.documentKekFile), adapter, now: new Date() });
+  const result = runBackup({
+    backupDirectory: paths.backupDirectory,
+    documentKekHex: () => readDocumentKekHex(paths.documentKekFile),
+    documentKekFile: paths.documentKekFile,
+    adapter,
+    now: new Date(),
+  });
   writeResult(`Orbit backup created: ${result.finalTarPath}`);
   process.exit(0);
 }
@@ -976,6 +982,7 @@ function commandExportRecoveryBundle(deployDir: string, args: string[], director
   const result = runExportRecoveryBundle({
     sourceBundlePath: resolve(args[0]),
     documentKekHex,
+    documentKekFile: paths.documentKekFile,
     // export-recovery-bundle.sh asked only once the source bundle had passed --verify.
     collectPassphrase: collectRecoveryPassphraseWithConfirmation,
     backupDirectory: paths.backupDirectory,

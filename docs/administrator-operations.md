@@ -849,6 +849,13 @@ application holds **both** the current key and the next one
 protects it, so every row stays readable whether or not the rewrap worker has
 reached it yet. No maintenance window is needed at any step below.
 
+Take a backup (`bash scripts/backup.sh`) just before step 1, and another
+straight after step 4. In between, backups and recovery-bundle exports are
+refused, including the scheduled nightly one: rows written during the
+rotation are under the next key, which a backup does not carry, so it could
+not bring them back. They work again as soon as step 4 is done (or the
+rotation is undone).
+
 1. Generate a fresh key and put it where the rotation overlay expects it,
    with owner-only permissions:
    ```sh
@@ -922,6 +929,9 @@ reached it yet. No maintenance window is needed at any step below.
    current; nothing needs to know the id in advance. Dropping the overlay (by
    deploying with just `docker-compose.yml` again) removes
    `DOCUMENT_KEK_NEXT`; with the rewrap complete, no row depended on it.
+
+   Now take the backup (`bash scripts/backup.sh`): it is the first one since
+   step 1 that holds everything written during the rotation.
 
 ### If you are rotating because a key may have leaked
 
