@@ -75,7 +75,7 @@ describe("#1316: the approve's partial answer, through the data seam both screen
       const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
       if (href.includes("/api/auth/session")) return json({ user: { id: "u1" }, csrfToken: "token" });
       if (href.includes("/api/imap-inbox/")) {
-        return json(init?.method === "PUT" ? {} : { receipt: { draftVersion: 1 }, sections: [{ id: "s1", name: "Home" }], attachments: [] });
+        return json(init?.method === "PUT" ? {} : { receipt: { draftVersion: 1 }, sections: [{ id: "s1", name: "Home" }, { id: "s2", name: "Garage" }], attachments: [] });
       }
       if (href.includes("/api/reviewed-intake/approve")) {
         approvalBodies.push(JSON.parse(String(init.body)));
@@ -100,7 +100,7 @@ describe("#1316: the approve's partial answer, through the data seam both screen
     const operationIds = new Map();
     const amended = { title: "Boiler cover (amended)", kind: "service" };
 
-    const first = await approveWithOperation(suggestion, operationIds, "h-1", amended, "s1");
+    const first = await approveWithOperation(suggestion, operationIds, "h-1", amended, "s2");
     expect(first).toEqual({ partial: true, message: PARTIAL_SENTENCE });
 
     // The second press on the suggestion is the plain approve: no amended item.
@@ -110,6 +110,12 @@ describe("#1316: the approve's partial answer, through the data seam both screen
     expect(approvalBodies).toHaveLength(2);
     expect(approvalBodies[0].item).toMatchObject({ title: "Boiler cover (amended)" });
     expect(approvalBodies[1].operationId).toBe(approvalBodies[0].operationId);
+    // Same operation id means the engine treats the second body as the first
+    // one again, so it must BE the first one: the amended item and the section
+    // the reader chose, not the proposal's own item and the first section.
+    expect(approvalBodies[0].sectionId).toBe("s2");
+    expect(approvalBodies[1].item).toEqual(approvalBodies[0].item);
+    expect(approvalBodies[1].sectionId).toBe(approvalBodies[0].sectionId);
   });
 });
 

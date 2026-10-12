@@ -813,11 +813,21 @@ export async function approveWithOperation(suggestion, operationIds, fallbackHou
     operationId = crypto.randomUUID();
     operationIds.set(suggestion.receiptId, operationId);
   }
+  // The engine binds an operation id to the body it first carried, so a plain
+  // retry (no amendment given) re-sends the amendment and section sent first.
+  const pinned = pinnedApprovals.get(operationId);
+  if (pinned && !amendedItem) ({ amendedItem, sectionId } = pinned);
+  else pinnedApprovals.set(operationId, { amendedItem, sectionId });
   const result = await approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem, sectionId);
   if (result.outcome === "partial_success") return { partial: true, message: PARTIAL_APPROVAL_MESSAGE };
   operationIds.delete(suggestion.receiptId);
+  pinnedApprovals.delete(operationId);
   return { ok: true };
 }
+
+/** What each kept operation id first sent, by operation id.
+ *  @type {Map<string, { amendedItem: ?ItemProposal, sectionId: ?string }>} */
+const pinnedApprovals = new Map();
 
 /**
  * Discard a mail-in receipt; its staged files are purged server-side.
