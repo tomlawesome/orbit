@@ -43,6 +43,17 @@ export const REMINDER_CHOICES = [90, 60, 30, 21, 14, 7, 3, 1];
 export const REMINDER_DEFAULT = [14, 3];
 
 /**
+ * The pair a new entry starts with: the member's own from Settings
+ * (workspace.js readReminders), or the default when it could not be read.
+ * @param {{ firstWarningDays: number | null, finalWarningDays: number | null } | null} [reminders]
+ */
+export function reminderPairOf(reminders) {
+  const first = reminders?.firstWarningDays;
+  const final = reminders?.finalWarningDays;
+  return typeof first === "number" && typeof final === "number" ? [first, final] : [...REMINDER_DEFAULT];
+}
+
+/**
  * The kind a stored item reads as, so the form lights the right chip: its
  * subtype when that is one of the five, otherwise what its schedule says.
  * Presentation only — it reads what the engine stored and never decides it.

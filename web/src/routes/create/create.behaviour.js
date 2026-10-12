@@ -1,5 +1,5 @@
 import { goto } from "$app/navigation";
-import { PARTIAL_CREATE_MESSAGE, WorkspaceError, activeHousehold, applyCommand, attachItemDocument, checkDraftCommand } from "$lib/data/workspace.js";
+import { PARTIAL_CREATE_MESSAGE, WorkspaceError, activeHousehold, applyCommand, attachItemDocument, checkDraftCommand, readReminders } from "$lib/data/workspace.js";
 import {
   CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
   WHY_UNDRAWABLE, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
@@ -9,7 +9,7 @@ import { screenScope } from "$lib/teardown.js";
 import { takeHeldDocument } from "$lib/data/held-document.js";
 import { wireDropFeedback } from "./drop-feedback.js";
 import { dryRunner } from "$lib/data/dry-run.js";
-import { createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice } from "./entry.js";
+import { REMINDER_DEFAULT, createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, reminderPairOf } from "./entry.js";
 import { sizeLabel } from "$lib/format.js";
 
 /**
@@ -110,6 +110,20 @@ export function mountCreate() {
       idempotency absorbs the retry instead of creating a second item. */
   const draftId = crypto.randomUUID();
 
+  /* A new entry starts from the member's own pair, which they can still change
+     here: the select's one choice replaces the pair once it is changed. */
+  const reminderSelect = /** @type {HTMLSelectElement} */ (document.getElementById("f-reminder"));
+  let reminderPair = [...REMINDER_DEFAULT];
+  let reminderChosen = false;
+  on(reminderSelect, "change", () => { reminderChosen = true; });
+  readReminders()
+    .catch(() => null)
+    .then((reminders) => {
+      reminderPair = reminderPairOf(reminders);
+      const first = [...reminderSelect.options].find((option) => Number(option.value) === reminderPair[0]);
+      if (first && !reminderChosen) reminderSelect.value = first.value;
+    });
+
   /** The recurrence select's value, in months — 0 is once (#1058d). */
   const monthsOf = () => recurrenceOfChoice(recurSelect.value, recurMonths.value);
 
@@ -132,7 +146,7 @@ export function mountCreate() {
       dueDate: value("f-date"),
       recurrence: monthsOf(),
       cost: value("f-cost"),
-      reminderDays: [Number(value("f-reminder"))],
+      reminderDays: reminderChosen ? [Number(value("f-reminder"))] : [...reminderPair],
       notes: value("f-notes"),
     };
   }

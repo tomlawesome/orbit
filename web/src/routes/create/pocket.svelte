@@ -3,7 +3,7 @@
   import { beforeNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { PARTIAL_CREATE_MESSAGE, WorkspaceError, applyCommand, attachItemDocument, checkDraftCommand, readWorkspace } from "$lib/data/workspace.js";
+  import { PARTIAL_CREATE_MESSAGE, WorkspaceError, applyCommand, attachItemDocument, checkDraftCommand, readReminders, readWorkspace } from "$lib/data/workspace.js";
   import { saveProblem } from "$lib/data/metadata-status.js";
   import {
     CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
@@ -15,7 +15,7 @@
   import { wake } from "$lib/pocket/wake.js";
   import EntryForm from "./EntryForm.svelte";
   import { dryRunner } from "$lib/data/dry-run.js";
-  import { blankEntry, createCommandOf, entryChanged } from "./entry.js";
+  import { blankEntry, createCommandOf, entryChanged, reminderPairOf } from "./entry.js";
 
   /**
    * NEW ENTRY ON A PHONE (#1120, proposal §2.5). Server-rendered beside the
@@ -231,13 +231,15 @@
   async function load() {
     phase = "loading";
     try {
-      const workspace = await readWorkspace();
+      const [workspace, reminders] = await Promise.all([readWorkspace(), readReminders().catch(() => null)]);
       households = (workspace.households ?? []).map((one) => ({
         id: one.id, name: one.name, currency: one.currency, sections: one.sections ?? [],
       }));
       if (!households.length) { phase = "none"; return; }
       const active = workspace.activeHouseholdId ?? households[0].id;
       entry.householdId = households.some((one) => one.id === active) ? active : households[0].id;
+      /* A new entry starts from the member's own pair, which they can still change on the entry. */
+      entry.reminderDays = reminderPairOf(reminders);
       start = $state.snapshot(entry);
       phase = "ready";
     } catch {
