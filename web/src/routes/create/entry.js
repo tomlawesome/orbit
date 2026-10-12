@@ -34,8 +34,13 @@ export const RECURRENCE_MAX = 120;
 export const RECURRENCE_DEFAULT = 12;
 /** Reminder days offered in the reminders callout, furthest first. */
 export const REMINDER_CHOICES = [90, 60, 30, 21, 14, 7, 3, 1];
-/** The two reminders a new entry starts with (§2.5). */
-export const REMINDER_DEFAULT = [21, 7];
+/**
+ * The two reminders a new entry starts with: the engine's own pair
+ * (src/lib/preferences.ts DEFAULT_FIRST/FINAL_WARNING_DAYS), so a new entry
+ * starts where settings says it does. Pinned by test rather than imported,
+ * as the web bundle does not import server code.
+ */
+export const REMINDER_DEFAULT = [14, 3];
 
 /**
  * The kind a stored item reads as, so the form lights the right chip: its
