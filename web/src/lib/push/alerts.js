@@ -86,7 +86,10 @@ export async function currentSubscription(scope = globalThis) {
  * device the last person never signed out of -- is a different thing: the
  * browser is subscribed, this account is not, and a switch reading "on"
  * would promise alerts that never come. That reads as off, so the reader
- * can turn it on for themselves.
+ * can turn it on for themselves. A subscription made under an older server
+ * key is replaced before it is sent (freshenedSubscription): re-sending the
+ * old one would undo the server's revocation of it and read "on" while no
+ * alert can arrive.
  *
  * @param {object} [deps] see resolvedDeps
  * @returns {Promise<PushSubscription | null>}
@@ -95,13 +98,30 @@ export async function syncAlerts(deps = {}) {
   const d = resolvedDeps(deps);
   const existing = await currentSubscription(d.scope);
   if (!existing) return null;
+  let subscription = existing;
+  let config = null;
   try {
-    await d.writePushSubscription(/** @type {any} */ (existing.toJSON()));
+    config = await d.readPushConfig();
+  } catch {
+    /* unreachable: write what the browser has; the next visit checks the key */
+  }
+  if (config) {
+    try {
+      const registration = await d.getRegistration();
+      if (registration) subscription = await freshenedSubscription(registration, existing, config);
+    } catch {
+      // Re-keying failed part-way: the old subscription cannot deliver under
+      // the server's current key, so the switch must not read "on".
+      return null;
+    }
+  }
+  try {
+    await d.writePushSubscription(/** @type {any} */ (subscription.toJSON()));
   } catch (error) {
     if (serverRefused(error)) return null;
     /* unreachable: re-sent on the next visit */
   }
-  return existing;
+  return subscription;
 }
 
 /**
@@ -142,6 +162,31 @@ function sameKey(subscriptionKey, serverKey) {
   const a = new Uint8Array(subscriptionKey);
   const b = applicationServerKeyOf(serverKey);
   return a.length === b.length && a.every((byte, index) => byte === b[index]);
+}
+
+/**
+ * `existing`, or a fresh subscription when the server's VAPID key has changed
+ * since it was made. A restored or re-keyed server needs one: a subscription
+ * bound to the old key is refused by the push service, so it would read as
+ * on and never deliver. Permission was already granted to make `existing`,
+ * so subscribing again needs no user gesture. The old one goes first: a
+ * browser will not subscribe under a new key while it holds one under
+ * another. A server with no key leaves `existing` as it is.
+ *
+ * @param {ServiceWorkerRegistration} registration
+ * @param {PushSubscription} existing
+ * @param {{ publicKey?: string | null } | null | undefined} config
+ * @returns {Promise<PushSubscription>}
+ */
+async function freshenedSubscription(registration, existing, config) {
+  if (!config?.publicKey || sameKey(existing.options?.applicationServerKey, config.publicKey)) {
+    return existing;
+  }
+  await existing.unsubscribe();
+  return registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: applicationServerKeyOf(config.publicKey),
+  });
 }
 
 /**
@@ -193,24 +238,16 @@ export async function enableAlerts(deps = {}) {
   const registration = (await d.getRegistration()) ?? (await d.register());
 
   const existing = await registration.pushManager.getSubscription();
-  let config;
   if (existing) {
-    // A restored or re-keyed server needs a fresh subscription: one bound to
-    // the old VAPID key is refused by the push service, so it would read as
-    // on and never deliver. Permission was already granted to make it.
-    config = await d.readPushConfig();
-    if (!config?.publicKey || sameKey(existing.options?.applicationServerKey, config.publicKey)) {
-      await d.writePushSubscription(existing.toJSON());
-      return existing;
-    }
-    await existing.unsubscribe();
-  } else {
-    const permission = await d.requestPermission();
-    if (permission !== "granted") {
-      throw new AlertsError("Notification permission was not granted", { code: "permission_denied" });
-    }
-    config = await d.readPushConfig();
+    const subscription = await freshenedSubscription(registration, existing, await d.readPushConfig());
+    await d.writePushSubscription(subscription.toJSON());
+    return subscription;
   }
+  const permission = await d.requestPermission();
+  if (permission !== "granted") {
+    throw new AlertsError("Notification permission was not granted", { code: "permission_denied" });
+  }
+  const config = await d.readPushConfig();
   if (!config?.publicKey) {
     throw new AlertsError("Web Push is not configured on this Orbit server", { code: "unconfigured" });
   }
