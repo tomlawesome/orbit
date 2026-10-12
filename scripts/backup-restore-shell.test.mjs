@@ -50,13 +50,33 @@ function scratchDir(prefix) {
 // FAKE_ENGINE_HANG_READY, when set, is a path the full run creates once its
 // other effects are done (journal included) before it blocks until a signal
 // kills it, so a test can signal the script while the engine is running
-// (#1316 O2-R2).
+// (#1316 O2-R2). With FAKE_ENGINE_EXIT_AFTER_SIGNAL_MS also set it ignores
+// TERM and HUP and keeps running that long after the first, then appends an
+// ["engine-exited"] line to FAKE_DOCKER_LOG and exits; it writes
+// FAKE_ENGINE_JOURNAL_AFTER_SIGNAL (a journal path) only at that point.
+// \`docker wait <name>\` and \`docker stop <name>\` are accepted and recorded
+// (wait blocks until the engine-exited marker when the engine is slow).
 const FAKE_DOCKER = `#!/usr/bin/env node
 const { appendFileSync, mkdirSync, writeFileSync } = require("node:fs");
 const { dirname } = require("node:path");
 const argv = process.argv.slice(2);
 appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(argv) + "\\n");
 if (argv[0] === "info") { process.stdout.write("[name=seccomp,profile=builtin name=cgroupns]\\n"); process.exit(0); }
+if (argv[0] === "stop") process.exit(0);
+if (argv[0] === "wait") {
+  // \`docker wait <name>\`: with a slow engine (FAKE_ENGINE_EXIT_AFTER_SIGNAL_MS) it blocks until
+  // the engine has logged its exit marker, as the real command blocks until the container ends.
+  if (process.env.FAKE_ENGINE_EXIT_AFTER_SIGNAL_MS) {
+    const { readFileSync } = require("node:fs");
+    const until = Date.now() + 10000;
+    const exited = () => readFileSync(process.env.FAKE_DOCKER_LOG, "utf8").includes('["engine-exited"]');
+    const poll = () => { if (exited() || Date.now() > until) { process.stdout.write("0\\n"); process.exit(0); } setTimeout(poll, 25); };
+    poll();
+    return;
+  }
+  process.stdout.write("0\\n");
+  process.exit(0);
+}
 if (argv[0] !== "compose") process.exit(1);
 if (argv[1] === "version") process.exit(0);
 let verbIndex = 1;
@@ -88,6 +108,26 @@ if (verb === "run") {
   if (process.env.FAKE_ENGINE_STDOUT) process.stdout.write(process.env.FAKE_ENGINE_STDOUT);
   if (process.env.FAKE_ENGINE_HANG_READY) {
     writeFileSync(process.env.FAKE_ENGINE_HANG_READY, "ready\\n");
+    if (process.env.FAKE_ENGINE_EXIT_AFTER_SIGNAL_MS) {
+      // A slow engine: it survives TERM and HUP (as \`trap '' TERM HUP\` would), keeps working
+      // for FAKE_ENGINE_EXIT_AFTER_SIGNAL_MS after the first one, writes the journal then when
+      // FAKE_ENGINE_JOURNAL_AFTER_SIGNAL is set, logs an engine-exited marker and ends.
+      let signalled = false;
+      const onSignal = () => {
+        if (signalled) return;
+        signalled = true;
+        setTimeout(() => {
+          if (process.env.FAKE_ENGINE_JOURNAL_AFTER_SIGNAL) {
+            mkdirSync(dirname(process.env.FAKE_ENGINE_JOURNAL_AFTER_SIGNAL), { recursive: true });
+            writeFileSync(process.env.FAKE_ENGINE_JOURNAL_AFTER_SIGNAL, "state=checkpointed\\n");
+          }
+          appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(["engine-exited"]) + "\\n");
+          process.exit(Number(process.env.FAKE_ENGINE_STATUS || 0));
+        }, Number(process.env.FAKE_ENGINE_EXIT_AFTER_SIGNAL_MS));
+      };
+      process.on("SIGTERM", onSignal);
+      process.on("SIGHUP", onSignal);
+    }
     setInterval(() => {}, 1000);
     return;
   }
@@ -266,7 +306,9 @@ describe("the one-off each script becomes (E1/E5)", () => {
     expect(result.stdout).toBe("Orbit backup created: /srv/x.tar\n");
     const engine = engineRun(result.calls);
     expect(engine.envFile).toBe(".env-orbit");
-    expect(engine.flags).toEqual(["--rm", "--no-deps", "-i", "-T"]);
+    expect(engine.flags).toEqual(["--rm", "--no-deps", "--name", "-i", "-T"]);
+    const engineCall = result.calls.find((call) => call.includes("--name"));
+    expect(engineCall[engineCall.indexOf("--name") + 1]).toMatch(/^orbit-backup-engine-\d+$/u);
     expect(engine.volumes).toEqual([`${deployment.deployDir}:/orbit-deploy:rw`]);
     expect(engine.env).toMatchObject({ ORBIT_HOST_UID: String(process.getuid()), ORBIT_HOST_GID: String(process.getgid()), ORBIT_HOST_DEPLOY_DIR: deployment.deployDir });
     expect(engine.entrypoint).toBe("node");
@@ -620,6 +662,41 @@ describe("the stop / engine / start rule (E3)", () => {
     const result = await runSignalledMidEngine(deployment, "restore.sh", ["--yes", bundle], { env: { ...UNATTENDED, FAKE_ENGINE_JOURNAL: deployment.journal } });
     expect(verbs(result.calls)).toEqual(["run", "stop", "run"]);
     expect(result.stderr).toContain("bash scripts/restore.sh --recover");
+  });
+
+  // #1316 audit: a signal must not start the app while the engine, which
+  // ignores TERM and HUP, is still working on the data. The app may start
+  // only after the engine has ended, and the journal is looked for then.
+  const SLOW_ENGINE = { FAKE_ENGINE_EXIT_AFTER_SIGNAL_MS: "1500" };
+  const appStartIndex = (calls) => calls.findIndex((call) => call[0] === "compose" && call.includes("--env-file") && composeCall(call).verb === "start" && composeCall(call).rest.includes("orbit-app"));
+
+  it.each([
+    ["backup.sh", []],
+    ["restore.sh", ["--yes"]],
+    ["import-recovery-bundle.sh", []],
+  ])("%s does not start the app on SIGTERM until the engine, which ignores TERM and HUP, has ended", async (script, flags) => {
+    const deployment = makeDeployment();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const args = script === "backup.sh" ? [] : [...flags, bundle];
+    const result = await runSignalledMidEngine(deployment, script, args, { env: { ...yesEnv(flags), ...SLOW_ENGINE } });
+    const exited = result.calls.findIndex((call) => call[0] === "engine-exited");
+    expect(exited, "the engine should have logged engine-exited").toBeGreaterThanOrEqual(0);
+    const started = appStartIndex(result.calls);
+    expect(started, "compose start orbit-app should be recorded").toBeGreaterThanOrEqual(0);
+    expect(started, "compose start orbit-app was recorded before the engine exited").toBeGreaterThan(exited);
+  });
+
+  it("restore.sh looks for the journal after the engine has ended: one written only after SIGTERM keeps the app stopped and points at --recover", async () => {
+    const deployment = makeDeployment();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const result = await runSignalledMidEngine(deployment, "restore.sh", ["--yes", bundle], {
+      env: { ...UNATTENDED, ...SLOW_ENGINE, FAKE_ENGINE_JOURNAL_AFTER_SIGNAL: deployment.journal },
+    });
+    expect(existsSync(deployment.journal)).toBe(true);
+    expect(appStartIndex(result.calls), "compose start orbit-app must not be recorded").toBe(-1);
+    expect(result.stderr).toContain("--recover");
   });
 
   // A bundle is validated while Orbit runs (E3a); --recover has none, so it stops first as before.

@@ -22,6 +22,8 @@ readonly backup_directory
 secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
 [[ "$secrets_directory" == /* ]] || secrets_directory="$repo_dir/$secrets_directory"
 readonly secrets_directory
+# The engine one-off's container name: unique to this run, so the EXIT trap can `docker wait` for it.
+readonly engine_name="orbit-backup-engine-$$"
 # The engine's exit status when another backup or restore holds the
 # backup/restore lock. Only runs that stopped orbit-app take it (a preflight
 # takes none), so that run owns orbit-app and this one leaves it alone.
@@ -161,10 +163,11 @@ engine_host_identity() {
 # the bundle being read is mounted read-only. The ORBIT_HOST_* paths let the
 # engine print host paths. The drill's switches are forwarded when set (the
 # engine ignores the ones its command does not use). Exit status passes through.
+# The one-off is named $engine_name so an EXIT trap can wait for it to end.
 run_engine() {
   local input_file="$1" name
   shift
-  local -a run_args=(run --rm --no-deps -i) directory_args=()
+  local -a run_args=(run --rm --no-deps --name "$engine_name" -i) directory_args=()
   if [[ -t 0 && -t 1 ]]; then run_args+=(-t); else run_args+=(-T); fi
   run_args+=(-e "ORBIT_HOST_UID=$host_uid" -e "ORBIT_HOST_GID=$host_gid" -e "ORBIT_HOST_DEPLOY_DIR=$repo_dir")
   for name in ORBIT_NONINTERACTIVE_RESTORE ORBIT_RECOVERY_PROMPTS ORBIT_RECOVERY_TEST_MODE ORBIT_RESTORE_TEST_MODE ORBIT_RESTORE_TEST_SYNC_FAILURE_STAGE \
@@ -238,12 +241,16 @@ elif [[ "$#" == 0 ]]; then
   # shellcheck disable=SC2119  # this script does not wait for health
   require_deployment
   engine_host_identity
-  # A signal, a timeout or a fail() after the stop must not leave Orbit down:
+  # A signal, a timeout or a fail() after the stop must not leave Orbit down
+  # once the engine has ended (the trap waits for it):
   # the engine's own restart is a no-op in its container.
   app_stopped=false
   # shellcheck disable=SC2317  # run by the EXIT trap
   restart_app() {
     [[ "$app_stopped" == true && "${status:-0}" != "$engine_locked_status" ]] || return 0
+    # A signal reaches this shell, not the engine (node ignores TERM/HUP as PID 1): wait for it to end
+    # before starting Orbit, never under a backup still in flight. Gone: wait fails.
+    docker wait "$engine_name" >/dev/null 2>&1 || true
     compose start orbit-app >/dev/null 2>&1 || printf 'Orbit could not be started again after the backup.\n' >&2
   }
   trap restart_app EXIT

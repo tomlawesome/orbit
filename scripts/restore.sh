@@ -15,6 +15,8 @@ readonly backup_directory
 secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
 [[ "$secrets_directory" == /* ]] || secrets_directory="$repo_dir/$secrets_directory"
 readonly secrets_directory
+# The engine one-off's container name: unique to this run, so the EXIT trap can `docker wait` for it.
+readonly engine_name="orbit-restore-engine-$$"
 readonly journal_path="$backup_directory/.orbit-restore/restore.journal"
 # 75: another backup/restore holds the lock. Only runs that stopped orbit-app take it (a preflight
 # takes none), so that run owns orbit-app.
@@ -151,10 +153,11 @@ engine_host_identity() {
 # the bundle being read is mounted read-only. The ORBIT_HOST_* paths let the
 # engine print host paths. The drill's switches are forwarded when set (the
 # engine ignores the ones its command does not use). Exit status passes through.
+# The one-off is named $engine_name so an EXIT trap can wait for it to end.
 run_engine() {
   local input_file="$1" name
   shift
-  local -a run_args=(run --rm --no-deps -i) directory_args=()
+  local -a run_args=(run --rm --no-deps --name "$engine_name" -i) directory_args=()
   if [[ -t 0 && -t 1 ]]; then run_args+=(-t); else run_args+=(-T); fi
   run_args+=(-e "ORBIT_HOST_UID=$host_uid" -e "ORBIT_HOST_GID=$host_gid" -e "ORBIT_HOST_DEPLOY_DIR=$repo_dir")
   for name in ORBIT_NONINTERACTIVE_RESTORE ORBIT_RECOVERY_PROMPTS ORBIT_RECOVERY_TEST_MODE ORBIT_RESTORE_TEST_MODE ORBIT_RESTORE_TEST_SYNC_FAILURE_STAGE \
@@ -229,13 +232,16 @@ require_deployment health
 engine_host_identity
 [[ "$recover" == true ]] || run_engine "$backup_file" restore --preflight /orbit-input/bundle.tar </dev/null || exit $?
 keep_stopped_message='Orbit restore: recovery evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.'
-# A signal, a timeout or a fail() after the stop must not leave Orbit down: the engine's own
-# restart is a no-op in its container. A locked run (75) does not own the app; recovery
-# evidence keeps it stopped.
+# A signal, a timeout or a fail() after the stop must not leave Orbit down once the engine has
+# ended (the trap waits for it): the engine's own restart is a no-op in its container. A locked
+# run (75) does not own the app; recovery evidence keeps it stopped.
 app_stopped=false
 # shellcheck disable=SC2317  # run by the EXIT trap
 restart_app() {
   [[ "$app_stopped" == true && "${status:-0}" != "$engine_locked_status" ]] || return 0
+  # A signal reaches this shell, not the engine (node ignores TERM/HUP as PID 1): wait for it to end
+  # before reading the journal, never start Orbit under a restore still in flight. Gone: wait fails.
+  docker wait "$engine_name" >/dev/null 2>&1 || true
   if [[ -f "$journal_path" ]]; then
     printf '%s\n' "$keep_stopped_message" >&2
     return 0
