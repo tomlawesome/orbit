@@ -621,6 +621,14 @@ function environmentKeyIsNonEmpty(deployDir: string, key: string): boolean {
   return (rawEnvironmentKeyValue(deployDir, key) ?? "") !== "";
 }
 
+/** Whether .env-orbit carries an applied-configuration stamp. */
+export function environmentHasAppliedStamp(deployDir: string): boolean {
+  return (
+    environmentKeyIsNonEmpty(deployDir, "ORBIT_CONFIG_APPLIED_VERSION") ||
+    environmentKeyIsNonEmpty(deployDir, "ORBIT_CONFIG_APPLIED_DIGEST")
+  );
+}
+
 /**
  * ensure_oidc_secret_placeholder (configure.sh:786-814, guarantees #18-19).
  *
@@ -872,7 +880,10 @@ export interface ConfigureApplyResult {
 export function runConfigureApply(
   deployDir: string,
   orbitImage: string | undefined,
-  options: { trustOrbitImage?: boolean } = {},
+  // stampAbsentBeforeMigration: the installer's reading of the stamp taken
+  // before its own configuration migration, which writes the stamp before
+  // this runs. Omitted (bare configure), the file is read here instead.
+  options: { trustOrbitImage?: boolean; stampAbsentBeforeMigration?: boolean } = {},
 ): ConfigureApplyResult {
   const messages: string[] = [];
 
@@ -903,13 +914,15 @@ export function runConfigureApply(
   }
   // Before anything is written, so a refused run changes nothing.
   refuseRetiredSecretsDirectory(deployDir);
-  // A stamped .env-orbit has finished an install (the stamp is written only
-  // after a successful configure), so an empty or missing secrets directory
-  // is a loss, not a first run. Read after preflight has validated the file.
-  if (
-    environmentKeyIsNonEmpty(deployDir, "ORBIT_CONFIG_APPLIED_VERSION") ||
-    environmentKeyIsNonEmpty(deployDir, "ORBIT_CONFIG_APPLIED_DIGEST")
-  ) {
+  // A stamped .env-orbit has finished an install, so an empty or missing
+  // secrets directory is a loss, not a first run. The installer's migration
+  // also stamps a pre-provisioned first install just before this, so the
+  // installer passes what the file held before that migration. Otherwise
+  // read after preflight has validated the file.
+  const stampedBeforeThisRun = options.stampAbsentBeforeMigration === undefined
+    ? environmentHasAppliedStamp(deployDir)
+    : !options.stampAbsentBeforeMigration;
+  if (stampedBeforeThisRun) {
     isFreshInstall = false;
   }
 

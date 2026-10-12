@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { type ConfigurationMigrationTarget, runConfigurationMigration, runConfigurationPreflight } from "./configuration-migration";
-import { type GuidedInitInput, applyGuidedInit, applySetOidcSecret, runConfigureApply, setDeploymentProfile } from "./configure-engine";
+import { type GuidedInitInput, applyGuidedInit, applySetOidcSecret, environmentHasAppliedStamp, runConfigureApply, setDeploymentProfile } from "./configure-engine";
 import {
   DEPLOYMENT_ASSET_FILE_MODE,
   DEPLOYMENT_ASSETS,
@@ -577,6 +577,9 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       // An existing .env-orbit is preflighted and migrated before anything
       // else is installed (#50).
       let configurationMigrationCompleted = false;
+      // Read before the migration below writes the stamp, so configure can
+      // tell a pre-provisioned first install from one that lost its secrets.
+      const stampAbsentBeforeMigration = !environmentHasAppliedStamp(context.targetDir);
       if (existsSync(environmentFile)) {
         const preflight = transaction.shareLock(() => runConfigurationPreflight(environmentFile));
         if (!preflight.ok) return fail("configuration", "configuration", preflight.message);
@@ -615,7 +618,7 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
         return undefined;
       };
       try {
-        say(dependencies, transaction.shareLock(() => runConfigureApply(context.targetDir, context.resolvedReference, { trustOrbitImage: true })).messages);
+        say(dependencies, transaction.shareLock(() => runConfigureApply(context.targetDir, context.resolvedReference, { trustOrbitImage: true, stampAbsentBeforeMigration })).messages);
       } catch {
         return configurationFailure("Configuration failed; restoring the previous deployment.");
       }

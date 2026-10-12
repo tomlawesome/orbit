@@ -851,6 +851,37 @@ describe("runConfigureApply (bare flow, minus ensure_vapid_keys)", () => {
       mkdirSync(join(deployDir, SECRETS_DIRECTORY_NAME), { mode: 0o700 });
       expectSecretRefusalAndNothingGenerated();
     });
+
+    // The migration that runs just before configure can itself write the
+    // applied stamp on a first install, so the stamp alone no longer proves
+    // an earlier install finished. The caller says whether the stamp was
+    // absent before this run's migration; that statement makes a stamped,
+    // secret-less deployment a fresh install. The option name
+    // `stampAbsentBeforeMigration` is the test author's reading of the
+    // specification's wording.
+    it("a stamped .env-orbit with no generated secrets is a fresh install when the caller says the stamp was absent before this run's migration", () => {
+      writeMigratedEnv();
+      const result = runConfigureApply(deployDir, undefined, {
+        stampAbsentBeforeMigration: true,
+      } as Parameters<typeof runConfigureApply>[2]);
+      for (const name of ["session-secret", "postgres-password", "document-kek"]) {
+        expect(readFileSync(join(deployDir, SECRETS_DIRECTORY_NAME, name), "utf8")).toMatch(/^[0-9a-f]{64}\n$/);
+        expect(result.messages).toContain(`Generated ${SECRETS_DIRECTORY_NAME}/${name}.`);
+      }
+    });
+
+    it("the same stamped, secret-less .env-orbit without that statement still refuses (O1-S1 kept)", () => {
+      writeMigratedEnv();
+      expectSecretRefusalAndNothingGenerated();
+    });
+
+    it("an explicit statement that the stamp was NOT absent before the migration still refuses", () => {
+      writeMigratedEnv();
+      expect(() =>
+        runConfigureApply(deployDir, undefined, { stampAbsentBeforeMigration: false } as Parameters<typeof runConfigureApply>[2]),
+      ).toThrow(ConfigureEngineRefusal);
+      expect(existsSync(join(deployDir, SECRETS_DIRECTORY_NAME, "document-kek"))).toBe(false);
+    });
   });
 
   // #1151 RANGE-F1: install.sh runs `configure.sh --init` (which writes
