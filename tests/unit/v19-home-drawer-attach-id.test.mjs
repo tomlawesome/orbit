@@ -71,6 +71,45 @@ describe("#1316 W1-R2: the drawer's attach id is stable per item and file", () =
   });
 });
 
+describe("#1316 W1-R2: the drawer's attach id is dropped once the attach is acknowledged", () => {
+  const loadBoth = async () => {
+    const mod = await import(/* @vite-ignore */ HELPER);
+    expect(typeof mod.attachIdFor).toBe("function");
+    expect(typeof mod.forget).toBe("function");
+    return mod;
+  };
+
+  it("keeps giving the same id until forget is called (retry after a failed attach reuses it)", async () => {
+    const { attachIdFor } = await loadBoth();
+    const f = file("retry.pdf");
+    const first = attachIdFor("item-5", f);
+    expect(attachIdFor("item-5", f)).toBe(first);
+    expect(attachIdFor("item-5", f)).toBe(first);
+  });
+
+  it("gives a different id after forget(item, file) for the same item and file", async () => {
+    const { attachIdFor, forget } = await loadBoth();
+    const f = file("done.pdf");
+    const first = attachIdFor("item-6", f);
+    forget("item-6", f);
+    const second = attachIdFor("item-6", f);
+    expect(second).toMatch(UUID);
+    expect(second).not.toBe(first);
+  });
+
+  it("forget leaves other items and other files alone", async () => {
+    const { attachIdFor, forget } = await loadBoth();
+    const f = file("keep.pdf");
+    const otherFile = file("other-keep.pdf");
+    const kept = attachIdFor("item-7a", f);
+    const keptFile = attachIdFor("item-7b", otherFile);
+    forget("item-7b", f);
+    forget("item-7a", otherFile);
+    expect(attachIdFor("item-7a", f)).toBe(kept);
+    expect(attachIdFor("item-7b", otherFile)).toBe(keptFile);
+  });
+});
+
 describe("#1316 W1-R2: neither home screen passes crypto.randomUUID() straight to the attach", () => {
   it.each([
     ["the desk (+page.svelte onattach)", "web/src/routes/home/+page.svelte"],

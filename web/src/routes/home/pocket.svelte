@@ -31,7 +31,7 @@
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
   import { BAND_VAR, tlabel } from "$lib/data/bands.js";
   import ItemDrawer from "./ItemDrawer.svelte";
-  import { attachIdFor } from "./attach-id.js";
+  import { attachIdFor, forget as forgetAttachId } from "./attach-id.js";
   import SuggestionDrawer from "./SuggestionDrawer.svelte";
 
   /**
@@ -686,6 +686,7 @@
     delete rowProblem[one.id];
     try {
       await attachItemDocument(householdId, one.id, file, attachIdFor(one.id, file));
+      forgetAttachId(one.id, file);
       wake(`${file.name} attached`);
       // In this order: the papers are read from the refreshed view, which
       // lists the item as now carrying one (a first paper was left out).

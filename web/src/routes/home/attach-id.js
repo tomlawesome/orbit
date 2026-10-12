@@ -6,13 +6,24 @@
 /** @type {Map<string, string>} */
 const ids = new Map();
 
+/** @param {string} itemId @param {File} file */
+const keyOf = (itemId, file) => `${itemId}\n${file.name}\n${file.size}\n${file.lastModified}`;
+
 /** @param {string} itemId @param {File} file @returns {string} */
 export function attachIdFor(itemId, file) {
-  const key = `${itemId}\n${file.name}\n${file.size}\n${file.lastModified}`;
+  const key = keyOf(itemId, file);
   let id = ids.get(key);
   if (!id) {
     id = crypto.randomUUID();
     ids.set(key, id);
   }
   return id;
+}
+
+// The id covers one attempt: once the attach is acknowledged, drop it, so
+// removing the paper and picking the same file again sends a fresh id rather
+// than one the server now holds against a removed document.
+/** @param {string} itemId @param {File} file */
+export function forget(itemId, file) {
+  ids.delete(keyOf(itemId, file));
 }

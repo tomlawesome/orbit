@@ -24,7 +24,7 @@
   import { ago, agoLong, dayMonth, initials as initialsOf, money, MONTHS, plural, weekdayOf } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
-  import { attachIdFor } from "./attach-id.js";
+  import { attachIdFor, forget as forgetAttachId } from "./attach-id.js";
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "$lib/data/bands.js";
@@ -877,6 +877,7 @@
       footProblem = null;
       try {
         await attachItemDocument(item.householdId, item.id, file, attachIdFor(item.id, file));
+        forgetAttachId(item.id, file);
         await rereadAll();
         wake(`${file.name} attached to ${item.title}`);
       } catch (error) {
