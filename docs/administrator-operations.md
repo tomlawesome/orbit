@@ -828,8 +828,9 @@ restart the exact deployed image:
    were never changed.
 
 If the key is really gone and no recovery bundle holds it, this is not a
-restore. Encrypted documents and Tier 1 metadata are unrecoverable by design
-when both the key and the bundle are lost; that is the whole point of the
+restore. Encrypted documents and Tier 1 and Tier 2 metadata, every account
+address included, are unrecoverable by design when both the key and the bundle
+are lost; that is the whole point of the
 encryption. The way back is to restore both the database and the key from a
 backup that has them together (ADR-0004).
 

@@ -343,13 +343,18 @@ ADR-0024 extends the same envelope encryption to household metadata, in the
 tiers #365 names.
 
 **Tier 1** is `items.notes`, `items.reference`,
-`imap_ingestion_messages.proposal` and `.field_evidence`.
+`imap_ingestion_messages.proposal` and
+`imap_ingestion_messages.field_evidence`.
 
 **Tier 2** is `items.title`, `items.provider` (a provider *name*), the cost
-`items.cost_minor`, and the invited member address
-`household_invitations.email`. It uses the same household key, the same
-envelope and the same rotation path as Tier 1 — no second key and no second
-cipher. What it costs is queries: the database can no longer search titles,
+`items.cost_minor`, the invited member address `household_invitations.email`,
+and, since #969, every account address: `users.email` and the mail-forwarding
+sender address `mail_in_sender_addresses.address`. Those two account addresses
+sit under the instance key rather than a household one, because a person
+belongs to several households and a forwarded message is matched to its sender
+before any household is known. Everything else in Tier 2 uses the same
+household key as Tier 1, and all of it the same envelope and the same rotation
+path — no second cipher. What it costs is queries: the database can no longer search titles,
 match provider names or add up costs, so Orbit does all three in the
 application over one household's decrypted rows. Measured on a seeded
 database, that decrypt-and-scan takes about 4.5 ms for a 100-item household
@@ -401,11 +406,12 @@ surface may describe it as more than this.
   is the repair.
 - A missing KEK is the separate, already-defined state: the application stays
   usable, encrypted fields read as locked rather than damaged, and writes to
-  them are refused, exactly as document operations lock today. Signing in is
-  not affected: the account address `users.email` is deliberately not
-  encrypted, so a missing KEK never locks anybody out of the instance. Whether
-  that stays true is the open decision on #966 (the Tier 2 remainder), which
-  records the trade in full.
+  them are refused, exactly as document operations lock today. Account
+  addresses are encrypted under the instance key, so with no KEK password
+  sign-in is refused in the words encryption-at-rest.md gives — "this instance
+  cannot sign anybody in until its encryption key is available" — and never as
+  a wrong password. Identity-provider sign-in is unaffected, because it matches
+  on the provider's issuer and subject, never the address. #966 settled this.
 - A reminder whose item name will not decrypt is not sent with an empty or
   invented name: the delivery is retried, like any other transient fault,
   until the key or the value is repaired.

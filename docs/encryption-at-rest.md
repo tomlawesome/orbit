@@ -116,7 +116,8 @@ live host, because a running Orbit holds the key. It is also being rolled out
 over two releases: the expand release adds the encrypted columns beside the
 plaintext ones and converts existing rows in the background, and only the
 contract release afterwards drops the plaintext columns. Until that lands, a
-database dump can still contain those four columns in the clear.
+database dump can still contain every Tier 1 and Tier 2 column listed above,
+account addresses included, in the clear.
 
 ### 3. Backups and recovery bundles
 
