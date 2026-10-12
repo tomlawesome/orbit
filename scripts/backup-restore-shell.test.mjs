@@ -516,6 +516,36 @@ describe("every compose call names the project (#1345)", () => {
   });
 });
 
+describe("a CRLF .env-orbit (#1316)", () => {
+  // An env file saved with Windows line endings: every value ends in a
+  // carriage return the scripts must not carry into the project name or the
+  // probe URL.
+  const crlfEnv = "ORBIT_IMAGE=orbit-local:abcdef123456\r\nCOMPOSE_PROJECT_NAME=orbit-home\r\nORBIT_PORT=3123\r\n";
+
+  it.each(SCRIPTS)("%s names the Compose project orbit-home on every compose call", (script) => {
+    const deployment = makeDeployment({ envFile: crlfEnv });
+    // The compose file's own name is what a script falls back to when it
+    // misreads the env file, so a wrong answer shows as "orbit".
+    writeFileSync(join(deployment.deployDir, "docker-compose.yml"), "name: orbit\n\nservices:\n  orbit-app:\n    image: busybox\n");
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const result = run(deployment, script, script === "backup.sh" ? [] : [bundle]);
+    expect(result.status).toBe(0);
+    const projects = composeCalls(result.calls).map((call) => call.project);
+    expect(projects.length).toBeGreaterThan(0);
+    expect(new Set(projects)).toEqual(new Set(["orbit-home"]));
+  });
+
+  it("restore.sh probes health on port 3123 with no stray byte in the URL", () => {
+    const deployment = makeDeployment({ envFile: crlfEnv });
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const result = run(deployment, "restore.sh", ["--yes", bundle]);
+    expect(result.status).toBe(0);
+    expect(result.probes).toEqual(["--fail --silent --max-time 2 http://127.0.0.1:3123/api/health"]);
+  });
+});
+
 describe("the stop / engine / start rule (E3)", () => {
   it("backup.sh stops orbit-app, runs the engine, and starts it again", () => {
     const deployment = makeDeployment();
