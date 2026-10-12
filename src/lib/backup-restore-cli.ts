@@ -371,7 +371,10 @@ export function stageAndPreflightRestoreBundle(
   mkdirSync(stagedDocumentsRoot, { recursive: true });
   try {
     extractTar(join(extractedDir, "documents.tar"), stagedDocumentsRoot);
-  } catch {
+  } catch (error) {
+    if (error instanceof RecoveryBundleRefusal && error.code === "insufficient-space") {
+      refuse("staging-failed", "preflight/staging failed; not enough space to stage the document tree.");
+    }
     refuse("staging-failed", "preflight/staging failed; the document tree could not be staged privately.");
   }
   preflightValidateBundle({ adapter, databaseDumpPath: join(extractedDir, "database.dump"), stagedDocumentsRoot, stagingId });
@@ -827,7 +830,7 @@ function preflightRecoveryBundle(recoveryBundlePath: string, extractedDir: strin
       mkdirSync(extractedDir, { recursive: true });
       extractTar(recoveryBundlePath, extractedDir);
     },
-    {},
+    { "insufficient-space": "preflight/archive failed; not enough space to stage the recovery bundle." },
     "preflight/archive failed; the recovery bundle could not be extracted.",
   );
   asImportRefusal(() => validateRecoveryManifestFormatVersion(extractedDir), {}, "preflight/manifest failed; the recovery bundle format is unsupported.");
