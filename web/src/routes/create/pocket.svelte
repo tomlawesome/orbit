@@ -3,7 +3,7 @@
   import { beforeNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { WorkspaceError, applyCommand, attachItemDocument, checkDraftCommand, readWorkspace } from "$lib/data/workspace.js";
+  import { PARTIAL_CREATE_MESSAGE, WorkspaceError, applyCommand, attachItemDocument, checkDraftCommand, readWorkspace } from "$lib/data/workspace.js";
   import { saveProblem } from "$lib/data/metadata-status.js";
   import {
     CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
@@ -253,6 +253,7 @@
     if (!household || !command) return;
     saving = true;
     problem = null;
+    let landed = false;
     try {
       await applyCommand(command).catch((error) => {
         /* This draft id is new to the server, so "this item changed on another
@@ -262,6 +263,9 @@
         if (error instanceof WorkspaceError && error.code === "version_required") return;
         throw error;
       });
+      /* The item is on the server from here; a reload would mint a new draft
+         id and file it twice, so a later refusal must not read as unsaved. */
+      landed = true;
       /* #1245 (11a): the picked document goes onto the item just saved,
          through the same route the desk's form uses. A refusal lands in the
          catch below like any failed save: the entry is kept, and the next
@@ -276,7 +280,8 @@
       /* Loud (#1058): the reason stays above the bar until the next attempt,
          the button comes back, and nothing typed is lost. No wake. */
       const words = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
-      problem = /^not [a-z]+ —/i.test(words) ? words : `not saved — ${words}`;
+      if (landed) problem = `${PARTIAL_CREATE_MESSAGE} ${words}`;
+      else problem = /^not [a-z]+ —/i.test(words) ? words : `not saved — ${words}`;
     } finally {
       saving = false;
     }

@@ -1,5 +1,5 @@
 import { goto } from "$app/navigation";
-import { WorkspaceError, activeHousehold, applyCommand, attachItemDocument, checkDraftCommand } from "$lib/data/workspace.js";
+import { PARTIAL_CREATE_MESSAGE, WorkspaceError, activeHousehold, applyCommand, attachItemDocument, checkDraftCommand } from "$lib/data/workspace.js";
 import {
   CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
   WHY_UNDRAWABLE, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
@@ -568,6 +568,7 @@ export function mountCreate() {
     note.textContent = "";
     const label = save.textContent;
     save.textContent = "Adding…";
+    let landed = false;
 
     try {
       const active = household ?? await activeHousehold();
@@ -579,6 +580,9 @@ export function mountCreate() {
         if (error instanceof WorkspaceError && error.code === "version_required") return;
         throw error;
       });
+      /* The item is on the server from here; a reload would mint a new draft
+         id and file it twice, so a later refusal must not read as unsaved. */
+      landed = true;
 
       /* #1245: the picked document goes onto the item just saved. A refusal
          lands in the catch below like any failed save: the entry is kept,
@@ -598,7 +602,8 @@ export function mountCreate() {
          orbit", the reason sits beside it, and nothing typed is lost. No
          toast. saveProblem() is the same wording the pocket's form gives;
          a refusal the engine found only at the save reads in its own words. */
-      sticky = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
+      const words = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
+      sticky = landed ? `${PARTIAL_CREATE_MESSAGE} ${words}` : words;
       note.classList.add("fail");
       note.setAttribute("role", "alert");
       note.textContent = sticky;

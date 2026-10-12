@@ -787,6 +787,10 @@ export async function approveReceipt(suggestion, fallbackHouseholdId, operationI
 /** The one sentence for a receipt that is recorded but whose documents failed. */
 const PARTIAL_APPROVAL_MESSAGE = "The item is recorded, but its documents need another try — try once more to finish.";
 
+/** The create forms' sentence for an item that is saved but whose picked
+ *  document was refused; the refusal's own words follow it. */
+export const PARTIAL_CREATE_MESSAGE = "The item is recorded, but its document needs another try — try once more to finish.";
+
 /**
  * Approve a mail receipt's suggestion under its per-receipt operation id —
  * the one call every screen makes. The id is made on the first try and kept
