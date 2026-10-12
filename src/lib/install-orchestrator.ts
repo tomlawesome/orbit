@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { type ConfigurationMigrationTarget, runConfigurationMigration, runConfigurationPreflight } from "./configuration-migration";
-import { type GuidedInitInput, applyGuidedInit, applySetOidcSecret, environmentHasAppliedStamp, runConfigureApply, setDeploymentProfile } from "./configure-engine";
+import { ConfigureEngineRefusal, type GuidedInitInput, applyGuidedInit, applySetOidcSecret, environmentHasAppliedStamp, runConfigureApply, setDeploymentProfile } from "./configure-engine";
 import {
   DEPLOYMENT_ASSET_FILE_MODE,
   DEPLOYMENT_ASSETS,
@@ -619,7 +619,9 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       };
       try {
         say(dependencies, transaction.shareLock(() => runConfigureApply(context.targetDir, context.resolvedReference, { trustOrbitImage: true, stampAbsentBeforeMigration })).messages);
-      } catch {
+      } catch (error) {
+        // A refusal says what the operator must fix (and never carries a secret), so pass it on.
+        if (error instanceof ConfigureEngineRefusal) return configurationFailure(`Configuration failed, restoring the previous deployment: ${error.message}`);
         return configurationFailure("Configuration failed; restoring the previous deployment.");
       }
       let shapeProblem = leftSafeShape();

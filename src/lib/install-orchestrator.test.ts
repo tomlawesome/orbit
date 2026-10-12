@@ -371,6 +371,15 @@ describe("runInstall: refusals inside the transaction roll back (#11, #56)", () 
     expect(snapshot(target)).toEqual(before);
   });
 
+  it("reports the retired ORBIT_SECRETS_DIR setting of a recognised update in the failure message, and rolls back (#1316)", async () => {
+    const target = recognised(["ORBIT_SECRETS_DIR=/srv/secrets"]);
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "configuration", reason: "configuration-failure" });
+    if (outcome.status === "failed") expect(outcome.message).toContain("ORBIT_SECRETS_DIR");
+    expect(snapshot(target)).toEqual(before);
+  });
+
   it("rolls back on an unavailable provider, with its own reason (#25)", async () => {
     const target = preprovisioned(ENV_OIDC);
     const before = snapshot(target);
