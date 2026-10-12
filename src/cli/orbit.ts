@@ -1175,6 +1175,9 @@ class RestoreRehearsalFakeAdapter implements RestoreDockerAdapter {
   dropStageDatabase(name: string): void {
     this.stageContents.delete(name);
   }
+  listStageDatabases(): string[] {
+    return [...this.stageContents.keys()];
+  }
   restoreDumpToDatabase(name: string, dumpPath: string): boolean {
     const blob = JSON.parse(readFileSync(dumpPath, "utf8")) as { reports: CorrespondenceReports };
     this.stageContents.set(name, blob.reports);

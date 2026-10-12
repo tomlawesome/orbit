@@ -209,11 +209,23 @@ class FakeAdapter implements RestoreDockerAdapter {
     this.recordExportedCalls += 1;
     if (!this.recordExportedOk) throw new RecoveryBundleRefusal("record failed", "recovery-bundle-record-failed");
   }
+  /** Every stage-database create and drop, in call order: "create:<name>" / "drop:<name>". */
+  readonly stageEvents: string[] = [];
+  /**
+   * #1316 (leftover stage databases): the existing orbit_restore_stage_*
+   * databases, by name (the ones this fake created and not yet dropped, plus
+   * any a test seeds into openStageDatabases as a killed earlier run's leftovers).
+   */
+  listStageDatabases(): string[] {
+    return [...this.openStageDatabases].filter((name) => name.startsWith("orbit_restore_stage_"));
+  }
   createStageDatabase(name: string): void {
+    this.stageEvents.push(`create:${name}`);
     this.openStageDatabases.add(name);
     this.stageDatabasesCreated += 1;
   }
   dropStageDatabase(name: string): void {
+    this.stageEvents.push(`drop:${name}`);
     this.openStageDatabases.delete(name);
     this.stageContents.delete(name);
   }
@@ -913,6 +925,94 @@ describe("runRestore (restore.sh's main flow :897-933, including check_capacity 
 // 212 a rerun apiece, and #698 raised their budgets once already for the same
 // reason on GitHub. 20 s still fails a hung test, which is what the timeout
 // is for; it just stops measuring how loaded the box was.
+// #1316 (leftover stage databases): a restore killed between creating its
+// private stage database and dropping it leaves orbit_restore_stage_<ms>_<pid>
+// behind in the live Postgres, where it is never reclaimed. The name embeds
+// the creating run's start time in milliseconds, so a later run drops the ones
+// older than a day (a recent one may belong to a restore still running) before
+// it creates its own. Only a run that can mutate does so: a preflight-only run
+// drops nothing it did not create.
+describe("leftover stage databases (#1316)", () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const staleName = () => `orbit_restore_stage_${Date.now() - 2 * DAY_MS}_1`;
+  const recentName = () => `orbit_restore_stage_${Date.now() - 60_000}_1`;
+
+  function setup(): { documentsRoot: string; restorePaths: ReturnType<typeof deriveRestorePaths>; adapter: FakeAdapter } {
+    const documentsRoot = join(sandbox, "live-docs");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "backups");
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    const documentKekFile = join(sandbox, "document-kek");
+    writeFileSync(documentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    return { documentsRoot, restorePaths: deriveRestorePaths(backupDirectory, documentKekFile), adapter };
+  }
+
+  const restoreOptions = (context: ReturnType<typeof setup>, tag: string, extra: { preflightOnly?: boolean } = {}) => ({
+    backupTarPath: buildBundle(join(sandbox, `leftover-source-${tag}`), UPDATED_KEY, 22, LIVE_KEK, join(sandbox, `leftover-backups-${tag}`)),
+    documentKekHex: LIVE_KEK,
+    paths: context.restorePaths,
+    adapter: context.adapter,
+    workDir: mkdtempSync(join(sandbox, `leftover-run-${tag}-`)),
+    confirm: () => true,
+    ...extra,
+  });
+
+  it("a full runRestore drops a stage database older than a day before creating its own", () => {
+    const context = setup();
+    const stale = staleName();
+    context.adapter.openStageDatabases.add(stale);
+
+    const result = runRestore(restoreOptions(context, "full"));
+
+    expect(result.outcome).toBe("completed");
+    expect(context.adapter.stageEvents).toContain(`drop:${stale}`);
+    expect(context.adapter.openStageDatabases.has(stale)).toBe(false);
+    const firstCreate = context.adapter.stageEvents.findIndex((event) => event.startsWith("create:"));
+    expect(firstCreate).toBeGreaterThanOrEqual(0);
+    expect(context.adapter.stageEvents.indexOf(`drop:${stale}`)).toBeLessThan(firstCreate);
+  });
+
+  it("runRecoverRestore drops a stage database older than a day", () => {
+    const context = setup();
+    expect(runRestore(restoreOptions(context, "recover")).outcome).toBe("completed"); // leaves the journal and checkpoint to recover from
+    const stale = staleName();
+    context.adapter.openStageDatabases.add(stale);
+
+    const result = runRecoverRestore({ adapter: context.adapter, paths: context.restorePaths, workDir: mkdtempSync(join(sandbox, "leftover-recover-work-")) });
+
+    expect(result.outcome).toBe("completed");
+    expect(context.adapter.stageEvents).toContain(`drop:${stale}`);
+    expect(context.adapter.openStageDatabases.has(stale)).toBe(false);
+  });
+
+  it("a preflight-only run drops no database it did not create", () => {
+    const context = setup();
+    const stale = staleName();
+    context.adapter.openStageDatabases.add(stale);
+
+    const result = runRestore(restoreOptions(context, "preflight", { preflightOnly: true }));
+
+    expect(result.outcome).toBe("preflight-passed");
+    expect(context.adapter.stageEvents).not.toContain(`drop:${stale}`);
+    expect(context.adapter.openStageDatabases.has(stale)).toBe(true);
+  });
+
+  it("leaves a stage database with a recent timestamp alone, in a full run and in --recover", () => {
+    const context = setup();
+    const recent = recentName();
+    context.adapter.openStageDatabases.add(recent);
+
+    expect(runRestore(restoreOptions(context, "recent")).outcome).toBe("completed");
+    expect(context.adapter.stageEvents).not.toContain(`drop:${recent}`);
+    expect(context.adapter.openStageDatabases.has(recent)).toBe(true);
+
+    runRecoverRestore({ adapter: context.adapter, paths: context.restorePaths, workDir: mkdtempSync(join(sandbox, "leftover-recent-recover-")) });
+    expect(context.adapter.stageEvents).not.toContain(`drop:${recent}`);
+    expect(context.adapter.openStageDatabases.has(recent)).toBe(true);
+  });
+});
+
 describe("runExportRecoveryBundle (export-recovery-bundle.sh's orchestration)", { timeout: 20_000 }, () => {
   it("produces a recovery bundle whose wrapped KEK decrypts back to the original document KEK", () => {
     const documentsRoot = join(sandbox, "docs");
@@ -1713,6 +1813,7 @@ const adapter = {
   collectDocumentsArchive: (output) => createTar(config.documentsRoot, output, ["."]),
   createStageDatabase: () => {},
   dropStageDatabase: () => {},
+  listStageDatabases: () => [],
   restoreDumpToDatabase: (name, dumpPath) => {
     if (config.pauseAt === "staging" && !blocked && existsSync(config.rollbackFile)) {
       blocked = true;

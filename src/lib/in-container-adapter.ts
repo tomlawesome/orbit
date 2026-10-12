@@ -37,6 +37,8 @@ const DEFAULT_DOCUMENTS_ROOT = "/var/lib/orbit/documents";
 /** A correspondence report is one row per document; see PSQL_REPORT_MAX_BUFFER's history in restore-engine (#383). */
 const REPORT_MAX_BUFFER = 1024 * 1024 * 1024;
 const STAGE_DATABASE_NAME = /^[A-Za-z0-9_]+$/;
+const LIST_STAGE_DATABASES_SQL =
+  "SELECT datname FROM pg_database WHERE datname LIKE 'orbit\\_restore\\_stage\\_%' OR datname LIKE 'orbit\\_restore\\_checkpoint\\_stage\\_%' OR datname LIKE 'orbit\\_recover\\_checkpoint\\_stage\\_%'";
 const RECORD_RECOVERY_BUNDLE_EXPORTED_SQL =
   "insert into audit_log (entity_type, entity_id, action, changes) values ('recovery_bundle', gen_random_uuid(), 'recovery_bundle_exported', '{}'::jsonb)";
 
@@ -275,6 +277,13 @@ export function createInContainerAdapter(options: InContainerAdapterOptions = {}
       } catch {
         // Best-effort, like restore.sh's `|| true`.
       }
+    },
+
+    listStageDatabases(): string[] {
+      const result = tools.psql("postgres", ["--tuples-only", "--no-align", "--set=ON_ERROR_STOP=1", `--command=${LIST_STAGE_DATABASES_SQL}`]);
+      // Best-effort like dropStageDatabase: an unreadable list only means nothing is reclaimed this run.
+      if (result.status !== 0) return [];
+      return (typeof result.stdout === "string" ? result.stdout : "").split("\n").filter((name) => STAGE_DATABASE_NAME.test(name));
     },
 
     restoreDumpToDatabase(name: string, dumpPath: string): boolean {

@@ -695,6 +695,8 @@ export interface RestoreDockerAdapter extends Pick<BackupDockerAdapter, "dumpDat
   createStageDatabase(name: string): void;
   /** restore.sh:170-176 — `DROP DATABASE IF EXISTS "<name>"`; best-effort, never throws (`|| true`). */
   dropStageDatabase(name: string): void;
+  /** Every database named like one of the private stage databases above, whichever run created it. */
+  listStageDatabases(): string[];
   /** restore.sh:178-185 — `pg_restore --single-transaction --exit-on-error` into a private stage database. */
   restoreDumpToDatabase(databaseName: string, dumpPath: string): boolean;
   /** restore.sh:578-583 — `pg_restore --single-transaction --clean --if-exists --exit-on-error` into the live database. */

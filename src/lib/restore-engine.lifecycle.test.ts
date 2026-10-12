@@ -130,6 +130,9 @@ class FakeRestoreAdapter implements RestoreDockerAdapter {
     this.dropCalls.push(name);
     this.stageContents.delete(name);
   }
+  listStageDatabases(): string[] {
+    return [...this.stageContents.keys()];
+  }
   restoreDumpToDatabase(name: string, dumpPath: string): boolean {
     if (!this.restoreDumpToDatabaseOk) return false;
     this.stageContents.set(name, JSON.parse(readFileSync(dumpPath, "utf8")) as CorrespondenceReports);

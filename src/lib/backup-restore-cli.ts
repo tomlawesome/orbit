@@ -362,8 +362,10 @@ export function stageAndPreflightRestoreBundle(
   backupTarPath: string,
   documentKekHex: string,
   workDir: string,
-  adapter: Pick<RestoreDockerAdapter, "pgRestoreListOk" | "createStageDatabase" | "dropStageDatabase" | "restoreDumpToDatabase" | "queryReport">,
+  adapter: Pick<RestoreDockerAdapter, "pgRestoreListOk" | "createStageDatabase" | "dropStageDatabase" | "listStageDatabases" | "restoreDumpToDatabase" | "queryReport">,
   stagingId: string,
+  /** Only under the lock: a preflight holds none. */
+  dropLeftovers = false,
 ): StagedRestoreBundle {
   const { extractedDir, manifestFields } = verifyBackupBundle(backupTarPath, documentKekHex, workDir, adapter);
   const stagedDocumentsRoot = join(workDir, "staged-documents");
@@ -376,6 +378,7 @@ export function stageAndPreflightRestoreBundle(
     }
     refuse("staging-failed", "preflight/staging failed; the document tree could not be staged privately.");
   }
+  if (dropLeftovers) dropLeftoverStageDatabases(adapter);
   preflightValidateBundle({ adapter, databaseDumpPath: join(extractedDir, "database.dump"), stagedDocumentsRoot, stagingId });
   return { extractedDir, stagedDocumentsRoot, manifestFields };
 }
@@ -474,7 +477,7 @@ function runRestoreLocked(options: RunRestoreOptions): RunRestoreResult {
   const stagingWorkDir = join(options.workDir, "staging");
   mkdirSync(stagingWorkDir, { recursive: true });
   const stagingId = `${Date.now()}_${process.pid}`;
-  const staged = stageAndPreflightRestoreBundle(options.backupTarPath, options.documentKekHex, stagingWorkDir, options.adapter, stagingId);
+  const staged = stageAndPreflightRestoreBundle(options.backupTarPath, options.documentKekHex, stagingWorkDir, options.adapter, stagingId, !options.preflightOnly);
 
   checkRestoreCapacity({
     stagedDocumentsKib: directoryUsageKib(staged.stagedDocumentsRoot),
@@ -522,6 +525,26 @@ function runRestoreLocked(options: RunRestoreOptions): RunRestoreResult {
   }
 }
 
+const LEFTOVER_STAGE_DATABASE_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A run drops its stage databases only in a finally of the same process, so
+ * a killed run leaves a full copy of the live data in Postgres. Called with
+ * the lock held, before this run creates its own: a checkpoint stage database
+ * (only ever made under the lock) can then only be a killed run's. A
+ * preflight holds no lock, so its orbit_restore_stage_<ms>_<pid> is dropped
+ * only once a day old, by which time it can only be a killed run's too.
+ */
+function dropLeftoverStageDatabases(adapter: Pick<RestoreDockerAdapter, "listStageDatabases" | "dropStageDatabase">): void {
+  for (const name of adapter.listStageDatabases()) {
+    if (name.startsWith("orbit_restore_stage_")) {
+      const createdAt = /^orbit_restore_stage_(\d+)_\d+$/.exec(name)?.[1];
+      if (createdAt === undefined || Date.now() - Number(createdAt) <= LEFTOVER_STAGE_DATABASE_AGE_MS) continue;
+    }
+    adapter.dropStageDatabase(name);
+  }
+}
+
 /**
  * `restore --recover` under the same backup/restore lock as every other run,
  * as restore.sh held it for both paths (#1151 O2-R3): a backup must not stop
@@ -530,6 +553,7 @@ function runRestoreLocked(options: RunRestoreOptions): RunRestoreResult {
 export function runRecoverRestore(options: RecoverRestoreOptions): RestoreDisposeResult {
   const releaseLock = acquireBackupRestoreLock(options.paths.backupDirectory);
   try {
+    dropLeftoverStageDatabases(options.adapter);
     const result = recoverRestore(options);
     if (result.outcome === "completed") removeSpentImportRollbackKey(options.paths.documentKekFile);
     return result;
