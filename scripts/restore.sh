@@ -19,7 +19,7 @@ readonly journal_path="$backup_directory/.orbit-restore/restore.journal"
 # 75: another backup/restore holds the lock. Only runs that stopped orbit-app take it (a preflight
 # takes none), so that run owns orbit-app.
 readonly engine_locked_status=75
-readonly usage='usage failed; use bash scripts/restore.sh [--yes] <backup.tar> or bash scripts/restore.sh --recover.'
+readonly usage='usage failed; use bash scripts/restore.sh [--yes] <backup.tar> (--yes also needs ORBIT_NONINTERACTIVE_RESTORE=true) or bash scripts/restore.sh --recover.'
 
 fail() { printf 'Orbit restore: %s\n' "$*" >&2; exit 1; }
 # --- Shared by backup.sh, restore.sh, export-recovery-bundle.sh and ----------
@@ -222,6 +222,8 @@ else
   [[ "$backup_file" == /* ]] || backup_file="$PWD/$backup_file"
   [[ -f "$backup_file" && ! -L "$backup_file" && "$backup_file" != *:* ]] || fail 'preflight/archive failed; the recovery bundle must be a regular file.'
 fi
+# The engine refuses --yes without the variable, but only after Orbit was stopped: refuse it here first.
+[[ "${#yes_flag[@]}" == 0 || "${ORBIT_NONINTERACTIVE_RESTORE:-}" == true ]] || fail 'usage failed; --yes also needs ORBIT_NONINTERACTIVE_RESTORE=true (one switch alone never confirms a restore).'
 
 require_deployment health
 engine_host_identity

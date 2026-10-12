@@ -956,6 +956,7 @@ function commandRestore(deployDir: string, args: string[], directories: BackupRe
       adapter,
       workDir,
       confirm: makeRestoreConfirmer(yesFlag),
+      confirmedByYesFlag: yesFlag,
       hooks,
       testHooks,
       preflightOnly,

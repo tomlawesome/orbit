@@ -117,6 +117,12 @@ function makeDeployment({ envFile = "ORBIT_IMAGE=orbit-local:abcdef123456\n", ke
   return { deployDir, binDir, journal: join(deployDir, "backups", ".orbit-restore", "restore.journal") };
 }
 
+// restore.sh --yes refuses unless ORBIT_NONINTERACTIVE_RESTORE=true is set too (#1316).
+const UNATTENDED = { ORBIT_NONINTERACTIVE_RESTORE: "true" };
+function yesEnv(args) {
+  return args.includes("--yes") ? UNATTENDED : {};
+}
+
 function run(deployment, script, args, { env = {}, input = "" } = {}) {
   const dockerLog = join(deployment.binDir, "docker.jsonl");
   const curlLog = join(deployment.binDir, "curl.log");
@@ -277,7 +283,7 @@ describe("the one-off each script becomes (E1/E5)", () => {
     const deployment = makeDeployment();
     const bundle = join(scratchDir("orbit-bundle-"), "some bundle.tar");
     writeFileSync(bundle, "bundle");
-    const result = run(deployment, script, [...flags, bundle]);
+    const result = run(deployment, script, [...flags, bundle], { env: yesEnv(flags) });
     const engine = engineRun(result.calls);
     expect(engine.volumes).toContain(`${bundle}:/orbit-input/bundle.tar:ro`);
     expect(engine.env.ORBIT_HOST_INPUT_FILE).toBe(bundle);
@@ -371,7 +377,7 @@ describe("the one-off each script becomes (E1/E5)", () => {
     };
     const engine = engineRun(run(deployment, "restore.sh", ["--yes", bundle], { env: switches }).calls);
     expect(engine.env).toMatchObject(switches);
-    const bare = engineRun(run(deployment, "restore.sh", ["--yes", bundle]).calls);
+    const bare = engineRun(run(deployment, "restore.sh", [bundle]).calls);
     expect(Object.keys(bare.env).filter((name) => name.startsWith("ORBIT_RESTORE_TEST") || name === "ORBIT_NONINTERACTIVE_RESTORE")).toEqual([]);
   });
 
@@ -399,7 +405,7 @@ describe("the one-off each script becomes (E1/E5)", () => {
     const bundle = join(deployment.deployDir, "p.tar");
     writeFileSync(bundle, "bundle");
     const args = script === "backup.sh" ? [] : [...recoveryPromptsArgs(script), bundle];
-    const result = run(deployment, script, args, { env: { ORBIT_RECOVERY_PROMPTS: "machine" } });
+    const result = run(deployment, script, args, { env: { ...yesEnv(args), ORBIT_RECOVERY_PROMPTS: "machine" } });
     expect(result.status).toBe(0);
     const engine = engineRun(result.calls);
     expect(engine.env.ORBIT_RECOVERY_PROMPTS).toBe("machine");
@@ -413,7 +419,7 @@ describe("the one-off each script becomes (E1/E5)", () => {
     const bundle = join(deployment.deployDir, "p.tar");
     writeFileSync(bundle, "bundle");
     const args = script === "backup.sh" ? [] : [...recoveryPromptsArgs(script), bundle];
-    const result = run(deployment, script, args);
+    const result = run(deployment, script, args, { env: yesEnv(args) });
     expect(result.status).toBe(0);
     expect(engineRuns(result.calls).length).toBeGreaterThan(0);
     for (const engine of engineRuns(result.calls)) expect(Object.keys(engine.env)).not.toContain("ORBIT_RECOVERY_PROMPTS");
@@ -540,7 +546,7 @@ describe("a CRLF .env-orbit (#1316)", () => {
     const deployment = makeDeployment({ envFile: crlfEnv });
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
-    const result = run(deployment, "restore.sh", ["--yes", bundle]);
+    const result = run(deployment, "restore.sh", ["--yes", bundle], { env: UNATTENDED });
     expect(result.status).toBe(0);
     expect(result.probes).toEqual(["--fail --silent --max-time 2 http://127.0.0.1:3123/api/health"]);
   });
@@ -603,7 +609,7 @@ describe("the stop / engine / start rule (E3)", () => {
     const deployment = makeDeployment();
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
-    const result = await runSignalledMidEngine(deployment, "restore.sh", ["--yes", bundle]);
+    const result = await runSignalledMidEngine(deployment, "restore.sh", ["--yes", bundle], { env: UNATTENDED });
     expect(verbs(result.calls)).toEqual(["run", "stop", "run", "start"]);
   });
 
@@ -611,7 +617,7 @@ describe("the stop / engine / start rule (E3)", () => {
     const deployment = makeDeployment();
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
-    const result = await runSignalledMidEngine(deployment, "restore.sh", ["--yes", bundle], { env: { FAKE_ENGINE_JOURNAL: deployment.journal } });
+    const result = await runSignalledMidEngine(deployment, "restore.sh", ["--yes", bundle], { env: { ...UNATTENDED, FAKE_ENGINE_JOURNAL: deployment.journal } });
     expect(verbs(result.calls)).toEqual(["run", "stop", "run"]);
     expect(result.stderr).toContain("bash scripts/restore.sh --recover");
   });
@@ -627,7 +633,7 @@ describe("the stop / engine / start rule (E3)", () => {
     const deployment = makeDeployment();
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
-    const result = run(deployment, script, flags[0] === "--recover" ? flags : [...flags, bundle]);
+    const result = run(deployment, script, flags[0] === "--recover" ? flags : [...flags, bundle], { env: yesEnv(flags) });
     expect(result.status).toBe(0);
     expect(verbs(result.calls)).toEqual([...engineVerbs, "start"]);
     expect(result.probes).toEqual(["--fail --silent --max-time 2 http://127.0.0.1:3000/api/health"]);
@@ -637,7 +643,7 @@ describe("the stop / engine / start rule (E3)", () => {
     const deployment = makeDeployment();
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
-    const result = run(deployment, script, flags[0] === "--recover" ? flags : [...flags, bundle], { env: { FAKE_ENGINE_STATUS: "1" } });
+    const result = run(deployment, script, flags[0] === "--recover" ? flags : [...flags, bundle], { env: { ...yesEnv(flags), FAKE_ENGINE_STATUS: "1" } });
     expect(result.status).toBe(1);
     expect(verbs(result.calls)).toEqual([...engineVerbs, "start"]);
     expect(result.probes.length).toBeGreaterThan(0);
@@ -648,7 +654,7 @@ describe("the stop / engine / start rule (E3)", () => {
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
     const result = run(deployment, script, flags[0] === "--recover" ? flags : [...flags, bundle], {
-      env: { FAKE_ENGINE_STATUS: "1", FAKE_ENGINE_JOURNAL: deployment.journal },
+      env: { ...yesEnv(flags), FAKE_ENGINE_STATUS: "1", FAKE_ENGINE_JOURNAL: deployment.journal },
     });
     expect(result.status).toBe(1);
     expect(verbs(result.calls)).toEqual(engineVerbs);
@@ -682,7 +688,7 @@ describe("the stop / engine / start rule (E3)", () => {
     const deployment = makeDeployment();
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
-    const result = run(deployment, "restore.sh", ["--yes", bundle], { env: { FAKE_ENGINE_STATUS: "137", FAKE_ENGINE_JOURNAL: deployment.journal } });
+    const result = run(deployment, "restore.sh", ["--yes", bundle], { env: { ...UNATTENDED, FAKE_ENGINE_STATUS: "137", FAKE_ENGINE_JOURNAL: deployment.journal } });
     expect(result.status).toBe(137);
     expect(verbs(result.calls)).toEqual(["run", "stop", "run"]);
   });
@@ -699,7 +705,7 @@ describe("the stop / engine / start rule (E3)", () => {
       const deployment = makeDeployment();
       const bundle = join(deployment.deployDir, "b.tar");
       writeFileSync(bundle, "bundle");
-      const result = run(deployment, script, [...flags, bundle], { env: { FAKE_ENGINE_JOURNAL: deployment.journal, ...env } });
+      const result = run(deployment, script, [...flags, bundle], { env: { ...yesEnv(flags), FAKE_ENGINE_JOURNAL: deployment.journal, ...env } });
       return { deployment, result };
     }
 
@@ -725,7 +731,7 @@ describe("the stop / engine / start rule (E3)", () => {
     const deployment = makeDeployment();
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
-    const result = run(deployment, "restore.sh", ["--yes", bundle], { env: { FAKE_CURL_STATUS: "7", ORBIT_RESTORE_HEALTH_SECONDS: "1" } });
+    const result = run(deployment, "restore.sh", ["--yes", bundle], { env: { ...UNATTENDED, FAKE_CURL_STATUS: "7", ORBIT_RESTORE_HEALTH_SECONDS: "1" } });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Orbit did not become healthy");
   });
@@ -734,7 +740,7 @@ describe("the stop / engine / start rule (E3)", () => {
     const deployment = makeDeployment();
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
-    const result = run(deployment, "restore.sh", ["--yes", bundle], { env: { FAKE_STOP_STATUS: "1" } });
+    const result = run(deployment, "restore.sh", ["--yes", bundle], { env: { ...UNATTENDED, FAKE_STOP_STATUS: "1" } });
     expect(result.status).toBe(1);
     expect(verbs(result.calls)).toEqual(["run", "stop"]);
     expect(engineRun(result.calls).command).toContain("--preflight");
@@ -757,7 +763,7 @@ describe("validate the bundle before stopping Orbit (E3a)", () => {
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
     const stdinKinds = join(deployment.binDir, "stdin-kinds.log");
-    const result = run(deployment, script, [...flags, bundle], { env: { FAKE_ENGINE_STDIN_KIND_LOG: stdinKinds } });
+    const result = run(deployment, script, [...flags, bundle], { env: { ...yesEnv(flags), FAKE_ENGINE_STDIN_KIND_LOG: stdinKinds } });
     expect(result.status).toBe(0);
     expect(verbs(result.calls)).toEqual(["run", "stop", "run", "start"]);
     const [preflight, full] = engineRuns(result.calls);
@@ -777,7 +783,7 @@ describe("validate the bundle before stopping Orbit (E3a)", () => {
     const deployment = makeDeployment();
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
-    const result = run(deployment, script, [...flags, bundle], { env: { FAKE_PREFLIGHT_STATUS: "1" } });
+    const result = run(deployment, script, [...flags, bundle], { env: { ...yesEnv(flags), FAKE_PREFLIGHT_STATUS: "1" } });
     expect(result.status).toBe(1);
     expect(verbs(result.calls)).toEqual(["run"]);
     expect(result.probes).toEqual([]);
@@ -787,7 +793,7 @@ describe("validate the bundle before stopping Orbit (E3a)", () => {
     const deployment = makeDeployment();
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
-    const result = run(deployment, script, [...flags, bundle], { env: { FAKE_PREFLIGHT_STATUS: String(ENGINE_LOCKED_EXIT) } });
+    const result = run(deployment, script, [...flags, bundle], { env: { ...yesEnv(flags), FAKE_PREFLIGHT_STATUS: String(ENGINE_LOCKED_EXIT) } });
     expect(result.status).toBe(ENGINE_LOCKED_EXIT);
     expect(verbs(result.calls)).toEqual(["run"]);
     expect(result.probes).toEqual([]);
@@ -813,6 +819,33 @@ describe("validate the bundle before stopping Orbit (E3a)", () => {
   });
 });
 
+// #1316: `restore.sh --yes <bundle>` skips the typed confirmation, so
+// without ORBIT_NONINTERACTIVE_RESTORE=true it must refuse, naming the switch,
+// before stopping Orbit; the generic cancel message would not tell the operator
+// what to set.
+describe("restore.sh --yes needs ORBIT_NONINTERACTIVE_RESTORE=true (#1316)", () => {
+  function bundleIn(deployment) {
+    const bundle = join(deployment.deployDir, "bundle.tar");
+    writeFileSync(bundle, "bundle");
+    return bundle;
+  }
+
+  it("with the variable unset, exits 1 naming ORBIT_NONINTERACTIVE_RESTORE=true and never stops Orbit", () => {
+    const deployment = makeDeployment();
+    const result = run(deployment, "restore.sh", ["--yes", bundleIn(deployment)]);
+    expect(result.status).toBe(1);
+    expect(result.stderr + result.stdout).toContain("ORBIT_NONINTERACTIVE_RESTORE=true");
+    expect(verbs(result.calls)).not.toContain("stop");
+  });
+
+  it("with the variable set to true, proceeds: stop, full engine run, start", () => {
+    const deployment = makeDeployment();
+    const result = run(deployment, "restore.sh", ["--yes", bundleIn(deployment)], { env: { ORBIT_NONINTERACTIVE_RESTORE: "true" } });
+    expect(result.status).toBe(0);
+    expect(verbs(result.calls)).toEqual(["run", "stop", "run", "start"]);
+  });
+});
+
 // restore.sh's health_probe_url (#383 finding 3, #1241): the probe follows
 // the address and port docker-compose.yml publishes orbit-app on.
 describe("restore.sh and import-recovery-bundle.sh health probe", () => {
@@ -828,7 +861,7 @@ describe("restore.sh and import-recovery-bundle.sh health probe", () => {
       const deployment = makeDeployment({ envFile: `ORBIT_IMAGE=orbit-local:abcdef123456\n${keys}` });
       const bundle = join(deployment.deployDir, "b.tar");
       writeFileSync(bundle, "bundle");
-      const result = run(deployment, script, script === "restore.sh" ? ["--yes", bundle] : [bundle], { env });
+      const result = run(deployment, script, script === "restore.sh" ? ["--yes", bundle] : [bundle], { env: { ...(script === "restore.sh" ? UNATTENDED : {}), ...env } });
       expect(result.probes, script).toEqual([`--fail --silent --max-time 2 ${url}`]);
     }
   });

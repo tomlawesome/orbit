@@ -197,6 +197,15 @@ deployment, so the host needs Docker with Compose v2; restore also needs
 `curl`, to wait for Orbit to answer (backup does not). Keep `backups/` on a
 local disk (a backups directory on NFS is not supported).
 
+An unattended restore skips the typed `RESTORE` only when given both
+switches, so that neither alone can replace your data:
+
+```sh
+ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes backups/orbit-YYYYMMDD-HHMMSS.tar
+```
+
+`--yes` without the variable stops before Orbit is touched.
+
 A backup deliberately leaves out the document encryption key, so it is only
 useful on a machine that still has that key. To survive losing the machine,
 also export a recovery bundle, protected by a passphrase, and keep it

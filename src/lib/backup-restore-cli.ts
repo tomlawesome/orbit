@@ -414,6 +414,8 @@ export interface RunRestoreOptions {
    * after any live state has changed.
    */
   confirm: () => boolean;
+  /** The confirmer is `--yes`, which confirms only with ORBIT_NONINTERACTIVE_RESTORE=true: a refusal names that switch. */
+  confirmedByYesFlag?: boolean;
   /** ORBIT_RESTORE_ROLLBACK_KEK_FILE equivalent (import-recovery-bundle.sh's key-swap safety net). */
   rollbackDocumentKekFile?: string;
   hooks?: RestoreDurabilityHooks;
@@ -486,7 +488,7 @@ function runRestoreLocked(options: RunRestoreOptions): RunRestoreResult {
   if (options.preflightOnly) return { outcome: "preflight-passed" };
 
   if (!options.confirm()) {
-    refuse("restore-not-confirmed", "confirmation failed; restore cancelled.");
+    refuse("restore-not-confirmed", options.confirmedByYesFlag ? "--yes needs ORBIT_NONINTERACTIVE_RESTORE=true; restore cancelled." : "confirmation failed; restore cancelled.");
   }
 
   const runWorkDir = join(options.workDir, "run");
