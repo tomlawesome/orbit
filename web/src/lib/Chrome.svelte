@@ -126,9 +126,10 @@
       if (!leave) throw new Error("no flight");
     } catch {
       /* the flight cannot be had: the reader is signed out all the same, and
-         the dusk is at /logout */
+         the dusk is at /logout -- by way of the provider's own sign-out when
+         there is one, which brings the browser back there */
       loading = null;
-      location.href = "/logout";
+      location.href = redirectTo ?? "/logout";
       return;
     }
     await leave.descendFrom(redirectTo);

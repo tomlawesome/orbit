@@ -101,6 +101,11 @@
      */
     try { history.replaceState(history.state, "", "/logout"); } catch { /* no history, no harm */ }
     farewelled = true;
+    /* the provider's own sign-out, once the goodbye has played: Orbit's
+       session is already gone, but the provider's would seat this reader
+       again on the next sign-in at a shared computer. Its
+       post_logout_redirect_uri brings the browser back to /logout. */
+    if (providerLogout) location.replace(providerLogout);
   }
 </script>
 

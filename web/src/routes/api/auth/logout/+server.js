@@ -30,16 +30,18 @@ export const POST = api(
        and "/" being v19's own front door now means a bare sign-out would
        strand that journey there instead of showing it its own signed-out
        state. */
-    const postLogoutReturnTo = new URL(
-      safeReturnPath(event.url.searchParams.get("returnTo")),
-      config.appUrl,
-    );
+    /* The front end's descent ends on the goodbye at /logout, so that is where
+       the provider's own sign-out brings a JSON caller back to. */
+    const wantsJson = event.request.headers.get("accept")?.includes("application/json") ?? false;
+    const returnTo = event.url.searchParams.get("returnTo") ?? (wantsJson ? "/logout" : null);
+    const postLogoutReturnTo = new URL(safeReturnPath(returnTo), config.appUrl);
 
-    let redirectTarget = postLogoutReturnTo;
+    /** @type {URL | null} */
+    let providerLogout = null;
     if (config.oidc) {
       try {
         const metadata = await discoverProvider(config.oidc);
-        redirectTarget = createProviderLogoutUrl(config.oidc, metadata, postLogoutReturnTo) ?? postLogoutReturnTo;
+        providerLogout = createProviderLogoutUrl(config.oidc, metadata, postLogoutReturnTo);
       } catch {
         // Local logout must succeed even if the provider is unavailable.
       }
@@ -48,10 +50,13 @@ export const POST = api(
     clearSessionCookie(event.cookies, config);
 
     /* The caller chooses the shape: the front end asks for JSON so it can
-       drive the hand-off itself, a plain form post gets the redirect. */
-    if (event.request.headers.get("accept")?.includes("application/json")) {
-      return json({ redirectTo: redirectTarget.href }, { headers: { "cache-control": "no-store" } });
+       drive the hand-off itself, a plain form post gets the redirect. JSON
+       answers null when there is no provider session to end, so the front end
+       navigates only when there is somewhere to send the browser. */
+    if (wantsJson) {
+      return json({ redirectTo: providerLogout?.href ?? null }, { headers: { "cache-control": "no-store" } });
     }
+    const redirectTarget = providerLogout ?? postLogoutReturnTo;
     return new Response(null, {
       status: 303,
       headers: { location: redirectTarget.href, "cache-control": "no-store" },
