@@ -99,4 +99,14 @@ describe("deploy-container.sh trusts the image it has just built or pulled (#131
     expect(result.status, result.stderr).toBe(0);
     expect(configureEnv()).toEqual({ TRUST: "1", IMAGE: digestImage });
   });
+
+  it("--pull reads a digest ORBIT_IMAGE from a CRLF .env-orbit without the carriage return or a refusal", () => {
+    writeFileSync(join(checkout, ".env-orbit"), `ORBIT_PLACEHOLDER=1\r\nORBIT_IMAGE=${digestImage}\r\n`);
+    const result = runDeploy("--pull");
+    expect(result.stderr).not.toContain("immutable registry digest");
+    expect(result.status, result.stderr).toBe(0);
+    const env = configureEnv();
+    expect(env.IMAGE).not.toContain("\r");
+    expect(env).toEqual({ TRUST: "1", IMAGE: digestImage });
+  });
 });
