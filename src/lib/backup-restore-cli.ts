@@ -823,7 +823,7 @@ function renameSecretFileAcrossDevices(sourcePath: string, destinationPath: stri
  */
 export function runImportRecoveryBundle(options: RunImportRecoveryBundleOptions): { outcome: "completed" } | { outcome: "preflight-passed" } {
   // A preflight takes no lock: it stops nothing, and the shells treat the
-  // lock's holder as owning orbit-app. The full run takes it before the prompts.
+  // lock's holder as owning orbit-app. The full run takes it before the unpack.
   return importRecoveryBundleUnlocked(options);
 }
 
@@ -857,18 +857,22 @@ function importRecoveryBundleUnlocked(options: RunImportRecoveryBundleOptions): 
     );
   }
 
-  const workDir = mkdtempSync(join(tmpdir(), "orbit-recovery-import-"));
+  // Taken before the unpack and checksum check, not just before the swap: the
+  // shell stopped the app before this started, and a backup landing during
+  // that (possibly long) preflight or while the operator answers the prompts
+  // would restart it and encrypt a bundle with the swapped key. Taken after
+  // the refusals above, so those leave nothing behind. A preflight-only run
+  // takes no lock.
+  const releaseLock = options.preflightOnly
+    ? () => {}
+    : acquireBackupRestoreLock(options.backupDirectory, { operation: "import", ownsApp: true });
   try {
-    const extractedDir = join(workDir, "extracted");
-    preflightRecoveryBundle(options.recoveryBundlePath, extractedDir);
-    if (options.preflightOnly) return { outcome: "preflight-passed" as const };
-
-    // Taken before the prompts, not just before the swap: the shell stopped
-    // the app before this started, and a backup landing while the operator
-    // answers would restart it and encrypt a bundle with the swapped key.
-    // Taken after the refusals above, so those leave nothing behind.
-    const releaseLock = acquireBackupRestoreLock(options.backupDirectory, { operation: "import", ownsApp: true });
+    const workDir = mkdtempSync(join(tmpdir(), "orbit-recovery-import-"));
     try {
+      const extractedDir = join(workDir, "extracted");
+      preflightRecoveryBundle(options.recoveryBundlePath, extractedDir);
+      if (options.preflightOnly) return { outcome: "preflight-passed" as const };
+
       const passphrase = typeof options.passphrase === "function" ? options.passphrase() : options.passphrase;
       const envelope = readFileSync(join(extractedDir, "document-kek.enc"));
       // decryptDocumentKek already refuses (invalid-recovered-key) a plaintext
@@ -895,10 +899,10 @@ function importRecoveryBundleUnlocked(options: RunImportRecoveryBundleOptions): 
       options.beforeRestore?.();
       return swapKeyAndRestore(options, paths, previousKekPath, recoveredKekHex, join(extractedDir, "orbit-backup.tar"), workDir);
     } finally {
-      releaseLock();
+      rmSync(workDir, { recursive: true, force: true });
     }
   } finally {
-    rmSync(workDir, { recursive: true, force: true });
+    releaseLock();
   }
 }
 

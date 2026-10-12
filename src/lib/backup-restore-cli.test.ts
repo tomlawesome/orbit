@@ -1481,6 +1481,61 @@ describe("runImportRecoveryBundle (import-recovery-bundle.sh's orchestration, li
     expect(lockIsFree(lockPath)).toBe(true); // Released when the run ends.
   });
 
+  // #1316: the lock is contended before the bundle is examined. A full import
+  // against a bundle that would fail its checksum check must still say
+  // `restore-locked` while another process holds the lock, so the refusal tells
+  // the operator what to wait for rather than a fault the bundle may not have.
+  // Today the unpack and checksum preflight run first and win.
+  it("#1316: refuses with restore-locked, not import-preflight-failed, when the lock is held and the bundle's inner checksum is wrong", () => {
+    const passphrase = "correct horse battery staple";
+    const { recoveryBundlePath: goodBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+
+    // Repack the bundle with one digit of its own checksums.sha256 changed.
+    const unpacked = mkdtempSync(join(sandbox, "bad-checksum-unpacked-"));
+    extractTar(goodBundlePath, unpacked);
+    const checksumsPath = join(unpacked, "checksums.sha256");
+    const original = readFileSync(checksumsPath, "utf8");
+    writeFileSync(checksumsPath, `${original[0] === "0" ? "1" : "0"}${original.slice(1)}`);
+    const recoveryBundlePath = join(sandbox, "bad-checksum-recovery-bundle.tar");
+    createTar(unpacked, recoveryBundlePath, ["checksums.sha256", "document-kek.enc", "manifest", "orbit-backup.tar"]);
+    // Control: with no lock contention this bundle is refused by the checksum preflight.
+    expect(() => verifyRecoveryBundleChecksums(unpacked)).toThrow(RecoveryBundleRefusal);
+
+    const liveDocumentsRoot = join(sandbox, "live-docs-import-lock-first");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const liveDocumentKekFile = join(sandbox, "live-document-kek-lock-first");
+    writeFileSync(liveDocumentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+    const backupDirectory = join(sandbox, "import-target-backups-lock-first");
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    const adapter = new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const lockPath = join(backupDirectory, ".orbit-backup-restore.lock");
+    const holder = holdLockInAnotherProcess(lockPath);
+
+    try {
+      let caught: unknown;
+      try {
+        runImportRecoveryBundle({
+          recoveryBundlePath,
+          passphrase: () => {
+            throw new Error("the passphrase must not be asked for while the lock is held elsewhere");
+          },
+          liveDocumentKekFile,
+          backupDirectory,
+          adapter,
+          importConfirmed: true,
+          confirmRestore: () => true,
+        });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(BackupRestoreCliRefusal);
+      expect((caught as BackupRestoreCliRefusal).code).toBe("restore-locked");
+      expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(LIVE_KEK); // Nothing changed.
+    } finally {
+      killLockHolder(holder, lockPath);
+    }
+  });
+
   // `workDir` (mkdtempSync(join(tmpdir(), ...))) and the live deployment
   // directory are the same filesystem in every other test in this file,
   // since both `sandbox` and the OS tmpdir live under `/tmp`. These two
