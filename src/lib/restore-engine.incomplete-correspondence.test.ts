@@ -95,7 +95,7 @@ describe("correspondence that could not be checked (#678)", () => {
   });
 
   it("still reports a genuine correspondence violation with its original message", () => {
-    expect(() => preflight(adapterAnswering({ ...healthyReports, transientCount: "1\n" }))).toThrow(
+    expect(() => preflight(adapterAnswering({ ...healthyReports, crypto: `${DOCUMENT_ID}|${STORAGE_KEY}|11|available\n` }))).toThrow(
       "preflight/correspondence failed; the staged database and document tree do not correspond; use a complete backup and retry.",
     );
   });
