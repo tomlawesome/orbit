@@ -272,7 +272,12 @@ and v1.1.0 (see "Version tags in GHCR start at v0.3.0" below):
 7. Runs `scripts/stable-promotion-policy.mjs`, which refuses unless the
    image's revision is an ancestor of both `main` and its source branch and
    the tree at that revision exactly matches `main`'s tree.
-8. Refuses if `ghcr.io/tomlawesome/orbit:vX.Y.Z` already resolves in GHCR.
+8. Refuses if `ghcr.io/tomlawesome/orbit:vX.Y.Z` already resolves in GHCR,
+   unless it already resolves to the exact digest being promoted, in which
+   case the job carries on from there: it skips step 9 and still checks both
+   tags hold that digest before step 10. This lets a rerun finish a
+   promotion that failed after tagging GHCR but before creating the GitLab
+   tag (for example, an expired `GITLAB_RELEASE_TOKEN`).
 9. Tags that exact digest `vX.Y.Z` and `latest` in GHCR, by digest, without
    rebuilding anything (`latest`, not `stable`: `install.sh` defaults
    `ORBIT_CHANNEL` to `latest`).
