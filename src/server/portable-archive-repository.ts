@@ -18,7 +18,7 @@ import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 import { normalizeComparableMetadata } from "@/server/metadata/crypto";
 import { MetadataCipher, openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
 import { loadMetadataKey, metadataCryptoAvailable, MetadataKeyLockedError, receiptKeyScope } from "@/server/metadata/keys";
-import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
+import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS, MAX_ARCHIVE_DOCUMENT_MIB } from "@/server/portable-archive-limits";
 import { acquireActiveHouseholdLock, requireHouseholdAccess } from "@/server/workspace-access";
 
 const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -195,18 +195,26 @@ export async function createPortableArchive(input: {
     for (const document of documentRows) {
       if (document.lifecycle !== "available") continue;
       if (!document.itemId) continue;
-      if (total + document.sizeBytes > MAX_ARCHIVE_BYTES) {
-        throw new AppError("archive_too_large", "Document-inclusive exports are limited to 128 MiB; export metadata only or remove documents first", 413);
+      // Counted at the base64 size the archive carries them in, so a household
+      // over the limit is refused before any document is read.
+      if (total + Math.ceil(document.sizeBytes / 3) * 4 > MAX_ARCHIVE_BYTES) {
+        throw new AppError("archive_too_large", `Document-inclusive exports are limited to about ${MAX_ARCHIVE_DOCUMENT_MIB} MiB of documents; export metadata only or remove documents first`, 413);
       }
       const downloaded = await readDocumentDownload(input.userId, document.id);
-      total += downloaded.bytes.length;
-      bytes.push({ id: document.id, contentBase64: downloaded.bytes.toString("base64") });
+      const contentBase64 = downloaded.bytes.toString("base64");
+      total += contentBase64.length;
+      bytes.push({ id: document.id, contentBase64 });
       downloaded.bytes.fill(0);
     }
     payload.documentBytes = bytes;
   }
 
   const plaintext = jsonBuffer(payload);
+  // The same bound the import decrypts to, checked before the cipher work.
+  if (plaintext.length > MAX_ARCHIVE_BYTES) {
+    plaintext.fill(0);
+    throw new AppError("archive_too_large", "That export exceeds Orbit's portable archive limit", 413);
+  }
   let encrypted: EncryptedPortableArchive;
   try {
     encrypted = encryptPortableArchive(plaintext, input.passphrase);
@@ -214,10 +222,6 @@ export async function createPortableArchive(input: {
     plaintext.fill(0);
   }
   const contents = jsonBuffer(encrypted);
-  if (contents.length > MAX_ARCHIVE_BYTES) {
-    contents.fill(0);
-    throw new AppError("archive_too_large", "That export exceeds Orbit's portable archive limit", 413);
-  }
   const id = randomUUID();
   const storageKey = storage().createStorageKey();
   const expiresAt = new Date(Date.now() + ARCHIVE_TTL_MS);

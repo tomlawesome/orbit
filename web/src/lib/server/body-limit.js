@@ -38,7 +38,7 @@ export const ARCHIVE_BODY_LIMIT = MAX_ARCHIVE_CIPHERTEXT_CHARACTERS + SMALL_BODY
 
 /**
  * The largest body any route may take, rounded up to whole MiB because the
- * image states it in MiB. Must match the image's `BODY_SIZE_LIMIT=172M`
+ * image states it in MiB. Must match the image's `BODY_SIZE_LIMIT=343M`
  * (Dockerfile).
  */
 export const SERVER_BODY_LIMIT = Math.ceil(Math.max(DOCUMENT_MAX_BYTES_CEILING + SMALL_BODY_LIMIT, ARCHIVE_BODY_LIMIT) / MIB) * MIB;

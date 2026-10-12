@@ -1,13 +1,23 @@
 import { createHash, randomUUID } from "node:crypto";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import { documents, items, sections } from "@/db/schema";
 import { decryptPortableArchive, encryptPortableArchive } from "@/server/portable-archive";
-import { createPortableArchive, importPortableArchive, readPortableArchive } from "@/server/portable-archive-repository";
+import { readDocumentDownload } from "@/server/document-repository";
+import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
+import { createPortableArchive, importPortableArchive, previewPortableArchive, readPortableArchive } from "@/server/portable-archive-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { readWorkspace } from "@/server/workspace-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+
+// The export reads each document through readDocumentDownload. The real one
+// needs the stored, encrypted file; the size tests below only need bytes of
+// the size the row claims, so they swap in a stand-in and count the calls.
+vi.mock("@/server/document-repository", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/document-repository")>();
+  return { ...actual, readDocumentDownload: vi.fn(actual.readDocumentDownload) };
+});
 
 const passphrase = "correct-horse-battery-staple";
 
@@ -302,4 +312,94 @@ describe("portable archive import section bounds (#1316)", () => {
     const session = await fixture.session("member");
     await expect(readWorkspace(fixture.users.member.id, session.sessionId)).resolves.toBeTruthy();
   });
+});
+
+describe("portable archive document-inclusive export size (#1316, owner decision 2026-10-12)", () => {
+  const MIB = 1_048_576;
+  const realReadDocumentDownload = vi.mocked(readDocumentDownload).getMockImplementation()!;
+
+  afterEach(() => {
+    vi.mocked(readDocumentDownload).mockReset();
+    vi.mocked(readDocumentDownload).mockImplementation(realReadDocumentDownload);
+  });
+
+  /** Available documents on the fixture's item, each row claiming `sizeBytes`. */
+  async function addAvailableDocuments(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>, count: number, sizeBytes: number) {
+    const sizes = new Map<string, number>();
+    for (let index = 0; index < count; index += 1) {
+      const [row] = await getDb().insert(documents).values({
+        householdId: fixture.household.id,
+        itemId: fixture.item.id,
+        uploadedByUserId: fixture.users.owner.id,
+        displayName: `size-test-${index}.pdf`,
+        mediaType: "application/pdf",
+        sizeBytes,
+        contentSha256: createHash("sha256").update(randomUUID()).digest("hex"),
+        lifecycle: "available",
+        scanStatus: "skipped",
+        availableAt: new Date(),
+      }).returning({ id: documents.id });
+      sizes.set(row.id, sizeBytes);
+    }
+    // A fresh buffer per call: the export zeroes each one after use.
+    vi.mocked(readDocumentDownload).mockImplementation(async (_userId, documentId) => ({
+      bytes: Buffer.alloc(sizes.get(documentId) ?? 128),
+      displayName: "size-test.pdf",
+      mediaType: "application/pdf",
+    }));
+  }
+
+  it("raises the archive limit to 256 MiB, which the cipher-text and file limits follow", () => {
+    expect(MAX_ARCHIVE_BYTES).toBe(256 * MIB);
+    expect(MAX_ARCHIVE_CIPHERTEXT_CHARACTERS).toBe(Math.ceil((256 * MIB) / 3) * 4);
+  });
+
+  it("exports a household whose available documents total about 80 MiB, and the import pre-check accepts the written file", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-export-80-mib");
+    await addAvailableDocuments(fixture, 10, 8 * MIB);
+
+    // Today this is refused after encryption with "That export exceeds Orbit's
+    // portable archive limit": 80 MiB of documents is about 107 MiB as base64,
+    // and the finished file is about 143 MiB, over the 128 MiB cap.
+    const archive = await createPortableArchive({
+      userId: fixture.users.owner.id,
+      householdId: fixture.household.id,
+      passphrase,
+      includeDocuments: true,
+    });
+    expect(archive.includesDocuments).toBe(true);
+
+    const { bytes } = await readPortableArchive(fixture.users.owner.id, archive.id);
+    const encrypted = JSON.parse(bytes.toString("utf8"));
+    // The import's size pre-check (rejectOversizedCiphertext) runs first in
+    // the preview, before any decryption; the preview then decrypts the
+    // archive and counts what it holds, so a file the pre-check or the
+    // plaintext cap refused would throw archive_too_large here.
+    expect(encrypted.ciphertext.length).toBeLessThanOrEqual(MAX_ARCHIVE_CIPHERTEXT_CHARACTERS);
+    const preview = previewPortableArchive(encrypted, passphrase);
+    // Ten rows added here, plus the fixture's own document.
+    expect(preview.documents).toBe(11);
+  }, 180_000);
+
+  it("refuses a household whose documents total about 200 MiB before reading any document, naming about 192 MiB", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-export-200-mib");
+    // 200 MiB of documents is over the new 192 MiB document figure only when
+    // the pre-check counts them at their base64 size (about 267 MiB against
+    // the 256 MiB archive limit). Counted raw, 200 MiB would sit under the
+    // 256 MiB limit and every document would be read before the refusal.
+    await addAvailableDocuments(fixture, 4, 50 * MIB);
+
+    const refusal = await createPortableArchive({
+      userId: fixture.users.owner.id,
+      householdId: fixture.household.id,
+      passphrase,
+      includeDocuments: true,
+    }).then(() => null, (error: unknown) => error);
+
+    expect(refusal).toMatchObject({ code: "archive_too_large", status: 413 });
+    const message = (refusal as { message: string }).message;
+    expect(message).toMatch(/about 192 MiB/);
+    expect(message).not.toMatch(/128 MiB/);
+    expect(readDocumentDownload).not.toHaveBeenCalled();
+  }, 60_000);
 });
