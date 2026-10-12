@@ -337,6 +337,12 @@ export function mountCreate() {
     dueDate: { input: "f-date", field: "field-date" },
     cost: { input: "f-cost", field: "field-cost" },
   });
+  /* Typing in a suggested field makes the value the member's own, as the
+     pocket's form does: the mark goes, so clearSuggestions leaves it alone. */
+  for (const slot of Object.values(SUGGESTION_SLOTS)) {
+    const input = document.getElementById(slot.input);
+    if (input) on(input, "input", () => document.getElementById(slot.field)?.classList.remove("sugg"));
+  }
 
   /** One read in flight at a time: picking again, "not this one" or leaving
       cancels the last. */

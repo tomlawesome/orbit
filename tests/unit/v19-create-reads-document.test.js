@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -17,6 +18,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * against the file's own text and tests/e2e/v19-create.spec.ts proves the
  * journey.
  */
+
+/* The desk form's own behaviour module is mounted in the last describe below
+   on a minimal copy of its markup, with the read's outcome handed in by the
+   test: only readPickedDocument is replaced, and only while a test sets
+   `nextReads`; every other test in this file meets the real helper. */
+/** @type {Array<{ page: unknown, read: unknown }>} */
+const nextReads = [];
+vi.mock("$app/navigation", () => ({ goto: async () => {} }));
+vi.mock("$lib/data/workspace.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  activeHousehold: async () => ({ id: "hh-1", currency: "GBP", sections: [{ id: "s-home", name: "Home", accent: "a", visible: true }] }),
+  checkDraftCommand: async () => null,
+  readReminders: async () => ({ firstWarningDays: null, finalWarningDays: null }),
+}));
+vi.mock("$lib/data/document-read.js", async (importOriginal) => {
+  const real = /** @type {Record<string, unknown>} */ (await importOriginal());
+  return {
+    ...real,
+    readPickedDocument: (/** @type {unknown[]} */ ...args) =>
+      nextReads.length ? nextReads.shift() : /** @type {Function} */ (real.readPickedDocument)(...args),
+  };
+});
 
 const here = (/** @type {string} */ rel) => readFileSync(resolve(import.meta.dirname, rel), "utf8");
 
@@ -247,5 +270,77 @@ describe("#1245: the desk form reads the document the moment it is picked", () =
   it("offers 'not this one', which drops the file and what it suggested", () => {
     expect(page).toMatch(/id="rc-drop"[^>]*>not this one</u);
     expect(behaviour).toMatch(/on\(dropFile, "click"/u);
+  });
+});
+
+describe("[1316] a suggested value someone has begun editing is theirs, not the document's", () => {
+  const MARKUP = `
+    <form id="card" novalidate>
+      <div id="disclose">
+        <div id="types"><button type="button" data-type="service" aria-pressed="false">service</button></div>
+        <div id="sections"></div>
+        <div id="field-date"><input id="f-date" type="date"></div>
+        <div class="f-recur"><select id="f-recur"><option value="0">once</option></select>
+          <input id="f-recur-months" hidden></div>
+        <div id="field-cost"><input id="f-cost"></div>
+        <div id="field-provider"><input id="f-provider"></div>
+        <div id="field-ref"><input id="f-ref"></div>
+        <textarea id="f-notes"></textarea>
+        <select id="f-reminder"><option value="14">14</option></select>
+      </div>
+      <input id="f-name">
+      <div id="dropzone"></div><span id="dz-held-name"></span><span id="dz-held-size"></span><div id="dz-live"></div>
+      <div class="save-row"><div class="save-note" id="save-note"></div>
+        <button type="submit" class="btn-primary">Add to orbit</button></div>
+    </form>
+    <div id="readcard"></div><div id="read-head"></div><div id="focusline"></div><div id="focuswhy"></div>
+    <img id="sheet-page"><div id="rc-capline"></div><div id="rc-honest"></div><div id="rc-file"></div>
+    <div id="rc-size"></div><div id="rc-scan"></div><button id="rc-drop" type="button"></button><div id="docnote"></div>
+  `;
+
+  const reads = (/** @type {{ field: string, value: string }[]} */ suggestions) => ({
+    page: Promise.resolve({ kind: "up", url: "blob:page-one", scanned: true }),
+    read: Promise.resolve({ kind: "read", extracted: true, suggestions, message: "" }),
+  });
+  const settle = () => new Promise((done) => setTimeout(done, 20));
+  const pick = async (/** @type {string} */ name) => {
+    const picker = /** @type {HTMLInputElement} */ (document.querySelector('#card input[type="file"]'));
+    Object.defineProperty(picker, "files", { configurable: true, value: [new File([new Uint8Array([37, 80, 68, 70])], name, { type: "application/pdf" })] });
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
+    await settle();
+  };
+
+  /** @type {{ teardown: () => void } | null} */
+  let mounted = null;
+  beforeEach(() => {
+    nextReads.length = 0;
+    document.body.innerHTML = MARKUP;
+  });
+  afterEach(() => {
+    mounted?.teardown();
+    mounted = null;
+    document.body.className = "";
+  });
+
+  it("keeps what was typed over a suggestion when a second file, with nothing to suggest, is picked", async () => {
+    const { mountCreate } = await import("../../web/src/routes/create/create.behaviour.js");
+    mounted = mountCreate();
+    await settle();
+    const field = /** @type {HTMLElement} */ (document.getElementById("field-provider"));
+    const provider = /** @type {HTMLInputElement} */ (document.getElementById("f-provider"));
+
+    nextReads.push(reads([{ field: "provider", value: "British Gas" }]));
+    await pick("first.pdf");
+    expect(provider.value).toBe("British Gas");
+    expect(field.classList.contains("sugg")).toBe(true);
+
+    // Someone starts editing the suggestion, without pressing accept.
+    provider.value = "British Gas Ltd";
+    provider.dispatchEvent(new Event("input", { bubbles: true }));
+
+    nextReads.push(reads([]));
+    await pick("second.pdf");
+    expect(provider.value).toBe("British Gas Ltd");
+    expect(field.classList.contains("sugg")).toBe(false);
   });
 });
