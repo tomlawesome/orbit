@@ -203,17 +203,45 @@ points at with the new key and replace its `.sig` asset. Until that third
 step is done the one-line installer refuses every install and update: the
 `get-orbit.sh` on `main` carries only the committed key, and nothing re-signs
 a published manifest by itself (signing only runs inside a release pipeline).
-On the runner host, as `gitlab-signer` (the key is readable only by it), with
-`vX.Y.Z` the current `latest` release, sign exactly as
-`scripts/ci/sign-release-manifest.sh` does and upload over the old signature:
+Re-sign on the runner host in three steps, with `vX.Y.Z` the current `latest`
+release. Only `gitlab-signer` can read the key, but it has no login shell and
+no GitHub credential (giving it one would undo the isolation above), so you
+download and upload with your own `gh` login and `gitlab-signer` only signs.
+
+First, as yourself, download the manifest into a fresh directory:
+
 ```sh
+cd "$(mktemp -d)"
 gh release download vX.Y.Z -R tomlawesome/orbit -p orbit-release-manifest.json
-cosign sign-blob --key /etc/orbit-signing/cosign.key \
-  --tlog-upload=false --use-signing-config=false --yes \
-  --new-bundle-format=false \
-  --output-signature orbit-release-manifest.json.sig orbit-release-manifest.json
+```
+
+Then, from that directory, copy it into a directory only `gitlab-signer` can
+write, sign there as `gitlab-signer` exactly as
+`scripts/ci/sign-release-manifest.sh` does (same flags, password read from
+`/etc/orbit-signing/password`), and copy the signature back out.
+`gitlab-signer` cannot write your directory and you cannot read the key, hence
+the hand-over:
+
+```sh
+d=/var/tmp/orbit-resign
+sudo install -d -m 0700 -o gitlab-signer -g gitlab-signer "$d"
+sudo install -m 0600 -o gitlab-signer -g gitlab-signer orbit-release-manifest.json "$d/"
+sudo -u gitlab-signer bash -c 'cd /var/tmp/orbit-resign &&
+  export COSIGN_PASSWORD="$(< /etc/orbit-signing/password)" &&
+  cosign sign-blob --key /etc/orbit-signing/cosign.key \
+    --tlog-upload=false --use-signing-config=false --yes \
+    --new-bundle-format=false \
+    --output-signature orbit-release-manifest.json.sig orbit-release-manifest.json'
+sudo install -m 0644 -o "$USER" "$d/orbit-release-manifest.json.sig" .
+sudo rm -r "$d"
+```
+
+Last, as yourself again, upload it over the old signature:
+
+```sh
 gh release upload vX.Y.Z orbit-release-manifest.json.sig -R tomlawesome/orbit --clobber
 ```
+
 The keyless `.sigstore.json` countersignature covers the manifest, not the
 `.sig`, so it is unaffected. Attestations made under the old key stop
 verifying, so any digest not yet published must go through validation again

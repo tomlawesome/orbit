@@ -621,7 +621,10 @@ describe("docs/releasing.md key rotation (#1316)", () => {
   };
 
   it("Key rotation re-signs the published latest manifest and replaces its .sig asset", () => {
-    const rotation = paragraphStartingWith("**Key rotation:**");
+    // The re-sign runs as separate steps, so read the whole subsection, not its first paragraph.
+    const at = releasingDoc.indexOf("**Key rotation:**");
+    expect(at, "Key rotation subsection").toBeGreaterThanOrEqual(0);
+    const rotation = releasingDoc.slice(at, releasingDoc.indexOf("\n## ", at));
     expect(rotation).toContain("sign-blob");
     expect(rotation).toContain("--clobber");
     expect(rotation).toMatch(/latest/i);
@@ -631,5 +634,66 @@ describe("docs/releasing.md key rotation (#1316)", () => {
   it("launcher Rotation no longer claims latest unconditionally carries a current-key manifest", () => {
     const rotation = paragraphStartingWith("**Rotation.**");
     expect(rotation).not.toMatch(/`latest` always carries a manifest signed under the current key/);
+  });
+});
+
+describe("docs/releasing.md key rotation re-sign split by account (#1316)", () => {
+  // The re-sign must not hand gitlab-signer a GitHub credential: the owner's
+  // account downloads and uploads, gitlab-signer only signs, in a directory
+  // both can reach.
+  const releasingDoc = readFileSync(new URL("../docs/releasing.md", import.meta.url), "utf8");
+  const start = releasingDoc.indexOf("**Key rotation:**");
+  const section = releasingDoc.slice(start, releasingDoc.indexOf("\n## ", start));
+  const fences = [...section.matchAll(/```[a-z]*\n([\s\S]*?)```/g)].map((match) => ({
+    body: match[1],
+    index: match.index,
+  }));
+  const fenceWith = (needle) => fences.find((fence) => fence.body.includes(needle));
+
+  it("has a Key rotation section with code blocks to check", () => {
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(fences.length).toBeGreaterThan(0);
+  });
+
+  it("signs in its own step, with the password read from the signing directory, and no gh in it", () => {
+    const sign = fenceWith("cosign sign-blob");
+    expect(sign, "a code block with cosign sign-blob").toBeDefined();
+    expect(sign.body).toContain('COSIGN_PASSWORD="$(< /etc/orbit-signing/password)"');
+    expect(sign.body).toContain("--key /etc/orbit-signing/cosign.key");
+    expect(sign.body).not.toMatch(/\bgh\b/);
+  });
+
+  it("downloads and uploads with gh in steps that do not sign and do not run as gitlab-signer", () => {
+    const download = fenceWith("gh release download");
+    const upload = fenceWith("gh release upload");
+    expect(download, "a code block with gh release download").toBeDefined();
+    expect(upload, "a code block with gh release upload").toBeDefined();
+    expect(upload.body).toContain("--clobber");
+    for (const ghStep of [download, upload]) {
+      expect(ghStep.body).not.toContain("cosign");
+      expect(ghStep.body).not.toMatch(/gitlab-signer/);
+    }
+  });
+
+  it("downloads into a directory gitlab-signer can write, before signing, and uploads after", () => {
+    expect(section).toMatch(/(install -d|mkdir)[^\n]*(0700|700)[^\n]*gitlab-signer|chown[^\n]*gitlab-signer/);
+    const downloadAt = section.indexOf("gh release download");
+    const signAt = section.indexOf("cosign sign-blob");
+    const uploadAt = section.indexOf("gh release upload");
+    expect(downloadAt).toBeGreaterThanOrEqual(0);
+    expect(signAt).toBeGreaterThan(downloadAt);
+    expect(uploadAt).toBeGreaterThan(signAt);
+  });
+
+  it("never gives gitlab-signer a GitHub credential", () => {
+    expect(section).not.toMatch(/gitlab-signer[^\n]*\b(gh auth|GH_TOKEN|GITHUB_TOKEN|GH_CONFIG_DIR)\b/);
+    expect(section).not.toMatch(/\b(gh auth login|GH_TOKEN|GITHUB_TOKEN)\b/);
+    // A step introduced as run by gitlab-signer must not contain gh at all.
+    for (const fence of fences) {
+      const lead = section.slice(0, fence.index).split(/\n\s*\n/).pop();
+      if (/as `gitlab-signer`|sudo -u gitlab-signer|su -[^\n]*gitlab-signer/.test(lead + fence.body)) {
+        expect(fence.body, `step run as gitlab-signer: ${fence.body}`).not.toMatch(/\bgh\b/);
+      }
+    }
   });
 });
