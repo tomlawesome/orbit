@@ -123,3 +123,23 @@ describe("#1316 W1-R2: neither home screen passes crypto.randomUUID() straight t
     expect(src).toMatch(/from\s+["'][^"']*attach-id\.js["']/u);
   });
 });
+
+describe("#1316 W1-R2: both home screens forget the attach id once the attach is acknowledged", () => {
+  /* forget() is proven above; this pins that each screen calls it after the
+     awaited attach succeeds (before the attempt's `catch`), so a later attach
+     of the same file mints a new id while a retry after a failure reuses it. */
+  it.each([
+    ["the desk (+page.svelte onattach)", "web/src/routes/home/+page.svelte"],
+    ["the phone (pocket.svelte attachTo)", "web/src/routes/home/pocket.svelte"],
+  ])("%s calls forgetAttachId after attachItemDocument, outside the catch", (_name, path) => {
+    const lines = read(path).split("\n");
+    const calls = lines.flatMap((line, at) => (line.includes("attachItemDocument(") && !line.includes("import ") ? [at] : []));
+    expect(calls.length).toBeGreaterThan(0);
+    for (const at of calls) {
+      const rest = lines.slice(at + 1);
+      const end = rest.findIndex((line) => /\bcatch\b/u.test(line));
+      const tryTail = end === -1 ? rest : rest.slice(0, end);
+      expect(tryTail.some((line) => line.includes("forgetAttachId(")), `${path}:${at + 1}`).toBe(true);
+    }
+  });
+});

@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as heldCompletion from "../../web/src/lib/data/held-completion.js";
@@ -139,5 +142,34 @@ describe("the words for a dropped completion (#1316)", () => {
   it("does not tell the user to refresh and try again", () => {
     expect(String(wake())).not.toMatch(/refresh/i);
     expect(String(wake())).not.toMatch(/try again/i);
+  });
+});
+
+describe("both home screens use the words for a dropped completion (#1316)", () => {
+  /* The helper is proven above; this pins each screen's wiring against its
+     own text (the screens cannot be driven without a browser): a refusal
+     names the item the command was for, looked up by its itemId. */
+  const read = (p) => readFileSync(resolve(import.meta.dirname, "../..", p), "utf8");
+  /** The text from `from` (after `after`) up to the closing `});` at two-space indent. */
+  const block = (src, after, from) => {
+    const start = src.indexOf(from, src.indexOf(after));
+    expect(src.indexOf(after)).toBeGreaterThan(-1);
+    expect(start).toBeGreaterThan(-1);
+    const end = src.indexOf("\n  });", start);
+    return src.slice(start, end === -1 ? undefined : end);
+  };
+
+  it("the desk's held completion (+page.svelte onfailed) names the refused item", () => {
+    const onfailed = block(read("web/src/routes/home/+page.svelte"), "createHeldCompletion({", "onfailed:");
+    expect(onfailed).toContain("isRefused(error)");
+    expect(onfailed).toMatch(/\bcommand\)?\??\.itemId\b/u);
+    expect(onfailed).toContain("droppedCompletionWords(");
+  });
+
+  it("the phone's stash replay (pocket.svelte catch) names the refused item", () => {
+    const replay = block(read("web/src/routes/home/pocket.svelte"), "of readHeldCompletionStash()", ".catch(");
+    expect(replay).toMatch(/\brefused\s*\?/u);
+    expect(replay).toContain("rawItems.get(sent.itemId)");
+    expect(replay).toContain("droppedCompletionWords(");
   });
 });
