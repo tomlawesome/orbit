@@ -348,6 +348,45 @@ describe("#1316 9a: signing out ends the identity provider's session (Leave.svel
     expect(win.navigations).toEqual([]);
   });
 
+  it("goes to the provider at once when the page is already hidden as the descent starts", async () => {
+    vi.useFakeTimers();
+    const text = goodbyeTextMs();
+    const win = fakeWindow();
+    const leave = mountOnPage(Leave, { name: "The Household" });
+
+    // The reader pressed Sign out and locked the phone at once: by the time
+    // the descent starts the page is already hidden, so no visibilitychange
+    // will ever fire for it. None is dispatched here.
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    await leave.descendFrom(PROVIDER);
+    await Promise.resolve();
+    expect(win.navigations).toEqual([{ how: "replace", to: PROVIDER }]);
+
+    // The farewell and the hold then elapse: no second navigation.
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(text + SLACK_MS);
+    await vi.advanceTimersByTimeAsync(WELL_AFTER_MS);
+    expect(win.navigations).toEqual([{ how: "replace", to: PROVIDER }]);
+  });
+
+  it("does nothing, and stays at /logout, when the page is already hidden and there is no provider session", async () => {
+    vi.useFakeTimers();
+    const text = goodbyeTextMs();
+    const win = fakeWindow();
+    const leave = mountOnPage(Leave, { name: "The Household" });
+
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    await leave.descendFrom(null);
+    await Promise.resolve();
+    expect(win.navigations).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(text + SLACK_MS);
+    await vi.advanceTimersByTimeAsync(WELL_AFTER_MS);
+    expect(win.navigations).toEqual([]);
+    expect(win.addresses.at(-1)).toBe("/logout");
+  });
+
   it("leaves the location alone, at /logout, when there is no provider session to end, and then shows the gate", async () => {
     vi.useFakeTimers();
     const text = goodbyeTextMs();

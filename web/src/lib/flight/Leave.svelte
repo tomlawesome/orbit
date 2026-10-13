@@ -107,6 +107,9 @@
        (journey.later, README.md) */
     providerLogout = redirectTo;
     if (redirectTo) document.addEventListener("visibilitychange", onVisibility);
+    /* the page may already be hidden by the time the sign-out request
+       returns: no visibilitychange will come, so hand off now */
+    onVisibility();
     leaving = true;
     await tick();
     flight?.descend();
