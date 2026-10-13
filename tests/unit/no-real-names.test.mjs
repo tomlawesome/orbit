@@ -81,7 +81,7 @@ const BANNED_LOGINS = new Set([
 ]);
 
 /** `/home/<login>`, `/Users/<login>`, `C:\Users\<login>` (any slash, escaped or not, either case), `~<login>/`. */
-const HOME_DIRECTORY = /(?:\/home\/|[/\\]+[Uu]sers[/\\]+|(?<![\w/])~)([A-Za-z0-9._-]+)/gu;
+const HOME_DIRECTORY = /(?:\/home\/|[/\\]+[Uu][Ss][Ee][Rr][Ss][/\\]+|(?<![\w/])~)([A-Za-z0-9._-]+)/gu;
 
 /**
  * The lower-case login candidates of every home-directory path in a line: the

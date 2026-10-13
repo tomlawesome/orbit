@@ -35,8 +35,8 @@ const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 // both lanes for the record but has no guard of its own to check: it starts
 // before `classify`, so it never sees ORBIT_LANE and always runs.
 const laneMembers = {
-  [CI_LANE.IGNORE_POLICY]: ["gitleaks", "licence_policy", "supply_chain_source"],
-  [CI_LANE.CI]: ["fast", "fast_docker", "gitleaks", "supply_chain_source"],
+  [CI_LANE.IGNORE_POLICY]: ["gitleaks", "licence_policy", "names_guard", "supply_chain_source"],
+  [CI_LANE.CI]: ["fast", "fast_docker", "gitleaks", "names_guard", "supply_chain_source"],
 };
 
 function guardedJobs() {
@@ -167,6 +167,8 @@ describe("pipeline lanes", () => {
       // lane that skipped the build rather than load the placeholder.
       "launcher_install_compat",
       "licence_policy",
+      // #1408: reads every tracked file, so every lane admits it.
+      "names_guard",
       "repair_journeys",
       "smoke",
       "smoke_firefox",

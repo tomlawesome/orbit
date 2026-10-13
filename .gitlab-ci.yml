@@ -344,10 +344,12 @@ variables:
   # request into `main`, so this never re-checks the branch.
   #
   #   ignore_policy  .gitleaksignore, supply-chain/licence-policy.yml
-  #                  -> gitleaks, licence_policy, supply_chain_source
+  #                  -> gitleaks, licence_policy, names_guard,
+  #                     supply_chain_source
   #   ci             .gitlab-ci.yml, scripts/ci/, the classifier and the two
   #                  tests that read this file
-  #                  -> fast, fast_docker, gitleaks, supply_chain_source
+  #                  -> fast, fast_docker, gitleaks, names_guard,
+  #                     supply_chain_source
   #
   # `gitleaks` is in both and needs no call: it starts before `classify` and so
   # never sees ORBIT_LANE. Membership is unconditional -- a member runs whether
@@ -358,8 +360,8 @@ variables:
   orbit_lane_admits() {
     case "${ORBIT_LANE:-full}:$1" in
       full:*) return 0 ;;
-      ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:supply_chain_source) return 0 ;;
-      ci:fast | ci:fast_docker | ci:gitleaks | ci:supply_chain_source) return 0 ;;
+      ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:names_guard | ignore_policy:supply_chain_source) return 0 ;;
+      ci:fast | ci:fast_docker | ci:gitleaks | ci:names_guard | ci:supply_chain_source) return 0 ;;
     esac
     echo "skipped: the ${ORBIT_LANE:-full} lane does not run ${1} (#889)"
     return 1
@@ -1109,7 +1111,7 @@ names_guard:
       artifacts: true
   script:
     - *reach_helpers
-    - orbit_lane_admits fast || exit 0
+    - orbit_lane_admits names_guard || exit 0
     - *reuse_gate
     - node --test tests/unit/no-real-names.test.mjs
     - *reuse_evidence
