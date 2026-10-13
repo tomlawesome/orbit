@@ -7,7 +7,7 @@
 # waiting on CI.
 #
 # Mirrors the &container_validation_steps sequence in
-# .github/workflows/publish-container.yml (the "Create isolated test
+# the retired GitHub container workflow (the "Create isolated test
 # configuration" through "Run browser and accessibility checks" steps):
 # same compose files, same order, same health and OIDC/mail setup. It
 # deliberately does not reproduce that job's image-scanning, installer or

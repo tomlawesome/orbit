@@ -68,11 +68,11 @@ done
 #
 # Decision (#436): Orbit does not pin off BuildKit by default. BuildKit is the
 # supported, current builder — CI, most local Docker installs, and the digest-
-# pinned base images this build depends on are all exercised against it daily
-# (see scripts/exact-image-workflow.test.mjs). The isolation seen here is a
-# property of some hosts' Docker network configuration, not of BuildKit in
-# general, so pinning every build to the deprecated legacy builder to work
-# around a minority of hosts would be the wrong trade for everyone else.
+# pinned base images this build depends on are all exercised against it daily.
+# The isolation seen here is a property of some hosts' Docker network
+# configuration, not of BuildKit in general, so pinning every build to the
+# deprecated legacy builder to work around a minority of hosts would be the
+# wrong trade for everyone else.
 # Where it does happen, `DOCKER_BUILDKIT=0` builds
 # through the same Dockerfile with the legacy builder and produces an
 # equivalent image: same digest-pinned base images, same ORBIT_VERSION /

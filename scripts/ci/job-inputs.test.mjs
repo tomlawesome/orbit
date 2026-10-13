@@ -71,7 +71,7 @@ const tree = [
   entry("docs/architecture.md", "b1"),
   entry("docs/installer-guarantees.md", "b2"),
   entry("docs/engine-events.md", "b6"),
-  entry(".github/workflows/publish-container.yml", "b7"),
+  entry(".github/workflows/publish-from-gitlab.yml", "b7"),
   entry("README.md", "b3"),
   entry("compose/docker-compose.acceptance.yml", "b4"),
   entry("drizzle/0001_init.sql", "b5"),
@@ -158,10 +158,9 @@ describe("the deny-lists", () => {
 
   /*
    * ADR-0028's list for `fast` also names `.github/**`, which this checkout
-   * disproves: eight suites `fast` runs read a file there --
-   * exact-image-workflow, launcher-compat-job, preview-lane-preflight,
-   * processor-compose-contract, publish-from-gitlab-workflow, sidecar-pins,
-   * supply-chain-policy and trivy-db-retry. The ADR's admissibility rule
+   * disproves: four suites `fast` runs read a file there --
+   * launcher-compat-job, publish-from-gitlab-workflow, sidecar-pins and
+   * supply-chain-policy. The ADR's admissibility rule
    * ("only when the job reaches it solely through its artefact or not at
    * all") outranks its example list, and the same rule keeps three named
    * files in: docs/engine-events.md (configure-check-contract,
@@ -170,7 +169,7 @@ describe("the deny-lists", () => {
    * (test-e2e-local, which spawns the real script).
    */
   it("keeps the files fast's own suites read out of fast's deny-list", () => {
-    expect(covers("fast", ".github/workflows/publish-container.yml")).toBe(true);
+    expect(covers("fast", ".github/workflows/publish-from-gitlab.yml")).toBe(true);
     expect(covers("fast", "docs/engine-events.md")).toBe(true);
     expect(covers("fast", "docs/installer-guarantees.md")).toBe(true);
     expect(covers("fast", "tests/e2e/local-only-specs.txt")).toBe(true);

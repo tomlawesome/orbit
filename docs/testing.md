@@ -284,12 +284,10 @@ bash scripts/install-test-browser.sh
 bash scripts/test-frontend.sh
 ```
 
-The current measured suite and its known gaps are recorded in the
-[engineering baseline](engineering-baseline.md). Playwright verifies
-signed-out privacy in desktop and mobile Chromium and uses the disposable OIDC
-profile for authenticated household-lifecycle acceptance. Coverage is
-diagnostic while the database/API integration baseline is established; it is
-not an arbitrary release percentage.
+Playwright verifies signed-out privacy in desktop and mobile Chromium and
+uses the disposable OIDC profile for authenticated household-lifecycle
+acceptance. Coverage is diagnostic while the database/API integration baseline
+is established; it is not an arbitrary release percentage.
 
 Every corpus committed to the repository is invented — real paperwork must
 never be committed. If you want to know how extraction does against your own

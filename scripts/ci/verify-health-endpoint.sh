@@ -6,7 +6,7 @@
 #
 # Extracted verbatim from the "Verify health endpoint" step of the
 # &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# the retired GitHub container workflow (#801).
 #
 # Inputs: a stack listening on 127.0.0.1:3000.
 set -Eeuo pipefail

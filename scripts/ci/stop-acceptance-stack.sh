@@ -6,7 +6,7 @@
 #
 # Extracted from the "Stop smoke-test services" step of the
 # &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# the retired GitHub container workflow (#801).
 #
 # Inputs (environment):
 #   COMPOSE_FILES  overlay set to tear down; defaults to the workflow's

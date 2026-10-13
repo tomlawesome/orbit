@@ -9,7 +9,7 @@
 #
 # Extracted verbatim from the "Pre-provision unattended installer target"
 # step of the &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# the retired GitHub container workflow (#801).
 #
 # Inputs (environment):
 #   INSTALL_TARGET    the empty directory prepared earlier

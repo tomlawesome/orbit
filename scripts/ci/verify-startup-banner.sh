@@ -8,7 +8,7 @@
 #
 # Extracted verbatim from the "Verify startup banner and immutable identity"
 # step of the &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# the retired GitHub container workflow (#801).
 #
 # Inputs (environment):
 #   TESTED_IMAGE_VERSION  version the banner must report

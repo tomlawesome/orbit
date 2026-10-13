@@ -66,8 +66,6 @@ has the friendly introduction; these pages are the detail behind it.
   development stack, the local harnesses and the local traps.
 - [Quality strategy](quality-strategy.md): the test layers, CI lanes and the
   definition of done.
-- [Engineering baseline](engineering-baseline.md): the dated evidence of what
-  is proven ready.
 - [Engine event stream](engine-events.md): the installer's machine-readable
   status lines.
 - [Private local evaluation](private-eval.md): scoring extraction against

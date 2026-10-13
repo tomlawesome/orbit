@@ -7,7 +7,7 @@
 #
 # Extracted verbatim from the "Create isolated test configuration" step of the
 # &container_validation_steps anchor in
-# .github/workflows/publish-container.yml, so the GitLab pipeline can run the
+# the retired GitHub container workflow, so the GitLab pipeline can run the
 # same setup rather than a paraphrase of it (#801).
 #
 # Inputs: ORBIT_IMAGE, the loaded image under test: configure.sh runs inside

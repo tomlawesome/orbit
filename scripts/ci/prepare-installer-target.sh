@@ -8,7 +8,7 @@
 #
 # Extracted verbatim from the "Prepare empty installer target and Git guard"
 # step of the &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# the retired GitHub container workflow (#801).
 #
 # Inputs (environment): RUNNER_TEMP, optional; defaults to $TMPDIR or /tmp.
 #

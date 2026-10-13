@@ -1,20 +1,20 @@
 # Orbit's pipeline on the owner's self-hosted GitLab (gitlab.tomlawson.io).
 #
-# It mirrors .github/workflows/publish-container.yml job for job. GitHub stays
-# the source of truth during #801 step 2: nothing here promotes anything to
-# `main`, and the image this pipeline publishes to registry.tomlawson.io is
-# recorded as evidence (.orbit-supply-chain/gitlab-tested-image.json) for a
-# later GitHub job to copy to GHCR by digest, rather than being republished.
+# GitLab is where every check runs and where changes are merged (#801); the
+# GitHub repository is a push mirror. The image this pipeline publishes to
+# registry.tomlawson.io is recorded as evidence
+# (.orbit-supply-chain/gitlab-tested-image.json), and the GitHub workflow
+# publish-from-gitlab.yml copies that exact digest to GHCR rather than
+# rebuilding it.
 #
-# Every check the workflow's `&container_validation_steps` anchor makes is run
-# here by calling the same scripts/ci/*.sh the workflow calls, so a finding on
-# one host means the same thing on the other. Nothing below reimplements a
-# check: where a job looks like a copy, it is passing the script its inputs.
+# Every check is run by calling a scripts/ci/*.sh script. Nothing below
+# reimplements a check: where a job looks like a copy, it is passing the
+# script its inputs.
 #
 # Three things are deliberately deferred, not forgotten:
 #
-#   1. The four steps of the anchor that are neither inline shell nor a
-#      scripts/ci script: `scripts/preview-lane-preflight.sh`,
+#   1. The four steps of the old workflow's anchor that are neither inline
+#      shell nor a scripts/ci script: `scripts/preview-lane-preflight.sh`,
 #      `scripts/test-install-acceptance.sh`, `scripts/test-malware-scanner.sh`
 #      and `scripts/test-backup-restore.sh`. Each is a long-running suite of
 #      its own rather than a validation step, and each wants a lane here
@@ -26,7 +26,7 @@
 #      bar under policy P" -- is different, and does live here: a cosign
 #      key-based attestation minted by `sign_evidence` and verified by every
 #      publishing hop (#661, ADR-0020).
-#   3. The workflow's second concurrent integration run. See `integration`.
+#   3. The old workflow's second concurrent integration run. See `integration`.
 #
 # Every job that touches Docker asks for the `orbit-build` runner by tag. A
 # Docker daemon needs a privileged container whichever way it arrives -- the
@@ -175,7 +175,7 @@ variables:
   # needs this bumped alongside it -- build-launcher.sh's own toolchain check
   # fails closed and names the mismatch if it is not.
   GOLANG_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/golang:1.27.1-bookworm@sha256:69a7b9788769bec032d238959b61854e9ae87f57be9029ec04e9885fabf99195
-  # Same scanner build as the workflow, so a finding here and a finding there
+  # Same scanner build as the old workflow, so a finding here and a finding there
   # mean the same thing.
   TRIVY_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
   # The vendor's own registry rather than Trivy's mirror.gcr.io default, which
@@ -1093,7 +1093,7 @@ fast_docker:
     expire_in: 14 days
     when: on_success
 
-# Blocking, like the workflow's job: Orbit pins its own base image, so a stale
+# Blocking, like the old workflow's job: Orbit pins its own base image, so a stale
 # base is a fixable condition rather than one to wait out.
 #
 # It waited on nothing and started immediately, because the check has nothing
@@ -1123,7 +1123,7 @@ base_image:
 
 # --- policy ------------------------------------------------------------------
 
-# Mirrors the workflow's source policy job. Trivy runs as the job image rather
+# Mirrors the old workflow's source policy job. Trivy runs as the job image rather
 # than through `docker run`: under dind a bind mount of the workspace would be
 # empty, because the workspace lives in the job container and the daemon does
 # not share it. Node comes from the image's own Alpine repository -- the three
@@ -1656,13 +1656,13 @@ fidelity_webkit:
     # (red run) or the reuse evidence (green run) exists.
     when: always
 
-# The workflow runs `pnpm test:integration`, which starts its own disposable
+# The old workflow runs `pnpm test:integration`, which starts its own disposable
 # PostgreSQL container and reaches it on a published loopback port. That is not
 # reproducible under dind, so the database is a GitLab service on the same
 # pinned digest and the suite is driven directly with the environment
 # scripts/test-integration.mjs builds.
 #
-# One run rather than the workflow's two concurrent ones. The pair there proves
+# One run rather than the old workflow's two concurrent ones. The pair there proves
 # per-run isolation, and it can, because each invocation gets its own container
 # and its own database; two suites sharing this one service would simply
 # collide. The isolation proof stays with GitHub until this lane can create
@@ -1717,7 +1717,7 @@ integration:
 
 # Builds the image once and hands it on as a tarball, so `smoke`,
 # `repair_journeys` and `record_image` all exercise and publish the same
-# bytes rather than three builds of the same source. The workflow rebuilds
+# bytes rather than three builds of the same source. The old workflow rebuilds
 # instead, because its smoke and publish jobs share one steps anchor.
 build_image:
   stage: acceptance
@@ -1781,7 +1781,7 @@ build_image:
       version="$(node scripts/calculate-version.mjs --channel "$channel")"
       # The release stage recorded in the image. `ci` unless this pipeline is
       # the one that may publish, exactly as PUBLICATION_CHANNEL decides it in
-      # the workflow.
+      # the old workflow.
       publication_channel=ci
       if [ "${CI_PIPELINE_SOURCE:-}" = "push" ]; then
         case "${CI_COMMIT_BRANCH:-}" in
@@ -1857,7 +1857,7 @@ build_image:
           echo "could not export the build cache to ${ORBIT_BUILD_CACHE_REF}; the image built above is unaffected" >&2
         fi
       fi
-    # The same identity assertions the workflow makes on the image it just
+    # The same identity assertions the old workflow makes on the image it just
     # built, made by the same script: the labels and the files baked inside it
     # must agree with what this pipeline believes it built, or nothing
     # downstream means anything. `version` and `publication_channel` are the
@@ -1975,7 +1975,7 @@ build_image:
     # successful pipeline's artifacts regardless of this.
     expire_in: 4 hours
 
-# The workflow's "Scan exact local image" step: Trivy against the image that
+# The old workflow's "Scan exact local image" step: Trivy against the image that
 # was built and tested rather than a rebuild of the same source, an SPDX SBOM
 # beside the report, and the supply-chain policy over both.
 #
@@ -2049,7 +2049,7 @@ supply_chain_image:
     expire_in: 14 days
     when: always
 
-# The stack-and-browser portion of the workflow's &container_validation_steps
+# The stack-and-browser portion of the old workflow's &container_validation_steps
 # anchor, run by calling the anchor's own scripts: create the isolated test
 # configuration, bring the acceptance stack up on the image that was just
 # built, prove it healthy and honest about its identity, prove it unprivileged
@@ -2058,7 +2058,7 @@ supply_chain_image:
 # `acceptance` job below.
 #
 # compose/docker-compose.ci-cap.yml is the extra overlay: the same file set the
-# workflow uses, capped to the standard CI profile from #801 step 1.
+# old workflow used, capped to the standard CI profile from #801 step 1.
 #
 # scripts/test-e2e-local.sh is deliberately not called. It is the local
 # iteration path for this same sequence, and it insists on building its own
@@ -2097,7 +2097,7 @@ smoke:
     # configuration is created from ORBIT_IMAGE, the image just loaded.
     - bash scripts/ci/create-test-configuration.sh
     - *stack_diagnostics_on_failure
-    # The workflow builds the disposable OIDC provider as a step of its own,
+    # The old workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
     - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
     - bash scripts/ci/start-acceptance-stack.sh
@@ -2189,7 +2189,7 @@ smoke_firefox:
     # configuration is created from ORBIT_IMAGE, the image just loaded.
     - bash scripts/ci/create-test-configuration.sh
     - *stack_diagnostics_on_failure
-    # The workflow builds the disposable OIDC provider as a step of its own,
+    # The old workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
     - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
     - bash scripts/ci/start-acceptance-stack.sh
@@ -2309,7 +2309,7 @@ smoke_webkit:
     # configuration is created from ORBIT_IMAGE, the image just loaded.
     - bash scripts/ci/create-test-configuration.sh
     - *stack_diagnostics_on_failure
-    # The workflow builds the disposable OIDC provider as a step of its own,
+    # The old workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
     - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
     - bash scripts/ci/start-acceptance-stack.sh
@@ -2400,7 +2400,7 @@ smoke_webkit_mobile:
     # configuration is created from ORBIT_IMAGE, the image just loaded.
     - bash scripts/ci/create-test-configuration.sh
     - *stack_diagnostics_on_failure
-    # The workflow builds the disposable OIDC provider as a step of its own,
+    # The old workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
     - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
     - bash scripts/ci/start-acceptance-stack.sh
@@ -2532,7 +2532,7 @@ smoke_local_only:
     expire_in: 14 days
     when: always
 
-# The rest of the workflow's &container_validation_steps anchor, in the
+# The rest of the old workflow's &container_validation_steps anchor, in the
 # anchor's order: the deployment asset set and every supported compose
 # combination, the confined hostile-document processor, and then the installer
 # evidence -- an unattended run into an empty directory must refuse, and a run
@@ -2596,7 +2596,7 @@ acceptance:
       : > "$GITHUB_OUTPUT"
     - docker load --input image.tar
     # The compose validations read .env-orbit, so the same configuration step
-    # the workflow runs once for the whole anchor runs once here too.
+    # the old workflow runs once for the whole anchor runs once here too.
     # configure.sh runs inside the image under test (#1210), so the
     # configuration is created from ORBIT_IMAGE, the image just loaded.
     - bash scripts/ci/create-test-configuration.sh
@@ -2625,7 +2625,7 @@ acceptance:
       fi
     # The processor check leaves orbit-tika running, and the installer's own
     # deployment reuses the fixed container names below. Same position, and the
-    # same reason, as the workflow's "Stop smoke-test services".
+    # same reason, as the old workflow's "Stop smoke-test services".
     - bash scripts/ci/stop-acceptance-stack.sh
     - |
       set -eu
@@ -3170,7 +3170,7 @@ record_image:
   timeout: 20m
   # A push must never be cancelled by the next one: the delivery model requires
   # trusted evidence for that exact commit, and a cancelled publish leaves it
-  # permanently without. Same reasoning as the workflow's cancel-in-progress,
+  # permanently without. Same reasoning as the old workflow's cancel-in-progress,
   # which is true only for pull requests.
   interruptible: false
   rules:
@@ -3227,7 +3227,7 @@ record_image:
       sha_reference="${CI_REGISTRY_IMAGE}:sha-${CI_COMMIT_SHA}"
       docker tag "$ORBIT_IMAGE_TAG" "$sha_reference"
       echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
-    # The workflow's push-and-verify: the tag is pushed, the digest the
+    # The old workflow's push-and-verify: the tag is pushed, the digest the
     # registry returns is pulled back, and its configuration identity compared
     # with the tested one. Then the transport record, the moment the push it
     # describes has succeeded; the attestation binding the digest to the

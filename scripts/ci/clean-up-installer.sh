@@ -9,7 +9,7 @@
 #
 # Extracted verbatim from the "Clean up installer validation resources" step
 # of the &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801). Runs unconditionally, so it
+# the retired GitHub container workflow (#801). Runs unconditionally, so it
 # must never itself be the reason a run is red.
 #
 # Inputs (environment): REGISTRY_NAME, REGISTRY_ID, INSTALL_TARGET,

@@ -3,12 +3,12 @@
 # Decides whether the exact hostile-document processor check has to run for
 # this commit. It is minutes of a live Tika stack, so it is skipped when
 # nothing it covers moved -- the processor configuration, the compose file,
-# the document code paths, the test itself, or the workflow that runs it.
+# the document code paths or the test itself.
 # Unable to compare (no parent commit) means required, never skipped.
 #
 # Extracted verbatim from the "Detect exact processor validation scope" step
 # of the &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# the retired GitHub container workflow (#801).
 #
 # Inputs: the Git checkout. Outputs `required=true|false` on standard output,
 # and appends the same line to $GITHUB_OUTPUT when that variable is set.
@@ -25,8 +25,7 @@ if git rev-parse --verify HEAD^ >/dev/null 2>&1 &&
      src/server/document-drafts.ts \
      src/server/documents \
      src/server/item-document-inspection.ts \
-     scripts/test-tika-processor.mjs \
-     .github/workflows/publish-container.yml; then
+     scripts/test-tika-processor.mjs; then
   required=false
 else
   required=true

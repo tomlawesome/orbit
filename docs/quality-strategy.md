@@ -59,8 +59,8 @@ non-v1 maintenance. The pull request links the issue and records:
 - documentation and operator impact;
 - the CI run and, when applicable, preview digest and manual result.
 
-The [engineering baseline](engineering-baseline.md) is a dated audit. GitHub
-issues are the live status; durable requirements remain in version control.
+GitHub issues are the live status; durable requirements remain in version
+control.
 
 ## Coverage policy
 

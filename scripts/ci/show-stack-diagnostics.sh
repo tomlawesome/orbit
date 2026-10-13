@@ -6,7 +6,7 @@
 #
 # Extracted from the "Show service diagnostics" step of the
 # &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801). Runs on failure only, so it
+# the retired GitHub container workflow (#801). Runs on failure only, so it
 # must never itself be the reason a run is red.
 #
 # Deliberately without `set -e`: the run has already failed by the time this

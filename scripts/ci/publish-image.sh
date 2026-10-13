@@ -7,7 +7,7 @@
 #
 # Extracted verbatim from the "Push exact tested image" step of the
 # &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801). Registry authentication and
+# the retired GitHub container workflow (#801). Registry authentication and
 # attestation stay with the caller.
 #
 # Inputs (environment):

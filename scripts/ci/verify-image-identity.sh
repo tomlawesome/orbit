@@ -9,7 +9,7 @@
 #
 # Extracted verbatim from the "Record exact local image identity" step of the
 # &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# the retired GitHub container workflow (#801).
 #
 # Inputs (environment):
 #   IMAGE_TAGS           newline-separated tag list from the metadata step;

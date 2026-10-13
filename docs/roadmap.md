@@ -274,4 +274,3 @@ closed.
 
 - ORB-FUT-008 calls GitLab validation a contingency; it has been the primary path since #801. Needs removing from the register.
 - The charter's release acceptance cites GitHub issues; the work lives on GitLab.
-- `docs/engineering-baseline.md` evidence column dates from 2026-07 and is not a source for current status.

@@ -8,7 +8,7 @@
 #
 # Extracted verbatim from the "Verify exact hostile-document processor" step
 # of the &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# the retired GitHub container workflow (#801).
 #
 # Inputs (environment):
 #   TESTED_IMAGE_TAG  the image under test; the corpus runs inside it

@@ -7,7 +7,7 @@
 #
 # Extracted from the "Start application and database" step of the
 # &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# the retired GitHub container workflow (#801).
 #
 # Inputs (environment):
 #   COMPOSE_FILES  overlay set to bring up. Defaults to the set the workflow

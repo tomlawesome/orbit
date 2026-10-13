@@ -8,7 +8,7 @@
 #
 # Extracted verbatim from the "Validate the deployment asset set without a
 # source tree" step of the &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# the retired GitHub container workflow (#801).
 #
 # Inputs: none beyond the repository checkout and a generated .env-orbit.
 set -Eeuo pipefail

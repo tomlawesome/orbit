@@ -150,8 +150,7 @@ when they cannot weaken the supported core.
 
 Stable v1 requires:
 
-1. Every requirement above to map to an open gap issue or passing evidence in
-   the [engineering baseline](engineering-baseline.md).
+1. Every requirement above to map to an open gap issue or passing evidence.
 2. All release-blocking issues closed with linked tests and review evidence.
 3. The [quality strategy](quality-strategy.md) and required CI gates passing.
 4. A versioned-release preview deployed by digest and exercised on a

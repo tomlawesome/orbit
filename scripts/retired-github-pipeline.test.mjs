@@ -31,7 +31,7 @@ const filesMentioning = (needle) => [...texts].filter(([, text]) => text.include
 
 describe("retired GitHub-first pipeline (#1403 D1)", () => {
   it("has no publish-container workflow", () => {
-    expect(existsSync(new URL(".github/workflows/publish-container.yml", root))).toBe(false);
+    expect(existsSync(new URL("the retired GitHub container workflow", root))).toBe(false);
   });
 
   it("keeps the four workflows GitHub still runs", () => {

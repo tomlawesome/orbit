@@ -8,7 +8,7 @@
 #
 # Extracted verbatim from the "Verify empty target refuses unattended
 # install" step of the &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801). It deliberately does not
+# the retired GitHub container workflow (#801). It deliberately does not
 # change directory: the caller runs it from the installer target, and the
 # emptiness assertion at the end reads the working directory.
 #
