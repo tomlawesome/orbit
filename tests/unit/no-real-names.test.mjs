@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -152,4 +153,46 @@ describe("no real names (#1408)", () => {
     }
     expect(hits, "use a documentation address (192.0.2.x, 198.51.100.x, 203.0.113.x) or add a clearly fake fixture to FAKE_ADDRESSES (#1408)").toEqual([]);
   }, 60_000);
+});
+
+/*
+ * The matchers, tested directly with invented words (no digests, no real
+ * names). `wordsOf` and `loginsOf` are plain functions in this file. Written
+ * with `it` and `assert` only, so they run unchanged under node:test.
+ */
+describe("the guard's matchers (#1408)", () => {
+  /** @param {Set<string>} got @param {string[]} want */
+  const includesAll = (got, want) => {
+    for (const word of want) assert.ok(got.has(word), `${word} missing from ${JSON.stringify([...got])}`);
+  };
+
+  it("wordsOf finds a surname in its plural and possessive forms", () => {
+    includesAll(wordsOf("the Brightwells' boiler"), ["brightwell"]);
+    includesAll(wordsOf("BRIGHTWELLS"), ["brightwell"]);
+  });
+
+  it("wordsOf finds a surname inside a camelCase or upper-snake run", () => {
+    includesAll(wordsOf("const brightwellItems = []"), ["brightwell", "items"]);
+    includesAll(wordsOf("BRIGHTWELL_ITEMS"), ["brightwell"]);
+  });
+
+  it("wordsOf still finds the bare word, and does not join separate words", () => {
+    includesAll(wordsOf("brightwell"), ["brightwell"]);
+    assert.equal(wordsOf("bright well").has("brightwell"), false);
+  });
+
+  it("loginsOf finds a login that ends a sentence or is followed by a suffix", () => {
+    includesAll(loginsOf("files live in /home/alex."), ["alex"]);
+    includesAll(loginsOf("under ~alex."), ["alex"]);
+    includesAll(loginsOf("/home/alex-old"), ["alex"]);
+  });
+
+  it("loginsOf finds a login in a lower-case Windows path and in an ordinary path", () => {
+    includesAll(loginsOf("c:\\users\\alex\\x"), ["alex"]);
+    includesAll(loginsOf("/home/alex/projects"), ["alex"]);
+  });
+
+  it("loginsOf ignores a path with no leading slash", () => {
+    assert.equal(loginsOf("home/alex").size, 0);
+  });
 });
