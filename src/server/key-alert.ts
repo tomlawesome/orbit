@@ -26,7 +26,7 @@ import { and, desc, eq, gt } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog } from "@/db/schema";
-import { log, operationalDetail } from "@/lib/logger";
+import { log, operationalDetail, type OperationalDetail } from "@/lib/logger";
 import { sendBoundedMail } from "@/server/invitations/send";
 import type { KeyFaultReason, KeyState } from "@/server/key-state";
 
@@ -56,11 +56,29 @@ function addressHashOf(address: string): string {
    two never both fire. */
 let pendingAlert: ReturnType<typeof setTimeout> | null = null;
 
+/* The bounded line for an alert-bookkeeping read or write that threw: no
+   error text, which could carry a connection string. */
+function logAlertStoreFailure(detail: OperationalDetail): void {
+  log.warn({
+    event: "encryption.key",
+    state: "degraded",
+    reason: "unexpected_failure",
+    action: "check_database",
+    impact: "none",
+    detail,
+  });
+}
+
 function armAlert(state: KeyState, delayMs: number): void {
   if (pendingAlert) clearTimeout(pendingAlert);
   pendingAlert = setTimeout(() => {
     pendingAlert = null;
-    return sendKeyAlert(state).catch(() => undefined);
+    /* A database that cannot answer (a restart, a host update) must not end
+       the daily promise: say so and try again in an hour (#1316). */
+    return sendKeyAlert(state).catch(() => {
+      logAlertStoreFailure(operationalDetail`encryption key alert not checked; retrying in 60 minutes`);
+      armAlert(state, RETRY_INTERVAL_MS);
+    });
   }, Math.max(delayMs, 0));
   pendingAlert.unref();
 }
@@ -225,7 +243,10 @@ export async function sendKeyAlert(state: KeyState): Promise<void> {
 
   const outcome = await sendBoundedMail(address, renderAlert(fault, now), undefined, now);
   if (outcome.sendError === null) {
-    await record(ALERT_SENT, fault);
+    /* The mail went: the repeat is armed whether or not the record lands. A
+       lost record only means a restart may send this alert again. */
+    await record(ALERT_SENT, fault).catch(() =>
+      logAlertStoreFailure(operationalDetail`encryption key alert sent but not recorded; a restart may repeat it`));
     log.info({
       event: "delivery.smtp",
       state: "completed",
