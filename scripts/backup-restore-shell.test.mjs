@@ -840,11 +840,18 @@ describe("the stop / engine / start rule (E3)", () => {
     expect(result.stderr).toContain("bash scripts/restore.sh --finish");
   });
 
+  // #1316: restore.sh --finish reads the journal state before anything else.
+  function writeJournal(deployment, state) {
+    mkdirSync(dirname(deployment.journal), { recursive: true });
+    writeFileSync(deployment.journal, `format_version=1\nstate=${state}\n`);
+  }
+
   // #1316 R1-4: restore.sh --finish finishes a journal left by an earlier
   // restore whose own --finish never ran or failed. Orbit is already running
   // the restored data, so it must not be stopped or started.
   it("restore.sh --finish runs the engine once with `restore --finish` and neither stops nor starts orbit-app (#1316 R1-4)", () => {
     const deployment = makeDeployment();
+    writeJournal(deployment, "database-restored");
     const result = run(deployment, "restore.sh", ["--finish"], { env: { FAKE_CURL_STATUS: "0", ORBIT_RESTORE_HEALTH_SECONDS: "1" } });
     expect(result.status, result.stderr).toBe(0);
     const runs = engineRuns(result.calls);
@@ -860,12 +867,43 @@ describe("the stop / engine / start rule (E3)", () => {
   // names --recover as the way back.
   it("restore.sh --finish with an unhealthy Orbit fails, runs no engine command, stops/starts nothing and names --recover (#1316 3a)", () => {
     const deployment = makeDeployment();
+    writeJournal(deployment, "database-restored");
     const result = run(deployment, "restore.sh", ["--finish"], { env: { FAKE_CURL_STATUS: "7", ORBIT_RESTORE_HEALTH_SECONDS: "1" } });
     expect(result.status).not.toBe(0);
     expect(engineRuns(result.calls)).toEqual([]);
     expect(result.calls.filter((call) => call.includes("stop") || call.includes("start"))).toEqual([]);
     expect(result.stderr).toMatch(/not healthy/i);
     expect(result.stderr).toContain("bash scripts/restore.sh --recover");
+  });
+
+  // #1316 (audit): a journal still at state=checkpointed means the data was
+  // never restored; Orbit runs the old data, so a health probe proves nothing.
+  // --finish must refuse before probing and point at --recover.
+  it("restore.sh --finish on a checkpointed journal makes no health probe, runs no engine, and says keep Orbit stopped and --recover (#1316)", () => {
+    const deployment = makeDeployment();
+    writeJournal(deployment, "checkpointed");
+    const result = run(deployment, "restore.sh", ["--finish"], { env: { FAKE_CURL_STATUS: "7", ORBIT_RESTORE_HEALTH_SECONDS: "1" } });
+    expect(result.status).toBe(1);
+    expect(result.probes).toEqual([]);
+    expect(engineRuns(result.calls)).toEqual([]);
+    expect(result.calls.filter((call) => call.includes("stop") || call.includes("start"))).toEqual([]);
+    expect(result.stderr).toContain("keep Orbit stopped");
+    expect(result.stderr).toContain("bash scripts/restore.sh --recover");
+    expect(result.stderr).not.toContain("Start Orbit");
+  });
+
+  // #1316 (audit): with no journal there is nothing to wait for. --finish
+  // hands straight to the engine (which reports nothing to finish) and does
+  // not probe health or claim a journal is kept.
+  it("restore.sh --finish with no journal makes no health probe and runs the engine once with `restore --finish`, exiting 0 (#1316)", () => {
+    const deployment = makeDeployment();
+    const result = run(deployment, "restore.sh", ["--finish"], { env: { FAKE_CURL_STATUS: "7", ORBIT_RESTORE_HEALTH_SECONDS: "1" } });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.probes).toEqual([]);
+    const runs = engineRuns(result.calls);
+    expect(runs).toHaveLength(1);
+    expect(runs[0].command).toEqual(["/opt/orbit/cli/orbit.js", "restore", "--finish", "--dir", "/orbit-deploy"]);
+    expect(verbs(result.calls)).toEqual(["run"]);
   });
 
   it("restore.sh reports a restore that never became healthy, and fails", () => {

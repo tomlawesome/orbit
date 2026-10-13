@@ -222,12 +222,16 @@ for argument in "$@"; do
 done
 # --finish completes a restore whose own finish step never ran or failed: Orbit should already
 # be running the restored data, so it is neither stopped nor started. The engine removes the
-# journal and checkpoint only for a restore it recorded as completed.
+# journal and checkpoint only for a restore it recorded as completed; the shell reads the same
+# state first so an unfinished restore is told to stay stopped, not to start Orbit.
 if [[ "$finish" == true ]]; then
   [[ "$#" == 1 ]] || fail 'usage failed; --finish takes no other argument.'
   require_deployment
-  # The checkpoint is the only way back, so it goes only once the restored data is serving.
-  wait_for_health || fail 'finish failed; Orbit is not healthy on the restored data, so the restore journal and checkpoint are kept. Start Orbit and run bash scripts/restore.sh --finish again, or run bash scripts/restore.sh --recover to roll back.'
+  if [[ -f "$journal_path" ]]; then
+    grep -qx 'state=database-restored' "$journal_path" || fail 'finish failed; the restore journal does not record a completed restore; keep Orbit stopped and run bash scripts/restore.sh --recover.'
+    # The checkpoint is the only way back, so it goes only once the restored data is serving.
+    wait_for_health || fail 'finish failed; Orbit is not healthy on the restored data, so the restore journal and checkpoint are kept. Start Orbit and run bash scripts/restore.sh --finish again, or run bash scripts/restore.sh --recover to roll back.'
+  fi
   engine_host_identity
   run_engine "" restore --finish </dev/null || exit $?
   exit 0
