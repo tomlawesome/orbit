@@ -218,6 +218,22 @@ describe("scripts/test-backup-restore.sh health_probe_url (issue #684)", () => {
     expect(result.stdout).toBe("http://127.0.0.1:3001/api/health");
   });
 
+  it("ignores the carriage return of a CRLF .env-orbit, so the probe URL has no stray \\r (#1316)", () => {
+    const dir = makeFixture();
+    const environmentFile = join(dir, ".env-orbit");
+    writeFileSync(environmentFile, "APP_URL=https://orbit.internal\r\nORBIT_BIND_ADDRESS=127.0.0.1\r\nORBIT_PORT=3210\r\n");
+    chmodSync(environmentFile, 0o600);
+    const result = runHealthProbeUrl(environmentFile);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("http://127.0.0.1:3210/api/health");
+  });
+
+  it("strips the carriage return from both ORBIT_BIND_ADDRESS and ORBIT_PORT, in the drill as in scripts/restore.sh (#1316)", () => {
+    const stripCalls = (source) => source.match(/sub\(\/\\r\$\/, ""\);/g) ?? [];
+    expect(stripCalls(restoreHealthProbeUrlSource)).toHaveLength(2);
+    expect(stripCalls(healthProbeUrlSource)).toHaveLength(2);
+  });
+
   it("derives the probe the same way scripts/restore.sh does, so the two cannot drift apart", () => {
     expect(healthProbeUrlSource).toBe(restoreHealthProbeUrlSource);
   });

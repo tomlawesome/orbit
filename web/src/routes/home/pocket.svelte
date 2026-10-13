@@ -10,6 +10,7 @@
   import { sectionColourOf } from "$lib/option-colour.js";
   import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
+  import { droppedCompletionWords } from "$lib/data/held-completion.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf, manifestRowOf } from "$lib/data/chart.js";
   import { dayMonth, initials as initialsOf, money, MONTHS, plural } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
@@ -31,6 +32,7 @@
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
   import { BAND_VAR, tlabel } from "$lib/data/bands.js";
   import ItemDrawer from "./ItemDrawer.svelte";
+  import { attachIdFor, forget as forgetAttachId } from "./attach-id.js";
   import SuggestionDrawer from "./SuggestionDrawer.svelte";
 
   /**
@@ -297,12 +299,22 @@
     if (!suggestion || !onamend) throw new Error("not added — this suggestion has gone");
     const { item: amended, sectionId } = amendedOf(item, edits);
     const problem = await onamend(suggestion, amended, sectionId);
-    if (problem && typeof problem === "object") throw new Error(problem.message);
+    if (problem && typeof problem === "object") {
+      /* A partial approval has filed the item: the rows close, or a corrected
+         re-send under the same operation id is refused for good. */
+      wake(problem.message, { failure: true });
+      landedPartial = true;
+      return;
+    }
     if (problem) throw new Error(`not added — ${problem}`);
   }
+  /* Set by addSuggestion when the add landed partly: addAmended then leaves
+     the recorded-but-pending sentence standing instead of "added". */
+  let landedPartial = false;
   async function addAmended() {
+    landedPartial = false;
     const title = modes.edit.draft?.title.trim() ?? "";
-    if (await modes.edit.commit()) wake(`added to your orbit · ${title}`);
+    if (await modes.edit.commit() && !landedPartial) wake(`added to your orbit · ${title}`);
   }
   /** What a suggestion's lines need while they are amended. @param {{ id: string }} s */
   const amendActsOf = (s) => ({
@@ -326,13 +338,14 @@
 
   /** #1151 W1-Q8: shared with the desk's own copy (home/+page.svelte) via
    *  pocket-search.js's readSearchDocuments, which also carries the
-   *  concurrency cap (#1151 W1-R9). */
+   *  concurrency cap (#1151 W1-R9). The open row's item is read whatever
+   *  its status, so a retired or expired item still shows its papers. */
   async function loadSearchDocuments() {
     const household = view?.household;
     const householdId = view?.primary;
     if (!household || !householdId || searchDocumentsFor === household) return;
     searchDocumentsFor = household;
-    const carrying = (household.items ?? []).filter((item) => item.status === "active" && (item.documentCount ?? 0) > 0);
+    const carrying = (household.items ?? []).filter((item) => (item.status === "active" || item.id === lit) && (item.documentCount ?? 0) > 0);
     // Additive: an item whose papers cannot be read loses its papers from the
     // results, not the search.
     const found = await readSearchDocuments(
@@ -468,7 +481,12 @@
     /* #1319: an open row is the one asked for, so an edit that moves it out
        of what the manifest lists (a new date past 30 days) keeps it drawn,
        open, in its new place in date order, not folded away (the Q1 rule). */
-    if (open) { lit = id; asked = id; loadSearchDocuments(); } else if (lit === id) lit = null;
+    /* Papers read before a non-active row opened left that item out, so
+       read them again with it included. */
+    if (open) {
+      lit = id; asked = id;
+      if (rawItems.get(id)?.status === "active") loadSearchDocuments(); else rereadPapers();
+    } else if (lit === id) lit = null;
   });
 
   /**
@@ -540,7 +558,9 @@
     previewPaper = null;
     await rereadPapers();
     wake(`${paper.name} removed`, {
-      undo: () => { restoreDocument(paper.id).then(rereadPapers).catch(() => {}); },
+      // The removed wake is already gone by now, so a refused restore must
+      // say so or the paper silently stays removed.
+      undo: () => { restoreDocument(paper.id).then(rereadPapers).catch(() => wake(`couldn't restore ${paper.name} — try again`, { failure: true })); },
     });
   }
   /** @param {{ id: string }} paper */
@@ -591,22 +611,34 @@
   }
   /** A completion stashed by a previous visit that never confirmed it sent
       (#1151 W1-S3): picked up here instead of staying lost with nothing
-      said. A version conflict means somebody already holds this change —
-      most likely the original send landing after all — so that alone is
-      treated as the stash's own success. Runs once, on mount: nothing it
-      reads is reactive state. */
+      said. The engine replays a completion it already recorded as success,
+      so a refusal — a version conflict included — means it was NOT
+      recorded, and will come back on every load: it is said once and the
+      entry dropped. A network or server failure keeps it for the next load.
+      Runs once, on mount: nothing it reads is reactive state. */
   $effect(() => {
-    for (const command of readHeldCompletionStash()) applyCommand(command).then(async () => {
-      clearHeldCompletionStash(command);
-      await onchanged?.();
-    }).catch((error) => {
-      if (error instanceof WorkspaceError && error.code === "version_conflict") {
-        clearHeldCompletionStash(command);
-        onchanged?.();
-        return;
+    for (const command of readHeldCompletionStash()) {
+      /* A stash written before ADR-0034 carried a next due date and the
+         activity's kind, which the engine now refuses; the completion is
+         still the member's, so it is sent in today's shape. */
+      /** @type {any} */
+      const sent = structuredClone(command);
+      if (sent.type === "item.complete") {
+        delete sent.nextDate;
+        if (sent.activity) { delete sent.activity.kind; delete sent.activity.nextDate; }
       }
-      wake(wordsOf(error, "couldn't complete it — try again"), { failure: true });
-    });
+      applyCommand(sent).then(async () => {
+        clearHeldCompletionStash(command);
+        await onchanged?.();
+      }).catch((error) => {
+        const refused = error instanceof WorkspaceError && (error.status ?? 0) >= 400 && (error.status ?? 0) < 500;
+        if (refused) clearHeldCompletionStash(command);
+        /* Not recorded and now dropped: name the item rather than echo the
+           engine's "refresh and try again", which cannot bring it back. */
+        const title = refused ? rawItems.get(sent.itemId)?.title : null;
+        wake(title ? droppedCompletionWords(title) : wordsOf(error, "couldn't complete it — try again"), { failure: true });
+      });
+    }
   });
 
   /* `copy link`: the item's address, the desk's (+page.svelte addressOf),
@@ -658,9 +690,13 @@
     footBusy = { id: one.id, kind: "attach" };
     delete rowProblem[one.id];
     try {
-      await attachItemDocument(householdId, one.id, file, crypto.randomUUID());
+      await attachItemDocument(householdId, one.id, file, attachIdFor(one.id, file));
+      forgetAttachId(one.id, file);
       wake(`${file.name} attached`);
-      await Promise.all([rereadPapers(), onchanged?.()]);
+      // In this order: the papers are read from the refreshed view, which
+      // lists the item as now carrying one (a first paper was left out).
+      await onchanged?.();
+      await rereadPapers();
     } catch (error) {
       rowProblem[one.id] = wordsOf(error, "couldn't attach it — try again");
     } finally {
@@ -742,6 +778,7 @@
     const { item, fields } = out;
     footBusy = { id: one.id, kind: "complete" };
     modes.completeProblem = null;
+    modes.recording = true;
     try {
       const nextDate = dueDateIn(await applyCommand(completeCommand(item, fields)), item.householdId, item.id);
       modes.cancelComplete();
@@ -751,6 +788,7 @@
       modes.completeProblem = wordsOf(error, "couldn't complete it — try again");
     } finally {
       footBusy = null;
+      modes.recording = false;
     }
   }
   /* Escape: the chooser first, then the edit or the completion, ahead of
@@ -1160,6 +1198,13 @@
         {/snippet}
       </Row>
       {#if askedRow}{@render itemRow(askedRow)}{/if}
+    </div>
+  {:else if askedRow}
+    <!-- #1316 W1-F7: a household with nothing live (its one item archived)
+         has no manifest to seat the asked-for row in, so it stands alone;
+         its state word says why it is there. -->
+    <div class="pk-list" data-row-group data-row-cards>
+      {@render itemRow(askedRow)}
     </div>
   {/if}
   <!-- #466; round 3 §2 and owner-decisions §29 (#1142): 32px of clear sky

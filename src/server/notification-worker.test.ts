@@ -214,6 +214,18 @@ describe("notification worker scheduling", () => {
     expect(categorizeProviderError("email", { message: "password=secret" })).toBe("unknown");
   });
 
+  it("treats a 401 or 403 from the push service as a revoked subscription, not a transient failure (#1316)", () => {
+    // A push service answering 401/403 has rejected this subscription's
+    // credentials (for instance after the server's VAPID key changed); retrying
+    // can never succeed, so it must be handled like a 404/410: revoked and
+    // cancelled, not left active and retried.
+    for (const statusCode of [401, 403]) {
+      const category = categorizeProviderError("web_push", { statusCode, message: "https://push.example/subscription" });
+      expect(category, `status ${statusCode}`).toBe("push_unsubscribed");
+      expect(deliveryFailureState(category, 1, 5), `status ${statusCode}`).toBe("cancelled");
+    }
+  });
+
   it("retries only transient delivery categories and cancels corrective failures", () => {
     expect(deliveryFailureState("smtp_unconfigured", 1, 5)).toBe("cancelled");
     expect(deliveryFailureState("smtp_rejected", 1, 5)).toBe("cancelled");

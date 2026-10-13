@@ -17,6 +17,7 @@ const MAX_IMAGE_DIMENSION = 20_000;
 const MAX_IMAGE_PIXELS = 40_000_000;
 export const PDF_STRUCTURE_MAX_PAGES = 1_000;
 export const PDF_STRUCTURE_INSPECTION_BUDGET_MS = 5_000;
+const MAX_PDF_XREF_ENTRIES = 1_250_000;
 /**
  * The parameters the installed pdf.js's own `getDocument` declares. Options
  * are checked against this with `satisfies`, so an option the pinned version
@@ -41,6 +42,10 @@ export const PDF_STRUCTURE_PARSER_OPTIONS = Object.freeze({
   enableXfa: false,
   isImageDecoderSupported: false,
   isOffscreenCanvasSupported: false,
+  // The same pixel cap image uploads already hold, applied to images a PDF
+  // carries; with stopAtErrors an over-cap image fails the page instead of
+  // being decoded.
+  maxImageSize: MAX_IMAGE_PIXELS,
   stopAtErrors: true,
   useSystemFonts: false,
   useWasm: false,
@@ -110,6 +115,172 @@ function isPasswordRequired(error: unknown): boolean {
   return (error as { name?: unknown } | null)?.name === "PasswordException";
 }
 
+const PDF_DELIMITERS = new Set([..."()<>[]{}/%"]);
+const PDF_WHITESPACE = new Set([..."\0\t\n\f\r "]);
+const PDF_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)$/u;
+const MAX_PDF_XREF_SECTIONS = 32;
+const MAX_PDF_NESTING = 64;
+
+type PdfValue = number | string | PdfValue[] | Map<string, PdfValue> | { ref: number } | null;
+
+/** Thrown for any syntax the budget check cannot read; the caller refuses the file. */
+class PdfSyntaxError extends Error {}
+
+/**
+ * Just enough of pdf.js's lexer to read a cross-reference dictionary: names
+ * (with #xx escapes), numbers, delimiters and words, with strings and
+ * comments skipped so a `<<` inside them does not count.
+ */
+class PdfLexer {
+  constructor(private readonly text: string, public position: number) {}
+
+  next(): string | undefined {
+    const { text } = this;
+    while (this.position < text.length) {
+      const char = text[this.position]!;
+      if (PDF_WHITESPACE.has(char)) this.position += 1;
+      else if (char === "%") while (this.position < text.length && text[this.position] !== "\n" && text[this.position] !== "\r") this.position += 1;
+      else break;
+    }
+    if (this.position >= text.length) return undefined;
+    const start = this.position;
+    const char = text[start]!;
+    if ((char === "<" || char === ">") && text[start + 1] === char) {
+      this.position += 2;
+      return char + char;
+    }
+    if (char === "<") {
+      const end = text.indexOf(">", start);
+      if (end < 0) throw new PdfSyntaxError("unterminated hex string");
+      this.position = end + 1;
+      return "<>";
+    }
+    if (char === "(") {
+      let depth = 0;
+      for (; this.position < text.length; this.position += 1) {
+        const current = text[this.position];
+        if (current === "\\") this.position += 1;
+        else if (current === "(") depth += 1;
+        else if (current === ")" && --depth === 0) {
+          this.position += 1;
+          return "()";
+        }
+      }
+      throw new PdfSyntaxError("unterminated string");
+    }
+    this.position += 1;
+    if (char !== "/" && PDF_DELIMITERS.has(char)) return char;
+    while (this.position < text.length && !PDF_WHITESPACE.has(text[this.position]!) && !PDF_DELIMITERS.has(text[this.position]!)) this.position += 1;
+    const word = text.slice(start, this.position);
+    return char === "/" ? word.replace(/#([0-9A-Fa-f]{2})/gu, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16))) : word;
+  }
+}
+
+function readPdfValue(lexer: PdfLexer, token: string | undefined, depth: number): PdfValue {
+  if (token === undefined || depth > MAX_PDF_NESTING) throw new PdfSyntaxError("unreadable value");
+  if (token === "<<") return readPdfDictionary(lexer, depth + 1);
+  if (token === "[") {
+    const items: PdfValue[] = [];
+    for (let item = lexer.next(); item !== "]"; item = lexer.next()) items.push(readPdfValue(lexer, item, depth + 1));
+    return items;
+  }
+  if (token === ">>" || token === "]") throw new PdfSyntaxError("unbalanced delimiter");
+  if (token.startsWith("/")) return token;
+  return PDF_NUMBER.test(token) ? Number(token) : null;
+}
+
+/** A dictionary's own entries; nested dictionaries are values, so their keys never reach the top level. */
+function readPdfDictionary(lexer: PdfLexer, depth: number): Map<string, PdfValue> {
+  const entries = new Map<string, PdfValue>();
+  for (let key = lexer.next(); key !== ">>"; key = lexer.next()) {
+    if (key === undefined || !key.startsWith("/")) throw new PdfSyntaxError("dictionary key is not a name");
+    let value = readPdfValue(lexer, lexer.next(), depth);
+    if (typeof value === "number") {
+      const position = lexer.position;
+      const generation = lexer.next();
+      if (generation !== undefined && PDF_NUMBER.test(generation) && lexer.next() === "R") value = { ref: value };
+      else lexer.position = position;
+    }
+    entries.set(key, value);
+  }
+  return entries;
+}
+
+function isPdfCount(value: PdfValue | undefined): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * Whether every cross-reference section pdf.js would read declares, in all,
+ * no more entries than the cap. pdf.js loops over every declared entry on
+ * this thread, where the time budget cannot interrupt it, and an xref
+ * stream's entries can take no bytes at all, so a tiny file can declare
+ * billions. The sections are found as pdf.js's readXRef finds them: the last
+ * startxref, then each /Prev and a classic trailer's /XRefStm, read from the
+ * top-level dictionary only. A count that is not a non-negative integer, a
+ * dictionary this check cannot read or too long a chain refuses the file. A
+ * revisited section is skipped, as pdf.js skips it, so a loop adds nothing.
+ * A section pdf.js could not read either is skipped: with no readable
+ * section pdf.js rebuilds the table by scanning the file, which its size
+ * bounds.
+ */
+function hasPdfIndexBudget(bytes: Buffer): boolean {
+  // pdf.js takes the last startxref anywhere in the file, %%EOF or not.
+  const keyword = bytes.lastIndexOf("startxref");
+  if (keyword < 0) return true;
+  const text = bytes.toString("latin1");
+  const queue = [Number(text.slice(keyword + 9, keyword + 64).match(/^\s*(\d+)/u)?.[1])];
+  const visited = new Set<number>();
+  let total = 0;
+  try {
+    for (let offset = queue.shift(); offset !== undefined; offset = queue.shift()) {
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset >= bytes.length) continue;
+      if (visited.has(offset)) continue;
+      if (visited.size >= MAX_PDF_XREF_SECTIONS) return false;
+      visited.add(offset);
+      const lexer = new PdfLexer(text, offset);
+      const first = lexer.next();
+      let dictionary: Map<string, PdfValue>;
+      if (first === "xref") {
+        const trailer = bytes.indexOf("trailer", offset);
+        const table = text.slice(offset, trailer < 0 ? bytes.length : trailer);
+        const subsectionCounts = table.match(/^\s*\d+\s+(\d+)\s*$/gmu) ?? [];
+        total += subsectionCounts.reduce((sum, line) => sum + Number(line.match(/\d+\s*$/u)?.[0] ?? 0), 0);
+        if (trailer < 0) continue;
+        lexer.position = trailer + "trailer".length;
+        if (lexer.next() !== "<<") continue;
+        dictionary = readPdfDictionary(lexer, 1);
+        const stream = dictionary.get("/XRefStm");
+        if (typeof stream === "number") queue.push(stream);
+      } else {
+        if (!first || !PDF_NUMBER.test(first) || !PDF_NUMBER.test(lexer.next() ?? "") || lexer.next() !== "obj" || lexer.next() !== "<<") continue;
+        dictionary = readPdfDictionary(lexer, 1);
+        const index = dictionary.get("/Index");
+        if (index === undefined) {
+          const size = dictionary.get("/Size");
+          if (!isPdfCount(size)) return false;
+          total += size;
+        } else {
+          if (!Array.isArray(index) || index.length % 2 !== 0 || !index.every(isPdfCount)) return false;
+          total += index.reduce<number>((sum, value, position) => sum + (position % 2 === 1 ? value as number : 0), 0);
+        }
+      }
+      // /Size is checked on its own even where /Index governs the loop.
+      const size = dictionary.get("/Size");
+      if (size !== undefined && !(isPdfCount(size) && size <= MAX_PDF_XREF_ENTRIES)) return false;
+      if (total > MAX_PDF_XREF_ENTRIES) return false;
+      const previous = dictionary.get("/Prev");
+      if (typeof previous === "number") queue.push(previous);
+      // pdf.js follows a /Prev reference to the offset of its object number.
+      else if (previous && typeof previous === "object" && "ref" in previous) queue.push(previous.ref);
+    }
+  } catch (error) {
+    if (error instanceof PdfSyntaxError) return false;
+    throw error;
+  }
+  return total <= MAX_PDF_XREF_ENTRIES;
+}
+
 /**
  * Pattern E for PDFs (ADR-0033): pdf.js, the library that draws the file,
  * opens it with no password, within the page cap and the time budget, and
@@ -119,6 +290,9 @@ function isPasswordRequired(error: unknown): boolean {
  * contains: the renderer runs none of it.
  */
 async function classifyPdfStructure(bytes: Buffer): Promise<DocumentStructureReason> {
+  // A declared entry count pdf.js would loop over on this thread, bounded
+  // before it is opened (ADR-0033 item 3 resource limit).
+  if (!hasPdfIndexBudget(bytes)) return "unsupported_structure";
   let loadingTask: ReturnType<typeof getDocument> | undefined;
   let budgetTimer: ReturnType<typeof setTimeout> | undefined;
   try {

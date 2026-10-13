@@ -5,7 +5,7 @@
 **Relates to:** #1291 (ordinary PDF refused), #1292 (encrypted object streams
 refused), #1293 (checker and renderer can disagree), #1294 (`isEvalSupported`
 is a dead option); `docs/document-threat-model.md`; ADR-0010 (scanning);
-research note `pdf-safety-research.md` (paperless-ngx, Dangerzone, Docspell,
+research note [`pdf-safety-research.md`](../adr-notes/pdf-safety-research.md) (paperless-ngx, Dangerzone, Docspell,
 Mayan, Papermerge, Nextcloud, Stirling-PDF, Immich)
 
 ## Context
@@ -65,7 +65,9 @@ bounded by the page cap (page one when none is asked for; #1300).
    chunk walkers are deleted. Bespoke remainder, with the one-sentence
    reason: resource limits (page count, pixel cap read from the image header
    before decoding, byte and time budgets) stay local configuration because
-   no library sets them for us.
+   no library sets them for us. One more is kept: a PDF whose cross-reference
+   section declares over 1,250,000 entries is refused before pdf.js opens it,
+   because pdf.js loops over them where the time budget cannot interrupt.
 4. **The viewer is the server-side renderer, and it must enforce C.** One
    option set (`PDF_STRUCTURE_PARSER_OPTIONS`) serves the open check and the
    page renderer: `enableXfa: false`, no worker, no network or range

@@ -130,6 +130,9 @@ class FakeRestoreAdapter implements RestoreDockerAdapter {
     this.dropCalls.push(name);
     this.stageContents.delete(name);
   }
+  listStageDatabases(): string[] {
+    return [...this.stageContents.keys()];
+  }
   restoreDumpToDatabase(name: string, dumpPath: string): boolean {
     if (!this.restoreDumpToDatabaseOk) return false;
     this.stageContents.set(name, JSON.parse(readFileSync(dumpPath, "utf8")) as CorrespondenceReports);
@@ -206,7 +209,7 @@ const ORIGINAL_KEY = "a".repeat(64);
 const NEW_KEY = "b".repeat(64);
 
 describe("RestoreRun full lifecycle (checkpoint -> cutover -> finalize)", () => {
-  it("completes a restore end-to-end, replacing live documents/database and leaving no journal or checkpoint behind", () => {
+  it("completes a restore end-to-end, replacing live documents/database and keeping the journal for `restore --finish`", () => {
     const liveDocumentsRoot = join(sandbox, "live-documents");
     buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
     const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
@@ -230,7 +233,8 @@ describe("RestoreRun full lifecycle (checkpoint -> cutover -> finalize)", () => 
 
     run.finalize();
     expect(run.isCompleted()).toBe(true);
-    expect(() => readFileSync(paths.journalPath)).toThrow();
+    // The shell starts Orbit and confirms health before `restore --finish` removes the evidence (#1316 O2-S1).
+    expect(readFileSync(paths.journalPath, "utf8")).toContain("state=database-restored\n");
     expect(adapter.startCalls).toBe(1);
 
     const disposeResult = run.dispose();

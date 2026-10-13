@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { createCanvas } from "@napi-rs/canvas";
+import { deflateSync } from "node:zlib";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { log } from "@/lib/logger";
 import { useScratchTemporaryDirectory, type ScratchDirectory } from "../../../tests/support/scratch-directory";
@@ -34,6 +35,54 @@ function rasterFixture(mediaType: "image/jpeg" | "image/png", width: number, hei
 
 function pngDimensions(bytes: Buffer): { width: number; height: number } {
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+}
+
+/**
+ * A small, valid PDF whose one page draws one flat-colour Flate image of the
+ * declared size. The pixels are all one value, so the file stays a few dozen
+ * kilobytes while the decoded image is width x height bytes.
+ */
+function pdfDrawingFlatImage(width: number, height: number): Buffer {
+  const pixels = deflateSync(Buffer.alloc(width * height, 0x80), { level: 9 });
+  const content = Buffer.from("q 400 0 0 400 100 200 cm /Im0 Do Q");
+  const objects: Buffer[] = [
+    Buffer.from("<< /Type /Catalog /Pages 2 0 R >>"),
+    Buffer.from("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+    Buffer.from("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>"),
+    Buffer.concat([
+      Buffer.from(`<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length ${pixels.length} >>\nstream\n`),
+      pixels,
+      Buffer.from("\nendstream"),
+    ]),
+    Buffer.concat([Buffer.from(`<< /Length ${content.length} >>\nstream\n`), content, Buffer.from("\nendstream")]),
+  ];
+  const parts: Buffer[] = [Buffer.from("%PDF-1.7\n")];
+  const offsets: number[] = [];
+  let length = parts[0].length;
+  objects.forEach((object, index) => {
+    offsets.push(length);
+    const wrapped = Buffer.concat([Buffer.from(`${index + 1} 0 obj\n`), object, Buffer.from("\nendobj\n")]);
+    parts.push(wrapped);
+    length += wrapped.length;
+  });
+  let trailer = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  trailer += offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  trailer += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${length}\n%%EOF\n`;
+  parts.push(Buffer.from(trailer));
+  return Buffer.concat(parts);
+}
+
+/**
+ * The grey level the preview shows at the centre of the square the fixture's
+ * image is drawn into (400x400 points at 100,200 on a 612x792 page).
+ */
+async function greyAtFixtureImageCentre(preview: { bytes: Buffer; width: number }): Promise<number> {
+  const image = await loadImage(preview.bytes);
+  const canvas = createCanvas(image.width, image.height);
+  const context = canvas.getContext("2d");
+  context.drawImage(image, 0, 0);
+  const scale = preview.width / 612;
+  return context.getImageData(Math.round(300 * scale), Math.round((792 - 400) * scale), 1, 1).data[0];
 }
 
 let scratch: ScratchDirectory;
@@ -205,6 +254,29 @@ describe("renderDocumentPagePreview", () => {
       await expect(renderDocumentPagePreview(png, "image/png", 1)).resolves.toMatchObject({ pageCount: 1 });
       await expect(renderDocumentPagePreview(png, "image/png", 2))
         .rejects.toMatchObject({ code: "document_preview_page_not_found", status: 404 });
+    });
+  });
+
+  describe("an image bigger than the pixel cap inside a PDF (#1316)", () => {
+    // pdf.js refuses the over-cap image, but its render API ends the page at
+    // that point and resolves rather than rejecting, so the page comes back
+    // without the image instead of as a 422.
+    it("leaves out, rather than decodes, a flat-colour 8000x8000 image (64M pixels, over the 40M cap)", async () => {
+      const bomb = pdfDrawingFlatImage(8_000, 8_000);
+      // Small on the wire, huge once decoded: the point of the fixture.
+      expect(bomb.length).toBeLessThan(1_000_000);
+
+      const preview = await renderDocumentPagePreview(bomb, "application/pdf");
+
+      expect(await greyAtFixtureImageCentre(preview)).toBe(0xff);
+    });
+
+    it("still draws a page whose image is well under the cap", async () => {
+      const preview = await renderDocumentPagePreview(pdfDrawingFlatImage(1_000, 1_000), "application/pdf");
+
+      expect(preview.mediaType).toBe("image/png");
+      expect(preview.pageCount).toBe(1);
+      expect(await greyAtFixtureImageCentre(preview)).toBe(0x80);
     });
   });
 

@@ -8,11 +8,21 @@ repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_dir"
 
 readonly environment_file="${ORBIT_ENV_FILE:-.env-orbit}"
-readonly backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
-readonly secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
+# A relative directory is relative to the deployment directory; passed bare to -v it would be a named volume.
+backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
+[[ "$backup_directory" == /* ]] || backup_directory="$repo_dir/$backup_directory"
+readonly backup_directory
+secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
+[[ "$secrets_directory" == /* ]] || secrets_directory="$repo_dir/$secrets_directory"
+readonly secrets_directory
+# The engine one-off's container name: unique to this run, so the EXIT trap can `docker wait` for it.
+readonly engine_name="orbit-restore-engine-$$"
 readonly journal_path="$backup_directory/.orbit-restore/restore.journal"
-readonly engine_locked_status=75 # another backup/restore holds the lock: that run owns orbit-app
-readonly usage='usage failed; use bash scripts/restore.sh [--yes] <backup.tar> or bash scripts/restore.sh --recover.'
+# 75: the lock is held by a run that stopped orbit-app (a backup or restore; a preflight takes
+# none), so that run owns orbit-app. A running export holds it without stopping the app: meeting
+# it is an ordinary failure, after which this run restarts orbit-app.
+readonly engine_locked_status=75
+readonly usage='usage failed; use bash scripts/restore.sh [--yes] <backup.tar> (--yes also needs ORBIT_NONINTERACTIVE_RESTORE=true), bash scripts/restore.sh --finish or bash scripts/restore.sh --recover.'
 
 fail() { printf 'Orbit restore: %s\n' "$*" >&2; exit 1; }
 # --- Shared by backup.sh, restore.sh, export-recovery-bundle.sh and ----------
@@ -27,7 +37,9 @@ read_environment_value() {
   local requested_key="$1" line value="" found=0
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "${requested_key}="* ]]; then
+      # A CRLF .env-orbit is valid; drop the CR.
       value="${line#*=}"
+      value="${value%$'\r'}"
       found=1
     fi
   done < "$environment_file"
@@ -124,7 +136,10 @@ engine_host_identity() {
   # Read whole, then matched: `docker info | grep -q` under pipefail could
   # report a SIGPIPE'd docker as "not rootless", the dangerous answer here.
   local security_options
-  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null || true)"
+  # Fail closed: a guessed "not rootless" hands the files to a uid the
+  # operator cannot reach.
+  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null)" ||
+    fail "Could not tell whether Docker is rootless, so refusing to guess who should own the deployment files. Check that 'docker info' works, then rerun."
   if [[ "$security_options" == *rootless* ]]; then
     host_uid=0
     host_gid=0
@@ -139,13 +154,14 @@ engine_host_identity() {
 # the bundle being read is mounted read-only. The ORBIT_HOST_* paths let the
 # engine print host paths. The drill's switches are forwarded when set (the
 # engine ignores the ones its command does not use). Exit status passes through.
+# The one-off is named $engine_name so an EXIT trap can wait for it to end.
 run_engine() {
   local input_file="$1" name
   shift
-  local -a run_args=(run --rm --no-deps -i) directory_args=()
+  local -a run_args=(run --rm --no-deps --name "$engine_name" -i) directory_args=()
   if [[ -t 0 && -t 1 ]]; then run_args+=(-t); else run_args+=(-T); fi
   run_args+=(-e "ORBIT_HOST_UID=$host_uid" -e "ORBIT_HOST_GID=$host_gid" -e "ORBIT_HOST_DEPLOY_DIR=$repo_dir")
-  for name in ORBIT_NONINTERACTIVE_RESTORE ORBIT_RECOVERY_TEST_MODE ORBIT_RESTORE_TEST_MODE ORBIT_RESTORE_TEST_SYNC_FAILURE_STAGE \
+  for name in ORBIT_NONINTERACTIVE_RESTORE ORBIT_RECOVERY_PROMPTS ORBIT_RECOVERY_TEST_MODE ORBIT_RESTORE_TEST_MODE ORBIT_RESTORE_TEST_SYNC_FAILURE_STAGE \
     ORBIT_RESTORE_TEST_FAILURE_STAGE ORBIT_RESTORE_TEST_CHECKPOINT_FAILURE ORBIT_RESTORE_TEST_HARD_INTERRUPT_STAGE; do
     [[ -z "${!name:-}" ]] || run_args+=(-e "$name=${!name}")
   done
@@ -169,8 +185,8 @@ run_engine() {
 health_probe_url() {
   local bind_address port
 
-  bind_address="$(awk -F= '$1 == "ORBIT_BIND_ADDRESS" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
-  port="$(awk -F= '$1 == "ORBIT_PORT" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  bind_address="$(awk -F= '$1 == "ORBIT_BIND_ADDRESS" { sub(/\r$/, ""); sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  port="$(awk -F= '$1 == "ORBIT_PORT" { sub(/\r$/, ""); sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
   # An exported value wins over the file, exactly as it does for Compose's
   # own interpolation, so the probe reaches the port Compose published (#1241).
   bind_address="${ORBIT_BIND_ADDRESS:-${bind_address:-0.0.0.0}}"
@@ -195,14 +211,31 @@ wait_for_health() {
 }
 # --- End of the shared functions. -------------------------------------------
 
-yes_flag=() && recover=false && backup_file=""
+yes_flag=() && recover=false && finish=false && backup_file=""
 for argument in "$@"; do
   case "$argument" in
     --yes) yes_flag=(--yes) ;;
     --recover) recover=true ;;
+    --finish) finish=true ;;
     *) [[ -z "$backup_file" ]] || fail "$usage"; backup_file="$argument" ;;
   esac
 done
+# --finish completes a restore whose own finish step never ran or failed: Orbit should already
+# be running the restored data, so it is neither stopped nor started. The engine removes the
+# journal and checkpoint only for a restore it recorded as completed; the shell reads the same
+# state first so an unfinished restore is told to stay stopped, not to start Orbit.
+if [[ "$finish" == true ]]; then
+  [[ "$#" == 1 ]] || fail 'usage failed; --finish takes no other argument.'
+  require_deployment
+  if [[ -f "$journal_path" ]]; then
+    grep -qx 'state=database-restored' "$journal_path" || fail 'finish failed; the restore journal does not record a completed restore; keep Orbit stopped and run bash scripts/restore.sh --recover.'
+    # The checkpoint is the only way back, so it goes only once the restored data is serving.
+    wait_for_health || fail 'finish failed; Orbit is not healthy on the restored data, so the restore journal and checkpoint are kept. Start Orbit and run bash scripts/restore.sh --finish again, or run bash scripts/restore.sh --recover to roll back.'
+  fi
+  engine_host_identity
+  run_engine "" restore --finish </dev/null || exit $?
+  exit 0
+fi
 if [[ "$recover" == true ]]; then
   [[ -z "$backup_file" && "${#yes_flag[@]}" == 0 ]] || fail 'usage failed; --recover does not accept a new backup bundle.'
 else
@@ -210,17 +243,52 @@ else
   [[ "$backup_file" == /* ]] || backup_file="$PWD/$backup_file"
   [[ -f "$backup_file" && ! -L "$backup_file" && "$backup_file" != *:* ]] || fail 'preflight/archive failed; the recovery bundle must be a regular file.'
 fi
+# The engine refuses --yes without the variable, but only after Orbit was stopped: refuse it here first.
+[[ "${#yes_flag[@]}" == 0 || "${ORBIT_NONINTERACTIVE_RESTORE:-}" == true ]] || fail 'usage failed; --yes also needs ORBIT_NONINTERACTIVE_RESTORE=true (one switch alone never confirms a restore).'
 
 require_deployment health
 engine_host_identity
 [[ "$recover" == true ]] || run_engine "$backup_file" restore --preflight /orbit-input/bundle.tar </dev/null || exit $?
+keep_stopped_message='Orbit restore: recovery evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.'
+# A signal, a timeout or a fail() after the stop must not leave Orbit down once the engine has
+# ended (the trap waits for it): the engine's own restart is a no-op in its container. A locked
+# run (75) does not own the app; recovery evidence keeps it stopped.
+app_stopped=false
+# shellcheck disable=SC2317  # run by the EXIT trap
+restart_app() {
+  [[ "$app_stopped" == true && "${status:-0}" != "$engine_locked_status" ]] || return 0
+  # A signal reaches this shell, not the engine (node ignores TERM/HUP as PID 1): wait for it to end
+  # before reading the journal, never start Orbit under a restore still in flight. Gone: wait fails.
+  docker wait "$engine_name" >/dev/null 2>&1 || true
+  if [[ -f "$journal_path" ]]; then
+    printf '%s\n' "$keep_stopped_message" >&2
+    return 0
+  fi
+  compose start orbit-app >/dev/null 2>&1 || printf 'Orbit could not be started again.\n' >&2
+}
+trap restart_app EXIT
 compose stop orbit-app >/dev/null 2>&1 || fail 'checkpoint/stop failed; Orbit was not stopped for a consistent recovery point.'
+app_stopped=true
 status=0
 if [[ "$recover" == true ]]; then run_engine "" restore --recover || status=$?
 else run_engine "$backup_file" restore "${yes_flag[@]}" /orbit-input/bundle.tar || status=$?; fi
+app_stopped=false # the engine has returned: the lines below decide
 [[ "$status" != "$engine_locked_status" ]] || exit "$status"
+# A restore that exits 0 keeps its journal and checkpoint until Orbit is healthy on the
+# restored data, so a bundle the running image cannot serve can still be recovered. There is
+# no automatic rollback: if health never comes, Orbit is stopped again for the operator.
+if [[ "$status" == 0 && -f "$journal_path" ]]; then
+  if compose start orbit-app >/dev/null 2>&1 && wait_for_health; then
+    run_engine "" restore --finish </dev/null ||
+      fail 'finish failed; Orbit is running the restored data, but the restore journal and checkpoint could not be removed; run bash scripts/restore.sh --finish.'
+    exit 0
+  fi
+  compose stop orbit-app >/dev/null 2>&1 || printf 'Orbit could not be stopped again.\n' >&2
+  printf '%s\n' "$keep_stopped_message" >&2
+  exit 1
+fi
 if [[ -f "$journal_path" ]]; then
-  printf 'Orbit restore: recovery evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.\n' >&2
+  printf '%s\n' "$keep_stopped_message" >&2
   exit "$((status == 0 ? 1 : status))"
 fi
 compose start orbit-app >/dev/null 2>&1 || fail 'health failed; Orbit could not be started again.'

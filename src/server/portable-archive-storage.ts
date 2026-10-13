@@ -43,6 +43,27 @@ export class PortableArchiveStorage {
     await rm(this.pathFor(storageKey), { force: true });
   }
 
+  /**
+   * Removes `*.tmp` files left by a process killed between a temporary write
+   * and its rename: nothing else ever names them. A younger one may be a
+   * write still in flight.
+   */
+  async sweepTemporaryFiles(olderThanMs: number): Promise<void> {
+    const boundary = Date.now() - olderThanMs;
+    let entries;
+    try { entries = await readdir(this.root, { withFileTypes: true }); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".tmp")) continue;
+      const path = join(this.root, entry.name);
+      const details = await stat(path).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (details && details.mtimeMs < boundary) await rm(path, { force: true });
+    }
+  }
+
   async list(): Promise<StoredPortableArchive[]> {
     let entries;
     try { entries = await readdir(this.root, { withFileTypes: true }); }

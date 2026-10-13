@@ -1,5 +1,5 @@
 import { goto } from "$app/navigation";
-import { WorkspaceError, activeHousehold, applyCommand, attachItemDocument } from "$lib/data/workspace.js";
+import { PARTIAL_CREATE_MESSAGE, WorkspaceError, activeHousehold, applyCommand, attachItemDocument, checkDraftCommand, readReminders } from "$lib/data/workspace.js";
 import {
   CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
   WHY_UNDRAWABLE, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
@@ -9,7 +9,7 @@ import { screenScope } from "$lib/teardown.js";
 import { takeHeldDocument } from "$lib/data/held-document.js";
 import { wireDropFeedback } from "./drop-feedback.js";
 import { dryRunner } from "$lib/data/dry-run.js";
-import { createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice } from "./entry.js";
+import { REMINDER_DEFAULT, createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, reminderPairOf } from "./entry.js";
 import { sizeLabel } from "$lib/format.js";
 
 /**
@@ -110,6 +110,20 @@ export function mountCreate() {
       idempotency absorbs the retry instead of creating a second item. */
   const draftId = crypto.randomUUID();
 
+  /* A new entry starts from the member's own pair, which they can still change
+     here: the select's one choice replaces the pair once it is changed. */
+  const reminderSelect = /** @type {HTMLSelectElement} */ (document.getElementById("f-reminder"));
+  let reminderPair = [...REMINDER_DEFAULT];
+  let reminderChosen = false;
+  on(reminderSelect, "change", () => { reminderChosen = true; });
+  readReminders()
+    .catch(() => null)
+    .then((reminders) => {
+      reminderPair = reminderPairOf(reminders);
+      const first = [...reminderSelect.options].find((option) => Number(option.value) === reminderPair[0]);
+      if (first && !reminderChosen) reminderSelect.value = first.value;
+    });
+
   /** The recurrence select's value, in months — 0 is once (#1058d). */
   const monthsOf = () => recurrenceOfChoice(recurSelect.value, recurMonths.value);
 
@@ -132,7 +146,7 @@ export function mountCreate() {
       dueDate: value("f-date"),
       recurrence: monthsOf(),
       cost: value("f-cost"),
-      reminderDays: [Number(value("f-reminder"))],
+      reminderDays: reminderChosen ? [Number(value("f-reminder"))] : [...reminderPair],
       notes: value("f-notes"),
     };
   }
@@ -173,6 +187,7 @@ export function mountCreate() {
   }
   const dryRun = dryRunner({
     onanswer: (answer) => { refusal = answer; showRefusal(); },
+    check: checkDraftCommand,
   });
   /** Something changed: ask the engine again once the member pauses. */
   function updateRefusal() {
@@ -272,6 +287,9 @@ export function mountCreate() {
       so the documents route hands back the copy it already holds. */
   let attachmentId = "";
   function takeFile(/** @type {File | null | undefined} */ file) {
+    /* From the press until the server answers, the entry is the server's:
+       the file it holds cannot change under the save. */
+    if (saving) return;
     if (!file) return;
     attachmentId = crypto.randomUUID();
     attachment = file;
@@ -319,6 +337,12 @@ export function mountCreate() {
     dueDate: { input: "f-date", field: "field-date" },
     cost: { input: "f-cost", field: "field-cost" },
   });
+  /* Typing in a suggested field makes the value the member's own, as the
+     pocket's form does: the mark goes, so clearSuggestions leaves it alone. */
+  for (const slot of Object.values(SUGGESTION_SLOTS)) {
+    const input = document.getElementById(slot.input);
+    if (input) on(input, "input", () => document.getElementById(slot.field)?.classList.remove("sugg"));
+  }
 
   /** One read in flight at a time: picking again, "not this one" or leaving
       cancels the last. */
@@ -422,6 +446,10 @@ export function mountCreate() {
     const controller = new AbortController();
     reading = controller;
     const current = () => reading === controller && attachment === file;
+    /* A swapped file takes the first file's suggestions with it, as the
+       pocket's readDocument does: carrying only fills empty fields, so stale
+       ones would otherwise be saved against the new file. */
+    clearSuggestions();
     resetLane(file);
     const householdId = (household ?? await activeHousehold()).id;
     if (!current()) return;
@@ -502,6 +530,7 @@ export function mountCreate() {
   /* "not this one": the file leaves the entry, with what it suggested, and
      the drop target is a drop target again. */
   on(dropFile, "click", () => {
+    if (saving) return; /* the entry is the server's until it answers (see takeFile) */
     dropDocument();
     clearSheet();
     document.body.classList.remove("doc");
@@ -559,6 +588,12 @@ export function mountCreate() {
     note.textContent = "";
     const label = save.textContent;
     save.textContent = "Adding…";
+    let landed = false;
+    /* The save sends what was held at the press: a read refused while it is
+       in flight drops the document from the form, not from this save, so
+       the server's own refusal reaches the words below instead of the item
+       landing without its paper and nothing said. */
+    const held = { attachment, attachmentId };
 
     try {
       const active = household ?? await activeHousehold();
@@ -570,12 +605,15 @@ export function mountCreate() {
         if (error instanceof WorkspaceError && error.code === "version_required") return;
         throw error;
       });
+      /* The item is on the server from here; a reload would mint a new draft
+         id and file it twice, so a later refusal must not read as unsaved. */
+      landed = true;
 
       /* #1245: the picked document goes onto the item just saved. A refusal
          lands in the catch below like any failed save: the entry is kept,
          and the next attempt re-sends both under the same ids, so neither
          is stored twice. */
-      if (attachment) await attachItemDocument(active.id, draftId, attachment, attachmentId);
+      if (held.attachment) await attachItemDocument(active.id, draftId, held.attachment, held.attachmentId);
 
       /* The server holds the entry, and its document, from here, so leaving
          must not ask about discarding them (#1151 W1-S1). */
@@ -589,7 +627,8 @@ export function mountCreate() {
          orbit", the reason sits beside it, and nothing typed is lost. No
          toast. saveProblem() is the same wording the pocket's form gives;
          a refusal the engine found only at the save reads in its own words. */
-      sticky = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
+      const words = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
+      sticky = landed ? `${PARTIAL_CREATE_MESSAGE} ${words}` : words;
       note.classList.add("fail");
       note.setAttribute("role", "alert");
       note.textContent = sticky;

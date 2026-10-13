@@ -90,8 +90,10 @@
     const list = [];
     if (!view) return list;
     const failing = view.services.filter(([tone]) => tone === "overdue" || tone === "warm");
-    for (const [tone, name] of failing.slice(0, 2)) {
-      list.push({ id: "ad-operations", word: `${name} ${tone === "overdue" ? "down" : "retrying"}` });
+    /* The row's detail leads with the state's own word (#1296): the tell
+       repeats it rather than assuming every warm row is retrying. */
+    for (const [tone, name, detail] of failing.slice(0, 2)) {
+      list.push({ id: "ad-operations", word: `${name} ${tone === "overdue" ? "down" : detail.split(" · ")[0]}` });
     }
     if (failing.length > 2) list.push({ id: "ad-operations", word: `${failing.length - 2} more failing` });
     const failedJobs = jobs.filter((job) => job.status === "failed").length;
@@ -491,14 +493,22 @@
     mailBusy = label;
     mailProblem = null;
     mailOutcome = null;
+    let answer;
     try {
-      const answer = await commandMailbox(command);
-      await reread();
-      mailOutcome = answer.outcome ?? null;
-      if (!answer.outcome || answer.outcome === "verified") { editOpen = false; rotateOpen = false; }
-      mailPassword = "";
+      answer = await commandMailbox(command);
     } catch (error) {
       mailProblem = wordsOf(error);
+      mailBusy = null;
+      return;
+    }
+    mailOutcome = answer.outcome ?? null;
+    if (!answer.outcome || answer.outcome === "verified") { editOpen = false; rotateOpen = false; }
+    mailPassword = "";
+    // The command landed; a failed re-read must not read back as a failed command.
+    try {
+      await reread();
+    } catch {
+      mailProblem = "done — Orbit could not refresh this screen, so reload to see the new version";
     } finally {
       mailBusy = null;
     }

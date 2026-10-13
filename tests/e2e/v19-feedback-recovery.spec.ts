@@ -137,6 +137,13 @@ const createOffline: Journey = {
     const nameField = page.getByRole("textbox", { name: "name", exact: true }).filter({ visible: true });
     await expect(nameField).toBeVisible({ timeout: 30_000 });
     await nameField.fill(name);
+    /* Every entry needs a type (#1316 A4-F3, item_kind_missing); a document
+       is the type that asks for no date, as v19-create.spec.ts's undated save. */
+    if (isPocket()) {
+      await page.getByRole("form", { name: "New entry" }).getByRole("button", { name: "document", exact: true }).click();
+    } else {
+      await page.locator('#types button[data-type="document"]').click();
+    }
     await page.getByRole("group", { name: /^section/ }).filter({ visible: true }).getByRole("button", { name: "Home" }).click();
 
     await page.route("**/api/workspace/commands", failCommands);

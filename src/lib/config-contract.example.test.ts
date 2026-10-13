@@ -34,4 +34,12 @@ describe(".env-orbit.example agrees with the configuration contract", () => {
     const undocumented = ALLOWED_KEYS.filter((key) => !documented.has(key));
     expect(undocumented).toEqual([]);
   });
+
+  it("documents the retired ORBIT_SECRETS_DIR key in the commented `# KEY=` form", () => {
+    // The key stays allowed so the retired-directory refusal can name it, so
+    // the example must still list it, commented out (never an active value).
+    const lines = readFileSync(examplePath, "utf8").split("\n");
+    expect(lines.some((line) => /^#\s*ORBIT_SECRETS_DIR=/.test(line.trim()))).toBe(true);
+    expect(lines.some((line) => /^ORBIT_SECRETS_DIR=/.test(line.trim()))).toBe(false);
+  });
 });

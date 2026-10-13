@@ -37,6 +37,8 @@ const DEFAULT_DOCUMENTS_ROOT = "/var/lib/orbit/documents";
 /** A correspondence report is one row per document; see PSQL_REPORT_MAX_BUFFER's history in restore-engine (#383). */
 const REPORT_MAX_BUFFER = 1024 * 1024 * 1024;
 const STAGE_DATABASE_NAME = /^[A-Za-z0-9_]+$/;
+const LIST_STAGE_DATABASES_SQL =
+  "SELECT datname FROM pg_database WHERE datname LIKE 'orbit\\_restore\\_stage\\_%' OR datname LIKE 'orbit\\_restore\\_checkpoint\\_stage\\_%' OR datname LIKE 'orbit\\_recover\\_checkpoint\\_stage\\_%'";
 const RECORD_RECOVERY_BUNDLE_EXPORTED_SQL =
   "insert into audit_log (entity_type, entity_id, action, changes) values ('recovery_bundle', gen_random_uuid(), 'recovery_bundle_exported', '{}'::jsonb)";
 
@@ -242,7 +244,8 @@ export function createInContainerAdapter(options: InContainerAdapterOptions = {}
       const descriptor = openPrivateOutput(outputPath);
       try {
         // SS2-S1: the household portable-archive export is not part of a backup.
-        const result = spawnSync("tar", ["-C", documentsRoot, "--exclude=./portable-archives", "-cf", "-", "."], { env, stdio: ["ignore", descriptor, "inherit"] });
+        // A *.tmp is an unfinished write the app left behind (killed before its rename), never a document.
+        const result = spawnSync("tar", ["-C", documentsRoot, "--exclude=./portable-archives", "--exclude=*.tmp", "-cf", "-", "."], { env, stdio: ["ignore", descriptor, "inherit"] });
         if (result.status !== 0) throw new RecoveryBundleRefusal("The document archive could not be collected.", "document-archive-collection-failed");
       } finally {
         closeSync(descriptor);
@@ -276,12 +279,27 @@ export function createInContainerAdapter(options: InContainerAdapterOptions = {}
       }
     },
 
+    listStageDatabases(): string[] {
+      const result = tools.psql("postgres", ["--tuples-only", "--no-align", "--set=ON_ERROR_STOP=1", `--command=${LIST_STAGE_DATABASES_SQL}`]);
+      // Best-effort like dropStageDatabase: an unreadable list only means nothing is reclaimed this run.
+      if (result.status !== 0) return [];
+      return (typeof result.stdout === "string" ? result.stdout : "").split("\n").filter((name) => STAGE_DATABASE_NAME.test(name));
+    },
+
     restoreDumpToDatabase(name: string, dumpPath: string): boolean {
       requireStageDatabaseName(name);
       return restore(["--single-transaction", "--exit-on-error", "--no-owner", "--no-acl"], name, dumpPath);
     },
 
     restoreActiveDatabase(dumpPath: string): boolean {
+      // --clean drops only the objects the dump names, so tables added after
+      // the backup (a later migration) would survive and break the older
+      // build's migrations. Empty the schemas first; the checkpoint covers a
+      // failure between this and pg_restore.
+      const reset = tools.psql(database, ["--set=ON_ERROR_STOP=1", "--command=DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;"], {
+        stdio: ["ignore", "ignore", "inherit"],
+      });
+      if (reset.status !== 0) return false;
       return restore(["--single-transaction", "--clean", "--if-exists", "--no-owner", "--no-acl", "--exit-on-error"], database, dumpPath);
     },
 

@@ -1445,6 +1445,7 @@ readonly -a rotate_database_credential_steps=(checkpoint rotate-credential updat
 readonly -a restore_transaction_paths=(
   docker-compose.yml
   docker-compose.mail.yml
+  docker-compose.kek-rotation.yml
   .env-orbit.example
   config/tika-config.json
   scripts/configure.sh
@@ -1454,6 +1455,7 @@ readonly -a restore_transaction_paths=(
   scripts/repair.sh
   scripts/export-recovery-bundle.sh
   scripts/import-recovery-bundle.sh
+  scripts/end-maintenance.sh
   .env-orbit
   .orbit-secrets
 )
@@ -1731,7 +1733,9 @@ read_environment_value() {
   local requested_key="$1" line value="" found=0
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "${requested_key}="* ]]; then
+      # A CRLF .env-orbit is valid; drop the CR.
       value="${line#*=}"
+      value="${value%$'\r'}"
       found=1
     fi
   done < "$environment_file"
@@ -1774,6 +1778,32 @@ read_compose_project_name() {
   return 1
 }
 
+# engine_image_present <env-file>...
+#
+# Succeeds when configure.sh's engine can run without pulling: Docker
+# answered the availability probe and the ORBIT_IMAGE named in the first
+# <env-file> that names one (configure.sh's own lookup order) is already
+# present locally. Naming no image also succeeds, because configure.sh then
+# refuses on its own before it touches Docker; that refusal is a
+# configuration finding, not a Docker one. An exported ORBIT_IMAGE wins, as
+# it does in configure.sh. A malformed image also succeeds: configure.sh
+# refuses it before Docker, so it is reported as configuration-invalid
+# rather than as a missing image.
+engine_image_present() {
+  local image="${ORBIT_IMAGE:-}" file
+  [[ "$docker_available" == 1 ]] || return 1
+  for file in "$@"; do
+    [[ -z "$image" ]] || break
+    is_regular_non_symlink_file "$file" || continue
+    image="$(sed -n 's/^ORBIT_IMAGE=//p' "$file" 2>/dev/null | tail -n 1)"
+    image="${image%$'\r'}"
+  done
+  [[ -n "$image" ]] || return 0
+  # Same shape as configure.sh's is_valid_orbit_image.
+  [[ "$image" =~ ^orbit-local:[0-9a-f]{12}$ || "$image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || return 0
+  timeout "$docker_probe_timeout" docker image inspect "$image" >/dev/null 2>&1
+}
+
 # --- configuration-migration-interrupted (ADR-0014 decision 7) -------------
 #
 # repair.sh validates the live .env-orbit by running `bash scripts/
@@ -1799,6 +1829,8 @@ configuration_migration_rollback_recoverable() {
   is_regular_non_symlink_file "$rollback_path" || return 1
   has_mode "$rollback_path" 600 || return 1
   is_regular_non_symlink_file scripts/configure.sh || return 1
+  # --check-rollback runs the same engine; never let it pull either.
+  engine_image_present "$environment_file" "$rollback_path" || return 1
   local status=0
   bash scripts/configure.sh --check-rollback >/dev/null 2>/dev/null || status=$?
   [[ "$status" == 0 ]]
@@ -2210,6 +2242,19 @@ run_diagnosis() {
   shopt -u nullglob dotglob
   [[ ${#staging_entries[@]} -gt 0 ]] && add_finding staging-evidence-present staging warn
 
+  # --- Docker availability gate (used by Step 5 and Steps 8 onward) ----------
+  #
+  # One cheap, allowed, read-only probe (`docker ps -a`) decides whether every
+  # docker-backed check can run at all. Any failure — missing binary,
+  # missing `timeout`, unreachable daemon — is treated identically as
+  # docker-unavailable for every affected check; this script cannot and does
+  # not distinguish the cause.
+  docker_available=0
+  if command -v docker >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1 &&
+    timeout "$docker_probe_timeout" docker ps -a >/dev/null 2>&1; then
+    docker_available=1
+  fi
+
   # --- Step 5: configuration syntax/schema/secret readiness (delegated) ------
   #
   # configure.sh --check is the single source of truth for configuration
@@ -2227,8 +2272,16 @@ run_diagnosis() {
   #     configuration_migration_rollback_recoverable above), in which case
   #     configuration-migration-interrupted (ADR-0014 decision 7) replaces
   #     it: exactly one configuration finding is ever recorded per run.
+  #
+  # configure.sh --check runs its engine inside the pinned image, so it needs
+  # Docker, and pulls the image when it is missing. Without Docker, or with
+  # the image absent locally, the check cannot answer: that is
+  # docker-unavailable, not a broken configuration, and a read-only
+  # diagnosis must never pull.
   configuration_finding=0
-  if is_regular_non_symlink_file scripts/configure.sh; then
+  if is_regular_non_symlink_file scripts/configure.sh && ! engine_image_present "$environment_file"; then
+    add_finding docker-unavailable configuration info
+  elif is_regular_non_symlink_file scripts/configure.sh; then
     checked=$((checked + 1))
     configure_check_stderr="$(mktemp "${TMPDIR:-/tmp}/orbit-repair-configure-check.XXXXXX")"
     configure_check_status=0
@@ -2313,19 +2366,9 @@ run_diagnosis() {
     [[ -n "$candidate" && "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]] && project="$candidate"
   fi
 
-  # --- Step 7: docker availability gate ---------------------------------------
+  # --- Step 7: docker-backed check eligibility --------------------------------
   #
-  # One cheap, allowed, read-only probe (`docker ps -a`) decides whether every
-  # docker-backed check below can run at all. Any failure — missing binary,
-  # missing `timeout`, unreachable daemon — is treated identically as
-  # docker-unavailable for every affected check; this script cannot and does
-  # not distinguish the cause.
-  docker_available=0
-  if command -v docker >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1 &&
-    timeout "$docker_probe_timeout" docker ps -a >/dev/null 2>&1; then
-    docker_available=1
-  fi
-
+  # docker_available itself is probed ahead of Step 5, which needs it too.
   compose_check_eligible=0
   [[ "$env_status" == ok && "$compose_status" == ok && -n "$project" ]] && compose_check_eligible=1
   resource_check_eligible=0

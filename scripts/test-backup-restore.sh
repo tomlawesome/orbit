@@ -11,7 +11,11 @@
 #     match refused before any mutation; wrong and missing key)
 #   make_corrupt_{manifest,hmac,checksum}_bundle  restore.sh #3, #6 (HMAC and
 #     checksum chain re-verified before the bundle is trusted)
-#   make_{missing,extra,truncated,size_mismatch}* variants  restore.sh #9
+#   make_{missing,truncated,size_mismatch}* variants  restore.sh #9 (every
+#     referenced object is present and intact)
+#   make_extra_object_bundle                    restore.sh #9 (28e24e0c): an
+#     object no row references is residue of an interrupted upload, swept
+#     later, so restore accepts the bundle rather than refusing it
 #   test_missing_crypto_metadata                restore.sh #9 (transient or
 #     crypto-incomplete rows refuse a point-in-time restore)
 #   test_journal_publication_failures           restore.sh #15-#17 (crash-safe
@@ -23,6 +27,9 @@
 #     reopens it afterwards
 #   recovery-bundle export/import path          export/import-recovery-bundle.sh
 #     entries (Part 2)
+#   test_restore_removes_post_backup_table      restore.sh #8 (#1316): a table
+#     created after the backup point does not survive restoring it, Orbit
+#     boots healthy and the restore does not roll back.
 #   assert_credential_fixture_present            restore.sh #49 (authentication
 #     data and the revocation boundary, #917, ADR-0022 §6, ADR-0023 §7): a
 #     local credential and an unconsumed setup token seeded before the backup
@@ -151,6 +158,9 @@ readonly credential_setup_token_hash="606060606060606060606060606060606060606060
 readonly credential_identity_issuer="https://idp.backup-test.invalid/"
 readonly credential_identity_subject="backup-drill-subject"
 readonly credential_session_token_hash="7070707070707070707070707070707070707070707070707070707070707070"
+# #1316: a table that exists only after the backup point, standing in for a
+# later migration. Restoring the backup must remove it.
+readonly post_backup_table="orbit_drill_post_backup_table"
 backup_path=""
 recovery_bundle_path=""
 maintenance_backup_path=""
@@ -237,6 +247,7 @@ restore_deployment() {
   if [[ "$fixtures_seeded" == 1 && "$fixtures_removed" == 0 ]]; then
     remove_document_fixture >/dev/null 2>&1 || true
     remove_credential_fixture >/dev/null 2>&1 || true
+    drop_post_backup_table >/dev/null 2>&1 || true
   fi
   # The one-off container `compose run` starts is named, so it is found by name
   # and nothing else of the deployment's is touched.
@@ -526,8 +537,8 @@ compose() {
 health_probe_url() {
   local bind_address port
 
-  bind_address="$(awk -F= '$1 == "ORBIT_BIND_ADDRESS" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
-  port="$(awk -F= '$1 == "ORBIT_PORT" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  bind_address="$(awk -F= '$1 == "ORBIT_BIND_ADDRESS" { sub(/\r$/, ""); sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  port="$(awk -F= '$1 == "ORBIT_PORT" { sub(/\r$/, ""); sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
   # An exported value wins over the file, exactly as it does for Compose's
   # own interpolation, so the probe reaches the port Compose published (#1241).
   bind_address="${ORBIT_BIND_ADDRESS:-${bind_address:-0.0.0.0}}"
@@ -582,18 +593,22 @@ assert_staging_fixture_present() {
   fi
 }
 
+# The restored generation-1 scan job may still be pending, be mid-attempt, or
+# have run once: its stage is wrapped under 'backup-stage-key', which this
+# instance does not hold, so the attempt is retried as key_unavailable and the
+# stage row and file are kept (6bf40cd0). A retry comes round again about 8
+# minutes later, so a check made that long after its restore (the
+# wrong-material case restores nothing) sees a second attempt: attempts 3 or 4
+# are both bounded. Purging the stage fails the drill.
 assert_recovery_jobs_restored() {
   local recovery_state recovery_deadline=$((SECONDS + 10))
   while (( SECONDS < recovery_deadline )); do
     recovery_state="$(compose exec -T orbit-db sh -c \
-      'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select case when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''pending'\'' and attempts = 2 and locked_at is null and lease_token is null and lease_expires_at is null) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''pending'\'' when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''processing'\'' and attempts = 3 and locked_at is not null and lease_token is not null and lease_expires_at > now()) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''processing'\'' when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''completed'\'' and attempts = 3 and completed_at is not null and locked_at is null and lease_token is null and lease_expires_at is null) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''rejected'\'' and scan_status = '\''error'\'' and failure_code = '\''staging_object_invalid'\'') and not exists (select 1 from document_staging_objects where document_id = '\''$1'\'') then '\''purged'\'' else '\''invalid'\'' end from document_jobs where document_id = '\''$1'\'' and kind = '\''scan'\'';"' \
+      'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select case when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''pending'\'' and attempts = 2 and locked_at is null and lease_token is null and lease_expires_at is null) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''pending'\'' when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''processing'\'' and attempts in (3, 4) and locked_at is not null and lease_token is not null and lease_expires_at > now()) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''processing'\'' when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''retry'\'' and attempts in (3, 4) and last_error = '\''key_unavailable'\'' and locked_at is null and lease_token is null and lease_expires_at is null and next_attempt_at > now()) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''retry'\'' else '\''invalid'\'' end from document_jobs where document_id = '\''$1'\'' and kind = '\''scan'\'';"' \
       sh "$recovery_document_id" 2>/dev/null | tr -d '[:space:]')" || recovery_state=invalid
     case "$recovery_state" in
-      pending|processing)
+      pending|processing|retry)
         compose exec -T orbit-app test -f "$staging_path" >/dev/null 2>&1 && return 0
-        ;;
-      purged)
-        ! compose exec -T orbit-app test -e "$staging_path" >/dev/null 2>&1 && return 0
         ;;
     esac
     sleep 1
@@ -896,6 +911,22 @@ expect_preflight_rejection() {
   assert_staging_fixture_present
 }
 
+# The opposite of expect_preflight_rejection: restore must take this bundle.
+# A full restore to the backup point, checked as run_valid_restore checks
+# one; the post-backup session it removes is put back, so the restores after
+# this one still prove the revocation boundary.
+expect_restore_acceptance() {
+  local bundle_path="$1" label="$2" output=""
+  if ! output="$(ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$bundle_path" 2>&1)"; then
+    fail "Restore refused the ${label} case, which it must accept: ${output}"
+  fi
+  wait_for_health
+  assert_fixture_present
+  assert_staging_fixture_present
+  assert_credential_fixture_present
+  insert_post_backup_session_fixture
+}
+
 run_valid_restore() {
   ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$backup_path" >/dev/null
   wait_for_health
@@ -964,6 +995,50 @@ test_restore_during_maintenance() {
   maintenance_backup_path=""
   # Leave the canonical bundle applied for the assertions that follow.
   run_valid_restore
+}
+
+# The restore-removes-later-schema drill (#1316). A backup is taken, then a
+# table the backup has never heard of is created in the live database, as a
+# later migration would. Restoring that backup must leave the database exactly
+# as the backup had it: the table gone (pg_restore --clean only drops what the
+# archive names, so a table outside the archive survives it), Orbit healthy on
+# the restored data, and no rollback -- restore.sh exits 0 and leaves no
+# journal. A surviving table would make the migration that creates it fail on
+# boot with 'relation already exists', which the restore reads as a failed
+# cutover and rolls back.
+drop_post_backup_table() {
+  maintenance_sql "drop table if exists public.${post_backup_table};" >/dev/null
+}
+
+post_backup_table_exists() {
+  maintenance_sql "select to_regclass('public.${post_backup_table}') is not null;"
+}
+
+test_restore_removes_post_backup_table() {
+  local drill_backup_output drill_backup_path restore_status=0
+
+  drill_backup_output="$(bash scripts/backup.sh)"
+  drill_backup_path="${drill_backup_output#Orbit backup created: }"
+  [[ -f "$drill_backup_path" ]] || fail 'Backup for the post-backup table drill did not return a bundle path.'
+
+  maintenance_sql "drop table if exists public.${post_backup_table}; create table public.${post_backup_table} (id integer primary key);" >/dev/null
+  [[ "$(post_backup_table_exists)" == 't' ]] ||
+    fail 'The post-backup table was not created for the schema drill.'
+
+  ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$drill_backup_path" >/dev/null 2>&1 ||
+    restore_status=$?
+  rm -f -- "$drill_backup_path"
+
+  [[ "$restore_status" == 0 ]] ||
+    fail "Restoring a backup older than a later table exited $restore_status; the restore rolled back or failed."
+  [[ ! -f "$restore_state_directory/restore.journal" ]] ||
+    fail 'Restoring a backup older than a later table left a restore journal behind.'
+  wait_for_health
+  [[ "$(post_backup_table_exists)" == 'f' ]] || {
+    drop_post_backup_table
+    fail 'A table created after the backup survived the restore; the database is not as the backup had it.'
+  }
+  assert_fixture_present
 }
 
 test_local_key_rejections() {
@@ -1250,7 +1325,7 @@ expect_preflight_rejection "$test_directory/missing-attachment-object.tar" 'miss
 make_cross_table_duplicate_bundle
 expect_preflight_rejection "$test_directory/cross-table-duplicate.tar" 'cross-table duplicate object reference'
 make_extra_object_bundle
-expect_preflight_rejection "$test_directory/extra-object.tar" 'extra ciphertext object'
+expect_restore_acceptance "$test_directory/extra-object.tar" 'unreferenced ciphertext object'
 make_truncated_object_bundle
 expect_preflight_rejection "$test_directory/truncated-object.tar" 'truncated ciphertext object'
 make_size_mismatch_bundle
@@ -1272,11 +1347,13 @@ test_ordinary_rollback
 test_checkpoint_failure_recovery
 test_hard_interruption_recovery
 test_wrong_recovery_material
+test_restore_removes_post_backup_table
 test_restore_during_maintenance
 
 remove_document_fixture
 assert_fixture_absent
 remove_credential_fixture
+drop_post_backup_table
 fixtures_removed=1
 
 printf 'Orbit backup test: staged correspondence, rollback, interruption recovery, key handling, restore during maintenance, document/crypto round trip, and the authentication-data revocation boundary passed.\n'

@@ -123,9 +123,9 @@ without them:
   It does not read text out of scanned images: that feature (OCR) is
   switched off.
 - **Ollama**, a private AI model server. With a model chosen, Orbit also
-  asks the model to suggest a document's title, provider and reference, and
-  checks the answer against its own rules. Either way, nothing is added
-  until you review it.
+  asks the model to suggest a document's provider, reference, type, cost, how
+  often it recurs and its dates, and checks the answer against its own
+  rules. Either way, nothing is added until you review it.
 
 To turn both on, add these lines to `.env-orbit`:
 
@@ -193,8 +193,18 @@ the whole restore, including the checks on the backup before anything is
 replaced, and starts again once it is done. If a restore is interrupted
 part-way, Orbit stays stopped and `bash scripts/restore.sh --recover` puts
 the previous state back. Both scripts run the Orbit engine inside the
-deployment, so the host needs Docker and nothing else; keep `backups/` on a
+deployment, so the host needs Docker with Compose v2; restore also needs
+`curl`, to wait for Orbit to answer (backup does not). Keep `backups/` on a
 local disk (a backups directory on NFS is not supported).
+
+An unattended restore skips the typed `RESTORE` only when given both
+switches, so that neither alone can replace your data:
+
+```sh
+ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes backups/orbit-YYYYMMDD-HHMMSS.tar
+```
+
+`--yes` without the variable stops before Orbit is touched.
 
 A backup deliberately leaves out the document encryption key, so it is only
 useful on a machine that still has that key. To survive losing the machine,
@@ -229,8 +239,10 @@ bash scripts/deploy-container.sh --build
 
 It builds the image first, because `configure.sh` runs inside it, then
 refreshes the settings, takes a backup if the database is already running,
-starts everything and waits until it is healthy. Your existing `.env-orbit`,
-secrets and data are left as they are. `bash scripts/deploy-container.sh
+starts everything and waits until it is healthy. Your secrets and data are
+left as they are, and so is `.env-orbit` apart from `ORBIT_IMAGE`, which moves
+to the image just built or pulled so a later `docker compose --env-file
+.env-orbit up -d` starts the same build. `bash scripts/deploy-container.sh
 --pull` does the same with the published build named in `ORBIT_IMAGE`
 instead of building one: it pulls that digest first. Neither needs an
 existing `.env-orbit`: `configure.sh` creates it once the image exists. To

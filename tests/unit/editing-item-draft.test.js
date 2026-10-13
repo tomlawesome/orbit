@@ -263,7 +263,7 @@ describe("a suggestion amended in its drawer", () => {
     const item = proposedItemOf(/** @type {any} */ (suggestion()), where);
     expect(item).toMatchObject({
       id: "r-insurance", householdId: "h1", sectionId: "s-home", status: "suggested", title: "Home insurance renewal",
-      provider: "Harbour Mutual", dueDate: "2026-10-03", recurrenceMonths: 12, costMinor: 40000, reminderDays: [21, 7],
+      provider: "Harbour Mutual", dueDate: "2026-10-03", recurrenceMonths: 12, costMinor: 40000, reminderDays: [14, 3],
     });
     const draft = draftOf(item);
     expect(draft).toMatchObject({ title: "Home insurance renewal", kind: "renewal", cost: "£400.00", recurrence: 12 });

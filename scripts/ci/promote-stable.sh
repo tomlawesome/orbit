@@ -234,27 +234,38 @@ ORBIT_PREVIEW_SOURCE_BRANCH="${source_branch}" \
 
 # Refuse if the version tag already exists in GHCR -- belt and braces beside
 # the GitLab tag check above, since GHCR and GitLab are two registries that
-# could disagree about what has already shipped.
+# could disagree about what has already shipped. The one exception: the tag
+# already holds the exact digest being promoted, so a rerun after a failure
+# between the GHCR tags and the GitLab tag can finish the job.
+resuming=false
 if docker buildx imagetools inspect "${image}:${version}" > /dev/null 2>&1; then
-  fail "${image}:${version} already exists in GHCR; refusing to overwrite a shipped release"
+  if [[ "$(resolve_digest "${image}:${version}")" == "${PREVIEW_DIGEST}" ]]; then
+    printf 'promote-stable: %s:%s already tagged at this digest; resuming the promotion\n' "$image" "$version"
+    resuming=true
+  else
+    fail "${image}:${version} already exists in GHCR; refusing to overwrite a shipped release"
+  fi
 fi
 
 # --- Promote exact preview digest to latest (ported from promote-container.yml) --
 
-# A token that can only publish, piped on stdin so it never appears in argv
-# or a process listing.
-printf '%s' "$GHCR_PUBLISH_TOKEN" | docker login ghcr.io -u tomlawesome --password-stdin
+# Nothing to write to GHCR when resuming: the tags are already in place.
+if [[ "${resuming}" == false ]]; then
+  # A token that can only publish, piped on stdin so it never appears in argv
+  # or a process listing.
+  printf '%s' "$GHCR_PUBLISH_TOKEN" | docker login ghcr.io -u tomlawesome --password-stdin
 
-# `:latest`, not `:stable`: install.sh defaults ORBIT_CHANNEL to latest.
-# --prefer-index=false copies the tested manifest as it is. By default buildx
-# wraps a single-manifest source in a new, unsigned OCI index with a new
-# digest (#1179); the check below would catch that, but only after the tags
-# had moved.
-docker buildx imagetools create \
-  --prefer-index=false \
-  --tag "${image}:${version}" \
-  --tag "${image}:latest" \
-  "${image}@${PREVIEW_DIGEST}"
+  # `:latest`, not `:stable`: install.sh defaults ORBIT_CHANNEL to latest.
+  # --prefer-index=false copies the tested manifest as it is. By default buildx
+  # wraps a single-manifest source in a new, unsigned OCI index with a new
+  # digest (#1179); the check below would catch that, but only after the tags
+  # had moved.
+  docker buildx imagetools create \
+    --prefer-index=false \
+    --tag "${image}:${version}" \
+    --tag "${image}:latest" \
+    "${image}@${PREVIEW_DIGEST}"
+fi
 
 for tag in "${version}" latest; do
   promoted="$(resolve_digest "${image}:${tag}")"

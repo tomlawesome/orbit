@@ -24,6 +24,7 @@ import {
   type RestoreOrchestrationTestHooks,
   runBackup,
   runExportRecoveryBundle,
+  runFinishRestore,
   runImportRecoveryBundle,
   runRecoverRestore,
   runRestore,
@@ -40,7 +41,6 @@ import {
   createTar,
   extractTar,
   isValidDocumentKekHex,
-  isValidPassphrase,
   requireMatchingPassphrase,
   requireValidPassphrase,
 } from "../lib/recovery-bundle";
@@ -359,8 +359,10 @@ function collectImportPassphrase(): string {
   const passphrase = isStdinLinePromptMode()
     ? readStdinAnswer("A recovery passphrase is required on standard input.")
     : readTtyMaskedLine("Recovery passphrase: ");
-  // As the original import-recovery-bundle.sh did: refused before any decryption is attempted.
-  if (!isValidPassphrase(passphrase)) fail("orbit: A recovery passphrase of at least 12 characters is required.");
+  // Only an empty answer is refused here: the length floor applies when a
+  // bundle is made, never when one is opened (password-length.ts), so a
+  // bundle made under an older count must still reach decryption.
+  if (passphrase.length === 0) fail("orbit: A recovery passphrase is required.");
   return passphrase;
 }
 
@@ -770,19 +772,12 @@ function commandConfigure(deployDir: string, args: string[]): never {
 // commandBackup's --verify branch and commandRestore's --recover and
 // <backup.tar> branches creates a private mkdtempSync workDir under
 // os.tmpdir() that can hold decrypted document bytes and database dumps
-// while the command runs. A try/finally alone misses two cases: (1) a
-// signal (Ctrl-C/SIGINT, or SIGTERM from a supervisor) does not unwind JS
-// try/finally at all by default, so the directory is orphaned in /tmp
-// forever; (2) the success path in each branch calls `process.exit(0)`
-// *inside* the try, and process.exit() terminates immediately without
-// running a pending `finally` — confirmed empirically, not merely assumed —
-// so a plain try/finally around a process.exit() call never actually ran
-// its cleanup either. withScratchDirectory fixes both: callers never call
-// process.exit() from inside the wrapped callback, and the same tracked-set
-// cleanup runs on normal completion, on a thrown error, and on SIGINT/SIGTERM.
-const activeScratchDirectories = new Set<string>();
-let scratchCleanupSignalHandlersInstalled = false;
-
+// while the command runs. The success path in each branch calls
+// `process.exit(0)`, which terminates immediately without running a pending
+// `finally`, so callers never call process.exit() from inside the wrapped
+// callback. No signal handler: the engine is crash-only, and a listener
+// could only run once the synchronous docker step returned, turning Ctrl-C
+// into exit 0. A signal ends the process by the signal.
 function removeScratchDirectory(workDir: string): void {
   try {
     rmSync(workDir, { recursive: true, force: true });
@@ -791,51 +786,27 @@ function removeScratchDirectory(workDir: string): void {
   }
 }
 
-function installScratchCleanupSignalHandlers(): void {
-  if (scratchCleanupSignalHandlersInstalled) return;
-  scratchCleanupSignalHandlersInstalled = true;
-  for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    process.on(signal, () => {
-      for (const workDir of activeScratchDirectories) removeScratchDirectory(workDir);
-      activeScratchDirectories.clear();
-      // 128 + signal number, the conventional shell-reported exit status
-      // (SIGINT=2, SIGTERM=15); matches the 130 already used for Ctrl-C
-      // during masked TTY entry above.
-      process.exit(signal === "SIGINT" ? 130 : 143);
-    });
-  }
-}
-
-/** Runs `run` with `workDir` tracked for signal cleanup, always removing it afterward — on normal return, on a thrown error, and (via the signal handlers above) on SIGINT/SIGTERM. `run` must never call process.exit() itself; callers call it, with the result of `run`, only after this returns. */
+/** Runs `run`, always removing `workDir` afterward, on normal return or a thrown error. `run` must never call process.exit() itself; callers call it, with the result of `run`, only after this returns. */
 function withScratchDirectory<T>(workDir: string, run: () => T): T {
-  installScratchCleanupSignalHandlers();
-  activeScratchDirectories.add(workDir);
   try {
     return run();
   } finally {
-    activeScratchDirectories.delete(workDir);
     removeScratchDirectory(workDir);
   }
 }
 
 // Hidden/experimental, mirroring __install-transaction-rehearse and
-// __restore-engine-rehearse above: exercises withScratchDirectory's signal
-// cleanup end-to-end for src/cli/orbit.test.ts, without needing a real
-// docker backup/restore run to create a window to signal during.
+// __restore-engine-rehearse above: exercises how a backup/restore command
+// ends on SIGINT/SIGTERM, end-to-end for src/cli/orbit.test.ts, without
+// needing a real docker backup/restore run to create a window to signal
+// during.
 //
 // Blocks the same way the real docker-compose adapters block (a
-// synchronous spawnSync call), rather than a pure-JS wait: that is not a
-// cosmetic choice. A tight synchronous loop (e.g. Atomics.wait) never
-// returns control to the event loop, so a signal arriving during one is
-// never actually delivered to a `process.on` listener until the loop is
-// unblocked some other way — proven directly against this file's own
-// mkdtempSync/spawnSync pattern before writing this comment. What actually
-// happens on a real Ctrl-C is: the terminal's SIGINT reaches the whole
-// foreground process group, so the blocked `docker` child dies from the
-// same signal, spawnSync returns, and only then does the event loop
-// deliver the pending SIGINT/SIGTERM callback registered below. Spawning a
-// real `sleep` child here, signalled as a process group, reproduces that
-// exact sequence instead of a shape nothing in production ever hits.
+// synchronous spawnSync call), rather than a pure-JS wait. On a real Ctrl-C
+// the terminal's SIGINT reaches the whole foreground process group, so the
+// blocked `docker` child and this process both receive it. Spawning a real
+// `sleep` child here, signalled as a process group, reproduces that
+// sequence; with no handler installed, the signal ends this process.
 function commandScratchDirectorySignalRehearse(sleepSeconds: string): never {
   const workDir = mkdtempSync(join(tmpdir(), "orbit-scratch-signal-rehearse-"));
   withScratchDirectory(workDir, () => {
@@ -911,7 +882,13 @@ function commandBackup(deployDir: string, args: string[], directories: BackupRes
 
   if (args.length !== 0) fail("orbit: usage: orbit backup [--verify <backup.tar>]");
   preflightPostgresClient();
-  const result = runBackup({ backupDirectory: paths.backupDirectory, documentKekHex: () => readDocumentKekHex(paths.documentKekFile), adapter, now: new Date() });
+  const result = runBackup({
+    backupDirectory: paths.backupDirectory,
+    documentKekHex: () => readDocumentKekHex(paths.documentKekFile),
+    documentKekFile: paths.documentKekFile,
+    adapter,
+    now: new Date(),
+  });
   writeResult(`Orbit backup created: ${result.finalTarPath}`);
   process.exit(0);
 }
@@ -923,9 +900,10 @@ function commandRestore(deployDir: string, args: string[], directories: BackupRe
   const adapter = createInContainerAdapter();
   const { hooks, testHooks } = restoreTestHooksFromEnvironment();
 
-  const usage = "orbit: usage: orbit restore [--yes] <backup.tar> | orbit restore --preflight <backup.tar> | orbit restore --recover";
+  const usage = "orbit: usage: orbit restore [--yes] <backup.tar> | orbit restore --preflight <backup.tar> | orbit restore --recover | orbit restore --finish";
   let yesFlag = false;
   let recoverMode = false;
+  let finishMode = false;
   let preflightOnly = false;
   let backupFile: string | undefined;
   for (const arg of args) {
@@ -941,6 +919,10 @@ function commandRestore(deployDir: string, args: string[], directories: BackupRe
       preflightOnly = true;
       continue;
     }
+    if (arg === "--finish") {
+      finishMode = true;
+      continue;
+    }
     if (backupFile === undefined) {
       backupFile = arg;
       continue;
@@ -950,6 +932,13 @@ function commandRestore(deployDir: string, args: string[], directories: BackupRe
   // --preflight only validates (amendment E3a): it never asks, so --yes has
   // nothing to answer, and it never recovers.
   if (preflightOnly && (yesFlag || recoverMode)) fail("orbit: usage: --preflight accepts neither --yes nor --recover");
+
+  // The shell runs --finish once Orbit is healthy on the restored data.
+  if (finishMode) {
+    if (backupFile !== undefined || yesFlag || recoverMode || preflightOnly) fail("orbit: usage: --finish accepts no other arguments");
+    runFinishRestore({ paths: restorePaths });
+    process.exit(0);
+  }
 
   if (recoverMode) {
     if (backupFile !== undefined || yesFlag) fail("orbit: usage: --recover accepts no other arguments");
@@ -973,6 +962,7 @@ function commandRestore(deployDir: string, args: string[], directories: BackupRe
       adapter,
       workDir,
       confirm: makeRestoreConfirmer(yesFlag),
+      confirmedByYesFlag: yesFlag,
       hooks,
       testHooks,
       preflightOnly,
@@ -992,6 +982,7 @@ function commandExportRecoveryBundle(deployDir: string, args: string[], director
   const result = runExportRecoveryBundle({
     sourceBundlePath: resolve(args[0]),
     documentKekHex,
+    documentKekFile: paths.documentKekFile,
     // export-recovery-bundle.sh asked only once the source bundle had passed --verify.
     collectPassphrase: collectRecoveryPassphraseWithConfirmation,
     backupDirectory: paths.backupDirectory,
@@ -1190,6 +1181,9 @@ class RestoreRehearsalFakeAdapter implements RestoreDockerAdapter {
   }
   dropStageDatabase(name: string): void {
     this.stageContents.delete(name);
+  }
+  listStageDatabases(): string[] {
+    return [...this.stageContents.keys()];
   }
   restoreDumpToDatabase(name: string, dumpPath: string): boolean {
     const blob = JSON.parse(readFileSync(dumpPath, "utf8")) as { reports: CorrespondenceReports };
@@ -1911,7 +1905,9 @@ function main(): void {
     // no-leak sweep), so surfacing `error.message` directly here is safe;
     // anything else is a genuine bug and should keep its stack trace.
     // Another backup or restore holds the lock: a status of its own, so the
-    // shell leaves orbit-app to the run that owns it (#1211 E3).
+    // shell leaves orbit-app to the run that owns it (#1211 E3). A
+    // "backup-busy" refusal (an export holds the lock and never stopped the
+    // app) takes the ordinary failure path, so the shell restarts orbit-app.
     if (error instanceof BackupRestoreCliRefusal && error.code === "restore-locked") {
       process.stderr.write(`${displayHostPaths(`orbit: ${error.message}`)}\n`);
       process.exit(BACKUP_RESTORE_LOCKED_EXIT_CODE);

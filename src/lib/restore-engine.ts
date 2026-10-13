@@ -577,17 +577,17 @@ function walkFiles(documentsRoot: string, subdirectory: string): Array<{ relativ
  * validate_correspondence / validate_correspondence_reports (restore.sh:
  * 205-332,658-736): cross-checks every document/attachment/staging-object
  * database row against the actual on-disk blob (existence, non-symlink,
- * exact byte size, no duplicate storage-key reuse, no orphaned on-disk
- * objects) and refuses if any in-flight ("transient") document lifecycle
- * rows exist that a point-in-time backup can't safely represent (guarantee
- * #9). Returns false (never throws) on any mismatch, mirroring the Bash
+ * exact byte size, no duplicate storage-key reuse): every referenced object
+ * is present and intact (guarantee #9). In-flight ("transient") document
+ * rows and on-disk objects no row references are accepted: a backup of a
+ * running system can hold both after an interrupted upload, the running
+ * app accepts them too, and the maintenance worker sweeps them after the
+ * restore. Returns false (never throws) on any mismatch, mirroring the Bash
  * function's own `return 1` — the caller supplies the fail-closed message
  * appropriate to its context (preflight/checkpoint/active all report
  * differently for the same underlying check).
  */
 export function checkCorrespondence(reports: CorrespondenceReports, documentsRoot: string): boolean {
-  if (reports.transientCount.replace(/\s/g, "") !== "0") return false;
-
   const referencedObjects = new Set<string>();
   const storedCounts = new Map<string, number>();
 
@@ -616,7 +616,7 @@ export function checkCorrespondence(reports: CorrespondenceReports, documentsRoo
   // Pending ledger rows are the bounded recovery reference for a ciphertext
   // written before its attachment row committed (restore.sh:272-275
   // comment). A missing object is safe (the write may have failed); an
-  // existing one must not be treated as an unreferenced ordinary document.
+  // existing one is held to the referenced-object checks (stored once only).
   for (const line of splitReportLines(reports.staging)) {
     const [storageKey, lifecycle] = line.split("|");
     if (!storageKey) continue;
@@ -650,20 +650,22 @@ export function checkCorrespondence(reports: CorrespondenceReports, documentsRoo
   }
 
   for (const entry of walkFiles(documentsRoot, "objects")) {
+    // A kill between the temp write and the rename leaves a .tmp; it was never a stored object.
+    if (entry.relativePath.endsWith(".tmp")) continue;
     const match = OBJECT_RELATIVE_PATTERN.exec(entry.relativePath);
     if (!match) return false;
     const [, dirA, dirB, objectKey] = match;
     if (`${dirA}${dirB}` !== objectKey.slice(0, 4)) return false;
-    if (!referencedObjects.has(objectKey)) return false;
+    // An unreferenced object is residue of an interrupted upload, not damage.
     const count = (storedCounts.get(objectKey) ?? 0) + 1;
     storedCounts.set(objectKey, count);
     if (count !== 1) return false;
   }
   for (const entry of walkFiles(documentsRoot, "staging")) {
+    if (entry.relativePath.endsWith(".tmp")) continue;
     const match = STAGING_RELATIVE_PATTERN.exec(entry.relativePath);
     if (!match) return false;
     const objectKey = match[1];
-    if (!referencedObjects.has(objectKey)) return false;
     const count = (storedCounts.get(objectKey) ?? 0) + 1;
     storedCounts.set(objectKey, count);
     if (count !== 1) return false;
@@ -693,6 +695,8 @@ export interface RestoreDockerAdapter extends Pick<BackupDockerAdapter, "dumpDat
   createStageDatabase(name: string): void;
   /** restore.sh:170-176 — `DROP DATABASE IF EXISTS "<name>"`; best-effort, never throws (`|| true`). */
   dropStageDatabase(name: string): void;
+  /** Every database named like one of the private stage databases above, whichever run created it. */
+  listStageDatabases(): string[];
   /** restore.sh:178-185 — `pg_restore --single-transaction --exit-on-error` into a private stage database. */
   restoreDumpToDatabase(databaseName: string, dumpPath: string): boolean;
   /** restore.sh:578-583 — `pg_restore --single-transaction --clean --if-exists --exit-on-error` into the live database. */
@@ -1299,7 +1303,7 @@ export class RestoreRun {
     writeRestoreJournal(this.paths, { restoreId: this.restoreId, state: "database-restored", ...this.checkpointDigests! }, this.hooks);
   }
 
-  /** restore.sh:927-932: re-validates active correspondence, waits for health, and only then marks the restore complete and purges the journal/checkpoint. */
+  /** restore.sh:927-932: re-validates active correspondence, waits for health, and marks the restore complete; the journal/checkpoint stay for `restore --finish`. */
   finalize(): void {
     let corresponds: boolean;
     try {
@@ -1316,7 +1320,9 @@ export class RestoreRun {
     }
     this.appStopped = false;
     this.completed = true;
-    this.removeJournalAndCheckpoint();
+    // The adapter's start and health wait are no-ops inside the engine's
+    // container: the shell starts Orbit and confirms health afterwards, so
+    // the evidence stays until it runs `restore --finish`.
   }
 
   /** rollback_checkpoint (restore.sh:764-770): reapplies the verified checkpoint. Never throws — returns whether it succeeded. */

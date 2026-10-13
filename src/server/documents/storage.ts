@@ -17,6 +17,13 @@ import { getDocumentConfig, type DocumentConfig } from "@/server/documents/confi
  * query, A2-Q4) checks the one pattern rather than restating it. */
 export const STORAGE_KEY_PATTERN = /^[a-f0-9]{64}$/;
 
+// The quarantine is a fixed-size tmpfs shared by every upload in flight, so a
+// full one is a passing condition: tell the member to retry, not a bare 500.
+function quarantineFullError(error: unknown): unknown {
+  if ((error as NodeJS.ErrnoException | null)?.code !== "ENOSPC") return error;
+  return new AppError("document_upload_space_busy", "Document upload space is busy; try again shortly", 503);
+}
+
 export interface ReceivedDocument {
   quarantinePath: string;
   sizeBytes: number;
@@ -68,7 +75,9 @@ export class LocalDocumentStorage {
     // block. An attempt-specific opaque name lets the same idempotency UUID be
     // retried without deleting another concurrent upload's bytes.
     const quarantinePath = join(this.quarantineRoot, `${documentId}.${randomBytes(16).toString("hex")}.upload`);
-    const handle = await open(quarantinePath, "wx", 0o600);
+    const handle = await open(quarantinePath, "wx", 0o600).catch((error: unknown) => {
+      throw quarantineFullError(error);
+    });
     const digest = createHash("sha256");
     const leadingChunks: Buffer[] = [];
     let leadingLength = 0;
@@ -105,7 +114,7 @@ export class LocalDocumentStorage {
     } catch (error) {
       await reader.cancel().catch(() => undefined);
       await rm(quarantinePath, { force: true }).catch(() => undefined);
-      throw error;
+      throw quarantineFullError(error);
     } finally {
       await handle.close();
     }
@@ -259,6 +268,39 @@ export class LocalDocumentStorage {
     };
     await walk(objectsRoot);
     return objects;
+  }
+
+  /**
+   * Removes `*.tmp` files left in objects/, staging/ and the quarantine root
+   * by a process killed between a temporary write and its rename: nothing
+   * else ever names them. A younger one may be a write still in flight.
+   */
+  async sweepTemporaryFiles(olderThanMs: number): Promise<void> {
+    const boundary = Date.now() - olderThanMs;
+    const sweep = async (directory: string, recurse: boolean): Promise<void> => {
+      let entries;
+      try {
+        entries = await readdir(directory, { withFileTypes: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
+      }
+      for (const entry of entries) {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) {
+          if (recurse) await sweep(path, true);
+        } else if (entry.isFile() && entry.name.endsWith(".tmp")) {
+          const details = await stat(path).catch((error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return null;
+            throw error;
+          });
+          if (details && details.mtimeMs < boundary) await rm(path, { force: true });
+        }
+      }
+    };
+    await sweep(join(this.storageRoot, "objects"), true);
+    await sweep(join(this.storageRoot, "staging"), false);
+    await sweep(this.quarantineRoot, false);
   }
 
   async deleteCiphertext(storageKey: string): Promise<void> {

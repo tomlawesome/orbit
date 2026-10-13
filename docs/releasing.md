@@ -194,11 +194,56 @@ which ai/orbit-base-image's `publish_signing` builds and scans; pin the
 digest from that job's `published-signing-digest.txt`. If the image's cosign
 is not exactly the version `scripts/ci/ensure-cosign.sh` pins, the job stops
 naming both versions rather than fetching one, so a cosign bump here means
-rebuilding that image and re-pinning. Until the first publish the pin is an
-all-zero placeholder and the job fails to pull its image.
+rebuilding that image and re-pinning. The pin is the digest from base-image's
+`publish_signing` run (first published 2026-10-10).
 
 **Key rotation:** generate a new pair, replace the two files on the runner
-host, commit the new `cosign.pub`. Attestations made under the old key stop
+host, commit the new `cosign.pub`, then re-sign the manifest that `latest`
+points at with the new key and replace its `.sig` asset. Until that third
+step is done the one-line installer refuses every install and update: the
+`get-orbit.sh` on `main` carries only the committed key, and nothing re-signs
+a published manifest by itself (signing only runs inside a release pipeline).
+Re-sign on the runner host in three steps, with `vX.Y.Z` the current `latest`
+release. Only `gitlab-signer` can read the key, but it has no login shell and
+no GitHub credential (giving it one would undo the isolation above), so you
+download and upload with your own `gh` login and `gitlab-signer` only signs.
+
+First, as yourself, download the manifest into a fresh directory:
+
+```sh
+cd "$(mktemp -d)"
+gh release download vX.Y.Z -R tomlawesome/orbit -p orbit-release-manifest.json
+```
+
+Then, from that directory, copy it into a directory only `gitlab-signer` can
+write, sign there as `gitlab-signer` exactly as
+`scripts/ci/sign-release-manifest.sh` does (same flags, password read from
+`/etc/orbit-signing/password`), and copy the signature back out.
+`gitlab-signer` cannot write your directory and you cannot read the key, hence
+the hand-over:
+
+```sh
+d=/var/tmp/orbit-resign
+sudo install -d -m 0700 -o gitlab-signer -g gitlab-signer "$d"
+sudo install -m 0600 -o gitlab-signer -g gitlab-signer orbit-release-manifest.json "$d/"
+sudo -u gitlab-signer bash -c 'cd /var/tmp/orbit-resign &&
+  export COSIGN_PASSWORD="$(< /etc/orbit-signing/password)" &&
+  cosign sign-blob --key /etc/orbit-signing/cosign.key \
+    --tlog-upload=false --use-signing-config=false --yes \
+    --new-bundle-format=false \
+    --output-signature orbit-release-manifest.json.sig orbit-release-manifest.json'
+sudo install -m 0644 -o "$USER" "$d/orbit-release-manifest.json.sig" .
+sudo rm -r "$d"
+```
+
+Last, as yourself again, upload it over the old signature:
+
+```sh
+gh release upload vX.Y.Z orbit-release-manifest.json.sig -R tomlawesome/orbit --clobber
+```
+
+The keyless `.sigstore.json` countersignature covers the manifest, not the
+`.sig`, so it is unaffected. Attestations made under the old key stop
 verifying, so any digest not yet published must go through validation again
 after a rotation.
 
@@ -255,7 +300,12 @@ and v1.1.0 (see "Version tags in GHCR start at v0.3.0" below):
 7. Runs `scripts/stable-promotion-policy.mjs`, which refuses unless the
    image's revision is an ancestor of both `main` and its source branch and
    the tree at that revision exactly matches `main`'s tree.
-8. Refuses if `ghcr.io/tomlawesome/orbit:vX.Y.Z` already resolves in GHCR.
+8. Refuses if `ghcr.io/tomlawesome/orbit:vX.Y.Z` already resolves in GHCR,
+   unless it already resolves to the exact digest being promoted, in which
+   case the job carries on from there: it skips step 9 and still checks both
+   tags hold that digest before step 10. This lets a rerun finish a
+   promotion that failed after tagging GHCR but before creating the GitLab
+   tag (for example, an expired `GITLAB_RELEASE_TOKEN`).
 9. Tags that exact digest `vX.Y.Z` and `latest` in GHCR, by digest, without
    rebuilding anything (`latest`, not `stable`: `install.sh` defaults
    `ORBIT_CHANNEL` to `latest`).
@@ -402,11 +452,16 @@ SHA2-256(stdin)= ed183527165c366de2a4005d8b20c3df687ea2e35d488de7961806867c9d1a1
 
 **Rotation.** Follows "Key rotation" above, plus one thing specific to the
 launcher path: the scripts on `main` only accept manifests signed after the
-rotation, since they carry only the current key. `latest` always carries a
-manifest signed under the current key. A user who pins an older
+rotation, since they carry only the current key. `latest` carries a
+manifest signed under the current key only once the re-sign step above is
+done. A user who pins an older
 `ORBIT_VERSION` must also fetch `get-orbit.sh` from that version's own tag
 (`…/orbit/vX.Y.Z/scripts/get-orbit.sh`), which still carries the key that
-release was actually signed with.
+release was actually signed with. That holds only for releases left signed
+under their original key: the release that was `latest` at rotation was
+re-signed in "Key rotation" above and now verifies only with the current key,
+so its own tag's `get-orbit.sh` (old key) refuses it; pin that release with
+`main`'s `get-orbit.sh` instead.
 
 **A limit worth stating plainly:** on the `latest` channel there is no
 freshness check. Whoever controls what `get-orbit.sh` downloads from could

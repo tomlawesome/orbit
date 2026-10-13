@@ -202,8 +202,11 @@ the repository root has no `dev` script of its own.
 To run only PostgreSQL in Docker:
 
 ```sh
-docker compose --env-file .env-orbit up -d orbit-db
+docker compose -p <your-dev-name> --env-file .env-orbit up -d orbit-db
 ```
+
+Give it a project name of your own with `-p`; without one the command attaches
+to your real deployment's containers and data (see [Local traps](#local-traps)).
 
 The default host and database settings in `.env-orbit.example` use the same
 generated PostgreSQL password file as the container.
@@ -312,7 +315,7 @@ Each script's own header holds its full usage.
 | `scripts/test-all.sh` | `test-backend.sh`, then `test-frontend.sh` (Playwright against a running instance; `ORBIT_SKIP_E2E=true` skips it). |
 | `scripts/test-backend.sh` | Static analysis and the fast Vitest suite. |
 | `scripts/test-frontend.sh` | Playwright against a running instance. |
-| `pnpm --filter orbit-web fidelity` | The v19 visual gate: stands up the adapter-node build and the mockup host, compares 17 screens against the committed baselines. In CI it runs pinned to the Playwright image the baselines were proven against; run it locally the same way if a diff disagrees. |
+| `pnpm --filter orbit-web fidelity` | The v19 visual gate: stands up the adapter-node build and the mockup host, compares every screen in `SCREENS` against the committed baselines. In CI it runs pinned to the Playwright image the baselines were proven against; run it locally the same way if a diff disagrees. |
 | `scripts/test-integration.mjs` | Integration suite against a real database. |
 | `scripts/test-e2e-local.sh` | Local stack with disposable OIDC and GreenMail sidecars, then Playwright. `--profile local-only` swaps them for an Orbit with no identity provider and runs the short list in `tests/e2e/local-only-specs.txt`, which is what CI's `smoke_local_only` runs too (#916). `--reuse PROJECT` skips the build and `compose up` and runs Playwright against a stack a prior `--keep` run left up, identified by Compose's project/service labels and health-checked first; it never tears that stack down (#947). `--ci-cap` adds the cpu/memory overlay CI's acceptance stack runs under, so a local timing measurement transfers; off by default because an uncapped stack is the faster loop (#1080). **WebKit runs on this host only inside the CI Playwright image** (`mcr.microsoft.com/playwright:v1.63.0-noble`, already pulled): the host lacks WebKit's system packages, and that is not a reason to leave the check to a pipeline. The script does this itself for any run that includes a WebKit project (#1235); `--project desktop-webkit --spec <file>` with `--reuse` runs one file in WebKit alone. A change to a WebKit-affected e2e test is run locally on both WebKit projects before it is pushed; the pipeline is the second check, not the first (owner, 2026-10-06). |
 | `scripts/test-install-acceptance.sh` | Real fresh install to a healthy `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a fixture, so no provider credentials are needed. |
@@ -461,7 +464,7 @@ reappears, the pin has moved ahead of the host: discard the lockfile diff, run
 change, and ask the owner to upgrade the host pnpm (`sudo npm install -g
 pnpm@<pin>`). CI activates the pin through corepack, so it never sees this.
 
-### Only ten fonts exist on this host, and the rest fail silently
+### Only ten usable text fonts exist on this host; anything else falls back silently
 
 See "Fonts" in [the corpus README](../scripts/corpus/README.md#fonts) for the
 list and the reason. Check with `fc-list : family` rather than assuming a

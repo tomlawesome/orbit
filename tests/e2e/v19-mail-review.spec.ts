@@ -86,6 +86,8 @@ async function seedHousehold(page: Page): Promise<{ householdId: string; itemId:
     await command({
       type: "item.upsert",
       householdId,
+      // The engine refuses an item that names no kind (422 item_kind_missing).
+      kind: "service",
       item: { id: itemId, sectionId: homeSection, title: "Reviewed intake landing", currency: "GBP" },
       activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
     });
@@ -249,7 +251,9 @@ test("the manifest row approves in two taps, idempotently under partial success"
    approves what they hold. This took over "amend then accept from the item
    view", the belt's card and the phone's review sheet. */
 test("amend then accept from home's drawer", async ({ page }) => {
-  test.fail(test.info().project.name === "mobile-webkit", "#1196: mobile WebKit skips interceptMail's route after goto, so this hits the real (empty) inbox");
+  /* Skipped, not marked to fail: the driver fault does not happen every run, so an
+     expected failure sometimes passes and fails the job. Un-skip when #1196 closes. */
+  test.skip(test.info().project.name === "mobile-webkit", "#1196: mobile WebKit skips interceptMail's route after goto, so this hits the real (empty) inbox");
   await signInToHome(page);
   const { householdId } = await seedHousehold(page);
 
@@ -434,7 +438,9 @@ test("the phone sheet reads a staged paper's page one, and tells a gone mail apa
      `page.goto` reaches the real server instead of interceptMail's route --
      Playwright's WebKit driver skips the mock after a full navigation.
      desktop-webkit runs this same flow and passes; detail on #1196. */
-  test.fail(test.info().project.name === "mobile-webkit", "#1196: mobile WebKit skips interceptMail's route after goto, so this hits the real (empty) inbox");
+  /* Skipped, not marked to fail: the driver fault does not happen every run, so an
+     expected failure sometimes passes and fails the job. Un-skip when #1196 closes. */
+  test.skip(test.info().project.name === "mobile-webkit", "#1196: mobile WebKit skips interceptMail's route after goto, so this hits the real (empty) inbox");
   await signInToHome(page);
   const { householdId } = await seedHousehold(page);
 
@@ -475,6 +481,29 @@ test("the phone sheet reads a staged paper's page one, and tells a gone mail apa
        down by Playwright's test timeout while this finally block is still
        running, and an unrouteAll or sweep call that then finds the target
        already closed must not replace the real timeout error with its own. */
+    await unrouteAndSweep(page, households);
+  }
+});
+
+/* #1316: the engine refuses an item.upsert that names no kind (422), so the
+   proving ground's landing item has to arrive with one. This pins the seed
+   itself: it must be accepted, and the item the server then holds must read
+   back as a kind (a subtype or a schedule), not as a kindless item. */
+test("the proving ground's landing item is seeded with a kind the engine accepts (#1316)", async ({ page }) => {
+  await signInToHome(page);
+  const { householdId, itemId } = await seedHousehold(page);
+
+  try {
+    const stored = await page.evaluate(async ({ householdId, itemId }) => {
+      const response = await fetch("/api/workspace", { credentials: "same-origin", cache: "no-store" });
+      const body = (await response.json()) as {
+        workspace: { households: { id: string; items?: { id: string; subtype?: string | null; scheduleKind?: string | null }[] }[] };
+      };
+      return body.workspace.households.find((one) => one.id === householdId)?.items?.find((one) => one.id === itemId) ?? null;
+    }, { householdId, itemId });
+    expect(stored, "the landing item was stored").not.toBeNull();
+    expect(Boolean(stored?.subtype) || Boolean(stored?.scheduleKind), "the stored item carries a kind").toBe(true);
+  } finally {
     await unrouteAndSweep(page, households);
   }
 });

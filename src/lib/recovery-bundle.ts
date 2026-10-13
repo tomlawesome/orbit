@@ -4,6 +4,7 @@ import {
   constants,
   fchmodSync,
   fstatSync,
+  fsyncSync,
   linkSync,
   lstatSync,
   mkdtempSync,
@@ -15,7 +16,7 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   createCipheriv,
   createDecipheriv,
@@ -116,7 +117,8 @@ export type RecoveryBundleRefusalCode =
   | "app-stop-failed"
   | "app-start-failed"
   | "bundle-already-exists"
-  | "recovery-bundle-record-failed";
+  | "recovery-bundle-record-failed"
+  | "insufficient-space";
 
 /**
  * Thrown for every fail-closed refusal this module makes. Never carries
@@ -410,7 +412,61 @@ export function listTarEntriesVerbose(tarPath: string): TarEntry[] {
   return names.map((name, index) => ({ name, typeChar: typeChars[index] }));
 }
 
-export function extractTar(tarPath: string, destinationDir: string): void {
+const TAR_MAGIC = Buffer.from("ustar");
+const TAR_MAGIC_OFFSET = 257;
+// Leading bytes GNU tar and BusyBox tar use to auto-detect a compressed
+// archive: gzip, compress, bzip2, xz, zstd, lzip, lzop, lzma, lz4.
+const COMPRESSED_MAGICS = [
+  [0x1f, 0x8b], [0x1f, 0x9d], [0x42, 0x5a, 0x68], [0xfd, 0x37, 0x7a, 0x58, 0x5a], [0x28, 0xb5, 0x2f, 0xfd],
+  [0x4c, 0x5a, 0x49, 0x50], [0x89, 0x4c, 0x5a, 0x4f], [0x5d, 0x00, 0x00], [0x04, 0x22, 0x4d, 0x18],
+].map((bytes) => Buffer.from(bytes));
+
+/**
+ * tar auto-detects compression on both list and extract, so a small
+ * compressed file could expand without bound past any size check. Only an
+ * uncompressed ustar/GNU archive is accepted: the magic at offset 257 of the
+ * first header alone is not enough, because a gzip header's extra field can
+ * carry those bytes while tar still decompresses the rest.
+ */
+function requirePlainTar(tarPath: string): void {
+  let descriptor: number;
+  try {
+    descriptor = openSync(tarPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    refuse("archive-invalid", "Bundle archive is invalid.");
+  }
+  const header = Buffer.alloc(TAR_MAGIC_OFFSET + TAR_MAGIC.length);
+  let bytesRead: number;
+  try {
+    bytesRead = readSync(descriptor, header, 0, header.length, 0);
+  } finally {
+    closeSync(descriptor);
+  }
+  const plain =
+    bytesRead === header.length &&
+    header.subarray(TAR_MAGIC_OFFSET).equals(TAR_MAGIC) &&
+    !COMPRESSED_MAGICS.some((magic) => header.subarray(0, magic.length).equals(magic));
+  if (!plain) refuse("archive-invalid", "Bundle archive is invalid.");
+}
+
+/**
+ * Refuses before writing anything when the destination filesystem cannot
+ * hold the archive's contents: work directories live in temp space that may
+ * share a disk with the live database. A plain tar (requirePlainTar) cannot
+ * unpack to more than its own size, so that size is the bound; it needs no
+ * second pass over the archive and cannot be misstated by a crafted listing.
+ * `measureAvailable` defaults to the real statfs call; tests inject it, as
+ * for requireCapacityForDocumentArchive.
+ */
+export function extractTar(
+  tarPath: string,
+  destinationDir: string,
+  measureAvailable: (destinationDir: string) => number = measureAvailableBytes,
+): void {
+  requirePlainTar(tarPath);
+  if (measureAvailable(destinationDir) < measureEnvelopeBytes(tarPath)) {
+    refuse("insufficient-space", "Bundle archive could not be extracted; not enough space to stage its contents.");
+  }
   const { status } = runTar(["-xf", tarPath, "-C", destinationDir]);
   if (status !== 0) refuse("archive-invalid", "Bundle archive could not be extracted.");
 }
@@ -436,6 +492,18 @@ export function createTar(workDir: string, outputPath: string, members: readonly
   const result = spawnSync("tar", ["-C", workDir, "-cf", outputPath, ...members], { encoding: "utf8" });
   if (result.status !== 0) {
     throw new Error(`tar failed to package the bundle: ${result.stderr ?? ""}`);
+  }
+  // tar's writes may still be only in the page cache; the data must be on
+  // disk before publishBundleAtomically gives it its final name.
+  fsyncPath(outputPath);
+}
+
+function fsyncPath(path: string): void {
+  const descriptor = openSync(path, constants.O_RDONLY);
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
   }
 }
 
@@ -738,6 +806,7 @@ export function buildBackupManifest(fields: BackupManifestFields): string {
  * before any extraction is attempted.
  */
 export function validateBackupBundleLayout(tarPath: string): void {
+  requirePlainTar(tarPath);
   const members = [...listTarMembers(tarPath)].sort();
   const expected = [...BACKUP_BUNDLE_MEMBERS].sort();
   if (members.length !== expected.length || !members.every((name, index) => name === expected[index])) {
@@ -958,6 +1027,9 @@ export function publishBundleAtomically(temporaryPath: string, finalPath: string
     throw error;
   }
   unlinkSync(temporaryPath);
+  // A link is metadata: fsync the directory so the final name survives a
+  // power loss, not just the (already fsynced) data.
+  fsyncPath(dirname(finalPath));
 }
 
 export interface CreateBackupBundleResult {
@@ -1085,6 +1157,7 @@ export function buildRecoveryManifest(): string {
  * layer).
  */
 export function validateRecoveryBundleLayout(tarPath: string): void {
+  requirePlainTar(tarPath);
   const members = [...listTarMembers(tarPath)].sort();
   const expected = [...RECOVERY_BUNDLE_MEMBERS].sort();
   if (members.length !== expected.length || !members.every((name, index) => name === expected[index])) {

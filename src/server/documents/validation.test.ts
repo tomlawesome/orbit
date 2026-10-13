@@ -14,10 +14,13 @@ import {
 } from "./validation";
 import { syntheticJpeg, syntheticPdf, syntheticPdfWithXrefStream, syntheticPng } from "../../../tests/support/synthetic-documents";
 import {
+  classicChainPdf,
   syntheticModernPdf,
   syntheticPdfActiveContent,
   syntheticPdfWithPages,
   syntheticStructurePdfFixtures,
+  xrefStmChainPdf,
+  xrefStreamPdf,
 } from "../../../tests/support/generated-pdf-documents";
 import { syntheticOwnerPasswordPdf, syntheticUserPasswordPdf } from "../../../tests/support/encrypted-pdf-documents";
 
@@ -80,6 +83,52 @@ describe("structural document classification", () => {
     it("accepts a cross-reference dictionary long enough to push /Type /XRef past its first 512 bytes", async () => {
       await expect(classifyDocumentStructure(syntheticModernPdf({ longIndex: true }), "application/pdf"))
         .resolves.toBe("supported_structure");
+    });
+  });
+
+  describe("a cross-reference stream that declares a huge entry count is refused (#1316)", () => {
+    it("refuses the control: one /Index subsection of two billion entries", async () => {
+      await expect(classifyDocumentStructure(xrefStreamPdf({ dictionary: "/Index [0 2000000000]" }), "application/pdf"))
+        .resolves.toBe("unsupported_structure");
+    });
+
+    it.each([
+      ["/Index subsections whose counts cancel out to zero", "/Index [0 2000000000 0 -2000000000]"],
+      ["/Index with a huge count followed by non-numeric pairs", "/Index [0 2000000000 /X /Y]"],
+      ["a nested /DecodeParms /Index ahead of the real huge /Index", "/DecodeParms << /Index [0 1] >> /Index [0 2000000000]"],
+    ])("refuses %s", async (_name, dictionary) => {
+      await expect(classifyDocumentStructure(xrefStreamPdf({ dictionary }), "application/pdf")).resolves.toBe("unsupported_structure");
+    });
+
+    it("refuses a small final xref stream whose /Prev is an xref stream with /Size 2000000000", async () => {
+      const bytes = xrefStreamPdf({ dictionary: "/Index [0 8]", previous: { dictionary: "/Size 2000000000 /Index [0 7]", via: "Prev" } });
+      await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");
+    });
+
+    it("refuses a classic xref table whose trailer /XRefStm is an xref stream with /Size 2000000000", async () => {
+      const bytes = xrefStreamPdf({ previous: { dictionary: "/Size 2000000000 /Index [0 7]", via: "XRefStm" } });
+      await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");
+    });
+
+    it("accepts a small xref stream named by /XRefStm from two chained classic tables (pdf.js reads it once)", async () => {
+      await expect(classifyDocumentStructure(xrefStmChainPdf(), "application/pdf")).resolves.toBe("supported_structure");
+    });
+
+    it("accepts the same chain when the first table's /Prev points back at the final table (pdf.js skips the revisit)", async () => {
+      await expect(classifyDocumentStructure(xrefStmChainPdf({ cycle: true }), "application/pdf")).resolves.toBe("supported_structure");
+    });
+
+    it("accepts a chain of 32 classic tables linked by /Prev (the section cap is not reached)", async () => {
+      await expect(classifyDocumentStructure(classicChainPdf({ sections: 32 }), "application/pdf")).resolves.toBe("supported_structure");
+    });
+
+    it("refuses a chain of 33 classic tables linked by /Prev (the section cap)", async () => {
+      await expect(classifyDocumentStructure(classicChainPdf({ sections: 33 }), "application/pdf")).resolves.toBe("unsupported_structure");
+    });
+
+    it("refuses two chained classic tables whose declared counts are each under the entry cap but sum past it", async () => {
+      await expect(classifyDocumentStructure(classicChainPdf({ sections: 2, countEach: 700_000 }), "application/pdf"))
+        .resolves.toBe("unsupported_structure");
     });
   });
 
@@ -192,6 +241,11 @@ describe("structural document classification", () => {
       useWasm: false,
       useWorkerFetch: false,
     });
+  });
+
+  it("caps the pixels pdf.js will decode for one embedded image at the same cap as a raster upload (#1316)", () => {
+    // MAX_IMAGE_PIXELS, 40M, which safeImageDimensions holds PNG and JPEG to.
+    expect(PDF_STRUCTURE_PARSER_OPTIONS).toHaveProperty("maxImageSize", 40_000_000);
   });
 
   it("does not expose parser failure details to console output", async () => {

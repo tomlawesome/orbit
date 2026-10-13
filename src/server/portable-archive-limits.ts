@@ -6,8 +6,20 @@ import { MIN_PASSWORD_LENGTH } from "@/lib/password-length";
  * loading the archive repository and the database with it.
  */
 
-/** The largest archive Orbit writes, and the largest plaintext it will decrypt. */
-export const MAX_ARCHIVE_BYTES = 128 * 1024 * 1024;
+/**
+ * The largest archive plaintext: the most Orbit encrypts on export, and the
+ * most it will decrypt on import. The whole archive is held as one JavaScript
+ * string, and V8's longest string is about 512M characters, which caps the
+ * plaintext near 380 MiB; 256 MiB leaves room below that.
+ */
+export const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
+
+/**
+ * Documents travel in the plaintext as base64 (4 characters per 3 bytes), so
+ * a document-inclusive export holds about three quarters of the limit in
+ * documents. The figure the export's refusal names, in whole MiB.
+ */
+export const MAX_ARCHIVE_DOCUMENT_MIB = Math.floor((MAX_ARCHIVE_BYTES * 3) / 4 / (1024 * 1024));
 
 // Base64url has no padding, so this is the exact maximum encoded length for
 // a ciphertext that could decode to at most MAX_ARCHIVE_BYTES (AES-256-GCM

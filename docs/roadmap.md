@@ -108,20 +108,20 @@ closed.
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-039 | Attach a document to an item: upload, scan, encrypt, download, delete and restore without exposing it to another household or public storage | charter V1-DOC-01; ORB-FUT-003; site: "Around your household" | v1.0 | partial | #17, #42, 925ba6d6; uploads over 512 KB fail (#1286); no infected-file test (#1297) |
+| RM-039 | Attach a document to an item: upload, scan, encrypt, download, delete and restore without exposing it to another household or public storage | charter V1-DOC-01; ORB-FUT-003; site: "Around your household" | v1.0 | delivered | #17, #42, 925ba6d6 |
 | RM-040 | Documents encrypted at rest with per-document keys wrapped by a key-encryption key, and a key rotation that loses nothing | ORB-FUT-003; site: "The system"; decision #954 | M8 | delivered | #932, #954, da892a9d |
 | RM-041 | Downloads are authenticated, authorisation is rechecked, no public URLs, safe headers | ORB-FUT-003 | v1.0 | delivered | #42; the file is buffered, not streamed |
-| RM-042 | File type decided by inspecting the bytes; opaque storage keys | ORB-FUT-003 | v1.0 | delivered | #42; false refusals #1291, #1292, #1293 |
+| RM-042 | File type decided by inspecting the bytes; opaque storage keys | ORB-FUT-003 | v1.0 | delivered | #42, ADR-0033 |
 | RM-043 | Documents wait in quarantine until scanned, and a scanner outage recovers without re-upload | ORB-FUT-003 | v1.1 | delivered | #123, #168 |
 | RM-044 | Malware scanning is optional: on by default, a recommendation when off, never forced | ORB-FUT-003; site: "The system" | M16 | partial | DOCUMENT_SCAN_MODE=disabled works but the ClamAV container always runs (#1170) |
-| RM-045 | Per-file and per-instance limits, with an upload limit the administrator can set | ORB-FUT-003 | v0.3 | partial | limits come from the environment only (#1285) |
+| RM-045 | Per-file and per-instance limits, with an upload limit the administrator can set | ORB-FUT-003 | v0.3 | delivered | #1285: administrator-set upload limit in Administration |
 | RM-046 | Orphan cleanup and storage reconciliation | ORB-FUT-003 | v1.0 | delivered | #42 |
 | RM-047 | Document events recorded in the household audit history | ORB-FUT-003 | unscheduled | partial | events reach the instance audit log; only administrators read it; download auditing unconfirmed |
 | RM-048 | Optional Apache Tika parser, bounded, OCR off, on an internal network | ORB-FUT-003 | v1.1 | delivered | 1cb5917b |
 | RM-049 | Optional S3-compatible object storage | ORB-FUT-003 | unscheduled | dropped | owner 2026-10-07: no S3 storage; local storage only (the charter already lists it as a non-goal) |
 | RM-050 | Upload from a phone's file picker or camera | ORB-FUT-003; ORB-FUT-007 | v1.0 | partial | picker accepts PDF and images; no capture setting |
 | RM-051 | Mobile capture with preview, rotate, remove, retry and progress that survives bad connectivity | ORB-FUT-007 | unscheduled | not started | no issue |
-| RM-052 | Open a document's preview and a reader with page turning over the belt | owner-decisions §18; decision #1059 | M14 | partial | #1059; reader shows page 1 only (#1300); desk press fails (#1298) |
+| RM-052 | Open a document's preview and a reader with page turning over the belt | owner-decisions §18; decision #1059 | M14 | delivered | #1059 |
 
 ### Reading documents
 
@@ -160,7 +160,7 @@ closed.
 | RM-073 | Due dates and reminder preferences are deterministic across calendar and daylight-saving changes | charter V1-REM-01 | v1.0 | delivered | #41 |
 | RM-074 | Delivery is scheduled once, retried a bounded number of times, diagnosable without private content, and optional | charter V1-REM-02 | v1.0 | delivered | #41 |
 | RM-075 | Per-user email reminders with switches and per-item warning days | site: "The system"; charter foundations | v0.3 | delivered | #479, #763 |
-| RM-076 | Browser push notifications to your phone | site: "Around your household"; charter foundations | M16 | partial | #763; the push key is a byte short on about 1 install in 256 (#1276) |
+| RM-076 | Browser push notifications to your phone | site: "Around your household"; charter foundations | M16 | delivered | #763 |
 | RM-077 | Orbit installs like an app | site: "Around your household"; ORB-FUT-002 | v1.0 | delivered | manifest and service worker in web/; no installability test |
 | RM-078 | Members see the last five reminders sent to them | owner-decisions §20 | M14 | delivered | #1003 |
 | RM-079 | Your data stays on your server: no offline copy of private data on the phone | site: "Around your household"; charter V1-UX-02 | v1.0 | delivered | #88 |
@@ -175,7 +175,7 @@ closed.
 | RM-083 | Health and administrator views separate configuration, dependency, provider, queue and storage failures without leaking secrets | charter V1-OPS-02 | v1.0 | delivered | #95 |
 | RM-084 | Backup and restore keep the database and encrypted documents, detect corruption and a wrong key, and say the recovery key is separate | charter V1-OPS-04 | v1.0 | partial | #28, b8859295; the backup CLI never run against a real stack (#1199, #1211) |
 | RM-085 | Backups run on a schedule | charter quality attributes | unscheduled | dropped | owner 2026-10-07: operators run their own backups; the docs tell them to schedule backup.sh |
-| RM-086 | Real restore exercises | charter quality attributes | M16 | partial | CI drill only; no operator drill (#1273) |
+| RM-086 | Real restore exercises | charter quality attributes | M16 | partial | #1273: local --own-stack drill, and the CI drill; no drill an operator runs against their own deployment |
 | RM-087 | Deterministic update and rollback guidance | charter quality attributes | unscheduled | partial | orbit check --rollback exists; no standalone rollback guide |
 | RM-088 | Three containers on PostgreSQL 18, optional parser, scanner and model | charter supported deployment; site: "The system" | M5 | delivered | #686; the site still says PostgreSQL 17 |
 | RM-089 | Orbit never needs the Docker socket | feature-register conventions | v1.0 | delivered | compose files hold none |
@@ -216,7 +216,7 @@ closed.
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-107 | Export and import a household with its documents, owner-only, previewed, atomic and audited | ORB-FUT-006; owner-decisions §21 | M14 | delivered | #1002, #1049, a0f4308d; large archives #1290 |
+| RM-107 | Export and import a household with its documents, owner-only, previewed, atomic and audited | ORB-FUT-006; owner-decisions §21 | M14 | delivered | #1002, #1049, a0f4308d; #1290 (body limit sized to the archive cap) |
 | RM-108 | A human-readable export and a per-document hash manifest | ORB-FUT-006 | unscheduled | not started | only the machine archive exists; no issue |
 
 ### Delivery and release

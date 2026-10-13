@@ -421,16 +421,22 @@ export async function uploadItemDocument(input: {
             recoveryStatus: existing.recoveryJobStatus === "failed" ? "manual" : "retrying",
           }, config.scanMode);
         }
-        if (existing.lifecycle === "rejected") {
-          if (existing.failureCode === "malware_detected") {
-            throw new AppError("document_malware_detected", "That document upload has already been rejected", 422);
-          }
-          if (existing.failureCode === "scanner_failed") {
-            throw new AppError("document_scanner_failed", "That document upload has already been rejected", 503);
-          }
-          throw new AppError("document_upload_failed", "That document upload has already been rejected", 422);
+        if (existing.lifecycle === "rejected" && existing.failureCode === "malware_detected") {
+          throw new AppError("document_malware_detected", "That document upload has already been rejected", 422);
         }
-        throw new AppError("document_upload_recoverable", "That document upload needs recovery", 503);
+        if (existing.lifecycle !== "rejected") {
+          throw new AppError("document_upload_recoverable", "That document upload needs recovery", 503);
+        }
+        // A rejection that was not a verdict on the file (a storage or
+        // scanner failure, an interrupted upload) is retried, not remembered:
+        // the row goes (its staging and crypto rows cascade; any orphaned
+        // object is left to storage reconciliation) and the same id is
+        // reserved afresh below.
+        await getDb().delete(documents).where(and(
+          eq(documents.id, input.documentId),
+          eq(documents.lifecycle, "rejected"),
+          sql`${documents.failureCode} is distinct from 'malware_detected'`,
+        ));
       }
     }
 

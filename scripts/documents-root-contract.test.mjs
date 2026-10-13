@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { DOCUMENT_MAX_BYTES_CEILING } from "../src/server/documents/config";
+
 // #1151 SF2-F1: docker-compose.yml documents DOCUMENTS_ROOT as operator-
 // configurable (README.md, src/server/documents/config.ts's own default),
 // but the compose volume mount and every backup.sh/restore.sh command that
@@ -44,5 +46,20 @@ describe("DOCUMENTS_ROOT is read consistently, never hard-coded (#1151 SF2-F1)",
   it.each(shellSources)("%s never names the document tree; the engine finds it from DOCUMENTS_ROOT", (_name, source) => {
     expect(source).not.toContain("/var/lib/orbit/documents");
     expect(source).not.toContain("DOCUMENTS_ROOT");
+  });
+});
+
+// #1316: the quarantine tmpfs holds the upload being received before it is
+// validated and encrypted. If it is smaller than two of the largest allowed
+// documents, two concurrent maximum-size uploads fill it and the second
+// fails with ENOSPC. It must hold at least 2 x DOCUMENT_MAX_BYTES_CEILING.
+describe("the document quarantine tmpfs is sized for the largest upload (#1316)", () => {
+  it("docker-compose.yml sizes /tmp/orbit-document-quarantine at no less than 2 x DOCUMENT_MAX_BYTES_CEILING", () => {
+    const line = composeSource.split("\n").find((candidate) => candidate.includes("/tmp/orbit-document-quarantine"));
+    expect(line, "orbit-app tmpfs line for /tmp/orbit-document-quarantine").toBeDefined();
+    const match = /size=(\d+)([kmg]?)/iu.exec(line);
+    expect(match, `size= option in: ${line}`).not.toBeNull();
+    const unit = { "": 1, k: 1024, m: 1024 ** 2, g: 1024 ** 3 }[match[2].toLowerCase()];
+    expect(Number(match[1]) * unit).toBeGreaterThanOrEqual(2 * DOCUMENT_MAX_BYTES_CEILING);
   });
 });

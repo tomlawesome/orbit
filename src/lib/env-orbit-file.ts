@@ -19,7 +19,9 @@ export type EnvOrbitFailureCode =
 
 export type ParseEnvOrbitResult =
   | { ok: true; record: EnvOrbitRecord; schemaPresent: boolean }
-  | { ok: false; code: EnvOrbitFailureCode };
+  // key: the offending setting, for a removed, unknown or secret-conflict
+  // refusal, so the operator can be told which line to fix.
+  | { ok: false; code: EnvOrbitFailureCode; key?: string };
 
 // Mirrors scripts/configuration.sh's `removed_keys` (SQ1-Q1): keys this
 // project used to accept and now refuses with a dedicated
@@ -53,6 +55,19 @@ const REMOVED_KEYS: readonly string[] = [
   "IMAP_ALIAS_PREVIOUS_KEY_FILE",
   "IMAP_ALIAS_PREVIOUS_EXPIRY",
 ];
+
+// Strict UTF-8 decode: undefined on any malformed byte sequence. A lossy
+// decode would turn a stray byte into U+FFFD, and rewriting the file from that
+// string would change a value the operator never touched.
+const strictUtf8Decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+export function decodeUtf8Strict(buffer: Uint8Array): string | undefined {
+  try {
+    return strictUtf8Decoder.decode(buffer);
+  } catch {
+    return undefined;
+  }
+}
 
 function isControlFree(value: string): boolean {
   for (const char of value) {
@@ -146,6 +161,7 @@ export function parseEnvOrbitContent(content: string, options: ParseEnvOrbitOpti
         code: REMOVED_KEYS.includes(key)
           ? "configuration_removed_key"
           : "configuration_unknown_key",
+        key,
       };
     }
     if (!isValidValue(value)) return { ok: false, code: "configuration_syntax" };
@@ -180,7 +196,7 @@ export function parseEnvOrbitContent(content: string, options: ParseEnvOrbitOpti
     for (const [direct, file] of SECRET_FILE_PAIRS) {
       // An empty direct placeholder beside a populated _FILE value (the shape
       // configure writes for OIDC_CLIENT_SECRET) is not a conflict.
-      if (values[direct] && values[file]) return { ok: false, code: "configuration_secret_conflict" };
+      if (values[direct] && values[file]) return { ok: false, code: "configuration_secret_conflict", key: direct };
     }
   }
   if (schemaValue && schemaValue !== String(ENV_ORBIT_SCHEMA_VERSION)) {

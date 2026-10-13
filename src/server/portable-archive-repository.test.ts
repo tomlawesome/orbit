@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AppError } from "@/lib/app-error";
 import type { EncryptedPortableArchive } from "@/server/portable-archive";
 import { KDF_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
+import { MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "./portable-archive-limits";
 import { previewPortableArchive } from "./portable-archive-repository";
 
 // scrypt N=16384 by design; see KDF_TEST_TIMEOUT_MS
@@ -10,11 +11,9 @@ vi.setConfig({ testTimeout: KDF_TEST_TIMEOUT_MS });
 
 const passphrase = "correct-horse-battery-staple";
 
-// Base64url has no padding, so this is the exact maximum length for a
-// ciphertext that could decode to the module's 128 MiB archive bound
-// (`Math.ceil(128 * 1024 * 1024 / 3) * 4`). One character over it can only
-// decode to more than 128 MiB.
-const MAX_ARCHIVE_CIPHERTEXT_CHARACTERS = 178_956_972;
+// The bound is imported rather than restated, so the test follows the
+// module's archive limit when it changes. One character over the exported
+// maximum can only decode to more than MAX_ARCHIVE_BYTES.
 
 function oversizedArchive(): EncryptedPortableArchive {
   return {

@@ -72,6 +72,14 @@ test("Add to orbit arms on the first tap and approves as proposed on the second"
 
 test("review & amend opens create's form pre-filled, and approves the amended values into the chosen section", async ({ page }) => {
   const seen = await answerApproval(page);
+  /* The new item's reminders start at the member's own Settings pair (#1389,
+     owner decision 7a on #1316). The fixture app answers 14 and 3; this
+     member has chosen 30 and 7. */
+  await page.route("**/api/settings/reminders", (route) => route.request().method() === "GET"
+    ? route.fulfill({ json: { reminders: {
+      emailEnabled: true, firstWarningDays: 30, finalWarningDays: 7,
+      firstWarning: "30 days before closest approach", finalWarning: "7 days before", outboundMail: "configured" } } })
+    : route.fallback());
   await page.goto(`${APP}/inbox`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "review & amend →" }).click();
   const sheet = page.getByRole("dialog", { name: "Review & amend" });
@@ -92,7 +100,7 @@ test("review & amend opens create's form pre-filled, and approves the amended va
      to read and map (ADR-0034, #1325). */
   expect(seen.approvals[0].item).toMatchObject({
     title: "Home insurance renewal", provider: "Harbour Mutual plc", cost: "400.00", currency: "GBP",
-    dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, kind: "renewal", reminderDays: [21, 7],
+    dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, kind: "renewal", reminderDays: [30, 7],
   });
   await expect(sheet).toBeHidden();
 });

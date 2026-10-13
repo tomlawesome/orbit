@@ -147,14 +147,15 @@ describe("orbit import-recovery-bundle refuses as import-recovery-bundle.sh did 
 });
 
 describe("ORBIT_RECOVERY_TEST_MODE: answers as plain lines on standard input (#1211 E4)", () => {
-  it("refuses a passphrase shorter than 12 characters, once the archive has passed", () => {
+  it("passes a short passphrase to decryption and refuses it as a wrong passphrase, never for its length (#1316)", () => {
     const { root, directoryArgs } = deployment();
     const result = runCli(["import-recovery-bundle", structurallyValidRecoveryBundle(root), ...directoryArgs], {
       input: "too-short\n",
       env: { ORBIT_RECOVERY_TEST_MODE: "true" },
     });
     expect(result.status).toBe(1);
-    expect(result.stderr).toBe("orbit: A recovery passphrase of at least 12 characters is required.\n");
+    expect(result.stderr).not.toContain("at least 12 characters");
+    expect(result.stderr).toBe("orbit: preflight/decryption failed; the recovery key could not be decrypted.\n");
     expect(result.stdout).toBe("");
   });
 

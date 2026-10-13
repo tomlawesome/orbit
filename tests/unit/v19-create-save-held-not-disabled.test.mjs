@@ -32,6 +32,9 @@ vi.mock("$lib/data/workspace.js", () => ({
   applyCommand: (...args) => applyCommand(...args),
   attachItemDocument: async () => ({}),
   checkCommand: () => new Promise((done) => { pendingCheck = { resolve: done }; }),
+  // The desk form checks through checkDraftCommand (a create under a draft id).
+  checkDraftCommand: () => new Promise((done) => { pendingCheck = { resolve: done }; }),
+  readReminders: async () => ({ firstWarningDays: null, finalWarningDays: null }),
 }));
 
 const { mountCreate } = await import("../../web/src/routes/create/create.behaviour.js");

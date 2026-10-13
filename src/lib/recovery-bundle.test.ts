@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
@@ -605,6 +606,73 @@ describe("requireCapacityForDocumentArchive (O2-R9/SR2-R3)", () => {
     const envelopePath = join(workDir, "tiny.tar.enc");
     writeFileSync(envelopePath, "a few bytes");
     expect(() => internal.requireCapacityForDocumentArchive(envelopePath, workDir)).not.toThrow();
+  });
+});
+
+// #1316: extractTar used to extract first and (at best) check space later.
+// A plain tar cannot unpack to more than its own size, so that size is now
+// compared with the destination's free space BEFORE anything is written. The free-space
+// measurement is injected (third argument), as in the test above, so an
+// ordinary small tar stands in for an oversized one.
+describe("extractTar checks capacity before extracting (#1316)", () => {
+  it("refuses a plain tar whose member sizes exceed the destination's free space, writing nothing", () => {
+    const sourceDir = join(workDir, "capacity-source");
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(join(sourceDir, "big-member"), Buffer.alloc(64 * 1024, 1));
+    writeFileSync(join(sourceDir, "other-member"), Buffer.alloc(64 * 1024, 2));
+    const tarPath = join(workDir, "capacity.tar");
+    createTar(sourceDir, tarPath, ["big-member", "other-member"]);
+    const destinationDir = join(workDir, "capacity-destination");
+    mkdirSync(destinationDir, { recursive: true });
+
+    let error: unknown;
+    try {
+      extractTar(tarPath, destinationDir, () => 10 * 1024); // 10 KiB free, 128 KiB of members
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).message).toMatch(/space|capacity/i);
+    expect(fs.readdirSync(destinationDir)).toEqual([]);
+  });
+
+  it("still extracts a plain tar that fits in the free space", () => {
+    const sourceDir = join(workDir, "fits-source");
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(join(sourceDir, "member"), "small");
+    const tarPath = join(workDir, "fits.tar");
+    createTar(sourceDir, tarPath, ["member"]);
+    const destinationDir = join(workDir, "fits-destination");
+    mkdirSync(destinationDir, { recursive: true });
+    extractTar(tarPath, destinationDir, () => 10 * 1024 * 1024);
+    expect(readFileSync(join(destinationDir, "member"), "utf8")).toBe("small");
+  });
+});
+
+// #1316: tar auto-detects compression, so a gzip-compressed tar with exactly
+// the expected member names used to pass the layout check and be extracted,
+// letting a small file expand far past the capacity check. Only a plain tar
+// is accepted.
+describe("gzip-compressed backup bundle is refused as not a plain archive (#1316)", () => {
+  function buildGzipBundle(): string {
+    const dir = join(workDir, "gzip-bundle");
+    const plainTar = buildBackupBundleFixture(dir, KEK_A);
+    const gzipPath = join(workDir, "gzip-bundle.tar.gz");
+    writeFileSync(gzipPath, gzipSync(readFileSync(plainTar)));
+    return gzipPath;
+  }
+
+  it("validateBackupBundleLayout refuses it", () => {
+    const gzipPath = buildGzipBundle();
+    expect(() => validateBackupBundleLayout(gzipPath)).toThrow(RecoveryBundleRefusal);
+  });
+
+  it("extractTar refuses it before extracting anything", () => {
+    const gzipPath = buildGzipBundle();
+    const destinationDir = join(workDir, "gzip-destination");
+    mkdirSync(destinationDir, { recursive: true });
+    expect(() => extractTar(gzipPath, destinationDir)).toThrow(RecoveryBundleRefusal);
+    expect(fs.readdirSync(destinationDir)).toEqual([]);
   });
 });
 

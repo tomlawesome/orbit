@@ -60,6 +60,8 @@ resolve_engine_image() {
     [[ "$candidate" == "$environment_file" || "$flow" == --check-rollback ]] || continue
     if [[ -f "$candidate" && ! -L "$candidate" ]]; then
       image="$(sed -n 's/^ORBIT_IMAGE=//p' "$candidate" | tail -n 1)"
+      # The engine writes CRLF lines into a CRLF file; drop the CR.
+      image="${image%$'\r'}"
     fi
   done
   [[ -n "$image" ]] ||
@@ -84,7 +86,10 @@ engine_host_identity() {
   # Read whole, then matched: `docker info | grep -q` under pipefail could
   # report a SIGPIPE'd docker as "not rootless", the dangerous answer here.
   local security_options
-  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null || true)"
+  # Fail closed: a guessed "not rootless" hands the files to a uid the
+  # operator cannot reach.
+  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null)" ||
+    fail "Could not tell whether Docker is rootless, so refusing to guess who should own the deployment files. Check that 'docker info' works, then rerun."
   if [[ "$security_options" == *rootless* ]]; then
     host_uid=0
     host_gid=0
@@ -115,9 +120,12 @@ run_engine() {
       [[ -t 0 && -t 1 ]] || use_controlling_terminal=1
       ;;
   esac
+  # ORBIT_HOST_DEPLOY_DIR makes paths the engine prints host paths, as
+  # backup.sh does.
   docker_args+=(
     -e ORBIT_HOST_UID="$host_uid"
     -e ORBIT_HOST_GID="$host_gid"
+    -e ORBIT_HOST_DEPLOY_DIR="$repo_dir"
     -e ORBIT_IMAGE
     -e ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE
     -e ORBIT_CONFIGURE_PROMPTS
@@ -209,6 +217,11 @@ case "$flow" in
     fi
     ;;
 esac
+
+# ORBIT_SECRETS_DIR is retired: the engine only uses ./.orbit-secrets, and a
+# value pointing elsewhere would leave Compose mounting different secrets.
+[[ -z "${ORBIT_SECRETS_DIR:-}" || "${ORBIT_SECRETS_DIR}" == ./.orbit-secrets || "${ORBIT_SECRETS_DIR}" == .orbit-secrets ]] ||
+  fail "ORBIT_SECRETS_DIR is set to ${ORBIT_SECRETS_DIR}, but Orbit no longer reads that setting: it keeps its secrets in ./.orbit-secrets beside .env-orbit. Move the secret files from ${ORBIT_SECRETS_DIR} into ./.orbit-secrets, remove the ORBIT_SECRETS_DIR setting, then run again."
 
 resolve_engine_image
 engine_host_identity
