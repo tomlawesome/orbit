@@ -357,7 +357,10 @@ export interface RunBackupOptions {
  * A restore that exited 0 keeps its journal until restore.sh has seen Orbit
  * healthy and run `restore --finish`, and the lock is free during that wait.
  * A backup or export taking the lock then would make --finish fail, so both
- * refuse while any journal exists, before the lock or any stop.
+ * refuse while any journal exists. Called under the lock: a restore still
+ * running holds it and writes the journal, and must be answered as
+ * restore-locked (75, it owns orbit-app); only a journal with no holder is
+ * restore-unfinished.
  */
 function refuseWhileRestoreUnfinished(backupDirectory: string): void {
   const { journalPath } = deriveRestorePaths(backupDirectory, ""); // the key file plays no part in the journal path
@@ -374,12 +377,12 @@ export function runBackup(options: RunBackupOptions): CreateBackupBundleResult {
   // While a rotation is open, new rows are wrapped under document-kek-next,
   // which a bundle does not carry: it could not bring them back.
   if (options.documentKekFile) refuseIfDocumentKekRotationOpen(options.documentKekFile);
-  refuseWhileRestoreUnfinished(options.backupDirectory);
   // #1151 RANGE-R6/RANGE-S3: taken before anything else, same as runRestore
   // — otherwise a backup's own stopApp/startApp (inside createBackupBundle)
   // can race a concurrent restore's document-tree/database cutover.
   const releaseLock = acquireBackupRestoreLock(options.backupDirectory, { operation: "backup", ownsApp: true });
   try {
+    refuseWhileRestoreUnfinished(options.backupDirectory);
     // #1151 RANGE-R7: read only now, under the lock — an import's two-rename
     // key swap (taken under the same lock) can leave the live key file
     // briefly absent.
@@ -698,12 +701,12 @@ export function runExportRecoveryBundle(options: RunExportRecoveryBundleOptions)
   // Same reason as runBackup: the recovery bundle carries only the current key.
   if (options.documentKekFile) refuseIfDocumentKekRotationOpen(options.documentKekFile);
   requireRegularNonSymlinkFile(options.sourceBundlePath, "Usage: orbit export-recovery-bundle <backup.tar>");
-  refuseWhileRestoreUnfinished(options.backupDirectory);
   // Held for the whole run so that scratch left by a killed export can be
   // told from a live one's and swept here (or by the next backup). An export
   // never stops orbit-app, so a backup or restore it turns away restarts it.
   const releaseLock = acquireBackupRestoreLock(options.backupDirectory, { operation: "export", ownsApp: false });
   try {
+    refuseWhileRestoreUnfinished(options.backupDirectory);
     sweepKilledBackupScratch(options.backupDirectory);
     return exportRecoveryBundleLocked(options);
   } finally {

@@ -24,6 +24,7 @@ secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
 readonly secrets_directory
 # The engine one-off's container name: unique to this run, so the EXIT trap can `docker wait` for it.
 readonly engine_name="orbit-backup-engine-$$"
+readonly journal_path="$backup_directory/.orbit-restore/restore.journal"
 # The engine's exit status when the backup/restore lock is held by a run that
 # stopped orbit-app (a backup or restore; a preflight takes no lock), so that
 # run owns orbit-app and this one leaves it alone. A running export also holds
@@ -242,6 +243,10 @@ if [[ "${1:-}" == "--verify" ]]; then
 elif [[ "$#" == 0 ]]; then
   # shellcheck disable=SC2119  # this script does not wait for health
   require_deployment
+  # Before the stop: an unfinished restore (in its health wait, or failed and
+  # left stopped for --recover) owns orbit-app, and stopping then restarting
+  # it would undo that. The engine checks again under the lock.
+  [[ ! -e "$journal_path" && ! -L "$journal_path" ]] || fail 'A restore has not been finished; run bash scripts/restore.sh --finish once Orbit is healthy, or --recover to roll it back.'
   engine_host_identity
   # A signal, a timeout or a fail() after the stop must not leave Orbit down
   # once the engine has ended (the trap waits for it):

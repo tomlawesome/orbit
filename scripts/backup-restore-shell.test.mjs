@@ -603,6 +603,20 @@ describe("the stop / engine / start rule (E3)", () => {
     expect(verbs(run(deployment, "backup.sh", []).calls)).toEqual(["stop", "run", "start"]);
   });
 
+  // #1316: a restore that exited 0 keeps its journal until restore.sh --finish.
+  // backup.sh must refuse before it stops orbit-app, runs the engine or
+  // starts anything, and say how to finish or recover.
+  it("backup.sh refuses before touching the app while a restore journal exists, naming --finish and --recover", () => {
+    const deployment = makeDeployment();
+    mkdirSync(dirname(deployment.journal), { recursive: true });
+    writeFileSync(deployment.journal, "format_version=1\nstate=database-restored\n");
+    const result = run(deployment, "backup.sh", []);
+    expect(result.status).toBe(1);
+    expect(verbs(result.calls)).toEqual([]);
+    expect(result.stderr).toContain("bash scripts/restore.sh --finish");
+    expect(result.stderr).toContain("--recover");
+  });
+
   it("backup.sh starts the app again when the backup fails", () => {
     const deployment = makeDeployment();
     const result = run(deployment, "backup.sh", [], { env: { FAKE_ENGINE_STATUS: "1" } });

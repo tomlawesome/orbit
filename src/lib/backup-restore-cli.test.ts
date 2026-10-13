@@ -386,7 +386,7 @@ describe("runBackup", () => {
   // that wait. A scheduled backup landing then would take the lock and make
   // --finish fail, so backup refuses while a journal exists, before the lock
   // or any stop, and says how to finish it.
-  it("R1-4: refuses with restore-unfinished, naming `bash scripts/restore.sh --finish`, while a restore journal exists, before taking the lock or stopping anything", () => {
+  it("R1-4: refuses with restore-unfinished, naming `bash scripts/restore.sh --finish`, while a restore journal exists and no process holds the lock", () => {
     const documentsRoot = join(sandbox, "docs-backup-journal");
     buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
     const backupDirectory = join(sandbox, "backup-journal-backups");
@@ -410,8 +410,9 @@ describe("runBackup", () => {
     expect(adapter.stopCalls).toBe(0);
     expect(adapter.appRunning).toBe(true);
     expect(existsSync(journalPath)).toBe(true); // Left alone.
-    // Nothing written: no lock file taken, no bundle, no scratch directory.
-    expect(readdirSync(backupDirectory)).toEqual([".orbit-restore"]);
+    // Checked under the lock, so the lock file (left in place, as every run
+    // leaves it) is there; nothing else: no bundle, no scratch directory.
+    expect(readdirSync(backupDirectory).sort()).toEqual([".orbit-backup-restore.lock", ".orbit-restore"]);
   });
 
   it("holds the shared flock for the whole run and releases it afterwards, leaving the file in place", () => {
@@ -1288,6 +1289,34 @@ describe("runExportRecoveryBundle (export-recovery-bundle.sh's orchestration)", 
       expect((caught as BackupRestoreCliRefusal).code).toBe("restore-locked");
       expect(adapter.recordExportedCalls).toBe(0);
       expect(readdirSync(recoveryDirectory)).toEqual([".orbit-backup-restore.lock"]); // Nothing written.
+    } finally {
+      killLockHolder(holder, lockPath);
+    }
+  });
+
+  // #1316: when another process holds the lock AND a journal exists, the
+  // holder answers first: the journal may be that holder's own in-flight
+  // restore, so "restore-unfinished" would be wrong.
+  it("#1316: refuses with restore-locked, not restore-unfinished, when another process holds the lock and a restore journal exists", () => {
+    const documentsRoot = join(sandbox, "docs-backup-lock-journal");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "backup-lock-journal-backups");
+    mkdirSync(join(backupDirectory, ".orbit-restore"), { recursive: true, mode: 0o700 });
+    writeFileSync(join(backupDirectory, ".orbit-restore", "restore.journal"), "format_version=1\nstate=database-restored\n", { mode: 0o600 });
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    const lockPath = join(backupDirectory, ".orbit-backup-restore.lock");
+    const holder = holdLockInAnotherProcess(lockPath);
+
+    try {
+      let caught: unknown;
+      try {
+        runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(BackupRestoreCliRefusal);
+      expect((caught as BackupRestoreCliRefusal).code).toBe("restore-locked");
+      expect(adapter.stopCalls).toBe(0);
     } finally {
       killLockHolder(holder, lockPath);
     }
