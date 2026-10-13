@@ -528,3 +528,11 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-mail-review.spec.ts:431 "the phone sheet reads a staged paper's page one, and tells a gone mail apart from one it just cannot draw (#1155)" — mobile-webkit, marked expected-to-fail for #1196
 
 - 2026-10-13 · 5e852f6f (!1064; the same app code passed this job on pipeline 2559, where the test failed as expected) · pipeline 2560 / smoke_webkit_mobile (job 36017, the first re-run) · "Expected to fail, but passed", on the first attempt and the in-job retry: the #1196 driver fault it is marked for does not happen every run. First sighting.
+
+## v19-keyboard.spec.ts:314 "arrive: the sign-in door opens by Tab and Enter alone" — desktop-chromium, `net::ERR_ABORTED` on /home (the #1096 symptom, after its fix)
+
+- 2026-10-14 · 0c6e60bf · local `scripts/test-e2e-local.sh` full run, 2 workers, stopped at 681/1413 under host load · `page.goto: net::ERR_ABORTED at http://127.0.0.1:<port>/home` after 1.9s. Passed alone on the same code and a fresh stack (`--reuse … --project desktop-chromium --spec tests/e2e/v19-keyboard.spec.ts:314`, 3.7s). #1096's fix reasoned from `workers: 1`; this run had 2. First sighting.
+
+## v19-create.spec.ts:399 "the quick add's box takes a document by click or by drop, and opens the full form with it" — desktop-firefox, `socket hang up`
+
+- 2026-10-14 · 0c6e60bf · local `scripts/test-e2e-local.sh` full run, 2 workers, stopped at 681/1413 under host load · `apiRequestContext.get: socket hang up` on `GET /api/auth/session` from the household-cleanup helper, after 9.9s. Passed alone on the same code and a fresh stack (`--reuse … --project desktop-firefox --spec tests/e2e/v19-create.spec.ts:399`, 9.7s). First sighting.
