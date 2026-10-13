@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { settleArrival } from "./support/arrival";
+import { cleanupHousehold, sessionHeaders } from "./support/households";
+import { seedHousehold, type Household } from "./support/signed-in";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { homeIsLive } from "./support/keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
@@ -36,8 +38,8 @@ interface EndSessionCall {
 async function endSessionCalls(page: Page): Promise<EndSessionCall[]> {
   const reader = await page.context().newPage();
   try {
-    await reader.goto(`${PROVIDER}/test/end-sessions`);
-    return JSON.parse((await reader.locator("#records").textContent()) ?? "[]") as EndSessionCall[];
+      await reader.goto(`${PROVIDER}/test/end-sessions`);
+      return JSON.parse((await reader.locator("#records").textContent()) ?? "[]") as EndSessionCall[];
   } finally {
     await reader.close();
   }
@@ -49,12 +51,23 @@ async function signIn(page: Page) {
   await page.getByRole("link", { name: READER() }).click();
   await ensureWorkerAdministrator(page);
   await settleArrival(page);
+}
+
+/* Home draws only for a reader with a household, and the database is reset
+   between spec files, so the reader is given one here rather than relying on
+   another spec having left one (#1316: it waited on the belong card for home's
+   ready mark, passing or failing by test order). */
+async function signInToHome(page: Page): Promise<Household> {
+  await signIn(page);
+  const household = await seedHousehold(page, "sign-out-provider-return");
+  await page.goto("/home");
   await homeIsLive(page);
   const tour = page.locator("#orbit-tour-transport");
   if (await tour.isVisible().catch(() => false)) {
     await page.keyboard.press("Escape");
     await expect(page.locator("#orbit-tour-veil")).toBeHidden();
   }
+  return household;
 }
 
 /** Opens whichever menu this layout draws (desk 901px and up, otherwise the phone's) and returns its sign-out control. */
@@ -75,7 +88,8 @@ test("signing out of a provider session returns from the provider's sign-out pag
   test.setTimeout(120_000);
   await page.emulateMedia({ reducedMotion: "reduce" });
   const mobile = info.project.name.startsWith("mobile");
-  await signIn(page);
+  const household = await signInToHome(page);
+  try {
   const before = (await endSessionCalls(page)).filter((call) => call.sub === `oidc-test-w${process.env.TEST_PARALLEL_INDEX}-administrator`);
 
   await (await signOutControl(page, mobile)).click();
@@ -99,4 +113,8 @@ test("signing out of a provider session returns from the provider's sign-out pag
     return (await response.json()) as { authenticated?: boolean };
   });
   expect(session.authenticated, "Orbit's own session should be over").toBeFalsy();
+  } finally {
+    await signIn(page);
+    await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
+  }
 });
