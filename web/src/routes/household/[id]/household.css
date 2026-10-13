@@ -227,13 +227,13 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
    does not print a rule everybody has to read, it answers the person the rule
    stops, while it is stopping them. */
 .household-page .moment{margin-top:10px;font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.85}
-.household-page .moment.warn{color:var(--warm)}
+.household-page .moment.warn{color:var(--warm-text)}
 /* and it points at the way out rather than describing it */
 .household-page .ghost.beckon{border-color:var(--accent);color:var(--accent-text);
        box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
 /* What a control says when it could not do what it looked like it did — the
    helm's .note in the warm ink, never on the happy path. */
-.household-page .problem{margin-top:12px;font:11px var(--mono);color:var(--warm);line-height:1.8}
+.household-page .problem{margin-top:12px;font:11px var(--mono);color:var(--warm-text);line-height:1.8}
 
 /* sections: one editable list, saved whole. OWNER-ONLY (2b) — a plain
    member never sees this card at all, not even read-only. */
@@ -407,7 +407,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 /* the card's prose is 13px; its mono lines are not — say so, or the prose
    rule out-specifies .said and .problem and swallows them */
 .household-page .dangercard .said{font-size:11px;color:var(--ok-text);max-width:none}
-.household-page .dangercard .problem{font-size:11px;color:var(--warm);max-width:none}
+.household-page .dangercard .problem{font-size:11px;color:var(--warm-text);max-width:none}
 
 /* the button: red on the outside at rest, SOLID red once armed */
 .household-page .dangerbtn{font:600 11px var(--mono);letter-spacing:.15em;text-transform:uppercase;
@@ -466,7 +466,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .arch .man .lab{color:var(--ink-mid)}
 .household-page .arch .man small{margin-left:auto;font:10.5px var(--mono);color:var(--ink-faint);
       letter-spacing:.04em;text-align:right}
-.household-page .arch .man small.zero,.household-page .arch .man small.warm{color:var(--warm)}
+.household-page .arch .man small.zero,.household-page .arch .man small.warm{color:var(--warm-text)}
 .household-page .arch .man li.head{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.06em;
       padding-bottom:7px}
 .household-page .arch .act{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:0}
@@ -476,9 +476,9 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .arch .step.open{display:block}
 .household-page .arch .step .field{max-width:430px}
 .household-page .arch .field input.pw{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em}
-.household-page .arch .never{margin:0 0 13px;font:11px var(--mono);color:var(--warm);line-height:1.75;
+.household-page .arch .never{margin:0 0 13px;font:11px var(--mono);color:var(--warm-text);line-height:1.75;
       max-width:60ch}
-.household-page .arch .never b{color:var(--warm);font-weight:600}
+.household-page .arch .never b{color:var(--warm-text);font-weight:600}
 .household-page .arch .fname{margin:0 0 12px;font-size:13px;color:var(--ink)}
 .household-page .arch .fname b{font-weight:530}
 .household-page .arch .fname small{margin-left:8px;font:10.5px var(--mono);color:var(--ink-quiet)}
@@ -486,7 +486,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .arch .dup{margin:0 0 12px;padding:0;list-style:none}
 .household-page .arch .dup li{display:flex;align-items:center;gap:10px;padding:4px 2px;
       font-size:13px;color:var(--ink)}
-.household-page .arch .dup li span{margin-left:auto;font:10.5px var(--mono);color:var(--warm);
+.household-page .arch .dup li span{margin-left:auto;font:10.5px var(--mono);color:var(--warm-text);
       letter-spacing:.06em;white-space:nowrap}
 .household-page .arch .refuse{margin:12px 0 0;font:11.5px var(--mono);color:var(--overdue-text);line-height:1.7}
 /* the reactive step-up challenge (#1132): the same "type your password,
