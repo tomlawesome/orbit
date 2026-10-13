@@ -131,4 +131,3 @@ button instead of next back and skip."*
 - Round 4 must show: the manifest below the dial, a document brought in from
   the belt and the belt cycled, the way to the inbox, the account menu and its
   themes — and carry more of the ratified copy along the way.
-

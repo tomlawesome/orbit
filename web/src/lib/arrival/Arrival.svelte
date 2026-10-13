@@ -385,10 +385,11 @@
         await applyCommand(createSystemCommand({ name: wanted, timezone, currency }, { uuid: () => id }));
       }
     } catch (error) {
-      if (error instanceof TypeError) {
-        /* No answer came back ("Failed to fetch"), which is neither a success
-           nor a failure: query state before telling. The button stays held
-           while the session is read, once. */
+      if (error instanceof TypeError || isGatewayAnswer(error)) {
+        /* No answer came back ("Failed to fetch", or the proxy in front of
+           Orbit answering for it), which is neither a success nor a failure:
+           query state before telling. The button stays held while the
+           session is read, once. */
         const landed = await landedAfterSilence(pendingCreate?.id);
         if (disposed) return;
         if (landed) { pendingCreate = null; location.assign("/home"); return; }
@@ -427,19 +428,52 @@
   }
 
   /**
+   * A gateway's own bare answer (502, 503, 504 with no Orbit error code):
+   * the proxy in front of Orbit spoke, not Orbit, so whether the create
+   * landed is as unknown as when nothing answered at all.
+   * @param {unknown} error
+   */
+  function isGatewayAnswer(error) {
+    return error instanceof WorkspaceError && !error.code
+      && (error.status === 502 || error.status === 503 || error.status === 504);
+  }
+
+  /* How long a read after an unknown outcome is given before it is aborted
+     and counts as unknown too, so a hung request never holds the button. */
+  const READ_BOUND_MS = 2000;
+
+  /**
+   * One read, aborted once READ_BOUND_MS has passed.
+   * @template T
+   * @param {(signal: AbortSignal) => Promise<T>} read
+   * @returns {Promise<T>}
+   */
+  async function bounded(read) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), READ_BOUND_MS);
+    try {
+      return await read(controller.signal);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
    * After a create that got no answer, whether it landed, read off the
    * session the way decide() reads it: true when the session points at the
    * household sent, false when it answers and does not, null when it cannot
-   * be read either and nothing is known.
+   * be read either (or not in time) and nothing is known.
    * @param {string | undefined} householdId
    * @returns {Promise<boolean | null>}
    */
   async function landedAfterSilence(householdId) {
     try {
-      const response = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
-      if (!response.ok) return null;
-      const session = await response.json();
-      return Boolean(householdId) && session?.activeHouseholdId === householdId;
+      return await bounded(async (signal) => {
+        const response = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store", signal });
+        if (!response.ok) return null;
+        const session = await response.json();
+        return Boolean(householdId) && session?.activeHouseholdId === householdId;
+      });
     } catch {
       return null;
     }
@@ -447,15 +481,17 @@
 
   /**
    * The name the household with this id is stored under, read off the
-   * workspace's visible households; null when the read fails or it is not
-   * among them.
+   * member's own households (a member's `visibleHouseholds` is empty: it is
+   * filled only for a reader with no household); null when the read fails,
+   * does not answer in time, or it is not among them.
    * @param {string} householdId
    * @returns {Promise<string | null>}
    */
   async function storedNameOf(householdId) {
     try {
-      const workspace = await readWorkspace();
-      return workspace?.visibleHouseholds?.find((household) => household.id === householdId)?.name ?? null;
+      const workspace = await bounded((signal) => readWorkspace(
+        /** @type {typeof fetch} */ ((url, init) => fetch(url, { ...init, signal }))));
+      return workspace?.households?.find((household) => household.id === householdId)?.name ?? null;
     } catch {
       return null;
     }
@@ -464,8 +500,9 @@
   /**
    * The "already created" line's road: the household this card made is
    * theirs, so it becomes the session's and the reader goes home, where
-   * settings can change what was edited. No second create is sent. A failure
-   * leaves the line standing, its link still there to press.
+   * settings can change what was edited. No second create is sent. A
+   * failure, lost or refused, says so on the same line and leaves its link
+   * there to press again.
    * @param {string | null | undefined} householdId
    */
   async function carryOn(householdId) {
@@ -475,6 +512,9 @@
       if (!fixture) await applyCommand({ type: "household.activate", householdId });
     } catch {
       busy = false;
+      reject(rejected?.name ?? pendingCreate?.name ?? name.trim(), "was already created — couldn't open it", {
+        householdId, link: "try again →", road: "carry-on",
+      });
       return;
     }
     pendingCreate = null;

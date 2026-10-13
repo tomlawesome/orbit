@@ -24,7 +24,7 @@
   let members = $state([
     { id: "rob", name: "Rob Harlow", role: "owner" },
     { id: "ada", name: "Ada Harlow", role: "member" },
-    { id: "tom", name: "Ned Harlow", role: "member" },
+    { id: "ned", name: "Ned Harlow", role: "member" },
   ]);
   /** @param {string} id */
   function removeMember(id) {
@@ -146,8 +146,8 @@
     <span class="p-body sug" title="suggested"></span>
     <span class="p-body ok breathing" title="breathing"></span>
     <span class="p-body failed" title="failed"></span>
-    <span class="p-avatar"AH</span>
-    <span class="p-avatar owner"RH</span>
+    <span class="p-avatar">AH</span>
+    <span class="p-avatar owner">RH</span>
     <span class="p-paper" aria-hidden="true">◆</span>
     <span class="p-aster" aria-hidden="true">✦</span>
   </section>

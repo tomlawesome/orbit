@@ -291,6 +291,7 @@ page's URL at failure, which this one has to infer.
 - 2026-10-04 · bc9ba29e (!1021, #1151's audit fixes; the only door-side change since the green run on bcaf64e0 is a waiting-card timeout constant, nothing in the ring's motion) · pipeline 2064 / fidelity (job 31041) · "a jump between frames at 280ms": 25.5 against the < 20 bound, same shape as the first sighting. The same test passed on pipeline 2054 ten commits earlier. Second sighting; an issue on the third.
 - 2026-10-07 · 5a12b2bd (!1043, the create-form batch; nothing in the ring's motion) · pipeline 2233 / fidelity (job 33106) · "a jump between frames at 328ms": 20.008 against the < 20 bound. Third sighting: filed as #1306.
 - 2026-10-12 · 9232c92c (!1064, #1371's shared door import) · pipeline 2559 / fidelity (job 35977) · "a jump between frames at 270ms": 22.06 against the < 20 bound, the job's only failure (162 passed). Retried as job 35991 on the same commit: green. Fourth sighting.
+- 2026-10-13 · 01666c27 (`fix/1408-invented-names`, a fixture-name sweep; nothing in the ring's motion) · local `pnpm fidelity`, run while other Playwright captures loaded the host · "a jump between frames at 282ms": 26.8 against the < 20 bound, the run's only failure (174 passed). Green on a rerun of door-station.spec.js alone on the same code (29 passed). Fifth sighting, still #1306.
 
 ## tour-pocket-webkit.spec.js "plays end to end at 430x932 under normal motion" — pill moving between places (#1174)
 

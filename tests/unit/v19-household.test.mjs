@@ -18,7 +18,7 @@ import { initials as initialsOf } from "../../web/src/lib/format.js";
 import { WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
 import { MEMBERS_FIXTURE } from "../../web/src/lib/data/fixtures/household.js";
 
-const TOM = { id: "u-fixture", displayName: "Ned Harlow", email: "ned@harlow.example" };
+const NED = { id: "u-fixture", displayName: "Ned Harlow", email: "ned@harlow.example" };
 const TODAY = "2026-08-13"; // DESIGN_TODAY: the date every mockup was drawn against
 const NOON = "2026-08-13T12:00:00Z";
 
@@ -28,7 +28,7 @@ const ownerScreen = (overrides = {}) =>
   householdScreenOf({
     workspace: WORKSPACE_FIXTURE,
     householdId: "hh-harlow-1",
-    user: TOM,
+    user: NED,
     members: MEMBERS_FIXTURE["hh-harlow-1"].members,
     candidates: MEMBERS_FIXTURE["hh-harlow-1"].candidates,
     today: TODAY,
@@ -38,7 +38,7 @@ const ownerScreen = (overrides = {}) =>
 
 describe("initials", () => {
   it("takes two letters from a chosen display name", () => {
-    expect(initialsOf("Ned Harlow")).toBe("TL");
+    expect(initialsOf("Ned Harlow")).toBe("NH");
     expect(initialsOf("Ada Reid")).toBe("AR");
   });
 
@@ -207,7 +207,7 @@ describe("the owner's screen", () => {
       { id: "jr-2", householdId: "hh-seaside-4551", userId: "u-rob", displayName: "Rob Harlow", createdAt: "2026-08-11T12:00:00.000Z" },
     ];
     expect(ownerScreen({ joinRequests: requests }).joinRequests).toEqual([
-      { id: "jr-1", userId: "u-sue", name: "Sue Harlow", initials: "SL", waited: "2d ago" },
+      { id: "jr-1", userId: "u-sue", name: "Sue Harlow", initials: "SH", waited: "2d ago" },
     ]);
   });
 
@@ -224,7 +224,7 @@ describe("the non-owner's screen", () => {
   const memberScreen = householdScreenOf({
     workspace: WORKSPACE_FIXTURE,
     householdId: "hh-seaside-4551",
-    user: TOM,
+    user: NED,
     members: MEMBERS_FIXTURE["hh-seaside-4551"].members,
     candidates: MEMBERS_FIXTURE["hh-seaside-4551"].candidates,
     today: TODAY,
@@ -336,7 +336,7 @@ describe("invitations on the household screen", () => {
     const screen = householdScreenOf({
       workspace: WORKSPACE_FIXTURE,
       householdId: "hh-seaside-4551",
-      user: TOM,
+      user: NED,
       members: MEMBERS_FIXTURE["hh-seaside-4551"].members,
       candidates: MEMBERS_FIXTURE["hh-seaside-4551"].candidates,
       invitations: [{ ...INVITATION, householdId: "hh-seaside-4551" }],

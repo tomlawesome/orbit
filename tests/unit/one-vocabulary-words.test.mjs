@@ -72,8 +72,8 @@ describe("initials", () => {
   });
 
   it("takes the first letter of each of two words, upper case", () => {
-    expect(format.initials("Ned Harlow")).toBe("TL");
-    expect(format.initials("tom harlow")).toBe("TL");
+    expect(format.initials("Ned Harlow")).toBe("NH");
+    expect(format.initials("ned harlow")).toBe("NH");
   });
 
   it("is never empty for a real name", () => {
