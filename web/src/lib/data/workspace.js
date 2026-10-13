@@ -2093,14 +2093,41 @@ const UNAVAILABLE_RELAY = {
  * ("configured"/"not configured"), never a host, a port or a credential —
  * the same rule the relay follows.
  *
+ * `within` bounds the wait (#1316): past that many milliseconds the fetch is
+ * aborted and the read refused, so a caller holding a screen open on the
+ * answer falls back instead of waiting on a server that never answers.
+ *
+ * @param {{ within?: number }} [options]
  * @returns {Promise<Reminders>}
  */
-export async function readReminders() {
-  /** @type {{ reminders?: Partial<Reminders> }} */
-  const body = await json(
-    await fetch("/api/settings/reminders", { credentials: "same-origin" }),
-  );
-  return remindersOf(body.reminders);
+export async function readReminders({ within } = {}) {
+  const abort = within ? new AbortController() : null;
+  const read = (async () => {
+    /** @type {{ reminders?: Partial<Reminders> }} */
+    const body = await json(
+      await fetch("/api/settings/reminders", abort
+        ? { credentials: "same-origin", signal: abort.signal }
+        : { credentials: "same-origin" }),
+    );
+    return remindersOf(body.reminders);
+  })();
+  if (!abort) return read;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  /** @type {Promise<never>} */
+  const late = new Promise((_, refuse) => {
+    timer = setTimeout(() => {
+      abort.abort();
+      refuse(new WorkspaceError("Orbit could not read your reminder timing in time", {
+        code: "reminders_timeout",
+      }));
+    }, within);
+  });
+  try {
+    return await Promise.race([read, late]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
