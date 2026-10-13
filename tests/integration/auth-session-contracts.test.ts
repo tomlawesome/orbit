@@ -176,7 +176,7 @@ describe("PostgreSQL authentication session contracts", () => {
     // The route only asks the provider when sign-in is configured; without it
     // this case would pass for the wrong reason.
     expect(config.oidc).not.toBeNull();
-    vi.spyOn(oidc, "discoverProvider").mockResolvedValue({
+    const discover = vi.spyOn(oidc, "discoverProvider").mockResolvedValue({
       issuer: config.oidc!.issuer,
       authorization_endpoint: "https://oidc.invalid.example/authorize",
       token_endpoint: "https://oidc.invalid.example/token",
@@ -198,6 +198,8 @@ describe("PostgreSQL authentication session contracts", () => {
     expect(redirect.origin + redirect.pathname).toBe("https://oidc.invalid.example/logout");
     expect(redirect.searchParams.get("post_logout_redirect_uri")).toBe(new URL("/logout", config.appUrl).href);
     expect(redirect.searchParams.get("client_id")).toBe(config.oidc!.clientId);
+    // Sign-out alone may fall back on the last good discovery document.
+    expect(discover).toHaveBeenCalledWith(config.oidc, { staleIfError: true });
     expect(await sessionRows(session.sessionId)).toHaveLength(0);
   });
 

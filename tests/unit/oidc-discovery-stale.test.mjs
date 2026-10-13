@@ -91,6 +91,23 @@ describe("discoverProvider staleIfError (#1316 P-R13, P-S25)", () => {
     await expect(discoverProvider(config)).rejects.toMatchObject({ code: "discovery_failed" });
   });
 
+  it("answers a strict and a staleIfError call started together differently when the shared refresh fails", async () => {
+    const { discoverProvider } = await loadOidc();
+    fetchMock.mockResolvedValueOnce(metadataResponse());
+    await discoverProvider(config);
+
+    vi.advanceTimersByTime(ONE_HOUR_AND_A_BIT_MS);
+    fetchMock.mockResolvedValue(new Response("unavailable", { status: 503 }));
+
+    // Started in the same tick, so both wait on the one refresh in flight.
+    const strict = discoverProvider(config);
+    const stale = discoverProvider(config, { staleIfError: true });
+
+    await expect(strict).rejects.toMatchObject({ code: "discovery_failed" });
+    await expect(stale).resolves.toMatchObject({ end_session_endpoint: END_SESSION });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("still rejects discovery_failed with staleIfError when there was never a good document", async () => {
     const { discoverProvider } = await loadOidc();
     fetchMock.mockResolvedValue(new Response("unavailable", { status: 503 }));

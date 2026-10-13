@@ -40,7 +40,10 @@ export const POST = api(
     let providerLogout = null;
     if (config.oidc) {
       try {
-        // A failed refresh falls back on the last good document rather than skip the provider sign-out.
+        /* A failed refresh falls back on the last good document rather than
+           skip the provider sign-out. That needs an earlier good lookup in
+           this process: after a restart with the provider down there is no
+           document to fall back on, and the provider sign-out is skipped. */
         const metadata = await discoverProvider(config.oidc, { staleIfError: true });
         providerLogout = createProviderLogoutUrl(config.oidc, metadata, postLogoutReturnTo);
       } catch {
