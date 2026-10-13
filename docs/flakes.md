@@ -341,6 +341,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-10 · a318e11b (#1342 batch) · pipeline 2382 / smoke (job 34366), desktop-chromium and mobile-chromium, and smoke_webkit (job 34368), desktop-webkit · the :379 announcement check and the :396 focus check for /create timed out waiting for the error words; each passed on the in-job retry. Not the new service worker: this file already keeps it out on WebKit, and a local run on the fixed branch passed on desktop-chromium, mobile-chromium, desktop-firefox and desktop-webkit. Still #1313.
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934), mobile-webkit · the :379 announcement check for /create failed its first attempt and passed on the in-job retry.
 - 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (jobs 35081 and 35145), mobile-webkit · the :396 focus check for /create failed its first attempt and passed on the in-job retry, in both re-runs.
+- 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · "a save on /create that cannot reach Orbit is announced, and the act can be repeated by keyboard": `the failure is shown` not visible at line 387.
 
 ## settings-notification-history.spec.ts:137 "a member sees their own last sent reminders, plainly, on both dialects" — desktop-firefox
 
@@ -385,6 +386,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-10 · a318e11b (v0.3 batch, !1054) · pipeline 2382 / smoke_webkit (job 34368), **desktop-webkit**, same world-forced test · the same `#1262: the menu is still open after sign-out started`, first attempt and in-job retry. Filed as #1367 after the third sighting; this is the first on desktop-webkit.
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 35081, the first re-run) · the same `#1262: the menu is still open after sign-out started`, first attempt and in-job retry. Fourth sighting; noted on #1367.
 - 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35145, the second re-run) · failed its first attempt, passed on the in-job retry.
+- 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · the same `#1262: the menu is still open after sign-out started` at line 198.
 
 ## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on desktop-webkit
 
@@ -470,10 +472,12 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934) · `auditTabOrder`: `Tab reached a control the screen does not show as visible` for the drawer's Snooze, Complete, Attach, Retire, Edit and Copy link buttons, on the first attempt and the in-job retry.
 - 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35081, the first re-run) · the same audit message on the first attempt; passed on the in-job retry.
 - 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35145, the second re-run) · failed its first attempt, passed on the in-job retry. Third sighting: filed as #1381.
+- 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · `auditTabOrder` failed at line 442.
 
 ## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on mobile-webkit
 
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (jobs 35081 and 35145, both re-runs) · failed its first attempt and passed on the in-job retry, in both. First sightings on mobile-webkit; the heading above is desktop-webkit.
+- 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · `#1249: the menu is still open after sign-out started` at line 284. Second sighting.
 
 ## v19-document-preview.spec.ts:397 "the preview's pager turns a multi-page document in place, and the reader opens on its page" — mobile-webkit
 
