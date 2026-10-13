@@ -14,6 +14,7 @@ import {
 } from "./validation";
 import { syntheticJpeg, syntheticPdf, syntheticPdfWithXrefStream, syntheticPng } from "../../../tests/support/synthetic-documents";
 import {
+  classicChainPdf,
   syntheticModernPdf,
   syntheticPdfActiveContent,
   syntheticPdfWithPages,
@@ -115,6 +116,19 @@ describe("structural document classification", () => {
 
     it("accepts the same chain when the first table's /Prev points back at the final table (pdf.js skips the revisit)", async () => {
       await expect(classifyDocumentStructure(xrefStmChainPdf({ cycle: true }), "application/pdf")).resolves.toBe("supported_structure");
+    });
+
+    it("accepts a chain of 32 classic tables linked by /Prev (the section cap is not reached)", async () => {
+      await expect(classifyDocumentStructure(classicChainPdf({ sections: 32 }), "application/pdf")).resolves.toBe("supported_structure");
+    });
+
+    it("refuses a chain of 33 classic tables linked by /Prev (the section cap)", async () => {
+      await expect(classifyDocumentStructure(classicChainPdf({ sections: 33 }), "application/pdf")).resolves.toBe("unsupported_structure");
+    });
+
+    it("refuses two chained classic tables whose declared counts are each under the entry cap but sum past it", async () => {
+      await expect(classifyDocumentStructure(classicChainPdf({ sections: 2, countEach: 700_000 }), "application/pdf"))
+        .resolves.toBe("unsupported_structure");
     });
   });
 

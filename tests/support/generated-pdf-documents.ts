@@ -217,6 +217,31 @@ export function xrefStmChainPdf(options: { cycle?: boolean } = {}): Buffer {
   return Buffer.concat([bytes, text(first), text(section(firstOffset, secondOffset))]);
 }
 
+/**
+ * `sections` classic xref tables chained by /Prev, each listing the same five page objects; startxref names the last.
+ * Each subsection header declares `countEach` entries (default 6, the real count) while carrying only the six real lines.
+ */
+export function classicChainPdf(options: { sections: number; countEach?: number }): Buffer {
+  const content = pageContent();
+  const objects = pageObjects(object(5, streamObject(`/Length ${content.length}`, content)));
+  let bytes = text("%PDF-1.7\n");
+  const offsets = new Map<number, number>();
+  for (const entry of objects) {
+    offsets.set(entry.id, bytes.length);
+    bytes = Buffer.concat([bytes, text(`${entry.id} 0 obj\n`), entry.body, text("\nendobj\n")]);
+  }
+  let entries = "0000000000 65535 f \n";
+  for (let id = 1; id <= 5; id += 1) entries += `${String(offsets.get(id)).padStart(10, "0")} 00000 n \n`;
+  let previous: number | undefined;
+  for (let section = 0; section < options.sections; section += 1) {
+    const offset = bytes.length;
+    const prev = previous === undefined ? "" : ` /Prev ${previous}`;
+    bytes = Buffer.concat([bytes, text(`xref\n0 ${options.countEach ?? 6}\n${entries}trailer\n<< /Size 6 /Root 1 0 R${prev} >>\n`)]);
+    previous = offset;
+  }
+  return Buffer.concat([bytes, text(`startxref\n${previous}\n%%EOF\n`)]);
+}
+
 function objectStreamPdf(): Buffer {
   const font = text("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
   const objectStreamHeader = text("4 0 ");
