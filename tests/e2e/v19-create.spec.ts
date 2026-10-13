@@ -252,68 +252,79 @@ test("a document picked on the create form is attached to the saved item", async
  * nothing reached, and the owner saw the lane sit on "Focusing on the
  * anomaly" for good.
  */
-test("picking a document shows its front page while the read runs alongside", async ({ page }) => {
-  test.skip(test.info().project.name.startsWith("mobile"), "the pocket's reading card is proven by its own tests below (#1279)");
-  test.setTimeout(90_000);
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: workerAccount("administrator") }).click();
-  await settleArrival(page);
-  await ensureWorkerAdministrator(page);
-  households.track(await seedHousehold(page));
+test.describe(() => {
+  /* The preview and the read are held with `page.route`, which a request from
+     a page Orbit's service worker controls skips on WebKit (#1196, #1235); kept
+     out there, as in the describes below. */
+  test.use({
+    serviceWorkers: async ({}, use, testInfo) => {
+      await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
+    },
+  });
 
-  // The lane says "reading" until both requests of a pick have answered: the
-  // preview draws page one (the heading becomes "Page one"), the inspection
-  // settles the read (`data-reading` goes). Either can win a race with the
-  // assertions, so hold both, look at the lane while it is still reading, then
-  // let them through.
-  let release: () => void = () => undefined;
-  const held = new Promise<void>((resolve) => { release = resolve; });
-  for (const route of ["**/item-document-preview", "**/item-document-inspection"]) {
-    await page.route(route, async (request) => {
-      await held;
-      await request.continue();
-    });
-  }
+  test("picking a document shows its front page while the read runs alongside", async ({ page }) => {
+    test.skip(test.info().project.name.startsWith("mobile"), "the pocket's reading card is proven by its own tests below (#1279)");
+    test.setTimeout(90_000);
+    await answerPushWithoutAService(page);
+    await page.goto("/api/auth/login?returnTo=/home");
+    await page.getByRole("link", { name: workerAccount("administrator") }).click();
+    await settleArrival(page);
+    await ensureWorkerAdministrator(page);
+    households.track(await seedHousehold(page));
 
-  try {
-    await gotoCreate(page);
-    const readcard = page.locator("#readcard");
-    await page.locator('#card input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+    // The lane says "reading" until both requests of a pick have answered: the
+    // preview draws page one (the heading becomes "Page one"), the inspection
+    // settles the read (`data-reading` goes). Either can win a race with the
+    // assertions, so hold both, look at the lane while it is still reading, then
+    // let them through.
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    for (const route of ["**/item-document-preview", "**/item-document-inspection"]) {
+      await page.route(route, async (request) => {
+        await held;
+        await request.continue();
+      });
+    }
 
-    // The lanes split and the lane says what it is doing, straight away.
-    await expect(page.locator("body")).toHaveClass(/\bdoc\b/);
-    await expect(readcard).toBeVisible();
-    await expect(readcard).toHaveAttribute("data-reading", "true");
-    await expect(page.locator("#read-head")).toHaveText("Reading your document");
-    await expect(page.locator("body")).not.toHaveClass(/\bsnap\b/);
-    release();
+    try {
+      await gotoCreate(page);
+      const readcard = page.locator("#readcard");
+      await page.locator('#card input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
 
-    // Page one lands — a real picture, drawn from the file — within seconds,
-    // and the heading says so.
-    await expect(page.locator("body")).toHaveClass(/\bsnap\b/, { timeout: 20_000 });
-    await expect(page.locator("#read-head")).toHaveText("Page one");
-    const sheet = page.locator("#sheet-page");
-    await expect(sheet).toBeVisible();
-    await expect(sheet).toHaveAttribute("alt", `Page one of ${DOCUMENT}`);
-    await expect.poll(() => sheet.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
-    await expect(page.locator("#rc-file")).toContainText(DOCUMENT);
-    await expect(page.locator("#rc-scan")).toBeVisible();
+      // The lanes split and the lane says what it is doing, straight away.
+      await expect(page.locator("body")).toHaveClass(/\bdoc\b/);
+      await expect(readcard).toBeVisible();
+      await expect(readcard).toHaveAttribute("data-reading", "true");
+      await expect(page.locator("#read-head")).toHaveText("Reading your document");
+      await expect(page.locator("body")).not.toHaveClass(/\bsnap\b/);
+      release();
 
-    // The read settles on its own, whatever it found (the stack may have no
-    // processor), and never undoes the page.
-    await expect(readcard).not.toHaveAttribute("data-reading", "true", { timeout: 45_000 });
-    await expect(page.locator("body")).toHaveClass(/\bsnap\b/);
-    await expect(page.locator("#rc-capline")).not.toHaveText("orbit is reading the pages it was given");
+      // Page one lands — a real picture, drawn from the file — within seconds,
+      // and the heading says so.
+      await expect(page.locator("body")).toHaveClass(/\bsnap\b/, { timeout: 20_000 });
+      await expect(page.locator("#read-head")).toHaveText("Page one");
+      const sheet = page.locator("#sheet-page");
+      await expect(sheet).toBeVisible();
+      await expect(sheet).toHaveAttribute("alt", `Page one of ${DOCUMENT}`);
+      await expect.poll(() => sheet.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+      await expect(page.locator("#rc-file")).toContainText(DOCUMENT);
+      await expect(page.locator("#rc-scan")).toBeVisible();
 
-    // "not this one" takes the file out again and closes the lane.
-    await page.locator("#rc-drop").click();
-    await expect(page.locator("body")).not.toHaveClass(/\bdoc\b/);
-    await expect(page.locator("body")).not.toHaveClass(/\bsnap\b/);
-  } finally {
-    release();
-    await households.sweep(page);
-  }
+      // The read settles on its own, whatever it found (the stack may have no
+      // processor), and never undoes the page.
+      await expect(readcard).not.toHaveAttribute("data-reading", "true", { timeout: 45_000 });
+      await expect(page.locator("body")).toHaveClass(/\bsnap\b/);
+      await expect(page.locator("#rc-capline")).not.toHaveText("orbit is reading the pages it was given");
+
+      // "not this one" takes the file out again and closes the lane.
+      await page.locator("#rc-drop").click();
+      await expect(page.locator("body")).not.toHaveClass(/\bdoc\b/);
+      await expect(page.locator("body")).not.toHaveClass(/\bsnap\b/);
+    } finally {
+      release();
+      await households.sweep(page);
+    }
+  });
 });
 
 /**
