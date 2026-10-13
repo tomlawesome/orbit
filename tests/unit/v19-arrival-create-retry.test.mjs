@@ -5,6 +5,8 @@ import { pathToFileURL } from "node:url";
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createEmptyWorkspace, workspaceSchema } from "@/lib/workspace";
+
 /*
  * #1316 (GAP-U1): the first-run create must survive a lost reply. The create
  * lands but the answer is lost (a network blip), the browser says
@@ -42,8 +44,10 @@ const creates = () => commands.filter((command) => command.type === "household.c
  * lost: no answer (the browser's TypeError). refused: a 409 in the server's
  * own words. mismatch: the 422 for the same id with different details (U3
  * decision 2). bare: a refusal with no words of its own (an empty message).
- * ok: the household was created.
- * @type {("lost" | "refused" | "mismatch" | "bare" | "ok")[]}
+ * ok: the household was created. gateway502 / gateway504: the proxy in front
+ * of Orbit answered with its own bare page and no Orbit error code, so the
+ * create may or may not have landed (a lost reply by another road).
+ * @type {("lost" | "refused" | "mismatch" | "bare" | "ok" | "gateway502" | "gateway504")[]}
  */
 let answers = [];
 /**
@@ -51,38 +55,65 @@ let answers = [];
  * decision 1, "read before telling"). landed: the session points at the id
  * last sent. absent: it points nowhere. fails: the read gets no answer too.
  * Before any lost create it always points nowhere (the empty instance).
- * @type {"landed" | "absent" | "fails"}
+ * @type {"landed" | "absent" | "fails" | "hangs"}
  */
 let sessionAfterLost = "absent";
 /**
  * How /api/workspace answers once the server has refused a create as a
- * mismatch (the card reads the household's name back). stored: the visible
- * households hold the pinned id under the name it was really created with,
- * "Harlow Home". absent: it is not among them. fails: the read gets no answer.
+ * mismatch (the card reads the household's name back). stored: the member's
+ * own `households` hold the pinned id under the name it was really created
+ * with, "Harlow Home", exactly as the real read gives a member: their
+ * households in `households`, `visibleHouseholds` EMPTY (it is filled only
+ * for a user with no household; workspace-repository.ts). absent: it is not
+ * among them. fails: the read gets no answer. hangs: it never answers.
  * Before any mismatch it always answers the empty instance.
- * @type {"stored" | "absent" | "fails"}
+ * @type {"stored" | "absent" | "fails" | "hangs"}
  */
 let workspaceAfterMismatch = "absent";
 let mismatched = false;
 /** Set to hold the session read after a lost create until released. @type {Promise<void> | null} */
 let holdSession = null;
+/**
+ * How household.activate answers, in order; the last one repeats.
+ * ok: activated. lost: no answer. refused: a 409 in the server's own words.
+ * @type {("ok" | "lost" | "refused")[]}
+ */
+let activateAnswers = [];
+let activations = 0;
 /** Every request, in order: "session", "create", "activate", "workspace". @type {string[]} */
 let requests = [];
 let createLost = false;
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status });
 
+/** A read that never answers (it rejects only if the caller aborts it). */
+const never = (/** @type {RequestInit | undefined} */ init) => new Promise((_, reject) => {
+  init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+});
+
+/** A household as the real workspace read gives a member (schema-checked below). */
+const memberHousehold = (/** @type {string} */ id, /** @type {string} */ name) => {
+  const workspace = workspaceSchema.parse({
+    ...createEmptyWorkspace(),
+    activeHouseholdId: id,
+    households: [{ ...createEmptyWorkspace().households[0], id, name }],
+  });
+  return workspace.households[0];
+};
+
 function stubFetch() {
   commands = [];
   requests = [];
   createLost = false;
   mismatched = false;
+  activations = 0;
   vi.stubGlobal("fetch", vi.fn(async (url, init) => {
     const href = String(url);
     if (href.includes("/api/auth/session")) {
       requests.push("session");
       if (!createLost) return json({ user: { id: "u1" }, csrfToken: "t1", activeHouseholdId: null });
       if (holdSession) await holdSession;
+      if (sessionAfterLost === "hangs") await never(init);
       if (sessionAfterLost === "fails") throw new TypeError("Failed to fetch");
       const landed = sessionAfterLost === "landed" ? creates().at(-1)?.household.id ?? null : null;
       return json({ user: { id: "u1" }, csrfToken: "t1", activeHouseholdId: landed });
@@ -90,9 +121,10 @@ function stubFetch() {
     if (href.endsWith("/api/workspace") && !init?.method) {
       requests.push("workspace");
       if (mismatched && workspaceAfterMismatch === "fails") throw new TypeError("Failed to fetch");
+      if (mismatched && workspaceAfterMismatch === "hangs") await never(init);
       if (mismatched && workspaceAfterMismatch === "stored") {
         const id = creates().at(-1)?.household.id;
-        return json({ workspace: { households: [], visibleHouseholds: [{ id, name: "Harlow Home" }] } });
+        return json({ workspace: { ...createEmptyWorkspace(), households: [memberHousehold(id, "Harlow Home")], visibleHouseholds: [] } });
       }
       return json({ workspace: { households: [], visibleHouseholds: [] } });
     }
@@ -101,12 +133,18 @@ function stubFetch() {
       commands.push(command);
       if (command.type === "household.activate") {
         requests.push("activate");
+        const answer = activateAnswers[Math.min(activations, activateAnswers.length - 1)] ?? "ok";
+        activations += 1;
+        if (answer === "lost") throw new TypeError("Failed to fetch");
+        if (answer === "refused") return json({ error: { code: "household_activate_refused", message: "That household cannot be opened" } }, 409);
         return json({ workspace: { activeHouseholdId: command.householdId, households: [], visibleHouseholds: [] } });
       }
       requests.push("create");
       const sent = creates().length;
       const answer = answers[Math.min(sent, answers.length) - 1];
       if (answer === "lost") { createLost = true; throw new TypeError("Failed to fetch"); }
+      if (answer === "gateway502") { createLost = true; return new Response("<html>502 Bad Gateway</html>", { status: 502 }); }
+      if (answer === "gateway504") { createLost = true; return new Response("<html>504 Gateway Time-out</html>", { status: 504 }); }
       if (answer === "mismatch") {
         mismatched = true;
         return json({ error: { code: "household_create_mismatch", message: "This household was already created with different details" } }, 422);
@@ -171,10 +209,12 @@ beforeEach(() => {
   sessionAfterLost = "absent";
   workspaceAfterMismatch = "absent";
   holdSession = null;
+  activateAnswers = [];
   stubFetch();
   assigned = vi.spyOn(window.location, "assign").mockImplementation(() => {});
 });
 afterEach(() => {
+  vi.useRealTimers();
   unmountArrival?.();
   unmountArrival = null;
   newcomer.props = null;
@@ -222,7 +262,9 @@ async function mountOnEmptyInstance() {
     newcomer.props[field] = value;
     flushSync();
   };
-  return { type, pressCreate, refusal, line, pressLink, set };
+  /** Whether the card's Create button is being held (Newcomer's `busy`). */
+  const busy = () => Boolean(newcomer.props.busy);
+  return { type, pressCreate, refusal, line, pressLink, set, busy };
 }
 
 describe("#1316 GAP-U1: pressing Create again after a lost reply", () => {
@@ -355,7 +397,9 @@ describe("#1316 GAP-U1: pressing Create again after a lost reply", () => {
     /* Press 1 sends "Harlow Hme": no answer, and it did not land. Press 2
        sends "Harlow Home" (same id): it lands but its reply is lost too.
        Press 3 sends "Harlow HQ": the server refuses, and the card reads the
-       workspace once to see what the household with its id is called. */
+       workspace once to see what the household with its id is called. The
+       read gives a member their own `households` and leaves
+       `visibleHouseholds` empty, so the name is found there, by the pinned id. */
     answers = ["lost", "lost", "mismatch"];
     sessionAfterLost = "absent";
     workspaceAfterMismatch = "stored";
@@ -421,5 +465,109 @@ describe("#1316 GAP-U1: pressing Create again after a lost reply", () => {
     await pressCreate();
 
     expect(line()).toBe("“Harlow HQ” could not be created");
+  });
+
+  it("(11) a 502 after a create is a lost reply: when the session says it landed, goes home with no line", async () => {
+    answers = ["gateway502"];
+    sessionAfterLost = "landed";
+    const { type, pressCreate, line } = await mountOnEmptyInstance();
+    type("Harlow HQ");
+    await pressCreate();
+
+    expect(requests.slice(requests.lastIndexOf("create") + 1), "the session is read once").toEqual(["session"]);
+    expect(line(), "it landed: there is nothing to refuse").toBe("");
+    expect(assigned).toHaveBeenCalledWith("/home");
+    expect(creates()).toHaveLength(1);
+  });
+
+  it("(11) a 504 after a create is a lost reply: when the session says it did not land, says it wasn't created", async () => {
+    answers = ["gateway504"];
+    sessionAfterLost = "absent";
+    const { type, pressCreate, line, busy } = await mountOnEmptyInstance();
+    type("Harlow HQ");
+    await pressCreate();
+
+    expect(requests.slice(requests.lastIndexOf("create") + 1), "the session is read once").toEqual(["session"]);
+    expect(line()).toBe("“Harlow HQ” wasn't created — no answer came back. Try again");
+    expect(assigned).not.toHaveBeenCalled();
+    expect(busy()).toBe(false);
+  });
+});
+
+describe("#1316 U3 follow-up: the carry-on link and reads that never answer", () => {
+  /** Reaches the "already created" line: press 1 is lost, press 2 is refused as a mismatch. */
+  async function reachCarryOnLine() {
+    answers = ["lost", "mismatch"];
+    sessionAfterLost = "absent";
+    const card = await mountOnEmptyInstance();
+    card.type("Harlow HQ");
+    await card.pressCreate();
+    card.type("Harlow House");
+    await card.pressCreate();
+    expect(card.line()).toBe("“Harlow HQ” was already created — carry on, and change it in settings →");
+    return card;
+  }
+
+  for (const failure of /** @type {const} */ (["lost", "refused"])) {
+    it(`(12) when household.activate is ${failure}, says it couldn't open it, keeps the link and frees the button`, async () => {
+      const card = await reachCarryOnLine();
+      activateAnswers = [failure, "ok"];
+      await card.pressLink();
+
+      expect(commands.filter((command) => command.type === "household.activate")).toHaveLength(1);
+      expect(card.line()).toContain("couldn't open it — try again");
+      expect(assigned).not.toHaveBeenCalled();
+      expect(card.busy(), "the Create button is not left busy").toBe(false);
+
+      /* The link is still there to press: the second press goes through. */
+      await card.pressLink();
+      expect(commands.filter((command) => command.type === "household.activate")).toHaveLength(2);
+      expect(assigned).toHaveBeenCalledWith("/home");
+      expect(creates(), "no further create is sent").toHaveLength(2);
+    });
+  }
+
+  it("(13) a session read that never answers is given up on within 3 s: the honest unknown line, button free", async () => {
+    answers = ["lost"];
+    sessionAfterLost = "hangs";
+    const { type, line, busy } = await mountOnEmptyInstance();
+    type("Harlow HQ");
+
+    vi.useFakeTimers();
+    let finished = false;
+    const pressed = Promise.resolve(newcomer.props.onsubmit()).then(() => { finished = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(requests.slice(requests.lastIndexOf("create") + 1), "the read is out").toEqual(["session"]);
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(100);
+    void pressed; // not awaited: an unbounded read must fail the checks below, not hang the test
+
+    expect(finished, "the press settled within 3 s of fake time").toBe(true);
+    expect(line()).toBe("“Harlow HQ” may or may not have been created — Orbit can't be reached. Try again");
+    expect(busy()).toBe(false);
+    expect(assigned).not.toHaveBeenCalled();
+  });
+
+  it("(14) a workspace read that never answers after a 422 is given up on within 3 s: the first-sent name, button free", async () => {
+    answers = ["lost", "mismatch"];
+    sessionAfterLost = "absent";
+    workspaceAfterMismatch = "hangs";
+    const { type, pressCreate, line, busy } = await mountOnEmptyInstance();
+    type("Harlow HQ");
+    await pressCreate();
+    type("Harlow House");
+
+    vi.useFakeTimers();
+    let finished = false;
+    const pressed = Promise.resolve(newcomer.props.onsubmit()).then(() => { finished = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(requests.at(-1), "the workspace read is out").toBe("workspace");
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(100);
+    void pressed; // not awaited: an unbounded read must fail the checks below, not hang the test
+
+    expect(finished, "the press settled within 3 s of fake time").toBe(true);
+    expect(line()).toBe("“Harlow HQ” was already created — carry on, and change it in settings →");
+    expect(busy()).toBe(false);
   });
 });
