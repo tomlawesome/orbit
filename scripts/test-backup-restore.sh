@@ -593,18 +593,19 @@ assert_staging_fixture_present() {
   fi
 }
 
+# The restored generation-1 scan job may still be pending, be mid-attempt, or
+# have run once: its stage is wrapped under 'backup-stage-key', which this
+# instance does not hold, so the attempt is retried as key_unavailable and the
+# stage row and file are kept (6bf40cd0). Purging the stage fails the drill.
 assert_recovery_jobs_restored() {
   local recovery_state recovery_deadline=$((SECONDS + 10))
   while (( SECONDS < recovery_deadline )); do
     recovery_state="$(compose exec -T orbit-db sh -c \
-      'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select case when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''pending'\'' and attempts = 2 and locked_at is null and lease_token is null and lease_expires_at is null) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''pending'\'' when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''processing'\'' and attempts = 3 and locked_at is not null and lease_token is not null and lease_expires_at > now()) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''processing'\'' when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''completed'\'' and attempts = 3 and completed_at is not null and locked_at is null and lease_token is null and lease_expires_at is null) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''rejected'\'' and scan_status = '\''error'\'' and failure_code = '\''staging_object_invalid'\'') and not exists (select 1 from document_staging_objects where document_id = '\''$1'\'') then '\''purged'\'' else '\''invalid'\'' end from document_jobs where document_id = '\''$1'\'' and kind = '\''scan'\'';"' \
+      'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select case when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''pending'\'' and attempts = 2 and locked_at is null and lease_token is null and lease_expires_at is null) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''pending'\'' when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''processing'\'' and attempts = 3 and locked_at is not null and lease_token is not null and lease_expires_at > now()) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''processing'\'' when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''retry'\'' and attempts = 3 and last_error = '\''key_unavailable'\'' and locked_at is null and lease_token is null and lease_expires_at is null and next_attempt_at > now()) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''retry'\'' else '\''invalid'\'' end from document_jobs where document_id = '\''$1'\'' and kind = '\''scan'\'';"' \
       sh "$recovery_document_id" 2>/dev/null | tr -d '[:space:]')" || recovery_state=invalid
     case "$recovery_state" in
-      pending|processing)
+      pending|processing|retry)
         compose exec -T orbit-app test -f "$staging_path" >/dev/null 2>&1 && return 0
-        ;;
-      purged)
-        ! compose exec -T orbit-app test -e "$staging_path" >/dev/null 2>&1 && return 0
         ;;
     esac
     sleep 1
