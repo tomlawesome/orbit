@@ -73,20 +73,10 @@ vi.mock("./relays", () => ({
 }));
 
 const { runImapIngestionCycle, setImapClientFactoryForTests } = await import("./imap-ingestion");
-const { parseImapIngestionConfigFromEnvironment } = await import("./core/config");
+const { testImapConfig } = await import("../../../tests/support/imap-config");
 
 function testConfig() {
-  return parseImapIngestionConfigFromEnvironment({
-    IMAP_HOST: "imap.example.test",
-    IMAP_USER: "orbit",
-    IMAP_PASSWORD: "test-password",
-    IMAP_RECIPIENT_DOMAIN: "ingest.example.test",
-    IMAP_ALIAS_CURRENT_GENERATION: "1",
-    IMAP_ALIAS_CURRENT_SECRET: "test-current-alias-secret-that-is-long-enough",
-    IMAP_TRUSTED_RECIPIENT_HEADER: "X-Original-To",
-    SMTP_HOST: "smtp.example.test",
-    NODE_ENV: "test",
-  } as NodeJS.ProcessEnv);
+  return testImapConfig();
 }
 
 function fakeClient() {

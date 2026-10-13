@@ -32,7 +32,6 @@ export const REASON_WORDS = /** @type {Record<string, string>} */ ({
   not_kept: "couldn’t be kept",
   wrong_recipient: "not addressed to you",
   account_disabled: "account disabled",
-  older_review: "needs cleanup",
   unknown: "reason not named",
 });
 

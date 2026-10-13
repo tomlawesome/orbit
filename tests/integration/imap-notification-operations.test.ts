@@ -10,7 +10,7 @@ import {
   cancelDisabledImapNotificationForTests,
   markImapNotificationFailureForTests,
   materializeImapNotificationsForTests,
-} from "@/server/imap-receipt-worker";
+} from "@/server/mail-in/imap-receipt-worker";
 
 const { GET: getOperations } = await loadRoute("admin/operations");
 const { POST: verifyImap } = await loadRoute("admin/operations/imap-test");

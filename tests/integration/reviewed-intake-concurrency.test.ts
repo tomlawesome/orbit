@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, documents, imapIngestionAttachments, imapIngestionMessages, items, reviewedIntakeOperations, sections } from "@/db/schema";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
-import { purgeHeldImapAttachment, scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/imap-attachment-holding";
+import { purgeHeldImapAttachment, scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
 import { uploadItemDocument } from "@/server/document-repository";
 import { createIntegrationFixture } from "./support/fixtures";
 import { syntheticPdf } from "../support/synthetic-documents";

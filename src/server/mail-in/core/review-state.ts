@@ -41,7 +41,6 @@ export type FailureReason =
   | "not_kept"
   | "wrong_recipient"
   | "account_disabled"
-  | "older_review"
   | "unknown";
 
 const failureReasonByCode: Record<string, FailureReason> = {
@@ -73,7 +72,6 @@ const failureReasonByCode: Record<string, FailureReason> = {
   staging_expiry_pending: "not_kept",
   recipient_mismatch: "wrong_recipient",
   account_disabled: "account_disabled",
-  legacy_review_item: "older_review",
 };
 
 /**
@@ -110,7 +108,6 @@ export function reviewInboxState(status: string, failureCode: string | null | un
   if (status === "held") return { classification: "waiting", canApprove: false, canDiscard: false, message: "Collection is paused. This will be prepared when you turn it back on.", reason };
   if (canRetryAttachmentTransfer) return { classification: "retry", canApprove: true, canDiscard: true, message: "The item was created; retry to finish attaching the selected documents.", reason };
   if (status === "recoverable") return { classification: "retry", canApprove: false, canDiscard: true, message: "Private cleanup is waiting to finish. You can retry discard.", reason };
-  if (status === "failed" && failureCode === "legacy_review_item") return { classification: "cleanup", canApprove: false, canDiscard: true, message: "This older review can only finish private cleanup.", reason };
   return { classification: "unavailable", canApprove: false, canDiscard: false, message: "This incoming document is no longer available for review.", reason };
 }
 

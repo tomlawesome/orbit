@@ -489,8 +489,8 @@ export async function registerNode(): Promise<void> {
     const [{ startNotificationWorker }, { startDocumentWorker }, { startImapIngestionWorker }, { startImapReceiptWorker }, { startMaintenanceWorker }] = await Promise.all([
       import("@/server/notification-worker"),
       import("@/server/document-worker"),
-      import("@/server/imap-ingestion"),
-      import("@/server/imap-receipt-worker"),
+      import("@/server/mail-in/imap-ingestion"),
+      import("@/server/mail-in/imap-receipt-worker"),
       import("@/server/maintenance-worker"),
     ]);
     const optionalSettings = new Set(

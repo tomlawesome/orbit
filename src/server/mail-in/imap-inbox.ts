@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, lt, or, sql } from "drizzle-orm";
 import { AppError } from "@/lib/app-error";
 import { getDb } from "@/db";
-import { documents, households, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, items, memberships, metadataKeyOutages, sections, users } from "@/db/schema";
+import { households, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, items, memberships, metadataKeyOutages, sections, users } from "@/db/schema";
 import { clearMetadataDamageForColumn } from "@/server/metadata/damage-sightings";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import { flagStagingPurgeFailed, purgeHeldImapAttachment } from "./imap-attachment-holding";
-import { requestDocumentDeletion, requireDocumentDeletionAccess } from "@/server/document-repository";
+import { requestDocumentDeletion } from "@/server/document-repository";
 import { clearedReviewDraftMetadata, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
 import { validUuid } from "@/lib/uuid";
@@ -23,8 +23,7 @@ import {
   type ReviewInboxStateContext,
 } from "./core/review-state";
 
-// Re-exported so `@/server/imap-inbox` (now a deprecated stub pointing here)
-// keeps every existing import path working churn-free. See
+// Re-exported so importers of this module keep one import path. See
 // src/server/mail-in/core/review-state.ts for the implementations.
 export { reviewInboxState, failureReasonOf, findReviewedIntakeCandidateReason, reviewAttachmentDisplayName, reviewAttachmentMediaType, reviewAttachmentScanState };
 export type { FailureReason, ReviewAttachmentMediaType, ReviewInboxClassification, ReviewInboxStateContext };
@@ -396,16 +395,6 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
   if (receipt.householdId && !(await hasHouseholdMembership(userId, receipt.householdId))) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   if (["discarded", "expired"].includes(receipt.status)) return;
 
-  // A legacy receipt's documents are deleted below through the accepted,
-  // authorised path. Check that authorisation now, before the receipt is
-  // claimed: refused after the claim, the claim stood (locked, then purged
-  // by the staging job) while the document and its item stayed behind, and
-  // the retry reported the discard done.
-  if (receipt.failureCode === "legacy_review_item" && receipt.reviewItemId) {
-    const legacyDocuments = await getDb().select({ id: documents.id }).from(documents).where(and(eq(documents.itemId, receipt.reviewItemId), eq(documents.lifecycle, "available")));
-    for (const document of legacyDocuments) await requireDocumentDeletionAccess(userId, document.id);
-  }
-
   const cleanupToken = randomUUID();
   const now = new Date();
   const claimed = await getDb().transaction(async (transaction) => {
@@ -413,10 +402,7 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
       .where(and(
         eq(imapIngestionMessages.id, receipt.id),
         eq(imapIngestionMessages.userId, userId),
-        or(
-          inArray(imapIngestionMessages.status, ["pending_review", "recoverable"]),
-          and(eq(imapIngestionMessages.status, "failed"), eq(imapIngestionMessages.failureCode, "legacy_review_item")),
-        ),
+        inArray(imapIngestionMessages.status, ["pending_review", "recoverable"]),
       )).for("update").limit(1);
     if (!current || (current.lockedAt && current.lockedAt.getTime() > now.getTime() - 10 * 60_000)) return false;
     const [changed] = await transaction.update(imapIngestionMessages).set({ status: "recoverable", receiptStatus: "pending", failureCode: "staging_purge_pending", attachmentProcessingLockedAt: now, attachmentProcessingLeaseToken: cleanupToken, attachmentProcessingNextAttemptAt: null, updatedAt: now })
@@ -433,21 +419,6 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
     const [latest] = await getDb().select({ status: imapIngestionMessages.status }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receipt.id)).limit(1);
     if (latest && ["discarded", "expired"].includes(latest.status)) return;
     throw new AppError("staging_cleanup_busy", "The incoming document is already being cleaned up; retry discard", 409);
-  }
-
-  // Rows created by the prototype remain linked to their item so encrypted
-  // bytes and foreign-key targets can be cleaned through the accepted path.
-  if (receipt.failureCode === "legacy_review_item" && receipt.reviewItemId) {
-    const documentRows = await getDb().select({ id: documents.id }).from(documents).where(and(eq(documents.itemId, receipt.reviewItemId), eq(documents.lifecycle, "available")));
-    // A document that left "available" between the read above and its
-    // deletion (another tab, the retention purge) is already gone as far as
-    // this discard is concerned; thrown here, with the claim standing, it
-    // left the receipt locked with its item behind -- the shape A3-S1 closes.
-    for (const document of documentRows) await requestDocumentDeletion(userId, document.id).catch((error: unknown) => {
-      if (error instanceof AppError && error.code === "document_not_found") return;
-      throw error;
-    });
-    await getDb().delete(items).where(eq(items.id, receipt.reviewItemId));
   }
 
   const assigned = await getDb().select({ documentId: imapIngestionAttachments.assignedDocumentId }).from(imapIngestionAttachments).where(and(

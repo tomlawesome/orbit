@@ -4,7 +4,7 @@ import { getDb } from "@/db";
 import { imapIngestionMessages, items } from "@/db/schema";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { openMetadataReader } from "@/server/metadata/fields";
-import { assignImapReceiptHousehold, listImapInbox } from "@/server/imap-inbox";
+import { assignImapReceiptHousehold, listImapInbox } from "@/server/mail-in/imap-inbox";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 
 afterAll(async () => {

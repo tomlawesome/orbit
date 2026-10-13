@@ -9,7 +9,7 @@ import {
   runImapIngestionCycle,
   setImapClientFactoryForTests,
   type ImapIngestionConfig,
-} from "@/server/imap-ingestion";
+} from "@/server/mail-in/imap-ingestion";
 import { digestImapRecipientAlias } from "@/server/mail-in/core/imap-recipient";
 import { rotateRelay } from "@/server/mail-in/relays";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
