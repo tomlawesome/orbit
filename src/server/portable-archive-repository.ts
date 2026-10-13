@@ -190,16 +190,19 @@ export async function createPortableArchive(input: {
     documents: documentRows.map((document) => ({ id: document.id, itemId: document.itemId, displayName: document.displayName, mediaType: document.mediaType, sizeBytes: document.sizeBytes, contentSha256: document.contentSha256, lifecycle: document.lifecycle, scanStatus: document.scanStatus, failureCode: document.failureCode, deleteAfter: document.deleteAfter, deletedAt: document.deletedAt, availableAt: document.availableAt, version: document.version })),
   };
   if (input.includeDocuments) {
+    const tooLarge = () => new AppError("archive_too_large", `Document-inclusive exports are limited to about ${MAX_ARCHIVE_DOCUMENT_MIB} MiB of documents; export metadata only or remove documents first`, 413);
+    const included = documentRows.filter((document) => document.lifecycle === "available" && document.itemId);
+    // Every included document's recorded size, counted at the base64 size the
+    // archive carries it in, is summed first, so a household over the limit
+    // is refused before any document is read.
+    const recordedTotal = included.reduce((sum, document) => sum + Math.ceil(document.sizeBytes / 3) * 4, 0);
+    if (recordedTotal > MAX_ARCHIVE_BYTES) throw tooLarge();
     const bytes: Array<{ id: string; contentBase64: string }> = [];
     let total = 0;
-    for (const document of documentRows) {
-      if (document.lifecycle !== "available") continue;
-      if (!document.itemId) continue;
-      // Counted at the base64 size the archive carries them in, so a household
-      // over the limit is refused before any document is read.
-      if (total + Math.ceil(document.sizeBytes / 3) * 4 > MAX_ARCHIVE_BYTES) {
-        throw new AppError("archive_too_large", `Document-inclusive exports are limited to about ${MAX_ARCHIVE_DOCUMENT_MIB} MiB of documents; export metadata only or remove documents first`, 413);
-      }
+    for (const document of included) {
+      // The running total of what was actually read still guards against a
+      // recorded size smaller than the stored document.
+      if (total + Math.ceil(document.sizeBytes / 3) * 4 > MAX_ARCHIVE_BYTES) throw tooLarge();
       const downloaded = await readDocumentDownload(input.userId, document.id);
       const contentBase64 = downloaded.bytes.toString("base64");
       total += contentBase64.length;
