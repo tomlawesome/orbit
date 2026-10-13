@@ -333,9 +333,9 @@ recoverable state.
   rest of the application unhealthy.
 - Disk exhaustion, quota exhaustion, and key unavailability return distinct
   administrator diagnostics but non-sensitive user errors.
-- The application remains usable when the KEK is missing, but all document
-  upload/download/rotation operations remain locked. Orbit never generates a
-  replacement key automatically.
+- An instance with no usable KEK locks itself to everyone until the key is
+  restored (#1405, ADR-0024 amendment; see "Household metadata encryption"
+  below). Orbit never generates a replacement key automatically.
 
 ## Household metadata encryption (Tiers 1 and 2)
 

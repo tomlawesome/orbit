@@ -395,7 +395,7 @@ detail behind that, for readers who want to check it.
   HTTP-only, same-site cookie.
 - Discovery metadata must exactly match the configured HTTPS issuer. Provider endpoints must also use HTTPS.
 - ID-token signature, issuer, audience, expiry, nonce, authorized party, and access-token hash are validated where applicable.
-- Provider access and refresh tokens — anything that could call another service — are never stored. The ID token from a provider sign-in is kept on that session's row, encrypted under the instance's encryption key (the one that protects account addresses), so that signing out can tell the provider which session to end. It is deleted with the session, is never sent to the browser, and cannot be used to sign in to Orbit again.
+- Provider access and refresh tokens — anything that could call another service — are never stored. The ID token from a provider sign-in is kept on that session's row, encrypted under the instance's encryption key (the one that protects account addresses), so that signing out can tell the provider which session to end. It is deleted with the session, is handed to the browser once, inside the provider sign-out address at the moment of sign-out, and never on any session read or list, and cannot be used to sign in to Orbit again.
 - The browser receives a random opaque session credential. Only its SHA-256 hash is stored in PostgreSQL. Setup and recovery tokens are stored the same way: only their SHA-256 hash, never the token itself.
 - Session refresh rotates the credential atomically. Logout deletes it server-side and expires the cookie.
 - State-changing session actions require an exact same-origin request and a session-bound HMAC synchronizer token.

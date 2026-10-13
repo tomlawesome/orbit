@@ -48,7 +48,8 @@ add any: the PostgreSQL data directory (the named `orbit-postgres` volume) is
 **cleartext on disk**. That includes household and item names, filenames and
 media types (which the threat model already treats as potentially sensitive
 on their own), audit events, session data, and every other row Orbit writes,
-apart from the columns layer 2a covers. Percona's `pg_tde` extension, a
+apart from the columns layer 2a covers (which includes the identity provider's
+ID token kept on a session row). Percona's `pg_tde` extension, a
 Postgres add-on for whole-database encryption, is a possible future option.
 Its encryption of the database's write-ahead journal is still marked
 experimental upstream, so Orbit does not depend on it today. It is being
@@ -74,7 +75,12 @@ and its cost, the address on an open household invitation, and â€” since #969 â€
 every account address: `users.email` and the mail-forwarding addresses members
 send from. Those two sit under an instance-wide key rather than a household
 one, because a person belongs to several households and a forwarded message is
-matched to its sender before any household is known. Tier 2 costs
+matched to its sender before any household is known. Since #1316 the instance
+key also protects the identity provider's ID token (`sessions.id_token`), which
+Orbit keeps on a session that began at the provider so that signing out can tell
+the provider which session to end. It is deleted with the session; if the key
+cannot open it, the only cost is that signing out ends Orbit's session without
+the provider hand-off. Tier 2 costs
 queries the database used to be able to do: searching item names, matching a
 provider and adding up costs all happen in Orbit now, over one household's
 decrypted rows. Measured on a seeded database, that costs about 4.5 ms for a
@@ -94,8 +100,13 @@ in a locked state. Every screen shows one page saying the encryption key is
 not available and nothing is lost; every API answers
 `503 {"error":"encryption_key_unavailable"}`; nobody signs in, administrators
 and identity-provider users included, because with host access the only
-remedy, a person signed in could read or save almost nothing. Only signing out
-and the healthcheck stay open. The container log states the fault, and an
+remedy, a person signed in could read or save almost nothing. What stays open
+is the healthcheck (`/api/health`), `/api/auth/availability` (which the sign-in
+page reads to learn the instance is locked), signing out (`/api/auth/logout`
+and the goodbye page `/logout`) and `/maintenance`, which is the locked page
+itself. `/login` and `/auth/error` are static pages that load even while
+locked; the script on `/login` then sends the reader to `/maintenance`, and
+`/auth/error` stays where it is. The container log states the fault, and an
 alert goes to `OPERATOR_ALERT_ADDRESS` when it is set. Fixing the key on the
 host and restarting is the way out. If the key **and** the recovery bundle are
 both gone, the addresses cannot be recovered at all, and a host-shell command

@@ -805,12 +805,16 @@ not the one this database was written under: Orbit opens its own instance key
 with the key it holds once at startup, and a key that will not open it is the
 wrong key. Nothing is lost and nothing is overwritten. While locked:
 
-- every screen answers 503 with one page: "locked — back once the key is
+- every dynamic screen answers 503 with one page: "locked — back once the key is
   restored", that nothing is lost, that an administrator has to fix it on the
   server, the instance's public contact address when one is set, and that the
-  details are in the container log;
+  details are in the container log. The static pages
+  `/login`, `/logout` and `/auth/error` are plain files and still load with a
+  200; the sign-in page then moves the reader to the locked page;
 - every API answers `503 {"error":"encryption_key_unavailable"}`, and nobody
-  signs in by any method, administrators included; signing out still works;
+  signs in by any method, administrators included; signing out still works.
+  The exceptions are `/api/health` (below) and `/api/auth/availability`, which
+  the sign-in page reads to learn that the instance is locked;
 - `/api/health` answers 200 `maintenance`, so the container stays healthy and
   is not restarted: a restart cannot fix the key;
 - only the scheduled-maintenance worker runs; reminders, documents and mail
