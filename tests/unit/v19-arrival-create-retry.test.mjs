@@ -41,10 +41,9 @@ const creates = () => commands.filter((command) => command.type === "household.c
  * Answers to household.create, in order; the last one repeats.
  * lost: no answer (the browser's TypeError). refused: a 409 in the server's
  * own words. mismatch: the 422 for the same id with different details (U3
- * decision 2). stored: that 422 carrying the stored household's name, the one
- * it was really created with ("Harlow Home"), as `error.details.name`. bare: a refusal with no words of its own (an empty message).
+ * decision 2). bare: a refusal with no words of its own (an empty message).
  * ok: the household was created.
- * @type {("lost" | "refused" | "mismatch" | "stored" | "bare" | "ok")[]}
+ * @type {("lost" | "refused" | "mismatch" | "bare" | "ok")[]}
  */
 let answers = [];
 /**
@@ -55,6 +54,16 @@ let answers = [];
  * @type {"landed" | "absent" | "fails"}
  */
 let sessionAfterLost = "absent";
+/**
+ * How /api/workspace answers once the server has refused a create as a
+ * mismatch (the card reads the household's name back). stored: the visible
+ * households hold the pinned id under the name it was really created with,
+ * "Harlow Home". absent: it is not among them. fails: the read gets no answer.
+ * Before any mismatch it always answers the empty instance.
+ * @type {"stored" | "absent" | "fails"}
+ */
+let workspaceAfterMismatch = "absent";
+let mismatched = false;
 /** Set to hold the session read after a lost create until released. @type {Promise<void> | null} */
 let holdSession = null;
 /** Every request, in order: "session", "create", "activate", "workspace". @type {string[]} */
@@ -67,6 +76,7 @@ function stubFetch() {
   commands = [];
   requests = [];
   createLost = false;
+  mismatched = false;
   vi.stubGlobal("fetch", vi.fn(async (url, init) => {
     const href = String(url);
     if (href.includes("/api/auth/session")) {
@@ -79,6 +89,11 @@ function stubFetch() {
     }
     if (href.endsWith("/api/workspace") && !init?.method) {
       requests.push("workspace");
+      if (mismatched && workspaceAfterMismatch === "fails") throw new TypeError("Failed to fetch");
+      if (mismatched && workspaceAfterMismatch === "stored") {
+        const id = creates().at(-1)?.household.id;
+        return json({ workspace: { households: [], visibleHouseholds: [{ id, name: "Harlow Home" }] } });
+      }
       return json({ workspace: { households: [], visibleHouseholds: [] } });
     }
     if (href.includes("/api/workspace/commands") && init?.method === "POST") {
@@ -93,14 +108,8 @@ function stubFetch() {
       const answer = answers[Math.min(sent, answers.length) - 1];
       if (answer === "lost") { createLost = true; throw new TypeError("Failed to fetch"); }
       if (answer === "mismatch") {
+        mismatched = true;
         return json({ error: { code: "household_create_mismatch", message: "This household was already created with different details" } }, 422);
-      }
-      if (answer === "stored") {
-        return json({ error: {
-          code: "household_create_mismatch",
-          message: "This household was already created with different details",
-          details: { name: "Harlow Home" },
-        } }, 422);
       }
       if (answer === "bare") return json({ error: { code: "household_create_refused", message: "" } }, 409);
       if (answer === "ok") {
@@ -160,6 +169,7 @@ beforeEach(() => {
   sessionStorage.clear();
   answers = [];
   sessionAfterLost = "absent";
+  workspaceAfterMismatch = "absent";
   holdSession = null;
   stubFetch();
   assigned = vi.spyOn(window.location, "assign").mockImplementation(() => {});
@@ -341,22 +351,39 @@ describe("#1316 GAP-U1: pressing Create again after a lost reply", () => {
     );
   });
 
-  it("(8b) the already-created line names the stored household, not the first name sent", async () => {
+  it("(8b) the already-created line names the household as stored, read back from the workspace", async () => {
     /* Press 1 sends "Harlow Hme": no answer, and it did not land. Press 2
        sends "Harlow Home" (same id): it lands but its reply is lost too.
-       Press 3 sends "Harlow HQ": the server refuses and says what it holds. */
-    answers = ["lost", "lost", "stored"];
+       Press 3 sends "Harlow HQ": the server refuses, and the card reads the
+       workspace once to see what the household with its id is called. */
+    answers = ["lost", "lost", "mismatch"];
     sessionAfterLost = "absent";
+    workspaceAfterMismatch = "stored";
     const { type, pressCreate, line } = await mountOnEmptyInstance();
     type("Harlow Hme");
     await pressCreate();
     type("Harlow Home");
     await pressCreate();
     type("Harlow HQ");
+    const readsBefore = requests.filter((request) => request === "workspace").length;
     await pressCreate();
 
     expect(creates().map((command) => command.household.name)).toEqual(["Harlow Hme", "Harlow Home", "Harlow HQ"]);
+    expect(requests.filter((request) => request === "workspace").length - readsBefore, "one workspace read after the 422").toBe(1);
     expect(line()).toBe("“Harlow Home” was already created — carry on, and change it in settings →");
+  });
+
+  it("(8c) when the workspace read fails, the line falls back to the first-sent name", async () => {
+    answers = ["lost", "mismatch"];
+    sessionAfterLost = "absent";
+    workspaceAfterMismatch = "fails";
+    const { type, pressCreate, line } = await mountOnEmptyInstance();
+    type("Harlow HQ");
+    await pressCreate();
+    type("Harlow House");
+    await pressCreate();
+
+    expect(line()).toBe("“Harlow HQ” was already created — carry on, and change it in settings →");
   });
 
   it("(9) that line's link activates the pinned household and goes home, sending no second create", async () => {

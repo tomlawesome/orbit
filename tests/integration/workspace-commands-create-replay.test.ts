@@ -116,9 +116,7 @@ describe("household.create sent twice with the same id (a retry after a lost rep
     const members = await getDb().select({ userId: memberships.userId, role: memberships.role })
       .from(memberships).where(eq(memberships.householdId, id));
     expect(members).toEqual([{ userId: owner.userId, role: "owner" }]);
-    const claimedBody = (await claimed.json()) as { error?: { details?: unknown } };
-    expect(claimedBody.error?.details, "nothing of the household goes to a different user").toBeUndefined();
-    expect(JSON.stringify(claimedBody)).not.toContain(name);
+    expect(JSON.stringify(await claimed.json()), "nothing of the household goes to a different user").not.toContain(name);
     const [stored] = await getDb().select({ name: households.name }).from(households).where(eq(households.id, id));
     expect(stored.name).toBe(name);
     expect(await activeHouseholdOf(other), "the refused user's session is not moved").toBe(otherActive);
@@ -149,23 +147,6 @@ describe("household.create with the same id and different details (U3 decision 2
     expect((await storedHousehold(id)).name).toBe(name);
     expect(await activeHouseholdOf(second), "a refusal changes nothing").toBeNull();
     expect(await fixture.auditCount(id)).toBe(1);
-  });
-
-  it("(12b) the 422 carries the stored household's name in error.details.name, so the card can show what was created", async () => {
-    /* Assumed shape: the error envelope gains an optional `details` object,
-       { error: { code, message, details: { name } } }; the name is the stored
-       row's, not the one in the refused request. */
-    const fixture = await createIntegrationFixture("create-mismatch-stored-name");
-    const owner = await fixture.session("outsider");
-    const id = randomUUID();
-    const stored = `Harlow Home ${id.slice(0, 8)}`;
-    expect((await send(owner, create(id, stored))).status).toBe(200);
-
-    const refused = await send(owner, create(id, `Harlow HQ ${id.slice(0, 8)}`));
-    expect(refused.status).toBe(422);
-    const body = (await refused.json()) as { error?: { code?: string; details?: { name?: string } } };
-    expect(body.error?.code).toBe("household_create_mismatch");
-    expect(body.error?.details?.name, "the name the household was actually created with").toBe(stored);
   });
 
   it("(13) refuses the same name with a different time zone with 422, and keeps the stored zone", async () => {
