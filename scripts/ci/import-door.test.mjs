@@ -343,9 +343,11 @@ function onlyImportBranch(world) {
   return branches[0];
 }
 
-/** The state after the merge request is merged: Orbit's dev is the pushed branch. */
-function mergedOrbit(world) {
-  const branch = onlyImportBranch(world);
+/**
+ * The state after the merge request is merged: Orbit's dev is the pushed branch.
+ * Names the branch when the world holds more than one import branch.
+ */
+function mergedOrbit(world, branch = onlyImportBranch(world)) {
   const dir = scratchDir("orbit-door-merged-");
   rmSync(dir, { recursive: true, force: true });
   git(tmpdir(), ["clone", "--quiet", "--branch", branch, world.bare, dir]);
@@ -516,15 +518,17 @@ describe("import-door.sh when nothing changed (item 4)", () => {
 });
 
 describe("import-door.sh when the door changed (item 5, as revised by decision 12a)", () => {
-  it("pushes chore/door-import-<short sha> of the upstream commit", async () => {
+  it("pushes chore/door-import-<new tree>-on-<recorded tree>, `none` when dev has no record", async () => {
     const world = await deployWorld();
     const result = await runImport(world);
     expect(result.status, ok(result)).toBe(0);
 
     const branch = onlyImportBranch(world);
-    const short = branch.match(/^chore\/door-import-([0-9a-f]{7,12})$/u)?.[1];
-    expect(short, `branch ${branch}`).toBeTruthy();
-    expect(upstreamCommit(world.upstream).startsWith(short)).toBe(true);
+    const [, tree, base] = branch.match(/^chore\/door-import-([0-9a-f]{12})-on-([0-9a-f]{12}|none)$/u) ?? [];
+    expect(tree, `branch ${branch}`).toBeTruthy();
+    const record = JSON.parse(pushedFile(world.bare, branch, "web/src/lib/door.upstream.json").toString("utf8"));
+    expect(record.tree.startsWith(tree)).toBe(true);
+    expect(base).toBe("none");
   });
 
   it("the push carries merge_request.create, merge_request.target=dev and a merge_request.title naming the upstream commit", async () => {
@@ -580,6 +584,67 @@ describe("import-door.sh when the door changed (item 5, as revised by decision 1
     expect(remoteBranches(world.bare)).toContain("chore/door-import-aaaaaaa");
     expect(importedBranch(world.bare)).toHaveLength(2);
     expect(world.api.requests).toEqual([]);
+  });
+
+  it("a later upstream commit that leaves the door alone does not propose it again while the first merge request is unmerged (P-S23, #1316)", async () => {
+    const world = await deployWorld();
+    expect((await runImport(world)).status).toBe(0);
+    const [first] = importedBranch(world.bare);
+    expect(importedBranch(world.bare)).toEqual([first]);
+    expect(pushesTo(world.bare)).toHaveLength(1);
+
+    // Nothing merged: dev is still the old tree. Upstream moves on, door untouched.
+    touchUpstreamElsewhere(world.upstream);
+    const orbit = deployOrbit();
+    const result = await runImport({ ...world, orbit });
+
+    expect(result.status, ok(result)).toBe(0);
+    expect(pushesTo(world.bare)).toHaveLength(1);
+    expect(importedBranch(world.bare)).toEqual([first]);
+    expect(world.api.requests).toEqual([]);
+  });
+
+  it("re-proposes a newer door change once an older import is merged, on a branch that merges cleanly (P-S24, #1316)", async () => {
+    const world = await deployWorld();
+    advanceUpstream(world.upstream); // X
+    expect((await runImport(world)).status).toBe(0);
+    const [branchX] = importedBranch(world.bare);
+
+    // The door changes again (Z) before X is merged; dev is still the old tree.
+    writeFileSync(join(world.upstream, "assets", "door", "dusk.js"), "export const dusk = 2;\n");
+    git(world.upstream, ["add", "-A"]);
+    git(world.upstream, ["commit", "--quiet", "-m", "the door, third"]);
+    const commitZ = upstreamCommit(world.upstream);
+    const second = await runImport({ ...world, orbit: deployOrbit() });
+    expect(second.status, ok(second)).toBe(0);
+    const branchZ1 = importedBranch(world.bare).filter((b) => b !== branchX);
+    expect(branchZ1, "branch for Z cut from the old dev").toHaveLength(1);
+
+    // The owner merges X. The next nightly run sees Z against a dev that holds X.
+    const merged = mergedOrbit(world, branchX);
+    const third = await runImport({ ...world, orbit: merged });
+    expect(third.status, ok(third)).toBe(0);
+
+    const all = importedBranch(world.bare);
+    expect(all, "a third branch, named differently from Z's first").toHaveLength(3);
+    const branchZ2 = all.filter((b) => b !== branchX && b !== branchZ1[0]);
+    expect(branchZ2).toHaveLength(1);
+    const record = JSON.parse(pushedFile(world.bare, branchZ2[0], "web/src/lib/door.upstream.json").toString("utf8"));
+    expect(record.commit).toBe(commitZ);
+
+    // It merges cleanly into the merged dev.
+    const clone = scratchDir("orbit-door-mergecheck-");
+    rmSync(clone, { recursive: true, force: true });
+    git(tmpdir(), ["clone", "--quiet", merged, clone]);
+    git(clone, ["config", "user.email", "test@example.invalid"]);
+    git(clone, ["config", "user.name", "Test"]);
+    git(clone, ["fetch", "--quiet", world.bare, `refs/heads/${branchZ2[0]}`]);
+    const merge = spawnSync("git", ["merge", "--no-commit", "--no-ff", "FETCH_HEAD"], {
+      cwd: clone,
+      encoding: "utf8",
+      env: { PATH: process.env.PATH, HOME: tmpdir(), ...gitEnv },
+    });
+    expect(merge.status, `${merge.stdout}\n${merge.stderr}`).toBe(0);
   });
 
   it("the pushed branch carries the new copy, the new record and the deletions together", async () => {

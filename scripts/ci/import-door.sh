@@ -18,16 +18,21 @@
 #   2. Hashes that folder (scripts/ci/door-tree-hash.sh, the same function
 #      scripts/ci/check-door-unchanged.sh uses). If the hash equals the one in
 #      web/src/lib/door.upstream.json, and the copy on disk still matches it,
-#      nothing changed: exit 0, no branch, no merge request. A commit
-#      upstream that leaves assets/door/ alone therefore changes nothing here.
+#      nothing changed: exit 0, no branch, no merge request.
 #   3. Otherwise replaces web/src/lib/door/ with the new copy (files gone
 #      upstream are deleted), rewrites web/src/lib/door.upstream.json
 #      ({ project, ref, commit, path, tree }) and commits both.
-#   4. If branch chore/door-import-<short sha> already exists on Orbit (asked
-#      with `git ls-remote`), a merge request for this upstream commit was
-#      already proposed: exit 0, open nothing. Otherwise it pushes that branch
-#      with GitLab push options that open the merge request into `dev`, titled
-#      with the upstream commit.
+#   4. Names the branch chore/door-import-<new tree>-on-<recorded tree> (12
+#      hex characters of each; `none` when there is no record): what the merge
+#      request would carry, and what it is cut from. If that branch already
+#      exists on Orbit (asked with `git ls-remote`), this door was already
+#      proposed from this base: exit 0, open nothing. So an upstream commit
+#      that leaves assets/door/ alone proposes nothing while an earlier import
+#      waits, and once an older import merges, a newer door is proposed again
+#      from the new base. Otherwise it pushes that branch with GitLab push
+#      options that open the merge request into `dev`, titled with the
+#      upstream commit, and logs any proposal of the same door from an older
+#      base, which is left for the owner to close.
 #
 # It never lists, closes or comments on merge requests, and never deletes a
 # branch: older import merge requests and branches are closed by hand (owner
@@ -229,13 +234,18 @@ current_tree=""
 if [[ -d "$copy_dir" ]]; then
   current_tree="$(door_tree_hash "$copy_dir" 2> /dev/null || true)"
 fi
-branch_name="${branch_prefix}${short_sha}"
+# Keyed on content and base, not on the upstream commit: the same door from
+# the same base is one proposal however many upstream commits carry it, and a
+# base that has moved (an older import merged) gets a fresh, mergeable one.
+base_tree="none"
+[[ "$recorded_tree" =~ ^[0-9a-f]{12,}$ ]] && base_tree="${recorded_tree:0:12}"
+branch_name="${branch_prefix}${new_tree:0:12}-on-${base_tree}"
 if [[ "$recorded_tree" == "$new_tree" && "$current_tree" == "$new_tree" ]]; then
   log "the door is unchanged upstream (tree ${new_tree}); no branch, no merge request."
   exit 0
 fi
 
-# --- Has this commit been proposed already? ---------------------------------
+# --- Has this door been proposed from this base already? --------------------
 #
 # The token never goes in a URL, where it would sit in this process's argv for
 # the life of the git command; git reads it from a mode-600 credential-store
@@ -253,9 +263,15 @@ push_git() {
 existing_branch="$(push_git ls-remote --heads "$push_url" "refs/heads/${branch_name}")" ||
   fail "could not list the branches of ${CI_PROJECT_PATH}. Check DOOR_IMPORT_TOKEN's scope (write_repository) and role (Developer)."
 if [[ -n "$existing_branch" ]]; then
-  log "${branch_name} already exists on ${CI_PROJECT_PATH}: this upstream commit was proposed already; opening nothing."
+  log "${branch_name} already exists on ${CI_PROJECT_PATH}: this door was proposed from this base already; opening nothing."
   exit 0
 fi
+older_proposals="$(push_git ls-remote --heads "$push_url" "refs/heads/${branch_prefix}${new_tree:0:12}-on-*")" ||
+  fail "could not list the branches of ${CI_PROJECT_PATH}. Check DOOR_IMPORT_TOKEN's scope (write_repository) and role (Developer)."
+while read -r _ ref; do
+  [[ -n "$ref" ]] || continue
+  log "${ref#refs/heads/} is an earlier proposal of this door from an older base; close it by hand (decision 12a)."
+done <<< "$older_proposals"
 
 # --- Commit, push, and open the merge request --------------------------------
 
