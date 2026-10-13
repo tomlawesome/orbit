@@ -5,6 +5,10 @@ per flake, one line per sighting: `date · commit · pipeline/job · symptom`.
 The third sighting under a heading gets an issue, linked from the heading;
 fixing the cause deletes the heading in the same commit.
 
+## sign-out-provider-session.test.mjs:273 and :280, the Chrome.svelte no-flight fallback cases
+
+- 2026-10-13 · 0fd4d6aa (the #1316 audit branch with dev merged in; neither side changed Chrome.svelte's fallback or this file) · local `npx vitest run` (full unit suite, 7170 tests, other suites running on the host) · both cases saw no navigation (`expected undefined to be ...`); the file alone passes 4/4 straight after. The cases wait a fixed 60 ms (`settle`, :183) for the lazy flight import to fail and the fallback to navigate. First sighting.
+
 ## availability-route.test.mjs "GET /api/auth/availability carries phase: starting straight from getBootPhase" (#869)
 
 - 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, nowhere near auth/availability) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default in a run that took 393s overall against 232s for the same file set minutes before, with unrelated files failing alongside it — wall-clock-under-load, not this test. First sighting.
