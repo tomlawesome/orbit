@@ -176,7 +176,7 @@ async function amendOnPhone() {
   const started = [];
   /** @type {Record<string, unknown>} */
   const names = {
-    view, rowProblem: {}, previewPaper: null, reviewLockedOf: () => false,
+    view, lit: "r-1", rowProblem: {}, previewPaper: null, reviewLockedOf: () => false,
     modes: { startEdit: (/** @type {any} */ item) => { started.push(item); } },
     focusInRow: () => {}, readReminders, proposedItemOf, reminderPairOf,
   };
