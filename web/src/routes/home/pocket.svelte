@@ -279,6 +279,9 @@
   /** @param {import('$lib/data/workspace.js').ReceiptSuggestion} s */
   async function startAmend(s) {
     if (!s.receiptId || reviewLockedOf(s) || !view) return;
+    /* Already amending this one: a second tap on the lit body keeps what was
+       typed rather than starting the rows again (#1316). */
+    if (modes.id === s.id) return;
     const householdId = s.householdId ?? view.primary;
     if (!householdId) {
       rowProblem[s.id] = "This account has no household yet";
