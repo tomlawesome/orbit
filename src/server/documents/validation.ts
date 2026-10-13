@@ -218,8 +218,9 @@ function isPdfCount(value: PdfValue | undefined): value is number {
  * billions. The sections are found as pdf.js's readXRef finds them: the last
  * startxref, then each /Prev and a classic trailer's /XRefStm, read from the
  * top-level dictionary only. A count that is not a non-negative integer, a
- * dictionary this check cannot read, a loop or too long a chain refuses the
- * file. A section pdf.js could not read either is skipped: with no readable
+ * dictionary this check cannot read or too long a chain refuses the file. A
+ * revisited section is skipped, as pdf.js skips it, so a loop adds nothing.
+ * A section pdf.js could not read either is skipped: with no readable
  * section pdf.js rebuilds the table by scanning the file, which its size
  * bounds.
  */
@@ -234,7 +235,8 @@ function hasPdfIndexBudget(bytes: Buffer): boolean {
   try {
     for (let offset = queue.shift(); offset !== undefined; offset = queue.shift()) {
       if (!Number.isSafeInteger(offset) || offset < 0 || offset >= bytes.length) continue;
-      if (visited.has(offset) || visited.size >= MAX_PDF_XREF_SECTIONS) return false;
+      if (visited.has(offset)) continue;
+      if (visited.size >= MAX_PDF_XREF_SECTIONS) return false;
       visited.add(offset);
       const lexer = new PdfLexer(text, offset);
       const first = lexer.next();

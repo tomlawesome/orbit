@@ -18,6 +18,7 @@ import {
   syntheticPdfActiveContent,
   syntheticPdfWithPages,
   syntheticStructurePdfFixtures,
+  xrefStmChainPdf,
   xrefStreamPdf,
 } from "../../../tests/support/generated-pdf-documents";
 import { syntheticOwnerPasswordPdf, syntheticUserPasswordPdf } from "../../../tests/support/encrypted-pdf-documents";
@@ -106,6 +107,14 @@ describe("structural document classification", () => {
     it("refuses a classic xref table whose trailer /XRefStm is an xref stream with /Size 2000000000", async () => {
       const bytes = xrefStreamPdf({ previous: { dictionary: "/Size 2000000000 /Index [0 7]", via: "XRefStm" } });
       await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");
+    });
+
+    it("accepts a small xref stream named by /XRefStm from two chained classic tables (pdf.js reads it once)", async () => {
+      await expect(classifyDocumentStructure(xrefStmChainPdf(), "application/pdf")).resolves.toBe("supported_structure");
+    });
+
+    it("accepts the same chain when the first table's /Prev points back at the final table (pdf.js skips the revisit)", async () => {
+      await expect(classifyDocumentStructure(xrefStmChainPdf({ cycle: true }), "application/pdf")).resolves.toBe("supported_structure");
     });
   });
 

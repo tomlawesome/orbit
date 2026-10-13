@@ -185,6 +185,38 @@ export function xrefStreamPdf(options: XrefStreamPdfOptions = {}): Buffer {
   return Buffer.concat([bytes, text(table)]);
 }
 
+/**
+ * A classic-table chain that names one small xref stream S from two sections: T1's trailer has `/XRefStm S`, and the
+ * final table T2 (startxref points at it) has `/Prev T1` and the same `/XRefStm S`. Every count is small.
+ * With `cycle`, T1's trailer also has `/Prev T2`, so the two table sections point at each other.
+ */
+export function xrefStmChainPdf(options: { cycle?: boolean } = {}): Buffer {
+  const content = pageContent();
+  const objects = pageObjects(object(5, streamObject(`/Length ${content.length}`, content)));
+  let bytes = text("%PDF-1.7\n");
+  const offsets = new Map<number, number>();
+  for (const entry of objects) {
+    offsets.set(entry.id, bytes.length);
+    bytes = Buffer.concat([bytes, text(`${entry.id} 0 obj\n`), entry.body, text("\nendobj\n")]);
+  }
+  const streamOffset = bytes.length;
+  offsets.set(6, streamOffset);
+  bytes = Buffer.concat([bytes, xrefStreamSection(6, offsets, streamOffset, "/Size 7 /Index [0 7]")]);
+  let body = "xref\n0 7\n0000000000 65535 f \n";
+  for (let id = 1; id <= 6; id += 1) body += `${String(offsets.get(id)).padStart(10, "0")} 00000 n \n`;
+  const section = (prev: number | undefined, startxref: number): string =>
+    `${body}trailer\n<< /Size 7 /Root 1 0 R /XRefStm ${streamOffset}${prev === undefined ? "" : ` /Prev ${prev}`} >>\nstartxref\n${startxref}\n%%EOF\n`;
+  const firstOffset = bytes.length;
+  // T2 starts where T1 ends; T1's length depends on the digits of T2's offset when it points back, so settle it.
+  let secondOffset = firstOffset;
+  for (let pass = 0; pass < 4; pass += 1) {
+    secondOffset = firstOffset + Buffer.byteLength(section(options.cycle ? secondOffset : undefined, 0), "latin1");
+  }
+  const first = section(options.cycle ? secondOffset : undefined, 0);
+  if (firstOffset + Buffer.byteLength(first, "latin1") !== secondOffset) throw new Error("fixture offsets did not settle");
+  return Buffer.concat([bytes, text(first), text(section(firstOffset, secondOffset))]);
+}
+
 function objectStreamPdf(): Buffer {
   const font = text("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
   const objectStreamHeader = text("4 0 ");
