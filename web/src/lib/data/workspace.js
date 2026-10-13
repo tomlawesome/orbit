@@ -2317,13 +2317,23 @@ export async function signOut() {
      sent through `json()`, which would bounce into the login flow; with no
      session there is nothing to prove, and the route takes the same-origin
      check alone. */
-  const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin" });
+  /** @type {?string} */
+  let csrfToken = null;
+  try {
+    const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin" });
+    if (sessionResponse.status !== 401) {
+      ({ csrfToken } = /** @type {Session} */ (await json(sessionResponse)));
+    }
+  } catch {
+    /* The session read failing (Orbit answering 5xx, or not reached at all)
+       must not stop someone signing out. Send the token cached earlier on this
+       page if there is one, and otherwise none: the route then takes the
+       same-origin check, or refuses, and only that refusal is an error. */
+    csrfToken = (await sessionPromise?.catch(() => null))?.csrfToken ?? null;
+  }
   /** @type {Record<string, string>} */
   const headers = { accept: "application/json" };
-  if (sessionResponse.status !== 401) {
-    const { csrfToken } = /** @type {Session} */ (await json(sessionResponse));
-    headers["x-csrf-token"] = csrfToken;
-  }
+  if (csrfToken) headers["x-csrf-token"] = csrfToken;
   const response = await fetch("/api/auth/logout", {
     method: "POST",
     credentials: "same-origin",

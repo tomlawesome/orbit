@@ -144,6 +144,72 @@ describe("signOut() against a dead or stale session (#1316)", () => {
     expect(logout?.init?.headers?.["x-csrf-token"]).toBe("B");
   });
 
+  it("still signs out with the cached CSRF token when the session read answers 503", async () => {
+    let sessionDown = false;
+    const calls = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      calls.push({ url, init });
+      if (url === "/api/auth/session") {
+        return sessionDown
+          ? reply(503, { error: { message: "Unavailable", code: "unavailable" } })
+          : reply(200, { csrfToken: "A" });
+      }
+      return reply(200, { redirectTo: null });
+    }));
+    const { readSession, signOut } = await import("../../web/src/lib/data/workspace.js");
+
+    await expect(readSession()).resolves.toMatchObject({ csrfToken: "A" });
+    sessionDown = true;
+
+    await expect(signOut()).resolves.toBeNull();
+    const logout = calls.find((c) => c.url === "/api/auth/logout");
+    expect(logout?.init?.method).toBe("POST");
+    expect(logout?.init?.headers?.["x-csrf-token"]).toBe("A");
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("still sends the sign-out, without a CSRF header, when the session read cannot be made and nothing is cached", async () => {
+    const calls = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      calls.push({ url, init });
+      if (url === "/api/auth/session") throw new TypeError("Failed to fetch");
+      return reply(200, { redirectTo: null });
+    }));
+    const { signOut } = await import("../../web/src/lib/data/workspace.js");
+
+    await expect(signOut()).resolves.toBeNull();
+    const logout = calls.find((c) => c.url === "/api/auth/logout");
+    expect(logout?.init?.method).toBe("POST");
+    expect(logout?.init?.headers?.["x-csrf-token"]).toBeUndefined();
+  });
+
+  it.each([
+    ["the session read answers 401", 401],
+    ["the session read answers 200", 200],
+  ])("clears the cached session once signed out, when %s", async (_label, status) => {
+    let signedOut = false;
+    const calls = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      calls.push({ url, init });
+      if (url === "/api/auth/session") {
+        if (signedOut && status === 401) {
+          return reply(401, { error: { message: "Sign in required", code: "unauthenticated" } });
+        }
+        return reply(200, { csrfToken: "A" });
+      }
+      return reply(200, { redirectTo: null });
+    }));
+    const { readSession, signOut } = await import("../../web/src/lib/data/workspace.js");
+
+    await readSession();
+    signedOut = true;
+    await signOut();
+    const before = calls.filter((c) => c.url === "/api/auth/session").length;
+
+    await readSession().catch(() => null);
+    expect(calls.filter((c) => c.url === "/api/auth/session")).toHaveLength(before + 1);
+  });
+
   it("still rejects with a 403 WorkspaceError when the logout POST is refused", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url) => {
       if (url === "/api/auth/session") return reply(200, { csrfToken: "A" });
