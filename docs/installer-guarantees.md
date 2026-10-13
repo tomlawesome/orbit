@@ -540,7 +540,7 @@ Scope: `backup.sh`, `restore.sh`, `export-recovery-bundle.sh`, `import-recovery-
 self-contained); `recovery-crypto.mjs` is invoked as a one-off `node` entrypoint inside the
 `orbit-app` container rather than sourced.
 
-All citations are `file.sh:line` against `/srv/checkouts/orbit/scripts/<file>`.
+All citations are `file.sh:line` against `scripts/<file>` in the repository.
 
 ### Before and after an upgrade
 

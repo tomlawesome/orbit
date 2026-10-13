@@ -1,6 +1,6 @@
 // Screenshots of the round's pages: desk at 1440 (2×), phone at 390 (3×), a reduced-motion desk shot,
 // and the hover state of one desk cell per pack (3×, element only).
-// PW=/srv/checkouts/orbit/node_modules/.pnpm/playwright@1.63.0/node_modules/playwright node shots.cjs
+// PW=<project root>/node_modules/.pnpm/playwright@1.63.0/node_modules/playwright node shots.cjs
 const { chromium } = require(process.env.PW || 'playwright');
 const path = require('path');
 const pages = (process.env.PAGES || 'orbit,feather,weighted').split(',');
