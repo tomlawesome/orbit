@@ -87,11 +87,23 @@ async function forceWorld(page: Page) {
   });
 }
 
-/** What the descent drew on, recorded from inside the page at its warp. */
+/**
+ * What the descent drew on, recorded from inside the page at its warp.
+ *
+ * Kept in sessionStorage: with a provider sign-out address the goodbye hands
+ * the tab to the provider, which sends it back to /logout as a new page
+ * (#1316), and the record must outlive that trip. Both timestamps are taken
+ * on the first page, so their difference keeps its meaning.
+ */
 async function watchDescent(page: Page) {
   await page.addInitScript(() => {
+    const KEY = "__descent";
     const seen = { world: false, warp: false, withdraw: 0, farewell: 0 };
+    try {
+      Object.assign(seen, JSON.parse(sessionStorage.getItem(KEY) ?? "{}"));
+    } catch { /* nothing kept yet */ }
     (window as unknown as { __descent: typeof seen }).__descent = seen;
+    const keep = () => sessionStorage.setItem(KEY, JSON.stringify(seen));
     const watch = () => new MutationObserver(() => {
       const b = document.body;
       if (!seen.withdraw && b.classList.contains("withdrawing")) seen.withdraw = performance.now();
@@ -101,6 +113,7 @@ async function watchDescent(page: Page) {
         const gl = document.getElementById("warpgl");
         if (gl && gl.isConnected && gl.style.visibility !== "hidden") seen.world = true;
       }
+      keep();
     }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
     if (document.body) watch(); else addEventListener("DOMContentLoaded", watch);
   });
