@@ -81,7 +81,7 @@ const BANNED_LOGINS = new Set([
 ]);
 
 /** `/home/<login>`, `/Users/<login>`, `C:\Users\<login>` (any slash, escaped or not, either case), `~<login>/`. */
-const HOME_DIRECTORY = /(?:\/home\/|[/\\]+[Uu]sers[/\\]+|(?<![\w/])~)([A-Za-z0-9._-]+)/gu;
+const HOME_DIRECTORY = /(?:\/home\/|[/\\]+[Uu][Ss][Ee][Rr][Ss][/\\]+|(?<![\w/])~)([A-Za-z0-9._-]+)/gu;
 
 /**
  * The lower-case login candidates of every home-directory path in a line: the
@@ -220,6 +220,15 @@ describe("the guard's matchers (#1408)", () => {
     includesAll(loginsOf("files live in /home/alex."), ["alex"]);
     includesAll(loginsOf("under ~alex."), ["alex"]);
     includesAll(loginsOf("/home/alex-old"), ["alex"]);
+  });
+
+  it("loginsOf finds a dotted login that ends a sentence", () => {
+    includesAll(loginsOf("files live in /home/al-ex."), ["al-ex"]);
+    includesAll(loginsOf("under ~al.ex."), ["al.ex"]);
+  });
+
+  it("loginsOf finds a login in an all-caps Windows path", () => {
+    includesAll(loginsOf("C:\\USERS\\alex\\x"), ["alex"]);
   });
 
   it("loginsOf finds a login in a lower-case Windows path and in an ordinary path", () => {
