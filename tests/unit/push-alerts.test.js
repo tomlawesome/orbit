@@ -188,6 +188,21 @@ describe("syncAlerts — the subscription's server key (#1316)", () => {
   });
 });
 
+describe("syncAlerts — the browser holds an incomplete subscription", () => {
+  it("reads as off and sends nothing, as a server refusal would", async () => {
+    const existing = { endpoint: "https://push.example/partial", toJSON: () => ({ endpoint: "https://push.example/partial", keys: {} }) };
+    const registration = fakeRegistration(existing);
+    const scope = {
+      ...SUPPORTED_SCOPE,
+      navigator: { serviceWorker: { getRegistration: vi.fn(async () => registration) } },
+    };
+    const writePushSubscription = vi.fn(async () => ({ subscribed: true }));
+
+    await expect(syncAlerts({ scope, readPushConfig: vi.fn(async () => null), writePushSubscription })).resolves.toBeNull();
+    expect(writePushSubscription).not.toHaveBeenCalled();
+  });
+});
+
 describe("enableAlerts — unsupported browser", () => {
   it("throws code unsupported and never asks for permission", async () => {
     const requestPermission = vi.fn();
@@ -276,6 +291,27 @@ describe("enableAlerts — permission granted, not yet subscribed", () => {
     });
 
     expect(register).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("enableAlerts — the browser returns an incomplete subscription", () => {
+  it("refuses with code invalid_subscription and sends nothing to the server", async () => {
+    const subscribed = { toJSON: () => ({ endpoint: "https://push.example/partial", keys: { p256dh: "p256dh-value" } }) };
+    const registration = fakeRegistration(null, { subscribe: vi.fn(async () => subscribed) });
+    const writePushSubscription = vi.fn(async () => ({ subscribed: true }));
+
+    const refusal = await enableAlerts({
+      scope: SUPPORTED_SCOPE,
+      getRegistration: vi.fn(async () => registration),
+      register: vi.fn(),
+      requestPermission: vi.fn(async () => "granted"),
+      readPushConfig: vi.fn(async () => ({ publicKey: "AAAA" })),
+      writePushSubscription,
+    }).then(() => null, (error) => error);
+
+    expect(refusal).toBeInstanceOf(AlertsError);
+    expect(refusal.code).toBe("invalid_subscription");
+    expect(writePushSubscription).not.toHaveBeenCalled();
   });
 });
 
@@ -383,7 +419,7 @@ describe("enableAlerts — already subscribed", () => {
     // So a device whose write failed once stays correctly "not confirmed
     // on" rather than the switch claiming success — the caller (the
     // settings screen) is the one that decides what the reader sees.
-    const existing = { endpoint: "e", toJSON: () => ({ endpoint: "e", keys: {} }) };
+    const existing = { endpoint: "e", toJSON: () => ({ endpoint: "e", expirationTime: null, keys: { p256dh: "a", auth: "b" } }) };
     const registration = fakeRegistration(existing);
     const writePushSubscription = vi.fn(async () => { throw new Error("network down"); });
 

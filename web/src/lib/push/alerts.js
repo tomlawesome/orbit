@@ -116,12 +116,32 @@ export async function syncAlerts(deps = {}) {
     }
   }
   try {
-    await d.writePushSubscription(/** @type {any} */ (subscription.toJSON()));
+    await d.writePushSubscription(subscriptionPayload(subscription));
   } catch (error) {
-    if (serverRefused(error)) return null;
+    // An incomplete subscription can never be delivered to, the same as one
+    // the server refused.
+    if (serverRefused(error) || error instanceof AlertsError) return null;
     /* unreachable: re-sent on the next visit */
   }
   return subscription;
+}
+
+/**
+ * What the server is sent for a subscription: its endpoint and both keys,
+ * which `toJSON()` types as optional. One the browser returned without them
+ * could never be delivered to, so it is refused rather than sent.
+ *
+ * @param {PushSubscription} subscription
+ * @returns {{ endpoint: string, expirationTime: ?number, keys: { p256dh: string, auth: string } }}
+ */
+function subscriptionPayload(subscription) {
+  const json = subscription.toJSON();
+  const p256dh = json.keys?.p256dh;
+  const auth = json.keys?.auth;
+  if (!json.endpoint || !p256dh || !auth) {
+    throw new AlertsError("The browser returned an incomplete push subscription", { code: "invalid_subscription" });
+  }
+  return { endpoint: json.endpoint, expirationTime: json.expirationTime ?? null, keys: { p256dh, auth } };
 }
 
 /**
@@ -141,7 +161,7 @@ function serverRefused(error) {
  * same padding-then-decode, without the TypeScript-only buffer rewrap.
  *
  * @param {string} value
- * @returns {Uint8Array}
+ * @returns {Uint8Array<ArrayBuffer>}
  */
 function applicationServerKeyOf(value) {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
@@ -240,7 +260,7 @@ export async function enableAlerts(deps = {}) {
   const existing = await registration.pushManager.getSubscription();
   if (existing) {
     const subscription = await freshenedSubscription(registration, existing, await d.readPushConfig());
-    await d.writePushSubscription(subscription.toJSON());
+    await d.writePushSubscription(subscriptionPayload(subscription));
     return subscription;
   }
   const permission = await d.requestPermission();
@@ -256,7 +276,7 @@ export async function enableAlerts(deps = {}) {
     userVisibleOnly: true,
     applicationServerKey: applicationServerKeyOf(config.publicKey),
   });
-  await d.writePushSubscription(subscription.toJSON());
+  await d.writePushSubscription(subscriptionPayload(subscription));
   return subscription;
 }
 
