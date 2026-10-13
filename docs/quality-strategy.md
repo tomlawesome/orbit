@@ -105,20 +105,19 @@ zero-error check: it runs `svelte-check` across `web/` and fails on any error,
 anywhere, with no per-file exemption. `web/svelte-check-ceiling.json` is kept
 only as the empty historical record of the ledger; nothing reads it anymore.
 
-`due-next/+page.svelte` and `home/+page.svelte` were the two files still
-carrying tolerated errors, both for the same reason: a `{#snippet}` parameter
-is one of the positions where `svelte-check` accepts an inline `@type` cast
-comment but the production rolldown build does not (#782), so the type
-couldn't be written inline in the route's own `<script>`. Both reached zero by
-turning the snippet into a real child component, whose `$props()`
-destructuring is a plain `<script>` statement and takes the annotation
-without issue: `due-next/EntryRow.svelte`, and `home/CorridorRow.svelte` and
-`home/ItemView.svelte` (home's two snippets closed over a large slice of the
-screen's own reactive state and handlers, so those became typed props and
-callback props instead). Both routes' reactive `view` state and lookup
-objects also moved into small companion modules (`due-next-view.svelte.js`,
-`bands.js`) for the same reason. #782 stays open to carry the upstream
-constraint and the workaround, but no file needs it worked around today.
+`home/+page.svelte` was the last file still carrying tolerated errors: a
+`{#snippet}` parameter is one of the positions where `svelte-check` accepts an
+inline `@type` cast comment but the production rolldown build does not (#782),
+so the type couldn't be written inline in the route's own `<script>`. It
+reached zero by turning the snippets into real child components, whose
+`$props()` destructuring is a plain `<script>` statement and takes the
+annotation without issue: `home/CorridorRow.svelte` and `home/ItemView.svelte`
+(home's two snippets closed over a large slice of the screen's own reactive
+state and handlers, so those became typed props and callback props instead).
+The route's reactive `view` state and lookup objects also moved into a small
+companion module (`bands.js`) for the same reason. #782 stays open to carry the
+upstream constraint and the workaround, but no file needs it worked around
+today.
 
 The same job compiles `web/` (`pnpm --filter orbit-web build`, about twenty
 seconds). Before that, a `.svelte` file that did not compile could merge green

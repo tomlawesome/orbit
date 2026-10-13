@@ -451,16 +451,6 @@ and back) by `scripts/configure-check-contract.test.mjs`, mirroring
 changing whether it can report `optional`, is a breaking change requiring a
 version bump and coordination with orbit-launcher.
 
-`imap` moved from "Optional groups" to "App-managed groups" in the same
-change that removed every `IMAP_*` .env-orbit key (ADR-0017 slice 2, issue
-#743): a consumer that still expects `optional imap`/`missing imap`/
-`ready imap` will not see any of those three words for this field again.
-This is exactly the breaking change the paragraph above describes; it ships
-without a version bump only because there are no external operators of this
-interface to coordinate with yet (the same reasoning ADR-0017 gives for
-dropping the deployment contract's `IMAP_*` deprecation window). Coordinate
-with orbit-launcher before relying on this if that stops being true.
-
 ## Machine prompts: backup/restore/recovery (v0)
 
 The backup/restore/recovery-bundle family

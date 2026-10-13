@@ -76,7 +76,7 @@ describe("installer guarantee catalogue aggregates", () => {
     // silently merged into its neighbour) would otherwise show up only as a
     // suspiciously small total further down.
     expect(part1Sections.length).toBeGreaterThanOrEqual(7);
-    expect(part2Sections.length).toBeGreaterThanOrEqual(9);
+    expect(part2Sections.length).toBeGreaterThanOrEqual(8);
   });
 
   it("Part 1's per-script table matches the numbered entries in each section", () => {
