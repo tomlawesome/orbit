@@ -56,8 +56,6 @@ const notificationEnvironmentSchema = z.object({
   ),
   SMTP_USER: z.string().trim().max(320).optional().default(""),
   SMTP_PASSWORD: z.string().optional().default(""),
-  // Deprecated compatibility input. New deployments should use the fields above.
-  SMTP_URL: z.string().optional().default(""),
   SMTP_FROM: z.string().min(1).default("Orbit <orbit@localhost>"),
   VAPID_SUBJECT: z.string().optional().default(""),
   VAPID_PUBLIC_KEY: z.string().optional().default(""),
@@ -249,29 +247,16 @@ export function notificationRetryDelayMs(attempts: number): number {
 export function getNotificationWorkerConfig(environment: NodeJS.ProcessEnv = process.env): NotificationWorkerConfig {
   const parsed = notificationEnvironmentSchema.parse({
     ...environment,
-    SMTP_URL: readRuntimeSecret(environment, "SMTP_URL"),
     SMTP_PASSWORD: readRuntimeSecret(environment, "SMTP_PASSWORD"),
     VAPID_PRIVATE_KEY: readRuntimeSecret(environment, "VAPID_PRIVATE_KEY"),
   });
   const smtpRequested = Boolean(parsed.SMTP_HOST || parsed.SMTP_USER || parsed.SMTP_PASSWORD);
   if (smtpRequested && !(parsed.SMTP_HOST && parsed.SMTP_USER && parsed.SMTP_PASSWORD)) throw new Error("SMTP_HOST, SMTP_USER, and SMTP_PASSWORD must be configured together");
-  if (parsed.SMTP_URL && smtpRequested) throw new Error("Use either SMTP_URL or individual SMTP settings, not both");
-  const hasExplicitSmtpSecurity = typeof environment.SMTP_SECURITY === "string" && environment.SMTP_SECURITY.length > 0;
-  let smtpSecurity = parsed.SMTP_SECURITY;
-  if (parsed.SMTP_URL) {
-    let smtpUrl: URL;
-    try { smtpUrl = new URL(parsed.SMTP_URL); } catch { throw new Error("SMTP_URL must be a valid SMTP URL"); }
-    if (!smtpUrl.hostname || !["smtp:", "smtps:"].includes(smtpUrl.protocol)) throw new Error("SMTP_URL must use smtp or smtps");
-    const inferredSecurity = smtpUrl.protocol === "smtps:" ? "implicit_tls" : "starttls";
-    if (hasExplicitSmtpSecurity && inferredSecurity !== parsed.SMTP_SECURITY) {
-      throw new Error(parsed.SMTP_SECURITY === "implicit_tls" ? "SMTP_URL must use implicit TLS" : "SMTP_URL requires STARTTLS");
-    }
-    smtpSecurity = inferredSecurity;
-  }
+  const smtpSecurity = parsed.SMTP_SECURITY;
   const smtpPort = parsed.SMTP_PORT ?? (smtpSecurity === "implicit_tls" ? 465 : 587);
   const smtpUrl = smtpRequested
     ? `${smtpSecurity === "implicit_tls" ? "smtps" : "smtp"}://${encodeURIComponent(parsed.SMTP_USER)}:${encodeURIComponent(parsed.SMTP_PASSWORD)}@${parsed.SMTP_HOST}:${smtpPort}`
-    : parsed.SMTP_URL;
+    : "";
   return {
     smtpUrl,
     smtpSecurity,

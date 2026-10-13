@@ -19,9 +19,7 @@ readonly environment_file="${ORBIT_ENV_FILE:-.env-orbit}"
 backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
 [[ "$backup_directory" == /* ]] || backup_directory="$repo_dir/$backup_directory"
 readonly backup_directory
-secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
-[[ "$secrets_directory" == /* ]] || secrets_directory="$repo_dir/$secrets_directory"
-readonly secrets_directory
+readonly secrets_directory="$repo_dir/.orbit-secrets"
 # The engine one-off's container name: unique to this run, so the EXIT trap can `docker wait` for it.
 readonly engine_name="orbit-import-engine-$$"
 readonly journal_path="$backup_directory/.orbit-restore/restore.journal"
@@ -156,7 +154,7 @@ engine_host_identity() {
 }
 
 # run_engine <bundle|""> <orbit args...>: one compose one-off (#1211 E1/E5).
-# A backups or secrets directory outside the deployment gets its own mount;
+# A backups directory outside the deployment gets its own mount;
 # the bundle being read is mounted read-only. The ORBIT_HOST_* paths let the
 # engine print host paths. The drill's switches are forwarded when set (the
 # engine ignores the ones its command does not use). Exit status passes through.
@@ -176,10 +174,6 @@ run_engine() {
     { mkdir -p -- "$backup_directory" && chmod 700 -- "$backup_directory"; } || fail "Could not create ${backup_directory}."
     run_args+=(-v "$backup_directory:/orbit-backups:rw" -e "ORBIT_HOST_BACKUP_DIR=$backup_directory")
     directory_args+=(--backup-dir /orbit-backups)
-  fi
-  if [[ "$secrets_directory" != "$repo_dir/.orbit-secrets" ]]; then
-    run_args+=(-v "$secrets_directory:/orbit-secrets:rw" -e "ORBIT_HOST_SECRETS_DIR=$secrets_directory")
-    directory_args+=(--secrets-dir /orbit-secrets)
   fi
   if [[ -n "$input_file" ]]; then
     run_args+=(-v "$input_file:/orbit-input/bundle.tar:ro" -e "ORBIT_HOST_INPUT_FILE=$input_file")

@@ -599,7 +599,7 @@ async function prepareDrill(mode) {
   const dir = makeFixture();
   const binDir = join(dir, "bin");
   mkdirSync(binDir);
-  const secrets = join(dir, "secrets");
+  const secrets = join(dir, ".orbit-secrets");
   mkdirSync(secrets);
   writeFileSync(join(secrets, "document-kek"), "kek\n");
   const envFile = join(dir, ".env-orbit");
@@ -643,7 +643,6 @@ exit 0
       ...process.env,
       PATH: `${binDir}:${process.env.PATH}`,
       ORBIT_ENV_FILE: envFile,
-      ORBIT_SECRETS_DIR: secrets,
       ORBIT_BACKUP_DIR: join(dir, "backups"),
       ORBIT_EVIDENCE_ROOT: join(dir, "evidence"),
       TMPDIR: dir,

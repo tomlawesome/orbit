@@ -780,30 +780,16 @@ describe("runConfigureApply (bare flow, minus ensure_vapid_keys)", () => {
     expect(() => runConfigureApply(deployDir, undefined)).toThrow(ConfigureEngineRefusal);
   });
 
-  // #1316 O1-F1 (owner decision 2026-10-11, option a): ORBIT_SECRETS_DIR is
-  // retired. A deployment that still points it away from ./.orbit-secrets
-  // is refused clearly, before anything is generated in the wrong place.
-  it("#1316 O1-F1: refuses a .env-orbit whose ORBIT_SECRETS_DIR points elsewhere, and creates no ./.orbit-secrets", () => {
+  // #1403 D3: ORBIT_SECRETS_DIR is no longer a setting at all, so a file that
+  // still carries it fails preflight as an unknown key, before anything is
+  // generated.
+  it("refuses a .env-orbit that still sets ORBIT_SECRETS_DIR, and creates no ./.orbit-secrets", () => {
     writeFileSync(
       envPath(),
       "ORBIT_CONFIG_SCHEMA_VERSION=1\nAPP_URL=https://orbit.example.com\nORBIT_SECRETS_DIR=/srv/orbit-secrets\n",
       { mode: 0o600 },
     );
-    expect(existsSync(join(deployDir, SECRETS_DIRECTORY_NAME))).toBe(false);
-
-    let thrown: unknown;
-    try {
-      runConfigureApply(deployDir, undefined);
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(ConfigureEngineRefusal);
-    const message = (thrown as ConfigureEngineRefusal).message;
-    expect(message).toContain("ORBIT_SECRETS_DIR");
-    expect(message).toContain(".orbit-secrets");
-
-    // Nothing was written: not the directory, not any secret file.
-    expect(existsSync(join(deployDir, SECRETS_DIRECTORY_NAME))).toBe(false);
+    expect(() => runConfigureApply(deployDir, undefined)).toThrow(ConfigureEngineRefusal);
     expect(lstatOrNull(join(deployDir, SECRETS_DIRECTORY_NAME))).toBeNull();
   });
 

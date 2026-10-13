@@ -185,15 +185,6 @@ describe("notification worker scheduling", () => {
     expect(config.smtpUrl).not.toContain("IMAP");
   });
 
-  it("rejects an SMTP plaintext downgrade or mismatched security URL", () => {
-    expect(() => getNotificationWorkerConfig({
-      NODE_ENV: "test", SMTP_URL: "smtp://smtp.example.test:25", SMTP_SECURITY: "implicit_tls",
-    } as NodeJS.ProcessEnv)).toThrow("implicit TLS");
-    expect(() => getNotificationWorkerConfig({
-      NODE_ENV: "test", SMTP_URL: "smtps://smtp.example.test:465", SMTP_SECURITY: "starttls",
-    } as NodeJS.ProcessEnv)).toThrow("STARTTLS");
-  });
-
   it("suppresses only reminders scheduled before the household snooze resume date", () => {
     const earlyReminder = householdReminderTime("2026-08-31", 30, "Europe/London");
     const laterReminder = householdReminderTime("2026-08-31", 7, "Europe/London");

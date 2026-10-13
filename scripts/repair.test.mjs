@@ -801,8 +801,7 @@ function makeFixture({ withConfigure = true, withComposeAndEnv = true, withSecre
     const envLines = [
       "APP_URL=https://orbit.repair-test.internal",
       `ORBIT_IMAGE=${FIXTURE_IMAGE}`,
-      // Every supported install writes this key (ADR-0016 gate, #681); the
-      // floor itself is the representative supported value.
+      // Every install writes this key (ADR-0016 gate, #681).
       "ORBIT_CONFIG_APPLIED_VERSION=v0.3.0",
       ...appliedDigestLines(FIXTURE_IMAGE),
       "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
@@ -2389,12 +2388,9 @@ describe("scripts/repair.sh --check", () => {
 
 // --- #681 criterion 9: the ADR-0016 supported-version gate ----------------
 //
-// ORBIT_CONFIG_APPLIED_VERSION is written by configuration.sh on every
-// supported install, so a readable .env-orbit without it is the signature
-// of a pre-floor (v1.0.0-era) or hand-assembled deployment — both fail
-// closed. The floor is v0.3.0 (ADR-0016 amendment, #1213): releases are
-// numbered 0.x, so there is no longer a major-0 exemption, and the 1.x tags
-// are retracted alphas below the floor. While the finding is present,
+// ORBIT_CONFIG_APPLIED_VERSION is written on every install, so a readable
+// .env-orbit without it is the signature of a hand-assembled deployment and
+// fails closed. While the finding is present,
 // --execute refuses the whole batch: even the safe executors must not mutate
 // a layout repair was never proven against.
 
@@ -2435,12 +2431,6 @@ describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion
 
     expect(result.status).toBe(0);
     expect(result.stdout).not.toContain("deployment-version-unsupported");
-  });
-
-  it("carries no supported-floor arithmetic or retracted-tag wording in repair.sh (#1403 D3)", () => {
-    const source = readFileSync(new URL("./repair.sh", import.meta.url), "utf8");
-    expect(source).not.toMatch(/supported_floor_/);
-    expect(source).not.toMatch(/retract/i);
   });
 
   // #1210: the engine behind configure.sh --check refuses a malformed
@@ -2520,20 +2510,19 @@ describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion
 
   it("plans the finding as manual, with value-free guidance and criterion 6's preview fields", () => {
     const targetDir = makeFixture();
-    writeVersionedEnv(targetDir, "ORBIT_CONFIG_APPLIED_VERSION=v1.2.0");
+    writeVersionedEnv(targetDir, null);
 
     const result = runRepair(targetDir, ["--plan"]);
 
     expect(result.stdout).toContain(
       "plan action=manual resolves=deployment-version-unsupported mutation=none backup=not-required target=deployment rollback=not-required expect=operator-action",
     );
-    expect(result.stderr).toContain("supported floor");
-    expect(result.stderr).not.toContain("v1.2.0");
+    expect(result.stderr).toContain("no well-formed ORBIT_CONFIG_APPLIED_VERSION");
   });
 
   it("--execute --safe-only refuses the entire batch, exit 6, mutating nothing", () => {
     const targetDir = makeFixture();
-    writeVersionedEnv(targetDir, "ORBIT_CONFIG_APPLIED_VERSION=v1.2.0");
+    writeVersionedEnv(targetDir, null);
     // A genuinely executable safe action must be on the table, or this test
     // proves refusal of an empty batch — which nothing distinguishes from
     // the ordinary empty path.
@@ -2551,7 +2540,7 @@ describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion
 
   it("--execute --dangerous reports the dangerous batch refused for the same reason", () => {
     const targetDir = makeFixture();
-    writeVersionedEnv(targetDir, "ORBIT_CONFIG_APPLIED_VERSION=v1.2.0");
+    writeVersionedEnv(targetDir, null);
 
     const result = runRepair(targetDir, ["--execute", "--dangerous"], {}, { input: "y\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } });
 

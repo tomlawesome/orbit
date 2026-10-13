@@ -167,21 +167,19 @@ interface BackupRestorePaths {
   documentKekFile: string;
 }
 
-/** `--backup-dir`/`--secrets-dir`: where the shell mounted ORBIT_BACKUP_DIR/ORBIT_SECRETS_DIR when they lie outside the deployment (#1211 E5). */
+/** `--backup-dir`: where the shell mounted ORBIT_BACKUP_DIR when it lies outside the deployment (#1211 E5). */
 interface BackupRestoreDirectories {
   backupDir?: string;
-  secretsDir?: string;
 }
 
 // Everything is derived from `--dir` (matching `check`'s convention above),
-// except the two directories an operator may keep elsewhere: the shells map
-// ORBIT_BACKUP_DIR and ORBIT_SECRETS_DIR onto mounts and pass them as
-// `--backup-dir`/`--secrets-dir` (#1211 build note E5).
+// except the backups directory an operator may keep elsewhere: the shells map
+// ORBIT_BACKUP_DIR onto a mount and pass it as `--backup-dir` (#1211 build
+// note E5). The secrets always live in the deployment's own .orbit-secrets.
 function resolveBackupRestorePaths(deployDir: string, directories: BackupRestoreDirectories): BackupRestorePaths {
-  const secretsDirectory = directories.secretsDir !== undefined ? resolve(directories.secretsDir) : join(deployDir, ".orbit-secrets");
   return {
     backupDirectory: directories.backupDir !== undefined ? resolve(directories.backupDir) : join(deployDir, "backups"),
-    documentKekFile: join(secretsDirectory, "document-kek"),
+    documentKekFile: join(deployDir, ".orbit-secrets", "document-kek"),
   };
 }
 
@@ -1848,9 +1846,6 @@ function main(): void {
       index += 1;
     } else if (takesDirectories && rest[index] === "--backup-dir" && rest[index + 1]) {
       directories.backupDir = rest[index + 1];
-      index += 1;
-    } else if (takesDirectories && rest[index] === "--secrets-dir" && rest[index + 1]) {
-      directories.secretsDir = rest[index + 1];
       index += 1;
     } else {
       commandArgs.push(rest[index]);

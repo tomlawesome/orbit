@@ -433,10 +433,8 @@ self_fetch_release_manifest() {
   # the version asked for: an older signed release is still signed.
   if [[ "$channel" =~ $version_pin_pattern ]]; then
     local manifest_version
+    # The manifest records the image label, `vX.Y.Z`.
     manifest_version="$(grep -F '"version":' "$manifest_json" | sed -n 's/.*: *"\([^"]*\)".*/\1/p' | head -n1)"
-    # The manifest records the image label, `vX.Y.Z` since #1228; older ones
-    # carried the bare `X.Y.Z`. Either form names the same release (#1378).
-    manifest_version="v${manifest_version#v}"
     [[ "$manifest_version" == "$channel" ]] ||
       fail "Asked for ${channel} but the signed release manifest is for ${manifest_version}; refusing."
   fi
@@ -909,10 +907,6 @@ target_dir="$(pwd -P)" || fail "Could not resolve the installation directory."
 command -v docker >/dev/null 2>&1 || fail "Docker is required."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required."
 command -v timeout >/dev/null 2>&1 || fail "GNU timeout is required for bounded health checks."
-# ORBIT_SECRETS_DIR is retired: the engine only uses ./.orbit-secrets, and a
-# value pointing elsewhere would leave Compose mounting different secrets.
-[[ -z "${ORBIT_SECRETS_DIR:-}" || "${ORBIT_SECRETS_DIR}" == ./.orbit-secrets || "${ORBIT_SECRETS_DIR}" == .orbit-secrets ]] ||
-  fail "ORBIT_SECRETS_DIR is set to ${ORBIT_SECRETS_DIR}, but Orbit no longer reads that setting: it keeps its secrets in ./.orbit-secrets beside .env-orbit. Move the secret files from ${ORBIT_SECRETS_DIR} into ./.orbit-secrets, remove the ORBIT_SECRETS_DIR setting, then run again."
 installer_ui_event host host completed host-tools check
 
 # Resolve the release manifest (ADR-0031 #7) and pin the pull to the digest

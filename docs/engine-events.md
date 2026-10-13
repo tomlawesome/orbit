@@ -731,10 +731,9 @@ docker compose --env-file "$environment_file" \
   [-e <switch>=<value> ...] \
   -v "<host-deployment-dir>:/orbit-deploy:rw" \
   [-v "<backup-dir>:/orbit-backups:rw" -e ORBIT_HOST_BACKUP_DIR=<backup-dir>] \
-  [-v "<secrets-dir>:/orbit-secrets:rw" -e ORBIT_HOST_SECRETS_DIR=<secrets-dir>] \
   [-v "<bundle>:/orbit-input/bundle.tar:ro" -e ORBIT_HOST_INPUT_FILE=<bundle>] \
   --entrypoint node orbit-app /opt/orbit/cli/orbit.js <command> ... \
-  --dir /orbit-deploy [--backup-dir /orbit-backups] [--secrets-dir /orbit-secrets]
+  --dir /orbit-deploy [--backup-dir /orbit-backups]
 ```
 
 - `--rm --no-deps` — a throwaway container on the `orbit-app` service; no
@@ -758,11 +757,11 @@ docker compose --env-file "$environment_file" \
   `ORBIT_RECOVERY_PROMPTS`, `ORBIT_RECOVERY_TEST_MODE`, and restore.sh's test switches
   (`ORBIT_RESTORE_TEST_*`, which `scripts/test-backup-restore.sh` sets). None
   is a secret; passphrases only ever travel on standard input.
-- `ORBIT_ENV_FILE` is the `--env-file`. `ORBIT_BACKUP_DIR` and
-  `ORBIT_SECRETS_DIR`, when they name somewhere other than the deployment's
-  own `backups/` and `.orbit-secrets/`, get mounts of their own and are
-  passed as `--backup-dir`/`--secrets-dir`; the script creates an outside
-  backup directory (mode 700) itself, so Docker never creates it as root.
+- `ORBIT_ENV_FILE` is the `--env-file`. `ORBIT_BACKUP_DIR`, when it names
+  somewhere other than the deployment's own `backups/`, gets a mount of its
+  own and is passed as `--backup-dir`; the script creates an outside backup
+  directory (mode 700) itself, so Docker never creates it as root. The
+  secrets are always the deployment's own `.orbit-secrets/`.
   The bundle being read is mounted read-only at `/orbit-input/bundle.tar`.
   The `ORBIT_HOST_*` variables let the engine print host paths
   (`src/lib/host-paths.ts`): `Orbit backup created: /srv/orbit/backups/...`,

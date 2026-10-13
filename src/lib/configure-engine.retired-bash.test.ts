@@ -159,12 +159,6 @@ describe(".env-orbit.example (ported from scripts/configure.test.mjs)", () => {
     expect(environmentExampleSource).not.toMatch(/^#?\s*IMAP_[A-Z_]*=/m);
   });
 
-  it("keeps the deprecated SMTP_URL compatibility form out of the active surface", () => {
-    expect(environmentExampleSource).not.toMatch(/^SMTP_URL=/m);
-    expect(environmentExampleSource).not.toMatch(/^SMTP_URL_FILE=/m);
-    expect(environmentExampleSource).toContain("# SMTP_URL=");
-    expect(environmentExampleSource).toContain("# SMTP_URL_FILE=");
-  });
 });
 
 describe("the bare flow (ported from scripts/configure.test.mjs)", () => {
