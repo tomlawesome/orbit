@@ -22,7 +22,7 @@ const headersOf = (...lines: string[]) => parseMailHeaders(block(...lines))!;
 
 describe("normalizeSenderAddress", () => {
   it("trims, unwraps a display name, and case-folds both halves", () => {
-    expect(normalizeSenderAddress("  Ned Harlow <Tom@Example.COM> ")).toBe("tom@example.com");
+    expect(normalizeSenderAddress("  Ned Harlow <Ned@Example.COM> ")).toBe("ned@example.com");
     expect(normalizeSenderAddress("TOM@EXAMPLE.COM")).toBe("tom@example.com");
     expect(normalizeSenderAddress("<tom@example.com>")).toBe("tom@example.com");
   });

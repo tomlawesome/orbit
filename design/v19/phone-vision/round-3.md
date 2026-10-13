@@ -478,7 +478,7 @@ moved.
   `every 30s` on the pocket only (`words.js`); 27 beside `on`, and `on`
   already says enabled. The desk keeps its words: they sit in its mockup.
 - Administration `verification` meta `verified · 12/08/2026, 09:00:00` →
-  `verified · 12 Aug`, and `credential set` `01/08/2026, 09:00:00 · Tom
+  `verified · 12 Aug`, and `credential set` `01/08/2026, 09:00:00 · Ned
   Harlow` → `1 Aug · Ned Harlow`; the pocket's date is day and month
   (§3.9's `lapses 3 Oct`), and the name goes last for the guard (R5).
 - Administration document job `couldn’t reach the scanner · 6m ago` →
