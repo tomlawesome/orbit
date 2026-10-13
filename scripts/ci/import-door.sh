@@ -34,9 +34,13 @@
 #      upstream commit, and logs any proposal of the same door from an older
 #      base, which is left for the owner to close.
 #
-# It never lists, closes or comments on merge requests, and never deletes a
-# branch: older import merge requests and branches are closed by hand (owner
-# decision 12a on #1371). It makes no API call at all.
+#      If GitLab takes the branch but says it could not act on the push
+#      options (no merge request opened), it deletes that branch again, so
+#      the next run proposes the door again, and fails the job.
+#
+# It never lists, closes or comments on merge requests, and deletes only a
+# branch it pushed in this same run: older import merge requests and branches
+# are closed by hand (owner decision 12a on #1371). It makes no API call at all.
 #
 # A failure to read upstream or to push exits 2 and fails the job. Finding the
 # door changed is not a failure: it is the merge request.
@@ -329,13 +333,25 @@ git -C "$push_repo" config receive.shallowUpdate true
 git -C "$repo_dir" push -q "$push_repo" "refs/heads/${branch_name}:refs/heads/${branch_name}"
 # The push options ask GitLab to open the merge request itself, so this needs
 # no API call and no `api` scope. No --force: the branch was just seen not to
-# exist, and an existing one is never overwritten.
-push_git -C "$push_repo" push -q \
+# exist, and an existing one is never overwritten. Not -q: GitLab reports a
+# push option it could not act on only as a warning on an accepted push.
+push_output="$(push_git -C "$push_repo" push \
   -o merge_request.create \
   -o "merge_request.target=${target_branch}" \
   -o "merge_request.title=Import the door from ${upstream_project} ${short_sha}" \
   -o "merge_request.label=dependencies" \
   -o merge_request.remove_source_branch \
-  "$push_url" "refs/heads/${branch_name}:refs/heads/${branch_name}" ||
+  "$push_url" "refs/heads/${branch_name}:refs/heads/${branch_name}" 2>&1)" || {
+  printf '%s\n' "$push_output" >&2
   fail "the push of ${branch_name} was refused or failed. Check DOOR_IMPORT_TOKEN's scope (write_repository) and role (Developer) on ${CI_PROJECT_PATH}."
+}
+printf '%s\n' "$push_output" >&2
+# A branch with no merge request is a half-done proposal, and the
+# branch-exists check above would treat it as proposed for ever. Delete the
+# branch this run just pushed so the next run proposes the door again.
+if push_option_errors="$(printf '%s\n' "$push_output" | grep -F 'Error encountered with push options')"; then
+  push_git -C "$push_repo" push -q "$push_url" ":refs/heads/${branch_name}" ||
+    log "could not delete ${branch_name} again; delete it by hand so the next run proposes the door."
+  fail "GitLab accepted ${branch_name} but did not open the merge request: $(printf '%s' "$push_option_errors" | tr -s ' \n' ' '). The branch was removed so the next run proposes it again. Check DOOR_IMPORT_TOKEN's role on ${CI_PROJECT_PATH} and the push options."
+fi
 log "pushed ${branch_name}; GitLab opens the merge request into ${target_branch} from the push options."

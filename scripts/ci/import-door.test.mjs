@@ -219,6 +219,13 @@ function deployBare(fromRepo) {
     i=$((i + 1))
   done
 } >> '${log}'
+# A marker file makes this fake GitLab accept the refs but refuse to open the
+# merge request, the way a rejected push option does: a warning on stderr
+# (which reaches the client as \`remote:\` lines) and exit 0 (#1316, D1-S1).
+if [ -f '${join(dir, "refuse-merge-request")}' ]; then
+  echo "WARNINGS:" >&2
+  echo "  Error encountered with push options 'merge_request.create': Target branch does not exist" >&2
+fi
 `,
   );
   chmodSync(hook, 0o755);
@@ -573,6 +580,21 @@ describe("import-door.sh when the door changed (item 5, as revised by decision 1
     expect(importedBranch(world.bare)).toEqual([branch]);
     expect(git(world.bare, ["rev-parse", branch]).trim()).toBe(tip);
     expect(world.api.requests).toEqual([]);
+  });
+
+  it("fails the job, names the push option error and leaves no branch when GitLab accepts the push but refuses to open the merge request (D1-S1, #1316)", async () => {
+    const world = await deployWorld();
+    writeFileSync(join(world.bare, "refuse-merge-request"), "");
+    const result = await runImport(world);
+
+    expect(result.status, ok(result)).not.toBe(0);
+    expect(result.stderr, ok(result)).toContain("merge_request.create");
+    // One proposal, then the push that deletes the branch again, which carries no options.
+    const pushes = pushesTo(world.bare);
+    expect(pushes, ok(result)).toHaveLength(2);
+    expect(pushes[0]).toContain("merge_request.create");
+    expect(pushes[1]).toEqual([]);
+    expect(importedBranch(world.bare), ok(result)).toEqual([]);
   });
 
   it("does not touch older door-import branches that are already on Orbit", async () => {
