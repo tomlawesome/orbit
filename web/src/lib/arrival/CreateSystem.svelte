@@ -24,10 +24,10 @@
    *   name?: string,
    *   timezone?: string,
    *   currency?: string,
-   *   rejected?: { name: string, reason: string, householdId?: string | null } | null,
+   *   rejected?: { name: string, reason: string, householdId?: string | null, link?: string, road?: "join" | "carry-on" } | null,
    *   busy?: boolean,
    *   onsubmit?: () => void,
-   *   onask?: (rejected: { name: string, reason: string, householdId?: string | null }) => void,
+   *   onask?: (rejected: { name: string, reason: string, householdId?: string | null, link?: string, road?: "join" | "carry-on" }) => void,
    *   onnaming?: import('svelte/elements').FormEventHandler<HTMLInputElement>,
    * }}
    */
@@ -37,7 +37,8 @@
     timezone = $bindable(TIME_ZONES[0].value),
     currency = $bindable(CURRENCIES[0]),
     /* the name the server (or the list of systems out there) refused, and the
-       household it collided with, if that household can be asked to join */
+       road on from it where there is one: the words of its link, and the
+       household that link is about */
     rejected = null,
     busy = false,
     onsubmit = () => {},
@@ -82,8 +83,8 @@
            and "your answers are still here" are not said, because the answers,
            still sitting in the fields, say it. -->
       {#if rejected}
-        <p class="err" role="alert"><b>{`“${rejected.name}”`}</b> {rejected.reason}{#if rejected.householdId}
-          — <a href="#ask" onclick={(event) => { event.preventDefault(); onask(rejected); }}>ask to join it →</a>{/if}</p>
+        <p class="err" role="alert"><b>{`“${rejected.name}”`}</b> {rejected.reason}{#if rejected.link}
+          — <a href="#ask" onclick={(event) => { event.preventDefault(); onask(rejected); }}>{rejected.link}</a>{/if}</p>
       {/if}
     </div>
 
