@@ -411,16 +411,23 @@
           : "may or may not have been created — Orbit can't be reached. Try again");
         return;
       }
-      busy = false;
       if (error instanceof WorkspaceError && error.code === "household_create_mismatch" && pendingCreate) {
-        /* It landed, with the details first sent: named from those, worded
-           here from the code as the clash line is. The server's message is
-           for API readers and logs. */
-        reject(pendingCreate.name, "was already created", {
-          householdId: pendingCreate.id, link: "carry on, and change it in settings →", road: "carry-on",
+        /* It landed, but which press landed is not known here: an earlier
+           one whose reply was lost may have carried an edited name. Query
+           state rather than guess: the workspace is read once and the line
+           names the household as stored, or the first-sent name when that
+           read cannot say. Worded here from the code, as the clash line is;
+           the server's message is for API readers and logs. */
+        const { id } = pendingCreate;
+        const stored = await storedNameOf(id);
+        if (disposed) return;
+        busy = false;
+        reject(stored ?? pendingCreate.name, "was already created", {
+          householdId: id, link: "carry on, and change it in settings →", road: "carry-on",
         });
         return;
       }
+      busy = false;
       /* One warm line, in the server's own words. Nothing was created, and the
          answers are visibly still in the fields, so neither is said. */
       reject(wanted, wordsOf(error, "could not be created"));
@@ -444,6 +451,22 @@
       if (!response.ok) return null;
       const session = await response.json();
       return Boolean(householdId) && session?.activeHouseholdId === householdId;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The name the household with this id is stored under, read off the
+   * workspace's visible households; null when the read fails or it is not
+   * among them.
+   * @param {string} householdId
+   * @returns {Promise<string | null>}
+   */
+  async function storedNameOf(householdId) {
+    try {
+      const workspace = await readWorkspace();
+      return workspace?.visibleHouseholds?.find((household) => household.id === householdId)?.name ?? null;
     } catch {
       return null;
     }
