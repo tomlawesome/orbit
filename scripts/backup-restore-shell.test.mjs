@@ -110,7 +110,6 @@ if (verb === "run") {
   }
   if (process.env.FAKE_ENGINE_STDOUT) process.stdout.write(process.env.FAKE_ENGINE_STDOUT);
   if (process.env.FAKE_ENGINE_HANG_READY) {
-    writeFileSync(process.env.FAKE_ENGINE_HANG_READY, "ready\\n");
     if (process.env.FAKE_ENGINE_EXIT_AFTER_SIGNAL_MS) {
       // A slow engine: it survives TERM and HUP (as \`trap '' TERM HUP\` would), keeps working
       // for FAKE_ENGINE_EXIT_AFTER_SIGNAL_MS after the first one, writes the journal then when
@@ -131,6 +130,7 @@ if (verb === "run") {
       process.on("SIGTERM", onSignal);
       process.on("SIGHUP", onSignal);
     }
+    writeFileSync(process.env.FAKE_ENGINE_HANG_READY, "ready\\n");
     setInterval(() => {}, 1000);
     return;
   }
