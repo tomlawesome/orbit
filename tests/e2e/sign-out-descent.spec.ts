@@ -92,13 +92,14 @@ async function forceWorld(page: Page) {
  *
  * Kept in sessionStorage: with a provider sign-out address the goodbye hands
  * the tab to the provider, which sends it back to /logout as a new page
- * (#1316), and the record must outlive that trip. Both timestamps are taken
- * on the first page, so their difference keeps its meaning.
+ * (#1316), and the record must outlive that trip. Once the descent starts,
+ * only that document may add to the record: /logout sets `farewell` on its
+ * own body, and a farewell stamped there would be on another clock.
  */
 async function watchDescent(page: Page) {
   await page.addInitScript(() => {
     const KEY = "__descent";
-    const seen = { world: false, warp: false, withdraw: 0, farewell: 0 };
+    const seen = { world: false, warp: false, withdraw: 0, farewell: 0, doc: 0 };
     try {
       Object.assign(seen, JSON.parse(sessionStorage.getItem(KEY) ?? "{}"));
     } catch { /* nothing kept yet */ }
@@ -106,7 +107,11 @@ async function watchDescent(page: Page) {
     const keep = () => sessionStorage.setItem(KEY, JSON.stringify(seen));
     const watch = () => new MutationObserver(() => {
       const b = document.body;
-      if (!seen.withdraw && b.classList.contains("withdrawing")) seen.withdraw = performance.now();
+      if (seen.withdraw && seen.doc !== performance.timeOrigin) return;
+      if (!seen.withdraw && b.classList.contains("withdrawing")) {
+        seen.withdraw = performance.now();
+        seen.doc = performance.timeOrigin;
+      }
       if (!seen.farewell && b.classList.contains("farewell")) seen.farewell = performance.now();
       if (b.classList.contains("showwarp") && b.classList.contains("dispersing")) {
         seen.warp = true;
@@ -230,6 +235,7 @@ for (const size of WIDTHS) {
            first beat to last, so the revocation and the browser's own speed
            at navigating are not counted. */
         expect(took, "#1262: the descent was not seen to start and end").not.toBeNull();
+        expect(took ?? 0, "#1262: the descent ended before it started").toBeGreaterThan(0);
         /* Asked where the fault lived: over the world, whose slow frames the
            capped clock waited on (19s and more on SwiftShader). A canvas
            descent never had the cap, and in a loaded container (WebKit in
@@ -321,6 +327,7 @@ for (const size of WIDTHS.filter((s) => s.label !== "narrow desk")) {
 
       const drawn = await page.evaluate(() => (window as unknown as { __descent?: { withdraw: number; farewell: number } }).__descent ?? null);
       expect(drawn?.withdraw && drawn?.farewell, "#1253: the descent was not seen to start and end").toBeTruthy();
+      expect((drawn?.farewell ?? 0) - (drawn?.withdraw ?? 0), "#1253: the descent ended before it started").toBeGreaterThan(0);
       expect(errors, "#1253: the page threw during the sign-out").toEqual([]);
     } finally {
       const live = await page.evaluate(async () => {

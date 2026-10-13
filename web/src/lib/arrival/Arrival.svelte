@@ -13,7 +13,7 @@
   import {
     ASKING, DOOR, INVITED, NEWCOMER, ONWARD,
     arrivalStageOf, collidingHouseholdOf, createSystemCommand, isInvitedLanding,
-    preferredCurrency, preferredTimeZone,
+    browserCurrency, preferredCurrency, preferredTimeZone,
   } from "./stage.js";
   /* The ring and the card themselves (#914): shared with the sign-in door's
      four cards since the owner's 2026-09-09 composition ruling, and drawn
@@ -113,7 +113,7 @@
 
   let name = $state("");
   let timezone = $state(preferredTimeZone(detectedZone()));
-  let currency = $state(preferredCurrency(detectedCurrency()));
+  let currency = $state(preferredCurrency(browserCurrency()));
 
   /*
    * IS A LAUNCH OWED? Taken at initialisation, before anything else on this
@@ -166,17 +166,6 @@
   function detectedZone() {
     try {
       return Intl.DateTimeFormat().resolvedOptions().timeZone;
-    } catch {
-      return null;
-    }
-  }
-  function detectedCurrency() {
-    try {
-      const region = new Intl.Locale(navigator.language).region;
-      if (!region) return null;
-      return (/** @type {Record<string, string>} */ ({
-        GB: "GBP", IE: "EUR", FR: "EUR", DE: "EUR", US: "USD", CA: "CAD", AU: "AUD", NZ: "NZD",
-      }))[region] ?? null;
     } catch {
       return null;
     }
