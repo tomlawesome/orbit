@@ -25,7 +25,15 @@ function sources(dir) {
   });
 }
 
+/*
+ * The shared door's folder (#1371, web/src/lib/door/) is orbit-site's code,
+ * copied in unchanged and never edited here: it is not a place Orbit's rules
+ * could live, and what it says is not Orbit's to fix. It is left out.
+ */
+const IMPORTED_DOOR = join("lib", "door") + "/";
+
 const files = sources(WEB_SRC)
+  .filter((path) => !relative(WEB_SRC, path).startsWith(IMPORTED_DOOR))
   .map((path) => ({ path: relative(WEB_SRC, path), text: readFileSync(path, "utf8") }));
 
 /** Every file under web/src where `pattern` matches. @param {RegExp} pattern */

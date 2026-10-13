@@ -106,7 +106,7 @@
   <h1 class="sr-only">Choose a password for your Orbit account</h1>
 
   <div class="signin-stage" aria-hidden="true"></div>
-  <Dawn shown={true} />
+  <Dawn shown={true} heading={false} />
   <Grain slope={0.08} />
 
   <div class="bigring" aria-hidden="true">

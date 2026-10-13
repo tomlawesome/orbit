@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * comes back from the back-forward cache.
  *
  * Shaped like v19-flight-home-ready.test.mjs: stub the page, reset modules
- * per test, mock fitness.js's GPU verdict.
+ * per test, mock lib/gpu.js's GPU verdict.
  */
 
 function stubPage() {
@@ -50,7 +50,7 @@ function stubPage() {
     observe(target) { page.mutations.push({ cb: this.cb, target }); }
     disconnect() { page.mutations = page.mutations.filter((m) => m.cb !== this.cb); }
   });
-  vi.doMock("$lib/flight/fitness.js", () => ({ gpu: () => ({ parallel: true }) }));
+  vi.doMock("$lib/gpu.js", () => ({ gpu: () => ({ parallel: true }) }));
 
   const gl = new Proxy({ VERTEX_SHADER: 1, FRAGMENT_SHADER: 2, COMPILE_STATUS: 3, LINK_STATUS: 4, ARRAY_BUFFER: 5, STATIC_DRAW: 6, TRIANGLES: 7 }, {
     get(target, key) {
@@ -77,7 +77,7 @@ function stubPage() {
 }
 
 beforeEach(() => { vi.resetModules(); });
-afterEach(() => { vi.unstubAllGlobals(); vi.doUnmock("$lib/flight/fitness.js"); });
+afterEach(() => { vi.unstubAllGlobals(); vi.doUnmock("$lib/gpu.js"); });
 
 describe("the sun stops drawing under a sign-out (#1299)", () => {
   it("draws while the page fades, and stops once the sign-out has hidden it", async () => {

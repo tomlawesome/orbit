@@ -12,8 +12,8 @@ import { describe, expect, it } from "vitest";
  * and administration-pocket-tells-scope.test.mjs): each pulls out the one
  * function or block the issue names and checks it for the behaviour the
  * reference layout already has. The two with a plain module behind them
- * (burnsInOf, drawnIn) also have behaviour tests (this file; the drawnIn
- * one in flight-warm-drawn-in.test.mjs).
+ * (burnsInOf) also has behaviour tests (this file). The drawnIn one retired
+ * with #1371: the wait for the painted animations is the shared door's now.
  *
  * Out of scope here: the sent-list time format (#1339, another lane owns
  * format.js) and phone settings' compact words (no change).
@@ -277,11 +277,12 @@ describe("Chrome's 'household · role' line (#1344, web-21)", () => {
   });
 });
 
-describe("SignIn.svelte's drawnIn (#1344, web-14 sibling: SSR-safe copy)", () => {
+describe("SignIn.svelte's wait for the painted animations (#1344, web-14 sibling; #1371: the folder's)", () => {
   const signin = () => lib("flight/SignIn.svelte");
 
-  it("imports drawnIn from warm.js, with the other warm.js imports", () => {
-    expect(signin()).toMatch(/import\s*\{[^}]*\bdrawnIn\b[^}]*\}\s*from\s*["']\.\/warm\.js["']/);
+  it("takes the wait from the folder's first light (onOpen), not from a helper of its own", () => {
+    expect(signin()).toMatch(/onOpen:\s*\(\)\s*=>/);
+    expect(signin()).not.toMatch(/\bdrawnIn\b/);
   });
 
   it("no longer keeps its own copy of drawnIn or the painted/COMPOSITED helpers", () => {

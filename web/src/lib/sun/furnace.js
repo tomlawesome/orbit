@@ -10,14 +10,14 @@
  *
  * The still (sun.py's `furnace()`, the same formulas run once) stands in
  * under reduced motion, where WebGL2 is missing, where the page may not use
- * the GPU at all (the flight's own verdict, lib/flight/fitness.js `gpu()`:
+ * the GPU at all (the shared door's verdict, lib/gpu.js `gpu()`:
  * a performance caveat or a software renderer), and until the shader has
  * drawn its first frame. The shader draws only while the sun is
  * on screen, the tab is showing and the sun has not been hidden: a sign-out
  * fades the page out under the descent and then hides it (home.css,
  * `body.dispersing`), which neither of the first two notices (#1299).
  */
-import { gpu } from "$lib/flight/fitness.js";
+import { gpu } from "$lib/gpu.js";
 import { THEME_TABLE } from "$lib/theme.js";
 
 /* The disc's radius in dial units (the 380-unit dial). Today's size; the

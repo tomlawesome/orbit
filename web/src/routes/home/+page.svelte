@@ -6,11 +6,10 @@
   import { resolve } from "$app/paths";
   import { mountAccount, mountEmptySky, mountHome } from "./home.behaviour.js";
   import Leave from "$lib/flight/Leave.svelte";
-  import { readyFlightAtLeisure } from "$lib/flight/warm.js";
   import Sun from "$lib/sun/Sun.svelte";
   import { SUN_R } from "$lib/sun/furnace.js";
   import { swatchStyle } from "$lib/theme-swatches.js";
-  import { othersOf } from "$lib/flight/engine.js";
+  import { othersOf } from "$lib/flight/homes.js";
   import Dawn from "$lib/flight/Dawn.svelte";
   import { consumeLaunch } from "$lib/flight/arrival.js";
   /* The sun is one of the household screen's two doors, and that screen owns
@@ -233,7 +232,7 @@
      the sign-out, a few seconds after home has arrived and its painted
      animations are done, as orbit-site does on any page but the door. The
      climb (a launch) readies its own world as it starts. */
-  onMount(() => (launching ? undefined : readyFlightAtLeisure()));
+  onMount(() => (launching ? undefined : leave?.readyAtLeisure()));
 
   async function tapSignOut() {
     /* One press (owner, 2026-10-06): the plain sign-out does not arm first. */
@@ -1574,8 +1573,8 @@
 <!-- The flight's surfaces: the dawn the climb leaves from, the dusk the
      descent lands on, and the canvas, mark and void-name between them. Each
      is here only for the journey that needs it. -->
-{#if launching}<Dawn />{/if}
-<Leave bind:this={leave} {launching} leaving={fixtureFlight === "down"} name={view?.household?.name ?? ""}
+{#if launching}<Dawn heading={false} />{/if}
+<Leave bind:this={leave} leaving={fixtureFlight === "down"} name={view?.household?.name ?? ""}
        homes={view && !view.emptySky ? othersOf(view.galaxy, view.primary) : []} />
 
 <div class="desk" class:arrive role="main">

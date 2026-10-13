@@ -208,6 +208,11 @@ enough to take one of these actions.
 
 ## Signing out, plainly
 
+Signing out of this device ends Orbit's session and, when the identity
+provider offers a sign-out page, then sends the browser to it after the
+goodbye, so the provider's session ends too and the provider brings the
+browser back to Orbit's goodbye at `/logout`.
+
 "Sign out of every device" ends every session Orbit itself issued. It cannot
 end a session at the identity provider. If a user signs out of Orbit
 everywhere and the identity provider still remembers them, the very next OIDC

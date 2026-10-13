@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -7,9 +8,6 @@ import {
   createSystemCommand, discoveredCountOf, isInvitedLanding, preferredCurrency, preferredTimeZone,
   sectionNote, sectionNoteTitle, WAITING_APPROVAL_NOTE,
 } from "$lib/arrival/stage.js";
-import {
-  T, newcomerAscentBeats, newcomerAscentBeatsReduced, runTimeline,
-} from "$lib/flight/timeline.js";
 import { NEWCOMER_FAR, NEWCOMER_NEAR } from "$lib/flight/starfields.js";
 import { labelledSkyOf } from "$lib/data/chart.js";
 import * as STAGES from "$lib/arrival/stage.js";
@@ -98,21 +96,24 @@ describe("the invited landing, told apart from an ordinary return (#871)", () =>
   });
 });
 
-describe("the invited landing's climb is the newcomer's own, to the beat the chooser would stand on", () => {
-  it("flies the newcomer's beats to the same last one, full motion and reduced alike", () => {
-    /* Flight.svelte's landing="invited" reuses these two arrays UNCHANGED —
-       it only reads the terminal "belong" act differently (hands off to the
-       household instead of drawing the chooser) — so a later retiming that
-       moved "belong" off the end, or dropped it, would silently strand the
-       invited reader on a sky, no chooser and no move either. Pinned here
-       rather than left to that surface's own DOM tests. */
-    const full = newcomerAscentBeats();
-    expect(full.at(-1)).toEqual({ at: T.belongAt, act: "belong" });
+/*
+ * The climb itself (its beats and their timing) is the shared door's since
+ * #1371: the folder's timeline, held to its recorded tree hash. What is
+ * Orbit's own is what hangs off the folder's `settled` hook in Flight.svelte:
+ * the newcomer's count and the question that follows it. Pinned from the
+ * component's source, as the other surfaces' wiring is.
+ */
+const FLIGHT = readFileSync(new URL("../../web/src/lib/flight/Flight.svelte", import.meta.url), "utf8");
 
-    const reduced = newcomerAscentBeatsReduced();
-    expect(reduced.at(-1)).toEqual({ at: 700 + T.dwell + 1900, act: "belong" });
-    /* the count still takes its turn before that last beat, ordering unchanged */
-    expect(reduced.map((beat) => beat.act)).toEqual(["land", "instrument", "countOn", "countOff", "belong"]);
+describe("the invited landing's climb is the newcomer's own, to the beat the chooser would stand on", () => {
+  it("flies one climb for both, and only reads the last beat differently", () => {
+    /* landing="invited" flies the newcomer's count unchanged and differs at
+       exactly one beat: the question's. A later edit that moved `belong` off
+       the end of the count, or dropped it, would silently strand the invited
+       reader on a sky, no chooser and no move either. */
+    expect(FLIGHT).toMatch(/const newcomer = landing !== "home";/);
+    expect(FLIGHT).toMatch(/settled: \(\) => \{ onsettled\(\); if \(newcomer\) count\(\); \}/);
+    expect(FLIGHT).toMatch(/if \(landing === "invited"\) onbelong\(\); else b\.classList\.add\("belong"\)/);
   });
 });
 
@@ -264,69 +265,33 @@ describe("the waiting note (owner-decisions §23): the marker is not the explana
   });
 });
 
-describe("the newcomer's clock is the site's, with the count hung off its instrument beat (#1222)", () => {
-  it("takes the site's dwell and instrument beat, with no newcomer-only dwell", () => {
-    expect(T.dwell).toBe(600);
-    expect(T.instrumentAt).toBe(5900);
-    for (const gone of ["newDwell", "newInstrumentAt"]) {
-      expect(T, gone).not.toHaveProperty(gone);
-    }
-  });
+describe("the newcomer's count hangs off the folder's instrument beat (#1222)", () => {
+  /** the offsets, in ms from the instrument's arrival, as Flight.svelte writes them */
+  const offsets = (name) => {
+    const m = FLIGHT.match(new RegExp(`const ${name} = \\{ on: ([^,]+), off: ([^,]+), belong: ([^}]+) \\};`));
+    expect(m, `${name} not found in Flight.svelte`).not.toBeNull();
+    return m.slice(1, 4).map((expr) => expr.split("+").reduce((sum, term) => sum + Number(term), 0));
+  };
 
   it("keeps the count's own offsets from the instrument beat (#870)", () => {
-    expect(T.countOn - T.instrumentAt).toBe(300);
-    expect(T.countOn).toBe(6200);
-    expect(T.countOff).toBe(9400);
-    expect(T.belongAt).toBe(10300);
+    const [on, off, belong] = offsets("COUNT");
+    expect(on).toBe(300);
     /* ~4.55s of screen time in all: 0.45s in, 3.2s held, 0.9s out */
-    expect(T.countOff - T.countOn).toBe(3200);
-    expect(T.belongAt - T.countOff).toBe(900);
+    expect(off - on).toBe(3200);
+    expect(belong - off).toBe(900);
   });
 
-  it("flies the same climb to the millisecond and only lands differently", () => {
-    const climb = newcomerAscentBeats().filter((beat) => beat.at <= T.land);
-    expect(climb).toEqual([
-      { at: 0, act: "arming" },
-      { at: 200, act: "warp" },
-      { at: 260, act: "mark" },
-      { at: 430, act: "release" },
-      { at: 1340, act: "markOut" },
-      { at: 1560, act: "nameOn" },
-      { at: 2600, act: "nameOff" },
-      { at: 4800, act: "land" },
-    ]);
+  it("keeps the whole staging under reduced motion, and only drops the fade", () => {
+    const [on, off, belong] = offsets("COUNT_REDUCED");
+    expect(on).toBe(0);
+    /* the count still takes its turn, on the mockup's own 1900 hold, and yields to the question */
+    expect(off - on).toBe(1900);
+    expect(belong).toBe(off);
   });
 
-  it("lands, settles, counts and then asks — in that order", () => {
-    expect(newcomerAscentBeats().map((beat) => beat.act)).toEqual([
-      "arming", "warp", "mark", "release", "markOut", "nameOn", "nameOff",
-      "land", "instrument", "countOn", "countOff", "belong",
-    ]);
-  });
-
-  it("pins every beat up to a millisecond and schedules nothing", () => {
-    const applied = [];
-    const cancel = runTimeline(newcomerAscentBeats(), (act) => applied.push(act), { at: T.countOn });
-    expect(applied).toEqual([
-      "arming", "warp", "mark", "release", "markOut", "nameOn", "nameOff",
-      "land", "instrument", "countOn",
-    ]);
-    expect(cancel).toBeTypeOf("function");
-  });
-
-  it("keeps the whole staging under reduced motion, and only drops the motion", () => {
-    const beats = newcomerAscentBeatsReduced();
-    expect(beats).toEqual([
-      { at: 0, act: "land" },
-      { at: 1300, act: "instrument" },
-      { at: 1300, act: "countOn" },
-      { at: 3200, act: "countOff" },
-      { at: 3200, act: "belong" },
-    ]);
-    /* the bare labelled sky, the site's own 600 dwell, then the instrument */
-    expect(beats[1].at).toBe(700 + T.dwell);
-    /* the count still takes its turn, on the mockup's own 1900 hold */
-    expect(beats[3].at - beats[1].at).toBe(1900);
+  it("is cancelled with the flight, and does not outlive it", () => {
+    expect(FLIGHT).toMatch(/function cancelCount\(\)/);
+    expect(FLIGHT).toMatch(/cancelCount\(\);\s*j\.destroy\(\)/);
   });
 });
 
