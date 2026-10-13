@@ -811,6 +811,7 @@ test.describe(() => {
    * dialects: the desk (#save-note) and the phone's pocket (.pk-problem).
    */
   test("a create whose document failed can be retried under the same item and document ids", async ({ page }) => {
+    test.skip(test.info().project.name.startsWith("desktop-"), "#1406: the all-or-nothing save replaces this retry; rewrite this test and remove the skip there");
     test.setTimeout(120_000);
     await answerPushWithoutAService(page);
     await page.goto("/api/auth/login?returnTo=/home");
