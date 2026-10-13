@@ -1199,6 +1199,13 @@
       </Row>
       {#if askedRow}{@render itemRow(askedRow)}{/if}
     </div>
+  {:else if askedRow}
+    <!-- #1316 W1-F7: a household with nothing live (its one item archived)
+         has no manifest to seat the asked-for row in, so it stands alone;
+         its state word says why it is there. -->
+    <div class="pk-list" data-row-group data-row-cards>
+      {@render itemRow(askedRow)}
+    </div>
   {/if}
   <!-- #466; round 3 §2 and owner-decisions §29 (#1142): 32px of clear sky
        below the manifest, a caps head, then each signal as its own row-card
