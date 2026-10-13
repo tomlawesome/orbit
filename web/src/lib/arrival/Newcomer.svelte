@@ -268,7 +268,14 @@
   <div class="belong" class:drawn={drawerOpen} role="group" aria-label="Where do you belong?">
     <div class="top">
       <h2>where do you belong?</h2>
-      <p>the systems around you are labels until someone lets you in</p>
+      <!-- On an empty instance nobody can let the reader in, so the line says
+           what the sky holds and what is open to them. The same test as the
+           list below, inverted. -->
+      {#if rows.length === 0}
+        <p>no systems out here yet — the first one is yours to name</p>
+      {:else}
+        <p>the systems around you are labels until someone lets you in</p>
+      {/if}
     </div>
     {#if rows.length > 0}
     <ul>
