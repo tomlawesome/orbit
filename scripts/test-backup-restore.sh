@@ -11,7 +11,11 @@
 #     match refused before any mutation; wrong and missing key)
 #   make_corrupt_{manifest,hmac,checksum}_bundle  restore.sh #3, #6 (HMAC and
 #     checksum chain re-verified before the bundle is trusted)
-#   make_{missing,extra,truncated,size_mismatch}* variants  restore.sh #9
+#   make_{missing,truncated,size_mismatch}* variants  restore.sh #9 (every
+#     referenced object is present and intact)
+#   make_extra_object_bundle                    restore.sh #9 (28e24e0c): an
+#     object no row references is residue of an interrupted upload, swept
+#     later, so restore accepts the bundle rather than refusing it
 #   test_missing_crypto_metadata                restore.sh #9 (transient or
 #     crypto-incomplete rows refuse a point-in-time restore)
 #   test_journal_publication_failures           restore.sh #15-#17 (crash-safe
@@ -903,6 +907,22 @@ expect_preflight_rejection() {
   assert_staging_fixture_present
 }
 
+# The opposite of expect_preflight_rejection: restore must take this bundle.
+# A full restore to the backup point, checked as run_valid_restore checks
+# one; the post-backup session it removes is put back, so the restores after
+# this one still prove the revocation boundary.
+expect_restore_acceptance() {
+  local bundle_path="$1" label="$2" output=""
+  if ! output="$(ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$bundle_path" 2>&1)"; then
+    fail "Restore refused the ${label} case, which it must accept: ${output}"
+  fi
+  wait_for_health
+  assert_fixture_present
+  assert_staging_fixture_present
+  assert_credential_fixture_present
+  insert_post_backup_session_fixture
+}
+
 run_valid_restore() {
   ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$backup_path" >/dev/null
   wait_for_health
@@ -1301,7 +1321,7 @@ expect_preflight_rejection "$test_directory/missing-attachment-object.tar" 'miss
 make_cross_table_duplicate_bundle
 expect_preflight_rejection "$test_directory/cross-table-duplicate.tar" 'cross-table duplicate object reference'
 make_extra_object_bundle
-expect_preflight_rejection "$test_directory/extra-object.tar" 'extra ciphertext object'
+expect_restore_acceptance "$test_directory/extra-object.tar" 'unreferenced ciphertext object'
 make_truncated_object_bundle
 expect_preflight_rejection "$test_directory/truncated-object.tar" 'truncated ciphertext object'
 make_size_mismatch_bundle
