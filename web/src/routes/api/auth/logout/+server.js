@@ -40,7 +40,8 @@ export const POST = api(
     let providerLogout = null;
     if (config.oidc) {
       try {
-        const metadata = await discoverProvider(config.oidc);
+        // A failed refresh falls back on the last good document rather than skip the provider sign-out.
+        const metadata = await discoverProvider(config.oidc, { staleIfError: true });
         providerLogout = createProviderLogoutUrl(config.oidc, metadata, postLogoutReturnTo);
       } catch {
         // Local logout must succeed even if the provider is unavailable.

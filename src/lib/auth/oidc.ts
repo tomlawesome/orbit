@@ -64,6 +64,9 @@ export class StaleAuthenticationError extends Error {
 }
 
 const metadataCache = new Map<string, { expiresAt: number; promise: Promise<OidcMetadata> }>();
+/* The last document that passed validation, per issuer: sign-out falls back on
+   it when a refresh fails, so a provider blip cannot skip the provider sign-out. */
+const lastGoodMetadata = new Map<string, OidcMetadata>();
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 const allowedIdTokenAlgorithms = new Set(["RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "EdDSA"]);
 
@@ -106,7 +109,24 @@ async function readBoundedJson(response: Response, maxBytes: number = OIDC_DISCO
   return JSON.parse(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8"));
 }
 
-export async function discoverProvider(config: OidcAuthConfig): Promise<OidcMetadata> {
+/**
+ * `staleIfError` (RFC 5861 §4): when a refresh fails, answer with the last
+ * validated document instead of throwing. Sign-out sets it; sign-in stays strict.
+ */
+export async function discoverProvider(
+  config: OidcAuthConfig,
+  { staleIfError = false }: { staleIfError?: boolean } = {},
+): Promise<OidcMetadata> {
+  const fresh = discoverFresh(config);
+  if (!staleIfError) return fresh;
+  return fresh.catch((error) => {
+    const lastGood = lastGoodMetadata.get(config.issuer);
+    if (lastGood) return lastGood;
+    throw error;
+  });
+}
+
+function discoverFresh(config: OidcAuthConfig): Promise<OidcMetadata> {
   const cached = metadataCache.get(config.issuer);
   if (cached && cached.expiresAt > Date.now()) return cached.promise;
 
@@ -129,6 +149,7 @@ export async function discoverProvider(config: OidcAuthConfig): Promise<OidcMeta
       if (!metadata.code_challenge_methods_supported.includes("S256")) {
         throw new Error("Provider does not advertise S256 PKCE support");
       }
+      lastGoodMetadata.set(config.issuer, metadata);
       return metadata;
     } catch (error) {
       metadataCache.delete(config.issuer);

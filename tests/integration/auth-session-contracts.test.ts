@@ -169,6 +169,38 @@ describe("PostgreSQL authentication session contracts", () => {
     expect((await checkSession(session)).status).toBe(401);
   });
 
+  it("answers a JSON sign-out with the provider's end-session address and the goodbye page as the way back (#1316)", async () => {
+    const fixture = await createIntegrationFixture("auth-logout-json-contract");
+    const session = await fixture.session("member");
+    const config = getAuthConfig();
+    // The route only asks the provider when sign-in is configured; without it
+    // this case would pass for the wrong reason.
+    expect(config.oidc).not.toBeNull();
+    vi.spyOn(oidc, "discoverProvider").mockResolvedValue({
+      issuer: config.oidc!.issuer,
+      authorization_endpoint: "https://oidc.invalid.example/authorize",
+      token_endpoint: "https://oidc.invalid.example/token",
+      jwks_uri: "https://oidc.invalid.example/jwks",
+      end_session_endpoint: "https://oidc.invalid.example/logout",
+      code_challenge_methods_supported: ["S256"],
+    });
+
+    const response = await callRouteForSession(logout, session, {
+      url: "http://127.0.0.1:3000/api/auth/logout",
+      method: "POST",
+      headers: { accept: "application/json" },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = (await response.json()) as { redirectTo: string | null };
+    expect(body.redirectTo).toEqual(expect.any(String));
+    const redirect = new URL(body.redirectTo!);
+    expect(redirect.origin + redirect.pathname).toBe("https://oidc.invalid.example/logout");
+    expect(redirect.searchParams.get("post_logout_redirect_uri")).toBe(new URL("/logout", config.appUrl).href);
+    expect(redirect.searchParams.get("client_id")).toBe(config.oidc!.clientId);
+    expect(await sessionRows(session.sessionId)).toHaveLength(0);
+  });
+
   it("clears a signed-out cookie without changing database state", async () => {
     await createIntegrationFixture("auth-logout-signed-out");
     const config = getAuthConfig();
