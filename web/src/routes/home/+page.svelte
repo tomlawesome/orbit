@@ -955,6 +955,8 @@
   async function startAmend() {
     const suggestion = asView(view).suggestions.find((one) => one.id === expanded);
     if (!suggestion?.receiptId) return;
+    /* Already amending this one: keep what was typed (#1316). */
+    if (modes.id === suggestion.id) return;
     const householdId = suggestion.householdId ?? asView(view).primary;
     if (!householdId) {
       armed = { id: suggestion.id, act: null };

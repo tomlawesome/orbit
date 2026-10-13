@@ -120,19 +120,27 @@ function startAmendOf(source, names) {
   return make(scope);
 }
 
-/** @type {"pair" | "fails" | "gated" | "never"} */
+/** @type {"pair" | "fails" | "gated" | "never" | "slow"} */
 let readMode = "pair";
+/** The `init` of every settings read, so a test can see its abort signal. */
+/** @type {any[]} */
+let readInits = [];
+/** The real timer, taken before any test fakes the clock. */
+const realSetTimeout = globalThis.setTimeout;
 /** @type {() => void} */
 let answerRead = () => {};
 beforeEach(() => {
   readMode = "pair";
+  readInits = [];
   /** @type {Promise<void>} */
   const gate = new Promise((done) => { answerRead = () => done(); });
-  vi.stubGlobal("fetch", vi.fn(async (/** @type {string} */ url) => {
+  vi.stubGlobal("fetch", vi.fn(async (/** @type {string} */ url, /** @type {any} */ init) => {
     const href = String(url);
     const json = (/** @type {unknown} */ body, status = 200) => new Response(JSON.stringify(body), { status });
     if (href.includes("/api/settings/reminders")) {
+      readInits.push(init);
       if (readMode === "never") return new Promise(() => {});
+      if (readMode === "slow") await new Promise((done) => setTimeout(done, 1000));
       if (readMode === "gated") await gate;
       if (readMode === "fails") return json({ error: { code: "unavailable", message: "not today" } }, 503);
       return json({
@@ -281,7 +289,7 @@ describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () =
       expect(s.modes.id).toBe("item-9");
     });
 
-    it("pressing twice while the read is pending starts the editor at most once", async () => {
+    it("pressing twice while the read is pending starts exactly one editor, at the member's pair", async () => {
       readMode = "gated";
       const s = await screenOf(kind);
       const first = s.press();
@@ -289,7 +297,18 @@ describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () =
       answerRead();
       await Promise.all([first, second]);
       await settle();
-      expect(s.started.length).toBeLessThanOrEqual(1);
+      expect(s.started).toHaveLength(1);
+      expect(s.started[0].reminderDays).toEqual(MEMBER_PAIR);
+    });
+
+    it("pressing on a suggestion already being amended does not restart the editor (typed changes are kept)", async () => {
+      readMode = "pair";
+      const s = await screenOf(kind);
+      s.modes.id = "r-1";
+      s.modes.edit = { id: "r-1" };
+      await s.press();
+      await settle();
+      expect(s.started, "startEdit was not called again over the draft in progress").toHaveLength(0);
     });
 
     it("a read that never answers is bounded: within 3 s the editor starts at the default [14, 3]", async () => {
@@ -302,6 +321,69 @@ describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () =
         expect(s.started, "the editor opened within 3 s of fake time").toHaveLength(1);
         expect(s.started[0].reminderDays).toEqual(DEFAULT_PAIR);
         await pressed;
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("the bound is 1.5 s: a read answered after 1000 ms starts the editor at the member's pair [30, 7]", async () => {
+      readMode = "slow";
+      const s = await screenOf(kind);
+      vi.useFakeTimers();
+      try {
+        const pressed = s.press();
+        await vi.advanceTimersByTimeAsync(1000);
+        await Promise.race([pressed, new Promise((done) => realSetTimeout(done, 500))]);
+        expect(s.started).toHaveLength(1);
+        expect(s.started[0].reminderDays).toEqual(MEMBER_PAIR);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("the bound is 1.5 s: a never-answering read has started nothing at 1400 ms and [14, 3] by 1600 ms", async () => {
+      readMode = "never";
+      const s = await screenOf(kind);
+      vi.useFakeTimers();
+      try {
+        const pressed = s.press();
+        await vi.advanceTimersByTimeAsync(1400);
+        expect(s.started, "nothing started before the bound").toHaveLength(0);
+        await vi.advanceTimersByTimeAsync(200);
+        expect(s.started, "the editor started once the bound passed").toHaveLength(1);
+        expect(s.started[0].reminderDays).toEqual(DEFAULT_PAIR);
+        await pressed;
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("a never-answering read's fetch is aborted after the bound", async () => {
+      readMode = "never";
+      const s = await screenOf(kind);
+      vi.useFakeTimers();
+      try {
+        const pressed = s.press();
+        await vi.advanceTimersByTimeAsync(1400);
+        expect(readInits).toHaveLength(1);
+        expect(readInits[0]?.signal, "the read carries an abort signal").toBeTruthy();
+        expect(readInits[0].signal.aborted, "not aborted before the bound").toBe(false);
+        await vi.advanceTimersByTimeAsync(200);
+        expect(readInits[0].signal.aborted, "aborted after the bound").toBe(true);
+        await pressed;
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("an immediate answer leaves no timer pending", async () => {
+      readMode = "pair";
+      const s = await screenOf(kind);
+      vi.useFakeTimers();
+      try {
+        await s.press();
+        expect(s.started).toHaveLength(1);
+        expect(vi.getTimerCount()).toBe(0);
       } finally {
         vi.useRealTimers();
       }
@@ -321,6 +403,19 @@ describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () =
       await s.press();
       expect(s.started).toHaveLength(1);
       expect(s.started[0].reminderDays).toEqual(DEFAULT_PAIR);
+    });
+  });
+
+  describe("desk only", () => {
+    it("the suggestion disappeared from the view while the read is pending: the late answer starts no editor", async () => {
+      readMode = "gated";
+      const s = await screenOf("desk");
+      const pressed = s.press();
+      s.names.view = { ...view, suggestions: [] };
+      answerRead();
+      await pressed;
+      await settle();
+      expect(s.started).toHaveLength(0);
     });
   });
 
