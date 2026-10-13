@@ -424,6 +424,9 @@ test.describe("on the desk", () => {
     const useTheChip = async () => {
       const body = page.locator(`.body-link[data-body="${otherId}"]`);
       await expect(body).toHaveAttribute("data-docs", "1", { timeout: 20_000 });
+      // The callout is fixed beside the body; a body scrolled off-screen puts it
+      // off-screen too. A member scrolls to the dial before pointing at it.
+      await body.scrollIntoViewIfNeeded();
       await body.dispatchEvent("mouseenter");
       const chip = page.locator(".callout.show .chip");
       await expect(chip).toHaveText("◆ 1 document");
@@ -717,7 +720,7 @@ test.describe("on the desk", () => {
     await drawer.getByRole("button", { name: "Edit this item" }).click();
     await expect(editing).toBeVisible();
     await expect(completing).toHaveCount(0);
-    await expect(drawer.getByRole("textbox", { name: "title" })).toBeVisible();
+    await expect(page.locator(`[id="${itemId}"]`).getByRole("textbox", { name: "title" })).toBeVisible();
   });
 
   /* #1316 W1-R3: undo is a promise; when the server refuses it the reader is

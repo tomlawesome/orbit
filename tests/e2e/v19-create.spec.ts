@@ -262,6 +262,20 @@ test("picking a document shows its front page while the read runs alongside", as
   await ensureWorkerAdministrator(page);
   households.track(await seedHousehold(page));
 
+  // The lane says "reading" until both requests of a pick have answered: the
+  // preview draws page one (the heading becomes "Page one"), the inspection
+  // settles the read (`data-reading` goes). Either can win a race with the
+  // assertions, so hold both, look at the lane while it is still reading, then
+  // let them through.
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  for (const route of ["**/item-document-preview", "**/item-document-inspection"]) {
+    await page.route(route, async (request) => {
+      await held;
+      await request.continue();
+    });
+  }
+
   try {
     await gotoCreate(page);
     const readcard = page.locator("#readcard");
@@ -272,6 +286,8 @@ test("picking a document shows its front page while the read runs alongside", as
     await expect(readcard).toBeVisible();
     await expect(readcard).toHaveAttribute("data-reading", "true");
     await expect(page.locator("#read-head")).toHaveText("Reading your document");
+    await expect(page.locator("body")).not.toHaveClass(/\bsnap\b/);
+    release();
 
     // Page one lands — a real picture, drawn from the file — within seconds,
     // and the heading says so.
@@ -295,6 +311,7 @@ test("picking a document shows its front page while the read runs alongside", as
     await expect(page.locator("body")).not.toHaveClass(/\bdoc\b/);
     await expect(page.locator("body")).not.toHaveClass(/\bsnap\b/);
   } finally {
+    release();
     await households.sweep(page);
   }
 });
