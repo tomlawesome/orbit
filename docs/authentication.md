@@ -206,6 +206,10 @@ enough to take one of these actions.
   spent the moment it is used, and cannot be replayed even within its short
   (120 second) life.
 
+With no usable encryption key, nobody signs in by any method, administrators
+included: Orbit is locked until the key is fixed on the host (#1405; see
+[administrator-operations.md](administrator-operations.md#restoring-the-document-key-encryption-key)).
+
 ## Signing out, plainly
 
 Pressing sign out ends Orbit's session at once; the descent and the goodbye

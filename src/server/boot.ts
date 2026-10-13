@@ -256,7 +256,7 @@ export async function reportKekRotationInProgress(): Promise<void> {
 }
 
 export async function registerNode(): Promise<void> {
-  const [{ validateStartupConfiguration, StartupConfigurationError }, { getDatabaseClient }, { verifyMigrationIntegrity, verifyMigrationJournalComplete, MigrationIntegrityError }, { log, operationalErrorDetail }, { getConfigurationProblems }] = await Promise.all([
+  const [{ validateStartupConfiguration, StartupConfigurationError }, { getDatabaseClient }, { verifyMigrationIntegrity, verifyMigrationJournalComplete, MigrationIntegrityError }, { log, operationalDetail, operationalErrorDetail }, { getConfigurationProblems }] = await Promise.all([
     import("@/lib/startup-config"),
     import("@/db"),
     import("@/db/migration-integrity"),
@@ -447,7 +447,45 @@ export async function registerNode(): Promise<void> {
     });
   });
 
-  if (process.env.WORKER_ENABLED === "true") {
+  /* The encryption key self-test (#1405): awaited, after migrations and the
+     import rollback and before any worker, while the phase is still
+     "starting", so the door shows "waking up" until the verdict exists and no
+     request ever reaches a gate before it does. A database that cannot answer
+     inside the startup window fails boot like any other boot step. */
+  const { probeEncryptionKey, logKeyVerdict } = await import("@/server/key-state");
+  let keyState: Awaited<ReturnType<typeof probeEncryptionKey>>;
+  try {
+    keyState = await probeEncryptionKey();
+  } catch {
+    log.error({
+      event: "encryption.key",
+      state: "exhausted",
+      reason: "dependency_unavailable",
+      action: "check_database",
+      impact: "application_unavailable",
+    });
+    throw new Error("key_probe_failed");
+  }
+  logKeyVerdict(keyState);
+  const keyUsable = keyState.verdict === "usable";
+
+  if (process.env.WORKER_ENABLED === "true" && !keyUsable) {
+    /* No usable key (#1405): only the scheduled-maintenance worker, which
+       needs none (ADR-0013 §5). The others cannot do their work without the
+       key, and three of them would say so in the log every cycle; mail
+       deliveries would spend their attempts on a fault no retry fixes.
+       Leaving this state is a restart, which starts them normally. */
+    const { startMaintenanceWorker } = await import("@/server/maintenance-worker");
+    startMaintenanceWorker();
+    log.warn({
+      event: "application.startup",
+      state: "blocked",
+      reason: "key_unavailable",
+      action: "check_configuration",
+      impact: "application_unavailable",
+      detail: operationalDetail`workers not started while the encryption key is unusable; only scheduled maintenance ticks`,
+    });
+  } else if (process.env.WORKER_ENABLED === "true") {
     const [{ startNotificationWorker }, { startDocumentWorker }, { startImapIngestionWorker }, { startImapReceiptWorker }, { startMaintenanceWorker }] = await Promise.all([
       import("@/server/notification-worker"),
       import("@/server/document-worker"),
@@ -492,6 +530,21 @@ export async function registerNode(): Promise<void> {
   // post-boot reporting, not a boot step, so it flips before the scanner
   // probe kicks off rather than after.
   bootPhase = "running";
+
+  /* The operator alert for a locked instance, or the one "working again"
+     notice after an alert (#1405): only now the server is answering, so a
+     slow mail server never delays boot, and never able to fail it. */
+  const { sendKeyAlert, sendKeyRestoredNotice } = await import("@/server/key-alert");
+  const keyMail = keyUsable ? sendKeyRestoredNotice() : sendKeyAlert(keyState);
+  void keyMail.catch(() => {
+    log.warn({
+      event: "encryption.key",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "inspect_admin_diagnostics",
+      impact: "none",
+    });
+  });
 
   // Best-effort: the reminder that a KEK rotation is open must appear in
   // every boot's log, but a failed audit write may not stop the boot (#956)

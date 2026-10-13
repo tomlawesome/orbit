@@ -80,5 +80,8 @@ export const POST = api(
       headers: { location: redirectTarget.href, "cache-control": "no-store" },
     });
   },
-  { errorResponse: authErrorResponse },
+  /* Open while the encryption key is unusable (#1405): a member may always
+     leave. The row still goes; with the key locked its ID token cannot be
+     read, so the sign-out ends Orbit's session only. */
+  { errorResponse: authErrorResponse, openWhileKeyUnusable: true },
 );

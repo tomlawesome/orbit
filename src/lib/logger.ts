@@ -135,6 +135,9 @@ export const operationalReasons = [
      administrator can find it; it never carries the value, the ciphertext or
      any key material, and the rest of the row keeps working. */
   "metadata_integrity_failed",
+  /* A mail send that failed in a way the transport could not classify
+     (`sendBoundedMail`'s own word, #1405 alert). */
+  "unknown",
 ] as const;
 export type OperationalReason = typeof operationalReasons[number];
 
@@ -213,10 +216,15 @@ export const configurationSettings = [
   "push",
   "processing",
   "ai",
+  /* OPERATOR_ALERT_ADDRESS (#1405): where Orbit writes when it cannot run safely. */
+  "alerts",
 ] as const;
 export type ConfigurationSetting = typeof configurationSettings[number];
 
-export const configurationProblemCodes = ["configuration_version", "configuration_core", "configuration_optional"] as const;
+/* `configuration_key` (#1405): the document key settings hold no usable key.
+   Reported, but it does not stop the start: the instance comes up locked so
+   it can say so to members and to the operator. */
+export const configurationProblemCodes = ["configuration_version", "configuration_core", "configuration_optional", "configuration_key"] as const;
 export type ConfigurationProblemCode = typeof configurationProblemCodes[number];
 
 export const configurationFallbacks = ["startup_blocked", "feature_disabled"] as const;
@@ -272,6 +280,9 @@ export const operationalEvents = {
      beside the document events because what it names is document ciphertext
      left behind, not a portable-archive export file. */
   "portable_archive.import": "document",
+  /* Whether Orbit holds a usable encryption key (#1405): the startup verdict,
+     sign-ins refused while it does not, and the operator alert. */
+  "encryption.key": "encryption",
 } as const;
 export type OperationalEventName = keyof typeof operationalEvents;
 export type OperationalComponent = typeof operationalEvents[OperationalEventName];

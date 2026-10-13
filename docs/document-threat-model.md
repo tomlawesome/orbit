@@ -401,13 +401,16 @@ surface may describe it as more than this.
   the rest of the row renders normally. Each failure logs an administrator
   diagnostic naming the column and row and nothing else. Writing to the field
   is the repair.
-- A missing KEK is the separate, already-defined state: the application stays
-  usable, encrypted fields read as locked rather than damaged, and writes to
-  them are refused, exactly as document operations lock today. Signing in is
-  not affected: the account address `users.email` is deliberately not
-  encrypted, so a missing KEK never locks anybody out of the instance. Whether
-  that stays true is the open decision on #966 (the Tier 2 remainder), which
-  records the trade in full.
+- An instance with no usable KEK (missing, unreadable, malformed, set in both
+  forms, or not the key the instance-scope `metadata_keys` row was wrapped
+  under) is locked as a whole (#1405, ADR-0024 amendment): every screen and
+  API answers 503, nobody signs in, administrators included, and only the
+  scheduled-maintenance worker runs, until the key is fixed on the host and
+  the container restarted. Account addresses (`users.email`) are encrypted
+  since #969, so a session could not even show who is signed in. A
+  household-scope key wrapped under a key the instance does not hold is the
+  narrower case: those fields read as locked rather than damaged, and writes
+  to them are refused, exactly as document operations lock.
 - A reminder whose item name will not decrypt is not sent with an empty or
   invented name: the delivery is retried, like any other transient fault,
   until the key or the value is repaired.

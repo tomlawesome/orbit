@@ -16,6 +16,9 @@ export const DOOR = "door";
 export const UNCONFIGURED = "unconfigured";
 export const STARTING = "starting";
 export const FAILED = "failed";
+/* #1405: Orbit holds no usable encryption key, so nobody can sign in; the
+   door hands the reader to the locked screen at /maintenance instead. */
+export const LOCKED = "locked";
 
 /** The two states whose wording never varies. `FAILED` is handled by {@link failedMessage}. */
 const FIXED_MESSAGES = {
@@ -57,7 +60,7 @@ export function failedMessage(contactAddress) {
  * The words for a given state — Orbit's own, always; nothing here can ever
  * echo a provider's or a network response's own text.
  *
- * @param {typeof DOOR | typeof UNCONFIGURED | typeof STARTING | typeof FAILED} state
+ * @param {typeof DOOR | typeof UNCONFIGURED | typeof STARTING | typeof FAILED | typeof LOCKED} state
  * @param {string | null} [contactAddress]
  * @returns {{ primary: string, sub: string }}
  */
@@ -115,10 +118,15 @@ export function phaseOf(body) {
  */
 export function availabilityOf(body) {
   if (!body || typeof body !== "object") return null;
-  const record = /** @type {{ configured?: unknown, contactAddress?: unknown }} */ (body);
+  const record = /** @type {{ configured?: unknown, contactAddress?: unknown, encryptionKey?: unknown }} */ (body);
   if (typeof record.configured !== "boolean") return null;
   const contactAddress = typeof record.contactAddress === "string" ? record.contactAddress : null;
-  return { configured: record.configured, contactAddress };
+  /* Kept only when it is one of the two words (#1405): anything else is not
+     read as locked, so a body that never mentions the key changes nothing. */
+  const encryptionKey = record.encryptionKey === "usable" || record.encryptionKey === "unusable"
+    ? record.encryptionKey
+    : undefined;
+  return { configured: record.configured, contactAddress, ...(encryptionKey ? { encryptionKey } : {}) };
 }
 
 /**
@@ -140,12 +148,17 @@ export function availabilityOf(body) {
  * `FAILED` too; otherwise the door opens, or names why it cannot, purely on
  * `configured`.
  *
- * @param {{ phase: "starting" | "running" | null, readiness: "ready" | "degraded" | "maintenance" | null, availability: { configured: boolean, contactAddress: string | null } | null }} read
- * @returns {typeof DOOR | typeof UNCONFIGURED | typeof STARTING | typeof FAILED}
+ * `LOCKED` (#1405) comes straight after `"starting"`: once boot is done, an
+ * unusable encryption key wins over readiness and over `configured`, because
+ * nobody can sign in at all and the key is the more basic fault.
+ *
+ * @param {{ phase: "starting" | "running" | null, readiness: "ready" | "degraded" | "maintenance" | null, availability: { configured: boolean, contactAddress: string | null, encryptionKey?: "usable" | "unusable" } | null }} read
+ * @returns {typeof DOOR | typeof UNCONFIGURED | typeof STARTING | typeof FAILED | typeof LOCKED}
  */
 export function nextDoorState(read) {
   if (read.phase === null) return FAILED;
   if (read.phase === "starting") return STARTING;
+  if (read.availability?.encryptionKey === "unusable") return LOCKED;
   if (read.readiness === null || read.readiness === "degraded") return FAILED;
   if (read.availability === null) return FAILED;
   return read.availability.configured ? DOOR : UNCONFIGURED;
@@ -321,10 +334,10 @@ export const APPROVAL_BACKSTOP_MS = 10 * 60_000;
  * is what lets the backstop itself be pinned without a browser or a real
  * clock, the same way {@link nextDoorState} is.
  *
- * @param {typeof DOOR | typeof UNCONFIGURED | typeof STARTING | typeof FAILED} state
+ * @param {typeof DOOR | typeof UNCONFIGURED | typeof STARTING | typeof FAILED | typeof LOCKED} state
  * @param {number} deadline epoch ms after which STARTING gives up
  * @param {number} now epoch ms, the caller's own `Date.now()` read
- * @returns {typeof DOOR | typeof UNCONFIGURED | typeof STARTING | typeof FAILED}
+ * @returns {typeof DOOR | typeof UNCONFIGURED | typeof STARTING | typeof FAILED | typeof LOCKED}
  */
 export function applyStartingBackstop(state, deadline, now) {
   if (state !== STARTING) return state;

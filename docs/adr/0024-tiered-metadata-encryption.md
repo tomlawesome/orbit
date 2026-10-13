@@ -264,8 +264,44 @@ rotation rewraps the DEK and rewrites no value and no index, so these two
 columns cost it nothing. `tests/integration/metadata-addresses.test.ts`
 proves it rather than assuming it — the #955 failure.
 
+## Amendment (#1405, 2026-10-13)
+
+**Decision 5 is reversed for the whole-instance case.** "A missing KEK is the
+separate, already-defined state: the application stays usable" no longer
+holds. When Orbit holds no usable key — missing, unreadable, malformed, set in
+both forms, or not the key the instance-scope `metadata_keys` row was wrapped
+under — it is **locked**: every screen and every API answers 503 with one
+explanatory screen, nobody signs in (provider, password, approval and setup
+links; administrators included), and only the scheduled-maintenance worker
+runs. The verdict is taken once at startup, by unwrapping the instance key row
+(`src/server/key-state.ts`), and leaving the state is a restart with the key
+fixed on the host. Per-field `metadata_locked` remains the answer for a
+household-scope row under an unheld key; it is no longer the answer for the
+instance.
+
+**The #969 amendment's sign-in paragraph is superseded.** "An identity
+provider's existing users still sign in" was kept as "do not regress", not
+because it was useful: with host access the only remedy, a member who signs in
+can read or save almost nothing, and a session created without the key cannot
+hold the ID token RP-Initiated Logout needs (#1316 decision 26a). The
+`instance_locked` verdicts stay as a second layer behind the gate; their
+removal is #1407.
+
+**Why `instance_contact.public_address` is unencrypted — extended.** It is
+shown on the signed-out door *and on the locked screen*: the one address Orbit
+can still read is the one a member needs when nobody can sign in.
+
+**Alerting.** Administrators' addresses are under the missing key, so the
+alert goes to `OPERATOR_ALERT_ADDRESS`, a server setting, and never to the
+public contact address (owner, #1405); "already sent" is an `audit_log` row,
+repeat interval 24 h, and one "working again" mail follows the first clean
+start after an alert.
+
 ## Consequences
 
+- With no usable key the instance is locked as a whole, not degraded field by
+  field (#1405 amendment above); the container log, the locked screen and the
+  operator alert say so.
 - Slices 2 and 3 of #365 can be filed: slice 2 implements sections 1–3 and
   5–6 for the four columns; slice 3 builds the rewrap worker meeting the
   extended ADR-0017 contract in section 4.

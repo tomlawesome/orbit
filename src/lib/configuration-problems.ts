@@ -20,10 +20,21 @@ let currentProblems: ConfigurationProblem[] = [];
  */
 export function setConfigurationProblems(issues: ReadonlyArray<{ field: ConfigurationSetting; code: ConfigurationProblemCode }>): void {
   const seen = new Set<string>();
-  currentProblems = issues.flatMap((issue) => {
+  currentProblems = issues.flatMap((issue): ConfigurationProblem[] => {
     const key = `${issue.field}|${issue.code}`;
     if (seen.has(key)) return [];
     seen.add(key);
+    /* A key fault (#1405) is an error that does not stop the start: the
+       instance comes up locked rather than not at all. */
+    if (issue.code === "configuration_key") {
+      return [{
+        code: issue.code,
+        severity: "error",
+        setting: issue.field,
+        fallback: "feature_disabled",
+        remediation: "check_configuration",
+      }];
+    }
     const blocking = issue.code !== "configuration_optional";
     return [{
       code: issue.code,

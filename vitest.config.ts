@@ -85,7 +85,9 @@ const test: TestUserConfig = {
         // One temporary root per test file, removed when the file ends (#654).
         // The suites leaked every mkdtemp they made: ~88k directories filled
         // this host's /tmp and started failing runs with ENOSPC.
-        setupFiles: ["./tests/support/temp-root.ts"],
+        // The second gives every file a usable encryption key verdict (#1405);
+        // a file about the key sets its own.
+        setupFiles: ["./tests/support/temp-root.ts", "./tests/support/key-usable.ts"],
         // Vitest's defaults (5s / 10s) already fail a hung test rather than the
         // whole job — pinned here, unchanged, so intent is explicit and can't
         // silently drift. A handful of tests that spawn real subprocesses

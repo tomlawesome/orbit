@@ -1,5 +1,5 @@
 import { ZodError } from "zod";
-import { AppError, MaintenanceActiveError } from "@/lib/errors";
+import { AppError, KeyUnavailableError, MaintenanceActiveError } from "@/lib/errors";
 import { AuthError } from "@/lib/auth/errors";
 import { log, operationalErrorDetail } from "@/lib/logger";
 
@@ -7,7 +7,7 @@ import { log, operationalErrorDetail } from "@/lib/logger";
    1) so operator artifacts can bundle domain code without linking Next.
    They are re-exported here because this is where the rest of the codebase
    already imports them from, and that should keep working. */
-export { AppError, MaintenanceActiveError };
+export { AppError, KeyUnavailableError, MaintenanceActiveError };
 
 function isPayloadTooLarge(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { status?: unknown }).status === 413;
@@ -15,6 +15,11 @@ function isPayloadTooLarge(error: unknown): boolean {
 
 /** Converts expected API failures into a consistent, non-cacheable response. */
 export function appErrorResponse(error: unknown): Response {
+  /* #1405: no usable encryption key. No Retry-After: nothing says when the
+     key will be back, and a guess would only send clients back too soon. */
+  if (error instanceof KeyUnavailableError) {
+    return Response.json({ error: "encryption_key_unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
   if (error instanceof MaintenanceActiveError) {
     const headers: Record<string, string> = { "Cache-Control": "no-store" };
     const secondsRemaining = error.expectedEndAt

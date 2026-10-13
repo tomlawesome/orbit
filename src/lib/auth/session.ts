@@ -10,6 +10,7 @@ import { constantTimeEqual, createCsrfToken, hashSessionToken, randomUrlSafe } f
 import { AuthError } from "@/lib/auth/errors";
 import type { TextSize, UrgencyPalette } from "@/lib/preferences";
 import { log, operationalDetail } from "@/lib/logger";
+import { assertKeyUsable } from "@/server/key-state";
 import { openInstanceMetadataCipher, openInstanceMetadataReader } from "@/server/metadata/fields";
 import { themePackOrDefault } from "@/lib/preferences";
 
@@ -74,6 +75,10 @@ export async function createSession(
   userAgent?: string | null,
   options: CreateSessionOptions = {},
 ): Promise<{ token: string; expiresAt: Date }> {
+  /* Belt and braces (#1405): no usable encryption key, no session, whatever
+     wrapper a future route forgot. Every route that reaches here is behind
+     the API key gate, or (the provider callback) calls it first. */
+  assertKeyUsable();
   const token = randomUrlSafe(32);
   const expiresAt = new Date(Date.now() + config.sessionTtlSeconds * 1000);
   /* Generated here rather than by the column default, because the ID token

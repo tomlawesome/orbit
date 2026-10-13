@@ -86,16 +86,21 @@ and household and member relationships. Those are what the reminder workers and
 due-window queries run on in SQL, and disk encryption (layer 4) is the answer
 for them.
 
-**What happens to signing in when the key is missing** was the open question
-here, and #966 settled it. Orbit finds an account by its address, so with no
-key it can match none. Password sign-in is refused in those words, "this
-instance cannot sign anybody in until its encryption key is available", and
-never as a wrong password, which would send an operator looking for a fault in
-themselves. People who sign in through an identity provider are unaffected,
-because that match is on the provider's own issuer and subject and never
-touches the address. If the key **and** the recovery bundle are both gone, the
-addresses cannot be recovered at all, and a host-shell command clears them so
-that people can be let back in and their addresses re-entered by hand — see
+**What happens when the key is missing or wrong** (#1405): Orbit closes to
+everyone and says so. It checks the key once at startup, by opening the
+instance's own key with it; a key that is missing, unreadable, malformed, set
+twice, or not the one this database was written under puts the whole instance
+in a locked state. Every screen shows one page saying the encryption key is
+not available and nothing is lost; every API answers
+`503 {"error":"encryption_key_unavailable"}`; nobody signs in, administrators
+and identity-provider users included, because with host access the only
+remedy, a person signed in could read or save almost nothing. Only signing out
+and the healthcheck stay open. The container log states the fault, and an
+alert goes to `OPERATOR_ALERT_ADDRESS` when it is set. Fixing the key on the
+host and restarting is the way out. If the key **and** the recovery bundle are
+both gone, the addresses cannot be recovered at all, and a host-shell command
+clears them so that people can be let back in and their addresses re-entered
+by hand — see
 [administrator-operations.md](administrator-operations.md#when-the-encryption-key-and-the-recovery-bundle-are-both-lost).
 
 `items.reference`, the invitation address and both account addresses carry a

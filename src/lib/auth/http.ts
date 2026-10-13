@@ -1,5 +1,5 @@
 import { ZodError } from "zod";
-import { appErrorResponse, MaintenanceActiveError } from "@/lib/app-error";
+import { appErrorResponse, KeyUnavailableError, MaintenanceActiveError } from "@/lib/app-error";
 import { AuthError, asAuthError } from "@/lib/auth/errors";
 import {
   reportAuthConfiguration,
@@ -11,6 +11,8 @@ export function authErrorResponse(error: unknown): Response {
   // The guard's block is not an authentication failure: it must keep its
   // bounded 503 contract (#523) rather than collapse into provider_error.
   if (error instanceof MaintenanceActiveError) return appErrorResponse(error);
+  /* Nor is a locked instance (#1405): the same bounded 503 every API gives. */
+  if (error instanceof KeyUnavailableError) return appErrorResponse(error);
   const authError = error instanceof ZodError
     ? new AuthError("auth_not_configured", "Authentication runtime configuration is incomplete", 503, { cause: error })
     : asAuthError(error);
