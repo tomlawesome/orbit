@@ -52,12 +52,7 @@ import { getAuthConfig } from "@/lib/env";
 import { AppError } from "@/lib/errors";
 import { log } from "@/lib/logger";
 import { validUuid } from "@/lib/uuid";
-import {
-  MetadataCipher,
-  openInstanceMetadataReader,
-  requireInstanceMetadataWriter,
-} from "@/server/metadata/fields";
-import { metadataCryptoAvailable } from "@/server/metadata/keys";
+import { openInstanceMetadataReader, requireInstanceMetadataWriter } from "@/server/metadata/fields";
 
 /** The executor a caller already holds a transaction on, or `getDb()` itself. */
 type Executor = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
@@ -163,20 +158,9 @@ export async function createLocalUser(
       }
     }
 
-    /* Creating an account WRITES an address, so unlike signing in it genuinely
-       needs the key, and the claim — the very first thing a new instance does
-       — needs it most (#969). Refused in its own words: an operator whose key
-       is missing must not read this as their address being rejected. */
-    let cipher: MetadataCipher;
-    try {
-      cipher = await requireInstanceMetadataWriter(transaction);
-    } catch {
-      throw new AuthError(
-        "instance_locked",
-        "This Orbit instance cannot create accounts until its encryption key is available",
-        503,
-      );
-    }
+    /* Creating an account writes an address, so it needs the key (#969); an
+       instance without one is in maintenance and never gets here (#1405). */
+    const cipher = await requireInstanceMetadataWriter(transaction);
 
     /* Checked rather than left to the case-insensitive unique index, so the
        answer is Orbit's own bounded refusal instead of a driver error. The
@@ -265,19 +249,7 @@ export async function createLocalUser(
 export type CredentialVerdict =
   | { outcome: "verified"; userId: string }
   | { outcome: "rejected" }
-  | { outcome: "throttled" }
-  /**
-   * The instance holds no usable encryption key, so no address can be matched
-   * at all (#969). A FIFTH answer, deliberately, and the one exception to the
-   * "every failure looks the same" rule at the top of this file: that rule
-   * exists so a verdict cannot be turned into "that address exists", and this
-   * one says nothing about any address. It is true of the whole instance
-   * before a single character of the address is compared, so an attacker
-   * learns only what the sign-in screen is about to tell everybody anyway —
-   * while the operator learns the thing they actually need to know, instead of
-   * being told their own password is wrong.
-   */
-  | { outcome: "locked" };
+  | { outcome: "throttled" };
 
 /**
  * Verifies an email and password against `local_credentials` (ADR-0023 §4).
@@ -310,17 +282,10 @@ export async function verifyCredential(email: string, password: string): Promise
 async function attemptVerification(email: string, password: string): Promise<CredentialVerdict> {
   const db = getDb();
 
-  /* The address is behind the key now (#969), so the lookup is the blind index
-     — and an instance with no KEK can compute no index. Reported before any
-     derivation runs: there is nothing to guess against, so spending the decoy
-     would only make a locked instance slow as well as locked.
-
-     The test is "is there a KEK", not "is this cipher locked". They differ on
-     an instance that has simply never written an address — a fresh, unclaimed
-     one — whose key row does not exist yet. That instance is not locked and
-     has no accounts either, so it must keep giving the ordinary answer rather
-     than announcing which of the two states it is in. */
-  if (!metadataCryptoAvailable()) return { outcome: "locked" };
+  /* The address is behind the key now (#969), so the lookup is the blind
+     index. An instance with no usable key is in maintenance and nobody signs
+     in (#1405), so the only locked cipher here is a fresh, unclaimed
+     instance's whose key row does not exist yet. */
   const cipher = await openInstanceMetadataReader();
 
   const trimmed = email.trim();

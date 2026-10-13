@@ -20,7 +20,7 @@ describe("which face a failed callback wears", () => {
     for (const code of [
       "auth_not_configured", "provider_error", "invalid_request", "invalid_state",
       "discovery_failed", "token_exchange_failed", "invalid_id_token", "missing_email",
-      "step_up_failed", "link_exists", "bootstrap_claimed", "instance_locked",
+      "step_up_failed", "link_exists", "bootstrap_claimed",
     ]) {
       expect(authErrorStateFor(code)).toBe(INCOMPLETE);
     }

@@ -11,7 +11,7 @@ import { AuthError } from "@/lib/auth/errors";
 import type { TextSize, UrgencyPalette } from "@/lib/preferences";
 import { log, operationalDetail } from "@/lib/logger";
 import { assertKeyUsable } from "@/server/key-state";
-import { openInstanceMetadataCipher, openInstanceMetadataReader } from "@/server/metadata/fields";
+import { openInstanceMetadataReader, requireInstanceMetadataWriter } from "@/server/metadata/fields";
 import { themePackOrDefault } from "@/lib/preferences";
 
 export interface AuthenticatedSession {
@@ -99,8 +99,8 @@ export async function createSession(
     }
     let idTokenEnc: string | null = null;
     if (idToken) {
-      const cipher = await openInstanceMetadataCipher(transaction);
-      idTokenEnc = cipher.locked ? null : cipher.encryptText("sessions.id_token", id, idToken);
+      const cipher = await requireInstanceMetadataWriter(transaction);
+      idTokenEnc = cipher.encryptText("sessions.id_token", id, idToken);
     }
     await transaction.insert(sessions).values({
       id,

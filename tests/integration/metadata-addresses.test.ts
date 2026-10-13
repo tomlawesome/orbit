@@ -10,18 +10,14 @@
  *    account, which now happens through a blind index rather than `lower()`;
  *  - a KEK rotation covers both new columns (ADR-0017's contract, the #955
  *    failure, checked rather than assumed);
- *  - and the behaviour when the key is missing, which is the whole reason
- *    slice 3 (#970) exists: an operator must be able to tell "this instance
- *    cannot read any address" from "your password is wrong", and an identity
- *    provider's users must still get in, because that path never touched the
- *    address in the first place.
+ *  - and the behaviour when the key is missing: since #1405 the instance is in
+ *    maintenance and no session can be created.
  */
 import { randomBytes, randomUUID } from "node:crypto";
 import { eq, isNotNull } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, externalIdentities, instanceAuthority, localCredentials, mailInSenderAddresses, metadataKeys, users } from "@/db/schema";
-import { AuthError } from "@/lib/auth/errors";
 import { provisionIdentity } from "@/lib/auth/provision";
 import type { VerifiedIdentity } from "@/lib/auth/oidc";
 import { hashPassword } from "@/lib/auth/password";
@@ -203,30 +199,10 @@ describe("no readable address survives anywhere (#969, the #966 failure)", () =>
 });
 
 describe("an instance with no usable key (#969, and why #970 exists)", () => {
-  it("refuses local sign-in as locked, never as a wrong password", async () => {
-    const address = "locked-out@example.invalid";
-    await createLocalUser(
-      { email: address, displayName: "Locked out", passwordHash: await hashPassword(PASSWORD) },
-      { bootstrap: true },
-    );
-
-    const restore = lockTheInstance();
-    try {
-      const verdict = await verifyCredential(address, PASSWORD);
-      /* The distinction the operator's whole recovery depends on: not
-         `rejected`, which is what a wrong password gets. */
-      expect(verdict.outcome).toBe("locked");
-      expect((await verifyCredential(address, "the-wrong-password")).outcome).toBe("locked");
-    } finally {
-      restore();
-    }
-  });
-
-  /* #1405 retitled this: with no usable key the repository still matches an
-     identity on issuer and subject (the regression #969 named), but Orbit as a
-     whole is closed, so no session can follow. The tolerant sign-in code is
-     left in place and removed separately (#1407). */
-  it("still matches an identity the provider already knows on issuer and subject, and no session can follow (#1405)", async () => {
+  /* With no usable key Orbit is in maintenance and nobody signs in (#1405);
+     the tolerant sign-in code that once let a known identity in is gone
+     (#1407). */
+  it("lets no session follow for an identity the provider already knows (#1405)", async () => {
     const identity = identityFor("oidc-survivor@example.invalid");
     const provisioned = await provisionIdentity(identity, { bootstrap: true });
 
@@ -234,20 +210,7 @@ describe("an instance with no usable key (#969, and why #970 exists)", () => {
     try {
       const { KeyUnavailableError, setKeyStateForTests } = await import("@/server/key-state");
       setKeyStateForTests({ verdict: "unusable", reason: "missing" });
-      /* The regression #969 names explicitly. `external_identities` matches on
-         issuer and subject, so a missing key must not shut these people out. */
-      const again = await provisionIdentity(identity);
-      expect(again.id).toBe(provisioned.id);
-      // The address cannot be read, and is reported as unreadable rather than blank.
-      expect(again.email).toBeNull();
-
-      // And the stored ciphertext was not touched by a sign-in that could not read it.
-      const stored = await storedUser(provisioned.id);
-      expect(stored.emailEnc).not.toBeNull();
-      expect(stored.email).toBeNull();
-
-      // And that is as far as it goes: nobody is signed in.
-      await expect(createSession(again.id, getAuthConfig())).rejects.toBeInstanceOf(KeyUnavailableError);
+      await expect(createSession(provisioned.id, getAuthConfig())).rejects.toBeInstanceOf(KeyUnavailableError);
     } finally {
       restore();
       await import("@/server/key-state")
@@ -256,19 +219,6 @@ describe("an instance with no usable key (#969, and why #970 exists)", () => {
     }
   });
 
-  it("refuses to create an account, in its own words", async () => {
-    const restore = lockTheInstance();
-    try {
-      const attempt = createLocalUser(
-        { email: "never-created@example.invalid", displayName: "Never", passwordHash: await hashPassword(PASSWORD) },
-        { bootstrap: true },
-      );
-      await expect(attempt).rejects.toBeInstanceOf(AuthError);
-      await expect(attempt).rejects.toMatchObject({ code: "instance_locked" });
-    } finally {
-      restore();
-    }
-  });
 });
 
 describe("a KEK rotation covers the address rows (#969, ADR-0017's contract)", () => {
