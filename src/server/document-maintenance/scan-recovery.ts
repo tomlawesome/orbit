@@ -94,7 +94,9 @@ export async function claimScannerRecoveryJobs(limit = 25): Promise<ClaimedScanJ
 async function readOwnedScanRecord(job: ClaimedScanJob): Promise<ScanRecoveryRecord | undefined> {
   const rows = await getDb().execute(sql<ScanRecoveryRecord>`
     select document.household_id as "householdId",
-           document.item_id as "itemId",
+           -- The id the staged ciphertext was sealed under; a staged upload
+           -- may not be bound to its item yet.
+           coalesce(document.sealed_item_id, document.item_id) as "itemId",
            document.media_type as "mediaType",
            document.size_bytes as "sizeBytes",
            document.display_name as "displayName",

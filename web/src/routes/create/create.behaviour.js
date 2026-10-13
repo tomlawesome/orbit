@@ -1,5 +1,8 @@
 import { goto } from "$app/navigation";
-import { PARTIAL_CREATE_MESSAGE, WorkspaceError, activeHousehold, applyCommand, attachItemDocument, checkDraftCommand, readReminders } from "$lib/data/workspace.js";
+import {
+  WorkspaceError, activeHousehold, applyCommand, checkDraftCommand, readReminders, refusesFile, stageDocument, unsavedWords,
+  wordsOf, notSavedWords,
+} from "$lib/data/workspace.js";
 import {
   CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
   WHY_UNDRAWABLE, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
@@ -49,8 +52,9 @@ import { sizeLabel } from "$lib/format.js";
  *      inspection route scans and reads the same bytes alongside, and what
  *      it read is typed into the empty fields marked `.sugg` ("◆ from
  *      document"), which `.accept` clears, as the mockup drew. Neither
- *      request keeps anything: the save attaches the file to the item it
- *      creates through the item's own documents route. The mockup's lit
+ *      request keeps anything: the save stages the file, then binds it to
+ *      the item in the one command that creates it, so the two are saved
+ *      together or not at all (#1406). The mockup's lit
  *      marks went with its sketched page — a real page has no marks to
  *      light, so the fields carry that instead.
  *   2. The mockup's inline `onsubmit="return false"` is a listener here — a
@@ -163,6 +167,12 @@ export function mountCreate() {
       section refusal (#1058b) held it before. */
   /** @type {string | null} */
   let refusal = "";
+  /** Why the server refused the file held now, or null (#1406, owner's
+      answer 6a): a refused file stays in the entry, marked with the
+      server's words, and holds the save until it is replaced or removed,
+      so no item is saved without the paper the member meant to attach. */
+  /** @type {string | null} */
+  let fileRefusal = null;
   /**
    * #1058b/#1058e: the save button stays held (`aria-disabled`, #1327: it
    * keeps its place in the tab order, and the submit handler ignores it)
@@ -177,7 +187,7 @@ export function mountCreate() {
   }
   function showRefusal() {
     if (saving) return;
-    holdSave(refusal !== null);
+    holdSave(refusal !== null || fileRefusal !== null);
     /* A sticky message from the last save attempt outranks the live refusal
        note until the next attempt clears it — typing does not erase it. */
     if (sticky) return;
@@ -291,6 +301,8 @@ export function mountCreate() {
        the file it holds cannot change under the save. */
     if (saving) return;
     if (!file) return;
+    /* A new file replaces a refused one, and the refusal goes with it. */
+    fileRefusal = null;
     attachmentId = crypto.randomUUID();
     attachment = file;
     edited();
@@ -304,6 +316,7 @@ export function mountCreate() {
     /* The §14 walk, for real (#1245): page one and the read start together
        from the pick, and neither waits for the other. */
     readDocument(file).catch(() => { /* every outcome is drawn in the lane */ });
+    updateRefusal();
   }
 
   /* ---- the reading lane (§14 ruling 3; design/v19/create-v3.html's `doc`
@@ -395,12 +408,19 @@ export function mountCreate() {
     else focusWhy.textContent = state.why;
   }
 
-  /** The server would not keep this file (malware, or a structure the
-      upload refuses), so it leaves the entry now rather than at the save,
-      and the lane says so in the item page's own words. */
+  /** The server would not keep this file (malware, or a type, size or
+      structure the upload refuses), whether the read found it or the save's
+      stage did. It stays in the entry, marked refused in the server's words,
+      and the save is held until it is replaced or removed (#1406, owner's
+      answer 6a); the lane says so in the item page's own words. */
   function refuseDocument(/** @type {File} */ file, /** @type {string} */ why) {
-    dropDocument();
-    if (heldName) heldName.textContent = `${file.name} — refused`;
+    reading?.abort();
+    reading = null;
+    fileRefusal = why;
+    /* The heldName line is text: the lane's own two-line words carry markup. */
+    const reason = why.replaceAll("<br>", "; ");
+    if (heldName) heldName.textContent = `${file.name} — refused: ${reason}. Replace it, or remove it to save without it.`;
+    updateRefusal();
     clearSheet();
     pageState = "failed";
     readcard.dataset.page = "failed";
@@ -421,12 +441,13 @@ export function mountCreate() {
     docnote.classList.remove("show");
   }
 
-  /** The file is out of the entry — refused by the server, or "not this one". */
+  /** The file is out of the entry: "not this one", refused or not. */
   function dropDocument() {
     reading?.abort();
     reading = null;
     attachment = null;
     attachmentId = "";
+    fileRefusal = null;
     /* So the same file can be picked again: `change` only fires on a change. */
     picker.value = "";
     clearSuggestions();
@@ -492,7 +513,7 @@ export function mountCreate() {
       .then((outcome) => {
         if (!current()) return;
         if (outcome.kind === "refused") {
-          /* The upload would refuse it too, so it leaves the entry now. */
+          /* The upload would refuse it too, so the save is held now. */
           refuseDocument(file, outcome.why);
           return;
         }
@@ -577,7 +598,7 @@ export function mountCreate() {
 
   on(card, "submit", async (event) => {
     event.preventDefault();
-    if (saving || refusal !== null) return;
+    if (saving || refusal !== null || fileRefusal !== null) return;
     dryRun.stop();
 
     saving = true;
@@ -588,32 +609,35 @@ export function mountCreate() {
     note.textContent = "";
     const label = save.textContent;
     save.textContent = "Adding…";
-    let landed = false;
     /* The save sends what was held at the press: a read refused while it is
-       in flight drops the document from the form, not from this save, so
-       the server's own refusal reaches the words below instead of the item
-       landing without its paper and nothing said. */
+       in flight marks the file in the form, and the stage below still gets
+       the server's own verdict on it. */
     const held = { attachment, attachmentId };
+    /** Until the stage is answered, a failure is the file's or the send's. */
+    let staging = false;
 
     try {
       const active = household ?? await activeHousehold();
       household ??= active;
-      await applyCommand(commandFromForm()).catch((error) => {
+      const command = commandFromForm();
+      /* #1406: all or nothing. The file is staged first -- stored, scanned
+         and sealed under this draft's id, with no item yet -- and the one
+         command that creates the item binds it in the same transaction, so
+         the server holds both or neither. A retry re-sends both under the
+         same ids, and the server hands back what it already holds. */
+      if (held.attachment) {
+        staging = true;
+        await stageDocument(active.id, held.attachment, held.attachmentId, draftId);
+        staging = false;
+      }
+      await applyCommand(held.attachment ? { ...command, documentIds: [held.attachmentId] } : command).catch((error) => {
         /* This draft id is new to the server, so "this item changed on another
-           device" can only mean the earlier send landed and its answer was
-           lost (same reading as pocket.svelte's save). */
+           device" can only mean the earlier send landed -- the item and its
+           document together -- and its answer was lost (same reading as
+           pocket.svelte's save). */
         if (error instanceof WorkspaceError && error.code === "version_required") return;
         throw error;
       });
-      /* The item is on the server from here; a reload would mint a new draft
-         id and file it twice, so a later refusal must not read as unsaved. */
-      landed = true;
-
-      /* #1245: the picked document goes onto the item just saved. A refusal
-         lands in the catch below like any failed save: the entry is kept,
-         and the next attempt re-sends both under the same ids, so neither
-         is stored twice. */
-      if (held.attachment) await attachItemDocument(active.id, draftId, held.attachment, held.attachmentId);
 
       /* The server holds the entry, and its document, from here, so leaving
          must not ask about discarding them (#1151 W1-S1). */
@@ -625,10 +649,15 @@ export function mountCreate() {
     } catch (error) {
       /* #1058e: loud, not small print — the button goes back to "Add to
          orbit", the reason sits beside it, and nothing typed is lost. No
-         toast. saveProblem() is the same wording the pocket's form gives;
-         a refusal the engine found only at the save reads in its own words. */
-      const words = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
-      sticky = landed ? `${PARTIAL_CREATE_MESSAGE} ${words}` : words;
+         toast. Nothing is ever half saved (#1406), so the words say only
+         what stopped it: a file the server refused (which stays, marked,
+         holding Add), a send that got no verdict, or the engine's refusal
+         of the item in its own words, as the pocket's form gives them. */
+      if (staging && held.attachment && held.attachment === attachment && refusesFile(error)) {
+        refuseDocument(held.attachment, wordsOf(error));
+      }
+      sticky = unsavedWords(error)
+        ?? (staging ? notSavedWords(error) : saveProblem(/** @type {{ code?: string, message?: string }} */ (error)));
       note.classList.add("fail");
       note.setAttribute("role", "alert");
       note.textContent = sticky;

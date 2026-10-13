@@ -584,6 +584,12 @@ export const documents = pgTable("documents", {
   id: uuid("id").primaryKey().defaultRandom(),
   householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
   itemId: uuid("item_id").references(() => items.id, { onDelete: "set null" }),
+  /**
+   * The item id the ciphertext was sealed under. A staged upload has no item
+   * yet, so this is what binding checks; null on rows from before it existed,
+   * which read under `item_id` (`documentSealedItemId`).
+   */
+  sealedItemId: uuid("sealed_item_id"),
   uploadedByUserId: uuid("uploaded_by_user_id").references(() => users.id, { onDelete: "set null" }),
   displayName: text("display_name").notNull(),
   mediaType: text("media_type").notNull(),

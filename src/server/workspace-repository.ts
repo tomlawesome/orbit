@@ -703,6 +703,26 @@ async function runWorkspaceCommand(
       if (existing && existing.version !== expectedVersion) {
         throw new AppError("version_conflict", "This item changed on another device; refresh and try again", 409);
       }
+      // #1316: each document must be this household's, sealed under this
+      // item, bound to no other item, and not refused or on its way out. One
+      // that is not refuses the whole save, in the same words whatever the
+      // reason, so no item is kept without the paper the member attached and
+      // nothing is learned about another household's documents or drafts.
+      const documentIds = [...new Set((command.documentIds ?? []).map((id) => id.toLowerCase()))];
+      if (documentIds.length > 0) {
+        const bindable = await transaction.select({ id: documents.id }).from(documents)
+          .where(and(
+            inArray(documents.id, documentIds),
+            eq(documents.householdId, householdId),
+            sql`coalesce(${documents.sealedItemId}, ${documents.itemId}) = ${itemId}::uuid`,
+            or(isNull(documents.itemId), eq(documents.itemId, itemId)),
+            notInArray(documents.lifecycle, ["rejected", "deleted", "pending_deletion"]),
+          ))
+          .for("update");
+        if (bindable.length !== documentIds.length) {
+          throw new AppError("document_not_available", "That document is no longer available — pick it again", 422);
+        }
+      }
       if (dryRun) return;
       // Tier 1 and Tier 2 (ADR-0024 decision 3): encrypt and clear the
       // plaintext in the same statement, so the row is never in both states at
@@ -745,6 +765,10 @@ async function runWorkspaceCommand(
         if (!updated) throw new AppError("version_conflict", "This item changed on another device; refresh and try again", 409);
       } else {
         await transaction.insert(items).values({ id: itemId, householdId, version: 1, ...values });
+      }
+      if (documentIds.length > 0) {
+        await transaction.update(documents).set({ itemId, deleteAfter: null, updatedAt: new Date() })
+          .where(inArray(documents.id, documentIds));
       }
       // Every encrypted column on the row was just rewritten - Tier 1 and, since
       // #963, Tier 2 - so anything this row had been seen damaged in is gone

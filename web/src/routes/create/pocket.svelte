@@ -3,8 +3,10 @@
   import { beforeNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { PARTIAL_CREATE_MESSAGE, WorkspaceError, applyCommand, attachItemDocument, checkDraftCommand, readReminders, readWorkspace } from "$lib/data/workspace.js";
-  import { saveProblem } from "$lib/data/metadata-status.js";
+  import {
+    WorkspaceError, applyCommand, checkDraftCommand, notSavedWords, readReminders, readWorkspace, refusesFile, stageDocument,
+    unsavedWords, wordsOf,
+  } from "$lib/data/workspace.js";
   import {
     CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
     suggestionsToCarry,
@@ -28,8 +30,9 @@
    * the refusal beside save while something is missing (#1058: no section
    * is chosen for you); saving; a failure that is loud and stays until the
    * next attempt, with nothing typed lost (#1058); saved, which raises the
-   * wake and approaches the new item on its belt. A document picked goes
-   * onto the saved item, as the desk's does (#1245, owner's 11a), and is read
+   * wake and approaches the new item on its belt. A document picked is saved
+   * with the item, all or nothing, as the desk's is (#1245, owner's 11a;
+   * #1406: staged first, then bound by the one command), and is read
    * the moment it is picked, as the desk reads it (#1279, owner's 14a): page
    * one lands in the reading card and the read fills the empty fields.
    * Leaving with something typed asks first.
@@ -76,8 +79,9 @@
      create.behaviour.js): two requests from one pick, neither waiting for
      the other. Page one lands the moment it is drawn; the read fills the
      empty fields, never over what someone typed, and names them in `marked`
-     for EntryForm's "◆ from document". A refused file leaves the entry at
-     once, so the save does not send it. Picking again, "not this one" and
+     for EntryForm's "◆ from document". A refused file stays in the entry,
+     marked, and holds the save until it is replaced or removed (#1406,
+     owner's answer 6a). Picking again, "not this one" and
      leaving each abort the read in flight and revoke the page's object URL. */
   /** @type {import('$lib/data/document-read.js').PickedRead | null} */
   let picked = $state(null);
@@ -108,13 +112,13 @@
     picked.why = why;
   }
 
-  /** The server would not keep this file, so it leaves the entry now
-      rather than at the save, and the card says so in the desk's words. */
+  /** The server would not keep this file -- the read found it, or the
+      save's stage did -- so it stays in the entry marked refused, in the
+      server's words, and the save is held until it is replaced or removed
+      (#1406, owner's answer 6a). The card says so in the desk's words. */
   /** @param {string} why */
   function refuse(why) {
     stopReading();
-    attachment = null;
-    clearSuggestions();
     if (!picked) return;
     picked.scanned = false;
     picked.refused = true;
@@ -227,6 +231,8 @@
   });
   onDestroy(() => dryRun.stop());
   const dirty = $derived(!saved && (entryChanged(entry, start) || attachment !== null));
+  /** A refused file is still held: Add waits until it is replaced or removed. */
+  const fileRefused = $derived.by(() => attachment !== null && picked?.refused === true);
 
   async function load() {
     phase = "loading";
@@ -249,36 +255,37 @@
   $effect(() => { load(); });
 
   async function save() {
-    if (saving || saved || refusal !== null || phase !== "ready") return;
+    if (saving || saved || refusal !== null || fileRefused || phase !== "ready") return;
     const household = households.find((one) => one.id === entry.householdId);
     const command = commandNow();
     if (!household || !command) return;
     saving = true;
     problem = null;
-    /* The file is taken now, as the desk's create does: a read refused while
-       the save is in flight drops `attachment`, and testing it after the
-       await would skip the upload and land the item without its paper. */
+    /* The file is taken now, as the desk's create does: what was held at
+       the press is what the stage sends, so the server, not a late read,
+       has the last word on it. */
     const held = attachment;
-    let landed = false;
+    /** Until the stage is answered, a failure is the file's or the send's. */
+    let staging = false;
     try {
-      await applyCommand(command).catch((error) => {
+      /* #1406: all or nothing, as the desk's save. The file is staged first
+         -- stored, scanned and sealed under this draft's id, with no item
+         yet -- and the one command that creates the item binds it in the
+         same transaction. A retry re-sends both under the same ids, and the
+         server hands back what it already holds. */
+      if (held) {
+        staging = true;
+        await stageDocument(household.id, held, documentIdOf(held), draftId);
+        staging = false;
+      }
+      await applyCommand(held ? { ...command, documentIds: [documentIdOf(held)] } : command).catch((error) => {
         /* This draft id is new to the server, so "this item changed on another
-           device" can only mean the earlier send landed and its answer was
-           lost; refreshing would mint a new id and create the duplicate the
-           retry exists to avoid. */
+           device" can only mean the earlier send landed -- the item and its
+           document together -- and its answer was lost; refreshing would
+           mint a new id and create the duplicate the retry exists to avoid. */
         if (error instanceof WorkspaceError && error.code === "version_required") return;
         throw error;
       });
-      /* The item is on the server from here; a reload would mint a new draft
-         id and file it twice, so a later refusal must not read as unsaved. */
-      landed = true;
-      /* #1245 (11a): the picked document goes onto the item just saved,
-         through the same route the desk's form uses. A refusal lands in the
-         catch below like any failed save: the entry is kept, and the next
-         attempt re-sends both under the same ids, so neither is stored twice.
-         It sends the file held at submit, so the server, not a late read,
-         has the last word on it. */
-      if (held) await attachItemDocument(household.id, draftId, held, documentIdOf(held));
       saved = true;
       wake(`added to your orbit · ${entry.name.trim()}`);
       /* #1319 (§34): the new item, its drawer open on home, as the desk's
@@ -286,10 +293,11 @@
       await goto(resolve(`/home?item=${encodeURIComponent(draftId)}`));
     } catch (error) {
       /* Loud (#1058): the reason stays above the bar until the next attempt,
-         the button comes back, and nothing typed is lost. No wake. */
-      const words = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
-      if (landed) problem = `${PARTIAL_CREATE_MESSAGE} ${words}`;
-      else problem = /^not [a-z]+ —/i.test(words) ? words : `not saved — ${words}`;
+         the button comes back, and nothing typed is lost. No wake. Nothing
+         is ever half saved (#1406): a refused file stays, marked, holding
+         Add; a send with no verdict says so; a refusal reads in its own words. */
+      if (staging && held && held === attachment && refusesFile(error)) refuse(wordsOf(error));
+      problem = unsavedWords(error) ?? notSavedWords(error);
     } finally {
       saving = false;
     }
@@ -390,7 +398,7 @@
       <div class="pk-bar-acts">
         <a class="p-pill pk-never" href={resolve("/home")}>never mind</a>
         <button type="submit" form="pocket-entry" class="p-pill filled pk-save"
-                aria-disabled={phase !== "ready" || refusal !== null || saving || saved ? "true" : undefined}
+                aria-disabled={phase !== "ready" || refusal !== null || fileRefused || saving || saved ? "true" : undefined}
                 aria-describedby={refusal ? "pk-refusal" : undefined}>
           {saved ? "Added" : saving ? "Adding…" : "Add to orbit"}
         </button>
