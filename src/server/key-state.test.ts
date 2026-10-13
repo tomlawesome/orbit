@@ -257,3 +257,114 @@ describe("when the database cannot answer (an outage is not this mode)", () => {
     expect(getKeyState()).toEqual({ verdict: "unknown" });
   });
 });
+
+/*
+ * #1316 fault 4: the visual fidelity harness runs the real boot with
+ * ORBIT_FIXTURES=1 and no database at all, so a startup key check that reads
+ * the instance key row never finishes. In that mode (and only when the value
+ * is exactly "1") the verdict comes from the key settings alone.
+ */
+describe("probeEncryptionKey under the fixture harness (#1316 fault 4)", () => {
+  const original = process.env.ORBIT_FIXTURES;
+
+  beforeEach(() => {
+    delete process.env.ORBIT_FIXTURES;
+  });
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.ORBIT_FIXTURES;
+    else process.env.ORBIT_FIXTURES = original;
+  });
+
+  it("never reads the database when ORBIT_FIXTURES is 1, even if it would fail", async () => {
+    process.env.ORBIT_FIXTURES = "1";
+    vi.useFakeTimers();
+    mocks.rows.mockImplementation(() => { throw new Error("connect ECONNREFUSED"); });
+
+    const result = probeEncryptionKey().catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(mocks.queries).not.toHaveBeenCalled();
+    expect(mocks.rows).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    await result;
+  });
+
+  it("is usable, holding the configured key id, and answers without waiting out the retry window", async () => {
+    process.env.ORBIT_FIXTURES = "1";
+    vi.useFakeTimers();
+    mocks.rows.mockImplementation(() => { throw new Error("connect ECONNREFUSED"); });
+
+    const settled = vi.fn();
+    const result = probeEncryptionKey().then(settled, settled);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(settled).toHaveBeenCalledWith({ verdict: "usable", heldKeyId: HELD });
+    await result;
+  });
+
+  it("is usable even when the database holds a key row under a key that is not held", async () => {
+    process.env.ORBIT_FIXTURES = "1";
+    mocks.rows.mockReturnValue([instanceKeyRow(STORED)]);
+
+    expect(await probeEncryptionKey()).toEqual({ verdict: "usable", heldKeyId: HELD });
+    expect(mocks.queries).not.toHaveBeenCalled();
+  });
+
+  it("makes getKeyState report the same verdict afterwards", async () => {
+    process.env.ORBIT_FIXTURES = "1";
+    mocks.rows.mockReturnValue([instanceKeyRow(STORED)]);
+    expect(getKeyState()).toEqual({ verdict: "unknown" });
+
+    await probeEncryptionKey();
+
+    expect(getKeyState()).toEqual({ verdict: "usable", heldKeyId: HELD });
+    expect(() => assertKeyUsable()).not.toThrow();
+  });
+
+  it.each(["missing", "unreadable", "malformed", "both_forms"] as const)(
+    "is still unusable with reason %s when the key settings have that fault, without asking the database",
+    async (reason) => {
+      process.env.ORBIT_FIXTURES = "1";
+      mocks.documentKeyProblem.mockReturnValue(reason);
+
+      const verdict = await probeEncryptionKey();
+
+      expect(verdict).toMatchObject({ verdict: "unusable", reason });
+      expect(getKeyState()).toMatchObject({ verdict: "unusable", reason });
+      expect(mocks.queries).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, "", "0", "true", "yes", " 1", "1 ", "11"] as const)(
+    "consults the database as before when ORBIT_FIXTURES is %j",
+    async (value) => {
+      if (value !== undefined) process.env.ORBIT_FIXTURES = value;
+      mocks.rows.mockReturnValue([instanceKeyRow(STORED)]);
+
+      const verdict = await probeEncryptionKey();
+
+      expect(mocks.queries).toHaveBeenCalled();
+      expect(verdict).toMatchObject({ verdict: "unusable", reason: "mismatch", heldKeyId: HELD, storedKeyId: STORED });
+      expect(getKeyState()).toMatchObject({ verdict: "unusable", reason: "mismatch" });
+    },
+  );
+
+  it("still retries a database that cannot answer when ORBIT_FIXTURES is not 1", async () => {
+    process.env.ORBIT_FIXTURES = "0";
+    vi.useFakeTimers();
+    mocks.rows
+      .mockImplementationOnce(() => { throw new Error("connect ECONNREFUSED"); })
+      .mockImplementation(() => []);
+
+    const settled = vi.fn();
+    const result = probeEncryptionKey().then(settled, settled);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await result;
+    expect(mocks.queries).toHaveBeenCalledTimes(2);
+    expect(settled).toHaveBeenCalledWith({ verdict: "usable", heldKeyId: HELD });
+  });
+});
