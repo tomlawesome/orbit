@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -117,10 +117,8 @@ const EXPECTED_ROUTES = [
   "/api/auth/sessions",
   "/api/auth/sessions/[sessionId]/revoke",
   "/api/auth/sessions/revoke",
-  "/api/document-drafts/[draftId]/approve",
   "/api/documents/[documentId]",
   "/api/documents/[documentId]/download",
-  "/api/documents/[documentId]/draft",
   "/api/documents/[documentId]/preview",
   "/api/documents/[documentId]/restore",
   "/api/health",
@@ -198,12 +196,36 @@ function exportedHandlers(source) {
 
 const routeFiles = collectServerFiles(routesRoot);
 
+// #1399 (#1316): the document-draft feature is removed. Its two routes,
+// `POST /api/documents/{id}/draft` and `POST /api/document-drafts/{draftId}/approve`,
+// are absent from EXPECTED_ROUTES above, so the exact-set test already fails if
+// either returns. The `document_drafts` table stays (dropping it is a separate
+// decision), so only the module and its importers are checked here.
+const repoRoot = new URL("../../", import.meta.url).pathname;
+const SOURCE_EXTENSIONS = /\.(?:[cm]?[jt]s|svelte)$/;
+const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", ".svelte-kit", "build", "dist", "coverage"]);
+
+function collectSourceFiles(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      return SKIPPED_DIRECTORIES.has(entry.name) ? [] : collectSourceFiles(entryPath);
+    }
+    return SOURCE_EXTENSIONS.test(entry.name) ? [entryPath] : [];
+  });
+}
+
+// Any quoted module specifier ending in `document-drafts` (optionally .js/.ts):
+// static and dynamic imports, re-exports and vi.mock all name the module this
+// way. Route paths such as "document-drafts/[draftId]/approve" do not end there.
+const DRAFT_MODULE_SPECIFIER = /["'`][^"'`\n]*\/document-drafts(?:\.[jt]s)?["'`]/;
+
 describe("SvelteKit API route-set contract (#735)", () => {
   it("finds route files to check, so a misconfigured glob cannot silently empty this test", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 80 route families -- no fewer, no more", () => {
+  it("has exactly the expected 78 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });
@@ -230,5 +252,51 @@ describe("exportedHandlers (#1151 T-Q5)", () => {
 
   it("still finds a real handler sitting next to a dead one", () => {
     expect(exportedHandlers("// export function GET() {}\nexport function POST() {}")).toEqual(["POST"]);
+  });
+});
+
+describe("document drafts are gone (#1399)", () => {
+  it("has no src/server/document-drafts module", () => {
+    expect(existsSync(join(repoRoot, "src/server/document-drafts.ts"))).toBe(false);
+  });
+
+  it("has no route directory for document drafts", () => {
+    expect(existsSync(join(routesRoot, "document-drafts"))).toBe(false);
+    expect(existsSync(join(routesRoot, "documents/[documentId]/draft"))).toBe(false);
+  });
+
+  it("is imported, mocked or re-exported by no module in src, web/src, tests or scripts", () => {
+    const importers = ["src", "web/src", "tests", "scripts"]
+      .map((directory) => join(repoRoot, directory))
+      .filter((directory) => existsSync(directory))
+      .flatMap(collectSourceFiles)
+      .filter((file) => !file.endsWith("/api-route-set-contract.test.mjs"))
+      .filter((file) => DRAFT_MODULE_SPECIFIER.test(stripComments(readFileSync(file, "utf8"))))
+      .map((file) => file.slice(repoRoot.length));
+    expect(importers).toEqual([]);
+  });
+});
+
+describe("DRAFT_MODULE_SPECIFIER (#1399)", () => {
+  it("matches the ways a module can name the draft module", () => {
+    for (const text of [
+      'import { x } from "./document-drafts";',
+      'import { x } from "@/server/document-drafts";',
+      'import { x } from "orbit/server/document-drafts";',
+      'vi.mock("./document-drafts.js", () => ({}));',
+      'await import("../src/server/document-drafts.ts");',
+    ]) {
+      expect(DRAFT_MODULE_SPECIFIER.test(text), text).toBe(true);
+    }
+  });
+
+  it("does not match unrelated names", () => {
+    for (const text of [
+      'loadRoute("document-drafts/[draftId]/approve")',
+      'import { x } from "./document-draft-helpers";',
+      'import { x } from "./document-worker";',
+    ]) {
+      expect(DRAFT_MODULE_SPECIFIER.test(text), text).toBe(false);
+    }
   });
 });
