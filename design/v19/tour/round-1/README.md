@@ -1,5 +1,7 @@
 # First-run tour — round 1 (#866)
 
+The screenshots and recordings this page shows are kept outside git (#1408): frames are blank in a clone or on the mirror.
+
 The tour reframed as a story rather than a pointer: "run your first year in
 a minute". One item is born, time runs, paper arrives, it comes round. The
 owner's reading of Node-RED's "moves the interface" on 2026-09-16: "Yeah
