@@ -1130,7 +1130,7 @@ describe("authenticated encrypted document lifecycle", () => {
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
       action: "create_separate",
-      item: { title: "Reviewed recovery item", currency: "GBP", status: "active" },
+      item: { kind: "service", title: "Reviewed recovery item", currency: "GBP", status: "active" },
       attachmentIds: [],
     });
     const documentId = randomUUID();
@@ -1192,7 +1192,7 @@ describe("authenticated encrypted document lifecycle", () => {
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
       action: "create_separate" as const,
-      item: { title: "Mailbox recovery value", currency: "GBP", status: "active" },
+      item: { kind: "service", title: "Mailbox recovery value", currency: "GBP", status: "active" },
       attachmentIds: [held.id],
     };
 
@@ -1267,7 +1267,7 @@ describe("authenticated encrypted document lifecycle", () => {
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
       action: "create_separate",
-      item: { title: "Reviewed terminal recovery", currency: "GBP", status: "active" },
+      item: { kind: "service", title: "Reviewed terminal recovery", currency: "GBP", status: "active" },
       attachmentIds: [],
     });
     const documentId = randomUUID();
@@ -1331,7 +1331,7 @@ describe("authenticated encrypted document lifecycle", () => {
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
       action: "create_separate",
-      item: { title: "Reviewed clean unchanged", currency: "GBP", status: "active" },
+      item: { kind: "service", title: "Reviewed clean unchanged", currency: "GBP", status: "active" },
       attachmentIds: [],
     });
     const documentId = randomUUID();

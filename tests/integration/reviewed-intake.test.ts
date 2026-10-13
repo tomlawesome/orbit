@@ -50,7 +50,7 @@ describe("private reviewed intake approval boundary", () => {
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
       action: "create_separate" as const,
-      item: { title: "Exact reviewed value", provider: "Reviewed provider", currency: "GBP", status: "active" as const },
+      item: { kind: "service", title: "Exact reviewed value", provider: "Reviewed provider", currency: "GBP", status: "active" as const },
       attachmentIds: [],
     };
 

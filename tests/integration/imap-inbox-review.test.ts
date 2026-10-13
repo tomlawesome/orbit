@@ -216,7 +216,7 @@ describe("authenticated mailbox review read boundary", () => {
         householdId: fixture.household.id,
         sectionId: fixture.section.id,
         action: "create_separate",
-        item: { title: "Must remain private", currency: "GBP", status: "active" },
+        item: { kind: "service", title: "Must remain private", currency: "GBP", status: "active" },
         attachmentIds: [],
       })).rejects.toMatchObject({ code: "reviewed_intake_not_approvable" });
     } finally {

@@ -18,7 +18,7 @@ function body(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>, ove
     householdId: fixture.household.id,
     sectionId: fixture.section.id,
     action: "create_separate",
-    item: { title: "Reviewed route item", currency: "GBP", status: "active" },
+    item: { kind: "service", title: "Reviewed route item", currency: "GBP", status: "active" },
     attachmentIds: [],
     ...overrides,
   };
@@ -64,7 +64,7 @@ describe("POST /api/reviewed-intake/approve security contract", () => {
     expect(hidden.status).toBe(404);
     const first = await approve(member, url, body(fixture));
     expect(first.status).toBe(200);
-    const altered = await approve(member, url, body(fixture, { item: { title: "Altered", currency: "GBP", status: "active" } }));
+    const altered = await approve(member, url, body(fixture, { item: { kind: "service", title: "Altered", currency: "GBP", status: "active" } }));
     expect(altered.status).toBe(409);
     expect((await altered.json()).error).toEqual({ code: "reviewed_intake_conflict", message: "That approval identity was already used" });
     await fixture.cleanup();
@@ -135,7 +135,7 @@ describe("POST /api/reviewed-intake/approve security contract", () => {
       operationId,
       source: { kind: "mailbox_draft", receiptId, draftVersion },
       action: "create_separate",
-      item: { title: "Partial retry value", currency: "GBP", status: "active" },
+      item: { kind: "service", title: "Partial retry value", currency: "GBP", status: "active" },
       attachmentIds: [held.id],
     });
     try {
