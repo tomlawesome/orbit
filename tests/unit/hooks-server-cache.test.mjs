@@ -25,6 +25,9 @@ vi.mock("orbit/lib/env", () => ({ getAuthConfig: () => ({}) }));
 vi.mock("orbit/server/maintenance", () => ({
   readEffectiveMaintenance: mocks.readEffectiveMaintenance,
 }));
+/* #1405: the key gate reads the process's key verdict first; this file is about
+   something else, so the key is usable. */
+vi.mock("orbit/server/key-state", () => ({ getKeyState: () => ({ verdict: "usable", heldKeyId: "a".repeat(24) }) }));
 vi.mock("orbit/server/workspace-repository", () => ({
   hasOnwardHousehold: vi.fn().mockResolvedValue(true),
 }));

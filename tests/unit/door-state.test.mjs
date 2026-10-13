@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  CLAIM, DOOR, FAILED, LOCAL, MIXED, STARTING, STARTING_BACKSTOP_MS, UNCONFIGURED,
+  CLAIM, DOOR, FAILED, LOCAL, LOCKED, MIXED, STARTING, STARTING_BACKSTOP_MS, UNCONFIGURED,
   applyStartingBackstop, availabilityOf, cardMessageFor, claimFromHash, doorMessageFor,
   doorModeOf, failedMessage, nextDoorState, phaseOf, readinessOf,
 } from "$lib/flight/door-state.js";
@@ -315,5 +315,54 @@ describe("what a refused card says", () => {
     for (const code of ["credentials_invalid", "too_many_attempts", "invalid_request"]) {
       expect(cardMessageFor(code)).not.toContain("@");
     }
+  });
+});
+
+/*
+ * #1405: with no usable encryption key nobody can sign in, so the door must
+ * not be drawn at all: it sends the reader to the maintenance screen that says
+ * why (`SignIn.svelte` answers LOCKED with location.replace("/maintenance")).
+ * The word comes from `GET /api/auth/availability`'s new `encryptionKey` field.
+ */
+describe("the door when Orbit has no usable encryption key (#1405)", () => {
+  const configured = { configured: true, contactAddress: null };
+
+  it("reads the encryption key word off the availability body, and keeps it", () => {
+    expect(availabilityOf({ configured: true, contactAddress: null, encryptionKey: "unusable" }))
+      .toMatchObject({ configured: true, encryptionKey: "unusable" });
+    expect(availabilityOf({ configured: true, contactAddress: null, encryptionKey: "usable" }))
+      .toMatchObject({ configured: true, encryptionKey: "usable" });
+  });
+
+  it("does not treat an unknown or missing word as locked", () => {
+    expect(availabilityOf({ configured: true, contactAddress: null, encryptionKey: "sideways" })?.encryptionKey).not.toBe("unusable");
+    expect(availabilityOf({ configured: true, contactAddress: null })?.encryptionKey).not.toBe("unusable");
+  });
+
+  it("is LOCKED once boot is done and the key is unusable, whatever readiness says", () => {
+    const availability = { ...configured, encryptionKey: "unusable" };
+    for (const readiness of ["ready", "maintenance", "degraded", null]) {
+      expect(nextDoorState({ phase: "running", readiness, availability }), `readiness ${readiness}`).toBe(LOCKED);
+    }
+  });
+
+  it("is LOCKED even when authentication is not configured: the key is the more basic fault", () => {
+    expect(nextDoorState({
+      phase: "running", readiness: "ready", availability: { configured: false, contactAddress: null, encryptionKey: "unusable" },
+    })).toBe(LOCKED);
+  });
+
+  it("is still STARTING while the process is booting: there is no verdict to report yet", () => {
+    expect(nextDoorState({
+      phase: "starting", readiness: null, availability: { ...configured, encryptionKey: "unusable" },
+    })).toBe(STARTING);
+  });
+
+  it("changes nothing for a usable key, or for an availability body that never mentions one", () => {
+    expect(nextDoorState({ phase: "running", readiness: "ready", availability: { ...configured, encryptionKey: "usable" } })).toBe(DOOR);
+    expect(nextDoorState({ phase: "running", readiness: "ready", availability: configured })).toBe(DOOR);
+    expect(nextDoorState({ phase: "running", readiness: "degraded", availability: { ...configured, encryptionKey: "usable" } })).toBe(FAILED);
+    expect(nextDoorState({ phase: "running", readiness: "ready", availability: { configured: false, contactAddress: null, encryptionKey: "usable" } }))
+      .toBe(UNCONFIGURED);
   });
 });

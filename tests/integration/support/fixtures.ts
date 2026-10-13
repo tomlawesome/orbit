@@ -24,7 +24,7 @@ import {
   userPreferences,
   users,
 } from "@/db/schema";
-import { resetDocumentConfigForTests } from "@/server/documents/config";
+import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 
 export type FixtureRole = "owner" | "member" | "outsider" | "admin" | "disabled";
 
@@ -41,6 +41,16 @@ process.env.DOCUMENT_SCAN_MODE = "disabled";
    with encrypted addresses, so a stale "there is no key" made whole files
    fail, and which files depended on import order. */
 resetDocumentConfigForTests();
+
+/* #1405: the integration suite calls route handlers directly and never boots
+   the server, so the startup key check has not run and its verdict would read
+   "unknown", which every gate treats as closed. Every file here is about
+   something other than the key unless it says so, so the baseline is a usable
+   key; a file that is about the key sets its own verdict. Loaded tolerantly
+   because the module did not exist before #1405 was built. */
+await import("@/server/key-state")
+  .then((module) => module.setKeyStateForTests({ verdict: "usable", heldKeyId: getDocumentConfig().keyId }))
+  .catch(() => undefined);
 
 export interface IntegrationSession {
   userId: string;

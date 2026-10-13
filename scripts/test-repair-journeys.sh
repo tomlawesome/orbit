@@ -51,7 +51,7 @@ readonly journeys=(cancelled-repair signal-cleanup credential-drift idempotent-r
                    hostile-value-privacy-negatives retained-volume-new-target
                    interrupted-configuration-migration
                    unsafe-permissions missing-files failed-db-migration
-                   unhealthy-app successful-rollback)
+                   unhealthy-app successful-rollback locked-key)
 
 # Acceptance criteria of #532 with no live evidence yet. Printed on every run
 # so the gap is visible in the log rather than implied by a green tick.
@@ -1579,6 +1579,103 @@ journey_successful_rollback() {
   [[ "$(household_name)" == 'repair-journeys-household' ]] ||
     fail 'successful-rollback: the rollback disturbed the fixture data'
   result_line successful-rollback pass
+}
+
+# #1405: no usable encryption key puts Orbit into maintenance. This is the
+# stack-level check no browser spec can make, because it changes the key the
+# container runs with. The instance has written no encrypted value yet, so
+# there is no key row to disagree with; one is seeded by SQL, wrapped under a
+# key id this deployment does not hold (the probe reads the row's key id and
+# never unwraps a row it has no key for, so the bytes need not be a real
+# envelope), then the app is restarted so its startup self-test sees it.
+#
+# While locked: every screen (the prerendered /login and /logout aside) and
+# every sign-in answers 503 with the one screen; the healthcheck still says "maintenance" at 200 and the container is
+# neither unhealthy nor restarting (a restart cannot help, ADR-0013 decision
+# 6); the log states the fault once at startup, names both key ids and never
+# the key. Then the row is removed, the app restarted, and the deployment is
+# what it was, with the log saying which key it holds.
+journey_locked_key() {
+  local before stored_id held_id kek restarts body status headers
+  before="$(deployment_manifest)"
+  stored_id=ffffffffffffffffffffffff
+  kek="$(tr -d '\r\n' < "$target/.orbit-secrets/document-kek")"
+  [[ "$kek" =~ ^[0-9a-fA-F]{64}$ ]] || fail 'locked-key: the deployment has no 64-hex document key to hold'
+  held_id="$(node -e 'const c=require("node:crypto");process.stdout.write(c.createHash("sha256").update("orbit-document-kek-v1\0").update(Buffer.from(process.argv[1],"hex")).digest("hex").slice(0,24))' "$kek")"
+
+  compose exec -T orbit-db sh -c \
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="
+      delete from metadata_keys where scope = '\''instance'\'';
+      insert into metadata_keys (scope, envelope_version, wrapped_dek, wrap_iv, wrap_auth_tag, key_id)
+        values ('\''instance'\'', 1, '\''seeded'\'', '\''seeded'\'', '\''seeded'\'', '\''$1'\'');"' \
+    sh "$stored_id" >/dev/null || fail 'locked-key: could not seed an instance key written under another key'
+  mark_setup_done instance-key-row-under-another-key
+
+  compose restart orbit-app >/dev/null 2>&1 || fail 'locked-key: could not restart the app'
+  locked_health_wait() {
+    local deadline=$((SECONDS + 90)) answer
+    until answer="$(curl --silent --max-time 5 "http://127.0.0.1:$orbit_port/api/health" || true)"; [[ "$answer" == *'"status":"maintenance"'* ]]; do
+      ((SECONDS < deadline)) || { container_snapshot orbit >&2; fail 'locked-key: health never answered maintenance'; }
+      sleep 2
+    done
+  }
+  locked_health_wait
+
+  # Every screen: 503, the same body, at the address that was asked for, never stored.
+  # (/login is a prerendered page that adapter-node serves before the server's
+  # gate ever runs, so curl sees it answer 200; the door's own script is what
+  # sends a reader on, and that is the browser's to prove, in door-state.test.mjs.)
+  local path
+  for path in / /home /settings; do
+    headers="$(curl --silent --max-time 10 --output "$workdir/locked-body" --dump-header - --write-out '' "http://127.0.0.1:$orbit_port$path" | tr -d '\r')"
+    status="$(sed -n '1s/^HTTP[^ ]* \([0-9]*\).*/\1/p' <<<"$headers")"
+    [[ "$status" == 503 ]] || { printf '%s\n' "$headers" >&2; fail "locked-key: $path answered $status, expected 503"; }
+    grep -qi '^cache-control:.*no-store' <<<"$headers" || fail "locked-key: $path was not marked no-store"
+    ! grep -qi '^retry-after:' <<<"$headers" || fail "locked-key: $path promised a return time"
+    grep -q 'locked' "$workdir/locked-body" || fail "locked-key: $path did not carry the locked screen"
+  done
+
+  # Every sign-in: 503, named for what is wrong.
+  body="$(curl --silent --max-time 10 --write-out '\n%{http_code}' -X POST \
+    -H 'content-type: application/json' -H "origin: http://127.0.0.1:$orbit_port" \
+    --data '{"email":"someone@example.invalid","password":"not-checked"}' \
+    "http://127.0.0.1:$orbit_port/api/auth/local/login")"
+  [[ "$(tail -1 <<<"$body")" == 503 ]] || fail 'locked-key: password sign-in was not refused with 503'
+  grep -q '"error":"encryption_key_unavailable"' <<<"$body" || fail 'locked-key: password sign-in did not say the key is unavailable'
+  body="$(curl --silent --max-time 10 "http://127.0.0.1:$orbit_port/api/auth/availability")"
+  grep -q '"encryptionKey":"unusable"' <<<"$body" || fail 'locked-key: availability did not name the lock'
+
+  # The container is up, healthy as far as Docker knows, and not restarting.
+  [[ "$(docker inspect orbit --format '{{.State.Health.Status}}')" != unhealthy ]] || fail 'locked-key: the locked container is marked unhealthy'
+  restarts="$(docker inspect orbit --format '{{.RestartCount}}')"
+  sleep 5
+  [[ "$(docker inspect orbit --format '{{.RestartCount}}')" == "$restarts" ]] || fail 'locked-key: the locked container is restarting'
+
+  # The log: one blocked line, both ids, no key.
+  local log_text blocked blocked_line ready_line
+  log_text="$(docker logs orbit 2>&1)"
+  blocked="$(grep -c 'encryption\.key.*state=blocked.*reason=key_unavailable' <<<"$log_text" || true)"
+  [[ "$blocked" -ge 1 ]] || { printf '%s\n' "$log_text" | tail -40 >&2; fail 'locked-key: the log never stated the fault'; }
+  # Capture first, test second (issue #809): no pipeline into `grep -q`.
+  blocked_line="$(grep -m1 'encryption\.key.*state=blocked' <<<"$log_text" || true)"
+  [[ "$blocked_line" == *"$stored_id"* ]] || fail 'locked-key: the log line does not name the key the database was written under'
+  [[ "$blocked_line" == *"$held_id"* ]] || fail 'locked-key: the log line does not name the key held'
+  ! grep -qi "$kek" <<<"$log_text" || fail 'locked-key: the key itself is in the log'
+
+  # Put it right: remove the foreign row, restart, and the door is back.
+  compose exec -T orbit-db sh -c \
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="delete from metadata_keys where scope = '\''instance'\'';"' \
+    >/dev/null || fail 'locked-key: could not remove the seeded key row'
+  compose restart orbit-app >/dev/null 2>&1 || fail 'locked-key: could not restart the app after the fix'
+  wait_for_health
+  [[ "$(curl --silent --max-time 10 --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:$orbit_port/")" == 200 ]] ||
+    fail 'locked-key: the door did not come back after the fix'
+  log_text="$(docker logs orbit 2>&1)"
+  ready_line="$(grep -m1 'encryption\.key.*state=ready' <<<"$log_text" || true)"
+  [[ "$ready_line" == *"$held_id"* ]] || fail 'locked-key: the log did not say which key it holds once fixed'
+  assert_manifest "$before" 'locked-key: the journey changed the deployment files'
+  [[ "$(household_name)" == 'repair-journeys-household' ]] || fail 'locked-key: the journey disturbed the fixture data'
+  result_line locked-key pass
 }
 
 # --- run ------------------------------------------------------------------

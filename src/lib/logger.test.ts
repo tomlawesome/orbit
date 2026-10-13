@@ -9,6 +9,9 @@ import {
   operationalDetail,
   operationalErrorDetail,
   resetLoggerForTests,
+  configurationProblemCodes,
+  configurationSettings,
+  operationalEvents,
   setLoggerClockForTests,
   shouldUseColor,
   type OperationalEvent,
@@ -393,5 +396,44 @@ describe("asOperationalReason (engine-28)", () => {
     expect(asOperationalReason("purge_failed")).toBe("purge_failed");
     expect(asOperationalReason("a code nobody listed")).toBe("unexpected_failure");
     expect(asOperationalReason("")).toBe("unexpected_failure");
+  });
+});
+
+
+/*
+ * #1405: the vocabulary a locked-for-want-of-a-key instance speaks. The words
+ * for state, reason, action and impact already exist (blocked, ready,
+ * key_unavailable, check_configuration, restore_backup, application_unavailable,
+ * sign_in_blocked); what is new is the event, the setting for the alert
+ * address, and the configuration code that is reported but does not stop boot.
+ */
+describe("the encryption key's place in the log vocabulary (#1405)", () => {
+  it("has an encryption.key event of its own, in the encryption component", () => {
+    expect((operationalEvents as Record<string, string>)["encryption.key"]).toBe("encryption");
+  });
+
+  it("names the alert address as a setting, and a key fault as a configuration problem code", () => {
+    expect(configurationSettings as readonly string[]).toContain("alerts");
+    expect(configurationProblemCodes as readonly string[]).toContain("configuration_key");
+  });
+
+  it("renders a startup line that names both key ids, and shows the same reason in text and JSON", () => {
+    const line: OperationalEvent = {
+      event: "encryption.key",
+      state: "blocked",
+      reason: "key_unavailable",
+      action: "check_configuration",
+      impact: "application_unavailable",
+      detail: operationalDetail`encryption key mismatch: holding ${"0123456789abcdef01234567"} but this database was written under ${"fedcba9876543210fedcba98"}; restore that key on the host and restart`,
+    } as unknown as OperationalEvent;
+    const text = formatRecord("error", line, "2026-01-01T00:00:00.000Z");
+    expect(text).toContain("encryption.key");
+    expect(text).toContain("reason=key_unavailable");
+    expect(text).toContain("0123456789abcdef01234567");
+    expect(text).toContain("fedcba9876543210fedcba98");
+    expect(JSON.parse(formatJsonRecord("error", line, "2026-01-01T00:00:00.000Z"))).toMatchObject({
+      event: "encryption.key",
+      reason: "key_unavailable",
+    });
   });
 });
