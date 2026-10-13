@@ -93,7 +93,7 @@ describe("#1316 / 17a: the create card's currency helper tells the truth about d
   }
 
   for (const language of ["en", "de-AT", "fr-BE"]) {
-    it(`no mapped region (${language}): the helper says it fell back, in the owner's words`, async () => {
+    it(`no mapped region (${language}): the helper says it fell back`, async () => {
       const card = await mountCard(language);
       expect(card.helper).toBe(FALLBACK_NOTE);
     });
