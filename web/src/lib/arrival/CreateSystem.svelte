@@ -46,6 +46,22 @@
   } = $props();
 
   const trimmed = $derived(name.trim());
+
+  /* The host only hands down the answer, not whether the browser supplied it.
+     A browser zone outside the short list fell back to the first option, so
+     the helper must not claim it was read off the browser; asked here, once,
+     the same way the host asks. */
+  const zoneOnList = (() => {
+    try {
+      const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      return TIME_ZONES.some((zone) => zone.value === browserZone);
+    } catch {
+      return false;
+    }
+  })();
+  const zoneHelper = zoneOnList
+    ? "Read off your browser. It moves to settings afterwards, and dates read by it."
+    : "your browser's zone isn't on this short list — change it in settings";
 </script>
 
 <!-- THIRD PASS: three fields, a button, air. Everything that was prose is
@@ -76,7 +92,7 @@
         <div class="field selwrap">
           <label for="tz">time zone</label>
           <select id="tz" aria-label="Time zone" bind:value={timezone}
-                  title="Read off your browser. It moves to settings afterwards, and dates read by it.">
+                  title={zoneHelper}>
             {#each TIME_ZONES as zone (zone.value)}<option value={zone.value}>{zone.label}</option>{/each}
           </select>
         </div>
