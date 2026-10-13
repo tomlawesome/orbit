@@ -815,10 +815,20 @@ export async function approveWithOperation(suggestion, operationIds, fallbackHou
   }
   // The engine binds an operation id to the body it first carried, so a plain
   // retry (no amendment given) re-sends the amendment and section sent first.
+  // A refusal (4xx) bound nothing, so it unpins and the next tap sends afresh;
+  // a lost answer may have been accepted, so the pin stays for the retry.
   const pinned = pinnedApprovals.get(operationId);
   if (pinned && !amendedItem) ({ amendedItem, sectionId } = pinned);
   else pinnedApprovals.set(operationId, { amendedItem, sectionId });
-  const result = await approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem, sectionId);
+  let result;
+  try {
+    result = await approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem, sectionId);
+  } catch (error) {
+    if (error instanceof WorkspaceError && typeof error.status === "number" && error.status >= 400 && error.status < 500) {
+      pinnedApprovals.delete(operationId);
+    }
+    throw error;
+  }
   if (result.outcome === "partial_success") return { partial: true, message: PARTIAL_APPROVAL_MESSAGE };
   operationIds.delete(suggestion.receiptId);
   pinnedApprovals.delete(operationId);

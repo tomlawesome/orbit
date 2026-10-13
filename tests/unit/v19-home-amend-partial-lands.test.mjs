@@ -66,19 +66,26 @@ describe("#1316: the approve's partial answer, through the data seam both screen
   /** @type {Array<Record<string, any>>} */
   let approvalBodies = [];
   let approveAnswer = { outcome: "partial_success", itemId: "i-1" };
+  /** The next approve answers with this status and body, or (when "network") the fetch rejects. */
+  let approveFirst = null;
 
   beforeEach(() => {
     approvalBodies = [];
+    approveFirst = null;
     approveAnswer = { outcome: "partial_success", itemId: "i-1" };
     vi.stubGlobal("fetch", vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ init) => {
       const href = String(url);
       const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
       if (href.includes("/api/auth/session")) return json({ user: { id: "u1" }, csrfToken: "token" });
       if (href.includes("/api/imap-inbox/")) {
-        return json(init?.method === "PUT" ? {} : { receipt: { draftVersion: 1 }, sections: [{ id: "s1", name: "Home" }, { id: "s2", name: "Garage" }], attachments: [] });
+        return json(init?.method === "PUT" ? {} : { receipt: { draftVersion: 1, proposal: { title: "Boiler cover" } }, sections: [{ id: "s1", name: "Home" }, { id: "s2", name: "Garage" }], attachments: [] });
       }
       if (href.includes("/api/reviewed-intake/approve")) {
         approvalBodies.push(JSON.parse(String(init.body)));
+        if (approveFirst && approvalBodies.length === 1) {
+          if (approveFirst === "network") throw new TypeError("Failed to fetch");
+          return new Response(JSON.stringify(approveFirst.body), { status: approveFirst.status, headers: { "content-type": "application/json" } });
+        }
         return json(approveAnswer);
       }
       throw new Error(`unexpected fetch: ${href}`);
@@ -116,6 +123,48 @@ describe("#1316: the approve's partial answer, through the data seam both screen
     expect(approvalBodies[0].sectionId).toBe("s2");
     expect(approvalBodies[1].item).toEqual(approvalBodies[0].item);
     expect(approvalBodies[1].sectionId).toBe(approvalBodies[0].sectionId);
+  });
+
+  it("a refused amended approve is forgotten: the plain retry sends the proposal's own item and the first section, under the same operation id", async () => {
+    const { approveWithOperation } = await import("../../web/src/lib/data/workspace.js");
+    const operationIds = new Map();
+    const amended = { title: "Boiler cover (amended)", kind: "service", cost: "1,50" };
+    approveFirst = { status: 422, body: { error: { message: "use a dot for pence", code: "invalid_cost" } } };
+
+    await expect(approveWithOperation(suggestion, operationIds, "h-1", amended, "s2")).rejects.toBeDefined();
+
+    // The engine refused the amended body (nothing landed), so the amendment is
+    // dropped: the plain approve is the proposal as it stands, in the first section.
+    approveAnswer = { outcome: "approved", itemId: "i-1" };
+    await expect(approveWithOperation(suggestion, operationIds, "h-1")).resolves.toEqual({ ok: true });
+
+    expect(approvalBodies).toHaveLength(2);
+    expect(approvalBodies[0].item).toMatchObject({ title: "Boiler cover (amended)" });
+    expect(approvalBodies[0].sectionId).toBe("s2");
+    expect(approvalBodies[1].operationId).toBe(approvalBodies[0].operationId);
+    expect(approvalBodies[1].item).toMatchObject(suggestion.proposal);
+    expect(approvalBodies[1].item).not.toMatchObject({ title: "Boiler cover (amended)" });
+    expect(approvalBodies[1].sectionId).toBe("s1");
+  });
+
+  it("an amended approve whose answer was lost (network error) is kept: the plain retry re-sends the amended item and section under the same operation id", async () => {
+    const { approveWithOperation } = await import("../../web/src/lib/data/workspace.js");
+    const operationIds = new Map();
+    const amended = { title: "Boiler cover (amended)", kind: "service" };
+    approveFirst = "network";
+
+    await expect(approveWithOperation(suggestion, operationIds, "h-1", amended, "s2")).rejects.toBeDefined();
+
+    // The first body may have landed, so the retry must BE the first body.
+    approveAnswer = { outcome: "approved", itemId: "i-1" };
+    await expect(approveWithOperation(suggestion, operationIds, "h-1")).resolves.toEqual({ ok: true });
+
+    expect(approvalBodies).toHaveLength(2);
+    expect(approvalBodies[1].operationId).toBe(approvalBodies[0].operationId);
+    expect(approvalBodies[0].sectionId).toBe("s2");
+    expect(approvalBodies[1].item).toEqual(approvalBodies[0].item);
+    expect(approvalBodies[1].item).toMatchObject({ title: "Boiler cover (amended)" });
+    expect(approvalBodies[1].sectionId).toBe("s2");
   });
 });
 
