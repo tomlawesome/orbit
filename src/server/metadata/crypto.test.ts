@@ -112,6 +112,35 @@ describe("Tier 1 metadata value envelopes (ADR-0024 decision 3)", () => {
   });
 });
 
+describe("the session ID token column (#1316 decision 26a)", () => {
+  const dataKey = randomBytes(32);
+  const sessionA = "55555555-5555-4555-8555-555555555555";
+  const sessionB = "66666666-6666-4666-8666-666666666666";
+  const token = "header.payload.signature-sentinel";
+
+  it("opens for the session it was sealed to", () => {
+    const stored = encryptMetadataValue(token, dataKey, { column: "sessions.id_token", rowId: sessionA });
+    expect(isMetadataEnvelope(stored)).toBe(true);
+    expect(stored).not.toContain(token);
+    expect(decryptMetadataValue(stored, dataKey, { column: "sessions.id_token", rowId: sessionA })).toBe(token);
+  });
+
+  it("refuses a token moved onto another session row", () => {
+    const stored = encryptMetadataValue(token, dataKey, { column: "sessions.id_token", rowId: sessionA });
+    expect(() => decryptMetadataValue(stored, dataKey, { column: "sessions.id_token", rowId: sessionB }))
+      .toThrow(MetadataIntegrityError);
+  });
+
+  it("refuses a token read as another column of the same row, and the reverse", () => {
+    const stored = encryptMetadataValue(token, dataKey, { column: "sessions.id_token", rowId: sessionA });
+    expect(() => decryptMetadataValue(stored, dataKey, { column: "users.email", rowId: sessionA }))
+      .toThrow(MetadataIntegrityError);
+    const address = encryptMetadataValue("a@example.invalid", dataKey, { column: "users.email", rowId: sessionA });
+    expect(() => decryptMetadataValue(address, dataKey, { column: "sessions.id_token", rowId: sessionA }))
+      .toThrow(MetadataIntegrityError);
+  });
+});
+
 describe("the one canonical comparison form (ADR-0024 decision 2)", () => {
   it("applies NFKC, whitespace collapse, trim and lowercasing", () => {
     expect(normalizeComparableMetadata("  AB-123  ")).toBe("ab-123");

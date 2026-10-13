@@ -239,7 +239,7 @@ async function completeLink(actor: Actor, identity: VerifiedIdentity, challenge:
   const authorizationUrl = new URL(started.headers.get("location") ?? "");
   const transactionCookie = readSetCookie(started, transactionCookieName(config))?.value ?? "";
 
-  vi.spyOn(oidc, "completeAuthorization").mockResolvedValue(identity);
+  vi.spyOn(oidc, "completeAuthorization").mockResolvedValue({ identity, idToken: "header.payload.signature-sentinel" });
   return callRoute(callback, {
     url: `${ORIGIN}/api/auth/callback?code=provider-code&state=${authorizationUrl.searchParams.get("state")}`,
     headers: { cookie: `${transactionCookieName(config)}=${transactionCookie}` },
@@ -320,7 +320,7 @@ describe("linking a provider identity (ADR-0023 §6)", () => {
     // A link is not a re-authentication, so it asks for no `max_age`.
     expect(authorizationUrl.searchParams.get("max_age")).toBeNull();
 
-    vi.spyOn(oidc, "completeAuthorization").mockResolvedValue(identity);
+    vi.spyOn(oidc, "completeAuthorization").mockResolvedValue({ identity, idToken: "header.payload.signature-sentinel" });
     const returned = await callRoute(callback, {
       url: `${ORIGIN}/api/auth/callback?code=provider-code&state=${authorizationUrl.searchParams.get("state")}`,
       headers: { cookie: `${transactionCookieName(config)}=${sealed}` },

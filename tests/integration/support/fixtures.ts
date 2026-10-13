@@ -65,7 +65,8 @@ export interface IntegrationFixture {
   secondDocument: { id: string; displayName: string };
   archive: { id: string };
   users: Record<FixtureRole | "secondOwner", FixtureUser>;
-  session(role: FixtureRole | "secondOwner"): Promise<IntegrationSession>;
+  /** `idToken` is the provider's ID token for a session that began at the provider (#1316 decision 26a). */
+  session(role: FixtureRole | "secondOwner", options?: { idToken?: string }): Promise<IntegrationSession>;
   expireSession(session: IntegrationSession): Promise<void>;
   removeMember(): Promise<void>;
   disableUser(role: FixtureRole): Promise<void>;
@@ -243,10 +244,10 @@ export async function createIntegrationFixture(label: string): Promise<Integrati
     expiresAt: new Date(Date.now() + 86_400_000),
   }).returning({ id: portableArchives.id });
 
-  async function session(role: FixtureRole | "secondOwner"): Promise<IntegrationSession> {
+  async function session(role: FixtureRole | "secondOwner", options: { idToken?: string } = {}): Promise<IntegrationSession> {
     const userId = fixtureUsers[role].id;
     const config = getAuthConfig();
-    const created = await createSession(userId, config);
+    const created = await createSession(userId, config, undefined, options.idToken ? { idToken: options.idToken } : undefined);
     /* A plain literal, not a framework request (#735). `readSession` takes a
        `CookieReader`, which is one method — `src/lib/http.ts` says so in as
        many words, and the whole point of that seam is that a test does not

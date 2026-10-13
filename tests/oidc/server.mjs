@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync, randomBytes, sign, timingSafeEqual } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes, sign, timingSafeEqual, verify } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:https";
 
@@ -80,6 +80,32 @@ const users = new Map([
 ]);
 const codes = new Map();
 
+/*
+ * RP-INITIATED LOGOUT (OpenID Connect RP-Initiated Logout 1.0, #1316). A
+ * provider like Authentik refuses an end-session request that names no ID
+ * token and sends nobody back to an address it was not given a token for, so
+ * this one does the same: 400 without an `id_token_hint` it signed itself
+ * (an expired one is fine, as the specification asks), 400 for a return
+ * address that is not a `/logout` page, otherwise 302 to the address given.
+ * Every request is recorded, verdict included, and the list is served at
+ * /test/end-sessions so a spec can see what the browser was actually sent
+ * with, without a back door into Orbit.
+ */
+const endSessions = [];
+
+function inspectIdTokenHint(hint) {
+  const parts = (hint ?? "").split(".");
+  if (parts.length !== 3) return { valid: false, sub: null };
+  const valid = verify("RSA-SHA256", Buffer.from(`${parts[0]}.${parts[1]}`), signing.publicKey, Buffer.from(parts[2], "base64url"));
+  if (!valid) return { valid: false, sub: null };
+  try {
+    const claims = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    return { valid: claims.iss === issuer, sub: typeof claims.sub === "string" ? claims.sub : null };
+  } catch {
+    return { valid: false, sub: null };
+  }
+}
+
 function base64url(value) {
   return Buffer.from(value).toString("base64url");
 }
@@ -152,9 +178,36 @@ const server = createServer({ key: readFileSync(keyPath), cert: readFileSync(cer
       authorization_endpoint: `${issuer}authorize`,
       token_endpoint: `${issuer}token`,
       jwks_uri: `${issuer}jwks`,
+      end_session_endpoint: `${issuer}end-session`,
       code_challenge_methods_supported: ["S256"],
       id_token_signing_alg_values_supported: ["RS256"],
     });
+  }
+  if (request.method === "GET" && url.pathname === "/end-session") {
+    const parameters = query(request);
+    const hint = inspectIdTokenHint(parameters.get("id_token_hint"));
+    const returnTo = parameters.get("post_logout_redirect_uri");
+    endSessions.push({
+      clientId: parameters.get("client_id"),
+      hintPresent: Boolean(parameters.get("id_token_hint")),
+      hintValid: hint.valid,
+      sub: hint.sub,
+      postLogoutRedirectUri: returnTo,
+    });
+    if (!hint.valid) return responseJson(response, 400, { error: "invalid_request", error_description: "id_token_hint is required" });
+    if (parameters.get("client_id") !== clientId) return responseJson(response, 400, { error: "invalid_request" });
+    let target = null;
+    try {
+      target = returnTo ? new URL(returnTo) : null;
+    } catch {
+      target = null;
+    }
+    if (!target || target.pathname !== "/logout") return responseJson(response, 400, { error: "invalid_request", error_description: "post_logout_redirect_uri is not registered" });
+    return redirect(response, target.href);
+  }
+  if (request.method === "GET" && url.pathname === "/test/end-sessions") {
+    response.writeHead(200, { "Cache-Control": "no-store", "Content-Type": "text/html; charset=utf-8" });
+    return response.end(`<!doctype html><html><body><pre id="records">${JSON.stringify(endSessions).replaceAll("<", "\\u003c")}</pre></body></html>`);
   }
   if (request.method === "GET" && url.pathname === "/jwks") return responseJson(response, 200, { keys: [jwk] });
   if (request.method === "GET" && url.pathname === "/authorize") {
