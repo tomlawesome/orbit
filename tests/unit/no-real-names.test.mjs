@@ -31,6 +31,24 @@ function banned(word) {
   return hit;
 }
 
+/**
+ * The lower-case words a line could spell the banned word with: camelCase runs
+ * split, and each token also tried without a trailing `s` or `es`, because the
+ * plural was 185 of the 191 lines the sweep removed (#1408).
+ * @param {string} line
+ */
+export function wordsOf(line) {
+  /** @type {Set<string>} */
+  const words = new Set();
+  for (const token of line.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().match(/[a-z0-9]+/g) ?? []) {
+    words.add(token);
+    if (token.length <= 2) continue;
+    if (token.endsWith("s")) words.add(token.slice(0, -1));
+    if (token.endsWith("es")) words.add(token.slice(0, -2));
+  }
+  return words;
+}
+
 function trackedTextFiles() {
   const names = execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" })
     .split("\0")
@@ -62,8 +80,26 @@ const BANNED_LOGINS = new Set([
   "57de4cf40144bdf7d00010f2f5557a7d642c2b9705309bfade167dd313e2ca93",
 ]);
 
-/** `/home/<login>`, `/Users/<login>`, `C:\Users\<login>` (any slash, escaped or not), `~<login>/`. */
-const HOME_DIRECTORY = /(?:\/home\/|[/\\]+Users[/\\]+|(?<![\w/])~)([A-Za-z0-9._-]+)/gu;
+/** `/home/<login>`, `/Users/<login>`, `C:\Users\<login>` (any slash, escaped or not, either case), `~<login>/`. */
+const HOME_DIRECTORY = /(?:\/home\/|[/\\]+[Uu]sers[/\\]+|(?<![\w/])~)([A-Za-z0-9._-]+)/gu;
+
+/**
+ * The lower-case login candidates of every home-directory path in a line: the
+ * whole segment, the segment without a trailing `.` or `-` (end of a sentence),
+ * and the part before its first `.` or `-` (`/home/<login>-old`).
+ * @param {string} line
+ */
+export function loginsOf(line) {
+  /** @type {Set<string>} */
+  const logins = new Set();
+  for (const match of line.matchAll(HOME_DIRECTORY)) {
+    const login = match[1].toLowerCase();
+    logins.add(login);
+    logins.add(login.replace(/[.-]+$/u, ""));
+    logins.add(login.split(/[.-]/u)[0]);
+  }
+  return logins;
+}
 
 /** A dotted quad not embedded in a longer run of digits and dots (version strings, OIDs). */
 const IPV4 = /(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.]*\d)/gu;
@@ -113,8 +149,7 @@ describe("no real names (#1408)", () => {
     for (const { name, text } of trackedTextFiles()) {
       const lines = text.split("\n");
       for (let i = 0; i < lines.length; i++) {
-        const tokens = new Set(lines[i].toLowerCase().match(/[a-z0-9]+/g) ?? []);
-        for (const token of tokens) {
+        for (const token of wordsOf(lines[i])) {
           if (banned(token)) hits.push(`${name}:${i + 1}`);
         }
       }
@@ -128,8 +163,7 @@ describe("no real names (#1408)", () => {
     for (const { name, text } of trackedTextFiles()) {
       const lines = text.split("\n");
       for (let i = 0; i < lines.length; i++) {
-        for (const match of lines[i].matchAll(HOME_DIRECTORY)) {
-          const login = match[1].toLowerCase();
+        for (const login of loginsOf(lines[i])) {
           if (BANNED_LOGINS.has(createHash("sha256").update(login).digest("hex"))) hits.push(`${name}:${i + 1}`);
         }
       }
