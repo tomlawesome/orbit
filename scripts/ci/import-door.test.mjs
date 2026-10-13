@@ -840,3 +840,39 @@ describe("import-door.sh does not leave git-ignored files out silently (hardenin
     expect(importedBranch(world.bare)).toEqual([]);
   });
 });
+
+describe("import-door.sh leaves nothing in TMPDIR once it exits (D1-F1, #1316)", () => {
+  /** What dir holds at its top level: a leaked scratch directory or file shows as one name. */
+  const entriesUnder = (dir) => readdirSync(dir).sort();
+
+  /** Files under dir whose contents hold the token, so a leak is named before emptiness is asserted. */
+  const filesHoldingToken = (dir) =>
+    readdirSync(dir, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => join(entry.parentPath, entry.name))
+      .filter((file) => readFileSync(file).includes(FAKE_TOKEN));
+
+  it("a changed-door run that exits 0 leaves TMPDIR empty", async () => {
+    const world = await deployWorld();
+    const tmp = scratchDir("orbit-door-tmp-");
+    const result = await runImportWith(world, { TMPDIR: tmp });
+
+    expect(result.status, ok(result)).toBe(0);
+    expect(importedBranch(world.bare).length, ok(result)).toBeGreaterThan(0);
+    expect(entriesUnder(tmp)).toEqual([]);
+  });
+
+  it("a run that fails after the push credential file is written leaves TMPDIR empty and no token on disk", async () => {
+    const world = await deployWorld();
+    writeFileSync(join(world.orbit, ".gitignore"), "*.webp\n");
+    git(world.orbit, ["add", ".gitignore"]);
+    git(world.orbit, ["commit", "--quiet", "-m", "ignore pictures"]);
+    const tmp = scratchDir("orbit-door-tmp-");
+    const result = await runImportWith(world, { TMPDIR: tmp });
+
+    expect(result.status, ok(result)).not.toBe(0);
+    expect(result.stdout + result.stderr).toContain("dawn.webp");
+    expect(filesHoldingToken(tmp)).toEqual([]);
+    expect(entriesUnder(tmp)).toEqual([]);
+  });
+});

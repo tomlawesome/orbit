@@ -104,32 +104,27 @@ log() { printf 'import-door: %s\n' "$1"; }
 fail() { printf 'import-door: %s\n' "$1" >&2; exit 2; }
 
 # Every file this script writes a token into, and every scratch directory,
-# goes through here, so there is one cleanup path and it covers every exit:
-# success, `fail`, an unhandled error under `set -e`, or a signal.
-_secret_files=()
-_scratch_dirs=()
-_cleanup() {
-  [[ ${#_secret_files[@]} -eq 0 ]] || rm -f "${_secret_files[@]}"
-  [[ ${#_scratch_dirs[@]} -eq 0 ]] || rm -rf "${_scratch_dirs[@]}"
-}
-trap _cleanup EXIT INT TERM
+# lives under one mode-700 root that the parent shell creates and its trap
+# removes, so cleanup covers every exit: success, `fail`, an unhandled error
+# under `set -e`, or a signal. Nothing is tracked per file, because the
+# helpers below run in command substitutions (subshells) whose variable
+# changes never reach this shell.
+scratch_root="$(mktemp -d)"
+chmod 700 "$scratch_root"
+trap 'rm -rf "$scratch_root"' EXIT INT TERM
 
-# A mode-600 temp file, tracked for cleanup. Callers write the secret into it
-# with a builtin (`printf ... > "$file"`), so the value is never the argv of
+# A mode-600 temp file under the scratch root. Callers write the secret into
+# it with a builtin (`printf ... > "$file"`), so the value is never the argv of
 # any process.
 new_secret_file() {
   local f
-  f="$(mktemp)"
+  f="$(mktemp -p "$scratch_root")"
   chmod 600 "$f"
-  _secret_files+=("$f")
   printf '%s' "$f"
 }
 
 new_scratch_dir() {
-  local d
-  d="$(mktemp -d)"
-  _scratch_dirs+=("$d")
-  printf '%s' "$d"
+  mktemp -d -p "$scratch_root"
 }
 
 : "${DOOR_IMPORT_TOKEN:?DOOR_IMPORT_TOKEN is not set. See the door_import job in .gitlab-ci.yml for the exact grant this needs.}"
