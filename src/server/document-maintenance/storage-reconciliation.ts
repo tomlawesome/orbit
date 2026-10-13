@@ -7,9 +7,9 @@
  * deliberately preserved rather than rewritten: their durable evidence is what
  * the purge job's retry depends on.
  */
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documentStagingObjects, documents } from "@/db/schema";
+import { auditLog, documentCrypto, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionStagingObjects } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { reconcileMissingDocument } from "@/server/documents/reconciliation";
@@ -151,6 +151,16 @@ export async function reconcileDocumentStorage(): Promise<void> {
     }
   }
 
+  // Held mail-in attachments live in the same objects tree for as long as
+  // their receipt is retained, which can be far longer than a day; until
+  // their own purge path removes them they are referenced, not orphans.
+  const heldAttachments = await getDb().select({ storageKey: imapIngestionAttachments.storageKey }).from(imapIngestionAttachments).where(or(
+    eq(imapIngestionAttachments.status, "stored"),
+    and(eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.purgePending, true)),
+  ));
+  const heldStagingObjects = await getDb().select({ storageKey: imapIngestionStagingObjects.storageKey }).from(imapIngestionStagingObjects);
+  for (const row of [...heldAttachments, ...heldStagingObjects]) referencedKeys.add(row.storageKey);
+
   const orphanBoundary = Date.now() - 24 * 60 * 60 * 1_000;
   for (const object of await storage.listCiphertextObjects()) {
     if (!referencedKeys.has(object.storageKey) && object.modifiedAt.getTime() < orphanBoundary) {
@@ -166,5 +176,6 @@ export async function reconcileDocumentStorage(): Promise<void> {
   for (const quarantine of await storage.listQuarantineFiles()) {
     if (quarantine.modifiedAt.getTime() < orphanBoundary) await storage.discardQuarantine(quarantine.path);
   }
+  await storage.sweepTemporaryFiles(60 * 60 * 1_000);
   workerState.__orbitDocumentWorkerLastReconciliationAt = new Date().toISOString();
 }

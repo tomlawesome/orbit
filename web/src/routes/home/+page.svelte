@@ -1,5 +1,5 @@
 <script>
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { browser } from "$app/environment";
   import { afterNavigate, beforeNavigate, goto, pushState, replaceState } from "$app/navigation";
   import { page } from "$app/state";
@@ -17,12 +17,13 @@
   import { markDoor } from "../household/[id]/door.js";
   import { applyCommand, approveWithOperation, attachItemDocument, dismissReceipt, dueDateIn, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
   import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
-  import { createHeldCompletion } from "$lib/data/held-completion.js";
+  import { createHeldCompletion, droppedCompletionWords, isRefused } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
   import { ago, agoLong, dayMonth, initials as initialsOf, money, MONTHS, plural, weekdayOf } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
+  import { attachIdFor, forget as forgetAttachId } from "./attach-id.js";
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "$lib/data/bands.js";
@@ -350,9 +351,22 @@
   /** @type {string | null} */
   let revealTarget = null;
 
+  /* Back (or Forward) over the drawer's shallow entry reaches no
+     beforeNavigate, so only the effect below sees it: rows holding changes
+     put their row back and arm the cancel pill; a second press inside the
+     hold discards, as a close does. True when the row was put back. */
+  function holdRows() {
+    const held = untrack(() => modes.id);
+    if (!held || untrack(() => modes.cancel())) return false;
+    pushedEntry = true;
+    pushState(resolve(`/home?item=${encodeURIComponent(held)}`), { orbitItem: held });
+    return true;
+  }
+
   $effect(() => {
     const id = expanded;
     if (!id) {
+      if (holdRows()) return;
       pushedEntry = false;
       detailFor = null;
       detail = null;
@@ -362,6 +376,7 @@
       return;
     }
     if (detailFor === id) return;
+    if (holdRows()) return;
     previewDoc = null;
     modes.end();
     footProblem = null;
@@ -459,7 +474,9 @@
     previewDoc = null;
     await rereadDetail();
     wake(`${doc.name} removed`, {
-      undo: () => { restoreDocument(doc.id).then(rereadDetail).catch(() => {}); },
+      // The removed wake is already gone by now, so a refused restore must
+      // say so or the paper silently stays removed.
+      undo: () => { restoreDocument(doc.id).then(rereadDetail).catch(() => wake(`couldn't restore ${doc.name} — try again`, { failure: true })); },
     });
   }
   /** @param {import('$lib/data/belt.js').BeltDocumentRow} doc */
@@ -566,6 +583,8 @@
   function openSearchResult(id) {
     stripOpen = false;
     if (expanded === id) return;
+    /* rows holding changes are not thrown away by opening another row */
+    if (expanded !== null && modes.id === expanded && !modes.cancel()) { docsTarget = null; return; }
     revealTarget = id;
     if (expanded === null) {
       pushedEntry = true;
@@ -634,8 +653,11 @@
     apply: applyCommand,
     holdMs: WAKE_HOLD_MS,
     onsent: () => rereadAll().catch(() => {}),
-    onfailed: (error) => {
-      wake(wordsOf(error, "couldn't complete it — try again"), { failure: true });
+    onfailed: (error, command) => {
+      /* A refusal means the tick was not recorded: name the item, when home
+         still holds it, rather than echo the engine's "refresh and try again". */
+      const title = isRefused(error) ? rawItems.get(/** @type {any} */ (command)?.itemId)?.title : null;
+      wake(title ? droppedCompletionWords(title) : wordsOf(error, "couldn't complete it — try again"), { failure: true });
     },
   });
   beforeNavigate(() => { held.flush(); });
@@ -762,6 +784,7 @@
     const { item, fields } = out;
     footBusy = "complete";
     modes.completeProblem = null;
+    modes.recording = true;
     try {
       const nextDate = dueDateIn(await applyCommand(completeCommand(item, fields)), item.householdId, item.id);
       modes.cancelComplete();
@@ -774,6 +797,7 @@
       modes.completeProblem = wordsOf(error, "couldn't complete it — try again");
     } finally {
       footBusy = null;
+      modes.recording = false;
     }
   }
 
@@ -854,7 +878,8 @@
       footBusy = "attach";
       footProblem = null;
       try {
-        await attachItemDocument(item.householdId, item.id, file, crypto.randomUUID());
+        await attachItemDocument(item.householdId, item.id, file, attachIdFor(item.id, file));
+        forgetAttachId(item.id, file);
         await rereadAll();
         wake(`${file.name} attached to ${item.title}`);
       } catch (error) {
@@ -951,12 +976,25 @@
     if (!suggestion) throw new Error("not added — this suggestion has gone");
     const { item: amended, sectionId } = amendedOf(item, edits);
     const problem = await amendReceipt(suggestion, amended, sectionId);
-    if (problem && typeof problem === "object") throw new Error(problem.message);
+    if (problem && typeof problem === "object") {
+      /* A partial approval has filed the item: the rows close, or a corrected
+         re-send under the same operation id is refused for good. The drawer
+         says what tapReceipt says of a partial, armed for the plain retry. */
+      armed = { id: suggestion.id, act: "approve" };
+      mailProblem = problem.message;
+      landedPartial = true;
+      return;
+    }
     if (problem) throw new Error(`not added — ${problem}`);
   }
+  /* Set by addSuggestion when the add landed partly: addAmended then leaves
+     the drawer open on the recorded-but-pending sentence instead. */
+  let landedPartial = false;
   async function addAmended() {
+    landedPartial = false;
     const title = modes.edit.draft?.title.trim() ?? "";
     if (await modes.edit.commit()) {
+      if (landedPartial) return;
       collapseRow();
       wake(`added to your orbit · ${title}`);
     }
@@ -1011,7 +1049,12 @@
     busyReceipt = suggestion.id;
     try {
       const result = await approveWithOperation(suggestion, operationIds, asView(view).primary, item, sectionId);
-      if ("partial" in result) return result;
+      if ("partial" in result) {
+        /* the item exists now: home shows it, and a failed re-read must not
+           turn what landed into a refusal */
+        view = await readHome().catch(() => view);
+        return result;
+      }
       view = await readHome();
       return null;
     } catch (error) {

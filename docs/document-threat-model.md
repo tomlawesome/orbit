@@ -137,7 +137,7 @@ recoverable state.
   scanning, then that it has moved on to generating the preview
   ([ADR-0033](adr/0033-document-safety-standard-patterns.md)).
 - The open check is pattern E of ADR-0033: the library that will draw the file
-  opens it and finds a page. For a PDF, PDF.js, the one PDF parser in Orbit,
+  opens it and finds a page. For a PDF, PDF.js, the one PDF parser inside Orbit's own process,
   opens it with no password and finds page one, within 1,000 pages and five
   seconds (`password_required` when it needs a password to open,
   `unsupported_structure` for anything else it cannot open). For a JPEG or
@@ -343,13 +343,18 @@ ADR-0024 extends the same envelope encryption to household metadata, in the
 tiers #365 names.
 
 **Tier 1** is `items.notes`, `items.reference`,
-`imap_ingestion_messages.proposal` and `.field_evidence`.
+`imap_ingestion_messages.proposal` and
+`imap_ingestion_messages.field_evidence`.
 
 **Tier 2** is `items.title`, `items.provider` (a provider *name*), the cost
-`items.cost_minor`, and the invited member address
-`household_invitations.email`. It uses the same household key, the same
-envelope and the same rotation path as Tier 1 — no second key and no second
-cipher. What it costs is queries: the database can no longer search titles,
+`items.cost_minor`, the invited member address `household_invitations.email`,
+and, since #969, every account address: `users.email` and the mail-forwarding
+sender address `mail_in_sender_addresses.address`. Those two account addresses
+sit under the instance key rather than a household one, because a person
+belongs to several households and a forwarded message is matched to its sender
+before any household is known. Everything else in Tier 2 uses the same
+household key as Tier 1, and all of it the same envelope and the same rotation
+path — no second cipher. What it costs is queries: the database can no longer search titles,
 match provider names or add up costs, so Orbit does all three in the
 application over one household's decrypted rows. Measured on a seeded
 database, that decrypt-and-scan takes about 4.5 ms for a 100-item household

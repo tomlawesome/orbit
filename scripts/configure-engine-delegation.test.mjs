@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -233,6 +233,57 @@ describe("whose files the engine writes (D5, #1258)", () => {
     const result = run(targetDir, ["--check"], { env: { ORBIT_IMAGE: LOCAL_IMAGE } });
     expect(runCall(result.calls)).not.toContain("--user");
   });
+
+  // #1316 O1-R7: when `docker info` fails there is no answer to "is this
+  // rootless?", and guessing "rootful" hands the files to the wrong owner.
+  it("refuses to guess who should own the files when `docker info` fails, and runs no engine (#1316 O1-R7)", () => {
+    const targetDir = makeFixture();
+    const docker = makeDocker();
+    writeFileSync(join(docker.binDir, "docker"), `#!/usr/bin/env node
+const { appendFileSync } = require("node:fs");
+const argv = process.argv.slice(2);
+if (process.env.ORBIT_FAKE_DOCKER_LOG) appendFileSync(process.env.ORBIT_FAKE_DOCKER_LOG, JSON.stringify(argv) + "\\n");
+process.exit(argv[0] === "info" ? 1 : 0);
+`, { mode: 0o755 });
+    const result = run(targetDir, ["--check"], { env: { ORBIT_IMAGE: LOCAL_IMAGE }, docker });
+    expect(result.calls.map((call) => call[0])).toContain("info");
+    expect(runCall(result.calls)).toBeUndefined();
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/could not tell whether Docker is rootless/i);
+    expect(result.stderr).toMatch(/refus\w* to guess/i);
+  });
+});
+
+// #1316: a refusal inside the container names /orbit-deploy/..., which means
+// nothing on the host. The engine rewrites it to the host directory when it is
+// told that directory in ORBIT_HOST_DEPLOY_DIR (src/lib/host-paths.ts), so
+// configure.sh must pass the deployment directory's real path as -e NAME=value.
+describe("the host's name for the deployment directory (#1316)", () => {
+  const hostDeployDir = (calls) =>
+    shape(runCall(calls)).env.find((entry) => entry.startsWith("ORBIT_HOST_DEPLOY_DIR="));
+
+  it("passes ORBIT_HOST_DEPLOY_DIR set to the deployment directory's real path", () => {
+    const targetDir = makeFixture();
+    const result = run(targetDir, [], { env: { ORBIT_IMAGE: LOCAL_IMAGE } });
+    expect(result.status).toBe(0);
+    expect(hostDeployDir(result.calls)).toBe(`ORBIT_HOST_DEPLOY_DIR=${realpathSync(targetDir)}`);
+  });
+
+  it("passes it on a read-only flow too", () => {
+    const targetDir = makeFixture();
+    const result = run(targetDir, ["--check"], { env: { ORBIT_IMAGE: LOCAL_IMAGE } });
+    expect(hostDeployDir(result.calls)).toBe(`ORBIT_HOST_DEPLOY_DIR=${realpathSync(targetDir)}`);
+  });
+
+  it("resolves a symlinked deployment directory to its real path", () => {
+    const targetDir = makeFixture();
+    const linkParent = scratchDir("orbit-configure-delegation-link-");
+    const link = join(linkParent, "deploy-link");
+    symlinkSync(targetDir, link);
+    const result = run(link, [], { env: { ORBIT_IMAGE: LOCAL_IMAGE }, cwd: link });
+    expect(result.status, result.stderr).toBe(0);
+    expect(hostDeployDir(result.calls)).toBe(`ORBIT_HOST_DEPLOY_DIR=${realpathSync(targetDir)}`);
+  });
 });
 
 describe("which image runs the engine (D2)", () => {
@@ -246,6 +297,18 @@ describe("which image runs the engine (D2)", () => {
     const targetDir = makeFixture({ envFile: `ORBIT_IMAGE=orbit-local:111111111111\nORBIT_IMAGE=${LOCAL_IMAGE}\n` });
     const result = run(targetDir, ["--check"]);
     expect(shape(runCall(result.calls)).image).toBe(LOCAL_IMAGE);
+  });
+
+  it("reads the digest from a CRLF-terminated .env-orbit with no ORBIT_IMAGE in the environment (#1316 O1-F2)", () => {
+    const targetDir = makeFixture({
+      envFile: `ORBIT_CONFIG_SCHEMA_VERSION=1\r\nORBIT_IMAGE=${DIGEST_IMAGE}\r\nAPP_URL=https://orbit.delegation.invalid\r\n`,
+    });
+    const result = run(targetDir, ["--check"]);
+    expect(result.stderr).not.toContain("ORBIT_IMAGE must be an immutable registry digest");
+    expect(result.status).toBe(0);
+    const call = runCall(result.calls);
+    expect(call).toBeDefined();
+    expect(shape(call).image).toBe(DIGEST_IMAGE);
   });
 
   it("--check-rollback can read the image from the rollback copy when .env-orbit has none", () => {

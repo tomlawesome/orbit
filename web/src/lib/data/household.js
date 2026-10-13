@@ -41,7 +41,9 @@ export function entriesLabel(count) {
  * @returns {import('./workspace.js').SectionRow[]}
  */
 export function sectionRowsOf(household) {
-  const items = (household?.items ?? []).filter((item) => item.status !== "archived");
+  /* Archived entries count too: the engine keeps an archived entry in its
+     section, so removing the section must still ask where it goes. */
+  const items = household?.items ?? [];
   return (household?.sections ?? []).map((section) => {
     const count = items.filter((item) => item.sectionId === section.id).length;
     return {

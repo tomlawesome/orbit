@@ -24,6 +24,8 @@ else
   configured_image="${ORBIT_IMAGE:-}"
   if [[ -z "$configured_image" && -f "$environment_file" ]]; then
     configured_image="$(sed -n 's/^ORBIT_IMAGE=//p' "$environment_file" | tail -n 1)"
+    # A CRLF .env-orbit leaves a trailing CR that would fail the digest match.
+    configured_image="${configured_image%$'\r'}"
   fi
   [[ "$configured_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] ||
     fail "Pull deployments require ORBIT_IMAGE to identify an immutable registry digest."
@@ -44,7 +46,11 @@ else
   docker pull "$ORBIT_IMAGE"
 fi
 
-bash scripts/configure.sh
+# This run has just built or pulled the image it exports, so the pin in
+# .env-orbit moves with it, as the installer's does. Otherwise a later
+# compose up from a fresh shell would start the previous build against the
+# database this one migrated.
+ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 bash scripts/configure.sh
 
 # Prepare the remaining images before touching a running deployment.
 compose pull orbit-db

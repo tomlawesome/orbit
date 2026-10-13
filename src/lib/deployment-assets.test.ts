@@ -74,6 +74,19 @@ describe("the deployment asset list (guarantee #45)", () => {
     expect(staged).toEqual(repairAllowlist());
   });
 
+  // docs/administrator-operations.md gives scripts/end-maintenance.sh as the
+  // host-side emergency command; a deployment that lacks it has nothing to
+  // run when the app cannot lift maintenance itself (#1316).
+  it("includes scripts/end-maintenance.sh, the host-side emergency command the administrator docs give", () => {
+    expect(DEPLOYMENT_ASSETS).toContain("scripts/end-maintenance.sh");
+  });
+
+  // The document-key rotation overlay is run from the deployment directory,
+  // so a deployment that lacks it cannot finish or abort a rotation (#1316).
+  it("includes docker-compose.kek-rotation.yml, the document-key rotation overlay", () => {
+    expect(DEPLOYMENT_ASSETS).toContain("docker-compose.kek-rotation.yml");
+  });
+
   it("names every bundled shell script as a deployment script, and each passes bash -n", () => {
     expect(DEPLOYMENT_SCRIPTS).toEqual(DEPLOYMENT_ASSETS.filter((asset) => asset.startsWith("scripts/")));
     for (const script of DEPLOYMENT_SCRIPTS) {

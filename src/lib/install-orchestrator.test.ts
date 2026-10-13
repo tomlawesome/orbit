@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { NOT_UTF8_FAILURE_MESSAGE } from "./configuration-migration";
 import { DEPLOYMENT_ASSETS } from "./deployment-assets";
 import type { EngineEvent } from "./engine-event";
 import { type HostFacts, parseHostFacts } from "./host-facts";
@@ -254,6 +255,25 @@ describe("runInstall: target and action (guarantees #7, #21)", () => {
     expect(snapshot(target)).toEqual(before);
   });
 
+  // An open document-key rotation (the .orbit-secrets/document-kek-next
+  // overlay) must be finished or aborted before anything else changes the
+  // deployment (#1316).
+  it("refuses an update while a document-key rotation is open, before any file changes (#1316)", async () => {
+    const target = recognised();
+    writeFileSync(join(target, ".orbit-secrets", "document-kek-next"), `${"f".repeat(64)}\n`, { mode: 0o600 });
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+
+    expect(outcome.status).toBe("failed");
+    const message = outcome.status === "failed" ? outcome.message : "";
+    expect(message).toMatch(/document-key rotation is open/i);
+    expect(message).toMatch(/finish/i);
+    expect(message).toMatch(/rewrap/i);
+    expect(message).toMatch(/overlay/i);
+    expect(message).toMatch(/abort/i);
+    expect(snapshot(target)).toEqual(before);
+  });
+
   it("refuses an explicit install over a recognised deployment, and an explicit update of an empty target", async () => {
     expect((await run(recognised(), { requestedAction: "install" })).outcome).toMatchObject({
       status: "failed",
@@ -352,6 +372,15 @@ describe("runInstall: refusals inside the transaction roll back (#11, #56)", () 
     expect(snapshot(target)).toEqual(before);
   });
 
+  it("reports the retired ORBIT_SECRETS_DIR setting of a recognised update in the failure message, and rolls back (#1316)", async () => {
+    const target = recognised(["ORBIT_SECRETS_DIR=/srv/secrets"]);
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "configuration", reason: "configuration-failure" });
+    if (outcome.status === "failed") expect(outcome.message).toContain("ORBIT_SECRETS_DIR");
+    expect(snapshot(target)).toEqual(before);
+  });
+
   it("rolls back on an unavailable provider, with its own reason (#25)", async () => {
     const target = preprovisioned(ENV_OIDC);
     const before = snapshot(target);
@@ -433,6 +462,45 @@ describe("runInstall: refusals inside the transaction roll back (#11, #56)", () 
     expect(snapshot(target)).toEqual(before);
   });
 
+  it("names a removed setting in the failure, with what to do about it (#1316)", async () => {
+    const target = recognised(["IMAP_HOST=mail.example.test"]);
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "configuration", reason: "configuration-failure" });
+    const message = outcome.status === "failed" ? outcome.message : "";
+    expect(message).toContain("IMAP_HOST");
+    expect(message).toMatch(/removed/i);
+    expect(message).toMatch(/Administration/);
+    expect(message).toMatch(/delete (the|that) line/i);
+    expect(message).toMatch(/re-?run/i);
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("names the conflicting pair when a secret and its _FILE twin are both set (#1316)", async () => {
+    const target = recognised(["SESSION_SECRET=direct-value", "SESSION_SECRET_FILE=/run/orbit-secrets/session-secret"]);
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "configuration", reason: "configuration-failure" });
+    const message = outcome.status === "failed" ? outcome.message : "";
+    expect(message).toContain("SESSION_SECRET");
+    expect(message).toContain("SESSION_SECRET_FILE");
+    expect(message).not.toBe("Configuration preflight failed; restoring the previous deployment.");
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("names only session-ttl when SESSION_TTL_SECONDS is out of range in an otherwise complete deployment (#1316)", async () => {
+    const target = recognised(["SESSION_TTL_SECONDS=100"]);
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "configuration", reason: "configuration-failure" });
+    const message = outcome.status === "failed" ? outcome.message : "";
+    expect(message).toContain("session-ttl");
+    expect(message).not.toContain("APP_URL");
+    expect(message).not.toContain("ORBIT_IMAGE");
+    expect(message).not.toMatch(/OIDC_/);
+    expect(snapshot(target)).toEqual(before);
+  });
+
   it("rolls back an update whose configuration does not pass the preflight (#50)", async () => {
     const target = recognised();
     writeFileSync(join(target, ".env-orbit"), "not an assignment\n", { mode: 0o600 });
@@ -440,6 +508,18 @@ describe("runInstall: refusals inside the transaction roll back (#11, #56)", () 
     const { outcome } = await run(target);
     expect(outcome).toMatchObject({ status: "failed", message: "Configuration preflight failed; restoring the previous deployment." });
     expect(snapshot(target)).toEqual(before);
+  });
+
+  it("reports a .env-orbit that is not valid UTF-8 as a failed outcome, not a thrown refusal, and leaves the target unchanged (#1316)", async () => {
+    const target = recognised();
+    const envPath = join(target, ".env-orbit");
+    writeFileSync(envPath, Buffer.concat([readFileSync(envPath), Buffer.from("# caf"), Buffer.from([0xe9]), Buffer.from("\n")]), { mode: 0o600 });
+    const bytesBefore = readFileSync(envPath);
+    const before = snapshot(target);
+    const { outcome } = await run(target);
+    expect(outcome).toMatchObject({ status: "failed", message: NOT_UTF8_FAILURE_MESSAGE });
+    expect(snapshot(target)).toEqual(before);
+    expect(readFileSync(envPath).equals(bytesBefore)).toBe(true);
   });
 });
 

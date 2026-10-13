@@ -3,7 +3,7 @@
   import { beforeNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { WorkspaceError, applyCommand, attachItemDocument, readWorkspace } from "$lib/data/workspace.js";
+  import { PARTIAL_CREATE_MESSAGE, WorkspaceError, applyCommand, attachItemDocument, checkDraftCommand, readReminders, readWorkspace } from "$lib/data/workspace.js";
   import { saveProblem } from "$lib/data/metadata-status.js";
   import {
     CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
@@ -15,7 +15,7 @@
   import { wake } from "$lib/pocket/wake.js";
   import EntryForm from "./EntryForm.svelte";
   import { dryRunner } from "$lib/data/dry-run.js";
-  import { blankEntry, createCommandOf, entryChanged } from "./entry.js";
+  import { blankEntry, createCommandOf, entryChanged, reminderPairOf } from "./entry.js";
 
   /**
    * NEW ENTRY ON A PHONE (#1120, proposal §2.5). Server-rendered beside the
@@ -217,7 +217,7 @@
       ? createCommandOf($state.snapshot(entry), { householdId: household.id, currency: household.currency ?? "GBP", id: draftId })
       : null;
   }
-  const dryRun = dryRunner({ onanswer: (answer) => { refusal = answer; } });
+  const dryRun = dryRunner({ onanswer: (answer) => { refusal = answer; }, check: checkDraftCommand });
   let asked = false;
   $effect(() => {
     if (phase !== "ready") return;
@@ -231,13 +231,15 @@
   async function load() {
     phase = "loading";
     try {
-      const workspace = await readWorkspace();
+      const [workspace, reminders] = await Promise.all([readWorkspace(), readReminders().catch(() => null)]);
       households = (workspace.households ?? []).map((one) => ({
         id: one.id, name: one.name, currency: one.currency, sections: one.sections ?? [],
       }));
       if (!households.length) { phase = "none"; return; }
       const active = workspace.activeHouseholdId ?? households[0].id;
       entry.householdId = households.some((one) => one.id === active) ? active : households[0].id;
+      /* A new entry starts from the member's own pair, which they can still change on the entry. */
+      entry.reminderDays = reminderPairOf(reminders);
       start = $state.snapshot(entry);
       phase = "ready";
     } catch {
@@ -253,6 +255,11 @@
     if (!household || !command) return;
     saving = true;
     problem = null;
+    /* The file is taken now, as the desk's create does: a read refused while
+       the save is in flight drops `attachment`, and testing it after the
+       await would skip the upload and land the item without its paper. */
+    const held = attachment;
+    let landed = false;
     try {
       await applyCommand(command).catch((error) => {
         /* This draft id is new to the server, so "this item changed on another
@@ -262,11 +269,16 @@
         if (error instanceof WorkspaceError && error.code === "version_required") return;
         throw error;
       });
+      /* The item is on the server from here; a reload would mint a new draft
+         id and file it twice, so a later refusal must not read as unsaved. */
+      landed = true;
       /* #1245 (11a): the picked document goes onto the item just saved,
          through the same route the desk's form uses. A refusal lands in the
          catch below like any failed save: the entry is kept, and the next
-         attempt re-sends both under the same ids, so neither is stored twice. */
-      if (attachment) await attachItemDocument(household.id, draftId, attachment, documentIdOf(attachment));
+         attempt re-sends both under the same ids, so neither is stored twice.
+         It sends the file held at submit, so the server, not a late read,
+         has the last word on it. */
+      if (held) await attachItemDocument(household.id, draftId, held, documentIdOf(held));
       saved = true;
       wake(`added to your orbit · ${entry.name.trim()}`);
       /* #1319 (§34): the new item, its drawer open on home, as the desk's
@@ -276,7 +288,8 @@
       /* Loud (#1058): the reason stays above the bar until the next attempt,
          the button comes back, and nothing typed is lost. No wake. */
       const words = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
-      problem = /^not [a-z]+ —/i.test(words) ? words : `not saved — ${words}`;
+      if (landed) problem = `${PARTIAL_CREATE_MESSAGE} ${words}`;
+      else problem = /^not [a-z]+ —/i.test(words) ? words : `not saved — ${words}`;
     } finally {
       saving = false;
     }

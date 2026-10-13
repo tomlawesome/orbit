@@ -416,6 +416,16 @@ App-managed groups — always reported as `app-managed <FIELD>`, never `ready`,
 imap
 ```
 
+Shape-checked fields — reported only as `missing <FIELD>`, and only when the
+value is present but invalid; nothing is printed when it is absent or valid:
+
+```
+session-ttl
+```
+
+`session-ttl` is `SESSION_TTL_SECONDS` set to anything other than a whole
+number of seconds from 900 to 2592000 (15 minutes to 30 days).
+
 ### Consumer guidance
 
 - orbit-launcher's `ConfigCheck.Missing` collects every field reported
@@ -745,7 +755,7 @@ docker compose --env-file "$environment_file" \
   did; the "Machine prompts: backup/restore/recovery (v0)" grammar above is
   unchanged.
 - Switches travel as `-e NAME=value`, only when set: `ORBIT_NONINTERACTIVE_RESTORE`,
-  `ORBIT_RECOVERY_TEST_MODE`, and restore.sh's test switches
+  `ORBIT_RECOVERY_PROMPTS`, `ORBIT_RECOVERY_TEST_MODE`, and restore.sh's test switches
   (`ORBIT_RESTORE_TEST_*`, which `scripts/test-backup-restore.sh` sets). None
   is a secret; passphrases only ever travel on standard input.
 - `ORBIT_ENV_FILE` is the `--env-file`. `ORBIT_BACKUP_DIR` and
@@ -767,23 +777,33 @@ docker compose --env-file "$environment_file" \
 - The backup/restore lock is the engine's: a `flock` on
   `backups/.orbit-backup-restore.lock`, on the bind mount, so it excludes a
   second run on the same host kernel (a backups directory on NFS is not
-  supported). A run that finds the lock held refuses at once and exits `75`;
-  the shell then leaves `orbit-app` to the run that holds it.
+  supported). Only runs whose shell stopped `orbit-app` take it; a run that
+  finds it held refuses at once and exits `75`, and the shell then leaves
+  `orbit-app` to the run that holds it.
 - The shell stops and starts `orbit-app`; the engine never does. `backup.sh`
   stops it, runs `backup`, and starts it again. `restore.sh <bundle>` and
   `import-recovery-bundle.sh` validate first: while Orbit still runs, they
   run the engine once with `--preflight` (`restore --preflight` or
   `import-recovery-bundle --preflight`, standard input `/dev/null`, so `-T`
-  and no prompt; the passphrase is asked once, in the full run). It takes
-  and releases the same lock, creates no checkpoint or journal, drops its
-  stage database and scratch on exit, and prints nothing when the bundle
-  passes. Any refusal, or `75`, ends the script there with Orbit untouched
+  and no prompt; the passphrase is asked once, in the full run). It stops
+  nothing, so it takes no lock (the lock's holder owns `orbit-app`) and
+  leaves any killed run's checkpoint to the full run to remove; it creates
+  no checkpoint or journal, drops its stage database and scratch on exit,
+  and prints nothing when the bundle passes. Any refusal ends the script
+  there with Orbit untouched
   (amendment E3a on #1211: validate before taking the service down). Only
   then do they stop `orbit-app` and run the full command, which repeats
   every check; `restore.sh --recover` has no bundle and stops first. After
-  the full run they start it and wait up to 45 seconds for `/api/health` —
-  unless `backups/.orbit-restore/restore.journal` exists afterwards, which
-  keeps Orbit stopped for `bash scripts/restore.sh --recover`. `backup.sh --verify` and `export-recovery-bundle.sh` leave it
+  the full run they start it and wait up to 45 seconds for `/api/health`.
+  A failed run that leaves `backups/.orbit-restore/restore.journal` keeps
+  Orbit stopped for `bash scripts/restore.sh --recover`. A successful
+  restore or import also leaves the journal and its checkpoint: the shell
+  starts Orbit, and only once health passes runs `restore --finish`
+  (standard input `/dev/null`), which removes them under the lock. If Orbit
+  never becomes healthy on the restored data (say, a bundle from a newer
+  build than the running image), the shell stops `orbit-app` again, prints
+  the `--recover` line and exits 1; nothing rolls back automatically.
+  `backup.sh --verify` and `export-recovery-bundle.sh` leave it
   running. The engine reports, once, on standard error, that it left the
   app's lifecycle to the shell:
   `phase=application component=application state=skipped reason=application-startup action=skip elapsed=0s`.

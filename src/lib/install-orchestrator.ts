@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { type ConfigurationMigrationTarget, runConfigurationMigration, runConfigurationPreflight } from "./configuration-migration";
-import { type GuidedInitInput, applyGuidedInit, applySetOidcSecret, runConfigureApply, setDeploymentProfile } from "./configure-engine";
+import { ConfigureEngineRefusal, type GuidedInitInput, applyGuidedInit, applySetOidcSecret, environmentHasAppliedStamp, runConfigureApply, setDeploymentProfile } from "./configure-engine";
 import {
   DEPLOYMENT_ASSET_FILE_MODE,
   DEPLOYMENT_ASSETS,
@@ -68,9 +68,10 @@ import {
 // the launcher its config tree (onConfigurationFailure, #1225). A failure's
 // own terminal `failed` event is the shell's to emit (docs/engine-events.md);
 // this module emits the progress events only. A leftover staging directory
-// from a hard kill is never rolled back by a later run: beside an otherwise
-// empty target validateTarget refuses it for the operator to remove (#383),
-// and beside a deployment it is repair.sh's to diagnose.
+// from a hard kill is never rolled back by a later run: validateTarget
+// refuses it, beside an otherwise empty target for the operator to remove
+// (#383) and beside a deployment for repair.sh to restore or the operator to
+// remove, so a rerun never stages over a half-updated tree.
 
 export interface InstallContext {
   /** The deployment directory, as the engine sees it (/orbit-deploy). */
@@ -377,6 +378,17 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
   if (action === "update" && targetWasEmpty) {
     return fail("host", "host", "Update requires a recognized existing Orbit deployment.");
   }
+  // An open document-key rotation runs orbit-app through the kek-rotation
+  // overlay; recreating it here would bring it back without the next key,
+  // locking every row already rewrapped. Same refusal as restore's.
+  const documentKekNext = join(context.targetDir, SECRETS_DIRECTORY, "document-kek-next");
+  if (isRegularNonSymlinkFile(documentKekNext)) {
+    return fail(
+      "host",
+      "host",
+      `A document-key rotation is open (${documentKekNext} exists). Finish the rotation (complete the rewrap and remove the compose kek-rotation overlay) or abort it before updating.`,
+    );
+  }
 
   // verify_database_volume_safety, from the shell's Docker facts (#13-18, F3).
   let volumeState: DatabaseVolumeSafetyState = {
@@ -565,9 +577,15 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       // An existing .env-orbit is preflighted and migrated before anything
       // else is installed (#50).
       let configurationMigrationCompleted = false;
+      // No file means a fresh install, so the stamp is absent.
+      let stampAbsentBeforeMigration = true;
       if (existsSync(environmentFile)) {
         const preflight = transaction.shareLock(() => runConfigurationPreflight(environmentFile));
         if (!preflight.ok) return fail("configuration", "configuration", preflight.message);
+        // Read only once the preflight has accepted the file, and before the
+        // migration below writes the stamp, so configure can tell a
+        // pre-provisioned first install from one that lost its secrets.
+        stampAbsentBeforeMigration = !environmentHasAppliedStamp(context.targetDir);
         const migration = transaction.shareLock(() => runConfigurationMigration(migrationTarget));
         if (!migration.ok) return fail("configuration", "configuration", migration.message);
         say(dependencies, [migration.message]);
@@ -603,8 +621,10 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
         return undefined;
       };
       try {
-        say(dependencies, transaction.shareLock(() => runConfigureApply(context.targetDir, context.resolvedReference, { trustOrbitImage: true })).messages);
-      } catch {
+        say(dependencies, transaction.shareLock(() => runConfigureApply(context.targetDir, context.resolvedReference, { trustOrbitImage: true, stampAbsentBeforeMigration })).messages);
+      } catch (error) {
+        // A refusal says what the operator must fix (and never carries a secret), so pass it on.
+        if (error instanceof ConfigureEngineRefusal) return configurationFailure(`Configuration failed, restoring the previous deployment: ${error.message}`);
         return configurationFailure("Configuration failed; restoring the previous deployment.");
       }
       let shapeProblem = leftSafeShape();

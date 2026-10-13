@@ -27,7 +27,8 @@ import {
 } from "./config-contract";
 import { acquireDeployLock as acquireSharedDeployLock } from "./deploy-lock";
 import { HostOwnershipError, applyHostOwnership } from "./host-ownership";
-import { preflightEnvironmentFile } from "./configuration-migration";
+import { NOT_UTF8_FAILURE_MESSAGE, isNotUtf8Failure, preflightEnvironmentFile } from "./configuration-migration";
+import { decodeUtf8Strict } from "./env-orbit-file";
 import { ensureVapidKeys } from "./vapid-keys";
 
 // The write side of scripts/configure.sh, ported to the TypeScript engine
@@ -352,12 +353,15 @@ function updateManagedKeysLocked(deployDir: string, pairs: ReadonlyArray<readonl
   const order = pairs.map(([key]) => key);
   const pending = new Map<string, string>(pairs);
 
-  let raw: string;
+  let bytes: Buffer;
   try {
-    raw = readFileSync(envPath, "utf8");
+    bytes = readFileSync(envPath);
   } catch {
     refuse(`Could not read ${ENVIRONMENT_FILE_NAME} for an atomic update.`, "environment-file-invalid");
   }
+  // A lossy decode would rewrite a value the operator never changed.
+  const raw = decodeUtf8Strict(bytes);
+  if (raw === undefined) refuse(`Refusing to update ${ENVIRONMENT_FILE_NAME} because it is not valid UTF-8.`, "environment-file-invalid");
 
   let finalNewline = true;
   if (raw.length > 0) {
@@ -571,12 +575,14 @@ export function ensureSecretFile(deployDir: string, relativePath: string, isFres
 /** environment_key_is_nonempty (configure.sh:774-784): a raw, unvalidated last-assignment-wins scan, deliberately not the full parseEnvOrbitContent parser. */
 function rawEnvironmentKeyValue(deployDir: string, key: string): string | undefined {
   const envPath = join(deployDir, ENVIRONMENT_FILE_NAME);
-  let raw: string;
+  let bytes: Buffer;
   try {
-    raw = readFileSync(envPath, "utf8");
+    bytes = readFileSync(envPath);
   } catch {
     return undefined;
   }
+  const raw = decodeUtf8Strict(bytes);
+  if (raw === undefined) refuse(`Refusing to use ${ENVIRONMENT_FILE_NAME} because it is not valid UTF-8.`, "environment-file-invalid");
   let value: string | undefined;
   let found = false;
   for (const line of raw.split("\n")) {
@@ -588,11 +594,39 @@ function rawEnvironmentKeyValue(deployDir: string, key: string): string | undefi
   return found ? value : undefined;
 }
 
+// ORBIT_SECRETS_DIR is retired: the engine only ever reads and writes
+// ./.orbit-secrets. A deployment still pointing it elsewhere would otherwise
+// look fresh here and get a new, unmounted set of secrets.
+const DEFAULT_SECRETS_DIRECTORY_VALUES = new Set([SECRETS_DIRECTORY_NAME, `./${SECRETS_DIRECTORY_NAME}`]);
+
+export function isRetiredSecretsDirectoryOverride(value: string | undefined): value is string {
+  return value !== undefined && value !== "" && !DEFAULT_SECRETS_DIRECTORY_VALUES.has(value);
+}
+
+export function retiredSecretsDirectoryMessage(value: string): string {
+  return `ORBIT_SECRETS_DIR is set to ${value}, but Orbit no longer reads that setting: it keeps its secrets in ./${SECRETS_DIRECTORY_NAME} beside ${ENVIRONMENT_FILE_NAME}. Move the secret files from ${value} into ./${SECRETS_DIRECTORY_NAME}, remove the ORBIT_SECRETS_DIR line, then run again.`;
+}
+
+export function refuseRetiredSecretsDirectory(deployDir: string): void {
+  const value = rawEnvironmentKeyValue(deployDir, "ORBIT_SECRETS_DIR")?.replace(/\r$/, "");
+  if (isRetiredSecretsDirectoryOverride(value)) {
+    refuse(retiredSecretsDirectoryMessage(value), "secrets-directory-invalid");
+  }
+}
+
 function environmentKeyIsNonEmpty(deployDir: string, key: string): boolean {
   const envPath = join(deployDir, ENVIRONMENT_FILE_NAME);
   const info = pathInfo(envPath);
   if (!info.isRegularFollowing || info.isSymlink) return false;
   return (rawEnvironmentKeyValue(deployDir, key) ?? "") !== "";
+}
+
+/** Whether .env-orbit carries an applied-configuration stamp. */
+export function environmentHasAppliedStamp(deployDir: string): boolean {
+  return (
+    environmentKeyIsNonEmpty(deployDir, "ORBIT_CONFIG_APPLIED_VERSION") ||
+    environmentKeyIsNonEmpty(deployDir, "ORBIT_CONFIG_APPLIED_DIGEST")
+  );
 }
 
 /**
@@ -805,7 +839,7 @@ export function setDeploymentProfile(deployDir: string, preset: string, model: s
 
 export type ConfigurePreflightOutcome =
   | { ok: true }
-  | { ok: false; code: "preflight-failed" | "configuration-migration-required" };
+  | { ok: false; code: "preflight-failed" | "configuration-migration-required"; message?: string };
 
 /**
  * run_configuration_preflight (configure.sh guarantee #2): an existing
@@ -818,6 +852,7 @@ export function runConfigurePreflight(deployDir: string): ConfigurePreflightOutc
   const envPath = join(deployDir, ENVIRONMENT_FILE_NAME);
   if (!pathInfo(envPath).existsFollowing && !pathInfo(envPath).isSymlink) return { ok: true };
   const result = preflightEnvironmentFile(envPath);
+  if (isNotUtf8Failure(result)) return { ok: false, code: "preflight-failed", message: NOT_UTF8_FAILURE_MESSAGE };
   if (result.status !== 0) return { ok: false, code: "preflight-failed" };
   if (/^safely_migratable ORBIT_CONFIG_SCHEMA_VERSION$/m.test(result.stdout)) {
     return { ok: false, code: "configuration-migration-required" };
@@ -846,20 +881,24 @@ export interface ConfigureApplyResult {
 export function runConfigureApply(
   deployDir: string,
   orbitImage: string | undefined,
-  options: { trustOrbitImage?: boolean } = {},
+  // stampAbsentBeforeMigration: the installer's reading of the stamp taken
+  // before its own configuration migration, which writes the stamp before
+  // this runs. Omitted (bare configure), the file is read here instead.
+  options: { trustOrbitImage?: boolean; stampAbsentBeforeMigration?: boolean } = {},
 ): ConfigureApplyResult {
   const messages: string[] = [];
 
   // #1151 RANGE-F1 (O1-S1/SS1-S2's "existing deployment" signal for
   // ensureSecretFile): a deployment is existing when any of the three
-  // generated secrets already exists before this run (a symlink counts).
-  // .env-orbit and the secrets directory are not signals: install.sh runs
-  // `configure.sh --init` (which writes .env-orbit) and then a bare
-  // configure in a second process. Checked once for the whole set, before
+  // generated secrets already exists before this run (a symlink counts), or
+  // when .env-orbit carries an applied-configuration stamp (below). The mere
+  // existence of .env-orbit or the secrets directory is not a signal:
+  // install.sh runs `configure.sh --init` (which writes .env-orbit) and then
+  // a bare configure in a second process. Checked once for the whole set, before
   // the first is generated, so writing one cannot make the next look existing.
   // hadEnvironmentFile is only for persist_orbit_image's rule below.
   const hadEnvironmentFile = pathInfo(join(deployDir, ENVIRONMENT_FILE_NAME)).existsFollowing;
-  const isFreshInstall = !GENERATED_SECRET_RELATIVE_PATHS.some((relativePath) => {
+  let isFreshInstall = !GENERATED_SECRET_RELATIVE_PATHS.some((relativePath) => {
     const info = pathInfo(join(deployDir, relativePath));
     return info.existsFollowing || info.isSymlink;
   });
@@ -872,7 +911,20 @@ export function runConfigureApply(
     if (preflight.code === "configuration-migration-required") {
       refuse("configuration_migration_required", preflight.code);
     }
-    refuse("Configuration preflight failed; restoring the previous deployment.", preflight.code);
+    refuse(preflight.message ?? "Configuration preflight failed; restoring the previous deployment.", preflight.code);
+  }
+  // Before anything is written, so a refused run changes nothing.
+  refuseRetiredSecretsDirectory(deployDir);
+  // A stamped .env-orbit has finished an install, so an empty or missing
+  // secrets directory is a loss, not a first run. The installer's migration
+  // also stamps a pre-provisioned first install just before this, so the
+  // installer passes what the file held before that migration. Otherwise
+  // read after preflight has validated the file.
+  const stampedBeforeThisRun = options.stampAbsentBeforeMigration === undefined
+    ? environmentHasAppliedStamp(deployDir)
+    : !options.stampAbsentBeforeMigration;
+  if (stampedBeforeThisRun) {
+    isFreshInstall = false;
   }
 
   // persist_orbit_image's rule (configure.sh): an existing deployment only

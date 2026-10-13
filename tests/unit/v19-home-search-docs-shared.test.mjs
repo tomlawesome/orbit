@@ -42,4 +42,16 @@ describe("#1151 W1-Q8: one shared loadSearchDocuments helper", () => {
     expect(POCKET).toMatch(/searchDocuments = found;\s*\n\s*papersReady = true;/u);
     expect(HOME_PAGE).not.toContain("papersReady");
   });
+
+  /* #1316 W1-F7: the phone's filter admitted only active items, so an
+     archived item's drawer (/home?item=<id>) lost its Documents section. */
+  it("the pocket's loadSearchDocuments filter admits the open row's item whatever its status", () => {
+    const start = POCKET.indexOf("async function loadSearchDocuments()");
+    const fn = POCKET.slice(start, POCKET.indexOf("readSearchDocuments(", start));
+    const filter = fn.slice(fn.indexOf("const carrying"), fn.indexOf(";", fn.indexOf("const carrying")));
+    expect(filter).toMatch(/documentCount/u);
+    // not active-only: an alternative clause names the open (asked/lit) row
+    expect(filter).toMatch(/\|\|/u);
+    expect(filter).toMatch(/asked|lit\b|open/u);
+  });
 });

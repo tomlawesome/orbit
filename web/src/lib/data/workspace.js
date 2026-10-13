@@ -597,7 +597,7 @@ export async function applyCommand(command, { retryCsrf = true } = {}) {
  *
  * @param {object} command
  * @param {{ retryCsrf?: boolean }} [options]
- * @returns {Promise<{ refusal: string | null, preview: { nextDate: string } | null } | null>}
+ * @returns {Promise<{ refusal: string | null, refusalCode: string | null, preview: { nextDate: string } | null } | null>}
  */
 export async function askCommand(command, { retryCsrf = true } = {}) {
   try {
@@ -617,6 +617,7 @@ export async function askCommand(command, { retryCsrf = true } = {}) {
     const nextDate = body.preview?.nextDate;
     return {
       refusal: body.refusal?.message ?? null,
+      refusalCode: body.refusal?.code ?? null,
       preview: nextDate ? { nextDate } : null,
     };
   } catch {
@@ -634,6 +635,21 @@ export async function askCommand(command, { retryCsrf = true } = {}) {
  */
 export async function checkCommand(command) {
   return (await askCommand(command))?.refusal ?? null;
+}
+
+/**
+ * checkCommand for a create under a draft id. A draft id new to the server
+ * can only be answered version_required when an earlier send landed and its
+ * answer was lost, so that refuses nothing: the save swallows it the same way
+ * and carries on, and the entry can be retried.
+ *
+ * @param {object} command
+ * @returns {Promise<string | null>}
+ */
+export async function checkDraftCommand(command) {
+  const answer = await askCommand(command);
+  if (answer?.refusalCode === "version_required") return null;
+  return answer?.refusal ?? null;
 }
 
 /**
@@ -771,6 +787,10 @@ export async function approveReceipt(suggestion, fallbackHouseholdId, operationI
 /** The one sentence for a receipt that is recorded but whose documents failed. */
 const PARTIAL_APPROVAL_MESSAGE = "The item is recorded, but its documents need another try — try once more to finish.";
 
+/** The create forms' sentence for an item that is saved but whose picked
+ *  document was refused; the refusal's own words follow it. */
+export const PARTIAL_CREATE_MESSAGE = "The item is recorded, but its document needs another try — try once more to finish.";
+
 /**
  * Approve a mail receipt's suggestion under its per-receipt operation id —
  * the one call every screen makes. The id is made on the first try and kept
@@ -793,11 +813,31 @@ export async function approveWithOperation(suggestion, operationIds, fallbackHou
     operationId = crypto.randomUUID();
     operationIds.set(suggestion.receiptId, operationId);
   }
-  const result = await approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem, sectionId);
+  // The engine binds an operation id to the body it first carried, so a plain
+  // retry (no amendment given) re-sends the amendment and section sent first.
+  // A refusal (4xx) bound nothing, so it unpins and the next tap sends afresh;
+  // a lost answer may have been accepted, so the pin stays for the retry.
+  const pinned = pinnedApprovals.get(operationId);
+  if (pinned && !amendedItem) ({ amendedItem, sectionId } = pinned);
+  else pinnedApprovals.set(operationId, { amendedItem, sectionId });
+  let result;
+  try {
+    result = await approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem, sectionId);
+  } catch (error) {
+    if (error instanceof WorkspaceError && typeof error.status === "number" && error.status >= 400 && error.status < 500) {
+      pinnedApprovals.delete(operationId);
+    }
+    throw error;
+  }
   if (result.outcome === "partial_success") return { partial: true, message: PARTIAL_APPROVAL_MESSAGE };
   operationIds.delete(suggestion.receiptId);
+  pinnedApprovals.delete(operationId);
   return { ok: true };
 }
+
+/** What each kept operation id first sent, by operation id.
+ *  @type {Map<string, { amendedItem: ?ItemProposal, sectionId: ?string }>} */
+const pinnedApprovals = new Map();
 
 /**
  * Discard a mail-in receipt; its staged files are purged server-side.

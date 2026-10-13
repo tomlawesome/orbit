@@ -102,10 +102,10 @@ ENV HOST=0.0.0.0
 # adapter-node's server-wide request body limit (#1285). Its 512K default
 # refused every document over 512 KB. Set to the largest body any route may
 # take -- a portable-archive import at the archive format's cap, about
-# 171 MiB (#1290) -- and the request pipeline then holds each route to its
+# 342 MiB (#1290) -- and the request pipeline then holds each route to its
 # own, smaller limit (web/src/lib/server/body-limit.js, SERVER_BODY_LIMIT
 # must match this).
-ENV BODY_SIZE_LIMIT=172M
+ENV BODY_SIZE_LIMIT=343M
 ENV MIGRATE_ON_START=true
 ENV WORKER_ENABLED=true
 # Baked into the image config itself, so it is present in every container
@@ -191,12 +191,12 @@ RUN ORBIT_WEB_BUILD_ROOT=/opt/orbit/web node scripts/web-pdfjs-runtime-check.mjs
   && rm -f /opt/orbit/scripts/web-pdfjs-runtime-check.mjs
 COPY --chown=orbit:orbit scripts/recovery-crypto.mjs ./scripts/recovery-crypto.mjs
 COPY --chown=root:root scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
-# The eleven deployment assets, at the same relative paths an install uses
+# The twelve deployment assets, at the same relative paths an install uses
 # them at (ADR-0019). They travel with the digest, so the compose file an
 # operator runs and the image it configures are the same artifact, and an
 # install needs nothing but the registry. Root-owned data: the install engine
 # copies them into the deployment and sets its own modes (#1212).
-COPY --chown=root:root docker-compose.yml docker-compose.mail.yml .env-orbit.example ./deploy/
+COPY --chown=root:root docker-compose.yml docker-compose.mail.yml docker-compose.kek-rotation.yml .env-orbit.example ./deploy/
 COPY --chown=root:root config/tika-config.json ./deploy/config/
 COPY --chown=root:root \
   scripts/configure.sh \
@@ -206,6 +206,7 @@ COPY --chown=root:root \
   scripts/repair.sh \
   scripts/export-recovery-bundle.sh \
   scripts/import-recovery-bundle.sh \
+  scripts/end-maintenance.sh \
   ./deploy/scripts/
 # The bundled engine CLI (single file, no node_modules dependency at
 # runtime — see scripts/bundle-orbit-cli.mjs). Root-owned and read-only,

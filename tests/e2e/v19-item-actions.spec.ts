@@ -35,6 +35,14 @@ resetDatabaseBetweenSpecFiles();
    once cleanup existed, one worker hard-deleting the household another was
    still using. CI never showed it because CI pins workers to 1. Nothing
    asserts the name. */
+/* Reduced motion, as v19-home-drawer.spec.ts does for the same drawer: the
+   drawer's opening animation and home's smooth scrolling are instant, so
+   nothing is still moving under Playwright's actionability wait. On
+   desktop-webkit the press on "complete" waited ~1.6 s for a drawer that
+   was not stable, then landed while it was still settling and opened
+   nothing. The assertions hold in either mode. */
+test.use({ reducedMotion: "reduce" });
+
 const HOUSEHOLD_PREFIX = "Actions Proving Ground";
 const households = householdRegister();
 

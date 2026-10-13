@@ -133,10 +133,12 @@ Reasoning for each is in [docs/testing.md](docs/testing.md#local-traps).
 - `test-backup-restore.sh` seeds its own state with SQL and nothing else drives
   it: a dropped column fails only the compose smoke test. Grep it before any
   schema change.
-- No `pnpm install` from a worktree: it can rewire the main checkout. If it
-  recurs, `find node_modules web/node_modules -type l -lname '*worktrees*'` must
-  be empty in the main checkout; repair with `CI=true pnpm install` there, after
-  agreeing a window (it breaks other sessions' builds meanwhile).
+- `pnpm install` from a worktree is refused by `scripts/guard-worktree-install.mjs`
+  unless the worktree has its own `node_modules` (#784, #858). If the main
+  checkout is ever rewired again, `find node_modules web/node_modules -type l
+  -lname '*worktrees*'` must be empty there; repair with `CI=true pnpm install`
+  in the main checkout, after agreeing a window (it breaks other sessions' builds
+  meanwhile).
 - The web type check says SKIPPED in most worktrees, and that is correct (it
   would read another branch's `orbit/server/*`); run it in the main checkout.
 - A red compose smoke job can hide the next failure, because it stops at the
@@ -150,8 +152,8 @@ Reasoning for each is in [docs/testing.md](docs/testing.md#local-traps).
   the pin: discard the diff, run `node --test scripts/lockfile-no-pnpm-exe.test.mjs`
   before committing a lockfile change, and ask the owner to upgrade the host
   pnpm.
-- Only ten fonts exist on this host and anything else falls back silently;
-  check `fc-list : family` (list in `scripts/corpus/README.md`).
+- Only ten usable text fonts exist on this host; anything else falls back
+  silently; check `fc-list : family` (list in `scripts/corpus/README.md`).
 - `tmp/` is gitignored scratch for prototypes; the gates skip it. Nothing there
   is built or shipped.
 - Every tappable thing on the phone layout is at least 44x44px (`--p-hit`,

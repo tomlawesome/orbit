@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { randomUUID } from "node:crypto";
 import { AppError } from "@/lib/app-error";
 import { COST_MINOR_MAX } from "@/lib/domain";
 import { encryptPortableArchive } from "@/server/portable-archive";
@@ -351,6 +352,39 @@ describe("portable archive import refuses what the engine would not store (#1333
   });
 });
 
+describe("portable archive import keeps the household within the reader's 12 live sections (#1316)", () => {
+  const liveRows = (count: number) => Array.from({ length: count }, (_, index) => ({ id: `live-${index}`, slug: `live-${index}`, archivedAt: null }));
+  const archiveWithSections = (count: number) => encrypted({
+    format: "orbit-portable-archive",
+    version: 1,
+    household: { name: "Home" },
+    sections: Array.from({ length: count }, (_, index) => ({
+      id: index === 0 ? sectionId : randomUUID(), slug: `imported-${index}`, name: `Imported ${index}`, icon: "home", accent: "sage", position: index, visible: true, archivedAt: null,
+    })),
+    items: [{ id: item1Id, sectionId, title: "Boiler", subtype: null, provider: null, reference: null, currency: "GBP", status: "active" }],
+    documents: [],
+  });
+
+  it("refuses with a 422 naming the limit before writing anything", async () => {
+    seedHouseholdAccess();
+    queue(mocks.selectQueues, "sections", liveRows(9));
+    const error = await importPortableArchive({ userId, householdId, archive: archiveWithSections(4), passphrase, conflictItemIds: [] })
+      .then(() => undefined, (caught: unknown) => caught);
+    expect(error).toMatchObject({ code: "archive_sections_over_limit", status: 422 });
+    expect((error as AppError).message).toContain("12");
+    expect(mocks.insertCalls).toEqual([]);
+  });
+
+  it("does not count archived sections, which the reader never loads", async () => {
+    seedHouseholdAccess();
+    const archived = Array.from({ length: 3 }, (_, index) => ({ id: `old-${index}`, slug: `old-${index}`, archivedAt: new Date("2024-01-01T00:00:00.000Z") }));
+    queue(mocks.selectQueues, "sections", [...liveRows(11), ...archived]);
+    queue(mocks.selectQueues, "items", []);
+    await importPortableArchive({ userId, householdId, archive: archiveWithSections(1), passphrase, conflictItemIds: [] });
+    expect(mocks.insertCalls.filter((call) => call.table === "sections")).toHaveLength(1);
+  });
+});
+
 describe("portable archive import (#1151 A2-F3, A2-S2)", () => {
   function fullArchive() {
     return encrypted({
@@ -358,7 +392,7 @@ describe("portable archive import (#1151 A2-F3, A2-S2)", () => {
       version: 1,
       household: { name: "Home" },
       sections: [{
-        id: sectionId, slug: "insurance", name: "Insurance", icon: "shield", accent: "blue",
+        id: sectionId, slug: "insurance", name: "Insurance", icon: "service", accent: "blue",
         position: 0, visible: true, archivedAt: "2024-01-01T00:00:00.000Z",
       }],
       items: [
@@ -423,7 +457,7 @@ describe("portable archive import is all-or-nothing (#1151 RANGE-R2)", () => {
       version: 1,
       household: { name: "Home" },
       sections: [{
-        id: sectionId, slug: "insurance", name: "Insurance", icon: "shield", accent: "blue",
+        id: sectionId, slug: "insurance", name: "Insurance", icon: "service", accent: "blue",
         position: 0, visible: true, archivedAt: null,
       }],
       items: [

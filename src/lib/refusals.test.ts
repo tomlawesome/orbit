@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { completionRefusal, costMinorOf, itemRefusal, Refusal, refusalWords } from "./refusals";
+import { completionRefusal, costMinorOf, itemRefusal, Refusal, refusalCodes, refusalWords } from "./refusals";
 
 /* ADR-0034, #1325: the rules and the member's words moved here from the
    browser (create/entry.js refusalOf, editing/item-draft.js editsOf, the
@@ -57,8 +57,41 @@ describe("itemRefusal names the first thing missing, in the browser's order", ()
     expect(itemRefusal(filled({ dueDate: undefined }), "service")).toBe("repeatNeedsDate");
     expect(itemRefusal(filled({ dueDate: undefined }), "document")).toBeNull();
     expect(itemRefusal(filled({ dueDate: undefined }), "suggestion")).toBeNull();
-    expect(itemRefusal(filled({ dueDate: undefined }), undefined)).toBeNull();
+    expect(itemRefusal(filled({ dueDate: undefined }), undefined)).not.toBe("repeatNeedsDate");
     expect(itemRefusal(filled({ dueDate: undefined, recurrenceMonths: 0 }), "service")).toBeNull();
+  });
+
+  /* #1316 A4-F3, owner decision 2026-10-11 (option b): an upsert with no type
+     and none derivable is refused whatever its date or repeat, because a
+     kindless save quietly drops the schedule it was given. */
+  describe("refuses an item with no type, whatever its date or repeat (#1316 A4-F3)", () => {
+    const kindWords = "not yet — choose a type";
+    const kindCode = "item_kind_missing";
+    const boiler = { title: "Boiler", sectionId: "s", cost: undefined, reminderDays: undefined };
+
+    it.each([
+      ["a due date", { dueDate: "2026-11-02", recurrenceMonths: undefined }],
+      ["a repeat and no date", { dueDate: undefined, recurrenceMonths: 12 }],
+      ["a date and a repeat", { dueDate: "2026-11-02", recurrenceMonths: 12 }],
+      ["no date and no repeat", { dueDate: undefined, recurrenceMonths: undefined }],
+    ])("with %s and no kind, in the member's words and code", (_label, dates) => {
+      for (const kind of [undefined, null]) {
+        const rule = itemRefusal({ ...boiler, ...dates }, kind);
+        expect(rule).not.toBeNull();
+        expect(refusalWords[rule!]).toBe(kindWords);
+        expect(refusalCodes[rule!]).toBe(kindCode);
+      }
+    });
+
+    it("carries the 422, code and words on a Refusal", () => {
+      const rule = itemRefusal({ ...boiler, dueDate: "2026-11-02" }, undefined)!;
+      expect(new Refusal(rule)).toMatchObject({ status: 422, code: kindCode, message: kindWords });
+    });
+
+    it("still accepts the same item once a type is chosen", () => {
+      expect(itemRefusal({ ...boiler, dueDate: "2026-11-02" }, "service")).toBeNull();
+      expect(itemRefusal({ ...boiler, dueDate: undefined, recurrenceMonths: undefined }, "document")).toBeNull();
+    });
   });
 
   it("holds the reminders to eight, each at most 365 days before", () => {

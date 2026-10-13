@@ -245,9 +245,11 @@ describe("checkCorrespondence (restore.sh:205-332,658-736, guarantee #9)", () =>
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("refuses when a transient (in-flight) document lifecycle row exists", () => {
+  // #1316: the restore only needs every referenced object present at its
+  // size; an in-flight document count is not part of that.
+  it("still accepts when the transient (in-flight) document count is 1", () => {
     const root = documentsRootWithObject();
-    expect(checkCorrespondence({ ...baseReports(), transientCount: "1" }, root)).toBe(false);
+    expect(checkCorrespondence({ ...baseReports(), transientCount: "1" }, root)).toBe(true);
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -273,13 +275,32 @@ describe("checkCorrespondence (restore.sh:205-332,658-736, guarantee #9)", () =>
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("refuses an orphaned on-disk object with no referencing database row", () => {
+  it("accepts an extra well-placed objects/xx/yy/<sha>.bin that no report references", () => {
     const root = documentsRootWithObject();
-    const orphanKey = "b".repeat(64);
-    const orphanDir = join(root, "objects", orphanKey.slice(0, 2), orphanKey.slice(2, 4));
-    mkdirSync(orphanDir, { recursive: true });
-    writeFileSync(join(orphanDir, `${orphanKey}.bin`), Buffer.alloc(3, 1));
-    expect(checkCorrespondence(baseReports(), root)).toBe(false);
+    const extraKey = "b".repeat(64);
+    const extraDir = join(root, "objects", extraKey.slice(0, 2), extraKey.slice(2, 4));
+    mkdirSync(extraDir, { recursive: true });
+    writeFileSync(join(extraDir, `${extraKey}.bin`), Buffer.alloc(3, 1));
+    expect(checkCorrespondence(baseReports(), root)).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("accepts an extra staging/<sha>.bin that no report references", () => {
+    const root = documentsRootWithObject();
+    const extraKey = "d".repeat(64);
+    writeFileSync(join(root, "staging", `${extraKey}.bin`), Buffer.alloc(3, 1));
+    expect(checkCorrespondence(baseReports(), root)).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("accepts both extra unreferenced files together with a transient count of 1", () => {
+    const root = documentsRootWithObject();
+    const extraKey = "b".repeat(64);
+    const extraDir = join(root, "objects", extraKey.slice(0, 2), extraKey.slice(2, 4));
+    mkdirSync(extraDir, { recursive: true });
+    writeFileSync(join(extraDir, `${extraKey}.bin`), Buffer.alloc(3, 1));
+    writeFileSync(join(root, "staging", `${"d".repeat(64)}.bin`), Buffer.alloc(3, 1));
+    expect(checkCorrespondence({ ...baseReports(), transientCount: "1" }, root)).toBe(true);
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -351,6 +372,50 @@ describe("checkCorrespondence (restore.sh:205-332,658-736, guarantee #9)", () =>
       staging: "",
       documentStaging: `${documentId36}|${STORAGE_KEY}|pending|${CONTENT.length}\n`,
       transientCount: "0",
+    };
+    expect(checkCorrespondence(reports, root)).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  // #1316: interrupted atomic writes leave `<name>.<16 hex>.tmp` files beside
+  // real objects; the storage sweep removes them later, so they must not be
+  // counted as orphans or abort the walk.
+  it("ignores a leftover <key>.bin.<hex>.tmp file beside a referenced object in objects/", () => {
+    const root = documentsRootWithObject();
+    const objectDir = join(root, "objects", STORAGE_KEY.slice(0, 2), STORAGE_KEY.slice(2, 4));
+    writeFileSync(join(objectDir, `${STORAGE_KEY}.bin.0123456789abcdef.tmp`), Buffer.alloc(4, 9));
+    expect(checkCorrespondence(baseReports(), root)).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("ignores a leftover <key>.bin.<hex>.tmp file beside a referenced object in staging/", () => {
+    const root = mkdtempSync(join(tmpdir(), "orbit-correspondence-staging-tmp-"));
+    mkdirSync(join(root, "objects"), { recursive: true });
+    mkdirSync(join(root, "staging"), { recursive: true });
+    writeFileSync(join(root, "staging", `${STORAGE_KEY}.bin`), CONTENT);
+    writeFileSync(join(root, "staging", `${STORAGE_KEY}.bin.0123456789abcdef.tmp`), Buffer.alloc(4, 9));
+    const reports: CorrespondenceReports = {
+      crypto: "",
+      visible: "",
+      attachments: "",
+      staging: "",
+      documentStaging: `${"1".repeat(36)}|${STORAGE_KEY}|pending|${CONTENT.length}\n`,
+      transientCount: "0",
+    };
+    expect(checkCorrespondence(reports, root)).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("ignores .tmp files in both objects/ and staging/ together", () => {
+    const root = documentsRootWithObject();
+    const objectDir = join(root, "objects", STORAGE_KEY.slice(0, 2), STORAGE_KEY.slice(2, 4));
+    writeFileSync(join(objectDir, `${STORAGE_KEY}.bin.0123456789abcdef.tmp`), Buffer.alloc(4, 9));
+    const stagedKey = "c".repeat(64);
+    writeFileSync(join(root, "staging", `${stagedKey}.bin`), CONTENT);
+    writeFileSync(join(root, "staging", `${stagedKey}.bin.0123456789abcdef.tmp`), Buffer.alloc(4, 9));
+    const reports: CorrespondenceReports = {
+      ...baseReports(),
+      documentStaging: `${"1".repeat(36)}|${stagedKey}|pending|${CONTENT.length}\n`,
     };
     expect(checkCorrespondence(reports, root)).toBe(true);
     rmSync(root, { recursive: true, force: true });

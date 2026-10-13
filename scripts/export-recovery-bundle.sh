@@ -13,8 +13,15 @@ repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_dir"
 
 readonly environment_file="${ORBIT_ENV_FILE:-.env-orbit}"
-readonly backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
-readonly secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
+# A relative directory is relative to the deployment directory; passed bare to -v it would be a named volume.
+backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
+[[ "$backup_directory" == /* ]] || backup_directory="$repo_dir/$backup_directory"
+readonly backup_directory
+secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
+[[ "$secrets_directory" == /* ]] || secrets_directory="$repo_dir/$secrets_directory"
+readonly secrets_directory
+# The engine one-off's container name: unique to this run, so the EXIT trap can `docker wait` for it.
+readonly engine_name="orbit-export-engine-$$"
 
 fail() { printf 'Orbit recovery export: %s\n' "$*" >&2; exit 1; }
 # --- Shared by backup.sh, restore.sh, export-recovery-bundle.sh and ----------
@@ -29,7 +36,9 @@ read_environment_value() {
   local requested_key="$1" line value="" found=0
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "${requested_key}="* ]]; then
+      # A CRLF .env-orbit is valid; drop the CR.
       value="${line#*=}"
+      value="${value%$'\r'}"
       found=1
     fi
   done < "$environment_file"
@@ -126,7 +135,10 @@ engine_host_identity() {
   # Read whole, then matched: `docker info | grep -q` under pipefail could
   # report a SIGPIPE'd docker as "not rootless", the dangerous answer here.
   local security_options
-  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null || true)"
+  # Fail closed: a guessed "not rootless" hands the files to a uid the
+  # operator cannot reach.
+  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null)" ||
+    fail "Could not tell whether Docker is rootless, so refusing to guess who should own the deployment files. Check that 'docker info' works, then rerun."
   if [[ "$security_options" == *rootless* ]]; then
     host_uid=0
     host_gid=0
@@ -141,13 +153,14 @@ engine_host_identity() {
 # the bundle being read is mounted read-only. The ORBIT_HOST_* paths let the
 # engine print host paths. The drill's switches are forwarded when set (the
 # engine ignores the ones its command does not use). Exit status passes through.
+# The one-off is named $engine_name so an EXIT trap can wait for it to end.
 run_engine() {
   local input_file="$1" name
   shift
-  local -a run_args=(run --rm --no-deps -i) directory_args=()
+  local -a run_args=(run --rm --no-deps --name "$engine_name" -i) directory_args=()
   if [[ -t 0 && -t 1 ]]; then run_args+=(-t); else run_args+=(-T); fi
   run_args+=(-e "ORBIT_HOST_UID=$host_uid" -e "ORBIT_HOST_GID=$host_gid" -e "ORBIT_HOST_DEPLOY_DIR=$repo_dir")
-  for name in ORBIT_NONINTERACTIVE_RESTORE ORBIT_RECOVERY_TEST_MODE ORBIT_RESTORE_TEST_MODE ORBIT_RESTORE_TEST_SYNC_FAILURE_STAGE \
+  for name in ORBIT_NONINTERACTIVE_RESTORE ORBIT_RECOVERY_PROMPTS ORBIT_RECOVERY_TEST_MODE ORBIT_RESTORE_TEST_MODE ORBIT_RESTORE_TEST_SYNC_FAILURE_STAGE \
     ORBIT_RESTORE_TEST_FAILURE_STAGE ORBIT_RESTORE_TEST_CHECKPOINT_FAILURE ORBIT_RESTORE_TEST_HARD_INTERRUPT_STAGE; do
     [[ -z "${!name:-}" ]] || run_args+=(-e "$name=${!name}")
   done
@@ -171,8 +184,8 @@ run_engine() {
 health_probe_url() {
   local bind_address port
 
-  bind_address="$(awk -F= '$1 == "ORBIT_BIND_ADDRESS" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
-  port="$(awk -F= '$1 == "ORBIT_PORT" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  bind_address="$(awk -F= '$1 == "ORBIT_BIND_ADDRESS" { sub(/\r$/, ""); sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  port="$(awk -F= '$1 == "ORBIT_PORT" { sub(/\r$/, ""); sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
   # An exported value wins over the file, exactly as it does for Compose's
   # own interpolation, so the probe reaches the port Compose published (#1241).
   bind_address="${ORBIT_BIND_ADDRESS:-${bind_address:-0.0.0.0}}"

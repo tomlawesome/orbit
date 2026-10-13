@@ -96,7 +96,7 @@ describe("#1245: the desk form's save attaches the picked document", () => {
 
   it("uploads the attachment onto the draft's item, and no longer says documents are unwired", () => {
     expect(behaviour).not.toMatch(/not wired up yet/u);
-    expect(submitHandler).toMatch(/attachItemDocument\(active\.id, draftId, attachment, attachmentId\)/u);
+    expect(submitHandler).toMatch(/attachItemDocument\(active\.id, draftId, held\.attachment, held\.attachmentId\)/u);
   });
 
   it("mints the document id per file picked, not per save attempt", () => {

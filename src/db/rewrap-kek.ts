@@ -72,7 +72,8 @@ async function main(): Promise<void> {
     const before = await rotationRemaining(keys);
     process.stdout.write(
       `Starting rewrap: ${before.documentsRemaining} document(s), ${before.metadataKeysRemaining} metadata key(s), `
-      + `${before.mailInSecretsRemaining} mail-in secret(s) to move from ${keys.currentKeyId} to ${keys.nextKeyId}.\n`,
+      + `${before.mailInSecretsRemaining} mail-in secret(s), ${before.heldAttachmentsRemaining} held mail attachment(s), `
+      + `${before.stagingObjectsRemaining} scanner-recovery object(s) to move from ${keys.currentKeyId} to ${keys.nextKeyId}.\n`,
     );
     await runKekRotationToCompletion(keys);
     await recordRotationCompleted(keys);

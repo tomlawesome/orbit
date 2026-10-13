@@ -15,7 +15,7 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 
 import { acquireDeployLock } from "./deploy-lock";
-import { ENV_ORBIT_SCHEMA_VERSION, parseEnvOrbitContent, type EnvOrbitFailureCode } from "./env-orbit-file";
+import { ENV_ORBIT_SCHEMA_VERSION, decodeUtf8Strict, parseEnvOrbitContent, type EnvOrbitFailureCode } from "./env-orbit-file";
 import { applyHostOwnership } from "./host-ownership";
 
 // The .env-orbit configuration contract's preflight and migration: the
@@ -50,10 +50,12 @@ export interface ConfigurationCommandResult {
   stdout: string;
   /** The single failure code configuration.sh printed on stderr (empty on success). */
   stderr: string;
+  /** The setting a removed, unknown or secret-conflict refusal is about; never printed, so the stdout/stderr contract is unchanged. */
+  key?: string;
 }
 
-function failure(code: ConfigurationFailureCode, stdout = ""): ConfigurationCommandResult {
-  return { status: 1, stdout, stderr: `${code}\n` };
+function failure(code: ConfigurationFailureCode, stdout = "", key?: string): ConfigurationCommandResult {
+  return key === undefined ? { status: 1, stdout, stderr: `${code}\n` } : { status: 1, stdout, stderr: `${code}\n`, key };
 }
 
 const DEPRECATED_SECRET_KEYS = new Set([
@@ -106,7 +108,10 @@ function readConfiguration(file: string): ParseOutcome {
   } finally {
     closeSync(descriptor);
   }
-  const content = raw.toString("utf8");
+  // Never decode lossily: the file is rebuilt from this string, so a replaced
+  // byte would silently change a value on disk.
+  const content = decodeUtf8Strict(raw);
+  if (content === undefined) return { ok: false, result: failure("configuration_syntax", "not_utf8 configuration\n") };
   const parsed = parseEnvOrbitContent(content, { refuseSecretConflicts: true });
   if (!parsed.ok) {
     const stdout =
@@ -115,7 +120,7 @@ function readConfiguration(file: string): ParseOutcome {
         : parsed.code === "configuration_unknown_key"
           ? "unknown configuration\n"
           : "";
-    return { ok: false, result: failure(parsed.code, stdout) };
+    return { ok: false, result: failure(parsed.code, stdout, parsed.key) };
   }
   const values = parsed.record as Record<string, string>;
   return { ok: true, parsed: { raw, content, keys: Object.keys(values), values, schemaPresent: parsed.schemaPresent } };
@@ -475,10 +480,38 @@ export type ConfigurationPreflightOutcome = { ok: true } | { ok: false; message:
  * transaction (src/lib/install-transaction.ts), so a failure rolls back.
  */
 export function runConfigurationPreflight(environmentFile: string): ConfigurationPreflightOutcome {
-  if (installPreflightCommand(environmentFile).status !== 0) {
-    return { ok: false, message: "Configuration preflight failed; restoring the previous deployment." };
-  }
+  const result = installPreflightCommand(environmentFile);
+  if (result.status !== 0) return { ok: false, message: preflightFailureMessage(result) };
   return { ok: true };
+}
+
+// An undecodable file is reported only as "not_utf8" on stdout, which the
+// installer never shows; without naming the encoding an operator whose editor
+// saved .env-orbit as cp1252 is rolled back with nothing to say why.
+export const NOT_UTF8_FAILURE_MESSAGE =
+  ".env-orbit is not valid UTF-8; re-save it as UTF-8 and run the install again (restoring the previous deployment).";
+
+export function isNotUtf8Failure(result: ConfigurationCommandResult): boolean {
+  return result.status !== 0 && result.stdout.startsWith("not_utf8");
+}
+
+// Names the offending line where the parser knows it: without the key an
+// operator whose file still carries a retired setting is rolled back with
+// nothing to say which line to fix, and stays blocked.
+function preflightFailureMessage(result: ConfigurationCommandResult): string {
+  if (isNotUtf8Failure(result)) return NOT_UTF8_FAILURE_MESSAGE;
+  const { key } = result;
+  if (key !== undefined) {
+    switch (result.stderr.trim()) {
+      case "configuration_removed_key":
+        return `Configuration preflight failed: .env-orbit still has ${key}, a setting this release removed (inbound mail is now set up in Administration); delete that line and rerun the update.`;
+      case "configuration_unknown_key":
+        return `Configuration preflight failed: .env-orbit has ${key}, which is not an Orbit setting; delete or correct that line and rerun the update.`;
+      case "configuration_secret_conflict":
+        return `Configuration preflight failed: .env-orbit sets both ${key} and ${key}_FILE; keep only one of them and rerun the update.`;
+    }
+  }
+  return "Configuration preflight failed; restoring the previous deployment.";
 }
 
 export type ConfigurationMigrationOutcome = { ok: true; message: string } | { ok: false; message: string };
@@ -500,6 +533,7 @@ export function runConfigurationMigration(target: ConfigurationMigrationTarget):
 
 /** runConfigurationMigration's decision on one migration result. */
 export function classifyMigrationResult(result: ConfigurationCommandResult): ConfigurationMigrationOutcome {
+  if (isNotUtf8Failure(result)) return { ok: false, message: NOT_UTF8_FAILURE_MESSAGE };
   if (result.status !== 0) {
     return { ok: false, message: "Configuration migration failed; restoring the previous deployment." };
   }

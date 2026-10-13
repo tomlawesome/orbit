@@ -44,9 +44,13 @@ import {
 
 /**
  * A staged object wrapped under a key id this instance does not hold (#1260),
- * for instance after a restore onto an instance with different keys. The
- * failure is permanent, so it ends the recovery terminally with the stage
- * purged, like a stage that fails authentication, and is never retried.
+ * for instance after a restore onto an instance with different keys, a wrong
+ * key mount, or a key rotation finished before the stage was scanned. Each of
+ * those can be put right by giving the instance the key back, so the job is
+ * retried as `key_unavailable` (and, once its attempts run out, waits as a
+ * failed job an administrator can retry) until the key returns or the stage's
+ * recovery expiry passes; the expiry purge is the terminal end, never this
+ * error.
  */
 export class StagingKeyNotHeldError extends Error {
   constructor() {
@@ -283,8 +287,12 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
       return;
     }
     if (finalStorageKey) await storage.deleteCiphertext(finalStorageKey).catch(() => undefined);
-    if (error instanceof StagingKeyNotHeldError
-      || (error instanceof Error && /authentication|invalid|unsupported|size|enoent|no such file/i.test(error.message))) {
+    // Never purged here: the staged copy is the only one, and the key can come back.
+    if (error instanceof StagingKeyNotHeldError) {
+      await failScannerRecoveryJob(job, "key_unavailable");
+      return;
+    }
+    if (error instanceof Error && /authentication|invalid|unsupported|size|enoent|no such file/i.test(error.message)) {
       await purgeScannerStage(job, record, "staging_object_invalid");
       return;
     }

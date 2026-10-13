@@ -191,6 +191,9 @@ no misleading success is written to the audit trail.
 - A failed scanner recovery job can be retried from attempt zero. Its recovery
   expiry does not change. A failed final stage purge can be retried as a
   deletion only; it never goes back into scanning.
+- A staged upload wrapped under a key this instance does not hold is never
+  deleted for that reason: its job retries as `key_unavailable` until you put
+  the key back, or until its recovery expiry rejects it.
 - A restore keeps a scanner job's attempt count and its failed or manual
   state; only live pending, retry or processing leases are put back in the
   queue.
@@ -220,7 +223,8 @@ administrator and tries the control during maintenance gets the same bounded
 `503` as on any other path; from outside, the control cannot be found or
 used.
 
-Sign-in stays open during maintenance: the sign-in page and the OIDC login,
+Sign-in stays open during maintenance: the sign-in page, the emailed
+sign-in approval page, setup and recovery links, and the OIDC login,
 callback, session and logout routes are exempt. So the ordinary way back in
 is to sign in and end maintenance from the control.
 
@@ -447,11 +451,11 @@ key-encryption key" is the master key that protects each document's own key.
 | `SESSION_SECRET_FILE` | Orbit | File containing the session-signing secret. The Compose stack sets this to `/run/orbit-secrets/orbit-session-secret`. | `.orbit-secrets/session-secret` |
 | `SESSION_TTL_SECONDS` | Orbit | How long a sign-in lasts, in seconds. | `604800` |
 | `DOCUMENTS_ROOT` | Orbit | Where encrypted documents are kept inside the container. | `/var/lib/orbit/documents` |
-| `DOCUMENTS_QUARANTINE_ROOT` | Orbit | Temporary holding area for an upload while it is scanned; Compose supplies a private in-memory folder that disappears on restart. | `/tmp/orbit-document-quarantine` |
+| `DOCUMENTS_QUARANTINE_ROOT` | Orbit | Temporary holding area for an upload while it is scanned; Compose supplies a private 256 MiB in-memory folder that disappears on restart; it must hold two uploads at the 100 MiB size-limit ceiling, and a member who finds it full is told to try again shortly. | `/tmp/orbit-document-quarantine` |
 | `DOCUMENT_KEK` | Orbit | Direct 32-byte hexadecimal document key-encryption key. Leave empty when the file form is used. | `<64-character-random-hex>` |
 | `DOCUMENT_KEK_FILE` | Orbit | File containing the document key-encryption key. Compose mounts the generated file at `/run/orbit-secrets/orbit-document-kek`. | `.orbit-secrets/document-kek` |
 | `DOCUMENT_KEK_NEXT` / `DOCUMENT_KEK_NEXT_FILE` | Orbit | Second document key-encryption key, held alongside the first only while a key rotation is in progress (#954). Set only via the `docker-compose.kek-rotation.yml` overlay — see "Rotating the document key-encryption key" in `docs/administrator-operations.md`. | `<64-character-random-hex>` |
-| `DOCUMENT_MAX_BYTES` | Orbit | Largest upload accepted, in bytes, until an administrator sets their own limit under "Upload size limit" in Administration (1 to 100 MiB, no restart). "use the default" there goes back to this value. Allowed: 1048576 to 104857600. | `52428800` |
+| `DOCUMENT_MAX_BYTES` | Orbit | Largest upload accepted, in bytes, until an administrator sets their own limit under "Upload size limit" in Administration (1 to 100 MiB, no restart). "use the default" there goes back to this value. Allowed: 1048576 to 104857600. Mail-in has a separate fixed cap of 25 MiB per message and per set of attachments, so a higher limit does not raise what mail accepts. | `52428800` |
 | `DOCUMENT_HOUSEHOLD_QUOTA_BYTES` | Orbit | Most document storage one household may keep. | `5368709120` |
 | `DOCUMENT_INSTANCE_QUOTA_BYTES` | Orbit | Most document storage the whole instance may keep. | `21474836480` |
 | `DOCUMENT_RETENTION_DAYS` | Orbit | Days a deleted document can still be restored before it is purged for good. | `30` |
@@ -467,7 +471,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `OLLAMA_MODEL` | Orbit and Compose | The local model the private model server uses and the pull helper fetches. | `<a-local-model-name>` |
 | `OLLAMA_MEMORY_LIMIT` / `OLLAMA_CPUS` | Compose | Memory and CPU limits for the model server. | `6g` / `2.0` |
 | `OLLAMA_MAX_QUEUE` / `OLLAMA_KEEP_ALIVE` | Compose | Most requests the model server queues, and how long it keeps a model loaded after use. | `8` / `0` |
-| `DATABASE_URL` | Orbit | Complete PostgreSQL connection URL. Leave empty when using the individual PostgreSQL settings. | `postgres://orbit:example-password@postgres:5432/orbit` |
+| `DATABASE_URL` | Orbit | Complete PostgreSQL connection URL. Leave empty when using the individual PostgreSQL settings. Backup, restore and recovery export cover only the bundled `orbit-db` database and refuse to run while this or `DATABASE_URL_FILE` is set. | `postgres://orbit:example-password@postgres:5432/orbit` |
 | `DATABASE_URL_FILE` | Orbit | File containing a complete database URL instead of `DATABASE_URL`. | `/run/secrets/orbit-database-url` |
 | `POSTGRES_HOST` | Orbit | PostgreSQL hostname. Compose overrides the host-local default with the database service name. | `localhost` |
 | `POSTGRES_PORT` | Orbit | PostgreSQL TCP port. | `5432` |
@@ -501,7 +505,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `MIGRATE_ON_START` | Orbit | Applies pending database migrations at startup. Compose sets this to `true`. | `false` |
 | `WORKER_ENABLED` | Orbit | Runs the notification scheduler inside the application container. Compose sets this to `true`. | `false` |
 | `DRIZZLE_MIGRATIONS_PATH` | Orbit | Directory containing versioned SQL migrations. | `drizzle` |
-| `ORBIT_SECRETS_DIR` | Compose | Host directory containing files mounted as Compose secrets. | `./.orbit-secrets` |
+| `ORBIT_SECRETS_DIR` | Retired | The secrets directory is fixed at `./.orbit-secrets`. Configure and install refuse any other value; move the files there and remove the setting. | `./.orbit-secrets` |
 
 Inbound mail (the mailbox Orbit polls for incoming statements and documents)
 is not set here any more. An instance administrator sets it on the
@@ -537,7 +541,7 @@ deployment configuration.
 To configure inbound mail:
 
 1. Configure SMTP first, and deploy the mail overlay so the SMTP password is
-   mounted from `${ORBIT_SECRETS_DIR}/smtp-password`. Put it there from a
+   mounted from `.orbit-secrets/smtp-password`. Put it there from a
    secret manager or a private editor, not a command argument. The path must
    be a non-empty ordinary file, not a symbolic link, and readable only by the
    deployment operator.
@@ -767,13 +771,12 @@ bash scripts/export-recovery-bundle.sh backups/orbit-<timestamp>.tar
 Run them from the deployment directory. Each runs the Orbit engine's own
 command (`orbit backup`, then `orbit export-recovery-bundle <backup.tar>`)
 inside the deployment, as a one-off container on the app service, so the host
-needs Docker and nothing else.
+needs Docker with Compose v2 and nothing else.
 
-`export-recovery-bundle.sh` asks for the passphrase twice, then locks the live
-`DOCUMENT_KEK` under it
-passphrase you choose (the passphrase is stretched with scrypt and the key
-encrypted with AES-256-GCM) and packages it with the backup you just made into
-one file, `orbit-recovery-<timestamp>.tar`.
+`export-recovery-bundle.sh` asks for a passphrase of your choice twice, then
+locks the live `DOCUMENT_KEK` under it (the passphrase is stretched with scrypt
+and the key encrypted with AES-256-GCM) and packages it with the backup you
+just made into one file, `orbit-recovery-<timestamp>.tar`.
 
 Keep its two parts apart: the bundle file on storage separate from this
 instance, and its passphrase in a password manager or on paper — never both
@@ -856,8 +859,9 @@ restart the exact deployed image:
    re-encrypting and no backfill runs, because the values were never changed.
 
 If the key is really gone and no recovery bundle holds it, this is not a
-restore. Encrypted documents and Tier 1 metadata are unrecoverable by design
-when both the key and the bundle are lost; that is the whole point of the
+restore. Encrypted documents and Tier 1 and Tier 2 metadata, every account
+address included, are unrecoverable by design when both the key and the bundle
+are lost; that is the whole point of the
 encryption. The way back is to restore both the database and the key from a
 backup that has them together (ADR-0004).
 
@@ -875,6 +879,13 @@ application holds **both** the current key and the next one
 (`DOCUMENT_KEK_NEXT`, #954, ADR-0024 decision 4). Every row records which key
 protects it, so every row stays readable whether or not the rewrap worker has
 reached it yet. No maintenance window is needed at any step below.
+
+Take a backup (`bash scripts/backup.sh`) just before step 1, and another
+straight after step 4. In between, backups and recovery-bundle exports are
+refused, including the scheduled nightly one: rows written during the
+rotation are under the next key, which a backup does not carry, so it could
+not bring them back. They work again as soon as step 4 is done (or the
+rotation is undone).
 
 1. Generate a fresh key and put it where the rotation overlay expects it,
    with owner-only permissions:
@@ -920,8 +931,12 @@ reached it yet. No maintenance window is needed at any step below.
    ```sh
    pnpm rewrap-kek --next-key-file .orbit-secrets/document-kek-next
    ```
-   It reports progress and keeps going until every `document_crypto`,
-   `metadata_keys` and `mail_in_secrets` row is under the next key. You can
+   It reports progress and keeps going until every row in all five places
+   that hold a wrapped key is under the next key: `document_crypto` (stored
+   documents), `metadata_keys`, `mail_in_secrets`,
+   `imap_ingestion_attachments` (mailed attachments waiting for a household)
+   and `document_staging_objects` (uploads held while the scanner was down).
+   You can
    stop it (Ctrl-C, a crash, a host reboot) and run it again; it carries on
    from where it was. Every row it has not reached is still readable under
    the current key, and every row it has moved is readable under the next
@@ -945,6 +960,9 @@ reached it yet. No maintenance window is needed at any step below.
    current; nothing needs to know the id in advance. Dropping the overlay (by
    deploying with just `docker-compose.yml` again) removes
    `DOCUMENT_KEK_NEXT`; with the rewrap complete, no row depended on it.
+
+   Now take the backup (`bash scripts/backup.sh`): it is the first one since
+   step 1 that holds everything written during the rotation.
 
 ### If you are rotating because a key may have leaked
 

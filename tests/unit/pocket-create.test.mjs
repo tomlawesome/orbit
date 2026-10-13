@@ -102,7 +102,7 @@ describe("the entry's fields", () => {
       kind: "inspection",
       item: {
         id: "new-1", sectionId: "s-vehicles", title: "Car MOT", provider: "Kwik Fit", cost: "54.85",
-        currency: "GBP", dueDate: "2027-03-01", recurrenceMonths: 12, reminderDays: [21, 7],
+        currency: "GBP", dueDate: "2027-03-01", recurrenceMonths: 12, reminderDays: [14, 3],
       },
     });
     expect(command.item).not.toHaveProperty("assignee");
@@ -153,7 +153,7 @@ describe("review mode: amending what the relay read (#1120, §2.5, §2.6)", () =
     expect(item).toMatchObject({
       title: "Home insurance renewal", provider: "Harbour Mutual plc", cost: "412", currency: "GBP",
       dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, kind: "renewal",
-      reminderDays: [21, 7],
+      reminderDays: [14, 3],
     });
     expect(item).not.toHaveProperty("sectionId");
   });

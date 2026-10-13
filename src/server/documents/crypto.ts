@@ -249,20 +249,23 @@ export function decryptDocument(
   }
 }
 
-/** Rewraps a DEK without decrypting or rewriting document ciphertext. */
+/** Rewraps a DEK without decrypting or rewriting document ciphertext. The
+ * purpose must match the one the DEK was wrapped under: a scanner-recovery
+ * staging object's DEK carries its own AAD. */
 export function rewrapDocumentKey(
   documentId: string,
   envelope: CryptoEnvelope,
   currentKeyEncryptionKey: Buffer,
   nextKeyEncryptionKey: Buffer,
   nextKeyId: string,
+  purpose: DocumentEncryptionContext["purpose"] = "document",
 ): CryptoEnvelope {
-  const documentKey = unwrapDocumentKey(documentId, envelope, currentKeyEncryptionKey);
+  const documentKey = unwrapDocumentKey(documentId, envelope, currentKeyEncryptionKey, purpose);
   try {
     return {
       ...envelope,
       keyId: nextKeyId,
-      ...wrapDocumentKey(documentKey, documentId, nextKeyEncryptionKey, nextKeyId),
+      ...wrapDocumentKey(documentKey, documentId, nextKeyEncryptionKey, nextKeyId, purpose),
     };
   } finally {
     documentKey.fill(0);

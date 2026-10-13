@@ -1077,29 +1077,46 @@ describe("authenticated encrypted document lifecycle", () => {
     });
   });
 
-  it("purges a staged object under a key this instance does not hold, instead of retrying it forever (#1260)", async () => {
+  it("keeps a staged object under a key this instance does not hold recoverable until its recovery expiry, then rejects it (#1316 A2-S1)", async () => {
     const fixture = await createIntegrationFixture("document-scan-unheld-key-stage");
     const documentId = randomUUID();
-    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "protocol" });
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
     await withRequiredScanMode(async () => {
       expect((await uploadWithFilename(fixture, "policy.pdf", documentId)).response.status).toBe(202);
-      const [stage] = await getDb().select({ storageKey: documentStagingObjects.storageKey })
+      const [stageBefore] = await getDb().select({ storageKey: documentStagingObjects.storageKey, recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt })
         .from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId));
       // The backup drill's fixture: a stage wrapped under a key id that is
-      // neither the current nor the next key here.
+      // neither the current nor the next key here. The key may simply not be
+      // loaded yet, so the stage must survive until its recovery window ends.
       await getDb().update(documentStagingObjects).set({ keyId: "key-this-instance-never-held" })
         .where(eq(documentStagingObjects.documentId, documentId));
       const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
       await getDb().update(documentJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) })
         .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
       await runDocumentMaintenanceCycle();
-      expect(await getDb().select({ status: documentJobs.status }).from(documentJobs)
+
+      expect(await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId)))
+        .toEqual([{ lifecycle: "scanning" }]);
+      expect(await getDb().select({ status: documentStagingObjects.status, recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt })
+        .from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId)))
+        .toEqual([{ status: "pending", recoveryExpiresAt: stageBefore!.recoveryExpiresAt }]);
+      expect(await storage.stagingExists(stageBefore!.storageKey)).toBe(true);
+      await expect(storage.readStagingCiphertext(stageBefore!.storageKey, getDocumentConfig().maxBytes)).resolves.toBeDefined();
+      expect(await getDb().select({ status: documentJobs.status, lastError: documentJobs.lastError }).from(documentJobs)
         .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan"))))
-        .toEqual([{ status: "completed" }]);
+        .toEqual([{ status: "retry", lastError: "key_unavailable" }]);
+
+      // Once the recovery window has ended the unreadable stage is given up on.
+      await getDb().update(documentStagingObjects).set({ recoveryExpiresAt: new Date(Date.now() - 1_000) })
+        .where(eq(documentStagingObjects.documentId, documentId));
+      await getDb().update(documentJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) })
+        .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+      await runDocumentMaintenanceCycle();
+
       expect(await getDb().select({ lifecycle: documents.lifecycle, failureCode: documents.failureCode }).from(documents).where(eq(documents.id, documentId)))
-        .toEqual([{ lifecycle: "rejected", failureCode: "staging_object_invalid" }]);
+        .toEqual([{ lifecycle: "rejected", failureCode: "scan_recovery_expired" }]);
       expect(await getDb().select({ documentId: documentStagingObjects.documentId }).from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId))).toHaveLength(0);
-      await expect(storage.readStagingCiphertext(stage!.storageKey, getDocumentConfig().maxBytes)).rejects.toThrow();
+      await expect(storage.readStagingCiphertext(stageBefore!.storageKey, getDocumentConfig().maxBytes)).rejects.toThrow();
     });
   });
 
@@ -1113,7 +1130,7 @@ describe("authenticated encrypted document lifecycle", () => {
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
       action: "create_separate",
-      item: { title: "Reviewed recovery item", currency: "GBP", status: "active" },
+      item: { kind: "service", title: "Reviewed recovery item", currency: "GBP", status: "active" },
       attachmentIds: [],
     });
     const documentId = randomUUID();
@@ -1175,7 +1192,7 @@ describe("authenticated encrypted document lifecycle", () => {
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
       action: "create_separate" as const,
-      item: { title: "Mailbox recovery value", currency: "GBP", status: "active" },
+      item: { kind: "service", title: "Mailbox recovery value", currency: "GBP", status: "active" },
       attachmentIds: [held.id],
     };
 
@@ -1250,7 +1267,7 @@ describe("authenticated encrypted document lifecycle", () => {
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
       action: "create_separate",
-      item: { title: "Reviewed terminal recovery", currency: "GBP", status: "active" },
+      item: { kind: "service", title: "Reviewed terminal recovery", currency: "GBP", status: "active" },
       attachmentIds: [],
     });
     const documentId = randomUUID();
@@ -1314,7 +1331,7 @@ describe("authenticated encrypted document lifecycle", () => {
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
       action: "create_separate",
-      item: { title: "Reviewed clean unchanged", currency: "GBP", status: "active" },
+      item: { kind: "service", title: "Reviewed clean unchanged", currency: "GBP", status: "active" },
       attachmentIds: [],
     });
     const documentId = randomUUID();
@@ -1363,6 +1380,56 @@ describe("authenticated encrypted document lifecycle", () => {
     } finally {
       capture.restore();
     }
+  });
+
+  it("lets the same bytes be uploaded again under the same id after the first attempt failed writing ciphertext (#1316)", async () => {
+    const fixture = await createIntegrationFixture("document-upload-retry-after-write-failure");
+    const documentId = randomUUID();
+    const writeFailure = vi.spyOn(LocalDocumentStorage.prototype, "writeCiphertext")
+      .mockRejectedValueOnce(new Error("synthetic ciphertext write outage"));
+    try {
+      const { response: failed } = await uploadWithFilename(fixture, "policy.pdf", documentId);
+      expect(failed.status).toBeGreaterThanOrEqual(400);
+      expect(writeFailure).toHaveBeenCalledTimes(1);
+      const [rejected] = await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId));
+      expect(rejected?.lifecycle).toBe("rejected");
+    } finally {
+      writeFailure.mockRestore();
+    }
+
+    // The failure was ours (storage), not a verdict on the file, so the same
+    // bytes under the same id must now go through rather than hit the
+    // "already been rejected" refusal.
+    const { session, response: retried } = await uploadWithFilename(fixture, "policy.pdf", documentId);
+    expect(retried.status).toBe(201);
+    const [available] = await getDb().select({ lifecycle: documents.lifecycle, failureCode: documents.failureCode }).from(documents).where(eq(documents.id, documentId));
+    expect(available).toEqual({ lifecycle: "available", failureCode: null });
+    const downloaded = await callRouteForSession(downloadDocument, session, {
+      url: "http://127.0.0.1:3000/api/documents/" + documentId + "/download",
+      params: documentContext(documentId),
+    });
+    expect(downloaded.status).toBe(200);
+    expect(Buffer.from(await downloaded.arrayBuffer())).toEqual(syntheticPdf);
+  });
+
+  it("still refuses a retry of the same id and bytes once the first attempt was rejected as malware (#1316)", async () => {
+    const fixture = await createIntegrationFixture("document-upload-retry-after-malware");
+    const documentId = randomUUID();
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "infected", signature: "Eicar-Test-Signature" });
+    await withRequiredScanMode(async () => {
+      const { response: first } = await uploadWithFilename(fixture, "policy.pdf", documentId);
+      expect(first.status).toBe(422);
+      expect((await first.json() as { error: { code: string } }).error.code).toBe("document_malware_detected");
+
+      // Even if the scanner would now say clean, a malware verdict is final.
+      vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+      const { response: retried } = await uploadWithFilename(fixture, "policy.pdf", documentId);
+      expect(retried.status).toBe(422);
+      expect((await retried.json() as { error: { code: string } }).error.code).toBe("document_malware_detected");
+      const [stored] = await getDb().select({ lifecycle: documents.lifecycle, failureCode: documents.failureCode }).from(documents).where(eq(documents.id, documentId));
+      expect(stored).toEqual({ lifecycle: "rejected", failureCode: "malware_detected" });
+      expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
+    });
   });
 
   it("records bounded lifecycle and job diagnostics across delete, restore and purge", async () => {

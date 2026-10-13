@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 // these entries go?"): delete and reassign. The engine half is built
 // (`sections.replace` takes `moveItemsTo`); this file holds the interface's
 // pure half: the commands the save sends, the save bar's count, and the words.
-import { sectionCommandsOf } from "../../web/src/lib/data/household.js";
+import { sectionCommandsOf, sectionRowsOf, entriesLabel, whereHeadingOf } from "../../web/src/lib/data/household.js";
 import { changesOf, commandsFor } from "../../web/src/routes/household/[id]/edits.js";
 
 /** One editor row, in the shape sectionRowsOf gives, plus the editor's own marks. */
@@ -281,3 +281,54 @@ describe("a save that stops part-way shows the true list (#1332)", () => {
   });
 });
 
+
+/* #1316 W2-F3 (owner decision, note 35310, option a): a retired (archived)
+   entry counts the same as a live one on the household screen. A section
+   holding only an archived entry reads `1 entry`, is not removable, and asks
+   where its entries go rather than arming a plain remove. */
+describe("a section holding only archived entries asks where they go (#1316 W2-F3)", () => {
+  const household = () => ({
+    sections: [
+      { id: "s-home", name: "Home", icon: "home", accent: "sage", visible: true },
+      { id: "s-pets", name: "Pets", icon: "home", accent: "sage", visible: true },
+    ],
+    items: [{ id: "i-1", sectionId: "s-pets", status: "archived" }],
+  });
+  const petsOf = (rows) => rows.find((one) => one.id === "s-pets");
+
+  it("counts the archived entry in the row, reading '1 entry'", () => {
+    const pets = petsOf(sectionRowsOf(household()));
+    expect(pets.count).toBe(1);
+    expect(entriesLabel(pets.count)).toBe("1 entry");
+  });
+
+  it("is not removable while it holds only an archived entry", () => {
+    expect(petsOf(sectionRowsOf(household())).removable).toBe(false);
+  });
+
+  it("words the chooser 'where 1 entry goes' from the row's count", () => {
+    expect(whereHeadingOf(petsOf(sectionRowsOf(household())).count)).toBe("where 1 entry goes");
+  });
+
+  it("counts live and archived entries together", () => {
+    const mixed = household();
+    mixed.items.push({ id: "i-2", sectionId: "s-pets", status: "active" });
+    expect(petsOf(sectionRowsOf(mixed)).count).toBe(2);
+  });
+
+  it("sends moveItemsTo the chosen section when the row is removed with a destination", () => {
+    const rows = sectionRowsOf(household()).map((one) =>
+      one.id === "s-pets" ? { ...one, removed: true, moveTo: "s-home" } : one);
+    const commands = sectionCommandsOf("hh-1", rows);
+    expect(commands).toHaveLength(1);
+    expect(commands[0].type).toBe("sections.replace");
+    expect(ids(commands[0])).toEqual(["s-home"]);
+    expect(commands[0].moveItemsTo).toBe("s-home");
+  });
+
+  it("refuses with 'Choose where the entries in Pets go' when removed with no destination", () => {
+    const rows = sectionRowsOf(household()).map((one) =>
+      one.id === "s-pets" ? { ...one, removed: true } : one);
+    expect(() => sectionCommandsOf("hh-1", rows)).toThrow(/Choose where the entries in Pets go/);
+  });
+});

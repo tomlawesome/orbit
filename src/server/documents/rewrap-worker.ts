@@ -4,13 +4,17 @@
  * under the next one, transactionally, one row (or one small batch of rows)
  * at a time, and never touches a ciphertext column.
  *
- * Three populations share one KEK (ADR-0017's reasoning: a second key buys no
+ * Five populations share one KEK (ADR-0017's reasoning: a second key buys no
  * isolation inside one host boundary): `document_crypto` (one row per
  * document, driven through the existing `document_jobs` lease/claim queue —
  * kind `"rewrap"` already existed with no worker), `metadata_keys` (one row
- * per household plus one instance row, #931/ADR-0024), and `mail_in_secrets`
- * (ADR-0017). Each is handled by its own small, resumable batch so a crash or
- * an operator Ctrl-C mid-run loses at most one in-flight batch's progress —
+ * per household plus one instance row, #931/ADR-0024), `mail_in_secrets`
+ * (ADR-0017), and the two kinds of held ciphertext that can outlive a
+ * rotation window: mailed attachments awaiting a household
+ * (`imap_ingestion_attachments`) and scanner-recovery objects
+ * (`document_staging_objects`). Each is handled by its own small, resumable
+ * batch so a crash or an operator Ctrl-C mid-run loses at most one in-flight
+ * batch's progress —
  * every row a batch's transaction did not commit is exactly as it was before
  * the batch started, and every row a transaction did commit is fully wrapped
  * under the next key. A row is therefore always readable under the current
@@ -34,7 +38,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, mailInSecrets, metadataKeys } from "@/db/schema";
+import { auditLog, documentCrypto, documentStagingObjects, imapIngestionAttachments, mailInSecrets, metadataKeys } from "@/db/schema";
 import { log, operationalDetail } from "@/lib/logger";
 import { envelopeOf, rewrapDocumentKey } from "@/server/documents/crypto";
 import { rewrapMetadataKey, type MetadataKeyContext } from "@/server/metadata/crypto";
@@ -64,6 +68,7 @@ export interface ClaimedRewrapJob {
 const REWRAP_MAX_ATTEMPTS = 5;
 export const METADATA_KEY_ROTATION_BATCH = 100;
 export const MAIL_IN_SECRET_ROTATION_BATCH = 100;
+export const HELD_OBJECT_ROTATION_BATCH = 100;
 export const DOCUMENT_REWRAP_CLAIM_LIMIT = 25;
 
 /**
@@ -281,14 +286,104 @@ export async function runMailInSecretRotationBatch(keys: RotationKeys, batchSize
   });
 }
 
+/**
+ * As `runMailInSecretRotationBatch`, for mailed attachments held in
+ * `imap_ingestion_attachments` until the recipient picks a household. Their
+ * DEK is wrapped under the document purpose with the attachment id, and a
+ * held receipt can wait weeks, so it routinely spans a rotation.
+ */
+export async function runImapAttachmentRotationBatch(keys: RotationKeys, batchSize = HELD_OBJECT_ROTATION_BATCH): Promise<number> {
+  return getDb().transaction(async (transaction) => {
+    const rows = await transaction.select({
+      id: imapIngestionAttachments.id,
+      envelopeVersion: imapIngestionAttachments.envelopeVersion,
+      keyId: imapIngestionAttachments.keyId,
+      contentIv: imapIngestionAttachments.contentIv,
+      contentAuthTag: imapIngestionAttachments.contentAuthTag,
+      wrappedDek: imapIngestionAttachments.wrappedDek,
+      wrapIv: imapIngestionAttachments.wrapIv,
+      wrapAuthTag: imapIngestionAttachments.wrapAuthTag,
+    }).from(imapIngestionAttachments)
+      .where(ne(imapIngestionAttachments.keyId, keys.nextKeyId))
+      .limit(batchSize)
+      .for("update", { skipLocked: true });
+
+    let rewrapped = 0;
+    for (const row of rows) {
+      if (row.keyId !== keys.currentKeyId) {
+        throw new Error("imap_ingestion_attachments row is wrapped under neither the current nor the next key");
+      }
+      const next = rewrapDocumentKey(row.id, envelopeOf(row), keys.currentKek, keys.nextKek, keys.nextKeyId);
+      const updated = await transaction.update(imapIngestionAttachments).set({
+        wrappedDek: next.wrappedDek,
+        wrapIv: next.wrapIv,
+        wrapAuthTag: next.wrapAuthTag,
+        keyId: next.keyId,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(imapIngestionAttachments.id, row.id),
+        eq(imapIngestionAttachments.keyId, keys.currentKeyId),
+      )).returning({ id: imapIngestionAttachments.id });
+      rewrapped += updated.length;
+    }
+    return rewrapped;
+  });
+}
+
+/**
+ * As `runMailInSecretRotationBatch`, for scanner-recovery objects in
+ * `document_staging_objects`: kept while a scanner outage is recoverable, so
+ * also long enough to span a rotation. Their DEK is wrapped under the
+ * `scanner_recovery` purpose with the document id.
+ */
+export async function runStagingObjectRotationBatch(keys: RotationKeys, batchSize = HELD_OBJECT_ROTATION_BATCH): Promise<number> {
+  return getDb().transaction(async (transaction) => {
+    const rows = await transaction.select({
+      documentId: documentStagingObjects.documentId,
+      envelopeVersion: documentStagingObjects.envelopeVersion,
+      keyId: documentStagingObjects.keyId,
+      contentIv: documentStagingObjects.contentIv,
+      contentAuthTag: documentStagingObjects.contentAuthTag,
+      wrappedDek: documentStagingObjects.wrappedDek,
+      wrapIv: documentStagingObjects.wrapIv,
+      wrapAuthTag: documentStagingObjects.wrapAuthTag,
+    }).from(documentStagingObjects)
+      .where(ne(documentStagingObjects.keyId, keys.nextKeyId))
+      .limit(batchSize)
+      .for("update", { skipLocked: true });
+
+    let rewrapped = 0;
+    for (const row of rows) {
+      if (row.keyId !== keys.currentKeyId) {
+        throw new Error("document_staging_objects row is wrapped under neither the current nor the next key");
+      }
+      const next = rewrapDocumentKey(row.documentId, envelopeOf(row), keys.currentKek, keys.nextKek, keys.nextKeyId, "scanner_recovery");
+      const updated = await transaction.update(documentStagingObjects).set({
+        wrappedDek: next.wrappedDek,
+        wrapIv: next.wrapIv,
+        wrapAuthTag: next.wrapAuthTag,
+        keyId: next.keyId,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(documentStagingObjects.documentId, row.documentId),
+        eq(documentStagingObjects.keyId, keys.currentKeyId),
+      )).returning({ documentId: documentStagingObjects.documentId });
+      rewrapped += updated.length;
+    }
+    return rewrapped;
+  });
+}
+
 export interface RotationCycleResult {
   documentsEnqueued: number;
   documentJobsProcessed: number;
   metadataKeysRewrapped: number;
   mailInSecretsRewrapped: number;
+  heldAttachmentsRewrapped: number;
+  stagingObjectsRewrapped: number;
 }
 
-/** One pass over all three populations: enqueue, claim and process a batch of each. */
+/** One pass over all five populations: enqueue, claim and process a batch of each. */
 export async function runKekRotationCycle(keys: RotationKeys, batchSize = DOCUMENT_REWRAP_CLAIM_LIMIT): Promise<RotationCycleResult> {
   const documentsEnqueued = await enqueueDocumentRewrapJobs(keys.nextKeyId);
   const claimed = await claimRewrapJobs(batchSize);
@@ -303,31 +398,51 @@ export async function runKekRotationCycle(keys: RotationKeys, batchSize = DOCUME
   }
   const metadataKeysRewrapped = await runMetadataKeyRotationBatch(keys, batchSize);
   const mailInSecretsRewrapped = await runMailInSecretRotationBatch(keys, batchSize);
-  return { documentsEnqueued, documentJobsProcessed, metadataKeysRewrapped, mailInSecretsRewrapped };
+  const heldAttachmentsRewrapped = await runImapAttachmentRotationBatch(keys, batchSize);
+  const stagingObjectsRewrapped = await runStagingObjectRotationBatch(keys, batchSize);
+  return {
+    documentsEnqueued,
+    documentJobsProcessed,
+    metadataKeysRewrapped,
+    mailInSecretsRewrapped,
+    heldAttachmentsRewrapped,
+    stagingObjectsRewrapped,
+  };
 }
 
 export interface RotationProgress {
   documentsRemaining: number;
   metadataKeysRemaining: number;
   mailInSecretsRemaining: number;
+  heldAttachmentsRemaining: number;
+  stagingObjectsRemaining: number;
 }
 
 /** How many rows, in each population, are not yet wrapped under the next key. */
 export async function rotationRemaining(keys: RotationKeys): Promise<RotationProgress> {
-  const [[documentsRow], [metadataRow], [secretsRow]] = await Promise.all([
+  const [[documentsRow], [metadataRow], [secretsRow], [attachmentsRow], [stagingRow]] = await Promise.all([
     getDb().select({ count: sql<number>`count(*)::int` }).from(documentCrypto).where(ne(documentCrypto.keyId, keys.nextKeyId)),
     getDb().select({ count: sql<number>`count(*)::int` }).from(metadataKeys).where(ne(metadataKeys.keyId, keys.nextKeyId)),
     getDb().select({ count: sql<number>`count(*)::int` }).from(mailInSecrets).where(ne(mailInSecrets.keyId, keys.nextKeyId)),
+    getDb().select({ count: sql<number>`count(*)::int` }).from(imapIngestionAttachments).where(ne(imapIngestionAttachments.keyId, keys.nextKeyId)),
+    getDb().select({ count: sql<number>`count(*)::int` }).from(documentStagingObjects).where(ne(documentStagingObjects.keyId, keys.nextKeyId)),
   ]);
   return {
     documentsRemaining: documentsRow.count,
     metadataKeysRemaining: metadataRow.count,
     mailInSecretsRemaining: secretsRow.count,
+    heldAttachmentsRemaining: attachmentsRow.count,
+    stagingObjectsRemaining: stagingRow.count,
   };
 }
 
+function totalRemaining(progress: RotationProgress): number {
+  return progress.documentsRemaining + progress.metadataKeysRemaining + progress.mailInSecretsRemaining
+    + progress.heldAttachmentsRemaining + progress.stagingObjectsRemaining;
+}
+
 export function rotationComplete(progress: RotationProgress): boolean {
-  return progress.documentsRemaining === 0 && progress.metadataKeysRemaining === 0 && progress.mailInSecretsRemaining === 0;
+  return totalRemaining(progress) === 0;
 }
 
 /**
@@ -343,12 +458,13 @@ export async function runKekRotationToCompletion(keys: RotationKeys, batchSize =
     const progress = await rotationRemaining(keys);
     if (rotationComplete(progress)) return progress;
 
-    const totalRemaining = progress.documentsRemaining + progress.metadataKeysRemaining + progress.mailInSecretsRemaining;
-    const madeProgress = cycle.documentJobsProcessed > 0 || cycle.metadataKeysRewrapped > 0 || cycle.mailInSecretsRewrapped > 0;
-    if (!madeProgress && totalRemaining === previousRemaining) {
-      throw new Error(`document_kek rotation stalled with ${totalRemaining} row(s) still unrewrapped`);
+    const remaining = totalRemaining(progress);
+    const madeProgress = cycle.documentJobsProcessed > 0 || cycle.metadataKeysRewrapped > 0 || cycle.mailInSecretsRewrapped > 0
+      || cycle.heldAttachmentsRewrapped > 0 || cycle.stagingObjectsRewrapped > 0;
+    if (!madeProgress && remaining === previousRemaining) {
+      throw new Error(`document_kek rotation stalled with ${remaining} row(s) still unrewrapped`);
     }
-    previousRemaining = totalRemaining;
+    previousRemaining = remaining;
   }
 }
 

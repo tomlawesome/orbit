@@ -5,6 +5,10 @@ per flake, one line per sighting: `date · commit · pipeline/job · symptom`.
 The third sighting under a heading gets an issue, linked from the heading;
 fixing the cause deletes the heading in the same commit.
 
+## sign-out-provider-session.test.mjs:273 and :280, the Chrome.svelte no-flight fallback cases
+
+- 2026-10-13 · 0fd4d6aa (the #1316 audit branch with dev merged in; neither side changed Chrome.svelte's fallback or this file) · local `npx vitest run` (full unit suite, 7170 tests, other suites running on the host) · both cases saw no navigation (`expected undefined to be ...`); the file alone passes 4/4 straight after. The cases wait a fixed 60 ms (`settle`, :183) for the lazy flight import to fail and the fallback to navigate. First sighting.
+
 ## availability-route.test.mjs "GET /api/auth/availability carries phase: starting straight from getBootPhase" (#869)
 
 - 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, nowhere near auth/availability) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default in a run that took 393s overall against 232s for the same file set minutes before, with unrelated files failing alongside it — wall-clock-under-load, not this test. First sighting.
@@ -14,7 +18,7 @@ fixing the cause deletes the heading in the same commit.
 
 - 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, nowhere near document extraction) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default in the same heavily-loaded run as the sighting above. First sighting.
 
-## document-lifecycle.test.ts:1335 "emits a bounded rejected lifecycle record when reconciliation finds an available document's ciphertext missing"
+## document-lifecycle.test.ts:1335 "emits a bounded rejected lifecycle record when reconciliation finds an available document's ciphertext missing" — #1404
 
 - 2026-09-09 · 11a68e8 (+ #911's uncommitted setup-mail work, none of it near documents) · local `pnpm test:integration` · the bounded reason came back `crypto_metadata_missing` where the test expects `storage_object_missing`. The same file passed on the run immediately before, on the same code, and the run's other 39 files were green both times — so reconciliation appears to reach the two missing-piece checks in a different order under load.
 - 2026-09-10 · 257d263 (+ #961's uncommitted `modelExtraction` health work, none of it near reconciliation) · local `pnpm test:integration` · failed on one run and passed on the run before it on the same code, and two later runs on the branch point without the change were green here as well. Only the four `@node-rs/argon2` files failed on every run.
@@ -115,7 +119,7 @@ sighting proves nothing either way.
 
 - 2026-09-10 · `feature/m8-tier2` · local `vitest run --project integration tests/integration/migrations.test.ts` against a disposable PostgreSQL 18 container · failed once, then passed on three consecutive re-runs of the same file on unchanged code. The failing run took 18.8 s against 1.4–1.8 s on each passing run, so it looks like contention with the containers the other migration scenarios in the same file create and drop, rather than a schema-contract mismatch. First sighting; no issue yet (an issue on the third, per the testing-and-ci skill). The next sighting should capture the assertion itself, which this one did not.
 
-## document-lifecycle.test.ts "emits a bounded rejected lifecycle record when reconciliation finds an available document's ciphertext missing"
+## document-lifecycle.test.ts "emits a bounded rejected lifecycle record when reconciliation finds an available document's ciphertext missing" — #1404
 
 - 2026-09-15 · `feature/m8-addresses` · local `node scripts/test-integration.mjs` (full suite, disposable PostgreSQL 18 container) · failed once in a whole-suite run, then passed both on its own file (34/34) and on an immediate re-run of the whole suite (404 passed), on unchanged code. The failing run reported 600 ms against the file's ordinary pace.
 
@@ -126,6 +130,7 @@ run that failed had a neighbouring file still holding or removing files under
 the shared `DOCUMENTS_ROOT`, rather than anything about the record's bounds.
 First sighting; no issue yet (an issue on the third, per the testing-and-ci
 skill).
+- 2026-10-13 · 77ff631a (`fix/1316-audit-fixes`, the frozen #1316 audit head) · local `node scripts/test-integration.mjs` (full suite) · `crypto_metadata_missing` where `storage_object_missing` was expected, at ~:1509; the next full run passed. Past the third sighting: filed as #1404.
 
 ## fidelity: `first-run-error matches its mockup (porting)` — the mockup capture drifts, the app render does not
 
@@ -344,6 +349,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · "a save on /create that cannot reach Orbit is announced, and the act can be repeated by keyboard": `the failure is shown` not visible at line 387.
 - 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36017, the first re-run) · the same `the failure is shown` check at line 387 on the first attempt; passed on the in-job retry.
 - 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36018, the second re-run; the job passed) · the same `the failure is shown` check at line 387; passed on the in-job retry.
+- 2026-10-13 · 3a297cc8 (!1065) · pipeline 2570 / smoke (job 36067), smoke_webkit (job 36069), smoke_webkit_mobile (job 36070) · the /create announcement check (now :386) and focus check (now :403) failed their first attempts on desktop-chromium, mobile-chromium, desktop-webkit and mobile-webkit, and passed on the in-job retries. Still #1313.
 
 ## settings-notification-history.spec.ts:137 "a member sees their own last sent reminders, plainly, on both dialects" — desktop-firefox
 
@@ -390,6 +396,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35145, the second re-run) · failed its first attempt, passed on the in-job retry.
 - 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · the same `#1262: the menu is still open after sign-out started` at line 198.
 - 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36018, the second re-run; the job passed) · `#1262: the descent did not keep time`, 13224 ms against 9000; passed on the in-job retry.
+- 2026-10-13 · 7906d9f4 (#1316 audit fixes; no change to the sign-out descent, its spec, or `web/src/lib/flight`) · local `scripts/test-e2e-local.sh --project mobile-webkit`, no retries · the same `#1262: the menu is still open after sign-out started` at line 198. Sixth sighting, the first outside CI (#1367).
 
 ## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on desktop-webkit
 
@@ -408,10 +415,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## bootstrap-protection.spec.ts:387 "once the instance is claimed the code is spent, cookie or no cookie" — [unclaimed]
 
 - 2026-10-08 · 059878f1 (#1325, which touches no sign-in code) · local `scripts/test-e2e-local.sh --spec 'tests/e2e/v19-(home-drawer|create|item-actions|mail-review)\.spec\.ts'` · `expect(session.ok()).toBe(true)` at `tests/e2e/support/bootstrap.ts:112` (`claimInstanceAsAdministrator`): `/api/auth/session` was not OK straight after the claim's sign-in. Every project depends on `[unclaimed]`, so 141 tests did not run. The next run of the same command on the same commit passed it. Traces: `~/projects/.backups/orbit/e2e-orbit-e2e-local-ecd11949-2436667-20261008-222859`. First sighting.
-
-## v19-create.spec.ts:254 "picking a document shows its front page while the read runs alongside" on desktop-chromium
-
-- 2026-10-09 · 79c68846 (#1319 stage 3b; this test unchanged on the branch) · local `scripts/test-e2e-local.sh --keep --project desktop-chromium`, whole suite, with the fidelity suite running alongside on the same host · `#read-head` read "Page one" where the test expects "Reading your document": the read finished before the heading was looked at. Passed on a rerun of the file against the same stack. Traces: `~/projects/.backups/orbit/e2e-1319-stage3b-79c68846-desktop-chromium`. First sighting.
 
 ## v19-keyboard.spec.ts:313 "arrive: the sign-in door opens by Tab and Enter alone" on desktop-chromium
 
@@ -477,6 +480,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35145, the second re-run) · failed its first attempt, passed on the in-job retry. Third sighting: filed as #1381.
 - 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · `auditTabOrder` failed at line 442.
 - 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36018, the second re-run; the job passed) · `Tab reached a control the screen does not show as visible`; passed on the in-job retry.
+- 2026-10-13 · 3a297cc8 (!1065, #1316 audit fixes) · pipeline 2570 / smoke_webkit_mobile (job 36070) · `home (pocket) with the item drawer open` audit failed on the first attempt and the in-job retry, so the job failed. Still #1381.
 
 ## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on mobile-webkit
 
@@ -494,3 +498,11 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-mail-review.spec.ts:431 "the phone sheet reads a staged paper's page one, and tells a gone mail apart from one it just cannot draw (#1155)" — mobile-webkit, marked expected-to-fail for #1196
 
 - 2026-10-13 · 5e852f6f (!1064; the same app code passed this job on pipeline 2559, where the test failed as expected) · pipeline 2560 / smoke_webkit_mobile (job 36017, the first re-run) · "Expected to fail, but passed", on the first attempt and the in-job retry: the #1196 driver fault it is marked for does not happen every run. First sighting.
+
+## v19-upload-limit.spec.ts:76 "an administrator lowers the upload limit, an over-limit upload is refused, and the default comes back" — desktop-chromium
+
+- 2026-10-13 · 3a297cc8 (!1065) · pipeline 2570 / smoke (job 36067) · failed its first attempt in 1.5 s, passed on the in-job retry. First sighting.
+
+## v19-tour.spec.ts:170 "a first-time reader gets the film, works its transport, and a second arrival stays silent" — desktop-webkit
+
+- 2026-10-13 · 3a297cc8 (!1065) · pipeline 2570 / smoke_webkit (job 36069) · failed its first attempt in 3.4 s, passed on the in-job retry. First sighting.

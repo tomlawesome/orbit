@@ -1,6 +1,7 @@
 import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
+import { isRetiredSecretsDirectoryOverride, retiredSecretsDirectoryMessage } from "./configure-engine";
 import { DEPLOY_LOCK_FILE_NAME } from "./deploy-lock";
 
 // Target and identity validation (issue #295 slice 2), ported from
@@ -168,11 +169,32 @@ export function validateTarget(targetDir: string): ValidateTargetResult {
     isRegularNonSymlinkFile(composeFile) &&
     isRealNonSymlinkDirectory(secretsDirectory)
   ) {
+    // A staging directory left by a hard-killed update holds the real
+    // originals; a second transaction would snapshot the half-updated tree
+    // as its "original" and bury the first. The lone deploy lock is not
+    // checked here: it has its own stale-lock handling.
+    const staging = readdirSync(targetDir)
+      .filter((entry) => entry.startsWith(".orbit-install-staging."))
+      .sort();
+    if (staging.length > 0) {
+      throw new TargetValidationRefusal(
+        `A previous update was interrupted and left ${staging.join(" ")} behind in this deployment. If it holds a "committed" marker the update finished: remove it once you have confirmed the deployment is working. If it does not, run "bash scripts/repair.sh" to put the previous files back, then rerun.`,
+      );
+    }
     return { targetWasEmpty: false };
   }
 
   if (isPreprovisionedInput(targetDir)) {
     return { targetWasEmpty: true };
+  }
+
+  // A deployment whose secrets live elsewhere (the retired ORBIT_SECRETS_DIR)
+  // gets the reason, not the generic "not recognizable" refusal below.
+  if (isRegularNonSymlinkFile(environmentFile)) {
+    const secretsDirectoryValue = readEnvironmentValue(targetDir, "ORBIT_SECRETS_DIR");
+    if (isRetiredSecretsDirectoryOverride(secretsDirectoryValue)) {
+      throw new TargetValidationRefusal(retiredSecretsDirectoryMessage(secretsDirectoryValue));
+    }
   }
 
   // A leftover `.orbit-install-staging.*` means an earlier attempt was
@@ -218,7 +240,8 @@ export function readEnvironmentValue(targetDir: string, key: string): string | u
   let value = "";
   for (const line of content.split("\n")) {
     if (line.startsWith(prefix)) {
-      value = line.slice(prefix.length);
+      // The engine writes CRLF lines into a CRLF file; drop the CR.
+      value = line.slice(prefix.length).replace(/\r$/, "");
       found = true;
     }
   }

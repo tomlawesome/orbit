@@ -29,16 +29,16 @@ import { bodyLimitFor, limitRequestBody } from "$lib/server/body-limit.js";
  * the whole point of a setup or recovery link is that the person holding it
  * has no way in yet. It reads no session at all — the token in the body of
  * the POST it makes is the entire authorisation — so there is nothing for a
- * gate to protect. It is deliberately NOT in `DOORS` below: maintenance
- * closes it like any other screen, because setting a password is not the
- * administrator action a window exists to allow.
+ * gate to protect. It is also in `DOORS` below: a recovery link is the
+ * documented way past a broken mailbox, and someone who sets a password
+ * during a window still lands on a closed home, so nothing new opens.
  *
  * `/approve/[token]` is open because the person it is written for must NOT be
  * signed in (#1033, ADR-0027 §4): the link finishes somebody else's sign-in,
  * on a phone that may never have seen this instance before, and approving on
  * it deliberately signs nobody in. It reads no session either -- the token in
- * the address is the whole authorisation -- and it is not in `DOORS`, for the
- * same reason `/setup/[token]` is not.
+ * the address is the whole authorisation -- and it is in `DOORS`, because it
+ * is the second half of the password sign-in a window must leave open.
  *
  * `/auth/error` is open for the same reason `/login` is (#1056): it is where
  * a failed OIDC callback lands a signed-out stranger, and a session-required
@@ -46,8 +46,7 @@ import { bodyLimitFor, limitRequestBody } from "$lib/server/body-limit.js";
  * no session either -- `code` off the query string is the whole of what it
  * reads, client-side, in +page.svelte -- so there is nothing here for a gate
  * to protect. Not in `DOORS`: unlike /login it is not an administrator's way
- * to end a maintenance window, so maintenance closes it like /invite and
- * /setup do.
+ * to end a maintenance window, so maintenance closes it like /invite.
  */
 const OPEN_ROUTES = new Set([
   "/", "/login", "/logout", "/maintenance",
@@ -58,13 +57,15 @@ const OPEN_ROUTES = new Set([
  * The screens maintenance never closes (#526; ADR-0013 decision 3): the door
  * and the way out, because an administrator has to be able to sign in to end
  * a window and anyone may leave cleanly. Neither reads any state at all.
+ * The approval and setup links are doors too, because a window closes
+ * nothing a password sign-in needs to finish; each reads only its own token.
  *
  * `/` is deliberately not here: a signed-out visitor is not an administrator,
  * and the arrival would only send them to a home that is closed. The API is
  * a separate boundary with its own guard (`web/src/lib/server/api.js`); this
  * set is for screens.
  */
-const DOORS = new Set(["/login", "/logout"]);
+const DOORS = new Set(["/login", "/logout", "/approve/[token]", "/setup/[token]"]);
 
 /**
  * Orbit's boot sequence, moved off Next's instrumentation hook (#735).

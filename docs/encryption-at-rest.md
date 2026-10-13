@@ -121,7 +121,8 @@ live host, because a running Orbit holds the key. It is also being rolled out
 over two releases: the expand release adds the encrypted columns beside the
 plaintext ones and converts existing rows in the background, and only the
 contract release afterwards drops the plaintext columns. Until that lands, a
-database dump can still contain those four columns in the clear.
+database dump can still contain every Tier 1 and Tier 2 column listed above,
+account addresses included, in the clear.
 
 ### 3. Backups and recovery bundles
 
@@ -141,15 +142,18 @@ encrypted":
   in full to whoever can read the file. This is the second half of the
   database gap above, not a separate issue.
 - **`scripts/export-recovery-bundle.sh`** (`orbit export-recovery-bundle`)
-  produces a much smaller, separate bundle whose only job is to let an
-  operator recover the `DOCUMENT_KEK` itself using a memorised passphrase
-  (12 characters minimum, confirmed twice) instead of the raw key file. The
-  key is wrapped in the **ORBKEK01 envelope**: a key derived from your
-  passphrase encrypts the master key under AES-256-GCM, with a fresh salt
-  and IV per export, and the result is locked to the format's own
-  marker.[^scrypt] This bundle does not contain documents or
-  database rows — it exists purely so a lost `document-kek` secret file does
-  not mean a permanently unreadable document archive. See
+  produces a bundle that lets an operator recover the `DOCUMENT_KEK` itself
+  using a memorised passphrase (12 characters minimum, confirmed twice)
+  instead of the raw key file, so a lost `document-kek` secret file does not
+  mean a permanently unreadable document archive. The bundle is the backup
+  you give it, whole (`orbit-backup.tar`: the encrypted document archive
+  plus the plaintext database dump), plus the `DOCUMENT_KEK` wrapped in the
+  **ORBKEK01 envelope**: a key derived from your passphrase encrypts the
+  master key under AES-256-GCM, with a fresh salt and IV per export, and the
+  result is locked to the format's own marker.[^scrypt] The passphrase
+  protects the key only. The file discloses everything the backup does, so
+  store it with the same care as a backup, and keep its passphrase apart
+  from it. See
   `docs/adr-notes/296-backup-port-plan.md` for the implementation slice this
   landed in.
 - **Repair/restore checkpoints** (the restore engine's checkpoint, `src/lib/restore-engine.ts`,

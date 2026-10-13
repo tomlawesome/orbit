@@ -302,7 +302,9 @@ read_environment_value() {
   local requested_key="$1" line value="" found=0
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "${requested_key}="* ]]; then
+      # The engine writes CRLF lines into a CRLF file; drop the CR.
       value="${line#*=}"
+      value="${value%$'\r'}"
       found=1
     fi
   done < "$environment_file"
@@ -550,7 +552,10 @@ gather_host_facts() {
 # Files the engine writes on the host belong to the operator (#1210 D5).
 engine_host_identity() {
   local security_options
-  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null || true)"
+  # Fail closed: a guessed "not rootless" hands the files to a uid the
+  # operator cannot reach.
+  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null)" ||
+    fail "Could not tell whether Docker is rootless, so refusing to guess who should own the deployment files. Check that 'docker info' works, then rerun."
   if [[ "$security_options" == *rootless* ]]; then
     host_uid=0
     host_gid=0
@@ -612,9 +617,12 @@ run_engine() {
     fi
   fi
 
+  # ORBIT_HOST_DEPLOY_DIR makes paths the engine prints host paths, as
+  # backup.sh does.
   docker_args+=(
     -e ORBIT_HOST_UID="$host_uid"
     -e ORBIT_HOST_GID="$host_gid"
+    -e ORBIT_HOST_DEPLOY_DIR="$target_dir"
     -e ORBIT_IMAGE="$resolved_reference"
     -e ORBIT_CHANNEL="$channel"
     -e ORBIT_INSTALLER_ELAPSED="$((SECONDS - installer_process_started_at))"
@@ -901,6 +909,10 @@ target_dir="$(pwd -P)" || fail "Could not resolve the installation directory."
 command -v docker >/dev/null 2>&1 || fail "Docker is required."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required."
 command -v timeout >/dev/null 2>&1 || fail "GNU timeout is required for bounded health checks."
+# ORBIT_SECRETS_DIR is retired: the engine only uses ./.orbit-secrets, and a
+# value pointing elsewhere would leave Compose mounting different secrets.
+[[ -z "${ORBIT_SECRETS_DIR:-}" || "${ORBIT_SECRETS_DIR}" == ./.orbit-secrets || "${ORBIT_SECRETS_DIR}" == .orbit-secrets ]] ||
+  fail "ORBIT_SECRETS_DIR is set to ${ORBIT_SECRETS_DIR}, but Orbit no longer reads that setting: it keeps its secrets in ./.orbit-secrets beside .env-orbit. Move the secret files from ${ORBIT_SECRETS_DIR} into ./.orbit-secrets, remove the ORBIT_SECRETS_DIR setting, then run again."
 installer_ui_event host host completed host-tools check
 
 # Resolve the release manifest (ADR-0031 #7) and pin the pull to the digest
