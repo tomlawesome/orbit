@@ -32,7 +32,8 @@ describe("#1151 W1-R2: the desktop create form mints one id per draft", () => {
     expect(submitHandler).not.toMatch(/crypto\.randomUUID/u);
     /* The command the save sends (and the dry run asks about, #1325) is
        built in one place, under the draft's own id. */
-    expect(submitHandler).toMatch(/applyCommand\(commandFromForm\(\)\)/u);
+    expect(submitHandler).toMatch(/const command = commandFromForm\(\);/u);
+    expect(submitHandler).toMatch(/applyCommand\([^\n]*\bcommand\)/u);
     const commandFn = behaviour.slice(behaviour.indexOf("function commandFromForm()"), behaviour.indexOf("function commandFromForm()") + 250);
     expect(commandFn).toMatch(/id: draftId,/u);
     expect(behaviour.indexOf("const draftId = crypto.randomUUID();"))

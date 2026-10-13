@@ -33,6 +33,8 @@ import {
 const PREVIEW = "/api/households/[householdId]/item-document-preview";
 const INSPECTION = "/api/households/[householdId]/item-document-inspection";
 const ITEM_DOCUMENTS = "/api/households/[householdId]/items/[itemId]/documents";
+/* #1316: the stage route for a create's document is an upload route too. */
+const STAGE_DOCUMENT = "/api/households/[householdId]/documents";
 const readLimit = async () => mocks.uploadLimit;
 
 /** @param {number} size @param {{ declare?: boolean }} [options] */
@@ -60,7 +62,7 @@ beforeEach(() => {
 describe("which limit a route gets", () => {
   it("holds every document upload route to the administrator's upload limit", async () => {
     mocks.uploadLimit = 3 * MIB;
-    for (const route of [PREVIEW, INSPECTION, ITEM_DOCUMENTS]) {
+    for (const route of [PREVIEW, INSPECTION, ITEM_DOCUMENTS, STAGE_DOCUMENT]) {
       await expect(bodyLimitFor(route, readLimit)).resolves.toMatchObject({ limit: 3 * MIB, code: "document_too_large" });
     }
   });

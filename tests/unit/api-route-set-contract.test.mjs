@@ -124,6 +124,9 @@ const EXPECTED_ROUTES = [
   "/api/documents/[documentId]/preview",
   "/api/documents/[documentId]/restore",
   "/api/health",
+  // #1316: the stage half of an all-or-nothing create -- a document stored
+  // before any item exists, bound later by item.upsert's documentIds.
+  "/api/households/[householdId]/documents",
   "/api/households/[householdId]/invitations",
   "/api/households/[householdId]/item-document-inspection",
   "/api/households/[householdId]/item-document-preview",

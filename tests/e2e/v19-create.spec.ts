@@ -599,27 +599,32 @@ test.describe("the phone's create form reads a picked document", () => {
   });
 
   /**
-   * #1279: a file the upload would refuse leaves the phone's entry at once,
-   * in the desk's words, and the "add a document" row is back to choose
-   * another; there is nothing to drop, so no "not this one".
+   * #1279, amended by #1316 (owner answer 6a): a file the upload would
+   * refuse is marked refused in the phone's reading card, with the server's
+   * words, and STAYS in the entry; Add is held until the file is replaced or
+   * removed, and "add a document" is not offered while it is held.
    */
-  test("the phone's create form says when a picked document is refused", async ({ page }) => {
+  test("the phone's create form says when a picked document is refused, and keeps it until it is replaced or removed", async ({ page }) => {
     test.skip(!test.info().project.name.startsWith("mobile"), "the desk's refusal shares the same read (#1245)");
     test.setTimeout(90_000);
     await signInWithHousehold(page);
 
     try {
-      await answerInspection(page, { extracted: false, suggestions: [], attachmentDisposition: "rejected" });
+      await answerInspection(page, { extracted: false, suggestions: [], attachmentDisposition: "rejected", message: "That file is not a PDF or image we can keep" });
       await gotoCreate(page);
       const form = page.getByRole("form", { name: "New entry" });
       await form.locator('input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
 
       const card = form.locator(".pc-reading");
       await expect(card).toContainText("Orbit refused this file.", { timeout: 20_000 });
-      await expect(card).toContainText("choose another document");
+      await expect(card).toContainText("That file is not a PDF or image we can keep");
+      await expect(card).toContainText(DOCUMENT);
       await expect(card).toContainText(/KB · refused/);
       await expect(card.getByRole("img")).toHaveCount(0);
-      await expect(card.getByRole("button", { name: "not this one" })).toHaveCount(0);
+      // The file is still in the entry, so it can be removed or replaced, and Add is held.
+      await expect(page.getByRole("button", { name: "Add to orbit" })).toHaveAttribute("aria-disabled", "true");
+      await expect(card.getByRole("button", { name: /not this one|remove/i })).toHaveCount(1);
+      await card.getByRole("button", { name: /not this one|remove/i }).click();
       await expect(form.getByRole("button", { name: /add a document/ })).toBeVisible();
     } finally {
       await households.sweep(page);
@@ -804,95 +809,193 @@ test.describe(() => {
   });
 
   /**
-   * #1316 W1-F1/F2: a create whose item landed but whose document did not can
-   * be tried again. The retry keeps the draft id, so the live check the forms
-   * ask on every edit gets "this item changed on another device" back -- the
-   * item is already there -- and used to hold Add on that text for ever. Both
-   * dialects: the desk (#save-note) and the phone's pocket (.pk-problem).
+   * #1316 (owner, 2026-10-13): creating an item with a document is
+   * all-or-nothing. The document is staged first (POST
+   * /api/households/:id/documents) and the item is sent afterwards in one
+   * command that carries `documentIds`. When the stage fails no item is kept;
+   * the member sees the most accurate reason available; the form keeps
+   * everything entered, the file included; and trying again re-sends the same
+   * document id (and the same item id), so nothing is stored twice. This
+   * replaces W1-F1/F2, whose half-landed create (the item saved, its document
+   * not) can no longer happen. Both dialects: the desk (#save-note) and the
+   * phone's pocket (.pk-problem).
    */
-  test("a create whose document failed can be retried under the same item and document ids", async ({ page }) => {
-    test.skip(test.info().project.name.startsWith("desktop-"), "#1406: the all-or-nothing save replaces this retry; rewrite this test and remove the skip there");
+  test("a create whose document failed saves no item and can be retried under the same document id", async ({ page }) => {
     test.setTimeout(120_000);
     await answerPushWithoutAService(page);
     await page.goto("/api/auth/login?returnTo=/home");
     await page.getByRole("link", { name: workerAccount("administrator") }).click();
     await settleArrival(page);
     await ensureWorkerAdministrator(page);
-    households.track(await seedHousehold(page));
+    const household = households.track(await seedHousehold(page));
 
     const pocket = test.info().project.name.startsWith("mobile");
-    const upserts: string[] = [];
-    const documentPosts: Array<{ itemId: string; documentId: string | undefined }> = [];
-    let documentAnswers = 0;
+    const upserts: Array<{ itemId: string; documentIds: string[] | undefined }> = [];
+    const stagePosts: Array<{ name: string; documentId: string | undefined; itemId: string | undefined }> = [];
+    const attachPosts: string[] = [];
+    let stageAnswers = 0;
 
     /* The real saves only: the live checks carry `dryRun: true`. */
     page.on("request", (request) => {
       if (request.method() !== "POST" || !request.url().includes("/api/workspace/commands")) return;
-      const body = request.postDataJSON() as { type?: string; dryRun?: boolean; item?: { id?: string } };
-      if (body.type === "item.upsert" && !body.dryRun && body.item?.id) upserts.push(body.item.id);
+      const body = request.postDataJSON() as { type?: string; dryRun?: boolean; item?: { id?: string }; documentIds?: string[] };
+      if (body.type === "item.upsert" && !body.dryRun && body.item?.id) upserts.push({ itemId: body.item.id, documentIds: body.documentIds });
     });
-    /* The first document POST fails; the retry goes through to the real route. */
+    /* The create no longer attaches onto a saved item: that route is the home drawer's. */
     await page.route(/\/api\/households\/[^/]+\/items\/[^/]+\/documents$/, async (route) => {
+      if (route.request().method() === "POST") attachPosts.push(route.request().url());
+      return route.fallback();
+    });
+    /* The first stage POST fails; the retry goes through to the real route. */
+    await page.route(/\/api\/households\/[^/]+\/documents$/, async (route) => {
       const request = route.request();
       if (request.method() !== "POST") return route.fallback();
-      documentPosts.push({
-        itemId: new URL(request.url()).pathname.split("/").slice(-2)[0],
+      stagePosts.push({
+        name: decodeURIComponent(request.headers()["x-orbit-filename"] ?? ""),
         documentId: request.headers()["x-orbit-document-id"],
+        itemId: request.headers()["x-orbit-item-id"],
       });
-      documentAnswers += 1;
-      if (documentAnswers === 1) {
-        return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "The document store is down" }) });
+      stageAnswers += 1;
+      if (stageAnswers === 1) {
+        return route.fulfill({
+          status: 500, contentType: "application/json",
+          body: JSON.stringify({ error: { code: "document_store_down", message: "The document store is down" } }),
+        });
       }
       return route.fallback();
     });
 
     try {
-      const name = "Retry after partial landing proving";
+      const name = "Retry after a failed document proving";
       const add = pocket ? page.getByRole("button", { name: "Add to orbit" }) : page.locator(".btn-primary");
       const note = pocket ? page.locator(".pk-problem") : page.locator("#save-note");
       const nameField = pocket
         ? page.getByRole("form", { name: "New entry" }).getByRole("textbox", { name: "name", exact: true })
         : page.locator("#f-name");
+      const heldFile = pocket ? page.locator(".pc-reading") : page.locator("#dz-held-name");
 
       await (pocket ? savePocketEntryWithDocument : saveDeskEntryWithDocument)(page, name);
 
-      // The document failed once; the item had already landed.
-      await expect.poll(() => documentPosts.length, { timeout: 30_000 }).toBe(1);
+      // The document failed to stage: no item was sent, none is kept.
+      await expect.poll(() => stagePosts.length, { timeout: 30_000 }).toBe(1);
       await expect(note).toBeVisible();
-      await expect(note).not.toHaveText("");
-      await expect(note).not.toContainText("changed on another device");
-      await expect(add).not.toHaveAttribute("aria-disabled", "true");
-      expect(upserts).toHaveLength(1);
+      await expect(note).toContainText("The document store is down");
+      await expect(note).not.toContainText(/recorded|another try|changed on another device/);
+      expect(upserts).toHaveLength(0);
+      expect(await itemIdOf(page, household.id, name)).toBeNull();
 
-      // Editing the entry asks the live check again; it must not hold Add.
-      await nameField.fill(`${name} again`);
-      await expect(add).not.toHaveAttribute("aria-disabled", "true", { timeout: 10_000 });
-      await expect(page.locator("#pk-refusal")).toHaveCount(0);
-      await expect(page.locator("body")).not.toContainText("changed on another device");
+      // Everything entered stays, the file included, and Add can be pressed again.
+      await expect(nameField).toHaveValue(name);
+      await expect(heldFile).toContainText(DOCUMENT);
+      await expect(add).not.toHaveAttribute("aria-disabled", "true");
 
       await add.click();
       await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
 
       const itemId = new URL(page.url()).searchParams.get("item") as string;
-      expect(upserts).toHaveLength(2);
-      expect(upserts[1]).toBe(upserts[0]);
-      expect(upserts[1]).toBe(itemId);
-      expect(documentPosts).toHaveLength(2);
-      expect(documentPosts[0].documentId).toBeTruthy();
-      expect(documentPosts[1].documentId).toBe(documentPosts[0].documentId);
-      expect(documentPosts[1].itemId).toBe(itemId);
+      expect(stagePosts).toHaveLength(2);
+      expect(stagePosts[0].documentId).toBeTruthy();
+      expect(stagePosts[1].documentId).toBe(stagePosts[0].documentId);
+      expect(stagePosts[1].name).toBe(DOCUMENT);
+      expect(upserts).toEqual([{ itemId, documentIds: [stagePosts[0].documentId] }]);
+      // The ciphertext is sealed under the draft item's id, so both stages name the id the one command used.
+      expect(stagePosts.map((one) => one.itemId)).toEqual([itemId, itemId]);
+      expect(attachPosts).toHaveLength(0);
+      expect(itemId).toBe(await itemIdOf(page, household.id, name));
+      await expect.poll(async () => {
+        const response = await page.request.get(`/api/households/${household.id}/items/${itemId}/documents`);
+        if (!response.ok()) return `http_${response.status()}`;
+        const { documents } = (await response.json()) as { documents: Array<{ id: string; displayName: string }> };
+        return documents.map((one) => `${one.id}:${one.displayName}`).join(",");
+      }, { timeout: 30_000 }).toBe(`${stagePosts[0].documentId}:${DOCUMENT}`);
     } finally {
+      await page.unroute(/\/api\/households\/[^/]+\/documents$/).catch(() => {});
       await page.unroute(/\/api\/households\/[^/]+\/items\/[^/]+\/documents$/).catch(() => {});
       await households.sweep(page);
     }
   });
 
   /**
+   * #1316 (owner answer 6a): a file the server refuses stays in the form marked
+   * refused with the server's reason; no item is sent; Add is held until the
+   * file is replaced or removed, and removing it lets Add save without it.
+   * Both dialects. The refusal is the stage route's own 422, so the words are
+   * the server's, not the test's.
+   */
+  test("a document the server refuses stays in the form, holds Add, and saves without it once removed", async ({ page }) => {
+    test.setTimeout(120_000);
+    await answerPushWithoutAService(page);
+    await page.goto("/api/auth/login?returnTo=/home");
+    await page.getByRole("link", { name: workerAccount("administrator") }).click();
+    await settleArrival(page);
+    await ensureWorkerAdministrator(page);
+    const household = households.track(await seedHousehold(page));
+
+    const pocket = test.info().project.name.startsWith("mobile");
+    const REASON = "That file is not a PDF or image we can keep";
+    const upserts: Array<{ itemId: string; documentIds: string[] | undefined }> = [];
+    let stagePosts = 0;
+    page.on("request", (request) => {
+      if (request.method() !== "POST" || !request.url().includes("/api/workspace/commands")) return;
+      const body = request.postDataJSON() as { type?: string; dryRun?: boolean; item?: { id?: string }; documentIds?: string[] };
+      if (body.type === "item.upsert" && !body.dryRun && body.item?.id) upserts.push({ itemId: body.item.id, documentIds: body.documentIds });
+    });
+    await page.route(/\/api\/households\/[^/]+\/documents$/, async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      stagePosts += 1;
+      return route.fulfill({
+        status: 422, contentType: "application/json",
+        body: JSON.stringify({ error: { code: "document_unsupported_type", message: REASON } }),
+      });
+    });
+
+    try {
+      const name = "Refused document proving";
+      const add = pocket ? page.getByRole("button", { name: "Add to orbit" }) : page.locator(".btn-primary");
+      const nameField = pocket
+        ? page.getByRole("form", { name: "New entry" }).getByRole("textbox", { name: "name", exact: true })
+        : page.locator("#f-name");
+      const heldFile = pocket ? page.locator(".pc-reading") : page.locator("#dz-held-name");
+
+      await (pocket ? savePocketEntryWithDocument : saveDeskEntryWithDocument)(page, name);
+      await expect.poll(() => stagePosts, { timeout: 30_000 }).toBe(1);
+
+      // The file stays, marked refused, with the server's own reason; Add is held; nothing was sent.
+      await expect(page.locator("body")).toContainText(REASON);
+      await expect(heldFile).toContainText(DOCUMENT);
+      await expect(heldFile).toContainText(/refused/i);
+      await expect(add).toHaveAttribute("aria-disabled", "true");
+      await expect(nameField).toHaveValue(name);
+      expect(upserts).toHaveLength(0);
+      await add.click({ force: true });
+      await page.waitForTimeout(500);
+      expect(stagePosts).toBe(1);
+      expect(upserts).toHaveLength(0);
+      expect(await itemIdOf(page, household.id, name)).toBeNull();
+
+      // Removing the file lets Add save the item without it.
+      await page.getByRole("button", { name: /not this one|remove/i }).first().click();
+      await expect(add).not.toHaveAttribute("aria-disabled", "true", { timeout: 10_000 });
+      await add.click();
+      await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
+      const itemId = new URL(page.url()).searchParams.get("item") as string;
+      expect(upserts).toHaveLength(1);
+      expect(upserts[0].itemId).toBe(itemId);
+      expect(upserts[0].documentIds === undefined || upserts[0].documentIds.length === 0).toBe(true);
+      expect(stagePosts).toBe(1);
+    } finally {
+      await page.unroute(/\/api\/households\/[^/]+\/documents$/).catch(() => {});
+      await households.sweep(page);
+    }
+  });
+
+  /**
    * #1316 W1-R5: the desk's save sends the document that was picked when Add
-   * was pressed. While "Adding…" shows (the item write is still in flight),
-   * pressing "not this one" or dropping another file must not change what the
-   * save carries, nor what the zone says is held: one document POST, with the
-   * first file's name and id.
+   * was pressed. While "Adding…" shows (the document is already staged and the
+   * item write is still in flight), pressing "not this one" or dropping another
+   * file must not change what the save carries, nor what the zone says is
+   * held: one stage POST, with the first file's name and id, and the item
+   * command naming that id in `documentIds`.
    */
   const FIRST_DOCUMENT = DOCUMENT;
   const SECOND_DOCUMENT = "second-file-dropped-mid-save.pdf";
@@ -920,7 +1023,8 @@ test.describe(() => {
       });
 
       const upserts: string[] = [];
-      const documentPosts: Array<{ name: string; documentId: string | undefined }> = [];
+      const upsertDocumentIds: Array<string[] | undefined> = [];
+      const documentPosts: Array<{ name: string; documentId: string | undefined; itemId: string | undefined }> = [];
       let releaseItemWrite: () => void = () => {};
       const itemWriteHeld = new Promise<void>((resolveHeld) => { releaseItemWrite = resolveHeld; });
       let itemWriteSeen = false;
@@ -928,19 +1032,21 @@ test.describe(() => {
       /* The item write is the held reply; the live checks (`dryRun: true`) go through. */
       await page.route("**/api/workspace/commands", async (route) => {
         const request = route.request();
-        const body = request.method() === "POST" ? (request.postDataJSON() as { type?: string; dryRun?: boolean; item?: { id?: string } }) : {};
+        const body = request.method() === "POST" ? (request.postDataJSON() as { type?: string; dryRun?: boolean; item?: { id?: string }; documentIds?: string[] }) : {};
         if (body.type !== "item.upsert" || body.dryRun) return route.fallback();
         if (body.item?.id) upserts.push(body.item.id);
+        upsertDocumentIds.push(body.documentIds);
         itemWriteSeen = true;
         await itemWriteHeld;
         return route.fallback();
       });
-      await page.route(/\/api\/households\/[^/]+\/items\/[^/]+\/documents$/, async (route) => {
+      await page.route(/\/api\/households\/[^/]+\/documents$/, async (route) => {
         const request = route.request();
         if (request.method() !== "POST") return route.fallback();
         documentPosts.push({
           name: decodeURIComponent(request.headers()["x-orbit-filename"] ?? ""),
           documentId: request.headers()["x-orbit-document-id"],
+          itemId: request.headers()["x-orbit-item-id"],
         });
         return route.fallback();
       });
@@ -961,7 +1067,9 @@ test.describe(() => {
         // The item write is held: the form is mid-save.
         await expect.poll(() => itemWriteSeen, { timeout: 20_000 }).toBe(true);
         await expect(page.locator(".btn-primary")).toContainText("Adding…");
-        expect(documentPosts).toHaveLength(0);
+        // The file was staged before the item was sent: one POST, for the first file.
+        expect(documentPosts).toHaveLength(1);
+        expect(documentPosts[0].name).toBe(FIRST_DOCUMENT);
 
         if (interference === "not this one") {
           await page.locator("#rc-drop").click();
@@ -984,8 +1092,8 @@ test.describe(() => {
         const itemId = new URL(page.url()).searchParams.get("item") as string;
         expect(upserts).toEqual([itemId]);
 
-        // Exactly one document POST, for the first file, under the id its pick minted.
-        await expect.poll(() => documentPosts.length, { timeout: 20_000 }).toBeGreaterThan(0);
+        // Exactly one stage POST, for the first file, under the id its pick minted,
+        // and the one item command binds that same id.
         await page.waitForTimeout(1_000);
         expect(documentPosts).toHaveLength(1);
         expect(documentPosts[0].name).toBe(FIRST_DOCUMENT);
@@ -993,10 +1101,12 @@ test.describe(() => {
         expect(postedId).toBeTruthy();
         expect(postedId).not.toBe(itemId);
         expect(mintedAtFirstPick).toContain(postedId);
+        expect(upsertDocumentIds).toEqual([[postedId]]);
+        expect(documentPosts[0].itemId, "the stage names the draft item the command saves").toBe(itemId);
       } finally {
         releaseItemWrite();
         await page.unroute("**/api/workspace/commands").catch(() => {});
-        await page.unroute(/\/api\/households\/[^/]+\/items\/[^/]+\/documents$/).catch(() => {});
+        await page.unroute(/\/api\/households\/[^/]+\/documents$/).catch(() => {});
         await households.sweep(page);
       }
     });
