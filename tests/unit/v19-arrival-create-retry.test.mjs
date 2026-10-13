@@ -11,8 +11,11 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
  * "Failed to fetch", and the person presses Create again. Each press used to
  * mint a fresh household id, so the retry made a second household. The id is
  * the idempotency key (the server replays a repeat of the same id): Arrival
- * keeps ONE id for the form until the create succeeds or the name changes, and
- * the refusal line is Orbit's own words, never the browser's.
+ * keeps ONE id for the card until a create succeeds, whatever is edited, and
+ * the refusal line is Orbit's own words, never the browser's. After no answer
+ * it reads the session before saying anything (U3 design,
+ * .agents/reviews/v0.3.0-door/r5/design-U3-lost-reply.md; the numbers in the
+ * test names are that design's testable behaviours).
  *
  * Arrival.svelte is compiled here with Svelte's own compiler and mounted in
  * happy-dom over the real workspace.js and a stubbed fetch, as
@@ -32,23 +35,69 @@ vi.mock("../../web/src/lib/flight/fetch-ahead.js", () => ({ fetchFlightAhead: ()
 
 /** The commands the server was sent, in order. @type {any[]} */
 let commands = [];
-/** Answers to household.create, in order; the last one repeats. @type {("lost" | "refused")[]} */
+/** The household.create commands alone. */
+const creates = () => commands.filter((command) => command.type === "household.create");
+/**
+ * Answers to household.create, in order; the last one repeats.
+ * lost: no answer (the browser's TypeError). refused: a 409 in the server's
+ * own words. mismatch: the 422 for the same id with different details (U3
+ * decision 2). bare: a refusal with no words of its own (an empty message).
+ * ok: the household was created.
+ * @type {("lost" | "refused" | "mismatch" | "bare" | "ok")[]}
+ */
 let answers = [];
+/**
+ * How /api/auth/session answers once a create has gone unanswered (U3
+ * decision 1, "read before telling"). landed: the session points at the id
+ * last sent. absent: it points nowhere. fails: the read gets no answer too.
+ * Before any lost create it always points nowhere (the empty instance).
+ * @type {"landed" | "absent" | "fails"}
+ */
+let sessionAfterLost = "absent";
+/** Set to hold the session read after a lost create until released. @type {Promise<void> | null} */
+let holdSession = null;
+/** Every request, in order: "session", "create", "activate", "workspace". @type {string[]} */
+let requests = [];
+let createLost = false;
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status });
 
 function stubFetch() {
   commands = [];
+  requests = [];
+  createLost = false;
   vi.stubGlobal("fetch", vi.fn(async (url, init) => {
     const href = String(url);
-    if (href.includes("/api/auth/session")) return json({ user: { id: "u1" }, csrfToken: "t1" });
+    if (href.includes("/api/auth/session")) {
+      requests.push("session");
+      if (!createLost) return json({ user: { id: "u1" }, csrfToken: "t1", activeHouseholdId: null });
+      if (holdSession) await holdSession;
+      if (sessionAfterLost === "fails") throw new TypeError("Failed to fetch");
+      const landed = sessionAfterLost === "landed" ? creates().at(-1)?.household.id ?? null : null;
+      return json({ user: { id: "u1" }, csrfToken: "t1", activeHouseholdId: landed });
+    }
     if (href.endsWith("/api/workspace") && !init?.method) {
+      requests.push("workspace");
       return json({ workspace: { households: [], visibleHouseholds: [] } });
     }
     if (href.includes("/api/workspace/commands") && init?.method === "POST") {
-      commands.push(JSON.parse(String(init.body)));
-      const answer = answers[Math.min(commands.length, answers.length) - 1];
-      if (answer === "lost") throw new TypeError("Failed to fetch");
+      const command = JSON.parse(String(init.body));
+      commands.push(command);
+      if (command.type === "household.activate") {
+        requests.push("activate");
+        return json({ workspace: { activeHouseholdId: command.householdId, households: [], visibleHouseholds: [] } });
+      }
+      requests.push("create");
+      const sent = creates().length;
+      const answer = answers[Math.min(sent, answers.length) - 1];
+      if (answer === "lost") { createLost = true; throw new TypeError("Failed to fetch"); }
+      if (answer === "mismatch") {
+        return json({ error: { code: "household_create_mismatch", message: "This household was already created with different details" } }, 422);
+      }
+      if (answer === "bare") return json({ error: { code: "household_create_refused", message: "" } }, 409);
+      if (answer === "ok") {
+        return json({ workspace: { activeHouseholdId: command.household.id, households: [], visibleHouseholds: [] } });
+      }
       return json({ error: { code: "household_name_recoverable", message: "That name is waiting to be restored" } }, 409);
     }
     return json({}, 404);
@@ -94,19 +143,25 @@ afterAll(() => { rmSync(compiledDir, { recursive: true, force: true }); });
 
 /** @type {(() => void) | null} */
 let unmountArrival = null;
+/** The page's own navigations (location.assign), stubbed so the test stays put. @type {any} */
+let assigned = null;
 beforeEach(() => {
   vi.resetModules();
   document.body.className = "";
   document.body.innerHTML = "";
   sessionStorage.clear();
   answers = [];
+  sessionAfterLost = "absent";
+  holdSession = null;
   stubFetch();
+  assigned = vi.spyOn(window.location, "assign").mockImplementation(() => {});
 });
 afterEach(() => {
   unmountArrival?.();
   unmountArrival = null;
   newcomer.props = null;
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const settle = async () => { await new Promise((done) => setTimeout(done, 80)); };
@@ -130,49 +185,188 @@ async function mountOnEmptyInstance() {
   };
   /** The refusal line under the name: Orbit's words, as Newcomer is handed them. */
   const refusal = () => newcomer.props.rejected?.reason ?? "";
-  return { type, pressCreate, refusal };
+  /**
+   * The whole line as the card renders it (CreateSystem.svelte: the quoted
+   * name, the lower-case reason, then any link after a dash). The link's words
+   * may come in the reason itself or in a `link` field beside it.
+   */
+  const line = () => {
+    const rejected = newcomer.props.rejected;
+    if (!rejected) return "";
+    return `“${rejected.name}” ${rejected.reason}${rejected.link ? ` — ${rejected.link}` : ""}`;
+  };
+  /** Presses the link on the refusal line: the card's one link road, `onask`. */
+  const pressLink = async () => {
+    await newcomer.props.onask?.(newcomer.props.rejected);
+    await settle();
+  };
+  const set = (/** @type {"timezone" | "currency"} */ field, /** @type {string} */ value) => {
+    newcomer.props[field] = value;
+    flushSync();
+  };
+  return { type, pressCreate, refusal, line, pressLink, set };
 }
 
 describe("#1316 GAP-U1: pressing Create again after a lost reply", () => {
-  it("sends the same household id both times, and says it could not be created rather than 'Failed to fetch'", async () => {
-    answers = ["lost"];
-    const { type, pressCreate, refusal } = await mountOnEmptyInstance();
-    type("Harlow Home");
+  /* U3 design, decision 1: one household id per card for the card's whole
+     life, cleared only when a create succeeds. The old "new id when the name
+     changes" rule is dropped: a second press can never mint a second household. */
 
-    await pressCreate();
-    expect(commands, "the first Create was sent").toHaveLength(1);
-    expect(refusal(), "a network failure is not the server's words").toBe("could not be created");
-    expect(refusal()).not.toMatch(/failed to fetch/iu);
-
-    await pressCreate();
-    expect(commands, "the second Create was sent").toHaveLength(2);
-    expect(commands[0].household.id).toMatch(/^[0-9a-f-]{36}$/u);
-    expect(commands[1].household.id, "the retry carries the same id, so the server can replay it").toBe(commands[0].household.id);
-  });
-
-  it("keeps the same id across a refusal in the server's words as well", async () => {
-    answers = ["refused"];
-    const { type, pressCreate, refusal } = await mountOnEmptyInstance();
-    type("Harlow Home");
-
-    await pressCreate();
-    expect(refusal()).toBe("That name is waiting to be restored");
-    await pressCreate();
-
-    expect(commands).toHaveLength(2);
-    expect(commands[1].household.id).toBe(commands[0].household.id);
-  });
-
-  it("takes a new id once the name changes: a different name is a different household", async () => {
+  it("(1) sends the same household id when the name was edited between two presses", async () => {
     answers = ["lost"];
     const { type, pressCreate } = await mountOnEmptyInstance();
-    type("Harlow Home");
+    type("Harlow HQ");
     await pressCreate();
-    type("Seaside Cottage");
+    type("Harlow House");
     await pressCreate();
 
-    expect(commands).toHaveLength(2);
-    expect(commands[1].household.name).toBe("Seaside Cottage");
-    expect(commands[1].household.id).not.toBe(commands[0].household.id);
+    expect(creates()).toHaveLength(2);
+    expect(creates()[0].household.id).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(creates()[1].household.name, "the edited name is what is sent").toBe("Harlow House");
+    expect(creates()[1].household.id, "an id that never landed carries any name").toBe(creates()[0].household.id);
+  });
+
+  it("(2) sends the same household id when the time zone or currency changed between presses", async () => {
+    answers = ["lost"];
+    const { TIME_ZONES, CURRENCIES } = await import(pathToFileURL(join(web, "src/lib/arrival/stage.js")).href);
+    const { type, pressCreate, set } = await mountOnEmptyInstance();
+    type("Harlow HQ");
+    await pressCreate();
+    const firstZone = creates()[0].household.timezone;
+    const firstCurrency = creates()[0].household.currency;
+
+    const otherZone = TIME_ZONES.map((/** @type {any} */ zone) => zone.value).find((/** @type {string} */ zone) => zone !== firstZone);
+    set("timezone", otherZone);
+    await pressCreate();
+    const otherCurrency = CURRENCIES.find((/** @type {string} */ currency) => currency !== firstCurrency);
+    set("currency", otherCurrency);
+    await pressCreate();
+
+    expect(creates()).toHaveLength(3);
+    expect(creates()[1].household.timezone, "the changed zone is what is sent").toBe(otherZone);
+    expect(creates()[2].household.currency, "the changed currency is what is sent").toBe(otherCurrency);
+    expect(creates()[1].household.id).toBe(creates()[0].household.id);
+    expect(creates()[2].household.id).toBe(creates()[0].household.id);
+  });
+
+  it("(3) keeps the id across every refusal: a 409, a 422 and no answer never change it", async () => {
+    answers = ["lost", "refused", "mismatch", "bare", "lost"];
+    const { type, pressCreate } = await mountOnEmptyInstance();
+    type("Harlow HQ");
+    for (let press = 0; press < 5; press += 1) await pressCreate();
+
+    expect(creates()).toHaveLength(5);
+    const ids = new Set(creates().map((command) => command.household.id));
+    expect([...ids], "one id across every refusal").toHaveLength(1);
+  });
+
+  it("(4) after a create that got no answer, reads the session once before showing any line", async () => {
+    answers = ["lost"];
+    sessionAfterLost = "absent";
+    /** @type {() => void} */
+    let release = () => {};
+    holdSession = new Promise((done) => { release = done; });
+    const { type, line } = await mountOnEmptyInstance();
+    type("Harlow HQ");
+
+    const pressed = newcomer.props.onsubmit();
+    await settle();
+    const afterCreate = requests.slice(requests.lastIndexOf("create") + 1);
+    expect(afterCreate, "the session is read after the lost create").toEqual(["session"]);
+    expect(line(), "no line while the session read is still out").toBe("");
+
+    release();
+    await pressed;
+    await settle();
+    expect(requests.slice(requests.lastIndexOf("create") + 1), "read once, not again").toEqual(["session"]);
+    expect(line()).not.toBe("");
+  });
+
+  it("(5) when the session read says the household landed, shows no line and goes home", async () => {
+    answers = ["lost"];
+    sessionAfterLost = "landed";
+    const { type, pressCreate, line } = await mountOnEmptyInstance();
+    type("Harlow HQ");
+    await pressCreate();
+
+    expect(line(), "it landed: there is nothing to refuse").toBe("");
+    expect(assigned).toHaveBeenCalledWith("/home");
+    expect(creates(), "no second create is sent").toHaveLength(1);
+  });
+
+  it("(6) when the session read says it did not land, says it wasn't created and to try again", async () => {
+    answers = ["lost"];
+    sessionAfterLost = "absent";
+    const { type, pressCreate, line, refusal } = await mountOnEmptyInstance();
+    type("Harlow HQ");
+    await pressCreate();
+
+    expect(line()).toBe("“Harlow HQ” wasn't created — no answer came back. Try again");
+    expect(refusal()).not.toMatch(/failed to fetch/iu);
+    expect(assigned).not.toHaveBeenCalled();
+  });
+
+  it("(7) when the session read fails too, says it may or may not have been created", async () => {
+    answers = ["lost"];
+    sessionAfterLost = "fails";
+    const { type, pressCreate, line, refusal } = await mountOnEmptyInstance();
+    type("Harlow HQ");
+    await pressCreate();
+
+    expect(line()).toBe("“Harlow HQ” may or may not have been created — Orbit can't be reached. Try again");
+    expect(refusal()).not.toMatch(/failed to fetch/iu);
+    expect(assigned).not.toHaveBeenCalled();
+  });
+
+  it("(8) a 422 household_create_mismatch names the first-sent name and says it was already created", async () => {
+    answers = ["lost", "mismatch"];
+    sessionAfterLost = "absent";
+    const { type, pressCreate, line } = await mountOnEmptyInstance();
+    type("Harlow HQ");
+    await pressCreate();
+    type("Harlow House");
+    await pressCreate();
+
+    expect(creates()).toHaveLength(2);
+    expect(line(), "the name that landed, not the field's").toBe(
+      "“Harlow HQ” was already created — carry on, and change it in settings →",
+    );
+  });
+
+  it("(9) that line's link activates the pinned household and goes home, sending no second create", async () => {
+    answers = ["lost", "mismatch"];
+    sessionAfterLost = "absent";
+    const { type, pressCreate, pressLink } = await mountOnEmptyInstance();
+    type("Harlow HQ");
+    await pressCreate();
+    type("Harlow House");
+    await pressCreate();
+    const pinned = creates()[0].household.id;
+
+    await pressLink();
+
+    const activations = commands.filter((command) => command.type === "household.activate");
+    expect(activations).toEqual([{ type: "household.activate", householdId: pinned }]);
+    expect(assigned).toHaveBeenCalledWith("/home");
+    expect(creates(), "the link sends no further create").toHaveLength(2);
+    expect(commands.at(-1).type, "activate comes after the last create").toBe("household.activate");
+  });
+
+  it("(10) a refusal in the server's own words shows those words", async () => {
+    answers = ["refused"];
+    const { type, pressCreate, refusal } = await mountOnEmptyInstance();
+    type("Harlow HQ");
+    await pressCreate();
+
+    expect(refusal()).toBe("That name is waiting to be restored");
+  });
+
+  it("(10) 'could not be created' only for a refusal with no words of its own", async () => {
+    answers = ["bare"];
+    const { type, pressCreate, line } = await mountOnEmptyInstance();
+    type("Harlow HQ");
+    await pressCreate();
+
+    expect(line()).toBe("“Harlow HQ” could not be created");
   });
 });
