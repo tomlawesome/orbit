@@ -36,7 +36,8 @@
 #
 #      If GitLab takes the branch but says it could not act on the push
 #      options (no merge request opened), it deletes that branch again, so
-#      the next run proposes the door again, and fails the job.
+#      the next run proposes the door again, and fails the job. If the delete
+#      is refused too, the failure says to delete the branch by hand.
 #
 # It never lists, closes or comments on merge requests, and deletes only a
 # branch it pushed in this same run: older import merge requests and branches
@@ -117,10 +118,15 @@ fail() { printf 'import-door: %s\n' "$1" >&2; exit 2; }
 # removes, so cleanup covers every exit: success, `fail`, an unhandled error
 # under `set -e`, or a signal. Nothing is tracked per file, because the
 # helpers below run in command substitutions (subshells) whose variable
-# changes never reach this shell.
+# changes never reach this shell. A signal also stops the run, with the
+# shell's usual 128+signal status: carrying on after the root is gone could
+# recreate paths under it or still push.
 scratch_root="$(mktemp -d)"
 chmod 700 "$scratch_root"
-trap 'rm -rf "$scratch_root"' EXIT INT TERM
+remove_scratch_root() { rm -rf "$scratch_root"; }
+trap remove_scratch_root EXIT
+trap 'remove_scratch_root; exit 130' INT
+trap 'remove_scratch_root; exit 143' TERM
 
 # A mode-600 temp file under the scratch root. Callers write the secret into
 # it with a builtin (`printf ... > "$file"`), so the value is never the argv of
@@ -350,8 +356,11 @@ printf '%s\n' "$push_output" >&2
 # branch-exists check above would treat it as proposed for ever. Delete the
 # branch this run just pushed so the next run proposes the door again.
 if push_option_errors="$(printf '%s\n' "$push_output" | grep -F 'Error encountered with push options')"; then
-  push_git -C "$push_repo" push -q "$push_url" ":refs/heads/${branch_name}" ||
-    log "could not delete ${branch_name} again; delete it by hand so the next run proposes the door."
-  fail "GitLab accepted ${branch_name} but did not open the merge request: $(printf '%s' "$push_option_errors" | tr -s ' \n' ' '). The branch was removed so the next run proposes it again. Check DOOR_IMPORT_TOKEN's role on ${CI_PROJECT_PATH} and the push options."
+  if push_git -C "$push_repo" push -q "$push_url" ":refs/heads/${branch_name}"; then
+    cleanup_note="The branch was removed so the next run proposes it again."
+  else
+    cleanup_note="The branch could not be removed: delete ${branch_name} by hand, or the next run will take the door as proposed already."
+  fi
+  fail "GitLab accepted ${branch_name} but did not open the merge request: $(printf '%s' "$push_option_errors" | tr -s ' \n' ' '). ${cleanup_note} Check DOOR_IMPORT_TOKEN's role on ${CI_PROJECT_PATH} and the push options."
 fi
 log "pushed ${branch_name}; GitLab opens the merge request into ${target_branch} from the push options."

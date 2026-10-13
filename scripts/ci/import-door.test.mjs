@@ -226,6 +226,26 @@ if [ -f '${join(dir, "refuse-merge-request")}' ]; then
   echo "WARNINGS:" >&2
   echo "  Error encountered with push options 'merge_request.create': Target branch does not exist" >&2
 fi
+# A marker that makes it refuse a branch deletion, as a protected or
+# permission-limited remote would.
+if [ -f '${join(dir, "refuse-delete")}' ]; then
+  while read -r old new ref; do
+    case "$new" in
+      *[!0]*) ;;
+      *) echo "refusing to delete $ref" >&2; exit 1 ;;
+    esac
+  done
+fi
+# A marker that holds the push open until the test releases it, so a signal
+# can reach the import while it waits on the push.
+if [ -f '${join(dir, "hold-push")}' ]; then
+  : > '${join(dir, "push-reached")}'
+  i=0
+  while [ ! -f '${join(dir, "release-push")}' ] && [ "$i" -lt 400 ]; do
+    sleep 0.05
+    i=$((i + 1))
+  done
+fi
 `,
   );
   chmodSync(hook, 0o755);
@@ -270,9 +290,10 @@ async function startGitLab() {
 
 /* ---------------------------------------------------------------- running */
 
-function run(cmd, args, { cwd, env }) {
+function run(cmd, args, { cwd, env, onSpawn }) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    onSpawn?.(child);
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d) => (stdout += d));
@@ -597,6 +618,19 @@ describe("import-door.sh when the door changed (item 5, as revised by decision 1
     expect(importedBranch(world.bare), ok(result)).toEqual([]);
   });
 
+  it("does not say the branch was removed when GitLab refuses to delete it again (#1316)", async () => {
+    const world = await deployWorld();
+    writeFileSync(join(world.bare, "refuse-merge-request"), "");
+    writeFileSync(join(world.bare, "refuse-delete"), "");
+    const result = await runImport(world);
+
+    expect(result.status, ok(result)).not.toBe(0);
+    const branches = importedBranch(world.bare);
+    expect(branches, ok(result)).toHaveLength(1);
+    expect(result.stderr, ok(result)).not.toContain("was removed");
+    expect(result.stdout + result.stderr, ok(result)).toContain(`delete ${branches[0]} by hand`);
+  });
+
   it("does not touch older door-import branches that are already on Orbit", async () => {
     const world = await deployWorld();
     git(world.orbit, ["push", "--quiet", world.bare, "dev:refs/heads/chore/door-import-aaaaaaa"]);
@@ -629,7 +663,8 @@ describe("import-door.sh when the door changed (item 5, as revised by decision 1
   it("re-proposes a newer door change once an older import is merged, on a branch that merges cleanly (P-S24, #1316)", async () => {
     const world = await deployWorld();
     advanceUpstream(world.upstream); // X
-    expect((await runImport(world)).status).toBe(0);
+    const first = await runImport(world);
+    expect(first.status, ok(first)).toBe(0);
     const [branchX] = importedBranch(world.bare);
 
     // The door changes again (Z) before X is merged; dev is still the old tree.
@@ -641,6 +676,9 @@ describe("import-door.sh when the door changed (item 5, as revised by decision 1
     expect(second.status, ok(second)).toBe(0);
     const branchZ1 = importedBranch(world.bare).filter((b) => b !== branchX);
     expect(branchZ1, "branch for Z cut from the old dev").toHaveLength(1);
+    // Neither run had an earlier proposal of its own door to point at.
+    expect(first.stdout + first.stderr).not.toContain("earlier proposal");
+    expect(second.stdout + second.stderr).not.toContain("earlier proposal");
 
     // The owner merges X. The next nightly run sees Z against a dev that holds X.
     const merged = mergedOrbit(world, branchX);
@@ -653,6 +691,8 @@ describe("import-door.sh when the door changed (item 5, as revised by decision 1
     expect(branchZ2).toHaveLength(1);
     const record = JSON.parse(pushedFile(world.bare, branchZ2[0], "web/src/lib/door.upstream.json").toString("utf8"));
     expect(record.commit).toBe(commitZ);
+    // Z's first branch, cut from the old dev, is named for the owner to close.
+    expect(third.stdout, ok(third)).toContain(`${branchZ1[0]} is an earlier proposal of this door from an older base`);
 
     // It merges cleanly into the merged dev.
     const clone = scratchDir("orbit-door-mergecheck-");
@@ -839,7 +879,7 @@ describe("check-door-unchanged.sh (item 6)", () => {
  * (a value of undefined removes the variable). Its own runner rather than
  * runImport, so these tests say exactly which variables they depend on.
  */
-function runImportWith({ orbit, upstream, bare, api }, overrides = {}) {
+function runImportWith({ orbit, upstream, bare, api }, overrides = {}, { onSpawn } = {}) {
   const env = {
     PATH: process.env.PATH,
     HOME: scratchDir("orbit-door-home-"),
@@ -857,7 +897,7 @@ function runImportWith({ orbit, upstream, bare, api }, overrides = {}) {
     ...overrides,
   };
   for (const [key, value] of Object.entries(env)) if (value === undefined) delete env[key];
-  return run("bash", [join(orbit, "scripts", "ci", "import-door.sh")], { cwd: orbit, env });
+  return run("bash", [join(orbit, "scripts", "ci", "import-door.sh")], { cwd: orbit, env, onSpawn });
 }
 
 /** git with stdin, for building trees git itself would never let `git add` build. */
@@ -946,6 +986,29 @@ describe("import-door.sh leaves nothing in TMPDIR once it exits (D1-F1, #1316)",
 
     expect(result.status, ok(result)).toBe(0);
     expect(importedBranch(world.bare).length, ok(result)).toBeGreaterThan(0);
+    expect(entriesUnder(tmp)).toEqual([]);
+  });
+
+  it.each([
+    ["SIGTERM", 143],
+    ["SIGINT", 130],
+  ])("stops on %s while the push waits, with its exit status, and leaves TMPDIR empty", async (signal, status) => {
+    const world = await deployWorld();
+    writeFileSync(join(world.bare, "hold-push"), "");
+    const tmp = scratchDir("orbit-door-tmp-");
+    let child;
+    const pending = runImportWith(world, { TMPDIR: tmp }, { onSpawn: (spawned) => (child = spawned) });
+
+    const reached = join(world.bare, "push-reached");
+    const deadline = Date.now() + PROCESS_DEADLINE_MS;
+    while (!existsSync(reached) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
+    expect(existsSync(reached), "the push reached the fake GitLab").toBe(true);
+    child.kill(signal);
+    writeFileSync(join(world.bare, "release-push"), "");
+    const result = await pending;
+
+    expect(result.status, ok(result)).toBe(status);
+    expect(result.stdout, ok(result)).not.toContain("pushed chore/door-import-");
     expect(entriesUnder(tmp)).toEqual([]);
   });
 
