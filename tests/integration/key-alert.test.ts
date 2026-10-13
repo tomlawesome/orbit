@@ -476,3 +476,77 @@ describe("the all-clear (#1405, owner answer 10a)", () => {
     await getDb().delete(auditLog).where(and(eq(auditLog.action, "mail_in_credential_locked")));
   });
 });
+
+describe("key alert survives database errors (#1316 r5 U1)", () => {
+  const SECRET_TEXT = "db-failure-text-that-must-not-be-logged";
+  const HOUR_MS = 3_600_000;
+
+  /* Only the clock is faked, as in the repeat cases above: the database
+     driver's own timers must keep running. Elapsed time is simulated by moving
+     the clock and calling the callback of the timer the alert armed. */
+  const timerCallsSince = (timers: ReturnType<typeof vi.spyOn>, from: number) =>
+    (timers.mock.calls as Array<[() => unknown, number | undefined]>).slice(from);
+
+  /* A first alert goes out, which arms the 24-hour repeat timer; returns the
+     timer spy and that timer's callback, with the clock moved past the day. */
+  async function firstAlertThenDayPasses() {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    await sendKeyAlert(mismatch);
+    expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
+    const repeat = (timers.mock.calls as Array<[() => unknown, number | undefined]>)
+      .find(([, delay]) => (delay ?? 0) > 23 * HOUR_MS);
+    expect(repeat, "no 24-hour repeat timer was armed after the first send").toBeDefined();
+    vi.setSystemTime(Date.now() + DAY_MS + 60_000);
+    return { timers, fireRepeat: repeat![0] };
+  }
+
+  it("a database read that throws in the repeat is not the end of the alert: one warning without the error text, a retry in an hour, and the mail goes when the database answers", async () => {
+    const { timers, fireRepeat } = await firstAlertThenDayPasses();
+    const armedBefore = timers.mock.calls.length;
+    vi.spyOn(getDb(), "select").mockImplementationOnce(() => {
+      throw new Error(SECRET_TEXT);
+    });
+
+    await fireRepeat();
+
+    expect(mocks.sendBoundedMail, "the mail went out although the dedupe read threw").toHaveBeenCalledTimes(1);
+    const keyWarnings = warnLines().filter((line) => line.event === "encryption.key");
+    expect(keyWarnings, "expected exactly one encryption.key warning").toHaveLength(1);
+    expect(JSON.stringify([...warnLines(), ...infoLines()])).not.toContain(SECRET_TEXT);
+    const retry = timerCallsSince(timers, armedBefore).find(([, delay]) => delay === HOUR_MS);
+    expect(retry, "no one-hour retry was armed after the database error").toBeDefined();
+
+    // The hour passes and the database answers again.
+    vi.setSystemTime(Date.now() + HOUR_MS);
+    await retry![0]();
+    await vi.waitFor(() => expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(2));
+    await vi.waitFor(async () => expect(await rows(ALERT)).toHaveLength(2));
+  });
+
+  it("an 'alert sent' record that throws after the mail went still arms the 24-hour repeat, and logs a warning", async () => {
+    const { timers, fireRepeat } = await firstAlertThenDayPasses();
+    const armedBefore = timers.mock.calls.length;
+    vi.spyOn(getDb(), "insert").mockImplementationOnce(() => {
+      throw new Error(SECRET_TEXT);
+    });
+
+    await fireRepeat();
+
+    expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(2);
+    expect(warnLines().length, "no warning was logged for the failed record").toBeGreaterThanOrEqual(1);
+    expect(JSON.stringify([...warnLines(), ...infoLines()])).not.toContain(SECRET_TEXT);
+    const repeats = timerCallsSince(timers, armedBefore).filter(([, delay]) => (delay ?? 0) > 23 * HOUR_MS);
+    expect(repeats, "no 24-hour repeat was armed after the record failed").toHaveLength(1);
+  });
+
+  it("a 'working again' record older than 24 hours does not extend the window: an alert sent 25 hours ago is repeated", async () => {
+    await priorRow(RESTORED, 72, {});
+    await priorRow(ALERT, 25, { reason: "mismatch", heldKeyId: HELD, storedKeyId: STORED, addressHash: OPERATOR_HASH });
+
+    await sendKeyAlert(mismatch);
+
+    expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
+    expect(await rows(ALERT)).toHaveLength(2);
+  });
+});
