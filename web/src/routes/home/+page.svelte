@@ -947,6 +947,11 @@
      choosers stand beside it as a filed item's do. `add to orbit` sends the
      rows as the amended item on the two-tap decision's own operation id
      (amendReceipt), into the section the rows chose. */
+  /* #1316: the latest review & amend press still waiting on the reminder
+     read; an earlier press, or one the screen has moved on from, opens
+     nothing when its answer lands. */
+  /** @type {object | null} */
+  let amendAsk = null;
   async function startAmend() {
     const suggestion = asView(view).suggestions.find((one) => one.id === expanded);
     if (!suggestion?.receiptId) return;
@@ -964,8 +969,17 @@
     previewDoc = null;
     /* The rows start the reminders at the member's own pair from Settings,
        read before they open so no late answer has to be reconciled with an
-       edit; a failed read falls back to the default pair. */
-    const reminders = await readReminders().catch(() => null);
+       edit; a failed read, or one past 1.5 s (#1316), falls back to the
+       default pair. */
+    const ask = {};
+    amendAsk = ask;
+    const reminders = await readReminders({ within: 1500 }).catch(() => null);
+    if (amendAsk !== ask) return;
+    amendAsk = null;
+    /* #1316: the drawer may have closed, moved to another row or begun
+       another item's edit while the read was out: then the rows stay shut. */
+    if (expanded !== suggestion.id || (modes.id != null && modes.id !== suggestion.id)
+      || !asView(view).suggestions.some((one) => one.id === suggestion.id)) return;
     modes.startEdit(proposedItemOf(suggestion, { householdId, sectionId }, { reminders }));
     focusInDrawer('[data-ed="title"]');
   }

@@ -272,6 +272,10 @@
      (home's amendReceipt, as `onamend`), into the section the rows chose;
      `cancel` puts the readings back. The review sheet that rose here is
      gone. */
+  /* #1316: the latest review & amend press still waiting on the reminder
+     read (as the desk's amendAsk). */
+  /** @type {object | null} */
+  let amendAsk = null;
   /** @param {import('$lib/data/workspace.js').ReceiptSuggestion} s */
   async function startAmend(s) {
     if (!s.receiptId || reviewLockedOf(s) || !view) return;
@@ -286,8 +290,17 @@
     delete rowProblem[s.id];
     previewPaper = null;
     /* The member's own reminder pair from Settings, read before the lines
-       open (as the desk's startAmend does); the default pair if it fails. */
-    const reminders = await readReminders().catch(() => null);
+       open (as the desk's startAmend does); the default pair if it fails or
+       takes past 1.5 s (#1316). */
+    const ask = {};
+    amendAsk = ask;
+    const reminders = await readReminders({ within: 1500 }).catch(() => null);
+    if (amendAsk !== ask) return;
+    amendAsk = null;
+    /* #1316: the row may have closed, another opened, another item's edit
+       begun, or the suggestion been locked or gone while the read was out. */
+    const still = view?.suggestions.find((one) => one.id === s.id);
+    if (lit !== s.id || (modes.id != null && modes.id !== s.id) || !still || reviewLockedOf(still)) return;
     modes.startEdit(proposedItemOf(s, { householdId, sectionId }, { reminders }));
     focusInRow(s.id, '[data-ed="title"]');
   }
