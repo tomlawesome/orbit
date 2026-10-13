@@ -352,7 +352,9 @@ and, since #969, every account address: `users.email` and the mail-forwarding
 sender address `mail_in_sender_addresses.address`. Those two account addresses
 sit under the instance key rather than a household one, because a person
 belongs to several households and a forwarded message is matched to its sender
-before any household is known. Everything else in Tier 2 uses the same
+before any household is known. Since #1316 the identity provider's ID token
+kept for sign-out, `sessions.id_token`, sits under the instance key too, bound
+to its own session row and deleted with it. Everything else in Tier 2 uses the same
 household key as Tier 1, and all of it the same envelope and the same rotation
 path — no second cipher. What it costs is queries: the database can no longer search titles,
 match provider names or add up costs, so Orbit does all three in the
