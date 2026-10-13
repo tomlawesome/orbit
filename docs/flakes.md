@@ -5,10 +5,13 @@ per flake, one line per sighting: `date · commit · pipeline/job · symptom`.
 The third sighting under a heading gets an issue, linked from the heading;
 fixing the cause deletes the heading in the same commit.
 
-## sign-out-provider-session.test.mjs:273 and :280, the Chrome.svelte no-flight fallback cases
+## sign-out-provider-session.test.mjs:273 and :280, the Chrome.svelte no-flight fallback cases (#1409)
 
 - 2026-10-13 · 0fd4d6aa (the #1316 audit branch with dev merged in; neither side changed Chrome.svelte's fallback or this file) · local `npx vitest run` (full unit suite, 7170 tests, other suites running on the host) · both cases saw no navigation (`expected undefined to be ...`); the file alone passes 4/4 straight after. The cases wait a fixed 60 ms (`settle`, :183) for the lazy flight import to fail and the fallback to navigate. First sighting.
 - 2026-10-13 · d9b053a3 (#1399's removal of document drafts, on the door branch; nothing near Chrome.svelte or this file) · local full unit suite, other suites running on the host · one case in this file failed; the rest of the suite passed. Second sighting.
+- 2026-10-13 · f9d9b513 (#1403 slice D5, docs only) · local full unit suite, other agents building in parallel on the host · one case failed; passes alone. Third sighting; #1409 filed.
+- 2026-10-13 · 29ef79ca (#1403 slice D2; nothing near Chrome.svelte) · local full unit suite, other agents building in parallel · the Chrome.svelte cases failed; pass alone. Fourth sighting.
+- 2026-10-13 · a76e6d44 (door branch; changes since the green gate at bfdb4daf are docs, CI and the names guard) · local full unit suite alongside the e2e and fidelity runs · both cases saw no navigation (`expected undefined to be ...`), two `ReferenceError: location is not defined`; the file alone passes straight after. Fifth sighting.
 
 ## availability-route.test.mjs "GET /api/auth/availability carries phase: starting straight from getBootPhase" (#869)
 
