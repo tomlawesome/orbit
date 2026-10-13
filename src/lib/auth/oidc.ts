@@ -392,12 +392,25 @@ export function profileFromClaims(config: OidcAuthConfig, claims: Record<string,
   };
 }
 
+/**
+ * What a completed code exchange hands back: the verified identity, and the
+ * provider's ID token exactly as it was issued (#1316 decision 26a). The token
+ * is kept apart from `VerifiedIdentity` so that type stays secret-free for
+ * provisioning, linking and step-up; only a sign-in passes it on, to the
+ * session row, so that sign-out can send it as `id_token_hint`.
+ */
+export interface CompletedAuthorization {
+  identity: VerifiedIdentity;
+  /** The raw compact JWS from the token response, byte for byte. */
+  idToken: string;
+}
+
 export async function completeAuthorization(
   config: OidcAuthConfig,
   metadata: OidcMetadata,
   code: string,
   transaction: LoginTransaction,
-): Promise<VerifiedIdentity> {
+): Promise<CompletedAuthorization> {
   const tokens = await exchangeCode(config, metadata, code, transaction.codeVerifier);
   /* The freshness rule comes off the sealed transaction, never off the
      request: only a step-up this process started asks for `max_age`, so only a
@@ -412,13 +425,31 @@ export async function completeAuthorization(
     transaction.maxAge === undefined ? {} : { maxAuthAgeSeconds: STEP_UP_MAX_AUTH_AGE_SECONDS },
   );
   const userInfo = tokens.access_token ? await fetchUserInfo(metadata, tokens.access_token, idClaims.sub as string) : {};
-  return profileFromClaims(config, { ...idClaims, ...userInfo, sub: idClaims.sub });
+  return {
+    identity: profileFromClaims(config, { ...idClaims, ...userInfo, sub: idClaims.sub }),
+    idToken: tokens.id_token,
+  };
 }
 
-export function createProviderLogoutUrl(config: OidcAuthConfig, metadata: OidcMetadata, postLogoutReturnTo: URL): URL | null {
-  if (!metadata.end_session_endpoint) return null;
+/**
+ * The provider's end-session address for one session (OpenID Connect
+ * RP-Initiated Logout 1.0 §2), or null when there is nowhere to send the
+ * browser: no `end_session_endpoint`, or no ID token to name the provider's
+ * session with. A session without a token (a password sign-in, a damaged or
+ * over-size value) has no provider session Orbit can name, and a provider
+ * such as Authentik answers a `post_logout_redirect_uri` without a hint with
+ * an error page (#1316 decision 26a).
+ */
+export function createProviderLogoutUrl(
+  config: OidcAuthConfig,
+  metadata: OidcMetadata,
+  postLogoutReturnTo: URL,
+  idTokenHint: string | null | undefined,
+): URL | null {
+  if (!metadata.end_session_endpoint || !idTokenHint) return null;
   const url = new URL(metadata.end_session_endpoint);
   url.searchParams.set("client_id", config.clientId);
+  url.searchParams.set("id_token_hint", idTokenHint);
   url.searchParams.set("post_logout_redirect_uri", postLogoutReturnTo.href);
   return url;
 }

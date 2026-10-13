@@ -372,7 +372,9 @@ surface may describe it as more than this.
 
 - One random 32-byte metadata data-encryption key per household, wrapped under
   the existing instance KEK (`DOCUMENT_KEK`), plus one instance-scope key for
-  mail-in receipts that are not attributed to a household yet. Deleting a
+  mail-in receipts that are not attributed to a household yet, account
+  addresses (#969), and the identity provider's ID token kept on each session
+  that began at the provider so sign-out can name it (#1316). Deleting a
   household deletes its key, which crypto-shreds any stray copy of that
   household's ciphertext.
 - Each value is one AES-256-GCM envelope, `mdv1.<iv>.<tag>.<ciphertext>`,

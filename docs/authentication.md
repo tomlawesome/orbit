@@ -208,10 +208,14 @@ enough to take one of these actions.
 
 ## Signing out, plainly
 
-Signing out of this device ends Orbit's session and, when the identity
-provider offers a sign-out page, then sends the browser to it after the
-goodbye, so the provider's session ends too and the provider brings the
-browser back to Orbit's goodbye at `/logout`.
+Pressing sign out ends Orbit's session at once; the descent and the goodbye
+play; then, for a session that began at the identity provider, the browser
+goes to the provider's sign-out page carrying that session's ID token, so the
+provider knows which of its sessions to end, and the provider brings the
+browser back to `/logout`. A session that began with a password has no
+provider session, so the journey ends at the goodbye. If the tab is closed
+before the goodbye finishes, the provider's session stays alive; sign out
+there too.
 
 "Sign out of every device" ends every session Orbit itself issued. It cannot
 end a session at the identity provider. If a user signs out of Orbit
@@ -228,7 +232,10 @@ did not exist yet at that point never comes back. Local credentials and setup
 tokens present at backup time restore intact; sessions created after that
 point do not survive the restore. `scripts/test-backup-restore.sh` asserts
 this every time the drill runs (see
-[installer-guarantees.md](installer-guarantees.md)).
+[installer-guarantees.md](installer-guarantees.md)). A restored backup brings
+back the sessions it held, and signing one of those out may land on the
+provider's error page because the provider no longer knows that token;
+Orbit's session is still ended.
 
 ## Authentik provider
 
@@ -241,6 +248,7 @@ In the Authentik Admin interface:
 5. Keep the recommended per-provider issuer mode. With an application slug of `orbit`, the issuer is normally `https://auth.example.com/application/o/orbit/`.
 6. Select an asymmetric **Signing key**, such as Authentik's self-signed certificate. Orbit only trusts sign-in tokens it can check against the provider's published public keys (its JWKS); it deliberately refuses tokens signed with a shared secret.
 7. Select a stable, non-email subject mode, such as a hashed user ID or user UUID. Changing this setting later creates a new Orbit identity from the application's perspective.
+8. Add `https://orbit.your-domain.tld/logout` as a second **Strict** redirect URI, alongside the callback from step 3. Authentik checks the address Orbit asks it to return to after sign-out (`post_logout_redirect_uri`) against the provider's registered redirect URIs and refuses one it has not seen: without this entry, signing out ends on an Authentik error page instead of Orbit's goodbye. Orbit's own session is ended either way.
 
 
 The settings this produces, in plain terms: Orbit sends the person to
@@ -301,6 +309,11 @@ A provider must support:
 - the standard `sub` claim and a usable email claim in either the ID token or UserInfo response;
 - an `auth_time` claim honouring `max_age=0`, for the step-up re-challenge above.
 
+If the provider advertises an `end_session_endpoint`, register `<APP_URL>/logout`
+as a post-logout redirect URI there. Orbit sends `id_token_hint` (the
+session's own ID token) with every provider sign-out, as OpenID Connect
+RP-Initiated Logout 1.0 describes.
+
 Custom claim names can be configured with `OIDC_EMAIL_CLAIM`, `OIDC_EMAIL_VERIFIED_CLAIM`, `OIDC_NAME_CLAIM`, and `OIDC_AVATAR_CLAIM`.
 
 Orbit maps accounts only by the immutable `(issuer, subject)` pair. It updates mutable profile information on subsequent sign-ins, but it never merges users merely because their email addresses match.
@@ -327,7 +340,7 @@ Membership and owner checks are repeated by every household-scoped API. Client-s
 | `GET` | `/api/auth/callback` | Validates the provider response and completes sign-in, bootstrap, linking, or step-up, depending on what started the transaction. |
 | `GET` | `/api/auth/session` | Returns the current user, expiry, household context, and CSRF token. |
 | `POST` | `/api/auth/session/refresh` | Rotates the local session after origin and CSRF validation. |
-| `POST` | `/api/auth/logout` | Invalidates the local session and redirects through provider logout when advertised. |
+| `POST` | `/api/auth/logout` | Ends the local session, then redirects to the provider's end-session page with `id_token_hint` when the session came from the provider. |
 | `POST` | `/api/auth/sessions/revoke` | Ends every session the caller holds, including the calling device, and clears its cookie (see "Signing out, plainly"). |
 | `GET` | `/api/auth/methods` | The caller's own sign-in methods: password set/changed, and linked providers. |
 | `POST` | `/api/auth/local/password` | Sets or changes the caller's password, behind recent authentication. |
@@ -378,7 +391,7 @@ detail behind that, for readers who want to check it.
   HTTP-only, same-site cookie.
 - Discovery metadata must exactly match the configured HTTPS issuer. Provider endpoints must also use HTTPS.
 - ID-token signature, issuer, audience, expiry, nonce, authorized party, and access-token hash are validated where applicable.
-- Provider access and ID tokens are used only to complete the callback and are not persisted.
+- Provider access and refresh tokens — anything that could call another service — are never stored. The ID token from a provider sign-in is kept on that session's row, encrypted under the instance's encryption key (the one that protects account addresses), so that signing out can tell the provider which session to end. It is deleted with the session, is never sent to the browser, and cannot be used to sign in to Orbit again.
 - The browser receives a random opaque session credential. Only its SHA-256 hash is stored in PostgreSQL. Setup and recovery tokens are stored the same way: only their SHA-256 hash, never the token itself.
 - Session refresh rotates the credential atomically. Logout deletes it server-side and expires the cookie.
 - State-changing session actions require an exact same-origin request and a session-bound HMAC synchronizer token.
@@ -429,3 +442,4 @@ detail behind that, for readers who want to check it.
 - `invalid_id_token`: select an asymmetric signing key, confirm the configured client ID, and check server clock accuracy.
 - `missing_email`: enable the provider's email scope mapping or set `OIDC_EMAIL_CLAIM` to the actual claim name.
 - Redirect URI error at the provider: configure the callback as a strict redirect and make its scheme, host, port, and path identical to `OIDC_CALLBACK_URL`.
+- Error page at the provider after signing out: `<APP_URL>/logout` is not registered on the provider, or the provider no longer recognises the session's token (a restored backup, a provider key rotation). Orbit's own session is already ended either way.

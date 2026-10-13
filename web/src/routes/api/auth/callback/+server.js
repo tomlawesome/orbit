@@ -83,7 +83,10 @@ export async function GET(event) {
     }
 
     const metadata = await discoverProvider(config.oidc);
-    const identity = await completeAuthorization(config.oidc, metadata, code, transaction);
+    /* The ID token travels on only to a new session (#1316 decision 26a):
+       sign-out sends it back to the provider as `id_token_hint`. A step-up and
+       a link create no session, so they drop it. */
+    const { identity, idToken } = await completeAuthorization(config.oidc, metadata, code, transaction);
 
     /* What the provider's answer is FOR is decided by the transaction this
        process sealed, never by anything on the request (ADR-0022 §2). Four
@@ -163,7 +166,7 @@ export async function GET(event) {
        error, say -- the reader would be left with neither session, signed
        out by a blip that had nothing to do with their sign-in. */
     const previousSessionToken = event.cookies.get(sessionCookieName(config));
-    const session = await createSession(user.id, config, event.request.headers.get("user-agent"));
+    const session = await createSession(user.id, config, event.request.headers.get("user-agent"), { idToken });
     await deleteSessionToken(previousSessionToken);
 
     clearTransactionCookie(event.cookies, config);
