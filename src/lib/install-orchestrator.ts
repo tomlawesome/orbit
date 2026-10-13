@@ -577,12 +577,15 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       // An existing .env-orbit is preflighted and migrated before anything
       // else is installed (#50).
       let configurationMigrationCompleted = false;
-      // Read before the migration below writes the stamp, so configure can
-      // tell a pre-provisioned first install from one that lost its secrets.
-      const stampAbsentBeforeMigration = !environmentHasAppliedStamp(context.targetDir);
+      // No file means a fresh install, so the stamp is absent.
+      let stampAbsentBeforeMigration = true;
       if (existsSync(environmentFile)) {
         const preflight = transaction.shareLock(() => runConfigurationPreflight(environmentFile));
         if (!preflight.ok) return fail("configuration", "configuration", preflight.message);
+        // Read only once the preflight has accepted the file, and before the
+        // migration below writes the stamp, so configure can tell a
+        // pre-provisioned first install from one that lost its secrets.
+        stampAbsentBeforeMigration = !environmentHasAppliedStamp(context.targetDir);
         const migration = transaction.shareLock(() => runConfigurationMigration(migrationTarget));
         if (!migration.ok) return fail("configuration", "configuration", migration.message);
         say(dependencies, [migration.message]);

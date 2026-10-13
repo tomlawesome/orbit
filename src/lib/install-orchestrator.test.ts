@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { NOT_UTF8_FAILURE_MESSAGE } from "./configuration-migration";
 import { DEPLOYMENT_ASSETS } from "./deployment-assets";
 import type { EngineEvent } from "./engine-event";
 import { type HostFacts, parseHostFacts } from "./host-facts";
@@ -507,6 +508,18 @@ describe("runInstall: refusals inside the transaction roll back (#11, #56)", () 
     const { outcome } = await run(target);
     expect(outcome).toMatchObject({ status: "failed", message: "Configuration preflight failed; restoring the previous deployment." });
     expect(snapshot(target)).toEqual(before);
+  });
+
+  it("reports a .env-orbit that is not valid UTF-8 as a failed outcome, not a thrown refusal, and leaves the target unchanged (#1316)", async () => {
+    const target = recognised();
+    const envPath = join(target, ".env-orbit");
+    writeFileSync(envPath, Buffer.concat([readFileSync(envPath), Buffer.from("# caf"), Buffer.from([0xe9]), Buffer.from("\n")]), { mode: 0o600 });
+    const bytesBefore = readFileSync(envPath);
+    const before = snapshot(target);
+    const { outcome } = await run(target);
+    expect(outcome).toMatchObject({ status: "failed", message: NOT_UTF8_FAILURE_MESSAGE });
+    expect(snapshot(target)).toEqual(before);
+    expect(readFileSync(envPath).equals(bytesBefore)).toBe(true);
   });
 });
 
