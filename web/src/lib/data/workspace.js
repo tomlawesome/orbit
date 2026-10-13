@@ -2312,11 +2312,22 @@ export async function signOutEverywhere() {
  * @returns {Promise<?string>}  the provider's own logout URL, when it has one
  */
 export async function signOut() {
-  const { csrfToken } = await readSession();
+  /* Read the session fresh, not from the cache: another tab may have replaced
+     it, and its old CSRF token would be refused on every press. A 401 is not
+     sent through `json()`, which would bounce into the login flow; with no
+     session there is nothing to prove, and the route takes the same-origin
+     check alone. */
+  const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin" });
+  /** @type {Record<string, string>} */
+  const headers = { accept: "application/json" };
+  if (sessionResponse.status !== 401) {
+    const { csrfToken } = /** @type {Session} */ (await json(sessionResponse));
+    headers["x-csrf-token"] = csrfToken;
+  }
   const response = await fetch("/api/auth/logout", {
     method: "POST",
     credentials: "same-origin",
-    headers: { accept: "application/json", "x-csrf-token": csrfToken },
+    headers,
   });
   if (!response.ok) {
     throw new WorkspaceError("The session could not be ended", { status: response.status });
