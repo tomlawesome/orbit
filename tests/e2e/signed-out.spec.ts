@@ -246,10 +246,15 @@ test("nothing signed out says which identity provider this instance trusts", asy
      the same kind of fact as `oidc`: a boolean about the INSTANCE, which the
      door and the settings screen both have to read from one place so they
      cannot disagree. It names no account -- the factor is on for everybody or
-     off for everybody -- and no provider, host or endpoint. */
+     off for everybody -- and no provider, host or endpoint.
+
+     `encryptionKey` (#1405) is the other: one word about the instance, so
+     the door can send a reader to the locked screen. Never the reason or a
+     key id, so its value is asserted too. */
   expect(Object.keys(body).sort()).toEqual(
-    ["claimed", "configured", "contactAddress", "methods", "phase"],
+    ["claimed", "configured", "contactAddress", "encryptionKey", "methods", "phase"],
   );
+  expect(["usable", "unusable"]).toContain(body["encryptionKey"]);
   expect(Object.keys(body["methods"] as Record<string, unknown>).sort())
     .toEqual(["local", "localAccounts", "oidc", "secondFactor"]);
   for (const value of Object.values(body)) {
