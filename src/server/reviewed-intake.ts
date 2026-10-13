@@ -238,7 +238,9 @@ function canonicalItem(input: ReviewedIntakeApproval, itemId: string): HomeItem 
     subtype: typeof subtype === "string" ? subtype : undefined,
     scheduleKind: typeof scheduleKind === "string" ? scheduleKind : undefined,
   });
-  const refused = itemRefusal({ ...intent, cost, sectionId: input.sectionId }, effective);
+  const found = itemRefusal({ ...intent, cost, sectionId: input.sectionId }, effective);
+  // Attaching to an existing item creates none, so it needs no type.
+  const refused = found === "kindNeeded" && input.action === "attach_existing" ? null : found;
   // The one-tap approval has no type chooser; review & amend does.
   if (refused) throw new Refusal(refused === "kindNeeded" ? "kindNeededInReview" : refused);
   const typedCost = typeof cost === "string" ? { costMinor: costMinorOf(cost) } : {};
