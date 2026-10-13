@@ -15,7 +15,7 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { applyCommand, approveWithOperation, attachItemDocument, dismissReceipt, dueDateIn, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
+  import { applyCommand, approveWithOperation, attachItemDocument, dismissReceipt, dueDateIn, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, readReminders, removeDocument, requestToJoin, restoreDocument, signOut, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
   import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
   import { createHeldCompletion, droppedCompletionWords, isRefused } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/arm.js";
@@ -947,7 +947,7 @@
      choosers stand beside it as a filed item's do. `add to orbit` sends the
      rows as the amended item on the two-tap decision's own operation id
      (amendReceipt), into the section the rows chose. */
-  function startAmend() {
+  async function startAmend() {
     const suggestion = asView(view).suggestions.find((one) => one.id === expanded);
     if (!suggestion?.receiptId) return;
     const householdId = suggestion.householdId ?? asView(view).primary;
@@ -962,7 +962,11 @@
     mailProblem = null;
     armed = { id: null, act: null };
     previewDoc = null;
-    modes.startEdit(proposedItemOf(suggestion, { householdId, sectionId }));
+    /* The rows start the reminders at the member's own pair from Settings,
+       read before they open so no late answer has to be reconciled with an
+       edit; a failed read falls back to the default pair. */
+    const reminders = await readReminders().catch(() => null);
+    modes.startEdit(proposedItemOf(suggestion, { householdId, sectionId }, { reminders }));
     focusInDrawer('[data-ed="title"]');
   }
   /**

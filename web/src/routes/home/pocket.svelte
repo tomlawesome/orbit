@@ -4,7 +4,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { applyCommand, attachItemDocument, dueDateIn, householdElsewhereFor, readItemDocuments, removeDocument, restoreDocument, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
+  import { applyCommand, attachItemDocument, dueDateIn, householdElsewhereFor, readItemDocuments, readReminders, removeDocument, restoreDocument, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import { sectionColourOf } from "$lib/option-colour.js";
@@ -273,7 +273,7 @@
      `cancel` puts the readings back. The review sheet that rose here is
      gone. */
   /** @param {import('$lib/data/workspace.js').ReceiptSuggestion} s */
-  function startAmend(s) {
+  async function startAmend(s) {
     if (!s.receiptId || reviewLockedOf(s) || !view) return;
     const householdId = s.householdId ?? view.primary;
     if (!householdId) {
@@ -285,7 +285,10 @@
     const sectionId = (own.find((one) => one.visible !== false) ?? own[0])?.id ?? null;
     delete rowProblem[s.id];
     previewPaper = null;
-    modes.startEdit(proposedItemOf(s, { householdId, sectionId }));
+    /* The member's own reminder pair from Settings, read before the lines
+       open (as the desk's startAmend does); the default pair if it fails. */
+    const reminders = await readReminders().catch(() => null);
+    modes.startEdit(proposedItemOf(s, { householdId, sectionId }, { reminders }));
     focusInRow(s.id, '[data-ed="title"]');
   }
   /**
