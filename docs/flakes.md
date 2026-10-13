@@ -346,6 +346,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-10 · a318e11b (#1342 batch) · pipeline 2382 / smoke (job 34366), desktop-chromium and mobile-chromium, and smoke_webkit (job 34368), desktop-webkit · the :379 announcement check and the :396 focus check for /create timed out waiting for the error words; each passed on the in-job retry. Not the new service worker: this file already keeps it out on WebKit, and a local run on the fixed branch passed on desktop-chromium, mobile-chromium, desktop-firefox and desktop-webkit. Still #1313.
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934), mobile-webkit · the :379 announcement check for /create failed its first attempt and passed on the in-job retry.
 - 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (jobs 35081 and 35145), mobile-webkit · the :396 focus check for /create failed its first attempt and passed on the in-job retry, in both re-runs.
+- 2026-10-13 · 3a297cc8 (!1065) · pipeline 2570 / smoke (job 36067), smoke_webkit (job 36069), smoke_webkit_mobile (job 36070) · the /create announcement check (now :386) and focus check (now :403) failed their first attempts on desktop-chromium, mobile-chromium, desktop-webkit and mobile-webkit, and passed on the in-job retries. Still #1313.
 
 ## settings-notification-history.spec.ts:137 "a member sees their own last sent reminders, plainly, on both dialects" — desktop-firefox
 
@@ -472,6 +473,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934) · `auditTabOrder`: `Tab reached a control the screen does not show as visible` for the drawer's Snooze, Complete, Attach, Retire, Edit and Copy link buttons, on the first attempt and the in-job retry.
 - 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35081, the first re-run) · the same audit message on the first attempt; passed on the in-job retry.
 - 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35145, the second re-run) · failed its first attempt, passed on the in-job retry. Third sighting: filed as #1381.
+- 2026-10-13 · 3a297cc8 (!1065, #1316 audit fixes) · pipeline 2570 / smoke_webkit_mobile (job 36070) · `home (pocket) with the item drawer open` audit failed on the first attempt and the in-job retry, so the job failed. Still #1381.
 
 ## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on mobile-webkit
 
@@ -484,3 +486,11 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## tour-pocket-webkit.spec.js:1284 "chapter 8 plays through on a new household (#1174 round 6)" — at 390x844, chapters 7 to 9
 
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / fidelity_webkit (job 34927) · `chapters 7, 8 and 9 in order, none skipped` did not hold (soft assertion). Passed on the re-run, job 35082. First sighting.
+
+## v19-upload-limit.spec.ts:76 "an administrator lowers the upload limit, an over-limit upload is refused, and the default comes back" — desktop-chromium
+
+- 2026-10-13 · 3a297cc8 (!1065) · pipeline 2570 / smoke (job 36067) · failed its first attempt in 1.5 s, passed on the in-job retry. First sighting.
+
+## v19-tour.spec.ts:170 "a first-time reader gets the film, works its transport, and a second arrival stays silent" — desktop-webkit
+
+- 2026-10-13 · 3a297cc8 (!1065) · pipeline 2570 / smoke_webkit (job 36069) · failed its first attempt in 3.4 s, passed on the in-job retry. First sighting.
