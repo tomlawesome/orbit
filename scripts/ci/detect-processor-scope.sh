@@ -22,7 +22,6 @@ if git rev-parse --verify HEAD^ >/dev/null 2>&1 &&
    git diff --quiet HEAD^ HEAD -- \
      config/tika-config.json \
      docker-compose.yml \
-     src/server/document-drafts.ts \
      src/server/documents \
      src/server/item-document-inspection.ts \
      scripts/test-tika-processor.mjs \

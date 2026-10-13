@@ -724,8 +724,8 @@ const DRAFT_PROPOSAL_MAX_EXTRACTED_CHARACTERS = 250_000;
  * The text the receipt's draft proposal reads, from the first staged
  * attachment that yields any: this is a best-effort suggestion source, not
  * part of the attachment's own commit, so a parser failure here must never
- * fail the attachment it was reading (mirrors `document-drafts.ts` and
- * `item-document-inspection.ts`, the other two document paths' extraction).
+ * fail the attachment it was reading (mirrors `item-document-inspection.ts`,
+ * the other document path's extraction).
  */
 async function draftProposalTextFromAttachment(
   bytes: Buffer,
