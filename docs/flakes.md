@@ -343,6 +343,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (jobs 35081 and 35145), mobile-webkit · the :396 focus check for /create failed its first attempt and passed on the in-job retry, in both re-runs.
 - 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · "a save on /create that cannot reach Orbit is announced, and the act can be repeated by keyboard": `the failure is shown` not visible at line 387.
 - 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36017, the first re-run) · the same `the failure is shown` check at line 387 on the first attempt; passed on the in-job retry.
+- 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36018, the second re-run; the job passed) · the same `the failure is shown` check at line 387; passed on the in-job retry.
 
 ## settings-notification-history.spec.ts:137 "a member sees their own last sent reminders, plainly, on both dialects" — desktop-firefox
 
@@ -388,6 +389,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 35081, the first re-run) · the same `#1262: the menu is still open after sign-out started`, first attempt and in-job retry. Fourth sighting; noted on #1367.
 - 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35145, the second re-run) · failed its first attempt, passed on the in-job retry.
 - 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · the same `#1262: the menu is still open after sign-out started` at line 198.
+- 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36018, the second re-run; the job passed) · `#1262: the descent did not keep time`, 13224 ms against 9000; passed on the in-job retry.
 
 ## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on desktop-webkit
 
@@ -474,6 +476,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35081, the first re-run) · the same audit message on the first attempt; passed on the in-job retry.
 - 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35145, the second re-run) · failed its first attempt, passed on the in-job retry. Third sighting: filed as #1381.
 - 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · `auditTabOrder` failed at line 442.
+- 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36018, the second re-run; the job passed) · `Tab reached a control the screen does not show as visible`; passed on the in-job retry.
 
 ## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on mobile-webkit
 
