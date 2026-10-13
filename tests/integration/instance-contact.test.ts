@@ -120,10 +120,13 @@ describe("PostgreSQL public-contact-address contracts (#860)", () => {
     // instance has a primary administrator, and which methods it can offer
     // at all. Neither says whether any account exists or which one, and
     // `claimed` never carries anything about the claim code, which lives
-    // only in the container's own log. Widening this list is a decision
-    // about an unauthenticated surface; make it here, on purpose, or not at
-    // all.
-    expect(Object.keys(signedOut).sort()).toEqual(["claimed", "configured", "contactAddress", "methods", "phase"]);
+    // only in the container's own log. `encryptionKey` joined them in #1405:
+    // "usable" or "unusable", so the door can send a visitor to the
+    // maintenance screen; a locked instance is already visible to anyone
+    // as that screen, so the word tells them nothing more. Widening this
+    // list is a decision about an unauthenticated surface; make it here, on
+    // purpose, or not at all.
+    expect(Object.keys(signedOut).sort()).toEqual(["claimed", "configured", "contactAddress", "encryptionKey", "methods", "phase"]);
   });
 
   // T-Q4 (#1151): this used to be named "reflects whether authentication is

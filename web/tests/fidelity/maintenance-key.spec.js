@@ -15,7 +15,9 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  *
  * Run on the desk and on the phone (AGENTS.md: every screen on both layouts).
  * The apostrophe is compared as a straight one; the screen may use the
- * typographic one, as the rest of Orbit's copy does.
+ * typographic one, as the rest of Orbit's copy does. The heading is compared
+ * without case: innerText applies the screen's text-transform, and the words,
+ * not their capitals, are what the design fixes.
  */
 
 const LAYOUTS = [
@@ -23,11 +25,13 @@ const LAYOUTS = [
   { label: "pocket", width: 400, height: 850 },
 ];
 
+/** @param {string} text */
 const straight = (text) => text.replace(/[‘’]/gu, "'").replace(/\s+/gu, " ").trim();
 
 const HEADING = "locked — back once the key is restored";
 const FIRST = "Orbit's encryption key isn't available, so it can't open anyone's records or sign anyone in right now.";
 const SECOND = "Nothing is lost. Everything is intact and waiting. An administrator needs to fix this on the server Orbit runs on — it can't be done from here, and signing in won't help until it's done.";
+/** @param {string} address */
 const ADDRESS_LINE = (address) => `If you're not sure who that is, write to ${address}.`;
 
 for (const layout of LAYOUTS) {
@@ -41,7 +45,7 @@ for (const layout of LAYOUTS) {
       expect(response?.ok() || response?.status() === 503).toBe(true);
 
       await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
-      expect(straight(await page.getByRole("heading", { level: 1 }).innerText())).toBe(HEADING);
+      expect(straight(await page.getByRole("heading", { level: 1 }).innerText()).toLowerCase()).toBe(HEADING);
       const text = straight(await page.locator("main, body").first().innerText());
       expect(text).toContain(FIRST);
       expect(text).toContain(SECOND);
@@ -57,7 +61,7 @@ for (const layout of LAYOUTS) {
       expect(text).toContain(SECOND);
       const address = text.match(/write to (\S+@\S+?)\.(?:\s|$)/u)?.[1];
       expect(address, "the contact line names no address").toBeTruthy();
-      expect(text).toContain(ADDRESS_LINE(address));
+      expect(text).toContain(ADDRESS_LINE(address ?? ""));
     });
 
     test("promises no return time, no timeline and no earlier updates", async ({ page }) => {
