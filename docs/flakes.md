@@ -8,6 +8,7 @@ fixing the cause deletes the heading in the same commit.
 ## sign-out-provider-session.test.mjs:273 and :280, the Chrome.svelte no-flight fallback cases
 
 - 2026-10-13 · 0fd4d6aa (the #1316 audit branch with dev merged in; neither side changed Chrome.svelte's fallback or this file) · local `npx vitest run` (full unit suite, 7170 tests, other suites running on the host) · both cases saw no navigation (`expected undefined to be ...`); the file alone passes 4/4 straight after. The cases wait a fixed 60 ms (`settle`, :183) for the lazy flight import to fail and the fallback to navigate. First sighting.
+- 2026-10-13 · d9b053a3 (#1399's removal of document drafts, on the door branch; nothing near Chrome.svelte or this file) · local full unit suite, other suites running on the host · one case in this file failed; the rest of the suite passed. Second sighting.
 
 ## availability-route.test.mjs "GET /api/auth/availability carries phase: starting straight from getBootPhase" (#869)
 
@@ -518,3 +519,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-mail-review.spec.ts:399 "the desk reads a staged paper's page one, from the suggestion's drawer and from the inbox ..." — desktop-firefox
 
 - 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke_firefox (job 36099) · failed its first attempt, passed on the in-job retry. First sighting.
+
+## v19-mail-review.spec.ts:431 "the phone sheet reads a staged paper's page one, and tells a gone mail apart from one it just cannot draw (#1155)" — mobile-webkit, marked expected-to-fail for #1196
+
+- 2026-10-13 · 5e852f6f (!1064; the same app code passed this job on pipeline 2559, where the test failed as expected) · pipeline 2560 / smoke_webkit_mobile (job 36017, the first re-run) · "Expected to fail, but passed", on the first attempt and the in-job retry: the #1196 driver fault it is marked for does not happen every run. First sighting.
