@@ -350,6 +350,9 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36017, the first re-run) · the same `the failure is shown` check at line 387 on the first attempt; passed on the in-job retry.
 - 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36018, the second re-run; the job passed) · the same `the failure is shown` check at line 387; passed on the in-job retry.
 - 2026-10-13 · 3a297cc8 (!1065) · pipeline 2570 / smoke (job 36067), smoke_webkit (job 36069), smoke_webkit_mobile (job 36070) · the /create announcement check (now :386) and focus check (now :403) failed their first attempts on desktop-chromium, mobile-chromium, desktop-webkit and mobile-webkit, and passed on the in-job retries. Still #1313.
+- 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke (job 36098), desktop-chromium and mobile-chromium · the /create announcement check (now :386) and focus check (now :403) failed its first attempt, passed on the in-job retry. Still #1313.
+- 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke_webkit (job 36100), desktop-webkit · the /create announcement check (now :386) failed its first attempt, passed on the in-job retry. Still #1313.
+- 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke_webkit_mobile (job 36101), mobile-webkit · the /create announcement check (now :386) failed its first attempt, passed on the in-job retry. Still #1313.
 
 ## settings-notification-history.spec.ts:137 "a member sees their own last sent reminders, plainly, on both dialects" — desktop-firefox
 
@@ -481,6 +484,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · `auditTabOrder` failed at line 442.
 - 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36018, the second re-run; the job passed) · `Tab reached a control the screen does not show as visible`; passed on the in-job retry.
 - 2026-10-13 · 3a297cc8 (!1065, #1316 audit fixes) · pipeline 2570 / smoke_webkit_mobile (job 36070) · `home (pocket) with the item drawer open` audit failed on the first attempt and the in-job retry, so the job failed. Still #1381.
+- 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke_webkit_mobile (job 36101), mobile-webkit · failed its first attempt, passed on the in-job retry. Still #1381.
 
 ## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on mobile-webkit
 
@@ -506,3 +510,15 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-tour.spec.ts:170 "a first-time reader gets the film, works its transport, and a second arrival stays silent" — desktop-webkit
 
 - 2026-10-13 · 3a297cc8 (!1065) · pipeline 2570 / smoke_webkit (job 36069) · failed its first attempt in 3.4 s, passed on the in-job retry. First sighting.
+
+## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on desktop-chromium
+
+- 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke (job 36098) · failed its first attempt, passed on the in-job retry. First sighting.
+
+## v19-administration.spec.ts:146 "document jobs and the two mail tests (#1071) › the relay test's pill and reason ..." — desktop-firefox
+
+- 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke_firefox (job 36099) · failed its first attempt, passed on the in-job retry. First sighting.
+
+## v19-mail-review.spec.ts:399 "the desk reads a staged paper's page one, from the suggestion's drawer and from the inbox ..." — desktop-firefox
+
+- 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke_firefox (job 36099) · failed its first attempt, passed on the in-job retry. First sighting.
