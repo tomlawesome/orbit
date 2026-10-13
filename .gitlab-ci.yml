@@ -3865,12 +3865,16 @@ base_image_repin:
 # web/src/lib/door/, writes web/src/lib/door.upstream.json (project, ref, full
 # commit, path, and a sha256 over the sorted paths and contents), and, only
 # when that tree differs from the recorded one and no branch
-# chore/door-import-<short sha> exists on ai/orbit yet (`git ls-remote`), pushes
-# that branch with GitLab push options (merge_request.create, target `dev`,
-# title naming the upstream commit), which makes GitLab open the merge request.
-# It makes no API call, and it never lists, closes or deletes older import merge
-# requests or branches: the owner closes those by hand. Nothing here merges
-# itself, and an unchanged door opens nothing. `fast` runs
+# chore/door-import-<new tree>-on-<recorded tree> (12 hex characters each,
+# `none` with no record) exists on ai/orbit yet (`git ls-remote`), pushes that
+# branch with GitLab push options (merge_request.create, target `dev`, title
+# naming the upstream commit), which makes GitLab open the merge request. The
+# same door from the same base is proposed once; a moved base gets a fresh
+# proposal, and older proposals of that door are logged for the owner to close
+# by hand. It makes no API call, never lists, closes or comments on merge
+# requests, and deletes only a branch it pushed in the same run, when GitLab
+# took the push but opened no merge request (it then fails the job). Nothing
+# here merges itself, and an unchanged door opens nothing. `fast` runs
 # scripts/ci/check-door-unchanged.sh, which fails when the copy no longer
 # matches the record, so the copy is never edited here. The script refuses to
 # run on any branch but `dev`.
