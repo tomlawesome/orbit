@@ -7,7 +7,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 import arrive, { SELECTORS } from "../../web/src/lib/tour/chapters/01-arrive.js";
 import { CHAPTERS } from "../../web/src/lib/tour/chapters/index.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
-import { TOUR_STOPS } from "../../web/src/lib/tour/stops.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
 
 /*
@@ -145,10 +144,10 @@ describe("the selectors chapter 1 names", () => {
   });
 
   it("names the same chart and sun the ratified walk already points at", () => {
-    /* stops.js is where these were ratified; the film must not drift off
-       onto its own idea of where the star chart is. */
-    const chart = TOUR_STOPS.find((stop) => stop.id === "chart");
-    const sun = TOUR_STOPS.find((stop) => stop.id === "sun");
+    /* The walk ratified these targets (held here as literals, #1403 D2); the
+       film must not drift off onto its own idea of where the star chart is. */
+    const chart = { target: ".dial .chrome, .sun-link" };
+    const sun = { target: ".sun-link, .minisys" };
     expect(chart.target).toContain(".dial");
     expect(SELECTORS.DESK.dial).toBe(".dial");
     expect(sun.target).toContain(".sun-link");

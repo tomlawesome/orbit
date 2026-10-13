@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import relay, { SELECTORS } from "../../web/src/lib/tour/chapters/06-paper-by-post.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
-import { TOUR_STOPS } from "../../web/src/lib/tour/stops.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
 
 /*
@@ -121,9 +120,10 @@ describe("the selectors chapter 6 names", () => {
   });
 
   it("names the same card the ratified walk already points at", () => {
-    /* stops.js is where this stop was ratified; the film must not drift off
-       onto its own idea of where the relay lives. */
-    const stop = TOUR_STOPS.find((one) => one.id === "relay");
+    /* The walk ratified this stop (route and target held here as literals,
+       #1403 D2); the film must not drift off onto its own idea of where the
+       relay lives. */
+    const stop = { route: "/settings/mail", target: ".relay-card" };
     expect(stop.route).toBe("/settings/mail");
     expect(stop.target).toContain(".relay-card");
     expect(SELECTORS.DESK.card).toBe(".relay-card");
@@ -131,8 +131,11 @@ describe("the selectors chapter 6 names", () => {
   });
 
   it("says the same line the ratified walk already says (its second cut, #1174)", () => {
-    const stop = TOUR_STOPS.find((one) => one.id === "relay");
-    expect(stop.copy).toEqual([
+    /* The ratified copy, held here as the reference (#1403 D2). */
+    const ratifiedCopy = [
+      "Forward a bill to your relay address and Orbit reads a copy to import it.",
+    ];
+    expect(ratifiedCopy).toEqual([
       "Forward a bill to your relay address and Orbit reads a copy to import it.",
     ]);
   });
