@@ -29,7 +29,9 @@ const saveFn = pocket.slice(pocket.indexOf("async function save()"), pocket.inde
 describe("#1245 (11a): the pocket's create form keeps the document it was given", () => {
   it("uploads the attachment onto the draft's item through the desk's own helper", () => {
     expect(pocket).toMatch(/import \{[^}]*\battachItemDocument\b[^}]*\} from "\$lib\/data\/workspace\.js"/u);
-    expect(saveFn).toMatch(/attachItemDocument\(household\.id, draftId, attachment, documentIdOf\(attachment\)\)/u);
+    // The file is taken at submit (`held`), so a read refused mid-save cannot drop it.
+    expect(saveFn).toMatch(/const held = attachment;/u);
+    expect(saveFn).toMatch(/attachItemDocument\(household\.id, draftId, held, documentIdOf\(held\)\)/u);
   });
 
   it("counts the entry as saved only once the document is attached", () => {

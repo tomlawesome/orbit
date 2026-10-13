@@ -255,6 +255,10 @@
     if (!household || !command) return;
     saving = true;
     problem = null;
+    /* The file is taken now, as the desk's create does: a read refused while
+       the save is in flight drops `attachment`, and testing it after the
+       await would skip the upload and land the item without its paper. */
+    const held = attachment;
     let landed = false;
     try {
       await applyCommand(command).catch((error) => {
@@ -271,8 +275,10 @@
       /* #1245 (11a): the picked document goes onto the item just saved,
          through the same route the desk's form uses. A refusal lands in the
          catch below like any failed save: the entry is kept, and the next
-         attempt re-sends both under the same ids, so neither is stored twice. */
-      if (attachment) await attachItemDocument(household.id, draftId, attachment, documentIdOf(attachment));
+         attempt re-sends both under the same ids, so neither is stored twice.
+         It sends the file held at submit, so the server, not a late read,
+         has the last word on it. */
+      if (held) await attachItemDocument(household.id, draftId, held, documentIdOf(held));
       saved = true;
       wake(`added to your orbit · ${entry.name.trim()}`);
       /* #1319 (§34): the new item, its drawer open on home, as the desk's

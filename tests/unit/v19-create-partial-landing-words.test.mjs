@@ -315,6 +315,36 @@ describe("#1316: the pocket form's words when the item landed and its document w
     },
   );
 
+  it("a read refused while Add is pending does not skip the upload: the file held at submit is sent and the words are shown", async () => {
+    held = { save: null, read: null };
+    attachStatuses = [503];
+    const { pressAdd, problem } = await fillPocket();
+    // EntryForm tells the pocket of a pick through onpick, which starts the document read.
+    entryForm.props.onpick(entryForm.props.attachment);
+    await settle();
+    expect(held.read, "the read is still pending when Add is pressed").not.toBeNull();
+
+    const pressed = pressAdd(); // not awaited: the item save stays pending
+    await settle();
+    expect(saves, "the item save is pending").toHaveLength(1);
+    expect(held.save, "applyCommand is waiting on its answer").not.toBeNull();
+
+    // While the save is pending, the read is answered: refused.
+    held.read?.(json({ attachmentDisposition: "rejected", message: REFUSAL }));
+    await settle();
+    // Then the item save answers ok.
+    held.save?.(json({ workspace }));
+    await settle();
+    await pressed;
+
+    expect(attaches, "the upload was still attempted").toHaveLength(1);
+    const sent = /** @type {File} */ (attaches[0].init.body);
+    expect(sent.name, "with the file held at submit").toBe("policy.pdf");
+    expect(sent.size).toBe(4);
+    expect(goto, "the form does not navigate away silently").not.toHaveBeenCalled();
+    expectHalfLandedWords(problem());
+  });
+
   it("a second press of Add sends the item and the document again under the same ids", async () => {
     itemAnswers = ["ok", "version_required"];
     attachStatuses = [503, 201];
