@@ -71,7 +71,9 @@ scripts/extract-bundle/docs/
 scripts/extract-bundle/out/
 
 # Images and recordings that show a real person's name and cannot be
-# re-taken: kept in the project folder, never tracked (#1408).
+# re-taken: kept at these paths untracked; git drops them from any checkout
+# that moves onto this history, so a copy is held in the project's backups
+# folder outside every repository (#1408).
 /design/v19/document-card/round-1/pages/service-invoice-1.png
 /design/v19/tour/round-1/shots/home-empty.png
 /design/v19/tour/round-1/shots/home.png

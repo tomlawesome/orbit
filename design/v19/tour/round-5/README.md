@@ -1,5 +1,7 @@
 # First-run tour — round 5 (#866)
 
+The screenshots and recordings this page shows are kept outside git (#1408): frames are blank in a clone or on the mirror.
+
 Round 4 was "very close now" (verdict verbatim in `../round-4/README.md`), so
 round 5 carries it forward verbatim except the four things the verdict named.
 One direction: **F — one take**, at
