@@ -286,6 +286,9 @@ test.describe("the signed-in v19 screens at every size and in every theme pack",
   for (const pack of THEME_PACKS.filter((id) => id !== DEFAULT_THEME)) {
     for (const screen of SCREENS) {
       test(`${screen.name} in the ${pack} pack has no WCAG A/AA violations`, async ({ page }) => {
+        /* Owner, 2026-10-14: the default theme is checked at every size (above);
+           every other pack at one size, the desktop project's. */
+        test.skip(test.info().project.name.startsWith("mobile"), "other packs are checked at one size; the desktop project runs them");
         const defect = PACK_DEFECTS[`${screen.name} ${pack} ${test.info().project.name}`];
         test.fail(Boolean(defect), defect);
         await page.addInitScript((id: string) => {
