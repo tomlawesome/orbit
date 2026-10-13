@@ -533,8 +533,8 @@ compose() {
 health_probe_url() {
   local bind_address port
 
-  bind_address="$(awk -F= '$1 == "ORBIT_BIND_ADDRESS" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
-  port="$(awk -F= '$1 == "ORBIT_PORT" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  bind_address="$(awk -F= '$1 == "ORBIT_BIND_ADDRESS" { sub(/\r$/, ""); sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  port="$(awk -F= '$1 == "ORBIT_PORT" { sub(/\r$/, ""); sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
   # An exported value wins over the file, exactly as it does for Compose's
   # own interpolation, so the probe reaches the port Compose published (#1241).
   bind_address="${ORBIT_BIND_ADDRESS:-${bind_address:-0.0.0.0}}"
