@@ -21,7 +21,7 @@
  * No key material, no host path, no private address goes into a mail: key ids
  * only, and APP_URL, which is the operator's own public address.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { and, desc, eq, gt } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -35,11 +35,34 @@ const KEY_RESTORED = "encryption_key_restored";
 const REPEAT_INTERVAL_MS = 24 * 3_600_000;
 const RETRY_INTERVAL_MS = 3_600_000;
 
-/** The configured alert address, or null when unset or not an address. */
-function operatorAlertAddress(): string | null {
+/* Told apart so a mistyped address is logged as invalid, not as unset: the
+   boot-time warning for it only runs on a usable start. */
+type AlertAddress = { address: string } | { invalid: true } | null;
+
+/** The configured alert address; null when unset. */
+function operatorAlertAddress(): AlertAddress {
   const configured = process.env.OPERATOR_ALERT_ADDRESS?.trim();
   if (!configured) return null;
-  return z.email().safeParse(configured).success ? configured : null;
+  return z.email().safeParse(configured).success ? { address: configured } : { invalid: true };
+}
+
+/* The address is part of the fault, so a corrected address hears at once; only
+   a short hash is recorded, never the address. */
+function addressHashOf(address: string): string {
+  return createHash("sha256").update(address).digest("hex").slice(0, 16);
+}
+
+/* One timer at a time, shared by the hourly retry and the daily repeat, so the
+   two never both fire. */
+let pendingAlert: ReturnType<typeof setTimeout> | null = null;
+
+function armAlert(state: KeyState, delayMs: number): void {
+  if (pendingAlert) clearTimeout(pendingAlert);
+  pendingAlert = setTimeout(() => {
+    pendingAlert = null;
+    return sendKeyAlert(state).catch(() => undefined);
+  }, Math.max(delayMs, 0));
+  pendingAlert.unref();
 }
 
 /** The operator's own public address for the instance, as the mail names it. */
@@ -55,11 +78,12 @@ function sentAt(now: Date): string {
   return `${now.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
-type Fault = { reason: KeyFaultReason; heldKeyId?: string; storedKeyId?: string };
+type Fault = { reason: KeyFaultReason; heldKeyId?: string; storedKeyId?: string; addressHash: string };
 
-function faultOf(state: Extract<KeyState, { verdict: "unusable" }>): Fault {
+function faultOf(state: Extract<KeyState, { verdict: "unusable" }>, address: string): Fault {
   return {
     reason: state.reason,
+    addressHash: addressHashOf(address),
     ...(state.heldKeyId ? { heldKeyId: state.heldKeyId } : {}),
     ...(state.storedKeyId ? { storedKeyId: state.storedKeyId } : {}),
   };
@@ -69,7 +93,8 @@ function sameFault(changes: unknown, fault: Fault): boolean {
   const recorded = (changes ?? {}) as Partial<Fault>;
   return recorded.reason === fault.reason
     && (recorded.heldKeyId ?? null) === (fault.heldKeyId ?? null)
-    && (recorded.storedKeyId ?? null) === (fault.storedKeyId ?? null);
+    && (recorded.storedKeyId ?? null) === (fault.storedKeyId ?? null)
+    && recorded.addressHash === fault.addressHash;
 }
 
 const FAULT_WORDS: Record<KeyFaultReason, string> = {
@@ -125,25 +150,51 @@ async function record(action: string, changes: Record<string, unknown>): Promise
   });
 }
 
-async function alertedRecently(fault: Fault, now: Date): Promise<boolean> {
-  const rows = await getDb()
-    .select({ changes: auditLog.changes })
+/**
+ * When the same fault was last alerted within 24 hours, or null. An alert
+ * before the newest "working again" record belongs to a fault already
+ * resolved, so it does not hold back a new one.
+ */
+async function lastAlertedWithinDay(fault: Fault, now: Date): Promise<Date | null> {
+  const [lastRestored] = await getDb()
+    .select({ createdAt: auditLog.createdAt })
     .from(auditLog)
-    .where(and(eq(auditLog.action, ALERT_SENT), gt(auditLog.createdAt, new Date(now.getTime() - REPEAT_INTERVAL_MS))));
-  return rows.some((row) => sameFault(row.changes, fault));
+    .where(eq(auditLog.action, KEY_RESTORED))
+    .orderBy(desc(auditLog.createdAt))
+    .limit(1);
+  const dayAgo = new Date(now.getTime() - REPEAT_INTERVAL_MS);
+  const since = lastRestored && lastRestored.createdAt > dayAgo ? lastRestored.createdAt : dayAgo;
+  const rows = await getDb()
+    .select({ changes: auditLog.changes, createdAt: auditLog.createdAt })
+    .from(auditLog)
+    .where(and(eq(auditLog.action, ALERT_SENT), gt(auditLog.createdAt, since)))
+    .orderBy(desc(auditLog.createdAt));
+  return rows.find((row) => sameFault(row.changes, fault))?.createdAt ?? null;
 }
 
 /**
  * Sends the alert for an unusable verdict, unless the same fault was alerted
- * within 24 hours. Never throws for a mail failure: it logs, and for a
- * transient one tries again in an hour, on a timer that does not hold the
- * process open.
+ * within 24 hours, and arms the next one: 24 hours after the newest alert
+ * while the process stays locked (counted from the recorded row, so a restart
+ * does not reset the clock). Never throws for a mail failure: it logs, and for
+ * a transient one tries again in an hour. Timers do not hold the process open.
  */
 export async function sendKeyAlert(state: KeyState): Promise<void> {
   if (state.verdict !== "unusable") return;
-  const fault = faultOf(state);
-  const address = operatorAlertAddress();
-  if (!address) {
+  const configured = operatorAlertAddress();
+  if (configured && "invalid" in configured) {
+    log.info({
+      event: "encryption.key",
+      state: "degraded",
+      reason: "configuration_optional",
+      setting: "alerts",
+      action: "repair_configuration",
+      impact: "none",
+      detail: operationalDetail`OPERATOR_ALERT_ADDRESS is not a valid address; the fault is in this log only`,
+    });
+    return;
+  }
+  if (!configured) {
     log.info({
       event: "encryption.key",
       state: "degraded",
@@ -154,9 +205,12 @@ export async function sendKeyAlert(state: KeyState): Promise<void> {
     });
     return;
   }
+  const { address } = configured;
+  const fault = faultOf(state, address);
 
   const now = new Date();
-  if (await alertedRecently(fault, now)) {
+  const lastAlerted = await lastAlertedWithinDay(fault, now);
+  if (lastAlerted) {
     log.info({
       event: "encryption.key",
       state: "blocked",
@@ -165,6 +219,7 @@ export async function sendKeyAlert(state: KeyState): Promise<void> {
       impact: "none",
       detail: operationalDetail`alert already sent within 24 hours; not repeated`,
     });
+    armAlert(state, lastAlerted.getTime() + REPEAT_INTERVAL_MS - now.getTime());
     return;
   }
 
@@ -177,6 +232,7 @@ export async function sendKeyAlert(state: KeyState): Promise<void> {
       action: "none",
       detail: operationalDetail`encryption key alert sent to the operator address`,
     });
+    armAlert(state, REPEAT_INTERVAL_MS);
     return;
   }
   if (outcome.sendError === "smtp_unconfigured") {
@@ -198,9 +254,7 @@ export async function sendKeyAlert(state: KeyState): Promise<void> {
     impact: "none",
     detail: operationalDetail`encryption key alert not sent; retrying in 60 minutes`,
   });
-  setTimeout(() => {
-    void sendKeyAlert(state).catch(() => undefined);
-  }, RETRY_INTERVAL_MS).unref();
+  armAlert(state, RETRY_INTERVAL_MS);
 }
 
 /**
@@ -224,8 +278,9 @@ export async function sendKeyRestoredNotice(): Promise<void> {
     .limit(1);
   if (lastRestored && lastRestored.createdAt >= lastAlert.createdAt) return;
 
-  const address = operatorAlertAddress();
-  if (!address) return;
+  const configured = operatorAlertAddress();
+  if (!configured || "invalid" in configured) return;
+  const { address } = configured;
   const now = new Date();
   const outcome = await sendBoundedMail(address, renderRestored(now), undefined, now);
   if (outcome.sendError !== null) {

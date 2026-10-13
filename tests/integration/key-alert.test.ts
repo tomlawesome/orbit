@@ -15,7 +15,7 @@
  * the first clean start that follows an alert, and a repeat at most once in
  * 24 hours.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -50,6 +50,12 @@ const missing = { verdict: "unusable", reason: "missing" } as const;
 
 const sentOk = { sentAt: new Date(), sendError: null };
 
+/* The fault row carries a short hash of the alert address (never the address),
+   so a corrected address is a new fault (round 4, unit A). */
+const addressHashOf = (address: string) => createHash("sha256").update(address).digest("hex").slice(0, 16);
+const OPERATOR_HASH = addressHashOf(OPERATOR);
+const DAY_MS = 24 * 3_600_000;
+
 async function rows(action: string) {
   return getDb().select().from(auditLog).where(eq(auditLog.action, action));
 }
@@ -80,6 +86,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
   await getDb().delete(auditLog).where(inArray(auditLog.action, [ALERT, RESTORED]));
@@ -149,7 +156,7 @@ describe("the alert (#1405 section 5)", () => {
 
   describe("not twice in a day", () => {
     it("does not repeat a fault already alerted 23 hours ago, and says so in the log", async () => {
-      await priorRow(ALERT, 23, { reason: "mismatch", heldKeyId: HELD, storedKeyId: STORED });
+      await priorRow(ALERT, 23, { reason: "mismatch", heldKeyId: HELD, storedKeyId: STORED, addressHash: OPERATOR_HASH });
 
       await sendKeyAlert(mismatch);
 
@@ -190,11 +197,121 @@ describe("the alert (#1405 section 5)", () => {
     });
 
     it("holds a key that is missing to the same day as any other", async () => {
-      await priorRow(ALERT, 2, { reason: "missing" });
+      await priorRow(ALERT, 2, { reason: "missing", addressHash: OPERATOR_HASH });
 
       await sendKeyAlert(missing);
 
       expect(mocks.sendBoundedMail).not.toHaveBeenCalled();
+    });
+
+    it("a fault alerted 2 hours ago and then recorded as restored alerts again at once", async () => {
+      await priorRow(ALERT, 2, { reason: "missing", addressHash: OPERATOR_HASH });
+      await priorRow(RESTORED, 1, {});
+
+      await sendKeyAlert(missing);
+
+      expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
+      expect(await rows(ALERT)).toHaveLength(2);
+    });
+
+    it("still holds back an alert that is newer than the restored record", async () => {
+      await priorRow(RESTORED, 3, {});
+      await priorRow(ALERT, 1, { reason: "missing", addressHash: OPERATOR_HASH });
+
+      await sendKeyAlert(missing);
+
+      expect(mocks.sendBoundedMail).not.toHaveBeenCalled();
+    });
+
+    it("a changed alert address is a new fault: the corrected address hears at once", async () => {
+      await priorRow(ALERT, 1, { reason: "mismatch", heldKeyId: HELD, storedKeyId: STORED, addressHash: addressHashOf("typo@example.invalid") });
+
+      await sendKeyAlert(mismatch);
+
+      expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
+      expect(mocks.sendBoundedMail.mock.calls[0][0]).toBe(OPERATOR);
+    });
+
+    it("records a hash of the alert address with the fault, and never the address", async () => {
+      await sendKeyAlert(mismatch);
+
+      const recorded = await rows(ALERT);
+      expect(recorded).toHaveLength(1);
+      expect(recorded[0].changes).toMatchObject({ addressHash: OPERATOR_HASH });
+      expect(JSON.stringify(recorded[0].changes)).not.toContain(OPERATOR);
+    });
+  });
+
+  describe("the 24-hour repeat while still locked", () => {
+    /* Only the clock and the timer registry are watched: the database driver's
+       own timers must keep running. Elapsed time is simulated by moving the
+       clock and calling the timer's callback, as the retry case below does. */
+    const repeatTimers = (timers: ReturnType<typeof vi.spyOn>) =>
+      (timers.mock.calls as Array<[() => unknown, number | undefined]>).filter(([, delay]) => (delay ?? 0) > 23 * 3_600_000);
+
+    it("repeats the alert 24 hours later while the process stays locked", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const timers = vi.spyOn(globalThis, "setTimeout");
+
+      await sendKeyAlert(mismatch);
+      expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
+
+      const repeats = repeatTimers(timers);
+      expect(repeats, "no timer of about 24 hours was armed after the send").toHaveLength(1);
+      expect(repeats[0][1]).toBeLessThanOrEqual(DAY_MS + 60_000);
+
+      vi.setSystemTime(Date.now() + DAY_MS + 60_000);
+      await repeats[0][0]();
+      await vi.waitFor(() => expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(2));
+      await vi.waitFor(async () => expect(await rows(ALERT)).toHaveLength(2));
+    });
+
+    it("counts the day from the newest alert already sent, so a restart does not reset the clock", async () => {
+      await priorRow(ALERT, 5, { reason: "mismatch", heldKeyId: HELD, storedKeyId: STORED, addressHash: OPERATOR_HASH });
+      const timers = vi.spyOn(globalThis, "setTimeout");
+
+      await sendKeyAlert(mismatch);
+
+      expect(mocks.sendBoundedMail).not.toHaveBeenCalled();
+      const waits = (timers.mock.calls as Array<[unknown, number | undefined]>)
+        .map(([, delay]) => delay ?? 0)
+        .filter((delay) => delay > 17 * 3_600_000 && delay < 21 * 3_600_000);
+      expect(waits, "no timer for the remaining ~19 hours was armed after the already-sent branch").toHaveLength(1);
+      expect(Math.abs(waits[0] - 19 * 3_600_000)).toBeLessThan(5 * 60_000);
+    });
+
+    it("does not hold the process open for the repeat timer", async () => {
+      const timers = vi.spyOn(globalThis, "setTimeout");
+
+      await sendKeyAlert(mismatch);
+
+      const index = timers.mock.calls.findIndex(([, delay]) => (delay ?? 0) > 23 * 3_600_000);
+      expect(index, "no repeat timer was armed").toBeGreaterThanOrEqual(0);
+      const handle = timers.mock.results[index].value as { hasRef?: () => boolean };
+      expect(handle.hasRef?.()).toBe(false);
+    });
+
+    it("keeps one repeat timer: arming again clears the one before", async () => {
+      const timers = vi.spyOn(globalThis, "setTimeout");
+      const cleared = vi.spyOn(globalThis, "clearTimeout");
+
+      await sendKeyAlert(mismatch);
+      const index = timers.mock.calls.findIndex(([, delay]) => (delay ?? 0) > 23 * 3_600_000);
+      expect(index, "no repeat timer was armed").toBeGreaterThanOrEqual(0);
+      const first = timers.mock.results[index].value;
+
+      await sendKeyAlert(mismatch);
+
+      expect(cleared).toHaveBeenCalledWith(first);
+    });
+
+    it("arms no repeat when the alert address is not configured", async () => {
+      vi.stubEnv("OPERATOR_ALERT_ADDRESS", "");
+      const timers = vi.spyOn(globalThis, "setTimeout");
+
+      await sendKeyAlert(mismatch);
+
+      expect(repeatTimers(timers)).toEqual([]);
     });
   });
 
@@ -213,6 +330,22 @@ describe("the alert (#1405 section 5)", () => {
         action: "repair_configuration",
         impact: "none",
       }));
+    });
+
+    it("says an alert address that is not an address is invalid, not missing", async () => {
+      vi.stubEnv("OPERATOR_ALERT_ADDRESS", "not-an-address");
+
+      await sendKeyAlert(mismatch);
+
+      expect(mocks.sendBoundedMail).not.toHaveBeenCalled();
+      expect(await rows(ALERT)).toHaveLength(0);
+      expect(infoLines()).toContainEqual(expect.objectContaining({
+        reason: "configuration_optional",
+        setting: "alerts",
+        detail: expect.stringMatching(/not a valid address/iu),
+      }));
+      expect(infoLines().map((line) => String(line.detail ?? ""))).not.toContainEqual(expect.stringMatching(/no OPERATOR_ALERT_ADDRESS/u));
+      expect(JSON.stringify([...infoLines(), ...warnLines()])).not.toContain("not-an-address");
     });
 
     it("only logs, with no timer, when outbound mail is not configured", async () => {
