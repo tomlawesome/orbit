@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it, test } from "node:test";
 
 /*
  * #1408: fixtures, mockups and docs use invented names only. This guard keeps
@@ -106,7 +106,8 @@ const ALL_FAKE = new Set([...FAKE_ADDRESSES.values()].flatMap((set) => [...set])
 const SELF = "tests/unit/no-real-names.test.mjs";
 
 describe("no real names (#1408)", () => {
-  it("no tracked text file contains a banned word", () => {
+  // reads every tracked file: seconds, not milliseconds
+  test("no tracked text file contains a banned word", { timeout: 60_000 }, () => {
     /** @type {string[]} */
     const hits = [];
     for (const { name, text } of trackedTextFiles()) {
@@ -118,10 +119,10 @@ describe("no real names (#1408)", () => {
         }
       }
     }
-    expect(hits, "use an invented name instead (#1408)").toEqual([]);
-  }, 60_000); // reads every tracked file: seconds, not milliseconds
+    assert.deepEqual(hits, [], "use an invented name instead (#1408)");
+  });
 
-  it("no tracked text file names a real host login in a home-directory path", () => {
+  test("no tracked text file names a real host login in a home-directory path", { timeout: 60_000 }, () => {
     /** @type {string[]} */
     const hits = [];
     for (const { name, text } of trackedTextFiles()) {
@@ -133,10 +134,10 @@ describe("no real names (#1408)", () => {
         }
       }
     }
-    expect(hits, "use ~/..., <project root> or an invented account such as /home/alex (#1408)").toEqual([]);
-  }, 60_000);
+    assert.deepEqual(hits, [], "use ~/..., <project root> or an invented account such as /home/alex (#1408)");
+  });
 
-  it("no tracked text file holds a private or shared-address IPv4 address outside the known fake fixtures", () => {
+  test("no tracked text file holds a private or shared-address IPv4 address outside the known fake fixtures", { timeout: 60_000 }, () => {
     /** @type {string[]} */
     const hits = [];
     for (const { name, text } of trackedTextFiles()) {
@@ -151,8 +152,8 @@ describe("no real names (#1408)", () => {
         }
       }
     }
-    expect(hits, "use a documentation address (192.0.2.x, 198.51.100.x, 203.0.113.x) or add a clearly fake fixture to FAKE_ADDRESSES (#1408)").toEqual([]);
-  }, 60_000);
+    assert.deepEqual(hits, [], "use a documentation address (192.0.2.x, 198.51.100.x, 203.0.113.x) or add a clearly fake fixture to FAKE_ADDRESSES (#1408)");
+  });
 });
 
 /*

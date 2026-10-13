@@ -140,6 +140,8 @@ const test: TestUserConfig = {
           "scripts/bump-launcher-pin.test.mjs",
           // Same reason (#1374): uses node:test. Run by scripts/test-backend.sh.
           "scripts/corpus/stages-rerun.test.mjs",
+          // Same reason (#1408): uses node:test. Run by the `names_guard` CI job.
+          "tests/unit/no-real-names.test.mjs",
           // ORBIT_TEST_SKIP_DOCKER (#950): the CI `fast` job runs on the
           // unprivileged `big` lane, which has no `docker` binary on PATH.
           // test-e2e-local-reuse.test.mjs joined the list on #947: it drives
