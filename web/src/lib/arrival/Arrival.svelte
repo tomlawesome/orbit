@@ -356,6 +356,11 @@
    * no dawn and no second climb, and the POL-1 arrival brings the dial in with
    * the new name, the first-run tour after it as for anyone.
    */
+  /* The household id this form's Create sends, and the name it was minted
+     for: a different name is a different household, so it takes a new id. */
+  /** @type {{ id: string, name: string } | null} */
+  let pendingCreate = null;
+
   async function submit() {
     if (busy) return;
     const wanted = name.trim();
@@ -371,14 +376,24 @@
     body().classList.remove("rejected");
     try {
       if (fixture) await new Promise((resolve) => setTimeout(resolve, 60));
-      else await applyCommand(createSystemCommand({ name: wanted, timezone, currency }));
+      else {
+        /* One id per form, kept across presses: if the reply was lost after
+           the create landed, the retry is the same create and the server
+           replays it instead of making a second household. */
+        if (pendingCreate?.name !== wanted) pendingCreate = { id: crypto.randomUUID(), name: wanted };
+        const { id } = pendingCreate;
+        await applyCommand(createSystemCommand({ name: wanted, timezone, currency }, { uuid: () => id }));
+      }
     } catch (error) {
       busy = false;
       /* One warm line, in the server's own words. Nothing was created, and the
-         answers are visibly still in the fields, so neither is said. */
-      reject(wanted, wordsOf(error, "could not be created"), null);
+         answers are visibly still in the fields, so neither is said. A fetch
+         that never got an answer throws the browser's TypeError ("Failed to
+         fetch"), which is not the server's words, so it reads the fallback. */
+      reject(wanted, error instanceof TypeError ? "could not be created" : wordsOf(error, "could not be created"), null);
       return;
     }
+    pendingCreate = null;
     location.assign("/home");
   }
 

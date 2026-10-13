@@ -384,6 +384,18 @@ async function runWorkspaceCommand(
   if (command.type === "household.create") {
     const householdId = requireUuid(command.household.id, "Household");
     await getDb().transaction(async (transaction) => {
+      /* The client's id is the idempotency key: a retry after a lost reply
+         sends the same id again. Its owner gets the first result back; anyone
+         else is refused rather than handed a household they do not own. */
+      const [existing] = await transaction.select({ id: households.id }).from(households)
+        .where(eq(households.id, householdId)).limit(1);
+      if (existing) {
+        const [owned] = await transaction.select({ userId: memberships.userId }).from(memberships)
+          .where(and(eq(memberships.householdId, householdId), eq(memberships.userId, userId), eq(memberships.role, "owner"))).limit(1);
+        if (!owned) throw new AppError("household_exists", "This household already exists", 409);
+        if (!dryRun) await transaction.update(sessions).set({ activeHouseholdId: householdId }).where(eq(sessions.id, sessionId));
+        return;
+      }
       const [recoverableName] = await transaction.select({ id: households.id }).from(households)
         .where(and(
           isNotNull(households.deletionRequestedAt),
