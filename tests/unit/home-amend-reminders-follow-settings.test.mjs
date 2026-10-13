@@ -94,6 +94,16 @@ function functionText(source, name) {
  * @param {(fn: Function) => unknown} call
  */
 async function runStartAmend(source, names, call) {
+  await call(startAmendOf(source, names));
+}
+
+/**
+ * The screen's `startAmend`, bound to `names` as its surrounding script.
+ * @param {string} source
+ * @param {Record<string, unknown>} names
+ * @returns {Function}
+ */
+function startAmendOf(source, names) {
   const text = functionText(source, "startAmend");
   expect(text.length, "the screen has a startAmend").toBeGreaterThan(100);
   const body = text.startsWith("async") ? text : `async ${text}`;
@@ -107,17 +117,23 @@ async function runStartAmend(source, names, call) {
     },
   });
   const make = new Function("scope", `with (scope) { return (${body}); }`);
-  await call(make(scope));
+  return make(scope);
 }
 
-/** @type {"pair" | "fails"} */
+/** @type {"pair" | "fails" | "gated" | "never"} */
 let readMode = "pair";
+/** @type {() => void} */
+let answerRead = () => {};
 beforeEach(() => {
   readMode = "pair";
+  /** @type {Promise<void>} */
+  const gate = new Promise((done) => { answerRead = () => done(); });
   vi.stubGlobal("fetch", vi.fn(async (/** @type {string} */ url) => {
     const href = String(url);
     const json = (/** @type {unknown} */ body, status = 200) => new Response(JSON.stringify(body), { status });
     if (href.includes("/api/settings/reminders")) {
+      if (readMode === "never") return new Promise(() => {});
+      if (readMode === "gated") await gate;
       if (readMode === "fails") return json({ error: { code: "unavailable", message: "not today" } }, 503);
       return json({
         reminders: {
@@ -188,5 +204,147 @@ describe.each([
     expect(started[0].reminderDays).toEqual(DEFAULT_PAIR);
     const edits = editsOf(draftOf(started[0]));
     expect(amendedOf(started[0], edits).item.reminderDays).toEqual(DEFAULT_PAIR);
+  });
+});
+
+/* ---- #1316 round 5, U2: the read is awaited, so the screen can move on ---- */
+
+/** Real time for the stubbed answer to travel through fetch, Response and the awaits. */
+const settle = () => new Promise((done) => setTimeout(done, 25));
+
+/**
+ * One screen's `startAmend` with its drawer state mutable between the press
+ * and the answer. `open` names the row the drawer is on (the desk's
+ * `expanded`, the phone's `lit`).
+ * @param {"desk" | "phone"} screen
+ */
+async function screenOf(screen) {
+  const { readReminders } = await import("../../web/src/lib/data/workspace.js");
+  /** @type {any[]} */
+  const started = [];
+  /** @type {any} */
+  const modes = { id: null, startEdit: (/** @type {any} */ item) => { started.push(item); } };
+  /** @type {Record<string, any>} */
+  const names = screen === "desk"
+    ? {
+      view, expanded: "r-1", asView: (/** @type {unknown} */ v) => v, armed: null, mailProblem: null, previewDoc: null,
+      modes, focusInDrawer: () => {}, readReminders, proposedItemOf, reminderPairOf,
+    }
+    : {
+      view, lit: "r-1", rowProblem: {}, previewPaper: null, reviewLockedOf: () => false,
+      modes, focusInRow: () => {}, readReminders, proposedItemOf, reminderPairOf,
+    };
+  const startAmend = startAmendOf(screen === "desk" ? DESK : PHONE, names);
+  return {
+    started, names, modes,
+    press: () => /** @type {Promise<unknown>} */ (screen === "desk" ? startAmend() : startAmend(suggestion)),
+    /** Moves the drawer to another row, or shuts it (null). */
+    moveTo: (/** @type {string | null} */ id) => { names[screen === "desk" ? "expanded" : "lit"] = id; },
+  };
+}
+
+describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () => {
+  describe.each([["desk"], ["phone"]])("%s", (screen) => {
+    const kind = /** @type {"desk" | "phone"} */ (screen);
+
+    it("the drawer closed while the read is pending: the late answer starts no editor", async () => {
+      readMode = "gated";
+      const s = await screenOf(kind);
+      const pressed = s.press();
+      s.moveTo(null);
+      answerRead();
+      await pressed;
+      await settle();
+      expect(s.started).toHaveLength(0);
+    });
+
+    it("a different row opened while the read is pending: the late answer starts no editor", async () => {
+      readMode = "gated";
+      const s = await screenOf(kind);
+      const pressed = s.press();
+      s.moveTo("r-2");
+      answerRead();
+      await pressed;
+      await settle();
+      expect(s.started).toHaveLength(0);
+    });
+
+    it("another item's edit begun while the read is pending: the late answer leaves that draft alone", async () => {
+      readMode = "gated";
+      const s = await screenOf(kind);
+      const pressed = s.press();
+      s.modes.id = "item-9";
+      answerRead();
+      await pressed;
+      await settle();
+      expect(s.started, "no editor started over the other item's draft").toHaveLength(0);
+      expect(s.modes.id).toBe("item-9");
+    });
+
+    it("pressing twice while the read is pending starts the editor at most once", async () => {
+      readMode = "gated";
+      const s = await screenOf(kind);
+      const first = s.press();
+      const second = s.press();
+      answerRead();
+      await Promise.all([first, second]);
+      await settle();
+      expect(s.started.length).toBeLessThanOrEqual(1);
+    });
+
+    it("a read that never answers is bounded: within 3 s the editor starts at the default [14, 3]", async () => {
+      readMode = "never";
+      const s = await screenOf(kind);
+      vi.useFakeTimers();
+      try {
+        const pressed = s.press();
+        await vi.advanceTimersByTimeAsync(3000);
+        expect(s.started, "the editor opened within 3 s of fake time").toHaveLength(1);
+        expect(s.started[0].reminderDays).toEqual(DEFAULT_PAIR);
+        await pressed;
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("an immediate answer still starts the editor once, at the member's pair", async () => {
+      readMode = "pair";
+      const s = await screenOf(kind);
+      await s.press();
+      expect(s.started).toHaveLength(1);
+      expect(s.started[0].reminderDays).toEqual(MEMBER_PAIR);
+    });
+
+    it("a failed read still starts the editor once, at the default [14, 3]", async () => {
+      readMode = "fails";
+      const s = await screenOf(kind);
+      await s.press();
+      expect(s.started).toHaveLength(1);
+      expect(s.started[0].reminderDays).toEqual(DEFAULT_PAIR);
+    });
+  });
+
+  describe("phone only", () => {
+    it("the suggestion became review-locked while the read is pending: the late answer starts no editor", async () => {
+      readMode = "gated";
+      const s = await screenOf("phone");
+      const pressed = s.press();
+      s.names.reviewLockedOf = () => true;
+      answerRead();
+      await pressed;
+      await settle();
+      expect(s.started).toHaveLength(0);
+    });
+
+    it("the suggestion disappeared from the view while the read is pending: the late answer starts no editor", async () => {
+      readMode = "gated";
+      const s = await screenOf("phone");
+      const pressed = s.press();
+      s.names.view = { ...view, suggestions: [] };
+      answerRead();
+      await pressed;
+      await settle();
+      expect(s.started).toHaveLength(0);
+    });
   });
 });
