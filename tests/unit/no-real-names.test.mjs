@@ -222,6 +222,15 @@ describe("the guard's matchers (#1408)", () => {
     includesAll(loginsOf("/home/alex-old"), ["alex"]);
   });
 
+  it("loginsOf finds a dotted login that ends a sentence", () => {
+    includesAll(loginsOf("files live in /home/al-ex."), ["al-ex"]);
+    includesAll(loginsOf("under ~al.ex."), ["al.ex"]);
+  });
+
+  it("loginsOf finds a login in an all-caps Windows path", () => {
+    includesAll(loginsOf("C:\\USERS\\alex\\x"), ["alex"]);
+  });
+
   it("loginsOf finds a login in a lower-case Windows path and in an ordinary path", () => {
     includesAll(loginsOf("c:\\users\\alex\\x"), ["alex"]);
     includesAll(loginsOf("/home/alex/projects"), ["alex"]);
