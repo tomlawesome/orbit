@@ -2418,21 +2418,29 @@ function writeVersionedEnv(targetDir, versionLine) {
 }
 
 describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion 9)", () => {
+  // #1403 D3: the gate is "key present and well-formed", nothing more. The
+  // floor arithmetic and the retracted-1.x wording are gone, so any
+  // well-formed version is accepted, including ones the old floor refused.
   it.each([
-    ["v1.2.0", "a retracted 1.x alpha"],
-    ["v1.0.0", "the pre-configuration.sh era"],
-    ["v1.3.0", "the retracted 1.x line"],
-    ["v2.0.0", "a major version above the retracted 1.x line"],
-    ["v0.2.9", "a 0.x release below the floor"],
-    ["v0.0.0", "a development build, no longer exempt"],
-  ])("reports deployment-version-unsupported for %s (%s)", (version) => {
+    ["v1.2.0", "formerly refused as a retracted 1.x alpha"],
+    ["v1.0.0", "formerly refused as the pre-configuration.sh era"],
+    ["v2.0.0", "formerly refused as above the retracted 1.x line"],
+    ["v0.2.9", "formerly refused as a 0.x release below the floor"],
+    ["v0.0.0", "formerly refused as a development build"],
+  ])("accepts the well-formed version %s with no version finding (%s)", (version) => {
     const targetDir = makeFixture();
     writeVersionedEnv(targetDir, `ORBIT_CONFIG_APPLIED_VERSION=${version}`);
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
-    expect(result.stdout).toContain("finding class=deployment-version-unsupported target=deployment severity=fail");
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("deployment-version-unsupported");
+  });
+
+  it("carries no supported-floor arithmetic or retracted-tag wording in repair.sh (#1403 D3)", () => {
+    const source = readFileSync(new URL("./repair.sh", import.meta.url), "utf8");
+    expect(source).not.toMatch(/supported_floor_/);
+    expect(source).not.toMatch(/retract/i);
   });
 
   // #1210: the engine behind configure.sh --check refuses a malformed
