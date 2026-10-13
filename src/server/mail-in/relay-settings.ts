@@ -19,7 +19,7 @@ import { getDb } from "@/db";
 import { imapIngestionMessages } from "@/db/schema";
 import { getImapIngestionConfig } from "./mailbox-config";
 import type { ImapIngestionConfig } from "./core/config";
-import { ensureRelayAliases, readRelayRow, relayAddressFor, rotateRelay, setRelayIngestPaused, type RelayRotationMode } from "./relays";
+import { ensureRelayAliases, relayAddressFor, rotateRelay, setRelayIngestPaused, type RelayRotationMode } from "./relays";
 import { hasVerifiedSenderAddress, seedSenderAddress } from "./sender-addresses";
 
 /** Mail-in is configured, switched on, and this account has a mailbox. */
@@ -182,9 +182,4 @@ export async function setRelayIngest(
   if (user.isInstanceAdmin || !config?.enabled) return readRelaySettings(user);
   await setRelayIngestPaused(user.id, paused);
   return readRelaySettings(user);
-}
-
-/** The member's own relay row, or `undefined` before they are enrolled. */
-export async function readOwnRelayRow(user: { id: string }) {
-  return readRelayRow(user.id);
 }

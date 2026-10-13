@@ -200,12 +200,6 @@ export function matchesImapRecipientAlias(value: string, userId: string, config:
   return matchImapRecipientAliasGeneration(value, userId, config.aliasBase, { generation, secret: config.aliasCurrent.secret });
 }
 
-/** Reads one provider-injected recipient header without retaining raw mail headers. */
-export function trustedRecipientFromHeaders(headers: Buffer | undefined, headerName: string): string | undefined {
-  const result = parseTrustedRecipientHeader(headers, headerName);
-  return result.kind === "value" ? result.value : undefined;
-}
-
 type RecipientResolution = {
   userId?: string;
   generation?: number;

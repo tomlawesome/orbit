@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, gt, lt, sql } from "drizzle-orm";
-import type { CookieReader, CookieSink } from "@/lib/http";
+import type { CookieReader } from "@/lib/http";
 import { getDb } from "@/db";
 import { auditLog, sessions, userPreferences, users } from "@/db/schema";
 import type { AuthConfig } from "@/lib/env";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
-import { clearSessionCookie, sessionCookieName, setSessionCookie } from "@/lib/auth/cookies";
+import { sessionCookieName } from "@/lib/auth/cookies";
 import { constantTimeEqual, createCsrfToken, hashSessionToken, randomUrlSafe } from "@/lib/auth/crypto";
 import { AuthError } from "@/lib/auth/errors";
 import type { TextSize, UrgencyPalette } from "@/lib/preferences";
@@ -344,22 +344,6 @@ export async function requireSession(cookies: CookieReader, config: AuthConfig):
   return session;
 }
 
-export async function rotateSession(session: AuthenticatedSession, cookies: CookieSink, config: AuthConfig): Promise<void> {
-  const nextToken = randomUrlSafe(32);
-  const nextExpiry = new Date(Date.now() + config.sessionTtlSeconds * 1000);
-  const [rotated] = await getDb()
-    .update(sessions)
-    .set({
-      tokenHash: hashSessionToken(nextToken),
-      expiresAt: nextExpiry,
-      rotatedAt: new Date(),
-    })
-    .where(and(eq(sessions.id, session.id), eq(sessions.tokenHash, hashSessionToken(session.token))))
-    .returning({ id: sessions.id });
-  if (!rotated) throw new AuthError("session_required", "The session was replaced by another request", 401);
-  setSessionCookie(cookies, nextToken, config);
-}
-
 export function assertSameOrigin(headers: Headers, config: AuthConfig): void {
   const origin = headers.get("origin");
   const fetchSite = headers.get("sec-fetch-site");
@@ -385,9 +369,4 @@ export function assertCsrf(headers: Headers, session: AuthenticatedSession, conf
 
 export function csrfTokenForSession(session: AuthenticatedSession, config: AuthConfig): string {
   return createCsrfToken(session.token, config.sessionSecret);
-}
-
-export async function invalidateSession(cookies: CookieSink, config: AuthConfig): Promise<void> {
-  await deleteSessionToken(cookies.get(sessionCookieName(config)));
-  clearSessionCookie(cookies, config);
 }

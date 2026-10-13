@@ -1,7 +1,0 @@
-{
-  "note": "The v19 type ledger (#624) is retired: web/ now type-checks clean and scripts/check-v19-types.mjs is a plain zero-error gate with no per-file tolerance. This file is kept empty as the historical record of the ledger; nothing reads it anymore.",
-  "issue": "https://gitlab.tomlawson.io/ai/orbit/-/issues/624",
-  "recorded": "2026-08-24",
-  "closed": "2026-09-05",
-  "files": {}
-}

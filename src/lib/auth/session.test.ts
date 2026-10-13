@@ -35,7 +35,7 @@ const session: AuthenticatedSession = {
 /* A plain Request since the cut (#735): the seam reads `.headers` and nothing
    else, so there was never anything Next-specific to construct here. */
 function postRequest(headers: Record<string, string>): Request {
-  return new Request("https://orbit.example/api/auth/session/refresh", {
+  return new Request("https://orbit.example/api/auth/sessions/revoke", {
     method: "POST",
     headers,
   });

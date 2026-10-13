@@ -14,10 +14,6 @@ export function scannerRecoveryDelayMs(attempt: number): number {
   return Math.min(60 * 1_000 * (2 ** (boundedAttempt - 1)), 15 * 60 * 1_000);
 }
 
-export function isRetryableScannerFailureCode(value: string | null | undefined): value is RetryableScannerFailureCode {
-  return Boolean(value && (retryableScannerFailureCodes as readonly string[]).includes(value));
-}
-
 export function isScannerRecoveryExpired(expiresAt: Date, now = new Date()): boolean {
   return expiresAt.getTime() <= now.getTime();
 }

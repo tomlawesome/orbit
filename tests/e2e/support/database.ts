@@ -468,3 +468,36 @@ export function assertEverySpecFileResets(suite: string): void {
     );
   }
 }
+
+/**
+ * Puts a one-use sender-address check on a member's account and says whether
+ * the address was already proven (#745; #1403 D2).
+ *
+ * The route a member used to ask for this link
+ * (`PUT /api/settings/mail-relay/senders`) is gone, so nothing in the product
+ * mails one any more. What the link proves is still served, by
+ * `GET /api/settings/mail-relay/verify`, and that is what the caller then
+ * opens: this writes only what asking for the link wrote -- the claim,
+ * unverified, with the SHA-256 digest of `token` and a day to open it -- and
+ * never marks the address verified itself. A re-run that finds the address
+ * already verified changes nothing and answers true.
+ *
+ * The address goes in the plaintext column, which attribution still matches
+ * (`userForVerifiedSender`). `userId`, `address` and `digest` come from the
+ * spec itself, never from a reader, and are quoted as SQL literals anyway.
+ */
+export function pendingSenderVerification(userId: string, address: string, digest: string): boolean {
+  const literal = (value: string) => `'${value.replaceAll("'", "''")}'`;
+  const answer = runSql(`
+    insert into mail_in_sender_addresses (user_id, address, source, verification_token_digest, verification_expires_at)
+    values (${literal(userId)}, ${literal(address)}, 'manual', ${literal(digest)}, now() + interval '1 day')
+    on conflict (address) do update
+      set verification_token_digest = excluded.verification_token_digest,
+          verification_expires_at = excluded.verification_expires_at,
+          updated_at = now()
+      where mail_in_sender_addresses.verified_at is null
+        and mail_in_sender_addresses.user_id = excluded.user_id;
+    select verified_at is not null from mail_in_sender_addresses where address = ${literal(address)};
+  `);
+  return answer.trim() === "t";
+}

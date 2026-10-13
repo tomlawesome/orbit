@@ -670,9 +670,8 @@ create more than once, and bounded on failure. Their generic body contains no
 source content and links only to `/?open=inbox` on the configured HTTP(S)
 application origin. The link still needs sign-in and cannot approve, attach or
 write anything. SMTP is at-least-once: if a provider accepts a message just
-before Orbit loses its completion update, an explicit retry can send the
-generic notification twice. The interface warns before retrying exhausted
-deliveries.
+before Orbit loses its completion update, the next attempt can send the
+generic notification twice.
 
 ### Disable, restart, and credential rotation
 

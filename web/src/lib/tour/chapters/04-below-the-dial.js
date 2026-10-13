@@ -9,9 +9,9 @@
  * WHAT THIS CHAPTER TEACHES. The manifest — the real corridor of what's
  * ahead, read top to bottom below the dial — and that it keeps the same law
  * the dial itself does (nearest first), in a different geometry. Both lines
- * and the manifest's own target are the ratified "manifest" stop
- * (web/src/lib/tour/stops.js), which is where this copy and `#manifest-top`
- * were already ratified for the eight-stop walk this film replaces.
+ * and the manifest's own target are the "manifest" stop of the retired
+ * eight-stop walk this film replaces, which is where this copy and
+ * `#manifest-top` were ratified.
  *
  * THE SCROLL. The mockup fakes scrolling by translating a screenshot of the
  * whole scrollable strip (`scrollImg`) because it has no real page under it.
@@ -56,7 +56,7 @@ import { dayMonth, tminusOf } from "../../format.js";
 export const SELECTORS = Object.freeze({
   DESK: Object.freeze({
     /** The manifest column itself — always rendered, and the ratified
-     *  "manifest" stop's own target (stops.js). */
+     *  "manifest" stop's own target in the retired walk. */
     manifest: "#manifest-top",
     /** The manifest's own "TODAY ·" header row. */
     today: "#manifest-top .today",

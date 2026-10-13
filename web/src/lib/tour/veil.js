@@ -11,8 +11,8 @@
  * keep its own stacking context and its own hit-testing. So a hole cannot be
  * an element placed on top of the veil — it has to be an actual gap cut into
  * the dark sheet, which is what a CSS mask is for. The lit element itself is
- * never moved, re-parented, classed or given a z-index (`emphasis.js`
- * already collides `.lit` with `home.css:495` and zeroes it out entirely at
+ * never moved, re-parented, classed or given a z-index (`.lit` already
+ * collides with `home.css:495` and is zeroed out entirely at
  * `create.css:221` — this module never uses that class name, or any class on
  * the target at all).
  *

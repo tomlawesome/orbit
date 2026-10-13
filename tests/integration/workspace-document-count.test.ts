@@ -8,7 +8,7 @@ import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./suppo
 
 /**
  * `readWorkspace` never computed `documentCount` (#1091): items always came
- * back without the field, so `readBelt`'s `(item.documentCount ?? 0) > 0`
+ * back without the field, so the belt's `(item.documentCount ?? 0) > 0`
  * filter was always false for a real household and no document ever reached
  * the belt. Only the demo fixtures hand-wrote the field, which is why
  * nothing that exercised only fixtures noticed.

@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -225,64 +225,5 @@ describe("exportedHandlers (#1151 T-Q5)", () => {
 
   it("still finds a real handler sitting next to a dead one", () => {
     expect(exportedHandlers("// export function GET() {}\nexport function POST() {}")).toEqual(["POST"]);
-  });
-});
-
-/*
- * #1403 D2 (owner, 2026-10-13): five API routes kept only for older clients
- * are removed -- nothing in this release calls them. Three neighbours that
- * look alike are KEPT: a live caller exists for each.
- */
-const REMOVED_API_ROUTES = [
-  "/api/admin/primary",
-  "/api/admin/operations/deliveries/[deliveryId]",
-  "/api/admin/operations/mailbox-notifications",
-  "/api/auth/session/refresh",
-  "/api/settings/mail-relay/senders",
-];
-const KEPT_API_ROUTES = [
-  "/api/admin/maintenance",
-  "/api/settings/mail-relay/verify",
-  "/api/preferences",
-  // parents of the removed children stay
-  "/api/auth/session",
-  "/api/settings/mail-relay",
-  "/api/admin/operations",
-];
-
-describe("removed API routes (#1403 D2)", () => {
-  const actual = routeFiles.map((file) => file.routePath);
-
-  it.each(REMOVED_API_ROUTES)("%s has no +server.js and no directory", (route) => {
-    expect(actual).not.toContain(route);
-    expect(existsSync(join(routesRoot, "..", ...route.split("/").filter(Boolean)))).toBe(false);
-  });
-
-  it.each(KEPT_API_ROUTES)("%s is still served", (route) => {
-    expect(actual).toContain(route);
-  });
-
-  it("PUT /api/preferences is still exported", () => {
-    const file = routeFiles.find((one) => one.routePath === "/api/preferences");
-    expect(exportedHandlers(readFileSync(file.filePath, "utf8"))).toContain("PUT");
-  });
-});
-
-/*
- * #1403 D2: the page-route equivalent. Five old URLs only redirected to their
- * new homes (/home, /administration, /inbox ...); the redirects go, and the
- * screens they pointed at stay.
- */
-const pagesRoot = new URL("../../web/src/routes/", import.meta.url).pathname;
-const REMOVED_PAGE_ROUTES = ["admin", "documents", "due-next", "mobile", "item"];
-const KEPT_PAGE_ROUTES = ["home", "inbox", "administration", "maintenance", "settings"];
-
-describe("removed page routes (#1403 D2)", () => {
-  it.each(REMOVED_PAGE_ROUTES)("/%s has no route directory", (name) => {
-    expect(existsSync(join(pagesRoot, name))).toBe(false);
-  });
-
-  it.each(KEPT_PAGE_ROUTES)("/%s is still a route directory", (name) => {
-    expect(existsSync(join(pagesRoot, name))).toBe(true);
   });
 });

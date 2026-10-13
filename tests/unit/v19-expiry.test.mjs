@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
  *
  * The transforms under test are plain ESM inside web/, which root vitest
  * excludes from COLLECTION (#425) but not from import — the same arrangement
- * v19-chart and v19-belt already rely on.
+ * v19-chart already relies on.
  */
 import {
   bandOfKind,
@@ -16,7 +16,6 @@ import {
   kindOfItem,
   manifestGroupsOf,
 } from "../../web/src/lib/data/chart.js";
-import { beltManifestOf, whenOf } from "../../web/src/lib/data/belt.js";
 import {
   expirySweepBoundary,
   expirySweepIsDue,
@@ -128,27 +127,6 @@ describe("what counts as overdue", () => {
     expect(ended.band).toBe("ended");
     expect(ended.kind).toBe("expiry");
     expect(groups.attention.find((row) => row.id === "i-late").band).toBe("overdue");
-  });
-});
-
-describe("the belt's words", () => {
-  it("says what the day is, not just which day", () => {
-    expect(whenOf("expiry", 20, "02 Sep")).toBe("ends 02 Sep");
-    expect(whenOf("expiry", -7, "06 Aug")).toBe("ended 06 Aug");
-    expect(whenOf("renewal", -7, "06 Aug")).toBe("06 Aug");
-    expect(whenOf("service", 20, "02 Sep")).toBe("02 Sep");
-  });
-
-  it("carries those words and the ended urgency onto the rock", () => {
-    const [row] = beltManifestOf({ household: householdOf([itemOf({ dueDate: "2026-08-06" })]), today: TODAY });
-    expect(row.kind).toBe("expiry");
-    expect(row.when).toBe("ended 06 Aug");
-    expect(row.urg).toBe("ended");
-    expect(row.months).toBe(null);
-
-    const [ahead] = beltManifestOf({ household: householdOf([itemOf()]), today: TODAY });
-    expect(ahead.when).toBe("ends 02 Sep");
-    expect(ahead.urg).toBe("soon");
   });
 });
 

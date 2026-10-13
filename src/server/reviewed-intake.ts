@@ -1036,9 +1036,3 @@ export async function approveReviewedIntake(userId: string, rawInput: unknown): 
   if (input.source.kind === "mailbox_draft") return finishMailboxApproval(userId, input as MailboxApproval, requestHash);
   return finishDirectApproval(userId, input as DirectApproval, requestHash);
 }
-
-export async function listStagedAttachmentIds(receiptId: string): Promise<string[]> {
-  const rows = await getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments)
-    .where(and(eq(imapIngestionAttachments.messageId, receiptId), inArray(imapIngestionAttachments.status, ["stored", "assigned"])));
-  return rows.map((row) => row.id);
-}

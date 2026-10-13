@@ -120,12 +120,6 @@ describe("a held completion", () => {
     await vi.advanceTimersByTimeAsync(10);
     expect(onfailed).toHaveBeenCalledWith(boom, { type: "item.complete", itemId: "i1" });
   });
-
-  it("reads the older single-slot stash the belt once wrote", () => {
-    const storage = memoryStorage();
-    storage.setItem(HELD_COMPLETION_KEY, JSON.stringify({ command: { itemId: "i1" } }));
-    expect(readHeldCompletionStash(storage)).toEqual([{ itemId: "i1" }]);
-  });
 });
 
 describe("the words for a dropped completion (#1316)", () => {

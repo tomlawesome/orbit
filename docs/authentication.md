@@ -188,8 +188,7 @@ It recovers nothing, and it refuses to run while the key still works.
 
 Every sensitive action — setting or changing a password, linking or
 unlinking a sign-in method, re-issuing another user's setup link,
-transferring primary-administrator authority, creating a system for somebody
-else, and writing out or bringing in a portable archive — always re-challenges the
+creating a system for somebody else, and writing out or bringing in a portable archive — always re-challenges the
 person taking it, regardless of how recently they signed in. There is no
 freshness window: a session left open at an unlocked screen is never itself
 enough to take one of these actions.
@@ -343,7 +342,6 @@ Membership and owner checks are repeated by every household-scoped API. Client-s
 | `GET` | `/api/auth/login?returnTo=/path` | Starts OIDC sign-in and redirects to the provider (`auth_not_configured` when OIDC is off). |
 | `GET` | `/api/auth/callback` | Validates the provider response and completes sign-in, bootstrap, linking, or step-up, depending on what started the transaction. |
 | `GET` | `/api/auth/session` | Returns the current user, expiry, household context, and CSRF token. |
-| `POST` | `/api/auth/session/refresh` | Rotates the local session after origin and CSRF validation. |
 | `POST` | `/api/auth/logout` | Ends the local session, then redirects to the provider's end-session page with `id_token_hint` when the session came from the provider. |
 | `POST` | `/api/auth/sessions/revoke` | Ends every session the caller holds, including the calling device, and clears its cookie (see "Signing out, plainly"). |
 | `GET` | `/api/auth/methods` | The caller's own sign-in methods: password set/changed, and linked providers. |
@@ -369,7 +367,7 @@ To call a state-changing endpoint, first request `/api/auth/session`, then send 
 const sessionResponse = await fetch("/api/auth/session", { cache: "no-store" });
 const session = await sessionResponse.json();
 
-await fetch("/api/auth/session/refresh", {
+await fetch("/api/auth/logout", {
   method: "POST",
   headers: { "X-CSRF-Token": session.csrfToken },
 });
@@ -397,7 +395,7 @@ detail behind that, for readers who want to check it.
 - ID-token signature, issuer, audience, expiry, nonce, authorized party, and access-token hash are validated where applicable.
 - Provider access and refresh tokens — anything that could call another service — are never stored. The ID token from a provider sign-in is kept on that session's row, encrypted under the instance's encryption key (the one that protects account addresses), so that signing out can tell the provider which session to end. It is deleted with the session, is handed to the browser once, inside the provider sign-out address at the moment of sign-out, and never on any session read or list, and cannot be used to sign in to Orbit again.
 - The browser receives a random opaque session credential. Only its SHA-256 hash is stored in PostgreSQL. Setup and recovery tokens are stored the same way: only their SHA-256 hash, never the token itself.
-- Session refresh rotates the credential atomically. Logout deletes it server-side and expires the cookie.
+- Logout deletes the session credential server-side and expires the cookie.
 - State-changing session actions require an exact same-origin request and a session-bound HMAC synchronizer token.
 - Production cookies use `Secure`, `HttpOnly`, `SameSite=Lax`, and the `__Host-`/`__Secure-` prefixes where their path constraints permit.
 - Every password sign-in is completed by a link emailed to the account

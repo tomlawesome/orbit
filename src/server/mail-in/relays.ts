@@ -24,7 +24,6 @@ import { auditLog, imapIngestionMessages, imapRecipientAliases, mailInRelays, us
 import type { ImapIngestionConfig } from "./core/config";
 import { deriveImapRecipientAlias, digestImapRecipientAlias } from "./core/imap-recipient";
 import {
-  activeRelayGenerations,
   nextRelayGeneration,
   RELAY_CUT_OFF_GRACE_MS,
   RELAY_MAX_GRACE_MS,
@@ -323,11 +322,6 @@ export async function expireLapsedRelayAliases(now = new Date()): Promise<void> 
       isNotNull(imapRecipientAliases.activeUntil),
       lte(imapRecipientAliases.activeUntil, now),
     ));
-}
-
-/** The generations a lookup may consider for one user right now. */
-export function relayLookupGenerations(relay: RelayGenerationState, now: Date): number[] {
-  return activeRelayGenerations(relay, now);
 }
 
 /** Users per rotation chunk (A2-R5). Bounded so one chunk's transaction is

@@ -9,7 +9,7 @@ import { auditLog, metadataDamageSightings, metadataKeys, sessions } from "@/db/
 import { AuthError } from "@/lib/auth/errors";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { sessionCookieName } from "@/lib/auth/cookies";
-import { createCsrfToken, hashSessionToken } from "@/lib/auth/crypto";
+import { hashSessionToken } from "@/lib/auth/crypto";
 import * as oidc from "@/lib/auth/oidc";
 import { createSession } from "@/lib/auth/session";
 import { hashPassword } from "@/lib/auth/password";
@@ -22,7 +22,6 @@ import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
-  sessionHeaders,
   type IntegrationSession,
 } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
@@ -39,7 +38,6 @@ resetAuthConfigForTests();
 
 const { POST: logout } = await loadRoute("auth/logout");
 const { GET: sessionStatus } = await loadRoute("auth/session");
-const { POST: refresh } = await loadRoute("auth/session/refresh");
 const { GET: listSessions } = await loadRoute("auth/sessions");
 // #1151 A1-R7: the route's own cap, read back from its own module rather
 // than duplicated as a literal here, so this test fails the moment the two
@@ -73,22 +71,6 @@ function checkSession(session: IntegrationSession, overrides: Record<string, str
     url: "http://127.0.0.1:3000/api/auth/session",
     headers: overrides,
   });
-}
-
-function replacementSession(session: IntegrationSession, response: Response): IntegrationSession {
-  const config = getAuthConfig();
-  const token = readSetCookie(response, sessionCookieName(config))?.value;
-  if (!token) throw new Error("Refresh response did not set a session cookie");
-  const csrfToken = createCsrfToken(token, config.sessionSecret);
-  return {
-    ...session,
-    token,
-    csrfToken,
-    headers: sessionHeaders(session, {
-      cookie: `${sessionCookieName(config)}=${token}`,
-      "x-csrf-token": csrfToken,
-    }),
-  };
 }
 
 async function sessionRows(sessionId: string) {
@@ -146,77 +128,6 @@ async function userSessionCount(userId: string): Promise<number> {
 }
 
 describe("PostgreSQL authentication session contracts", () => {
-  it("rotates one persisted token atomically and rejects the old cookie and CSRF token", async () => {
-    const fixture = await createIntegrationFixture("auth-refresh");
-    const session = await fixture.session("member");
-    const config = getAuthConfig();
-    const [before] = await sessionRows(session.sessionId);
-
-    const response = await callRouteForSession(refresh, session, {
-      url: "http://127.0.0.1:3000/api/auth/session/refresh",
-      method: "POST",
-    });
-    expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(readSetCookie(response, sessionCookieName(config))?.value).toBeTruthy();
-    expect(response.headers.get("set-cookie")).toContain("HttpOnly");
-    /* `Lax`, not `lax`, since the cut (#735): Next's response-cookie jar spelled
-       the value lowercase, SvelteKit's serialiser capitalises it. The attribute
-       value is case-insensitive (RFC 6265bis §5.4.7), so the cookie a browser
-       receives means exactly what it meant before — this pins the new speller,
-       it does not accept a weaker cookie. */
-    expect(response.headers.get("set-cookie")).toContain("SameSite=Lax");
-
-    const [after] = await sessionRows(session.sessionId);
-    expect(after).toEqual(expect.objectContaining({ id: session.sessionId }));
-    expect(after?.tokenHash).not.toBe(before?.tokenHash);
-    expect(await sessionRows(session.sessionId)).toHaveLength(1);
-
-    const rotated = replacementSession(session, response);
-    const rotatedStatus = await checkSession(rotated);
-    expect(rotatedStatus.status).toBe(200);
-    expect((await rotatedStatus.json()).authenticated).toBe(true);
-
-    const oldStatus = await checkSession(session);
-    expect(oldStatus.status).toBe(401);
-    expect(oldStatus.headers.get("cache-control")).toBe("no-store");
-
-    const oldCsrfResponse = await callRouteForSession(refresh, rotated, {
-      url: "http://127.0.0.1:3000/api/auth/session/refresh",
-      method: "POST",
-      headers: { "x-csrf-token": session.csrfToken },
-    });
-    expect(oldCsrfResponse.status).toBe(403);
-    expect(oldCsrfResponse.headers.get("cache-control")).toBe("no-store");
-    expect((await oldCsrfResponse.json()).error.code).toBe("csrf_failed");
-    expect(hashSessionToken(rotated.token)).toBe(after?.tokenHash);
-  });
-
-  it("gives exactly one concurrent refresh winner and leaves only the winner usable", async () => {
-    const fixture = await createIntegrationFixture("auth-refresh-concurrent");
-    const session = await fixture.session("member");
-
-    const [first, second] = await Promise.all([
-      callRouteForSession(refresh, session, { url: "http://127.0.0.1:3000/api/auth/session/refresh", method: "POST" }),
-      callRouteForSession(refresh, session, { url: "http://127.0.0.1:3000/api/auth/session/refresh", method: "POST" }),
-    ]);
-    const responses = [first, second];
-    expect(responses.map((response) => response.status).sort((left, right) => left - right)).toEqual([200, 401]);
-
-    const winner = responses.find((response) => response.status === 200);
-    const loser = responses.find((response) => response.status === 401);
-    expect(winner).toBeDefined();
-    expect(loser).toBeDefined();
-    expect(winner?.headers.get("cache-control")).toBe("no-store");
-    expect(loser?.headers.get("cache-control")).toBe("no-store");
-    expect((await loser?.json()).error.code).toBe("session_required");
-
-    const rotated = replacementSession(session, winner!);
-    expect((await (await checkSession(rotated)).json()).authenticated).toBe(true);
-    expect((await checkSession(session)).status).toBe(401);
-    expect(await sessionRows(session.sessionId)).toHaveLength(1);
-  });
-
   it("logs out locally first and clears the cookie when provider discovery fails", async () => {
     const fixture = await createIntegrationFixture("auth-logout-provider-down");
     const session = await fixture.session("member");
@@ -308,10 +219,7 @@ describe("PostgreSQL authentication session contracts", () => {
     expect(await sessionRows(phone.sessionId)).toHaveLength(0);
     expect((await checkSession(laptop)).status).toBe(401);
     expect((await checkSession(phone)).status).toBe(401);
-    expect((await callRouteForSession(refresh, phone, {
-      url: "http://127.0.0.1:3000/api/auth/session/refresh",
-      method: "POST",
-    })).status).toBe(401);
+    expect((await callRouteForSession(revokeSessions, phone, { url: REVOKE_URL, method: "POST" })).status).toBe(401);
 
     // Another account's session is untouched: the scope is the caller's user.
     expect((await checkSession(someoneElse)).status).toBe(200);

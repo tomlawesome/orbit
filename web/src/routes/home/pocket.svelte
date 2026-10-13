@@ -611,7 +611,7 @@
       const raw = localStorage.getItem(HELD_COMPLETION_KEY);
       if (!raw) return [];
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [parsed.command].filter(Boolean);
+      return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
     }
@@ -637,15 +637,8 @@
       Runs once, on mount: nothing it reads is reactive state. */
   $effect(() => {
     for (const command of readHeldCompletionStash()) {
-      /* A stash written before ADR-0034 carried a next due date and the
-         activity's kind, which the engine now refuses; the completion is
-         still the member's, so it is sent in today's shape. */
       /** @type {any} */
-      const sent = structuredClone(command);
-      if (sent.type === "item.complete") {
-        delete sent.nextDate;
-        if (sent.activity) { delete sent.activity.kind; delete sent.activity.nextDate; }
-      }
+      const sent = command;
       applyCommand(sent).then(async () => {
         clearHeldCompletionStash(command);
         await onchanged?.();

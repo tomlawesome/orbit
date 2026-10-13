@@ -3,7 +3,7 @@
  *
  * The owner's ruling is that no freshness window ships. Setting a password,
  * changing one, linking, unlinking, issuing somebody else a setup link and
- * transferring primary authority all re-challenge the person in front of the
+ * creating a system for somebody else all re-challenge the person in front of the
  * screen, every time — a window is a bearer token for anyone at an unlocked
  * laptop, which is exactly what this replaces (#263's fifteen minutes, deleted
  * with this module).
@@ -51,9 +51,9 @@ export const STEP_UP_PROOF_TTL_SECONDS = 120;
 
 /**
  * What a step-up is FOR. A closed list, because the proof is bound to one of
- * these: a step-up taken to change a password cannot be spent transferring the
- * instance. Later M7 slices append their own actions here; nothing reorders or
- * removes, and no route invents an intent of its own.
+ * these: a step-up taken to change a password cannot be spent creating a
+ * system. A new sensitive action appends its own intent here; no route invents
+ * an intent of its own.
  */
 export const stepUpIntents = [
   "password_set",
@@ -62,7 +62,6 @@ export const stepUpIntents = [
   "unlink_method",
   "local_user_create",
   "setup_link_issue",
-  "primary_transfer",
   /* Creating a system for somebody else (#1052): an administrator act that
      hands a household to a named owner, so it is challenged like the rest. */
   "system_create",
