@@ -59,7 +59,7 @@ async function signIn(page: Page) {
    ready mark, passing or failing by test order). */
 async function signInToHome(page: Page): Promise<Household> {
   await signIn(page);
-  const household = await seedHousehold(page, "sign-out-provider-return");
+  const household = await seedHousehold(page, "provider-sign-out");
   await page.goto("/home");
   await homeIsLive(page);
   const tour = page.locator("#orbit-tour-transport");
