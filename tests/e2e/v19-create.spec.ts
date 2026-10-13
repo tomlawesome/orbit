@@ -780,200 +780,213 @@ test("add to orbit lands an undated item on its row under the no-date rule", asy
   }
 });
 
-/**
- * #1316 W1-F1/F2: a create whose item landed but whose document did not can
- * be tried again. The retry keeps the draft id, so the live check the forms
- * ask on every edit gets "this item changed on another device" back -- the
- * item is already there -- and used to hold Add on that text for ever. Both
- * dialects: the desk (#save-note) and the phone's pocket (.pk-problem).
- */
-test("a create whose document failed can be retried under the same item and document ids", async ({ page }) => {
-  test.setTimeout(120_000);
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: workerAccount("administrator") }).click();
-  await settleArrival(page);
-  await ensureWorkerAdministrator(page);
-  households.track(await seedHousehold(page));
-
-  const pocket = test.info().project.name.startsWith("mobile");
-  const upserts: string[] = [];
-  const documentPosts: Array<{ itemId: string; documentId: string | undefined }> = [];
-  let documentAnswers = 0;
-
-  /* The real saves only: the live checks carry `dryRun: true`. */
-  page.on("request", (request) => {
-    if (request.method() !== "POST" || !request.url().includes("/api/workspace/commands")) return;
-    const body = request.postDataJSON() as { type?: string; dryRun?: boolean; item?: { id?: string } };
-    if (body.type === "item.upsert" && !body.dryRun && body.item?.id) upserts.push(body.item.id);
-  });
-  /* The first document POST fails; the retry goes through to the real route. */
-  await page.route(/\/api\/households\/[^/]+\/items\/[^/]+\/documents$/, async (route) => {
-    const request = route.request();
-    if (request.method() !== "POST") return route.fallback();
-    documentPosts.push({
-      itemId: new URL(request.url()).pathname.split("/").slice(-2)[0],
-      documentId: request.headers()["x-orbit-document-id"],
-    });
-    documentAnswers += 1;
-    if (documentAnswers === 1) {
-      return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "The document store is down" }) });
-    }
-    return route.fallback();
+/* The tests below stage their failure or hold with `page.route` (a document
+   POST that fails once; an item write held mid-save), and on WebKit a request
+   from a page Orbit's service worker controls skips Playwright's route
+   (#1196, #1235), so the save went straight through. Nothing here is about
+   the worker, so on WebKit it is kept out, as in the describes above. */
+test.describe(() => {
+  test.use({
+    serviceWorkers: async ({}, use, testInfo) => {
+      await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
+    },
   });
 
-  try {
-    const name = "Retry after partial landing proving";
-    const add = pocket ? page.getByRole("button", { name: "Add to orbit" }) : page.locator(".btn-primary");
-    const note = pocket ? page.locator(".pk-problem") : page.locator("#save-note");
-    const nameField = pocket
-      ? page.getByRole("form", { name: "New entry" }).getByRole("textbox", { name: "name", exact: true })
-      : page.locator("#f-name");
-
-    await (pocket ? savePocketEntryWithDocument : saveDeskEntryWithDocument)(page, name);
-
-    // The document failed once; the item had already landed.
-    await expect.poll(() => documentPosts.length, { timeout: 30_000 }).toBe(1);
-    await expect(note).toBeVisible();
-    await expect(note).not.toHaveText("");
-    await expect(note).not.toContainText("changed on another device");
-    await expect(add).not.toHaveAttribute("aria-disabled", "true");
-    expect(upserts).toHaveLength(1);
-
-    // Editing the entry asks the live check again; it must not hold Add.
-    await nameField.fill(`${name} again`);
-    await expect(add).not.toHaveAttribute("aria-disabled", "true", { timeout: 10_000 });
-    await expect(page.locator("#pk-refusal")).toHaveCount(0);
-    await expect(page.locator("body")).not.toContainText("changed on another device");
-
-    await add.click();
-    await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
-
-    const itemId = new URL(page.url()).searchParams.get("item") as string;
-    expect(upserts).toHaveLength(2);
-    expect(upserts[1]).toBe(upserts[0]);
-    expect(upserts[1]).toBe(itemId);
-    expect(documentPosts).toHaveLength(2);
-    expect(documentPosts[0].documentId).toBeTruthy();
-    expect(documentPosts[1].documentId).toBe(documentPosts[0].documentId);
-    expect(documentPosts[1].itemId).toBe(itemId);
-  } finally {
-    await page.unroute(/\/api\/households\/[^/]+\/items\/[^/]+\/documents$/).catch(() => {});
-    await households.sweep(page);
-  }
-});
-
-/**
- * #1316 W1-R5: the desk's save sends the document that was picked when Add
- * was pressed. While "Adding…" shows (the item write is still in flight),
- * pressing "not this one" or dropping another file must not change what the
- * save carries, nor what the zone says is held: one document POST, with the
- * first file's name and id.
- */
-const FIRST_DOCUMENT = DOCUMENT;
-const SECOND_DOCUMENT = "second-file-dropped-mid-save.pdf";
-
-for (const [title, interference] of [
-  ["pressing 'not this one' while Adding… shows", "not this one"],
-  ["dropping another file while Adding… shows", "drop"],
-] as const) {
-  test(`the desk's create form: ${title} still attaches the file that was picked`, async ({ page }) => {
-    test.skip(test.info().project.name.startsWith("mobile"), "the desk's #dropzone and lane; the phone's pocket form has neither");
+  /**
+   * #1316 W1-F1/F2: a create whose item landed but whose document did not can
+   * be tried again. The retry keeps the draft id, so the live check the forms
+   * ask on every edit gets "this item changed on another device" back -- the
+   * item is already there -- and used to hold Add on that text for ever. Both
+   * dialects: the desk (#save-note) and the phone's pocket (.pk-problem).
+   */
+  test("a create whose document failed can be retried under the same item and document ids", async ({ page }) => {
     test.setTimeout(120_000);
-    await signInWithHousehold(page);
+    await answerPushWithoutAService(page);
+    await page.goto("/api/auth/login?returnTo=/home");
+    await page.getByRole("link", { name: workerAccount("administrator") }).click();
+    await settleArrival(page);
+    await ensureWorkerAdministrator(page);
+    households.track(await seedHousehold(page));
 
-    /* Every id the page mints, in order, so the document id in the POST can be
-       tied to the pick that made it (the id is random, minted once per pick). */
-    await page.addInitScript(() => {
-      const minted: string[] = [];
-      (window as unknown as { __minted: string[] }).__minted = minted;
-      const original = crypto.randomUUID.bind(crypto);
-      crypto.randomUUID = (() => {
-        const id = original();
-        minted.push(id);
-        return id;
-      }) as typeof crypto.randomUUID;
-    });
-
+    const pocket = test.info().project.name.startsWith("mobile");
     const upserts: string[] = [];
-    const documentPosts: Array<{ name: string; documentId: string | undefined }> = [];
-    let releaseItemWrite: () => void = () => {};
-    const itemWriteHeld = new Promise<void>((resolveHeld) => { releaseItemWrite = resolveHeld; });
-    let itemWriteSeen = false;
+    const documentPosts: Array<{ itemId: string; documentId: string | undefined }> = [];
+    let documentAnswers = 0;
 
-    /* The item write is the held reply; the live checks (`dryRun: true`) go through. */
-    await page.route("**/api/workspace/commands", async (route) => {
-      const request = route.request();
-      const body = request.method() === "POST" ? (request.postDataJSON() as { type?: string; dryRun?: boolean; item?: { id?: string } }) : {};
-      if (body.type !== "item.upsert" || body.dryRun) return route.fallback();
-      if (body.item?.id) upserts.push(body.item.id);
-      itemWriteSeen = true;
-      await itemWriteHeld;
-      return route.fallback();
+    /* The real saves only: the live checks carry `dryRun: true`. */
+    page.on("request", (request) => {
+      if (request.method() !== "POST" || !request.url().includes("/api/workspace/commands")) return;
+      const body = request.postDataJSON() as { type?: string; dryRun?: boolean; item?: { id?: string } };
+      if (body.type === "item.upsert" && !body.dryRun && body.item?.id) upserts.push(body.item.id);
     });
+    /* The first document POST fails; the retry goes through to the real route. */
     await page.route(/\/api\/households\/[^/]+\/items\/[^/]+\/documents$/, async (route) => {
       const request = route.request();
       if (request.method() !== "POST") return route.fallback();
       documentPosts.push({
-        name: decodeURIComponent(request.headers()["x-orbit-filename"] ?? ""),
+        itemId: new URL(request.url()).pathname.split("/").slice(-2)[0],
         documentId: request.headers()["x-orbit-document-id"],
       });
+      documentAnswers += 1;
+      if (documentAnswers === 1) {
+        return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "The document store is down" }) });
+      }
       return route.fallback();
     });
 
     try {
-      const name = `Mid-save interference proving ${interference === "drop" ? "drop" : "release"}`;
-      await gotoCreate(page);
-      await page.locator('#card input[type="file"]').setInputFiles({ name: FIRST_DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
-      await expect(page.locator("#dz-held-name")).toHaveText(FIRST_DOCUMENT);
-      await expect(page.locator("#rc-file")).toContainText(FIRST_DOCUMENT);
-      const mintedAtFirstPick = await page.evaluate(() => [...(window as unknown as { __minted: string[] }).__minted]);
+      const name = "Retry after partial landing proving";
+      const add = pocket ? page.getByRole("button", { name: "Add to orbit" }) : page.locator(".btn-primary");
+      const note = pocket ? page.locator(".pk-problem") : page.locator("#save-note");
+      const nameField = pocket
+        ? page.getByRole("form", { name: "New entry" }).getByRole("textbox", { name: "name", exact: true })
+        : page.locator("#f-name");
 
-      await page.locator("#f-name").fill(name);
-      await page.locator('#types button[data-type="document"]').click();
-      await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
-      await page.locator(".btn-primary").click();
+      await (pocket ? savePocketEntryWithDocument : saveDeskEntryWithDocument)(page, name);
 
-      // The item write is held: the form is mid-save.
-      await expect.poll(() => itemWriteSeen, { timeout: 20_000 }).toBe(true);
-      await expect(page.locator(".btn-primary")).toContainText("Adding…");
-      expect(documentPosts).toHaveLength(0);
+      // The document failed once; the item had already landed.
+      await expect.poll(() => documentPosts.length, { timeout: 30_000 }).toBe(1);
+      await expect(note).toBeVisible();
+      await expect(note).not.toHaveText("");
+      await expect(note).not.toContainText("changed on another device");
+      await expect(add).not.toHaveAttribute("aria-disabled", "true");
+      expect(upserts).toHaveLength(1);
 
-      if (interference === "not this one") {
-        await page.locator("#rc-drop").click();
-      } else {
-        const files = await page.evaluateHandle(({ fileName, bytes }) => {
-          const transfer = new DataTransfer();
-          transfer.items.add(new File([Uint8Array.from(atob(bytes), (c) => c.charCodeAt(0))], fileName, { type: "application/pdf" }));
-          return transfer;
-        }, { fileName: SECOND_DOCUMENT, bytes: DOCUMENT_BYTES.toString("base64") });
-        const zone = page.locator("#dropzone");
-        await zone.dispatchEvent("dragenter", { dataTransfer: files });
-        await zone.locator(".dz-main [data-when=rest]").dispatchEvent("drop", { dataTransfer: files });
-      }
+      // Editing the entry asks the live check again; it must not hold Add.
+      await nameField.fill(`${name} again`);
+      await expect(add).not.toHaveAttribute("aria-disabled", "true", { timeout: 10_000 });
+      await expect(page.locator("#pk-refusal")).toHaveCount(0);
+      await expect(page.locator("body")).not.toContainText("changed on another device");
 
-      // Whatever the form did with it, the zone still names the file the save is carrying.
-      await expect(page.locator("#dz-held-name")).toHaveText(FIRST_DOCUMENT);
-
-      releaseItemWrite();
+      await add.click();
       await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
-      const itemId = new URL(page.url()).searchParams.get("item") as string;
-      expect(upserts).toEqual([itemId]);
 
-      // Exactly one document POST, for the first file, under the id its pick minted.
-      await expect.poll(() => documentPosts.length, { timeout: 20_000 }).toBeGreaterThan(0);
-      await page.waitForTimeout(1_000);
-      expect(documentPosts).toHaveLength(1);
-      expect(documentPosts[0].name).toBe(FIRST_DOCUMENT);
-      const postedId = documentPosts[0].documentId as string;
-      expect(postedId).toBeTruthy();
-      expect(postedId).not.toBe(itemId);
-      expect(mintedAtFirstPick).toContain(postedId);
+      const itemId = new URL(page.url()).searchParams.get("item") as string;
+      expect(upserts).toHaveLength(2);
+      expect(upserts[1]).toBe(upserts[0]);
+      expect(upserts[1]).toBe(itemId);
+      expect(documentPosts).toHaveLength(2);
+      expect(documentPosts[0].documentId).toBeTruthy();
+      expect(documentPosts[1].documentId).toBe(documentPosts[0].documentId);
+      expect(documentPosts[1].itemId).toBe(itemId);
     } finally {
-      releaseItemWrite();
-      await page.unroute("**/api/workspace/commands").catch(() => {});
       await page.unroute(/\/api\/households\/[^/]+\/items\/[^/]+\/documents$/).catch(() => {});
       await households.sweep(page);
     }
   });
-}
+
+  /**
+   * #1316 W1-R5: the desk's save sends the document that was picked when Add
+   * was pressed. While "Adding…" shows (the item write is still in flight),
+   * pressing "not this one" or dropping another file must not change what the
+   * save carries, nor what the zone says is held: one document POST, with the
+   * first file's name and id.
+   */
+  const FIRST_DOCUMENT = DOCUMENT;
+  const SECOND_DOCUMENT = "second-file-dropped-mid-save.pdf";
+
+  for (const [title, interference] of [
+    ["pressing 'not this one' while Adding… shows", "not this one"],
+    ["dropping another file while Adding… shows", "drop"],
+  ] as const) {
+    test(`the desk's create form: ${title} still attaches the file that was picked`, async ({ page }) => {
+      test.skip(test.info().project.name.startsWith("mobile"), "the desk's #dropzone and lane; the phone's pocket form has neither");
+      test.setTimeout(120_000);
+      await signInWithHousehold(page);
+
+      /* Every id the page mints, in order, so the document id in the POST can be
+         tied to the pick that made it (the id is random, minted once per pick). */
+      await page.addInitScript(() => {
+        const minted: string[] = [];
+        (window as unknown as { __minted: string[] }).__minted = minted;
+        const original = crypto.randomUUID.bind(crypto);
+        crypto.randomUUID = (() => {
+          const id = original();
+          minted.push(id);
+          return id;
+        }) as typeof crypto.randomUUID;
+      });
+
+      const upserts: string[] = [];
+      const documentPosts: Array<{ name: string; documentId: string | undefined }> = [];
+      let releaseItemWrite: () => void = () => {};
+      const itemWriteHeld = new Promise<void>((resolveHeld) => { releaseItemWrite = resolveHeld; });
+      let itemWriteSeen = false;
+
+      /* The item write is the held reply; the live checks (`dryRun: true`) go through. */
+      await page.route("**/api/workspace/commands", async (route) => {
+        const request = route.request();
+        const body = request.method() === "POST" ? (request.postDataJSON() as { type?: string; dryRun?: boolean; item?: { id?: string } }) : {};
+        if (body.type !== "item.upsert" || body.dryRun) return route.fallback();
+        if (body.item?.id) upserts.push(body.item.id);
+        itemWriteSeen = true;
+        await itemWriteHeld;
+        return route.fallback();
+      });
+      await page.route(/\/api\/households\/[^/]+\/items\/[^/]+\/documents$/, async (route) => {
+        const request = route.request();
+        if (request.method() !== "POST") return route.fallback();
+        documentPosts.push({
+          name: decodeURIComponent(request.headers()["x-orbit-filename"] ?? ""),
+          documentId: request.headers()["x-orbit-document-id"],
+        });
+        return route.fallback();
+      });
+
+      try {
+        const name = `Mid-save interference proving ${interference === "drop" ? "drop" : "release"}`;
+        await gotoCreate(page);
+        await page.locator('#card input[type="file"]').setInputFiles({ name: FIRST_DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+        await expect(page.locator("#dz-held-name")).toHaveText(FIRST_DOCUMENT);
+        await expect(page.locator("#rc-file")).toContainText(FIRST_DOCUMENT);
+        const mintedAtFirstPick = await page.evaluate(() => [...(window as unknown as { __minted: string[] }).__minted]);
+
+        await page.locator("#f-name").fill(name);
+        await page.locator('#types button[data-type="document"]').click();
+        await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+        await page.locator(".btn-primary").click();
+
+        // The item write is held: the form is mid-save.
+        await expect.poll(() => itemWriteSeen, { timeout: 20_000 }).toBe(true);
+        await expect(page.locator(".btn-primary")).toContainText("Adding…");
+        expect(documentPosts).toHaveLength(0);
+
+        if (interference === "not this one") {
+          await page.locator("#rc-drop").click();
+        } else {
+          const files = await page.evaluateHandle(({ fileName, bytes }) => {
+            const transfer = new DataTransfer();
+            transfer.items.add(new File([Uint8Array.from(atob(bytes), (c) => c.charCodeAt(0))], fileName, { type: "application/pdf" }));
+            return transfer;
+          }, { fileName: SECOND_DOCUMENT, bytes: DOCUMENT_BYTES.toString("base64") });
+          const zone = page.locator("#dropzone");
+          await zone.dispatchEvent("dragenter", { dataTransfer: files });
+          await zone.locator(".dz-main [data-when=rest]").dispatchEvent("drop", { dataTransfer: files });
+        }
+
+        // Whatever the form did with it, the zone still names the file the save is carrying.
+        await expect(page.locator("#dz-held-name")).toHaveText(FIRST_DOCUMENT);
+
+        releaseItemWrite();
+        await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
+        const itemId = new URL(page.url()).searchParams.get("item") as string;
+        expect(upserts).toEqual([itemId]);
+
+        // Exactly one document POST, for the first file, under the id its pick minted.
+        await expect.poll(() => documentPosts.length, { timeout: 20_000 }).toBeGreaterThan(0);
+        await page.waitForTimeout(1_000);
+        expect(documentPosts).toHaveLength(1);
+        expect(documentPosts[0].name).toBe(FIRST_DOCUMENT);
+        const postedId = documentPosts[0].documentId as string;
+        expect(postedId).toBeTruthy();
+        expect(postedId).not.toBe(itemId);
+        expect(mintedAtFirstPick).toContain(postedId);
+      } finally {
+        releaseItemWrite();
+        await page.unroute("**/api/workspace/commands").catch(() => {});
+        await page.unroute(/\/api\/households\/[^/]+\/items\/[^/]+\/documents$/).catch(() => {});
+        await households.sweep(page);
+      }
+    });
+  }
+});
