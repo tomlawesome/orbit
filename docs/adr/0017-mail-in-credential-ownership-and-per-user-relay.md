@@ -542,4 +542,3 @@ on slice 1 and is not sliced here.
 - Handing a relay address to a third party, which the 2026-08-13 framing
   allowed and this record's first draft assumed, is unsupported and advised
   against (decision 3).
-

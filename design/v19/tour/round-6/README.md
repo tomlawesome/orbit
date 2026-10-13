@@ -228,4 +228,3 @@ round needs an owner ruling: the end-caps' existence is #1062's shipped
 answer to round 5's open question, the preview's shape is §18 ratified and
 #1088 built, and the counter's absence is the owner's own 2026-09-22
 decision. The 2-second shortening and the knock-on starts are mechanical.
-

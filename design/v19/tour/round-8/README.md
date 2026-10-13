@@ -315,4 +315,3 @@ every sheet.
 **3** *later → steps the belt — so do the arrow keys.* on a phone:
 - a. verbatim, as drawn (ratified copy; a keyboard is possible);
 - b. the pocket drops the clause — *later → steps the belt.*
-
