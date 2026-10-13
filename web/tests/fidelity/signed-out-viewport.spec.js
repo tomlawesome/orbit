@@ -70,7 +70,9 @@ for (const height of HEIGHTS) {
       top: r.y, bottom: r.y + r.height, left: r.x, right: r.x + r.width,
     });
 
-    const ring = toEdges(await box("#dusk .glyph svg > circle"));
+    // The shared door draws the ring three times at one size: two `lux` glow
+    // strokes under the plain one. The plain stroke is the ring you see.
+    const ring = toEdges(await box("#dusk .glyph svg > circle.ring:not(.lux)"));
     const gate = toEdges(await box("#dusk .gate-wrap a"));
     const farewell = toEdges(await box("#dusk .farewell"));
 

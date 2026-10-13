@@ -2,7 +2,6 @@
   import { tick } from "svelte";
   import Flight from "./Flight.svelte";
   import Dusk from "./Dusk.svelte";
-  import { readyFlight, stopLeisure } from "./warm.js";
 
   /**
    * SIGNING OUT, ONE WAY EVERYWHERE (#1253; owner, 2026-10-07: "signing out
@@ -20,17 +19,14 @@
    * for the flight: import this component lazily (Chrome does); home, which
    * flies the climb on the same Flight, imports it as it always imported it.
    *
-   * `launching` keeps the flight mounted for the climb as well (home's own
-   * launch) and `ascend` plays it; `descend` is the descent alone (home's
-   * fixtures pin it to a millisecond).
+   * The flight is always mounted (#1371), so `ascend` plays home's own
+   * launch on it; `descend` is the descent alone (home's fixtures).
    */
   let {
     /* the household's name, written on the void */
     name = "",
     /* the reader's other households, met again on the way down */
     homes = [],
-    /* mount the flight before any sign-out, for the climb */
-    launching = false,
     /* mount the dusk and flight from the start (home's pinned descent fixture) */
     leaving: startLeaving = false,
   } = $props();
@@ -47,12 +43,26 @@
   /* the farewell has landed: the goodbye is now the screen (Dusk gets the landmark) */
   let farewelled = $state(false);
   const backIn = $derived(providerLogout ?? "/");
+  /** @param {string} text */
+  const escapeAttr = (text) => text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c);
 
   /* #1253, #1262: the menu holds the sign-out, so when it opens the descent's
-     world is readied (never a compile that would stop the page: warm.js),
-     and it is there by the time the one press has revoked the session */
+     world is readied and proved (never a compile that would stop the page:
+     Flight.svelte readyWorld), and it is there by the time the one press has
+     revoked the session */
   export function ready() {
-    readyFlight({ hurry: true, gentle: true });
+    flight?.readyWorld({ hurry: true, gentle: true });
+  }
+
+  /**
+   * The unhurried readying, a few seconds after the page has arrived and its
+   * painted animations are done (#1299): a descent that waits for nothing finds
+   * its world already made. Home asks it on arriving.
+   * @param {{ after?: number }} [how]
+   * @returns {(() => void) | undefined} stops it, if the page is left first
+   */
+  export function readyAtLeisure(how) {
+    return flight?.readyAtLeisure(how);
   }
 
   /** The launch: the climb, from the page that has just been signed in to. */
@@ -73,8 +83,8 @@
    */
   export async function descendFrom(redirectTo) {
     /* #1299: the page's unhurried readying, if still to come, would land in
-       the middle of the descent (warm.js) */
-    stopLeisure();
+       the middle of the descent: the folder drops it as the descent begins
+       (journey.later, README.md) */
     providerLogout = redirectTo;
     leaving = true;
     await tick();
@@ -91,6 +101,11 @@
      */
     try { history.replaceState(history.state, "", "/logout"); } catch { /* no history, no harm */ }
     farewelled = true;
+    /* the provider's own sign-out, once the goodbye has played: Orbit's
+       session is already gone, but the provider's would seat this reader
+       again on the next sign-in at a shared computer. Its
+       post_logout_redirect_uri brings the browser back to /logout. */
+    if (providerLogout) location.replace(providerLogout);
   }
 </script>
 
@@ -98,14 +113,14 @@
   <!-- the ground under the dusk, so a daylight theme's page background never
        shows beneath it (as the sign-in's own dawn has) -->
   <div class="signin-stage" aria-hidden="true"></div>
-  <Dusk landmark={farewelled}>
-    <!-- `backIn` is the identity provider's own end-session URL as often as
-         it is "/": genuinely external, not a route this app can resolve(),
-         which is what `rel="external"` tells the lint rule (and anyone
-         reading the markup) rather than a suppression. -->
-    <a class="again" rel="external" href={backIn}>Sign back in</a>
-  </Dusk>
+  <!-- `backIn` is the identity provider's own end-session URL as often as it
+       is "/": genuinely external, not a route this app can resolve(), which
+       is what `rel="external"` says. Written as the dusk's gate markup (the
+       shared door's slot, #1371), escaped, once: it is known before the
+       sign-out mounts the dusk. -->
+  <Dusk landmark={farewelled} gate={`<a class="gate" rel="external" href="${escapeAttr(backIn)}">Sign back in</a>`} />
 {/if}
-{#if launching || leaving}
-  <Flight bind:this={flight} {name} onfarewell={onFarewell} {homes} />
-{/if}
+<!-- The flight is mounted with the page, not with the sign-out (#1371): the
+     descent's world belongs to its journey now, and is readied at leisure
+     (readyAtLeisure) only once there is a journey to ready. -->
+<Flight bind:this={flight} {name} onfarewell={onFarewell} {homes} />

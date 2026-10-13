@@ -1,16 +1,17 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 
-/* Same app the fidelity gate photographs (playwright.config.js webServer). */
-const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
+/* The pictures are the imported door folder's own (#1371): read from disk and
+ * decoded in the browser, since the app serves them under hashed names. */
+const IMG = new URL("../../src/lib/door/img/", import.meta.url);
 
 /*
  * The door's and the dusk's glows are faint: the dusk's glow peaks at 14/255
  * opacity. Drawn into 8 bits and saved as lossy WebP (orbit-site's
  * tools/glows.cjs), each picture held a dozen or so opacity steps across the
  * sky, and on the sign-out each step showed as a stripe (owner, 2026-10-07).
- * scripts/flight-glows.mjs draws them from a high-precision merge, dithers
- * them and saves them lossless, so neighbouring pixels of one stripe now
- * differ.
+ * They are now dithered upstream (ai/orbit-site#22) and arrive in the
+ * imported folder, so neighbouring pixels of one stripe differ.
  *
  * Measured as the share of 16-pixel horizontal runs, among those the glow
  * reaches, whose opacity is identical all along: a stripe is flat for its
@@ -20,7 +21,7 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  * pictures were never flat.
  */
 const CEILINGS = {
-  "door/glow-zod.webp": 0.1, // 0.20 → 0.02
+  "dawn/glow-zod.webp": 0.1, // 0.20 → 0.02
   "dusk/glow-glow.webp": 0.4, // 0.66 → 0.17
   "dusk/glow-belt.webp": 0.8, // 0.95 → 0.62: its source saturates past 4× (quarter steps)
   "dusk/glow-afterglow.webp": 0.25, // 0.35 → 0.13
@@ -28,7 +29,7 @@ const CEILINGS = {
 
 for (const [picture, ceiling] of Object.entries(CEILINGS)) {
   test(`${picture} is dithered, not striped`, async ({ page }) => {
-    await page.goto(APP + "/flight/" + picture);
+    const src = "data:image/webp;base64," + readFileSync(new URL(picture, IMG)).toString("base64");
     const flat = await page.evaluate(async (src) => {
       const img = new Image();
       img.src = src;
@@ -54,7 +55,7 @@ for (const [picture, ceiling] of Object.entries(CEILINGS)) {
         }
       }
       return flatRuns / runs;
-    }, APP + "/flight/" + picture);
+    }, src);
     expect(flat, `${picture}: share of flat 16-pixel runs`).toBeLessThan(ceiling);
   });
 }

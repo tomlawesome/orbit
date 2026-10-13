@@ -5,7 +5,7 @@
   import SignIn from "$lib/flight/SignIn.svelte";
   import Flight from "$lib/flight/Flight.svelte";
   import { consumeLaunch, markLaunch } from "$lib/flight/arrival.js";
-  import { readyFlight } from "$lib/flight/warm.js";
+  import { fetchFlightAhead } from "$lib/flight/fetch-ahead.js";
   import { applyCommand, readWorkspace, requestToJoin, wordsOf } from "$lib/data/workspace.js";
   import { labelledSkyOf } from "$lib/data/chart.js";
   import { ARRIVAL_FIXTURES } from "$lib/data/fixtures/arrival.js";
@@ -96,6 +96,9 @@
   /** @type {ReturnType<typeof Flight> | null} */
   let flight = $state(null);
   let climbing = $state(false);
+  /* the flight is mounted before the climb starts, so its world can be readied
+     while the workspace is read (decide()) */
+  let flying = $state(false);
   let busy = $state(false);
   /** @type {Rejected | null} */
   let rejected = $state(null);
@@ -134,13 +137,12 @@
 
   onMount(() => {
     /* #1222: a launch is owed, so a flight is coming whichever way the answers
-       fall (the climb here, or /home's after the hand-on). Ready its world NOW,
-       hurried, while the session and workspace are still being asked, instead
-       of when the climb starts and has to hold for it. Gentle, as the door's
-       own ask is: never under save-data, never a compile that would stop the
-       page; and without the test frames, which wait until this reader is known
-       to fly here (decide(), below). */
-    if (launchOwed) readyFlight({ hurry: true, gentle: true, prove: false });
+       fall (the climb here, or /home's after the hand-on). Ask the browser for
+       the flight's pictures NOW, hurried, while the session and workspace are
+       still being asked, so the climb finds them in its cache (fetch-ahead.js:
+       never under save-data). The world itself is the journey's, and is
+       readied once this page knows the reader flies here (decide(), below). */
+    if (launchOwed) fetchFlightAhead({ hurry: true });
     decide();
     return () => {
       disposed = true;
@@ -214,9 +216,15 @@
       }
       if (session?.activeHouseholdId) { handOn(); return; }
       /* a session pointing nowhere flies here (the newcomer's climb, or the
-         invited one): have the world's test frames run while the workspace is
-         read, so the climb finds the verdict made (#1222) */
-      if (launchOwed) readyFlight({ hurry: true, gentle: true });
+         invited one): mount the flight now, and have the world's test frames
+         run while the workspace is read, so the climb finds the verdict made
+         (#1222) */
+      if (launchOwed) {
+        flying = true;
+        await tick();
+        if (disposed) return;
+        flight?.readyWorld({ hurry: true, gentle: true });
+      }
       workspace = await readWorkspace();
       if (disposed) return;
     } catch {
@@ -433,7 +441,7 @@
        dawn, the lockup and (only on the door) the gate. The card and the
        newcomer's sky stand ON it, and the chrome is hidden by `showform` while
        they do — no wordmark, no glyph, no button, no footer. -->
-  <SignIn gate={stage === DOOR} dawnShown={!climbing} {title} />
+  <SignIn gate={stage === DOOR} dawnShown={!climbing} {title} heading={false} />
 
   {#if stage === NEWCOMER || stage === INVITED}
     <!-- #871: `showChooser` is false only for INVITED — no chooser drawn at
@@ -445,16 +453,19 @@
               showChooser={stage !== INVITED}
               bind:drawerOpen bind:name bind:timezone bind:currency {rejected} {busy}
               onsubmit={submit} onnaming={naming} />
-    {#if climbing}
-      <!-- The landing is the host's, as it is on home: the flight says WHEN and
-           this reveals the labelled sky at that exact beat. landing="invited"
-           flies the identical beats and differs only at the one the chooser
-           would stand on (Flight.svelte's own note on `onbelong`). -->
-      <Flight bind:this={flight} landing={stage === INVITED ? "invited" : "newcomer"}
-              name="" subtitle="you are new here"
-              onland={() => body().classList.add("shownew")}
-              onsettled={settled}
-              onbelong={stage === INVITED ? toHousehold : undefined} />
-    {/if}
+  {/if}
+
+  {#if climbing || flying}
+    <!-- The flight is mounted from the moment this page knows the reader flies
+         here (`flying`), not only from the climb, so its world is readied while
+         the workspace is read. The landing is the host's, as it is on home: the
+         flight says WHEN and this reveals the labelled sky at that exact beat.
+         landing="invited" flies the identical beats and differs only at the one
+         the chooser would stand on (Flight.svelte's own note on `onbelong`). -->
+    <Flight bind:this={flight} landing={stage === INVITED ? "invited" : "newcomer"}
+            name="" subtitle="you are new here"
+            onland={() => body().classList.add("shownew")}
+            onsettled={settled}
+            onbelong={stage === INVITED ? toHousehold : undefined} />
   {/if}
 </main>

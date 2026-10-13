@@ -10,6 +10,12 @@
  * now) while the v19 rebuild worked file by file down to zero. That rebuild
  * is done, so this is now a plain gate: any `svelte-check` error, in any
  * file, fails the fast checks. No per-file tolerance is left anywhere.
+ *
+ * It reads web/tsconfig.check.json, not tsconfig.json (#1371): the shared
+ * door's folder (web/src/lib/door/, orbit-site's, never edited here) is plain
+ * JavaScript that does not pass the strict check. The check config leaves it
+ * out and maps `$lib/door/*` to the declarations in web/types/door/, because
+ * a file that Orbit's code imports is checked whatever `exclude` says.
  */
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
@@ -41,7 +47,7 @@ function runSvelteCheck() {
   try {
     return execFileSync(
       "node_modules/.bin/svelte-check",
-      ["--tsconfig", "./tsconfig.json", "--output", "machine"],
+      ["--tsconfig", "./tsconfig.check.json", "--output", "machine"],
       { cwd: `${repositoryRoot}web`, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
     );
   } catch (error) {

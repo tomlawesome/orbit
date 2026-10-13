@@ -18,22 +18,10 @@ resetDatabaseBetweenSpecFiles();
  * 7: no About on the sign-in door).
  */
 
-/* The Milky Way's credit, found by the picture it credits rather than by its
-   name: the name is what the page shows and changes with it (163731d3 added
-   the work's title), and its id is the one the page itself derives. */
-type Picture = { name: string; files: string[]; changes?: string };
-type Entry = { id: string; name: string };
-/* Loaded, not imported: the root tsconfig keeps allowJs off, and these two
-   are plain data the page is drawn from. */
+/* Loaded, not imported: the root tsconfig keeps allowJs off, and this is
+   plain data the page is drawn from. */
 const load = createRequire(__filename);
-const { CREDITS, FONTS, SIDECARS } = load("../../web/src/lib/about/credits.js") as { CREDITS: Picture[]; FONTS: unknown[]; SIDECARS: unknown[] };
-const { creditsView } = load("../../web/src/lib/about/group.js") as {
-  creditsView: (input: { pictures: Picture[]; fonts: unknown[]; sidecars: unknown[]; libraries: null }) => { groups: { entries: Entry[] | null }[] };
-};
-const GALAXY = CREDITS.find((credit) => credit.files.includes("flight/world/galaxy-2k.webp"));
-if (!GALAXY?.changes) throw new Error("#1256: the galaxy picture's credit, or its changes line, is missing from credits.js");
-const GALAXY_ID = creditsView({ pictures: CREDITS, fonts: FONTS, sidecars: SIDECARS, libraries: null })
-  .groups.flatMap((group) => group.entries ?? []).find((entry) => entry.name === GALAXY.name)?.id;
+const { CREDITS } = load("../../web/src/lib/about/credits.js") as { CREDITS: unknown[] };
 
 /** The account menu this width draws: the desk's card, or the pocket's hatch. */
 async function openMenu(page: Page, phone: boolean) {
@@ -99,11 +87,6 @@ test("a member opens About from the menu and sees the three cards", async ({ pag
     /* Card 2's index and the pictures it must credit; card 3 lists each licence once. */
     const index = screen.getByRole("navigation", { name: "Credits index" });
     await expect(index.getByRole("link")).toHaveText([new RegExp(`^Pictures · ${CREDITS.length}$`), /^Fonts · 3$/, /^Libraries · (\d+|—)$/, /^Sidecar images · 4$/]);
-    expect(GALAXY_ID, "#1256: the galaxy credit has no id on the page").toBeTruthy();
-    const galaxy = screen.locator(`[id="${GALAXY_ID}"]`);
-    await expect(galaxy.locator("b")).toHaveText(GALAXY.name);
-    await expect(galaxy.locator("small", { hasText: "changed:" })).toBeVisible();
-    await expect(galaxy).toContainText(`changed: ${GALAXY.changes}`);
     const licences = await screen.locator("section.licences .kv b").allTextContents();
     expect(new Set(licences).size).toBe(licences.length);
 

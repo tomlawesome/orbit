@@ -285,6 +285,7 @@ page's URL at failure, which this one has to infer.
 - 2026-10-01 · d3141346 (!1013, #1183's Firefox projects for tests/e2e; nothing under web/ or tests/fidelity) · pipeline 1926 / fidelity (job 28697) · "a jump between frames at 317ms": 38.9 against the < 20 bound. The full fidelity runs on !1010 and !1012 just before it passed, and the same pipeline's smoke ran about eleven minutes longer than usual alongside it on the shared runner. First sighting; an issue on the third.
 - 2026-10-04 · bc9ba29e (!1021, #1151's audit fixes; the only door-side change since the green run on bcaf64e0 is a waiting-card timeout constant, nothing in the ring's motion) · pipeline 2064 / fidelity (job 31041) · "a jump between frames at 280ms": 25.5 against the < 20 bound, same shape as the first sighting. The same test passed on pipeline 2054 ten commits earlier. Second sighting; an issue on the third.
 - 2026-10-07 · 5a12b2bd (!1043, the create-form batch; nothing in the ring's motion) · pipeline 2233 / fidelity (job 33106) · "a jump between frames at 328ms": 20.008 against the < 20 bound. Third sighting: filed as #1306.
+- 2026-10-12 · 9232c92c (!1064, #1371's shared door import) · pipeline 2559 / fidelity (job 35977) · "a jump between frames at 270ms": 22.06 against the < 20 bound, the job's only failure (162 passed). Retried as job 35991 on the same commit: green. Fourth sighting.
 
 ## tour-pocket-webkit.spec.js "plays end to end at 430x932 under normal motion" — pill moving between places (#1174)
 
@@ -339,6 +340,8 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-09 · 11e0e1c4 (#1325) · pipeline 2277 / smoke (job 33639), mobile-chromium · the :373 /create focus check failed its first attempt with "Expected to fail, but passed" (focus stayed on the pressed button) and met its expected failure on the retry, so Playwright counted it flaky. Chromium kept the focus this time: the race runs both ways. Not reproduced locally in four mobile-chromium runs, three of them under CPU load. Still #1313.
 - 2026-10-09 · 0ff6cbbf (engine batch, !1051; its only web change is the household page, nowhere near /create) · pipeline 2317 / smoke_webkit_mobile (job 33987), mobile-webkit · the :379 announcement check for /create timed out after 5 s waiting for `not saved|Failed to fetch|Load failed`; the in-job retry passed, so Playwright counted it flaky. Still #1313.
 - 2026-10-10 · a318e11b (#1342 batch) · pipeline 2382 / smoke (job 34366), desktop-chromium and mobile-chromium, and smoke_webkit (job 34368), desktop-webkit · the :379 announcement check and the :396 focus check for /create timed out waiting for the error words; each passed on the in-job retry. Not the new service worker: this file already keeps it out on WebKit, and a local run on the fixed branch passed on desktop-chromium, mobile-chromium, desktop-firefox and desktop-webkit. Still #1313.
+- 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934), mobile-webkit · the :379 announcement check for /create failed its first attempt and passed on the in-job retry.
+- 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (jobs 35081 and 35145), mobile-webkit · the :396 focus check for /create failed its first attempt and passed on the in-job retry, in both re-runs.
 
 ## settings-notification-history.spec.ts:137 "a member sees their own last sent reminders, plainly, on both dialects" — desktop-firefox
 
@@ -381,7 +384,9 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-08 · 687cb0f4 (door batch, !1044; the hatch's descent and this spec are new in it) · pipeline 2251 / smoke_webkit_mobile (job 33372) · `#1262: the menu is still open after sign-out started` at line 198, on the first attempt and the in-job retry. The menu lost its `open` class, but its layer kept `visibility: visible` past the 2 s check: the layer hides 300 ms after closing (Sheet.svelte), and the retry's screencast has no frame from 0.2 s to 2.1 s after the press, so the page drew nothing in that time. The forced world was on in this run ("flight world: on", "moon on the GPU" in the console); pipeline 2248's pass on the same code flew "on the canvas". Suspected, not established: drawing the forced world without a GPU stalls WebKit's rendering as the descent starts. First sighting.
 - 2026-10-09 · 1e0299ab (engine batch, !1050; no front-end change but one household page's time-zone list) · pipeline 2313 / smoke_webkit_mobile (job 33895) · the same `#1262: the menu is still open after sign-out started` at line 198, first attempt and in-job retry. The job was re-run as 33901. Second sighting.
 - 2026-10-10 · a318e11b (v0.3 batch, !1054) · pipeline 2382 / smoke_webkit (job 34368), **desktop-webkit**, same world-forced test · the same `#1262: the menu is still open after sign-out started`, first attempt and in-job retry. Filed as #1367 after the third sighting; this is the first on desktop-webkit.
-- 2026-10-13 · 7906d9f4 (#1316 audit fixes; no change to the sign-out descent, its spec, or `web/src/lib/flight`) · local `scripts/test-e2e-local.sh --project mobile-webkit`, no retries · the same `#1262: the menu is still open after sign-out started` at line 198. Fourth sighting, the first outside CI (#1367).
+- 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 35081, the first re-run) · the same `#1262: the menu is still open after sign-out started`, first attempt and in-job retry. Fourth sighting; noted on #1367.
+- 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35145, the second re-run) · failed its first attempt, passed on the in-job retry.
+- 2026-10-13 · 7906d9f4 (#1316 audit fixes; no change to the sign-out descent, its spec, or `web/src/lib/flight`) · local `scripts/test-e2e-local.sh --project mobile-webkit`, no retries · the same `#1262: the menu is still open after sign-out started` at line 198. Sixth sighting, the first outside CI (#1367).
 
 ## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on desktop-webkit
 
@@ -413,16 +418,18 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-09 · dad77c25 (#1325 rebased onto dev; the tree differs from pipeline 2287's green 8170fecb only in design files, an ADR, this log and one e2e spec) · pipeline 2290 / fidelity (job 33718) · `ArrowRight did not come back`; the same test passed at 390x844 in the same run. 45/45 locally with `--repeat-each=5` on the same commit; job retried as 33765. First sighting.
 
-## pocket-measure.spec.js:544 "/home · row-… meets the pocket floors" — `openRow`'s tap never opens the panel (row-retire-armed at 390x664, row-snooze at 360x640)
+## pocket-measure.spec.js:544 "/home · row-… meets the pocket floors" — `openRow`'s tap never opens the panel (row-retire-armed at 390x664, row-snooze at 360x640) (#1376)
 
 - 2026-10-09 · abcb06f1 · pipeline 2301 / fidelity (job 33822) · `openRow`'s tap on Car MOT's face never opened its panel (`locator.waitFor` ran to the 60 s test timeout), after `go()` had already waited for `body[data-home-ready]`; 487 others passed. Locally in the pinned image on 6afb412e: 20 repeats alone, then every `/home · row-` state 15 times over 4 workers (420 runs), all green. First sighting.
 - 2026-10-10 · cd964294 (!1052; since 8b9bf878, whose fidelity job 34065 passed, only e2e specs and one unit test changed) · pipeline 2341 / fidelity (job 34107) · row-snooze at 360x640, the same wait at `pocket-states.js:61` for Car MOT's opened panel ran to the 60 s test timeout; 487 others passed. Retried as job 34122. Second sighting.
 
 - 2026-10-10 · d80cf61b (!1054) · pipeline 2392 / fidelity (job 34627) · "/home · document-preview meets the pocket floors" at 390x664, the same wait at `pocket-states.js:61` for Car MOT's opened panel ran to the 60 s timeout; 487 others passed. Third sighting: filed as #1376.
+- 2026-10-10 · e0d5d796 (`dev`, merge of !1057; its head 327d32c1 passed fidelity in pipeline 2440, and the merge adds only `scripts/install.sh`, its test and `scripts/ci/repin-base-image.sh`) · pipeline 2461 / fidelity (job 35271) · "/home · row-complete meets the pocket floors" at 390x664, `locator.waitFor` ran to the 60 s test timeout; 487 of 488 passed.
 
 ## tour-pocket-webkit.spec.js:539 "plays through chapter 3 at 360x780 under normal motion" — chapters skipped
 
 - 2026-10-09 · abcb06f1 · pipeline 2301 / fidelity_webkit (job 33823) · the film reached only chapters 1 and 2 (`done` false, chapters `[0, 1]`) in 3.4 min. Neither of the next commits (63354fb6, 6afb412e) touches chapters 1–3; on 6afb412e, locally in the pinned image, it passed. First sighting.
+- 2026-10-10 · e0d5d796 (`dev`, merge of !1057; its head 327d32c1 passed fidelity_webkit in pipeline 2440, and the merge touches no web file) · pipeline 2461 / fidelity_webkit (job 35272) · at 390x844 this time: "the film plays as far as this phone watches it" false and "every chapter, in order, none skipped" short by two; 25 of 26 passed. Second sighting.
 
 ## install-orchestrator.test.ts "runInstall: success > installs a pre-provisioned target unattended: assets from the image, secrets, migration, digest (#6, #42, #45, #53)"
 
@@ -455,3 +462,21 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-home-drawer.spec.ts:241 "a document opens its preview beside the drawer; the page opens the reader; Escape walks back" — desktop-chromium
 
 - 2026-10-10 · 65e369b5 (!1057) · local `scripts/test-e2e-local.sh --ci-cap --reuse`, 6 runs of the spec · failed once in 9.2 s with `apiRequestContext.get: socket hang up`; passed on the other five. First sighting.
+
+## v19-keyboard-pocket.spec.ts:437 "item drawer (pocket): opened from the dial by keyboard, is fully reachable" — mobile-webkit — #1381
+
+- 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934) · `auditTabOrder`: `Tab reached a control the screen does not show as visible` for the drawer's Snooze, Complete, Attach, Retire, Edit and Copy link buttons, on the first attempt and the in-job retry.
+- 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35081, the first re-run) · the same audit message on the first attempt; passed on the in-job retry.
+- 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35145, the second re-run) · failed its first attempt, passed on the in-job retry. Third sighting: filed as #1381.
+
+## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on mobile-webkit
+
+- 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (jobs 35081 and 35145, both re-runs) · failed its first attempt and passed on the in-job retry, in both. First sightings on mobile-webkit; the heading above is desktop-webkit.
+
+## v19-document-preview.spec.ts:397 "the preview's pager turns a multi-page document in place, and the reader opens on its page" — mobile-webkit
+
+- 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934) · failed its first attempt (9.0 s), passed on the in-job retry (13.5 s). First sighting.
+
+## tour-pocket-webkit.spec.js:1284 "chapter 8 plays through on a new household (#1174 round 6)" — at 390x844, chapters 7 to 9
+
+- 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / fidelity_webkit (job 34927) · `chapters 7, 8 and 9 in order, none skipped` did not hold (soft assertion). Passed on the re-run, job 35082. First sighting.
