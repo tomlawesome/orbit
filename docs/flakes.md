@@ -342,6 +342,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934), mobile-webkit · the :379 announcement check for /create failed its first attempt and passed on the in-job retry.
 - 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (jobs 35081 and 35145), mobile-webkit · the :396 focus check for /create failed its first attempt and passed on the in-job retry, in both re-runs.
 - 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · "a save on /create that cannot reach Orbit is announced, and the act can be repeated by keyboard": `the failure is shown` not visible at line 387.
+- 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36017, the first re-run) · the same `the failure is shown` check at line 387 on the first attempt; passed on the in-job retry.
 
 ## settings-notification-history.spec.ts:137 "a member sees their own last sent reminders, plainly, on both dialects" — desktop-firefox
 
@@ -486,3 +487,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## tour-pocket-webkit.spec.js:1284 "chapter 8 plays through on a new household (#1174 round 6)" — at 390x844, chapters 7 to 9
 
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / fidelity_webkit (job 34927) · `chapters 7, 8 and 9 in order, none skipped` did not hold (soft assertion). Passed on the re-run, job 35082. First sighting.
+
+## v19-mail-review.spec.ts:431 "the phone sheet reads a staged paper's page one, and tells a gone mail apart from one it just cannot draw (#1155)" — mobile-webkit, marked expected-to-fail for #1196
+
+- 2026-10-13 · 5e852f6f (!1064; the same app code passed this job on pipeline 2559, where the test failed as expected) · pipeline 2560 / smoke_webkit_mobile (job 36017, the first re-run) · "Expected to fail, but passed", on the first attempt and the in-job retry: the #1196 driver fault it is marked for does not happen every run. First sighting.
