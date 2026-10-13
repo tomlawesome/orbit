@@ -251,7 +251,9 @@ test("the manifest row approves in two taps, idempotently under partial success"
    approves what they hold. This took over "amend then accept from the item
    view", the belt's card and the phone's review sheet. */
 test("amend then accept from home's drawer", async ({ page }) => {
-  test.fail(test.info().project.name === "mobile-webkit", "#1196: mobile WebKit skips interceptMail's route after goto, so this hits the real (empty) inbox");
+  /* Skipped, not marked to fail: the driver fault does not happen every run, so an
+     expected failure sometimes passes and fails the job. Un-skip when #1196 closes. */
+  test.skip(test.info().project.name === "mobile-webkit", "#1196: mobile WebKit skips interceptMail's route after goto, so this hits the real (empty) inbox");
   await signInToHome(page);
   const { householdId } = await seedHousehold(page);
 
@@ -436,7 +438,9 @@ test("the phone sheet reads a staged paper's page one, and tells a gone mail apa
      `page.goto` reaches the real server instead of interceptMail's route --
      Playwright's WebKit driver skips the mock after a full navigation.
      desktop-webkit runs this same flow and passes; detail on #1196. */
-  test.fail(test.info().project.name === "mobile-webkit", "#1196: mobile WebKit skips interceptMail's route after goto, so this hits the real (empty) inbox");
+  /* Skipped, not marked to fail: the driver fault does not happen every run, so an
+     expected failure sometimes passes and fails the job. Un-skip when #1196 closes. */
+  test.skip(test.info().project.name === "mobile-webkit", "#1196: mobile WebKit skips interceptMail's route after goto, so this hits the real (empty) inbox");
   await signInToHome(page);
   const { householdId } = await seedHousehold(page);
 
