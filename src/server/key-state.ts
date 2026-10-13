@@ -103,6 +103,9 @@ async function readInstanceKeyRow(): Promise<InstanceKeyRow | undefined> {
  *    mode, ADR-0013 decision 6): asked again every five seconds inside the
  *    startup window, then the probe rejects and the verdict stays unknown.
  *
+ * Under the fixture harness (`ORBIT_FIXTURES=1`) step 2 is skipped: no
+ * database, so settings that pass are usable.
+ *
  * Household-scope rows are not probed: one wrapped under an unheld key is a
  * per-household lock the field UI already handles, not "no key".
  */
@@ -111,6 +114,11 @@ export async function probeEncryptionKey(): Promise<KeyState> {
   if (problem) return settle({ verdict: "unusable", reason: problem });
 
   const config = getDocumentConfig();
+  /* The fixture harness (the fidelity gate) runs the real boot with no
+     database, so the row cannot be asked for (#1316). Its settings are still
+     judged above. Safe on the terms the page and API gates already rely on:
+     startup refuses ORBIT_FIXTURES in production. */
+  if (process.env.ORBIT_FIXTURES === "1") return settle({ verdict: "usable", heldKeyId: config.keyId });
   const deadline = Date.now() + KEY_PROBE_WINDOW_MS;
   let row: InstanceKeyRow | undefined;
   for (;;) {
