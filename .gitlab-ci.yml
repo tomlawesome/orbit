@@ -1093,6 +1093,33 @@ fast_docker:
     expire_in: 14 days
     when: on_success
 
+# The names guard (#1408) is its own job because it reads every tracked file,
+# docs and tests included, so it cannot share `fast`'s narrowed key: its
+# job-inputs.json entry denies nothing (ADR-0028 section 6). It needs only
+# `node` and `git`, so it runs in seconds with no `pnpm install`.
+names_guard:
+  stage: fast
+  extends: .node
+  timeout: 5m
+  rules:
+    - *not_scheduled
+    - when: on_success
+  needs:
+    - job: classify
+      artifacts: true
+  script:
+    - *reach_helpers
+    - orbit_lane_admits fast || exit 0
+    - *reuse_gate
+    - node --test tests/unit/no-real-names.test.mjs
+    - *reuse_evidence
+  artifacts:
+    name: orbit-names-guard
+    paths:
+      - ci-evidence/
+    expire_in: 14 days
+    when: on_success
+
 # Blocking, like the workflow's job: Orbit pins its own base image, so a stale
 # base is a fixable condition rather than one to wait out.
 #

@@ -1,8 +1,9 @@
+import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it, test } from "node:test";
 
 /*
  * #1408: fixtures, mockups and docs use invented names only. This guard keeps
@@ -28,6 +29,24 @@ function banned(word) {
     seen.set(word, hit);
   }
   return hit;
+}
+
+/**
+ * The lower-case words a line could spell the banned word with: camelCase runs
+ * split, and each token also tried without a trailing `s` or `es`, because the
+ * plural was 185 of the 191 lines the sweep removed (#1408).
+ * @param {string} line
+ */
+export function wordsOf(line) {
+  /** @type {Set<string>} */
+  const words = new Set();
+  for (const token of line.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().match(/[a-z0-9]+/g) ?? []) {
+    words.add(token);
+    if (token.length <= 2) continue;
+    if (token.endsWith("s")) words.add(token.slice(0, -1));
+    if (token.endsWith("es")) words.add(token.slice(0, -2));
+  }
+  return words;
 }
 
 function trackedTextFiles() {
@@ -61,8 +80,26 @@ const BANNED_LOGINS = new Set([
   "57de4cf40144bdf7d00010f2f5557a7d642c2b9705309bfade167dd313e2ca93",
 ]);
 
-/** `/home/<login>`, `/Users/<login>`, `C:\Users\<login>` (any slash, escaped or not), `~<login>/`. */
-const HOME_DIRECTORY = /(?:\/home\/|[/\\]+Users[/\\]+|(?<![\w/])~)([A-Za-z0-9._-]+)/gu;
+/** `/home/<login>`, `/Users/<login>`, `C:\Users\<login>` (any slash, escaped or not, either case), `~<login>/`. */
+const HOME_DIRECTORY = /(?:\/home\/|[/\\]+[Uu]sers[/\\]+|(?<![\w/])~)([A-Za-z0-9._-]+)/gu;
+
+/**
+ * The lower-case login candidates of every home-directory path in a line: the
+ * whole segment, the segment without a trailing `.` or `-` (end of a sentence),
+ * and the part before its first `.` or `-` (`/home/<login>-old`).
+ * @param {string} line
+ */
+export function loginsOf(line) {
+  /** @type {Set<string>} */
+  const logins = new Set();
+  for (const match of line.matchAll(HOME_DIRECTORY)) {
+    const login = match[1].toLowerCase();
+    logins.add(login);
+    logins.add(login.replace(/[.-]+$/u, ""));
+    logins.add(login.split(/[.-]/u)[0]);
+  }
+  return logins;
+}
 
 /** A dotted quad not embedded in a longer run of digits and dots (version strings, OIDs). */
 const IPV4 = /(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.]*\d)/gu;
@@ -105,37 +142,36 @@ const ALL_FAKE = new Set([...FAKE_ADDRESSES.values()].flatMap((set) => [...set])
 const SELF = "tests/unit/no-real-names.test.mjs";
 
 describe("no real names (#1408)", () => {
-  it("no tracked text file contains a banned word", () => {
+  // reads every tracked file: seconds, not milliseconds
+  test("no tracked text file contains a banned word", { timeout: 60_000 }, () => {
     /** @type {string[]} */
     const hits = [];
     for (const { name, text } of trackedTextFiles()) {
       const lines = text.split("\n");
       for (let i = 0; i < lines.length; i++) {
-        const tokens = new Set(lines[i].toLowerCase().match(/[a-z0-9]+/g) ?? []);
-        for (const token of tokens) {
+        for (const token of wordsOf(lines[i])) {
           if (banned(token)) hits.push(`${name}:${i + 1}`);
         }
       }
     }
-    expect(hits, "use an invented name instead (#1408)").toEqual([]);
-  }, 60_000); // reads every tracked file: seconds, not milliseconds
+    assert.deepEqual(hits, [], "use an invented name instead (#1408)");
+  });
 
-  it("no tracked text file names a real host login in a home-directory path", () => {
+  test("no tracked text file names a real host login in a home-directory path", { timeout: 60_000 }, () => {
     /** @type {string[]} */
     const hits = [];
     for (const { name, text } of trackedTextFiles()) {
       const lines = text.split("\n");
       for (let i = 0; i < lines.length; i++) {
-        for (const match of lines[i].matchAll(HOME_DIRECTORY)) {
-          const login = match[1].toLowerCase();
+        for (const login of loginsOf(lines[i])) {
           if (BANNED_LOGINS.has(createHash("sha256").update(login).digest("hex"))) hits.push(`${name}:${i + 1}`);
         }
       }
     }
-    expect(hits, "use ~/..., <project root> or an invented account such as /home/alex (#1408)").toEqual([]);
-  }, 60_000);
+    assert.deepEqual(hits, [], "use ~/..., <project root> or an invented account such as /home/alex (#1408)");
+  });
 
-  it("no tracked text file holds a private or shared-address IPv4 address outside the known fake fixtures", () => {
+  test("no tracked text file holds a private or shared-address IPv4 address outside the known fake fixtures", { timeout: 60_000 }, () => {
     /** @type {string[]} */
     const hits = [];
     for (const { name, text } of trackedTextFiles()) {
@@ -150,6 +186,48 @@ describe("no real names (#1408)", () => {
         }
       }
     }
-    expect(hits, "use a documentation address (192.0.2.x, 198.51.100.x, 203.0.113.x) or add a clearly fake fixture to FAKE_ADDRESSES (#1408)").toEqual([]);
-  }, 60_000);
+    assert.deepEqual(hits, [], "use a documentation address (192.0.2.x, 198.51.100.x, 203.0.113.x) or add a clearly fake fixture to FAKE_ADDRESSES (#1408)");
+  });
+});
+
+/*
+ * The matchers, tested directly with invented words (no digests, no real
+ * names). `wordsOf` and `loginsOf` are plain functions in this file. Written
+ * with `it` and `assert` only, so they run unchanged under node:test.
+ */
+describe("the guard's matchers (#1408)", () => {
+  /** @param {Set<string>} got @param {string[]} want */
+  const includesAll = (got, want) => {
+    for (const word of want) assert.ok(got.has(word), `${word} missing from ${JSON.stringify([...got])}`);
+  };
+
+  it("wordsOf finds a surname in its plural and possessive forms", () => {
+    includesAll(wordsOf("the Brightwells' boiler"), ["brightwell"]);
+    includesAll(wordsOf("BRIGHTWELLS"), ["brightwell"]);
+  });
+
+  it("wordsOf finds a surname inside a camelCase or upper-snake run", () => {
+    includesAll(wordsOf("const brightwellItems = []"), ["brightwell", "items"]);
+    includesAll(wordsOf("BRIGHTWELL_ITEMS"), ["brightwell"]);
+  });
+
+  it("wordsOf still finds the bare word, and does not join separate words", () => {
+    includesAll(wordsOf("brightwell"), ["brightwell"]);
+    assert.equal(wordsOf("bright well").has("brightwell"), false);
+  });
+
+  it("loginsOf finds a login that ends a sentence or is followed by a suffix", () => {
+    includesAll(loginsOf("files live in /home/alex."), ["alex"]);
+    includesAll(loginsOf("under ~alex."), ["alex"]);
+    includesAll(loginsOf("/home/alex-old"), ["alex"]);
+  });
+
+  it("loginsOf finds a login in a lower-case Windows path and in an ordinary path", () => {
+    includesAll(loginsOf("c:\\users\\alex\\x"), ["alex"]);
+    includesAll(loginsOf("/home/alex/projects"), ["alex"]);
+  });
+
+  it("loginsOf ignores a path with no leading slash", () => {
+    assert.equal(loginsOf("home/alex").size, 0);
+  });
 });

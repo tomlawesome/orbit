@@ -59,6 +59,9 @@
         "web/**"
       ]
     },
+    "names_guard": {
+      "deny": []
+    },
     "integration": {
       "deny": []
     },
