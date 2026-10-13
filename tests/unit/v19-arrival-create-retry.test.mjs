@@ -41,9 +41,10 @@ const creates = () => commands.filter((command) => command.type === "household.c
  * Answers to household.create, in order; the last one repeats.
  * lost: no answer (the browser's TypeError). refused: a 409 in the server's
  * own words. mismatch: the 422 for the same id with different details (U3
- * decision 2). bare: a refusal with no words of its own (an empty message).
+ * decision 2). stored: that 422 carrying the stored household's name, the one
+ * it was really created with ("Harlow Home"), as `error.details.name`. bare: a refusal with no words of its own (an empty message).
  * ok: the household was created.
- * @type {("lost" | "refused" | "mismatch" | "bare" | "ok")[]}
+ * @type {("lost" | "refused" | "mismatch" | "stored" | "bare" | "ok")[]}
  */
 let answers = [];
 /**
@@ -93,6 +94,13 @@ function stubFetch() {
       if (answer === "lost") { createLost = true; throw new TypeError("Failed to fetch"); }
       if (answer === "mismatch") {
         return json({ error: { code: "household_create_mismatch", message: "This household was already created with different details" } }, 422);
+      }
+      if (answer === "stored") {
+        return json({ error: {
+          code: "household_create_mismatch",
+          message: "This household was already created with different details",
+          details: { name: "Harlow Home" },
+        } }, 422);
       }
       if (answer === "bare") return json({ error: { code: "household_create_refused", message: "" } }, 409);
       if (answer === "ok") {
@@ -331,6 +339,24 @@ describe("#1316 GAP-U1: pressing Create again after a lost reply", () => {
     expect(line(), "the name that landed, not the field's").toBe(
       "“Harlow HQ” was already created — carry on, and change it in settings →",
     );
+  });
+
+  it("(8b) the already-created line names the stored household, not the first name sent", async () => {
+    /* Press 1 sends "Harlow Hme": no answer, and it did not land. Press 2
+       sends "Harlow Home" (same id): it lands but its reply is lost too.
+       Press 3 sends "Harlow HQ": the server refuses and says what it holds. */
+    answers = ["lost", "lost", "stored"];
+    sessionAfterLost = "absent";
+    const { type, pressCreate, line } = await mountOnEmptyInstance();
+    type("Harlow Hme");
+    await pressCreate();
+    type("Harlow Home");
+    await pressCreate();
+    type("Harlow HQ");
+    await pressCreate();
+
+    expect(creates().map((command) => command.household.name)).toEqual(["Harlow Hme", "Harlow Home", "Harlow HQ"]);
+    expect(line()).toBe("“Harlow Home” was already created — carry on, and change it in settings →");
   });
 
   it("(9) that line's link activates the pinned household and goes home, sending no second create", async () => {
