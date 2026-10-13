@@ -1,9 +1,11 @@
 <script>
   import { onDestroy, untrack } from "svelte";
   import { dryRunner } from "$lib/data/dry-run.js";
+  import { readReminders } from "$lib/data/workspace.js";
   import Sheet from "./Sheet.svelte";
   import EntryForm from "../../routes/create/EntryForm.svelte";
   import { createCommandOf, entryChanged, entryOfProposal, reviewItemOf } from "../../routes/create/entry.js";
+  import { reminderPairOf } from "../../routes/create/entry.js";
   const uid = $props.id();
 
   /**
@@ -40,13 +42,32 @@
       outright; this is what lets the sheet ask first via confirmDiscard. */
   /** @type {import('../../routes/create/entry.js').Entry | null} */
   let start = $state(null);
+  /* Whether the member has set the reminders themselves, which a late answer
+     from the settings read must not overwrite. */
+  let reminderChosen = false;
+  /** Counts openings, so an answer for an earlier opening is ignored. */
+  let openings = 0;
   /* A fresh form each time the sheet rises, before it draws. */
   $effect.pre(() => {
-    if (!open) return;
+    if (!open) { openings++; return; }
     untrack(() => {
       entry = entryOfProposal(proposal ?? {}, { householdId });
       start = $state.snapshot(entry);
+      reminderChosen = false;
+      /* The new item starts from the member's own reminder pair, as create's
+         forms do; the form shows the default until it answers. The start
+         moves with it, so the seeding alone is not an edit. */
+      const opening = ++openings;
+      readReminders().catch(() => null).then((reminders) => {
+        if (opening !== openings || !entry || !start || reminderChosen) return;
+        const pair = reminderPairOf(reminders);
+        entry = { ...entry, reminderDays: [...pair] };
+        start = { ...start, reminderDays: [...pair] };
+      });
     });
+  });
+  $effect(() => {
+    if (entry && start && JSON.stringify(entry.reminderDays) !== JSON.stringify(start.reminderDays)) reminderChosen = true;
   });
   const household = $derived(households.find((one) => one.id === entry?.householdId) ?? null);
   const dirty = () => Boolean(entry && start && entryChanged(entry, start));
