@@ -142,6 +142,38 @@ describe("administrator mailbox settings (ADR-0017 decision 1, slice 2)", () => 
     expect(await getDb().select().from(mailInMailbox)).toHaveLength(0);
   });
 
+  it("refuses the loser of two simultaneous first saves with 409, never a database error (#1417)", async () => {
+    /* Both saves read "no mailbox yet" before either writes. The provider
+       check sits between that read and the write, so a barrier there holds
+       the first save until the second has arrived, then releases both into
+       their transactions together. */
+    let arrived = 0;
+    let release: () => void = () => undefined;
+    const bothArrived = new Promise<void>((resolve) => { release = resolve; });
+    const heldProvider: MailboxSettingsDependencies = {
+      verifyImap: async () => {
+        arrived += 1;
+        if (arrived === 2) release();
+        await bothArrived;
+        return "ready";
+      },
+    };
+
+    const results = await Promise.allSettled([
+      setMailboxSettings(admin, null, settings, heldProvider),
+      setMailboxSettings(admin, null, { ...settings, password: SECOND_PASSWORD }, heldProvider),
+    ]);
+
+    const fulfilled = results.filter((result) => result.status === "fulfilled");
+    const rejected = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toBeInstanceOf(AppError);
+    expect(rejected[0].reason).toMatchObject({ code: "mailbox_version_conflict", status: 409 });
+    expect(await getDb().select().from(mailInMailbox)).toHaveLength(1);
+    expect(await passwordRows()).toHaveLength(1);
+  });
+
   it("rotates in one transaction: the new row becomes active and the old row is gone (acceptance 5)", async () => {
     const created = await setUpMailbox();
     const originalId = (await passwordRows())[0].id;
