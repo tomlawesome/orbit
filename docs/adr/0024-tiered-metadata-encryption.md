@@ -50,6 +50,8 @@ Facts verified in the tree on 2026-09-09:
   `schema.ts:640`): a receipt can exist before attribution and lose its
   household later, so its owning household is not a stable fact of the row.
 
+> **Note (2026-10-13, #1399):** `document-drafts.ts`, cited here and under Consequences, was removed with the document-draft feature; the `document_drafts` table remains.
+
 ## Decision
 
 ### 1. Key hierarchy: one metadata DEK per household, under the existing KEK

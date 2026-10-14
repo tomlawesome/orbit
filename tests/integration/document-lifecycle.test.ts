@@ -3,7 +3,7 @@ import { and, desc, eq, notInArray, sql } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import * as database from "@/db";
-import { auditLog, documentCrypto, documentDrafts, documentJobs, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionMessages, items, reviewedIntakeOperations } from "@/db/schema";
+import { auditLog, documentCrypto, documentDrafts, documentJobs, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionMessages, reviewedIntakeOperations } from "@/db/schema";
 import { updateDocumentJob } from "@/server/admin-operations";
 import { reconcileDocumentStorage, runDocumentMaintenanceCycle } from "@/server/document-worker";
 import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
@@ -22,8 +22,6 @@ import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../su
 const { GET: downloadDocument } = await loadRoute("documents/[documentId]/download");
 const { DELETE: deleteDocument } = await loadRoute("documents/[documentId]");
 const { POST: restoreDocumentRoute } = await loadRoute("documents/[documentId]/restore");
-const { POST: createDocumentDraftRoute } = await loadRoute("documents/[documentId]/draft");
-const { POST: approveDocumentDraftRoute } = await loadRoute("document-drafts/[draftId]/approve");
 const { GET: listDocuments, POST: uploadDocument } = await loadRoute("households/[householdId]/items/[itemId]/documents");
 const { GET: previewDocument } = await loadRoute("documents/[documentId]/preview");
 
@@ -113,10 +111,6 @@ function documentContext(documentId: string) {
   return { documentId };
 }
 
-function draftContext(draftId: string) {
-  return { draftId };
-}
-
 async function uploadSyntheticDocument(
   fixture: Awaited<ReturnType<typeof createIntegrationFixture>>,
   bytes: Buffer = syntheticPdf,
@@ -145,14 +139,6 @@ describe("authenticated encrypted document lifecycle", () => {
     const fixture = await createIntegrationFixture("document-lifecycle");
     const { session, documentId } = await uploadSyntheticDocument(fixture);
     const downloadUrl = `http://127.0.0.1:3000/api/documents/${documentId}/download`;
-    await getDb().insert(documentDrafts).values({
-      documentId,
-      householdId: fixture.household.id,
-      requestedByUserId: fixture.users.member.id,
-      extractedTextSha256: createHash("sha256").update("synthetic draft evidence").digest("hex"),
-      evidence: { excerpt: "synthetic draft evidence" },
-      proposal: { title: "Synthetic draft" },
-    });
 
     const downloaded = await callRouteForSession(downloadDocument, session, { url: downloadUrl, params: documentContext(documentId) });
     expect(downloaded.status).toBe(200);
@@ -207,7 +193,6 @@ describe("authenticated encrypted document lifecycle", () => {
       .from(documents).where(eq(documents.id, documentId));
     expect(terminal?.lifecycle).toBe("deleted");
     expect(await getDb().select().from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
-    expect(await getDb().select().from(documentDrafts).where(eq(documentDrafts.documentId, documentId))).toHaveLength(0);
     expect(await storage.ciphertextExists(cryptoBeforePurge!.storageKey)).toBe(false);
 
     const [job] = await getDb().select({ status: documentJobs.status, generation: documentJobs.generation })
@@ -253,7 +238,7 @@ describe("authenticated encrypted document lifecycle", () => {
     expect(await fixture.auditCount(documentId)).toBe(beforeAudits);
   });
 
-  it("bounds a malformed document or draft id to 404 instead of a driver-error 500 (#383)", async () => {
+  it("bounds a malformed document id to 404 instead of a driver-error 500 (#383)", async () => {
     const fixture = await createIntegrationFixture("document-malformed-id");
     const session = await fixture.session("member");
     const malformedId = "not-a-uuid";
@@ -263,21 +248,10 @@ describe("authenticated encrypted document lifecycle", () => {
       await callRouteForSession(downloadDocument, session, { url: downloadUrl, params: documentContext(malformedId) }),
       await callRouteForSession(deleteDocument, session, { url: downloadUrl, method: "DELETE", params: documentContext(malformedId) }),
       await callRouteForSession(restoreDocumentRoute, session, { url: `${downloadUrl}/restore`, method: "POST", params: documentContext(malformedId) }),
-      await callRouteForSession(createDocumentDraftRoute, session, { url: `http://127.0.0.1:3000/api/documents/${malformedId}/draft`, method: "POST", params: documentContext(malformedId) }),
     ]) {
       expect(response.status).toBe(404);
       expect((await response.json()).error).toMatchObject({ code: "document_not_found" });
     }
-
-    const draftApproval = await callRouteForSession(approveDocumentDraftRoute, session, {
-      url: "http://127.0.0.1:3000/api/document-drafts/not-a-uuid/approve",
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sectionId: fixture.section.id, title: "Test", provider: null, reference: null, mode: "create" }),
-      params: draftContext(malformedId),
-    });
-    expect(draftApproval.status).toBe(404);
-    expect((await draftApproval.json()).error).toMatchObject({ code: "draft_not_found" });
   });
 
   it("finalizes a purge when ciphertext was already removed by an interrupted attempt", async () => {
@@ -352,129 +326,6 @@ describe("authenticated encrypted document lifecycle", () => {
       .from(documents).where(eq(documents.householdId, fixture.household.id))).toEqual(beforeDocuments);
     expect(await getDb().select({ id: auditLog.id })
       .from(auditLog).where(eq(auditLog.householdId, fixture.household.id))).toEqual(beforeAudits);
-  });
-
-  it("applies only explicitly reviewed draft fields and sanitizes stored parser evidence", async () => {
-    const fixture = await createIntegrationFixture("document-explicit-draft-review");
-    const { session, documentId } = await uploadSyntheticDocument(fixture);
-    await getDb().update(items).set({ provider: "Old Provider", reference: "OLD-12345" })
-      .where(eq(items.id, fixture.item.id));
-    const createResponse = await callRouteForSession(createDocumentDraftRoute, session, {
-      url: `http://127.0.0.1:3000/api/documents/${documentId}/draft`,
-      method: "POST",
-      params: documentContext(documentId),
-    });
-    expect(createResponse.status).toBe(200);
-    const created = await createResponse.json() as { draft: { id: string } };
-    await getDb().update(documentDrafts).set({
-      evidence: {
-        excerpt: "<script>fetch('https://example.invalid')</script>\u202e private parser sentinel",
-        characters: 9_999,
-        extracted: true,
-      },
-      proposal: {
-        title: "<img src=x>",
-        provider: "Parser\u202e Provider",
-        reference: "<PARSER-SECRET>",
-        tool: "delete",
-        householdId: "other-household",
-      },
-    }).where(eq(documentDrafts.id, created.draft.id));
-
-    const sanitizedResponse = await callRouteForSession(createDocumentDraftRoute, session, {
-      url: `http://127.0.0.1:3000/api/documents/${documentId}/draft`,
-      method: "POST",
-      params: documentContext(documentId),
-    });
-    const sanitizedBody = await sanitizedResponse.json() as {
-      draft: { proposal: Record<string, unknown>; evidence: { excerpt: string; characters: number } };
-    };
-    expect(sanitizedBody.draft.proposal).toEqual({
-      title: "synthetic-policy",
-      provider: "Parser Provider",
-      dates: [],
-    });
-    expect(sanitizedBody.draft.proposal).not.toHaveProperty("reference");
-    expect(sanitizedBody.draft.proposal).not.toHaveProperty("tool");
-    expect(sanitizedBody.draft.proposal).not.toHaveProperty("householdId");
-    expect(sanitizedBody.draft.evidence.excerpt).not.toMatch(/[<>\u202e]/u);
-    expect(sanitizedBody.draft.evidence.characters).toBe(sanitizedBody.draft.evidence.excerpt.length);
-
-    const rejectedAuthority = await callRouteForSession(approveDocumentDraftRoute, session, {
-      url: `http://127.0.0.1:3000/api/document-drafts/${created.draft.id}/approve`,
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        sectionId: fixture.section.id,
-        title: "Reviewed title",
-        provider: "Reviewed Provider",
-        reference: null,
-        mode: "merge",
-        targetItemId: fixture.item.id,
-        tool: "delete",
-        url: "https://example.invalid",
-        secret: "parser-controlled",
-      }),
-      params: draftContext(created.draft.id),
-    });
-    expect(rejectedAuthority.status).toBe(422);
-    expect(await getDb().select({ provider: items.provider, reference: items.reference })
-      .from(items).where(eq(items.id, fixture.item.id)))
-      .toEqual([{ provider: "Old Provider", reference: "OLD-12345" }]);
-
-    const approval = await callRouteForSession(approveDocumentDraftRoute, session, {
-      url: `http://127.0.0.1:3000/api/document-drafts/${created.draft.id}/approve`,
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        sectionId: fixture.section.id,
-        title: "Reviewed title",
-        provider: "Reviewed Provider",
-        reference: null,
-        mode: "merge",
-        targetItemId: fixture.item.id,
-      }),
-      params: draftContext(created.draft.id),
-    });
-    expect(approval.status).toBe(200);
-    expect(await getDb().select({ provider: items.provider, reference: items.reference })
-      .from(items).where(eq(items.id, fixture.item.id)))
-      .toEqual([{ provider: "Reviewed Provider", reference: null }]);
-  });
-
-  it("serializes duplicate draft approval so one explicit write wins", async () => {
-    const fixture = await createIntegrationFixture("document-draft-approval-race");
-    const { session, documentId } = await uploadSyntheticDocument(fixture);
-    const draftResponse = await callRouteForSession(createDocumentDraftRoute, session, {
-      url: `http://127.0.0.1:3000/api/documents/${documentId}/draft`,
-      method: "POST",
-      params: documentContext(documentId),
-    });
-    const payload = await draftResponse.json() as { draft: { id: string } };
-    const approve = () => callRouteForSession(approveDocumentDraftRoute, session, {
-      url: `http://127.0.0.1:3000/api/document-drafts/${payload.draft.id}/approve`,
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        sectionId: fixture.section.id,
-        title: "Concurrent reviewed draft",
-        provider: null,
-        reference: null,
-        mode: "create",
-      }),
-      params: draftContext(payload.draft.id),
-    });
-
-    const responses = await Promise.all([approve(), approve()]);
-    expect(responses.map((response) => response.status).sort()).toEqual([200, 404]);
-    expect(await getDb().select({ id: items.id }).from(items).where(and(
-      eq(items.householdId, fixture.household.id),
-      eq(items.title, "Concurrent reviewed draft"),
-    ))).toHaveLength(1);
-    expect(await getDb().select({ id: auditLog.id }).from(auditLog).where(and(
-      eq(auditLog.entityId, payload.draft.id),
-      eq(auditLog.action, "document_draft_create"),
-    ))).toHaveLength(1);
   });
 
   it("keeps a failed ciphertext purge recoverable through bounded administrator retry", async () => {
@@ -707,13 +558,11 @@ describe("authenticated encrypted document lifecycle", () => {
         expect(stage).toMatchObject({ status: "pending" });
         expect(stage?.storageKey).toMatch(/^[a-f0-9]{64}$/u);
         expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
-        expect(await getDb().select({ id: documentDrafts.id }).from(documentDrafts).where(eq(documentDrafts.documentId, documentId))).toHaveLength(0);
         const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
         expect(await storage.stagingExists(stage!.storageKey)).toBe(true);
         expect(await storage.listQuarantineFiles()).toHaveLength(0);
         const documentUrl = `http://127.0.0.1:3000/api/documents/${documentId}`;
         expect((await callRouteForSession(downloadDocument, session, { url: `${documentUrl}/download`, params: documentContext(documentId) })).status).toBe(404);
-        expect((await callRouteForSession(createDocumentDraftRoute, session, { url: `${documentUrl}/draft`, method: "POST", params: documentContext(documentId) })).status).toBe(404);
       });
     } finally {
       capture.restore();

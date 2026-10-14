@@ -4,7 +4,6 @@ import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { households } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
-import { createDocumentDraft } from "@/server/document-drafts";
 import { listItemDocuments, readDocumentDownload } from "@/server/document-repository";
 import { requirePortableArchiveAccess } from "@/server/portable-archive-repository";
 import { requireHouseholdAccess } from "@/server/workspace-access";
@@ -117,8 +116,6 @@ describe("document access", () => {
     expect(await refusal(readDocumentDownload(outsider, fixture.document.id))).toEqual(DOCUMENT_UNAVAILABLE);
     expect(await refusal(readDocumentDownload(fixture.users.member.id, "not-a-uuid"))).toEqual(DOCUMENT_UNAVAILABLE);
     expect(await refusal(readDocumentDownload(fixture.users.member.id, randomUUID()))).toEqual(DOCUMENT_UNAVAILABLE);
-    expect(await refusal(createDocumentDraft(outsider, fixture.document.id))).toEqual(DOCUMENT_UNAVAILABLE);
-    expect(await refusal(createDocumentDraft(fixture.users.member.id, "not-a-uuid"))).toEqual(DOCUMENT_UNAVAILABLE);
   });
 
   it("keeps refusing documents of a household waiting to be deleted", async () => {
@@ -126,7 +123,6 @@ describe("document access", () => {
     await getDb().update(households).set({ deletionRequestedAt: new Date(), deleteAfter: new Date(Date.now() + 86_400_000) }).where(eq(households.id, fixture.household.id));
     expect(await refusal(listItemDocuments(fixture.users.admin.id, fixture.household.id, fixture.item.id))).toEqual(ITEM_UNAVAILABLE);
     expect(await refusal(readDocumentDownload(fixture.users.admin.id, fixture.document.id))).toEqual(DOCUMENT_UNAVAILABLE);
-    expect(await refusal(createDocumentDraft(fixture.users.admin.id, fixture.document.id))).toEqual(DOCUMENT_UNAVAILABLE);
   });
 
   it("refuses a disabled member from every document path", async () => {
@@ -135,7 +131,6 @@ describe("document access", () => {
     const member = fixture.users.member.id;
     expect(await refusal(listItemDocuments(member, fixture.household.id, fixture.item.id))).toEqual(ITEM_UNAVAILABLE);
     expect(await refusal(readDocumentDownload(member, fixture.document.id))).toEqual(DOCUMENT_UNAVAILABLE);
-    expect(await refusal(createDocumentDraft(member, fixture.document.id))).toEqual(DOCUMENT_UNAVAILABLE);
   });
 
   it("refuses a disabled administrator from every document path", async () => {
@@ -144,6 +139,5 @@ describe("document access", () => {
     const admin = fixture.users.admin.id;
     expect(await refusal(listItemDocuments(admin, fixture.household.id, fixture.item.id))).toEqual(ITEM_UNAVAILABLE);
     expect(await refusal(readDocumentDownload(admin, fixture.document.id))).toEqual(DOCUMENT_UNAVAILABLE);
-    expect(await refusal(createDocumentDraft(admin, fixture.document.id))).toEqual(DOCUMENT_UNAVAILABLE);
   });
 });

@@ -47,7 +47,7 @@ export const listableDocumentLifecycles = [
 
 export type ListableDocumentLifecycle = typeof listableDocumentLifecycles[number];
 
-export type DocumentContentOperation = "summary" | "download" | "draft" | "restore";
+export type DocumentContentOperation = "summary" | "download" | "restore";
 
 /**
  * The single content-readiness boundary for document operations.
@@ -55,8 +55,8 @@ export type DocumentContentOperation = "summary" | "download" | "draft" | "resto
  * A genuinely `clean` scan is always ready. `skipped` is ready only when the
  * runtime scan mode is explicitly `disabled`; any other or unknown scan mode
  * value must not authorize a `skipped` scan status. The operation also
- * supplies its own lifecycle boundary: content reads and draft creation
- * require `available`, while restore is only valid during retention.
+ * supplies its own lifecycle boundary: content reads require `available`,
+ * while restore is only valid during retention.
  */
 export function isDocumentContentReady(
   record: { lifecycle: string; scanStatus: string },
@@ -71,7 +71,6 @@ export function isDocumentContentReady(
     case "summary":
       return record.lifecycle === "available" || record.lifecycle === "pending_deletion";
     case "download":
-    case "draft":
       return record.lifecycle === "available";
     case "restore":
       return record.lifecycle === "pending_deletion";
@@ -90,7 +89,7 @@ export interface DocumentSummary {
   scanStatus: string;
   availableAt: string | null;
   deleteAfter: string | null;
-  /** Whether the document's content can be downloaded or drafted from yet. */
+  /** Whether the document's content can be downloaded yet. */
   ready: boolean;
   /** Bounded failure reason for a rejected document; never provider text. */
   failureCode: string | null;
