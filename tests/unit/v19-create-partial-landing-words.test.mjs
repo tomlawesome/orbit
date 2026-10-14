@@ -81,7 +81,7 @@ let gates = { stage: false, read: false };
 let pending = { stage: null, read: null };
 
 const stagedOk = (status = 201) => () => json({ document: { id: "d1", displayName: "policy.pdf" } }, status);
-const refusedFile = () => json({ error: { code: "document_unsupported_type", message: FILE_WORDS } }, 422);
+const refusedFile = () => json({ error: { code: "document_type_unsupported", message: FILE_WORDS } }, 415);
 const lostNetwork = () => { throw new TypeError("Failed to fetch"); };
 const serverDown = () => new Response("", { status: 500 });
 const commandOk = () => json({ workspace });

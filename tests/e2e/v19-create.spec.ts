@@ -944,8 +944,8 @@ test.describe(() => {
       if (route.request().method() !== "POST") return route.fallback();
       stagePosts += 1;
       return route.fulfill({
-        status: 422, contentType: "application/json",
-        body: JSON.stringify({ error: { code: "document_unsupported_type", message: REASON } }),
+        status: 415, contentType: "application/json",
+        body: JSON.stringify({ error: { code: "document_type_unsupported", message: REASON } }),
       });
     });
 

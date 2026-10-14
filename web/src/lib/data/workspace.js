@@ -484,16 +484,32 @@ export function bindRefused(error) {
   return error instanceof WorkspaceError && error.code === "document_not_available";
 }
 
+/* The server's codes for a file it will never take, whoever sends it:
+   too large or empty, a type it does not accept, a structure it cannot open
+   (or a password), or malware found. */
+const FILE_REFUSAL_CODES = new Set([
+  "document_too_large",
+  "document_empty",
+  "document_type_unsupported",
+  "document_password_required",
+  "document_structure_invalid",
+  "document_malware_detected",
+]);
+
 /**
  * #1406: whether a failed stage is the server refusing the file itself --
  * its type, size or structure, or malware -- rather than a failed send.
+ * Decided by code, not status: the household's or the instance's storage
+ * limit (`document_household_quota`, `document_instance_quota`) is also a
+ * 413, but no replacement file helps there, so it reads as a plain
+ * "not saved" and the file stays attached.
  * A refused file stays in the form, marked with these words, and holds Add
  * until it is replaced or removed (owner's answer 6a).
  * @param {unknown} error
  * @returns {boolean}
  */
 export function refusesFile(error) {
-  return error instanceof WorkspaceError && [413, 415, 422].includes(error.status ?? 0);
+  return error instanceof WorkspaceError && FILE_REFUSAL_CODES.has(error.code ?? "");
 }
 
 /**
