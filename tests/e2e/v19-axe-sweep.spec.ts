@@ -25,11 +25,6 @@ resetDatabaseBetweenSpecFiles();
  * the pocket dial on mobile) — the other routes are dialect-blind, but
  * running them twice costs little and is never wrong.
  *
- * `/mobile` is not swept on its own: web/src/routes/mobile/+page.js is a bare
- * 308 redirect onto `/home` (the pocket dialect moved onto home's own URL,
- * CON-10/#430), so there is no second screen there to check — `/home`'s own
- * tests already cover what renders.
- *
  * Each test signs in as "Orbit Administrator" fresh (the disposable OIDC
  * provider's identity list, same as v19-tour.spec.ts) and asserts one route
  * or one overlay state, so a failing axe rule points straight at what was on

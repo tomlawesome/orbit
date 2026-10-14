@@ -31,11 +31,9 @@ import { readRuntimeSecret } from "@/lib/runtime-secret";
 import { openInstanceMetadataReader, openMetadataReaders } from "@/server/metadata/fields";
 
 // Re-exported so every existing import of these from this module (the
-// dispatch worker) keeps working: the pure logic itself now lives in
-// src/lib/preferences.ts so src/lib/notifications.ts (imported by a client
-// component) can share the exact same truth without pulling this module's
-// server-only dependencies (nodemailer, web-push, the database) into a
-// browser bundle (#487).
+// dispatch worker) keeps working: the pure logic itself lives in
+// src/lib/preferences.ts, free of this module's server-only dependencies
+// (nodemailer, web-push, the database) (#487).
 export { effectiveReminderOffsets };
 export type { ReminderOffset, RecipientWarningDays };
 

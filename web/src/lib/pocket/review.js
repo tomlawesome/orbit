@@ -1,6 +1,6 @@
 import { daysUntil } from "$lib/data/chart.js";
 import { LOCKED, evidenceReadable, fieldState } from "$lib/data/metadata-status.js";
-import { dayMonth, dayMonthYear, money, plural, sizeLabel } from "$lib/format.js";
+import { dayMonthYear, money, plural, sizeLabel } from "$lib/format.js";
 
 /**
  * THE REVIEW CARD'S WORDS (round 3 §4, #1140): what ReviewCard.svelte and
@@ -23,9 +23,6 @@ import { dayMonth, dayMonthYear, money, plural, sizeLabel } from "$lib/format.js
  * @typedef {{ label: string, value: string, sure: boolean, field: Reading["field"] }} FormReading
  *   a reading as create's form (EntryForm.svelte) takes it
  */
-
-/** `11 Aug`. @param {string | null | undefined} iso */
-export const caughtOf = (iso) => (iso ? dayMonth(iso) : "");
 
 /** @param {Reviewable} mail */
 export const reviewTitleOf = (mail) => mail.proposal?.title ?? mail.title ?? "Forwarded email";

@@ -51,8 +51,8 @@ describe("#1151 W1-R5/W1-S3: a held completion is stashed before it is sent", ()
 });
 
 /*
- * #1316 W2-F1 / W2-S1. A stashed completion from an older build is finished,
- * not refused forever, and a stash entry is never replayed endlessly. A
+ * #1316 W2-F1 / W2-S1. A stashed completion is finished on the next load, and
+ * a stash entry is never replayed endlessly. A
  * replayed completion the engine refuses with a version conflict is reported,
  * not read as done.
  */
@@ -73,14 +73,13 @@ const isConflict = (error) => /** @type {any} */ (error)?.code === "version_conf
 /* a turn of the microtask queue (timers are faked in this block) */
 const settle = () => vi.advanceTimersByTimeAsync(0);
 
-const OLD_COMMAND = {
+const STASHED_COMMAND = {
   type: "item.complete",
   householdId: "h1",
   itemId: "i1",
   expectedVersion: 3,
   completedDate: "2026-10-11",
-  activity: { id: "a1", itemId: "i1", occurredAt: "2026-10-11T09:00:00.000Z", kind: "service_completed" },
-  nextDate: "2026-11-01",
+  activity: { id: "a1", itemId: "i1", occurredAt: "2026-10-11T09:00:00.000Z" },
 };
 
 function stashedWith(command, apply) {
@@ -92,20 +91,17 @@ function stashedWith(command, apply) {
   return { storage, onsent, onfailed, held };
 }
 
-describe("#1316 W2-F1: retryStashed finishes an older build's completion and never replays a refused one", () => {
+describe("#1316 W2-F1: retryStashed finishes a stashed completion and never replays a refused one", () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it("an old-shaped entry is sent without nextDate and activity.kind, and the stash empties on success", async () => {
+  it("a stashed entry is sent as it was stashed, and the stash empties on success", async () => {
     const apply = vi.fn(async () => ({}));
-    const { storage, onsent, held } = stashedWith(OLD_COMMAND, apply);
+    const { storage, onsent, held } = stashedWith(STASHED_COMMAND, apply);
     held.retryStashed(isConflict);
     await settle();
     expect(apply).toHaveBeenCalledTimes(1);
     const sent = /** @type {any} */ (apply.mock.calls[0][0]);
-    expect(sent).not.toHaveProperty("nextDate");
-    expect(sent.activity).not.toHaveProperty("kind");
-    // the rest of the command is untouched
     expect(sent).toMatchObject({ type: "item.complete", householdId: "h1", itemId: "i1", expectedVersion: 3, completedDate: "2026-10-11" });
     expect(sent.activity).toMatchObject({ id: "a1", itemId: "i1", occurredAt: "2026-10-11T09:00:00.000Z" });
     expect(onsent).toHaveBeenCalledTimes(1);
@@ -115,7 +111,7 @@ describe("#1316 W2-F1: retryStashed finishes an older build's completion and nev
   it("an entry the engine refuses with a 400 is reported once and dropped from the stash", async () => {
     const refusal = new WorkspaceError("not a valid command", { status: 400 });
     const apply = vi.fn(async () => { throw refusal; });
-    const { storage, onsent, onfailed, held } = stashedWith(OLD_COMMAND, apply);
+    const { storage, onsent, onfailed, held } = stashedWith(STASHED_COMMAND, apply);
     held.retryStashed(isConflict);
     await settle();
     expect(onfailed).toHaveBeenCalledTimes(1);
@@ -125,7 +121,7 @@ describe("#1316 W2-F1: retryStashed finishes an older build's completion and nev
 
   it("an entry that failed for want of a network stays stashed and is reported", async () => {
     const apply = vi.fn(async () => { throw new TypeError("Failed to fetch"); });
-    const { storage, onsent, onfailed, held } = stashedWith(OLD_COMMAND, apply);
+    const { storage, onsent, onfailed, held } = stashedWith(STASHED_COMMAND, apply);
     held.retryStashed(isConflict);
     await settle();
     expect(onfailed).toHaveBeenCalledTimes(1);
@@ -141,7 +137,7 @@ describe("#1316 W2-S1: a replayed completion refused with a version conflict is 
   it("onfailed gets the conflict, onsent is not called, and the entry is cleared", async () => {
     const conflict = new WorkspaceError("changed elsewhere", { status: 409, code: "version_conflict" });
     const apply = vi.fn(async () => { throw conflict; });
-    const { storage, onsent, onfailed, held } = stashedWith({ ...OLD_COMMAND, nextDate: undefined, activity: { id: "a1", itemId: "i1", occurredAt: "2026-10-11T09:00:00.000Z" } }, apply);
+    const { storage, onsent, onfailed, held } = stashedWith(STASHED_COMMAND, apply);
     held.retryStashed(isConflict);
     await settle();
     expect(onfailed).toHaveBeenCalledTimes(1);
@@ -162,11 +158,6 @@ const POCKET_REPLAY = (() => {
 describe("#1316 W2-F1/W2-S1: home/pocket.svelte's own stash replay", () => {
   it("finds the replay block", () => {
     expect(POCKET_REPLAY).toMatch(/applyCommand\(/u);
-  });
-
-  it("W2-F1: drops nextDate and activity.kind from an old entry before sending it", () => {
-    expect(POCKET_REPLAY).toMatch(/nextDate/u);
-    expect(POCKET_REPLAY).toMatch(/\bkind\b/u);
   });
 
   it("W2-F1: a refused (400) entry is cleared from the stash, not kept for ever", () => {

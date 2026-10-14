@@ -52,12 +52,9 @@ const EXPECTED_ROUTES = [
   "/api/admin/mailbox",
   "/api/admin/maintenance",
   "/api/admin/operations",
-  "/api/admin/operations/deliveries/[deliveryId]",
   "/api/admin/operations/document-jobs/[jobId]",
   "/api/admin/operations/imap-test",
-  "/api/admin/operations/mailbox-notifications",
   "/api/admin/operations/smtp-test",
-  "/api/admin/primary",
   "/api/admin/recovery-bundle",
   // An administrator creates a system for a named owner (#1052): the flow
   // behind the Systems card's "new system" button, which was drawn from the
@@ -110,7 +107,6 @@ const EXPECTED_ROUTES = [
   "/api/auth/sign-in-notice",
   "/api/auth/logout",
   "/api/auth/session",
-  "/api/auth/session/refresh",
   // The OIDC step-up (M7, ADR-0023 §5): the challenge for a reader with no
   // password, called by every sensitive action's screen, never by the provider.
   "/api/auth/step-up/start",
@@ -145,7 +141,7 @@ const EXPECTED_ROUTES = [
   "/api/push/subscriptions",
   "/api/reviewed-intake/approve",
   "/api/settings/mail-relay",
-  "/api/settings/mail-relay/senders",
+  "/api/settings/mail-relay/verification",
   "/api/settings/mail-relay/verify",
   "/api/settings/reminders",
   "/api/settings/sent",
@@ -203,7 +199,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 80 route families -- no fewer, no more", () => {
+  it("has exactly the expected 76 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });

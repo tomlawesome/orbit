@@ -6,7 +6,7 @@
  * `view.emptySky` is true, in both the desk and pocket dialects, as an
  * element carrying the `adrift` class (home/+page.svelte, pocket.svelte) —
  * has no dial, no sun-link, no manifest. The walk's first three stops all
- * target the dial (stops.js), so a reader on that sky got the card up
+ * targeted the dial, so a reader on that sky got the card up
  * ("Stop 1 of 8") over a screen where nothing lit.
  *
  * #484 seeds demo data on first run specifically so the tour has something

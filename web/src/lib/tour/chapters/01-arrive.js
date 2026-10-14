@@ -5,8 +5,8 @@
  * are cut from: same shape, same imports, same rules. Its beats are the
  * ratified mockup's first `CH` entry, verbatim
  * (design/v19/tour/round-5/f-one-take.html), and its four lines are the
- * ratified copy — the same words `web/src/lib/tour/stops.js` already carries
- * for the stops `chart` and `sun`, which is where they were ratified.
+ * ratified copy — the same words the retired eight-stop walk carried for its
+ * stops `chart` and `sun`, which is where they were ratified.
  *
  * WHAT A CHAPTER IS. `{ id, name, play }` and nothing else. `play` gets the
  * film context (vocabulary.js) and uses only words from it: it never

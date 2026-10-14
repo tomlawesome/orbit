@@ -94,16 +94,16 @@ test("after a save, the sky scrolls down to the manifest", async ({ page }) => {
 
 /* #1319 (owner-decisions §34): was "after a save, the item's way back
    returns to a sky that scrolls", which walked to the belt and took its
-   "← YOUR SKY". The belt is gone: its address now answers with home and
-   the item's drawer open, and the item's way back is putting that drawer
-   away. Both are walked here, as a bookmark to the old address would. */
-test("after a save, the item's old address and its drawer's way back return to a sky that scrolls", async ({ page }) => {
+   "← YOUR SKY". The belt is gone: the item's address is home with its
+   drawer open, and the item's way back is putting that drawer away. Both
+   are walked here, as a bookmark to that address would. */
+test("after a save, the item's address and its drawer's way back return to a sky that scrolls", async ({ page }) => {
   await signIn(page);
   await addItem(page, "Scroll via item");
   /* the save lands with the new row already open (`/home?item=`) */
   const id = new URL(page.url()).searchParams.get("item");
   expect(id, "the save did not land on the new item's address").toBeTruthy();
-  await page.goto(`/item/${id}`);
+  await page.goto(`/home?item=${id}`);
   await expect(page).toHaveURL(new RegExp(`/home\\?item=${id}$`));
   const drawer = page.locator(`[id="${id}-view"]`);
   await expect(drawer).toBeVisible({ timeout: 20_000 });

@@ -1,11 +1,12 @@
+import { createHash, randomBytes } from "node:crypto";
 import { createTransport } from "nodemailer";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { settleArrival } from "./support/arrival";
-import { INTAKE_MAILBOX, waitForSenderVerificationToken } from "./support/mail";
+import { INTAKE_MAILBOX } from "./support/mail";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { ensureWorkerAdministrator, workerAccount, workerEmail } from "./support/worker-identity";
-import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { pendingSenderVerification, resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -161,34 +162,24 @@ async function configureMailbox(page: Page) {
 
 /**
  * Claims SENDER_ADDRESS as the signed-in member's own and proves it through
- * the real one-use link (ADR-0017 slice 4, #745) -- not a database shortcut,
- * because the point of this spec is the real pipe. Idempotent: a re-run
- * against a live stack finds the address already verified and does nothing
- * further, the same accommodation `configureMailbox` above makes.
+ * the real one-use link (ADR-0017 slice 4, #745). Nothing in the product mails
+ * that link any more (#1403 D2 removed the route that asked for it), so the
+ * pending check is written straight into the database -- the claim and the
+ * digest of a token only this spec knows, never a verified row -- and the
+ * address is then proven the only way the product accepts: by opening
+ * `/api/settings/mail-relay/verify` with that token, signed in as the member.
+ * Idempotent: a re-run against a live stack finds the address already verified
+ * and does nothing further, the same accommodation `configureMailbox` above
+ * makes.
  */
 async function verifySenderAddress(page: Page) {
-  const outcome = await page.evaluate(async (address) => {
-    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
-    const request = async (body: unknown) => {
-      const response = await fetch("/api/settings/mail-relay/senders", {
-        method: "PUT",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) throw new Error(`sender address request failed: ${response.status}`);
-      return (await response.json()) as { addresses: Array<{ id: string; address: string; verified: boolean }> };
-    };
-    const added = await request({ action: "add", address });
-    const row = added.addresses.find((entry) => entry.address === address);
-    if (!row) throw new Error("sender address did not round-trip");
-    if (row.verified) return "already-verified";
-    await request({ action: "verify", id: row.id });
-    return "verification-sent";
-  }, SENDER_ADDRESS());
-  if (outcome === "already-verified") return;
+  const session = (await (await page.request.get("/api/auth/session")).json()) as { user?: { id?: string } };
+  const userId = session.user?.id;
+  if (!userId) throw new Error("the member's session did not name the member");
+  const token = randomBytes(32).toString("base64url");
+  const digest = createHash("sha256").update(token, "utf8").digest("hex");
+  if (pendingSenderVerification(userId, SENDER_ADDRESS().toLowerCase(), digest)) return;
 
-  const token = await waitForSenderVerificationToken(SENDER_ADDRESS());
   const verified = await page.request.get(`/api/settings/mail-relay/verify?token=${encodeURIComponent(token)}`);
   if (!verified.ok() || !verified.url().includes("sender=verified")) {
     throw new Error(`sender verification link did not confirm: ${verified.status()} ${verified.url()}`);

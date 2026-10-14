@@ -57,7 +57,7 @@ export function mmss(ms) {
 }
 
 /* Not one colour below is new: every value is a pack token from packs.css,
-   the same rule tour.css states. The blur is written both ways (#1174): iOS
+   the same rule the rest of the tour keeps. The blur is written both ways (#1174): iOS
    Safari before 18 knows only `-webkit-backdrop-filter`, and without it the
    pill at its 38% recede is a see-through box with the page's words showing
    through its own. */

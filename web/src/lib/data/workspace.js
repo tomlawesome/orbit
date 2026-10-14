@@ -264,8 +264,7 @@
  *
  * One shape rather than two because the screen draws one thing. Everything an
  * origin cannot fill is optional, and `suggestion` is the flag that says which
- * origin this was: readBelt reads exactly that to decide whether the arrival
- * has a seat in the band.
+ * origin this was.
  *
  * @typedef {Partial<WorkspaceItem> & Partial<ReceiptSuggestion> & {
  *   id: string,
@@ -1707,9 +1706,8 @@ export function drawerDocumentOf(doc) {
  * `version`/`updatedAt`/`snoozedUntil` ride along for #424's writes.
  *
  * @param {string} id  an item id, or (#434) a mail-in receipt id
- * @param {Workspace} [workspace]  a workspace the caller already holds
- *   (#1151 W2-Q4: readBelt reads one for itself before falling back to
- *   this for a mail-in suggestion, and must not read a second one)
+ * @param {Workspace} [workspace]  a workspace the caller already holds, so
+ *   it is not read a second time (#1151 W2-Q4)
  * @returns {Promise<?ItemView>}
  */
 export async function readItem(id, workspace) {
@@ -1760,7 +1758,7 @@ export async function readItem(id, workspace) {
 
 /**
  * One item's papers, for the pocket home's item sheet and search (#1119,
- * #1057): the per-item documents route readItem and readBelt already read,
+ * #1057): the per-item documents route readItem already reads,
  * with each paper's id kept so a row can say which one it means. The
  * household id comes from the home view the caller already holds, which the
  * route's own membership check still guards. Each paper carries the belt's
@@ -2890,95 +2888,8 @@ export async function withdrawInvitation(householdId, invitationId) {
 }
 
 /* ---------------------------------------------------------------------------
- * The item belt (#458) — the item screen, and the document surface with it.
+ * A document's own lifecycle: restore and remove.
  */
-
-/**
- * Everything the belt renders for one arrival: the WHOLE household the item
- * belongs to, because the belt is that household's manifest bent round a ring
- * and an item without its date-neighbours is not an arrival, it is a card on
- * its own.
- *
- * The membership test is readItem's, deliberately: the household is found by
- * looking for the id in data the session already sees, never by building a
- * request out of the URL, so an unknown id is a 404 and not a probe (#451).
- *
- * Documents come from the per-item route, fanned out over the items that
- * report carrying any — the pattern the retired archive used, and additive in the
- * same way: an item whose papers cannot be read loses its papers, not the
- * screen. They are read for the whole household rather than for the centred
- * item alone because every item's rock wears CON-1's belt ellipse when it has
- * papers, and because centring a neighbour must not go back to the server.
- *
- * #434, and since #1145 the owner's merge of the suggestion screen into the
- * belt: an id that is a mail-in receipt rather than an item is the SAME
- * belt -- the household the receipt files into (its own, else the primary),
- * with the suggestion handed alongside so beltManifestOf seats it, hollow, at
- * the date the relay read. It is a visitor: a suggestion is not in the
- * manifest until it is accepted into it, so no other arrival ever seats one.
- * `households` and `primary` ride along for the phone's review sheet, whose
- * form offers the sections of the household the item files into.
- *
- * @param {string} id  the centred item, or (#434) a mail-in receipt
- */
-export async function readBelt(id) {
-  const [workspace, session] = await Promise.all([readWorkspace(), readSession().catch(() => null)]);
-  const today = todayOf(workspace);
-  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
-  let household = workspace.households.find((one) =>
-    (one.items ?? []).some((item) => item.id === id),
-  );
-  /** @type {?ItemView} */
-  let suggestion = null;
-  if (!household) {
-    const found = await readItem(id, workspace);
-    if (!found?.suggestion) return null;
-    suggestion = found;
-    household = workspace.households.find((one) => one.id === (found.householdId ?? primary))
-      ?? workspace.households[0];
-  }
-
-  /** @type {Record<string, DocumentSummary[]>} */
-  const documentsByItem = {};
-  const items = household?.items ?? [];
-  const householdId = household?.id ?? "";
-  await Promise.all(
-    items
-      .filter((item) => (item.documentCount ?? 0) > 0)
-      .map(async (item) => {
-        try {
-          /** @type {{ documents?: DocumentSummary[] }} */
-          const body = await json(
-            await fetch(`/api/households/${householdId}/items/${item.id}/documents`, {
-              credentials: "same-origin",
-            }),
-          );
-          documentsByItem[item.id] = body.documents ?? [];
-        } catch {
-          documentsByItem[item.id] = [];
-        }
-      }),
-  );
-
-  return {
-    kind: "belt",
-    selectedId: id,
-    today,
-    user: session?.user ?? null,
-    household: household
-      ? {
-          ...household,
-          /* The command builders write against the raw item plus the household it
-             proved membership of (#455, commands.js base()). */
-          items: items.map((item) => ({ ...item, householdId })),
-        }
-      : null,
-    suggestion,
-    households: workspace.households,
-    primary,
-    documentsByItem,
-  };
-}
 
 /**
  * Undoes a document's soft delete (#1054/#1088): `POST

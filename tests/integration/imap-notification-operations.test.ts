@@ -14,10 +14,8 @@ import {
 
 const { GET: getOperations } = await loadRoute("admin/operations");
 const { POST: verifyImap } = await loadRoute("admin/operations/imap-test");
-const { POST: retryMailboxNotifications } = await loadRoute("admin/operations/mailbox-notifications");
 
 const adminVerifyUrl = "http://127.0.0.1:3000/api/admin/operations/imap-test";
-const adminRetryUrl = "http://127.0.0.1:3000/api/admin/operations/mailbox-notifications";
 
 function expectNoStore(response: Response): void {
   expect(response.headers.get("cache-control")).toBe("no-store");
@@ -139,23 +137,20 @@ describe("administrator mailbox operation boundaries", () => {
     try {
       const member = await fixture.session("member");
       const admin = await fixture.session("admin");
-      for (const [url, body] of [[adminVerifyUrl, undefined], [adminRetryUrl, JSON.stringify({ action: "retry_exhausted" })]] as const) {
-        const handler = url === adminVerifyUrl ? verifyImap : retryMailboxNotifications;
-        const signedOut = await callRoute(handler, { url, method: "POST", body, headers: { "content-type": "application/json" } });
-        expect(signedOut.status).toBe(401);
-        expectNoStore(signedOut);
-        const nonAdmin = await callRouteForSession(handler, member, { url, method: "POST", body, headers: { "content-type": "application/json" } });
-        expect(nonAdmin.status).toBe(403);
-        expectNoStore(nonAdmin);
-        const missingCsrf = await callRouteForSession(handler, admin, { url, method: "POST", body, headers: { "content-type": "application/json", "x-csrf-token": "" } });
-        expect(missingCsrf.status).toBe(403);
-        expectNoStore(missingCsrf);
-        expect((await missingCsrf.json()).error.code).toBe("csrf_failed");
-        const wrongCsrf = await callRouteForSession(handler, admin, { url, method: "POST", body, headers: { "content-type": "application/json", "x-csrf-token": "wrong" } });
-        expect(wrongCsrf.status).toBe(403);
-        expectNoStore(wrongCsrf);
-        expect((await wrongCsrf.json()).error.code).toBe("csrf_failed");
-      }
+      const signedOut = await callRoute(verifyImap, { url: adminVerifyUrl, method: "POST" });
+      expect(signedOut.status).toBe(401);
+      expectNoStore(signedOut);
+      const nonAdmin = await callRouteForSession(verifyImap, member, { url: adminVerifyUrl, method: "POST" });
+      expect(nonAdmin.status).toBe(403);
+      expectNoStore(nonAdmin);
+      const missingCsrf = await callRouteForSession(verifyImap, admin, { url: adminVerifyUrl, method: "POST", headers: { "x-csrf-token": "" } });
+      expect(missingCsrf.status).toBe(403);
+      expectNoStore(missingCsrf);
+      expect((await missingCsrf.json()).error.code).toBe("csrf_failed");
+      const wrongCsrf = await callRouteForSession(verifyImap, admin, { url: adminVerifyUrl, method: "POST", headers: { "x-csrf-token": "wrong" } });
+      expect(wrongCsrf.status).toBe(403);
+      expectNoStore(wrongCsrf);
+      expect((await wrongCsrf.json()).error.code).toBe("csrf_failed");
     } finally {
       await fixture.cleanup();
     }
@@ -171,28 +166,14 @@ describe("administrator mailbox operation boundaries", () => {
         userId: fixture.users.member.id, householdId: fixture.household.id, status: "pending_review",
         proposal: { title: "Private receipt marker" }, expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "sent",
       }).returning({ id: imapIngestionMessages.id });
-      const [delivery] = await getDb().insert(imapNotificationDeliveries).values({
-        messageId: message.id, userId: fixture.users.member.id, kind: "review_ready", status: "failed",
-      }).returning({ id: imapNotificationDeliveries.id });
       const before = (await getDb().select({ proposal: imapIngestionMessages.proposal, status: imapIngestionMessages.status }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, message.id)))[0];
       const verifyResponse = await callRouteForSession(verifyImap, admin, { url: adminVerifyUrl, method: "POST" });
-      const retryResponse = await callRouteForSession(retryMailboxNotifications, admin, { url: adminRetryUrl, method: "POST", body: JSON.stringify({ action: "retry_exhausted" }), headers: { "content-type": "application/json" } });
       const operationsResponse = await callRouteForSession(getOperations, admin, { url: "http://127.0.0.1:3000/api/admin/operations" });
-      for (const response of [verifyResponse, retryResponse, operationsResponse]) {
+      for (const response of [verifyResponse, operationsResponse]) {
         expect(response.status).toBe(200);
         expectNoStore(response);
         expect(await response.clone().text()).not.toContain("Private receipt marker");
       }
-      const retryResult = await retryResponse.json() as { queued: number };
-      expect(retryResult.queued).toBeGreaterThanOrEqual(1);
-      expect(retryResult.queued).toBeLessThanOrEqual(25);
-      const retriedDelivery = (await getDb().select({
-        status: imapNotificationDeliveries.status,
-        attempts: imapNotificationDeliveries.attempts,
-        leaseToken: imapNotificationDeliveries.leaseToken,
-        failureCode: imapNotificationDeliveries.failureCode,
-      }).from(imapNotificationDeliveries).where(eq(imapNotificationDeliveries.id, delivery.id)))[0];
-      expect(retriedDelivery).toEqual({ status: "retry", attempts: 0, leaseToken: null, failureCode: null });
       const after = (await getDb().select({ proposal: imapIngestionMessages.proposal, status: imapIngestionMessages.status }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, message.id)))[0];
       expect(after).toEqual(before);
     } finally {

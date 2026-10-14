@@ -63,8 +63,3 @@ export const CHAPTERS = [
   yourSky,
   yours,
 ];
-
-/** @param {string} id */
-export function chapterIndex(id) {
-  return CHAPTERS.findIndex((chapter) => chapter.id === id);
-}

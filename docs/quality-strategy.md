@@ -92,7 +92,7 @@ had no caller in CI until #620, so 1,644 errors accumulated across 52 files --
 overwhelmingly implicit `any` and DOM narrowing rather than defects.
 
 Gating on zero would have failed every pull request on day one, so from #620
-until #624 `web/svelte-check-ceiling.json` recorded exactly how many errors
+until #624 a per-file ledger recorded exactly how many errors
 each file was still allowed, on the same ratchet principle as the coverage
 floors above: a file that got worse failed, a file that got better also
 failed (asking for its number to be lowered), and a file with no entry had to
@@ -102,8 +102,7 @@ entries in it.
 
 **#624 closed that out.** `scripts/check-v19-types.mjs` is now a plain
 zero-error check: it runs `svelte-check` across `web/` and fails on any error,
-anywhere, with no per-file exemption. `web/svelte-check-ceiling.json` is kept
-only as the empty historical record of the ledger; nothing reads it anymore.
+anywhere, with no per-file exemption. The ledger file is gone.
 
 `due-next/+page.svelte` and `home/+page.svelte` were the two files still
 carrying tolerated errors, both for the same reason: a `{#snippet}` parameter

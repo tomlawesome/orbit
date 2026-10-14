@@ -5,9 +5,8 @@
  * `svelte-check` reads the SvelteKit front end in web/, which the root
  * `pnpm typecheck` cannot see: tsconfig.json sets "allowJs": false and
  * includes only **\/*.ts and **\/*.tsx, while web/src holds no TypeScript at
- * all. From #620 until #624 this ran against a per-file error ledger
- * (`web/svelte-check-ceiling.json`, kept only as an empty historical record
- * now) while the v19 rebuild worked file by file down to zero. That rebuild
+ * all. From #620 until #624 this ran against a per-file error ledger while
+ * the v19 rebuild worked file by file down to zero. That rebuild
  * is done, so this is now a plain gate: any `svelte-check` error, in any
  * file, fails the fast checks. No per-file tolerance is left anywhere.
  *

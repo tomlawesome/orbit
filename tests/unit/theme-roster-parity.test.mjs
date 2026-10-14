@@ -29,7 +29,7 @@ describe("the browser table (#1331)", () => {
   it("lists the five packs in order, each with the full set of fields", () => {
     expect(THEME_TABLE.map((row) => row.id)).toEqual(ALL_FIVE);
     for (const row of THEME_TABLE) {
-      for (const key of ["id", "title", "ground", "dark", "emphasis", "sun"]) {
+      for (const key of ["id", "title", "ground", "dark", "sun"]) {
         expect(row, `${row.id} has ${key}`).toHaveProperty(key);
       }
     }

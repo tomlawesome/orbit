@@ -116,7 +116,7 @@ describe("OIDC validation", () => {
     const stepUp = createAuthorizationUrl(config, metadata, {
       ...transaction,
       stepUpSessionId: "11111111-1111-4111-8111-111111111111",
-      intent: "primary_transfer",
+      intent: "system_create",
       maxAge: 0,
     });
     expect(stepUp.searchParams.get("max_age")).toBe("0");

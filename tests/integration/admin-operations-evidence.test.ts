@@ -5,9 +5,7 @@ import { getDb } from "@/db";
 import {
   auditLog,
   documentJobs,
-  dueEvents,
   households,
-  notificationDeliveries,
 } from "@/db/schema";
 import {
   cleanupIntegrationEnvironment,
@@ -19,11 +17,9 @@ import { callRoute, callRouteForSession, loadRoute } from "./support/request-eve
 const { GET: getOperations } = await loadRoute("admin/operations");
 const { GET: getDocumentHealth } = await loadRoute("admin/documents/health");
 const { GET: getDocumentRotation } = await loadRoute("admin/documents/rotation");
-const { POST: retryDelivery } = await loadRoute("admin/operations/deliveries/[deliveryId]");
 const { POST: retryDocumentJob } = await loadRoute("admin/operations/document-jobs/[jobId]");
 const { POST: verifySmtp } = await loadRoute("admin/operations/smtp-test");
 const { POST: verifyImap } = await loadRoute("admin/operations/imap-test");
-const { POST: retryMailboxNotifications } = await loadRoute("admin/operations/mailbox-notifications");
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -78,7 +74,6 @@ describe("administrator operations evidence", () => {
     }));
     expect(JSON.stringify(rotationPayload)).not.toContain("keyId");
 
-    const deliveryId = randomUUID();
     const documentJobId = randomUUID();
     const mutationCases: Array<{
       name: string;
@@ -86,18 +81,6 @@ describe("administrator operations evidence", () => {
       invoke: (session: IntegrationSession, headers?: Record<string, string>) => Promise<Response>;
       invokeWithoutSession: () => Promise<Response>;
     }> = [
-      {
-        name: "delivery",
-        body: JSON.stringify({ action: "retry", expectedStatus: "failed" }),
-        invoke: (session, headers) => callRouteForSession(retryDelivery, session, {
-          url: "http://127.0.0.1:3000/api/admin/operations/delivery",
-          method: "POST",
-          headers: { "content-type": "application/json", ...headers },
-          body: JSON.stringify({ action: "retry", expectedStatus: "failed" }),
-          params: { deliveryId },
-        }),
-        invokeWithoutSession: () => callRoute(retryDelivery, { url: "http://127.0.0.1:3000/api/admin/operations/deliveries", method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "retry", expectedStatus: "failed" }), params: { deliveryId } }),
-      },
       {
         name: "document-job",
         body: JSON.stringify({ action: "retry", expectedStatus: "failed" }),
@@ -120,17 +103,6 @@ describe("administrator operations evidence", () => {
         invoke: (session, headers) => callRouteForSession(verifyImap, session, { url: "http://127.0.0.1:3000/api/admin/operations/imap", method: "POST", headers }),
         invokeWithoutSession: () => callRoute(verifyImap, { url: "http://127.0.0.1:3000/api/admin/operations/imap-test", method: "POST" }),
       },
-      {
-        name: "mailbox-notification",
-        body: JSON.stringify({ action: "retry_exhausted" }),
-        invoke: (session, headers) => callRouteForSession(retryMailboxNotifications, session, {
-          url: "http://127.0.0.1:3000/api/admin/operations/mailbox-notification",
-          method: "POST",
-          headers: { "content-type": "application/json", ...headers },
-          body: JSON.stringify({ action: "retry_exhausted" }),
-        }),
-        invokeWithoutSession: () => callRoute(retryMailboxNotifications, { url: "http://127.0.0.1:3000/api/admin/operations/mailbox-notifications", method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "retry_exhausted" }) }),
-      },
     ];
     const auditBeforeDeniedMutations = (await getDb().select({ id: auditLog.id }).from(auditLog)).length;
     for (const mutation of mutationCases) {
@@ -147,34 +119,6 @@ describe("administrator operations evidence", () => {
     const fixture = await createIntegrationFixture("admin-evidence-corrections");
     const admin = await fixture.session("admin");
     const db = getDb();
-    const beforeEmptyMailboxRetry = (await db.select({ id: auditLog.id }).from(auditLog).where(eq(auditLog.action, "imap_notification_delivery_retried"))).length;
-    const emptyMailboxRetry = await callRouteForSession(retryMailboxNotifications, admin, {
-      url: "http://127.0.0.1:3000/api/admin/operations/mailbox-notifications",
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "retry_exhausted" }),
-    });
-    expect(emptyMailboxRetry.status).toBe(200);
-    expect(emptyMailboxRetry.headers.get("cache-control")).toBe("no-store");
-    expect(await json(emptyMailboxRetry)).toEqual({ queued: 0 });
-    expect((await db.select({ id: auditLog.id }).from(auditLog).where(eq(auditLog.action, "imap_notification_delivery_retried"))).length).toBe(beforeEmptyMailboxRetry);
-
-    const [event] = await db.insert(dueEvents).values({
-      householdId: fixture.household.id,
-      itemId: fixture.item.id,
-      kind: "renewal",
-      dueDate: "2030-01-01",
-    }).returning({ id: dueEvents.id });
-    const [delivery] = await db.insert(notificationDeliveries).values({
-      householdId: fixture.household.id,
-      eventId: event.id,
-      userId: fixture.users.admin.id,
-      channel: "email",
-      scheduledFor: new Date(),
-      status: "failed",
-      attempts: 5,
-      lastError: "smtp_unavailable",
-    }).returning({ id: notificationDeliveries.id });
     const [job] = await db.insert(documentJobs).values({
       documentId: fixture.document.id,
       kind: "purge",
@@ -182,35 +126,6 @@ describe("administrator operations evidence", () => {
       attempts: 5,
       lastError: "purge_failed",
     }).returning({ id: documentJobs.id });
-
-    const beforeDeliveryAudit = (await db.select({ id: auditLog.id }).from(auditLog).where(eq(auditLog.entityId, delivery.id))).length;
-    await expectError(await callRouteForSession(retryDelivery, admin, {
-      url: "http://127.0.0.1:3000/api/admin/operations/deliveries/invalid",
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "retry", expectedStatus: "failed" }),
-      params: { deliveryId: "invalid" },
-    }), 409, "operation_conflict");
-    expect((await db.select({ id: auditLog.id }).from(auditLog).where(eq(auditLog.entityId, delivery.id))).length).toBe(beforeDeliveryAudit);
-
-    const acceptedDelivery = await callRouteForSession(retryDelivery, admin, {
-      url: "http://127.0.0.1:3000/api/admin/operations/deliveries",
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "retry", expectedStatus: "failed" }),
-      params: { deliveryId: delivery.id },
-    });
-    expect(acceptedDelivery.status).toBe(200);
-    expect(acceptedDelivery.headers.get("cache-control")).toBe("no-store");
-    const replayedDelivery = await callRouteForSession(retryDelivery, admin, {
-      url: "http://127.0.0.1:3000/api/admin/operations/deliveries",
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "retry", expectedStatus: "failed" }),
-      params: { deliveryId: delivery.id },
-    });
-    await expectError(replayedDelivery, 409, "operation_conflict");
-    expect((await db.select({ id: auditLog.id }).from(auditLog).where(and(eq(auditLog.entityId, delivery.id), eq(auditLog.action, "notification_delivery_retried")))).length).toBe(1);
 
     const wrongDocumentState = await callRouteForSession(retryDocumentJob, admin, {
       url: "http://127.0.0.1:3000/api/admin/operations/document-jobs",

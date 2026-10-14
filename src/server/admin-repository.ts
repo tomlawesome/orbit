@@ -1,13 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, externalIdentities, households, instanceAuthority, localCredentials, memberships, sections, sessions, users } from "@/db/schema";
+import { auditLog, households, instanceAuthority, memberships, sections, sessions, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY, ADMINISTRATOR_LOCK_KEY } from "@/lib/auth/authority-locks";
-import type { RecentAuthentication } from "@/lib/auth/recent-auth";
 import { requireUuid } from "@/lib/uuid";
 import { cloneSections } from "@/lib/workspace";
-import { identitiesAreUsable } from "@/server/local-credentials";
 import { openInstanceMetadataReader, type MetadataCipher, type MetadataFieldState } from "@/server/metadata/fields";
 import { requireActiveAdministrator, requireInstanceAdministrator } from "@/server/authorization";
 import { sectionSlug } from "@/server/workspace-access";
@@ -312,112 +310,6 @@ export async function setInstanceUserDisabled(
       entityId: targetUserId,
       action: disabled ? "account_disabled" : "account_enabled",
       changes: { disabled },
-    });
-  });
-
-  return instanceUserList();
-}
-
-/**
- * Moves primary administrator authority to another active administrator
- * (#263). One atomic transaction under the administrator lock, so a
- * concurrent disable, demotion or second transfer serializes behind it and
- * re-reads the authority row it may have moved. Only the current primary may
- * transfer; the target must be a different, active administrator with a
- * usable sign-in method — a password or a linked provider identity
- * (ADR-0023 §6). The former primary remains an ordinary active administrator.
- *
- * Administrator and primary status are read from the database on every
- * mutation rather than cached in sessions, so existing sessions see the new
- * authority immediately; nothing needs revoking.
- *
- * The caller must have just been re-challenged: `recentAuthentication` is the
- * receipt `requireRecentAuthentication` returns (ADR-0023 §5), and it replaces
- * #263's fifteen-minute session window, which is deleted. The receipt is
- * checked here rather than trusted, so this function cannot be reached with
- * somebody else's challenge or one earned for a different action.
- */
-export async function transferPrimaryAdministrator(
-  actorUserId: string,
-  recentAuthentication: RecentAuthentication,
-  targetUserId: string,
-): Promise<InstanceUserList> {
-  requireUuid(targetUserId, "User");
-  if (recentAuthentication.userId !== actorUserId || recentAuthentication.intent !== "primary_transfer") {
-    throw new AppError(
-      "recent_authentication_required",
-      "Confirm it is you before transferring primary administrator authority",
-      403,
-    );
-  }
-
-  await getDb().transaction(async (transaction) => {
-    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ADMINISTRATOR_LOCK_KEY}, 0))`);
-
-    await requireActiveAdministrator(actorUserId, transaction);
-
-    const primary = await primaryAdministratorId(transaction);
-    if (primary !== actorUserId) {
-      throw new AppError(
-        "primary_administrator_required",
-        "Only the primary administrator can transfer this authority",
-        403,
-      );
-    }
-
-    if (targetUserId === actorUserId) {
-      throw new AppError(
-        "transfer_target_ineligible",
-        "Choose a different active administrator to receive primary authority",
-        409,
-      );
-    }
-    const [target] = await transaction
-      .select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt })
-      .from(users).where(eq(users.id, targetUserId)).limit(1);
-    if (!target || !target.administrator || target.disabledAt) {
-      throw new AppError(
-        "transfer_target_ineligible",
-        "Choose a different active administrator to receive primary authority",
-        409,
-      );
-    }
-    /* The target must be able to sign in. Since M7 that is a password OR a
-       linked provider identity (ADR-0023 §6): on a local-only instance nobody
-       has an identity, and requiring one would leave the authority
-       untransferable.
-       A password always counts; an identity only counts while its provider
-       is still switched on (#1151 SS1-S1) -- the same rule the unlink checks
-       in local-credentials.ts already apply to their own caller. Without it,
-       an identity row left over from a since-disabled provider satisfied
-       this check while giving the target no way to actually sign in. */
-    const [identity] = await transaction
-      .select({ id: externalIdentities.id })
-      .from(externalIdentities)
-      .where(eq(externalIdentities.userId, targetUserId))
-      .limit(1);
-    const [credential] = await transaction
-      .select({ userId: localCredentials.userId })
-      .from(localCredentials)
-      .where(eq(localCredentials.userId, targetUserId))
-      .limit(1);
-    if (!credential && !(identity && identitiesAreUsable())) {
-      throw new AppError(
-        "transfer_target_ineligible",
-        "Choose a different active administrator to receive primary authority",
-        409,
-      );
-    }
-
-    await transaction.update(instanceAuthority)
-      .set({ primaryUserId: targetUserId, updatedAt: new Date() });
-    await transaction.insert(auditLog).values({
-      householdId: null,
-      actorUserId,
-      entityType: "user",
-      entityId: targetUserId,
-      action: "primary_administrator_transferred",
-      changes: { from: actorUserId, to: targetUserId },
     });
   });
 

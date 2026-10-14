@@ -34,8 +34,7 @@ const defaultStorage = () => {
 
 /**
  * The held commands a previous visit stashed: a list, one per completion,
- * in the same shape the belt and the pocket write (an older single-slot
- * `{ command }` is read too).
+ * in the same shape the pocket writes.
  * @param {StashStorage | null} [storage]
  * @returns {object[]}
  */
@@ -44,26 +43,10 @@ export function readHeldCompletionStash(storage = defaultStorage()) {
     const raw = storage?.getItem(HELD_COMPLETION_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return (Array.isArray(parsed) ? parsed : [parsed.command].filter(Boolean)).map(todaysShape);
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
-}
-
-/**
- * A stash written before ADR-0034 carried a next due date and the activity's
- * kind, which the engine now refuses; the completion is still the member's,
- * so it is sent in today's shape.
- * @param {any} command
- */
-function todaysShape(command) {
-  if (command?.type !== "item.complete") return command;
-  const { nextDate: _nextDate, ...rest } = command;
-  if (rest.activity && typeof rest.activity === "object") {
-    const { kind: _kind, nextDate: _activityNext, ...activity } = rest.activity;
-    rest.activity = activity;
-  }
-  return rest;
 }
 
 /** @param {object[]} commands @param {StashStorage | null} storage */

@@ -9,8 +9,8 @@ import { DEFAULT_THEME, THEME_PACKS, themeOrDefault } from "../../web/src/lib/th
  * #865: atlas left the visible roster at #480 but its tokens and its place in
  * four hand-written copies of the roster stayed, and two of those four
  * disagreed about the default (`starchart` vs `afterdark`). web/src/lib/
- * theme.js is now the one list and the one default; Chrome.svelte,
- * settings/+page.svelte and tour/emphasis.js all import it directly.
+ * theme.js is now the one list and the one default; Chrome.svelte
+ * and settings/+page.svelte import it directly.
  *
  * app.html's pre-paint script is the one reader that cannot import it — it
  * runs synchronously before first paint, and any import would be the flash
@@ -85,10 +85,6 @@ describe("the theme roster, from one source (#865)", () => {
 describe("themeOrDefault (#865)", () => {
   it("honours a preference that is still on the roster", () => {
     for (const theme of THEME_PACKS) expect(themeOrDefault(theme)).toBe(theme);
-  });
-
-  it("resolves a removed theme (atlas) to after dark", () => {
-    expect(themeOrDefault("atlas")).toBe(DEFAULT_THEME);
   });
 
   it("resolves a string that was never a theme to after dark", () => {

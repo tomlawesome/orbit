@@ -1,39 +1,15 @@
 import { eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import { auditLog, instanceAuthority, sessions, users } from "@/db/schema";
-import {
-  sealStepUpProof,
-  stepUpProofCookieName,
-  type RecentAuthentication,
-} from "@/lib/auth/recent-auth";
-import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
+import { auditLog, instanceAuthority, users } from "@/db/schema";
 import {
   setInstanceAdministrator,
   setInstanceUserDisabled,
-  transferPrimaryAdministrator,
   listInstanceUsers,
 } from "@/server/admin-repository";
-import {
-  cleanupIntegrationEnvironment,
-  createIntegrationFixture,
-  type IntegrationSession,
-} from "./support/fixtures";
-import { callRouteForSession, loadRoute } from "./support/request-event";
-
-/* The transfer targets below are provider-backed accounts, and an identity
-   only counts as a way in while the provider is switched on (#1151 SS1-S1),
-   so the key is on for this file and restored at the end. */
-const previousOidcKey = process.env.ORBIT_AUTH_OIDC;
-process.env.ORBIT_AUTH_OIDC = "true";
-resetAuthConfigForTests();
-
-const { POST: transferPrimary } = await loadRoute("admin/primary");
+import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 
 afterAll(async () => {
-  if (previousOidcKey === undefined) delete process.env.ORBIT_AUTH_OIDC;
-  else process.env.ORBIT_AUTH_OIDC = previousOidcKey;
-  resetAuthConfigForTests();
   await cleanupIntegrationEnvironment();
 });
 
@@ -45,31 +21,6 @@ afterEach(async () => {
 
 async function seatPrimary(userId: string): Promise<void> {
   await getDb().insert(instanceAuthority).values({ primaryUserId: userId });
-}
-
-/**
- * The receipt `requireRecentAuthentication` returns (ADR-0023 §5). #263's
- * fifteen-minute session window is gone, so what the repository now demands is
- * proof that this actor was just challenged FOR THIS action; the challenge
- * itself — password or step-up — is exercised end to end in
- * `recent-authentication.test.ts`.
- */
-function challenged(userId: string, intent = "primary_transfer"): RecentAuthentication {
-  return { userId, intent: intent as RecentAuthentication["intent"], method: "password" };
-}
-
-/** The cookie a step-up leaves behind, for the route's own challenge. */
-async function stepUpCookie(session: IntegrationSession): Promise<string> {
-  const config = getAuthConfig();
-  const proof = await sealStepUpProof(session.sessionId, "primary_transfer", config);
-  return `${session.headers.cookie}; ${stepUpProofCookieName(config)}=${proof}`;
-}
-
-async function primaryRow(): Promise<string | null> {
-  const [row] = await getDb()
-    .select({ primaryUserId: instanceAuthority.primaryUserId })
-    .from(instanceAuthority);
-  return row?.primaryUserId ?? null;
 }
 
 describe("primary administrator authority (#263)", () => {
@@ -108,131 +59,6 @@ describe("primary administrator authority (#263)", () => {
     await expect(
       getDb().insert(instanceAuthority).values({ singleton: false, primaryUserId: fixture.users.owner.id }),
     ).rejects.toMatchObject({ cause: { code: "23514" } });
-
-    await fixture.cleanup();
-  });
-
-  it("transfers atomically: only the challenged primary, only to an eligible target, audited, former stays admin", async () => {
-    const fixture = await createIntegrationFixture("primary-transfer");
-    const primary = fixture.users.admin;
-    await seatPrimary(primary.id);
-    await setInstanceAdministrator(primary.id, fixture.users.owner.id, true);
-    const primarySession = await fixture.session("admin");
-
-    // A non-primary administrator cannot transfer.
-    await expect(
-      transferPrimaryAdministrator(fixture.users.owner.id, challenged(fixture.users.owner.id), primary.id),
-    ).rejects.toMatchObject({ code: "primary_administrator_required" });
-
-    // Ineligible targets: self, a non-administrator, a disabled account.
-    await expect(
-      transferPrimaryAdministrator(primary.id, challenged(primary.id), primary.id),
-    ).rejects.toMatchObject({ code: "transfer_target_ineligible" });
-    await expect(
-      transferPrimaryAdministrator(primary.id, challenged(primary.id), fixture.users.member.id),
-    ).rejects.toMatchObject({ code: "transfer_target_ineligible" });
-    await fixture.disableUser("disabled");
-    await expect(
-      transferPrimaryAdministrator(primary.id, challenged(primary.id), fixture.users.disabled.id),
-    ).rejects.toMatchObject({ code: "transfer_target_ineligible" });
-
-    // Somebody else's challenge, or one earned for another action, is not a
-    // challenge for this one (ADR-0023 §5).
-    await expect(
-      transferPrimaryAdministrator(primary.id, challenged(fixture.users.owner.id), fixture.users.owner.id),
-    ).rejects.toMatchObject({ code: "recent_authentication_required" });
-    await expect(
-      transferPrimaryAdministrator(primary.id, challenged(primary.id, "password_change"), fixture.users.owner.id),
-    ).rejects.toMatchObject({ code: "recent_authentication_required" });
-    expect(await primaryRow()).toBe(primary.id);
-
-    /* An hour-old session transfers, where #263's window refused it: the
-       fifteen minutes are deleted and the challenge is what counts. */
-    await getDb().update(sessions)
-      .set({ createdAt: new Date(Date.now() - 60 * 60 * 1000) })
-      .where(eq(sessions.id, primarySession.sessionId));
-    const listed = await transferPrimaryAdministrator(primary.id, challenged(primary.id), fixture.users.owner.id);
-    expect(await primaryRow()).toBe(fixture.users.owner.id);
-    const former = listed.users.find((user) => user.id === primary.id);
-    expect(former).toMatchObject({ isInstanceAdmin: true, isPrimaryAdministrator: false, disabledAt: null });
-    expect(listed.users.find((user) => user.id === fixture.users.owner.id)).toMatchObject({ isPrimaryAdministrator: true });
-    const audits = await getDb().select({ id: auditLog.id }).from(auditLog)
-      .where(eq(auditLog.action, "primary_administrator_transferred"));
-    expect(audits.length).toBeGreaterThanOrEqual(1);
-
-    // Authority has moved: the former primary can now be demoted, and a
-    // repeated transfer from the former primary is rejected.
-    await expect(
-      transferPrimaryAdministrator(primary.id, challenged(primary.id), fixture.users.owner.id),
-    ).rejects.toMatchObject({ code: "primary_administrator_required" });
-    await setInstanceAdministrator(fixture.users.owner.id, primary.id, false);
-
-    await fixture.cleanup();
-  });
-
-  it("serializes a concurrent transfer and disable so authority is never orphaned", async () => {
-    const fixture = await createIntegrationFixture("primary-race");
-    const primary = fixture.users.admin;
-    await seatPrimary(primary.id);
-    await setInstanceAdministrator(primary.id, fixture.users.owner.id, true);
-    // Both run at once under the administrator lock: whichever wins, the
-    // instance ends with exactly one primary who is an active administrator.
-    const [transferOutcome, disableOutcome] = await Promise.allSettled([
-      transferPrimaryAdministrator(primary.id, challenged(primary.id), fixture.users.owner.id),
-      setInstanceUserDisabled(primary.id, fixture.users.owner.id, true),
-    ]);
-    const seated = await primaryRow();
-    expect(seated).not.toBeNull();
-    const [seatedUser] = await getDb()
-      .select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt })
-      .from(users).where(eq(users.id, seated as string));
-    expect(seatedUser.administrator).toBe(true);
-    expect(seatedUser.disabledAt).toBeNull();
-    // At least one of the two operations must have concluded decisively.
-    expect([transferOutcome.status, disableOutcome.status]).toContain("fulfilled");
-
-    await fixture.cleanup();
-  });
-
-  it("exposes transfer over the API with CSRF and admin gating", async () => {
-    const fixture = await createIntegrationFixture("primary-route");
-    const primary = fixture.users.admin;
-    await seatPrimary(primary.id);
-    await setInstanceAdministrator(primary.id, fixture.users.owner.id, true);
-
-    const memberSession = await fixture.session("member");
-    const denied = await callRouteForSession(transferPrimary, memberSession, {
-      url: "http://orbit.test/api/admin/primary",
-      method: "POST",
-      body: JSON.stringify({ targetUserId: fixture.users.owner.id }),
-      headers: { "Content-Type": "application/json" },
-    });
-    expect(denied.status).toBe(403);
-
-    const primarySession = await fixture.session("admin");
-    /* The fixture users sign in with a provider, so the route's challenge is
-       the step-up proof; the password half is exercised in
-       `recent-authentication.test.ts`. Without it the transfer is refused. */
-    const unchallenged = await callRouteForSession(transferPrimary, primarySession, {
-      url: "http://orbit.test/api/admin/primary",
-      method: "POST",
-      body: JSON.stringify({ targetUserId: fixture.users.owner.id }),
-      headers: { "Content-Type": "application/json" },
-    });
-    expect(unchallenged.status).toBe(403);
-    expect(await primaryRow()).toBe(primary.id);
-
-    const response = await callRouteForSession(transferPrimary, primarySession, {
-      url: "http://orbit.test/api/admin/primary",
-      method: "POST",
-      body: JSON.stringify({ targetUserId: fixture.users.owner.id }),
-      headers: { "Content-Type": "application/json", cookie: await stepUpCookie(primarySession) },
-    });
-    expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("no-store");
-    const payload = await response.json() as { users: Array<{ id: string; isPrimaryAdministrator: boolean }> };
-    expect(payload.users.find((user) => user.id === fixture.users.owner.id)?.isPrimaryAdministrator).toBe(true);
-    expect(await primaryRow()).toBe(fixture.users.owner.id);
 
     await fixture.cleanup();
   });

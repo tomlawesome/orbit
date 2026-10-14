@@ -76,15 +76,6 @@ export function getBootPhase(): BootPhase {
 }
 
 /**
- * Test-only: set the phase directly, so a route or door-state test can
- * exercise the "running" branch without paying for the full mocked
- * `registerNode` sequence below.
- */
-export function setBootPhaseForTests(phase: BootPhase | undefined): void {
-  bootPhase = phase ?? "starting";
-}
-
-/**
  * Validates authentication configuration in the Node runtime without making
  * startup or public health depend on private runtime configuration.
  */
