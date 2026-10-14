@@ -20,7 +20,7 @@ import { imapIngestionMessages } from "@/db/schema";
 import { getImapIngestionConfig } from "./mailbox-config";
 import type { ImapIngestionConfig } from "./core/config";
 import { ensureRelayAliases, relayAddressFor, rotateRelay, setRelayIngestPaused, type RelayRotationMode } from "./relays";
-import { hasVerifiedSenderAddress, listSenderAddresses, seedSenderAddress } from "./sender-addresses";
+import { hasVerifiedSenderAddress, listSenderAddresses, seedSenderAddress, withSenderLock } from "./sender-addresses";
 
 /** Mail-in is configured, switched on, and this account has a mailbox. */
 export const RELAY_LISTENING = "connected · listening";
@@ -120,9 +120,13 @@ export async function readRelaySettings(
   /* Seeding here, on the member's own read, is what puts the account address
      in front of them without anybody typing it — still unverified, because
      Orbit knowing an address is not the member proving they send from it. */
-  await seedSenderAddress(user.id);
-  const usable = await hasVerifiedSenderAddress(user.id);
-  const [senderRow] = await listSenderAddresses(user.id);
+  const { usable, senderRow } = await withSenderLock(user.id, async (locked) => {
+    await seedSenderAddress(user.id, {}, locked);
+    return {
+      usable: await hasVerifiedSenderAddress(user.id, locked),
+      senderRow: (await listSenderAddresses(user.id, {}, locked))[0],
+    };
+  });
   const sender: RelaySender | null = senderRow?.address
     ? {
       address: senderRow.address,
