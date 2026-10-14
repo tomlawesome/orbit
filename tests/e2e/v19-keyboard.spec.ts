@@ -648,6 +648,9 @@ test("inbox: reachable via the account panel, and keyboard-navigable", async ({ 
   }
 });
 
+/** The test identity provider (tests/oidc/server.mjs); its end-session path sends the browser back to Orbit's /logout. */
+const PROVIDER_ORIGIN = "https://orbit-oidc:4443";
+
 test("sign out: the one-press control ends the session by keyboard alone", async ({ page }) => {
   test.setTimeout(60_000);
   const household = await arriveAtHome(page);
@@ -657,6 +660,31 @@ test("sign out: the one-press control ends the session by keyboard alone", async
     await tabTo(page, { selector: ".signout" }, { screen: "home account panel" });
     const signOut = await currentFocus(page);
     expect(signOut?.focusVisible, "home: the sign-out control has no visible focus indicator").toBe(true);
+    /* The goodbye hands the browser to the identity provider's end-session
+       address, and the provider sends it back to Orbit's /logout. The /logout
+       the URL shows first is only a replaceState during the goodbye, so
+       navigating on at once races that hand-off (Firefox lost the race in
+       pipeline 2588: "Navigation to /api/auth/login is interrupted by another
+       navigation to /logout"). Watch for the real return: a navigation to
+       Orbit's /logout that was redirected from the provider. Registered before
+       the press so it cannot be missed; settled to true/false so a failure
+       earlier in the test leaves no unhandled rejection. */
+    const cameBackFromProvider = page
+      .waitForResponse(
+        (response) => {
+          const request = response.request();
+          return (
+            request.isNavigationRequest() &&
+            new URL(response.url()).pathname === "/logout" &&
+            (request.redirectedFrom()?.url().startsWith(`${PROVIDER_ORIGIN}/`) ?? false)
+          );
+        },
+        { timeout: 30_000 },
+      )
+      .then(
+        () => true,
+        () => false,
+      );
     await page.keyboard.press("Enter"); // revokes the session, then plays the descent (one press: owner, 2026-10-06)
 
     await expect(page).toHaveURL(/\/logout$/, { timeout: 15_000 });
@@ -665,6 +693,9 @@ test("sign out: the one-press control ends the session by keyboard alone", async
       return (await response.json()) as { authenticated?: boolean };
     });
     expect(session.authenticated, "sign out: the session is still authenticated after the sign-out control fired").toBeFalsy();
+
+    expect(await cameBackFromProvider, "sign out: the browser never came back from the provider's end-session page to /logout").toBe(true);
+    await page.waitForLoadState("load");
 
     /* Cleanup needs a live session again — sign back in the same keyboard way
        the arrival journey proved, so this test's own household can still be
