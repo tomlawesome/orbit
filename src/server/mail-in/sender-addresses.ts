@@ -261,9 +261,11 @@ export async function hasVerifiedSenderAddress(userId: string, executor: Metadat
  * place the member's send times are kept.
  *
  * Only a row that READS as a different address is dropped. A row that cannot
- * be decrypted proves nothing about which address it holds (a locked or
- * damaged value may well be the verified, registered one), so it is left
- * alone, and while one remains no replacement is seeded beside it.
+ * be read while the key is locked proves nothing about which address it holds
+ * (it may well be the verified, registered one), so it is left alone. With
+ * the key working, a row that fails authentication is damaged and can never
+ * be read again: it is dropped and the registered address seeded afresh,
+ * unverified, so the member is not stranded.
  */
 export async function seedSenderAddress(
   userId: string,
@@ -301,9 +303,11 @@ export async function seedSenderAddress(
   let matching: typeof mailInSenderAddresses.$inferSelect | undefined;
   let unreadable: typeof mailInSenderAddresses.$inferSelect | undefined;
   const stale: Array<typeof mailInSenderAddresses.$inferSelect> = [];
+  const damaged: Array<typeof mailInSenderAddresses.$inferSelect> = [];
   for (const row of existingRows) {
-    const value = readAddress(reader, row).value;
-    if (value === null) unreadable ??= row;
+    const { value, state } = readAddress(reader, row);
+    if (state === "metadata_integrity_failed") damaged.push(row);
+    else if (value === null) unreadable ??= row;
     else if (normalizeSenderAddress(value) === address) matching ??= row;
     else stale.push(row);
   }
@@ -314,19 +318,28 @@ export async function seedSenderAddress(
   /* The send times are the member's, not the address's, and they survive any
      change of address: every replaced row's times are merged into wherever
      the member's row ends up. */
-  const staleTimes = stale.flatMap((row) => row.checkSentAt);
+  const staleTimes = [...stale, ...damaged].flatMap((row) => row.checkSentAt);
   const removeStale = () => executor.delete(mailInSenderAddresses).where(and(
     eq(mailInSenderAddresses.userId, userId),
     inArray(mailInSenderAddresses.id, staleIds),
   ));
 
+  /* Dropped first: a damaged row still holds its blind index, which is most
+     likely the registered address's, and would otherwise block the reseed. */
+  if (damaged.length > 0) {
+    await executor.delete(mailInSenderAddresses).where(and(
+      eq(mailInSenderAddresses.userId, userId),
+      inArray(mailInSenderAddresses.id, damaged.map((row) => row.id)),
+    ));
+  }
+
   const home = matching ?? unreadable;
   if (home) {
-    if (stale.length > 0) {
+    if (staleTimes.length > 0 || stale.length > 0) {
       await executor.update(mailInSenderAddresses)
         .set({ checkSentAt: mergeChecks([...home.checkSentAt, ...staleTimes], now), updatedAt: now })
         .where(eq(mailInSenderAddresses.id, home.id));
-      await removeStale();
+      if (stale.length > 0) await removeStale();
     }
     return;
   }

@@ -22,10 +22,12 @@ import { callRoute, callRouteForSession, loadRoute } from "./support/request-eve
  * Issue #1403, the review of the decision 7c code. One failing case per
  * finding, written from the behaviour the review asked for:
  *
- *   1. A stored sender row that cannot be decrypted is never deleted by a
- *      relay read or a send attempt (a verified row stays verified); with
- *      several rows, only rows that decrypt to an address other than the
- *      registered one are removed.
+ *   1. With the key working, a stored sender row that fails authentication is
+ *      damaged: a relay read or a send attempt replaces it with an unverified
+ *      row for the registered address (verification is earned again; release
+ *      audit, #1316). With several rows, rows that decrypt to another address
+ *      go too, and the registered row stays. (The locked-key case, where such
+ *      a row is kept, is in mail-relay-sender-read.test.ts.)
  *   2. When the registered address changes outside the settings screen (the
  *      single sign-on path), mail from the old address stops attributing to
  *      the member and an outstanding link for it stops verifying, with no
@@ -160,51 +162,55 @@ async function providerReportsNewAddress(userId: string, email: string) {
   });
 }
 
-describe("finding 1: an unreadable stored address is never deleted", () => {
-  it("keeps an unreadable VERIFIED row, still verified, through a relay read", async () => {
+/** The damaged row is gone and one unverified row stands in its place. */
+async function expectReplaced(rowId: string) {
+  const rows = await rowsOf(fixture.users.member.id);
+  expect(rows.map((row) => row.id)).not.toContain(rowId);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].verifiedAt).toBeNull();
+}
+
+describe("finding 1: a damaged stored address is replaced, unverified", () => {
+  it("replaces a damaged VERIFIED row with an unverified one through a relay read", async () => {
     await turnMailInOn();
     const rowId = await seedUnreadableRow(fixture.users.member.id);
     await getDb().update(mailInSenderAddresses).set({ verifiedAt: new Date() }).where(eq(mailInSenderAddresses.id, rowId));
 
     await readRelaySettings(memberActor());
 
-    const rows = await rowsOf(fixture.users.member.id);
-    expect(rows.map((row) => row.id)).toContain(rowId);
-    expect(rows.find((row) => row.id === rowId)?.verifiedAt).not.toBeNull();
+    await expectReplaced(rowId);
   });
 
-  it("keeps an unreadable VERIFIED row, still verified, through a send attempt", async () => {
+  it("replaces a damaged VERIFIED row with an unverified one through a send attempt", async () => {
     const rowId = await seedUnreadableRow(fixture.users.member.id);
     await getDb().update(mailInSenderAddresses).set({ verifiedAt: new Date() }).where(eq(mailInSenderAddresses.id, rowId));
     const session = await fixture.session("member");
 
     await send(session);
 
-    const rows = await rowsOf(fixture.users.member.id);
-    expect(rows.map((row) => row.id)).toContain(rowId);
-    expect(rows.find((row) => row.id === rowId)?.verifiedAt).not.toBeNull();
+    await expectReplaced(rowId);
   });
 
-  it("keeps an unreadable unchecked row through a relay read", async () => {
+  it("replaces a damaged unchecked row through a relay read", async () => {
     await turnMailInOn();
     const rowId = await seedUnreadableRow(fixture.users.member.id);
 
     await readRelaySettings(memberActor());
 
-    expect((await rowsOf(fixture.users.member.id)).map((row) => row.id)).toContain(rowId);
+    await expectReplaced(rowId);
   });
 
-  it("keeps an unreadable unchecked row through a send attempt", async () => {
+  it("replaces a damaged unchecked row through a send attempt", async () => {
     const rowId = await seedUnreadableRow(fixture.users.member.id);
     const session = await fixture.session("member");
 
     await send(session);
 
-    expect((await rowsOf(fixture.users.member.id)).map((row) => row.id)).toContain(rowId);
+    await expectReplaced(rowId);
   });
 
   /* Three rows for one member: the registered address, another readable
-     address, and an unreadable one. Only the other readable address goes. */
+     address, and a damaged one. Only the registered address stays. */
   async function threeRows() {
     const userId = fixture.users.member.id;
     await seedSenderAddress(userId);
@@ -224,27 +230,27 @@ describe("finding 1: an unreadable stored address is never deleted", () => {
     return { registered: registered.id, other: other.id, unreadable: unreadable.id };
   }
 
-  it("with several rows, a relay read removes only the row that reads as a different address", async () => {
+  it("with several rows, a relay read keeps only the registered address", async () => {
     await turnMailInOn();
     const ids = await threeRows();
 
     await readRelaySettings(memberActor());
 
     const kept = (await rowsOf(fixture.users.member.id)).map((row) => row.id);
-    expect(kept).toContain(ids.registered);
-    expect(kept).toContain(ids.unreadable);
+    expect(kept).toEqual([ids.registered]);
+    expect(kept).not.toContain(ids.unreadable);
     expect(kept).not.toContain(ids.other);
   });
 
-  it("with several rows, a send attempt removes only the row that reads as a different address", async () => {
+  it("with several rows, a send attempt keeps only the registered address", async () => {
     const ids = await threeRows();
     const session = await fixture.session("member");
 
     await send(session);
 
     const kept = (await rowsOf(fixture.users.member.id)).map((row) => row.id);
-    expect(kept).toContain(ids.registered);
-    expect(kept).toContain(ids.unreadable);
+    expect(kept).toEqual([ids.registered]);
+    expect(kept).not.toContain(ids.unreadable);
     expect(kept).not.toContain(ids.other);
   });
 });

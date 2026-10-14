@@ -1,7 +1,10 @@
+import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, imapRecipientAliases, mailInMailbox, mailInRelays, mailInSecrets, mailInSenderAddresses } from "@/db/schema";
+import { resetDocumentConfigForTests } from "@/server/documents/config";
+import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
 import { listSenderAddresses, seedSenderAddress } from "@/server/mail-in/sender-addresses";
@@ -202,5 +205,72 @@ describe("the sender module's view carries the link's expiry (decision 7c)", () 
 
     expect(lapsed.verified).toBe(false);
     expect(lapsed.verificationPending).toBe(false);
+  });
+});
+
+/*
+ * M-S10: a member's sending-address row whose stored value cannot be read
+ * while the instance key works must not strand them. The relay read mends it:
+ * the unreadable row goes and the member's registered address is seeded again,
+ * unchecked. With the key locked nothing can be told apart from "unreadable",
+ * so the row is kept.
+ */
+describe("M-S10: an unreadable stored sender address", () => {
+  const rowsOf = (userId: string) => getDb().select().from(mailInSenderAddresses)
+    .where(eq(mailInSenderAddresses.userId, userId));
+
+  async function corruptRow(userId: string) {
+    await seedSenderAddress(userId);
+    const [row] = await rowsOf(userId);
+    await getDb().update(mailInSenderAddresses)
+      .set({ addressEnc: randomBytes(48).toString("base64") })
+      .where(eq(mailInSenderAddresses.id, row.id));
+    return row.id;
+  }
+
+  it("the relay read leaves one unchecked row for the registered address, and the corrupt row is gone", async () => {
+    await turnMailInOn();
+    const userId = fixture.users.member.id;
+    const corruptId = await corruptRow(userId);
+
+    const reading = await readRelaySettings({ id: userId, isInstanceAdmin: false });
+
+    const rows = await rowsOf(userId);
+    expect(rows).toHaveLength(1);
+    expect(rows.map((row) => row.id)).not.toContain(corruptId);
+    expect(rows[0].verifiedAt).toBeNull();
+    expect(reading.sender).toEqual({
+      address: fixture.users.member.email,
+      verified: false,
+      verificationPending: false,
+      expiresAt: null,
+    });
+    const [view] = await listSenderAddresses(userId);
+    expect(view.address).toBe(fixture.users.member.email);
+    expect(view.verified).toBe(false);
+  });
+
+  it("with the metadata key locked, the unreadable row is kept", async () => {
+    await turnMailInOn();
+    const userId = fixture.users.member.id;
+    const corruptId = await corruptRow(userId);
+    const [before] = await rowsOf(userId);
+    const original = process.env.DOCUMENT_KEK;
+    delete process.env.DOCUMENT_KEK;
+    resetDocumentConfigForTests();
+    resetMetadataKeyCacheForTests();
+    try {
+      await readRelaySettings({ id: userId, isInstanceAdmin: false }).catch(() => undefined);
+    } finally {
+      if (original === undefined) delete process.env.DOCUMENT_KEK;
+      else process.env.DOCUMENT_KEK = original;
+      resetDocumentConfigForTests();
+      resetMetadataKeyCacheForTests();
+    }
+
+    const rows = await rowsOf(userId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(corruptId);
+    expect(rows[0].addressEnc).toBe(before.addressEnc);
   });
 });

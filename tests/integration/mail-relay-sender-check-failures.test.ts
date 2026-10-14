@@ -34,9 +34,10 @@ import { callRouteForSession, loadRoute } from "./support/request-event";
  *      database driver's own.)
  *   2. A mailer that throws is a 503 with a stable code, not 500
  *      `internal_error`; the attempt still counts.
- *   3. A stored address that cannot be read while the key IS available is a
- *      distinct refusal (409 `sender_address_unreadable`), not the "key
- *      unavailable" 503 `metadata_locked`; the relay read reports the state.
+ *   3. A stored address that fails authentication while the key IS available
+ *      is damaged, not locked: the press replaces it with the registered
+ *      address, unchecked, and sends the check there; the relay read shows
+ *      the registered address (release audit, #1316).
  *   4. The send times belong to the member, not the address: changing the
  *      registered address, even to one another member already claims, does
  *      not hand back the five sends.
@@ -244,26 +245,27 @@ describe("finding 3: a damaged stored address while the key is available", () =>
     return row.id;
   }
 
-  it("answers 409 sender_address_unreadable, not the key-unavailable 503, and sends nothing", async () => {
-    await damagedRow();
+  it("replaces the damaged row and sends the check to the registered address, not the key-unavailable 503", async () => {
+    const rowId = await damagedRow();
 
     const response = await send();
 
-    expect(response.status).toBe(409);
-    expect(await envelopeOf(response)).toEqual({ code: "sender_address_unreadable", message: WORDS.unreadable });
-    expect(mail.sent).toEqual([]);
+    expect(response.status).toBe(202);
+    expect(mail.sent.map((message) => message.to)).toEqual([fixture.users.member.email]);
+    expect((await rowsOf(fixture.users.member.id)).map((row) => row.id)).not.toContain(rowId);
   });
 
-  it("lets the relay read report the state without crashing, and without an address", async () => {
+  it("lets the relay read show the registered address, unchecked, in place of the damaged row", async () => {
     await turnMailInOn();
     const rowId = await damagedRow();
 
     const reading = await readRelaySettings(memberActor());
 
-    expect(reading.sender?.address ?? null).toBeNull();
-    expect((await rowsOf(fixture.users.member.id)).map((row) => row.id)).toContain(rowId);
+    expect(reading.sender?.address).toBe(fixture.users.member.email);
+    expect(reading.sender?.verified).toBe(false);
+    expect((await rowsOf(fixture.users.member.id)).map((row) => row.id)).not.toContain(rowId);
     const [view] = await listSenderAddresses(fixture.users.member.id);
-    expect(view.metadataStatus?.address).toBe("metadata_integrity_failed");
+    expect(view.metadataStatus?.address).toBeUndefined();
   });
 });
 
