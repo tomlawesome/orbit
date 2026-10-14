@@ -172,7 +172,7 @@ describe("listInstanceUsers with encrypted addresses (#969)", () => {
     expect(user.email).toBeNull();
   });
 
-  it("reports a locked address as no address, never as an empty one, and sorts it last", async () => {
+  it("reports a locked address as no address, never as an empty one", async () => {
     mocks.rows = [
       encrypted("aaaaaaaa-0000-4000-8000-000000000005", "Sam Carter", "zoe@example.invalid"),
       encrypted("aaaaaaaa-0000-4000-8000-000000000006", "Sam Carter", "alex@example.invalid"),
@@ -182,6 +182,18 @@ describe("listInstanceUsers with encrypted addresses (#969)", () => {
     const list = await listInstanceUsers(ADMIN);
     expect(list.users.map((user) => user.email)).toEqual([null, null]);
     expect(list.users.map((user) => user.metadataStatus?.email)).toEqual(["metadata_locked", "metadata_locked"]);
+  });
+
+  it("sorts an unreadable address after a readable one with the same display name", async () => {
+    // The unreadable row arrives first, so it ends up last only if the
+    // tiebreak puts it there.
+    mocks.rows = [
+      plaintext("aaaaaaaa-0000-4000-8000-000000000005", "Sam Carter", "old@example.invalid"),
+      encrypted("aaaaaaaa-0000-4000-8000-000000000006", "Sam Carter", "zoe@example.invalid"),
+    ];
+
+    const list = await listInstanceUsers(ADMIN);
+    expect(list.users.map((user) => user.email)).toEqual(["zoe@example.invalid", null]);
   });
 
   it("#592: keeps the primary administrator first, outside the address tiebreak", async () => {
