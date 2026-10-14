@@ -184,10 +184,6 @@ missing, has moved on, was already acted on, is being processed, or the update
 touches no row for any other reason, you get the bounded conflict result and
 no misleading success is written to the audit trail.
 
-- A failed or cancelled notification can be retried. Its attempt count, lock,
-  sent time and failure state are cleared and it is scheduled straight away.
-- A pending, retrying or failed notification can be discarded; it becomes
-  cancelled.
 - A failed scanner recovery job can be retried from attempt zero. Its recovery
   expiry does not change. A failed final stage purge can be retried as a
   deletion only; it never goes back into scanning.
@@ -533,8 +529,9 @@ base `docker-compose.yml` without mail secret files.
 administrator sets it on the administration screen, and Orbit stores the
 password encrypted in its own database under the document key. No `IMAP_*`
 environment variable is accepted any more; one left in `.env-orbit` fails the
-configuration check as a removed key. Outbound SMTP is unchanged and is still
-deployment configuration.
+configuration check as a setting Orbit does not know ("`.env-orbit` has
+`IMAP_HOST`, which is not an Orbit setting"): delete the line and rerun the
+update. Outbound SMTP is unchanged and is still deployment configuration.
 
 To configure inbound mail:
 
@@ -791,7 +788,10 @@ instance, and it clears the moment `export-recovery-bundle.sh` completes.
 To use a recovery bundle, run `bash scripts/import-recovery-bundle.sh
 <recovery.tar>` (it asks for the passphrase, then for `IMPORT RECOVERY`, then
 for `RESTORE`) and see "Restoring
-the document key-encryption key" below.
+the document key-encryption key" below. The import needs the deployment's
+current key file in `.orbit-secrets/document-kek` and refuses without it
+("the configured document key is missing"); when that file is gone, see the
+same section.
 
 ## Restoring the document key-encryption key
 
@@ -845,8 +845,8 @@ restart the exact deployed image:
    holding. A key that is not the one that wrote them leaves everything locked
    exactly as it was. A wrong key can never damage a value, because
    decryption refuses rather than guesses.
-2. Restore the key file from wherever you kept it, your recovery bundle or
-   the secrets directory backup, with owner-only permissions:
+2. Restore the key file from your copy of the secrets directory, with
+   owner-only permissions:
    ```sh
    install -m 0400 /path/to/your/copy/document-kek .orbit-secrets/document-kek
    ```
@@ -858,6 +858,16 @@ restart the exact deployed image:
    id you expected, that the locked page has gone, and on the administration
    screen that no "Encrypted details are locked" card remains. Nothing needs
    re-encrypting and no backfill runs, because the values were never changed.
+
+If you have no copy of the key file but do have a recovery bundle, the way
+back is to restore the backup bundle or reinstall. The bundle import needs the
+deployment's current key file and refuses without it, so do not run it in the
+locked deployment. Reinstall Orbit into a fresh directory
+([Installing Orbit](installing.md)), then import the bundle there:
+
+```sh
+bash scripts/import-recovery-bundle.sh <recovery.tar>
+```
 
 If the key is really gone and no recovery bundle holds it, this is not a
 restore. Encrypted documents and Tier 1 and Tier 2 metadata, every account

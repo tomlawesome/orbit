@@ -497,6 +497,11 @@ change in the same pull request as the code, per that document's rule.
    with stale keys fails closed with the distinct removed-key message;
    guarantee catalogue updated.
 
+   *Note (2026-10-14):* the distinct removed-key message was retired with
+   the rest of the compatibility code in #1403, nobody having run Orbit yet.
+   A stale `IMAP_*` key now fails closed as an unknown setting
+   (`configuration_unknown_key`), like any other key Orbit does not know.
+
 Slices 1–2 are hard to reverse (migration, config format) and cut alone
 (`Cut: risk`); 3–5 may share a branch, with 4 landing before 5 because pause
 applies to attributed mail. XOAUTH2 (device-code sign-in, refresh token as
