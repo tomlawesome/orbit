@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -17,7 +17,7 @@ import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { provisionIdentity } from "@/lib/auth/provision";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
-import { listSenderAddresses, requestSenderCheck, seedSenderAddress, setSenderSendDeadlineForTests } from "@/server/mail-in/sender-addresses";
+import { listSenderAddresses, requestSenderCheck, seedSenderAddress, setSenderSendDeadlineForTests, verifySenderAddress } from "@/server/mail-in/sender-addresses";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, senderAddressColumns, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 
@@ -466,6 +466,113 @@ describe("M-R8: a send attempt counts when it starts, and the mailer call holds 
 
     expect(second).toEqual({ ok: false, code: "sender_check_too_soon" });
     expect(mail.sent).toEqual([]);
+  });
+
+  /* The row is written before the mailer is called, so a refusal must not
+     leave a token nobody was sent (release audit, #1316, M-R8). */
+  it("a mailer that throws leaves no pending link: the route answers 503 sender_mailer_refused and the relay read and the list report none", async () => {
+    await turnMailInOn();
+    mail.mode = "throw";
+
+    at(0);
+    const response = await send();
+
+    expect(response.status).toBe(503);
+    expect((await envelopeOf(response)).code).toBe("sender_mailer_refused");
+    const reading = (await readRelaySettings(memberActor())).sender;
+    expect(reading).toMatchObject({ verificationPending: false, expiresAt: null });
+    const views = await listSenderAddresses(fixture.users.member.id);
+    expect(views.filter((view) => view.verificationPending)).toEqual([]);
+    expect(views.map((view) => view.expiresAt)).toEqual(views.map(() => null));
+  });
+
+  it("a mailer that throws on a later press leaves the earlier delivered link working", async () => {
+    mail.mode = "ok";
+    at(0);
+    expect((await send()).status).toBe(202);
+    expect(mail.sent).toHaveLength(1);
+    const match = /token=([A-Za-z0-9_-]+)/.exec(mail.sent[0].text);
+    if (!match) throw new Error("the check email carried no link token");
+    const firstToken = match[1];
+
+    mail.mode = "throw";
+    at(61);
+    expect((await send()).status).toBe(503);
+
+    const verified = await verifySenderAddress(fixture.users.member.id, firstToken);
+    expect(verified.verified).toBe(true);
+    const rows = await rowsOf(fixture.users.member.id);
+    expect(rows.map((row) => row.verifiedAt !== null)).toEqual([true]);
+  });
+
+  it("guard: the failed attempt still counts, so a press a second later is sender_check_too_soon", async () => {
+    await turnMailInOn();
+    mail.mode = "throw";
+    at(0);
+    expect((await send()).status).toBe(503);
+
+    at(1);
+    const again = await send();
+
+    expect(again.status).toBe(429);
+    expect(await codeOf(again)).toBe("sender_check_too_soon");
+  });
+
+  describe("a busy member lock (guards: the lock is tried, never waited for)", () => {
+    const lockKey = () => `orbit:mail-relay-sender:${fixture.users.member.id}`;
+    /** Holds the member's advisory lock in an open transaction until the returned function is called. */
+    async function holdLock() {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      let acquired!: () => void;
+      const locked = new Promise<void>((resolve) => { acquired = resolve; });
+      const holder = getDb().transaction(async (tx) => {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockKey()}, 0))`);
+        acquired();
+        await gate;
+      });
+      holder.catch(() => undefined);
+      await locked;
+      return async () => { release(); await holder; };
+    }
+
+    it("the route press answers 429 sender_check_too_soon with Retry-After 5, sends nothing and records no attempt", async () => {
+      await seedSenderAddress(fixture.users.member.id);
+      const before = (await rowsOf(fixture.users.member.id)).flatMap((row) => row.checkSentAt);
+      const release = await holdLock();
+      try {
+        at(0);
+        const response = await send();
+
+        expect(response.status).toBe(429);
+        expect(await codeOf(response)).toBe("sender_check_too_soon");
+        expect(response.headers.get("retry-after")).toBe("5");
+        expect(mail.sent).toEqual([]);
+        const after = (await rowsOf(fixture.users.member.id)).flatMap((row) => row.checkSentAt);
+        expect(after).toEqual(before);
+      } finally {
+        await release();
+      }
+    });
+
+    it("the relay read resolves within 2 s and seeds no row; once the lock is released a read seeds one", async () => {
+      await turnMailInOn();
+      expect(await rowsOf(fixture.users.member.id)).toEqual([]);
+      const release = await holdLock();
+      let released = false;
+      try {
+        const result = await within(readRelaySettings(memberActor()).then(() => "read" as const), 2 * SECOND);
+
+        expect(result).toBe("read");
+        expect(await rowsOf(fixture.users.member.id)).toEqual([]);
+        await release();
+        released = true;
+        await readRelaySettings(memberActor());
+        expect(await rowsOf(fixture.users.member.id)).toHaveLength(1);
+      } finally {
+        if (!released) await release();
+      }
+    }, 30 * SECOND);
   });
 
   it("a second press while the first is stuck in the mailer is refused sender_check_too_soon within 2 s, not queued behind it", async () => {

@@ -469,15 +469,36 @@ export async function requestSenderCheck(
 
 type MailMessage = { from: string; to: string; subject: string; text: string };
 interface ReservedSend {
+  id: string;
   address: string;
   expiresAt: Date;
   send: (message: MailMessage) => Promise<void>;
   message: MailMessage;
+  /** The digest this attempt wrote, and the link that stood before it. */
+  digest: string;
+  previous: { digest: string | null; expiresAt: Date | null };
 }
 
 /** The slow part, run after the reservation has committed. */
-async function deliver({ address, expiresAt, send, message }: ReservedSend): Promise<{ address: string; expiresAt: Date }> {
-  await sendWithDeadline(send, message);
+async function deliver({ id, address, expiresAt, send, message, digest, previous }: ReservedSend): Promise<{ address: string; expiresAt: Date }> {
+  try {
+    await sendWithDeadline(send, message);
+  } catch (error) {
+    /* A refused send delivered nothing, so put back whatever link stood
+       before (none, or an earlier delivered one) instead of leaving a link
+       nobody was sent. Only while the row still holds this attempt's digest,
+       so a newer press's link is never touched; the attempt still counts. */
+    if (error instanceof AppError && error.code === "sender_mailer_refused") {
+      await getDb().update(mailInSenderAddresses).set({
+        verificationTokenDigest: previous.digest,
+        verificationExpiresAt: previous.expiresAt,
+      }).where(and(
+        eq(mailInSenderAddresses.id, id),
+        eq(mailInSenderAddresses.verificationTokenDigest, digest),
+      ));
+    }
+    throw error;
+  }
   return { address, expiresAt };
 }
 
@@ -532,6 +553,8 @@ async function reserveSend(
   const [locked] = await executor.select({
     verifiedAt: mailInSenderAddresses.verifiedAt,
     checkSentAt: mailInSenderAddresses.checkSentAt,
+    verificationTokenDigest: mailInSenderAddresses.verificationTokenDigest,
+    verificationExpiresAt: mailInSenderAddresses.verificationExpiresAt,
   }).from(mailInSenderAddresses)
     .where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId)))
     .for("update");
@@ -550,8 +573,9 @@ async function reserveSend(
     .filter((at) => at.getTime() > sentAt.getTime() - SENDER_CHECK_WINDOW_MS)
     .sort((a, b) => a.getTime() - b.getTime())
     .slice(-(SENDER_CHECK_DAILY_LIMIT - 1));
+  const digest = digestToken(token);
   const [updated] = await executor.update(mailInSenderAddresses).set({
-    verificationTokenDigest: digestToken(token),
+    verificationTokenDigest: digest,
     verificationExpiresAt: expiresAt,
     checkSentAt: [...kept, sentAt],
     updatedAt: now,
@@ -563,9 +587,12 @@ async function reserveSend(
   if (!updated) throw new AppError("sender_already_verified", SENDER_CHECK_WORDS.alreadyChecked, 409);
 
   return {
+    id,
     address,
     expiresAt,
     send,
+    digest,
+    previous: { digest: locked.verificationTokenDigest, expiresAt: locked.verificationExpiresAt },
     message: {
       from: smtp.smtpFrom,
       to: address,
@@ -586,9 +613,9 @@ async function reserveSend(
  * Hands the message to the mailer, but only for so long. A mailer that never
  * answers ends in 503 `sender_mailer_timeout`; one that throws ends in 503
  * `sender_mailer_refused` rather than an unexplained 500. Either way the
- * attempt was already recorded, so it counts and its link stays outstanding
- * (a mailer that took the message just as the deadline fell may still deliver
- * a working link).
+ * attempt was already recorded, so it counts. A timed-out send keeps its link
+ * outstanding (a mailer that took the message just as the deadline fell may
+ * still deliver it); a refused one has its link withdrawn by `deliver`.
  */
 async function sendWithDeadline(send: (message: MailMessage) => Promise<void>, message: MailMessage): Promise<void> {
   let timer: NodeJS.Timeout | undefined;

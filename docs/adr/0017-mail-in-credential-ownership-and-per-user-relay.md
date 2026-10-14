@@ -593,8 +593,10 @@ the database, and refused with 429 `sender_check_too_soon` and `Retry-After`
 that does not answer ends the request with 503 `sender_mailer_timeout`; one that
 throws ends with 503 `sender_mailer_refused`. The attempt and its link are
 recorded and committed before the mailer is called, and no lock or transaction
-is held across the call, so either way the attempt still counts and its link
-stays outstanding. The limit counts attempts, not deliveries (release audit,
+is held across the call. A refused send puts back whatever link stood before
+(none, or an earlier delivered one); a timed-out send leaves the new link
+outstanding, because the mailer may still deliver it; the attempt counts
+either way. The limit counts attempts, not deliveries (release audit,
 #1316). A press made while another check for the same member is in flight is
 refused 429 `sender_check_too_soon` rather than queued. The send times belong
 to the member, not the address: they carry over when the registered address

@@ -309,9 +309,9 @@ describe("finding 6: no sending address but the registered one attributes", () =
 });
 
 describe("finding 3: the mailer fails", () => {
-  /* The attempt and its link are recorded before the mailer is called, so a
-     failed send leaves the link outstanding (the limit counts attempts). */
-  it("leaves the attempt's link outstanding, and the relay read reports it", async () => {
+  /* The attempt still counts (the limit counts attempts), but no link was
+     sent, so none is reported as outstanding (release audit, #1316, M-R8). */
+  it("reports no pending link after the failed send, in the relay read and the list", async () => {
     await turnMailInOn();
     const session = await fixture.session("member");
     mail.failing = true;
@@ -321,9 +321,9 @@ describe("finding 3: the mailer fails", () => {
     expect(response.status).not.toBe(202);
     expect(mail.sent).toEqual([]);
     const reading = (await readRelaySettings(memberActor())).sender;
-    expect(reading).toMatchObject({ verified: false, verificationPending: true });
+    expect(reading).toMatchObject({ verified: false, verificationPending: false });
     const [view] = await listSenderAddresses(fixture.users.member.id);
-    expect(view.verificationPending).toBe(true);
+    expect(view.verificationPending).toBe(false);
   });
 });
 
