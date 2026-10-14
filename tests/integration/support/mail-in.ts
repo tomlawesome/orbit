@@ -11,22 +11,32 @@
  * These helpers exist so a suite says what it means — "this message is from a
  * verified member" — rather than restating the header rules in every case.
  */
+import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { mailInSenderAddresses } from "@/db/schema";
+import { listSenderAddresses, seedSenderAddress } from "@/server/mail-in/sender-addresses";
 
 /** The provider identity every fixture in the suite claims to trust. */
 export const TRUSTED_AUTHSERV_ID = "mx.provider.test";
 
-/** Marks an address as one this member has verified, ready to attribute. */
-export async function verifiedSenderFor(userId: string, address: string): Promise<string> {
-  const normalized = address.trim().toLowerCase();
-  await getDb().insert(mailInSenderAddresses).values({
-    userId,
-    address: normalized,
-    source: "manual",
+/**
+ * Verifies the member's REGISTERED address and returns it (decision 7c): a
+ * member's only sending address is their account email, and any other stored
+ * address is removed on the next relay read. Seeding goes through the
+ * product's own `seedSenderAddress`; the row is then marked verified the way
+ * `verifySenderAddress` leaves it (verifiedAt set, no outstanding link).
+ */
+export async function verifiedSenderFor(userId: string): Promise<string> {
+  await seedSenderAddress(userId);
+  const [row] = await getDb().update(mailInSenderAddresses).set({
     verifiedAt: new Date(),
-  }).onConflictDoNothing();
-  return normalized;
+    verificationTokenDigest: null,
+    verificationExpiresAt: null,
+  }).where(eq(mailInSenderAddresses.userId, userId)).returning({ id: mailInSenderAddresses.id });
+  if (!row) throw new Error(`No registered sender address could be seeded for ${userId}`);
+  const [view] = await listSenderAddresses(userId);
+  if (!view?.address) throw new Error(`The registered sender address for ${userId} is unreadable`);
+  return view.address;
 }
 
 export interface FixtureHeaderOptions {

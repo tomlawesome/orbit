@@ -128,7 +128,7 @@ describe("per-user relay generations (ADR-0017 slice 3)", () => {
 
     /* And B's mail still arrives, which is the half of the invariant a rows
        comparison alone cannot prove. */
-    const bSender = await verifiedSenderFor(b, `sibling-b-${b}@example.test`);
+    const bSender = await verifiedSenderFor(b);
     mailboxOf(() => bSender, () => bAddressBefore, 900n);
     await runImapIngestionCycle(config);
     expect(await getDb().select({ userId: imapIngestionMessages.userId, generation: imapIngestionMessages.recipientAliasGeneration })
@@ -146,7 +146,7 @@ describe("per-user relay generations (ADR-0017 slice 3)", () => {
     const rotation = await rotateRelay(member, "rotate", config, rotatedAt);
     expect(rotation.previousExpiresAt.getTime()).toBe(rotatedAt.getTime() + 14 * 86_400_000);
 
-    const memberSender = await verifiedSenderFor(member, `expiry-${member}@example.test`);
+    const memberSender = await verifiedSenderFor(member);
     mailboxOf(() => memberSender, () => oldAddress, 901n);
     await runImapIngestionCycle(config);
     /* The alias corroborates: the message belongs to this member, and the

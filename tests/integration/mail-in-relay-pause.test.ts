@@ -129,7 +129,7 @@ describe("per-user ingest pause (ADR-0017 slice 5)", () => {
     const config = await getImapIngestionConfig();
     const member = fixture.users.member.id;
     await reconcileImapRecipientAliases(config);
-    const sender = await verifiedSenderFor(member, "paused@example.test");
+    const sender = await verifiedSenderFor(member);
     await setRelayIngestPaused(member, true);
 
     mailboxHolding(3001n, [{ uid: 1, headers: attributedHeaders(sender) }]);
@@ -154,7 +154,7 @@ describe("per-user ingest pause (ADR-0017 slice 5)", () => {
     const config = await getImapIngestionConfig();
     const member = fixture.users.member.id;
     await reconcileImapRecipientAliases(config);
-    const sender = await verifiedSenderFor(member, "resume@example.test");
+    const sender = await verifiedSenderFor(member);
     await setRelayIngestPaused(member, true);
 
     mailboxHolding(3002n, [{ uid: 1, headers: attributedHeaders(sender) }]);
@@ -192,7 +192,7 @@ describe("per-user ingest pause (ADR-0017 slice 5)", () => {
     const config = await getImapIngestionConfig();
     const member = fixture.users.member.id;
     await reconcileImapRecipientAliases(config);
-    const sender = await verifiedSenderFor(member, "expiring@example.test");
+    const sender = await verifiedSenderFor(member);
     await setRelayIngestPaused(member, true);
 
     mailboxHolding(3003n, [{ uid: 1, headers: attributedHeaders(sender) }]);
@@ -218,8 +218,8 @@ describe("per-user ingest pause (ADR-0017 slice 5)", () => {
     const a = fixture.users.owner.id;
     const b = fixture.users.member.id;
     await reconcileImapRecipientAliases(config);
-    const senderA = await verifiedSenderFor(a, "pause-a@example.test");
-    const senderB = await verifiedSenderFor(b, "pause-b@example.test");
+    const senderA = await verifiedSenderFor(a);
+    const senderB = await verifiedSenderFor(b);
     const relayB = await readRelayRow(b);
     const addressB = relayAddressFor(b, relayB!.currentGeneration, config);
     const aliasA = imapRecipientAlias(a, config, (await readRelayRow(a))!.currentGeneration);
