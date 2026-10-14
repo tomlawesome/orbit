@@ -153,6 +153,12 @@ describe("POST /api/settings/mail-relay/verification (decision 7c)", () => {
     expect(mail.sent).toEqual([]);
   });
 
+  it("sends a signed-out reader of the emailed link to sign in, and back to the same link afterwards", async () => {
+    const response = await callRoute(await verifyRoute(), { url: `${VERIFY_URL}?token=abc` });
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`/login?returnTo=${encodeURIComponent("/api/settings/mail-relay/verify?token=abc")}`);
+  });
+
   it("refuses a session without the CSRF token, and sends nothing", async () => {
     const session = await fixture.session("member");
     const { "x-csrf-token": _omitted, ...withoutCsrf } = session.headers;
