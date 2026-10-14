@@ -8,7 +8,7 @@ import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { sessionCookieName } from "@/lib/auth/cookies";
 import { constantTimeEqual, createCsrfToken, hashSessionToken, randomUrlSafe } from "@/lib/auth/crypto";
 import { AuthError } from "@/lib/auth/errors";
-import type { TextSize, UrgencyPalette } from "@/lib/preferences";
+import type { TextSize } from "@/lib/preferences";
 import { log, operationalDetail } from "@/lib/logger";
 import { assertKeyUsable } from "@/server/key-state";
 import { openInstanceMetadataReader, requireInstanceMetadataWriter } from "@/server/metadata/fields";
@@ -30,10 +30,8 @@ export interface AuthenticatedSession {
     displayName: string;
     avatarUrl: string | null;
     isInstanceAdmin: boolean;
-    themeMode: "system" | "light" | "dark";
     themeId: string;
     textSize: TextSize;
-    urgencyPalette: UrgencyPalette;
     emailNotifications: boolean;
     pushNotifications: boolean;
   };
@@ -284,10 +282,8 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       avatarUrl: users.avatarUrl,
       isInstanceAdmin: users.isInstanceAdmin,
       disabledAt: users.disabledAt,
-      themeMode: userPreferences.themeMode,
       themeId: userPreferences.themeId,
       textSize: userPreferences.textSize,
-      urgencyPalette: userPreferences.urgencyPalette,
       emailNotifications: userPreferences.emailNotifications,
       pushNotifications: userPreferences.pushNotifications,
     })
@@ -323,7 +319,6 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       displayName: record.displayName,
       avatarUrl: record.avatarUrl,
       isInstanceAdmin: record.isInstanceAdmin,
-      themeMode: record.themeMode ?? "system",
       /* #865: a stale stored value — a removed pack (atlas), or the column's
          own pre-#325 legacy default ("after-dark", with the hyphen, which
          was never a v19 pack id either) — resolves to the current default
@@ -332,7 +327,6 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       textSize: record.textSize === "standard" || record.textSize === "large" || record.textSize === "extra-large"
         ? record.textSize
         : "comfortable",
-      urgencyPalette: record.urgencyPalette === "classic" ? "classic" : "themed",
       emailNotifications: record.emailNotifications ?? true,
       pushNotifications: record.pushNotifications ?? true,
     },

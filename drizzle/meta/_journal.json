@@ -372,6 +372,27 @@
       "when": 1789516800000,
       "tag": "0052_document_sealed_item_id",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1789603200000,
+      "tag": "0053_drop_document_drafts",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1789689600000,
+      "tag": "0054_drop_inert_theme_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1789776000000,
+      "tag": "0055_theme_id_real_default",
+      "breakpoints": true
     }
   ]
 }

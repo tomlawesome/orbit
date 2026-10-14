@@ -9,7 +9,7 @@
  */
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documentDrafts, documentJobs, documents } from "@/db/schema";
+import { auditLog, documentCrypto, documentJobs, documents } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { openDocumentStorage, STORAGE_KEY_PATTERN } from "@/server/documents/storage";
 import { processOwnedPurge, type OwnedPurgeState } from "@/server/documents/purge";
@@ -159,8 +159,6 @@ export async function processPurgeJob(job: ClaimedDocumentJob): Promise<"complet
           eq(documentCrypto.storageKey, state.storageKey),
         )).returning({ documentId: documentCrypto.documentId });
         if (deletedCrypto.length !== 1) throw new Error("Purge finalization lost crypto metadata");
-
-        await transaction.delete(documentDrafts).where(eq(documentDrafts.documentId, claimedJob.documentId));
 
         const completedJob = await completeJob(transaction, and(
           holdsJobLease(claimedJob),

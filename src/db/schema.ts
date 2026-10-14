@@ -14,7 +14,6 @@ export const itemStatus = pgEnum("item_status", ["active", "expired", "cancelled
 export const eventKind = pgEnum("event_kind", ["renewal", "service", "expiry"]);
 export const deliveryChannel = pgEnum("delivery_channel", ["email", "web_push"]);
 export const deliveryStatus = pgEnum("delivery_status", ["pending", "processing", "sent", "retry", "failed", "cancelled"]);
-export const themeMode = pgEnum("theme_mode", ["system", "light", "dark"]);
 export const documentLifecycle = pgEnum("document_lifecycle", [
   "receiving",
   "validating",
@@ -36,7 +35,6 @@ export const documentJobStatus = pgEnum("document_job_status", [
   "failed",
   "cancelled",
 ]);
-export const documentDraftStatus = pgEnum("document_draft_status", ["pending_review", "approved", "discarded"]);
 /** Which Tier 1 metadata key a row holds (ADR-0024 decision 1). */
 export const metadataKeyScope = pgEnum("metadata_key_scope", ["household", "instance"]);
 export const imapIngestionStatus = pgEnum("imap_ingestion_status", [
@@ -111,10 +109,8 @@ export const users = pgTable("users", {
 
 export const userPreferences = pgTable("user_preferences", {
   userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
-  themeMode: themeMode("theme_mode").notNull().default("system"),
-  themeId: text("theme_id").notNull().default("after-dark"),
+  themeId: text("theme_id").notNull().default("afterdark"),
   textSize: text("text_size").notNull().default("comfortable"),
-  urgencyPalette: text("urgency_palette").notNull().default("themed"),
   emailNotifications: boolean("email_notifications").notNull().default(true),
   pushNotifications: boolean("push_notifications").notNull().default(true),
   // The reader's own reminder timing (#468, settings §13): how far ahead the
@@ -797,21 +793,6 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
-
-/** Parser evidence and proposed item fields; never applied without approval. */
-export const documentDrafts = pgTable("document_drafts", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  documentId: uuid("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }),
-  householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
-  requestedByUserId: uuid("requested_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  status: documentDraftStatus("status").notNull().default("pending_review"),
-  extractedTextSha256: text("extracted_text_sha256").notNull(),
-  evidence: jsonb("evidence").notNull(),
-  proposal: jsonb("proposal").notNull(),
-  approvedItemId: uuid("approved_item_id").references(() => items.id, { onDelete: "set null" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [uniqueIndex("document_draft_document_unique").on(table.documentId), index("document_draft_household_status_idx").on(table.householdId, table.status)]);
 
 export const notificationStates = pgTable("notification_states", {
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

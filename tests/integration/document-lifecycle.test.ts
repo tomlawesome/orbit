@@ -3,7 +3,7 @@ import { and, desc, eq, notInArray, sql } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import * as database from "@/db";
-import { auditLog, documentCrypto, documentDrafts, documentJobs, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionMessages, reviewedIntakeOperations } from "@/db/schema";
+import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionMessages, reviewedIntakeOperations } from "@/db/schema";
 import { updateDocumentJob } from "@/server/admin-operations";
 import { reconcileDocumentStorage, runDocumentMaintenanceCycle } from "@/server/document-worker";
 import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
@@ -332,14 +332,6 @@ describe("authenticated encrypted document lifecycle", () => {
     const fixture = await createIntegrationFixture("document-storage-delete-failure");
     const { session, documentId } = await uploadSyntheticDocument(fixture);
     const downloadUrl = `http://127.0.0.1:3000/api/documents/${documentId}/download`;
-    await getDb().insert(documentDrafts).values({
-      documentId,
-      householdId: fixture.household.id,
-      requestedByUserId: fixture.users.member.id,
-      extractedTextSha256: createHash("sha256").update("retryable draft evidence").digest("hex"),
-      evidence: { excerpt: "retryable draft evidence" },
-      proposal: { title: "Retryable draft" },
-    });
     await callRouteForSession(deleteDocument, session, { url: downloadUrl, method: "DELETE", params: documentContext(documentId) });
     await getDb().update(documents).set({ deleteAfter: new Date(Date.now() - 1_000) })
       .where(eq(documents.id, documentId));
@@ -356,8 +348,6 @@ describe("authenticated encrypted document lifecycle", () => {
       expect(await storage.ciphertextExists(crypto!.storageKey)).toBe(true);
       expect(await getDb().select({ documentId: documentCrypto.documentId }).from(documentCrypto)
         .where(eq(documentCrypto.documentId, documentId))).toEqual([{ documentId }]);
-      expect(await getDb().select({ documentId: documentDrafts.documentId }).from(documentDrafts)
-        .where(eq(documentDrafts.documentId, documentId))).toEqual([{ documentId }]);
       expect(await getDb().select({ lifecycle: documents.lifecycle }).from(documents)
         .where(eq(documents.id, documentId))).toEqual([{ lifecycle: "pending_deletion" }]);
       expect(await getDb().select({ status: documentJobs.status, attempts: documentJobs.attempts, lastError: documentJobs.lastError })
@@ -404,8 +394,6 @@ describe("authenticated encrypted document lifecycle", () => {
       .where(eq(documents.id, documentId))).toEqual([{ lifecycle: "deleted" }]);
     expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto)
       .where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
-    expect(await getDb().select({ id: documentDrafts.id }).from(documentDrafts)
-      .where(eq(documentDrafts.documentId, documentId))).toHaveLength(0);
     expect(await getDb().select({ status: documentJobs.status, attempts: documentJobs.attempts })
       .from(documentJobs).where(eq(documentJobs.id, failedJob!.id)))
       .toEqual([{ status: "completed", attempts: 1 }]);
