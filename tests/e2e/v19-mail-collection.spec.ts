@@ -1,12 +1,11 @@
-import { createHash, randomBytes } from "node:crypto";
 import { createTransport } from "nodemailer";
 import { expect, test, type Browser, type Page } from "@playwright/test";
-import { householdRegister } from "./support/households";
+import { householdRegister, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
-import { INTAKE_MAILBOX } from "./support/mail";
+import { INTAKE_MAILBOX, newestSenderCheckUid, waitForSenderCheckLink } from "./support/mail";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { ensureWorkerAdministrator, workerAccount, workerEmail } from "./support/worker-identity";
-import { pendingSenderVerification, resetDatabaseBetweenSpecFiles } from "./support/database";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -48,14 +47,11 @@ const MAILBOX_PASSWORD = "greenmail-proving-ground-only";
 // host-binding can never diverge. Defaults to 3025 (CI's fixed value).
 const SMTP_PORT = Number(process.env.TEST_SMTP_PORT ?? 3025);
 
-/* #745: the address the member claims and proves they send from. Any address
-   works with GreenMail's auth disabled -- see support/mail.ts -- so this one
-   only has to be distinct from MAILBOX_ACCOUNT, which is the intake box, not
-   a sender's own mailbox. */
-/* #1080: per worker, because the address is claimed and verified as ONE
-   member's own — two workers claiming the same address would race the
-   claim and cross-read the verification mailbox. Lazy: worker env only. */
-const SENDER_ADDRESS = () => `forwarding-${workerEmail("member").split("@")[0]}@out.orbit.test`;
+/* #745, ADR-0017 decision 7c: the only address a member can send from is
+   their registered account email, so that is the sender -- this worker's
+   member, whose mail also lands in GreenMail (see support/worker-identity.ts),
+   which is where the check email is read from. */
+const SENDER_ADDRESS = () => workerEmail("member");
 /* The authserv-id this spec's mailbox configuration says it trusts, and the
    one it then writes into the `Authentication-Results` header it prepares --
    standing in for the real receiving provider GreenMail does not have. */
@@ -161,26 +157,25 @@ async function configureMailbox(page: Page) {
 }
 
 /**
- * Claims SENDER_ADDRESS as the signed-in member's own and proves it through
- * the real one-use link (ADR-0017 slice 4, #745). Nothing in the product mails
- * that link any more (#1403 D2 removed the route that asked for it), so the
- * pending check is written straight into the database -- the claim and the
- * digest of a token only this spec knows, never a verified row -- and the
- * address is then proven the only way the product accepts: by opening
- * `/api/settings/mail-relay/verify` with that token, signed in as the member.
+ * Claims the signed-in member's registered address as their sender and proves
+ * it through the real one-use link (ADR-0017 decision 7c, #745).
+ *
+ * The member asks for the check with `POST /api/settings/mail-relay/verification`
+ * (no body: the registered address is the only candidate), the product mails
+ * the link to that address, and it is read back out of the member's mailbox in
+ * the disposable GreenMail sidecar and opened signed in as the member.
  * Idempotent: a re-run against a live stack finds the address already verified
- * and does nothing further, the same accommodation `configureMailbox` above
- * makes.
+ * (the route answers 409 `sender_already_verified`) and does nothing further,
+ * the same accommodation `configureMailbox` above makes.
  */
 async function verifySenderAddress(page: Page) {
-  const session = (await (await page.request.get("/api/auth/session")).json()) as { user?: { id?: string } };
-  const userId = session.user?.id;
-  if (!userId) throw new Error("the member's session did not name the member");
-  const token = randomBytes(32).toString("base64url");
-  const digest = createHash("sha256").update(token, "utf8").digest("hex");
-  if (pendingSenderVerification(userId, SENDER_ADDRESS().toLowerCase(), digest)) return;
+  const mark = await newestSenderCheckUid(SENDER_ADDRESS());
+  const asked = await page.request.post("/api/settings/mail-relay/verification", { headers: await sessionHeaders(page) });
+  if (asked.status() === 409) return;
+  if (asked.status() !== 202) throw new Error(`the sender check was not sent: ${asked.status()}`);
 
-  const verified = await page.request.get(`/api/settings/mail-relay/verify?token=${encodeURIComponent(token)}`);
+  const link = new URL(await waitForSenderCheckLink(SENDER_ADDRESS(), mark));
+  const verified = await page.request.get(`${link.pathname}${link.search}`);
   if (!verified.ok() || !verified.url().includes("sender=verified")) {
     throw new Error(`sender verification link did not confirm: ${verified.status()} ${verified.url()}`);
   }
