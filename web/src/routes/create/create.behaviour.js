@@ -1,6 +1,6 @@
 import { goto } from "$app/navigation";
 import {
-  WorkspaceError, activeHousehold, applyCommand, checkDraftCommand, readReminders, refusesFile, stageDocument, unsavedWords,
+  WorkspaceError, activeHousehold, bindRefused, applyCommand, checkDraftCommand, readReminders, refusesFile, stageDocument, unsavedWords,
   wordsOf, notSavedWords,
 } from "$lib/data/workspace.js";
 import {
@@ -296,11 +296,18 @@ export function mountCreate() {
       a retry after a lost answer re-sends the same id with the same bytes,
       so the documents route hands back the copy it already holds. */
   let attachmentId = "";
+  /** A new id for the file already held, once the server has retired its old one. */
+  function reissueAttachmentId() {
+    attachmentId = crypto.randomUUID();
+  }
   function takeFile(/** @type {File | null | undefined} */ file) {
     /* From the press until the server answers, the entry is the server's:
        the file it holds cannot change under the save. */
-    if (saving) return;
     if (!file) return;
+    /* Taken (or turned away): the input goes back to empty so choosing the
+       same file again still fires `change`. */
+    picker.value = "";
+    if (saving) return;
     /* A new file replaces a refused one, and the refusal goes with it. */
     fileRefusal = null;
     attachmentId = crypto.randomUUID();
@@ -655,6 +662,12 @@ export function mountCreate() {
          of the item in its own words, as the pocket's form gives them. */
       if (staging && held.attachment && held.attachment === attachment && refusesFile(error)) {
         refuseDocument(held.attachment, wordsOf(error));
+      }
+      /* The server no longer holds the staged file (the sweep retired it),
+         and would answer a re-stage under its id "needs recovery" for ever:
+         the next Add stages the same file under a fresh id. */
+      if (!staging && held.attachment && bindRefused(error) && attachmentId === held.attachmentId) {
+        reissueAttachmentId();
       }
       sticky = unsavedWords(error)
         ?? (staging ? notSavedWords(error) : saveProblem(/** @type {{ code?: string, message?: string }} */ (error)));

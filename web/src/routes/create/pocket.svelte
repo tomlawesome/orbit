@@ -4,7 +4,7 @@
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import {
-    WorkspaceError, applyCommand, checkDraftCommand, notSavedWords, readReminders, readWorkspace, refusesFile, stageDocument,
+    WorkspaceError, applyCommand, bindRefused, checkDraftCommand, notSavedWords, readReminders, readWorkspace, refusesFile, stageDocument,
     unsavedWords, wordsOf,
   } from "$lib/data/workspace.js";
   import {
@@ -297,6 +297,9 @@
          is ever half saved (#1406): a refused file stays, marked, holding
          Add; a send with no verdict says so; a refusal reads in its own words. */
       if (staging && held && held === attachment && refusesFile(error)) refuse(wordsOf(error));
+      /* The sweep retired the staged file: stage it afresh under a new id on
+         the next Add, not the retired one the server would refuse for ever. */
+      if (!staging && held && bindRefused(error)) documentIds.delete(held);
       problem = unsavedWords(error) ?? notSavedWords(error);
     } finally {
       saving = false;

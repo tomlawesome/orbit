@@ -449,7 +449,8 @@ export function notSavedWords(error) {
 /**
  * #1406: what a create save says when it got no verdict -- the send never
  * arrived, its answer was lost, or Orbit failed -- or null when the server
- * answered with a verdict (a 4xx), which the caller words. Nothing is half
+ * answered with a verdict (a 4xx), which the caller words -- except a refused
+ * bind, whose words both forms show alike (see `bindRefused`). Nothing is half
  * saved in any of these: the item and its document land together or not at
  * all, so a retry under the same ids is always safe.
  * @param {unknown} error
@@ -460,7 +461,22 @@ export function unsavedWords(error) {
   const status = error.status ?? 0;
   if (status >= 500) return error.code ? notSavedWords(error) : SERVER_FAULT_WORDS;
   if (status < 400) return UNREACHED_WORDS;
+  /* One wording for the desk and the pocket: the server's own, which tells
+     the member to pick the file again. */
+  if (bindRefused(error)) return wordsOf(error);
   return null;
+}
+
+/**
+ * #1406: whether the create's one `item.upsert` was refused because the
+ * staged file it names is gone -- the 24-hour sweep retired it, so the server
+ * will answer a re-stage under the same document id with "needs recovery" for
+ * ever. The form must mint a fresh document id before its next Add.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+export function bindRefused(error) {
+  return error instanceof WorkspaceError && error.code === "document_not_available";
 }
 
 /**
@@ -1877,7 +1893,7 @@ export async function attachItemDocument(householdId, itemId, file, documentId, 
  * a retry sends both again and the route hands back what it already holds. A
  * 202 (held for a scan retry) is still staged; only a refusal or a failed
  * send throws, with the server's status so the form can tell a refused file
- * (4xx) from one that never got a verdict.
+ * (413/415/422) from one that never got a verdict.
  *
  * @param {string} householdId
  * @param {File} file

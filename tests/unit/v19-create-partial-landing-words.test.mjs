@@ -15,7 +15,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
  *    /api/households/:id/documents), then sends ONE item.upsert carrying
  *    `documentIds`. The item and its document land together or not at all, so
  *    no sentence says half of one landed.
- *  - A stage the server refuses (a 4xx: type, size, structure, malware) sends
+ *  - A stage the server refuses (a 413, 415 or 422: size, type, structure, malware) sends
  *    no command at all. Everything entered stays, the file included; the file
  *    is marked refused with the server's own words, and Add is held until the
  *    file is replaced or removed (owner's answer 6a). Removing it lets Add
