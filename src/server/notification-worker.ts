@@ -944,12 +944,12 @@ async function deliverClaimed(
       // Tier 2 (#963): the reminder worker holds key access, exactly as the
       // tiering decision assumed, so the item's name decrypts here. A name it
       // cannot read is not sent as an empty or invented one: the delivery is
-      // failed like any other transient fault, so it retries once the key or
+      // deferred without spending an attempt, so it goes out once the key or
       // the value is repaired rather than mailing a nameless reminder.
       const decryptedTitle = titleReaders.get(delivery.householdId)!
         .text("items.title", delivery.itemId, { encrypted: delivery.titleEnc });
       if (!decryptedTitle.value) {
-        await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "item_title_unreadable", now, retryDelay);
+        await deferDelivery(db, delivery.id, leaseToken, delivery.attempts, "item_title_unreadable", now, retryDelay);
         continue;
       }
       const title = decryptedTitle.value.trim().slice(0, 160);
@@ -961,13 +961,15 @@ async function deliverClaimed(
         }
         /* Tier 2 (#969): the address decrypts here, exactly as the item's name
            does above. An address this run cannot read leaves the reminder for
-           a later one — the row goes back to `retry` and is neither consumed
-           nor cancelled, because a locked key and a damaged value are both
-           repairable and neither is a reason to drop somebody's reminder. */
+           a later one — the row goes back to `retry` without spending an
+           attempt, so it is neither consumed nor cancelled, because a locked
+           key and a damaged value are both repairable and neither is a reason
+           to drop somebody's reminder. A reminder whose window passes while it
+           waits is still cancelled as stale above. */
         const address = addressReader!
           .text("users.email", delivery.userId, { encrypted: delivery.emailEnc });
         if (!address.value) {
-          await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "recipient_address_unreadable", now, retryDelay);
+          await deferDelivery(db, delivery.id, leaseToken, delivery.attempts, "recipient_address_unreadable", now, retryDelay);
           continue;
         }
         const recipientAddress = address.value;
@@ -1135,6 +1137,34 @@ export async function failDelivery(
     eq(notificationDeliveries.leaseToken, leaseToken),
   ));
   return status;
+}
+
+/**
+ * Puts a delivery back to `retry` over a reversible condition (an unreadable
+ * key or value) and hands back the attempt the claim took, so waiting for a
+ * repair never exhausts the attempt bound. Staleness still ends the wait.
+ */
+async function deferDelivery(
+  db: NotificationDatabase,
+  id: string,
+  leaseToken: string,
+  attempts: number,
+  category: NotificationFailureCategory,
+  now: Date,
+  retryDelay: (attempts: number) => number,
+): Promise<void> {
+  await db.update(notificationDeliveries).set({
+    status: "retry",
+    lockedAt: new Date(now.getTime() + retryDelay(attempts)),
+    leaseToken: null,
+    attempts: Math.max(0, attempts - 1),
+    lastError: category,
+    updatedAt: now,
+  }).where(and(
+    eq(notificationDeliveries.id, id),
+    eq(notificationDeliveries.status, "processing"),
+    eq(notificationDeliveries.leaseToken, leaseToken),
+  ));
 }
 
 /**
