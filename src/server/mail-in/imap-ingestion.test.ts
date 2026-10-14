@@ -166,8 +166,6 @@ describe("receipt draft proposal", () => {
       "receipt-1",
     );
 
-    expect(columns?.proposal).toEqual({});
-    expect(columns?.fieldEvidence).toEqual({});
     expect(draftMocks.requireReceiptMetadataWriter).toHaveBeenCalledWith(null);
     expect(JSON.parse(columns!.proposalEnc)).toEqual({ title: "receipt", provider: "Acme Cover", reference: "AB-12345", dueDate: "2027-08-01" });
     expect(JSON.parse(columns!.fieldEvidenceEnc)).toEqual({

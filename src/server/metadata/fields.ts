@@ -51,19 +51,24 @@ export interface MetadataJsonResult {
   state?: MetadataFieldState;
 }
 
+/**
+ * `plaintext` is optional: the item and mail-in receipt columns it fell back to
+ * are gone (ADR-0024 contract release), so their callers pass only `encrypted`.
+ * The account and address columns still pass it until they are contracted too.
+ */
 export interface StoredText {
   encrypted: string | null;
-  plaintext: string | null;
+  plaintext?: string | null;
 }
 
 export interface StoredJson {
   encrypted: string | null;
-  plaintext: unknown;
+  plaintext?: unknown;
 }
 
 export interface StoredNumber {
   encrypted: string | null;
-  plaintext: number | null;
+  plaintext?: number | null;
 }
 
 export interface MetadataNumberResult {
@@ -109,7 +114,7 @@ export class MetadataCipher {
     if (stored.encrypted === null) {
       // No ciphertext at all: this row is still pre-encryption, and its
       // plaintext is readable whether or not the instance holds a KEK.
-      return { value: stored.plaintext };
+      return { value: stored.plaintext ?? null };
     }
     if (!this.material) return { value: null, state: "metadata_locked" };
     try {
@@ -177,7 +182,7 @@ export class MetadataCipher {
    * of which would be a fabricated figure in a money field.
    */
   number(column: MetadataColumn, rowId: string, stored: StoredNumber): MetadataNumberResult {
-    if (stored.encrypted === null) return { value: stored.plaintext };
+    if (stored.encrypted === null) return { value: stored.plaintext ?? null };
     if (!this.material) return { value: null, state: "metadata_locked" };
     let decrypted: string;
     try {

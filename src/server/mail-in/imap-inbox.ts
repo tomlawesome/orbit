@@ -36,8 +36,6 @@ export type { FailureReason, ReviewAttachmentMediaType, ReviewInboxClassificatio
  */
 function readReceiptDraft(metadata: MetadataCipher, receipt: {
   id: string;
-  proposal: unknown;
-  fieldEvidence: unknown;
   proposalEnc: string | null;
   fieldEvidenceEnc: string | null;
 }): {
@@ -45,8 +43,8 @@ function readReceiptDraft(metadata: MetadataCipher, receipt: {
   fieldEvidence: Record<string, unknown>;
   metadataStatus?: { proposal?: MetadataFieldState; fieldEvidence?: MetadataFieldState };
 } {
-  const proposal = metadata.json("imap_ingestion_messages.proposal", receipt.id, { encrypted: receipt.proposalEnc, plaintext: receipt.proposal });
-  const fieldEvidence = metadata.json("imap_ingestion_messages.field_evidence", receipt.id, { encrypted: receipt.fieldEvidenceEnc, plaintext: receipt.fieldEvidence });
+  const proposal = metadata.json("imap_ingestion_messages.proposal", receipt.id, { encrypted: receipt.proposalEnc });
+  const fieldEvidence = metadata.json("imap_ingestion_messages.field_evidence", receipt.id, { encrypted: receipt.fieldEvidenceEnc });
   return {
     proposal: proposal.value,
     fieldEvidence: fieldEvidence.value,
@@ -73,9 +71,8 @@ async function rekeyReceiptDraft(
   const changes: Record<string, unknown> = {};
 
   if (current.proposalEnc !== null) {
-    const proposal = source.json("imap_ingestion_messages.proposal", current.id, { encrypted: current.proposalEnc, plaintext: {} });
+    const proposal = source.json("imap_ingestion_messages.proposal", current.id, { encrypted: current.proposalEnc });
     if (!proposal.state) {
-      changes.proposal = {};
       changes.proposalEnc = target.encryptJson("imap_ingestion_messages.proposal", current.id, proposal.value);
       // The value just re-encrypted cleanly, so whatever sighting this column
       // carried is resolved (#971) — cleared here rather than left to the
@@ -84,9 +81,8 @@ async function rekeyReceiptDraft(
     }
   }
   if (current.fieldEvidenceEnc !== null) {
-    const evidence = source.json("imap_ingestion_messages.field_evidence", current.id, { encrypted: current.fieldEvidenceEnc, plaintext: {} });
+    const evidence = source.json("imap_ingestion_messages.field_evidence", current.id, { encrypted: current.fieldEvidenceEnc });
     if (!evidence.state) {
-      changes.fieldEvidence = {};
       changes.fieldEvidenceEnc = target.encryptJson("imap_ingestion_messages.field_evidence", current.id, evidence.value);
       await clearMetadataDamageForColumn("imap_ingestion_messages.field_evidence", current.id, executor);
     }
@@ -176,8 +172,6 @@ export async function listImapInbox(userId: string) {
       status: imapIngestionMessages.status,
       householdId: imapIngestionMessages.householdId,
       draftVersion: imapIngestionMessages.draftVersion,
-      proposal: imapIngestionMessages.proposal,
-      fieldEvidence: imapIngestionMessages.fieldEvidence,
       proposalEnc: imapIngestionMessages.proposalEnc,
       fieldEvidenceEnc: imapIngestionMessages.fieldEvidenceEnc,
       expiresAt: imapIngestionMessages.expiresAt,
@@ -220,7 +214,6 @@ export async function listImapInbox(userId: string) {
     getDb().select({
       itemId: items.id,
       householdId: items.householdId,
-      title: items.title,
       titleEnc: items.titleEnc,
       itemStatus: items.status,
       messageId: imapIngestionMessages.id,
@@ -283,7 +276,7 @@ export async function listImapInbox(userId: string) {
       // under that household's key rather than the receipt's, which may be the
       // instance scope. `filedReaders` holds one per household, not one per row.
       const filedTitle = filedReaders.get(row.householdId)!
-        .text("items.title", row.itemId, { encrypted: row.titleEnc, plaintext: row.title });
+        .text("items.title", row.itemId, { encrypted: row.titleEnc });
       return {
         itemId: row.itemId,
         householdId: row.householdId,
@@ -310,8 +303,6 @@ export async function getImapReview(userId: string, receiptId: string, household
     status: imapIngestionMessages.status,
     householdId: imapIngestionMessages.householdId,
     draftVersion: imapIngestionMessages.draftVersion,
-    proposal: imapIngestionMessages.proposal,
-    fieldEvidence: imapIngestionMessages.fieldEvidence,
     proposalEnc: imapIngestionMessages.proposalEnc,
     fieldEvidenceEnc: imapIngestionMessages.fieldEvidenceEnc,
     expiresAt: imapIngestionMessages.expiresAt,
@@ -345,7 +336,7 @@ export async function getImapReview(userId: string, receiptId: string, household
     // by title in the application — the decrypt-and-scan the tiering decision
     // traded for. The 200 cap stands as the same safety bound it always was;
     // at household scale it is never the thing that decides what is returned.
-    getDb().select({ id: items.id, title: items.title, titleEnc: items.titleEnc, provider: items.provider, providerEnc: items.providerEnc, reference: items.reference, referenceEnc: items.referenceEnc, subtype: items.subtype })
+    getDb().select({ id: items.id, titleEnc: items.titleEnc, providerEnc: items.providerEnc, referenceEnc: items.referenceEnc, subtype: items.subtype })
       .from(items).where(and(eq(items.householdId, householdId), inArray(items.status, ["active", "expired", "cancelled"]))).orderBy(asc(items.createdAt), asc(items.id)).limit(200),
     getDb().select({
       id: imapIngestionAttachments.id,
@@ -364,9 +355,9 @@ export async function getImapReview(userId: string, receiptId: string, household
   const decryptedItems = householdItems
     .map((item) => ({
       ...item,
-      title: householdMetadata.text("items.title", item.id, { encrypted: item.titleEnc, plaintext: item.title }).value ?? "",
-      provider: householdMetadata.text("items.provider", item.id, { encrypted: item.providerEnc, plaintext: item.provider }).value,
-      reference: householdMetadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference }).value,
+      title: householdMetadata.text("items.title", item.id, { encrypted: item.titleEnc }).value ?? "",
+      provider: householdMetadata.text("items.provider", item.id, { encrypted: item.providerEnc }).value,
+      reference: householdMetadata.text("items.reference", item.id, { encrypted: item.referenceEnc }).value,
     }))
     .sort((left, right) => left.title.localeCompare(right.title));
   const candidates = decryptedItems.flatMap((item) => {

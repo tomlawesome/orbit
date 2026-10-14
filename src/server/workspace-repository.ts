@@ -208,14 +208,14 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
       const metadata = metadataReaders.get(household.id)!;
       const householdItems = itemRows.filter((item) => item.householdId === household.id).map((item) => {
         const event = eventByItem.get(item.id);
-        const reference = metadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference });
-        const notes = metadata.text("items.notes", item.id, { encrypted: item.notesEnc, plaintext: item.notes });
+        const reference = metadata.text("items.reference", item.id, { encrypted: item.referenceEnc });
+        const notes = metadata.text("items.notes", item.id, { encrypted: item.notesEnc });
         // Tier 2 (#963): decrypted here rather than in SQL. Cost totals and
         // search both run on these values in the client, over one household's
         // rows, which is what the tiering decision traded the query for.
-        const title = metadata.text("items.title", item.id, { encrypted: item.titleEnc, plaintext: item.title });
-        const provider = metadata.text("items.provider", item.id, { encrypted: item.providerEnc, plaintext: item.provider });
-        const costMinor = metadata.number("items.cost_minor", item.id, { encrypted: item.costMinorEnc, plaintext: item.costMinor });
+        const title = metadata.text("items.title", item.id, { encrypted: item.titleEnc });
+        const provider = metadata.text("items.provider", item.id, { encrypted: item.providerEnc });
+        const costMinor = metadata.number("items.cost_minor", item.id, { encrypted: item.costMinorEnc });
         const metadataStatus = {
           reference: reference.state,
           notes: notes.state,
@@ -731,15 +731,11 @@ async function runWorkspaceCommand(
       const metadata = await requireMetadataWriter(householdId, transaction);
       const values = {
         sectionId,
-        title: null,
         titleEnc: metadata.encryptText("items.title", itemId, item.title),
         subtype: item.subtype ?? null,
-        provider: null,
         providerEnc: metadata.encryptText("items.provider", itemId, item.provider),
-        reference: null,
         referenceEnc: metadata.encryptText("items.reference", itemId, item.reference),
         referenceIndex: metadata.referenceIndex(item.reference),
-        costMinor: null,
         costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, item.costMinor),
         currency: item.currency,
         /* #1005: belt and braces with `workspaceItemSchema`, which refuses the
@@ -747,7 +743,6 @@ async function runWorkspaceCommand(
            comes round again. */
         recurrenceMonths: item.scheduleKind === "expiry" ? null : item.recurrenceMonths ?? null,
         snoozedUntil: item.snoozedUntil ?? null,
-        notes: null,
         notesEnc: metadata.encryptText("items.notes", itemId, item.notes),
         status: item.status,
         updatedAt: new Date(),
@@ -925,7 +920,6 @@ async function runWorkspaceCommand(
       const completionCost = command.costMinor === undefined
         ? {}
         : {
-          costMinor: null,
           costMinorEnc: (await requireMetadataWriter(householdId, transaction))
             .encryptNumber("items.cost_minor", itemId, command.costMinor),
         };

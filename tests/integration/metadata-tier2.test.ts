@@ -79,9 +79,6 @@ describe("Tier 2 values are written and read encrypted (#963)", () => {
     const [stored] = await getDb().select().from(items).where(eq(items.id, itemId));
     // The whole point of the tier: a database file leaked from this instance
     // carries none of the three in readable form.
-    expect(stored.title).toBeNull();
-    expect(stored.provider).toBeNull();
-    expect(stored.costMinor).toBeNull();
     expect(stored.titleEnc?.startsWith("mdv1.")).toBe(true);
     expect(stored.providerEnc?.startsWith("mdv1.")).toBe(true);
     expect(stored.costMinorEnc?.startsWith("mdv1.")).toBe(true);
@@ -124,13 +121,9 @@ describe("Tier 2 values are written and read encrypted (#963)", () => {
       await writeItem({ userId: fixture.users.member.id, householdId: fixture.household.id, sectionId, ...item });
     }
 
-    // Nothing in this household still holds a plaintext cost, so a SQL sum
-    // could not produce this figure — the application's own sum over the
-    // decrypted values is what does (#365, owner 2026-08-13).
-    expect(await getDb().select({ id: items.id }).from(items)
-      .where(and(eq(items.householdId, fixture.household.id), isNotNull(items.costMinor))))
-      .toHaveLength(0);
-
+    // The cost is held only as ciphertext, so a SQL sum could not produce this
+    // figure — the application's own sum over the decrypted values is what
+    // does (#365, owner 2026-08-13).
     const visible = await workspaceItems(fixture);
     const total = visible.reduce((sum, item) => sum + (item.costMinor ?? 0), 0);
     expect(total).toBe(73_300);
@@ -162,7 +155,7 @@ describe("Tier 2 values are written and read encrypted (#963)", () => {
     });
     const { openMetadataReader } = await import("@/server/metadata/fields");
     const otherReader = await openMetadataReader(fixture.secondHousehold.id);
-    expect(otherReader.text("items.title", itemId, { encrypted: stored.titleEnc, plaintext: null }).state)
+    expect(otherReader.text("items.title", itemId, { encrypted: stored.titleEnc }).state)
       .toBe("metadata_integrity_failed");
   });
 });
@@ -184,12 +177,6 @@ describe("the backfill converts pre-existing Tier 2 plaintext (#963)", () => {
       notes: "legacy notes",
       currency: "GBP",
     });
-
-    // Readable before the backfill runs: the dual read is what makes the
-    // expand release safe, and a row it has not reached is not broken.
-    const before = (await workspaceItems(fixture)).find((candidate) => candidate.id === legacyId)!;
-    expect(before.title).toBe("Legacy item");
-    expect(before.costMinor).toBe(1_234);
 
     let guard = 0;
     while (guard++ < 20) {

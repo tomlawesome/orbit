@@ -75,10 +75,11 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
 
     // The household must not be left bricked: no row was written at all.
     // (Import always assigns its own row id rather than reusing the
-    // archive's item id, so title is the only stable handle here.)
+    // archive's item id, so the household's whole item list is the handle.)
+    // (The household holds only the fixture's own item.)
     expect(await getDb().select({ id: items.id }).from(items)
-      .where(and(eq(items.householdId, fixture.household.id), eq(items.title, "Imported item"))))
-      .toHaveLength(0);
+      .where(eq(items.householdId, fixture.household.id)))
+      .toEqual([{ id: fixture.item.id }]);
 
     // The same shape, within the reader's bound, must still import cleanly:
     // the fix tightens the cap, it does not regress ordinary imports.
@@ -100,7 +101,7 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
       .where(and(eq(items.householdId, fixture.household.id), isNotNull(items.notesEnc)));
     expect(stored?.notes).toBeNull();
     const metadata = await openMetadataReader(fixture.household.id);
-    expect(metadata.text("items.notes", stored.id, { encrypted: stored.notesEnc, plaintext: stored.notes }).value)
+    expect(metadata.text("items.notes", stored.id, { encrypted: stored.notesEnc }).value)
       .toHaveLength(2_000);
   });
 

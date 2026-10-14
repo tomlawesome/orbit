@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, eq, gt, inArray, isNotNull, isNull, lt } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lt } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documents, dueEvents, households, items, portableArchiveImports, portableArchives, reminderRules, sections, } from "@/db/schema";
@@ -104,9 +104,8 @@ function rejectOversizedCiphertext(archive: EncryptedPortableArchive): void {
  *
  * Not `openMetadataReader`: that one answers "locked" for a household whose
  * key has not been minted yet as well, and never throws, because a plain
- * read of such a household is fine -- nothing of its has ever been
- * encrypted, so its rows still hold plaintext and read normally. The same
- * is true of its export. The refusal belongs to the key that exists but
+ * read of such a household is fine -- it has never written an encrypted
+ * value, so it has none to read. The same is true of its export. The refusal belongs to the key that exists but
  * cannot be used: no KEK, or one that will not unwrap it.
  */
 async function openExportMetadataReader(householdId: string): Promise<MetadataCipher> {
@@ -168,14 +167,14 @@ export async function createPortableArchive(input: {
   }
   const exportedItems = householdItems.map((item) => ({
     ...item,
-    reference: metadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference }).value,
-    notes: metadata.text("items.notes", item.id, { encrypted: item.notesEnc, plaintext: item.notes }).value,
+    reference: metadata.text("items.reference", item.id, { encrypted: item.referenceEnc }).value,
+    notes: metadata.text("items.notes", item.id, { encrypted: item.notesEnc }).value,
     // Tier 2 (#963) exports decrypted for the same reason Tier 1 does: the
     // archive is the deliberate plaintext escape hatch, and an archive holding
     // ciphertext nobody outside this instance can open would not be one.
-    title: metadata.text("items.title", item.id, { encrypted: item.titleEnc, plaintext: item.title }).value ?? "",
-    provider: metadata.text("items.provider", item.id, { encrypted: item.providerEnc, plaintext: item.provider }).value,
-    costMinor: metadata.number("items.cost_minor", item.id, { encrypted: item.costMinorEnc, plaintext: item.costMinor }).value,
+    title: metadata.text("items.title", item.id, { encrypted: item.titleEnc }).value ?? "",
+    provider: metadata.text("items.provider", item.id, { encrypted: item.providerEnc }).value,
+    costMinor: metadata.number("items.cost_minor", item.id, { encrypted: item.costMinorEnc }).value,
   }));
 
   const payload: Record<string, unknown> = {
@@ -367,12 +366,9 @@ function decodeImportArchive(serialized: unknown, passphrase: string) {
  * Which of `references` the household already holds, as normalised strings
  * (ADR-0024 decision 2).
  *
- * The plaintext `items.reference` column is cleared the moment a row is
- * encrypted, so an encrypted row is found only through `reference_index` —
- * an HMAC-SHA-256 keyed by a derivation of the household DEK. Take the index
- * away and duplicate detection stops finding anything the application wrote.
- * The second query is the dual-read leg for rows the backfill has not reached
- * yet, and it goes away with the plaintext column in the contract release.
+ * A row is found only through `reference_index` — an HMAC-SHA-256 keyed by a
+ * derivation of the household DEK. Take the index away and duplicate detection
+ * stops finding anything the application wrote.
  */
 async function existingReferenceMatches(
   executor: MetadataExecutor,
@@ -404,12 +400,6 @@ async function existingReferenceMatches(
     }
   }
 
-  const remaining = await executor.select({ reference: items.reference }).from(items)
-    .where(and(eq(items.householdId, householdId), isNotNull(items.reference)));
-  for (const row of remaining) {
-    const normalized = normalizeComparableMetadata(row.reference);
-    if (normalized && wanted.has(normalized)) found.add(normalized);
-  }
   return found;
 }
 
@@ -430,9 +420,8 @@ function duplicatesExistingItem(
 }
 
 /**
- * The household's item titles, decrypted (#963). A locked instance yields the
- * plaintext of any row the backfill has not reached and nothing for the rest,
- * which is the correct conservative answer: an unreadable title cannot be
+ * The household's item titles, decrypted (#963). A locked instance yields
+ * nothing, which is the correct conservative answer: an unreadable title cannot be
  * shown to be a duplicate, so the import proceeds rather than being blocked by
  * a comparison nobody can make.
  */
@@ -440,11 +429,11 @@ async function existingItemTitles(
   executor: MetadataExecutor,
   householdId: string,
 ): Promise<Array<{ title: string }>> {
-  const rows = await executor.select({ id: items.id, title: items.title, titleEnc: items.titleEnc })
+  const rows = await executor.select({ id: items.id, titleEnc: items.titleEnc })
     .from(items).where(eq(items.householdId, householdId));
   const metadata = await openMetadataReader(householdId, executor);
   return rows.flatMap((row) => {
-    const title = metadata.text("items.title", row.id, { encrypted: row.titleEnc, plaintext: row.title }).value;
+    const title = metadata.text("items.title", row.id, { encrypted: row.titleEnc }).value;
     return title ? [{ title }] : [];
   });
 }
@@ -641,7 +630,7 @@ export async function importPortableArchive(input: { userId: string; householdId
       if (duplicate && !skipped.has(source.id)) throw new AppError("archive_conflict_unresolved", "Review every duplicate before importing", 409);
       if (duplicate || !sectionMap.has(source.sectionId)) continue;
       const itemId = randomUUID();
-      await transaction.insert(items).values({ id: itemId, householdId: input.householdId, sectionId: sectionMap.get(source.sectionId)!, title: null, titleEnc: metadata.encryptText("items.title", itemId, source.title), subtype: source.subtype ?? null, provider: null, providerEnc: metadata.encryptText("items.provider", itemId, source.provider), reference: null, referenceEnc: metadata.encryptText("items.reference", itemId, source.reference), referenceIndex: metadata.referenceIndex(source.reference), costMinor: null, costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, source.costMinor), currency: source.currency, startDate: source.startDate ?? null, expiryDate: source.expiryDate ?? null, renewalDate: source.renewalDate ?? null, serviceDate: source.serviceDate ?? null, recurrenceMonths: source.recurrenceMonths ?? null, snoozedUntil: source.snoozedUntil ?? null, notes: null, notesEnc: metadata.encryptText("items.notes", itemId, source.notes), externalDocumentUrl: source.externalDocumentUrl ?? null, status: source.status });
+      await transaction.insert(items).values({ id: itemId, householdId: input.householdId, sectionId: sectionMap.get(source.sectionId)!, titleEnc: metadata.encryptText("items.title", itemId, source.title), subtype: source.subtype ?? null, providerEnc: metadata.encryptText("items.provider", itemId, source.provider), referenceEnc: metadata.encryptText("items.reference", itemId, source.reference), referenceIndex: metadata.referenceIndex(source.reference), costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, source.costMinor), currency: source.currency, startDate: source.startDate ?? null, expiryDate: source.expiryDate ?? null, renewalDate: source.renewalDate ?? null, serviceDate: source.serviceDate ?? null, recurrenceMonths: source.recurrenceMonths ?? null, snoozedUntil: source.snoozedUntil ?? null, notesEnc: metadata.encryptText("items.notes", itemId, source.notes), externalDocumentUrl: source.externalDocumentUrl ?? null, status: source.status });
       itemIdMap.set(source.id, itemId);
       count++;
     }

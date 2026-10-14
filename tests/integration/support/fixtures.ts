@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { createSession, csrfTokenForSession, readSession } from "@/lib/auth/session";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { sessionCookieName } from "@/lib/auth/cookies";
-import { requireInstanceMetadataWriter } from "@/server/metadata/fields";
+import { requireInstanceMetadataWriter, requireMetadataWriter, requireReceiptMetadataWriter } from "@/server/metadata/fields";
 import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { closeDatabase, getDb } from "@/db";
 import {
@@ -146,6 +146,40 @@ export async function cleanupIntegrationEnvironment(): Promise<void> {
   ]);
 }
 
+/**
+ * The encrypted columns an `items` row carries for the values given, written
+ * exactly as the application writes them (ADR-0024, contract release: the
+ * plaintext columns are no longer read). Spread into an insert.
+ */
+export async function encryptedItemColumns(
+  householdId: string,
+  itemId: string,
+  values: { title?: string | null; provider?: string | null; reference?: string | null; notes?: string | null; costMinor?: number | null },
+) {
+  const cipher = await requireMetadataWriter(householdId);
+  return {
+    titleEnc: cipher.encryptText("items.title", itemId, values.title),
+    providerEnc: cipher.encryptText("items.provider", itemId, values.provider),
+    referenceEnc: cipher.encryptText("items.reference", itemId, values.reference),
+    referenceIndex: cipher.referenceIndex(values.reference),
+    notesEnc: cipher.encryptText("items.notes", itemId, values.notes),
+    costMinorEnc: cipher.encryptNumber("items.cost_minor", itemId, values.costMinor),
+  };
+}
+
+/** The encrypted draft columns of a mail-in receipt, under its household's key (the instance key when `householdId` is null). */
+export async function encryptedReceiptDraft(
+  householdId: string | null,
+  receiptId: string,
+  values: { proposal?: Record<string, unknown>; fieldEvidence?: Record<string, unknown> },
+) {
+  const cipher = await requireReceiptMetadataWriter(householdId);
+  return {
+    proposalEnc: values.proposal === undefined ? null : cipher.encryptJson("imap_ingestion_messages.proposal", receiptId, values.proposal),
+    fieldEvidenceEnc: values.fieldEvidence === undefined ? null : cipher.encryptJson("imap_ingestion_messages.field_evidence", receiptId, values.fieldEvidence),
+  };
+}
+
 export async function createIntegrationFixture(label: string): Promise<IntegrationFixture> {
   const db = getDb();
   const namespace = `${label}-${randomUUID()}`;
@@ -217,16 +251,20 @@ export async function createIntegrationFixture(label: string): Promise<Integrati
     position: 0,
   }).returning({ id: sections.id });
 
+  const itemId = randomUUID();
   const [item] = await db.insert(items).values({
+    id: itemId,
     householdId: household.id,
     sectionId: section.id,
-    title: `Integration item ${namespace}`,
+    ...await encryptedItemColumns(household.id, itemId, { title: `Integration item ${namespace}` }),
     currency: "GBP",
   }).returning({ id: items.id });
+  const secondItemId = randomUUID();
   const [secondItem] = await db.insert(items).values({
+    id: secondItemId,
     householdId: secondHousehold.id,
     sectionId: secondSection.id,
-    title: `Second integration item ${namespace}`,
+    ...await encryptedItemColumns(secondHousehold.id, secondItemId, { title: `Second integration item ${namespace}` }),
     currency: "GBP",
   }).returning({ id: items.id });
 
