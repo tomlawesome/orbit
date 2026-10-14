@@ -1,9 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { and, eq, sql } from "drizzle-orm";
-import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedItemColumns, type IntegrationFixture } from "./support/fixtures";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import {
@@ -746,11 +747,15 @@ describe("notification worker PostgreSQL contracts", () => {
     // test fast at a row count large enough to make an unbounded scan obvious.
     const farRowCount = 60;
     const farItems = await getDb().insert(items).values(
-      Array.from({ length: farRowCount }, (_, index) => ({
-        householdId: fixture.household.id,
-        sectionId: fixture.section.id,
-        title: `Far future item ${index}`,
-        currency: "GBP",
+      await Promise.all(Array.from({ length: farRowCount }, async (_, index) => {
+        const id = randomUUID();
+        return {
+          id,
+          householdId: fixture.household.id,
+          sectionId: fixture.section.id,
+          ...await encryptedItemColumns(fixture.household.id, id, { title: `Far future item ${index}` }),
+          currency: "GBP",
+        };
       })),
     ).returning({ id: items.id });
     await getDb().insert(dueEvents).values(

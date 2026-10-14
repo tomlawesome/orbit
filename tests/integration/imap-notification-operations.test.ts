@@ -3,7 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { imapIngestionMessages, imapNotificationDeliveries } from "@/db/schema";
-import { createIntegrationFixture } from "./support/fixtures";
+import { createIntegrationFixture, encryptedReceiptDraft } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import {
   claimImapNotificationsForTests,
@@ -30,13 +30,13 @@ describe("PostgreSQL mailbox notification lifecycle", () => {
         mailbox: "private", mailboxUidValidity: "bounded", mailboxUid: 200 + index,
         contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: `bounded-${index}`,
         userId: fixture.users.member.id, householdId: fixture.household.id, status: "pending_review" as const,
-        proposal: { privateMarker: `private-${index}` }, expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending" as const,
+        expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending" as const,
       }))).returning({ id: imapIngestionMessages.id });
       const [disabledMessage] = await getDb().insert(imapIngestionMessages).values({
         mailbox: "private", mailboxUidValidity: "bounded-disabled", mailboxUid: 300,
         contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "bounded-disabled",
         userId: fixture.users.disabled.id, householdId: fixture.household.id, status: "pending_review",
-        proposal: { privateMarker: "disabled-private" }, expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
+        expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
       }).returning({ id: imapIngestionMessages.id });
 
       expect(await materializeImapNotificationsForTests(new Date(), 2, fixture.users.member.id)).toBe(4);
@@ -160,13 +160,15 @@ describe("administrator mailbox operation boundaries", () => {
     const fixture = await createIntegrationFixture("imap-admin-private-boundary");
     try {
       const admin = await fixture.session("admin");
+      const messageId = randomUUID();
       const [message] = await getDb().insert(imapIngestionMessages).values({
-        mailbox: "private", mailboxUidValidity: "admin-private", mailboxUid: 600,
+        id: messageId, mailbox: "private", mailboxUidValidity: "admin-private", mailboxUid: 600,
         contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "admin-private",
         userId: fixture.users.member.id, householdId: fixture.household.id, status: "pending_review",
-        proposal: { title: "Private receipt marker" }, expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "sent",
+        ...await encryptedReceiptDraft(fixture.household.id, messageId, { proposal: { title: "Private receipt marker" } }),
+        expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "sent",
       }).returning({ id: imapIngestionMessages.id });
-      const before = (await getDb().select({ proposal: imapIngestionMessages.proposal, status: imapIngestionMessages.status }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, message.id)))[0];
+      const before = (await getDb().select({ proposalEnc: imapIngestionMessages.proposalEnc, status: imapIngestionMessages.status }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, message.id)))[0];
       const verifyResponse = await callRouteForSession(verifyImap, admin, { url: adminVerifyUrl, method: "POST" });
       const operationsResponse = await callRouteForSession(getOperations, admin, { url: "http://127.0.0.1:3000/api/admin/operations" });
       for (const response of [verifyResponse, operationsResponse]) {
@@ -174,7 +176,7 @@ describe("administrator mailbox operation boundaries", () => {
         expectNoStore(response);
         expect(await response.clone().text()).not.toContain("Private receipt marker");
       }
-      const after = (await getDb().select({ proposal: imapIngestionMessages.proposal, status: imapIngestionMessages.status }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, message.id)))[0];
+      const after = (await getDb().select({ proposalEnc: imapIngestionMessages.proposalEnc, status: imapIngestionMessages.status }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, message.id)))[0];
       expect(after).toEqual(before);
     } finally {
       await fixture.cleanup();

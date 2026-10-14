@@ -7,7 +7,8 @@ import { assignImapReceiptHousehold, discardImapReviewItem, getImapReview, listI
 import { scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { requestHouseholdDeletion } from "@/server/household-lifecycle";
-import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { requireMetadataWriter } from "@/server/metadata/fields";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedItemColumns, encryptedReceiptDraft } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf } from "../support/synthetic-documents";
 
@@ -37,11 +38,12 @@ describe("authenticated mailbox review read boundary", () => {
     const fixture = await createIntegrationFixture("imap-review-route-auth");
     const member = await fixture.session("member");
     const outsider = await fixture.session("outsider");
+    const reviewReceiptId = crypto.randomUUID();
     const [receipt] = await getDb().insert(imapIngestionMessages).values({
-      mailbox: "private", mailboxUidValidity: "review", mailboxUid: 101,
+      id: reviewReceiptId, mailbox: "private", mailboxUidValidity: "review", mailboxUid: 101,
       contentSha256: crypto.randomUUID().replaceAll("-", ""), recipientAliasSha256: "review-alias",
       userId: member.userId, status: "pending_review", householdId: fixture.household.id,
-      proposal: { title: "Private proposal", provider: "Private provider" },
+      ...await encryptedReceiptDraft(fixture.household.id, reviewReceiptId, { proposal: { title: "Private proposal", provider: "Private provider" } }),
       expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
     }).returning({ id: imapIngestionMessages.id });
     await getDb().insert(imapIngestionAttachments).values({
@@ -91,9 +93,11 @@ describe("authenticated mailbox review read boundary", () => {
       { ...shared, mailboxUidValidity: "unlisted-1", mailboxUid: 201, status: "unattributed", failureCode: "sender_unverified", receiptStatus: "cancelled" },
       { ...shared, mailboxUidValidity: "unlisted-2", mailboxUid: 202, status: "held", receiptStatus: "cancelled" },
     ]);
+    const visibleId = crypto.randomUUID();
     const [visible] = await getDb().insert(imapIngestionMessages).values({
-      ...shared, mailboxUidValidity: "unlisted-3", mailboxUid: 203, status: "pending_review",
-      receiptStatus: "processing", householdId: fixture.household.id, proposal: { title: "The one that should show" },
+      ...shared, id: visibleId, mailboxUidValidity: "unlisted-3", mailboxUid: 203, status: "pending_review",
+      receiptStatus: "processing", householdId: fixture.household.id,
+      ...await encryptedReceiptDraft(fixture.household.id, visibleId, { proposal: { title: "The one that should show" } }),
     }).returning({ id: imapIngestionMessages.id });
 
     const url = "http://127.0.0.1:3000/api/imap-inbox";
@@ -107,16 +111,21 @@ describe("authenticated mailbox review read boundary", () => {
   it("requires a selected household and redacts mail and storage metadata", async () => {
     const fixture = await createIntegrationFixture("imap-review-route-safe");
     const member = await fixture.session("member");
-    await getDb().update(items).set({ provider: "Shared provider" }).where(eq(items.id, fixture.secondItem.id));
+    await getDb().update(items).set({ providerEnc: (await requireMetadataWriter(fixture.secondHousehold.id)).encryptText("items.provider", fixture.secondItem.id, "Shared provider") }).where(eq(items.id, fixture.secondItem.id));
+    const candidateId = randomUUID();
     const [selectedCandidate] = await getDb().insert(items).values({
-      householdId: fixture.household.id, sectionId: fixture.section.id, title: "Other household record", provider: "Shared provider", currency: "GBP",
+      id: candidateId, householdId: fixture.household.id, sectionId: fixture.section.id,
+      ...await encryptedItemColumns(fixture.household.id, candidateId, { title: "Other household record", provider: "Shared provider" }), currency: "GBP",
     }).returning({ id: items.id });
+    const safeReceiptId = randomUUID();
     const [receipt] = await getDb().insert(imapIngestionMessages).values({
-      mailbox: "private", mailboxUidValidity: "safe", mailboxUid: 102,
+      id: safeReceiptId, mailbox: "private", mailboxUidValidity: "safe", mailboxUid: 102,
       contentSha256: crypto.randomUUID().replaceAll("-", ""), recipientAliasSha256: "safe-alias",
       userId: member.userId, status: "pending_review", householdId: fixture.household.id,
-      proposal: { title: "Safe title", provider: "Shared provider", sender: "must-not-appear", filename: "must-not-appear.pdf" },
-      fieldEvidence: { title: { source: "parser", confidence: "medium" } },
+      ...await encryptedReceiptDraft(fixture.household.id, safeReceiptId, {
+        proposal: { title: "Safe title", provider: "Shared provider", sender: "must-not-appear", filename: "must-not-appear.pdf" },
+        fieldEvidence: { title: { source: "parser", confidence: "medium" } },
+      }),
       expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
     }).returning({ id: imapIngestionMessages.id });
     const firstAttachmentId = randomUUID();
@@ -162,11 +171,12 @@ describe("authenticated mailbox review read boundary", () => {
     const fixture = await createIntegrationFixture("imap-review-deletion-boundary");
     try {
       const member = await fixture.session("member");
+      const deletionReceiptId = randomUUID();
       await getDb().insert(imapIngestionMessages).values({
-        mailbox: "private", mailboxUidValidity: "deletion", mailboxUid: 103,
+        id: deletionReceiptId, mailbox: "private", mailboxUidValidity: "deletion", mailboxUid: 103,
         contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "deletion-alias",
         userId: member.userId, status: "pending_review", householdId: fixture.household.id,
-        proposal: { title: "Scheduled household receipt" }, expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
+        ...await encryptedReceiptDraft(fixture.household.id, deletionReceiptId, { proposal: { title: "Scheduled household receipt" } }), expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
       });
       await requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, fixture.household.name);
       const inbox = await listImapInbox(member.userId);

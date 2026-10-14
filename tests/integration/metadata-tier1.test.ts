@@ -16,7 +16,7 @@ import {
   flushMetadataDamageSightings,
   resetMetadataDamageSightingsForTests,
 } from "@/server/metadata/damage-sightings";
-import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedReceiptDraft } from "./support/fixtures";
 
 const passphrase = "correct-horse-battery-staple";
 
@@ -140,8 +140,6 @@ describe("Tier 1 metadata is written and read encrypted (ADR-0024)", () => {
     const [stored] = await getDb().select().from(items).where(eq(items.id, itemId));
     // The whole point of the tier: a database file leaked from this instance
     // carries neither value in readable form.
-    expect(stored.reference).toBeNull();
-    expect(stored.notes).toBeNull();
     expect(stored.referenceEnc?.startsWith("mdv1.")).toBe(true);
     expect(stored.notesEnc?.startsWith("mdv1.")).toBe(true);
     expect(stored.referenceEnc).not.toContain("AB-123");
@@ -189,7 +187,7 @@ describe("Tier 1 metadata is written and read encrypted (ADR-0024)", () => {
     });
     const otherReader = await openMetadataReader(fixture.secondHousehold.id);
     expect(otherHousehold).toBeDefined();
-    expect(otherReader.text("items.reference", itemId, { encrypted: stored.referenceEnc, plaintext: null }).state)
+    expect(otherReader.text("items.reference", itemId, { encrypted: stored.referenceEnc }).state)
       .toBe("metadata_integrity_failed");
 
     // The same reference in two households produces unrelated digests, so
@@ -215,12 +213,6 @@ describe("duplicate detection uses the blind index (ADR-0024 decision 2)", () =>
       reference: "HI-9284712",
     });
 
-    // No plaintext reference survives anywhere in this household, so the
-    // lookup below has nothing but the index to match on.
-    expect(await getDb().select({ id: items.id }).from(items)
-      .where(and(eq(items.householdId, fixture.household.id), isNotNull(items.reference))))
-      .toHaveLength(0);
-
     // A differently-titled item carrying the same reference: only the
     // reference can flag it, so this is the index and nothing else.
     const archive = archiveWith([{ sectionId: randomUUID(), title: "Buildings cover", reference: "hi-9284712" }]);
@@ -239,7 +231,7 @@ describe("duplicate detection uses the blind index (ADR-0024 decision 2)", () =>
     })).rejects.toMatchObject({ code: "archive_conflict_unresolved", status: 409 });
 
     // Removing the index is what this test is guarding: with the digests
-    // cleared there is no plaintext to fall back on, and the duplicate goes
+    // cleared there is nothing left to match on, and the duplicate goes
     // unseen. This is the failure the index prevents.
     await getDb().update(items).set({ referenceIndex: null }).where(eq(items.householdId, fixture.household.id));
     const blind = await previewPortableImport(fixture.users.member.id, fixture.household.id, archive, passphrase);
@@ -277,13 +269,13 @@ describe("attribution moves a receipt's draft between keys (ADR-0024 decision 1)
       householdId: null,
       status: "pending_review",
       expiresAt: new Date(Date.now() + 86_400_000),
-      proposal: { title: "Unattributed draft", reference: "UA-1" },
-      fieldEvidence: { title: { source: "subject", confidence: "high" } },
+      // Encrypted under the instance key, which is the only key a receipt
+      // with no household can use.
+      ...await encryptedReceiptDraft(null, receiptId, {
+        proposal: { title: "Unattributed draft", reference: "UA-1" },
+        fieldEvidence: { title: { source: "subject", confidence: "high" } },
+      }),
     });
-
-    // The backfill encrypts it under the instance key, which is the only key
-    // a receipt with no household can use.
-    await runMetadataBackfillBatch(100);
     const [encrypted] = await getDb().select({ proposalEnc: imapIngestionMessages.proposalEnc })
       .from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receiptId));
     expect(encrypted.proposalEnc?.startsWith("mdv1.")).toBe(true);
@@ -297,13 +289,13 @@ describe("attribution moves a receipt's draft between keys (ADR-0024 decision 1)
     expect(moved.proposalEnc).not.toBe(encrypted.proposalEnc);
 
     const householdReader = await openMetadataReader(fixture.household.id);
-    expect(householdReader.json("imap_ingestion_messages.proposal", receiptId, { encrypted: moved.proposalEnc, plaintext: {} }))
+    expect(householdReader.json("imap_ingestion_messages.proposal", receiptId, { encrypted: moved.proposalEnc }))
       .toEqual({ value: { title: "Unattributed draft", reference: "UA-1" } });
 
     // And the instance key can no longer read it, which is the isolation the
     // move exists to establish.
     const instanceReader = await openMetadataReader(null);
-    expect(instanceReader.json("imap_ingestion_messages.proposal", receiptId, { encrypted: moved.proposalEnc, plaintext: {} }).state)
+    expect(instanceReader.json("imap_ingestion_messages.proposal", receiptId, { encrypted: moved.proposalEnc }).state)
       .toBe("metadata_integrity_failed");
 
     await getDb().delete(metadataKeys).where(eq(metadataKeys.scope, "instance"));
@@ -323,10 +315,11 @@ describe("attribution moves a receipt's draft between keys (ADR-0024 decision 1)
       householdId: null,
       status: "pending_review",
       expiresAt: new Date(Date.now() + 86_400_000),
-      proposal: { title: "Draft with a stale sighting", reference: "SG-1" },
-      fieldEvidence: { title: { source: "subject", confidence: "high" } },
+      ...await encryptedReceiptDraft(null, receiptId, {
+        proposal: { title: "Draft with a stale sighting", reference: "SG-1" },
+        fieldEvidence: { title: { source: "subject", confidence: "high" } },
+      }),
     });
-    await runMetadataBackfillBatch(100);
 
     // Damage the field_evidence column for real, so it stays unreadable and
     // rekeyReceiptDraft has to leave it exactly as it is (ADR-0024 decision 5).
@@ -442,13 +435,6 @@ describe("the backfill converts rows that predate encryption (ADR-0024 decision 
       fieldEvidence: { title: { source: "subject", confidence: "high" } },
     });
 
-    // Readable before the backfill runs: that is what makes the migration safe.
-    const before = await workspaceFor(fixture);
-    const beforeItem = before.households.find((candidate) => candidate.id === fixture.household.id)!
-      .items.find((candidate) => candidate.id === legacyId)!;
-    expect(beforeItem.reference).toBe("LEGACY-1");
-    expect(beforeItem.notes).toBe("Written before encryption");
-
     const batch = await runMetadataBackfillBatch(100);
     expect(batch.items).toBeGreaterThanOrEqual(1);
     expect(batch.receipts).toBeGreaterThanOrEqual(1);
@@ -474,7 +460,7 @@ describe("the backfill converts rows that predate encryption (ADR-0024 decision 
     expect(afterItem.notes).toBe("Written before encryption");
 
     const reader = await openMetadataReader(fixture.household.id);
-    expect(reader.json("imap_ingestion_messages.proposal", receiptId, { encrypted: receipt.proposalEnc, plaintext: {} }))
+    expect(reader.json("imap_ingestion_messages.proposal", receiptId, { encrypted: receipt.proposalEnc }))
       .toEqual({ value: { title: "Legacy proposal", reference: "LEGACY-1" } });
 
     // Resumable and idempotent: a second run finds nothing left to do.
@@ -515,19 +501,16 @@ describe("the backfill converts rows that predate encryption (ADR-0024 decision 
       householdId: null,
       status: "unattributed",
       expiresAt: new Date(Date.now() + 86_400_000),
-      proposal: { title: "Unattributed receipt" },
+      ...await encryptedReceiptDraft(null, receiptId, { proposal: { title: "Unattributed receipt" } }),
     });
-
-    await runMetadataBackfillBatch(100);
 
     const instanceKeys = await getDb().select().from(metadataKeys).where(eq(metadataKeys.scope, "instance"));
     expect(instanceKeys).toHaveLength(1);
     expect(instanceKeys[0].householdId).toBeNull();
 
     const [receipt] = await getDb().select().from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receiptId));
-    expect(receipt.proposal).toEqual({});
     const reader = await openMetadataReader(null);
-    expect(reader.json("imap_ingestion_messages.proposal", receiptId, { encrypted: receipt.proposalEnc, plaintext: {} }))
+    expect(reader.json("imap_ingestion_messages.proposal", receiptId, { encrypted: receipt.proposalEnc }))
       .toEqual({ value: { title: "Unattributed receipt" } });
 
     // Only ever one instance row, whatever races to create it. The assertion

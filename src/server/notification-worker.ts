@@ -846,7 +846,6 @@ async function deliverClaimed(
       householdId: notificationDeliveries.householdId,
       email: users.email,
       emailEnc: users.emailEnc,
-      title: items.title,
       titleEnc: items.titleEnc,
       dueDate: dueEvents.dueDate,
       kind: dueEvents.kind,
@@ -949,7 +948,7 @@ async function deliverClaimed(
       // failed like any other transient fault, so it retries once the key or
       // the value is repaired rather than mailing a nameless reminder.
       const decryptedTitle = titleReaders.get(delivery.householdId)!
-        .text("items.title", delivery.itemId, { encrypted: delivery.titleEnc, plaintext: delivery.title });
+        .text("items.title", delivery.itemId, { encrypted: delivery.titleEnc });
       if (!decryptedTitle.value) {
         await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "item_title_unreadable", now, retryDelay);
         continue;
