@@ -7,8 +7,7 @@
 # into an empty directory and validated with nothing else present.
 #
 # Extracted verbatim from the "Validate the deployment asset set without a
-# source tree" step of the &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# source tree" step of the retired GitHub container workflow, which the GitLab `acceptance` job now runs (#801).
 #
 # Inputs: none beyond the repository checkout and a generated .env-orbit.
 set -Eeuo pipefail

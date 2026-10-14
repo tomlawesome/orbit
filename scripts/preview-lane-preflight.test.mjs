@@ -20,10 +20,6 @@ const gitlabCi = readFileSync(
   new URL("../.gitlab-ci.yml", import.meta.url),
   "utf8",
 ).replaceAll("\r\n", "\n");
-const publishWorkflow = readFileSync(
-  new URL("../.github/workflows/publish-container.yml", import.meta.url),
-  "utf8",
-).replaceAll("\r\n", "\n");
 
 describe("preview-lane local preflight", () => {
   it("isolates generated configuration from the developer checkout", () => {
@@ -73,15 +69,14 @@ describe("preview-lane local preflight", () => {
     expect(scripts).not.toContain("packages: write");
   });
 
-  it("routes the preview preflight and both CI call sites to the same Compose validation script (#804)", () => {
+  it("routes the preview preflight and the CI call site to the same Compose validation script (#804)", () => {
     // The preflight is a thin wrapper: it must not hold its own copy of the
     // Compose assertions, only delegate to the shared script.
     expect(composeWrapper).toContain("bash scripts/ci/validate-compose.sh");
     expect(composeWrapper).not.toContain("docker compose");
     expect(composeWrapper).not.toContain("jq --exit-status");
 
-    // Both CI call sites invoke that same shared script directly.
+    // The CI call site invokes that same shared script directly.
     expect(gitlabCi).toContain("bash scripts/ci/validate-compose.sh");
-    expect(publishWorkflow).toContain("run: bash scripts/ci/validate-compose.sh");
   });
 });

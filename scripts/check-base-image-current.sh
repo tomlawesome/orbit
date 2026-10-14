@@ -68,7 +68,7 @@ printf 'base image: pinned %s\n' "$pinned_reference"
 manifest_json=""
 if ! manifest_json="$(docker manifest inspect "$pinned_tag" 2>/dev/null)"; then
   fail "could not resolve '$pinned_tag' from its registry."
-  fail "if this is a private registry, the workflow needs to log in before this step."
+  fail "if this is a private registry, the CI job needs to log in to it before this step."
   exit 2
 fi
 

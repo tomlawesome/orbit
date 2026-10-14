@@ -6,13 +6,13 @@
 # that was built, scanned and identity-checked, never a rebuild of it.
 #
 # Extracted from the "Start application and database" step of the
-# &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# retired GitHub container workflow, which the GitLab `smoke` job and its browser variants now run (#801).
 #
 # Inputs (environment):
-#   COMPOSE_FILES  overlay set to bring up. Defaults to the set the workflow
-#                  uses, which passes nothing; the GitLab lane appends its own
-#                  compose/docker-compose.ci-cap.yml to it.
+#   COMPOSE_FILES  overlay set to bring up. Defaults to the base, mail and
+#                  acceptance files; the GitLab smoke jobs append the
+#                  dependency-proxy and compose/docker-compose.ci-cap.yml
+#                  overlays to it.
 #   ORBIT_IMAGE    the image under test, plus the .env-orbit written by
 #                  scripts/ci/create-test-configuration.sh
 #

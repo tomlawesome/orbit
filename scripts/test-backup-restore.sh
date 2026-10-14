@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Backup/restore acceptance drill. Runs in CI against the container-validation
-# deployment (publish-container.yml) and asserts the operator guarantees
+# deployment and asserts the operator guarantees
 # below, cited as Part 2 / script #entry in docs/installer-guarantees.md
 # (issue #290 coverage map; the drill predates the catalogue, so citations
 # are mapped per test function rather than per assertion):
