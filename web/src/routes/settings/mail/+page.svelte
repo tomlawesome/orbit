@@ -13,6 +13,7 @@
   import Pocket from "./pocket.svelte";
   import {
     ALREADY_CHECKED, checkRow, clearLanding, landingOf, LINK_CHECKED, LINK_FAILED, refusalOf, SENDING, sentWords,
+    withLearnt,
   } from "./sender.js";
 
   /**
@@ -69,9 +70,12 @@
   /** @type {?HTMLButtonElement} */
   let checkButton = $state(null);
   let sending = $state(false);
-  /* When the link in the email just sent lapses: the read has not been taken
-     again, so the row follows the answer to the press. */
+  /* What this visit has learnt since the read -- when the link just sent
+     lapses, or that the address is checked already -- kept here and handed to
+     the phone's layout, so a window resized across the breakpoint shows the
+     same row in both. */
   let sentExpires = $state(/** @type {string | null} */ (null));
+  let checked = $state(false);
   /* The gate's sender rows, `?sender=unchecked|sent`, fixtures only. */
   const scene = data.fixtures ? new URLSearchParams(location.search).get("sender") ?? "" : "";
   const relay = $derived.by(() => {
@@ -84,7 +88,7 @@
   const sender = $derived.by(() => {
     const one = data.fixtures && !scene ? null : relay.sender;
     if (!one) return null;
-    return sentExpires && !one.verified ? { ...one, verificationPending: true, expiresAt: sentExpires } : one;
+    return withLearnt(one, { sentExpires, checked });
   });
   const row = $derived(sender ? checkRow(sender) : null);
   const failures = $derived(data.failures ?? []);
@@ -136,27 +140,29 @@
     sending = true;
     problem = null;
     said = "";
+    /** @type {"button" | "said" | "alert"} */
+    let focusOn = "button";
     try {
       const sent = await sendSenderCheck();
       sentExpires = sent.expiresAt;
       said = sentWords(sent.address ?? sender.address);
-      sending = false;
-      await tick();
-      checkButton?.focus();
     } catch (error) {
-      sending = false;
       const refusal = refusalOf(error);
       if (refusal.already) {
-        rotated = await readRelay().catch(() => rotated);
+        /* The button stays held until the re-read answers. If it cannot, the
+           server has still said so: the row follows it. */
+        try { rotated = await readRelay(); } catch { checked = true; }
         said = ALREADY_CHECKED;
-        await tick();
-        saidLine?.focus();
+        focusOn = "said";
       } else {
-        await refuse(refusal.words);
+        problem = refusal.words;
+        focusOn = "alert";
       }
     } finally {
       sending = false;
     }
+    await tick();
+    (focusOn === "button" ? checkButton : focusOn === "said" ? saidLine : problemLine)?.focus();
   };
   /* #1151 S7: the two-tap protocol (lib/arm.js) — the first tap arms, the
      second fires, and an unfired arm relaxes after four seconds, on scroll,
@@ -205,7 +211,7 @@
 </svelte:head>
 
 <!-- #1125, proposal §2.9: the phone's own relay, chosen by CSS. -->
-<Pocket relay={data.relay} bind:rotated {failures} fixtures={Boolean(data.fixtures)} live={pocket} {landing} />
+<Pocket relay={data.relay} bind:rotated {failures} fixtures={Boolean(data.fixtures)} live={pocket} {landing} bind:sentExpires bind:checked />
 
 <div class="relay-page">
 <div class="satellites" bind:this={backdropRoot} aria-hidden="true"></div>

@@ -7,7 +7,9 @@
   import { wake } from "$lib/pocket/wake.js";
   import { dismissReceipt, readRelay, rotateRelay, sendSenderCheck, wordsOf } from "$lib/data/workspace.js";
   import { SENDER_SCENES } from "$lib/data/fixtures/relay.js";
-  import { ALREADY_CHECKED, checkRow, LINK_CHECKED, LINK_FAILED, refusalOf, SENDING, SENT_WAKE } from "./sender.js";
+  import {
+    ALREADY_CHECKED, checkRow, LINK_CHECKED, LINK_FAILED, refusalOf, SENDING, SENT_WAKE, withLearnt,
+  } from "./sender.js";
 
   /*
    * YOUR RELAY ON A PHONE (#1125, proposal §2.9). Beside the desk's card and
@@ -40,16 +42,17 @@
    */
 
   /** @typedef {Awaited<ReturnType<typeof rotateRelay>>} Relay */
-  /** @type {{ relay: Relay, rotated: Relay | null, failures: import('$lib/data/workspace.js').MailFailure[], fixtures: boolean, live?: boolean, landing?: "verified" | "unverified" | null }} */
-  let { relay, rotated = $bindable(), failures, fixtures, live = false, landing = null } = $props();
+  /** @type {{ relay: Relay, rotated: Relay | null, failures: import('$lib/data/workspace.js').MailFailure[], fixtures: boolean, live?: boolean, landing?: "verified" | "unverified" | null, sentExpires?: string | null, checked?: boolean }} */
+  let {
+    relay, rotated = $bindable(), failures, fixtures, live = false, landing = null,
+    /* The page's: what this visit has learnt about the check, shared with the desk's layout. */
+    sentExpires = $bindable(null), checked = $bindable(false),
+  } = $props();
 
   /* The gate's other two states, `?relay=never|paused`, fixtures only. */
   let scene = $state("");
   /* ... and its other two sender rows, `?sender=unchecked|sent`. */
   const senderScene = fixtures ? new URLSearchParams(location.search).get("sender") ?? "" : "";
-  /* When the link in the email just sent lapses: the read has not been taken
-     again, so the row follows the answer to the press. */
-  let sentExpires = $state(/** @type {string | null} */ (null));
   const shown = $derived.by(() => {
     const base = Object.hasOwn(SENDER_SCENES, senderScene)
       ? { ...(rotated ?? relay), status: "no checked sending address", sender: SENDER_SCENES[/** @type {"sent"} */ (senderScene)] }
@@ -62,7 +65,7 @@
   const sender = $derived.by(() => {
     const one = fixtures && !senderScene ? null : shown.sender;
     if (!one) return null;
-    return sentExpires && !one.verified ? { ...one, verificationPending: true, expiresAt: sentExpires } : one;
+    return withLearnt(one, { sentExpires, checked });
   });
   const row = $derived(sender ? checkRow(sender) : null);
   const paused = $derived(shown.ingest === "paused");
@@ -77,6 +80,8 @@
   let problemLine = $state(null);
   /** @type {?HTMLButtonElement} */
   let checkButton = $state(null);
+  /** @type {?HTMLElement} */
+  let checkField = $state(null);
 
   /** @param {string} words */
   async function refuse(words) {
@@ -91,25 +96,30 @@
     if (sending || !sender) return;
     sending = true;
     problem = null;
+    /** @type {"button" | "field" | "alert"} */
+    let focusOn = "button";
     try {
       const sent = await sendSenderCheck();
       sentExpires = sent.expiresAt;
-      sending = false;
       wake(SENT_WAKE);
-      await tick();
-      checkButton?.focus();
     } catch (error) {
-      sending = false;
       const refusal = refusalOf(error);
       if (refusal.already) {
-        rotated = await readRelay().catch(() => rotated);
+        /* The button stays held until the re-read answers. If it cannot, the
+           server has still said so: the row follows it. */
+        try { rotated = await readRelay(); } catch { checked = true; }
         wake(ALREADY_CHECKED);
+        /* The button goes with it; focus goes to the row that now says why. */
+        focusOn = "field";
       } else {
-        await refuse(refusal.words);
+        problem = refusal.words;
+        focusOn = "alert";
       }
     } finally {
       sending = false;
     }
+    await tick();
+    (focusOn === "button" ? checkButton : focusOn === "field" ? checkField : problemLine)?.focus();
   }
 
   /** @param {"rotate" | "pause" | "resume"} action */
@@ -205,7 +215,7 @@
             <span class="rl-label">sending from</span>
             <span class="rl-value">{sender.address}</span>
           </div>
-          <div class="rl-field">
+          <div class="rl-field" tabindex="-1" bind:this={checkField}>
             <span class="rl-label">sender check</span>
             <b class:ok={row.tone === "ok"} class:warm={row.tone === "warm"}>{row.says}</b>
           </div>
