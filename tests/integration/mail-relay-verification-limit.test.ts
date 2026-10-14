@@ -89,16 +89,17 @@ const verificationRoute = async () => route ?? (route = (await loadRoute("settin
 let fixture: IntegrationFixture;
 const savedEnvironment: Record<string, string | undefined> = {};
 
-const SMTP_URL = "smtp://orbit-test:fake-smtp-password@smtp.example.test:587";
+/* Outbound mail as the config contract reads it since SMTP_URL was retired (#1403 D3). */
+const setSmtp = () => { process.env.SMTP_HOST = "smtp.example.test"; process.env.SMTP_PORT = "587"; process.env.SMTP_USER = "orbit-test"; process.env.SMTP_PASSWORD = "fake-smtp-password"; };
 
 beforeEach(async () => {
   mail.sent.length = 0;
   route = undefined;
-  for (const name of ["SMTP_URL", "SMTP_FROM", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"]) savedEnvironment[name] = process.env[name];
+  for (const name of ["SMTP_PORT", "SMTP_FROM", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"]) savedEnvironment[name] = process.env[name];
   delete process.env.SMTP_HOST;
   delete process.env.SMTP_USER;
   delete process.env.SMTP_PASSWORD;
-  process.env.SMTP_URL = SMTP_URL;
+  setSmtp();
   process.env.SMTP_FROM = "Orbit <orbit@example.test>";
   fixture = await createIntegrationFixture("sender-check-limit");
 });
@@ -311,7 +312,7 @@ describe("refused requests do not count", () => {
   });
 
   it("does not count a 503 (mail not configured) against the limit", async () => {
-    delete process.env.SMTP_URL;
+    delete process.env.SMTP_HOST;
     for (let attempt = 0; attempt < 6; attempt += 1) {
       at(attempt * 61);
       const response = await send();
@@ -319,7 +320,7 @@ describe("refused requests do not count", () => {
     }
     expect(mail.sent).toEqual([]);
 
-    process.env.SMTP_URL = SMTP_URL;
+    setSmtp();
     at(6 * 61);
     expect((await send()).status).toBe(202);
     expect(mail.sent).toHaveLength(1);

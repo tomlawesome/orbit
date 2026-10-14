@@ -80,11 +80,11 @@ const savedEnvironment: Record<string, string | undefined> = {};
 beforeEach(async () => {
   mail.sent.length = 0;
   mail.failing = false;
-  for (const name of ["SMTP_URL", "SMTP_FROM", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "APP_URL"]) savedEnvironment[name] = process.env[name];
+  for (const name of ["SMTP_PORT", "SMTP_FROM", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "APP_URL"]) savedEnvironment[name] = process.env[name];
   delete process.env.SMTP_HOST;
   delete process.env.SMTP_USER;
   delete process.env.SMTP_PASSWORD;
-  process.env.SMTP_URL = "smtp://orbit-test:fake-smtp-password@smtp.example.test:587";
+  process.env.SMTP_HOST = "smtp.example.test"; process.env.SMTP_PORT = "587"; process.env.SMTP_USER = "orbit-test"; process.env.SMTP_PASSWORD = "fake-smtp-password";
   process.env.SMTP_FROM = "Orbit <orbit@example.test>";
   fixture = await createIntegrationFixture("sender-hardening");
 });

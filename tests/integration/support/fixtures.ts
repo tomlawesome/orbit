@@ -7,6 +7,7 @@ import { createSession, csrfTokenForSession, readSession } from "@/lib/auth/sess
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { sessionCookieName } from "@/lib/auth/cookies";
 import { requireInstanceMetadataWriter } from "@/server/metadata/fields";
+import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { closeDatabase, getDb } from "@/db";
 import {
   auditLog,
@@ -123,6 +124,8 @@ export async function cleanupIntegrationEnvironment(): Promise<void> {
      under it survives this function, so dropping it loses nothing and the next
      writer mints a fresh one. */
   await db.delete(metadataKeys);
+  /* The key cache would otherwise outlive the row it cached. */
+  resetMetadataKeyCacheForTests();
   await closeDatabase();
   await Promise.all([
     rm(storageRoot, { recursive: true, force: true }),
