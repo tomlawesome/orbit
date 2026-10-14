@@ -3,7 +3,10 @@
 # Decides whether the exact hostile-document processor check has to run for
 # this commit. It is minutes of a live Tika stack, so it is skipped when
 # nothing it covers moved -- the processor configuration, the compose file,
-# the document code paths or the test itself.
+# the document code paths, the test itself (test-tika-processor.mjs and the
+# confinement assertions in verify-tika-processor.sh), this gate and
+# .gitlab-ci.yml, which runs both. A change to any of those must trigger the
+# check, or weakening it merges unverified.
 # Unable to compare (no parent commit) means required, never skipped.
 #
 # Extracted verbatim from the "Detect exact processor validation scope" step
@@ -23,7 +26,10 @@ if git rev-parse --verify HEAD^ >/dev/null 2>&1 &&
      docker-compose.yml \
      src/server/documents \
      src/server/item-document-inspection.ts \
-     scripts/test-tika-processor.mjs; then
+     scripts/test-tika-processor.mjs \
+     scripts/ci/verify-tika-processor.sh \
+     scripts/ci/detect-processor-scope.sh \
+     .gitlab-ci.yml; then
   required=false
 else
   required=true

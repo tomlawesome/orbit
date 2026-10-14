@@ -111,6 +111,11 @@ describe("hostile document processor contract", () => {
     expect(gitlabCi).toContain('[ "$(orbit_output required)" = "true" ]');
     expect(gitlabCi).toContain("bash scripts/ci/verify-tika-processor.sh");
     expect(processorScope).toContain("scripts/test-tika-processor.mjs");
+    // The confinement assertions, the step that calls them and the gate itself
+    // must also trigger the check, or weakening any of them merges unverified.
+    expect(processorScope).toContain("scripts/ci/verify-tika-processor.sh");
+    expect(processorScope).toContain("scripts/ci/detect-processor-scope.sh");
+    expect(processorScope).toContain(".gitlab-ci.yml");
     expect(processorRuntime).toContain("scripts/test-tika-processor.mjs");
     expect(processorRuntime).toContain('test "${tika_uid}" = "35002"');
     expect(processorRuntime).toContain('test "${tika_read_only}" = "true"');
