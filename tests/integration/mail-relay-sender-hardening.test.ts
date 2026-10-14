@@ -33,6 +33,9 @@ import { callRoute, callRouteForSession, loadRoute } from "./support/request-eve
  *   4. (A lapsed link reporting its expiry is asserted in
  *      mail-relay-sender-read.test.ts, where the old expectation lived.)
  *   5. With APP_URL empty or unset, a send answers 503 with a stable code, not 500.
+ *   6. A member's only sending address is their registered one (decision 7c):
+ *      a stored, verified row for any other address, whatever its source,
+ *      attributes nothing and does not count as a verified address.
  *
  * Mail is captured at the transport library; nothing opens a socket.
  */
@@ -273,6 +276,20 @@ describe("finding 2: the registered address changes outside the settings screen"
     expect(await hasVerifiedSenderAddress(fixture.users.member.id)).toBe(false);
     expect(await userForVerifiedSender(oldAddress)).toBeUndefined();
     expect(await userForVerifiedSender(newAddress)).toBeUndefined();
+  });
+});
+
+describe("finding 6: no sending address but the registered one attributes", () => {
+  it("does not attribute mail to a member from a verified stored address that is not their registered one", async () => {
+    const userId = fixture.users.member.id;
+    const stranger = "harlow-not-registered@example.test";
+    expect(stranger).not.toBe(fixture.users.member.email);
+    await getDb().insert(mailInSenderAddresses).values({
+      userId, address: stranger, source: "manual", verifiedAt: new Date(),
+    });
+
+    expect(await userForVerifiedSender(stranger)).toBeUndefined();
+    expect(await hasVerifiedSenderAddress(userId)).toBe(false);
   });
 });
 

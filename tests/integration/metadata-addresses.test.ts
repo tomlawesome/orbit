@@ -139,7 +139,8 @@ describe("an account address is written and read encrypted (#969)", () => {
 describe("the backfill converts addresses written before the release (#969)", () => {
   it("encrypts a plaintext account and sender address, clears both, and keeps sign-in working", async () => {
     const address = "pre-release@example.invalid";
-    const senderAddress = "pre-release-sender@example.invalid";
+    // A member's only sending address is their registered one (decision 7c).
+    const senderAddress = address;
 
     /* The state migration 0044 leaves behind: plaintext present, ciphertext
        absent. Written straight to the table, because no application path
@@ -149,7 +150,7 @@ describe("the backfill converts addresses written before the release (#969)", ()
       id: userId, email: address, emailVerified: true, displayName: "Pre-release person",
     });
     await getDb().insert(mailInSenderAddresses).values({
-      userId, address: senderAddress, source: "manual", verifiedAt: new Date(),
+      userId, address: senderAddress, source: "account", verifiedAt: new Date(),
     });
     await getDb().insert(localCredentials).values({ userId, passwordHash: await hashPassword(PASSWORD) });
 
@@ -183,7 +184,7 @@ describe("no readable address survives anywhere (#969, the #966 failure)", () =>
       { bootstrap: true },
     );
     await getDb().insert(mailInSenderAddresses).values({
-      userId: created.id, address: "sweep-sender@example.invalid", source: "manual",
+      userId: created.id, address, source: "account",
     });
     while (!backfillComplete(await runMetadataBackfillBatch())) { /* drain */ }
 
@@ -224,7 +225,7 @@ describe("an instance with no usable key (#969, and why #970 exists)", () => {
 describe("a KEK rotation covers the address rows (#969, ADR-0017's contract)", () => {
   it("re-reads both addresses after a full rotation, with no value rewritten", async () => {
     const address = "rotated@example.invalid";
-    const senderAddress = "rotated-sender@example.invalid";
+    const senderAddress = address;
     const created = await createLocalUser(
       { email: address, displayName: "Rotated", passwordHash: await hashPassword(PASSWORD) },
       { bootstrap: true },
@@ -237,7 +238,7 @@ describe("a KEK rotation covers the address rows (#969, ADR-0017's contract)", (
       address: null,
       addressEnc: writer.encryptText("mail_in_sender_addresses.address", senderId, senderAddress),
       addressIndex: writer.senderAddressIndex(senderAddress),
-      source: "manual",
+      source: "account",
       verifiedAt: new Date(),
     });
 

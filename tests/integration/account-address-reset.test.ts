@@ -74,7 +74,7 @@ async function seedEncryptedAccount(label: string): Promise<{ id: string; email:
     address: null,
     addressEnc: cipher.encryptText("mail_in_sender_addresses.address", senderId, email),
     addressIndex: cipher.senderAddressIndex(email),
-    source: "manual",
+    source: "account",
     verifiedAt: new Date(),
   });
   return { id: created.id, email };
