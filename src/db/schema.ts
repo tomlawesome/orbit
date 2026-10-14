@@ -1050,6 +1050,13 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   /** The one-use link's token, digested. The token itself is never stored. */
   verificationTokenDigest: text("verification_token_digest"),
   verificationExpiresAt: timestamp("verification_expires_at", { withTimezone: true }),
+  /**
+   * When the check email was last handed to the mailer, newest last, at most
+   * five entries (#1403 D2): the member's rate limit, one a minute and five in
+   * a rolling day, kept here so a restart does not forget it (the reasoning of
+   * `local_credentials.locked_until`, ADR-0023 section 4).
+   */
+  checkSentAt: timestamp("check_sent_at", { withTimezone: true }).array().notNull().default(sql`'{}'::timestamptz[]`),
   ...auditColumns,
 }, (table) => [
   uniqueIndex("mail_in_sender_address_unique").on(table.address),

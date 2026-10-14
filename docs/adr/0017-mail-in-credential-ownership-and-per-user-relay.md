@@ -574,6 +574,9 @@ body and sends the check email to the member's registered address, seeding the
 row again first if it is missing. It answers 202 with `{ address, expiresAt }`,
 or 409 `sender_already_verified` if the address is already verified. Only a
 signed-in member may call it. A body that names another address is not read.
+The send is rate-limited to one a minute and five a day per member, stored in
+the database, and refused with 429 `sender_check_too_soon` and `Retry-After`
+(owner, 2026-10-14).
 
 **The seeded row follows the registered address.** If the account email is
 edited, or the provider's claim changes, the row follows it and verification

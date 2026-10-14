@@ -27,7 +27,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { externalIdentities, mailInSenderAddresses, users } from "@/db/schema";
-import { AppError } from "@/lib/app-error";
+import { AppError, RateLimitedError } from "@/lib/app-error";
 import {
   openInstanceMetadataReader,
   requireInstanceMetadataWriter,
@@ -64,6 +64,28 @@ export interface SenderAddressView {
 
 /** How long a verification link is good for. One use, and not for long. */
 export const SENDER_VERIFICATION_TTL_MS = 24 * 3_600_000;
+
+/** The check email goes out at most once in this long per member (#1403 D2). */
+export const SENDER_CHECK_MIN_GAP_MS = 60_000;
+/** ...and at most `SENDER_CHECK_DAILY_LIMIT` times in a rolling window this long. */
+export const SENDER_CHECK_WINDOW_MS = 24 * 3_600_000;
+export const SENDER_CHECK_DAILY_LIMIT = 5;
+
+/**
+ * Whole seconds to wait before another check email may be sent, or 0 when one
+ * may go now. `sent` holds the counted sends (any order). The wait is until 60
+ * seconds after the newest send, or until the oldest of the five leaves the
+ * rolling 24 hours, whichever is later; rounded up to a whole second.
+ */
+export function senderCheckWaitSeconds(sent: readonly Date[], now: Date): number {
+  const inWindow = sent.map((at) => at.getTime()).filter((at) => at > now.getTime() - SENDER_CHECK_WINDOW_MS).sort((a, b) => a - b);
+  let readyAt = now.getTime();
+  if (inWindow.length > 0) readyAt = Math.max(readyAt, inWindow[inWindow.length - 1] + SENDER_CHECK_MIN_GAP_MS);
+  if (inWindow.length >= SENDER_CHECK_DAILY_LIMIT) {
+    readyAt = Math.max(readyAt, inWindow[inWindow.length - SENDER_CHECK_DAILY_LIMIT] + SENDER_CHECK_WINDOW_MS);
+  }
+  return Math.ceil((readyAt - now.getTime()) / 1000);
+}
 
 /** Explicit seams so tests never open a socket; the defaults are the real ones. */
 export interface SenderAddressDependencies {
@@ -189,11 +211,14 @@ export async function seedSenderAddress(userId: string, dependencies: SenderAddr
   const address = normalizeSenderAddress(accountEmail ?? undefined);
   if (!address) return;
 
+  /* The rate limit is the member's, not the address's: a replaced row keeps it. */
+  let carriedChecks: Date[] = [];
   if (existingRows.length > 0) {
     const current = existingRows.length === 1
       ? normalizeSenderAddress(readAddress(reader, existingRows[0]).value ?? undefined)
       : undefined;
     if (current === address) return;
+    carriedChecks = existingRows[0].checkSentAt;
     await getDb().delete(mailInSenderAddresses).where(eq(mailInSenderAddresses.userId, userId));
   }
 
@@ -214,6 +239,7 @@ export async function seedSenderAddress(userId: string, dependencies: SenderAddr
     addressEnc: cipher.encryptText("mail_in_sender_addresses.address", id, address),
     addressIndex,
     source: identity ? "sso" : "account",
+    checkSentAt: carriedChecks,
     updatedAt: now,
   }).onConflictDoNothing();
 }
@@ -268,25 +294,62 @@ export async function sendSenderVerification(
   const token = randomBytes(32).toString("base64url");
   const link = verificationUrl((dependencies.appUrl ?? (() => process.env.APP_URL ?? ""))(), token);
   const expiresAt = new Date(now.getTime() + SENDER_VERIFICATION_TTL_MS);
-  await getDb().update(mailInSenderAddresses).set({
-    verificationTokenDigest: digestToken(token),
-    verificationExpiresAt: expiresAt,
-    updatedAt: now,
-  }).where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId)));
-
   const send = dependencies.sendMail ?? defaultSender(smtp);
-  await send({
-    from: smtp.smtpFrom,
-    to: address,
-    subject: "Check your Orbit sending address",
-    text: [
-      "Orbit is checking that you send mail from this address.",
-      "",
-      `Open this link while signed in to Orbit, within 24 hours: ${link}`,
-      "",
-      "Until you do, mail you forward to Orbit from this address is not matched to you.",
-      "If you did not ask for this, ignore it — nothing changes.",
-    ].join("\n"),
+
+  /* Check, send and record in ONE transaction under a row lock: two presses by
+     the same member queue on the lock, and the second sees the first's send
+     (two-step "lock, then check-and-record", as the sign-in lockout does for
+     its attempt count). A send is recorded only once the mailer has taken the
+     message; if it throws, the transaction rolls back, so neither the count
+     nor the outstanding link changes. */
+  await getDb().transaction(async (transaction) => {
+    const [locked] = await transaction.select({
+      verifiedAt: mailInSenderAddresses.verifiedAt,
+      checkSentAt: mailInSenderAddresses.checkSentAt,
+    }).from(mailInSenderAddresses)
+      .where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId)))
+      .for("update");
+    if (!locked) throw new AppError("sender_address_unknown", "That address is not on this account", 404);
+    if (locked.verifiedAt) throw new AppError("sender_already_verified", "That address is already checked", 409);
+
+    /* The clock is the process's, not the database's `now()`, as everywhere
+       else in this file. */
+    const sentAt = dependencies.now?.() ?? new Date();
+    const wait = senderCheckWaitSeconds(locked.checkSentAt, sentAt);
+    if (wait > 0) {
+      throw new RateLimitedError(
+        "sender_check_too_soon",
+        "A check email was sent recently; try again shortly",
+        wait,
+      );
+    }
+
+    await transaction.update(mailInSenderAddresses).set({
+      verificationTokenDigest: digestToken(token),
+      verificationExpiresAt: expiresAt,
+      updatedAt: now,
+    }).where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId)));
+
+    await send({
+      from: smtp.smtpFrom,
+      to: address,
+      subject: "Check your Orbit sending address",
+      text: [
+        "Orbit is checking that you send mail from this address.",
+        "",
+        `Open this link while signed in to Orbit, within 24 hours: ${link}`,
+        "",
+        "Until you do, mail you forward to Orbit from this address is not matched to you.",
+        "If you did not ask for this, ignore it — nothing changes.",
+      ].join("\n"),
+    });
+
+    const kept = locked.checkSentAt
+      .filter((at) => at.getTime() > sentAt.getTime() - SENDER_CHECK_WINDOW_MS)
+      .sort((a, b) => a.getTime() - b.getTime())
+      .slice(-(SENDER_CHECK_DAILY_LIMIT - 1));
+    await transaction.update(mailInSenderAddresses).set({ checkSentAt: [...kept, sentAt] })
+      .where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId)));
   });
   return { address, expiresAt };
 }

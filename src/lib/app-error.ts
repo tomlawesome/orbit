@@ -1,5 +1,5 @@
 import { ZodError } from "zod";
-import { AppError, KeyUnavailableError, MaintenanceActiveError } from "@/lib/errors";
+import { AppError, KeyUnavailableError, MaintenanceActiveError, RateLimitedError } from "@/lib/errors";
 import { AuthError } from "@/lib/auth/errors";
 import { log, operationalErrorDetail } from "@/lib/logger";
 
@@ -7,7 +7,7 @@ import { log, operationalErrorDetail } from "@/lib/logger";
    1) so operator artifacts can bundle domain code without linking Next.
    They are re-exported here because this is where the rest of the codebase
    already imports them from, and that should keep working. */
-export { AppError, KeyUnavailableError, MaintenanceActiveError };
+export { AppError, KeyUnavailableError, MaintenanceActiveError, RateLimitedError };
 
 function isPayloadTooLarge(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { status?: unknown }).status === 413;
@@ -29,9 +29,11 @@ export function appErrorResponse(error: unknown): Response {
     return Response.json({ error: "maintenance_active" }, { status: 503, headers });
   }
   if (error instanceof AuthError || error instanceof AppError) {
+    const headers: Record<string, string> = { "Cache-Control": "no-store" };
+    if (error instanceof RateLimitedError) headers["Retry-After"] = String(error.retryAfterSeconds);
     return Response.json(
       { error: { code: error instanceof AuthError ? error.code : error.code, message: error.message } },
-      { status: error.status, headers: { "Cache-Control": "no-store" } },
+      { status: error.status, headers },
     );
   }
   if (error instanceof ZodError) {
