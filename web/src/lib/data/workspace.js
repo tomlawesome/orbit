@@ -2164,13 +2164,28 @@ export async function rotateRelay(action) {
  * their account is registered with, so the session names the member and the
  * server names the address. Answers 202 with where the mail went and when its
  * link lapses; the refusals reach the caller as a WorkspaceError carrying the
- * server's status and code (`sender_already_verified`, `smtp_not_configured`,
- * `sender_check_too_soon` ...), which the screen turns into its own words.
+ * server's status, code and the engine's own words (ADR-0034 decision 4), which
+ * the screen shows as they arrive. A refusal the engine did not word (a proxy
+ * page, a bare string) carries an empty message.
  *
  * @returns {Promise<{ address: string, expiresAt: string }>}
  */
 export async function sendSenderCheck() {
-  return json(await csrfFetch("/api/settings/mail-relay/verification"));
+  const response = await csrfFetch("/api/settings/mail-relay/verification");
+  /* Whether the engine actually worded the refusal: `json` fills in a "could
+     not be reached" sentence of its own when it did not, and that is not the
+     engine's to show as if it were. */
+  const spoken = response.ok
+    ? ""
+    : await response.clone().json().then((body) => body?.error?.message, () => "");
+  try {
+    return await json(response);
+  } catch (error) {
+    if (error instanceof WorkspaceError && !(typeof spoken === "string" && spoken.trim())) {
+      throw new WorkspaceError("", { status: error.status, code: error.code });
+    }
+    throw error;
+  }
 }
 
 const NO_ADDRESS = "no address yet";

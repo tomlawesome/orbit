@@ -844,9 +844,7 @@ async function deliverClaimed(
       attempts: notificationDeliveries.attempts,
       userId: notificationDeliveries.userId,
       householdId: notificationDeliveries.householdId,
-      email: users.email,
       emailEnc: users.emailEnc,
-      title: items.title,
       titleEnc: items.titleEnc,
       dueDate: dueEvents.dueDate,
       kind: dueEvents.kind,
@@ -949,7 +947,7 @@ async function deliverClaimed(
       // failed like any other transient fault, so it retries once the key or
       // the value is repaired rather than mailing a nameless reminder.
       const decryptedTitle = titleReaders.get(delivery.householdId)!
-        .text("items.title", delivery.itemId, { encrypted: delivery.titleEnc, plaintext: delivery.title });
+        .text("items.title", delivery.itemId, { encrypted: delivery.titleEnc });
       if (!decryptedTitle.value) {
         await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "item_title_unreadable", now, retryDelay);
         continue;
@@ -967,7 +965,7 @@ async function deliverClaimed(
            nor cancelled, because a locked key and a damaged value are both
            repairable and neither is a reason to drop somebody's reminder. */
         const address = addressReader!
-          .text("users.email", delivery.userId, { encrypted: delivery.emailEnc, plaintext: delivery.email });
+          .text("users.email", delivery.userId, { encrypted: delivery.emailEnc });
         if (!address.value) {
           await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "recipient_address_unreadable", now, retryDelay);
           continue;

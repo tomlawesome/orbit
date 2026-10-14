@@ -95,8 +95,6 @@ const emailSchema = z.email();
 
 type InvitationRow = {
   id: string;
-  /** Plaintext only for a row the backfill has not reached; `emailEnc` otherwise (#963). */
-  email: string | null;
   emailEnc: string | null;
   householdId: string;
   createdAt: Date;
@@ -110,8 +108,8 @@ type InvitationRow = {
  * reported as the damaged-value marker rather than as an empty address or an
  * invented one, and a marker never matches anybody at redemption.
  */
-function invitationEmail(cipher: MetadataCipher, row: { id: string; email: string | null; emailEnc: string | null }): string | null {
-  return cipher.text("household_invitations.email", row.id, { encrypted: row.emailEnc, plaintext: row.email }).value;
+function invitationEmail(cipher: MetadataCipher, row: { id: string; emailEnc: string | null }): string | null {
+  return cipher.text("household_invitations.email", row.id, { encrypted: row.emailEnc }).value;
 }
 
 function summarise(row: InvitationRow, cipher: MetadataCipher): HouseholdInvitation {
@@ -129,7 +127,6 @@ function summarise(row: InvitationRow, cipher: MetadataCipher): HouseholdInvitat
 const summaryColumns = {
   id: householdInvitations.id,
   householdId: householdInvitations.householdId,
-  email: householdInvitations.email,
   emailEnc: householdInvitations.emailEnc,
   createdAt: householdInvitations.createdAt,
   sentAt: householdInvitations.sentAt,
@@ -276,12 +273,10 @@ export async function sendHouseholdInvitation(
     // resend below still REPLACES the row it finds.
     const metadata = await requireMetadataWriter(householdId, transaction);
     const emailIndex = metadata.blindIndex("household_invitations.email", email);
-    const open = await transaction.select({ id: householdInvitations.id, email: householdInvitations.email, emailIndex: householdInvitations.emailIndex })
+    const open = await transaction.select({ id: householdInvitations.id, emailIndex: householdInvitations.emailIndex })
       .from(householdInvitations)
       .where(and(eq(householdInvitations.householdId, householdId), stillOpen));
-    const existing = open.find((row) => (
-      row.emailIndex !== null ? row.emailIndex === emailIndex : row.email === email
-    ));
+    const existing = emailIndex === null ? undefined : open.find((row) => row.emailIndex === emailIndex);
     if (!existing && open.length >= MAX_OPEN_INVITATIONS) {
       throw new AppError(
         "invitation_limit",
@@ -291,7 +286,6 @@ export async function sendHouseholdInvitation(
     }
 
     const values = {
-      email: null,
       emailEnc: metadata.encryptText("household_invitations.email", existing?.id ?? invitationRowId, email),
       emailIndex,
       tokenDigest: invitationTokenDigest(token),
@@ -385,7 +379,7 @@ export async function withdrawHouseholdInvitation(
         eq(householdInvitations.householdId, householdId),
         stillOpen,
       ))
-      .returning({ id: householdInvitations.id, email: householdInvitations.email, emailEnc: householdInvitations.emailEnc });
+      .returning({ id: householdInvitations.id, emailEnc: householdInvitations.emailEnc });
     if (!revoked) throw new AppError("invitation_not_found", "That invitation is no longer open", 404);
     /* The audit line records a digest of the address, never the address, and
        that is unchanged (#963). What changed is where the address comes from:
@@ -408,7 +402,6 @@ export async function withdrawHouseholdInvitation(
 const lookupColumns = {
   id: householdInvitations.id,
   householdId: householdInvitations.householdId,
-  email: householdInvitations.email,
   emailEnc: householdInvitations.emailEnc,
   expiresAt: householdInvitations.expiresAt,
   redeemedAt: householdInvitations.redeemedAt,

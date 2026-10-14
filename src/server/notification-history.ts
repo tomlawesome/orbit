@@ -124,7 +124,6 @@ export async function readSentNotifications(userId: string): Promise<SentNotific
       lastError: notificationDeliveries.lastError,
       householdId: notificationDeliveries.householdId,
       itemId: items.id,
-      itemTitle: items.title,
       itemTitleEnc: items.titleEnc,
       dueDate: dueEvents.dueDate,
       timezone: households.timezone,
@@ -166,7 +165,7 @@ export async function readSentNotifications(userId: string): Promise<SentNotific
     });
     const { warning, daysBefore } = warningFor(row.dueDate, row.scheduledFor, row.timezone, offsets);
     const decryptedTitle = titleReaders.get(row.householdId)!
-      .text("items.title", row.itemId, { encrypted: row.itemTitleEnc, plaintext: row.itemTitle });
+      .text("items.title", row.itemId, { encrypted: row.itemTitleEnc });
     return {
       id: row.id,
       itemId: row.itemId,

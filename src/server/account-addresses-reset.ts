@@ -63,10 +63,9 @@ export async function encryptionKeyIsUsable(): Promise<boolean> {
 /**
  * Clears every address the instance can no longer read, in one transaction.
  *
- * Only encrypted rows are touched. An account whose address is still plaintext
- * — one the backfill never reached — can be signed into perfectly well, so
- * taking its address away would destroy access this command is meant to
- * restore.
+ * Only rows holding ciphertext are touched. An account with no address stored
+ * has nothing to clear, and taking anything else away would destroy access
+ * this command is meant to restore.
  *
  * Accounts keep their row and lose only the address. Sending addresses are
  * removed outright rather than blanked: the row carries nothing but an address
@@ -78,7 +77,7 @@ export async function encryptionKeyIsUsable(): Promise<boolean> {
 export async function clearUnreadableAddresses(): Promise<AddressResetOutcome> {
   return getDb().transaction(async (transaction) => {
     const clearedUsers = await transaction.update(users)
-      .set({ email: null, emailEnc: null, emailIndex: null, updatedAt: new Date() })
+      .set({ emailEnc: null, emailIndex: null, updatedAt: new Date() })
       .where(isNotNull(users.emailEnc))
       .returning({ id: users.id });
 

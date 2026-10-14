@@ -28,7 +28,7 @@
  */
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, asc, eq, gt, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { base64url } from "jose";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -162,21 +162,19 @@ export async function createLocalUser(
        instance without one is in maintenance and never gets here (#1405). */
     const cipher = await requireInstanceMetadataWriter(transaction);
 
-    /* Checked rather than left to the case-insensitive unique index, so the
-       answer is Orbit's own bounded refusal instead of a driver error. The
-       wording is ADR-0023 §3's collision refusal: an address belongs to one
-       account, and the way to add a second sign-in method is to link it.
-
-       Both indexes are consulted (#969): the blind one for an encrypted row,
-       the case-insensitive one for a row the backfill has not reached. */
+    /* Checked rather than left to the unique blind index, so the answer is
+       Orbit's own bounded refusal instead of a driver error. The wording is
+       ADR-0023 §3's collision refusal: an address belongs to one account, and
+       the way to add a second sign-in method is to link it. The blind index
+       folds case, so this is case-insensitive (#969, #1403 Q3). */
     const emailIndex = cipher.emailIndex(email);
-    const [taken] = await transaction
-      .select({ id: users.id })
-      .from(users)
-      .where(emailIndex === null
-        ? sql`lower(${users.email}) = lower(${email})`
-        : or(eq(users.emailIndex, emailIndex), sql`lower(${users.email}) = lower(${email})`))
-      .limit(1);
+    const [taken] = emailIndex === null
+      ? []
+      : await transaction
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.emailIndex, emailIndex))
+        .limit(1);
     if (taken) {
       throw new AuthError(
         "link_required",
@@ -193,7 +191,6 @@ export async function createLocalUser(
       .insert(users)
       .values({
         id: userId,
-        email: null,
         emailEnc: cipher.encryptText("users.email", userId, email),
         emailIndex,
         /* Nothing has verified this address: no provider asserted it and Orbit
@@ -285,31 +282,27 @@ async function attemptVerification(email: string, password: string): Promise<Cre
   /* The address is behind the key now (#969), so the lookup is the blind
      index. An instance with no usable key is in maintenance and nobody signs
      in (#1405), so the only locked cipher here is a fresh, unclaimed
-     instance's whose key row does not exist yet. */
+     instance's whose key row does not exist yet: it has never written an
+     address, so no account can match. */
   const cipher = await openInstanceMetadataReader();
 
   const trimmed = email.trim();
-  /* Null on an instance whose key row does not exist yet — it has never
-     written an address, so there is nothing for an index to find, and asking
-     the cipher for one would throw. The plaintext arm below still answers. */
+  /* Null on an instance whose key row does not exist yet, where asking the
+     cipher for one would throw; nothing can match then. */
   const emailIndex = cipher.locked ? null : cipher.emailIndex(trimmed);
-  /* Two matches: the index finds an encrypted row, the case-insensitive
-     comparison finds one the backfill has not reached. A row is in exactly one
-     of those states, so this cannot match twice. */
-  const matchesAddress = emailIndex === null
-    ? sql`lower(${users.email}) = lower(${trimmed})`
-    : or(eq(users.emailIndex, emailIndex), sql`lower(${users.email}) = lower(${trimmed})`);
-  const [account] = await db
-    .select({
-      userId: users.id,
-      disabledAt: users.disabledAt,
-      passwordHash: localCredentials.passwordHash,
-      lockedUntil: localCredentials.lockedUntil,
-    })
-    .from(users)
-    .leftJoin(localCredentials, eq(localCredentials.userId, users.id))
-    .where(matchesAddress)
-    .limit(1);
+  const [account] = emailIndex === null
+    ? []
+    : await db
+      .select({
+        userId: users.id,
+        disabledAt: users.disabledAt,
+        passwordHash: localCredentials.passwordHash,
+        lockedUntil: localCredentials.lockedUntil,
+      })
+      .from(users)
+      .leftJoin(localCredentials, eq(localCredentials.userId, users.id))
+      .where(eq(users.emailIndex, emailIndex))
+      .limit(1);
 
   /* No such address, a disabled account, or an account that has no password
      yet: all three spend the decoy derivation and answer identically, so the

@@ -242,9 +242,6 @@ set -Eeuo pipefail
 #                                   build. Reported instead of, not as well
 #                                   as, application-unhealthy: restarting
 #                                   cannot change either side (#437).
-#   database-below-floor            — the application refused to start because
-#                                   the database predates the supported
-#                                   migration floor. Also not restartable.
 #   migration-failed                 — the migrator (drizzle) threw applying a
 #                                   migration and rolled it back, leaving no
 #                                   applied journal row: detected primarily by
@@ -1476,7 +1473,6 @@ readonly -a class_order=(
   image-identity-mismatch
   application-unhealthy
   database-schema-mismatch
-  database-below-floor
   migration-failed
 )
 
@@ -1512,10 +1508,9 @@ readonly -A action_for_class=(
   [stale-container]=restart-services
   [application-unhealthy]=restart-services
   # Both sides of a schema disagreement survive a restart, so restart-services
-  # would loop forever (#437). These need an operator decision: attach the
-  # matching database, or upgrade from a supported version.
+  # would loop forever (#437). This needs an operator decision: attach the
+  # matching database.
   [database-schema-mismatch]=manual
-  [database-below-floor]=manual
   # A failed, rolled-back migration leaves no applied row and no safe
   # automatic remedy: the migrator's own idempotent retry already happens on
   # any restart (issue #528 decision), so repair must not invent a competing
@@ -1631,7 +1626,6 @@ readonly -A manual_guidance=(
   # still recognises its migration history. repair never merges or migrates
   # a database on the operator's behalf.
   [database-schema-mismatch]="attach the database this build's migrations expect, or restore this deployment to the build that matches the current database, before starting either again"
-  [database-below-floor]="this database predates the oldest migration history this build supports; restore it from a backup made by a supported version, or run that version's upgrade path first, before pointing this build at it"
   # ADR-0004's recovery point is the actual rollback boundary here; repair
   # itself never applies, retries, or reverses a migration.
   [migration-failed]="restore this deployment from the pre-update recovery point captured before the migration ran, per the supported-upgrade recovery contract"
@@ -2981,12 +2975,10 @@ check_application_container() {
     # by scripts/repair-log-contract.test.mjs (#447) — do not rename one without the other.
     if [[ "$app_log" == *"reason=database_mismatch"* ]]; then
       add_finding database-schema-mismatch application fail
-    elif [[ "$app_log" == *"reason=database_below_floor"* ]]; then
-      add_finding database-below-floor application fail
     elif [[ "$app_log" == *"reason=migration_failed"* ]]; then
       # issue #528: the migrator's own wrapper (src/instrumentation-node.ts)
       # writes this sentinel before the crash-looping/exited container's
-      # process exits, exactly like the two #437 sentinels above — same
+      # process exits, exactly like the #437 sentinel above — same
       # bounded `docker logs` read, same fixed-token match, no new docker
       # verb. Primary migration-failed detection path: the SQL backstop
       # (check_migration_failed_backstop, for the rotated-logs/no-container

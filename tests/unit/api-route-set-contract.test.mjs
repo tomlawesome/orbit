@@ -198,8 +198,8 @@ const routeFiles = collectServerFiles(routesRoot);
 // #1399 (#1316): the document-draft feature is removed. Its two routes,
 // `POST /api/documents/{id}/draft` and `POST /api/document-drafts/{draftId}/approve`,
 // are absent from EXPECTED_ROUTES above, so the exact-set test already fails if
-// either returns. The `document_drafts` table stays (dropping it is a separate
-// decision), so only the module and its importers are checked here.
+// either returns. The `document_drafts` table is gone too (migration 0053), so
+// only the module and its importers are checked here.
 const repoRoot = new URL("../../", import.meta.url).pathname;
 const SOURCE_EXTENSIONS = /\.(?:[cm]?[jt]s|svelte)$/;
 const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", ".svelte-kit", "build", "dist", "coverage"]);

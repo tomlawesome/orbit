@@ -8,7 +8,7 @@
   import { dismissReceipt, readRelay, rotateRelay, sendSenderCheck, wordsOf } from "$lib/data/workspace.js";
   import { SENDER_SCENES } from "$lib/data/fixtures/relay.js";
   import {
-    ALREADY_CHECKED, checkRow, LINK_CHECKED, LINK_FAILED, refusalOf, SENDING, SENT_WAKE, withLearnt,
+    alreadyCheckedWords, checkRow, LINK_CHECKED, LINK_FAILED, refusalWords, SENDING, SENT_WAKE, withLearnt,
   } from "./sender.js";
 
   /*
@@ -103,16 +103,16 @@
       sentExpires = sent.expiresAt;
       wake(SENT_WAKE);
     } catch (error) {
-      const refusal = refusalOf(error);
-      if (refusal.already) {
+      const already = alreadyCheckedWords(error);
+      if (already !== null) {
         /* The button stays held until the re-read answers. If it cannot, the
            server has still said so: the row follows it. */
         try { rotated = await readRelay(); } catch { checked = true; }
-        wake(ALREADY_CHECKED);
+        wake(already);
         /* The button goes with it; focus goes to the row that now says why. */
         focusOn = "field";
       } else {
-        problem = refusal.words;
+        problem = refusalWords(error);
         focusOn = "alert";
       }
     } finally {

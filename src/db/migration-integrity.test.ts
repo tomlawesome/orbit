@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   MigrationIntegrityError,
   readExpectedMigrationHashes,
@@ -43,26 +46,49 @@ describe("migration integrity", () => {
 
   it("rejects missing or empty journals when product tables already exist", async () => {
     const missing = Object.assign(new Error("missing"), { code: "42P01" });
-    await expect(verifyMigrationIntegrity(clientWith(missing, true), folder)).rejects.toMatchObject({ code: "database_floor" });
-    await expect(verifyMigrationIntegrity(clientWith([], true), folder)).rejects.toMatchObject({ code: "database_floor" });
+    await expect(verifyMigrationIntegrity(clientWith(missing, true), folder)).rejects.toMatchObject({ code: "migration_integrity" });
+    await expect(verifyMigrationIntegrity(clientWith([], true), folder)).rejects.toMatchObject({ code: "migration_integrity" });
   });
 
-  it("accepts the supported floor and every exact prefix", async () => {
+  it("accepts every exact prefix", async () => {
     const expected = await readExpectedMigrationHashes(folder);
-    await expect(verifyMigrationIntegrity(clientWith(expected.slice(0, 18).map(({ hash }) => hash)), folder)).resolves.toBeUndefined();
-    for (let length = 18; length <= expected.length; length += 1) {
+    for (let length = 1; length <= expected.length; length += 1) {
       await expect(verifyMigrationIntegrity(clientWith(expected.slice(0, length).map(({ hash }) => hash)), folder)).resolves.toBeUndefined();
     }
   });
 
+  /* The checked-in history is one baseline entry, which cannot be reordered
+     and has no fifth migration to alter. These two cases therefore run against
+     a copy of the folder with the real baseline plus synthetic later entries;
+     the checker under test is unchanged. */
+  let longFolder: string;
+  beforeAll(async () => {
+    longFolder = await mkdtemp(join(tmpdir(), "orbit-integrity-long-"));
+    await cp(folder, longFolder, { recursive: true });
+    const journalPath = join(longFolder, "meta", "_journal.json");
+    const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
+      entries: Array<{ idx: number; version: string; when: number; tag: string; breakpoints: boolean }>;
+      version: string;
+    };
+    const last = journal.entries[journal.entries.length - 1];
+    for (let n = 1; n <= 5; n += 1) {
+      const tag = `${String(last.idx + n).padStart(4, "0")}_synthetic_${n}`;
+      await writeFile(join(longFolder, `${tag}.sql`), `SELECT ${n};\n`);
+      journal.entries.push({ idx: last.idx + n, version: last.version, when: last.when + n, tag, breakpoints: true });
+    }
+    await writeFile(journalPath, JSON.stringify(journal, null, 2));
+  });
+  afterAll(async () => {
+    await rm(longFolder, { recursive: true, force: true });
+  });
+
   it.each([
-    ["below floor", (hashes: string[]) => hashes.slice(0, 16), "database_floor"],
-    ["checksum drift", (hashes: string[]) => hashes.slice(0, 18).map((hash, index) => index === 4 ? "f".repeat(64) : hash), "migration_integrity"],
-    ["reordered", (hashes: string[]) => hashes.slice(0, 18).reverse(), "migration_integrity"],
+    ["checksum drift", (hashes: string[]) => hashes.map((hash, index) => index === 4 ? "f".repeat(64) : hash), "migration_integrity"],
+    ["reordered", (hashes: string[]) => [...hashes].reverse(), "migration_integrity"],
     ["extra", (hashes: string[]) => [...hashes, "e".repeat(64)], "migration_integrity"],
   ])("rejects %s journal state", async (_label, mutate, code) => {
-    const expected = await readExpectedMigrationHashes(folder);
-    await expect(verifyMigrationIntegrity(clientWith(mutate(expected.map(({ hash }) => hash))), folder))
+    const expected = await readExpectedMigrationHashes(longFolder);
+    await expect(verifyMigrationIntegrity(clientWith(mutate(expected.map(({ hash }) => hash))), longFolder))
       .rejects.toMatchObject({ code });
   });
 
@@ -71,5 +97,26 @@ describe("migration integrity", () => {
     await expect(verifyMigrationJournalComplete(clientWith(expected.map(({ hash }) => hash)), folder)).resolves.toBeUndefined();
     await expect(verifyMigrationJournalComplete(clientWith(expected.slice(0, -1).map(({ hash }) => hash)), folder))
       .rejects.toBeInstanceOf(MigrationIntegrityError);
+  });
+
+  // #1403 slice E: the history is one baseline migration. The hash recorded
+  // when it was applied is the control, so a hand-edit of the file afterwards
+  // must be refused, with no database needed to show it.
+  it("refuses a database whose baseline migration file was hand-edited after it was applied", async () => {
+    const expected = await readExpectedMigrationHashes(folder);
+    expect(expected.map(({ tag }) => tag)).toEqual(["0000_baseline"]);
+    const applied = expected.map(({ hash }) => hash);
+
+    const copy = await mkdtemp(join(tmpdir(), "orbit-integrity-copy-"));
+    try {
+      await cp(folder, copy, { recursive: true });
+      await expect(verifyMigrationIntegrity(clientWith(applied), copy)).resolves.toBeUndefined();
+      const baselinePath = join(copy, "0000_baseline.sql");
+      await writeFile(baselinePath, `${await readFile(baselinePath, "utf8")}\n-- hand edit\n`);
+      await expect(verifyMigrationIntegrity(clientWith(applied), copy)).rejects.toMatchObject({ code: "migration_integrity" });
+      await expect(verifyMigrationJournalComplete(clientWith(applied), copy)).rejects.toBeInstanceOf(MigrationIntegrityError);
+    } finally {
+      await rm(copy, { recursive: true, force: true });
+    }
   });
 });

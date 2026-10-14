@@ -4,7 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, dueEvents, items, notificationStates, reminderRules } from "@/db/schema";
 import { openMetadataReader } from "@/server/metadata/fields";
-import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedItemColumns } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 
 const { GET: readWorkspace } = await loadRoute("workspace");
@@ -124,7 +124,7 @@ async function itemSnapshot(fixture: Awaited<ReturnType<typeof createIntegration
   const metadata = await openMetadataReader(fixture.household.id);
   const item = {
     ...row,
-    title: metadata.text("items.title", row.id, { encrypted: row.titleEnc, plaintext: row.title }).value,
+    title: metadata.text("items.title", row.id, { encrypted: row.titleEnc }).value,
   };
   return { item, events, reminders, auditCount: await fixture.auditCount(fixture.item.id) };
 }
@@ -241,11 +241,15 @@ describe("conflict-safe item lifecycle", () => {
     // householdWorkspaceSchema re-validates on read, so a household can
     // reach these volumes through nothing more than ordinary, uncapped
     // writes; bulk-inserting directly here stands in for that accumulation.
-    await getDb().insert(items).values(Array.from({ length: 501 }, () => ({
-      householdId: fixture.household.id,
-      sectionId: fixture.section.id,
-      title: "Overflow item",
-      currency: "GBP",
+    await getDb().insert(items).values(await Promise.all(Array.from({ length: 501 }, async () => {
+      const id = randomUUID();
+      return {
+        id,
+        householdId: fixture.household.id,
+        sectionId: fixture.section.id,
+        ...await encryptedItemColumns(fixture.household.id, id, { title: "Overflow item" }),
+        currency: "GBP",
+      };
     })));
     await getDb().insert(notificationStates).values(Array.from({ length: 2_001 }, (_, index) => ({
       userId: fixture.users.owner.id,

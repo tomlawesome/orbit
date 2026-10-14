@@ -986,7 +986,6 @@ describe("purge jobs — irreversible ordering", () => {
       "execute:readOwnedPurgeRecord",
       "update:documents",
       "delete:document_crypto",
-      "delete:document_drafts",
       "update:document_jobs",
       "insert:audit_log",
       "tx:commit",

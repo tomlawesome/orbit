@@ -344,9 +344,7 @@ export async function registerNode(): Promise<void> {
          verdict, so they travel as one pair. */
       const verdict = !(error instanceof MigrationIntegrityError)
         ? ({ reason: "migration_integrity", action: "check_migrations" } as const)
-        : code === "database_floor"
-          ? ({ reason: "database_below_floor", action: "upgrade_from_supported_version" } as const)
-          : ({ reason: "database_mismatch", action: "attach_matching_database" } as const);
+        : ({ reason: "database_mismatch", action: "attach_matching_database" } as const);
       log.error({
         event: "startup.migration",
         state: "exhausted",
@@ -507,13 +505,6 @@ export async function registerNode(): Promise<void> {
     if (!optionalSettings.has("mail") && !optionalSettings.has("imap")) startImapReceiptWorker();
     // Unconditional: scheduled maintenance depends on no optional setting.
     startMaintenanceWorker();
-
-    /* The Tier 1 metadata backfill (ADR-0024 decision 3). It runs once, drains
-       the rows migration 0040 could not encrypt, and stops; an instance with
-       no key-encryption key logs and stops without converting anything, rather
-       than holding up start-up. */
-    const { startMetadataBackfill } = await import("@/server/metadata/backfill");
-    startMetadataBackfill();
   }
 
   // The strict sequence (#869) is done: configuration, readiness reports,

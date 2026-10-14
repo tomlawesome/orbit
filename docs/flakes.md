@@ -13,6 +13,7 @@ fixing the cause deletes the heading in the same commit.
 - 2026-10-13 · 29ef79ca (#1403 slice D2; nothing near Chrome.svelte) · local full unit suite, other agents building in parallel · the Chrome.svelte cases failed; pass alone. Fourth sighting.
 - 2026-10-13 · a76e6d44 (door branch; changes since the green gate at bfdb4daf are docs, CI and the names guard) · local full unit suite alongside the e2e and fidelity runs · both cases saw no navigation (`expected undefined to be ...`), two `ReferenceError: location is not defined`; the file alone passes straight after. Fifth sighting.
 - 2026-10-14 · 78c6d996 (door branch; changes since 0c6e60bf are household.css text colours, e2e spec marks, docs) · local full unit suite (7441 tests), after a browser run on the host · the "9a no-flight fallback … goes to the provider URL" case saw no navigation (`win.navigations.at(-1)?.to` undefined, line 431); the file passes alone, 9/9.
+- 2026-10-14 · 28dfb041 (#1403 slice E, Q3 part B: account email readers) · local full unit suite, seven agents building in parallel on the host · failed in the full run; passes alone. Seventh sighting.
 
 ## availability-route.test.mjs "GET /api/auth/availability carries phase: starting straight from getBootPhase" (#869)
 

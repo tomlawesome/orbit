@@ -4,16 +4,6 @@ import { sectionAccents, sectionIcons } from "./domain";
 export const textSizes = ["standard", "comfortable", "large", "extra-large"] as const;
 export type TextSize = (typeof textSizes)[number];
 
-/**
- * Legacy due-date colour mode. No longer a user-facing choice as of #325:
- * the v19 semantic status tokens (--ok/--warm/--overdue/--upcoming/
- * --degraded) are flat and fixed per theme pack, so there is nothing left
- * for "classic" vs "themed" to switch between. Retained only as a type so
- * the raw session/DB plumbing (lib/auth/session.ts, lib/preview-workspace.ts)
- * still type-checks against stored rows that predate this change.
- */
-export type UrgencyPalette = "classic" | "themed";
-
 /** THE THEME ROSTER, owned here (#1331): every pack the product offers, each
  *  with its dark/light flag. Token values for each pack live in
  *  web/src/lib/packs.css; the browser keeps a table of the same five in
@@ -31,8 +21,7 @@ const themePackFlags = {
 export const themePacks = ["starchart", "afterdark", "clouds", "dawn", "retrograde"] as const;
 export type ThemePack = (typeof themePacks)[number];
 
-/** True for a dark pack, false for a light one (or an id that is no pack).
- *  The stored `themeMode` column is derived from this, never chosen. */
+/** True for a dark pack, false for a light one (or an id that is no pack). */
 export function themePackIsDark(id: string): boolean {
   return (themePacks as readonly string[]).includes(id) && themePackFlags[id as ThemePack].dark;
 }

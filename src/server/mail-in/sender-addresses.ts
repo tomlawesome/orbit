@@ -17,21 +17,22 @@
  *
  * Since #969 the address itself is encrypted metadata under the instance key
  * (ADR-0024): `address_enc` holds it, `address_index` is the blind index that
- * attribution and the uniqueness rule both look up, and the plaintext column
- * stands only until the backfill reaches the row.
+ * attribution and the uniqueness rule both look up. There is no plaintext
+ * column: the address is read from `address_enc` alone.
  *
  * This lives outside `core/` because it needs `getDb`/schema access and the
  * SMTP transport, which `core/` is not allowed (see this directory's README).
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { externalIdentities, mailInSenderAddresses, users } from "@/db/schema";
-import { AppError } from "@/lib/app-error";
+import { AppError, RateLimitedError } from "@/lib/app-error";
 import {
   openInstanceMetadataReader,
   requireInstanceMetadataWriter,
   type MetadataCipher,
+  type MetadataExecutor,
   type MetadataFieldState,
 } from "@/server/metadata/fields";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
@@ -56,7 +57,7 @@ export interface SenderAddressView {
   verified: boolean;
   /** Set while a link is outstanding, so the screen can say "check your mail". */
   verificationPending: boolean;
-  /** When the outstanding link lapses (ISO); null once checked or when no link is live. */
+  /** When the latest link lapses, or lapsed (ISO); null once checked or when none was ever sent. */
   expiresAt: string | null;
   /** Present only when something is unreadable, as elsewhere (ADR-0024 decision 5). */
   metadataStatus?: { address?: MetadataFieldState };
@@ -64,6 +65,58 @@ export interface SenderAddressView {
 
 /** How long a verification link is good for. One use, and not for long. */
 export const SENDER_VERIFICATION_TTL_MS = 24 * 3_600_000;
+
+/** The check email goes out at most once in this long per member (#1403 D2). */
+export const SENDER_CHECK_MIN_GAP_MS = 60_000;
+/** ...and at most `SENDER_CHECK_DAILY_LIMIT` times in a rolling window this long. */
+export const SENDER_CHECK_WINDOW_MS = 24 * 3_600_000;
+export const SENDER_CHECK_DAILY_LIMIT = 5;
+
+/**
+ * The whole send, mailer included, gives up after this long (review of #1403
+ * D2). A mailer that never answers must not hold the member's lock, and with
+ * it their relay read, indefinitely. Tests shorten it with
+ * `setSenderSendDeadlineForTests`; nothing else changes it.
+ */
+export const SENDER_SEND_DEADLINE_MS = 15_000;
+let sendDeadlineMs = SENDER_SEND_DEADLINE_MS;
+/** Test seam: `null` restores the real deadline. */
+export function setSenderSendDeadlineForTests(milliseconds: number | null): void {
+  sendDeadlineMs = milliseconds ?? SENDER_SEND_DEADLINE_MS;
+}
+
+/*
+ * Every refusal of the check is worded here, once (ADR-0034 decision 4,
+ * #1410): the browser shows `error.message` as it arrives and rewrites
+ * nothing. One voice: "not sent — <why>. <what to do>".
+ */
+export const SENDER_CHECK_WORDS = {
+  alreadyChecked: "already checked — nothing to send",
+  noAddress: "not sent — this account has no registered email address to check",
+  noMail: "not sent — Orbit has no outbound mail set up yet. ask your administrator",
+  locked: "not sent — Orbit cannot read your address right now. try again later",
+  tooSoon: "not sent — too soon. try again in a few minutes",
+  mailerTimeout: "not sent — the mail server did not answer in time. try again later",
+  mailerRefused: "not sent — the mail server refused the message. try again later",
+  unreadable: "not sent — Orbit cannot read the address it holds for you. ask your administrator",
+  noAppUrl: "not sent — Orbit does not know its own web address. ask your administrator",
+} as const;
+
+/**
+ * Whole seconds to wait before another check email may be sent, or 0 when one
+ * may go now. `sent` holds the counted sends (any order). The wait is until 60
+ * seconds after the newest send, or until the oldest of the five leaves the
+ * rolling 24 hours, whichever is later; rounded up to a whole second.
+ */
+export function senderCheckWaitSeconds(sent: readonly Date[], now: Date): number {
+  const inWindow = sent.map((at) => at.getTime()).filter((at) => at > now.getTime() - SENDER_CHECK_WINDOW_MS).sort((a, b) => a - b);
+  let readyAt = now.getTime();
+  if (inWindow.length > 0) readyAt = Math.max(readyAt, inWindow[inWindow.length - 1] + SENDER_CHECK_MIN_GAP_MS);
+  if (inWindow.length >= SENDER_CHECK_DAILY_LIMIT) {
+    readyAt = Math.max(readyAt, inWindow[inWindow.length - SENDER_CHECK_DAILY_LIMIT] + SENDER_CHECK_WINDOW_MS);
+  }
+  return Math.ceil((readyAt - now.getTime()) / 1000);
+}
 
 /** Explicit seams so tests never open a socket; the defaults are the real ones. */
 export interface SenderAddressDependencies {
@@ -77,38 +130,56 @@ function digestToken(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
 }
 
-/**
- * The stored address, decrypted (#969).
- *
- * Dual read for the length of the expand release, as everywhere else: a row
- * whose `address_enc` is set is decrypted under the INSTANCE key, and a row
- * the backfill has not reached is read from its plaintext column.
- */
+/** The stored address, decrypted under the INSTANCE key (#969). */
 function readAddress(
   cipher: MetadataCipher,
-  row: { id: string; address: string | null; addressEnc: string | null },
+  row: { id: string; addressEnc: string | null },
 ) {
-  return cipher.text("mail_in_sender_addresses.address", row.id, { encrypted: row.addressEnc, plaintext: row.address });
+  return cipher.text("mail_in_sender_addresses.address", row.id, { encrypted: row.addressEnc });
 }
 
 /**
  * Any row already claiming this address — this member's or anybody else's.
  *
  * The blind index is what carries "one account per sending address" across the
- * encryption, and the plaintext arm catches a row the backfill has not reached
- * yet: without it an encrypted insert would not collide with an existing
- * plaintext claim, and the address would end up claimed twice.
+ * encryption. With no index (nothing to index) there is no claim to find.
  */
 async function existingClaim(
-  address: string,
   addressIndex: string | null,
+  executor: MetadataExecutor = getDb(),
 ): Promise<typeof mailInSenderAddresses.$inferSelect | undefined> {
-  const [row] = await getDb().select().from(mailInSenderAddresses)
-    .where(addressIndex === null
-      ? eq(mailInSenderAddresses.address, address)
-      : or(eq(mailInSenderAddresses.addressIndex, addressIndex), eq(mailInSenderAddresses.address, address)))
+  if (addressIndex === null) return undefined;
+  const [row] = await executor.select().from(mailInSenderAddresses)
+    .where(eq(mailInSenderAddresses.addressIndex, addressIndex))
     .limit(1);
   return row;
+}
+
+/**
+ * Runs `work` in one transaction holding a per-member advisory lock, so a
+ * member's seed, list and send queue behind each other (two presses, or a
+ * press and a settings read, cannot interleave). Advisory rather than a lock
+ * on the `users` row: that would hold up sign-in for as long as the mailer
+ * takes to answer.
+ */
+export async function withSenderLock<T>(userId: string, work: (executor: MetadataExecutor) => Promise<T>): Promise<T> {
+  return getDb().transaction(async (transaction) => {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:mail-relay-sender:${userId}`}, 0))`);
+    return work(transaction);
+  });
+}
+
+/**
+ * The address the member is registered with right now: the account's email,
+ * which is the provider's `email` claim once sign-in has rewritten it. Null
+ * when there is none or it cannot be read.
+ */
+async function registeredAddressOf(executor: MetadataExecutor, reader: MetadataCipher, userId: string): Promise<string | null> {
+  const [account] = await executor.select({ emailEnc: users.emailEnc })
+    .from(users).where(eq(users.id, userId)).limit(1);
+  if (!account) return null;
+  const value = reader.text("users.email", userId, { encrypted: account.emailEnc }).value;
+  return normalizeSenderAddress(value ?? undefined) ?? null;
 }
 
 function viewOf(
@@ -126,7 +197,9 @@ function viewOf(
     source: row.source,
     verified: row.verifiedAt !== null,
     verificationPending: linkLive,
-    expiresAt: linkLive && row.verificationExpiresAt ? row.verificationExpiresAt.toISOString() : null,
+    /* A lapsed link still reports when it lapsed, so the screen can say "the
+       last link lapsed"; only a checked row, or one never sent a link, has none. */
+    expiresAt: row.verifiedAt === null && row.verificationExpiresAt ? row.verificationExpiresAt.toISOString() : null,
     metadataStatus: address.state ? { address: address.state } : undefined,
   };
 }
@@ -135,21 +208,34 @@ function viewOf(
 export async function listSenderAddresses(
   userId: string,
   dependencies: SenderAddressDependencies = {},
+  executor: MetadataExecutor = getDb(),
 ): Promise<SenderAddressView[]> {
   const now = dependencies.now?.() ?? new Date();
-  const rows = await getDb().select().from(mailInSenderAddresses)
+  const rows = await executor.select().from(mailInSenderAddresses)
     .where(eq(mailInSenderAddresses.userId, userId))
     .orderBy(mailInSenderAddresses.createdAt);
-  const cipher = await openInstanceMetadataReader();
-  return rows.map((row) => viewOf(row, now, cipher));
+  const cipher = await openInstanceMetadataReader(executor);
+  const views = rows.map((row) => viewOf(row, now, cipher));
+  if (views.length === 0) return views;
+  /* A row that READS as an address other than the registered one is not the
+     member's any more (it may be kept only for its send times, see seeding);
+     a row that cannot be read at all stays, with its state. */
+  const registered = await registeredAddressOf(executor, cipher, userId);
+  return views.filter((view) => view.address === null || normalizeSenderAddress(view.address) === registered);
 }
 
-/** Whether this member has anything that can attribute mail to them yet. */
-export async function hasVerifiedSenderAddress(userId: string): Promise<boolean> {
-  const [row] = await getDb().select({ id: mailInSenderAddresses.id }).from(mailInSenderAddresses)
-    .where(and(eq(mailInSenderAddresses.userId, userId), isNotNull(mailInSenderAddresses.verifiedAt)))
-    .limit(1);
-  return Boolean(row);
+/**
+ * Whether this member has anything that can attribute mail to them yet: a
+ * checked row for the address they are registered with NOW. A row for an
+ * address they have since moved away from counts for nothing.
+ */
+export async function hasVerifiedSenderAddress(userId: string, executor: MetadataExecutor = getDb()): Promise<boolean> {
+  const rows = await executor.select().from(mailInSenderAddresses)
+    .where(and(eq(mailInSenderAddresses.userId, userId), isNotNull(mailInSenderAddresses.verifiedAt)));
+  if (rows.length === 0) return false;
+  const reader = await openInstanceMetadataReader(executor);
+  const registered = await registeredAddressOf(executor, reader, userId);
+  return rows.some((row) => normalizeSenderAddress(readAddress(reader, row).value ?? undefined) === registered);
 }
 
 /**
@@ -164,12 +250,26 @@ export async function hasVerifiedSenderAddress(userId: string): Promise<boolean>
  * old address stops attributing. Otherwise it is idempotent.
  *
  * Silent when the address already belongs to somebody else: seeding must
- * never take an address away from the member who verified it. In that case a
- * stale row is still dropped, because it no longer matches the account.
+ * never take an address away from the member who verified it. In that case
+ * the stale row is made inert rather than dropped, because it is the only
+ * place the member's send times are kept.
+ *
+ * Only a row that READS as a different address is dropped. A row that cannot
+ * be decrypted proves nothing about which address it holds (a locked or
+ * damaged value may well be the verified, registered one), so it is left
+ * alone, and while one remains no replacement is seeded beside it.
  */
-export async function seedSenderAddress(userId: string, dependencies: SenderAddressDependencies = {}): Promise<void> {
+export async function seedSenderAddress(
+  userId: string,
+  dependencies: SenderAddressDependencies = {},
+  executor?: MetadataExecutor,
+): Promise<void> {
+  if (!executor) {
+    await withSenderLock(userId, (locked) => seedSenderAddress(userId, dependencies, locked));
+    return;
+  }
   const now = dependencies.now?.() ?? new Date();
-  const existingRows = await getDb().select().from(mailInSenderAddresses)
+  const existingRows = await executor.select().from(mailInSenderAddresses)
     .where(eq(mailInSenderAddresses.userId, userId));
 
   /* Seeding writes an encrypted claim now (#969), so it needs the instance
@@ -178,48 +278,104 @@ export async function seedSenderAddress(userId: string, dependencies: SenderAddr
      the wrong trade — the next read seeds it once the key is back. */
   if (!metadataCryptoAvailable()) return;
 
-  const [account] = await getDb().select({ email: users.email, emailEnc: users.emailEnc })
+  const [account] = await executor.select({ emailEnc: users.emailEnc })
     .from(users).where(eq(users.id, userId)).limit(1);
-  const [identity] = await getDb().select({ id: externalIdentities.id }).from(externalIdentities)
+  const [identity] = await executor.select({ id: externalIdentities.id }).from(externalIdentities)
     .where(eq(externalIdentities.userId, userId)).limit(1);
-  const reader = await openInstanceMetadataReader();
+  const reader = await openInstanceMetadataReader(executor);
+  /* Without the key nothing below can be told apart from "unreadable", and an
+     unreadable row is never deleted. */
+  if (reader.locked) return;
   const accountEmail = account
-    ? reader.text("users.email", userId, { encrypted: account.emailEnc, plaintext: account.email }).value
+    ? reader.text("users.email", userId, { encrypted: account.emailEnc }).value
     : null;
   const address = normalizeSenderAddress(accountEmail ?? undefined);
   if (!address) return;
 
-  if (existingRows.length > 0) {
-    const current = existingRows.length === 1
-      ? normalizeSenderAddress(readAddress(reader, existingRows[0]).value ?? undefined)
-      : undefined;
-    if (current === address) return;
-    await getDb().delete(mailInSenderAddresses).where(eq(mailInSenderAddresses.userId, userId));
+  let matching: typeof mailInSenderAddresses.$inferSelect | undefined;
+  let unreadable: typeof mailInSenderAddresses.$inferSelect | undefined;
+  const stale: Array<typeof mailInSenderAddresses.$inferSelect> = [];
+  for (const row of existingRows) {
+    const value = readAddress(reader, row).value;
+    if (value === null) unreadable ??= row;
+    else if (normalizeSenderAddress(value) === address) matching ??= row;
+    else stale.push(row);
   }
 
-  const cipher = await requireInstanceMetadataWriter();
+  const cipher = await requireInstanceMetadataWriter(executor);
   const addressIndex = cipher.senderAddressIndex(address);
+  const staleIds = stale.map((row) => row.id);
+  /* The send times are the member's, not the address's, and they survive any
+     change of address: every replaced row's times are merged into wherever
+     the member's row ends up. */
+  const staleTimes = stale.flatMap((row) => row.checkSentAt);
+  const removeStale = () => executor.delete(mailInSenderAddresses).where(and(
+    eq(mailInSenderAddresses.userId, userId),
+    inArray(mailInSenderAddresses.id, staleIds),
+  ));
+
+  const home = matching ?? unreadable;
+  if (home) {
+    if (stale.length > 0) {
+      await executor.update(mailInSenderAddresses)
+        .set({ checkSentAt: mergeChecks([...home.checkSentAt, ...staleTimes], now), updatedAt: now })
+        .where(eq(mailInSenderAddresses.id, home.id));
+      await removeStale();
+    }
+    return;
+  }
+
   /* An address somebody already claims is left exactly as it is: seeding must
      never take an address away from the member who verified it. */
-  if (await existingClaim(address, addressIndex)) return;
+  if (await existingClaim(addressIndex, executor)) {
+    /* No row can be made, so the old rows are the only place the send times
+       live. They stay, but stop being anything: unchecked, no link, no claim
+       on their old address; they read as a different address, so they are
+       never listed and never attribute. The next seed with room replaces them. */
+    for (const row of stale) {
+      if (row.verifiedAt === null && row.verificationTokenDigest === null && row.addressIndex === null) continue;
+      await executor.update(mailInSenderAddresses).set({
+        verifiedAt: null,
+        verificationTokenDigest: null,
+        verificationExpiresAt: null,
+        addressIndex: null,
+        updatedAt: now,
+      }).where(eq(mailInSenderAddresses.id, row.id));
+    }
+    return;
+  }
+  if (stale.length > 0) await removeStale();
 
   /* The row id exists before the address is encrypted: the content AAD binds
      the ciphertext to its row, so a value cannot be replayed into another
      claim (ADR-0024 decision 3). */
   const id = randomUUID();
-  await getDb().insert(mailInSenderAddresses).values({
+  await executor.insert(mailInSenderAddresses).values({
     id,
     userId,
-    address: null,
     addressEnc: cipher.encryptText("mail_in_sender_addresses.address", id, address),
     addressIndex,
     source: identity ? "sso" : "account",
+    checkSentAt: mergeChecks(staleTimes, now),
     updatedAt: now,
   }).onConflictDoNothing();
 }
 
+/** The counted sends still inside the rolling window, oldest first, at most the daily limit. */
+function mergeChecks(times: readonly Date[], now: Date): Date[] {
+  return times
+    .filter((at) => at.getTime() > now.getTime() - SENDER_CHECK_WINDOW_MS)
+    .sort((a, b) => a.getTime() - b.getTime())
+    .slice(-SENDER_CHECK_DAILY_LIMIT);
+}
+
 function verificationUrl(appUrl: string, token: string): string {
-  const url = new URL(appUrl);
+  let url: URL;
+  try {
+    url = new URL(appUrl);
+  } catch {
+    throw new AppError("app_url_not_configured", SENDER_CHECK_WORDS.noAppUrl, 503);
+  }
   if (!url.hostname || !["http:", "https:"].includes(url.protocol)) {
     throw new AppError("unsafe_input", "The application address is unavailable", 503);
   }
@@ -241,41 +397,104 @@ export async function sendSenderVerification(
   id: string,
   dependencies: SenderAddressDependencies = {},
 ): Promise<{ address: string; expiresAt: Date }> {
+  return withSenderLock(userId, (executor) => sendWithin(executor, userId, id, dependencies));
+}
+
+/**
+ * The whole "check my address" request for one member: seed, read, send, in
+ * ONE transaction under the member's lock. A press that fails anywhere —
+ * including the mailer — leaves nothing behind.
+ */
+export async function requestSenderCheck(
+  userId: string,
+  dependencies: SenderAddressDependencies = {},
+): Promise<{ address: string; expiresAt: Date }> {
+  return withSenderLock(userId, async (executor) => {
+    await seedSenderAddress(userId, dependencies, executor);
+    const [row] = await listSenderAddresses(userId, dependencies, executor);
+    if (!row) {
+      throw new AppError("sender_address_unavailable", SENDER_CHECK_WORDS.noAddress, 409);
+    }
+    if (row.verified) throw new AppError("sender_already_verified", SENDER_CHECK_WORDS.alreadyChecked, 409);
+    return sendWithin(executor, userId, row.id, dependencies);
+  });
+}
+
+async function sendWithin(
+  executor: MetadataExecutor,
+  userId: string,
+  id: string,
+  dependencies: SenderAddressDependencies,
+): Promise<{ address: string; expiresAt: Date }> {
   const now = dependencies.now?.() ?? new Date();
-  const [row] = await getDb().select().from(mailInSenderAddresses)
+  const [row] = await executor.select().from(mailInSenderAddresses)
     .where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId))).limit(1);
   if (!row) throw new AppError("sender_address_unknown", "That address is not on this account", 404);
-  if (row.verifiedAt) throw new AppError("sender_already_verified", "That address is already checked", 409);
+  if (row.verifiedAt) throw new AppError("sender_already_verified", SENDER_CHECK_WORDS.alreadyChecked, 409);
 
   /* The link goes to the address itself, so an address Orbit cannot read is an
      address Orbit cannot check (#969). Refused rather than sent anywhere: a
      missing value must never become an empty or invented recipient. */
-  const address = readAddress(await openInstanceMetadataReader(), row).value;
+  const read = readAddress(await openInstanceMetadataReader(executor), row);
+  const address = read.value;
   if (!address) {
-    throw new AppError("metadata_locked", "Orbit cannot read this address until the encryption key is available", 503);
+    /* With the key available the value itself is damaged: a different refusal
+       from "the key is away", because waiting will not fix it. */
+    if (read.state === "metadata_locked") throw new AppError("metadata_locked", SENDER_CHECK_WORDS.locked, 503);
+    throw new AppError("sender_address_unreadable", SENDER_CHECK_WORDS.unreadable, 409);
   }
 
   let smtp: NotificationWorkerConfig;
   try {
     smtp = (dependencies.smtpConfig ?? getNotificationWorkerConfig)();
   } catch {
-    throw new AppError("smtp_not_configured", "Orbit cannot send mail, so it cannot check this address", 503);
+    throw new AppError("smtp_not_configured", SENDER_CHECK_WORDS.noMail, 503);
   }
   if (!smtp.smtpUrl || !smtp.smtpFrom) {
-    throw new AppError("smtp_not_configured", "Orbit cannot send mail, so it cannot check this address", 503);
+    throw new AppError("smtp_not_configured", SENDER_CHECK_WORDS.noMail, 503);
   }
 
   const token = randomBytes(32).toString("base64url");
   const link = verificationUrl((dependencies.appUrl ?? (() => process.env.APP_URL ?? ""))(), token);
   const expiresAt = new Date(now.getTime() + SENDER_VERIFICATION_TTL_MS);
-  await getDb().update(mailInSenderAddresses).set({
+  const send = dependencies.sendMail ?? defaultSender(smtp);
+
+  /* Check, write the token, send and record, all in the caller's transaction
+     under the member's lock: two presses by the same member queue on the lock,
+     and the second sees the first's send (two-step "lock, then
+     check-and-record", as the sign-in lockout does for its attempt count). The
+     token and the send are recorded only once the mailer has taken the
+     message; if it throws, the transaction rolls back, so neither the count
+     nor the outstanding link changes. */
+  const [locked] = await executor.select({
+    verifiedAt: mailInSenderAddresses.verifiedAt,
+    checkSentAt: mailInSenderAddresses.checkSentAt,
+  }).from(mailInSenderAddresses)
+    .where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId)))
+    .for("update");
+  if (!locked) throw new AppError("sender_address_unknown", "That address is not on this account", 404);
+  if (locked.verifiedAt) throw new AppError("sender_already_verified", SENDER_CHECK_WORDS.alreadyChecked, 409);
+
+  /* The clock is the process's, not the database's `now()`, as everywhere
+     else in this file. */
+  const sentAt = dependencies.now?.() ?? new Date();
+  const wait = senderCheckWaitSeconds(locked.checkSentAt, sentAt);
+  if (wait > 0) {
+    throw new RateLimitedError("sender_check_too_soon", SENDER_CHECK_WORDS.tooSoon, wait);
+  }
+
+  const [updated] = await executor.update(mailInSenderAddresses).set({
     verificationTokenDigest: digestToken(token),
     verificationExpiresAt: expiresAt,
     updatedAt: now,
-  }).where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId)));
+  }).where(and(
+    eq(mailInSenderAddresses.id, id),
+    eq(mailInSenderAddresses.userId, userId),
+    isNull(mailInSenderAddresses.verifiedAt),
+  )).returning({ id: mailInSenderAddresses.id });
+  if (!updated) throw new AppError("sender_already_verified", SENDER_CHECK_WORDS.alreadyChecked, 409);
 
-  const send = dependencies.sendMail ?? defaultSender(smtp);
-  await send({
+  await sendWithDeadline(send, {
     from: smtp.smtpFrom,
     to: address,
     subject: "Check your Orbit sending address",
@@ -288,7 +507,43 @@ export async function sendSenderVerification(
       "If you did not ask for this, ignore it — nothing changes.",
     ].join("\n"),
   });
+
+  const kept = locked.checkSentAt
+    .filter((at) => at.getTime() > sentAt.getTime() - SENDER_CHECK_WINDOW_MS)
+    .sort((a, b) => a.getTime() - b.getTime())
+    .slice(-(SENDER_CHECK_DAILY_LIMIT - 1));
+  await executor.update(mailInSenderAddresses).set({ checkSentAt: [...kept, sentAt] })
+    .where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId)));
   return { address, expiresAt };
+}
+
+/**
+ * Hands the message to the mailer, but only for so long. A mailer that never
+ * answers ends in 503 `sender_mailer_timeout`; one that throws ends in 503
+ * `sender_mailer_refused` rather than an unexplained 500. Either way the
+ * caller's transaction rolls back, so nothing is counted and no link is left
+ * pending. (A mailer that took the message just as the deadline fell may still
+ * deliver it: the member gets a link that does not work and presses again.)
+ */
+async function sendWithDeadline(
+  send: (message: { from: string; to: string; subject: string; text: string }) => Promise<void>,
+  message: { from: string; to: string; subject: string; text: string },
+): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new AppError("sender_mailer_timeout", SENDER_CHECK_WORDS.mailerTimeout, 503)),
+      sendDeadlineMs,
+    );
+  });
+  try {
+    await Promise.race([send(message), timeout]);
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw new AppError("sender_mailer_refused", SENDER_CHECK_WORDS.mailerRefused, 503);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function defaultSender(smtp: NotificationWorkerConfig) {
@@ -337,6 +592,14 @@ export async function verifySenderAddress(
   });
   if (!match || !match.verificationExpiresAt || match.verificationExpiresAt.getTime() <= now.getTime()) throw refuse();
 
+  /* The link must be for the address the member is registered with NOW: if it
+     has moved since the link went out, the old link verifies nothing. A row
+     that cannot be read cannot be confirmed either. */
+  const reader = await openInstanceMetadataReader();
+  const registered = await registeredAddressOf(getDb(), reader, userId);
+  const linked = normalizeSenderAddress(readAddress(reader, match).value ?? undefined);
+  if (!registered || linked !== registered) throw refuse();
+
   const [verified] = await getDb().update(mailInSenderAddresses).set({
     verifiedAt: now,
     verificationTokenDigest: null,
@@ -348,7 +611,7 @@ export async function verifySenderAddress(
     isNull(mailInSenderAddresses.verifiedAt),
   )).returning();
   if (!verified) throw refuse();
-  return viewOf(verified, now, await openInstanceMetadataReader());
+  return viewOf(verified, now, reader);
 }
 
 /**
@@ -358,28 +621,36 @@ export async function verifySenderAddress(
  * narrow: one exact normalised address, verified only, and never a prefix, a
  * domain or a pattern. A disabled account attributes nothing.
  *
- * The match is on the BLIND INDEX now (#969), which is what carries an exact
- * address lookup across the encryption, plus the plaintext for a row the
- * backfill has not reached yet — both arms in the one query, so attribution
- * behaves the same either side of the backfill. A locked instance cannot
- * produce an index at all; rather than throw, it matches on plaintext alone,
+ * The match is on the BLIND INDEX (#969), which is what carries an exact
+ * address lookup across the encryption. A locked instance cannot produce an
+ * index at all; rather than throw, it attributes to nobody (fail closed),
  * because mail-in must keep running while the key is away and an address it
- * cannot read simply attributes to nobody.
+ * cannot read simply belongs to nobody.
  */
 export async function userForVerifiedSender(address: string): Promise<string | undefined> {
   const normalized = normalizeSenderAddress(address);
   if (!normalized) return undefined;
   const cipher = await openInstanceMetadataReader();
-  const addressIndex = cipher.locked ? null : cipher.senderAddressIndex(normalized);
-  const [row] = await getDb().select({ userId: mailInSenderAddresses.userId, disabledAt: users.disabledAt })
+  if (cipher.locked) return undefined;
+  const addressIndex = cipher.senderAddressIndex(normalized);
+  if (addressIndex === null) return undefined;
+  const rows = await getDb().select({
+    userId: mailInSenderAddresses.userId,
+    disabledAt: users.disabledAt,
+    emailEnc: users.emailEnc,
+  })
     .from(mailInSenderAddresses)
     .innerJoin(users, eq(users.id, mailInSenderAddresses.userId))
     .where(and(
-      addressIndex === null
-        ? eq(mailInSenderAddresses.address, normalized)
-        : or(eq(mailInSenderAddresses.addressIndex, addressIndex), eq(mailInSenderAddresses.address, normalized)),
+      eq(mailInSenderAddresses.addressIndex, addressIndex),
       isNotNull(mailInSenderAddresses.verifiedAt),
-    ))
-    .limit(1);
-  return row && !row.disabledAt ? row.userId : undefined;
+    ));
+  /* The row counts only while it is still the member's registered address: a
+     member whose account address has since changed no longer attributes the
+     old one, with no settings visit needed to say so. */
+  const row = rows.find((candidate) => !candidate.disabledAt
+    && normalizeSenderAddress(
+      cipher.text("users.email", candidate.userId, { encrypted: candidate.emailEnc }).value ?? undefined,
+    ) === normalized);
+  return row?.userId;
 }

@@ -127,7 +127,7 @@ describe("sendSetupLink with an encrypted address (#969)", () => {
     expect(JSON.stringify(mocks.auditRows[0])).not.toContain("ada@example.invalid");
   });
 
-  it("still sends to a row the backfill has not reached", async () => {
+  it("does not send to an account that holds only a plaintext address (#1403 Q3)", async () => {
     mocks.row = {
       id: USER,
       email: "ada@example.invalid",
@@ -136,9 +136,9 @@ describe("sendSetupLink with an encrypted address (#969)", () => {
       credential: USER,
     };
 
-    const delivery = await sendSetupLink(ADMIN, USER, { mailer });
-    expect(delivery.sentTo).toBe("ada@example.invalid");
-    expect(sent).toHaveLength(1);
+    await expect(sendSetupLink(ADMIN, USER, { mailer }))
+      .rejects.toMatchObject({ code: "recipient_address_unreadable", status: 409 });
+    expect(sent).toEqual([]);
   });
 
   it("refuses rather than sending to nothing when the instance is locked", async () => {
@@ -176,8 +176,8 @@ describe("a resend that cannot be delivered (#1151 A1-S1)", () => {
     mocks.liveLink = true;
     mocks.row = {
       id: USER,
-      email: "ada@example.invalid",
-      emailEnc: null,
+      email: null,
+      emailEnc: new MetadataCipher(mocks.key as never).encryptText("users.email", USER, "ada@example.invalid"),
       displayName: "Ada Lovelace",
       credential: USER,
     };
@@ -200,8 +200,8 @@ describe("a resend that cannot be delivered (#1151 A1-S1)", () => {
     mocks.liveLink = false;
     mocks.row = {
       id: USER,
-      email: "ada@example.invalid",
-      emailEnc: null,
+      email: null,
+      emailEnc: new MetadataCipher(mocks.key as never).encryptText("users.email", USER, "ada@example.invalid"),
       displayName: "Ada Lovelace",
       credential: null,
     };
@@ -225,8 +225,8 @@ describe("a mail that goes out but is never persisted (#1151 R1)", () => {
   it("still leaves an audit record when persistSetupToken fails after a successful send", async () => {
     mocks.row = {
       id: USER,
-      email: "ada@example.invalid",
-      emailEnc: null,
+      email: null,
+      emailEnc: new MetadataCipher(mocks.key as never).encryptText("users.email", USER, "ada@example.invalid"),
       displayName: "Ada Lovelace",
       credential: null,
     };

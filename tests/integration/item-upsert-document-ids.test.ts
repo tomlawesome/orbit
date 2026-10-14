@@ -3,6 +3,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { documents, items } from "@/db/schema";
+import { openMetadataReader } from "@/server/metadata/fields";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 
@@ -312,8 +313,9 @@ describe("a document that cannot be bound refuses the whole command and leaves n
       activity: { id: randomUUID(), itemId: fixture.item.id, occurredAt: new Date().toISOString() },
     });
     expect(response.status).toBe(422);
-    const [stored] = await getDb().select({ title: items.title }).from(items).where(eq(items.id, fixture.item.id));
-    expect(stored.title).not.toBe("Renamed by a refused save");
+    const [stored] = await getDb().select({ titleEnc: items.titleEnc }).from(items).where(eq(items.id, fixture.item.id));
+    const reader = await openMetadataReader(fixture.household.id);
+    expect(reader.text("items.title", fixture.item.id, { encrypted: stored.titleEnc }).value).not.toBe("Renamed by a refused save");
   });
 });
 

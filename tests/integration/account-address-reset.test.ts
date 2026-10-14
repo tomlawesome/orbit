@@ -24,7 +24,7 @@ import { auditLog, instanceAuthority, localCredentials, mailInSenderAddresses, m
 import { hashPassword } from "@/lib/auth/password";
 import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { clearUnreadableAddresses, encryptionKeyIsUsable } from "@/server/account-addresses-reset";
-import { createLocalUser, verifyCredential } from "@/server/local-credentials";
+import { createLocalUser } from "@/server/local-credentials";
 import { requireInstanceMetadataWriter } from "@/server/metadata/fields";
 import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
@@ -71,10 +71,9 @@ async function seedEncryptedAccount(label: string): Promise<{ id: string; email:
   await getDb().insert(mailInSenderAddresses).values({
     id: senderId,
     userId: created.id,
-    address: null,
     addressEnc: cipher.encryptText("mail_in_sender_addresses.address", senderId, email),
     addressIndex: cipher.senderAddressIndex(email),
-    source: "manual",
+    source: "account",
     verifiedAt: new Date(),
   });
   return { id: created.id, email };
@@ -101,13 +100,11 @@ describe("it clears only what cannot be read (#970)", () => {
   it("frees the accounts, removes the unreadable sending addresses, and leaves a readable address alone", async () => {
     const administrator = await seedEncryptedAccount("administrator");
 
-    /* An account the backfill never reached: its address is still readable, so
-       it can be signed into perfectly well and must survive untouched. Taking
-       it away would destroy the very access this command exists to restore. */
+    /* An account that holds no ciphertext: the command clears only what it
+       finds in `email_enc`, so a row without one must survive untouched. */
     const plaintextId = randomUUID();
-    const plaintextEmail = `not-backfilled-${randomUUID()}@example.invalid`;
     await getDb().insert(users).values({
-      id: plaintextId, email: plaintextEmail, emailVerified: true, displayName: "Pre-release person",
+      id: plaintextId, emailVerified: true, displayName: "Pre-release person",
     });
     await getDb().insert(localCredentials).values({
       userId: plaintextId, passwordHash: await hashPassword(PASSWORD),
@@ -125,18 +122,17 @@ describe("it clears only what cannot be read (#970)", () => {
 
     // The account survives; only its address went.
     const [cleared] = await getDb()
-      .select({ email: users.email, emailEnc: users.emailEnc, emailIndex: users.emailIndex })
+      .select({ emailEnc: users.emailEnc, emailIndex: users.emailIndex })
       .from(users).where(eq(users.id, administrator.id));
-    expect(cleared).toEqual({ email: null, emailEnc: null, emailIndex: null });
+    expect(cleared).toEqual({ emailEnc: null, emailIndex: null });
 
     // Its sending address is gone outright: the row was nothing but an address.
     expect(await getDb().select().from(mailInSenderAddresses)
       .where(eq(mailInSenderAddresses.userId, administrator.id))).toEqual([]);
 
-    // And the readable account is untouched, and still signs in.
-    const [untouched] = await getDb().select({ email: users.email }).from(users).where(eq(users.id, plaintextId));
-    expect(untouched.email).toBe(plaintextEmail);
-    expect((await verifyCredential(plaintextEmail, PASSWORD)).outcome).toBe("verified");
+    // And the other account is untouched.
+    const [untouched] = await getDb().select({ displayName: users.displayName }).from(users).where(eq(users.id, plaintextId));
+    expect(untouched.displayName).toBe("Pre-release person");
   });
 
   it("records that it ran, with counts and no address in the record", async () => {

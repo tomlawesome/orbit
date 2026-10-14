@@ -8,7 +8,7 @@ import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { sessionCookieName } from "@/lib/auth/cookies";
 import { constantTimeEqual, createCsrfToken, hashSessionToken, randomUrlSafe } from "@/lib/auth/crypto";
 import { AuthError } from "@/lib/auth/errors";
-import type { TextSize, UrgencyPalette } from "@/lib/preferences";
+import type { TextSize } from "@/lib/preferences";
 import { log, operationalDetail } from "@/lib/logger";
 import { assertKeyUsable } from "@/server/key-state";
 import { openInstanceMetadataReader, requireInstanceMetadataWriter } from "@/server/metadata/fields";
@@ -30,10 +30,8 @@ export interface AuthenticatedSession {
     displayName: string;
     avatarUrl: string | null;
     isInstanceAdmin: boolean;
-    themeMode: "system" | "light" | "dark";
     themeId: string;
     textSize: TextSize;
-    urgencyPalette: UrgencyPalette;
     emailNotifications: boolean;
     pushNotifications: boolean;
   };
@@ -159,7 +157,7 @@ export async function takeSessionIdToken(
 export async function openSessionIdToken(taken: { id: string | null; encrypted: string | null }): Promise<string | null> {
   if (!taken.id || !taken.encrypted) return null;
   const cipher = await openInstanceMetadataReader();
-  return cipher.text("sessions.id_token", taken.id, { encrypted: taken.encrypted, plaintext: null }).value;
+  return cipher.text("sessions.id_token", taken.id, { encrypted: taken.encrypted }).value;
 }
 
 /**
@@ -277,17 +275,14 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       expiresAt: sessions.expiresAt,
       lastSeenAt: sessions.lastSeenAt,
       userId: users.id,
-      email: users.email,
       emailEnc: users.emailEnc,
       emailVerified: users.emailVerified,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
       isInstanceAdmin: users.isInstanceAdmin,
       disabledAt: users.disabledAt,
-      themeMode: userPreferences.themeMode,
       themeId: userPreferences.themeId,
       textSize: userPreferences.textSize,
-      urgencyPalette: userPreferences.urgencyPalette,
       emailNotifications: userPreferences.emailNotifications,
       pushNotifications: userPreferences.pushNotifications,
     })
@@ -317,13 +312,11 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       id: record.userId,
       email: cipher.text("users.email", record.userId, {
         encrypted: record.emailEnc,
-        plaintext: record.email,
       }).value,
       emailVerified: record.emailVerified,
       displayName: record.displayName,
       avatarUrl: record.avatarUrl,
       isInstanceAdmin: record.isInstanceAdmin,
-      themeMode: record.themeMode ?? "system",
       /* #865: a stale stored value — a removed pack (atlas), or the column's
          own pre-#325 legacy default ("after-dark", with the hyphen, which
          was never a v19 pack id either) — resolves to the current default
@@ -332,7 +325,6 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       textSize: record.textSize === "standard" || record.textSize === "large" || record.textSize === "extra-large"
         ? record.textSize
         : "comfortable",
-      urgencyPalette: record.urgencyPalette === "classic" ? "classic" : "themed",
       emailNotifications: record.emailNotifications ?? true,
       pushNotifications: record.pushNotifications ?? true,
     },

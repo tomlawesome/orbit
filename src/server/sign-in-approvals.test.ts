@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthError } from "@/lib/auth/errors";
+import { MetadataCipher } from "@/server/metadata/fields";
 
 /**
  * The second factor's own arithmetic (#1033, ADR-0027), against an in-memory
@@ -25,6 +26,13 @@ const APP_URL = "https://orbit.example.invalid";
 /** One row as the store holds it, in the module's own JS property names. */
 type Row = Record<string, unknown>;
 
+const testKey = vi.hoisted(() => ({
+  scope: "instance" as const,
+  householdId: null,
+  keyId: "test-key",
+  dataKey: Buffer.alloc(32, 9),
+}));
+
 const store = vi.hoisted(() => ({
   approvals: [] as Row[],
   credentials: [] as Row[],
@@ -37,10 +45,10 @@ vi.mock("@/server/metadata/fields", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/server/metadata/fields")>();
   return {
     ...original,
-    /* An unlocked reader over plaintext addresses: what this module needs of
+    /* An unlocked reader over a fixed test key: what this module needs of
        the cipher is only "give me the address", and #969's own tests own the
        question of what happens when it cannot. */
-    openInstanceMetadataReader: async () => new original.MetadataCipher(undefined),
+    openInstanceMetadataReader: async () => new original.MetadataCipher(testKey),
   };
 });
 
@@ -283,7 +291,11 @@ beforeEach(() => {
   store.audit.length = 0;
   posted = [];
   process.env.APP_URL = APP_URL;
-  store.users.push({ id: USER, email: "priya@example.invalid", emailEnc: null, displayName: "Priya Shah" });
+  store.users.push({
+    id: USER,
+    emailEnc: new MetadataCipher(testKey).encryptText("users.email", USER, "priya@example.invalid"),
+    displayName: "Priya Shah",
+  });
   store.credentials.push({ userId: USER, failedAttemptCount: 0, lockedUntil: null });
 });
 

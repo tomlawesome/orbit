@@ -232,9 +232,7 @@ describe("reviewed intake contract", () => {
 
   it("clears every column a mail-in draft's rejected reading could ride in, and nothing else", () => {
     expect(clearedReviewDraftMetadata).toEqual({
-      proposal: {},
       proposalEnc: null,
-      fieldEvidence: {},
       fieldEvidenceEnc: null,
     });
   });

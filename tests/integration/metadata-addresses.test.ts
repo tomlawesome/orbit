@@ -14,7 +14,7 @@
  *    maintenance and no session can be created.
  */
 import { randomBytes, randomUUID } from "node:crypto";
-import { eq, isNotNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, externalIdentities, instanceAuthority, localCredentials, mailInSenderAddresses, metadataKeys, users } from "@/db/schema";
@@ -26,7 +26,6 @@ import { getAuthConfig } from "@/lib/env";
 import { deriveDocumentKeyId, getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { rotationComplete, runKekRotationToCompletion, type RotationKeys } from "@/server/documents/rewrap-worker";
 import { createLocalUser, verifyCredential } from "@/server/local-credentials";
-import { backfillComplete, runMetadataBackfillBatch } from "@/server/metadata/backfill";
 import { isMetadataEnvelope } from "@/server/metadata/crypto";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
 import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
@@ -71,7 +70,7 @@ function lockTheInstance(): () => void {
 
 async function storedUser(id: string) {
   const [row] = await getDb()
-    .select({ email: users.email, emailEnc: users.emailEnc, emailIndex: users.emailIndex })
+    .select({ emailEnc: users.emailEnc, emailIndex: users.emailIndex })
     .from(users).where(eq(users.id, id));
   return row;
 }
@@ -96,7 +95,6 @@ describe("an account address is written and read encrypted (#969)", () => {
     );
 
     const stored = await storedUser(created.id);
-    expect(stored.email).toBeNull();
     expect(isMetadataEnvelope(stored.emailEnc!)).toBe(true);
     expect(stored.emailEnc).not.toContain(address);
     expect(stored.emailIndex).not.toBeNull();
@@ -111,7 +109,7 @@ describe("an account address is written and read encrypted (#969)", () => {
     expect((await verifyCredential("ENCRYPTED-LOCAL@Example.Invalid", PASSWORD)).outcome).toBe("verified");
 
     const reader = await openInstanceMetadataReader();
-    expect(reader.text("users.email", created.id, { encrypted: stored.emailEnc, plaintext: stored.email }).value)
+    expect(reader.text("users.email", created.id, { encrypted: stored.emailEnc }).value)
       .toBe(address);
   });
 
@@ -131,70 +129,7 @@ describe("an account address is written and read encrypted (#969)", () => {
     expect(provisioned.email).toBe(address);
 
     const stored = await storedUser(provisioned.id);
-    expect(stored.email).toBeNull();
     expect(isMetadataEnvelope(stored.emailEnc!)).toBe(true);
-  });
-});
-
-describe("the backfill converts addresses written before the release (#969)", () => {
-  it("encrypts a plaintext account and sender address, clears both, and keeps sign-in working", async () => {
-    const address = "pre-release@example.invalid";
-    const senderAddress = "pre-release-sender@example.invalid";
-
-    /* The state migration 0044 leaves behind: plaintext present, ciphertext
-       absent. Written straight to the table, because no application path
-       produces it any more. */
-    const userId = randomUUID();
-    await getDb().insert(users).values({
-      id: userId, email: address, emailVerified: true, displayName: "Pre-release person",
-    });
-    await getDb().insert(mailInSenderAddresses).values({
-      userId, address: senderAddress, source: "manual", verifiedAt: new Date(),
-    });
-    await getDb().insert(localCredentials).values({ userId, passwordHash: await hashPassword(PASSWORD) });
-
-    expect((await verifyCredential(address, PASSWORD)).outcome).toBe("verified");
-    expect(await userForVerifiedSender(senderAddress)).toBe(userId);
-
-    const batch = await runMetadataBackfillBatch();
-    expect(batch.users).toBe(1);
-    expect(batch.senderAddresses).toBe(1);
-
-    const stored = await storedUser(userId);
-    expect(stored.email).toBeNull();
-    expect(isMetadataEnvelope(stored.emailEnc!)).toBe(true);
-    const [sender] = await getDb()
-      .select({ address: mailInSenderAddresses.address, addressEnc: mailInSenderAddresses.addressEnc })
-      .from(mailInSenderAddresses).where(eq(mailInSenderAddresses.userId, userId));
-    expect(sender.address).toBeNull();
-    expect(isMetadataEnvelope(sender.addressEnc!)).toBe(true);
-
-    // The point of the whole slice: the same two lookups still answer.
-    expect((await verifyCredential(address, PASSWORD)).outcome).toBe("verified");
-    expect(await userForVerifiedSender(senderAddress)).toBe(userId);
-  });
-});
-
-describe("no readable address survives anywhere (#969, the #966 failure)", () => {
-  it("finds no plaintext address in any address-bearing column after the backfill drains", async () => {
-    const address = "sweep@example.invalid";
-    const created = await createLocalUser(
-      { email: address, displayName: "Swept", passwordHash: await hashPassword(PASSWORD) },
-      { bootstrap: true },
-    );
-    await getDb().insert(mailInSenderAddresses).values({
-      userId: created.id, address: "sweep-sender@example.invalid", source: "manual",
-    });
-    while (!backfillComplete(await runMetadataBackfillBatch())) { /* drain */ }
-
-    /* Asserted over the stored shapes rather than by inspection: any row still
-       holding a readable address fails this, including one a future column
-       introduces and forgets to encrypt. */
-    const leftovers = await getDb().select({ id: users.id }).from(users).where(isNotNull(users.email));
-    expect(leftovers).toEqual([]);
-    const senderLeftovers = await getDb().select({ id: mailInSenderAddresses.id })
-      .from(mailInSenderAddresses).where(isNotNull(mailInSenderAddresses.address));
-    expect(senderLeftovers).toEqual([]);
   });
 });
 
@@ -224,7 +159,7 @@ describe("an instance with no usable key (#969, and why #970 exists)", () => {
 describe("a KEK rotation covers the address rows (#969, ADR-0017's contract)", () => {
   it("re-reads both addresses after a full rotation, with no value rewritten", async () => {
     const address = "rotated@example.invalid";
-    const senderAddress = "rotated-sender@example.invalid";
+    const senderAddress = address;
     const created = await createLocalUser(
       { email: address, displayName: "Rotated", passwordHash: await hashPassword(PASSWORD) },
       { bootstrap: true },
@@ -234,10 +169,9 @@ describe("a KEK rotation covers the address rows (#969, ADR-0017's contract)", (
     await getDb().insert(mailInSenderAddresses).values({
       id: senderId,
       userId: created.id,
-      address: null,
       addressEnc: writer.encryptText("mail_in_sender_addresses.address", senderId, senderAddress),
       addressIndex: writer.senderAddressIndex(senderAddress),
-      source: "manual",
+      source: "account",
       verifiedAt: new Date(),
     });
 

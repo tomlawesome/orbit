@@ -126,15 +126,22 @@ describe("GET /api/settings/mail-relay reports the sender check (decision 7c)", 
     expect(sender).toMatchObject({ address: fixture.users.member.email, verified: true, verificationPending: false });
   });
 
-  it("a lapsed link, still unchecked, reads as not pending", async () => {
+  it("a lapsed link, still unchecked, reads as not pending and reports when it lapsed", async () => {
     await turnMailInOn();
     const session = await fixture.session("member");
     await seedSenderAddress(fixture.users.member.id);
-    await linkSent(fixture.users.member.id, new Date(Date.now() - HOUR_MS));
+    const lapsed = new Date(Date.now() - HOUR_MS);
+    await linkSent(fixture.users.member.id, lapsed);
 
     const sender = await readOverHttp(session);
 
-    expect(sender).toMatchObject({ address: fixture.users.member.email, verified: false, verificationPending: false });
+    /* The lapsed link's own time, so the screen can say "the last link lapsed". */
+    expect(sender).toMatchObject({
+      address: fixture.users.member.email,
+      verified: false,
+      verificationPending: false,
+      expiresAt: lapsed.toISOString(),
+    });
   });
 
   it("is null for an instance administrator", async () => {

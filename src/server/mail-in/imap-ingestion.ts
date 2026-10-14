@@ -751,7 +751,7 @@ export function draftProposalTextForTests(bytes: Buffer, mediaType: SupportedDoc
 async function draftProposalColumns(
   source: { text: string; filename: string },
   receiptId: string,
-): Promise<{ proposal: Record<string, unknown>; proposalEnc: string; fieldEvidence: Record<string, unknown>; fieldEvidenceEnc: string } | undefined> {
+): Promise<{ proposalEnc: string; fieldEvidenceEnc: string } | undefined> {
   try {
     const heuristic = proposalFromText(source.text, source.filename);
     const adjudication = await adjudicateProposal({
@@ -766,9 +766,7 @@ async function draftProposalColumns(
     // `imap-inbox.ts` already reads an unattributed receipt.
     const cipher = await requireReceiptMetadataWriter(null);
     return {
-      proposal: {},
       proposalEnc: cipher.encryptJson("imap_ingestion_messages.proposal", receiptId, proposal),
-      fieldEvidence: {},
       fieldEvidenceEnc: cipher.encryptJson("imap_ingestion_messages.field_evidence", receiptId, fieldEvidence),
     };
   } catch {
