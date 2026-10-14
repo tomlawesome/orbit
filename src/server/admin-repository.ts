@@ -70,7 +70,7 @@ type InstanceUserRow = {
 };
 
 function toInstanceUser(row: InstanceUserRow, cipher: MetadataCipher, primaryUserId: string | null): InstanceUser {
-  const email = cipher.text("users.email", row.id, { encrypted: row.emailEnc, plaintext: null });
+  const email = cipher.text("users.email", row.id, { encrypted: row.emailEnc });
   return {
     id: row.id,
     displayName: row.displayName,

@@ -108,7 +108,6 @@ vi.mock("@/server/key-alert", () => ({
   sendKeyRestoredNotice: mocks.sendKeyRestoredNotice,
 }));
 vi.mock("@/server/maintenance-worker", () => ({ startMaintenanceWorker: () => mocks.otherStarts.push("maintenance") }));
-vi.mock("@/server/metadata/backfill", () => ({ startMetadataBackfill: () => mocks.otherStarts.push("backfill") }));
 
 vi.mock("@/server/documents/rewrap-worker", () => ({
   recordRotationStarted: mocks.recordRotationStarted,
@@ -639,14 +638,14 @@ describe("strict startup ordering", () => {
       });
     });
 
-    it("starts every worker, the backfill included, when the key is usable (nothing about the normal start changed)", async () => {
+    it("starts every worker when the key is usable (nothing about the normal start changed)", async () => {
       const { registerNode } = await import("./boot");
 
       await registerNode();
 
       expect(mocks.workerCalls.filter((call) => ["notification", "document", "imap", "receipt"].includes(call)))
         .toEqual(["notification", "document", "imap", "receipt"]);
-      expect(mocks.otherStarts).toEqual(["maintenance", "backfill"]);
+      expect(mocks.otherStarts).toEqual(["maintenance"]);
       expect(mocks.log.warn.mock.calls.filter(([entry]) => entry.reason === "key_unavailable")).toEqual([]);
     });
 

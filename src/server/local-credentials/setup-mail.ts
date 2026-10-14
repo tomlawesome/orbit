@@ -252,7 +252,7 @@ export async function sendSetupLink(
   }
 
   const address = (await openInstanceMetadataReader(db))
-    .text("users.email", recipient.id, { encrypted: recipient.emailEnc, plaintext: null });
+    .text("users.email", recipient.id, { encrypted: recipient.emailEnc });
   return issueAndSend(
     { ...recipient, email: address.value },
     recipient.credential ? "recovery" : "setup",

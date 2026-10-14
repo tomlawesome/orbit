@@ -97,9 +97,8 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     // clears the plaintext, so the cap is asserted on the decrypted value.
     // Found by its own encrypted notes rather than by title: `items.title` is
     // Tier 2 ciphertext since #963, so a SQL equality on it matches nothing.
-    const [stored] = await getDb().select({ id: items.id, notes: items.notes, notesEnc: items.notesEnc }).from(items)
+    const [stored] = await getDb().select({ id: items.id, notesEnc: items.notesEnc }).from(items)
       .where(and(eq(items.householdId, fixture.household.id), isNotNull(items.notesEnc)));
-    expect(stored?.notes).toBeNull();
     const metadata = await openMetadataReader(fixture.household.id);
     expect(metadata.text("items.notes", stored.id, { encrypted: stored.notesEnc }).value)
       .toHaveLength(2_000);

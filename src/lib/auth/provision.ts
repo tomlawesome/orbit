@@ -98,7 +98,7 @@ function readEmail(
   cipher: MetadataCipher,
   row: { id: string; emailEnc: string | null },
 ): string | null {
-  return cipher.text("users.email", row.id, { encrypted: row.emailEnc, plaintext: null }).value;
+  return cipher.text("users.email", row.id, { encrypted: row.emailEnc }).value;
 }
 
 const refusals = {

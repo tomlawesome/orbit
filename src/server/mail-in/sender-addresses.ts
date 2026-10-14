@@ -17,14 +17,14 @@
  *
  * Since #969 the address itself is encrypted metadata under the instance key
  * (ADR-0024): `address_enc` holds it, `address_index` is the blind index that
- * attribution and the uniqueness rule both look up, and the plaintext column
- * stands only until the backfill reaches the row.
+ * attribution and the uniqueness rule both look up. There is no plaintext
+ * column: the address is read from `address_enc` alone.
  *
  * This lives outside `core/` because it needs `getDb`/schema access and the
  * SMTP transport, which `core/` is not allowed (see this directory's README).
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { externalIdentities, mailInSenderAddresses, users } from "@/db/schema";
 import { AppError, RateLimitedError } from "@/lib/app-error";
@@ -100,37 +100,27 @@ function digestToken(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
 }
 
-/**
- * The stored address, decrypted (#969).
- *
- * Dual read for the length of the expand release, as everywhere else: a row
- * whose `address_enc` is set is decrypted under the INSTANCE key, and a row
- * the backfill has not reached is read from its plaintext column.
- */
+/** The stored address, decrypted under the INSTANCE key (#969). */
 function readAddress(
   cipher: MetadataCipher,
-  row: { id: string; address: string | null; addressEnc: string | null },
+  row: { id: string; addressEnc: string | null },
 ) {
-  return cipher.text("mail_in_sender_addresses.address", row.id, { encrypted: row.addressEnc, plaintext: row.address });
+  return cipher.text("mail_in_sender_addresses.address", row.id, { encrypted: row.addressEnc });
 }
 
 /**
  * Any row already claiming this address — this member's or anybody else's.
  *
  * The blind index is what carries "one account per sending address" across the
- * encryption, and the plaintext arm catches a row the backfill has not reached
- * yet: without it an encrypted insert would not collide with an existing
- * plaintext claim, and the address would end up claimed twice.
+ * encryption. With no index (nothing to index) there is no claim to find.
  */
 async function existingClaim(
-  address: string,
   addressIndex: string | null,
   executor: MetadataExecutor = getDb(),
 ): Promise<typeof mailInSenderAddresses.$inferSelect | undefined> {
+  if (addressIndex === null) return undefined;
   const [row] = await executor.select().from(mailInSenderAddresses)
-    .where(addressIndex === null
-      ? eq(mailInSenderAddresses.address, address)
-      : or(eq(mailInSenderAddresses.addressIndex, addressIndex), eq(mailInSenderAddresses.address, address)))
+    .where(eq(mailInSenderAddresses.addressIndex, addressIndex))
     .limit(1);
   return row;
 }
@@ -158,7 +148,7 @@ async function registeredAddressOf(executor: MetadataExecutor, reader: MetadataC
   const [account] = await executor.select({ emailEnc: users.emailEnc })
     .from(users).where(eq(users.id, userId)).limit(1);
   if (!account) return null;
-  const value = reader.text("users.email", userId, { encrypted: account.emailEnc, plaintext: null }).value;
+  const value = reader.text("users.email", userId, { encrypted: account.emailEnc }).value;
   return normalizeSenderAddress(value ?? undefined) ?? null;
 }
 
@@ -260,7 +250,7 @@ export async function seedSenderAddress(
      unreadable row is never deleted. */
   if (reader.locked) return;
   const accountEmail = account
-    ? reader.text("users.email", userId, { encrypted: account.emailEnc, plaintext: null }).value
+    ? reader.text("users.email", userId, { encrypted: account.emailEnc }).value
     : null;
   const address = normalizeSenderAddress(accountEmail ?? undefined);
   if (!address) return;
@@ -290,7 +280,7 @@ export async function seedSenderAddress(
   const addressIndex = cipher.senderAddressIndex(address);
   /* An address somebody already claims is left exactly as it is: seeding must
      never take an address away from the member who verified it. */
-  if (await existingClaim(address, addressIndex, executor)) return;
+  if (await existingClaim(addressIndex, executor)) return;
 
   /* The row id exists before the address is encrypted: the content AAD binds
      the ciphertext to its row, so a value cannot be replayed into another
@@ -299,7 +289,6 @@ export async function seedSenderAddress(
   await executor.insert(mailInSenderAddresses).values({
     id,
     userId,
-    address: null,
     addressEnc: cipher.encryptText("mail_in_sender_addresses.address", id, address),
     addressIndex,
     source: identity ? "sso" : "account",
@@ -531,31 +520,28 @@ export async function verifySenderAddress(
  * narrow: one exact normalised address, verified only, and never a prefix, a
  * domain or a pattern. A disabled account attributes nothing.
  *
- * The match is on the BLIND INDEX now (#969), which is what carries an exact
- * address lookup across the encryption, plus the plaintext for a row the
- * backfill has not reached yet — both arms in the one query, so attribution
- * behaves the same either side of the backfill. A locked instance cannot
- * produce an index at all; rather than throw, it matches on plaintext alone,
+ * The match is on the BLIND INDEX (#969), which is what carries an exact
+ * address lookup across the encryption. A locked instance cannot produce an
+ * index at all; rather than throw, it attributes to nobody (fail closed),
  * because mail-in must keep running while the key is away and an address it
- * cannot read simply attributes to nobody.
+ * cannot read simply belongs to nobody.
  */
 export async function userForVerifiedSender(address: string): Promise<string | undefined> {
   const normalized = normalizeSenderAddress(address);
   if (!normalized) return undefined;
   const cipher = await openInstanceMetadataReader();
-  const addressIndex = cipher.locked ? null : cipher.senderAddressIndex(normalized);
+  if (cipher.locked) return undefined;
+  const addressIndex = cipher.senderAddressIndex(normalized);
+  if (addressIndex === null) return undefined;
   const rows = await getDb().select({
     userId: mailInSenderAddresses.userId,
     disabledAt: users.disabledAt,
-    email: users.email,
     emailEnc: users.emailEnc,
   })
     .from(mailInSenderAddresses)
     .innerJoin(users, eq(users.id, mailInSenderAddresses.userId))
     .where(and(
-      addressIndex === null
-        ? eq(mailInSenderAddresses.address, normalized)
-        : or(eq(mailInSenderAddresses.addressIndex, addressIndex), eq(mailInSenderAddresses.address, normalized)),
+      eq(mailInSenderAddresses.addressIndex, addressIndex),
       isNotNull(mailInSenderAddresses.verifiedAt),
     ));
   /* The row counts only while it is still the member's registered address: a
@@ -563,7 +549,7 @@ export async function userForVerifiedSender(address: string): Promise<string | u
      old one, with no settings visit needed to say so. */
   const row = rows.find((candidate) => !candidate.disabledAt
     && normalizeSenderAddress(
-      cipher.text("users.email", candidate.userId, { encrypted: candidate.emailEnc, plaintext: candidate.email }).value ?? undefined,
+      cipher.text("users.email", candidate.userId, { encrypted: candidate.emailEnc }).value ?? undefined,
     ) === normalized);
   return row?.userId;
 }

@@ -965,7 +965,7 @@ async function deliverClaimed(
            nor cancelled, because a locked key and a damaged value are both
            repairable and neither is a reason to drop somebody's reminder. */
         const address = addressReader!
-          .text("users.email", delivery.userId, { encrypted: delivery.emailEnc, plaintext: null });
+          .text("users.email", delivery.userId, { encrypted: delivery.emailEnc });
         if (!address.value) {
           await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "recipient_address_unreadable", now, retryDelay);
           continue;

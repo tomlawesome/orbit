@@ -7,7 +7,6 @@ import { readWorkspace, applyWorkspaceCommand } from "@/server/workspace-reposit
 import { assignImapReceiptHousehold } from "@/server/mail-in/imap-inbox";
 import { encryptPortableArchive } from "@/server/portable-archive";
 import { importPortableArchive, previewPortableImport } from "@/server/portable-archive-repository";
-import { runMetadataBackfillBatch } from "@/server/metadata/backfill";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { resetDocumentConfigForTests } from "@/server/documents/config";
@@ -403,91 +402,7 @@ describe("a corrupt ciphertext (ADR-0024 decision 5)", () => {
   });
 });
 
-describe("the backfill converts rows that predate encryption (ADR-0024 decision 3)", () => {
-  it("encrypts the plaintext left by the expand migration, clears it, and indexes the reference", async () => {
-    const fixture = await createIntegrationFixture("tier1-backfill");
-    const [section] = await getDb().select({ id: items.sectionId }).from(items).where(eq(items.id, fixture.item.id));
-
-    // Exactly the state migration 0040 leaves an existing row in: plaintext
-    // present, ciphertext columns null.
-    const legacyId = randomUUID();
-    await getDb().insert(items).values({
-      id: legacyId,
-      householdId: fixture.household.id,
-      sectionId: section.id,
-      title: "Legacy item",
-      currency: "GBP",
-      reference: "LEGACY-1",
-      notes: "Written before encryption",
-    });
-    const receiptId = randomUUID();
-    await getDb().insert(imapIngestionMessages).values({
-      id: receiptId,
-      mailbox: "INBOX",
-      mailboxUidValidity: "1",
-      mailboxUid: 4_242,
-      contentSha256: "a".repeat(64),
-      recipientAliasSha256: "b".repeat(64),
-      householdId: fixture.household.id,
-      status: "pending_review",
-      expiresAt: new Date(Date.now() + 86_400_000),
-      proposal: { title: "Legacy proposal", reference: "LEGACY-1" },
-      fieldEvidence: { title: { source: "subject", confidence: "high" } },
-    });
-
-    const batch = await runMetadataBackfillBatch(100);
-    expect(batch.items).toBeGreaterThanOrEqual(1);
-    expect(batch.receipts).toBeGreaterThanOrEqual(1);
-
-    const [converted] = await getDb().select().from(items).where(eq(items.id, legacyId));
-    expect(converted.reference).toBeNull();
-    expect(converted.notes).toBeNull();
-    expect(converted.referenceEnc?.startsWith("mdv1.")).toBe(true);
-    expect(converted.notesEnc?.startsWith("mdv1.")).toBe(true);
-    expect(converted.referenceIndex).toBeTruthy();
-
-    const [receipt] = await getDb().select().from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receiptId));
-    expect(receipt.proposal).toEqual({});
-    expect(receipt.fieldEvidence).toEqual({});
-    expect(receipt.proposalEnc?.startsWith("mdv1.")).toBe(true);
-    expect(receipt.fieldEvidenceEnc?.startsWith("mdv1.")).toBe(true);
-
-    // Same values afterwards, now read through the key.
-    const after = await workspaceFor(fixture);
-    const afterItem = after.households.find((candidate) => candidate.id === fixture.household.id)!
-      .items.find((candidate) => candidate.id === legacyId)!;
-    expect(afterItem.reference).toBe("LEGACY-1");
-    expect(afterItem.notes).toBe("Written before encryption");
-
-    const reader = await openMetadataReader(fixture.household.id);
-    expect(reader.json("imap_ingestion_messages.proposal", receiptId, { encrypted: receipt.proposalEnc }))
-      .toEqual({ value: { title: "Legacy proposal", reference: "LEGACY-1" } });
-
-    // Resumable and idempotent: a second run finds nothing left to do.
-    const second = await runMetadataBackfillBatch(100);
-    expect(second).toEqual({ items: 0, receipts: 0, invitations: 0, users: 0, senderAddresses: 0 });
-  });
-
-  it("leaves an empty receipt draft alone rather than encrypting an empty object", async () => {
-    const fixture = await createIntegrationFixture("tier1-backfill-empty");
-    const receiptId = randomUUID();
-    await getDb().insert(imapIngestionMessages).values({
-      id: receiptId,
-      mailbox: "INBOX",
-      mailboxUidValidity: "1",
-      mailboxUid: 4_243,
-      contentSha256: "c".repeat(64),
-      recipientAliasSha256: "d".repeat(64),
-      householdId: fixture.household.id,
-      status: "processing",
-      expiresAt: new Date(Date.now() + 86_400_000),
-    });
-    await runMetadataBackfillBatch(100);
-    const [receipt] = await getDb().select({ proposalEnc: imapIngestionMessages.proposalEnc })
-      .from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receiptId));
-    expect(receipt.proposalEnc).toBeNull();
-  });
-
+describe("a receipt with no household is encrypted under the instance key (ADR-0024 decision 3)", () => {
   it("mints the instance-scope key for a receipt with no household yet", async () => {
     await createIntegrationFixture("tier1-backfill-unattributed");
     const receiptId = randomUUID();

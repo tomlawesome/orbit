@@ -109,7 +109,7 @@ type InvitationRow = {
  * invented one, and a marker never matches anybody at redemption.
  */
 function invitationEmail(cipher: MetadataCipher, row: { id: string; emailEnc: string | null }): string | null {
-  return cipher.text("household_invitations.email", row.id, { encrypted: row.emailEnc, plaintext: null }).value;
+  return cipher.text("household_invitations.email", row.id, { encrypted: row.emailEnc }).value;
 }
 
 function summarise(row: InvitationRow, cipher: MetadataCipher): HouseholdInvitation {

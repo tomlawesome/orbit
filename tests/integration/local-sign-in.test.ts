@@ -151,7 +151,7 @@ describe("claiming the instance with a password (ADR-0022 §2)", () => {
        value. */
     expect(seated.emailIndex).not.toBeNull();
     const cipher = await openInstanceMetadataReader();
-    expect(cipher.text("users.email", seated.id, { encrypted: seated.emailEnc, plaintext: null }).value)
+    expect(cipher.text("users.email", seated.id, { encrypted: seated.emailEnc }).value)
       .toBe("First.Administrator@local.invalid");
     expect(await getDb().select({ primaryUserId: instanceAuthority.primaryUserId }).from(instanceAuthority))
       .toEqual([{ primaryUserId: seated.id }]);

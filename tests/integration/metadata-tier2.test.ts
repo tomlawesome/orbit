@@ -18,7 +18,6 @@ import { householdInvitations, items, metadataKeys } from "@/db/schema";
 import { deriveDocumentKeyId, getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { rotationComplete, runKekRotationToCompletion, type RotationKeys } from "@/server/documents/rewrap-worker";
-import { runMetadataBackfillBatch } from "@/server/metadata/backfill";
 import { readWorkspace, applyWorkspaceCommand } from "@/server/workspace-repository";
 import { listHouseholdInvitations, sendHouseholdInvitation } from "@/server/invitations";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
@@ -160,47 +159,6 @@ describe("Tier 2 values are written and read encrypted (#963)", () => {
   });
 });
 
-describe("the backfill converts pre-existing Tier 2 plaintext (#963)", () => {
-  it("encrypts a row written before the release and clears every plaintext column in the same statement", async () => {
-    const fixture = await createIntegrationFixture("tier2-backfill");
-    // Straight to SQL, which is exactly the shape of a row that predates the
-    // expand release: plaintext present, ciphertext absent.
-    const legacyId = randomUUID();
-    await getDb().insert(items).values({
-      id: legacyId,
-      householdId: fixture.household.id,
-      sectionId: await sectionOf(fixture.item.id),
-      title: "Legacy item",
-      provider: "Legacy provider",
-      costMinor: 1_234,
-      reference: "LEG-1",
-      notes: "legacy notes",
-      currency: "GBP",
-    });
-
-    let guard = 0;
-    while (guard++ < 20) {
-      const batch = await runMetadataBackfillBatch(100);
-      if (batch.items === 0 && batch.receipts === 0 && batch.invitations === 0) break;
-    }
-
-    const [converted] = await getDb().select().from(items).where(eq(items.id, legacyId));
-    expect(converted.title).toBeNull();
-    expect(converted.provider).toBeNull();
-    expect(converted.costMinor).toBeNull();
-    expect(converted.reference).toBeNull();
-    expect(converted.notes).toBeNull();
-    expect(converted.titleEnc?.startsWith("mdv1.")).toBe(true);
-    expect(converted.providerEnc?.startsWith("mdv1.")).toBe(true);
-    expect(converted.costMinorEnc?.startsWith("mdv1.")).toBe(true);
-
-    const after = (await workspaceItems(fixture)).find((candidate) => candidate.id === legacyId)!;
-    expect(after.title).toBe("Legacy item");
-    expect(after.provider).toBe("Legacy provider");
-    expect(after.costMinor).toBe(1_234);
-  });
-});
-
 describe("the invited address is encrypted, and its database rule survives (#963)", () => {
   it("stores the address as an envelope, keeps one open invitation per address, and still lists it", async () => {
     const fixture = await createIntegrationFixture("tier2-invitations");
@@ -209,7 +167,6 @@ describe("the invited address is encrypted, and its database rule survives (#963
 
     const [stored] = await getDb().select().from(householdInvitations)
       .where(eq(householdInvitations.householdId, fixture.household.id));
-    expect(stored.email).toBeNull();
     expect(stored.emailEnc?.startsWith("mdv1.")).toBe(true);
     expect(stored.emailEnc).not.toContain("invited.person");
     expect(stored.emailIndex).toBeTruthy();

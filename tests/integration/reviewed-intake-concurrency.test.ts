@@ -6,7 +6,7 @@ import { auditLog, documents, imapIngestionAttachments, imapIngestionMessages, i
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { purgeHeldImapAttachment, scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
 import { uploadItemDocument } from "@/server/document-repository";
-import { createIntegrationFixture } from "./support/fixtures";
+import { createIntegrationFixture, encryptedItemColumns } from "./support/fixtures";
 import { syntheticPdf } from "../support/synthetic-documents";
 
 function directInput(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>, operationId: string) {
@@ -177,7 +177,7 @@ describe("reviewed intake PostgreSQL idempotency boundaries", () => {
     // empty attachedAttachmentIds for an attachment that is durably linked.
     const fixture = await createIntegrationFixture("reviewed-concurrent-completion");
     const targetItemId = randomUUID();
-    await getDb().insert(items).values({ id: targetItemId, householdId: fixture.household.id, sectionId: fixture.section.id, title: "Concurrent completion target", currency: "GBP" });
+    await getDb().insert(items).values({ id: targetItemId, householdId: fixture.household.id, sectionId: fixture.section.id, ...await encryptedItemColumns(fixture.household.id, targetItemId, { title: "Concurrent completion target" }), currency: "GBP" });
     const bytes = syntheticPdf("concurrent completion");
     const receiptId = randomUUID();
     const held = await scanAndHoldImapAttachment({ bytes, filename: "concurrent-completion.pdf", declaredMediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
@@ -245,7 +245,7 @@ describe("reviewed intake PostgreSQL idempotency boundaries", () => {
     // failure code advertises outstanding purge work that is already done.
     const fixture = await createIntegrationFixture("reviewed-loser-purge-state");
     const targetItemId = randomUUID();
-    await getDb().insert(items).values({ id: targetItemId, householdId: fixture.household.id, sectionId: fixture.section.id, title: "Loser purge state target", currency: "GBP" });
+    await getDb().insert(items).values({ id: targetItemId, householdId: fixture.household.id, sectionId: fixture.section.id, ...await encryptedItemColumns(fixture.household.id, targetItemId, { title: "Loser purge state target" }), currency: "GBP" });
     const bytes = syntheticPdf("loser purge state");
     const receiptId = randomUUID();
     const held = await scanAndHoldImapAttachment({ bytes, filename: "loser-purge-state.pdf", declaredMediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
@@ -307,7 +307,7 @@ describe("reviewed intake PostgreSQL idempotency boundaries", () => {
   it("replays a stored attachment against an already available stable document without duplicating it", async () => {
     const fixture = await createIntegrationFixture("reviewed-crash-replay");
     const targetItemId = randomUUID();
-    await getDb().insert(items).values({ id: targetItemId, householdId: fixture.household.id, sectionId: fixture.section.id, title: "Crash replay target", currency: "GBP" });
+    await getDb().insert(items).values({ id: targetItemId, householdId: fixture.household.id, sectionId: fixture.section.id, ...await encryptedItemColumns(fixture.household.id, targetItemId, { title: "Crash replay target" }), currency: "GBP" });
     const bytes = syntheticPdf("stable crash replay");
     const receiptId = randomUUID();
     const held = await scanAndHoldImapAttachment({ bytes, filename: "crash-replay.pdf", declaredMediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });

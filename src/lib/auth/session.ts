@@ -157,7 +157,7 @@ export async function takeSessionIdToken(
 export async function openSessionIdToken(taken: { id: string | null; encrypted: string | null }): Promise<string | null> {
   if (!taken.id || !taken.encrypted) return null;
   const cipher = await openInstanceMetadataReader();
-  return cipher.text("sessions.id_token", taken.id, { encrypted: taken.encrypted, plaintext: null }).value;
+  return cipher.text("sessions.id_token", taken.id, { encrypted: taken.encrypted }).value;
 }
 
 /**
@@ -312,7 +312,6 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       id: record.userId,
       email: cipher.text("users.email", record.userId, {
         encrypted: record.emailEnc,
-        plaintext: null,
       }).value,
       emailVerified: record.emailVerified,
       displayName: record.displayName,

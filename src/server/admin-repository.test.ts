@@ -113,7 +113,7 @@ vi.mock("@/db", async () => {
   };
 });
 
-/** A row as the backfill leaves it: ciphertext in `email_enc`, no plaintext. */
+/** A row as the application writes it: ciphertext in `email_enc`, no plaintext. */
 function encrypted(id: string, displayName: string, email: string): UserRow {
   const cipher = new MetadataCipher(mocks.key as never);
   return {

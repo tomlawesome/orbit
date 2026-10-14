@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -14,7 +15,7 @@ import { provisionIdentity } from "@/lib/auth/provision";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
 import { hasVerifiedSenderAddress, listSenderAddresses, seedSenderAddress, userForVerifiedSender } from "@/server/mail-in/sender-addresses";
-import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, senderAddressColumns, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 
 /*
@@ -208,9 +209,11 @@ describe("finding 1: an unreadable stored address is never deleted", () => {
     const userId = fixture.users.member.id;
     await seedSenderAddress(userId);
     const [registered] = await rowsOf(userId);
+    const otherId = randomUUID();
     const [other] = await getDb().insert(mailInSenderAddresses).values({
+      id: otherId,
       userId,
-      address: "harlow-someone-else@example.test",
+      ...await senderAddressColumns(otherId, "harlow-someone-else@example.test"),
       source: "manual",
     }).returning({ id: mailInSenderAddresses.id });
     const [unreadable] = await getDb().insert(mailInSenderAddresses).values({
@@ -284,8 +287,9 @@ describe("finding 6: no sending address but the registered one attributes", () =
     const userId = fixture.users.member.id;
     const stranger = "harlow-not-registered@example.test";
     expect(stranger).not.toBe(fixture.users.member.email);
+    const strangerId = randomUUID();
     await getDb().insert(mailInSenderAddresses).values({
-      userId, address: stranger, source: "manual", verifiedAt: new Date(),
+      id: strangerId, userId, ...await senderAddressColumns(strangerId, stranger), source: "manual", verifiedAt: new Date(),
     });
 
     expect(await userForVerifiedSender(stranger)).toBeUndefined();

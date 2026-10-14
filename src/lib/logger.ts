@@ -265,9 +265,8 @@ export const operationalEvents = {
   "maintenance.worker": "maintenance",
   "configuration.problem": "configuration",
   /* Tier 1 metadata encryption (ADR-0024): a value that failed its integrity
-     check, and the resumable backfill that converts pre-encryption rows. */
+     check. */
   "metadata.integrity": "metadata",
-  "metadata.backfill": "metadata",
   /* The document KEK rewrap worker (#932, ADR-0017): reports beside
      "document.job" rather than reusing it, because this is a whole rotation's
      outcome across all three key populations, not one job's. */

@@ -40,6 +40,19 @@ export async function accountAddressColumns(userId: string, email: string): Prom
   };
 }
 
+/**
+ * The encrypted address columns for a `mail_in_sender_addresses` row, written
+ * the way the application writes them. The row id is needed first: the
+ * envelope binds the address to it.
+ */
+export async function senderAddressColumns(rowId: string, address: string): Promise<{ addressEnc: string | null; addressIndex: string | null }> {
+  const cipher = await requireInstanceMetadataWriter();
+  return {
+    addressEnc: cipher.encryptText("mail_in_sender_addresses.address", rowId, address),
+    addressIndex: cipher.senderAddressIndex(address),
+  };
+}
+
 export type FixtureRole = "owner" | "member" | "outsider" | "admin" | "disabled";
 
 const storageRoot = join(tmpdir(), `orbit-integration-documents-${randomUUID()}`);

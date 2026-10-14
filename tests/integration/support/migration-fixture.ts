@@ -147,8 +147,7 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   imap_recipient_alias_user_generation_unique: { table: "imap_recipient_aliases", columns: ["user_id", "generation"], unique: true },
   imap_recipient_alias_user_status_idx: { table: "imap_recipient_aliases", columns: ["user_id", "status"], unique: false },
   // The blind index carrying "one account per sender address" across the
-  // encryption (#969). The plaintext index above stands through the expand
-  // release, for the rows the backfill has not reached.
+  // encryption (#969).
   mail_in_sender_address_unique_index: { table: "mail_in_sender_addresses", columns: ["address_index"], unique: true },
   mail_in_sender_address_user_idx: { table: "mail_in_sender_addresses", columns: ["user_id", "verified_at"], unique: false },
   // Partial: at most one open window, enforced by the database (orbit#585).

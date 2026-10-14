@@ -239,7 +239,7 @@ async function readRecipient(userId: string): Promise<Recipient | null> {
     .limit(1);
   if (!row) return null;
   const address = (await openInstanceMetadataReader(db))
-    .text("users.email", row.id, { encrypted: row.emailEnc, plaintext: null });
+    .text("users.email", row.id, { encrypted: row.emailEnc });
   return { id: row.id, email: address.value, displayName: row.displayName };
 }
 
