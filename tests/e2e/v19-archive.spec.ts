@@ -6,7 +6,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { settleArrival } from "./support/arrival";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { ensureLocalPassword } from "./support/local-credentials";
-import { ensureWorkerAdministrator, workerAccount, workerFixturePassword } from "./support/worker-identity";
+import { ensureWorkerAdministrator, workerAccount, workerEmail, workerFixturePassword } from "./support/worker-identity";
+import { waitForInvitationLink } from "./support/mail";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { householdDateFromToday } from "./support/household-dates";
@@ -27,8 +28,12 @@ resetDatabaseBetweenSpecFiles();
  * once the stack is available — `pnpm test:e2e -- v19-archive`.
  */
 
-test.beforeEach(({ isMobile }) => {
-  test.skip(isMobile, "desktop archive card only; the pocket dialect is #1122's own file");
+/* The one test that runs on both layouts (#1316): a member who is not an owner
+   sees neither card, desk or pocket, and the API refuses them too. */
+const BOTH_LAYOUTS = "a member who is not an owner sees no archive card and cannot bring one in";
+
+test.beforeEach(({ isMobile }, testInfo) => {
+  test.skip(isMobile && testInfo.title !== BOTH_LAYOUTS, "desktop archive card only; the pocket dialect is #1122's own file");
 });
 
 /* #1080: this worker's own administrator, resolved lazily (worker env only). */
@@ -325,5 +330,48 @@ test("a wrong passphrase is refused, and nothing is read", async ({ page }) => {
   } finally {
     rmSync(scratch, { recursive: true, force: true });
     await cleanup(desk, source);
+  }
+});
+
+test(BOTH_LAYOUTS, async ({ page, browser }) => {
+  test.setTimeout(180_000);
+  await signIn(page, "/home");
+  const household = await seedHousehold(page, ["Boiler service"]);
+  /* A plain member, made the way a real one is: the administrator (who owns
+     the household they seeded) mails an invitation, and the invitee redeems
+     the mailed link (the flow v19-invitations.spec.ts drives). */
+  const invited = await page.request.post(`/api/households/${household.id}/invitations`, {
+    headers: await sessionHeaders(page),
+    data: { email: workerEmail("member") },
+  });
+  expect(invited.ok(), `invitation send failed: ${invited.status()}`).toBe(true);
+  const link = await waitForInvitationLink(workerEmail("member"), household.name);
+  expect(link).toMatch(/\/invite\//u);
+
+  const memberContext = await browser.newContext({ ignoreHTTPSErrors: true, reducedMotion: "reduce" });
+  const member = await memberContext.newPage();
+  try {
+    await answerPushWithoutAService(member);
+    await member.goto(link);
+    await member.getByRole("link", { name: workerAccount("member") }).click();
+    await expect(member).toHaveURL(/\/home$/, { timeout: 30_000 });
+
+    /* The household page has loaded (its title is showing on whichever layout
+       this is) before the absence below is believed. */
+    await member.goto(`/household/${household.id}`);
+    await expect(member.getByRole("heading", { level: 1, name: household.name })).toBeVisible({ timeout: 30_000 });
+    await expect(member.getByRole("heading", { name: "The archive" })).toHaveCount(0);
+
+    /* The card being absent is not the lock: the API itself says no, and says
+       why -- ahead of asking the member to prove anything. */
+    const refused = await member.request.post("/api/portable-archives/import", {
+      headers: await sessionHeaders(member),
+      data: { householdId: household.id, archive: {}, passphrase: "a passphrase long enough", conflictItemIds: [] },
+    });
+    expect(refused.status()).toBe(403);
+    expect(((await refused.json()) as { error?: { code?: string } }).error?.code).toBe("owner_required");
+  } finally {
+    await memberContext.close();
+    await cleanup(page, household);
   }
 });

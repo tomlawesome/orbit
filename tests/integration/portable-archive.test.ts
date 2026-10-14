@@ -8,7 +8,7 @@ import { auditLog, documents, dueEvents, items, portableArchiveImports, portable
 import { decryptPortableArchive, encryptPortableArchive } from "@/server/portable-archive";
 import { readDocumentDownload } from "@/server/document-repository";
 import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
-import { createPortableArchive, importPortableArchive, previewPortableArchive, readPortableArchive, rollBackUnfinishedPortableImports } from "@/server/portable-archive-repository";
+import { createPortableArchive, importPortableArchive, previewPortableArchive, previewPortableImport, readPortableArchive, rollBackUnfinishedPortableImports } from "@/server/portable-archive-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { readWorkspace } from "@/server/workspace-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
@@ -68,7 +68,7 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(poisoned)), passphrase);
 
     await expect(importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive: encrypted,
       passphrase,
@@ -88,7 +88,7 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     const valid = archivePayload({ sectionId, itemId, notes: "x".repeat(2_000) });
     const validEncrypted = encryptPortableArchive(Buffer.from(JSON.stringify(valid)), passphrase);
     const result = await importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive: validEncrypted,
       passphrase,
@@ -113,7 +113,7 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     delete (negativeCost.items[0] as Record<string, unknown>).notes;
     const encryptedNegativeCost = encryptPortableArchive(Buffer.from(JSON.stringify(negativeCost)), passphrase);
     await expect(importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive: encryptedNegativeCost,
       passphrase,
@@ -125,7 +125,7 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     delete (excessiveRecurrence.items[0] as Record<string, unknown>).notes;
     const encryptedRecurrence = encryptPortableArchive(Buffer.from(JSON.stringify(excessiveRecurrence)), passphrase);
     await expect(importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive: encryptedRecurrence,
       passphrase,
@@ -152,6 +152,41 @@ describe("portable archive export access and document selection (#1049)", () => 
       includeDocuments: false,
     });
     expect(archive.id).toBeTruthy();
+  });
+
+  it("refuses a non-owner member's import with owner_required, writing nothing and opening no import row (#1316, owner 2026-10-14)", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-import-owner-only");
+    const encrypted = encryptPortableArchive(
+      Buffer.from(JSON.stringify(archivePayload({ sectionId: randomUUID(), itemId: randomUUID() }))),
+      passphrase,
+    );
+
+    await expect(importPortableArchive({
+      userId: fixture.users.member.id,
+      householdId: fixture.household.id,
+      archive: encrypted,
+      passphrase,
+      conflictItemIds: [],
+    })).rejects.toMatchObject({ code: "owner_required", status: 403 });
+
+    expect(await getDb().select({ id: portableArchiveImports.id }).from(portableArchiveImports)
+      .where(eq(portableArchiveImports.householdId, fixture.household.id))).toEqual([]);
+    expect(await getDb().select({ id: items.id }).from(items)
+      .where(eq(items.householdId, fixture.household.id)))
+      .toEqual([{ id: fixture.item.id }]);
+  });
+
+  it("refuses a non-owner member's import preview with owner_required (#1316, owner 2026-10-14)", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-preview-owner-only");
+    const encrypted = encryptPortableArchive(
+      Buffer.from(JSON.stringify(archivePayload({ sectionId: randomUUID(), itemId: randomUUID() }))),
+      passphrase,
+    );
+
+    await expect(previewPortableImport(fixture.users.member.id, fixture.household.id, encrypted, passphrase))
+      .rejects.toMatchObject({ code: "owner_required", status: 403 });
+    await expect(previewPortableImport(fixture.users.owner.id, fixture.household.id, encrypted, passphrase))
+      .resolves.toMatchObject({ items: 1 });
   });
 
   it("excludes a pending_deletion document from the export, keeping an available one", async () => {
@@ -245,7 +280,7 @@ describe("portable archive export access and document selection (#1049)", () => 
       const encrypted = JSON.parse(bytes.toString("utf8"));
 
       const result = await importPortableArchive({
-        userId: target.users.member.id,
+        userId: target.users.owner.id,
         householdId: target.household.id,
         archive: encrypted,
         passphrase,
@@ -331,7 +366,7 @@ describe("portable archive import whose closing write fails, and rollback of tou
     let refusal: unknown = null;
     try {
       refusal = await importPortableArchive({
-        userId: target.users.member.id,
+        userId: target.users.owner.id,
         householdId: target.household.id,
         archive: encrypted,
         passphrase,
@@ -395,7 +430,7 @@ describe("portable archive import whose closing write fails, and rollback of tou
     );
     try {
       const result = await importPortableArchive({
-        userId: fixture.users.member.id,
+        userId: fixture.users.owner.id,
         householdId: fixture.household.id,
         archive,
         passphrase,
@@ -479,7 +514,7 @@ describe("portable archive import section bounds (#1316)", () => {
     const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase);
 
     const failure = await importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive: encrypted,
       passphrase,
@@ -508,7 +543,7 @@ describe("portable archive import section bounds (#1316)", () => {
     const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase);
 
     await expect(importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive: encrypted,
       passphrase,
@@ -524,7 +559,7 @@ describe("portable archive import section bounds (#1316)", () => {
     const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase);
 
     await expect(importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive: encrypted,
       passphrase,
@@ -540,7 +575,7 @@ describe("portable archive import section bounds (#1316)", () => {
     const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase);
 
     const result = await importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive: encrypted,
       passphrase,
