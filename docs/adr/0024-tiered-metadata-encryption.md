@@ -289,6 +289,8 @@ hold the ID token RP-Initiated Logout needs (#1316 decision 26a). The
 `instance_locked` verdicts stay as a second layer behind the gate; their
 removal is #1407.
 
+*2026-10-13 (#1407): removed — the tolerant sign-in cipher and every `instance_locked` arm are gone; sign-in and account creation use the strict instance writer.*
+
 **Why `instance_contact.public_address` is unencrypted — extended.** It is
 shown on the signed-out door *and on the locked screen*: the one address Orbit
 can still read is the one a member needs when nobody can sign in.

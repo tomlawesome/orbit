@@ -102,21 +102,11 @@ export interface RecentAuthenticationEvent {
 export interface RecentAuthenticationSubject {
   id: string;
   /**
-   * `email` is null when the instance holds no usable encryption key, so the
-   * account's own address cannot be read (#969). The password challenge below
-   * resolves an address to an account, so it has nothing to work with and says
-   * so, rather than answering "that is not your password".
+   * `email` is null when the stored address will not authenticate, so it
+   * cannot be read (#969). The password challenge below resolves an address
+   * to an account, so it has nothing to work with and fails closed.
    */
   user: { id: string; email: string | null };
-}
-
-/** The answer when the instance holds no usable encryption key (#969). */
-function instanceLocked(): AuthError {
-  return new AuthError(
-    "instance_locked",
-    "This change cannot be confirmed until the encryption key is available",
-    503,
-  );
 }
 
 /** The one answer every unproven action gets. */
@@ -272,14 +262,12 @@ async function verifyPasswordChallenge(
     : undefined;
   if (typeof supplied !== "string" || supplied.length === 0) throw unproven();
 
-  /* A locked instance cannot resolve any address to any account, so this
-     challenge cannot be answered at all (#969). Told plainly: `unproven()`
-     here would read as a wrong password and send the operator looking for a
-     fault in themselves rather than in the missing key. */
-  if (session.user.email === null) throw instanceLocked();
+  /* An address that will not read resolves to no account, so the challenge
+     cannot be answered. No session exists without a usable key (#1405), so
+     this is a damaged value, never a missing key. */
+  if (session.user.email === null) throw unproven();
 
   const verdict = await verifyCredential(session.user.email, supplied);
-  if (verdict.outcome === "locked") throw instanceLocked();
   if (verdict.outcome === "throttled") {
     throw new AuthError("too_many_attempts", "Too many attempts at once; try again shortly", 429);
   }

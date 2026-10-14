@@ -225,11 +225,7 @@ export class MetadataCipher {
     return this.blindIndex("items.reference", value);
   }
 
-  /**
-   * `blindIndex` for `users.email` (#969). A locked instance cannot produce
-   * one, which is what makes sign-in by address refusable rather than merely
-   * unsuccessful: the caller distinguishes "no key" from "no such account".
-   */
+  /** `blindIndex` for `users.email` (#969). A locked cipher cannot produce one. */
   emailIndex(value: string | null | undefined): string | null {
     return this.blindIndex("users.email", value);
   }
@@ -340,29 +336,6 @@ export async function openInstanceMetadataReader(
   executor: MetadataExecutor = getDb(),
 ): Promise<MetadataCipher> {
   return openMetadataReader(null, executor);
-}
-
-/**
- * An instance cipher that can read AND write when the instance holds a usable
- * KEK, and is locked rather than throwing when it does not (#969).
- *
- * The sign-in paths need exactly this: they must keep working with no key at
- * all — an identity provider matches on issuer and subject, never on the
- * address — while still refreshing the stored address when the key is there.
- * `openInstanceMetadataReader` is not enough, because it will not MINT the
- * instance key on an instance that has never written one, and
- * `requireInstanceMetadataWriter` is too much, because it refuses.
- */
-export async function openInstanceMetadataCipher(
-  executor: MetadataExecutor = getDb(),
-): Promise<MetadataCipher> {
-  if (!metadataCryptoAvailable()) return new MetadataCipher(undefined);
-  try {
-    return await openReceiptMetadataWriter(null, executor);
-  } catch (error) {
-    if (error instanceof MetadataKeyLockedError) return new MetadataCipher(undefined);
-    throw error;
-  }
 }
 
 /**
