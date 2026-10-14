@@ -14,7 +14,9 @@ import { write } from "$lib/server/api.js";
  * shape as the item's own documents route, plus the draft item's id in
  * `x-orbit-item-id`: the file is sealed under it, and only that item can bind
  * it. Idempotent on `x-orbit-document-id`, which is required so a retry never
- * stores the file twice. Unbound, it is retired after about a day.
+ * stores the file twice. Unbound, it is retired once its hold lapses: at
+ * least a day, and as long as scanner recovery keeps a row recoverable
+ * (DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS).
  */
 export const POST = write(async (event, session) => {
   const householdId = /** @type {string} */ (event.params.householdId);

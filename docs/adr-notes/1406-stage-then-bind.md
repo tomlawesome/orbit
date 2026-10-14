@@ -58,10 +58,13 @@ rejected, deleted, `pending_deletion` and sealed-id-mismatch documents all
 produce one identical 422 and no item is written. A scanner outage (202) binds
 as designed; the later scan result applies.
 
-## The 24-hour hold and the orphan sweep
+## The hold and the orphan sweep
 
 A staged file whose item is never saved is an orphan. Staging sets
-`delete_after` to now plus 24 hours on the unbound `available` row. The
+`delete_after` on the unbound `available` row to now plus the hold: the longer
+of 24 hours and scanner-recovery retention
+(`DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS`), so a document scanner recovery
+publishes is still there to bind (#1316 C-Q3). The
 storage sweep `retireUnboundUploads` moves such a row, once expired, to
 `pending_deletion`; the purge job then removes it. Without the sweep nothing
 would purge it, because the purge claims only `pending_deletion` rows. The
@@ -70,6 +73,10 @@ is serialised by the bind's row lock.
 
 An unbound document counts against the household's document quota for as long
 as it is held. See the threat model's "Storage and state integrity" section.
+Because the hold follows scanner-recovery retention, raising that retention
+keeps every abandoned staged upload -- not only those in scanner recovery --
+counted against the household and instance quota for that long (up to 7 days);
+narrowing the longer hold to the recovery path is on the post-release list.
 
 ## What counts as a refused file
 
@@ -78,3 +85,7 @@ or 422** (size, type, structure, malware). A refused file stays in the form,
 marked with the server's reason, and Add is held until it is replaced or
 removed. Any other failure shows "not saved" and leaves Add usable, so the
 member can try again.
+
+Narrowed 2026-10-14 (#1316 C-Q4): refusal is decided by the server's error
+code (the `FILE_REFUSAL_CODES` set in `web/src/lib/data/workspace.js`), never
+by HTTP status alone, because 413 also answers a full document store.

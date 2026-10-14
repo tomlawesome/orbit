@@ -473,10 +473,12 @@ export function unsavedWords(error) {
 }
 
 /**
- * #1406: whether the create's one `item.upsert` was refused because the
- * staged file it names is gone -- the 24-hour sweep retired it, so the server
- * will answer a re-stage under the same document id with "needs recovery" for
- * ever. The form must mint a fresh document id before its next Add.
+ * #1406: whether the server refused a staged file because it is gone -- the
+ * sweep retired it once its hold lapsed. The server answers both a re-stage
+ * and a bind under that document id with `document_not_available`, so the
+ * form stages the same file once more under a fresh id: within the same Add
+ * when the re-stage is refused, on the next Add when the bind is
+ * (create.behaviour.js).
  * @param {unknown} error
  * @returns {boolean}
  */

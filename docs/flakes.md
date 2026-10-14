@@ -388,14 +388,6 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-06 · f3e61aeb (#1248, #1251; neither touches the household screen) · local `pnpm --filter orbit-web fidelity` · drifted 0.1109% once, passed on the next run on the same code. First sighting.
 
-## mail-relay-senders-fixture.test.js "answers a seeded, unverified address instead of an empty list"
-
-- 2026-10-06 · 2221237a (#1262, no change near this route) · local `scripts/test-backend.sh`, worktree `flight-door-port`, an e2e image build and other agents' headless browsers on the host (load 9-14) · timed out at the 5s default; green on an immediate rerun of the file alone. First sighting.
-- 2026-10-07 · 2a076315 (+ #1279's uncommitted phone create reading card, none of it near this fixture) · local `scripts/test-backend.sh`, worktree `fix-create-form`, other sessions using the host · timed out at the 5s default; it passed in the run before on the same code, and green on an immediate rerun of the file alone. Second sighting.
-- 2026-10-09 · 3d6d7c20 (#1349) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
-- Third sighting: filed as #1365 (unattended-install case times out under host load).
-- 2026-10-14 · The test was removed in #1403 (its route is gone), so this entry is closed.
-
 ## v19-archive.spec.ts:192 "write an archive, then bring it into a second household — a clash stays out" on desktop-webkit
 
 - 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_webkit` · failed once (49.6s), passed on retry. First sighting.

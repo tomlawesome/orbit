@@ -275,11 +275,11 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     await assertLiveRegionIsSafe(drawer, "home", "#statusdrawer (system status)");
   });
 
-  /* #1319 (owner-decisions §34): was "/item/[id]", the belt. Its address
-     now lands on home with the item's drawer open, which holds everything
-     the belt did, so the drawer is what is read back: the screen with it
-     open, then with its rows in edit and the chooser up (the due date's
-     calendar), every control named and the landmarks and headings whole
+  /* #1319 (owner-decisions §34): was "/item/[id]", the belt. That address
+     no longer exists; the drawer opens from `/home?item=<id>` and holds
+     everything the belt did, so the drawer is what is read back: the
+     screen with it open, then with its rows in edit and the chooser up
+     (the due date's calendar), every control named and the landmarks and headings whole
      in both states. The desk's drawer is a named region; the phone's is
      the row's own panel. */
   test("/home?item=<id>: the item drawer, read and edited", async ({ page, isMobile }, testInfo) => {

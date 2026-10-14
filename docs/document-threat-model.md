@@ -270,7 +270,8 @@ recoverable state.
   health warning.
 - A file staged for an item that has not been saved yet (#1406, see
   [the design note](adr-notes/1406-stage-then-bind.md)) is an unbound
-  `available` document, held for 24 hours and counted against the household's
+  `available` document, held for at least 24 hours (longer when scanner recovery
+  keeps rows for longer; see the design note) and counted against the household's
   quota while it is held. A member of the household can create one without ever
   saving an item. The storage sweep moves an expired unbound document to
   `pending_deletion` for the normal purge. Binding it to an item requires the

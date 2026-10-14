@@ -23,6 +23,9 @@ const documentEnvironmentSchema = z.object({
   DOCUMENT_HOUSEHOLD_QUOTA_BYTES: z.coerce.number().int().min(25 * MIB).max(10_000 * GIB).default(5 * GIB),
   DOCUMENT_INSTANCE_QUOTA_BYTES: z.coerce.number().int().min(25 * MIB).max(100_000 * GIB).default(20 * GIB),
   DOCUMENT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3_650).default(30),
+  // Also sets the floor of the staged-upload hold (document-repository.ts
+  // stagedUploadHoldMs): raising it lengthens how long an abandoned staged
+  // upload counts against quota.
   DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS: z.coerce.number().int().min(1).max(168).default(24),
   // The install-time contract (src/lib/config-contract.ts) accepts "" as
   // "unset" for this variable, the same as every other optional one; that
