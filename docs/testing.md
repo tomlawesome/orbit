@@ -90,7 +90,8 @@ applied; add a new one.
 
 The history `0000`-`0057` was replaced by `0000_baseline` (#1403). A database
 built from the old history records the old migrations, so the integrity check
-refuses it ("applied migration does not match 0000_baseline"). Every dev and CI
+refuses it ("applied migration 1 of <N> does not match 0000_baseline; this database was
+migrated by a different build"). Every dev and CI
 database built before the squash must be recreated (drop it and run
 `pnpm db:migrate`, or remove the compose volume). Nobody runs Orbit yet, so
 there is no upgrade path and none is needed.

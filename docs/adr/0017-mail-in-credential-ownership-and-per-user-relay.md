@@ -564,6 +564,12 @@ that added and removed addresses (`settings/mail-relay/senders`), and its
 helpers and tests. The `mail_in_sender_addresses` row is now only ever the
 seeded registered address (`seedSenderAddress`).
 
+*Note (2026-10-14):* nothing writes the `manual` source any more, but the
+enum value, the column default and the `SenderAddressSource` type member
+remain in code, and the seed does not look at the source: an existing `manual`
+row is kept if it reads as the registered address, and otherwise is replaced
+(dropped, or made inert if another member already holds that address).
+
 **What stays.** `seedSenderAddress`, `listSenderAddresses` (one row, so the
 screen can show its state), `hasVerifiedSenderAddress`,
 `sendSenderVerification`, `verifySenderAddress` with the
@@ -596,3 +602,7 @@ starts over. The existing seed logic decides this; a test confirms it.
 not yet checked, or link sent with its expiry), one button, "Send the check
 email", and the existing "relay not usable" line until the address is checked.
 It is tracked as a separate issue.
+
+*Note (2026-10-14):* the screen was built in #1410
+(`web/src/routes/settings/mail/sender.js`); the button reads "send the check
+email".

@@ -274,8 +274,8 @@ recoverable state.
   quota while it is held. A member of the household can create one without ever
   saving an item. The storage sweep moves an expired unbound document to
   `pending_deletion` for the normal purge. Binding it to an item requires the
-  same household, an `available` document, and a sealed item id that matches
-  the item being saved; anything else is refused with one identical 422.
+  same household, a document that is not rejected, deleted or pending
+  deletion, and a sealed item id that matches the item being saved; anything else is refused with one identical 422.
 
 ### Download safety
 

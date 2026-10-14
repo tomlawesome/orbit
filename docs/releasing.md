@@ -502,7 +502,8 @@ The operator tooling supports installing v0.3.0 and later; earlier published
 releases, and the retracted v1.0.0 to v1.2.0 tags, are not supported install
 targets
 ([ADR-0016](adr/0016-release-identity-and-installer-era-boundary.md)); GHCR
-carries no version tag for them. Pinning a version tag requires
+has no v1.1.0 or v1.2.0 tag, and v1.0.0 still resolves but is retracted and
+refused by the installer. Pinning a version tag requires
 the image's own embedded version to name that release, so a moved tag cannot
 pass an image off as a version it is not. Moving tags such as `preview` make
 no version claim and are unaffected; `latest` always points at the newest

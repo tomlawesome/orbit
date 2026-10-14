@@ -29,7 +29,7 @@ unverifiable claim of cross-resource atomicity.
 > (the engineering preview whose journal ended at
 > `0017_imap_recipient_alias_index`) was removed, together with the startup
 > check and the `database_below_floor` log reason that enforced it. The
-> migration history is being squashed to one baseline, so no pre-baseline
+> migration history was squashed to one baseline (`0000_baseline`) in #1403, so no pre-baseline
 > database is supported and nothing in the code names a floor any more. The
 > text that stood here is in the git history.
 

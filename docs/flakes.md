@@ -5,9 +5,9 @@ per flake, one line per sighting: `date · commit · pipeline/job · symptom`.
 The third sighting under a heading gets an issue, linked from the heading;
 fixing the cause deletes the heading in the same commit.
 
-## sign-out-provider-session.test.mjs:273 and :280, the Chrome.svelte no-flight fallback cases (#1409)
+## sign-out-provider-session.test.mjs:428 and :435, the Chrome.svelte no-flight fallback cases (#1409)
 
-- 2026-10-13 · 0fd4d6aa (the #1316 audit branch with dev merged in; neither side changed Chrome.svelte's fallback or this file) · local `npx vitest run` (full unit suite, 7170 tests, other suites running on the host) · both cases saw no navigation (`expected undefined to be ...`); the file alone passes 4/4 straight after. The cases wait a fixed 60 ms (`settle`, :183) for the lazy flight import to fail and the fallback to navigate. First sighting.
+- 2026-10-13 · 0fd4d6aa (the #1316 audit branch with dev merged in; neither side changed Chrome.svelte's fallback or this file) · local `npx vitest run` (full unit suite, 7170 tests, other suites running on the host) · both cases saw no navigation (`expected undefined to be ...`); the file alone passes 4/4 straight after. The cases wait a fixed 60 ms (`settle`, :192) for the lazy flight import to fail and the fallback to navigate. First sighting.
 - 2026-10-13 · d9b053a3 (#1399's removal of document drafts, on the door branch; nothing near Chrome.svelte or this file) · local full unit suite, other suites running on the host · one case in this file failed; the rest of the suite passed. Second sighting.
 - 2026-10-13 · f9d9b513 (#1403 slice D5, docs only) · local full unit suite, other agents building in parallel on the host · one case failed; passes alone. Third sighting; #1409 filed.
 - 2026-10-13 · 29ef79ca (#1403 slice D2; nothing near Chrome.svelte) · local full unit suite, other agents building in parallel · the Chrome.svelte cases failed; pass alone. Fourth sighting.
@@ -291,7 +291,7 @@ page's URL at failure, which this one has to infer.
 
 - 2026-09-30 · 0135f516 (!1006, the batch that built this film chapter) · pipeline 1855 / fidelity (job 27168) · `page.waitForFunction` hit the 60000ms test timeout. The same test passed on pipeline 1836 (same film code), and the job retried as 27270 on the same commit was green. First sighting; an issue on the third.
 
-## fidelity: door-station.spec.js:103 "the ring's hand-over to a card at 390x664, motion no-preference › the ring travels from the door's station to the card's" — #1306
+## fidelity: door-station.spec.js:130 "the ring's hand-over to a card at 390x664, motion no-preference › the ring travels from the door's station to the card's" — #1306
 
 - 2026-10-01 · d3141346 (!1013, #1183's Firefox projects for tests/e2e; nothing under web/ or tests/fidelity) · pipeline 1926 / fidelity (job 28697) · "a jump between frames at 317ms": 38.9 against the < 20 bound. The full fidelity runs on !1010 and !1012 just before it passed, and the same pipeline's smoke ran about eleven minutes longer than usual alongside it on the shared runner. First sighting; an issue on the third.
 - 2026-10-04 · bc9ba29e (!1021, #1151's audit fixes; the only door-side change since the green run on bcaf64e0 is a waiting-card timeout constant, nothing in the ring's motion) · pipeline 2064 / fidelity (job 31041) · "a jump between frames at 280ms": 25.5 against the < 20 bound, same shape as the first sighting. The same test passed on pipeline 2054 ten commits earlier. Second sighting; an issue on the third.
@@ -394,6 +394,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-07 · 2a076315 (+ #1279's uncommitted phone create reading card, none of it near this fixture) · local `scripts/test-backend.sh`, worktree `fix-create-form`, other sessions using the host · timed out at the 5s default; it passed in the run before on the same code, and green on an immediate rerun of the file alone. Second sighting.
 - 2026-10-09 · 3d6d7c20 (#1349) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
 - Third sighting: filed as #1365 (unattended-install case times out under host load).
+- 2026-10-14 · The test was removed in #1403 (its route is gone), so this entry is closed.
 
 ## v19-archive.spec.ts:192 "write an archive, then bring it into a second household — a clash stays out" on desktop-webkit
 

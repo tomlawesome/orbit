@@ -69,6 +69,9 @@ the human owner under branch protection.
 - The phased roadmap in `docs/implementation-plan.md` and its GitHub
   milestones own delivery sequencing; `docs/engineering-baseline.md` rows
   flipping to proven states are the phase exit criteria.
+
+  *Note (2026-10-14):* `docs/engineering-baseline.md` was removed at v0.3.0;
+  phase exit now rests on the GitHub milestones and their issues.
 - The planning/orchestration validator scripts, their tests, the CI
   enforcement step, the pull-request attestation section, and the three policy
   JSON documents are deleted. CI lane classification no longer needs patterns

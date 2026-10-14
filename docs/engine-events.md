@@ -758,7 +758,8 @@ docker compose --env-file "$environment_file" \
   never the mount point.
 - Ownership: the one-off runs as the image's `root` (it must read the
   `orbit`-owned document objects). Every file and directory it creates under
-  `/orbit-deploy`, `/orbit-backups` or `/orbit-secrets` — the backups
+  `/orbit-deploy` or `/orbit-backups` (the secrets live under
+  `/orbit-deploy/.orbit-secrets`) — the backups
   directory, the lock file, bundles, the restore journal and checkpoints, a
   swapped document key — is handed to `ORBIT_HOST_UID:ORBIT_HOST_GID`, as for
   `configure` above. The document tree on the volume keeps the owners in its

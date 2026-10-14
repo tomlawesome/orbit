@@ -33,6 +33,9 @@ nullable, no foreign key or index). Reads use
 `coalesce(sealed_item_id, item_id)`, so rows from before the column still open
 under `item_id`.
 
+*Note (2026-10-14):* the column is now part of the single baseline migration
+`0000_baseline`; it was first added as `0052` before the squash (#1403).
+
 A staged row sealed under draft id A and bound to item B could never be opened.
 The bind check therefore refuses it: the check requires
 `coalesce(sealed_item_id, item_id)` to equal the item id being saved. A test
