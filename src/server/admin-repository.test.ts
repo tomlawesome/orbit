@@ -126,7 +126,7 @@ function encrypted(id: string, displayName: string, email: string): UserRow {
   };
 }
 
-/** A row the backfill has not reached: plaintext, readable with or without a key. */
+/** A row holding only the old plaintext column, which the application no longer reads (#1403 Q3). */
 function plaintext(id: string, displayName: string, email: string | null): UserRow {
   return { id, displayName, email, emailEnc: null, isInstanceAdmin: false, disabledAt: null };
 }
@@ -165,28 +165,23 @@ describe("listInstanceUsers with encrypted addresses (#969)", () => {
     expect(list.truncated).toBe(false);
   });
 
-  it("reads a row the backfill has not reached from its plaintext column", async () => {
+  it("shows no address for a row that holds only a plaintext one (#1403 Q3)", async () => {
     mocks.rows = [plaintext("aaaaaaaa-0000-4000-8000-000000000004", "Ada Lovelace", "ada@example.invalid")];
 
     const [user] = (await listInstanceUsers(ADMIN)).users;
-    expect(user.email).toBe("ada@example.invalid");
-    expect(user.metadataStatus).toBeUndefined();
+    expect(user.email).toBeNull();
   });
 
   it("reports a locked address as no address, never as an empty one, and sorts it last", async () => {
-    const unreadable = encrypted("aaaaaaaa-0000-4000-8000-000000000005", "Sam Carter", "zoe@example.invalid");
     mocks.rows = [
-      unreadable,
-      // Still plaintext, so this one reads whether or not the instance has its key.
-      plaintext("aaaaaaaa-0000-4000-8000-000000000006", "Sam Carter", "alex@example.invalid"),
+      encrypted("aaaaaaaa-0000-4000-8000-000000000005", "Sam Carter", "zoe@example.invalid"),
+      encrypted("aaaaaaaa-0000-4000-8000-000000000006", "Sam Carter", "alex@example.invalid"),
     ];
     mocks.locked = true;
 
     const list = await listInstanceUsers(ADMIN);
-    expect(list.users.map((user) => user.email)).toEqual(["alex@example.invalid", null]);
-    expect(list.users.map((user) => user.metadataStatus?.email)).toEqual([undefined, "metadata_locked"]);
-    // Unreadable last, which is where `asc(users.email)` put a null too.
-    expect(list.users[1].id).toBe(unreadable.id);
+    expect(list.users.map((user) => user.email)).toEqual([null, null]);
+    expect(list.users.map((user) => user.metadataStatus?.email)).toEqual(["metadata_locked", "metadata_locked"]);
   });
 
   it("#592: keeps the primary administrator first, outside the address tiebreak", async () => {

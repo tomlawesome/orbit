@@ -138,7 +138,6 @@ describe("claiming the instance with a password (ADR-0022 §2)", () => {
     const [seated] = await getDb()
       .select({
         id: users.id,
-        email: users.email,
         emailEnc: users.emailEnc,
         emailIndex: users.emailIndex,
         isInstanceAdmin: users.isInstanceAdmin,
@@ -150,10 +149,9 @@ describe("claiming the instance with a password (ADR-0022 §2)", () => {
        check it. The capitalisation the administrator typed still survives:
        only the index that finds the row is case-folded, never the stored
        value. */
-    expect(seated.email).toBeNull();
     expect(seated.emailIndex).not.toBeNull();
     const cipher = await openInstanceMetadataReader();
-    expect(cipher.text("users.email", seated.id, { encrypted: seated.emailEnc, plaintext: seated.email }).value)
+    expect(cipher.text("users.email", seated.id, { encrypted: seated.emailEnc, plaintext: null }).value)
       .toBe("First.Administrator@local.invalid");
     expect(await getDb().select({ primaryUserId: instanceAuthority.primaryUserId }).from(instanceAuthority))
       .toEqual([{ primaryUserId: seated.id }]);

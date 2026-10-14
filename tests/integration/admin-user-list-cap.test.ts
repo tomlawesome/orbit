@@ -34,7 +34,6 @@ describe("listInstanceUsers cap (#592)", () => {
       await getDb().insert(instanceAuthority).values({ primaryUserId: fixture.users.admin.id });
 
       const seeded = Array.from({ length: ADMIN_USER_LIST_CAP + 1 }, (_, index) => ({
-        email: `${namePrefix.replace(/\s+/g, "-")}-${index}@example.invalid`,
         displayName: `${namePrefix} ${String(index).padStart(4, "0")}`,
       }));
       await getDb().insert(users).values(seeded);

@@ -718,8 +718,8 @@ insert_credential_fixture() {
   compose exec -T orbit-db sh -c \
     'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="
       delete from users where id = '\''$1'\'';
-      insert into users (id, email, email_verified, display_name, is_instance_admin)
-        values ('\''$1'\'', '\''backup-drill@example.invalid'\'', false, '\''Backup Drill User'\'', false);
+      insert into users (id, email_verified, display_name, is_instance_admin)
+        values ('\''$1'\'', false, '\''Backup Drill User'\'', false);
       insert into local_credentials (user_id, password_hash)
         values ('\''$1'\'', '\''$2'\'');
       insert into credential_setup_tokens (id, user_id, token_hash, purpose, expires_at)

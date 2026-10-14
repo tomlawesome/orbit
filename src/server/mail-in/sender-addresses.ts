@@ -178,13 +178,13 @@ export async function seedSenderAddress(userId: string, dependencies: SenderAddr
      the wrong trade — the next read seeds it once the key is back. */
   if (!metadataCryptoAvailable()) return;
 
-  const [account] = await getDb().select({ email: users.email, emailEnc: users.emailEnc })
+  const [account] = await getDb().select({ emailEnc: users.emailEnc })
     .from(users).where(eq(users.id, userId)).limit(1);
   const [identity] = await getDb().select({ id: externalIdentities.id }).from(externalIdentities)
     .where(eq(externalIdentities.userId, userId)).limit(1);
   const reader = await openInstanceMetadataReader();
   const accountEmail = account
-    ? reader.text("users.email", userId, { encrypted: account.emailEnc, plaintext: account.email }).value
+    ? reader.text("users.email", userId, { encrypted: account.emailEnc, plaintext: null }).value
     : null;
   const address = normalizeSenderAddress(accountEmail ?? undefined);
   if (!address) return;

@@ -55,9 +55,7 @@ async function primaryAdministratorId(transaction: Transaction): Promise<string 
 const instanceUserColumns = {
   id: users.id,
   displayName: users.displayName,
-  /* Dual read for the length of the expand release (#969): `email_enc` when
-     the backfill has reached the row, the plaintext column when it has not. */
-  email: users.email,
+  /* The address is read from `email_enc` only (#1403 Q3). */
   emailEnc: users.emailEnc,
   isInstanceAdmin: users.isInstanceAdmin,
   disabledAt: users.disabledAt,
@@ -66,14 +64,13 @@ const instanceUserColumns = {
 type InstanceUserRow = {
   id: string;
   displayName: string;
-  email: string | null;
   emailEnc: string | null;
   isInstanceAdmin: boolean;
   disabledAt: Date | null;
 };
 
 function toInstanceUser(row: InstanceUserRow, cipher: MetadataCipher, primaryUserId: string | null): InstanceUser {
-  const email = cipher.text("users.email", row.id, { encrypted: row.emailEnc, plaintext: row.email });
+  const email = cipher.text("users.email", row.id, { encrypted: row.emailEnc, plaintext: null });
   return {
     id: row.id,
     displayName: row.displayName,
@@ -85,7 +82,7 @@ function toInstanceUser(row: InstanceUserRow, cipher: MetadataCipher, primaryUse
   };
 }
 
-/** Addresses last when they cannot be read, which is where `asc(users.email)` put a null too. */
+/** Addresses last when they cannot be read, which is where a null sorts. */
 function compareEmail(left: string | null, right: string | null): number {
   if (left === right) return 0;
   if (left === null) return 1;

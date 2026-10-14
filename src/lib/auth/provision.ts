@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, ne, or, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { auditLog, externalIdentities, instanceAuthority, userPreferences, users } from "@/db/schema";
 import { getDb } from "@/db";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY, INSTANCE_BOOTSTRAP_LOCK_KEY } from "@/lib/auth/authority-locks";
@@ -90,15 +90,15 @@ export function resolveRefreshedEmail(
 }
 
 /**
- * The dual read for an account address: an encrypted row is decrypted, a row
- * the backfill has not reached is read from its plaintext column, and a
- * damaged value reads as null rather than as an empty address (#969).
+ * An account address is read from its encrypted column only (#1403 Q3). A row
+ * with no usable ciphertext, or a damaged one, reads as null rather than as an
+ * empty address (#969).
  */
 function readEmail(
   cipher: MetadataCipher,
-  row: { id: string; email: string | null; emailEnc: string | null },
+  row: { id: string; emailEnc: string | null },
 ): string | null {
-  return cipher.text("users.email", row.id, { encrypted: row.emailEnc, plaintext: row.email }).value;
+  return cipher.text("users.email", row.id, { encrypted: row.emailEnc, plaintext: null }).value;
 }
 
 const refusals = {
@@ -134,7 +134,6 @@ export async function provisionIdentity(
     const [existing] = await transaction
       .select({
         id: users.id,
-        email: users.email,
         emailEnc: users.emailEnc,
         emailVerified: users.emailVerified,
         displayName: users.displayName,
@@ -202,7 +201,6 @@ export async function provisionIdentity(
       const addressColumns = refreshed === null
         ? {}
         : {
-          email: null,
           emailEnc: cipher.encryptText("users.email", existing.id, refreshed),
           emailIndex: cipher.emailIndex(refreshed),
         };
@@ -219,7 +217,6 @@ export async function provisionIdentity(
         .where(eq(users.id, existing.id))
         .returning({
           id: users.id,
-          email: users.email,
           emailEnc: users.emailEnc,
           emailVerified: users.emailVerified,
           displayName: users.displayName,
@@ -246,7 +243,6 @@ export async function provisionIdentity(
       .insert(users)
       .values({
         id: userId,
-        email: null,
         emailEnc: cipher.encryptText("users.email", userId, identity.email),
         emailIndex: cipher.emailIndex(identity.email),
         emailVerified: identity.emailVerified,
@@ -256,7 +252,6 @@ export async function provisionIdentity(
       })
       .returning({
         id: users.id,
-        email: users.email,
         emailEnc: users.emailEnc,
         emailVerified: users.emailVerified,
         displayName: users.displayName,
@@ -296,10 +291,9 @@ type ProvisioningTransaction = Parameters<Parameters<ReturnType<typeof getDb>["t
 /**
  * The id of the user holding this email, ignoring case and one excluded id.
  *
- * Two matches, not one (#969): the blind index finds an encrypted row, and the
- * case-insensitive plaintext comparison finds a row the backfill has not
- * reached yet. Both stand for the length of the expand release, and a row is
- * only ever in one of the two states, so this cannot double-count.
+ * Matched through the blind index only (#1403 Q3); it folds case when it is
+ * computed. A cipher that cannot produce an index (locked) matches nothing,
+ * and `requireInstanceMetadataWriter` has already refused that case.
  */
 async function ownerOfEmail(
   transaction: ProvisioningTransaction,
@@ -307,11 +301,9 @@ async function ownerOfEmail(
   email: string,
   exceptUserId?: string,
 ): Promise<string | undefined> {
-  const plaintextMatch = sql`lower(${users.email}) = lower(${email})`;
   const index = cipher.emailIndex(email);
-  const matchesEmail = index === null
-    ? plaintextMatch
-    : or(eq(users.emailIndex, index), plaintextMatch);
+  if (index === null) return undefined;
+  const matchesEmail = eq(users.emailIndex, index);
   const [row] = await transaction
     .select({ id: users.id })
     .from(users)

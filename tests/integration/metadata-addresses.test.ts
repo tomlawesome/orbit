@@ -111,7 +111,7 @@ describe("an account address is written and read encrypted (#969)", () => {
     expect((await verifyCredential("ENCRYPTED-LOCAL@Example.Invalid", PASSWORD)).outcome).toBe("verified");
 
     const reader = await openInstanceMetadataReader();
-    expect(reader.text("users.email", created.id, { encrypted: stored.emailEnc, plaintext: stored.email }).value)
+    expect(reader.text("users.email", created.id, { encrypted: stored.emailEnc, plaintext: null }).value)
       .toBe(address);
   });
 
@@ -136,6 +136,28 @@ describe("an account address is written and read encrypted (#969)", () => {
   });
 });
 
+describe("a plaintext-only account address is invisible to the application (#1403 Q3)", () => {
+  it("is neither found by sign-in nor counted as taking the address", async () => {
+    const address = "plaintext-only@example.invalid";
+    const legacyId = randomUUID();
+    await getDb().insert(users).values({
+      id: legacyId, email: address, emailVerified: true, displayName: "Plaintext-only person",
+    });
+    await getDb().insert(localCredentials).values({ userId: legacyId, passwordHash: await hashPassword(PASSWORD) });
+
+    expect((await verifyCredential(address, PASSWORD)).outcome).toBe("rejected");
+
+    // The address is not taken as far as the application can tell: a second
+    // account is created, and it signs in by its own blind index.
+    const created = await createLocalUser(
+      { email: address, displayName: "Encrypted person", passwordHash: await hashPassword(PASSWORD) },
+      { bootstrap: true },
+    );
+    expect(created.id).not.toBe(legacyId);
+    expect(await verifyCredential(address, PASSWORD)).toEqual({ outcome: "verified", userId: created.id });
+  });
+});
+
 describe("the backfill converts addresses written before the release (#969)", () => {
   it("encrypts a plaintext account and sender address, clears both, and keeps sign-in working", async () => {
     const address = "pre-release@example.invalid";
@@ -153,7 +175,9 @@ describe("the backfill converts addresses written before the release (#969)", ()
     });
     await getDb().insert(localCredentials).values({ userId, passwordHash: await hashPassword(PASSWORD) });
 
-    expect((await verifyCredential(address, PASSWORD)).outcome).toBe("verified");
+    /* The account address is read from its encrypted column only (#1403 Q3),
+       so a row still holding just the plaintext cannot be signed in to. */
+    expect((await verifyCredential(address, PASSWORD)).outcome).toBe("rejected");
     expect(await userForVerifiedSender(senderAddress)).toBe(userId);
 
     const batch = await runMetadataBackfillBatch();

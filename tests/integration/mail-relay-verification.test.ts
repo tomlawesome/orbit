@@ -141,7 +141,6 @@ async function openLink(session: IntegrationSession, token: string) {
 async function changeRegisteredAddress(userId: string, email: string) {
   const cipher = await requireInstanceMetadataWriter();
   await getDb().update(users).set({
-    email: null,
     emailEnc: cipher.encryptText("users.email", userId, email),
     emailIndex: cipher.emailIndex(email),
   }).where(eq(users.id, userId));

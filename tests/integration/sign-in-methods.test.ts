@@ -21,6 +21,7 @@
  * the token and claim rules.
  */
 
+import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -35,7 +36,7 @@ import { sealStepUpProof, stepUpProofCookieName } from "@/lib/auth/recent-auth";
 import { createSession, csrfTokenForSession, readSession } from "@/lib/auth/session";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { createLocalUser, listMethods, verifyCredential } from "@/server/local-credentials";
-import { cleanupIntegrationEnvironment } from "./support/fixtures";
+import { accountAddressColumns, cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute } from "./support/request-event";
 import { readSetCookie } from "./support/set-cookie";
 
@@ -130,8 +131,10 @@ async function localUser(label: string, options: { identity?: boolean } = {}): P
 
 /** A user with a provider identity and no password. */
 async function oidcUser(label: string): Promise<string> {
+  const id = randomUUID();
   const [user] = await getDb().insert(users).values({
-    email: `${label}@methods.invalid`,
+    id,
+    ...(await accountAddressColumns(id, `${label}@methods.invalid`)),
     emailVerified: true,
     displayName: `Methods ${label}`,
   }).returning({ id: users.id });
