@@ -8,6 +8,11 @@ import {
   listInstanceUsers,
 } from "@/server/admin-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { callRouteForSession, loadRoute } from "./support/request-event";
+
+const { PUT: updateAdministrator, PATCH: updateUser } = await loadRoute("admin/users");
+
+const PRIMARY_PROTECTED_MESSAGE = "The primary administrator's account cannot be demoted or disabled.";
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -33,10 +38,16 @@ describe("primary administrator authority (#263)", () => {
 
     await expect(
       setInstanceUserDisabled(fixture.users.owner.id, primary.id, true),
-    ).rejects.toMatchObject({ code: "primary_administrator_protected" });
+    ).rejects.toMatchObject({
+      code: "primary_administrator_protected",
+      message: "The primary administrator's account cannot be demoted or disabled.",
+    });
     await expect(
       setInstanceAdministrator(fixture.users.owner.id, primary.id, false),
-    ).rejects.toMatchObject({ code: "primary_administrator_protected" });
+    ).rejects.toMatchObject({
+      code: "primary_administrator_protected",
+      message: "The primary administrator's account cannot be demoted or disabled.",
+    });
 
     // The database itself refuses to delete the seated primary (RESTRICT),
     // so a missed application check cannot orphan the instance. The audit
@@ -71,6 +82,39 @@ describe("primary administrator authority (#263)", () => {
     await setInstanceAdministrator(fixture.users.admin.id, fixture.users.owner.id, true);
     await setInstanceAdministrator(fixture.users.admin.id, fixture.users.owner.id, false);
     await expect(getDb().execute(sql`select 1`)).resolves.toBeDefined();
+    await fixture.cleanup();
+  });
+
+  it("answers the admin users route with 409 and the same refusal words when an administrator disables or demotes the primary", async () => {
+    const fixture = await createIntegrationFixture("primary-route");
+    const primary = fixture.users.admin;
+    await seatPrimary(primary.id);
+    await setInstanceAdministrator(primary.id, fixture.users.owner.id, true);
+    const actor = await fixture.session("owner");
+    const headers = { "content-type": "application/json" };
+
+    const disabled = await callRouteForSession(updateUser, actor, {
+      url: "http://127.0.0.1:3000/api/admin/users",
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ userId: primary.id, disabled: true }),
+    });
+    expect(disabled.status).toBe(409);
+    const disabledBody = await disabled.json() as { error?: { code?: string; message?: string } };
+    expect(disabledBody.error?.code).toBe("primary_administrator_protected");
+    expect(disabledBody.error?.message).toBe(PRIMARY_PROTECTED_MESSAGE);
+
+    const demoted = await callRouteForSession(updateAdministrator, actor, {
+      url: "http://127.0.0.1:3000/api/admin/users",
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ userId: primary.id, administrator: false }),
+    });
+    expect(demoted.status).toBe(409);
+    const demotedBody = await demoted.json() as { error?: { code?: string; message?: string } };
+    expect(demotedBody.error?.code).toBe("primary_administrator_protected");
+    expect(demotedBody.error?.message).toBe(PRIMARY_PROTECTED_MESSAGE);
+
     await fixture.cleanup();
   });
 });

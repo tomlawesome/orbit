@@ -129,6 +129,10 @@ every sensitive action: set or change password, link, unlink, re-issue a
 setup token for someone else, and **transfer primary authority** (#263's
 window is deleted; the transfer calls this instead).
 
+> **Note (2026-10-14, #1403):** transferring primary authority was removed in
+> #1403 (owner, 2026-10-13) and is no longer a guarded action. The primary
+> administrator is fixed at install and cannot be demoted or disabled.
+
 - If the user has a local credential, the request body carries
   `currentPassword`; it is verified under the same backoff and gate as a
   sign-in. No password, or a wrong one, is `recent_authentication_required`.

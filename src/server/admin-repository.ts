@@ -191,12 +191,12 @@ export async function setInstanceAdministrator(
       );
     }
 
-    /* The primary administrator cannot be demoted by anyone — authority moves
-       first, by explicit transfer (#263). */
+    /* The primary administrator cannot be demoted by anyone. The primary
+       is fixed at install; there is no transfer (#1403, owner 2026-10-13). */
     if (!administrator && targetUserId === await primaryAdministratorId(transaction)) {
       throw new AppError(
         "primary_administrator_protected",
-        "Transfer primary administrator authority before changing this account",
+        "The primary administrator's account cannot be demoted or disabled.",
         409,
       );
     }
@@ -250,12 +250,12 @@ export async function setInstanceUserDisabled(
     if (targetUserId === actorUserId && disabled) {
       throw new AppError("self_disable_not_allowed", "Ask another administrator to disable your account", 409);
     }
-    /* The primary administrator cannot be disabled by anyone — authority moves
-       first, by explicit transfer (#263). */
+    /* The primary administrator cannot be disabled by anyone. The primary
+       is fixed at install; there is no transfer (#1403, owner 2026-10-13). */
     if (disabled && targetUserId === await primaryAdministratorId(transaction)) {
       throw new AppError(
         "primary_administrator_protected",
-        "Transfer primary administrator authority before changing this account",
+        "The primary administrator's account cannot be demoted or disabled.",
         409,
       );
     }
