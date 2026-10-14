@@ -93,7 +93,9 @@ export function setSenderSendDeadlineForTests(milliseconds: number | null): void
  */
 export const SENDER_CHECK_WORDS = {
   alreadyChecked: "already checked — nothing to send",
-  noAddress: "not sent — this account has no registered email address to check",
+  // Also the words when another account holds this address: naming that cause
+  // would tell a member which addresses are in use here.
+  noAddress: "not sent — no address can be checked for this account. ask your administrator",
   noMail: "not sent — Orbit has no outbound mail set up yet. ask your administrator",
   locked: "not sent — Orbit cannot read your address right now. try again later",
   tooSoon: "not sent — too soon. try again in a few minutes",

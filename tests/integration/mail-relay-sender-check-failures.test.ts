@@ -152,7 +152,7 @@ async function envelopeOf(response: Response): Promise<{ code: string; message: 
  */
 const WORDS = {
   alreadyChecked: "already checked — nothing to send",
-  noAddress: "not sent — this account has no registered email address to check",
+  noAddress: "not sent — no address can be checked for this account. ask your administrator",
   noMail: "not sent — Orbit has no outbound mail set up yet. ask your administrator",
   locked: "not sent — Orbit cannot read your address right now. try again later",
   tooSoon: "not sent — too soon. try again in a few minutes",
@@ -278,29 +278,29 @@ describe("finding 3: a damaged stored address while the key is available", () =>
   });
 });
 
+async function providerReportsNewAddress(userId: string, email: string) {
+  const [identity] = await getDb().select().from(externalIdentities).where(eq(externalIdentities.userId, userId));
+  await provisionIdentity({
+    issuer: identity.issuer,
+    subject: identity.subject,
+    email,
+    emailVerified: true,
+    displayName: "Integration member",
+    avatarUrl: null,
+  });
+}
+
+/** Another member already holds this address, as a row of their own. */
+async function otherMemberClaims(address: string) {
+  const id = randomUUID();
+  await getDb().insert(mailInSenderAddresses).values({
+    id, userId: fixture.users.owner.id, ...await senderAddressColumns(id, address), source: "manual",
+  });
+  return id;
+}
+
 describe("finding 4: send times carry over when the registered address changes", () => {
   const newAddress = "harlow-changed-address@example.test";
-
-  async function providerReportsNewAddress(userId: string, email: string) {
-    const [identity] = await getDb().select().from(externalIdentities).where(eq(externalIdentities.userId, userId));
-    await provisionIdentity({
-      issuer: identity.issuer,
-      subject: identity.subject,
-      email,
-      emailVerified: true,
-      displayName: "Integration member",
-      avatarUrl: null,
-    });
-  }
-
-  /** Another member already holds this address, as a row of their own. */
-  async function otherMemberClaims(address: string) {
-    const id = randomUUID();
-    await getDb().insert(mailInSenderAddresses).values({
-      id, userId: fixture.users.owner.id, ...await senderAddressColumns(id, address), source: "manual",
-    });
-    return id;
-  }
 
   it("is still limited (429) after a change to a free address, until the window passes", async () => {
     await usedFive();
@@ -646,4 +646,57 @@ describe("M-R8: a send attempt counts when it starts, and the mailer call holds 
       await releaseAndSettle(first, ...(reading ? [reading] : []));
     }
   }, 30 * SECOND);
+});
+
+/*
+ * Release audit #1316, M-Q9. When the registered address is already verified
+ * on another account, the member has no row, and the press refuses with the
+ * same 409 as an account with no address at all. The words must be true for
+ * both and must not say the address is in use (account enumeration, OWASP
+ * Authentication Cheat Sheet): one generic sentence, the same envelope.
+ */
+describe("M-Q9: a member whose address another account holds gets the generic refusal", () => {
+  const claimedAddress = "harlow-claimed-elsewhere@example.test";
+  const GENERIC = "not sent \u2014 no address can be checked for this account. ask your administrator";
+
+  /** Another member holds the address, then the provider reports it for this member. */
+  async function claimedMemberPress() {
+    await otherMemberClaims(claimedAddress);
+    await providerReportsNewAddress(fixture.users.member.id, claimedAddress);
+    return send();
+  }
+
+  it("answers 409 sender_address_unavailable with the generic words", async () => {
+    const response = await claimedMemberPress();
+
+    expect(response.status).toBe(409);
+    expect(await envelopeOf(response)).toEqual({ code: "sender_address_unavailable", message: GENERIC });
+  });
+
+  it("answers the same envelope as an account with no address, and neither names the cause", async () => {
+    const claimed = await envelopeOf(await claimedMemberPress());
+
+    await getDb().update(users).set({ emailEnc: null }).where(eq(users.id, fixture.users.member.id));
+    const none = await envelopeOf(await send());
+
+    expect(claimed).toEqual(none);
+    expect(claimed.message).not.toContain("registered");
+    expect(claimed.message).not.toContain("another");
+    expect(none.message).not.toContain("registered");
+    expect(none.message).not.toContain("another");
+  });
+
+  it("guard: the relay read shows no sender for the claimed member, as for the no-address member", async () => {
+    await turnMailInOn();
+    await otherMemberClaims(claimedAddress);
+    await providerReportsNewAddress(fixture.users.member.id, claimedAddress);
+    await send();
+    const claimed = (await readRelaySettings(memberActor())).sender;
+
+    await getDb().update(users).set({ emailEnc: null }).where(eq(users.id, fixture.users.member.id));
+    const none = (await readRelaySettings(memberActor())).sender;
+
+    expect(claimed).toBeNull();
+    expect(none).toBeNull();
+  });
 });
