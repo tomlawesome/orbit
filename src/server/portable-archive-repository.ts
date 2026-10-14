@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, eq, gt, inArray, isNull, lt } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lt } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documents, dueEvents, households, items, portableArchiveImports, portableArchives, reminderRules, sections, } from "@/db/schema";
@@ -496,6 +496,31 @@ export async function rollBackPortableImport(importId: string): Promise<void> {
     const createdItemIds: string[] = importRow.createdItemIds ?? [];
     const createdSectionIds: string[] = importRow.createdSectionIds ?? [];
 
+    // Recovery undoes only what a crash left, never items already in use: an
+    // imported item a member has edited (every edit bumps `version` past the
+    // 1 it was inserted at) or whose due event they completed keeps the whole
+    // import. The row stays open, so this is logged again at every boot and
+    // before the household's next import. Not detected: a document a member
+    // added without editing the item; that needs the import's own rollback to
+    // have failed first, and the log names the import for the administrator.
+    if (createdItemIds.length > 0) {
+      const [edited] = await transaction.select({ id: items.id }).from(items)
+        .where(and(inArray(items.id, createdItemIds), gt(items.version, 1))).limit(1);
+      const [completed] = edited ? [] : await transaction.select({ id: dueEvents.id }).from(dueEvents)
+        .where(and(inArray(dueEvents.itemId, createdItemIds), isNotNull(dueEvents.completedAt))).limit(1);
+      if (edited || completed) {
+        log.error({
+          event: "portable_archive.import",
+          state: "degraded",
+          reason: "unexpected_failure",
+          action: "inspect_admin_diagnostics",
+          impact: "application_degraded",
+          detail: operationalDetail`${importId}.household.${importRow.householdId}.unfinished_import_in_use_not_rolled_back`,
+        });
+        return undefined;
+      }
+    }
+
     const documentRows = createdItemIds.length > 0
       ? await transaction.select({ documentId: documents.id, storageKey: documentCrypto.storageKey })
           .from(documents)
@@ -687,6 +712,30 @@ export async function importPortableArchive(input: { userId: string; householdId
       bytes.fill(0);
     }
   }
-  await getDb().update(portableArchiveImports).set({ finishedAt: new Date(), outcome: "completed" }).where(eq(portableArchiveImports.id, importId));
+  // A failed closing write fails the whole import now, while the administrator
+  // is here, rather than leaving an open row for a later restart to undo after
+  // members have started using the items.
+  try {
+    await getDb().update(portableArchiveImports).set({ finishedAt: new Date(), outcome: "completed" }).where(eq(portableArchiveImports.id, importId));
+  } catch {
+    try {
+      await rollBackPortableImport(importId);
+    } catch (rollbackError) {
+      log.error({
+        event: "portable_archive.import",
+        state: "degraded",
+        reason: "unexpected_failure",
+        action: "inspect_admin_diagnostics",
+        impact: "application_degraded",
+        detail: operationalDetail`${importId}.${rollbackError instanceof Error ? rollbackError.name : "unknown"}`,
+      });
+      throw new AppError(
+        "archive_import_failed",
+        "The import failed and could not be undone either: Orbit could not record it as finished. Restart Orbit to finish undoing it, then try the import again.",
+        422,
+      );
+    }
+    throw new AppError("archive_import_failed", "Nothing was imported: Orbit could not record the import as finished. Try the import again.", 422);
+  }
   return { importedItems: imported, documentsExcluded: archive.documents.length - documentsRestored };
 }
