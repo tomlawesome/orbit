@@ -632,9 +632,10 @@ export function mountCreate() {
          command that creates the item binds it in the same transaction, so
          the server holds both or neither. A retry re-sends both under the
          same ids, and the server hands back what it already holds. */
-      if (held.attachment) {
+      const file = held.attachment;
+      if (file) {
         staging = true;
-        await stageDocument(active.id, held.attachment, held.attachmentId, draftId).catch(async (error) => {
+        await stageDocument(active.id, file, held.attachmentId, draftId).catch(async (error) => {
           /* The sweep retired the file once staged under this id, and the
              server will not take it under that id again: stage the same
              file once more under a fresh id, within this Add. A second
@@ -642,7 +643,7 @@ export function mountCreate() {
           if (!bindRefused(error) || attachmentId !== held.attachmentId) throw error;
           reissueAttachmentId();
           held.attachmentId = attachmentId;
-          await stageDocument(active.id, held.attachment, held.attachmentId, draftId);
+          await stageDocument(active.id, file, held.attachmentId, draftId);
         });
         staging = false;
       }
