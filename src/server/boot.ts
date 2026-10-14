@@ -344,9 +344,7 @@ export async function registerNode(): Promise<void> {
          verdict, so they travel as one pair. */
       const verdict = !(error instanceof MigrationIntegrityError)
         ? ({ reason: "migration_integrity", action: "check_migrations" } as const)
-        : code === "database_floor"
-          ? ({ reason: "database_below_floor", action: "upgrade_from_supported_version" } as const)
-          : ({ reason: "database_mismatch", action: "attach_matching_database" } as const);
+        : ({ reason: "database_mismatch", action: "attach_matching_database" } as const);
       log.error({
         event: "startup.migration",
         state: "exhausted",

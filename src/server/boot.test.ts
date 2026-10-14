@@ -70,7 +70,7 @@ const mocks = vi.hoisted(() => ({
   rollBackUnfinishedPortableImports: vi.fn(async () => undefined),
   /* Mirrors the real signature (code, detail?). It previously took a message
      and hardcoded code, which silently made every stubbed error look like a
-     generic integrity failure - so a test asserting the database_floor path
+     generic integrity failure - so a test asserting a specific code path
      could not have caught a regression in it. */
   MigrationIntegrityError: class MigrationIntegrityError extends Error {
     code: string;
@@ -384,20 +384,6 @@ describe("strict startup ordering", () => {
       reason: "database_mismatch",
       action: "attach_matching_database",
       detail: "applied migration 25 of 25 does not match 0026_x",
-    });
-  });
-
-  it("distinguishes a database below the supported floor (#437)", async () => {
-    const { registerNode } = await import("./boot");
-    mocks.verifyMigrationIntegrity.mockRejectedValueOnce(new mocks.MigrationIntegrityError("database_floor"));
-
-    await expect(registerNode()).rejects.toThrow("database_floor");
-    expect(mocks.log.error).toHaveBeenCalledWith({
-      event: "startup.migration",
-      state: "exhausted",
-      reason: "database_below_floor",
-      action: "upgrade_from_supported_version",
-      impact: "migration_blocked",
     });
   });
 
