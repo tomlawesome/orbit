@@ -4,6 +4,7 @@ import { householdRegister, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { INTAKE_MAILBOX, newestSenderCheckUid, waitForSenderCheckLink } from "./support/mail";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { configureMailbox as configureSharedMailbox } from "./support/mailbox";
 import { ensureWorkerAdministrator, workerAccount, workerEmail } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
@@ -112,48 +113,11 @@ async function establishInstanceAdmin(browser: Browser) {
 /**
  * Points the instance at the GreenMail sidecar through the real
  * administrator API (#743), which verifies the credential against the
- * provider before committing it. Idempotent: it reads the current version
- * first, so re-running the suite against a live stack re-sets the same
- * mailbox rather than failing on a version conflict.
+ * provider before committing it. Tolerant of a parallel spec doing the same
+ * (#1417): see support/mailbox.ts.
  */
 async function configureMailbox(page: Page) {
-  /* Everything this callback needs is passed in, because it is serialised and
-     run inside the browser: a constant from this module's scope is simply not
-     defined there. #745 added `trustedAuthservId` reading TRUSTED_AUTHSERV_ID
-     directly and pipeline 577's `smoke` died on
-     `ReferenceError: TRUSTED_AUTHSERV_ID is not defined`. */
-  const outcome = await page.evaluate(async ([account, password, authservId]) => {
-    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
-    const current = (await (await fetch("/api/admin/mailbox", { credentials: "same-origin" })).json()) as { mailbox?: { version?: number | null } | null };
-    const response = await fetch("/api/admin/mailbox", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
-      body: JSON.stringify({
-        action: "set",
-        expectedVersion: current.mailbox?.version ?? null,
-        host: "orbit-greenmail",
-        port: 3993,
-        accountUser: account,
-        mailbox: "INBOX",
-        tlsServerName: "orbit-greenmail",
-        providerProfile: "other",
-        trustedRecipientHeader: "X-Orbit-Delivered-To",
-        // #745: the provider identity `sendMail` above writes into
-        // Authentication-Results -- GreenMail never adds this header itself.
-        trustedAuthservId: authservId,
-        /* The floor the settings schema allows; the poll loop follows it, so
-           a receipt appears within seconds rather than a minute. */
-        pollSeconds: 30,
-        password,
-      }),
-    });
-    if (!response.ok) throw new Error(`mailbox set failed: ${response.status}`);
-    return ((await response.json()) as { outcome?: string }).outcome ?? "";
-  }, [MAILBOX_ACCOUNT, MAILBOX_PASSWORD, TRUSTED_AUTHSERV_ID]);
-  /* A refusal here is the provider check doing its job, and every assertion
-     below would fail for a reason that named the wrong thing. */
-  expect(outcome, "the administrator API must verify the GreenMail mailbox before committing it").toBe("verified");
+  await configureSharedMailbox(page, { account: MAILBOX_ACCOUNT, password: MAILBOX_PASSWORD, authservId: TRUSTED_AUTHSERV_ID });
 }
 
 /**

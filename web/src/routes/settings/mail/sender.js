@@ -1,4 +1,4 @@
-import { clockOf, dayMonth } from "$lib/format.js";
+import { clockOf, dayMonth, localZone } from "$lib/format.js";
 
 /*
  * The sender check's words (#1410, ADR-0017 decision 7c, design note 36064),
@@ -12,19 +12,33 @@ import { clockOf, dayMonth } from "$lib/format.js";
  *  @returns {{ says: string, tone: "ok" | "warm", button: string | null }} */
 export function checkRow(sender, now = Date.now()) {
   if (sender.verified) return { says: "checked", tone: "ok", button: null };
+  /* Lapsed is a link with an expiry in the past, whatever `verificationPending` says. */
+  if (sender.expiresAt && Date.parse(sender.expiresAt) <= now) {
+    return { says: "not yet checked · the last link lapsed", tone: "warm", button: "send the check email" };
+  }
   if (!sender.verificationPending) return { says: "not yet checked", tone: "warm", button: "send the check email" };
   if (!sender.expiresAt) {
     /* A pending check the read cannot date: say what is true of every link. */
     return { says: "email sent · open the link within 24 hours", tone: "warm", button: "send it again" };
   }
-  if (Date.parse(sender.expiresAt) <= now) {
-    return { says: "not yet checked · the last link lapsed", tone: "warm", button: "send the check email" };
-  }
+  /* In the member's own zone, as the rest of the app tells time. */
+  const zone = localZone();
   return {
-    says: `email sent · link lapses ${dayMonth(sender.expiresAt)} ${clockOf(sender.expiresAt)}`,
+    says: `email sent · link lapses ${dayMonth(sender.expiresAt, zone)} ${clockOf(sender.expiresAt, zone)}`,
     tone: "warm",
     button: "send it again",
   };
+}
+
+/** What this visit has learnt since the read, kept by the page so both layouts show it:
+ *  the link just sent lapses at `sentExpires`, or the address turned out to be checked already.
+ *  @typedef {{ sentExpires: string | null, checked: boolean }} Learnt
+ *  @param {import("$lib/data/workspace.js").RelaySender} sender
+ *  @param {Learnt} learnt
+ *  @returns {import("$lib/data/workspace.js").RelaySender} */
+export function withLearnt(sender, { sentExpires, checked }) {
+  if (checked) return { ...sender, verified: true, verificationPending: false, expiresAt: null };
+  return sentExpires && !sender.verified ? { ...sender, verificationPending: true, expiresAt: sentExpires } : sender;
 }
 
 export const SENDING = "sending…";

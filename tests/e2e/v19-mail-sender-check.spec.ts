@@ -3,7 +3,8 @@ import { householdRegister, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { INTAKE_MAILBOX, countSenderCheckMails, newestSenderCheckUid, waitForSenderCheckLink } from "./support/mail";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
-import { ensureWorkerAdministrator, workerAccount, workerEmail } from "./support/worker-identity";
+import { configureMailbox as configureSharedMailbox } from "./support/mailbox";
+import { ensureWorkerAdministrator, workerAccount, workerEmail, type WorkerRole } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 
@@ -30,48 +31,38 @@ const MAILBOX_ACCOUNT = INTAKE_MAILBOX;
    and is not a credential to anything. */
 const MAILBOX_PASSWORD = "greenmail-proving-ground-only";
 const TRUSTED_AUTHSERV_ID = "mx.orbit-proving-ground.test";
-/* The only address a member can send from is their registered account email. */
-const SENDER_ADDRESS = () => workerEmail("member");
+/* The only address a member can send from is their registered account email.
+   The worker's `member` is tried first; one an earlier run (or the collection
+   spec) already checked cannot show the button, so the worker's `outsider` --
+   also an ordinary, non-administrator account with its own mailbox -- stands
+   in. Nothing else about the journey differs. */
+const CANDIDATE_ROLES: WorkerRole[] = ["member", "outsider"];
 
 const HOUSEHOLD = "Sender Check Proving Ground";
 const households = householdRegister();
 let seeded = false;
 
-async function signInAsMember(page: Page) {
+async function signInAs(page: Page, role: WorkerRole) {
   await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: workerAccount("member") }).click();
+  await page.getByRole("link", { name: workerAccount(role) }).click();
   await settleArrival(page);
 }
 
-/** Points the instance at the GreenMail sidecar through the real administrator API (#743). */
+/** Signs in as the first candidate whose sending address is still unchecked. */
+async function signInAsUncheckedMember(page: Page): Promise<WorkerRole> {
+  for (const role of CANDIDATE_ROLES) {
+    await page.context().clearCookies();
+    await signInAs(page, role);
+    const body = (await (await page.request.get("/api/settings/mail-relay")).json()) as { relay?: { sender?: { verified?: boolean } | null } };
+    if (body.relay?.sender && !body.relay.sender.verified) return role;
+  }
+  throw new Error(`#1410: no unchecked member among ${CANDIDATE_ROLES.join(", ")} for this worker`);
+}
+
+/** Points the instance at the GreenMail sidecar; tolerant of a parallel spec doing the same (#1417). */
 async function configureMailbox(page: Page) {
-  const outcome = await page.evaluate(async ([account, password, authservId]) => {
-    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
-    const current = (await (await fetch("/api/admin/mailbox", { credentials: "same-origin" })).json()) as { mailbox?: { version?: number | null } | null };
-    const response = await fetch("/api/admin/mailbox", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
-      body: JSON.stringify({
-        action: "set",
-        expectedVersion: current.mailbox?.version ?? null,
-        host: "orbit-greenmail",
-        port: 3993,
-        accountUser: account,
-        mailbox: "INBOX",
-        tlsServerName: "orbit-greenmail",
-        providerProfile: "other",
-        trustedRecipientHeader: "X-Orbit-Delivered-To",
-        trustedAuthservId: authservId,
-        pollSeconds: 30,
-        password,
-      }),
-    });
-    if (!response.ok) throw new Error(`mailbox set failed: ${response.status}`);
-    return ((await response.json()) as { outcome?: string }).outcome ?? "";
-  }, [MAILBOX_ACCOUNT, MAILBOX_PASSWORD, TRUSTED_AUTHSERV_ID]);
-  expect(outcome, "the administrator API must verify the GreenMail mailbox before committing it").toBe("verified");
+  await configureSharedMailbox(page, { account: MAILBOX_ACCOUNT, password: MAILBOX_PASSWORD, authservId: TRUSTED_AUTHSERV_ID });
 }
 
 async function establishInstanceAdmin(browser: Browser) {
@@ -133,10 +124,10 @@ test("a member sends the check email from the settings mail screen, opens the li
   test.setTimeout(240_000);
 
   await establishInstanceAdmin(browser);
-  await signInAsMember(page);
+  const role = await signInAsUncheckedMember(page);
   await seedHousehold(page);
 
-  const address = SENDER_ADDRESS();
+  const address = workerEmail(role);
   const mark = await newestSenderCheckUid(address);
 
   await page.goto("/settings/mail");
@@ -162,7 +153,9 @@ test("a member sends the check email from the settings mail screen, opens the li
   await expect(page).toHaveURL(/\/settings\/mail$/u);
   await expect(page.getByText("address checked · your relay is listening")).toBeVisible();
   await expect(senderRow).toHaveText(/sender check\s*checked$/u);
-  await expect(page.getByText("connected · listening")).toBeVisible();
+  await expect(
+    page.locator(".kv, .rl-field").filter({ has: page.getByText("status", { exact: true }) }),
+  ).toContainText("connected · listening");
   await expect(page.getByRole("button", { name: "send the check email", exact: true })).toHaveCount(0);
 
   // Pressing again is no longer on offer; the route agrees.

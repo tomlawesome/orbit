@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RELAY_FIXTURE } from "../../web/src/lib/data/fixtures/relay.js";
-import { clockOf, dayMonth } from "../../web/src/lib/format.js";
+import { clockOf, dayMonth, localZone } from "../../web/src/lib/format.js";
 
 /*
  * #1410 (ADR-0017 decision 7c, design note 36064): the sender check on the
@@ -145,13 +145,15 @@ function relayBody(/** @type {object | null} */ sender) {
   };
 }
 
-/** @type {{ relay: object, reads: number, calls: { href: string, init: RequestInit | undefined }[], answer: (init?: RequestInit) => Promise<Response> | Response }} */
+/** @type {{ relay: object, reads: number, failReads: boolean, readGate: { promise: Promise<unknown> } | null, calls: { href: string, init: RequestInit | undefined }[], answer: (init?: RequestInit) => Promise<Response> | Response }} */
 let server;
 
 function stubServer() {
   server = {
     relay: relayBody(UNCHECKED),
     reads: 0,
+    failReads: false,
+    readGate: null,
     calls: [],
     answer: () => json({ address: ADDRESS, expiresAt: hoursFromNow(24) }, 202),
   };
@@ -165,6 +167,8 @@ function stubServer() {
     }
     if (href.endsWith("/api/settings/mail-relay") && method === "GET") {
       server.reads += 1;
+      if (server.failReads) throw new TypeError("Failed to fetch");
+      if (server.readGate) await server.readGate.promise;
       return json(server.relay);
     }
     return json({ error: { code: "unavailable", message: "not today" } }, 503);
@@ -202,6 +206,23 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** The screen follows the phone query's `change`; this lets a test fire it. */
+const mediaWatchers = new Set();
+const phoneQuery = {
+  get matches() { return media.pocket; },
+  media: "(max-width: 900px), (max-height: 600px)",
+  addEventListener: (/** @type {string} */ _type, /** @type {() => void} */ handler) => { mediaWatchers.add(handler); },
+  removeEventListener: (/** @type {string} */ _type, /** @type {() => void} */ handler) => { mediaWatchers.delete(handler); },
+  addListener: () => {},
+  removeListener: () => {},
+};
+/** The window is resized across the phone breakpoint, and the screen is told. */
+const switchLayout = async (/** @type {boolean} */ pocket) => {
+  media.pocket = pocket;
+  for (const handler of [...mediaWatchers]) handler();
+  await settle();
+};
+
 const settle = async () => {
   const { flushSync } = await import(pathToFileURL(join(svelteSrc, "index-client.js")).href);
   for (let turn = 0; turn < 6; turn += 1) {
@@ -216,6 +237,8 @@ const settle = async () => {
  */
 async function mountScreen(/** @type {{ sender: object | null, pocket: boolean, search?: string }} */ { sender, pocket, search = "" }) {
   media.pocket = pocket;
+  mediaWatchers.clear();
+  window.matchMedia = /** @type {any} */ (() => phoneQuery);
   server.relay = relayBody(sender);
   window.history.replaceState({}, "", `/settings/mail${search}`);
   const { readRelay } = await import("../../web/src/lib/data/workspace.js");
@@ -305,7 +328,7 @@ const LAYOUTS = [
   ["the phone", true, "check email sent · open the link within 24 hours"],
 ];
 
-const lapsesAt = (/** @type {string} */ iso) => `email sent · link lapses ${dayMonth(iso)} ${clockOf(iso)}`;
+const lapsesAt = (/** @type {string} */ iso) => `email sent · link lapses ${dayMonth(iso, localZone())} ${clockOf(iso, localZone())}`;
 
 describe.each(LAYOUTS)("#1410: %s shows where the sender check stands", (_name, pocket) => {
   it("not yet checked: the address, `not yet checked`, and the button to send the check email", async () => {
@@ -328,6 +351,15 @@ describe.each(LAYOUTS)("#1410: %s shows where the sender check stands", (_name, 
   it("link lapsed and still unchecked: says the last link lapsed, and offers the check email again", async () => {
     await mountScreen({
       sender: { address: ADDRESS, verified: false, verificationPending: true, expiresAt: hoursFromNow(-2) },
+      pocket,
+    });
+    expect(rowSays("sender check")).toBe("not yet checked · the last link lapsed");
+    expect(buttonSaying("send the check email")).not.toBeNull();
+  });
+
+  it("link lapsed as the server reports it (not pending, past expiry): says the last link lapsed (#1403 review)", async () => {
+    await mountScreen({
+      sender: { address: ADDRESS, verified: false, verificationPending: false, expiresAt: hoursFromNow(-2) },
       pocket,
     });
     expect(rowSays("sender check")).toBe("not yet checked · the last link lapsed");
@@ -483,5 +515,96 @@ describe.each(LAYOUTS)("#1410: %s after the link in the check email", (_name, po
     await mountScreen({ sender: UNCHECKED, pocket });
     expect(statusLines().concat(wakeLines())).not.toContain("address checked · your relay is listening");
     expect(alerts()).toHaveLength(0);
+  });
+});
+
+/* ---- review findings: written before the fix -------------------------------- */
+
+/** The check button, whatever it reads at the moment. */
+const checkButton = () => buttons().find((one) => /^(send the check email|send it again|sending…)$/u.test(text(one))) ?? null;
+
+describe.each(LAYOUTS)("#1410 review: %s", (_name, pocket) => {
+  it("shows the lapse time in the member's own zone, not UTC", async () => {
+    const before = process.env.TZ;
+    process.env.TZ = "Europe/London";
+    try {
+      /* The next 15 July, 17:05 UTC: 18:05 in London in summer. */
+      const now = new Date();
+      const year = now.getUTCMonth() > 6 || (now.getUTCMonth() === 6 && now.getUTCDate() >= 15) ? now.getUTCFullYear() + 1 : now.getUTCFullYear();
+      const expiresAt = new Date(Date.UTC(year, 6, 15, 17, 5)).toISOString();
+      await mountScreen({ sender: { address: ADDRESS, verified: false, verificationPending: true, expiresAt }, pocket });
+      expect(rowSays("sender check")).toBe("email sent · link lapses 15 Jul 18:05");
+    } finally {
+      if (before === undefined) delete process.env.TZ; else process.env.TZ = before;
+    }
+  });
+
+  it("409 sender_already_verified whose re-read then fails: the row reads `checked` and the button is gone", async () => {
+    await mountScreen({ sender: UNCHECKED, pocket });
+    server.answer = () => {
+      server.failReads = true;
+      return refusal(409, "sender_already_verified");
+    };
+    await press("send the check email");
+    expect(server.reads, "the relay was read again, and failed").toBeGreaterThanOrEqual(1);
+    expect(rowSays("sender check")).toBe("checked");
+    expect(checkButton(), "nothing left to press").toBeNull();
+    expect(alerts(), "the failed re-read is not an error to show").toHaveLength(0);
+  });
+
+  it("409 sender_already_verified: the button stays held while the re-read is in flight, and a press then sends no second request", async () => {
+    await mountScreen({ sender: UNCHECKED, pocket });
+    const reread = held();
+    server.readGate = reread;
+    server.answer = () => {
+      server.relay = relayBody(CHECKED);
+      return refusal(409, "sender_already_verified");
+    };
+    await press("send the check email");
+    expect(server.reads, "the re-read is out").toBeGreaterThanOrEqual(1);
+    const button = checkButton();
+    if (button) {
+      expect(isHeld(button), "the button is held until the re-read answers").toBe(true);
+      button.click();
+      await settle();
+    }
+    expect(server.calls, "no second request").toHaveLength(1);
+    reread.release(json({}));
+    await settle();
+    expect(rowSays("sender check")).toBe("checked");
+  });
+});
+
+describe.each([
+  ["from the desk to the phone", false],
+  ["from the phone to the desk", true],
+])("#1410 review: the window is resized %s after a press", (_name, startsAsPocket) => {
+  it("the other layout shows the same sender check, not the state the page was loaded in", async () => {
+    await mountScreen({ sender: UNCHECKED, pocket: startsAsPocket });
+    const expiresAt = hoursFromNow(24);
+    server.answer = () => json({ address: ADDRESS, expiresAt }, 202);
+    await press("send the check email");
+    expect(rowSays("sender check")).toBe(lapsesAt(expiresAt));
+
+    await switchLayout(!startsAsPocket);
+    expect(rowSays("sender check")).toBe(lapsesAt(expiresAt));
+    expect(buttonSaying("send it again")).not.toBeNull();
+    expect(buttonSaying("send the check email")).toBeNull();
+    expect(allText()).not.toContain("not yet checked");
+  });
+});
+
+describe("#1410 review: the phone after a 409 sender_already_verified", () => {
+  it("focus moves to the status message (or its field) when the button goes, not to the page", async () => {
+    await mountScreen({ sender: UNCHECKED, pocket: true });
+    server.answer = () => {
+      server.relay = relayBody(CHECKED);
+      return refusal(409, "sender_already_verified");
+    };
+    await press("send the check email");
+    expect(checkButton(), "the button has gone").toBeNull();
+    const active = document.activeElement;
+    expect(active, "focus is not dropped on the page").not.toBe(document.body);
+    expect(active?.closest('[role="status"], .rl-field'), "focus is on the status message or its field").not.toBeNull();
   });
 });
