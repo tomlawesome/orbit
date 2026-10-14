@@ -17,7 +17,7 @@ import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { provisionIdentity } from "@/lib/auth/provision";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
-import { listSenderAddresses, seedSenderAddress } from "@/server/mail-in/sender-addresses";
+import { listSenderAddresses, seedSenderAddress, setSenderSendDeadlineForTests } from "@/server/mail-in/sender-addresses";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, senderAddressColumns, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 
@@ -29,8 +29,9 @@ import { callRouteForSession, loadRoute } from "./support/request-event";
  *   1. The whole send has a deadline of about 15 seconds. A mailer that never
  *      answers ends the request with 503 and a stable code, counts nothing,
  *      leaves no pending link, and does not hold the member's relay read up
- *      beyond that deadline. (Real timers: the deadline is not configurable,
- *      and faking timers would also stop the database driver's own.)
+ *      beyond that deadline. (Real timers, with the deadline shortened by
+ *      `setSenderSendDeadlineForTests`; faking timers would also stop the
+ *      database driver's own.)
  *   2. A mailer that throws is a 503 with a stable code, not 500
  *      `internal_error`; nothing is counted and no link is left pending.
  *   3. A stored address that cannot be read while the key IS available is a
@@ -98,6 +99,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  setSenderSendDeadlineForTests(null);
   vi.useRealTimers();
   for (const release of mail.stalled.splice(0)) release();
   for (const [name, value] of Object.entries(savedEnvironment)) {
@@ -177,22 +179,23 @@ async function expectNothingLeft() {
 }
 
 describe("finding 1: a mailer that never answers", () => {
-  it("ends the request within about 15 s with a stable 503, counts nothing, and does not hold up the relay read", async () => {
+  it("ends the request at the send deadline (shortened to 300 ms here) with a stable 503, counts nothing, and does not hold up the relay read", async () => {
     await turnMailInOn();
     mail.mode = "stall";
+    setSenderSendDeadlineForTests(300);
     const started = Date.now();
 
     const sending = send().then((response) => ({ response, at: Date.now() - started }));
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 50));
     const reading = readRelaySettings(memberActor()).then(() => Date.now() - started);
-    const guard = new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 22 * SECOND));
+    const guard = new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 5 * SECOND));
 
     const outcome = await Promise.race([Promise.all([sending, reading]), guard]);
 
     expect(outcome).not.toBe("hung");
     const [sent, readAt] = outcome as [{ response: Response; at: number }, number];
-    expect(sent.at).toBeLessThan(20 * SECOND);
-    expect(readAt).toBeLessThan(20 * SECOND);
+    expect(sent.at).toBeLessThan(3 * SECOND);
+    expect(readAt).toBeLessThan(3 * SECOND);
     expect(sent.response.status).toBe(503);
     const { code, message } = await envelopeOf(sent.response);
     expect(code).toMatch(CODE_SHAPE);
@@ -206,7 +209,7 @@ describe("finding 1: a mailer that never answers", () => {
     mail.mode = "ok";
     expect((await send()).status).toBe(202);
     expect(mail.sent).toHaveLength(1);
-  }, 45 * SECOND);
+  }, 15 * SECOND);
 });
 
 describe("finding 2: the mailer refuses the message", () => {
