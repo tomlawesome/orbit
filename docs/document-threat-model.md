@@ -333,9 +333,9 @@ recoverable state.
   rest of the application unhealthy.
 - Disk exhaustion, quota exhaustion, and key unavailability return distinct
   administrator diagnostics but non-sensitive user errors.
-- The application remains usable when the KEK is missing, but all document
-  upload/download/rotation operations remain locked. Orbit never generates a
-  replacement key automatically.
+- An instance with no usable KEK locks itself to everyone until the key is
+  restored (#1405, ADR-0024 amendment; see "Household metadata encryption"
+  below). Orbit never generates a replacement key automatically.
 
 ## Household metadata encryption (Tiers 1 and 2)
 
@@ -352,7 +352,9 @@ and, since #969, every account address: `users.email` and the mail-forwarding
 sender address `mail_in_sender_addresses.address`. Those two account addresses
 sit under the instance key rather than a household one, because a person
 belongs to several households and a forwarded message is matched to its sender
-before any household is known. Everything else in Tier 2 uses the same
+before any household is known. Since #1316 the identity provider's ID token
+kept for sign-out, `sessions.id_token`, sits under the instance key too, bound
+to its own session row and deleted with it. Everything else in Tier 2 uses the same
 household key as Tier 1, and all of it the same envelope and the same rotation
 path — no second cipher. What it costs is queries: the database can no longer search titles,
 match provider names or add up costs, so Orbit does all three in the
@@ -377,7 +379,9 @@ surface may describe it as more than this.
 
 - One random 32-byte metadata data-encryption key per household, wrapped under
   the existing instance KEK (`DOCUMENT_KEK`), plus one instance-scope key for
-  mail-in receipts that are not attributed to a household yet. Deleting a
+  mail-in receipts that are not attributed to a household yet, account
+  addresses (#969), and the identity provider's ID token kept on each session
+  that began at the provider so sign-out can name it (#1316). Deleting a
   household deletes its key, which crypto-shreds any stray copy of that
   household's ciphertext.
 - Each value is one AES-256-GCM envelope, `mdv1.<iv>.<tag>.<ciphertext>`,
@@ -404,14 +408,16 @@ surface may describe it as more than this.
   the rest of the row renders normally. Each failure logs an administrator
   diagnostic naming the column and row and nothing else. Writing to the field
   is the repair.
-- A missing KEK is the separate, already-defined state: the application stays
-  usable, encrypted fields read as locked rather than damaged, and writes to
-  them are refused, exactly as document operations lock today. Account
-  addresses are encrypted under the instance key, so with no KEK password
-  sign-in is refused in the words encryption-at-rest.md gives — "this instance
-  cannot sign anybody in until its encryption key is available" — and never as
-  a wrong password. Identity-provider sign-in is unaffected, because it matches
-  on the provider's issuer and subject, never the address. #966 settled this.
+- An instance with no usable KEK (missing, unreadable, malformed, set in both
+  forms, or not the key the instance-scope `metadata_keys` row was wrapped
+  under) is locked as a whole (#1405, ADR-0024 amendment): every screen and
+  API answers 503, nobody signs in, administrators included, and only the
+  scheduled-maintenance worker runs, until the key is fixed on the host and
+  the container restarted. Account addresses (`users.email`) are encrypted
+  since #969, so a session could not even show who is signed in. A
+  household-scope key wrapped under a key the instance does not hold is the
+  narrower case: those fields read as locked rather than damaged, and writes
+  to them are refused, exactly as document operations lock.
 - A reminder whose item name will not decrypt is not sent with an empty or
   invented name: the delivery is retried, like any other transient fault,
   until the key or the value is repaired.

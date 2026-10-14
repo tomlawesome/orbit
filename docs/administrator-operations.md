@@ -138,6 +138,7 @@ The event groups you will see:
 | Component | Starting and healthy path | Failure, and what you do |
 | --- | --- | --- |
 | Application and configuration | `application.startup` and `configuration.problem` | an invalid or optional setting is blocked or degraded with a safe fallback and a fixed remediation |
+| Encryption key | `encryption.key` (`state=ready`, naming the key id held) | `state=blocked reason=key_unavailable`: no usable key, the instance is locked (see "Restoring the document key-encryption key"); also each refused sign-in, at most ten a minute, and what happened to the operator alert |
 | Authentication | `auth.configuration`, `auth.provider` | discovery, token and callback failures block sign-in without provider detail |
 | Database and migrations | `database.connection`, `database.migration` | notices, unavailable connections and migration integrity failures stay bounded |
 | Document, scanner and parser | `document.lifecycle`, `document.scan`, `document.parse`, `document.worker` | required scanning fails closed; retries, recovery and exhaustion name the safe action |
@@ -493,6 +494,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `SMTP_USER` / `SMTP_PASSWORD_FILE` | Orbit | SMTP login and a file containing its password. | `orbit@example.com` / `/run/orbit-secrets/orbit-smtp-password` |
 | `SMTP_URL` / `SMTP_URL_FILE` | Orbit | Deprecated compatibility form, given directly or as a file; do not set it with the individual SMTP settings. | `smtps://orbit%40example.com:password@smtp.example.com:465` |
 | `SMTP_FROM` | Orbit | Display name and sender address for reminder email. | `Orbit <orbit@example.com>` |
+| `OPERATOR_ALERT_ADDRESS` | Orbit | Where Orbit writes when it cannot run safely: today, when its encryption key is missing or wrong. Not a secret. Needs the SMTP settings; unset, Orbit only logs. Set it at install time. | `you@example.com` |
 | `VAPID_SUBJECT` | Orbit | Contact address sent with browser push notifications. VAPID is the standard for browser and PWA push; it is not Pushover. | `mailto:admin@example.com` |
 | `VAPID_PUBLIC_KEY` | Orbit and the browser | Public push key generated for this deployment. | `<base64url-public-key>` |
 | `VAPID_PRIVATE_KEY` | Orbit | Direct private push key. Leave empty when the file form is used. | `<base64url-private-key>` |
@@ -518,6 +520,11 @@ For production, use HTTPS, file-backed secrets, a private PostgreSQL
 connection, and working identity-provider, SMTP and push credentials. Keep
 recovery bundles somewhere other than the Docker host before storing real
 household data.
+
+Once SMTP works, set `OPERATOR_ALERT_ADDRESS` to an inbox you read. It is the
+one way Orbit can tell you it has locked itself for want of its encryption key
+(see "Restoring the document key-encryption key"): administrators' own
+addresses are encrypted under that key, so Orbit cannot read them then.
 
 ## Mailbox provider operation
 
@@ -791,18 +798,45 @@ the document key-encryption key" below.
 
 ## Restoring the document key-encryption key
 
-An instance that starts without `DOCUMENT_KEK` is **locked**, not damaged.
-Nothing is lost and nothing is overwritten. Documents cannot be opened;
-encrypted notes, references and mail-in extracts cannot be read or written;
-and every item edit is refused with a 503, because saving an item rewrites its
-encrypted fields. The rest of Orbit stays usable, deliberately (ADR-0024
-decision 5): a missing key must not take the household's list down with it.
+An instance that starts with no usable key is **locked**, not damaged
+(#1405, ADR-0024 amendment). That covers a `DOCUMENT_KEK` that is missing,
+unreadable, malformed or set both directly and as a file, and a key that is
+not the one this database was written under: Orbit opens its own instance key
+with the key it holds once at startup, and a key that will not open it is the
+wrong key. Nothing is lost and nothing is overwritten. While locked:
 
-Members see this at the field: "locked — safe, but unreadable right now", and
-a paused edit panel that says an administrator is who fixes it. The
-administration screen shows one "Encrypted details are locked" card with how
-many items and mail-in messages are waiting. No count and no detail of the key
-reaches a member, and Orbit never says the data is gone, because it is not.
+- every dynamic screen answers 503 with one page: "locked — back once the key is
+  restored", that nothing is lost, that an administrator has to fix it on the
+  server, the instance's public contact address when one is set, and that the
+  details are in the container log. The static pages
+  `/login`, `/logout` and `/auth/error` are plain files and still load with a
+  200; the sign-in page then moves the reader to the locked page;
+- every API answers `503 {"error":"encryption_key_unavailable"}`, and nobody
+  signs in by any method, administrators included; signing out still works.
+  The exceptions are `/api/health` (below) and `/api/auth/availability`, which
+  the sign-in page reads to learn that the instance is locked;
+- `/api/health` answers 200 `maintenance`, so the container stays healthy and
+  is not restarted: a restart cannot fix the key;
+- only the scheduled-maintenance worker runs; reminders, documents and mail
+  wait for the restart;
+- the container log has one line, `encryption.key state=blocked
+  reason=key_unavailable`, naming the fault (for a wrong key, the key id
+  Orbit holds and the key id the database was written under), and a line for
+  each refused sign-in;
+- when `OPERATOR_ALERT_ADDRESS` and outbound mail are set, Orbit mails that
+  address once (again after 24 hours if it is still locked), and once more
+  when the key is back. Unset, the log is the only record.
+
+`bash scripts/repair.sh --check` already names a missing host key file; the
+container log line and the locked page are how you recognise the state from
+the outside.
+
+A household's own key wrapped under a key the instance does not hold is the
+narrower case: members see "locked — safe, but unreadable right now" at the
+field and a paused edit panel, and the administration screen shows one
+"Encrypted details are locked" card with how many items and mail-in messages
+are waiting. No count and no detail of the key reaches a member, and Orbit
+never says the data is gone, because it is not.
 
 ![The "Encrypted details are locked" card, with counts of affected items and mail-in messages](images/admin-encrypted-details-locked.png)
 
@@ -823,10 +857,10 @@ restart the exact deployed image:
    ```sh
    bash scripts/deploy-container.sh --pull
    ```
-4. Confirm on the administration screen that the "Encrypted details are
-   locked" card has gone. It disappears the moment the instance holds a usable
-   key. Nothing needs re-encrypting and no backfill runs, because the values
-   were never changed.
+4. Confirm the container log says `encryption.key state=ready` with the key
+   id you expected, that the locked page has gone, and on the administration
+   screen that no "Encrypted details are locked" card remains. Nothing needs
+   re-encrypting and no backfill runs, because the values were never changed.
 
 If the key is really gone and no recovery bundle holds it, this is not a
 restore. Encrypted documents and Tier 1 and Tier 2 metadata, every account

@@ -14,12 +14,19 @@
  */
 
 /**
+ * `kind` (#1405): `"window"` is an operator's open window; `"key"` is Orbit
+ * holding no usable encryption key, which has no entries, no expected return,
+ * and may carry the instance's public contact address.
+ *
  * @typedef {{ id: string, kind: "scheduled" | "started" | "update" | "resolved", body: string, publishedAt: string }} MaintenanceEntry
  * @typedef {{ entries: MaintenanceEntry[], expectedEndAt: string | null }} MaintenanceView
+ * @typedef {MaintenanceView & { kind: "window" | "key", contactAddress: string | null }} MaintenanceScreen
  */
 
-/** @type {MaintenanceView} */
+/** @type {MaintenanceScreen} */
 export const MAINTENANCE_FIXTURE = {
+  kind: "window",
+  contactAddress: null,
   expectedEndAt: "2026-09-04T22:30:00.000Z",
   /* Newest first, as the screen shows them. */
   entries: [
@@ -44,8 +51,26 @@ export const MAINTENANCE_FIXTURE = {
   ],
 };
 
-/** @type {MaintenanceView} */
+/** @type {MaintenanceScreen} */
 export const MAINTENANCE_FIXTURE_ONE = {
+  kind: "window",
+  contactAddress: null,
   expectedEndAt: MAINTENANCE_FIXTURE.expectedEndAt,
   entries: MAINTENANCE_FIXTURE.entries.slice(0, 1),
+};
+
+/** The locked screen (#1405, `?kind=key`): nothing to show but the fact. */
+/** @type {MaintenanceScreen} */
+export const MAINTENANCE_KEY_FIXTURE = {
+  kind: "key",
+  entries: [],
+  expectedEndAt: null,
+  contactAddress: null,
+};
+
+/** The same with the instance's public contact address (`?kind=key&contact=1`). */
+/** @type {MaintenanceScreen} */
+export const MAINTENANCE_KEY_FIXTURE_CONTACT = {
+  ...MAINTENANCE_KEY_FIXTURE,
+  contactAddress: "household-help@example.com",
 };

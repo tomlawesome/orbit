@@ -63,7 +63,7 @@ function runSvelteCheck() {
  * Whether `orbit/server/*` resolves to THIS checkout (#1029).
  *
  * `web/node_modules` is a workspace link, and in a worktree it usually points
- * at the main checkout: `web/node_modules/orbit -> /srv/checkouts/orbit`.
+ * at the main checkout: `web/node_modules/orbit -> ~/projects/orbit`.
  * The `.svelte` and `.js` files being checked are then read from the worktree
  * while the server modules they import are read from whatever branch the main
  * checkout happens to have out. The answer belongs to neither branch.

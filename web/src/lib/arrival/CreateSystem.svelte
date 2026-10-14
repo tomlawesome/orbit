@@ -1,7 +1,7 @@
 <script>
   import {
     CURRENCIES, TIME_ZONES, NAME_LIMIT,
-    sectionNote, sectionNoteTitle,
+    browserCurrency, preferredCurrency, sectionNote, sectionNoteTitle,
   } from "./stage.js";
 
   /**
@@ -24,10 +24,10 @@
    *   name?: string,
    *   timezone?: string,
    *   currency?: string,
-   *   rejected?: { name: string, reason: string, householdId?: string | null } | null,
+   *   rejected?: { name: string, reason: string, householdId?: string | null, link?: string, road?: "join" | "carry-on" } | null,
    *   busy?: boolean,
    *   onsubmit?: () => void,
-   *   onask?: (rejected: { name: string, reason: string, householdId?: string | null }) => void,
+   *   onask?: (rejected: { name: string, reason: string, householdId?: string | null, link?: string, road?: "join" | "carry-on" }) => void,
    *   onnaming?: import('svelte/elements').FormEventHandler<HTMLInputElement>,
    * }}
    */
@@ -37,7 +37,8 @@
     timezone = $bindable(TIME_ZONES[0].value),
     currency = $bindable(CURRENCIES[0]),
     /* the name the server (or the list of systems out there) refused, and the
-       household it collided with, if that household can be asked to join */
+       road on from it where there is one: the words of its link, and the
+       household that link is about */
     rejected = null,
     busy = false,
     onsubmit = () => {},
@@ -46,6 +47,31 @@
   } = $props();
 
   const trimmed = $derived(name.trim());
+
+  /* The host only hands down the answer, not whether the browser supplied it.
+     A browser zone outside the short list fell back to the first option, so
+     the helper must not claim it was read off the browser; asked here, once,
+     the same way the host asks. */
+  const zoneOnList = (() => {
+    try {
+      const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      return TIME_ZONES.some((zone) => zone.value === browserZone);
+    } catch {
+      return false;
+    }
+  })();
+  const zoneHelper = zoneOnList
+    ? "Read off your browser. It moves to settings afterwards, and dates read by it."
+    : "your browser's zone isn't on this short list — change it in settings";
+  /* The same honesty for the currency: read off the browser only when its
+     language names a region Orbit maps to an offered currency (#1316). */
+  const browserCurrencyFound = (() => {
+    const found = browserCurrency();
+    return found !== null && preferredCurrency(found) === found;
+  })();
+  const currencyHelper = browserCurrencyFound
+    ? "Read off your browser. It moves to settings afterwards, and costs read by it."
+    : "your browser didn't say a currency we know — change it in settings";
 </script>
 
 <!-- THIRD PASS: three fields, a button, air. Everything that was prose is
@@ -66,8 +92,8 @@
            and "your answers are still here" are not said, because the answers,
            still sitting in the fields, say it. -->
       {#if rejected}
-        <p class="err" role="alert"><b>{`“${rejected.name}”`}</b> {rejected.reason}{#if rejected.householdId}
-          — <a href="#ask" onclick={(event) => { event.preventDefault(); onask(rejected); }}>ask to join it →</a>{/if}</p>
+        <p class="err" role="alert"><b>{`“${rejected.name}”`}</b> {rejected.reason}{#if rejected.link}
+          — <a href="#ask" onclick={(event) => { event.preventDefault(); onask(rejected); }}>{rejected.link}</a>{/if}</p>
       {/if}
     </div>
 
@@ -76,14 +102,14 @@
         <div class="field selwrap">
           <label for="tz">time zone</label>
           <select id="tz" aria-label="Time zone" bind:value={timezone}
-                  title="Read off your browser. It moves to settings afterwards, and dates read by it.">
+                  title={zoneHelper}>
             {#each TIME_ZONES as zone (zone.value)}<option value={zone.value}>{zone.label}</option>{/each}
           </select>
         </div>
         <div class="field selwrap">
           <label for="cur">currency</label>
           <select id="cur" aria-label="Currency" bind:value={currency}
-                  title="Read off your browser. It moves to settings afterwards, and costs read by it.">
+                  title={currencyHelper}>
             {#each CURRENCIES as code (code)}<option value={code}>{code}</option>{/each}
           </select>
         </div>

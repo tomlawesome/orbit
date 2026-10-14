@@ -334,6 +334,11 @@ export const sessions = pgTable("sessions", {
   // stale one.
   userAgent: text("user_agent"),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  // #1316 decision 26a: the provider's ID token, sealed under the instance
+  // metadata key and bound to this row, so sign-out can send it as
+  // id_token_hint. Null for a password sign-in. Never selected by a read that
+  // answers the browser; it goes with the row on every session-ending path.
+  idTokenEnc: text("id_token_enc"),
 });
 
 /**

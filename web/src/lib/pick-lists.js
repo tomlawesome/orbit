@@ -20,6 +20,10 @@
 
 export const ZONE_FAVOURITES = ["Europe/London", "Europe/Dublin", "Europe/Paris", "America/New_York", "Australia/Sydney", "UTC"];
 export const CURRENCY_FAVOURITES = ["GBP", "EUR", "USD", "CAD", "AUD", "NZD"];
+/** The currency a browser language's region implies, for the regions Orbit maps. */
+export const REGION_CURRENCIES = /** @type {Record<string, string>} */ ({
+  GB: "GBP", IE: "EUR", FR: "EUR", DE: "EUR", US: "USD", CA: "CAD", AU: "AUD", NZ: "NZD",
+});
 
 /** @param {"timeZone" | "currency"} key @returns {string[]} */
 function supported(key) {

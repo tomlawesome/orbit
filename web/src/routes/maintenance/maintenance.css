@@ -149,6 +149,12 @@ body{background:#060a18}
 .maintenance-page .log li{display:flex;flex-direction:column;gap:4px;padding:10px 0;
         border-top:1px solid rgba(233,237,248,.08)}
 .maintenance-page .log .body{font-size:13px;color:var(--ink-mid)}
+/* The locked screen (#1405): the same column, three short paragraphs instead
+   of a timeline, so it scrolls rather than clips wherever it runs long. */
+.maintenance-page .notice.key{overflow-y:auto;overscroll-behavior:contain}
+.maintenance-page .locked{display:flex;flex-direction:column;gap:10px;max-width:52ch}
+.maintenance-page .locked .body{font-size:16px}
+.maintenance-page .locked .note{font:400 13px/1.5 var(--ui);color:var(--ink-mid)}
 @media (prefers-reduced-motion: reduce){
   .maintenance-page .flare,.maintenance-page .wash,.maintenance-page .ringflare,.maintenance-page .flarewave{opacity:0!important}
   .maintenance-page .glints .glint{animation:none;opacity:.45}

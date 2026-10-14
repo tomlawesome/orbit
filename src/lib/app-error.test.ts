@@ -63,4 +63,21 @@ describe("application error diagnostics", () => {
     });
     expect(mocks.log.error).not.toHaveBeenCalled();
   });
+
+  /*
+   * #1405: with no usable encryption key every API answers the same bounded
+   * 503, named for what is wrong and with no Retry-After, because nothing says
+   * when the key will be back. The maintenance guard's answer is the pattern
+   * (a string code, not the { code, message } envelope).
+   */
+  it("answers a missing encryption key with a bare 503, never stored and with no Retry-After (#1405)", async () => {
+    /* imported here, not at the top, so the file's other cases do not depend on the module */
+    const { KeyUnavailableError } = await import("@/server/key-state");
+    const response = appErrorResponse(new KeyUnavailableError());
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("retry-after")).toBeNull();
+    await expect(response.json()).resolves.toEqual({ error: "encryption_key_unavailable" });
+    expect(mocks.log.error).not.toHaveBeenCalled();
+  });
 });

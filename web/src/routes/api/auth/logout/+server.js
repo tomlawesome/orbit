@@ -4,7 +4,13 @@ import { clearSessionCookie } from "orbit/lib/auth/cookies";
 import { safeReturnPath } from "orbit/lib/auth/crypto";
 import { authErrorResponse } from "orbit/lib/auth/http";
 import { createProviderLogoutUrl, discoverProvider } from "orbit/lib/auth/oidc";
-import { assertCsrf, assertSameOrigin, deleteSessionToken, readSession } from "orbit/lib/auth/session";
+import {
+  assertCsrf,
+  assertSameOrigin,
+  openSessionIdToken,
+  readSession,
+  takeSessionIdToken,
+} from "orbit/lib/auth/session";
 import { getAuthConfig } from "orbit/lib/env";
 
 import { api } from "$lib/server/api.js";
@@ -23,7 +29,9 @@ export const POST = api(
     const session = await readSession(event.cookies, config);
     if (session) assertCsrf(event.request.headers, session, config);
     else assertSameOrigin(event.request.headers, config);
-    await deleteSessionToken(session?.token);
+    /* Delete and return (#1316 decision 26a): the row, and the provider's ID
+       token sealed on it, are gone before anything below can fail. */
+    const taken = await takeSessionIdToken(session?.token);
 
     /* Mirrors the login route's returnTo (#410, §15): this engine's own
        sign-out button is only ever reached from this engine's own screens,
@@ -38,10 +46,20 @@ export const POST = api(
 
     /** @type {URL | null} */
     let providerLogout = null;
-    if (config.oidc) {
+    if (config.oidc && taken.encrypted) {
       try {
-        const metadata = await discoverProvider(config.oidc);
-        providerLogout = createProviderLogoutUrl(config.oidc, metadata, postLogoutReturnTo);
+        /* No token (a password sign-in, an over-size one), a damaged or moved
+           value, or a locked instance: no hint, so no hand-off. The session
+           here is already ended either way. */
+        const idTokenHint = await openSessionIdToken(taken);
+        /* A failed refresh falls back on the last good document rather than
+           skip the provider sign-out. That needs an earlier good lookup in
+           this process: after a restart with the provider down there is no
+           document to fall back on, and the provider sign-out is skipped. */
+        if (idTokenHint) {
+          const metadata = await discoverProvider(config.oidc, { staleIfError: true });
+          providerLogout = createProviderLogoutUrl(config.oidc, metadata, postLogoutReturnTo, idTokenHint);
+        }
       } catch {
         // Local logout must succeed even if the provider is unavailable.
       }
@@ -62,5 +80,8 @@ export const POST = api(
       headers: { location: redirectTarget.href, "cache-control": "no-store" },
     });
   },
-  { errorResponse: authErrorResponse },
+  /* Open while the encryption key is unusable (#1405): a member may always
+     leave. The row still goes; with the key locked its ID token cannot be
+     read, so the sign-out ends Orbit's session only. */
+  { errorResponse: authErrorResponse, openWhileKeyUnusable: true },
 );

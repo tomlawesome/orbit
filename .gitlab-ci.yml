@@ -344,10 +344,12 @@ variables:
   # request into `main`, so this never re-checks the branch.
   #
   #   ignore_policy  .gitleaksignore, supply-chain/licence-policy.yml
-  #                  -> gitleaks, licence_policy, supply_chain_source
+  #                  -> gitleaks, licence_policy, names_guard,
+  #                     supply_chain_source
   #   ci             .gitlab-ci.yml, scripts/ci/, the classifier and the two
   #                  tests that read this file
-  #                  -> fast, fast_docker, gitleaks, supply_chain_source
+  #                  -> fast, fast_docker, gitleaks, names_guard,
+  #                     supply_chain_source
   #
   # `gitleaks` is in both and needs no call: it starts before `classify` and so
   # never sees ORBIT_LANE. Membership is unconditional -- a member runs whether
@@ -358,8 +360,8 @@ variables:
   orbit_lane_admits() {
     case "${ORBIT_LANE:-full}:$1" in
       full:*) return 0 ;;
-      ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:supply_chain_source) return 0 ;;
-      ci:fast | ci:fast_docker | ci:gitleaks | ci:supply_chain_source) return 0 ;;
+      ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:names_guard | ignore_policy:supply_chain_source) return 0 ;;
+      ci:fast | ci:fast_docker | ci:gitleaks | ci:names_guard | ci:supply_chain_source) return 0 ;;
     esac
     echo "skipped: the ${ORBIT_LANE:-full} lane does not run ${1} (#889)"
     return 1
@@ -1088,6 +1090,33 @@ fast_docker:
     - *reuse_evidence
   artifacts:
     name: orbit-fast-docker
+    paths:
+      - ci-evidence/
+    expire_in: 14 days
+    when: on_success
+
+# The names guard (#1408) is its own job because it reads every tracked file,
+# docs and tests included, so it cannot share `fast`'s narrowed key: its
+# job-inputs.json entry denies nothing (ADR-0028 section 6). It needs only
+# `node` and `git`, so it runs in seconds with no `pnpm install`.
+names_guard:
+  stage: fast
+  extends: .node
+  timeout: 5m
+  rules:
+    - *not_scheduled
+    - when: on_success
+  needs:
+    - job: classify
+      artifacts: true
+  script:
+    - *reach_helpers
+    - orbit_lane_admits names_guard || exit 0
+    - *reuse_gate
+    - node --test tests/unit/no-real-names.test.mjs
+    - *reuse_evidence
+  artifacts:
+    name: orbit-names-guard
     paths:
       - ci-evidence/
     expire_in: 14 days
@@ -3865,12 +3894,16 @@ base_image_repin:
 # web/src/lib/door/, writes web/src/lib/door.upstream.json (project, ref, full
 # commit, path, and a sha256 over the sorted paths and contents), and, only
 # when that tree differs from the recorded one and no branch
-# chore/door-import-<short sha> exists on ai/orbit yet (`git ls-remote`), pushes
-# that branch with GitLab push options (merge_request.create, target `dev`,
-# title naming the upstream commit), which makes GitLab open the merge request.
-# It makes no API call, and it never lists, closes or deletes older import merge
-# requests or branches: the owner closes those by hand. Nothing here merges
-# itself, and an unchanged door opens nothing. `fast` runs
+# chore/door-import-<new tree>-on-<recorded tree> (12 hex characters each,
+# `none` with no record) exists on ai/orbit yet (`git ls-remote`), pushes that
+# branch with GitLab push options (merge_request.create, target `dev`, title
+# naming the upstream commit), which makes GitLab open the merge request. The
+# same door from the same base is proposed once; a moved base gets a fresh
+# proposal, and older proposals of that door are logged for the owner to close
+# by hand. It makes no API call, never lists, closes or comments on merge
+# requests, and deletes only a branch it pushed in the same run, when GitLab
+# took the push but opened no merge request (it then fails the job). Nothing
+# here merges itself, and an unchanged door opens nothing. `fast` runs
 # scripts/ci/check-door-unchanged.sh, which fails when the copy no longer
 # matches the record, so the copy is never edited here. The script refuses to
 # run on any branch but `dev`.

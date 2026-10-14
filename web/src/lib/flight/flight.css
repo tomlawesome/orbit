@@ -72,6 +72,9 @@ body.launching #dawn .lockup .glyph .tr{opacity:1;transition:none}
    keeps Orbit's look, which is the sign-in's. On the door it arrives with
    first light: Orbit's door has no flight of its own to wait for. */
 body.lit #dawn .gate{opacity:1;transform:none}
+/* The goodbye that hands off to the identity provider leaves before its way
+   back in would show (Leave.svelte): an empty pill holds the place, unseen. */
+.dusk-host #dusk .gate.held{visibility:hidden}
 
 /* ══ THE LOCAL LOGIN LINE (#914, plan §2.7) ══════════════════════════════
    Mixed mode only. The ratified door is UNCHANGED and this is the one thing

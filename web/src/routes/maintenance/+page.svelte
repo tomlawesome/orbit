@@ -22,6 +22,14 @@
    * windows have exactly one entry, and that case shows no arrow at all.
    *
    * Built from design/family/maintenance.html and owned here from that point on.
+   *
+   * The same screen answers a second kind of closure (#1405): Orbit holding
+   * no usable encryption key, `kind: "key"`. Same sky and type, different
+   * words, in metadata-status.js's vocabulary: "Orbit's encryption key",
+   * "locked", "nothing is lost", an administrator is who fixes it. No return
+   * time and no timeline, because nothing says when the key will be back; the
+   * instance's public contact address when one is set; and one line telling
+   * whoever runs the server that the details are in its log (owner, #1405).
    */
 
   /** @type {{ data: import("./$types").PageData }} */
@@ -533,6 +541,20 @@
   <rect class="wash" x="0" y="0" width="1600" height="1100" fill="url(#washg)"/>
 </svg></div>
 
+{#if data.maintenance.kind === "key"}
+<main class="notice key">
+  <h1 class="msg">locked — back once the key is restored</h1>
+
+  <div class="locked">
+    <p class="body">Orbit’s encryption key isn’t available, so it can’t open anyone’s records or sign anyone in right now.</p>
+    <p class="body">Nothing is lost. Everything is intact and waiting. An administrator needs to fix this on the server Orbit runs on — it can’t be done from here, and signing in won’t help until it’s done.</p>
+    {#if data.maintenance.contactAddress}
+      <p class="body">If you’re not sure who that is, write to {data.maintenance.contactAddress}.</p>
+    {/if}
+    <p class="note">If you run this Orbit, the details are in its container log.</p>
+  </div>
+</main>
+{:else}
 <main class="notice">
   <h1 class="msg">maintenance — back soon</h1>
 
@@ -571,6 +593,7 @@
     </details>
   {/if}
 </main>
+{/if}
 
 <Grain slope={0.09} />
 

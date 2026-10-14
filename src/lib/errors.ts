@@ -37,3 +37,18 @@ export class MaintenanceActiveError extends Error {
     this.name = "MaintenanceActiveError";
   }
 }
+
+/**
+ * Orbit holds no usable encryption key (#1405, ADR-0024 amendment): the
+ * instance is locked, and every API answers the bounded
+ * `{"error":"encryption_key_unavailable"}` 503 with no `Retry-After`, because
+ * nothing says when the key will be back. Like `MaintenanceActiveError` it
+ * sits outside the `{ error: { code, message } }` envelope, and its message
+ * names no key, no key id and no setting.
+ */
+export class KeyUnavailableError extends Error {
+  constructor() {
+    super("Orbit's encryption key is not available");
+    this.name = "KeyUnavailableError";
+  }
+}

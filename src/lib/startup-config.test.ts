@@ -162,4 +162,75 @@ describe("startup configuration", () => {
       fallback: "feature_disabled",
     }));
   });
+
+  /*
+   * #1405: a missing or unusable document key no longer stops the container.
+   * It is reported as its own, non-blocking, kind of problem
+   * (`configuration_key` on the `documents` setting) and the process comes up
+   * so it can say so to members (the maintenance screen) and to the operator
+   * (the log and the alert). The rest of the document settings are still
+   * checked, so a missing key cannot hide a bad DOCUMENTS_ROOT.
+   */
+  describe("the document key (#1405)", () => {
+    const keyProblems = () => getConfigurationProblems().filter((problem) => problem.code === ("configuration_key" as never));
+
+    it("reports a missing key as one non-blocking problem and starts", () => {
+      const environment = { ...baseEnvironment(), DOCUMENT_KEK: undefined };
+      expect(() => validateStartupConfiguration(environment)).not.toThrow();
+      expect(keyProblems()).toHaveLength(1);
+      expect(keyProblems()[0]).toMatchObject({ setting: "documents", code: "configuration_key" });
+      expect(getConfigurationProblems().filter((problem) => problem.setting === "documents")).toHaveLength(1);
+    });
+
+    it("still fails to start for a bad core document setting, alongside the key problem", () => {
+      const environment = {
+        ...baseEnvironment(),
+        DOCUMENT_KEK: undefined,
+        DOCUMENTS_ROOT: "/var/lib/orbit/same",
+        DOCUMENTS_QUARANTINE_ROOT: "/var/lib/orbit/same",
+      };
+      let failure: unknown;
+      try {
+        validateStartupConfiguration(environment);
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(StartupConfigurationError);
+      const issues = (failure as StartupConfigurationError).issues;
+      expect(issues).toContainEqual(expect.objectContaining({ field: "documents", code: "configuration_key" }));
+      expect(issues).toContainEqual(expect.objectContaining({ field: "documents", code: "configuration_core" }));
+    });
+
+    it("keeps the bad core document setting fatal when the key itself is fine", () => {
+      expect(() => validateStartupConfiguration({
+        ...baseEnvironment(),
+        DOCUMENTS_ROOT: "/var/lib/orbit/same",
+        DOCUMENTS_QUARANTINE_ROOT: "/var/lib/orbit/same",
+      })).toThrow(StartupConfigurationError);
+    });
+
+    it.each([
+      ["a malformed key", { DOCUMENT_KEK: "not-a-key" }],
+      ["a key file that is not there", { DOCUMENT_KEK: undefined, DOCUMENT_KEK_FILE: "/missing/runtime-secret" }],
+      ["a key set both directly and by file", { DOCUMENT_KEK_FILE: "/missing/runtime-secret" }],
+      ["a next key equal to the current key", { DOCUMENT_KEK_NEXT: "a".repeat(64) }],
+    ])("reports %s as a key problem without stopping the start", (_label, changes) => {
+      expect(() => validateStartupConfiguration({ ...baseEnvironment(), ...changes })).not.toThrow();
+      expect(keyProblems()).toHaveLength(1);
+      expect(keyProblems()[0]).toMatchObject({ setting: "documents" });
+    });
+
+    it("reports a key problem without the key, the file path or the file's contents", () => {
+      validateStartupConfiguration({ ...baseEnvironment(), DOCUMENT_KEK: "b".repeat(63) });
+      validateStartupConfiguration({ ...baseEnvironment(), DOCUMENT_KEK: undefined, DOCUMENT_KEK_FILE: "/missing/runtime-secret" });
+      const recorded = JSON.stringify(getConfigurationProblems());
+      expect(recorded).not.toContain("b".repeat(63));
+      expect(recorded).not.toContain("missing/runtime-secret");
+    });
+
+    it("reports nothing about the key when it is usable", () => {
+      validateStartupConfiguration(baseEnvironment());
+      expect(keyProblems()).toEqual([]);
+    });
+  });
 });

@@ -1,5 +1,6 @@
 import { getAuthConfig } from "orbit/lib/env";
 import { requireSession } from "orbit/lib/auth/session";
+import { assertKeyUsable } from "orbit/server/key-state";
 import { verifySenderAddress } from "orbit/server/mail-in/sender-addresses";
 
 /**
@@ -30,6 +31,14 @@ function seeOther(location) {
 }
 
 export async function GET(event) {
+  /* Not wrapped, so the encryption key gate is here, first (#1405): with no
+     usable key this reads no session and no encrypted address, and the
+     reader is sent to the screen that says why. */
+  try {
+    assertKeyUsable();
+  } catch {
+    return seeOther("/maintenance");
+  }
   const token = event.url.searchParams.get("token") ?? "";
 
   let session;

@@ -18,20 +18,30 @@
 #   2. Hashes that folder (scripts/ci/door-tree-hash.sh, the same function
 #      scripts/ci/check-door-unchanged.sh uses). If the hash equals the one in
 #      web/src/lib/door.upstream.json, and the copy on disk still matches it,
-#      nothing changed: exit 0, no branch, no merge request. A commit
-#      upstream that leaves assets/door/ alone therefore changes nothing here.
+#      nothing changed: exit 0, no branch, no merge request.
 #   3. Otherwise replaces web/src/lib/door/ with the new copy (files gone
 #      upstream are deleted), rewrites web/src/lib/door.upstream.json
 #      ({ project, ref, commit, path, tree }) and commits both.
-#   4. If branch chore/door-import-<short sha> already exists on Orbit (asked
-#      with `git ls-remote`), a merge request for this upstream commit was
-#      already proposed: exit 0, open nothing. Otherwise it pushes that branch
-#      with GitLab push options that open the merge request into `dev`, titled
-#      with the upstream commit.
+#   4. Names the branch chore/door-import-<new tree>-on-<recorded tree> (12
+#      hex characters of each; `none` when there is no record): what the merge
+#      request would carry, and what it is cut from. If that branch already
+#      exists on Orbit (asked with `git ls-remote`), this door was already
+#      proposed from this base: exit 0, open nothing. So an upstream commit
+#      that leaves assets/door/ alone proposes nothing while an earlier import
+#      waits, and once an older import merges, a newer door is proposed again
+#      from the new base. Otherwise it pushes that branch with GitLab push
+#      options that open the merge request into `dev`, titled with the
+#      upstream commit, and logs any proposal of the same door from an older
+#      base, which is left for the owner to close.
 #
-# It never lists, closes or comments on merge requests, and never deletes a
-# branch: older import merge requests and branches are closed by hand (owner
-# decision 12a on #1371). It makes no API call at all.
+#      If GitLab takes the branch but says it could not act on the push
+#      options (no merge request opened), it deletes that branch again, so
+#      the next run proposes the door again, and fails the job. If the delete
+#      is refused too, the failure says to delete the branch by hand.
+#
+# It never lists, closes or comments on merge requests, and deletes only a
+# branch it pushed in this same run: older import merge requests and branches
+# are closed by hand (owner decision 12a on #1371). It makes no API call at all.
 #
 # A failure to read upstream or to push exits 2 and fails the job. Finding the
 # door changed is not a failure: it is the merge request.
@@ -104,32 +114,32 @@ log() { printf 'import-door: %s\n' "$1"; }
 fail() { printf 'import-door: %s\n' "$1" >&2; exit 2; }
 
 # Every file this script writes a token into, and every scratch directory,
-# goes through here, so there is one cleanup path and it covers every exit:
-# success, `fail`, an unhandled error under `set -e`, or a signal.
-_secret_files=()
-_scratch_dirs=()
-_cleanup() {
-  [[ ${#_secret_files[@]} -eq 0 ]] || rm -f "${_secret_files[@]}"
-  [[ ${#_scratch_dirs[@]} -eq 0 ]] || rm -rf "${_scratch_dirs[@]}"
-}
-trap _cleanup EXIT INT TERM
+# lives under one mode-700 root that the parent shell creates and its trap
+# removes, so cleanup covers every exit: success, `fail`, an unhandled error
+# under `set -e`, or a signal. Nothing is tracked per file, because the
+# helpers below run in command substitutions (subshells) whose variable
+# changes never reach this shell. A signal also stops the run, with the
+# shell's usual 128+signal status: carrying on after the root is gone could
+# recreate paths under it or still push.
+scratch_root="$(mktemp -d)"
+chmod 700 "$scratch_root"
+remove_scratch_root() { rm -rf "$scratch_root"; }
+trap remove_scratch_root EXIT
+trap 'remove_scratch_root; exit 130' INT
+trap 'remove_scratch_root; exit 143' TERM
 
-# A mode-600 temp file, tracked for cleanup. Callers write the secret into it
-# with a builtin (`printf ... > "$file"`), so the value is never the argv of
+# A mode-600 temp file under the scratch root. Callers write the secret into
+# it with a builtin (`printf ... > "$file"`), so the value is never the argv of
 # any process.
 new_secret_file() {
   local f
-  f="$(mktemp)"
+  f="$(mktemp -p "$scratch_root")"
   chmod 600 "$f"
-  _secret_files+=("$f")
   printf '%s' "$f"
 }
 
 new_scratch_dir() {
-  local d
-  d="$(mktemp -d)"
-  _scratch_dirs+=("$d")
-  printf '%s' "$d"
+  mktemp -d -p "$scratch_root"
 }
 
 : "${DOOR_IMPORT_TOKEN:?DOOR_IMPORT_TOKEN is not set. See the door_import job in .gitlab-ci.yml for the exact grant this needs.}"
@@ -234,13 +244,18 @@ current_tree=""
 if [[ -d "$copy_dir" ]]; then
   current_tree="$(door_tree_hash "$copy_dir" 2> /dev/null || true)"
 fi
-branch_name="${branch_prefix}${short_sha}"
+# Keyed on content and base, not on the upstream commit: the same door from
+# the same base is one proposal however many upstream commits carry it, and a
+# base that has moved (an older import merged) gets a fresh, mergeable one.
+base_tree="none"
+[[ "$recorded_tree" =~ ^[0-9a-f]{12,}$ ]] && base_tree="${recorded_tree:0:12}"
+branch_name="${branch_prefix}${new_tree:0:12}-on-${base_tree}"
 if [[ "$recorded_tree" == "$new_tree" && "$current_tree" == "$new_tree" ]]; then
   log "the door is unchanged upstream (tree ${new_tree}); no branch, no merge request."
   exit 0
 fi
 
-# --- Has this commit been proposed already? ---------------------------------
+# --- Has this door been proposed from this base already? --------------------
 #
 # The token never goes in a URL, where it would sit in this process's argv for
 # the life of the git command; git reads it from a mode-600 credential-store
@@ -258,9 +273,15 @@ push_git() {
 existing_branch="$(push_git ls-remote --heads "$push_url" "refs/heads/${branch_name}")" ||
   fail "could not list the branches of ${CI_PROJECT_PATH}. Check DOOR_IMPORT_TOKEN's scope (write_repository) and role (Developer)."
 if [[ -n "$existing_branch" ]]; then
-  log "${branch_name} already exists on ${CI_PROJECT_PATH}: this upstream commit was proposed already; opening nothing."
+  log "${branch_name} already exists on ${CI_PROJECT_PATH}: this door was proposed from this base already; opening nothing."
   exit 0
 fi
+older_proposals="$(push_git ls-remote --heads "$push_url" "refs/heads/${branch_prefix}${new_tree:0:12}-on-*")" ||
+  fail "could not list the branches of ${CI_PROJECT_PATH}. Check DOOR_IMPORT_TOKEN's scope (write_repository) and role (Developer)."
+while read -r _ ref; do
+  [[ -n "$ref" ]] || continue
+  log "${ref#refs/heads/} is an earlier proposal of this door from an older base; close it by hand (decision 12a)."
+done <<< "$older_proposals"
 
 # --- Commit, push, and open the merge request --------------------------------
 
@@ -318,13 +339,28 @@ git -C "$push_repo" config receive.shallowUpdate true
 git -C "$repo_dir" push -q "$push_repo" "refs/heads/${branch_name}:refs/heads/${branch_name}"
 # The push options ask GitLab to open the merge request itself, so this needs
 # no API call and no `api` scope. No --force: the branch was just seen not to
-# exist, and an existing one is never overwritten.
-push_git -C "$push_repo" push -q \
+# exist, and an existing one is never overwritten. Not -q: GitLab reports a
+# push option it could not act on only as a warning on an accepted push.
+push_output="$(push_git -C "$push_repo" push \
   -o merge_request.create \
   -o "merge_request.target=${target_branch}" \
   -o "merge_request.title=Import the door from ${upstream_project} ${short_sha}" \
   -o "merge_request.label=dependencies" \
   -o merge_request.remove_source_branch \
-  "$push_url" "refs/heads/${branch_name}:refs/heads/${branch_name}" ||
+  "$push_url" "refs/heads/${branch_name}:refs/heads/${branch_name}" 2>&1)" || {
+  printf '%s\n' "$push_output" >&2
   fail "the push of ${branch_name} was refused or failed. Check DOOR_IMPORT_TOKEN's scope (write_repository) and role (Developer) on ${CI_PROJECT_PATH}."
+}
+printf '%s\n' "$push_output" >&2
+# A branch with no merge request is a half-done proposal, and the
+# branch-exists check above would treat it as proposed for ever. Delete the
+# branch this run just pushed so the next run proposes the door again.
+if push_option_errors="$(printf '%s\n' "$push_output" | grep -F 'Error encountered with push options')"; then
+  if push_git -C "$push_repo" push -q "$push_url" ":refs/heads/${branch_name}"; then
+    cleanup_note="The branch was removed so the next run proposes it again."
+  else
+    cleanup_note="The branch could not be removed: delete ${branch_name} by hand, or the next run will take the door as proposed already."
+  fi
+  fail "GitLab accepted ${branch_name} but did not open the merge request: $(printf '%s' "$push_option_errors" | tr -s ' \n' ' '). ${cleanup_note} Check DOOR_IMPORT_TOKEN's role on ${CI_PROJECT_PATH} and the push options."
+fi
 log "pushed ${branch_name}; GitLab opens the merge request into ${target_branch} from the push options."

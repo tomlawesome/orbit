@@ -2093,14 +2093,41 @@ const UNAVAILABLE_RELAY = {
  * ("configured"/"not configured"), never a host, a port or a credential —
  * the same rule the relay follows.
  *
+ * `within` bounds the wait (#1316): past that many milliseconds the fetch is
+ * aborted and the read refused, so a caller holding a screen open on the
+ * answer falls back instead of waiting on a server that never answers.
+ *
+ * @param {{ within?: number }} [options]
  * @returns {Promise<Reminders>}
  */
-export async function readReminders() {
-  /** @type {{ reminders?: Partial<Reminders> }} */
-  const body = await json(
-    await fetch("/api/settings/reminders", { credentials: "same-origin" }),
-  );
-  return remindersOf(body.reminders);
+export async function readReminders({ within } = {}) {
+  const abort = within ? new AbortController() : null;
+  const read = (async () => {
+    /** @type {{ reminders?: Partial<Reminders> }} */
+    const body = await json(
+      await fetch("/api/settings/reminders", abort
+        ? { credentials: "same-origin", signal: abort.signal }
+        : { credentials: "same-origin" }),
+    );
+    return remindersOf(body.reminders);
+  })();
+  if (!abort) return read;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  /** @type {Promise<never>} */
+  const late = new Promise((_, refuse) => {
+    timer = setTimeout(() => {
+      abort.abort();
+      refuse(new WorkspaceError("Orbit could not read your reminder timing in time", {
+        code: "reminders_timeout",
+      }));
+    }, within);
+  });
+  try {
+    return await Promise.race([read, late]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -2352,11 +2379,32 @@ export async function signOutEverywhere() {
  * @returns {Promise<?string>}  the provider's own logout URL, when it has one
  */
 export async function signOut() {
-  const { csrfToken } = await readSession();
+  /* Read the session fresh, not from the cache: another tab may have replaced
+     it, and its old CSRF token would be refused on every press. A 401 is not
+     sent through `json()`, which would bounce into the login flow; with no
+     session there is nothing to prove, and the route takes the same-origin
+     check alone. */
+  /** @type {?string} */
+  let csrfToken = null;
+  try {
+    const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin" });
+    if (sessionResponse.status !== 401) {
+      ({ csrfToken } = /** @type {Session} */ (await json(sessionResponse)));
+    }
+  } catch {
+    /* The session read failing (Orbit answering 5xx, or not reached at all)
+       must not stop someone signing out. Send the token cached earlier on this
+       page if there is one, and otherwise none: the route then takes the
+       same-origin check, or refuses, and only that refusal is an error. */
+    csrfToken = (await sessionPromise?.catch(() => null))?.csrfToken ?? null;
+  }
+  /** @type {Record<string, string>} */
+  const headers = { accept: "application/json" };
+  if (csrfToken) headers["x-csrf-token"] = csrfToken;
   const response = await fetch("/api/auth/logout", {
     method: "POST",
     credentials: "same-origin",
-    headers: { accept: "application/json", "x-csrf-token": csrfToken },
+    headers,
   });
   if (!response.ok) {
     throw new WorkspaceError("The session could not be ended", { status: response.status });

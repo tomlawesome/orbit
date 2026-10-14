@@ -4,6 +4,7 @@ import { isClaimed } from "orbit/lib/auth/bootstrap";
 import { getAuthConfig } from "orbit/lib/env";
 import { getBootPhase } from "orbit/server/boot";
 import { readPublicContactAddress } from "orbit/server/instance-contact";
+import { getKeyState } from "orbit/server/key-state";
 import { hasAnyLocalCredential } from "orbit/server/local-credentials";
 import { secondFactorConfigured } from "orbit/server/sign-in-approvals";
 
@@ -58,6 +59,13 @@ import { secondFactorConfigured } from "orbit/server/sign-in-approvals";
  * visitor. It is the presence of the `instance_authority` row and nothing
  * else, and it never says anything about the claim code, which lives only in
  * the container's log and this process's memory.
+ *
+ * `encryptionKey` (#1405) is `"usable"` or `"unusable"` (a verdict not yet
+ * taken counts as unusable): with no usable key nobody can sign in, and the
+ * door sends the reader to the locked screen instead of drawing a sign-in it
+ * would only refuse. One word: never the reason or a key id. The contact
+ * address is then the one address Orbit can still read, and the screen may
+ * show it.
  */
 export async function GET() {
   let configured = true;
@@ -97,12 +105,14 @@ export async function GET() {
     contactAddress = null;
   }
   const phase = getBootPhase();
+  const encryptionKey = getKeyState().verdict === "usable" ? "usable" : "unusable";
   return json(
     {
       configured,
       claimed,
       methods: { local: true, oidc: oidcMethodAvailable, localAccounts, secondFactor: emailSecondFactor },
       phase,
+      encryptionKey,
       contactAddress,
     },
     { headers: { "cache-control": "no-store" } },

@@ -370,6 +370,44 @@ export async function applyWorkspaceCommand(
   return readWorkspace(userId, sessionId, nextActiveId);
 }
 
+type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
+
+/**
+ * A `household.create` whose id is already a household: false when it is
+ * not, otherwise the replay. The id is an idempotency key, and the same key
+ * with a different payload is refused, never applied and never silently
+ * replayed (U3 decision 2): applying it would make the create a second rename
+ * road outside `household.setup`'s checks, and replaying it would drop the
+ * edit unseen. Its owner sending identical details gets the first result
+ * back, the session pointed at it; anyone else is refused rather than handed
+ * a household they do not own. Every check comes before the one write, so
+ * the dry run throws the same refusal and a refusal changes nothing.
+ */
+async function replayHouseholdCreate(
+  transaction: Transaction,
+  userId: string,
+  sessionId: string,
+  household: Extract<WorkspaceCommand, { type: "household.create" }>["household"],
+  dryRun: boolean,
+): Promise<boolean> {
+  const householdId = requireUuid(household.id, "Household");
+  const [stored] = await transaction.select({
+    name: households.name,
+    timezone: households.timezone,
+    currency: households.defaultCurrency,
+  }).from(households).where(eq(households.id, householdId)).limit(1);
+  if (!stored) return false;
+  const [owned] = await transaction.select({ userId: memberships.userId }).from(memberships)
+    .where(and(eq(memberships.householdId, householdId), eq(memberships.userId, userId), eq(memberships.role, "owner"))).limit(1);
+  if (!owned) throw new AppError("household_exists", "This household already exists", 409);
+  /* exact: a true retry sends the very values it sent the first time */
+  if (stored.name !== household.name || stored.timezone !== household.timezone || stored.currency !== household.currency) {
+    throw new AppError("household_create_mismatch", "This household was already created with different details", 422);
+  }
+  if (!dryRun) await transaction.update(sessions).set({ activeHouseholdId: householdId }).where(eq(sessions.id, sessionId));
+  return true;
+}
+
 /**
  * One command's checks and, unless `dryRun`, its writes, in one transaction.
  * Every branch makes its checks before its first write and returns there on a
@@ -384,6 +422,10 @@ async function runWorkspaceCommand(
   if (command.type === "household.create") {
     const householdId = requireUuid(command.household.id, "Household");
     await getDb().transaction(async (transaction) => {
+      /* The client's id is the idempotency key: a retry after a lost reply
+         sends the same id again. The lookup is the fast path; the insert's
+         ON CONFLICT below is what decides when two creates overlap. */
+      if (await replayHouseholdCreate(transaction, userId, sessionId, command.household, dryRun)) return;
       const [recoverableName] = await transaction.select({ id: households.id }).from(households)
         .where(and(
           isNotNull(households.deletionRequestedAt),
@@ -392,13 +434,22 @@ async function runWorkspaceCommand(
         )).limit(1);
       if (recoverableName) throw new AppError("household_name_recoverable", "A removed household already uses this name. Restore it, or ask an instance administrator to permanently delete it first.", 409);
       if (dryRun) return;
-      await transaction.insert(households).values({
+      /* Let the constraint decide: an overlapping create with the same id
+         waits here for the other to commit, inserts nothing, and is then a
+         replay like any other, so it never surfaces as a key violation. */
+      const [inserted] = await transaction.insert(households).values({
         id: householdId,
         name: command.household.name,
         timezone: command.household.timezone,
         defaultCurrency: command.household.currency,
         setupCompleted: command.household.onboardingComplete,
-      });
+      }).onConflictDoNothing({ target: households.id }).returning({ id: households.id });
+      if (!inserted) {
+        if (await replayHouseholdCreate(transaction, userId, sessionId, command.household, false)) return;
+        /* the row that beat this insert was gone again before it could be
+           read: nothing to replay, so refuse rather than guess */
+        throw new AppError("household_exists", "This household already exists", 409);
+      }
       await transaction.insert(memberships).values({ householdId, userId, role: "owner" });
       await transaction.insert(sections).values(command.household.sections.map((section, position) => {
         const sectionId = validUuid(section.id) ? section.id : randomUUID();

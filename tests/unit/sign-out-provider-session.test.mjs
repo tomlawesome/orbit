@@ -22,9 +22,16 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
  * What is required:
  *   - after descendFrom(url) and the farewell beat, the window location is
  *     REPLACED (location.replace, so Back does not walk into the signed-out
- *     page) with that provider URL, not merely held by an anchor;
+ *     page) with that provider URL, not merely held by an anchor. The goodbye
+ *     is first SEEN: the replace waits until the goodbye text has fully
+ *     appeared (the delay plus duration of door.css's `#dusk .farewell`
+ *     transition), and the "Sign back in" gate is never shown meanwhile;
+ *   - a page that goes hidden (tab closed or backgrounded, lid shut) before
+ *     then goes to the provider AT ONCE, since the animation's clock does not
+ *     run in a hidden tab, and does not navigate a second time later;
  *   - with a null redirectTo, there is no provider session to end: the
- *     location is not navigated and the address stays at /logout;
+ *     location is not navigated, the address stays at /logout and the gate
+ *     is shown;
  *   - when the flight component cannot be had, Chrome's fallback goes to the
  *     provider URL rather than /logout (and to /logout with a null one).
  *
@@ -175,6 +182,8 @@ let cleanups = [];
 afterEach(() => {
   for (const undo of cleanups.splice(0)) undo();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
+  delete (/** @type {any} */ (document)).visibilityState;
   delete (/** @type {any} */ (globalThis)).__orbitSignOut;
   document.body.innerHTML = "";
 });
@@ -226,31 +235,180 @@ function mountOnPage(Component, props = {}) {
   return /** @type {any} */ (mounted);
 }
 
+/**
+ * How long the goodbye text takes to be fully on the screen after the
+ * farewell beat, read from door.css's `#dusk .farewell` transition (opacity,
+ * duration then delay), in ms. The `#dusk.asdawn .farewell` rule sets no
+ * transition of its own, so this one is the one Orbit's goodbye plays.
+ */
+function goodbyeTextMs() {
+  const css = read("web/src/lib/door/door.css");
+  const rule = /#dusk \.farewell\{[^}]*\}/u.exec(css)?.[0] ?? "";
+  const transition = /transition:\s*opacity\s+([\d.]+)s\s+\S+\s+([\d.]+)s/u.exec(rule);
+  expect(transition, "door.css #dusk .farewell has an opacity transition").not.toBeNull();
+  return Math.round((Number(transition?.[1]) + Number(transition?.[2])) * 1000);
+}
+
+/** Slack for an implementation that waits a frame or two after the text is up. */
+const SLACK_MS = 250;
+/** Longer than the goodbye's own hold: nothing more may happen after it. */
+const WELL_AFTER_MS = 20000;
+
+/** @param {"hidden" | "visible"} state */
+function setVisibility(state) {
+  Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
+const gateIn = () => document.querySelector("#dusk a.gate");
+const gateShown = () => gateIn() !== null || (document.body.textContent ?? "").includes("Sign back in");
+
 describe("#1316 9a: signing out ends the identity provider's session (Leave.svelte)", () => {
-  it("replaces the window location with the provider's end-session URL once the farewell has landed", async () => {
+  it("goes to the provider's end-session URL only once the goodbye text has fully appeared", async () => {
+    vi.useFakeTimers();
+    const text = goodbyeTextMs();
+    expect(text).toBeGreaterThan(0);
     const win = fakeWindow();
     const leave = mountOnPage(Leave, { name: "The Household" });
 
     await leave.descendFrom(PROVIDER);
-    await settle();
+    expect(win.navigations).toEqual([]);
 
-    // The farewell beat has landed (the dusk has its landmark)...
+    // The farewell beat lands (the stand-in flight fires it on a 0 ms timer).
+    await vi.advanceTimersByTimeAsync(0);
     expect(document.querySelector("#dusk")?.getAttribute("data-landmark")).toBe("true");
-    // ...and the location was REPLACED with the provider's URL: not just held
-    // by the "Sign back in" anchor, and not a pushed history entry.
+    // The goodbye is only now beginning to fade in: the reader has not seen it.
+    expect(win.navigations).toEqual([]);
+
+    // Up to the instant before the text is fully on the screen: still here.
+    await vi.advanceTimersByTimeAsync(text - 1);
+    expect(win.navigations).toEqual([]);
+
+    // Once it has appeared: exactly one navigation, a REPLACE, to the provider.
+    await vi.advanceTimersByTimeAsync(1 + SLACK_MS);
+    expect(win.navigations).toEqual([{ how: "replace", to: PROVIDER }]);
+
+    // And nothing more, however long the page then lingers.
+    await vi.advanceTimersByTimeAsync(WELL_AFTER_MS);
     expect(win.navigations).toEqual([{ how: "replace", to: PROVIDER }]);
   });
 
-  it("leaves the location alone, at /logout, when there is no provider session to end", async () => {
+  it("never shows the Sign back in gate while the provider hand-off is pending", async () => {
+    vi.useFakeTimers();
+    const text = goodbyeTextMs();
+    fakeWindow();
+    const leave = mountOnPage(Leave, { name: "The Household" });
+
+    await leave.descendFrom(PROVIDER);
+    expect(gateShown()).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(document.querySelector("#dusk")?.getAttribute("data-landmark")).toBe("true");
+    expect(gateShown()).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(text - 1);
+    expect(gateShown()).toBe(false);
+  });
+
+  it("goes to the provider at once when the page is hidden before the farewell, and not again afterwards", async () => {
+    vi.useFakeTimers();
+    const text = goodbyeTextMs();
+    const win = fakeWindow();
+    const leave = mountOnPage(Leave, { name: "The Household" });
+
+    await leave.descendFrom(PROVIDER);
+    expect(win.navigations).toEqual([]);
+
+    // The tab is closed or backgrounded mid-flight: the farewell beat has not
+    // fired and, in a hidden tab, its clock never will.
+    expect(document.querySelector("#dusk")?.getAttribute("data-landmark")).toBe("false");
+    setVisibility("hidden");
+    await Promise.resolve();
+    expect(win.navigations).toEqual([{ how: "replace", to: PROVIDER }]);
+
+    // The farewell and the hold then elapse: no second navigation.
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(text + SLACK_MS);
+    await vi.advanceTimersByTimeAsync(WELL_AFTER_MS);
+    expect(win.navigations).toEqual([{ how: "replace", to: PROVIDER }]);
+  });
+
+  it("does not go early when the page merely becomes visible again before the goodbye text has appeared", async () => {
+    vi.useFakeTimers();
+    const text = goodbyeTextMs();
+    const win = fakeWindow();
+    const leave = mountOnPage(Leave, { name: "The Household" });
+
+    await leave.descendFrom(PROVIDER);
+    setVisibility("visible");
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(text - 1);
+
+    expect(win.navigations).toEqual([]);
+  });
+
+  it("goes to the provider at once when the page is already hidden as the descent starts", async () => {
+    vi.useFakeTimers();
+    const text = goodbyeTextMs();
+    const win = fakeWindow();
+    const leave = mountOnPage(Leave, { name: "The Household" });
+
+    // The reader pressed Sign out and locked the phone at once: by the time
+    // the descent starts the page is already hidden, so no visibilitychange
+    // will ever fire for it. None is dispatched here.
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    await leave.descendFrom(PROVIDER);
+    await Promise.resolve();
+    expect(win.navigations).toEqual([{ how: "replace", to: PROVIDER }]);
+
+    // The farewell and the hold then elapse: no second navigation.
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(text + SLACK_MS);
+    await vi.advanceTimersByTimeAsync(WELL_AFTER_MS);
+    expect(win.navigations).toEqual([{ how: "replace", to: PROVIDER }]);
+  });
+
+  it("does nothing, and stays at /logout, when the page is already hidden and there is no provider session", async () => {
+    vi.useFakeTimers();
+    const text = goodbyeTextMs();
+    const win = fakeWindow();
+    const leave = mountOnPage(Leave, { name: "The Household" });
+
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    await leave.descendFrom(null);
+    await Promise.resolve();
+    expect(win.navigations).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(text + SLACK_MS);
+    await vi.advanceTimersByTimeAsync(WELL_AFTER_MS);
+    expect(win.navigations).toEqual([]);
+    expect(win.addresses.at(-1)).toBe("/logout");
+  });
+
+  it("leaves the location alone, at /logout, when there is no provider session to end, and then shows the gate", async () => {
+    vi.useFakeTimers();
+    const text = goodbyeTextMs();
     const win = fakeWindow();
     const leave = mountOnPage(Leave, { name: "The Household" });
 
     await leave.descendFrom(null);
-    await settle();
+    // The page going hidden has no provider session to end.
+    setVisibility("hidden");
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(document.querySelector("#dusk")?.getAttribute("data-landmark")).toBe("true");
+    // After the farewell the gate IS shown, as today, pointing home.
+    expect(gateIn()?.getAttribute("href")).toBe("/");
+    expect(gateIn()?.textContent).toBe("Sign back in");
+
+    await vi.advanceTimersByTimeAsync(text + SLACK_MS);
+    await vi.advanceTimersByTimeAsync(WELL_AFTER_MS);
     expect(win.navigations).toEqual([]);
     expect(win.addresses.at(-1)).toBe("/logout");
+    expect(gateIn()?.getAttribute("href")).toBe("/");
   });
 });
 

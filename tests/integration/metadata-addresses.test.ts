@@ -25,6 +25,8 @@ import { AuthError } from "@/lib/auth/errors";
 import { provisionIdentity } from "@/lib/auth/provision";
 import type { VerifiedIdentity } from "@/lib/auth/oidc";
 import { hashPassword } from "@/lib/auth/password";
+import { createSession } from "@/lib/auth/session";
+import { getAuthConfig } from "@/lib/env";
 import { deriveDocumentKeyId, getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { rotationComplete, runKekRotationToCompletion, type RotationKeys } from "@/server/documents/rewrap-worker";
 import { createLocalUser, verifyCredential } from "@/server/local-credentials";
@@ -220,12 +222,18 @@ describe("an instance with no usable key (#969, and why #970 exists)", () => {
     }
   });
 
-  it("still signs an identity the provider already knows in, because that never touched the address", async () => {
+  /* #1405 retitled this: with no usable key the repository still matches an
+     identity on issuer and subject (the regression #969 named), but Orbit as a
+     whole is closed, so no session can follow. The tolerant sign-in code is
+     left in place and removed separately (#1407). */
+  it("still matches an identity the provider already knows on issuer and subject, and no session can follow (#1405)", async () => {
     const identity = identityFor("oidc-survivor@example.invalid");
     const provisioned = await provisionIdentity(identity, { bootstrap: true });
 
     const restore = lockTheInstance();
     try {
+      const { KeyUnavailableError, setKeyStateForTests } = await import("@/server/key-state");
+      setKeyStateForTests({ verdict: "unusable", reason: "missing" });
       /* The regression #969 names explicitly. `external_identities` matches on
          issuer and subject, so a missing key must not shut these people out. */
       const again = await provisionIdentity(identity);
@@ -237,8 +245,14 @@ describe("an instance with no usable key (#969, and why #970 exists)", () => {
       const stored = await storedUser(provisioned.id);
       expect(stored.emailEnc).not.toBeNull();
       expect(stored.email).toBeNull();
+
+      // And that is as far as it goes: nobody is signed in.
+      await expect(createSession(again.id, getAuthConfig())).rejects.toBeInstanceOf(KeyUnavailableError);
     } finally {
       restore();
+      await import("@/server/key-state")
+        .then((module) => module.setKeyStateForTests({ verdict: "usable", heldKeyId: getDocumentConfig().keyId }))
+        .catch(() => undefined);
     }
   });
 

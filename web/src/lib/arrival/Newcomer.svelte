@@ -32,14 +32,14 @@
    * @type {{
    *   galaxy?: Record<string, import('$lib/data/chart.js').GalaxyEntry>,
    *   visibleHouseholds?: Array<{ id: string, name: string, requested?: boolean }>,
-   *   onask?: (row: { id: string, name: string, requested?: boolean }) => void,
+   *   onask?: (target: { id: string, name: string, requested?: boolean } | { name: string, reason: string, householdId?: string | null, link?: string, road?: "join" | "carry-on" }) => void,
    *   oncreate?: () => void,
    *   showChooser?: boolean,
    *   drawerOpen?: boolean,
    *   name?: string,
    *   timezone?: string,
    *   currency?: string,
-   *   rejected?: { name: string, reason: string, householdId?: string | null } | null,
+   *   rejected?: { name: string, reason: string, householdId?: string | null, link?: string, road?: "join" | "carry-on" } | null,
    *   busy?: boolean,
    *   onsubmit?: () => void,
    *   onnaming?: import('svelte/elements').FormEventHandler<HTMLInputElement>,
@@ -93,10 +93,12 @@
   /**
    * "ask to join it →" under a refused name: the drawer closes and the row
    * that holds the name takes focus. The request is NOT filed on the
-   * reader's behalf — asking to join is theirs to do.
-   * @param {{ householdId?: string | null }} refusal
+   * reader's behalf — asking to join is theirs to do. Any other road on the
+   * line ("carry on", U3) is the host's to take, and goes to it whole.
+   * @param {{ name: string, reason: string, householdId?: string | null, link?: string, road?: "join" | "carry-on" }} refusal
    */
   async function askFromDrawer(refusal) {
+    if (refusal?.road !== "join") { onask(refusal); return; }
     drawerOpen = false;
     await tick();
     const id = refusal?.householdId;
@@ -268,7 +270,14 @@
   <div class="belong" class:drawn={drawerOpen} role="group" aria-label="Where do you belong?">
     <div class="top">
       <h2>where do you belong?</h2>
-      <p>the systems around you are labels until someone lets you in</p>
+      <!-- On an empty instance nobody can let the reader in, so the line says
+           what the sky holds and what is open to them. The same test as the
+           list below, inverted. -->
+      {#if rows.length === 0}
+        <p>no systems out here yet — the first one is yours to name</p>
+      {:else}
+        <p>the systems around you are labels until someone lets you in</p>
+      {/if}
     </div>
     {#if rows.length > 0}
     <ul>

@@ -676,7 +676,7 @@
      never touched. ABSENCE IS THE HELM — every deep link, every bookmark, and
      the state this sheet draws. The demos rail flips it. -->
 <a class="back" id="back" href="settings.html">← SETTINGS</a>
-<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick="toggleAccount(this)"NH</button>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick="toggleAccount(this)">NH</button>
 <div class="account" id="account" role="region" aria-label="Account and menu">
   <div class="who"><b>Ned Harlow</b><span>Harlow Home · owner</span></div>
   <nav>
@@ -874,7 +874,7 @@
 
       <div class="roster own-only" id="roster-own">
         <div class="memb">
-          <span class="avatar" aria-hidden="true"NH</span>
+          <span class="avatar" aria-hidden="true">NH</span>
           <b>Ned Harlow <em>· you</em></b>
           <span class="role owner">owner</span>
           <button class="ghost" id="handbtn" onclick="toggleDrawer('handover', this)">hand over →</button>
@@ -887,13 +887,13 @@
           an owner can’t be removed and can’t leave — hand the system over first
         </p>
         <div class="memb">
-          <span class="avatar" aria-hidden="true"EH</span>
+          <span class="avatar" aria-hidden="true">EH</span>
           <b>Emma Harlow</b>
           <span class="role">member</span>
           <button class="ghost" data-rest="remove" onclick="twoTap(this,'tap again to remove',()=>dropMember(this))">remove</button>
         </div>
         <div class="memb">
-          <span class="avatar" aria-hidden="true"RH</span>
+          <span class="avatar" aria-hidden="true">RH</span>
           <b>Rob Harlow</b>
           <span class="role">member</span>
           <button class="ghost" data-rest="remove" onclick="twoTap(this,'tap again to remove',()=>dropMember(this))">remove</button>
@@ -908,12 +908,12 @@
 
       <div class="roster mem-only">
         <div class="memb">
-          <span class="avatar" aria-hidden="true"EH</span>
+          <span class="avatar" aria-hidden="true">EH</span>
           <b>Emma Harlow</b>
           <span class="role owner">owner</span>
         </div>
         <div class="memb">
-          <span class="avatar" aria-hidden="true"NH</span>
+          <span class="avatar" aria-hidden="true">NH</span>
           <b>Ned Harlow <em>· you</em></b>
           <span class="role">member</span>
           <button class="ghost" data-rest="leave this system" data-moment="moment-leave"
@@ -921,7 +921,7 @@
         </div>
         <p class="moment" id="moment-leave">nothing you added goes with you — the entries stay with Seaside Cottage</p>
         <div class="memb">
-          <span class="avatar" aria-hidden="true"RH</span>
+          <span class="avatar" aria-hidden="true">RH</span>
           <b>Rob Harlow</b>
           <span class="role">member</span>
         </div>
@@ -942,7 +942,7 @@
       <div class="block own-only knocking">
         <h4>Knocking on the door</h4>
         <div class="joinreq">
-          <span class="avatar" aria-hidden="true"SH</span>
+          <span class="avatar" aria-hidden="true">SH</span>
           <p><b>Sue Harlow</b> asks to join <b>Harlow Home</b> · 2d ago</p>
           <button class="yes" onclick="approveJoin(this)">approve</button>
           <button onclick="declineJoin(this)">decline</button>
@@ -952,7 +952,7 @@
 
       <div class="block own-only" id="addpeople">
         <h4>Add someone who already has an account</h4>
-        <div class="cand"><span class="avatar" aria-hidden="true"BH</span><b>Ben Harlow</b>
+        <div class="cand"><span class="avatar" aria-hidden="true">BH</span><b>Ben Harlow</b>
           <button class="ghost" onclick="addMember('Ben Harlow','BH')">add</button></div>
         <div class="cand"><span class="avatar" aria-hidden="true">AR</span><b>Ada Reid</b>
           <button class="ghost" onclick="addMember('Ada Reid','AR')">add</button></div>
@@ -1489,7 +1489,7 @@ function setRole(role){
     for (const open of document.querySelectorAll(".handover.open")) open.classList.remove("open");
   }
   for (const control of document.querySelectorAll(".lock")) control.disabled = member;
-  /* the read-only view is a DIFFERENT system — Seaside Cottage, which Tom is
+  /* the read-only view is a DIFFERENT system — Seaside Cottage, which Ned is
      only a member of — so the identity card has to say so */
   const field = document.getElementById("hhname");
   if (field) field.value = member ? "Seaside Cottage" : "Harlow Home";
@@ -1613,7 +1613,7 @@ const tminus = (due, today) => {
    Verbatim from web/src/lib/data/fixtures/workspace.js. BOTH households the
    demos can put on this desk are here, because the backdrop has to tell the
    truth in both states: the owner sees Harlow Home, and flipping to
-   "non-owner" puts you inside SEASIDE COTTAGE — Emma's system, which Tom is
+   "non-owner" puts you inside SEASIDE COTTAGE — Emma's system, which Ned is
    only a member of — so the sky behind the cards changes to that system's
    geometry. Two different households, two different skies, one law and one
    rule. Real ids, real due dates, real costs: change a date and the star

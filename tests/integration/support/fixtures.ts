@@ -24,7 +24,7 @@ import {
   userPreferences,
   users,
 } from "@/db/schema";
-import { resetDocumentConfigForTests } from "@/server/documents/config";
+import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 
 export type FixtureRole = "owner" | "member" | "outsider" | "admin" | "disabled";
 
@@ -41,6 +41,16 @@ process.env.DOCUMENT_SCAN_MODE = "disabled";
    with encrypted addresses, so a stale "there is no key" made whole files
    fail, and which files depended on import order. */
 resetDocumentConfigForTests();
+
+/* #1405: the integration suite calls route handlers directly and never boots
+   the server, so the startup key check has not run and its verdict would read
+   "unknown", which every gate treats as closed. Every file here is about
+   something other than the key unless it says so, so the baseline is a usable
+   key; a file that is about the key sets its own verdict. Loaded tolerantly
+   because the module did not exist before #1405 was built. */
+await import("@/server/key-state")
+  .then((module) => module.setKeyStateForTests({ verdict: "usable", heldKeyId: getDocumentConfig().keyId }))
+  .catch(() => undefined);
 
 export interface IntegrationSession {
   userId: string;
@@ -65,7 +75,8 @@ export interface IntegrationFixture {
   secondDocument: { id: string; displayName: string };
   archive: { id: string };
   users: Record<FixtureRole | "secondOwner", FixtureUser>;
-  session(role: FixtureRole | "secondOwner"): Promise<IntegrationSession>;
+  /** `idToken` is the provider's ID token for a session that began at the provider (#1316 decision 26a). */
+  session(role: FixtureRole | "secondOwner", options?: { idToken?: string }): Promise<IntegrationSession>;
   expireSession(session: IntegrationSession): Promise<void>;
   removeMember(): Promise<void>;
   disableUser(role: FixtureRole): Promise<void>;
@@ -243,10 +254,10 @@ export async function createIntegrationFixture(label: string): Promise<Integrati
     expiresAt: new Date(Date.now() + 86_400_000),
   }).returning({ id: portableArchives.id });
 
-  async function session(role: FixtureRole | "secondOwner"): Promise<IntegrationSession> {
+  async function session(role: FixtureRole | "secondOwner", options: { idToken?: string } = {}): Promise<IntegrationSession> {
     const userId = fixtureUsers[role].id;
     const config = getAuthConfig();
-    const created = await createSession(userId, config);
+    const created = await createSession(userId, config, undefined, options.idToken ? { idToken: options.idToken } : undefined);
     /* A plain literal, not a framework request (#735). `readSession` takes a
        `CookieReader`, which is one method — `src/lib/http.ts` says so in as
        many words, and the whole point of that seam is that a test does not

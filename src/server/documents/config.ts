@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { readRuntimeSecret } from "@/lib/runtime-secret";
+import { inspectRuntimeSecret, readRuntimeSecret } from "@/lib/runtime-secret";
 
 const MIB = 1_048_576;
 const GIB = 1_073_741_824;
@@ -91,6 +91,42 @@ export function deriveDocumentKeyId(keyEncryptionKey: Buffer): string {
 }
 
 let cachedDocumentConfig: DocumentConfig | undefined;
+
+/**
+ * Why the key settings hold no usable key, read from the settings alone
+ * (#1405): the first four of the five "no usable key" faults. The fifth, a key
+ * that is not the one the database was written under, needs the database and
+ * is `src/server/key-state.ts`'s to find.
+ */
+export type DocumentKeyProblem = "missing" | "unreadable" | "malformed" | "both_forms";
+
+const KEY_HEX = /^[a-fA-F0-9]{64}$/;
+
+/**
+ * The reason the key settings are unusable, or null when they hold a key
+ * (#1405). Reads only `DOCUMENT_KEK` and `DOCUMENT_KEK_NEXT` (each directly or
+ * through `_FILE`), so an unrelated bad document setting never counts as a key
+ * fault. Never throws, and never returns key material or a path.
+ */
+export function documentKeyProblem(environment: NodeJS.ProcessEnv = process.env): DocumentKeyProblem | null {
+  const current = inspectRuntimeSecret(environment, "DOCUMENT_KEK");
+  if (current.state === "both_forms") return "both_forms";
+  if (current.state === "unreadable") return "unreadable";
+  if (current.state !== "present") return "missing";
+  if (!KEY_HEX.test(current.value)) return "malformed";
+
+  /* The rotation key is optional, but one that is set must be usable: the
+     full configuration refuses to load otherwise, so it is a key fault too. */
+  const next = inspectRuntimeSecret(environment, "DOCUMENT_KEK_NEXT");
+  if (next.state === "both_forms") return "both_forms";
+  if (next.state === "unreadable") return "unreadable";
+  if (next.state === "empty_file") return "malformed";
+  if (next.state === "present") {
+    if (!KEY_HEX.test(next.value)) return "malformed";
+    if (next.value.toLowerCase() === current.value.toLowerCase()) return "malformed";
+  }
+  return null;
+}
 
 /**
  * The document retention window alone, read without the document key (#1336).

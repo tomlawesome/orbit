@@ -103,9 +103,13 @@ rig or handing a check to the owner. It lists each script; the rules that matter
   owner-review bed), `cleanup-stacks.sh` (lists and removes `orbit*` projects).
 - Pins: `sidecar-pins.mjs` (`check`, `sync`), `ci/repin-base-image.sh`,
   `bump-launcher-pin.sh`.
-- WebKit runs on this host only inside the CI Playwright image;
-  `test-e2e-local.sh` does that itself. Run a WebKit-affected e2e change on both
-  WebKit projects locally before pushing (owner, 2026-10-06).
+- Browsers: test a change on the browsers and sizes it touches, and no more.
+  By default that is `--project desktop-chromium`; work aimed at a browser or a
+  phone size runs on that project too (WebKit-specific work on both WebKit
+  projects, before pushing). Never run every browser and size by habit: the
+  full matrix is for promotion (owner, 2026-10-06 and 2026-10-14). WebKit runs
+  on this host only inside the CI Playwright image; `test-e2e-local.sh` does
+  that itself.
 - `scripts/ci/prove-content-id.sh` runs by hand or as a manual job only; it
   builds the image three times.
 

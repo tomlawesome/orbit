@@ -9,7 +9,7 @@
  * the kind schedules, are the engine's (ADR-0034, #1325), asked through its
  * dry run as the rows change (EditSession).
  */
-import { entryOf, intentOf, REMINDER_DEFAULT } from "../../routes/create/entry.js";
+import { entryOf, intentOf, reminderPairOf } from "../../routes/create/entry.js";
 import { every, symbolOf } from "$lib/format.js";
 import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
 
@@ -185,13 +185,16 @@ export function editsOf(draft) {
  * home drawer", owner-decisions §34, superseding §27's belt card). What the
  * relay read, as the item it would become, so the drawer's own rows edit it
  * exactly as they edit a filed item: the reminders a new entry starts with
- * (create's, as the review sheet's form starts them), the section the
- * approval would file it into unless another is chosen.
+ * (the member's own pair from Settings, as the create forms and the review
+ * sheet start them, or the default when it could not be read), the section
+ * the approval would file it into unless another is chosen.
  * @param {import('$lib/data/workspace.js').ReceiptSuggestion} suggestion
  * @param {{ householdId: string, sectionId: string | null }} where
+ * @param {{ reminders?: { firstWarningDays: number | null, finalWarningDays: number | null } | null }} [read]
+ *   the member's pair, as workspace.js readReminders answers it
  * @returns {import('$lib/data/commands.js').CommandItem}
  */
-export function proposedItemOf(suggestion, { householdId, sectionId }) {
+export function proposedItemOf(suggestion, { householdId, sectionId }, { reminders } = {}) {
   const p = suggestion.proposal ?? {};
   return {
     id: suggestion.id,
@@ -207,7 +210,7 @@ export function proposedItemOf(suggestion, { householdId, sectionId }) {
     recurrenceMonths: p.recurrenceMonths ?? null,
     costMinor: p.costMinor ?? suggestion.costMinor ?? null,
     currency: p.currency ?? suggestion.currency ?? "GBP",
-    reminderDays: [...REMINDER_DEFAULT],
+    reminderDays: reminderPairOf(reminders),
     notes: p.notes ?? null,
   };
 }

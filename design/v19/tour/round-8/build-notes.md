@@ -533,7 +533,6 @@ note the measured lengths; screenshot every held mark into the PR or a
 - `owner-decisions.md` updated; round 8 folder and this file committed under
   `design/v19/tour/round-8/`.
 
-
 ## Addendum A (2026-09-30) — the lift inside a tight clip
 
 **The failure.** `film-hatch` fails the pocket-measure `cut` check at all four
@@ -617,4 +616,3 @@ original inline style; a control with room above (parent 8px taller,
 `padding-top:4px`) is still translated. `v19-tour-chapter-your-sky.test.mjs`:
 pocket dry/wet run of the settings beat leaves `[data-row-face]`'s
 `style.transform` empty.
-

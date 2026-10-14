@@ -1,13 +1,14 @@
-import { ZodError } from "zod";
+import { ZodError, z } from "zod";
 import { getAuthConfig } from "@/lib/env";
 import { databaseConnectionString } from "@/db";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
-import { getDocumentConfig } from "@/server/documents/config";
+import { documentKeyProblem, getDocumentConfig } from "@/server/documents/config";
 import { getNotificationWorkerConfig } from "@/server/notification-worker";
 import { setConfigurationProblems } from "@/lib/configuration-problems";
 import {
   logFormats,
   logLevels,
+  operationalDetail,
   operationalDetailFromValidatorMessage,
   type ConfigurationSetting,
   type OperationalDetail,
@@ -16,7 +17,8 @@ import {
 export type StartupConfigurationCode =
   | "configuration_version"
   | "configuration_core"
-  | "configuration_optional";
+  | "configuration_optional"
+  | "configuration_key";
 
 export type StartupConfigurationIssue = {
   /*
@@ -87,6 +89,17 @@ function detailFromCaughtError(error: unknown): OperationalDetail | undefined {
   return undefined;
 }
 
+/** A copy of the environment holding a placeholder key, for validating everything else. */
+function withPlaceholderKey(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return {
+    ...environment,
+    DOCUMENT_KEK: "00".repeat(32),
+    DOCUMENT_KEK_FILE: undefined,
+    DOCUMENT_KEK_NEXT: undefined,
+    DOCUMENT_KEK_NEXT_FILE: undefined,
+  };
+}
+
 /** Validates all startup prerequisites without opening a database connection. */
 export function validateStartupConfiguration(environment: NodeJS.ProcessEnv = process.env): void {
   const issues: StartupConfigurationIssue[] = [];
@@ -128,10 +141,32 @@ export function validateStartupConfiguration(environment: NodeJS.ProcessEnv = pr
   } catch (error) {
     issues.push({ field: "database", code: "configuration_core", detail: detailFromCaughtError(error) });
   }
+  /*
+   * #1405: a document key that is missing, unreadable, malformed or set in
+   * both forms no longer stops the container. It is its own non-blocking
+   * problem, and the process comes up locked so it can say so: the members'
+   * screen, the log and the operator alert (src/server/key-state.ts). The
+   * reason word names which fault, never the key or a path.
+   *
+   * The rest of the document settings are still checked, with the key fields
+   * replaced by a syntactically valid placeholder in a COPY of the
+   * environment (a non-`process.env` argument is never cached), so a missing
+   * key cannot hide a bad DOCUMENTS_ROOT, which stays core and fatal.
+   */
+  const keyProblem = documentKeyProblem(environment);
+  if (keyProblem) {
+    issues.push({ field: "documents", code: "configuration_key", detail: operationalDetail`DOCUMENT_KEK is ${keyProblem}` });
+  }
   try {
-    getDocumentConfig(environment);
+    getDocumentConfig(keyProblem ? withPlaceholderKey(environment) : environment);
   } catch (error) {
     issues.push({ field: "documents", code: "configuration_core", detail: detailFromCaughtError(error) });
+  }
+  /* OPERATOR_ALERT_ADDRESS (#1405) is optional; a value that is not an
+     address is reported and otherwise ignored, so the fault stays in the log. */
+  const alertAddress = environment.OPERATOR_ALERT_ADDRESS?.trim();
+  if (alertAddress && !z.email().safeParse(alertAddress).success) {
+    issues.push({ field: "alerts", code: "configuration_optional" });
   }
   const notificationEnvironment = {
     ...environment,
@@ -163,6 +198,6 @@ export function validateStartupConfiguration(environment: NodeJS.ProcessEnv = pr
   }
   issues.push(...selectedProfileConfiguration(environment));
   setConfigurationProblems(issues);
-  const blockingIssues = issues.filter((issue) => issue.code !== "configuration_optional");
+  const blockingIssues = issues.filter((issue) => issue.code !== "configuration_optional" && issue.code !== "configuration_key");
   if (blockingIssues.length > 0) throw new StartupConfigurationError(issues);
 }

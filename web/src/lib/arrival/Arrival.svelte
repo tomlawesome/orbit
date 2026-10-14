@@ -6,14 +6,14 @@
   import Flight from "$lib/flight/Flight.svelte";
   import { consumeLaunch, markLaunch } from "$lib/flight/arrival.js";
   import { fetchFlightAhead } from "$lib/flight/fetch-ahead.js";
-  import { applyCommand, readWorkspace, requestToJoin, wordsOf } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand, readWorkspace, requestToJoin, wordsOf } from "$lib/data/workspace.js";
   import { labelledSkyOf } from "$lib/data/chart.js";
   import { ARRIVAL_FIXTURES } from "$lib/data/fixtures/arrival.js";
   import Newcomer from "./Newcomer.svelte";
   import {
     ASKING, DOOR, INVITED, NEWCOMER, ONWARD,
     arrivalStageOf, collidingHouseholdOf, createSystemCommand, isInvitedLanding,
-    preferredCurrency, preferredTimeZone,
+    browserCurrency, preferredCurrency, preferredTimeZone,
   } from "./stage.js";
   /* The ring and the card themselves (#914): shared with the sign-in door's
      four cards since the owner's 2026-09-09 composition ruling, and drawn
@@ -58,7 +58,12 @@
    * (owner-decisions.md:684, #862 round 3) for the arrival only.
    */
   /** @typedef {import("./stage.js").VisibleHousehold} VisibleHousehold */
-  /** @typedef {{ name: string, reason: string, householdId: string | null }} Rejected */
+  /**
+   * The refusal line under the name, and its one road where it has one:
+   * `join` asks to join the household it collided with, `carry-on` goes into
+   * the household this card already created (U3 decision 3).
+   * @typedef {{ name: string, reason: string, householdId?: string | null, link?: string, road?: "join" | "carry-on" }} Rejected
+   */
 
   let { data } = $props();
 
@@ -108,7 +113,7 @@
 
   let name = $state("");
   let timezone = $state(preferredTimeZone(detectedZone()));
-  let currency = $state(preferredCurrency(detectedCurrency()));
+  let currency = $state(preferredCurrency(browserCurrency()));
 
   /*
    * IS A LAUNCH OWED? Taken at initialisation, before anything else on this
@@ -161,17 +166,6 @@
   function detectedZone() {
     try {
       return Intl.DateTimeFormat().resolvedOptions().timeZone;
-    } catch {
-      return null;
-    }
-  }
-  function detectedCurrency() {
-    try {
-      const region = new Intl.Locale(navigator.language).region;
-      if (!region) return null;
-      return (/** @type {Record<string, string>} */ ({
-        GB: "GBP", IE: "EUR", FR: "EUR", DE: "EUR", US: "USD", CA: "CAD", AU: "AUD", NZ: "NZD",
-      }))[region] ?? null;
     } catch {
       return null;
     }
@@ -293,7 +287,7 @@
     if (fixtureReject) {
       const clash = collidingHouseholdOf(fixtureReject, visibleHouseholds);
       name = fixtureReject;
-      rejected = { name: fixtureReject, reason: "already exists here", householdId: clash?.id ?? "fixture" };
+      rejected = { name: fixtureReject, reason: "already exists here", householdId: clash?.id ?? "fixture", link: JOIN_LINK, road: "join" };
       setTimeout(() => body().classList.add("rejected"), 0);
     }
     stage = NEWCOMER;
@@ -356,6 +350,14 @@
    * no dawn and no second climb, and the POL-1 arrival brings the dial in with
    * the new name, the first-run tour after it as for anyone.
    */
+  /* The household this card's Create sends, for the card's whole life: one
+     id, cleared only when a create succeeds, and the details first sent with
+     it, so a refusal can name what landed (U3 decision 1). */
+  /** @type {{ id: string, name: string, timezone: string, currency: string } | null} */
+  let pendingCreate = null;
+
+  const JOIN_LINK = "ask to join it →";
+
   async function submit() {
     if (busy) return;
     const wanted = name.trim();
@@ -365,30 +367,167 @@
        live system on this instance as the server sees it, so a collision here
        is a fact and the road the line offers — ask to join it — is real. */
     const clash = collidingHouseholdOf(wanted, visibleHouseholds);
-    if (clash) { reject(wanted, "already exists here", clash.id); return; }
+    if (clash) { reject(wanted, "already exists here", { householdId: clash.id, link: JOIN_LINK, road: "join" }); return; }
 
     busy = true;
     body().classList.remove("rejected");
     try {
       if (fixture) await new Promise((resolve) => setTimeout(resolve, 60));
-      else await applyCommand(createSystemCommand({ name: wanted, timezone, currency }));
+      else {
+        /* The id is the idempotency key, kept across presses whatever was
+           edited between them: a second press can never mint a second
+           household. The server answers the same id definitely: replayed if
+           it landed unchanged, refused with `household_create_mismatch` if it
+           landed with other details, made if it never landed, so the next
+           press needs no read of its own. */
+        pendingCreate ??= { id: crypto.randomUUID(), name: wanted, timezone, currency };
+        const { id } = pendingCreate;
+        await applyCommand(createSystemCommand({ name: wanted, timezone, currency }, { uuid: () => id }));
+      }
     } catch (error) {
+      if (error instanceof TypeError || isGatewayAnswer(error)) {
+        /* No answer came back ("Failed to fetch", or the proxy in front of
+           Orbit answering for it), which is neither a success nor a failure:
+           query state before telling. The button stays held while the
+           session is read, once. */
+        const landed = await landedAfterSilence(pendingCreate?.id);
+        if (disposed) return;
+        if (landed) { pendingCreate = null; location.assign("/home"); return; }
+        busy = false;
+        /* Not landed keeps the id too: the create may still be on its way,
+           and a replay of it is harmless. */
+        reject(wanted, landed === false
+          ? "wasn't created — no answer came back. Try again"
+          : "may or may not have been created — Orbit can't be reached. Try again");
+        return;
+      }
+      if (error instanceof WorkspaceError && error.code === "household_create_mismatch" && pendingCreate) {
+        /* It landed, but which press landed is not known here: an earlier
+           one whose reply was lost may have carried an edited name. Query
+           state rather than guess: the workspace is read once and the line
+           names the household as stored, or the first-sent name when that
+           read cannot say. Worded here from the code, as the clash line is;
+           the server's message is for API readers and logs. */
+        const { id } = pendingCreate;
+        const stored = await storedNameOf(id);
+        if (disposed) return;
+        busy = false;
+        reject(stored ?? pendingCreate.name, "was already created", {
+          householdId: id, link: "carry on, and change it in settings →", road: "carry-on",
+        });
+        return;
+      }
       busy = false;
       /* One warm line, in the server's own words. Nothing was created, and the
          answers are visibly still in the fields, so neither is said. */
-      reject(wanted, wordsOf(error, "could not be created"), null);
+      reject(wanted, wordsOf(error, "could not be created"));
       return;
     }
+    pendingCreate = null;
+    location.assign("/home");
+  }
+
+  /**
+   * A gateway's own bare answer (502, 503, 504 with no Orbit error code):
+   * the proxy in front of Orbit spoke, not Orbit, so whether the create
+   * landed is as unknown as when nothing answered at all.
+   * @param {unknown} error
+   */
+  function isGatewayAnswer(error) {
+    return error instanceof WorkspaceError && !error.code
+      && (error.status === 502 || error.status === 503 || error.status === 504);
+  }
+
+  /* How long a read after an unknown outcome is given before it is aborted
+     and counts as unknown too, so a hung request never holds the button. */
+  const READ_BOUND_MS = 2000;
+
+  /**
+   * One read, aborted once READ_BOUND_MS has passed.
+   * @template T
+   * @param {(signal: AbortSignal) => Promise<T>} read
+   * @returns {Promise<T>}
+   */
+  async function bounded(read) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), READ_BOUND_MS);
+    try {
+      return await read(controller.signal);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * After a create that got no answer, whether it landed, read off the
+   * session the way decide() reads it: true when the session points at the
+   * household sent, false when it answers and does not, null when it cannot
+   * be read either (or not in time) and nothing is known.
+   * @param {string | undefined} householdId
+   * @returns {Promise<boolean | null>}
+   */
+  async function landedAfterSilence(householdId) {
+    try {
+      return await bounded(async (signal) => {
+        const response = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store", signal });
+        if (!response.ok) return null;
+        const session = await response.json();
+        return Boolean(householdId) && session?.activeHouseholdId === householdId;
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The name the household with this id is stored under, read off the
+   * member's own households (a member's `visibleHouseholds` is empty: it is
+   * filled only for a reader with no household); null when the read fails,
+   * does not answer in time, or it is not among them.
+   * @param {string} householdId
+   * @returns {Promise<string | null>}
+   */
+  async function storedNameOf(householdId) {
+    try {
+      const workspace = await bounded((signal) => readWorkspace(
+        /** @type {typeof fetch} */ ((url, init) => fetch(url, { ...init, signal }))));
+      return workspace?.households?.find((household) => household.id === householdId)?.name ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The "already created" line's road: the household this card made is
+   * theirs, so it becomes the session's and the reader goes home, where
+   * settings can change what was edited. No second create is sent. A
+   * failure, lost or refused, says so on the same line and leaves its link
+   * there to press again.
+   * @param {string | null | undefined} householdId
+   */
+  async function carryOn(householdId) {
+    if (busy || !householdId) return;
+    busy = true;
+    try {
+      if (!fixture) await applyCommand({ type: "household.activate", householdId });
+    } catch {
+      busy = false;
+      reject(rejected?.name ?? pendingCreate?.name ?? name.trim(), "was already created — couldn't open it", {
+        householdId, link: "try again →", road: "carry-on",
+      });
+      return;
+    }
+    pendingCreate = null;
     location.assign("/home");
   }
 
   /**
    * @param {string} refused
    * @param {string} reason
-   * @param {string | null} householdId
+   * @param {{ householdId: string, link: string, road: "join" | "carry-on" }} [road]
    */
-  function reject(refused, reason, householdId) {
-    rejected = { name: refused, reason, householdId };
+  function reject(refused, reason, road) {
+    rejected = { name: refused, reason, householdId: null, ...road };
     setTimeout(() => body().classList.add("rejected"), 30);
   }
 
@@ -399,6 +538,16 @@
       rejected = null;
       body().classList.remove("rejected");
     }
+  }
+
+  /**
+   * The card's one link road, `onask`: a row from the chooser asks to join
+   * it; the "already created" line carries on into the household made here.
+   * @param {VisibleHousehold | Rejected} target
+   */
+  function follow(target) {
+    if ("road" in target && target.road === "carry-on") return carryOn(target.householdId);
+    return ask(/** @type {VisibleHousehold} */ (target));
   }
 
   /** The row, and the constellation behind it: POST the real join request. */
@@ -449,7 +598,7 @@
          not theirs to pick. -->
     <!-- #1263: the create drawer lives in the belong card, and its three
          answers, its refusal and its submit stay here with the host. -->
-    <Newcomer {galaxy} {visibleHouseholds} onask={ask} oncreate={toDrawer}
+    <Newcomer {galaxy} {visibleHouseholds} onask={follow} oncreate={toDrawer}
               showChooser={stage !== INVITED}
               bind:drawerOpen bind:name bind:timezone bind:currency {rejected} {busy}
               onsubmit={submit} onnaming={naming} />

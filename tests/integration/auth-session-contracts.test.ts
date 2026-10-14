@@ -1,15 +1,24 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { SignJWT, generateKeyPair } from "jose";
 import { readSetCookie } from "./support/set-cookie";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { auditLog, sessions } from "@/db/schema";
+import { auditLog, metadataDamageSightings, metadataKeys, sessions } from "@/db/schema";
 import { AuthError } from "@/lib/auth/errors";
-import { getAuthConfig } from "@/lib/env";
+import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { sessionCookieName } from "@/lib/auth/cookies";
 import { createCsrfToken, hashSessionToken } from "@/lib/auth/crypto";
 import * as oidc from "@/lib/auth/oidc";
+import { createSession } from "@/lib/auth/session";
+import { hashPassword } from "@/lib/auth/password";
+import { deriveDocumentKeyId, getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
+import { rotationComplete, runKekRotationToCompletion, type RotationKeys } from "@/server/documents/rewrap-worker";
+import { setInstanceUserDisabled } from "@/server/admin-repository";
+import { setPassword } from "@/server/local-credentials";
+import { flushMetadataDamageSightings } from "@/server/metadata/damage-sightings";
+import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
@@ -17,6 +26,16 @@ import {
   type IntegrationSession,
 } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
+
+/* OIDC is off by default since ADR-0023 §1 and the run's environment
+   (scripts/test-integration.mjs) leaves it that way, so the sign-out cases
+   below, which are about the hand-off to the provider, turn it on for this
+   file and put the key back afterwards (as bootstrap.test.ts does). Without
+   this the route never asks the provider anything and a hand-off case is
+   answered by "no provider", not by the code under test. */
+const previousOidcKey = process.env.ORBIT_AUTH_OIDC;
+process.env.ORBIT_AUTH_OIDC = "true";
+resetAuthConfigForTests();
 
 const { POST: logout } = await loadRoute("auth/logout");
 const { GET: sessionStatus } = await loadRoute("auth/session");
@@ -35,6 +54,9 @@ const { POST: revokeSessions } = await loadRoute("auth/sessions/revoke");
 const { POST: revokeOneSession } = await loadRoute("auth/sessions/[sessionId]/revoke");
 
 afterAll(async () => {
+  if (previousOidcKey === undefined) delete process.env.ORBIT_AUTH_OIDC;
+  else process.env.ORBIT_AUTH_OIDC = previousOidcKey;
+  resetAuthConfigForTests();
   await cleanupIntegrationEnvironment();
 });
 
@@ -73,6 +95,54 @@ async function sessionRows(sessionId: string) {
   return getDb().select({ id: sessions.id, tokenHash: sessions.tokenHash })
     .from(sessions)
     .where(eq(sessions.id, sessionId));
+}
+
+
+/* ---- #1316 decision 26a: the ID token kept for provider sign-out ---------- */
+
+const OVERSIZE_BYTES = 16 * 1024;
+
+/** A real compact JWS, because Orbit must hand the provider the string it was given, byte for byte. */
+async function signedIdToken(options: { expiresInSeconds?: number; padBytes?: number } = {}): Promise<string> {
+  const { privateKey } = await generateKeyPair("RS256");
+  const now = Math.floor(Date.now() / 1000);
+  return new SignJWT({ email: "person@example.invalid", padding: "x".repeat(options.padBytes ?? 0) })
+    .setProtectedHeader({ alg: "RS256", kid: "primary" })
+    .setIssuer("https://oidc.invalid.example")
+    .setAudience("orbit-integration")
+    .setSubject(`subject-${randomUUID()}`)
+    .setIssuedAt(now - 7200)
+    .setExpirationTime(now + (options.expiresInSeconds ?? 300))
+    .sign(privateKey);
+}
+
+function mockProvider() {
+  return vi.spyOn(oidc, "discoverProvider").mockResolvedValue({
+    issuer: getAuthConfig().oidc!.issuer,
+    authorization_endpoint: "https://oidc.invalid.example/authorize",
+    token_endpoint: "https://oidc.invalid.example/token",
+    jwks_uri: "https://oidc.invalid.example/jwks",
+    end_session_endpoint: "https://oidc.invalid.example/logout",
+    code_challenge_methods_supported: ["S256"],
+  });
+}
+
+function signOutJson(session: IntegrationSession): Promise<Response> {
+  return callRouteForSession(logout, session, {
+    url: "http://127.0.0.1:3000/api/auth/logout",
+    method: "POST",
+    headers: { accept: "application/json" },
+  });
+}
+
+/** Read with SQL, not the schema object, so this stays a statement about the column and not about a TypeScript name. */
+async function storedIdToken(sessionId: string): Promise<string | null | undefined> {
+  const rows = await getDb().execute(sql`select id_token_enc from sessions where id = ${sessionId}`);
+  return (rows[0] as { id_token_enc: string | null } | undefined)?.id_token_enc;
+}
+
+async function userSessionCount(userId: string): Promise<number> {
+  return (await getDb().select({ id: sessions.id }).from(sessions).where(eq(sessions.userId, userId))).length;
 }
 
 describe("PostgreSQL authentication session contracts", () => {
@@ -167,6 +237,33 @@ describe("PostgreSQL authentication session contracts", () => {
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
     expect(await sessionRows(session.sessionId)).toHaveLength(0);
     expect((await checkSession(session)).status).toBe(401);
+  });
+
+  it("answers a JSON sign-out with the provider's end-session address, the session's ID token and the goodbye page as the way back (#1316)", async () => {
+    const fixture = await createIntegrationFixture("auth-logout-json-contract");
+    const idToken = await signedIdToken();
+    const session = await fixture.session("member", { idToken });
+    const config = getAuthConfig();
+    // The route only asks the provider when sign-in is configured; without it
+    // this case would pass for the wrong reason.
+    expect(config.oidc).not.toBeNull();
+    const discover = mockProvider();
+
+    const response = await signOutJson(session);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = (await response.json()) as { redirectTo: string | null };
+    expect(body.redirectTo).toEqual(expect.any(String));
+    const redirect = new URL(body.redirectTo!);
+    expect(redirect.origin + redirect.pathname).toBe("https://oidc.invalid.example/logout");
+    expect(redirect.searchParams.get("id_token_hint")).toBe(idToken);
+    expect(redirect.searchParams.get("post_logout_redirect_uri")).toBe(new URL("/logout", config.appUrl).href);
+    expect(redirect.searchParams.get("client_id")).toBe(config.oidc!.clientId);
+    expect(readSetCookie(response, sessionCookieName(config))?.value).toBe("");
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    // Sign-out alone may fall back on the last good discovery document.
+    expect(discover).toHaveBeenCalledWith(config.oidc, { staleIfError: true });
+    expect(await sessionRows(session.sessionId)).toHaveLength(0);
   });
 
   it("clears a signed-out cookie without changing database state", async () => {
@@ -471,4 +568,235 @@ describe("PostgreSQL authentication session contracts", () => {
 
     expect(await sessionRows(session.sessionId)).toHaveLength(1);
   });
+});
+
+describe("the session keeps the provider's ID token for sign-out (#1316 decision 26a)", () => {
+  it("stores the token sealed on the session row, and nowhere readable", async () => {
+    const fixture = await createIntegrationFixture("id-token-sealed");
+    const idToken = await signedIdToken();
+    const session = await fixture.session("member", { idToken });
+
+    const stored = await storedIdToken(session.sessionId);
+    expect(stored).toEqual(expect.stringMatching(/^mdv1\./));
+    const [row] = await getDb().select().from(sessions).where(eq(sessions.id, session.sessionId));
+    expect(JSON.stringify(row)).not.toContain(idToken);
+    expect(JSON.stringify(row)).not.toContain(idToken.split(".")[1]);
+  });
+
+  it("keeps no token for a session that began with a password", async () => {
+    const fixture = await createIntegrationFixture("id-token-none");
+    const session = await fixture.session("member");
+    expect(await storedIdToken(session.sessionId)).toBeNull();
+  });
+
+  it("ends a session with no token locally and sends the browser nowhere, even with a provider configured", async () => {
+    const fixture = await createIntegrationFixture("id-token-signout-none");
+    const session = await fixture.session("member");
+    const config = getAuthConfig();
+    mockProvider();
+
+    const response = await signOutJson(session);
+    expect(response.status).toBe(200);
+    expect((await response.json())).toEqual({ redirectTo: null });
+    expect(await sessionRows(session.sessionId)).toHaveLength(0);
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(readSetCookie(response, sessionCookieName(config))?.value).toBe("");
+  });
+
+  it("answers a damaged stored value with a local sign-out, and records one sighting", async () => {
+    const fixture = await createIntegrationFixture("id-token-damaged");
+    const session = await fixture.session("member", { idToken: await signedIdToken() });
+    mockProvider();
+    await getDb().execute(sql`update sessions set id_token_enc = 'mdv1.x.y.z' where id = ${session.sessionId}`);
+
+    const response = await signOutJson(session);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ redirectTo: null });
+    expect(await sessionRows(session.sessionId)).toHaveLength(0);
+
+    await flushMetadataDamageSightings();
+    const sightings = await getDb().select().from(metadataDamageSightings)
+      .where(eq(metadataDamageSightings.rowId, session.sessionId));
+    expect(sightings).toHaveLength(1);
+    expect(sightings[0]).toMatchObject({ tableName: "sessions", columnName: "id_token" });
+  });
+
+  it("refuses a sealed value moved onto another session, because it is bound to its row", async () => {
+    const fixture = await createIntegrationFixture("id-token-moved");
+    const original = await fixture.session("member", { idToken: await signedIdToken() });
+    const other = await fixture.session("owner", { idToken: await signedIdToken() });
+    mockProvider();
+    await getDb().execute(sql`update sessions set id_token_enc = (select id_token_enc from sessions where id = ${original.sessionId}) where id = ${other.sessionId}`);
+
+    const response = await signOutJson(other);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ redirectTo: null });
+    expect(await sessionRows(other.sessionId)).toHaveLength(0);
+    await flushMetadataDamageSightings();
+    const sightings = await getDb().select().from(metadataDamageSightings)
+      .where(eq(metadataDamageSightings.rowId, other.sessionId));
+    expect(sightings).toHaveLength(1);
+  });
+
+  it("sends an ID token that has already expired, unchanged: sessions outlive provider tokens", async () => {
+    const fixture = await createIntegrationFixture("id-token-expired");
+    const expired = await signedIdToken({ expiresInSeconds: -3600 });
+    const session = await fixture.session("member", { idToken: expired });
+    mockProvider();
+
+    const body = (await (await signOutJson(session)).json()) as { redirectTo: string | null };
+    expect(new URL(body.redirectTo!).searchParams.get("id_token_hint")).toBe(expired);
+  });
+
+  it("stores no token over 16 KiB, still lets the person in, and signs out locally", async () => {
+    const fixture = await createIntegrationFixture("id-token-oversize");
+    const oversize = await signedIdToken({ padBytes: OVERSIZE_BYTES });
+    expect(Buffer.byteLength(oversize, "utf8")).toBeGreaterThan(OVERSIZE_BYTES);
+    const session = await fixture.session("member", { idToken: oversize });
+    mockProvider();
+
+    expect(await sessionRows(session.sessionId)).toHaveLength(1);
+    expect(await storedIdToken(session.sessionId)).toBeNull();
+    const response = await signOutJson(session);
+    expect(await response.json()).toEqual({ redirectTo: null });
+    expect(await sessionRows(session.sessionId)).toHaveLength(0);
+  });
+
+  it("stores a large token that is still under 16 KiB", async () => {
+    const fixture = await createIntegrationFixture("id-token-under-bound");
+    // The padding is base64-encoded inside the token, so 11 000 characters is about 14.7 KiB of token.
+    const token = await signedIdToken({ padBytes: 11_000 });
+    expect(Buffer.byteLength(token, "utf8")).toBeLessThanOrEqual(OVERSIZE_BYTES);
+    expect(Buffer.byteLength(token, "utf8")).toBeGreaterThan(OVERSIZE_BYTES - 3000);
+    const session = await fixture.session("member", { idToken: token });
+    expect(await storedIdToken(session.sessionId)).toEqual(expect.stringMatching(/^mdv1\./));
+  });
+
+  it("shows neither the token nor its ciphertext on any session read", async () => {
+    const fixture = await createIntegrationFixture("id-token-not-exposed");
+    const idToken = await signedIdToken();
+    const session = await fixture.session("member", { idToken });
+    await fixture.session("member", { idToken: await signedIdToken() });
+
+    const status = await (await checkSession(session)).text();
+    const list = await (await callRouteForSession(listSessions, session, { url: LIST_URL })).text();
+    const ciphertext = (await storedIdToken(session.sessionId))!;
+    expect(ciphertext).toEqual(expect.stringMatching(/^mdv1\./));
+    for (const body of [status, list]) {
+      expect(body).not.toContain(idToken);
+      expect(body).not.toContain(ciphertext);
+      expect(body).not.toContain("mdv1.");
+      expect(body.toLowerCase()).not.toContain("id_token");
+      expect(body).not.toContain("idToken");
+    }
+  });
+
+  it("deletes the token with the row on sign-out everywhere and on revoking one device", async () => {
+    const fixture = await createIntegrationFixture("id-token-revoke");
+    const laptop = await fixture.session("member", { idToken: await signedIdToken() });
+    const phone = await fixture.session("member", { idToken: await signedIdToken() });
+    const tablet = await fixture.session("member", { idToken: await signedIdToken() });
+
+    const one = await callRouteForSession(revokeOneSession, laptop, {
+      url: revokeOneUrl(phone.sessionId),
+      method: "POST",
+      params: { sessionId: phone.sessionId },
+    });
+    expect(one.status).toBe(200);
+    expect(await storedIdToken(phone.sessionId)).toBeUndefined();
+
+    const everywhere = await callRouteForSession(revokeSessions, laptop, { url: REVOKE_URL, method: "POST" });
+    expect(everywhere.status).toBe(200);
+    expect(await userSessionCount(laptop.userId)).toBe(0);
+    expect(await storedIdToken(tablet.sessionId)).toBeUndefined();
+  });
+
+  it("deletes the token with the row when an administrator disables the account", async () => {
+    const fixture = await createIntegrationFixture("id-token-disable");
+    const admin = await fixture.session("admin");
+    const member = await fixture.session("member", { idToken: await signedIdToken() });
+
+    await setInstanceUserDisabled(admin.userId, member.userId, true);
+    expect(await userSessionCount(member.userId)).toBe(0);
+    expect(await storedIdToken(member.sessionId)).toBeUndefined();
+  });
+
+  it("deletes the token with the row when the password is replaced", async () => {
+    const fixture = await createIntegrationFixture("id-token-password");
+    const member = await fixture.session("member", { idToken: await signedIdToken() });
+
+    // A first password revokes nothing; the second replaces one and takes the sessions with it.
+    await setPassword(member.userId, await hashPassword("a-first-local-password"), member.userId);
+    await setPassword(member.userId, await hashPassword("a-second-local-password"), member.userId);
+    expect(await userSessionCount(member.userId)).toBe(0);
+    expect(await storedIdToken(member.sessionId)).toBeUndefined();
+  });
+
+  it("deletes the token with the row when an expired session is presented", async () => {
+    const fixture = await createIntegrationFixture("id-token-expired-presented");
+    const member = await fixture.session("member", { idToken: await signedIdToken() });
+    await fixture.expireSession(member);
+
+    expect((await checkSession(member)).status).toBe(401);
+    expect(await storedIdToken(member.sessionId)).toBeUndefined();
+  });
+
+  it("sweeps expired sessions, token and all, whenever anyone signs in, even if their cookie is never shown again", async () => {
+    const fixture = await createIntegrationFixture("id-token-sweep");
+    const forgotten = await fixture.session("member", { idToken: await signedIdToken() });
+    const stillLive = await fixture.session("owner", { idToken: await signedIdToken() });
+    await fixture.expireSession(forgotten);
+    expect(await sessionRows(forgotten.sessionId)).toHaveLength(1);
+
+    // Nobody presents the forgotten cookie; a different person signs in.
+    await createSession(fixture.users.outsider.id, getAuthConfig());
+
+    expect(await sessionRows(forgotten.sessionId)).toHaveLength(0);
+    expect(await storedIdToken(forgotten.sessionId)).toBeUndefined();
+    expect(await sessionRows(stillLive.sessionId)).toHaveLength(1);
+  });
+
+  it("still answers the hint after the key-encryption key has been rotated", async () => {
+    const fixture = await createIntegrationFixture("id-token-rotation");
+    const idToken = await signedIdToken();
+    const session = await fixture.session("member", { idToken });
+    mockProvider();
+    const sealedBefore = await storedIdToken(session.sessionId);
+
+    const current = getDocumentConfig();
+    const originalKek = process.env.DOCUMENT_KEK;
+    const nextKek = randomBytes(32);
+    const keys: RotationKeys = {
+      currentKek: current.keyEncryptionKey,
+      currentKeyId: current.keyId,
+      nextKek,
+      nextKeyId: deriveDocumentKeyId(nextKek),
+    };
+    try {
+      process.env.DOCUMENT_KEK_NEXT = nextKek.toString("hex");
+      resetDocumentConfigForTests();
+      resetMetadataKeyCacheForTests();
+      expect(rotationComplete(await runKekRotationToCompletion(keys))).toBe(true);
+
+      process.env.DOCUMENT_KEK = nextKek.toString("hex");
+      delete process.env.DOCUMENT_KEK_NEXT;
+      resetDocumentConfigForTests();
+      resetMetadataKeyCacheForTests();
+
+      // Only the key's wrapping moved; the session's own value is untouched.
+      expect(await storedIdToken(session.sessionId)).toBe(sealedBefore);
+      const body = (await (await signOutJson(session)).json()) as { redirectTo: string | null };
+      expect(new URL(body.redirectTo!).searchParams.get("id_token_hint")).toBe(idToken);
+    } finally {
+      if (originalKek === undefined) delete process.env.DOCUMENT_KEK;
+      else process.env.DOCUMENT_KEK = originalKek;
+      delete process.env.DOCUMENT_KEK_NEXT;
+      /* As metadata-addresses.test.ts does: a key row wrapped under a KEK
+         nothing holds any more would lock every later file out. Dropped; the
+         next writer mints a fresh one under the real key. */
+      await getDb().delete(metadataKeys);
+      resetDocumentConfigForTests();
+      resetMetadataKeyCacheForTests();
+    }
+  }, 120_000);
 });

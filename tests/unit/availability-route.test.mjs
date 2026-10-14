@@ -19,12 +19,14 @@ const mocks = vi.hoisted(() => ({
   getBootPhase: vi.fn(),
   hasAnyLocalCredential: vi.fn(),
   secondFactorConfigured: vi.fn(),
+  getKeyState: vi.fn(),
 }));
 
 vi.mock("orbit/lib/env", () => ({ getAuthConfig: mocks.getAuthConfig }));
 vi.mock("orbit/server/instance-contact", () => ({ readPublicContactAddress: mocks.readPublicContactAddress }));
 vi.mock("orbit/server/boot", () => ({ getBootPhase: mocks.getBootPhase }));
 vi.mock("orbit/server/local-credentials", () => ({ hasAnyLocalCredential: mocks.hasAnyLocalCredential }));
+vi.mock("orbit/server/key-state", () => ({ getKeyState: mocks.getKeyState }));
 vi.mock("orbit/server/sign-in-approvals", () => ({ secondFactorConfigured: mocks.secondFactorConfigured }));
 
 describe("GET /api/auth/availability", () => {
@@ -39,6 +41,8 @@ describe("GET /api/auth/availability", () => {
     mocks.secondFactorConfigured.mockReturnValue(false);
     mocks.getAuthConfig.mockReturnValue({ oidc: null });
     mocks.readPublicContactAddress.mockResolvedValue(null);
+    mocks.getKeyState.mockReset();
+    mocks.getKeyState.mockReturnValue({ verdict: "usable", heldKeyId: "a".repeat(24) });
   });
 
   afterEach(() => {
@@ -79,6 +83,7 @@ describe("GET /api/auth/availability", () => {
       claimed: true,
       methods: { local: true, oidc: false, localAccounts: false, secondFactor: false },
       phase: "running",
+      encryptionKey: "usable",
       contactAddress: "ops@example.com",
     });
   });
@@ -126,4 +131,40 @@ describe("GET /api/auth/availability", () => {
     expect((await (await again.GET()).json()).methods.secondFactor).toBe(false);
   });
 
+
+  /*
+   * #1405. The door reads this one word to decide whether to open at all: with
+   * no usable encryption key it sends the reader to the maintenance screen. The
+   * address is the unencrypted public contact one, the single address Orbit can
+   * still read in that state, and it is what the screen may show.
+   */
+  it("reports encryptionKey usable when the process holds a usable key (#1405)", async () => {
+    mocks.getBootPhase.mockReturnValue("running");
+    mocks.getKeyState.mockReturnValue({ verdict: "usable", heldKeyId: "a".repeat(24) });
+
+    const { GET } = await import("../../web/src/routes/api/auth/availability/+server.js");
+    expect((await (await GET()).json()).encryptionKey).toBe("usable");
+  });
+
+  it.each([
+    ["an unusable verdict", { verdict: "unusable", reason: "mismatch", heldKeyId: "a".repeat(24), storedKeyId: "b".repeat(24) }],
+    ["a verdict not yet taken", { verdict: "unknown" }],
+  ])("reports encryptionKey unusable for %s, with the contact address, and nothing about the key (#1405)", async (_label, verdict) => {
+    mocks.getBootPhase.mockReturnValue("running");
+    mocks.getKeyState.mockReturnValue(verdict);
+    mocks.readPublicContactAddress.mockResolvedValue("ops@example.com");
+
+    const { GET } = await import("../../web/src/routes/api/auth/availability/+server.js");
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(body.encryptionKey).toBe("unusable");
+    expect(body.contactAddress).toBe("ops@example.com");
+    const text = JSON.stringify(body);
+    expect(text).not.toContain("a".repeat(24));
+    expect(text).not.toContain("b".repeat(24));
+    expect(text).not.toContain("mismatch");
+  });
 });

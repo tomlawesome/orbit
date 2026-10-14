@@ -26,7 +26,7 @@
  * @property {VisibleHousehold[]} [visibleHouseholds]
  */
 
-import { CURRENCY_FAVOURITES, ZONE_FAVOURITES, zoneLabel } from "../pick-lists.js";
+import { CURRENCY_FAVOURITES, REGION_CURRENCIES, ZONE_FAVOURITES, zoneLabel } from "../pick-lists.js";
 
 /** The reader is signed out, or we have not asked yet: the door is the door. */
 export const DOOR = "door";
@@ -171,6 +171,22 @@ export function preferredTimeZone(detected) {
   return TIME_ZONES.some((zone) => zone.value === detected)
     ? /** @type {string} */ (detected)
     : TIME_ZONES[0].value;
+}
+
+/**
+ * The browser's currency, by its language's region, or null when the region
+ * is absent or not one Orbit maps. One copy for the card and its host, so the
+ * helper's claim and the chosen value cannot disagree (#1316).
+ * @returns {string | null}
+ */
+export function browserCurrency() {
+  try {
+    const region = new Intl.Locale(navigator.language).region;
+    if (!region) return null;
+    return REGION_CURRENCIES[region] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** @param {string | null} [detected] */

@@ -15,7 +15,7 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { applyCommand, approveWithOperation, attachItemDocument, dismissReceipt, dueDateIn, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
+  import { applyCommand, approveWithOperation, attachItemDocument, dismissReceipt, dueDateIn, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, readReminders, removeDocument, requestToJoin, restoreDocument, signOut, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
   import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
   import { createHeldCompletion, droppedCompletionWords, isRefused } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/arm.js";
@@ -947,9 +947,16 @@
      choosers stand beside it as a filed item's do. `add to orbit` sends the
      rows as the amended item on the two-tap decision's own operation id
      (amendReceipt), into the section the rows chose. */
-  function startAmend() {
+  /* #1316: the latest review & amend press still waiting on the reminder
+     read; an earlier press, or one the screen has moved on from, opens
+     nothing when its answer lands. */
+  /** @type {object | null} */
+  let amendAsk = null;
+  async function startAmend() {
     const suggestion = asView(view).suggestions.find((one) => one.id === expanded);
     if (!suggestion?.receiptId) return;
+    /* Already amending this one: keep what was typed (#1316). */
+    if (modes.id === suggestion.id) return;
     const householdId = suggestion.householdId ?? asView(view).primary;
     if (!householdId) {
       armed = { id: suggestion.id, act: null };
@@ -962,7 +969,20 @@
     mailProblem = null;
     armed = { id: null, act: null };
     previewDoc = null;
-    modes.startEdit(proposedItemOf(suggestion, { householdId, sectionId }));
+    /* The rows start the reminders at the member's own pair from Settings,
+       read before they open so no late answer has to be reconciled with an
+       edit; a failed read, or one past 1.5 s (#1316), falls back to the
+       default pair. */
+    const ask = {};
+    amendAsk = ask;
+    const reminders = await readReminders({ within: 1500 }).catch(() => null);
+    if (amendAsk !== ask) return;
+    amendAsk = null;
+    /* #1316: the drawer may have closed, moved to another row or begun
+       another item's edit while the read was out: then the rows stay shut. */
+    if (expanded !== suggestion.id || (modes.id != null && modes.id !== suggestion.id)
+      || !asView(view).suggestions.some((one) => one.id === suggestion.id)) return;
+    modes.startEdit(proposedItemOf(suggestion, { householdId, sectionId }, { reminders }));
     focusInDrawer('[data-ed="title"]');
   }
   /**

@@ -28,6 +28,9 @@ vi.mock("orbit/lib/auth/session", () => ({ readSession: mocks.readSession }));
 vi.mock("orbit/lib/env", () => ({ getAuthConfig: mocks.getAuthConfig }));
 vi.mock("orbit/server/workspace-repository", () => ({ hasOnwardHousehold: mocks.hasOnwardHousehold }));
 vi.mock("orbit/server/maintenance", () => ({ readEffectiveMaintenance: mocks.readEffectiveMaintenance }));
+/* #1405: the key gate reads the process's key verdict first; these cases are about
+   something else, so the key is usable. */
+vi.mock("orbit/server/key-state", () => ({ getKeyState: () => ({ verdict: "usable", heldKeyId: "a".repeat(24) }) }));
 vi.mock("orbit/lib/logger", () => ({ log: { warn: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 
 /* The real cookie name, off the real helper: secureCookies is false below. */

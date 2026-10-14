@@ -7,7 +7,21 @@ const mocks = vi.hoisted(() => ({
     clamAv: { host: "private-scanner.internal", port: 3310, timeoutMs: 30_000 },
     keyId: "live-current-key-id",
     nextKeyId: null as string | null,
+    keyEncryptionKey: Buffer.alloc(32, 0xab),
   },
+  /* #1405. What the settings say about the key ("missing" and so on, or null
+     for a usable one), the rows the instance key query finds, and whether
+     opening the stored key works. The REAL key-state module runs against
+     these, so the log lines asserted below are the ones its verdict really
+     produces, whichever module writes them. */
+  keyProblem: null as string | null,
+  instanceKeyRows: [] as unknown[],
+  unwrapMetadataKey: vi.fn(),
+  /* The workers whose absence matters here, kept apart from `workerCalls` so
+     the long-standing exact sequences above stay what they were. */
+  otherStarts: [] as string[],
+  sendKeyAlert: vi.fn(),
+  sendKeyRestoredNotice: vi.fn(),
   recordRotationStarted: vi.fn(),
   getAuthConfig: vi.fn(),
   pingClamAv: vi.fn(),
@@ -72,7 +86,29 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/server/documents/config", () => ({
   getDocumentConfig: () => mocks.config,
+  /* The probe's first act (#1405): the settings alone say whether there is a
+     key at all. Recorded in the strict sequence so its place is pinned. */
+  documentKeyProblem: () => {
+    mocks.workerCalls.push("key-probe");
+    return mocks.keyProblem;
+  },
+  keyEncryptionKeyFor: (config: { keyId: string; keyEncryptionKey: Buffer }, keyId: string) =>
+    keyId === config.keyId ? config.keyEncryptionKey : undefined,
 }));
+vi.mock("@/server/metadata/crypto", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/metadata/crypto")>()),
+  unwrapMetadataKey: (...args: unknown[]) => mocks.unwrapMetadataKey(...args),
+}));
+/* The claim notice reads the database; with a stand-in database that answers
+   every statement it would find an unclaimed instance and try to print one.
+   Not what this file is about, so it prints nothing. */
+vi.mock("@/lib/auth/bootstrap", () => ({ printClaimNotice: async () => undefined }));
+vi.mock("@/server/key-alert", () => ({
+  sendKeyAlert: mocks.sendKeyAlert,
+  sendKeyRestoredNotice: mocks.sendKeyRestoredNotice,
+}));
+vi.mock("@/server/maintenance-worker", () => ({ startMaintenanceWorker: () => mocks.otherStarts.push("maintenance") }));
+vi.mock("@/server/metadata/backfill", () => ({ startMetadataBackfill: () => mocks.otherStarts.push("backfill") }));
 
 vi.mock("@/server/documents/rewrap-worker", () => ({
   recordRotationStarted: mocks.recordRotationStarted,
@@ -166,8 +202,31 @@ describe("strict startup ordering", () => {
     vi.resetModules();
     resetAuthObservabilityForTests();
     mocks.workerCalls.length = 0;
+    mocks.otherStarts.length = 0;
+    mocks.keyProblem = null;
+    mocks.instanceKeyRows = [];
+    mocks.unwrapMetadataKey.mockReset();
+    mocks.unwrapMetadataKey.mockImplementation(() => Buffer.alloc(32, 7));
+    mocks.sendKeyAlert.mockReset();
+    mocks.sendKeyAlert.mockResolvedValue(undefined);
+    mocks.sendKeyRestoredNotice.mockReset();
+    mocks.sendKeyRestoredNotice.mockResolvedValue(undefined);
+    mocks.renderedText.length = 0;
+    mocks.renderedJson.length = 0;
+    vi.stubEnv("DOCUMENT_KEK", "ab".repeat(32));
     mocks.getDatabaseClient.mockClear();
-    mocks.getDb.mockClear();
+    mocks.getDb.mockReset();
+    /* A statement of any shape answers with the instance key rows. */
+    mocks.getDb.mockImplementation(() => {
+      const chain: unknown = new Proxy(function chainable() { /* callable target */ }, {
+        get(_target, property) {
+          if (property === "then") return (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) => Promise.resolve(mocks.instanceKeyRows).then(resolve, reject);
+          return () => chain;
+        },
+        apply: () => chain,
+      });
+      return { select: () => chain, execute: () => chain, transaction: (callback: (executor: unknown) => unknown) => callback({ select: () => chain, execute: () => chain }) };
+    });
     mocks.rollBackUnfinishedPortableImports.mockClear();
     mocks.validateStartupConfiguration.mockReset();
     mocks.verifyMigrationIntegrity.mockReset();
@@ -198,7 +257,7 @@ describe("strict startup ordering", () => {
   it("validates, reports auth, checks and migrates before workers", async () => {
     const { registerNode } = await import("./boot");
     await registerNode();
-    expect(mocks.workerCalls).toEqual(["configuration", "auth", "precheck", "ensure-outcome-table", "migrate", "record-outcome", "postcheck", "notification", "document", "imap", "receipt"]);
+    expect(mocks.workerCalls).toEqual(["configuration", "auth", "precheck", "ensure-outcome-table", "migrate", "record-outcome", "postcheck", "key-probe", "notification", "document", "imap", "receipt"]);
     expect(mocks.log.info).toHaveBeenCalledWith({ event: "startup.migration", state: "starting", action: "check_migrations" });
     expect(mocks.log.info).not.toHaveBeenCalledWith({ event: "application.startup", state: "ready", action: "none" });
   });
@@ -216,7 +275,7 @@ describe("strict startup ordering", () => {
     const { registerNode } = await import("./boot");
     await registerNode();
 
-    expect(mocks.workerCalls).toEqual(["configuration", "auth", "document", "imap"]);
+    expect(mocks.workerCalls).toEqual(["configuration", "auth", "key-probe", "document", "imap"]);
     expect(mocks.log.warn).toHaveBeenCalledWith({
       event: "configuration.problem",
       state: "degraded",
@@ -525,6 +584,193 @@ describe("strict startup ordering", () => {
     await expect(registerNode()).rejects.toThrow("configuration_invalid");
 
     expect(getBootPhase()).toBe("starting");
+  });
+
+  /*
+   * #1405: no usable encryption key puts Orbit into maintenance. Boot takes
+   * the verdict once, after the database is migrated and any half-done import
+   * is rolled back and before a single worker starts; with no key it starts
+   * only the scheduled-maintenance worker (which needs none), tells the
+   * operator in the log, and sends the alert once the server is answering.
+   * The real key-state module runs here against a stand-in database and
+   * settings, so what is asserted is what its verdict really does to boot.
+   */
+  describe("no usable encryption key (#1405)", () => {
+    const KEK_HEX = "ab".repeat(32);
+    const STORED_ID = "0123456789abcdef01234567";
+    const lineFor = (event: string) => mocks.renderedText.filter((line) => line.includes(event));
+    beforeEach(() => {
+      /* an earlier test in this file leaves a mail problem recorded */
+      mocks.getConfigurationProblems.mockReturnValue([]);
+    });
+
+    it("takes the verdict after migrations and the import rollback, and before any worker, while the phase is still starting", async () => {
+      mocks.rollBackUnfinishedPortableImports.mockImplementation(async () => { mocks.workerCalls.push("rollback"); });
+      const boot = await import("./boot");
+      let phaseAtProbe: string | undefined;
+      const callsAtProbe: string[] = [];
+      const original = mocks.workerCalls.push.bind(mocks.workerCalls);
+      mocks.workerCalls.push = (...items: string[]) => {
+        if (items[0] === "key-probe") {
+          phaseAtProbe = boot.getBootPhase();
+          callsAtProbe.push(...mocks.workerCalls);
+        }
+        return original(...items);
+      };
+
+      await boot.registerNode();
+
+      expect(callsAtProbe).toEqual(["configuration", "auth", "precheck", "ensure-outcome-table", "migrate", "record-outcome", "postcheck", "rollback"]);
+      expect(phaseAtProbe).toBe("starting");
+      expect(boot.getBootPhase()).toBe("running");
+      expect(mocks.workerCalls.indexOf("key-probe")).toBeLessThan(mocks.workerCalls.indexOf("notification"));
+    });
+
+    it("holds the verdict in the process, as unusable, so every gate can read it without asking again", async () => {
+      mocks.keyProblem = "missing";
+      const { registerNode } = await import("./boot");
+      const { getKeyState } = await import("./key-state");
+
+      await registerNode();
+
+      expect(getKeyState()).toMatchObject({ verdict: "unusable", reason: "missing" });
+    });
+
+    it("starts only the scheduled-maintenance worker, and says once that the others were held back", async () => {
+      mocks.keyProblem = "missing";
+      const { registerNode } = await import("./boot");
+
+      await registerNode();
+
+      expect(mocks.workerCalls.filter((call) => ["notification", "document", "imap", "receipt"].includes(call))).toEqual([]);
+      expect(mocks.otherStarts).toEqual(["maintenance"]);
+      const held = mocks.log.warn.mock.calls.filter(([entry]) =>
+        entry.event === "application.startup" && entry.state === "blocked" && entry.reason === "key_unavailable");
+      expect(held).toHaveLength(1);
+      expect(held[0][0]).toMatchObject({
+        action: "check_configuration",
+        impact: "application_unavailable",
+      });
+    });
+
+    it("starts every worker, the backfill included, when the key is usable (nothing about the normal start changed)", async () => {
+      const { registerNode } = await import("./boot");
+
+      await registerNode();
+
+      expect(mocks.workerCalls.filter((call) => ["notification", "document", "imap", "receipt"].includes(call)))
+        .toEqual(["notification", "document", "imap", "receipt"]);
+      expect(mocks.otherStarts).toEqual(["maintenance", "backfill"]);
+      expect(mocks.log.warn.mock.calls.filter(([entry]) => entry.reason === "key_unavailable")).toEqual([]);
+    });
+
+    it("sends the alert once, only after the phase has flipped to running, with the verdict", async () => {
+      mocks.keyProblem = "missing";
+      const boot = await import("./boot");
+      let phaseAtSend: string | undefined;
+      mocks.sendKeyAlert.mockImplementation(async () => { phaseAtSend = boot.getBootPhase(); });
+
+      await boot.registerNode();
+      await vi.waitFor(() => expect(mocks.sendKeyAlert).toHaveBeenCalledTimes(1));
+
+      expect(phaseAtSend).toBe("running");
+      expect(mocks.sendKeyAlert).toHaveBeenCalledWith(expect.objectContaining({ verdict: "unusable", reason: "missing" }));
+      expect(mocks.sendKeyRestoredNotice).not.toHaveBeenCalled();
+    });
+
+    it("does not fail the start because the alert could not be sent", async () => {
+      mocks.keyProblem = "missing";
+      mocks.sendKeyAlert.mockRejectedValue(new Error("smtp down at 10.0.0.5"));
+      const boot = await import("./boot");
+
+      await expect(boot.registerNode()).resolves.toBeUndefined();
+      await vi.waitFor(() => expect(mocks.sendKeyAlert).toHaveBeenCalledTimes(1));
+
+      expect(boot.getBootPhase()).toBe("running");
+      expect(JSON.stringify(mocks.log.error.mock.calls) + JSON.stringify(mocks.log.warn.mock.calls)).not.toContain("10.0.0.5");
+    });
+
+    it("looks for a recovery notice, and sends no alert, when the key is usable", async () => {
+      const { registerNode } = await import("./boot");
+
+      await registerNode();
+      await vi.waitFor(() => expect(mocks.sendKeyRestoredNotice).toHaveBeenCalledTimes(1));
+
+      expect(mocks.sendKeyAlert).not.toHaveBeenCalled();
+    });
+
+    it("states the fault for a missing key in the log, once, without the key or any path", async () => {
+      mocks.keyProblem = "missing";
+      vi.stubEnv("DOCUMENT_KEK_FILE", "/run/secrets/orbit-kek-private-path");
+      const { registerNode } = await import("./boot");
+
+      await registerNode();
+
+      const lines = lineFor("encryption.key");
+      expect(lines.filter((line) => line.includes("state=blocked"))).toHaveLength(1);
+      const line = lines.find((entry) => entry.includes("state=blocked")) ?? "";
+      expect(line).toContain("ERROR");
+      expect(line).toContain("reason=key_unavailable");
+      expect(line).toContain("action=check_configuration");
+      expect(line).toContain("impact=application_unavailable");
+      expect(line).toContain("missing");
+      expect(line).toContain("DOCUMENT_KEK");
+      expect(line).toContain("restart");
+      const everything = [...mocks.renderedText, ...mocks.renderedJson].join("\n");
+      expect(everything).not.toContain(KEK_HEX);
+      expect(everything).not.toContain("orbit-kek-private-path");
+      const record = JSON.parse(mocks.renderedJson.find((entry) => entry.includes("encryption.key") && entry.includes("blocked")) ?? "{}");
+      expect(record).toMatchObject({ event: "encryption.key", state: "blocked", reason: "key_unavailable" });
+    });
+
+    it("names both key ids in the log for a key that is not the database's, and still not the key", async () => {
+      mocks.instanceKeyRows = [{
+        keyId: STORED_ID, key_id: STORED_ID,
+        wrappedDek: "wrapped", wrapped_dek: "wrapped", wrapIv: "iv", wrap_iv: "iv", wrapAuthTag: "tag", wrap_auth_tag: "tag",
+      }];
+      const { registerNode } = await import("./boot");
+      const { getKeyState } = await import("./key-state");
+
+      await registerNode();
+
+      expect(getKeyState()).toMatchObject({ verdict: "unusable", reason: "mismatch", heldKeyId: mocks.config.keyId, storedKeyId: STORED_ID });
+      const line = lineFor("encryption.key").find((entry) => entry.includes("state=blocked")) ?? "";
+      expect(line).toContain(mocks.config.keyId);
+      expect(line).toContain(STORED_ID);
+      expect(line).toContain("reason=key_unavailable");
+      expect(line).toContain("action=check_configuration");
+      expect(line).toContain("impact=application_unavailable");
+      expect([...mocks.renderedText, ...mocks.renderedJson].join("\n")).not.toContain(KEK_HEX);
+    });
+
+    it("points at the backup, not the configuration, when the held key's own row is damaged", async () => {
+      mocks.instanceKeyRows = [{
+        keyId: mocks.config.keyId, key_id: mocks.config.keyId,
+        wrappedDek: "wrapped", wrapped_dek: "wrapped", wrapIv: "iv", wrap_iv: "iv", wrapAuthTag: "tag", wrap_auth_tag: "tag",
+      }];
+      mocks.unwrapMetadataKey.mockImplementation(() => { throw new Error("Unsupported state or unable to authenticate data"); });
+      const { registerNode } = await import("./boot");
+
+      await registerNode();
+
+      const line = lineFor("encryption.key").find((entry) => entry.includes("state=blocked")) ?? "";
+      expect(line).toContain("action=restore_backup");
+      expect(line).toContain("reason=key_unavailable");
+    });
+
+    it("says which key it holds when the key is usable, and nothing is blocked", async () => {
+      const { registerNode } = await import("./boot");
+
+      await registerNode();
+
+      const lines = lineFor("encryption.key");
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("state=ready");
+      expect(lines[0]).toContain("action=none");
+      expect(lines[0]).toContain(mocks.config.keyId);
+      expect(lines[0]).not.toContain("ERROR");
+      expect([...mocks.renderedText, ...mocks.renderedJson].join("\n")).not.toContain(KEK_HEX);
+    });
   });
 });
 

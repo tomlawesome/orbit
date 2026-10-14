@@ -387,6 +387,38 @@ carried was dropped on 2026-08-24; see Amendments.
 
 ## Amendments
 
+**2026-10-13 — correction to the amendment below: three screens are static
+files (#1316, #1405).** `/login`, `/logout` and `/auth/error` are prerendered
+to plain HTML (`prerender = true` in each route's `+page.js`) and the server
+sends them before the `handle` hook runs. While the key is unusable they
+therefore still answer 200, not 503, and "answers every other screen with the
+`/maintenance` screen" is true of the dynamic screens only. `/login` is
+handled in the browser: its script reads `/api/auth/availability`, sees the
+instance is locked and moves the reader to `/maintenance`. `/auth/error`
+stays where it is. The set of routes that stay open in the amendment below is
+otherwise unchanged.
+
+**2026-10-13 — a second kind of maintenance: no usable encryption key
+(#1405, ADR-0024 amendment).** When Orbit holds no usable key it is closed by
+the same two choke points, with a different rule set. Kind `key` has no
+administrator bypass (decision 4 does not apply: an administrator can do
+nothing here without the key) and no exempt sign-in routes (decision 3's
+`/login` exemption does not apply either): only `/api/health`,
+`/api/auth/availability`, `/api/auth/logout`, `/logout` and `/maintenance`
+stay open. The page gate in `web/src/hooks.server.js` answers every other
+screen with the `/maintenance` screen at the URL asked for, 503, `no-store`,
+no `Retry-After`, before the session or the operator state is read; the API
+gate is in the `api()` wrapper, with `openWhileKeyUnusable` on sign-out alone
+and the two unwrapped routes (the provider callback and the mail-relay
+verification link) calling `assertKeyUsable()` themselves
+(`tests/unit/api-key-gate-coverage.test.mjs` holds the list). The key is
+decided first: with both active, the key screen and
+`encryption_key_unavailable` win. Public health still answers 200
+`maintenance` (decision 6 unchanged), so the container is not restarted. The
+workers are **stopped** except the scheduled-maintenance one: decision 7 keeps
+workers running during an operator window because they can still do their
+work, and without the key none of them can.
+
 **2026-09-04 — slice (6) lands (issue #526).** The `handle` hook in
 `web/src/hooks.server.js` is the page choke point decision 2 named: it reads
 the effective state once per screen request, before the session gate, and

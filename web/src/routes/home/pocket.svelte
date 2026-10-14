@@ -4,7 +4,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { applyCommand, attachItemDocument, dueDateIn, householdElsewhereFor, readItemDocuments, removeDocument, restoreDocument, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
+  import { applyCommand, attachItemDocument, dueDateIn, householdElsewhereFor, readItemDocuments, readReminders, removeDocument, restoreDocument, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import { sectionColourOf } from "$lib/option-colour.js";
@@ -272,9 +272,16 @@
      (home's amendReceipt, as `onamend`), into the section the rows chose;
      `cancel` puts the readings back. The review sheet that rose here is
      gone. */
+  /* #1316: the latest review & amend press still waiting on the reminder
+     read (as the desk's amendAsk). */
+  /** @type {object | null} */
+  let amendAsk = null;
   /** @param {import('$lib/data/workspace.js').ReceiptSuggestion} s */
-  function startAmend(s) {
+  async function startAmend(s) {
     if (!s.receiptId || reviewLockedOf(s) || !view) return;
+    /* Already amending this one: a second tap on the lit body keeps what was
+       typed rather than starting the rows again (#1316). */
+    if (modes.id === s.id) return;
     const householdId = s.householdId ?? view.primary;
     if (!householdId) {
       rowProblem[s.id] = "This account has no household yet";
@@ -285,7 +292,19 @@
     const sectionId = (own.find((one) => one.visible !== false) ?? own[0])?.id ?? null;
     delete rowProblem[s.id];
     previewPaper = null;
-    modes.startEdit(proposedItemOf(s, { householdId, sectionId }));
+    /* The member's own reminder pair from Settings, read before the lines
+       open (as the desk's startAmend does); the default pair if it fails or
+       takes past 1.5 s (#1316). */
+    const ask = {};
+    amendAsk = ask;
+    const reminders = await readReminders({ within: 1500 }).catch(() => null);
+    if (amendAsk !== ask) return;
+    amendAsk = null;
+    /* #1316: the row may have closed, another opened, another item's edit
+       begun, or the suggestion been locked or gone while the read was out. */
+    const still = view?.suggestions.find((one) => one.id === s.id);
+    if (lit !== s.id || (modes.id != null && modes.id !== s.id) || !still || reviewLockedOf(still)) return;
+    modes.startEdit(proposedItemOf(s, { householdId, sectionId }, { reminders }));
     focusInRow(s.id, '[data-ed="title"]');
   }
   /**

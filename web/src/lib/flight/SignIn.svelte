@@ -10,7 +10,7 @@
   import { fetchFlightAhead } from "./fetch-ahead.js";
   import { isFirstVisit } from "./door-seen.js";
   import {
-    APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, STARTING, STARTING_BACKSTOP_MS, STARTING_POLL_MS,
+    APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, LOCKED, STARTING, STARTING_BACKSTOP_MS, STARTING_POLL_MS,
     applyStartingBackstop, availabilityOf, cardMessageFor, claimFromHash, doorMessageFor,
     doorModeOf, nextDoorState, phaseOf, readinessOf,
   } from "./door-state.js";
@@ -588,6 +588,13 @@
     async function run() {
       const first = await checkOnce();
       if (disposed) return;
+      /* No usable encryption key (#1405): this page is static HTML served
+         before the server's gate, so it is this script that must not offer a
+         sign-in nobody can complete. `replace`, so Back is not a loop. */
+      if (first.state === LOCKED) {
+        location.replace("/maintenance");
+        return;
+      }
       if (first.state === DOOR) {
         wearFace(first.face);
         readyWhenDrawn();
@@ -608,6 +615,10 @@
         const next = await checkOnce();
         if (disposed) return;
         const resolved = applyStartingBackstop(next.state, backstopAt, Date.now());
+        if (resolved === LOCKED) {
+          location.replace("/maintenance");
+          return;
+        }
         if (resolved === STARTING) {
           pollTimer = setTimeout(poll, STARTING_POLL_MS);
           return;

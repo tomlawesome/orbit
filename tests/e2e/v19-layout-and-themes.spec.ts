@@ -232,21 +232,8 @@ async function layoutProblems(page: Page): Promise<string[]> {
 }
 
 /* Real contrast failures the pack sweep found, left failing rather than
-   excluded (#1178's report lists them for filing). Keyed "screen pack project". */
-const ZERO_ON_LIGHT_PACK =
-  "DEFECT (#1178): the desk household archive card's \"never in the file\" (small.zero, household.css:448) is drawn in "
-  + "--warm (#c06a12), which fails 4.5:1 on the light packs; --warm-text is the pack's darker text shade for exactly this";
-const PACK_DEFECTS: Record<string, string> = {
-  "/household/[id] clouds desktop-chromium": ZERO_ON_LIGHT_PACK,
-  "/household/[id] dawn desktop-chromium": ZERO_ON_LIGHT_PACK,
-  /* #1183: the same .zero contrast failure, found again by desktop-firefox. */
-  "/household/[id] clouds desktop-firefox": ZERO_ON_LIGHT_PACK,
-  "/household/[id] dawn desktop-firefox": ZERO_ON_LIGHT_PACK,
-  /* #1219: and by desktop-webkit (pipeline 2131), the same rule on the same
-     node in ten runs of ten in the pinned Playwright image. */
-  "/household/[id] clouds desktop-webkit": ZERO_ON_LIGHT_PACK,
-  "/household/[id] dawn desktop-webkit": ZERO_ON_LIGHT_PACK,
-};
+   excluded. Keyed "screen pack project". Empty since #854's household --warm-text fix. */
+const PACK_DEFECTS: Record<string, string> = {};
 
 const VIEWPORTS = [
   { name: "desktop", width: 1440, height: 900 },
@@ -299,6 +286,9 @@ test.describe("the signed-in v19 screens at every size and in every theme pack",
   for (const pack of THEME_PACKS.filter((id) => id !== DEFAULT_THEME)) {
     for (const screen of SCREENS) {
       test(`${screen.name} in the ${pack} pack has no WCAG A/AA violations`, async ({ page }) => {
+        /* Owner, 2026-10-14: the default theme is checked at every size (above);
+           every other pack at one size, the desktop project's. */
+        test.skip(test.info().project.name.startsWith("mobile"), "other packs are checked at one size; the desktop project runs them");
         const defect = PACK_DEFECTS[`${screen.name} ${pack} ${test.info().project.name}`];
         test.fail(Boolean(defect), defect);
         await page.addInitScript((id: string) => {

@@ -194,6 +194,21 @@ function closedForMaintenance(page, maintenance) {
 }
 
 /**
+ * The locked screen as the answer to every screen while Orbit holds no usable
+ * encryption key (#1405): 503, never stored, no validator, and no
+ * `Retry-After`, because nothing says when the key will be back.
+ *
+ * @param {Response} page
+ */
+function closedForKey(page) {
+  const headers = new Headers(page.headers);
+  headers.set("cache-control", "no-store");
+  headers.delete("etag");
+  headers.delete("retry-after");
+  return new Response(page.body, { status: 503, headers });
+}
+
+/**
  * A gated screen's answer, marked never to be stored (#1264).
  *
  * Without it a browser may keep a signed-in page in its back/forward cache or
@@ -348,6 +363,21 @@ export async function handle({ event, resolve }) {
      would photograph the door, or the eclipse. Safe on the same terms the API
      seam already relies on: nothing production runs sets the variable. */
   if (env.ORBIT_FIXTURES === "1") return resolve(event);
+
+  /* THE ENCRYPTION KEY GATE (#1405), before everything else about the reader.
+     With no usable key (or no verdict yet: fail closed) every screen is the
+     locked screen, at the URL that was asked for, so a reload after the fix
+     lands where it was. The session is never read: there is no
+     administrator way round, because nobody can do anything here without the
+     key. Only the goodbye is left alone, since it reads nothing and anyone may
+     leave. Operator maintenance is not consulted: the key is the more basic
+     fault. A memory read; no I/O. */
+  const { getKeyState } = await import("orbit/server/key-state");
+  if (getKeyState().verdict !== "usable") {
+    if (id === "/logout") return resolve(event);
+    const screen = id === "/maintenance" ? await resolve(event) : await event.fetch("/maintenance");
+    return closedForKey(screen);
+  }
 
   if (DOORS.has(id)) return resolve(event);
 

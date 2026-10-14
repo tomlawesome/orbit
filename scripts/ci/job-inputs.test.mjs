@@ -181,6 +181,16 @@ describe("the deny-lists", () => {
     expect(covers("fast", "tests/e2e/local-sign-in.spec.ts")).toBe(false);
   });
 
+  // The names guard reads every tracked file, so it cannot share fast's narrowed
+  // key (ADR-0028 section 6): its own job takes the docs, root markdown, e2e
+  // specs and web tests that fast's key leaves out.
+  it("keys names_guard on the whole checkout, docs and tests included", () => {
+    expect(covers("names_guard", "docs/architecture.md")).toBe(true);
+    expect(covers("names_guard", "README.md")).toBe(true);
+    expect(covers("names_guard", "tests/e2e/local-sign-in.spec.ts")).toBe(true);
+    expect(covers("names_guard", "web/tests/fidelity/dashboard.png")).toBe(true);
+  });
+
   // fast_docker runs three files and builds one Dockerfile target,
   // vapid-generator, which copies scripts/generate-vapid.mjs and nothing else.
   it("drops web/** for fast_docker and keeps it for fast", () => {
@@ -190,7 +200,7 @@ describe("the deny-lists", () => {
   });
 
   it("denies nothing at all for the two jobs ADR-0028 gives no deny-list", () => {
-    for (const job of ["fidelity", "fidelity_webkit", "integration"]) {
+    for (const job of ["fidelity", "fidelity_webkit", "integration", "names_guard"]) {
       expect(denyGlobs(config, job)).toEqual([]);
       expect(covers(job, "docs/architecture.md"), `${job} takes the whole checkout`).toBe(true);
     }

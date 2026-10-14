@@ -1,5 +1,5 @@
 <script>
-  import { tick } from "svelte";
+  import { onMount, tick } from "svelte";
   import Flight from "./Flight.svelte";
   import Dusk from "./Dusk.svelte";
 
@@ -35,16 +35,36 @@
   let flight = $state(null);
   // svelte-ignore state_referenced_locally
   let leaving = $state(startLeaving);
-  /* The provider's own end-session URL, kept for the way back: following it
-     now would yank the reader off the ratified goodbye, so "sign back in"
-     carries it instead, and the identity provider asks its question again. */
+  /* The provider's own end-session URL. The goodbye plays first; the page
+     goes there as soon as the goodbye's words are fully on the screen (owner,
+     2026-10-13: "play the goodbye and as soon as it finishes, go to authentik
+     before the sign in again shows"), or at once if the page is hidden before
+     then, since the flight's clock stops in a hidden tab. Its
+     post_logout_redirect_uri brings the browser back to /logout. */
   /** @type {string | null} */
   let providerLogout = $state(null);
   /* the farewell has landed: the goodbye is now the screen (Dusk gets the landmark) */
   let farewelled = $state(false);
-  const backIn = $derived(providerLogout ?? "/");
-  /** @param {string} text */
-  const escapeAttr = (text) => text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c);
+  /* how long after the farewell beat the goodbye's words are fully in:
+     door.css `#dusk .farewell`, an opacity transition of .9s after .3s */
+  const GOODBYE_SHOWN_MS = 1200;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let handOff;
+  let handedOff = false;
+  function toProvider() {
+    if (!providerLogout || handedOff) return;
+    handedOff = true;
+    letGo();
+    location.replace(providerLogout);
+  }
+  function onVisibility() {
+    if (document.visibilityState === "hidden") toProvider();
+  }
+  function letGo() {
+    clearTimeout(handOff);
+    document.removeEventListener("visibilitychange", onVisibility);
+  }
+  onMount(() => letGo);
 
   /* #1253, #1262: the menu holds the sign-out, so when it opens the descent's
      world is readied and proved (never a compile that would stop the page:
@@ -86,6 +106,10 @@
        the middle of the descent: the folder drops it as the descent begins
        (journey.later, README.md) */
     providerLogout = redirectTo;
+    if (redirectTo) document.addEventListener("visibilitychange", onVisibility);
+    /* the page may already be hidden by the time the sign-out request
+       returns: no visibilitychange will come, so hand off now */
+    onVisibility();
     leaving = true;
     await tick();
     flight?.descend();
@@ -101,11 +125,11 @@
      */
     try { history.replaceState(history.state, "", "/logout"); } catch { /* no history, no harm */ }
     farewelled = true;
-    /* the provider's own sign-out, once the goodbye has played: Orbit's
+    /* the provider's own sign-out, once the goodbye's words are in: Orbit's
        session is already gone, but the provider's would seat this reader
-       again on the next sign-in at a shared computer. Its
-       post_logout_redirect_uri brings the browser back to /logout. */
-    if (providerLogout) location.replace(providerLogout);
+       again on the next sign-in at a shared computer. A plain timer, not the
+       flight's clock, so it still fires in a background tab. */
+    if (providerLogout) handOff = setTimeout(toProvider, GOODBYE_SHOWN_MS);
   }
 </script>
 
@@ -113,12 +137,13 @@
   <!-- the ground under the dusk, so a daylight theme's page background never
        shows beneath it (as the sign-in's own dawn has) -->
   <div class="signin-stage" aria-hidden="true"></div>
-  <!-- `backIn` is the identity provider's own end-session URL as often as it
-       is "/": genuinely external, not a route this app can resolve(), which
-       is what `rel="external"` says. Written as the dusk's gate markup (the
-       shared door's slot, #1371), escaped, once: it is known before the
-       sign-out mounts the dusk. -->
-  <Dusk landmark={farewelled} gate={`<a class="gate" rel="external" href="${escapeAttr(backIn)}">Sign back in</a>`} />
+  <!-- The way back in, written as the dusk's gate markup (the shared door's
+       slot, #1371), once: it is known before the sign-out mounts the dusk.
+       `rel="external"` makes it a full page load, not a client route. With a
+       provider to hand off to, the page leaves before the way back in would
+       show, so it is never drawn: an empty pill, hidden (flight.css), holds
+       its place so the goodbye stands where it always does. -->
+  <Dusk landmark={farewelled} gate={providerLogout ? '<span class="gate held" aria-hidden="true">&nbsp;</span>' : '<a class="gate" rel="external" href="/">Sign back in</a>'} />
 {/if}
 <!-- The flight is mounted with the page, not with the sign-out (#1371): the
      descent's world belongs to its journey now, and is readied at leisure
