@@ -15,6 +15,7 @@ import {
   setDeploymentProfile,
 } from "./configure-engine";
 
+// Characterisation tests: they pin the installer's behaviour, the only written specification of it.
 // The cases of the retired scripts/configure.test.mjs that no other engine
 // test covered, ported onto the engine before that suite was deleted
 // (#1210 build note D10; the mapping is docs/adr-notes/1210-bash-test-
@@ -49,7 +50,7 @@ const IMAGE = "orbit-local:abcdef123456";
 let deployDir: string;
 
 beforeEach(() => {
-  deployDir = mkdtempSync(join(tmpdir(), "orbit-configure-retired-bash-"));
+  deployDir = mkdtempSync(join(tmpdir(), "orbit-configure-characterisation-"));
   writeFileSync(join(deployDir, ENVIRONMENT_EXAMPLE_NAME), environmentExampleSource);
 });
 
@@ -282,10 +283,10 @@ describe("the bare flow (ported from scripts/configure.test.mjs)", () => {
     expect(stagingLeftovers()).toEqual([]);
 
     rmSync(deployDir, { recursive: true, force: true });
-    deployDir = mkdtempSync(join(tmpdir(), "orbit-configure-retired-bash-"));
+    deployDir = mkdtempSync(join(tmpdir(), "orbit-configure-characterisation-"));
     writeFileSync(join(deployDir, ENVIRONMENT_EXAMPLE_NAME), environmentExampleSource);
     mkdirSync(join(deployDir, SECRETS_DIRECTORY_NAME), { mode: 0o700 });
-    const elsewhere = mkdtempSync(join(tmpdir(), "orbit-configure-retired-bash-elsewhere-"));
+    const elsewhere = mkdtempSync(join(tmpdir(), "orbit-configure-characterisation-elsewhere-"));
     try {
       writeFileSync(join(elsewhere, "session-secret"), "not-a-valid-secret");
       symlinkSync(join(elsewhere, "session-secret"), secretsPath("session-secret"));
