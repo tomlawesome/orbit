@@ -5,8 +5,7 @@
 # a red tick says the stack was unhealthy and never says how.
 #
 # Extracted from the "Show service diagnostics" step of the
-# &container_validation_steps anchor in
-# the retired GitHub container workflow (#801). Runs on failure only, so it
+# retired GitHub container workflow, which the GitLab smoke and acceptance jobs now run (#801). Runs on failure only, so it
 # must never itself be the reason a run is red.
 #
 # Deliberately without `set -e`: the run has already failed by the time this
@@ -16,7 +15,8 @@
 # nothing.
 #
 # Inputs (environment):
-#   COMPOSE_FILES  overlay set to inspect; defaults to the workflow's
+#   COMPOSE_FILES  overlay set to inspect; defaults to the base, mail and
+#                  acceptance files, as start-acceptance-stack.sh does
 #   ORBIT_IMAGE    defaulted, so Compose can still parse the files when the
 #                  run failed before the image was recorded
 set -Euo pipefail

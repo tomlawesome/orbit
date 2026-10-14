@@ -6,8 +6,8 @@
 # be caught locally in minutes instead of by promoting to `preview` and
 # waiting on CI.
 #
-# Mirrors the &container_validation_steps sequence in
-# the retired GitHub container workflow (the "Create isolated test
+# Mirrors the validation sequence of
+# the retired GitHub container workflow, now split across the GitLab `smoke` jobs (the "Create isolated test
 # configuration" through "Run browser and accessibility checks" steps):
 # same compose files, same order, same health and OIDC/mail setup. It
 # deliberately does not reproduce that job's image-scanning, installer or

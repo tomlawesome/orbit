@@ -5,8 +5,7 @@
 # pair is the point -- one route must refuse, the other must not.
 #
 # Extracted from the "Verify signed-out privacy boundary and favicon" step of
-# the &container_validation_steps anchor in
-# the retired GitHub container workflow (#801). The response bodies go to
+# the retired GitHub container workflow, which the GitLab `smoke` job and its browser variants now run (#801). The response bodies go to
 # private temporary files rather than fixed /tmp paths, so a stale file from
 # an earlier run can never be what an assertion reads.
 #

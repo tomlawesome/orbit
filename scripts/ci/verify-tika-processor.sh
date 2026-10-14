@@ -7,8 +7,7 @@
 # corpus when reached from inside that network by the image under test.
 #
 # Extracted verbatim from the "Verify exact hostile-document processor" step
-# of the &container_validation_steps anchor in
-# the retired GitHub container workflow (#801).
+# of the retired GitHub container workflow, which the GitLab `acceptance` job now runs (#801).
 #
 # Inputs (environment):
 #   TESTED_IMAGE_TAG  the image under test; the corpus runs inside it

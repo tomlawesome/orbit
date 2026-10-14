@@ -7,8 +7,7 @@
 # Unable to compare (no parent commit) means required, never skipped.
 #
 # Extracted verbatim from the "Detect exact processor validation scope" step
-# of the &container_validation_steps anchor in
-# the retired GitHub container workflow (#801).
+# of the retired GitHub container workflow, which the GitLab `acceptance` job now runs (#801).
 #
 # Inputs: the Git checkout. Outputs `required=true|false` on standard output,
 # and appends the same line to $GITHUB_OUTPUT when that variable is set.

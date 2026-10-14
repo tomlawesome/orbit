@@ -8,8 +8,7 @@
 # never what gets deleted.
 #
 # Extracted verbatim from the "Clean up installer validation resources" step
-# of the &container_validation_steps anchor in
-# the retired GitHub container workflow (#801). Runs unconditionally, so it
+# of the retired GitHub container workflow, which the GitLab `acceptance` job now runs (#801). Runs unconditionally, so it
 # must never itself be the reason a run is red.
 #
 # Inputs (environment): REGISTRY_NAME, REGISTRY_ID, INSTALL_TARGET,

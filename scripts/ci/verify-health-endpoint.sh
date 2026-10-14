@@ -5,8 +5,7 @@
 # over yet.
 #
 # Extracted verbatim from the "Verify health endpoint" step of the
-# &container_validation_steps anchor in
-# the retired GitHub container workflow (#801).
+# retired GitHub container workflow, which the GitLab `smoke` job and its browser variants now run (#801).
 #
 # Inputs: a stack listening on 127.0.0.1:3000.
 set -Eeuo pipefail

@@ -5,11 +5,11 @@
 # "orbit", so this must have completed before it starts or the two collide.
 #
 # Extracted from the "Stop smoke-test services" step of the
-# &container_validation_steps anchor in
-# the retired GitHub container workflow (#801).
+# retired GitHub container workflow, which the GitLab smoke and acceptance jobs now run (#801).
 #
 # Inputs (environment):
-#   COMPOSE_FILES  overlay set to tear down; defaults to the workflow's
+#   COMPOSE_FILES  overlay set to tear down; defaults to the base, mail and
+#                  acceptance files, as start-acceptance-stack.sh does
 #   ORBIT_IMAGE    defaulted, so Compose can still parse the files when the
 #                  run failed before the image was recorded
 set -Eeuo pipefail

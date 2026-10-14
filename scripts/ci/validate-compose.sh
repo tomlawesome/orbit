@@ -7,8 +7,7 @@
 # database that cannot reach it.
 #
 # Originally extracted verbatim from the "Validate Compose configuration"
-# step of the &container_validation_steps anchor in
-# the retired GitHub container workflow (#801), then reunited with
+# step of the retired GitHub container workflow, which the GitLab `acceptance` job now runs (#801), then reunited with
 # scripts/validate-compose-config.sh's operator-facing preview-preflight
 # copy after the two drifted (#804): this is now the single implementation,
 # CI calls it directly, and validate-compose-config.sh is a thin wrapper

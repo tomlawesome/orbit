@@ -7,8 +7,7 @@
 # operator's first experience of Orbit.
 #
 # Extracted verbatim from the "Verify empty target refuses unattended
-# install" step of the &container_validation_steps anchor in
-# the retired GitHub container workflow (#801). It deliberately does not
+# install" step of the retired GitHub container workflow, which the GitLab `acceptance` job now runs (#801). It deliberately does not
 # change directory: the caller runs it from the installer target, and the
 # emptiness assertion at the end reads the working directory.
 #

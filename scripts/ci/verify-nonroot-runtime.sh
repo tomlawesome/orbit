@@ -6,8 +6,7 @@
 # a secret left world-readable, is a finding this catches before publication.
 #
 # Extracted verbatim from the "Verify non-root runtime and private secrets"
-# step of the &container_validation_steps anchor in
-# the retired GitHub container workflow (#801).
+# step of the retired GitHub container workflow, which the GitLab `smoke` job and its browser variants now run (#801).
 #
 # Inputs: a running acceptance stack.
 set -Eeuo pipefail

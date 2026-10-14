@@ -6,8 +6,7 @@
 # that round trip would leave evidence describing something nobody ran.
 #
 # Extracted verbatim from the "Push exact tested image" step of the
-# &container_validation_steps anchor in
-# the retired GitHub container workflow (#801). Registry authentication and
+# retired GitHub container workflow, which the GitLab `record_image` job now runs (#801). Registry authentication and
 # attestation stay with the caller.
 #
 # Inputs (environment):

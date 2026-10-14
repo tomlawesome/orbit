@@ -7,8 +7,7 @@
 # can never be read as describing an image nobody ran.
 #
 # Extracted verbatim from the "Scan exact local image" step of the
-# &container_validation_steps anchor in
-# the retired GitHub container workflow (#801).
+# retired GitHub container workflow, which the GitLab `supply_chain_image` job now runs (#801).
 #
 # Inputs (environment):
 #   TESTED_IMAGE_ID       configuration digest of the image under test

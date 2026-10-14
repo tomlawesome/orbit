@@ -20,8 +20,8 @@
 #      its own rather than a validation step, and each wants a lane here
 #      instead of a line in an existing job.
 #   2. Provenance and SBOM attestation for operators. GitLab CE has no
-#      equivalent of actions/attest, so the GitHub lane still owns the
-#      operator-facing provenance/SBOM attestations over the GHCR digest.
+#      equivalent of actions/attest, so `publish-from-gitlab.yml` on GitHub
+#      still owns the operator-facing provenance/SBOM attestations over the GHCR digest.
 #      The evidence *publication* consumes -- "this digest passed the full
 #      bar under policy P" -- is different, and does live here: a cosign
 #      key-based attestation minted by `sign_evidence` and verified by every
@@ -144,7 +144,7 @@ variables:
   # a moving tag would silently change what the gate ran on.
   NODE_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/node:22-bookworm@sha256:87a4f951f28b85d189df365d24c479d3bdb70be77c1ff5c9029db2ef67e251ac
   # The image the v19 baselines were proven against, byte for byte the pin the
-  # GitHub fidelity job uses. Any other browser build is a different
+  # GitLab `fidelity` jobs use. Any other browser build is a different
   # rasteriser, and then the comparison measures the runner, not the design.
   # mcr.microsoft.com, not Docker Hub: stays direct.
   PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
@@ -757,7 +757,7 @@ variables:
 # --- classify ----------------------------------------------------------------
 
 # Selects the cheapest lane that still exercises every changed boundary, using
-# the same classifier the workflow uses. Classification is fail-safe: an
+# the classifier from scripts/classify-changed-paths.mjs. Classification is fail-safe: an
 # unknown path, an unreadable comparison or a changed production dependency
 # graph all select the broad system lane.
 #
@@ -1127,8 +1127,8 @@ base_image:
 # than through `docker run`: under dind a bind mount of the workspace would be
 # empty, because the workspace lives in the job container and the daemon does
 # not share it. Node comes from the image's own Alpine repository -- the three
-# policy scripts are Node standard library only, which is why the GitHub job
-# installs no dependencies either.
+# policy scripts are Node standard library only, which is why this job
+# installs no dependencies.
 #
 # Short scanners run on the light lane (4 CPU / 6 GB, four at a time) so they
 # stop holding a big-lane slot. If one is ever killed for memory, move it back
@@ -1230,7 +1230,7 @@ licence_policy:
 # Scans every image pinned in .github/supply-chain-policy.json, not just the
 # one Orbit builds: an operator's deployment runs the sidecars too (#647).
 #
-# Findings are reporting-only, as `continue-on-error` makes them on GitHub:
+# Findings are reporting-only, as `allow_failure` makes them here:
 # every pinned sidecar currently has fixable HIGH findings with no clean
 # upstream digest to re-pin to. When the pins scan clean, delete `allow_failure`
 # so a newly published advisory against a pinned digest fails the job.
@@ -1662,11 +1662,10 @@ fidelity_webkit:
 # pinned digest and the suite is driven directly with the environment
 # scripts/test-integration.mjs builds.
 #
-# One run rather than the old workflow's two concurrent ones. The pair there proves
-# per-run isolation, and it can, because each invocation gets its own container
-# and its own database; two suites sharing this one service would simply
-# collide. The isolation proof stays with GitHub until this lane can create
-# databases of its own.
+# One run rather than the retired GitHub workflow's two concurrent ones, which proved
+# per-run isolation because each invocation got its own container and its own
+# database; two suites sharing this one service would simply
+# collide. That concurrent-run isolation proof is no longer run anywhere.
 integration:
   stage: acceptance
   tags: [light]
@@ -2049,8 +2048,8 @@ supply_chain_image:
     expire_in: 14 days
     when: always
 
-# The stack-and-browser portion of the old workflow's &container_validation_steps
-# anchor, run by calling the anchor's own scripts: create the isolated test
+# The stack-and-browser portion of the retired GitHub container validation
+# steps, run by calling their scripts/ci scripts: create the isolated test
 # configuration, bring the acceptance stack up on the image that was just
 # built, prove it healthy and honest about its identity, prove it unprivileged
 # and signed-out-safe, and run the Playwright and accessibility suite against
@@ -2532,8 +2531,8 @@ smoke_local_only:
     expire_in: 14 days
     when: always
 
-# The rest of the old workflow's &container_validation_steps anchor, in the
-# anchor's order: the deployment asset set and every supported compose
+# The rest of the retired GitHub container validation steps, in their
+# original order: the deployment asset set and every supported compose
 # combination, the confined hostile-document processor, and then the installer
 # evidence -- an unattended run into an empty directory must refuse, and a run
 # against a pre-provisioned one must deploy the exact image this pipeline
@@ -2770,14 +2769,14 @@ repair_journeys:
 # reason those two jobs use it: docker-compose-v2 has no Debian Bookworm
 # package, and $NODE_IMAGE is Bookworm.
 #
-# Scope is the workflow's, narrowed the GitLab way: `classify` already treats
+# Scope is the retired GitHub workflow's, narrowed the GitLab way: `classify` already treats
 # both scripts/install.sh (explicitly) and .gitlab-ci.yml (via its unmatched-
 # path catch-all) as system risk, but that bucket is far wider than what this
 # job actually watches itself for, so it gets its own classifier output
 # (ORBIT_LAUNCHER_COMPAT, scripts/classify-changed-paths.mjs) rather than
 # reusing ORBIT_SYSTEM. A merge request targeting `main` is always checked --
 # that is the preview -> main promotion this job exists to gate -- exactly as
-# the workflow always ran on a pull request into `main`.
+# the retired GitHub workflow always ran on a pull request into `main`.
 #
 # Shared with build_launcher below (ADR-0031 #3: "runs on every ref the
 # compat job runs on"), because launcher_install_compat now `needs:` its
