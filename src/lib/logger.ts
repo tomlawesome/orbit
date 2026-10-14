@@ -197,6 +197,9 @@ export const operationalImpacts = [
   "worker_degraded",
   /* One field is unreadable, not the row and not the application. */
   "metadata_field_unreadable",
+  /* A member's sending address must be checked again before their forwarded
+     mail is attributed to them. */
+  "sender_check_required",
 ] as const;
 export type OperationalImpact = typeof operationalImpacts[number];
 
@@ -258,6 +261,8 @@ export const operationalEvents = {
   "document.model_extraction": "document",
   "imap.ingestion": "ingestion",
   "imap.receipt": "mail",
+  /* A member's stored sending address (the mail relay's sender check). */
+  "mail-relay.sender": "mail",
   "delivery.smtp": "delivery",
   "delivery.push": "delivery",
   "backup.operation": "backup",

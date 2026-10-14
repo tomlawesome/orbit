@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
@@ -7,8 +7,8 @@ import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
-import { listSenderAddresses, seedSenderAddress } from "@/server/mail-in/sender-addresses";
-import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
+import { listSenderAddresses, requestSenderCheck, seedSenderAddress, userForVerifiedSender } from "@/server/mail-in/sender-addresses";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, senderAddressColumns, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 
 /*
@@ -248,6 +248,88 @@ describe("M-S10: an unreadable stored sender address", () => {
     const [view] = await listSenderAddresses(userId);
     expect(view.address).toBe(fixture.users.member.email);
     expect(view.verified).toBe(false);
+  });
+
+  it("a VERIFIED row that cannot be read is replaced by a verified row, so mail keeps attributing", async () => {
+    await turnMailInOn();
+    const userId = fixture.users.member.id;
+    const corruptId = await corruptRow(userId);
+    await markChecked(userId);
+    await getDb().update(mailInSenderAddresses)
+      .set({ addressEnc: randomBytes(48).toString("base64") })
+      .where(eq(mailInSenderAddresses.id, corruptId));
+    expect(await userForVerifiedSender(fixture.users.member.email)).toBe(userId);
+
+    const reading = await readRelaySettings({ id: userId, isInstanceAdmin: false });
+
+    const rows = await rowsOf(userId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).not.toBe(corruptId);
+    expect(rows[0].verifiedAt).not.toBeNull();
+    const [view] = await listSenderAddresses(userId);
+    expect(view.address).toBe(fixture.users.member.email);
+    expect(reading.sender?.verified).toBe(true);
+    expect(await userForVerifiedSender(fixture.users.member.email)).toBe(userId);
+  });
+
+  it("guard: a damaged verified row holding another address's index is replaced by an unverified registered row", async () => {
+    await turnMailInOn();
+    const userId = fixture.users.member.id;
+    const oldId = randomUUID();
+    await getDb().insert(mailInSenderAddresses).values({
+      id: oldId,
+      userId,
+      ...await senderAddressColumns(oldId, "old@example.test"),
+      verifiedAt: new Date(),
+      source: "manual",
+    });
+    await getDb().update(mailInSenderAddresses)
+      .set({ addressEnc: randomBytes(48).toString("base64") })
+      .where(eq(mailInSenderAddresses.id, oldId));
+
+    await readRelaySettings({ id: userId, isInstanceAdmin: false });
+
+    const rows = await rowsOf(userId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).not.toBe(oldId);
+    expect(rows[0].verifiedAt).toBeNull();
+    const [view] = await listSenderAddresses(userId);
+    expect(view.address).toBe(fixture.users.member.email);
+    expect(await userForVerifiedSender("old@example.test")).toBeUndefined();
+  });
+
+  it("guard: the send times of a damaged row survive the replacement, so the limit still refuses a sixth check", async () => {
+    await turnMailInOn();
+    const userId = fixture.users.member.id;
+    const corruptId = await corruptRow(userId);
+    const sent = [23, 19, 15, 11, 5].map((hours) => new Date(Date.now() - hours * HOUR_MS));
+    await getDb().update(mailInSenderAddresses).set({ checkSentAt: sent })
+      .where(eq(mailInSenderAddresses.id, corruptId));
+
+    await readRelaySettings({ id: userId, isInstanceAdmin: false });
+
+    const rows = await rowsOf(userId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).not.toBe(corruptId);
+    const mailed: string[] = [];
+    await expect(requestSenderCheck(userId, {
+      smtpConfig: () => ({
+        smtpUrl: "smtps://fake:fake@smtp.example.test:465",
+        smtpSecurity: "implicit_tls" as const,
+        smtpFrom: "orbit@example.test",
+        vapidSubject: "",
+        vapidPublicKey: "",
+        vapidPrivateKey: "",
+        pollMilliseconds: 60_000,
+        maxAttempts: 5,
+      }),
+      appUrl: () => "http://127.0.0.1:3000",
+      sendMail: async (message) => { mailed.push(message.to); },
+    })).rejects.toMatchObject({
+      code: expect.stringMatching(/^sender_check_(too_soon|daily_limit)$/),
+    });
+    expect(mailed).toHaveLength(0);
+    expect((await rowsOf(userId))[0].verificationTokenDigest).toBeNull();
   });
 
   it("with the metadata key locked, the unreadable row is kept", async () => {

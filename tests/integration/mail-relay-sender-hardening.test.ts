@@ -23,9 +23,9 @@ import { callRoute, callRouteForSession, loadRoute } from "./support/request-eve
  * finding, written from the behaviour the review asked for:
  *
  *   1. With the key working, a stored sender row that fails authentication is
- *      damaged: a relay read or a send attempt replaces it with an unverified
- *      row for the registered address (verification is earned again; release
- *      audit, #1316). With several rows, rows that decrypt to another address
+ *      damaged: a relay read or a send attempt replaces it with a row for the
+ *      registered address, unchecked if the damaged row was unchecked and
+ *      verified if it was verified (release audit, #1316). With several rows, rows that decrypt to another address
  *      go too, and the registered row stays. (The locked-key case, where such
  *      a row is kept, is in mail-relay-sender-read.test.ts.)
  *   2. When the registered address changes outside the settings screen (the
@@ -171,24 +171,29 @@ async function expectReplaced(rowId: string) {
 }
 
 describe("finding 1: a damaged stored address is replaced, unverified", () => {
-  it("replaces a damaged VERIFIED row with an unverified one through a relay read", async () => {
+  it("keeps a damaged VERIFIED row's verification on the replacement through a relay read", async () => {
     await turnMailInOn();
     const rowId = await seedUnreadableRow(fixture.users.member.id);
     await getDb().update(mailInSenderAddresses).set({ verifiedAt: new Date() }).where(eq(mailInSenderAddresses.id, rowId));
 
     await readRelaySettings(memberActor());
 
-    await expectReplaced(rowId);
+    const rows = await rowsOf(fixture.users.member.id);
+    expect(rows.map((row) => row.id)).not.toContain(rowId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].verifiedAt).not.toBeNull();
   });
 
-  it("replaces a damaged VERIFIED row with an unverified one through a send attempt", async () => {
+  it("keeps a damaged VERIFIED row's verification on the replacement through a send attempt", async () => {
     const rowId = await seedUnreadableRow(fixture.users.member.id);
     await getDb().update(mailInSenderAddresses).set({ verifiedAt: new Date() }).where(eq(mailInSenderAddresses.id, rowId));
     const session = await fixture.session("member");
 
-    await send(session);
+    const response = await send(session);
 
-    await expectReplaced(rowId);
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe("sender_already_verified");
+    expect(mail.sent).toHaveLength(0);
   });
 
   it("replaces a damaged unchecked row through a relay read", async () => {

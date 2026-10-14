@@ -28,6 +28,7 @@ import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { externalIdentities, mailInSenderAddresses, users } from "@/db/schema";
 import { AppError, RateLimitedError } from "@/lib/app-error";
+import { log } from "@/lib/logger";
 import {
   openInstanceMetadataReader,
   requireInstanceMetadataWriter,
@@ -264,8 +265,12 @@ export async function hasVerifiedSenderAddress(userId: string, executor: Metadat
  * be read while the key is locked proves nothing about which address it holds
  * (it may well be the verified, registered one), so it is left alone. With
  * the key working, a row that fails authentication is damaged and can never
- * be read again: it is dropped and the registered address seeded afresh,
- * unverified, so the member is not stranded.
+ * be read again: it is dropped and the registered address seeded afresh, so
+ * the member is not stranded. The fresh row keeps the damaged row's
+ * verification when that row was verified and its blind index is the
+ * registered address's: the index is what attribution and "one account per
+ * address" already trust, and the ciphertext is only the display copy.
+ * Otherwise the fresh row is unverified and the check must be earned again.
  */
 export async function seedSenderAddress(
   userId: string,
@@ -314,6 +319,10 @@ export async function seedSenderAddress(
 
   const cipher = await requireInstanceMetadataWriter(executor);
   const addressIndex = cipher.senderAddressIndex(address);
+  /* Damaged but proven: the proof still holds for the registered address, so
+     the replacement carries it rather than turning the member into a
+     stranger until they check again. */
+  const proven = damaged.find((row) => row.addressIndex === addressIndex && row.verifiedAt !== null);
   const staleIds = stale.map((row) => row.id);
   /* The send times are the member's, not the address's, and they survive any
      change of address: every replaced row's times are merged into wherever
@@ -325,12 +334,21 @@ export async function seedSenderAddress(
   ));
 
   /* Dropped first: a damaged row still holds its blind index, which is most
-     likely the registered address's, and would otherwise block the reseed. */
+     likely the registered address's, and would otherwise block the reseed.
+     The caller's transaction holds the delete and the insert below together,
+     so there is no moment with no claim. */
   if (damaged.length > 0) {
     await executor.delete(mailInSenderAddresses).where(and(
       eq(mailInSenderAddresses.userId, userId),
       inArray(mailInSenderAddresses.id, damaged.map((row) => row.id)),
     ));
+    log.warn({
+      event: "mail-relay.sender",
+      state: "degraded",
+      reason: "metadata_integrity_failed",
+      action: "inspect_admin_diagnostics",
+      impact: (proven || (matching ?? unreadable)?.verifiedAt) ? "none" : "sender_check_required",
+    });
   }
 
   const home = matching ?? unreadable;
@@ -375,6 +393,7 @@ export async function seedSenderAddress(
     addressEnc: cipher.encryptText("mail_in_sender_addresses.address", id, address),
     addressIndex,
     source: identity ? "sso" : "account",
+    verifiedAt: proven?.verifiedAt ?? null,
     checkSentAt: mergeChecks(staleTimes, now),
     updatedAt: now,
   }).onConflictDoNothing();
