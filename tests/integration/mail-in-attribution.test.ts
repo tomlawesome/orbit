@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -312,7 +312,9 @@ function mailboxHoldingMessages(uidValidity: bigint, messages: Map<number, Buffe
     async messageDelete(range: string) { deleted.push(range); return true; },
     async fetchOne(uid: string) {
       const headers = messages.get(Number(uid));
-      return headers ? { uid: Number(uid), headers, source: Buffer.from(`attribution-message-${uid}`) } : false;
+      /* A fresh copy per fetch, as a real server sends: the cycle zeroes the
+         buffers it was handed, and a message may be fetched again. */
+      return headers ? { uid: Number(uid), headers: Buffer.from(headers), source: Buffer.from(`attribution-message-${uid}`) } : false;
     },
   } as unknown as import("imapflow").ImapFlow));
 }
@@ -353,9 +355,8 @@ describe("a message Orbit cannot attribute through its own fault is kept (#1316)
     try {
       expect(metadataCryptoAvailable()).toBe(false);
       mailboxHoldingMessages(3001n, new Map([[1, attributedHeaders(sender)]]));
-      /* A cycle that gives up and reports the outage is as good as one that
-         skips the message; only deleting or answering it is the fault. */
-      await runImapIngestionCycle(config, replyDependencies).catch(() => undefined);
+      /* No .catch: a cycle that throws fails the test. */
+      await runImapIngestionCycle(config, replyDependencies);
     } finally {
       restoreKey();
     }
@@ -365,34 +366,127 @@ describe("a message Orbit cannot attribute through its own fault is kept (#1316)
     expect(await receiptsFor("3001")).toEqual([]);
   }, 30_000);
 
+  /** Flips the tail of a member's stored envelope so it no longer authenticates; returns the original to restore. */
+  async function damageStoredAddress(userId: string) {
+    const [stored] = await getDb().select({ emailEnc: users.emailEnc }).from(users).where(eq(users.id, userId));
+    const envelope = stored!.emailEnc!;
+    const tampered = `${envelope.slice(0, -4)}${envelope.endsWith("AAAA") ? "BBBB" : "AAAA"}`;
+    expect(tampered).not.toBe(envelope);
+    await getDb().update(users).set({ emailEnc: tampered }).where(eq(users.id, userId));
+    return envelope;
+  }
+
+  async function restoreStoredAddress(userId: string, envelope: string) {
+    await getDb().update(users).set({ emailEnc: envelope }).where(eq(users.id, userId));
+  }
+
   it("keeps the message of a member whose stored address is damaged, while a stranger's in the same cycle is still handled as unattributed", async () => {
     const config = await getImapIngestionConfig();
     await reconcileImapRecipientAliases(config);
     const damaged = fixture.users.member.id;
     const sender = await verifiedSenderFor(damaged);
 
-    /* Flip the last characters of the member's stored envelope so it no longer
-       authenticates. The key is fine; this one member's row is not. */
-    const [stored] = await getDb().select({ emailEnc: users.emailEnc }).from(users).where(eq(users.id, damaged));
-    const envelope = stored!.emailEnc!;
-    const tampered = `${envelope.slice(0, -4)}${envelope.endsWith("AAAA") ? "BBBB" : "AAAA"}`;
-    expect(tampered).not.toBe(envelope);
-    await getDb().update(users).set({ emailEnc: tampered }).where(eq(users.id, damaged));
+    /* The key is fine; this one member's row is not. */
+    await damageStoredAddress(damaged);
 
     mailboxHoldingMessages(3002n, new Map([
       [1, attributedHeaders(sender)],
       [2, attributedHeaders("stranger@example.test")],
     ]));
-    await runImapIngestionCycle(config, replyDependencies).catch(() => undefined);
+    await runImapIngestionCycle(config, replyDependencies);
 
-    /* Message 1 (the damaged member's): not deleted, not answered. Message 2
+    /* Message 1 (the damaged member's): not deleted, not answered, but
+       recorded as held so a later cycle knows to come back to it. Message 2
        (a genuine stranger): answered once and deleted, as ever. */
     expect(deleted).toEqual(["2"]);
     expect(sent.map((message) => message.to)).toEqual(["stranger@example.test"]);
     const receipts = await receiptsFor("3002");
-    expect(receipts.filter((receipt) => receipt.uid === 1)).toEqual([]);
+    expect(receipts.filter((receipt) => receipt.uid === 1)).toEqual([
+      { uid: 1, userId: null, status: "held" },
+    ]);
     expect(receipts.filter((receipt) => receipt.uid === 2)).toEqual([
       { uid: 2, userId: null, status: "unattributed" },
     ]);
   }, 30_000);
+
+  it("ingests the damaged member's message on a later cycle once the address is repaired, though a later UID is already recorded", async () => {
+    const config = await getImapIngestionConfig();
+    await reconcileImapRecipientAliases(config);
+    const member = fixture.users.member.id;
+    const sender = await verifiedSenderFor(member);
+    const original = await damageStoredAddress(member);
+
+    const messages = new Map([
+      [1, attributedHeaders(sender)],
+      [2, attributedHeaders("stranger@example.test")],
+    ]);
+    mailboxHoldingMessages(3003n, messages);
+    await runImapIngestionCycle(config, replyDependencies);
+
+    expect(deleted).toEqual(["2"]);
+    expect(sent.map((message) => message.to)).toEqual(["stranger@example.test"]);
+    expect((await receiptsFor("3003")).filter((receipt) => receipt.uid === 1)).toEqual([
+      { uid: 1, userId: null, status: "held" },
+    ]);
+
+    /* Repair the address. The provider still holds both messages. */
+    await restoreStoredAddress(member, original);
+    mailboxHoldingMessages(3003n, messages);
+    await runImapIngestionCycle(config, replyDependencies);
+
+    const [first] = (await receiptsFor("3003")).filter((receipt) => receipt.uid === 1);
+    expect(first).toBeDefined();
+    expect(first!.userId).toBe(member);
+    expect(first!.status).not.toBe("held");
+    expect(first!.status).not.toBe("unattributed");
+    /* Each cycle re-sends the stranger's delete until it lands; only uid 2 is ever deleted. */
+    expect(new Set(deleted)).toEqual(new Set(["2"]));
+    expect(sent).toHaveLength(1);
+  }, 60_000);
+
+  it("keeps retrying a still-damaged message with a delay between tries, then ingests it once repaired", async () => {
+    const config = await getImapIngestionConfig();
+    await reconcileImapRecipientAliases(config);
+    const member = fixture.users.member.id;
+    const sender = await verifiedSenderFor(member);
+    const original = await damageStoredAddress(member);
+
+    const messages = new Map([
+      [1, attributedHeaders(sender)],
+      [2, attributedHeaders("stranger@example.test")],
+    ]);
+    mailboxHoldingMessages(3004n, messages);
+    await runImapIngestionCycle(config, replyDependencies);
+    mailboxHoldingMessages(3004n, messages);
+    await runImapIngestionCycle(config, replyDependencies);
+
+    /* Still damaged: still held, nothing deleted or answered beyond the stranger. */
+    expect((await receiptsFor("3004")).filter((receipt) => receipt.uid === 1)).toEqual([
+      { uid: 1, userId: null, status: "held" },
+    ]);
+    /* Each cycle re-sends the stranger's delete until it lands; only uid 2 is ever deleted. */
+    expect(new Set(deleted)).toEqual(new Set(["2"]));
+    expect(sent).toHaveLength(1);
+    const [pending] = await getDb().select({ next: imapIngestionMessages.attachmentProcessingNextAttemptAt })
+      .from(imapIngestionMessages)
+      .where(and(eq(imapIngestionMessages.mailboxUidValidity, "3004"), eq(imapIngestionMessages.mailboxUid, 1)));
+    expect(pending?.next).toBeInstanceOf(Date);
+    expect(pending!.next!.getTime()).toBeGreaterThan(Date.now());
+
+    /* Repair, and clear the delay so the next cycle may try at once. */
+    await restoreStoredAddress(member, original);
+    await getDb().update(imapIngestionMessages).set({ attachmentProcessingNextAttemptAt: null })
+      .where(and(eq(imapIngestionMessages.mailboxUidValidity, "3004"), eq(imapIngestionMessages.mailboxUid, 1)));
+    mailboxHoldingMessages(3004n, messages);
+    await runImapIngestionCycle(config, replyDependencies);
+
+    const [first] = (await receiptsFor("3004")).filter((receipt) => receipt.uid === 1);
+    expect(first).toBeDefined();
+    expect(first!.userId).toBe(member);
+    expect(first!.status).not.toBe("held");
+    expect(first!.status).not.toBe("unattributed");
+    /* Each cycle re-sends the stranger's delete until it lands; only uid 2 is ever deleted. */
+    expect(new Set(deleted)).toEqual(new Set(["2"]));
+    expect(sent).toHaveLength(1);
+  }, 60_000);
 });
