@@ -10,7 +10,7 @@ import { normalizeImapAttachmentName } from "./imap-attachment-validation";
 import { normalizeComparableMetadata } from "@/server/metadata/crypto";
 import type { SupportedDocumentMediaType } from "@/server/documents/validation";
 
-export type ReviewInboxClassification = "ready" | "waiting" | "retry" | "cleanup" | "unavailable";
+export type ReviewInboxClassification = "ready" | "waiting" | "retry" | "unavailable";
 
 export type ReviewInboxStateContext = {
   hasApprovalOperation?: boolean;

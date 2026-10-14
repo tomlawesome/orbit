@@ -110,7 +110,7 @@ test("a failed arrival the server lets go opens on a tap to remove; one it keeps
   await page.route("**/api/imap-inbox", (route) => route.fulfill({
     json: {
       receipts: [
-        { id: "r-gone", receivedAt: "2026-08-09T16:02:00.000Z", classification: "cleanup", canApprove: false,
+        { id: "r-gone", receivedAt: "2026-08-09T16:02:00.000Z", classification: "retry", canApprove: false,
           canDiscard: true, message: "It carried no document Orbit can read." },
         { id: "r-kept", receivedAt: "2026-08-06T08:41:00.000Z", classification: "unavailable", canApprove: false,
           canDiscard: false, message: "Its document could not be prepared." },

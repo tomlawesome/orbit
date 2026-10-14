@@ -270,7 +270,6 @@ export async function listImapInbox(userId: string) {
         attachmentCount: receipt.attachmentCount,
         attachments: orderedAttachments(attachmentsByMessage.get(receipt.id) ?? []),
         ...state,
-        cleanupOnly: state.classification === "cleanup",
         ...metadata,
       };
     }),
