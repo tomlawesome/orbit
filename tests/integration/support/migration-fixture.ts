@@ -1,19 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import baselineFixture from "../fixtures/migration-baseline.json";
 import { canonicalMigrationChecksum, readExpectedMigrationHashes as readProductionExpectedMigrationHashes } from "../../../src/db/migration-integrity";
 
-export const BASELINE_MIGRATION_TAG = baselineFixture.finalMigrationTag;
-export const EXPECTED_POSTGRES_MAJOR = baselineFixture.postgresMajor;
+/** The major version of the PostgreSQL image the integration script starts. */
+export const EXPECTED_POSTGRES_MAJOR = 18;
 const MIGRATION_SCHEMA = "drizzle";
 const MIGRATION_TABLE = "__drizzle_migrations";
 
-type FixtureRow = Record<string, unknown>;
 type MigrationJournalEntry = {
   idx: number;
   version: string;
@@ -423,68 +421,8 @@ async function migrationDefinitions(migrationsFolder: string): Promise<Migration
   })));
 }
 
-export async function verifyMigrationPrefix(migrationsFolder: string): Promise<void> {
-  const folder = resolve(process.cwd(), migrationsFolder);
-  const journal = await readJournalDefinition(folder);
-  const expectedTags = baselineFixture.migrationPrefix.map((migration) => migration.tag);
-  const actualTags = journal.entries.slice(0, expectedTags.length).map((entry) => entry.tag);
-  if (JSON.stringify(actualTags) !== JSON.stringify(expectedTags)) {
-    throw new Error("The checked-in migration journal no longer contains the supported immutable prefix");
-  }
-
-  for (const migration of baselineFixture.migrationPrefix) {
-    const content = await readFile(join(folder, `${migration.tag}.sql`));
-    const actualHash = canonicalMigrationChecksum(content);
-    if (actualHash !== migration.sha256) {
-      throw new Error(`Migration checksum mismatch for ${migration.tag}`);
-    }
-  }
-}
-
 export async function readExpectedMigrationHashes(migrationsFolder: string): Promise<string[]> {
   return (await readProductionExpectedMigrationHashes(resolve(process.cwd(), migrationsFolder))).map((migration) => migration.hash);
-}
-
-export async function createBaselineMigrationDirectory(migrationsFolder: string): Promise<TemporaryMigrationDirectory> {
-  await verifyMigrationPrefix(migrationsFolder);
-  const sourceFolder = resolve(process.cwd(), migrationsFolder);
-  const targetFolder = await mkdtemp(join(tmpdir(), "orbit-baseline-migrations-"));
-  await mkdir(join(targetFolder, "meta"), { recursive: true });
-  const sourceJournal = await readJournalDefinition(sourceFolder);
-  const baselineTags = new Set(baselineFixture.migrationPrefix.map((migration) => migration.tag));
-  for (const migration of baselineFixture.migrationPrefix) {
-    await cp(join(sourceFolder, `${migration.tag}.sql`), join(targetFolder, `${migration.tag}.sql`));
-  }
-  await writeFile(join(targetFolder, "meta", "_journal.json"), JSON.stringify({
-    ...sourceJournal,
-    entries: sourceJournal.entries.filter((entry) => baselineTags.has(entry.tag)),
-  }, null, 2) + "\n");
-  return {
-    path: targetFolder,
-    cleanup: () => rm(targetFolder, { recursive: true, force: true }),
-  };
-}
-
-export async function createMigrationDirectoryThroughTag(migrationsFolder: string, tag: string): Promise<TemporaryMigrationDirectory> {
-  const sourceFolder = resolve(process.cwd(), migrationsFolder);
-  const sourceJournal = await readJournalDefinition(sourceFolder);
-  const cutoffIndex = sourceJournal.entries.findIndex((entry) => entry.tag === tag);
-  if (cutoffIndex === -1) throw new Error(`Migration tag not found in journal: ${tag}`);
-  const includedEntries = sourceJournal.entries.slice(0, cutoffIndex + 1);
-
-  const targetFolder = await mkdtemp(join(tmpdir(), "orbit-through-tag-migrations-"));
-  await mkdir(join(targetFolder, "meta"), { recursive: true });
-  for (const entry of includedEntries) {
-    await cp(join(sourceFolder, `${entry.tag}.sql`), join(targetFolder, `${entry.tag}.sql`));
-  }
-  await writeFile(join(targetFolder, "meta", "_journal.json"), JSON.stringify({
-    ...sourceJournal,
-    entries: includedEntries,
-  }, null, 2) + "\n");
-  return {
-    path: targetFolder,
-    cleanup: () => rm(targetFolder, { recursive: true, force: true }),
-  };
 }
 
 export async function createInvalidMigrationDirectory(migrationsFolder: string): Promise<TemporaryMigrationDirectory & { failedTag: string }> {
@@ -516,88 +454,6 @@ export async function createInvalidMigrationDirectory(migrationsFolder: string):
     failedTag,
     cleanup: () => rm(targetFolder, { recursive: true, force: true }),
   };
-}
-
-/** The last migration before the window/update model (orbit#585). */
-export const PRE_WINDOW_MIGRATION_TAG = "0028_instance_maintenance";
-
-export interface PreWindowNoticeSeed {
-  id: string;
-  message: string;
-  startsAt: string;
-  expectedEndAt: string | null;
-  /** Set by the #525 worker when it claimed the notice. */
-  activatedAt?: string | null;
-  /** Set by cancelMaintenanceNotice, which retained rather than deleted. */
-  cancelledAt?: string | null;
-}
-
-export interface PreWindowMaintenanceSeed {
-  active: { message: string; expectedEndAt: string | null; activatedAt: string } | null;
-  notices: PreWindowNoticeSeed[];
-}
-
-/**
- * Writes the maintenance state a 0028 database actually holds, in the exact
- * shape the retired writers in src/server/maintenance.ts produced: the
- * singleton carrying one overwritable message with `message_published_at` and
- * `activated_at` set together, notices inserted with their scheduled instant,
- * `version` incremented once per mutation, and an audit row per mutation
- * against the singleton's stable id (notices against their own).
- *
- * The shape matters more than the values. A fixture that invents a row the
- * application could never have written proves nothing about the upgrade
- * (#529 in this same session), so this reproduces the writers rather than
- * describing them.
- */
-export async function seedPreWindowMaintenance(
-  client: PostgresClient,
-  seed: PreWindowMaintenanceSeed,
-): Promise<void> {
-  const [singleton] = await client.unsafe(`SELECT "id" FROM "instance_maintenance" WHERE "singleton"`);
-  if (!singleton) throw new Error("0028 must have seeded the maintenance singleton before this fixture runs");
-  const singletonId = String(singleton.id);
-  let version = 1;
-
-  for (const notice of seed.notices) {
-    version += 1;
-    await client.unsafe(
-      `INSERT INTO "maintenance_notices" ("id", "message", "starts_at", "expected_end_at", "activated_at", "cancelled_at")
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [notice.id, notice.message, notice.startsAt, notice.expectedEndAt, notice.activatedAt ?? null, notice.cancelledAt ?? null],
-    );
-    await client.unsafe(
-      `INSERT INTO "audit_log" ("entity_type", "entity_id", "action", "changes")
-       VALUES ('instance_maintenance', $1, 'maintenance_notice_scheduled', $2)`,
-      [notice.id, JSON.stringify({
-        message: notice.message,
-        startsAt: notice.startsAt,
-        expectedEndAt: notice.expectedEndAt,
-      })],
-    );
-  }
-
-  if (seed.active) {
-    version += 1;
-    await client.unsafe(
-      `UPDATE "instance_maintenance"
-          SET "active" = true, "message" = $1, "message_published_at" = $2,
-              "expected_end_at" = $3, "activated_at" = $2, "version" = $4, "updated_at" = $2
-        WHERE "singleton"`,
-      [seed.active.message, seed.active.activatedAt, seed.active.expectedEndAt, version],
-    );
-    await client.unsafe(
-      `INSERT INTO "audit_log" ("entity_type", "entity_id", "action", "changes")
-       VALUES ('instance_maintenance', $1, 'maintenance_activated', $2)`,
-      [singletonId, JSON.stringify({
-        active: true,
-        message: seed.active.message,
-        expectedEndAt: seed.active.expectedEndAt,
-      })],
-    );
-  } else if (seed.notices.length > 0) {
-    await client.unsafe(`UPDATE "instance_maintenance" SET "version" = $1 WHERE "singleton"`, [version]);
-  }
 }
 
 export async function runMigrations(databaseUrl: string, migrationsFolder: string): Promise<void> {
@@ -781,130 +637,4 @@ export async function readSchemaContract(client: PostgresClient): Promise<Schema
   }
 
   return { enums, tables, constraints, indexes };
-}
-
-const fixtureTableOrder = [
-  "users",
-  "user_preferences",
-  "external_identities",
-  "sessions",
-  "households",
-  "memberships",
-  "sections",
-  "items",
-  "documents",
-  "document_crypto",
-  "document_jobs",
-  "due_events",
-  "reminder_rules",
-  "push_subscriptions",
-  "document_drafts",
-  "notification_states",
-  "notification_deliveries",
-  "audit_log",
-  "portable_archives",
-  "imap_ingestion_messages",
-  "imap_ingestion_attachments",
-] as const;
-
-const fixtureOrderColumns: Record<string, string[]> = {
-  audit_log: ["id"],
-  document_crypto: ["document_id"],
-  document_drafts: ["id"],
-  document_jobs: ["id"],
-  documents: ["id"],
-  due_events: ["id"],
-  external_identities: ["id"],
-  households: ["id"],
-  imap_ingestion_attachments: ["id"],
-  imap_ingestion_messages: ["id"],
-  imap_notification_deliveries: ["id"],
-  items: ["id"],
-  memberships: ["household_id", "user_id"],
-  notification_deliveries: ["id"],
-  notification_states: ["user_id", "household_id", "notification_id"],
-  portable_archives: ["id"],
-  push_subscriptions: ["id"],
-  reminder_rules: ["id"],
-  sections: ["id"],
-  sessions: ["id"],
-  user_preferences: ["user_id"],
-  users: ["id"],
-};
-
-function fixtureRows(tableName: string): FixtureRow[] {
-  const rows = (baselineFixture.rows as Record<string, FixtureRow[]>)[tableName];
-  if (!rows) throw new Error(`Missing migration fixture table ${tableName}`);
-  return rows;
-}
-
-function fixtureColumns(tableName: string): string[] {
-  const rows = fixtureRows(tableName);
-  const columns = Object.keys(rows[0] ?? {});
-  if (columns.length === 0) throw new Error(`Migration fixture table ${tableName} has no columns`);
-  columns.forEach(quoteIdentifier);
-  return columns;
-}
-
-function snapshotColumns(tableName: string): string[] {
-  // The supported baseline intentionally predates the receipt identity
-  // migration. Snapshot only columns present on both sides so migration data
-  // comparisons remain stable while explicit migration assertions cover the
-  // transformed legacy rows and newly added columns.
-  // `email_enc` and `email_index` arrive with 0044 (#969), so they exist on
-  // the current side only and cannot appear in a before-and-after comparison.
-  // What 0044 does to existing rows is asserted directly, below this file's
-  // Tier 1 and Tier 2 cases.
-  if (tableName === "users") {
-    return EXPECTED_TABLE_COLUMNS.users.filter((column) => column !== "email_enc" && column !== "email_index");
-  }
-  if (tableName === "imap_ingestion_messages") return fixtureColumns(tableName).filter((column) => column !== "recipient_alias_generation");
-  return fixtureColumns(tableName);
-}
-
-function fixtureParameter(value: unknown): postgres.JSONValue {
-  if (value !== null && typeof value === "object") return JSON.stringify(value);
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
-  throw new Error("Unsupported value in synthetic migration fixture");
-}
-
-async function insertFixtureRows(client: PostgresClient, tableName: string): Promise<void> {
-  const columns = fixtureColumns(tableName);
-  const rows = fixtureRows(tableName);
-  const parameters: postgres.JSONValue[] = [];
-  const values = rows.map((row) => `(${columns.map((column) => {
-    parameters.push(fixtureParameter(row[column]));
-    return `$${parameters.length}`;
-  }).join(", ")})`).join(", ");
-  await client.unsafe(
-    `INSERT INTO ${quoteIdentifier(tableName)} (${columns.map(quoteIdentifier).join(", ")}) VALUES ${values}`,
-    parameters,
-  );
-}
-
-export async function loadMigrationFixture(client: PostgresClient): Promise<void> {
-  for (const tableName of fixtureTableOrder) await insertFixtureRows(client, tableName);
-}
-
-function normaliseFixtureValue(value: unknown): unknown {
-  if (value instanceof Date) return value.toISOString();
-  if (typeof value === "bigint") return Number(value);
-  if (Array.isArray(value)) return value.map(normaliseFixtureValue);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, normaliseFixtureValue(nested)]));
-  }
-  return value;
-}
-
-export async function readFixtureSnapshot(client: PostgresClient): Promise<Record<string, FixtureRow[]>> {
-  const snapshot: Record<string, FixtureRow[]> = {};
-  for (const tableName of fixtureTableOrder) {
-    const columns = snapshotColumns(tableName);
-    const orderBy = fixtureOrderColumns[tableName].map(quoteIdentifier).join(", ");
-    const rows = await client.unsafe(
-      `SELECT ${columns.map(quoteIdentifier).join(", ")} FROM ${quoteIdentifier(tableName)} ORDER BY ${orderBy}`,
-    );
-    snapshot[tableName] = rows.map((row) => Object.fromEntries(columns.map((column) => [column, normaliseFixtureValue(row[column])]))) as FixtureRow[];
-  }
-  return snapshot;
 }
