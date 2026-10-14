@@ -303,53 +303,23 @@ host access to the running deployment already means full control of it.
 
 ## When the encryption key and the recovery bundle are both lost
 
-This is the last resort, and it recovers nothing. Read the whole section
-before running it.
+Nothing in Orbit can recover an instance whose encryption key and recovery
+bundle are both gone. Orbit encrypts every document and every personal detail,
+including every account's email address, under that key; without it they are
+unreadable, permanently, and nobody can sign in.
 
-Orbit encrypts documents and personal details, including everyone's email
-address, under one key. If that key and the recovery bundle are both gone,
-those things are gone with them, permanently. Nothing here brings them back.
+There are two ways forward:
 
-What it does fix is the second problem that follows. Orbit finds an account by
-its email address, and it can no longer read any address, so **nobody can
-sign in at all**. Without this command the instance is a locked box with
-everyone's accounts intact inside it.
+- restore the most recent recovery bundle you have, with the backup it goes
+  with — see [Restoring the document key-encryption key](#restoring-the-document-key-encryption-key),
+  [Exporting a recovery bundle](#exporting-a-recovery-bundle) and
+  [Back up and restore](operating.md#back-up-and-restore);
+- or reinstall and start again.
 
-```sh
-docker compose --env-file .env-orbit exec orbit-app node /opt/orbit/cli/orbit.js auth clear-addresses
-```
-
-It asks you to type `CLEAR ADDRESSES` before doing anything, and then:
-
-- removes every account address it cannot read — **the accounts themselves
-  survive**, with their households, memberships and history intact;
-- removes every mail-forwarding address it cannot read; members add and prove
-  those again afterwards;
-- leaves alone any address it *can* still read.
-
-Then get back in and put the addresses back:
-
-```sh
-docker compose --env-file .env-orbit exec orbit-app node /opt/orbit/cli/orbit.js auth recovery-link
-```
-
-Open that link to set the primary administrator's password and sign in, then
-re-enter members' addresses by hand from the users screen. Each member sets
-their own password through a setup link as usual.
-
-**It refuses to run while the key still works.** This is deliberate, and it is
-the guard that matters most. If members cannot sign in and the key is fine,
-the fault is something else entirely, and running this would destroy addresses
-that were never in danger, so the command checks first and stops. If you have
-the recovery bundle, restore that instead: it brings the key back and nothing
-is lost.
-
-It can only be run from the host shell. No page, no button and no API request
-can reach it, deliberately: reachable over the network it would be a single
-request that wipes every account's identity. It needs a real terminal, so a
-script or scheduled job cannot run it either. Each run is recorded in the
-audit log as `account_addresses_cleared`, with counts only. The addresses
-could not be read, so there is nothing else to record.
+There is deliberately no command that clears what cannot be read. The result
+would be an instance that looks alive and holds nothing, and sign-in would
+still be refused while the key is away. `orbit auth recovery-link` needs a
+working key too.
 
 ## Provider tests
 

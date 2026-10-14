@@ -261,6 +261,15 @@ Registering a new account, and claiming the instance, both refuse with
 proceed. Redeeming a household invitation fails as a mismatch when either
 address cannot be read — a comparison that cannot be made must never pass.
 
+*Note, 2026-10-14:* the #970 last resort — an operator command that cleared
+every address the instance could no longer read, so the primary administrator
+could sign back in — was withdrawn at v0.3.0 (#1316). It left the instance key
+row in place, so sign-in stayed refused, and once every document and detail is
+under the same key there is nothing readable to sign in to. The `locked`
+verdict stays, so the operator restores the recovery bundle rather than
+guessing at credentials; with key and bundle both gone, the answer is to
+reinstall.
+
 **Rotation is unchanged, and that is the point (decision 4).** A KEK
 rotation rewraps the DEK and rewrites no value and no index, so these two
 columns cost it nothing. `tests/integration/metadata-addresses.test.ts`
