@@ -9,6 +9,7 @@ import { BackupRestoreCliRefusal, runBackup, runExportRecoveryBundle, runImportR
 import { type BackupDockerAdapter, createTar } from "./recovery-bundle";
 import { type RestoreDockerAdapter, RestoreEngineRefusal, deriveRestorePaths } from "./restore-engine";
 
+// Characterisation tests: they pin the installer's behaviour, the only written specification of it.
 // Behaviour the retired bash suites (scripts/restore.test.mjs,
 // scripts/import-recovery-bundle.test.mjs, scripts/backup-restore-lock.test.mjs)
 // proved of restore.sh, import-recovery-bundle.sh and backup.sh, ported to
@@ -23,7 +24,7 @@ afterEach(() => {
   for (const sandbox of sandboxes.splice(0)) rmSync(sandbox, { recursive: true, force: true });
 });
 function sandbox(): string {
-  const directory = mkdtempSync(join(tmpdir(), "orbit-retired-bash-"));
+  const directory = mkdtempSync(join(tmpdir(), "orbit-characterisation-"));
   sandboxes.push(directory);
   return directory;
 }
