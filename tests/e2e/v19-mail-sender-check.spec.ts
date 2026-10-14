@@ -151,10 +151,12 @@ test("a member sends the check email from the settings mail screen, opens the li
   expect((await landed).headers().location ?? "").toContain("/settings/mail?sender=verified");
 
   await expect(page).toHaveURL(/\/settings\/mail$/u);
-  await expect(page.getByText("address checked · your relay is listening")).toBeVisible();
+  // The phone also draws the words for sight with aria-hidden; the announcement is the status role.
+  await expect(page.getByRole("status").filter({ hasText: "address checked · your relay is listening" })).toHaveCount(1);
   await expect(senderRow).toHaveText(/sender check\s*checked$/u);
   await expect(
-    page.locator(".kv, .rl-field").filter({ has: page.getByText("status", { exact: true }) }),
+    // Both layouts carry a status row; only the one for this viewport is shown.
+    page.locator(".kv, .rl-field").filter({ visible: true }).filter({ has: page.getByText("status", { exact: true }) }),
   ).toContainText("connected · listening");
   await expect(page.getByRole("button", { name: "send the check email", exact: true })).toHaveCount(0);
 
