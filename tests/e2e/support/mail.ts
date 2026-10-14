@@ -271,6 +271,19 @@ export async function newestSenderCheckUid(address: string): Promise<number> {
 }
 
 /**
+ * How many sender-address check emails `address` has received since `afterUid`
+ * (the mark `newestSenderCheckUid` took). One press of the button must be one
+ * email, so a spec asks this rather than assuming the link it found is the
+ * only message.
+ */
+export async function countSenderCheckMails(address: string, afterUid = 0): Promise<number> {
+  return withInbox(address, async (client) => {
+    const found = await client.search({ body: SENDER_CHECK_PATH }, { uid: true });
+    return (found || []).filter((uid) => uid > afterUid).length;
+  });
+}
+
+/**
  * Waits for the check email sent to the member's registered address (decision
  * 7c) and returns its one `.../mail-relay/verify?token=...` link. Matched by
  * the link it carries, not by its subject or wording.
