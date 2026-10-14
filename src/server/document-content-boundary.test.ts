@@ -145,9 +145,9 @@ describe("readDocumentDownload boundary", () => {
       });
 
       // Only the authorization/lifecycle lookup (`documents`, then the
-      // household gate's `users`) ran; the crypto row query
+      // household gate's `users` and its look for a running import) ran; the crypto row query
       // (`document_crypto`) never happened.
-      expect(mocks.fromNames).toEqual(["documents", "users"]);
+      expect(mocks.fromNames).toEqual(["documents", "users", "portable_archive_imports"]);
       expect(mocks.readCiphertext).not.toHaveBeenCalled();
       expect(mocks.decryptDocument).not.toHaveBeenCalled();
       expect(mocks.insertNames).not.toContain("audit_log");
@@ -161,7 +161,7 @@ describe("readDocumentDownload boundary", () => {
       code: "document_not_found",
       status: 404,
     });
-    expect(mocks.fromNames).toEqual(["documents", "users"]);
+    expect(mocks.fromNames).toEqual(["documents", "users", "portable_archive_imports"]);
   });
 });
 
@@ -181,7 +181,7 @@ describe("restoreDocument boundary", () => {
         message: "That document is not available",
       });
 
-      expect(mocks.fromNames).toEqual(["documents", "users"]);
+      expect(mocks.fromNames).toEqual(["documents", "users", "portable_archive_imports"]);
       expect(mocks.transactionCalls).toBe(0);
       expect(mocks.ciphertextExists).not.toHaveBeenCalled();
       expect(mocks.insertNames).not.toContain("audit_log");

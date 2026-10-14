@@ -47,3 +47,13 @@ export const MAX_ARCHIVE_FILE_BYTES = MAX_ARCHIVE_CIPHERTEXT_CHARACTERS + 64 * 1
  */
 export const ARCHIVE_PASSPHRASE_MIN = MIN_PASSWORD_LENGTH;
 export const ARCHIVE_PASSPHRASE_MAX = 256;
+
+/**
+ * How long an unfinished import's start record (`portable_archive_imports`,
+ * `finished_at` still null) counts as an import in progress. Within it the
+ * household is closed to everyone but the importer (#1316, owner
+ * 2026-10-14); past it the row is a crash mid-restore, not an import, and the
+ * next import into that household rolls it back first. One figure for both
+ * judgements, so the gate and the stale sweep never disagree.
+ */
+export const PORTABLE_IMPORT_LEASE_MS = 60 * 60 * 1_000;

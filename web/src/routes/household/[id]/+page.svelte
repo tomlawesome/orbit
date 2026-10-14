@@ -16,6 +16,7 @@
   import Pocket from "./pocket.svelte";
   import { daysWords } from "$lib/data/engine-limits.js";
   import DeskArchive from "./DeskArchive.svelte";
+  import HouseholdClosed from "$lib/HouseholdClosed.svelte";
   import { addMember, decideJoinRequest, removeMember, requestHouseholdDeletion, sendInvitation, transferOwnership, withdrawInvitation, wordsOf, writeHouseholdIdentity, writeSections } from "$lib/data/workspace.js";
   import { zoneLabel } from "$lib/pick-lists.js";
   import PickSheet from "./PickSheet.svelte";
@@ -988,10 +989,14 @@
     </svg>
     <div>
       <h1>{v.name}</h1>
-      <div class="sub">{v.subtitle}</div>
+      <!-- Closed by an import (#1316), its counts would be read from nothing. -->
+      {#if !v.importInProgress}<div class="sub">{v.subtitle}</div>{/if}
     </div>
   </header>
 
+  {#if v.importInProgress}
+  <HouseholdClosed name={v.name} hasOthers={v.hasOthers} showHomeLink />
+  {:else}
   <div class="cards">
 
     <!-- ── the system ────────────────────────────────────────────────────
@@ -1367,5 +1372,6 @@
          row, and its one consequence appears while that button is armed. -->
 
   </div><!-- /cards -->
+  {/if}
 </div>
 </div>

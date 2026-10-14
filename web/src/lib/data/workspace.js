@@ -103,6 +103,8 @@
  * @property {boolean} [onboardingComplete]
  * @property {string} [deletionRequestedAt]
  * @property {string} [deleteAfter]
+ * @property {boolean} [importInProgress]  its owner is bringing an archive in
+ *   (#1316): closed to this reader, so it carries no sections or items
  * @property {WorkspaceSection[]} sections
  * @property {WorkspaceItem[]} items
  * @property {ItemActivity[]} [activities]
@@ -541,6 +543,13 @@ export async function json(response) {
       window.location.assign(
         `/api/auth/login?returnTo=${encodeURIComponent(window.location.pathname)}`,
       );
+    }
+    /* The household was closed by an import while this screen stood in it
+       (#1316): its data is no longer served, so the screen has nothing truer
+       to show than the notice a fresh read draws. Screens read nothing of a
+       household the workspace already marks closed, so the reload settles. */
+    if (body?.error?.code === "household_import_in_progress" && typeof window !== "undefined") {
+      window.location.reload();
     }
     /* The server explains itself in its own words when it can. When it can't —
        an HTML error page, a proxy, a process that isn't there — say that
@@ -1449,7 +1458,8 @@ export async function readAdminScreen() {
   /** @type {Record<string, string>} */
   const owners = { ...adminFixture.owners };
   await Promise.all(
-    workspace.households.map(async (household) => {
+    /* A household closed by an import (#1316) is not asked: it would refuse. */
+    workspace.households.filter((household) => !household.importInProgress).map(async (household) => {
       try {
         /** @type {Partial<Roster>} */
         const body = await json(
@@ -2832,7 +2842,10 @@ export async function sendSetupLink(userId, options = {}) {
  */
 export async function readHouseholdScreen(householdId) {
   const [workspace, session] = await Promise.all([readWorkspace(), readSession().catch(() => null)]);
-  const [roster, joinRequests, invitations] = await Promise.all([
+  /* Closed by an import (#1316): the screen draws only the notice, and the
+     household's own routes would refuse every read below. */
+  const importInProgress = Boolean(workspace.households.find((one) => one.id === householdId)?.importInProgress);
+  const [roster, joinRequests, invitations] = importInProgress ? [/** @type {Partial<Roster>} */ ({}), [], []] : await Promise.all([
     /** @type {Promise<Partial<Roster>>} */ (
       json(await fetch(`/api/households/${householdId}/members`, { credentials: "same-origin" }))
     ).catch(() => ({ members: [], candidates: [] })),
@@ -2864,7 +2877,14 @@ export async function readHouseholdScreen(householdId) {
   }));
   /* The engine's archive limits and retention windows (#1336), for the
      archive card and the deletion words. */
-  return screen && { ...screen, ...engineNumbersOf(session) };
+  return screen && {
+    ...screen,
+    ...engineNumbersOf(session),
+    importInProgress,
+    /* Whether the reader belongs to any household besides this one, for the
+       closed notice's "your other households are open" line. */
+    hasOthers: workspace.households.length > 1,
+  };
 }
 
 /**

@@ -171,6 +171,9 @@ const householdShapeOf = (rules: FieldRules, item: typeof workspaceItemSchema, a
   onboardingComplete: z.boolean().default(true),
   deletionRequestedAt: z.iso.datetime().optional(),
   deleteAfter: z.iso.datetime().optional(),
+  /** Read-only (#1316): someone else is importing into this household, so it
+   * is closed to this reader and carries nothing but its name and settings. */
+  importInProgress: z.boolean().default(false),
   sections: z.array(workspaceSectionSchema).min(1).max(12),
   items: z.array(item).max(500),
   activities: z.array(activity).max(5_000).default([]),
@@ -184,8 +187,14 @@ const householdShapeOf = (rules: FieldRules, item: typeof workspaceItemSchema, a
 
 /** A household as a write carries it (household.create). */
 export const householdWorkspaceSchema = householdShapeOf(writeRules, workspaceItemSchema, itemActivitySchema);
-/** A household as the workspace read returns it. */
-export const storedHouseholdSchema = householdShapeOf(readRules, storedItemSchema, storedActivitySchema);
+/** A household as the workspace read returns it. One closed by an import
+ * (#1316) is read with no sections at all; every other has at least one. */
+export const storedHouseholdSchema = householdShapeOf(readRules, storedItemSchema, storedActivitySchema)
+  .extend({ sections: z.array(workspaceSectionSchema).max(12) })
+  .refine((household) => household.importInProgress || household.sections.length > 0, {
+    path: ["sections"],
+    message: "A household has at least one section",
+  });
 
 export const recoverableHouseholdSchema = z.object({
   id: z.string().min(1).max(100),

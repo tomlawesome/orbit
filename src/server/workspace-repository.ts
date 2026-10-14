@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -9,6 +9,7 @@ import {
   items,
   memberships,
   notificationStates,
+  portableArchiveImports,
   reminderRules,
   sections,
   sessions,
@@ -45,6 +46,7 @@ import {
   sectionSlug,
 } from "@/server/workspace-access";
 import { isInstanceAdministrator } from "@/server/authorization";
+import { PORTABLE_IMPORT_LEASE_MS } from "@/server/portable-archive-limits";
 
 /**
  * Reconstructs the normalized database rows into the UI's versioned workspace
@@ -116,10 +118,23 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     });
   }
 
-  const householdIds = householdRows.map((household) => household.id);
-  const activeHouseholdId = preferredHouseholdId && householdIds.includes(preferredHouseholdId)
+  const listedHouseholdIds = householdRows.map((household) => household.id);
+  const activeHouseholdId = preferredHouseholdId && listedHouseholdIds.includes(preferredHouseholdId)
     ? preferredHouseholdId
-    : householdIds[0];
+    : listedHouseholdIds[0];
+  // A household someone else is importing into is closed to this reader
+  // (#1316, owner 2026-10-14; the gate in workspace-access.ts): it is still
+  // listed, by name, but nothing in it is read, so nothing of it travels.
+  const closedHouseholdIds = new Set((await getDb().select({ householdId: portableArchiveImports.householdId, actorUserId: portableArchiveImports.actorUserId })
+    .from(portableArchiveImports)
+    .where(and(
+      inArray(portableArchiveImports.householdId, listedHouseholdIds),
+      isNull(portableArchiveImports.finishedAt),
+      gt(portableArchiveImports.startedAt, new Date(Date.now() - PORTABLE_IMPORT_LEASE_MS)),
+    )))
+    .filter((row) => row.actorUserId !== userId)
+    .map((row) => row.householdId));
+  const householdIds = listedHouseholdIds.filter((id) => !closedHouseholdIds.has(id));
 
   const [sectionRows, itemRows, eventRows, reminderRows, activityRows, memberRows, stateRows, documentCountRows] = await Promise.all([
     getDb().select().from(sections)
@@ -153,7 +168,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
       .limit(5_000),
     getDb().select({ householdId: memberships.householdId, userId: memberships.userId, role: memberships.role })
       .from(memberships)
-      .where(inArray(memberships.householdId, householdIds)),
+      .where(inArray(memberships.householdId, listedHouseholdIds)),
     getDb().select().from(notificationStates)
       .where(and(eq(notificationStates.userId, userId), inArray(notificationStates.householdId, householdIds)))
       .orderBy(desc(notificationStates.updatedAt)),
@@ -205,6 +220,30 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     activeHouseholdId,
     recoverableHouseholds: recoverableHouseholds.map((household) => ({ id: household.id, name: household.name, deleteAfter: household.deleteAfter!.toISOString() })),
     households: householdRows.map((household) => {
+      const memberCount = memberRows.filter((member) => member.householdId === household.id).length;
+      const canManage = administrator || memberRows.some((member) => (
+        member.householdId === household.id
+        && member.userId === userId
+        && member.role === "owner"
+      ));
+      if (closedHouseholdIds.has(household.id)) {
+        return {
+          id: household.id,
+          name: household.name,
+          timezone: household.timezone,
+          today: householdToday(household.timezone),
+          currency: household.currency,
+          memberCount,
+          canManage,
+          onboardingComplete: household.onboardingComplete,
+          importInProgress: true,
+          sections: [],
+          items: [],
+          activities: [],
+          readNotificationIds: [],
+          dismissedNotificationIds: [],
+        };
+      }
       const metadata = metadataReaders.get(household.id)!;
       const householdItems = itemRows.filter((item) => item.householdId === household.id).map((item) => {
         const event = eventByItem.get(item.id);
@@ -257,12 +296,8 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
         timezone: household.timezone,
         today: householdToday(household.timezone),
         currency: household.currency,
-        memberCount: memberRows.filter((member) => member.householdId === household.id).length,
-        canManage: administrator || memberRows.some((member) => (
-          member.householdId === household.id
-          && member.userId === userId
-          && member.role === "owner"
-        )),
+        memberCount,
+        canManage,
         onboardingComplete: household.onboardingComplete,
         deletionRequestedAt: household.deletionRequestedAt?.toISOString(),
         deleteAfter: household.deleteAfter?.toISOString(),
@@ -497,7 +532,13 @@ async function runWorkspaceCommand(
     command.type === "sections.replace"
       || command.type === "household.setup"
       || command.type === "household.update",
-  );
+  ).catch((error: unknown) => {
+    // A member may still make a household closed by an import their home
+    // household (#1316): choosing it reads nothing of it, and home draws the
+    // notice there.
+    if (command.type === "household.activate" && error instanceof AppError && error.code === "household_import_in_progress") return;
+    throw error;
+  });
   const householdId = command.householdId;
   let preview: CommandPreview | undefined;
 

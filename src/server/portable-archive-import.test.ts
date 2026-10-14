@@ -173,6 +173,8 @@ function encrypted(payload: unknown) {
 
 function seedHouseholdAccess() {
   queue(mocks.selectQueues, "users", [{ administrator: true, role: null }]);
+  // The gate's own look for an import running in the household (#1316): none.
+  queue(mocks.selectQueues, "portable_archive_imports", []);
 }
 
 beforeEach(() => {

@@ -18,7 +18,7 @@ import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 import { normalizeComparableMetadata } from "@/server/metadata/crypto";
 import { MetadataCipher, openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
 import { loadMetadataKey, metadataCryptoAvailable, MetadataKeyLockedError, receiptKeyScope } from "@/server/metadata/keys";
-import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS, MAX_ARCHIVE_DOCUMENT_MIB } from "@/server/portable-archive-limits";
+import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS, MAX_ARCHIVE_DOCUMENT_MIB, PORTABLE_IMPORT_LEASE_MS } from "@/server/portable-archive-limits";
 import { acquireActiveHouseholdLock, requireHouseholdAccess } from "@/server/workspace-access";
 
 const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -460,15 +460,6 @@ export async function previewPortableImport(userId: string, householdId: string,
   return { householdName: archive.household.name, sections: archive.sections.length, items: archive.items.length, documents: archive.documents.length, conflicts, documentsExcluded };
 }
 
-/**
- * Past this age an unfinished import row (`finished_at` still null) is not a
- * concurrent request in flight -- it is a crash or timeout mid-restore
- * (#1151 RANGE-R2). Deliberately generous: the document-restore loop can
- * legitimately take a while for a large archive, and rolling back a request
- * that is merely slow would be worse than leaving it a little longer.
- */
-const STALE_UNFINISHED_IMPORT_MS = 60 * 60 * 1_000;
-
 /** Why a document restore failed, in words the admin can act on without a stack trace. */
 function documentFailureReason(error: unknown): string {
   if (error instanceof AppError && error.code === "document_malware_detected") return "malware was detected in that file";
@@ -596,9 +587,16 @@ export async function rollBackUnfinishedPortableImports(): Promise<void> {
   }
 }
 
-/** Rolls back this household's own stranded import before starting a new one, if it is old enough to be a crash rather than a concurrent request. */
+/**
+ * Rolls back this household's own stranded import before starting a new one,
+ * if it is old enough to be a crash rather than a concurrent request (#1151
+ * RANGE-R2). Deliberately generous: the document-restore loop can take a
+ * while for a large archive, and rolling back a request that is merely slow
+ * would be worse than leaving it a little longer. The lease is the one the
+ * household-access gate closes the household for (#1316), so the two agree.
+ */
 async function rollBackStaleUnfinishedPortableImport(householdId: string): Promise<void> {
-  const cutoff = new Date(Date.now() - STALE_UNFINISHED_IMPORT_MS);
+  const cutoff = new Date(Date.now() - PORTABLE_IMPORT_LEASE_MS);
   const stale = await getDb().select({ id: portableArchiveImports.id }).from(portableArchiveImports)
     .where(and(eq(portableArchiveImports.householdId, householdId), isNull(portableArchiveImports.finishedAt), lt(portableArchiveImports.startedAt, cutoff)));
   for (const row of stale) await rollBackPortableImport(row.id);

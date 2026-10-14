@@ -4,6 +4,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
+  import HouseholdClosed from "$lib/HouseholdClosed.svelte";
   import { applyCommand, attachItemDocument, dueDateIn, householdElsewhereFor, readItemDocuments, readReminders, removeDocument, restoreDocument, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
@@ -1184,7 +1185,11 @@
       {/snippet}
     </Row>
   {/snippet}
-  {#if groups?.attention.length}
+  <!-- #1316: closed while its owner brings an archive in; the other skies
+       above stay, and are the way to them. -->
+  {#if view?.household?.importInProgress}
+    <HouseholdClosed name={view.household.name} hasOthers={view.households.length > 1} />
+  {:else if groups?.attention.length}
     <h2 class="p-caps">Needs attention</h2>
     <div class="pk-list" data-row-group data-row-cards>
       {#each askedRow ? byDate([...groups.attention, askedRow]) : groups.attention as one (one.id)}
