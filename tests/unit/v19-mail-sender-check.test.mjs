@@ -419,6 +419,7 @@ describe.each(LAYOUTS)("#1410: %s presses the button", (_name, pocket, sentWords
   const NOT_REACHED = "not sent — Orbit could not reach your relay. try again";
   it.each([
     ["409 sender_address_unavailable", () => refusal(409, "sender_address_unavailable"), "not sent — this account has no registered email address to check"],
+    ["429 sender_check_too_soon (owner 1a, #1403 note 38581)", () => refusal(429, "sender_check_too_soon"), "not sent — too soon. try again in a few minutes"],
     ["503 smtp_not_configured", () => refusal(503, "smtp_not_configured"), "not sent — Orbit has no outbound mail set up yet. ask your administrator"],
     ["503 metadata_locked", () => refusal(503, "metadata_locked"), "not sent — Orbit cannot read your address right now. try again later"],
     ["503 encryption_key_unavailable", () => refusal(503, "encryption_key_unavailable"), "not sent — Orbit cannot read your address right now. try again later"],
