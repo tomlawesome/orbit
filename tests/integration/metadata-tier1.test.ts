@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { imapIngestionMessages, items, metadataDamageSightings, metadataKeys } from "@/db/schema";
 import { readWorkspace, applyWorkspaceCommand } from "@/server/workspace-repository";

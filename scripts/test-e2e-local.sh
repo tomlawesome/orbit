@@ -140,7 +140,7 @@
 # second stack under those names regardless of project;
 # compose/docker-compose.local-e2e.yml renames them to `${COMPOSE_PROJECT_NAME}-*`
 # for this script only, so a per-run project name also gives per-run
-# container names. Never runs `pnpm db:generate` (also a docs/testing.md "Local traps" entry) and
+# container names. Never runs `pnpm db:generate` and
 # never writes to .env-orbit or an existing file under .orbit-secrets/ --
 # scripts/configure.sh and the secret generation below only fill in what is
 # missing.

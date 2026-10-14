@@ -11,7 +11,7 @@
  * rows — the #955 failure, checked rather than assumed.
  */
 import { randomBytes, randomUUID } from "node:crypto";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { householdInvitations, items, metadataKeys } from "@/db/schema";

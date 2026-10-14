@@ -1,7 +1,7 @@
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   MigrationIntegrityError,
   readExpectedMigrationHashes,
@@ -57,13 +57,38 @@ describe("migration integrity", () => {
     }
   });
 
+  /* The checked-in history is one baseline entry, which cannot be reordered
+     and has no fifth migration to alter. These two cases therefore run against
+     a copy of the folder with the real baseline plus synthetic later entries;
+     the checker under test is unchanged. */
+  let longFolder: string;
+  beforeAll(async () => {
+    longFolder = await mkdtemp(join(tmpdir(), "orbit-integrity-long-"));
+    await cp(folder, longFolder, { recursive: true });
+    const journalPath = join(longFolder, "meta", "_journal.json");
+    const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
+      entries: Array<{ idx: number; version: string; when: number; tag: string; breakpoints: boolean }>;
+      version: string;
+    };
+    const last = journal.entries[journal.entries.length - 1];
+    for (let n = 1; n <= 5; n += 1) {
+      const tag = `${String(last.idx + n).padStart(4, "0")}_synthetic_${n}`;
+      await writeFile(join(longFolder, `${tag}.sql`), `SELECT ${n};\n`);
+      journal.entries.push({ idx: last.idx + n, version: last.version, when: last.when + n, tag, breakpoints: true });
+    }
+    await writeFile(journalPath, JSON.stringify(journal, null, 2));
+  });
+  afterAll(async () => {
+    await rm(longFolder, { recursive: true, force: true });
+  });
+
   it.each([
     ["checksum drift", (hashes: string[]) => hashes.map((hash, index) => index === 4 ? "f".repeat(64) : hash), "migration_integrity"],
     ["reordered", (hashes: string[]) => [...hashes].reverse(), "migration_integrity"],
     ["extra", (hashes: string[]) => [...hashes, "e".repeat(64)], "migration_integrity"],
   ])("rejects %s journal state", async (_label, mutate, code) => {
-    const expected = await readExpectedMigrationHashes(folder);
-    await expect(verifyMigrationIntegrity(clientWith(mutate(expected.map(({ hash }) => hash))), folder))
+    const expected = await readExpectedMigrationHashes(longFolder);
+    await expect(verifyMigrationIntegrity(clientWith(mutate(expected.map(({ hash }) => hash))), longFolder))
       .rejects.toMatchObject({ code });
   });
 
