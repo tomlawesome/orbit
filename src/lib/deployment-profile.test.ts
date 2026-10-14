@@ -163,12 +163,12 @@ describe("updateIdentityLines (show_update_identity)", () => {
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  it("reports the recorded identity, and legacy/unknown for anything unrecorded", () => {
+  it("reports the recorded identity, and none for anything unrecorded", () => {
     const dir = mkdtempSync(join(tmpdir(), "orbit-update-identity-"));
     dirs.push(dir);
     writeFileSync(join(dir, ".env-orbit"), `ORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_IMAGE=ghcr.io/x/y@sha256:${"c".repeat(64)}\n`, { mode: 0o600 });
     expect(updateIdentityLines(dir, "full", { version: "v1.2.3", digest: `sha256:${"d".repeat(64)}`, channel: "latest" })).toEqual([
-      `Current: schema=v1 version=legacy/unknown digest=sha256:${"c".repeat(64)} optional-profile=full`,
+      `Current: schema=v1 version=none digest=sha256:${"c".repeat(64)} optional-profile=full`,
       `Target: schema=v1 version=v1.2.3 digest=sha256:${"d".repeat(64)} channel=latest`,
     ]);
   });

@@ -150,7 +150,7 @@ describe("the docker run each flow becomes (D1)", () => {
       { env: { ORBIT_IMAGE: LOCAL_IMAGE }, cwd: elsewhere },
     );
     expect(result.status).toBe(0);
-    expect(result.stdout).toBe(`Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.0.0 digest ${digest}\n`);
+    expect(result.stdout).toBe(`Orbit configuration: migrated from schema v0 version none digest none to schema v1 version v1.0.0 digest ${digest}\n`);
     expect(shape(runCall(result.calls)).volumes).toEqual([`${elsewhere}:/orbit-deploy:rw`]);
   });
 });

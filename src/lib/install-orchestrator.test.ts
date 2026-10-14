@@ -462,16 +462,15 @@ describe("runInstall: refusals inside the transaction roll back (#11, #56)", () 
     expect(snapshot(target)).toEqual(before);
   });
 
-  it("names a removed setting in the failure, with what to do about it (#1316)", async () => {
+  it("names an unknown setting in the failure, with what to do about it (#1316)", async () => {
     const target = recognised(["IMAP_HOST=mail.example.test"]);
     const before = snapshot(target);
     const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
     expect(outcome).toMatchObject({ status: "failed", phase: "configuration", reason: "configuration-failure" });
     const message = outcome.status === "failed" ? outcome.message : "";
     expect(message).toContain("IMAP_HOST");
-    expect(message).toMatch(/removed/i);
-    expect(message).toMatch(/Administration/);
-    expect(message).toMatch(/delete (the|that) line/i);
+    expect(message).toMatch(/not an Orbit setting/);
+    expect(message).toMatch(/delete or correct (the|that) line/i);
     expect(message).toMatch(/re-?run/i);
     expect(snapshot(target)).toEqual(before);
   });

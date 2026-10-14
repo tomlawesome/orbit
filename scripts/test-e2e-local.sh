@@ -910,7 +910,7 @@ if [[ "$in_image" == 1 ]]; then
   [[ -S "$docker_sock" ]] || fail "docker socket not found at ${docker_sock}; the suite needs it inside the image."
   image_env=()
   for kv in "${suite_env[@]}"; do image_env+=(-e "$kv"); done
-  for name in TEST_SMTP_PORT TEST_IMAPS_PORT ORBIT_E2E_ENGINES ORBIT_E2E_WEBKIT_DEVICES ORBIT_E2E_WORKERS ORBIT_IMAGE ORBIT_SECRETS_DIR; do
+  for name in TEST_SMTP_PORT TEST_IMAPS_PORT ORBIT_E2E_ENGINES ORBIT_E2E_WEBKIT_DEVICES ORBIT_E2E_WORKERS ORBIT_IMAGE; do
     [[ -z "${!name:-}" ]] || image_env+=(-e "${name}=${!name}")
   done
   oidc_forward=""

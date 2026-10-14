@@ -29,6 +29,13 @@ the same commit and says why.
 | `install-transaction/` | install.sh's `prepare_rollback_area` / `rollback_transaction`: the rollback/original backup tree, rollback status and restored entries (2 cases) | `install-transaction.parity.test.ts` |
 | `install-guided-configuration/` | install.sh's `missing_required/guided/configuration_fields` over 4 readiness fixtures, and `print_noninteractive_configuration_guidance` | `guided-configuration.parity.test.ts` |
 
+#1403 (slice D3) edited `configuration-migration/` by hand for deliberate
+removals: `SMTP_URL`, `SMTP_URL_FILE` and `ORBIT_SECRETS_DIR` lines dropped
+from the "example keys" inputs and outputs; `deprecated_supported` lines now
+read `current`; a former `IMAP_*` key is `unknown configuration` /
+`configuration_unknown_key`; an unrecorded prior version or digest in the
+migration message is `none`, not `legacy/unknown`.
+
 #1211 captured its three directories from `6448f07e` (the scripts unchanged since
 `d6a365a3`), before backup.sh, restore.sh and the recovery-bundle scripts
 became thin shells, with a throwaway script that ran each bash half the

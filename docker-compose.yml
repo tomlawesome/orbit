@@ -296,12 +296,12 @@ configs:
 
 secrets:
   orbit-postgres-password:
-    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/postgres-password
+    file: ./.orbit-secrets/postgres-password
   orbit-session-secret:
-    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/session-secret
+    file: ./.orbit-secrets/session-secret
   orbit-document-kek:
-    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/document-kek
+    file: ./.orbit-secrets/document-kek
   orbit-vapid-private-key:
-    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/vapid-private-key
+    file: ./.orbit-secrets/vapid-private-key
   orbit-oidc-client-secret:
-    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/oidc-client-secret
+    file: ./.orbit-secrets/oidc-client-secret

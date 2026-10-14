@@ -34,13 +34,13 @@ interface Golden {
   stderr: string;
 }
 
-/** The shape the capture used: secrets and backups beside the deployment, as ORBIT_SECRETS_DIR/ORBIT_BACKUP_DIR. */
+/** The deployment's own .orbit-secrets, and backups beside it as ORBIT_BACKUP_DIR. */
 function deployment(): { root: string; directoryArgs: string[] } {
   const root = mkdtempSync(join(tmpdir(), "orbit-cli-backup-restore-"));
   sandboxes.push(root);
-  mkdirSync(join(root, "secrets"));
-  writeFileSync(join(root, "secrets", "document-kek"), `${KEK_A}\n`, { mode: 0o600 });
-  return { root, directoryArgs: ["--dir", root, "--secrets-dir", join(root, "secrets"), "--backup-dir", join(root, "backups")] };
+  mkdirSync(join(root, ".orbit-secrets"));
+  writeFileSync(join(root, ".orbit-secrets", "document-kek"), `${KEK_A}\n`, { mode: 0o600 });
+  return { root, directoryArgs: ["--dir", root, "--backup-dir", join(root, "backups")] };
 }
 
 function runCli(args: string[], { input = "", env = {} }: { input?: string; env?: NodeJS.ProcessEnv } = {}) {
@@ -134,7 +134,7 @@ describe("orbit import-recovery-bundle refuses as import-recovery-bundle.sh did 
 
   it("an open document-KEK rotation: the same category, the engine's own wording", () => {
     const { root, directoryArgs } = deployment();
-    writeFileSync(join(root, "secrets", "document-kek-next"), `${"b".repeat(64)}\n`);
+    writeFileSync(join(root, ".orbit-secrets", "document-kek-next"), `${"b".repeat(64)}\n`);
     const bundle = join(root, "irrelevant.tar");
     writeFileSync(bundle, "not a tar archive\n");
     const golden = importGolden("open rotation");
@@ -142,7 +142,7 @@ describe("orbit import-recovery-bundle refuses as import-recovery-bundle.sh did 
     expect(result.status).toBe(golden.status);
     const category = "preflight/rotation failed; a document-KEK rotation is open (";
     expect(withoutPrefix(golden.stderr, "Orbit recovery import: ")).toMatch(new RegExp(`^${category.replace(/[()]/g, "\\$&")}`));
-    expect(withoutPrefix(result.stderr, "orbit: ")).toContain(`${category}${join(root, "secrets", "document-kek-next")} exists)`);
+    expect(withoutPrefix(result.stderr, "orbit: ")).toContain(`${category}${join(root, ".orbit-secrets", "document-kek-next")} exists)`);
   });
 });
 

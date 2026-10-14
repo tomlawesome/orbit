@@ -125,7 +125,7 @@ describe("classifyMigrationResult (#29)", () => {
 
   it("accepts the successful-migration message", () => {
     const message =
-      "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.3 digest sha256:abc\n";
+      "Orbit configuration: migrated from schema v0 version none digest none to schema v1 version v1.2.3 digest sha256:abc\n";
     expect(classifyMigrationResult(ok(message))).toEqual({ ok: true, message: message.replace(/\n+$/, "") });
   });
 

@@ -124,7 +124,7 @@ describe("orbit configure --preflight / --migrate", () => {
     ]);
     expect(result).toEqual({
       status: 0,
-      stdout: `Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest ${DIGEST}\n`,
+      stdout: `Orbit configuration: migrated from schema v0 version none digest none to schema v1 version v1.2.0 digest ${DIGEST}\n`,
       stderr: "",
     });
     expect(existsSync(`${file}.orbit-config.rollback`)).toBe(false);
