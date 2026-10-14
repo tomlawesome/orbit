@@ -186,6 +186,66 @@ describe("item.upsert with documentIds binds staged documents in the same transa
     expect((await again.json()).error).toMatchObject({ code: "version_required" });
     expect(await documentRow(staged.id)).toMatchObject({ itemId, deleteAfter: null });
   });
+
+  it("a second send with no documentIds is still the existing version_required", async () => {
+    const fixture = await createIntegrationFixture("bind-retry-no-documents");
+    const owner = await fixture.session("owner");
+    const itemId = randomUUID();
+    const staged = await stagedDocument(fixture.household.id, fixture.users.owner.id, itemId);
+    expect((await send(owner, create(fixture, itemId, [staged.id]))).status).toBe(200);
+
+    const again = await send(owner, create(fixture, itemId));
+    expect((await again.json()).error).toMatchObject({ code: "version_required" });
+    expect(await documentRow(staged.id)).toMatchObject({ itemId, deleteAfter: null });
+  });
+
+  /* The first Add landed but its answer was lost; the member swaps the file and
+     presses Add again with the same draft id. The new file is staged but cannot
+     be bound, so the retry must say so (item_already_saved), not version_required,
+     which the forms read as "the earlier send landed with its file". */
+  describe("a second send of the create that carries a file the item does not have", () => {
+    async function landedFirst(label: string) {
+      const fixture = await createIntegrationFixture(label);
+      const owner = await fixture.session("owner");
+      const itemId = randomUUID();
+      const first = await stagedDocument(fixture.household.id, fixture.users.owner.id, itemId);
+      expect((await send(owner, create(fixture, itemId, [first.id]))).status).toBe(200);
+      const second = await stagedDocument(fixture.household.id, fixture.users.owner.id, itemId);
+      const [item] = await getDb().select({ version: items.version }).from(items).where(eq(items.id, itemId));
+      return {
+        fixture, owner, itemId, first, second,
+        itemVersion: item?.version,
+        secondBefore: await documentRow(second.id),
+      };
+    }
+
+    async function expectRefusedAndUntouched(
+      ran: Awaited<ReturnType<typeof landedFirst>>,
+      documentIds: string[],
+    ) {
+      const again = await send(ran.owner, create(ran.fixture, ran.itemId, documentIds));
+      const body = await again.json();
+      expect(body.error).toMatchObject({ code: "item_already_saved" });
+      expect(again.status).toBe(409);
+      expect(await documentRow(ran.first.id), "the first file is still bound").toMatchObject({ itemId: ran.itemId, deleteAfter: null });
+      const secondNow = await documentRow(ran.second.id);
+      expect(secondNow, "the new file stays staged and unbound").toEqual(ran.secondBefore);
+      expect(secondNow?.itemId).toBeNull();
+      expect(secondNow?.deleteAfter?.getTime()).toBe(ran.second.deleteAfter.getTime());
+      const [item] = await getDb().select({ version: items.version }).from(items).where(eq(items.id, ran.itemId));
+      expect(item?.version, "the item is unchanged").toBe(ran.itemVersion);
+    }
+
+    it("with only the new file is refused as item_already_saved, and nothing changes", async () => {
+      const ran = await landedFirst("bind-retry-swapped-file");
+      await expectRefusedAndUntouched(ran, [ran.second.id]);
+    });
+
+    it("with the first file and the new one is refused the same way", async () => {
+      const ran = await landedFirst("bind-retry-added-file");
+      await expectRefusedAndUntouched(ran, [ran.first.id, ran.second.id]);
+    });
+  });
 });
 
 describe("a document that cannot be bound refuses the whole command and leaves no item", () => {

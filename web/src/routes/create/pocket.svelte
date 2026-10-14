@@ -288,9 +288,11 @@
       }
       await applyCommand(held ? { ...command, documentIds: [documentIdOf(held)] } : command).catch((error) => {
         /* This draft id is new to the server, so "this item changed on another
-           device" can only mean the earlier send landed -- the item and its
-           document together -- and its answer was lost; refreshing would
-           mint a new id and create the duplicate the retry exists to avoid. */
+           device" can only mean the earlier send landed -- the item and the
+           same document together -- and its answer was lost; refreshing would
+           mint a new id and create the duplicate the retry exists to avoid.
+           A send whose file the landed item does not hold is refused in the
+           server's own words instead, and shown as not saved. */
         if (error instanceof WorkspaceError && error.code === "version_required") return;
         throw error;
       });

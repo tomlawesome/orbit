@@ -693,6 +693,18 @@ async function runWorkspaceCommand(
       // meant to replace; only a brand new item, which has no version to
       // race against, may omit it.
       if (existing && item.version === undefined) {
+        /* A create sent again after its answer was lost must be the same
+           request. One carrying a file this item does not already hold is a
+           different request: refuse it, rather than let version_required
+           read as "the earlier send landed with this file" and lose it. */
+        const requested = [...new Set((command.documentIds ?? []).map((id) => id.toLowerCase()))];
+        if (requested.length > 0) {
+          const bound = await transaction.select({ id: documents.id }).from(documents)
+            .where(and(inArray(documents.id, requested), eq(documents.householdId, householdId), eq(documents.itemId, itemId)));
+          if (bound.length !== requested.length) {
+            throw new AppError("item_already_saved", "This item was already added, but without this file. Open the item and attach the file there.", 409);
+          }
+        }
         throw new AppError("version_required", "This item changed on another device; refresh and try again", 409);
       }
       // `item.version` is the version the client wants this write to become;

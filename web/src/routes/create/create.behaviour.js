@@ -648,9 +648,10 @@ export function mountCreate() {
       }
       await applyCommand(held.attachment ? { ...command, documentIds: [held.attachmentId] } : command).catch((error) => {
         /* This draft id is new to the server, so "this item changed on another
-           device" can only mean the earlier send landed -- the item and its
-           document together -- and its answer was lost (same reading as
-           pocket.svelte's save). */
+           device" can only mean the earlier send landed -- the item and the
+           same document together -- and its answer was lost (same reading as
+           pocket.svelte's save). A changed file is refused in the server's
+           own words instead, and shown as not saved. */
         if (error instanceof WorkspaceError && error.code === "version_required") return;
         throw error;
       });
