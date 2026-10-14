@@ -386,36 +386,54 @@ describe("#1406: the desk and the pocket say the same words for a bind refusal",
    used to be answered "needs recovery" for ever when staged again under its id.
    The server now answers that re-stage 409 "document_not_available" -- the
    same refusal bindRefused() reads -- so the form must stage the file afresh
-   under a new id and save, whether it does so inside the same Add or on the
-   member's next Add (the member still holds the file either way). */
+   under a new id and save, within the same Add. A second refusal in that Add
+   is shown, in the bind refusal's words, and the form stays usable. */
 describe.each([
   ["the desk form", fillDesk],
   ["the pocket form", fillPocket],
 ])("#1316: %s when the stage answers 409 document_not_available for the retired id", (_name, fill) => {
-  it("stages the file again under a different document id and then saves", async () => {
+  it("stages the file again under a different document id and saves, within the same Add", async () => {
     const form = await fill();
     refusals = 0; // the bind is not what refuses here: the first stage is
     stageRefusals = 1;
     await form.pressAdd();
-    const firstStages = ofKind("stage");
-    expect(firstStages.length, "the first Add reached the stage").toBeGreaterThanOrEqual(1);
-    const firstId = header(firstStages[0], "x-orbit-document-id");
-
-    /* Either the same Add already retried and saved, or the member presses Add
-       again (picking the file again first if the form asks for it). */
-    if (goto.mock.calls.length === 0) {
-      if (form.addHeld()) await form.pickFile(pdf("policy.pdf"));
-      await form.pressAdd();
-    }
 
     const stages = ofKind("stage");
-    expect(stages.length, "a second stage call followed the refused one").toBeGreaterThanOrEqual(2);
-    const freshId = header(stages[stages.length - 1], "x-orbit-document-id");
-    expect(freshId, "the refused (retired) document id is not staged again").not.toBe(firstId);
+    expect(stages, "two stage calls within the one press").toHaveLength(2);
+    const firstId = header(stages[0], "x-orbit-document-id");
+    const secondId = header(stages[1], "x-orbit-document-id");
+    expect(secondId, "the refused (retired) document id is not staged again").not.toBe(firstId);
     const commands = ofKind("command");
     expect(commands, "the item was saved").toHaveLength(1);
-    expect(commands[0].body.documentIds, "bound to the freshly staged id").toEqual([freshId]);
-    expect(goto, "the item and its file saved together").toHaveBeenCalledTimes(1);
+    expect(commands[0].body.documentIds, "bound to the freshly staged id").toEqual([secondId]);
+    expect(goto, "the item and its file saved together, on the one press").toHaveBeenCalledTimes(1);
+  });
+
+  it("stops after one fresh stage when that is refused too, says so in the bind refusal's words, and the next Add still works", async () => {
+    const form = await fill();
+    refusals = 0;
+    stageRefusals = 2;
+    await form.pressAdd();
+
+    const stages = ofKind("stage");
+    expect(stages, "one retry within the press, no loop").toHaveLength(2);
+    const firstId = header(stages[0], "x-orbit-document-id");
+    expect(header(stages[1], "x-orbit-document-id")).not.toBe(firstId);
+    expect(ofKind("command"), "nothing is bound").toHaveLength(0);
+    expect(goto, "the form stays open").not.toHaveBeenCalled();
+    expect(words(form.note()), "the refusal is shown in the bind refusal's words").toBe(words(BIND_WORDS));
+
+    /* The member presses Add again: the form stages once more and saves. */
+    if (form.addHeld()) await form.pickFile(pdf("policy.pdf"));
+    await form.pressAdd();
+    const after = ofKind("stage");
+    expect(after, "one more stage call").toHaveLength(3);
+    const thirdStageId = header(after[2], "x-orbit-document-id");
+    expect(thirdStageId, "the first refused id is not staged again").not.toBe(firstId);
+    const commands = ofKind("command");
+    expect(commands).toHaveLength(1);
+    expect(commands[0].body.documentIds).toEqual([thirdStageId]);
+    expect(goto).toHaveBeenCalledTimes(1);
   });
 });
 

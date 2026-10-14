@@ -452,13 +452,14 @@ describe("the storage sweep retires staged uploads nobody bound", () => {
 });
 
 describe("a staged file the sweep has retired cannot be staged again under its id (#1316)", () => {
-  it("answers 409 document_not_available, not a permanent 503 document_upload_recoverable, for a re-stage of a pending_deletion row", async () => {
-    const fixture = await createIntegrationFixture("stage-retired");
+  // pending_deletion is what the sweep leaves; deleted is what the purge ends in.
+  it.each(["pending_deletion", "deleted"] as const)("answers 409 document_not_available, not a permanent 503 document_upload_recoverable, for a re-stage of a %s row", async (lifecycle) => {
+    const fixture = await createIntegrationFixture(`stage-retired-${lifecycle}`);
     const member = await fixture.session("member");
     const documentId = randomUUID();
     const itemId = randomUUID();
     expect((await stage(fixture, member, { documentId, itemId })).status).toBe(201);
-    await getDb().update(documents).set({ lifecycle: "pending_deletion" }).where(eq(documents.id, documentId));
+    await getDb().update(documents).set({ lifecycle }).where(eq(documents.id, documentId));
 
     const again = await stage(fixture, member, { documentId, itemId });
     expect(again.status).toBe(409);
@@ -506,6 +507,19 @@ describe("the home drawer's attach route to an existing item is unchanged", () =
     // A retry under the same id is still idempotent on this route.
     expect((await attach(fixture, member, fixture.item.id, documentId)).status).toBe(201);
     expect(await documentRows(documentId)).toHaveLength(1);
+  });
+
+  it("still answers 503 document_upload_recoverable for a retired id sent to an existing item: only a stage is told to pick again", async () => {
+    const fixture = await createIntegrationFixture("drawer-attach-retired");
+    const member = await fixture.session("member");
+    const documentId = randomUUID();
+    // Sealed under the item's own id, so the attach below is not a conflict.
+    expect((await stage(fixture, member, { documentId, itemId: fixture.item.id })).status).toBe(201);
+    await getDb().update(documents).set({ lifecycle: "pending_deletion" }).where(eq(documents.id, documentId));
+
+    const response = await attach(fixture, member, fixture.item.id, documentId);
+    expect(response.status).toBe(503);
+    expect((await response.json()).error.code).toBe("document_upload_recoverable");
   });
 
   it("still refuses an item that does not exist, and stores nothing", async () => {
