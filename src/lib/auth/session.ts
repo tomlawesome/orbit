@@ -275,7 +275,6 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       expiresAt: sessions.expiresAt,
       lastSeenAt: sessions.lastSeenAt,
       userId: users.id,
-      email: users.email,
       emailEnc: users.emailEnc,
       emailVerified: users.emailVerified,
       displayName: users.displayName,
@@ -313,7 +312,7 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       id: record.userId,
       email: cipher.text("users.email", record.userId, {
         encrypted: record.emailEnc,
-        plaintext: record.email,
+        plaintext: null,
       }).value,
       emailVerified: record.emailVerified,
       displayName: record.displayName,

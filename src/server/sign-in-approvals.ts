@@ -230,9 +230,7 @@ async function readRecipient(userId: string): Promise<Recipient | null> {
   const [row] = await db
     .select({
       id: users.id,
-      /* Dual read (#969): the envelope once the backfill has reached the row,
-         the plaintext column until it has. */
-      email: users.email,
+      /* Read from the envelope only (#1403 Q3). */
       emailEnc: users.emailEnc,
       displayName: users.displayName,
     })
@@ -241,7 +239,7 @@ async function readRecipient(userId: string): Promise<Recipient | null> {
     .limit(1);
   if (!row) return null;
   const address = (await openInstanceMetadataReader(db))
-    .text("users.email", row.id, { encrypted: row.emailEnc, plaintext: row.email });
+    .text("users.email", row.id, { encrypted: row.emailEnc, plaintext: null });
   return { id: row.id, email: address.value, displayName: row.displayName };
 }
 

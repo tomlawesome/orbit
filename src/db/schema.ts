@@ -77,8 +77,10 @@ export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   /**
    * Tier 2 metadata (ADR-0024, #969). `email_enc` holds the `mdv1.` envelope
-   * and `email_index` the blind index; the plaintext column stands only until
-   * the backfill reaches the row, and an encrypted row clears it.
+   * and `email_index` the blind index. The application no longer reads or
+   * writes the plaintext `email` column (#1403 Q3); it stays in this file only
+   * because `metadata/backfill.ts` still names it, and goes with its drop
+   * migration.
    *
    * Under the INSTANCE key, not a household one: a user belongs to several
    * households, so no household owns their address.

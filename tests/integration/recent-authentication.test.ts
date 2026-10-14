@@ -7,6 +7,7 @@
  * challenge itself, not the system it guards.
  */
 
+import { randomUUID } from "node:crypto";
 import { eq, inArray, like } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
@@ -33,7 +34,7 @@ import type { VerifiedIdentity } from "@/lib/auth/oidc";
 import { createSession, csrfTokenForSession, readSession } from "@/lib/auth/session";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { createLocalUser } from "@/server/local-credentials";
-import { cleanupIntegrationEnvironment } from "./support/fixtures";
+import { accountAddressColumns, cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute } from "./support/request-event";
 import { readSetCookie } from "./support/set-cookie";
 
@@ -93,8 +94,10 @@ async function localUser(label: string, options: { administrator?: boolean } = {
 
 /** A user with a provider identity and no password. */
 async function oidcUser(label: string, options: { administrator?: boolean } = {}): Promise<string> {
+  const id = randomUUID();
   const [user] = await getDb().insert(users).values({
-    email: `${label}@recent.invalid`,
+    id,
+    ...(await accountAddressColumns(id, `${label}@recent.invalid`)),
     emailVerified: true,
     displayName: `Recent ${label}`,
     isInstanceAdmin: options.administrator === true,

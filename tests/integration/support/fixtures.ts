@@ -27,6 +27,19 @@ import {
 } from "@/db/schema";
 import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 
+/**
+ * The encrypted address columns for an account row, written the way the
+ * application writes them. The row id is needed first: the envelope binds the
+ * address to it.
+ */
+export async function accountAddressColumns(userId: string, email: string): Promise<{ emailEnc: string | null; emailIndex: string | null }> {
+  const cipher = await requireInstanceMetadataWriter();
+  return {
+    emailEnc: cipher.encryptText("users.email", userId, email),
+    emailIndex: cipher.emailIndex(email),
+  };
+}
+
 export type FixtureRole = "owner" | "member" | "outsider" | "admin" | "disabled";
 
 const storageRoot = join(tmpdir(), `orbit-integration-documents-${randomUUID()}`);
@@ -139,21 +152,16 @@ export async function createIntegrationFixture(label: string): Promise<Integrati
   const householdSuffix = randomUUID().slice(0, 8);
   const issuer = "https://oidc.invalid.example";
 
-  /* Written encrypted, exactly as the application writes it (#969). A fixture
-     that inserted plaintext would still pass every test — the dual read falls
-     back to it — while proving nothing about the path real accounts take, so
-     the whole integration suite would be green on the pre-release shape alone.
-     A test that wants the un-backfilled shape makes it deliberately, as
-     `metadata-addresses.test.ts` does. */
+  /* Written encrypted, exactly as the application writes it (#969). The
+     application reads an account address from the encrypted column only
+     (#1403 Q3), so a fixture that wrote the plaintext column would be an
+     account nobody can sign in to. */
   async function createUser(role: string, isInstanceAdmin = false): Promise<FixtureUser> {
     const email = `${namespace}-${role}@example.invalid`;
     const userId = randomUUID();
-    const cipher = await requireInstanceMetadataWriter();
     await db.insert(users).values({
       id: userId,
-      email: null,
-      emailEnc: cipher.encryptText("users.email", userId, email),
-      emailIndex: cipher.emailIndex(email),
+      ...(await accountAddressColumns(userId, email)),
       emailVerified: true,
       displayName: `Integration ${role}`,
       isInstanceAdmin,

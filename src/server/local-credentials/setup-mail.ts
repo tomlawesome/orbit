@@ -238,9 +238,7 @@ export async function sendSetupLink(
   const [recipient] = await db
     .select({
       id: users.id,
-      /* Dual read (#969): `email_enc` once the backfill has reached the row,
-         the plaintext column until it has. */
-      email: users.email,
+      /* Read from `email_enc` only (#1403 Q3). */
       emailEnc: users.emailEnc,
       displayName: users.displayName,
       credential: localCredentials.userId,
@@ -254,7 +252,7 @@ export async function sendSetupLink(
   }
 
   const address = (await openInstanceMetadataReader(db))
-    .text("users.email", recipient.id, { encrypted: recipient.emailEnc, plaintext: recipient.email });
+    .text("users.email", recipient.id, { encrypted: recipient.emailEnc, plaintext: null });
   return issueAndSend(
     { ...recipient, email: address.value },
     recipient.credential ? "recovery" : "setup",

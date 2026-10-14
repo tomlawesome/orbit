@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -11,7 +12,7 @@ import {
 import { provisionIdentity } from "@/lib/auth/provision";
 import type { VerifiedIdentity } from "@/lib/auth/oidc";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
-import { cleanupIntegrationEnvironment } from "./support/fixtures";
+import { accountAddressColumns, cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute } from "./support/request-event";
 import { readSetCookie } from "./support/set-cookie";
 
@@ -67,8 +68,10 @@ async function countUsers(): Promise<number> {
 
 /** A user made the way `provisionIdentity` would, for the "already taken" case. */
 async function seedUser(email: string): Promise<string> {
+  const id = randomUUID();
   const [user] = await getDb().insert(users).values({
-    email,
+    id,
+    ...(await accountAddressColumns(id, email)),
     emailVerified: true,
     displayName: "Existing account",
   }).returning({ id: users.id });
@@ -241,7 +244,7 @@ describe("the claim itself", () => {
     const before = await countUsers();
     const identitiesBefore = (await getDb().select({ id: externalIdentities.id }).from(externalIdentities)).length;
 
-    // Case is not a way around it: the unique index is on lower(email).
+    // Case is not a way around it: the unique blind index folds case.
     await expect(provisionIdentity(identity("stranger", "SHARED@bootstrap.invalid"))).rejects.toMatchObject({
       code: "link_required",
       status: 403,

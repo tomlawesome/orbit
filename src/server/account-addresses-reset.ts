@@ -78,7 +78,7 @@ export async function encryptionKeyIsUsable(): Promise<boolean> {
 export async function clearUnreadableAddresses(): Promise<AddressResetOutcome> {
   return getDb().transaction(async (transaction) => {
     const clearedUsers = await transaction.update(users)
-      .set({ email: null, emailEnc: null, emailIndex: null, updatedAt: new Date() })
+      .set({ emailEnc: null, emailIndex: null, updatedAt: new Date() })
       .where(isNotNull(users.emailEnc))
       .returning({ id: users.id });
 

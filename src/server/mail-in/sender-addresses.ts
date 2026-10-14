@@ -155,10 +155,10 @@ export async function withSenderLock<T>(userId: string, work: (executor: Metadat
  * when there is none or it cannot be read.
  */
 async function registeredAddressOf(executor: MetadataExecutor, reader: MetadataCipher, userId: string): Promise<string | null> {
-  const [account] = await executor.select({ email: users.email, emailEnc: users.emailEnc })
+  const [account] = await executor.select({ emailEnc: users.emailEnc })
     .from(users).where(eq(users.id, userId)).limit(1);
   if (!account) return null;
-  const value = reader.text("users.email", userId, { encrypted: account.emailEnc, plaintext: account.email }).value;
+  const value = reader.text("users.email", userId, { encrypted: account.emailEnc, plaintext: null }).value;
   return normalizeSenderAddress(value ?? undefined) ?? null;
 }
 
@@ -251,7 +251,7 @@ export async function seedSenderAddress(
      the wrong trade — the next read seeds it once the key is back. */
   if (!metadataCryptoAvailable()) return;
 
-  const [account] = await executor.select({ email: users.email, emailEnc: users.emailEnc })
+  const [account] = await executor.select({ emailEnc: users.emailEnc })
     .from(users).where(eq(users.id, userId)).limit(1);
   const [identity] = await executor.select({ id: externalIdentities.id }).from(externalIdentities)
     .where(eq(externalIdentities.userId, userId)).limit(1);
@@ -260,7 +260,7 @@ export async function seedSenderAddress(
      unreadable row is never deleted. */
   if (reader.locked) return;
   const accountEmail = account
-    ? reader.text("users.email", userId, { encrypted: account.emailEnc, plaintext: account.email }).value
+    ? reader.text("users.email", userId, { encrypted: account.emailEnc, plaintext: null }).value
     : null;
   const address = normalizeSenderAddress(accountEmail ?? undefined);
   if (!address) return;
