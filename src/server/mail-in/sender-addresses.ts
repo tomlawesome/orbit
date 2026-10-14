@@ -201,9 +201,7 @@ export async function listSenderAddresses(
 /**
  * Whether this member has anything that can attribute mail to them yet: a
  * checked row for the address they are registered with NOW. A row for an
- * address they have since moved away from counts for nothing. (Rows from
- * before decision 7c, `source: "manual"`, never followed the account and are
- * not held to it here; the next settings read removes them.)
+ * address they have since moved away from counts for nothing.
  */
 export async function hasVerifiedSenderAddress(userId: string, executor: MetadataExecutor = getDb()): Promise<boolean> {
   const rows = await executor.select().from(mailInSenderAddresses)
@@ -211,8 +209,7 @@ export async function hasVerifiedSenderAddress(userId: string, executor: Metadat
   if (rows.length === 0) return false;
   const reader = await openInstanceMetadataReader(executor);
   const registered = await registeredAddressOf(executor, reader, userId);
-  return rows.some((row) => row.source === "manual"
-    || normalizeSenderAddress(readAddress(reader, row).value ?? undefined) === registered);
+  return rows.some((row) => normalizeSenderAddress(readAddress(reader, row).value ?? undefined) === registered);
 }
 
 /**
@@ -511,7 +508,7 @@ export async function verifySenderAddress(
   const reader = await openInstanceMetadataReader();
   const registered = await registeredAddressOf(getDb(), reader, userId);
   const linked = normalizeSenderAddress(readAddress(reader, match).value ?? undefined);
-  if (match.source !== "manual" && (!registered || linked !== registered)) throw refuse();
+  if (!registered || linked !== registered) throw refuse();
 
   const [verified] = await getDb().update(mailInSenderAddresses).set({
     verifiedAt: now,
@@ -549,7 +546,6 @@ export async function userForVerifiedSender(address: string): Promise<string | u
   const addressIndex = cipher.locked ? null : cipher.senderAddressIndex(normalized);
   const rows = await getDb().select({
     userId: mailInSenderAddresses.userId,
-    source: mailInSenderAddresses.source,
     disabledAt: users.disabledAt,
     email: users.email,
     emailEnc: users.emailEnc,
@@ -566,8 +562,8 @@ export async function userForVerifiedSender(address: string): Promise<string | u
      member whose account address has since changed no longer attributes the
      old one, with no settings visit needed to say so. */
   const row = rows.find((candidate) => !candidate.disabledAt
-    && (candidate.source === "manual" || normalizeSenderAddress(
+    && normalizeSenderAddress(
       cipher.text("users.email", candidate.userId, { encrypted: candidate.emailEnc, plaintext: candidate.email }).value ?? undefined,
-    ) === normalized));
+    ) === normalized);
   return row?.userId;
 }
