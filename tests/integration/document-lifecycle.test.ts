@@ -252,7 +252,6 @@ describe("authenticated encrypted document lifecycle", () => {
       expect(response.status).toBe(404);
       expect((await response.json()).error).toMatchObject({ code: "document_not_found" });
     }
-
   });
 
   it("finalizes a purge when ciphertext was already removed by an interrupted attempt", async () => {
