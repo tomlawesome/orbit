@@ -8,7 +8,7 @@ import { assignImapReceiptHousehold } from "@/server/mail-in/imap-inbox";
 import { encryptPortableArchive } from "@/server/portable-archive";
 import { importPortableArchive, previewPortableImport } from "@/server/portable-archive-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
-import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
+import { loadMetadataKey, resetMetadataKeyCacheForTests, resolveMetadataKey } from "@/server/metadata/keys";
 import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { getDocumentHealth } from "@/server/document-health";
 import {
@@ -446,6 +446,72 @@ describe("a receipt with no household is encrypted under the instance key (ADR-0
     await getDb().delete(imapIngestionMessages).where(eq(imapIngestionMessages.id, receiptId));
     expect(await getDb().select({ count: sql<number>`count(*)::int` }).from(metadataKeys)
       .where(eq(metadataKeys.scope, "instance"))).toEqual([{ count: 0 }]);
+  });
+});
+
+describe("a key minted inside a rolled-back transaction leaves no phantom key behind (#1316)", () => {
+  /** Mints the household key inside a transaction that then fails, as a rolled-back `item.upsert` does. */
+  async function mintAndRollBack(householdId: string): Promise<void> {
+    // The fixture's own seeded item already minted this household's key; drop
+    // it so the next mint is a first mint. (The seeded item's fields become
+    // unreadable, which these tests never look at.)
+    await getDb().delete(metadataKeys).where(eq(metadataKeys.householdId, householdId));
+    resetMetadataKeyCacheForTests();
+    const rolledBack = await getDb().transaction(async (tx) => {
+      await resolveMetadataKey("household", householdId, tx);
+      throw new Error("rolled back after minting");
+    }).then(() => undefined, (error: unknown) => error);
+    expect((rolledBack as Error).message).toBe("rolled back after minting");
+    expect(await getDb().select().from(metadataKeys).where(eq(metadataKeys.householdId, householdId))).toHaveLength(0);
+  }
+
+  it("answers the next resolve with the key that is stored, not the rolled-back one", async () => {
+    const fixture = await createIntegrationFixture("tier1-rolled-back-mint");
+    await mintAndRollBack(fixture.household.id);
+
+    const resolved = await resolveMetadataKey("household", fixture.household.id);
+    const resolvedKey = Buffer.from(resolved.dataKey);
+    // A restart: the cache is gone, so this unwraps the stored row.
+    resetMetadataKeyCacheForTests();
+    const stored = await loadMetadataKey("household", fixture.household.id);
+    expect(stored).toBeDefined();
+    expect(stored!.dataKey.equals(resolvedKey)).toBe(true);
+  });
+
+  it("still reads back a title written after the rolled-back mint, across a restart", async () => {
+    const fixture = await createIntegrationFixture("tier1-rolled-back-mint-product");
+    const [section] = await getDb().select({ id: items.sectionId }).from(items).where(eq(items.id, fixture.item.id));
+    await mintAndRollBack(fixture.household.id);
+
+    const itemId = await writeItem({
+      userId: fixture.users.member.id,
+      householdId: fixture.household.id,
+      sectionId: section.id,
+      title: "Written after a rollback",
+      reference: "RB-1",
+      notes: "Sealed under the stored key",
+    });
+    resetMetadataKeyCacheForTests();
+
+    const workspace = await workspaceFor(fixture);
+    const household = workspace.households.find((candidate) => candidate.id === fixture.household.id)!;
+    const read = household.items.find((candidate) => candidate.id === itemId)!;
+    expect(read.title).toBe("Written after a rollback");
+    expect(read.metadataStatus?.title).toBeUndefined();
+    expect(read.reference).toBe("RB-1");
+  });
+
+  it("guard: two resolves with no rollback return the same key, the second from the cache", async () => {
+    const fixture = await createIntegrationFixture("tier1-resolve-twice");
+    resetMetadataKeyCacheForTests();
+    const first = await resolveMetadataKey("household", fixture.household.id);
+    const second = await resolveMetadataKey("household", fixture.household.id);
+    expect(second.keyId).toBe(first.keyId);
+    expect(second.dataKey.equals(first.dataKey)).toBe(true);
+    // The cache answered: the very same buffer, not a fresh unwrap.
+    expect(second.dataKey).toBe(first.dataKey);
+    expect(await getDb().select().from(metadataKeys).where(eq(metadataKeys.householdId, fixture.household.id)))
+      .toHaveLength(1);
   });
 });
 
