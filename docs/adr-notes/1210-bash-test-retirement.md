@@ -31,7 +31,7 @@ Test files named below, by directory:
 | keeps the active-assignment surface to the bounded allowlist | configure-engine.characterisation.test.ts › keeps the active-assignment surface to the bounded allowlist |
 | uses HTTPS for every ordinary production URL example | configure-engine.characterisation.test.ts › uses HTTPS for every ordinary production URL example |
 | documents no IMAP_* key: inbound mail is configured on the administration screen (ADR-0017) | configure-engine.characterisation.test.ts › documents no IMAP_* key: inbound mail is configured on the administration screen (ADR-0017) |
-| keeps the deprecated SMTP_URL compatibility form out of the active surface | configure-engine.characterisation.test.ts › keeps the deprecated SMTP_URL compatibility form out of the active surface |
+| keeps the deprecated SMTP_URL compatibility form out of the active surface | retired: the `SMTP_URL` form itself was removed (#1403) |
 | honours ORBIT_SECRETS_DIR, writing generated secrets there instead of the default .orbit-secrets (#1151 SF2-F8) | retired: deliberate change, the engine always writes `.orbit-secrets` |
 | ignores a stale ambient ORBIT_IMAGE on an existing deployment without the installer's trust marker, printing what it ignored (#1151 O1-S4) | configure-engine.test.ts › an existing deployment keeps its pinned image unless the installer's trust marker says otherwise (configure.sh's persist_orbit_image rule) |
 | still seeds ORBIT_IMAGE from the environment on a brand-new deployment, even without the trust marker | orbit.configure.test.ts › persists a valid ORBIT_IMAGE from the environment |
