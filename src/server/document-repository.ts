@@ -140,8 +140,14 @@ export function sealedItemIdOf(row: { sealedItemId: string | null; itemId: strin
   return row.sealedItemId ?? row.itemId;
 }
 
-/** How long a staged upload waits to be bound before the storage sweep retires it. */
-const STAGED_UPLOAD_HOLD_MS = 24 * 60 * 60 * 1_000;
+/**
+ * How long a staged upload waits to be bound before the storage sweep retires
+ * it: at least a day, and never less than scanner recovery keeps the row
+ * recoverable, so a document recovery publishes is still there to bind.
+ */
+function stagedUploadHoldMs(config: { scanRecoveryRetentionHours: number }): number {
+  return Math.max(24, config.scanRecoveryRetentionHours) * 60 * 60 * 1_000;
+}
 
 async function requireDocumentAccess(userId: string, documentId: string) {
   // A malformed id must fail the same way an unknown-but-well-formed one
@@ -361,7 +367,7 @@ async function reserveDocumentMetadata(input: {
       householdId: input.householdId,
       itemId: input.staged ? null : input.itemId,
       sealedItemId: input.itemId,
-      deleteAfter: input.staged ? new Date(Date.now() + STAGED_UPLOAD_HOLD_MS) : null,
+      deleteAfter: input.staged ? new Date(Date.now() + stagedUploadHoldMs(config)) : null,
       uploadedByUserId: input.userId,
       displayName: input.displayName,
       mediaType: input.mediaType,

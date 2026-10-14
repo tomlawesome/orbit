@@ -220,6 +220,57 @@ describe("the stage route stores a document with no item", () => {
   });
 });
 
+async function withRecoveryRetentionHours<T>(hours: string | undefined, work: () => Promise<T>): Promise<T> {
+  const previous = process.env.DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS;
+  if (hours === undefined) delete process.env.DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS;
+  else process.env.DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS = hours;
+  resetDocumentConfigForTests();
+  try {
+    return await work();
+  } finally {
+    if (previous === undefined) delete process.env.DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS;
+    else process.env.DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS = previous;
+    resetDocumentConfigForTests();
+  }
+}
+
+describe("the hold on a staged upload is not shorter than the scanner recovery window (#1316)", () => {
+  it("with DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS=48, delete_after is at least 47 hours ahead", async () => {
+    await withRecoveryRetentionHours("48", async () => {
+      const fixture = await createIntegrationFixture("stage-hold-48h");
+      const member = await fixture.session("member");
+      const documentId = randomUUID();
+      const before = Date.now();
+
+      const response = await stage(fixture, member, { documentId, itemId: randomUUID() });
+      expect(response.status).toBe(201);
+
+      const rows = await documentRows(documentId);
+      expect(rows).toHaveLength(1);
+      const due = rows[0].deleteAfter?.getTime() ?? 0;
+      expect(due).toBeGreaterThanOrEqual(before + 47 * 60 * 60 * 1000);
+    });
+  });
+
+  it("with the default recovery retention, delete_after stays about 24 hours ahead", async () => {
+    await withRecoveryRetentionHours(undefined, async () => {
+      const fixture = await createIntegrationFixture("stage-hold-default");
+      const member = await fixture.session("member");
+      const documentId = randomUUID();
+      const before = Date.now();
+
+      const response = await stage(fixture, member, { documentId, itemId: randomUUID() });
+      expect(response.status).toBe(201);
+
+      const rows = await documentRows(documentId);
+      expect(rows).toHaveLength(1);
+      const due = rows[0].deleteAfter?.getTime() ?? 0;
+      expect(due).toBeGreaterThan(before + DAY_MS - 60 * 60 * 1000);
+      expect(due).toBeLessThan(Date.now() + DAY_MS + 60 * 60 * 1000);
+    });
+  });
+});
+
 describe("a refused file is refused at the stage, in the server's own words", () => {
   it("answers a detected virus as document_malware_detected and keeps no usable document", async () => {
     const fixture = await createIntegrationFixture("stage-malware");
