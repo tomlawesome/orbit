@@ -103,7 +103,6 @@ const actionLabels: Record<string, string> = {
 /** Maps persisted actions to a bounded administrator-facing label. */
 export function safeAdministratorAuditLabel(action: string): string {
   if (actionLabels[action]) return actionLabels[action];
-  if (action.startsWith("document_draft_")) return "Document review updated";
   if (action.startsWith("reviewed_intake_")) return "Reviewed intake updated";
   return "Orbit administration activity";
 }

@@ -103,7 +103,6 @@ describe("administrator SMTP relay verification", () => {
 describe("administrator audit labels", () => {
   it("uses explicit safe labels for critical actions and a generic label for unknown values", () => {
     expect(safeAdministratorAuditLabel("ownership_transferred")).toBe("Household ownership transferred");
-    expect(safeAdministratorAuditLabel("document_draft_approved")).toBe("Document review updated");
     expect(safeAdministratorAuditLabel("raw recipient=recipient@example.invalid secret=not-real")).toBe("Orbit administration activity");
   });
 });
