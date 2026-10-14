@@ -268,6 +268,14 @@ recoverable state.
   deletion windows.
 - Unknown or inconsistent states fail closed and surface a safe administrator
   health warning.
+- A file staged for an item that has not been saved yet (#1406, see
+  [the design note](adr-notes/1406-stage-then-bind.md)) is an unbound
+  `available` document, held for 24 hours and counted against the household's
+  quota while it is held. A member of the household can create one without ever
+  saving an item. The storage sweep moves an expired unbound document to
+  `pending_deletion` for the normal purge. Binding it to an item requires the
+  same household, an `available` document, and a sealed item id that matches
+  the item being saved; anything else is refused with one identical 422.
 
 ### Download safety
 

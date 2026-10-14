@@ -20,10 +20,10 @@
  * attribution and the uniqueness rule both look up, and the plaintext column
  * stands only until the backfill reaches the row.
  *
- * This lives outside `core/` because it needs `getDb`/schema access, which
- * `core/` is not allowed (see this directory's README).
+ * This lives outside `core/` because it needs `getDb`/schema access and the
+ * SMTP transport, which `core/` is not allowed (see this directory's README).
  */
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { externalIdentities, mailInSenderAddresses, users } from "@/db/schema";
@@ -35,6 +35,11 @@ import {
   type MetadataFieldState,
 } from "@/server/metadata/fields";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
+import {
+  createSmtpTransport,
+  getNotificationWorkerConfig,
+  type NotificationWorkerConfig,
+} from "@/server/notification-worker";
 import { normalizeSenderAddress } from "./core/sender-authentication";
 
 export type SenderAddressSource = "account" | "sso" | "manual";
@@ -51,12 +56,20 @@ export interface SenderAddressView {
   verified: boolean;
   /** Set while a link is outstanding, so the screen can say "check your mail". */
   verificationPending: boolean;
+  /** When the outstanding link lapses (ISO); null once checked or when no link is live. */
+  expiresAt: string | null;
   /** Present only when something is unreadable, as elsewhere (ADR-0024 decision 5). */
   metadataStatus?: { address?: MetadataFieldState };
 }
 
-/** An explicit clock seam for tests; the default is the real one. */
+/** How long a verification link is good for. One use, and not for long. */
+export const SENDER_VERIFICATION_TTL_MS = 24 * 3_600_000;
+
+/** Explicit seams so tests never open a socket; the defaults are the real ones. */
 export interface SenderAddressDependencies {
+  sendMail?: (message: { from: string; to: string; subject: string; text: string }) => Promise<void>;
+  smtpConfig?: () => NotificationWorkerConfig;
+  appUrl?: () => string;
   now?: () => Date;
 }
 
@@ -104,16 +117,31 @@ function viewOf(
   cipher: MetadataCipher,
 ): SenderAddressView {
   const address = readAddress(cipher, row);
+  const linkLive = row.verifiedAt === null
+    && row.verificationExpiresAt !== null
+    && row.verificationExpiresAt.getTime() > now.getTime();
   return {
     id: row.id,
     address: address.value,
     source: row.source,
     verified: row.verifiedAt !== null,
-    verificationPending: row.verifiedAt === null
-      && row.verificationExpiresAt !== null
-      && row.verificationExpiresAt.getTime() > now.getTime(),
+    verificationPending: linkLive,
+    expiresAt: linkLive && row.verificationExpiresAt ? row.verificationExpiresAt.toISOString() : null,
     metadataStatus: address.state ? { address: address.state } : undefined,
   };
+}
+
+/** The member's own address rows (at most one). Never anybody else's — there is no id to pass. */
+export async function listSenderAddresses(
+  userId: string,
+  dependencies: SenderAddressDependencies = {},
+): Promise<SenderAddressView[]> {
+  const now = dependencies.now?.() ?? new Date();
+  const rows = await getDb().select().from(mailInSenderAddresses)
+    .where(eq(mailInSenderAddresses.userId, userId))
+    .orderBy(mailInSenderAddresses.createdAt);
+  const cipher = await openInstanceMetadataReader();
+  return rows.map((row) => viewOf(row, now, cipher));
 }
 
 /** Whether this member has anything that can attribute mail to them yet. */
@@ -125,19 +153,24 @@ export async function hasVerifiedSenderAddress(userId: string): Promise<boolean>
 }
 
 /**
- * Seeds the member's first, unverified address from what Orbit already knows:
+ * Seeds the member's one, unverified address from what Orbit already knows:
  * the local account's email, or the `email` claim their identity provider
  * sent. It is deliberately unverified — Orbit knowing an address is not the
  * member proving they send from it.
  *
- * Idempotent, and silent when the address already belongs to somebody else:
- * seeding must never take an address away from the member who verified it.
+ * The row FOLLOWS the registered address (decision 7c). If the member's row
+ * carries a different address from the one now registered, it is replaced by
+ * an unverified row for the current one, so verification starts over and the
+ * old address stops attributing. Otherwise it is idempotent.
+ *
+ * Silent when the address already belongs to somebody else: seeding must
+ * never take an address away from the member who verified it. In that case a
+ * stale row is still dropped, because it no longer matches the account.
  */
 export async function seedSenderAddress(userId: string, dependencies: SenderAddressDependencies = {}): Promise<void> {
   const now = dependencies.now?.() ?? new Date();
-  const [existing] = await getDb().select({ id: mailInSenderAddresses.id }).from(mailInSenderAddresses)
-    .where(eq(mailInSenderAddresses.userId, userId)).limit(1);
-  if (existing) return;
+  const existingRows = await getDb().select().from(mailInSenderAddresses)
+    .where(eq(mailInSenderAddresses.userId, userId));
 
   /* Seeding writes an encrypted claim now (#969), so it needs the instance
      key. A locked instance simply does not seed: this runs on the member's own
@@ -155,6 +188,14 @@ export async function seedSenderAddress(userId: string, dependencies: SenderAddr
     : null;
   const address = normalizeSenderAddress(accountEmail ?? undefined);
   if (!address) return;
+
+  if (existingRows.length > 0) {
+    const current = existingRows.length === 1
+      ? normalizeSenderAddress(readAddress(reader, existingRows[0]).value ?? undefined)
+      : undefined;
+    if (current === address) return;
+    await getDb().delete(mailInSenderAddresses).where(eq(mailInSenderAddresses.userId, userId));
+  }
 
   const cipher = await requireInstanceMetadataWriter();
   const addressIndex = cipher.senderAddressIndex(address);
@@ -175,6 +216,90 @@ export async function seedSenderAddress(userId: string, dependencies: SenderAddr
     source: identity ? "sso" : "account",
     updatedAt: now,
   }).onConflictDoNothing();
+}
+
+function verificationUrl(appUrl: string, token: string): string {
+  const url = new URL(appUrl);
+  if (!url.hostname || !["http:", "https:"].includes(url.protocol)) {
+    throw new AppError("unsafe_input", "The application address is unavailable", 503);
+  }
+  const link = new URL("/api/settings/mail-relay/verify", url.origin);
+  link.searchParams.set("token", token);
+  return link.href;
+}
+
+/**
+ * Issues a fresh one-use link and sends it to the address itself.
+ *
+ * The link goes to the ADDRESS, not to the member's account mail: the whole
+ * point is proving that whoever holds this mailbox is this member. Re-issuing
+ * replaces any outstanding token, so an old link stops working the moment a
+ * new one is asked for. Returns where it went and when the link lapses.
+ */
+export async function sendSenderVerification(
+  userId: string,
+  id: string,
+  dependencies: SenderAddressDependencies = {},
+): Promise<{ address: string; expiresAt: Date }> {
+  const now = dependencies.now?.() ?? new Date();
+  const [row] = await getDb().select().from(mailInSenderAddresses)
+    .where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId))).limit(1);
+  if (!row) throw new AppError("sender_address_unknown", "That address is not on this account", 404);
+  if (row.verifiedAt) throw new AppError("sender_already_verified", "That address is already checked", 409);
+
+  /* The link goes to the address itself, so an address Orbit cannot read is an
+     address Orbit cannot check (#969). Refused rather than sent anywhere: a
+     missing value must never become an empty or invented recipient. */
+  const address = readAddress(await openInstanceMetadataReader(), row).value;
+  if (!address) {
+    throw new AppError("metadata_locked", "Orbit cannot read this address until the encryption key is available", 503);
+  }
+
+  let smtp: NotificationWorkerConfig;
+  try {
+    smtp = (dependencies.smtpConfig ?? getNotificationWorkerConfig)();
+  } catch {
+    throw new AppError("smtp_not_configured", "Orbit cannot send mail, so it cannot check this address", 503);
+  }
+  if (!smtp.smtpUrl || !smtp.smtpFrom) {
+    throw new AppError("smtp_not_configured", "Orbit cannot send mail, so it cannot check this address", 503);
+  }
+
+  const token = randomBytes(32).toString("base64url");
+  const link = verificationUrl((dependencies.appUrl ?? (() => process.env.APP_URL ?? ""))(), token);
+  const expiresAt = new Date(now.getTime() + SENDER_VERIFICATION_TTL_MS);
+  await getDb().update(mailInSenderAddresses).set({
+    verificationTokenDigest: digestToken(token),
+    verificationExpiresAt: expiresAt,
+    updatedAt: now,
+  }).where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId)));
+
+  const send = dependencies.sendMail ?? defaultSender(smtp);
+  await send({
+    from: smtp.smtpFrom,
+    to: address,
+    subject: "Check your Orbit sending address",
+    text: [
+      "Orbit is checking that you send mail from this address.",
+      "",
+      `Open this link while signed in to Orbit, within 24 hours: ${link}`,
+      "",
+      "Until you do, mail you forward to Orbit from this address is not matched to you.",
+      "If you did not ask for this, ignore it — nothing changes.",
+    ].join("\n"),
+  });
+  return { address, expiresAt };
+}
+
+function defaultSender(smtp: NotificationWorkerConfig) {
+  return async (message: { from: string; to: string; subject: string; text: string }) => {
+    const transporter = createSmtpTransport(smtp);
+    try {
+      await transporter.sendMail(message);
+    } finally {
+      transporter.close();
+    }
+  };
 }
 
 /**

@@ -80,6 +80,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   for (const [name, value] of Object.entries(savedEnvironment)) {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;
@@ -112,6 +113,14 @@ const rowsOf = (userId: string) => getDb().select().from(mailInSenderAddresses).
 
 async function markVerified(userId: string) {
   await getDb().update(mailInSenderAddresses).set({ verifiedAt: new Date() }).where(eq(mailInSenderAddresses.userId, userId));
+}
+
+/* The check email is limited to one per 60 seconds per member (#1403), so a
+   case that asks twice lets the clock pass between the asks. Only `Date` is
+   faked, as in mail-relay-verification-limit.test.ts. */
+function passMinute() {
+  if (!vi.isFakeTimers()) vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(Date.now() + 61_000));
 }
 
 function tokenIn(text: string): string {
@@ -238,7 +247,10 @@ describe("POST /api/settings/mail-relay/verification (decision 7c)", () => {
   it("leaves one row for the member however often the check is asked for", async () => {
     const session = await fixture.session("member");
 
-    for (let attempt = 0; attempt < 3; attempt += 1) expect((await send(session)).status).toBe(202);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      passMinute();
+      expect((await send(session)).status).toBe(202);
+    }
 
     expect(await rowsOf(fixture.users.member.id)).toHaveLength(1);
     expect(mail.sent).toHaveLength(3);
@@ -247,6 +259,7 @@ describe("POST /api/settings/mail-relay/verification (decision 7c)", () => {
   it("makes the link from the newest email the only one that works", async () => {
     const session = await fixture.session("member");
     expect((await send(session)).status).toBe(202);
+    passMinute();
     expect((await send(session)).status).toBe(202);
     const [older, newer] = mail.sent.map((message) => tokenIn(message.text));
 
@@ -291,6 +304,7 @@ describe("POST /api/settings/mail-relay/verification (decision 7c)", () => {
     mail.sent.length = 0;
 
     await changeRegisteredAddress(fixture.users.member.id, newAddress);
+    passMinute();
     const response = await send(session);
 
     expect(response.status).toBe(202);
