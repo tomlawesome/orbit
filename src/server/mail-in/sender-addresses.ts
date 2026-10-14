@@ -224,11 +224,13 @@ export async function listSenderAddresses(
   const cipher = await openInstanceMetadataReader(executor);
   const views = rows.map((row) => viewOf(row, now, cipher));
   if (views.length === 0) return views;
-  /* A row that READS as an address other than the registered one is not the
-     member's any more (it may be kept only for its send times, see seeding);
-     a row that cannot be read at all stays, with its state. */
+  /* A row that READS as an address other than the registered one, or that
+     has lost its claim, is not the member's any more (it may be kept only for
+     its send times, see seeding); a row that cannot be read at all stays,
+     with its state. */
   const registered = await registeredAddressOf(executor, cipher, userId);
-  return views.filter((view) => view.address === null || normalizeSenderAddress(view.address) === registered);
+  return views.filter((view, index) => view.address === null
+    || (rows[index].addressIndex !== null && normalizeSenderAddress(view.address) === registered));
 }
 
 /**
@@ -313,6 +315,10 @@ export async function seedSenderAddress(
     const { value, state } = readAddress(reader, row);
     if (state === "metadata_integrity_failed") damaged.push(row);
     else if (value === null) unreadable ??= row;
+    /* A row stripped of its claim is retired, whatever it reads as: if the
+       member's address comes back to it, it is replaced by a fresh row with
+       the claim, never revived without one. */
+    else if (row.addressIndex === null) stale.push(row);
     else if (normalizeSenderAddress(value) === address) matching ??= row;
     else stale.push(row);
   }
@@ -367,8 +373,9 @@ export async function seedSenderAddress(
   if (await existingClaim(addressIndex, executor)) {
     /* No row can be made, so the old rows are the only place the send times
        live. They stay, but stop being anything: unchecked, no link, no claim
-       on their old address; they read as a different address, so they are
-       never listed and never attribute. The next seed with room replaces them. */
+       on their old address; with no claim they are never listed, never sent
+       a link and never attribute. The next seed with room replaces them,
+       including when the member's address returns to what they read as. */
     for (const row of stale) {
       if (row.verifiedAt === null && row.verificationTokenDigest === null && row.addressIndex === null) continue;
       await executor.update(mailInSenderAddresses).set({
@@ -483,7 +490,11 @@ async function reserveSend(
   const now = dependencies.now?.() ?? new Date();
   const [row] = await executor.select().from(mailInSenderAddresses)
     .where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId))).limit(1);
-  if (!row) throw new AppError("sender_address_unknown", "That address is not on this account", 404);
+  /* A row kept only for its send times has no claim and is not listed, so it
+     is answered as if it were not there. */
+  if (!row || row.addressIndex === null) {
+    throw new AppError("sender_address_unknown", "That address is not on this account", 404);
+  }
   if (row.verifiedAt) throw new AppError("sender_already_verified", SENDER_CHECK_WORDS.alreadyChecked, 409);
 
   /* The link goes to the address itself, so an address Orbit cannot read is an

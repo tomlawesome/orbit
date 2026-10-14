@@ -13,7 +13,7 @@ import {
 import { requireInstanceMetadataWriter } from "@/server/metadata/fields";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { RELAY_LISTENING, RELAY_NOT_USABLE, readRelaySettings } from "@/server/mail-in/relay-settings";
-import { hasVerifiedSenderAddress, seedSenderAddress, userForVerifiedSender } from "@/server/mail-in/sender-addresses";
+import { hasVerifiedSenderAddress, listSenderAddresses, seedSenderAddress, userForVerifiedSender } from "@/server/mail-in/sender-addresses";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 
@@ -376,5 +376,82 @@ describe("the relay settings read reports the one row's state (decision 7c)", ()
 
     expect((await readRelaySettings(member)).listening).toBe(RELAY_LISTENING);
     expect(await rowsOf(fixture.users.member.id)).toHaveLength(1);
+  });
+});
+
+/*
+ * An address another member's row still claims makes the member's own row go
+ * inert (no index, no check, no link) when their registered address moves
+ * there. Moving back must make that row the member's again: the claim
+ * restored, the check earned afresh. Otherwise the row reads as the
+ * registered address, is listed and can be "checked", yet attributes nothing
+ * (attribution matches on the index alone), and the address stays open to
+ * another member.
+ */
+describe("a registered address that moves to a claimed address and back (#1316)", () => {
+  const claimed = "harlow-claimed-elsewhere@example.test";
+  const parked = "harlow-parked-elsewhere@example.test";
+
+  /** M is checked for X; N's row claims Y; M moves to Y (and so goes inert). Returns M's session and X. */
+  async function moveMemberOntoClaimedAddress() {
+    await setMailboxSettings(fixture.users.admin.id, null, settings, providerReady);
+    const member = { id: fixture.users.member.id, isInstanceAdmin: false };
+    const other = { id: fixture.users.owner.id, isInstanceAdmin: false };
+    const session = await fixture.session("member");
+    const original = fixture.users.member.email;
+
+    expect((await send(session)).status).toBe(202);
+    await openLink(session, tokenIn(mail.sent[0].text));
+    expect(await userForVerifiedSender(original)).toBe(fixture.users.member.id);
+    mail.sent.length = 0;
+
+    await changeRegisteredAddress(other.id, claimed);
+    await readRelaySettings(other);
+    await changeRegisteredAddress(other.id, parked);
+
+    await changeRegisteredAddress(member.id, claimed);
+    await readRelaySettings(member);
+    return { session, member, original };
+  }
+
+  it("gives the member's row its claim back, unchecked, when the registered address returns", async () => {
+    const { member, original } = await moveMemberOntoClaimedAddress();
+
+    await changeRegisteredAddress(member.id, original);
+    await readRelaySettings(member);
+
+    const rows = await rowsOf(member.id);
+    expect(rows).toHaveLength(1);
+    const listed = await listSenderAddresses(member.id);
+    expect(listed).toHaveLength(1);
+    expect(listed[0].address).toBe(original);
+    const cipher = await requireInstanceMetadataWriter();
+    expect(rows[0].addressIndex).toBe(cipher.senderAddressIndex(original));
+    expect(rows[0].verifiedAt).toBeNull();
+  });
+
+  it("attributes the returned address to the member once the check link is opened", async () => {
+    const { session, member, original } = await moveMemberOntoClaimedAddress();
+    await changeRegisteredAddress(member.id, original);
+    await readRelaySettings(member);
+
+    passMinute();
+    expect((await send(session)).status).toBe(202);
+    const opened = await openLink(session, tokenIn(mail.sent[0].text));
+
+    expect(opened.headers.get("location")).toContain("sender=verified");
+    expect(await userForVerifiedSender(original)).toBe(member.id);
+  });
+
+  it("guard: while the address is claimed by another, the member lists no address and keeps their send times", async () => {
+    const { member } = await moveMemberOntoClaimedAddress();
+
+    expect(await listSenderAddresses(member.id)).toEqual([]);
+    expect((await readRelaySettings(member)).sender).toBeNull();
+    const rows = await rowsOf(member.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].checkSentAt.length).toBeGreaterThan(0);
+    expect(rows[0].addressIndex).toBeNull();
+    expect(rows[0].verifiedAt).toBeNull();
   });
 });
