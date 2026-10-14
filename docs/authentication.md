@@ -275,9 +275,8 @@ OIDC_SCOPES=openid profile email
 
 The supported Compose deployment mounts the persistent host file read-only,
 copies it into Orbit's private runtime tmpfs with Orbit-user ownership and mode
-`0400`, and exposes only the runtime path to the application. Existing
-direct-value configuration remains readable for upgrade compatibility, but
-direct and file-backed forms are mutually exclusive. Re-running the secret
+`0400`, and exposes only the runtime path to the application. A direct value
+and the file-backed form are mutually exclusive. Re-running the secret
 command safely replaces the file; ordinary configuration and recognised
 upgrades preserve it.
 
