@@ -107,3 +107,12 @@ body:has(.satellites){overflow:auto}
 /* the conveyed message: dashes travelling craft → relay dish */
 @keyframes craft-convey{from{stroke-dashoffset:var(--doff)}to{stroke-dashoffset:0}}
 .relay-page .beam{stroke-dasharray:var(--dash);animation:craft-convey var(--bmdur) linear infinite}
+
+/* #1410: the sender check. Warm while the address is not yet checked; the
+   outcome line is the problem line's sibling, for good news. Either is empty
+   most of the time, and an empty one takes no room, so the card is unmoved. */
+.relay-page .kv b.warm{color:var(--warm-text)}
+.relay-page .said{font:10.5px var(--mono);color:var(--ink-mid);margin-top:16px;line-height:1.8}
+.relay-page .said:empty{display:none}
+/* The dish's rings stand still while the relay is not usable, as the phone's do. */
+.relay-page .dish.still span{animation:none}
