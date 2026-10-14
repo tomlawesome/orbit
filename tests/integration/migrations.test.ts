@@ -31,10 +31,12 @@ async function insertFixtureHousehold(client: MigrationTestClient, id: string): 
   await client.unsafe(`INSERT INTO "households" (id, name) VALUES ($1, $2)`, [id, "Synthetic readiness household"]);
 }
 
-async function insertFixtureUser(client: MigrationTestClient, email: string): Promise<string> {
+/* The plaintext address column is gone (#1403 slice E); an account is
+   identified by its blind index, so the fixture supplies a stand-in for one. */
+async function insertFixtureUser(client: MigrationTestClient, emailIndex: string): Promise<string> {
   const [row] = await client.unsafe(
-    `INSERT INTO "users" ("email", "display_name") VALUES ($1, $2) RETURNING "id"`,
-    [email, "Fixture user"],
+    `INSERT INTO "users" ("email_enc", "email_index", "display_name") VALUES ('mdv1.a.b.c', $1, $2) RETURNING "id"`,
+    [emailIndex, "Fixture user"],
   );
   return String(row.id);
 }
@@ -220,15 +222,12 @@ describe("PostgreSQL migration evidence", () => {
     });
   });
 
-  it("fails closed below the supported floor and on checksum drift", async () => {
+  it("fails closed on checksum drift", async () => {
     const database = await createMigrationTestDatabase("integrity");
     databases.push(database);
-    const belowFloorDirectory = await createMigrationDirectoryThroughTag("drizzle", "0016_imap_receipt_leases");
-    temporaryDirectories.push(belowFloorDirectory);
-    await runMigrations(database.url, belowFloorDirectory.path);
-    await expect(verifyMigrationIntegrity(database.client, "drizzle")).rejects.toMatchObject({ code: "database_floor" });
-
     await runMigrations(database.url, "drizzle");
+    await verifyMigrationIntegrity(database.client, "drizzle");
+
     await database.client.unsafe('UPDATE "drizzle"."__drizzle_migrations" SET "hash" = $1 WHERE "id" = 1', ["f".repeat(64)]);
     await expect(verifyMigrationIntegrity(database.client, "drizzle")).rejects.toBeInstanceOf(MigrationIntegrityError);
   });
@@ -332,15 +331,15 @@ describe("PostgreSQL migration evidence", () => {
     const householdId = randomUUID();
     await insertFixtureHousehold(database.client, householdId);
     const insert = (digest: string) => database.client.unsafe(
-      `INSERT INTO "household_invitations" ("household_id", "email", "token_digest", "expires_at")
-       VALUES ($1, $2, $3, now() + interval '14 days')`,
-      [householdId, "invited@example.invalid", digest],
+      `INSERT INTO "household_invitations" ("household_id", "email_enc", "email_index", "token_digest", "expires_at")
+       VALUES ($1, 'mdv1.a.b.c', $2, $3, now() + interval '14 days')`,
+      [householdId, "invited-address-blind-index", digest],
     );
 
     await expect(insert("a".repeat(64))).resolves.toBeDefined();
     /* The partial unique index is the "resend replaces" rule in the database:
        a second OPEN invitation to the same address cannot exist at all. */
-    await expect(insert("b".repeat(64))).rejects.toThrow(/household_invitation_open_once/u);
+    await expect(insert("b".repeat(64))).rejects.toThrow(/household_invitation_open_once_index/u);
     /* Withdrawn, and the address is free again — the audit row survives. */
     await database.client.unsafe(`UPDATE "household_invitations" SET "revoked_at" = now()`);
     await expect(insert("c".repeat(64))).resolves.toBeDefined();
@@ -350,7 +349,7 @@ describe("PostgreSQL migration evidence", () => {
       database.client.unsafe(`UPDATE "household_invitations" SET "send_error" = 'smtp_rejected'`),
     ).resolves.toBeDefined();
     await expect(
-      database.client.unsafe(`UPDATE "household_invitations" SET "send_error" = '550 no such user invited@example.invalid'`),
+      database.client.unsafe(`UPDATE "household_invitations" SET "send_error" = '550 no such user someone@example.invalid'`),
     ).rejects.toThrow(/household_invitation_send_error_valid/u);
   });
 
@@ -713,8 +712,8 @@ describe("PostgreSQL migration evidence", () => {
     await runMigrations(database.url, "drizzle");
 
     const [first] = await database.client.unsafe(
-      `INSERT INTO "users" ("email", "email_index", "display_name")
-       VALUES (NULL, 'shared-index-value', 'First') RETURNING "id"`,
+      `INSERT INTO "users" ("email_enc", "email_index", "display_name")
+       VALUES ('mdv1.a.b.c', 'shared-index-value', 'First') RETURNING "id"`,
     );
     expect(first.id).toBeDefined();
 
@@ -722,14 +721,12 @@ describe("PostgreSQL migration evidence", () => {
        it would have gone quietly when the plaintext was cleared, because
        PostgreSQL counts every NULL as distinct. */
     await expect(database.client.unsafe(
-      `INSERT INTO "users" ("email", "email_index", "display_name")
-       VALUES (NULL, 'shared-index-value', 'Second')`,
+      `INSERT INTO "users" ("email_enc", "email_index", "display_name")
+       VALUES ('mdv1.a.b.c', 'shared-index-value', 'Second')`,
     )).rejects.toMatchObject({ constraint_name: "user_email_unique_index" });
-
-    /* And two accounts with no index yet — rows the backfill has not reached —
-       still coexist, or the expand release could not run at all. */
     await expect(database.client.unsafe(
-      `INSERT INTO "users" ("email", "display_name") VALUES ('a@example.invalid', 'A'), ('b@example.invalid', 'B')`,
+      `INSERT INTO "users" ("email_enc", "email_index", "display_name")
+       VALUES ('mdv1.a.b.c', 'another-index-value', 'Third')`,
     )).resolves.toBeDefined();
   });
 
@@ -742,8 +739,8 @@ describe("PostgreSQL migration evidence", () => {
     await insertFixtureHousehold(database.client, householdId);
     let digestSeed = 0;
     const insertInvitation = (emailIndex: string | null) => database.client.unsafe(
-      `INSERT INTO "household_invitations" ("household_id", "email", "email_enc", "email_index", "token_digest", "expires_at")
-       VALUES ($1, NULL, 'mdv1.a.b.c', $2, $3, now() + interval '7 days')`,
+      `INSERT INTO "household_invitations" ("household_id", "email_enc", "email_index", "token_digest", "expires_at")
+       VALUES ($1, 'mdv1.a.b.c', $2, $3, now() + interval '7 days')`,
       [householdId, emailIndex, String(digestSeed += 1).padStart(64, "0")],
     );
 
@@ -759,23 +756,6 @@ describe("PostgreSQL migration evidence", () => {
       `UPDATE "household_invitations" SET "revoked_at" = now() WHERE "email_index" = 'digest-one'`,
     );
     await expect(insertInvitation("digest-one")).resolves.toBeDefined();
-  });
-
-  it("treats email as the same identity regardless of case (0038, ADR-0023 §2)", async () => {
-    const database = await createMigrationTestDatabase("email-case-insensitive");
-    databases.push(database);
-    await runMigrations(database.url, "drizzle");
-
-    const insertUser = (email: string) => database.client.unsafe(
-      `INSERT INTO "users" ("email", "display_name") VALUES ($1, $2)`,
-      [email, "Fixture user"],
-    );
-
-    await expect(insertUser("person@example.invalid")).resolves.toBeDefined();
-    /* Same address, different case: the unique index is on lower(email), so
-       this must collide even though no plain-text unique constraint does. */
-    await expect(insertUser("Person@Example.invalid")).rejects.toThrow(/user_email_unique_ci/u);
-    await expect(insertUser("someone-else@example.invalid")).resolves.toBeDefined();
   });
 
   it("bounds a credential setup token to its two purposes and cascades with its user (0038, ADR-0023 §2)", async () => {

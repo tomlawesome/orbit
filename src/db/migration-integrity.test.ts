@@ -1,3 +1,6 @@
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   MigrationIntegrityError,
@@ -71,5 +74,26 @@ describe("migration integrity", () => {
     await expect(verifyMigrationJournalComplete(clientWith(expected.map(({ hash }) => hash)), folder)).resolves.toBeUndefined();
     await expect(verifyMigrationJournalComplete(clientWith(expected.slice(0, -1).map(({ hash }) => hash)), folder))
       .rejects.toBeInstanceOf(MigrationIntegrityError);
+  });
+
+  // #1403 slice E: the history is one baseline migration. The hash recorded
+  // when it was applied is the control, so a hand-edit of the file afterwards
+  // must be refused, with no database needed to show it.
+  it("refuses a database whose baseline migration file was hand-edited after it was applied", async () => {
+    const expected = await readExpectedMigrationHashes(folder);
+    expect(expected.map(({ tag }) => tag)).toEqual(["0000_baseline"]);
+    const applied = expected.map(({ hash }) => hash);
+
+    const copy = await mkdtemp(join(tmpdir(), "orbit-integrity-copy-"));
+    try {
+      await cp(folder, copy, { recursive: true });
+      await expect(verifyMigrationIntegrity(clientWith(applied), copy)).resolves.toBeUndefined();
+      const baselinePath = join(copy, "0000_baseline.sql");
+      await writeFile(baselinePath, `${await readFile(baselinePath, "utf8")}\n-- hand edit\n`);
+      await expect(verifyMigrationIntegrity(clientWith(applied), copy)).rejects.toMatchObject({ code: "migration_integrity" });
+      await expect(verifyMigrationJournalComplete(clientWith(applied), copy)).rejects.toBeInstanceOf(MigrationIntegrityError);
+    } finally {
+      await rm(copy, { recursive: true, force: true });
+    }
   });
 });
