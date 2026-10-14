@@ -97,6 +97,7 @@ export const SENDER_CHECK_WORDS = {
   noMail: "not sent — Orbit has no outbound mail set up yet. ask your administrator",
   locked: "not sent — Orbit cannot read your address right now. try again later",
   tooSoon: "not sent — too soon. try again in a few minutes",
+  dailyLimit: "not sent — daily limit reached. try again tomorrow.",
   mailerTimeout: "not sent — the mail server did not answer in time. try again later",
   mailerRefused: "not sent — the mail server refused the message. try again later",
   unreadable: "not sent — Orbit cannot read the address it holds for you. ask your administrator",
@@ -117,6 +118,19 @@ export function senderCheckWaitSeconds(sent: readonly Date[], now: Date): number
     readyAt = Math.max(readyAt, inWindow[inWindow.length - SENDER_CHECK_DAILY_LIMIT] + SENDER_CHECK_WINDOW_MS);
   }
   return Math.ceil((readyAt - now.getTime()) / 1000);
+}
+
+/**
+ * Which rule refuses a send now, with the wait from `senderCheckWaitSeconds`,
+ * or null when one may go. "day" once the rolling window already holds the
+ * daily limit, so the member is not told "a few minutes" when the wait runs
+ * to the next day; "gap" otherwise.
+ */
+export function senderCheckRefusal(sent: readonly Date[], now: Date): { seconds: number; limit: "gap" | "day" } | null {
+  const seconds = senderCheckWaitSeconds(sent, now);
+  if (seconds <= 0) return null;
+  const inWindow = sent.filter((at) => at.getTime() > now.getTime() - SENDER_CHECK_WINDOW_MS).length;
+  return { seconds, limit: inWindow >= SENDER_CHECK_DAILY_LIMIT ? "day" : "gap" };
 }
 
 /** Explicit seams so tests never open a socket; the defaults are the real ones. */
@@ -564,9 +578,12 @@ async function reserveSend(
   /* The clock is the process's, not the database's `now()`, as everywhere
      else in this file. */
   const sentAt = dependencies.now?.() ?? new Date();
-  const wait = senderCheckWaitSeconds(locked.checkSentAt, sentAt);
-  if (wait > 0) {
-    throw new RateLimitedError("sender_check_too_soon", SENDER_CHECK_WORDS.tooSoon, wait);
+  const refusal = senderCheckRefusal(locked.checkSentAt, sentAt);
+  if (refusal?.limit === "day") {
+    throw new RateLimitedError("sender_check_daily_limit", SENDER_CHECK_WORDS.dailyLimit, refusal.seconds);
+  }
+  if (refusal) {
+    throw new RateLimitedError("sender_check_too_soon", SENDER_CHECK_WORDS.tooSoon, refusal.seconds);
   }
 
   const kept = locked.checkSentAt

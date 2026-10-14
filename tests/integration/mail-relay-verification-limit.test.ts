@@ -21,7 +21,8 @@ import { callRouteForSession, loadRoute, type RouteHandler } from "./support/req
  * rate-limited per member.
  *
  *   - at most one check email per 60 seconds, and five per 24 hours;
- *   - a refused request answers 429 `sender_check_too_soon`, with a
+ *   - a refused request answers 429 `sender_check_too_soon` (or
+ *     `sender_check_daily_limit` once the five are used, #1316), with a
  *     `Retry-After` header in whole seconds (RFC 6585 section 4), and sends
  *     no email;
  *   - the count is kept in the database, so a restart does not forget it
@@ -218,7 +219,7 @@ describe("five check emails per 24 hours", () => {
 
     expect(sixth.status).toBe(429);
     const { code, retryAfter } = await refusal(sixth);
-    expect(code).toBe("sender_check_too_soon");
+    expect(code).toBe("sender_check_daily_limit");
     expect(retryAfter).toMatch(/^[0-9]+$/);
     /* The oldest send was at T0; the sixth request is at T0 + 305 s. */
     expect(Number(retryAfter)).toBe(DAY_S - 5 * 61);

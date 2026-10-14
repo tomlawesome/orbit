@@ -587,7 +587,9 @@ or 409 `sender_already_verified` if the address is already verified. Only a
 signed-in member may call it. A body that names another address is not read.
 The send is rate-limited to one a minute and five a day per member, stored in
 the database, and refused with 429 `sender_check_too_soon` and `Retry-After`
-(owner, 2026-10-14).
+(owner, 2026-10-14). Once the five are used, the refusal is instead 429
+`sender_check_daily_limit`, worded "not sent — daily limit reached. try again
+tomorrow.", with `Retry-After` until the oldest of the five is a day old.
 
 **The send has an overall deadline** of 15 seconds, mailer included. A mailer
 that does not answer ends the request with 503 `sender_mailer_timeout`; one that

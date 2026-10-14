@@ -168,6 +168,15 @@ function at(offsetSeconds: number) {
   vi.setSystemTime(T0 + offsetSeconds * SECOND);
 }
 
+/** Five accepted presses, 61 seconds apart, the last at 244 s: the daily limit is spent. */
+async function usedFive() {
+  for (let index = 0; index < 5; index += 1) {
+    at(index * 61);
+    expect((await send()).status).toBe(202);
+  }
+  expect(mail.sent).toHaveLength(5);
+}
+
 /** The failed attempt counted once for this member, and nothing was sent. */
 async function expectCountedNotSent() {
   const rows = await rowsOf(fixture.users.member.id);
@@ -284,14 +293,6 @@ describe("finding 4: send times carry over when the registered address changes",
     });
   }
 
-  async function usedFive() {
-    for (let index = 0; index < 5; index += 1) {
-      at(index * 61);
-      expect((await send()).status).toBe(202);
-    }
-    expect(mail.sent).toHaveLength(5);
-  }
-
   /** Another member already holds this address, as a row of their own. */
   async function otherMemberClaims(address: string) {
     const id = randomUUID();
@@ -309,7 +310,7 @@ describe("finding 4: send times carry over when the registered address changes",
     const sixth = await send();
 
     expect(sixth.status).toBe(429);
-    expect(await codeOf(sixth)).toBe("sender_check_too_soon");
+    expect(await codeOf(sixth)).toBe("sender_check_daily_limit");
     expect(mail.sent).toHaveLength(5);
 
     at(24 * 3600 + 1);
@@ -330,6 +331,7 @@ describe("finding 4: send times carry over when the registered address changes",
     const later = await send();
 
     expect(later.status).toBe(429);
+    expect(await codeOf(later)).toBe("sender_check_daily_limit");
     expect(mail.sent).toHaveLength(5);
   });
 
@@ -347,6 +349,7 @@ describe("finding 4: send times carry over when the registered address changes",
     const later = await send();
 
     expect(later.status).toBe(429);
+    expect(await codeOf(later)).toBe("sender_check_daily_limit");
     expect(mail.sent).toHaveLength(5);
   });
 });
@@ -421,6 +424,42 @@ describe("ADR-0034 decision 4: the engine words every refusal of the check", () 
 
     expect(response.status).toBe(429);
     expect(await envelopeOf(response)).toEqual({ code: "sender_check_too_soon", message: WORDS.tooSoon });
+  });
+
+  it("429 sender_check_daily_limit, in words that say tomorrow, with Retry-After for the rest of the day", async () => {
+    await usedFive();
+
+    at(5 * 61);
+    const response = await send();
+
+    expect(response.status).toBe(429);
+    expect(await envelopeOf(response)).toEqual({
+      code: "sender_check_daily_limit",
+      message: "not sent — daily limit reached. try again tomorrow.",
+    });
+    expect(response.headers.get("retry-after")).toBe(String(24 * 3600 - 5 * 61));
+    expect(mail.sent).toHaveLength(5);
+  });
+
+  it("guard: the first press is accepted, and a press 10 seconds later is still the short wait (too soon, a few minutes)", async () => {
+    at(0);
+    expect((await send()).status).toBe(202);
+
+    at(10);
+    const response = await send();
+
+    expect(response.status).toBe(429);
+    expect(await envelopeOf(response)).toEqual({ code: "sender_check_too_soon", message: WORDS.tooSoon });
+  });
+
+  it("guard: after the daily limit, a press more than a day after the first send is accepted again", async () => {
+    await usedFive();
+    at(5 * 61);
+    expect((await send()).status).toBe(429);
+
+    at(24 * 3600 + 1);
+    expect((await send()).status).toBe(202);
+    expect(mail.sent).toHaveLength(6);
   });
 });
 
