@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RELAY_FIXTURE } from "../../web/src/lib/data/fixtures/relay.js";
-import { clockOf, dayMonth } from "../../web/src/lib/format.js";
+import { clockOf, dayMonth, localZone } from "../../web/src/lib/format.js";
 
 /*
  * #1410 (ADR-0017 decision 7c, design note 36064): the sender check on the
@@ -328,7 +328,7 @@ const LAYOUTS = [
   ["the phone", true, "check email sent · open the link within 24 hours"],
 ];
 
-const lapsesAt = (/** @type {string} */ iso) => `email sent · link lapses ${dayMonth(iso)} ${clockOf(iso)}`;
+const lapsesAt = (/** @type {string} */ iso) => `email sent · link lapses ${dayMonth(iso, localZone())} ${clockOf(iso, localZone())}`;
 
 describe.each(LAYOUTS)("#1410: %s shows where the sender check stands", (_name, pocket) => {
   it("not yet checked: the address, `not yet checked`, and the button to send the check email", async () => {
