@@ -578,6 +578,16 @@ The send is rate-limited to one a minute and five a day per member, stored in
 the database, and refused with 429 `sender_check_too_soon` and `Retry-After`
 (owner, 2026-10-14).
 
+**The send has an overall deadline** of 15 seconds, mailer included. A mailer
+that does not answer ends the request with 503 `sender_mailer_timeout`; one that
+throws ends with 503 `sender_mailer_refused`. Either way nothing is counted and
+no link is left pending. The send times belong to the member, not the address:
+they carry over when the registered address changes, even to one another member
+already claims. Accepted risk (review finding): if the mailer has accepted the
+message but recording the send then fails, the transaction rolls back and the
+send goes uncounted, so a mail may go out that the limit does not see. Each
+refusal is worded once, in the engine (ADR-0034 decision 4).
+
 **The seeded row follows the registered address.** If the account email is
 edited, or the provider's claim changes, the row follows it and verification
 starts over. The existing seed logic decides this; a test confirms it.
