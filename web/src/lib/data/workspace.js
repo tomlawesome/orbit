@@ -397,6 +397,13 @@
  * @property {string} status
  * @property {string} lastReceived
  * @property {string} ingest
+ * @property {RelaySender | null} [sender]  the address the member sends from, and whether it is checked (#1410); null for an administrator or when mail-in is off
+ *
+ * @typedef {object} RelaySender
+ * @property {string} address
+ * @property {boolean} verified
+ * @property {boolean} verificationPending  a check email has gone and its link has not been used
+ * @property {string | null} expiresAt      when that link lapses
  */
 
 /** Thrown with the server's own error code so screens can react to specifics. */
@@ -2098,7 +2105,7 @@ export async function inspectPickedDocument(householdId, file, { signal } = {}) 
  * @returns {Promise<Relay>}
  */
 export async function readRelay() {
-  /** @type {{ relay?: { address?: string, listening?: string, lastReceivedLabel?: string, lastReceived?: string, ingest?: string } }} */
+  /** @type {{ relay?: { address?: string, listening?: string, lastReceivedLabel?: string, lastReceived?: string, ingest?: string, sender?: RelaySender | null } }} */
   const body = await json(
     await fetch("/api/settings/mail-relay", { credentials: "same-origin" }),
   );
@@ -2112,6 +2119,7 @@ export async function readRelay() {
       relay.lastReceivedLabel
       ?? (relay.lastReceived ? ago(relay.lastReceived, new Date().toISOString()) : "nothing yet"),
     ingest: relay.ingest ?? UNAVAILABLE_RELAY.ingest,
+    sender: relay.sender ?? null,
   };
 }
 
@@ -2136,7 +2144,7 @@ export async function readRelay() {
  * @returns {Promise<Relay>}
  */
 export async function rotateRelay(action) {
-  /** @type {{ relay?: { address?: string, listening?: string, lastReceived?: string, ingest?: string } }} */
+  /** @type {{ relay?: { address?: string, listening?: string, lastReceived?: string, ingest?: string, sender?: RelaySender | null } }} */
   const body = await json(await csrfFetch("/api/settings/mail-relay", { method: "PUT", body: { action } }));
   const relay = body.relay ?? {};
   return {
@@ -2144,7 +2152,25 @@ export async function rotateRelay(action) {
     status: relay.listening ?? UNAVAILABLE_RELAY.status,
     lastReceived: relay.lastReceived ? ago(relay.lastReceived, new Date().toISOString()) : "nothing yet",
     ingest: relay.ingest ?? UNAVAILABLE_RELAY.ingest,
+    sender: relay.sender ?? null,
   };
+}
+
+/**
+ * Sends the check email to the signed-in member's registered address (#1410,
+ * ADR-0017 decision 7c).
+ *
+ * NO BODY, and none to send: the address a member forwards from is the one
+ * their account is registered with, so the session names the member and the
+ * server names the address. Answers 202 with where the mail went and when its
+ * link lapses; the refusals reach the caller as a WorkspaceError carrying the
+ * server's status and code (`sender_already_verified`, `smtp_not_configured`,
+ * `sender_check_too_soon` ...), which the screen turns into its own words.
+ *
+ * @returns {Promise<{ address: string, expiresAt: string }>}
+ */
+export async function sendSenderCheck() {
+  return json(await csrfFetch("/api/settings/mail-relay/verification"));
 }
 
 const NO_ADDRESS = "no address yet";

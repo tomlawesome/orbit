@@ -1,11 +1,13 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import FailedRow from "$lib/pocket/FailedRow.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
-  import { dismissReceipt, rotateRelay, wordsOf } from "$lib/data/workspace.js";
+  import { dismissReceipt, readRelay, rotateRelay, sendSenderCheck, wordsOf } from "$lib/data/workspace.js";
+  import { SENDER_SCENES } from "$lib/data/fixtures/relay.js";
+  import { ALREADY_CHECKED, checkRow, LINK_CHECKED, LINK_FAILED, refusalOf, SENDING, SENT_WAKE } from "./sender.js";
 
   /*
    * YOUR RELAY ON A PHONE (#1125, proposal §2.9). Beside the desk's card and
@@ -28,20 +30,41 @@
    * pocket (owner's answer 10b).
    *
    * `rotated` is the desk page's own, bound, so a rotation shows in both.
+   *
+   * The sender check (#1410, ADR-0017 decision 7c): two fields at the top of
+   * the list say where the check of the address you send from stands, and
+   * one pill under them sends the check email. Good news is a wake; a refusal
+   * is the card's own error line, and takes focus. Drawn only while `live`
+   * (this layout is the one showing), so the desk's copy of the same block
+   * is not on the page twice. The words are sender.js's.
    */
 
   /** @typedef {Awaited<ReturnType<typeof rotateRelay>>} Relay */
-  /** @type {{ relay: Relay, rotated: Relay | null, failures: import('$lib/data/workspace.js').MailFailure[], fixtures: boolean }} */
-  let { relay, rotated = $bindable(), failures, fixtures } = $props();
+  /** @type {{ relay: Relay, rotated: Relay | null, failures: import('$lib/data/workspace.js').MailFailure[], fixtures: boolean, live?: boolean, landing?: "verified" | "unverified" | null }} */
+  let { relay, rotated = $bindable(), failures, fixtures, live = false, landing = null } = $props();
 
   /* The gate's other two states, `?relay=never|paused`, fixtures only. */
   let scene = $state("");
+  /* ... and its other two sender rows, `?sender=unchecked|sent`. */
+  const senderScene = fixtures ? new URLSearchParams(location.search).get("sender") ?? "" : "";
+  /* When the link in the email just sent lapses: the read has not been taken
+     again, so the row follows the answer to the press. */
+  let sentExpires = $state(/** @type {string | null} */ (null));
   const shown = $derived.by(() => {
-    const base = rotated ?? relay;
+    const base = Object.hasOwn(SENDER_SCENES, senderScene)
+      ? { ...(rotated ?? relay), status: "no checked sending address", sender: SENDER_SCENES[/** @type {"sent"} */ (senderScene)] }
+      : (rotated ?? relay);
     if (scene === "never") return { ...base, lastReceived: "nothing yet" };
     if (scene === "paused") return { ...base, ingest: "paused" };
     return base;
   });
+  /* The ratified screenshots have no sender block, so the gate draws none at rest. */
+  const sender = $derived.by(() => {
+    const one = fixtures && !senderScene ? null : shown.sender;
+    if (!one) return null;
+    return sentExpires && !one.verified ? { ...one, verificationPending: true, expiresAt: sentExpires } : one;
+  });
+  const row = $derived(sender ? checkRow(sender) : null);
   const paused = $derived(shown.ingest === "paused");
   const never = $derived(shown.lastReceived === "nothing yet");
   const listening = $derived(!paused && /listen|connect/i.test(shown.status));
@@ -49,6 +72,45 @@
   let working = $state(/** @type {"rotate" | "pause" | "resume" | null} */ (null));
   let problem = $state(/** @type {string | null} */ (null));
   let canShare = $state(false);
+  let sending = $state(false);
+  /** @type {?HTMLElement} */
+  let problemLine = $state(null);
+  /** @type {?HTMLButtonElement} */
+  let checkButton = $state(null);
+
+  /** @param {string} words */
+  async function refuse(words) {
+    problem = words;
+    await tick();
+    problemLine?.focus();
+  }
+
+  /* No body and no address: the server checks the one the account is
+     registered with. */
+  async function sendCheck() {
+    if (sending || !sender) return;
+    sending = true;
+    problem = null;
+    try {
+      const sent = await sendSenderCheck();
+      sentExpires = sent.expiresAt;
+      sending = false;
+      wake(SENT_WAKE);
+      await tick();
+      checkButton?.focus();
+    } catch (error) {
+      sending = false;
+      const refusal = refusalOf(error);
+      if (refusal.already) {
+        rotated = await readRelay().catch(() => rotated);
+        wake(ALREADY_CHECKED);
+      } else {
+        await refuse(refusal.words);
+      }
+    } finally {
+      sending = false;
+    }
+  }
 
   /** @param {"rotate" | "pause" | "resume"} action */
   async function act(action) {
@@ -61,9 +123,9 @@
       wake(action === "rotate" ? "new address · the old one collects for 14 more days"
         : action === "pause" ? "ingest paused · mail is held until you resume" : "ingest resumed");
     } catch {
-      problem = action === "rotate"
+      await refuse(action === "rotate"
         ? "not rotated — your address is unchanged. try again"
-        : `not ${action === "pause" ? "paused" : "resumed"} — Orbit could not reach your relay`;
+        : `not ${action === "pause" ? "paused" : "resumed"} — Orbit could not reach your relay`);
     } finally {
       working = null;
     }
@@ -100,6 +162,9 @@
   onMount(() => {
     canShare = typeof navigator.share === "function";
     if (fixtures) scene = new URLSearchParams(location.search).get("relay") ?? "";
+    /* The check email's link landed here (the page has read and cleared it). */
+    if (live && landing === "verified") wake(LINK_CHECKED);
+    if (live && landing === "unverified") refuse(LINK_FAILED);
   });
 </script>
 
@@ -135,6 +200,16 @@
       {/if}
 
       <div class="rl-fields">
+        {#if live && sender && row}
+          <div class="rl-field">
+            <span class="rl-label">sending from</span>
+            <span class="rl-value">{sender.address}</span>
+          </div>
+          <div class="rl-field">
+            <span class="rl-label">sender check</span>
+            <b class:ok={row.tone === "ok"} class:warm={row.tone === "warm"}>{row.says}</b>
+          </div>
+        {/if}
         <div class="rl-field">
           <span class="rl-label">status</span>
           <b class:ok={listening} class:warm={paused}>{paused ? "paused · not collecting" : shown.status}</b>
@@ -153,6 +228,11 @@
         </div>
       </div>
 
+      {#if live && row?.button}
+        <button class="p-pill act-accent wide rl-check" bind:this={checkButton} disabled={sending} onclick={sendCheck}>
+          {sending ? SENDING : row.button}</button>
+      {/if}
+
       <div class="rl-acts">
         <ArmButton label={working === "rotate" ? "rotating…" : "rotate address"} armedLabel="tap again" name="Rotate your relay address"
                    danger={false} class="act-warm" onfire={() => act("rotate")} />
@@ -160,7 +240,7 @@
                 onclick={() => act(paused ? "resume" : "pause")}>
           {working === "pause" ? "pausing…" : working === "resume" ? "resuming…" : paused ? "resume" : "pause ingest"}</button>
       </div>
-      {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
+      {#if problem}<p class="p-error" role="alert" tabindex="-1" bind:this={problemLine}>{problem}</p>{/if}
     </section>
 
     {#if unread.length}
@@ -241,6 +321,7 @@
   .rl-field b.ok{color:var(--ok-text)}
   .rl-field b.warm{color:var(--warm-text)}
 
+  .rl-check{margin:16px 0 0}
   .rl-acts{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);margin:16px 0 0}
   .rl-acts > :global(*){flex:1 1 40%;white-space:nowrap}
 
