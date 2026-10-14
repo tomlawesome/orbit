@@ -302,10 +302,11 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
     return null;
   }
   await touchLastSeen(record.id, record.lastSeenAt);
-  /* The address is Tier 2 metadata now (#969). A locked instance still yields
-     a session — sign-in itself never depended on reading the address, and
-     everything else about the session is plaintext — so this reads null rather
-     than refusing, and the surfaces that need an address say so themselves. */
+  /* The address is Tier 2 metadata now (#969). With no usable key, Orbit is in
+     maintenance (#1405) and new sessions cannot be created. This reader is
+     tolerant so existing sessions created before the key became unusable can
+     still be read for sign-out and other operations. It reads null for the
+     address rather than refusing, and surfaces that need an address say so. */
   const cipher = await openInstanceMetadataReader();
   return {
     id: record.id,
