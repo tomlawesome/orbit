@@ -357,6 +357,15 @@ describe.each(LAYOUTS)("#1410: %s shows where the sender check stands", (_name, 
     expect(buttonSaying("send the check email")).not.toBeNull();
   });
 
+  it("link lapsed as the server reports it (not pending, past expiry): says the last link lapsed (#1403 review)", async () => {
+    await mountScreen({
+      sender: { address: ADDRESS, verified: false, verificationPending: false, expiresAt: hoursFromNow(-2) },
+      pocket,
+    });
+    expect(rowSays("sender check")).toBe("not yet checked · the last link lapsed");
+    expect(buttonSaying("send the check email")).not.toBeNull();
+  });
+
   it("checked: says `checked`, the status row says the relay is listening, and there is no button", async () => {
     server.relay = relayBody(CHECKED);
     await mountScreen({ sender: CHECKED, pocket });
