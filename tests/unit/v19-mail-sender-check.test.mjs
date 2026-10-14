@@ -183,9 +183,13 @@ function held() {
   return { promise, release };
 }
 
-/** The server's refusal, in words the screen must NOT repeat. */
-const refusal = (/** @type {number} */ status, /** @type {string} */ code) =>
-  json({ error: { code, message: "the server's own words, which the screen does not use" } }, status);
+/**
+ * The server's refusal. The engine words every refusal once (ADR-0034
+ * decision 4, #1410 note 38589): the screen shows the envelope's `message`
+ * exactly and does not map codes to words of its own.
+ */
+const refusal = (/** @type {number} */ status, /** @type {string} */ code, /** @type {string} */ message = `not sent — the engine's words for ${code}`) =>
+  json({ error: { code, message } }, status);
 
 /* ---- mounting and reading the screen --------------------------------------- */
 
@@ -434,10 +438,10 @@ describe.each(LAYOUTS)("#1410: %s presses the button", (_name, pocket, sentWords
 
   it("409 sender_already_verified: reads the relay again and says there is nothing to send, as a status and not an alert", async () => {
     await mountScreen({ sender: UNCHECKED, pocket });
-    const words = "already checked — nothing to send";
+    const words = "already checked — the engine's words, nothing to send";
     server.answer = () => {
       server.relay = relayBody(CHECKED);
-      return refusal(409, "sender_already_verified");
+      return refusal(409, "sender_already_verified", words);
     };
     await press("send the check email");
     expect(server.reads, "the relay is read again").toBeGreaterThanOrEqual(1);
@@ -449,13 +453,19 @@ describe.each(LAYOUTS)("#1410: %s presses the button", (_name, pocket, sentWords
   });
 
   const NOT_REACHED = "not sent — Orbit could not reach your relay. try again";
+  const engineWords = (/** @type {string} */ code) => `not sent — the engine's words for ${code}`;
   it.each([
-    ["409 sender_address_unavailable", () => refusal(409, "sender_address_unavailable"), "not sent — this account has no registered email address to check"],
-    ["429 sender_check_too_soon (owner 1a, #1403 note 38581)", () => refusal(429, "sender_check_too_soon"), "not sent — too soon. try again in a few minutes"],
-    ["503 smtp_not_configured", () => refusal(503, "smtp_not_configured"), "not sent — Orbit has no outbound mail set up yet. ask your administrator"],
-    ["503 metadata_locked", () => refusal(503, "metadata_locked"), "not sent — Orbit cannot read your address right now. try again later"],
-    ["503 encryption_key_unavailable", () => refusal(503, "encryption_key_unavailable"), "not sent — Orbit cannot read your address right now. try again later"],
-    ["500 with a code the screen does not know", () => refusal(500, "something_new"), NOT_REACHED],
+    ["409 sender_address_unavailable", () => refusal(409, "sender_address_unavailable"), engineWords("sender_address_unavailable")],
+    ["409 sender_address_unreadable", () => refusal(409, "sender_address_unreadable"), engineWords("sender_address_unreadable")],
+    ["429 sender_check_too_soon (owner 1a, #1403 note 38581)", () => refusal(429, "sender_check_too_soon"), engineWords("sender_check_too_soon")],
+    ["503 smtp_not_configured", () => refusal(503, "smtp_not_configured"), engineWords("smtp_not_configured")],
+    ["503 app_url_not_configured", () => refusal(503, "app_url_not_configured"), engineWords("app_url_not_configured")],
+    ["503 metadata_locked", () => refusal(503, "metadata_locked"), engineWords("metadata_locked")],
+    ["503 a mailer refusal or timeout code", () => refusal(503, "sender_check_mailer_timeout"), engineWords("sender_check_mailer_timeout")],
+    ["500 with a code the screen does not know, and a message", () => refusal(500, "something_new"), engineWords("something_new")],
+    ["500 with a code and no usable message", () => json({ error: { code: "something_new" } }, 500), NOT_REACHED],
+    ["500 with an empty message", () => json({ error: { code: "something_new", message: "" } }, 500), NOT_REACHED],
+    ["503 encryption_key_unavailable from the gate, a bare string with no message", () => json({ error: "encryption_key_unavailable" }, 503), NOT_REACHED],
     ["502 from a proxy, with no JSON", () => new Response("<html>bad gateway</html>", { status: 502 }), NOT_REACHED],
     ["no answer at all", () => { throw new TypeError("Failed to fetch"); }, NOT_REACHED],
   ])("%s: its words show in an alert that takes focus", async (_case, answer, words) => {
@@ -473,9 +483,10 @@ describe.each(LAYOUTS)("#1410: %s presses the button", (_name, pocket, sentWords
 
   it("a press after a refusal works again: it sends, and the refusal goes", async () => {
     await mountScreen({ sender: UNCHECKED, pocket });
-    server.answer = () => refusal(503, "smtp_not_configured");
+    const smtpWords = "not sent — the engine's words for smtp_not_configured";
+    server.answer = () => refusal(503, "smtp_not_configured", smtpWords);
     await press("send the check email");
-    expect(alertSaying("not sent — Orbit has no outbound mail set up yet. ask your administrator")).not.toBeNull();
+    expect(alertSaying(smtpWords)).not.toBeNull();
 
     const expiresAt = hoursFromNow(24);
     server.answer = () => json({ address: ADDRESS, expiresAt }, 202);
@@ -483,7 +494,7 @@ describe.each(LAYOUTS)("#1410: %s presses the button", (_name, pocket, sentWords
     expect(server.calls, "the second press sent its own request").toHaveLength(2);
     expect(rowSays("sender check")).toBe(lapsesAt(expiresAt));
     expect(announced(sentWords, pocket)).toBe(true);
-    expect(alerts().map(text)).not.toContain("not sent — Orbit has no outbound mail set up yet. ask your administrator");
+    expect(alerts().map(text)).not.toContain(smtpWords);
     expect(buttonSaying("send it again")).not.toBeNull();
   });
 });

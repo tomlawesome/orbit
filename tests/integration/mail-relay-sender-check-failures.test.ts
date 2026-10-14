@@ -5,12 +5,15 @@ import { getDb } from "@/db";
 import {
   auditLog,
   externalIdentities,
+  users,
   imapRecipientAliases,
   mailInMailbox,
   mailInRelays,
   mailInSecrets,
   mailInSenderAddresses,
 } from "@/db/schema";
+import { resetDocumentConfigForTests } from "@/server/documents/config";
+import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { provisionIdentity } from "@/lib/auth/provision";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
@@ -121,8 +124,8 @@ const memberActor = () => ({ id: fixture.users.member.id, isInstanceAdmin: false
 const rowsOf = (userId: string) => getDb().select().from(mailInSenderAddresses).where(eq(mailInSenderAddresses.userId, userId));
 
 /** A session made at the current (possibly faked) time, so it never reads as expired. */
-async function send() {
-  const session: IntegrationSession = await fixture.session("member");
+async function send(existing?: IntegrationSession) {
+  const session: IntegrationSession = existing ?? await fixture.session("member");
   return callRouteForSession((await loadRoute("settings/mail-relay/verification")).POST, session, {
     url: VERIFICATION_URL,
     method: "POST",
@@ -133,6 +136,28 @@ async function send() {
 async function codeOf(response: Response): Promise<string> {
   return ((await response.json()) as { error: { code: string } }).error.code;
 }
+
+/** The error envelope's code and message (`{ error: { code, message } }`). */
+async function envelopeOf(response: Response): Promise<{ code: string; message: string }> {
+  return ((await response.json()) as { error: { code: string; message: string } }).error;
+}
+
+/*
+ * ADR-0034 decision 4 (#1410 note 38589): the engine words every refusal once,
+ * in `error.message`; the browser shows it and never rewrites it. These are
+ * the words, in one voice: "not sent — <why>. <what to do>".
+ */
+const WORDS = {
+  alreadyChecked: "already checked — nothing to send",
+  noAddress: "not sent — this account has no registered email address to check",
+  noMail: "not sent — Orbit has no outbound mail set up yet. ask your administrator",
+  locked: "not sent — Orbit cannot read your address right now. try again later",
+  tooSoon: "not sent — too soon. try again in a few minutes",
+  mailerTimeout: "not sent — the mail server did not answer in time. try again later",
+  mailerRefused: "not sent — the mail server refused the message. try again later",
+  unreadable: "not sent — Orbit cannot read the address it holds for you. ask your administrator",
+  noAppUrl: "not sent — Orbit does not know its own web address. ask your administrator",
+} as const;
 
 /** Freezes the clock at `T0 + offsetSeconds`. Only `Date` is faked. */
 function at(offsetSeconds: number) {
@@ -169,10 +194,11 @@ describe("finding 1: a mailer that never answers", () => {
     expect(sent.at).toBeLessThan(20 * SECOND);
     expect(readAt).toBeLessThan(20 * SECOND);
     expect(sent.response.status).toBe(503);
-    const code = await codeOf(sent.response);
+    const { code, message } = await envelopeOf(sent.response);
     expect(code).toMatch(CODE_SHAPE);
     expect(code).not.toBe("internal_error");
     expect(code).not.toBe("metadata_locked");
+    expect(message).toBe(WORDS.mailerTimeout);
     await expectNothingLeft();
 
     /* The stalled attempt was not counted: the next press goes out at once. */
@@ -191,9 +217,10 @@ describe("finding 2: the mailer refuses the message", () => {
     const response = await send();
 
     expect(response.status).toBe(503);
-    const code = await codeOf(response);
+    const { code, message } = await envelopeOf(response);
     expect(code).toMatch(CODE_SHAPE);
     expect(code).not.toBe("internal_error");
+    expect(message).toBe(WORDS.mailerRefused);
     await expectNothingLeft();
 
     /* Not counted: an immediate second press is not "too soon". */
@@ -222,7 +249,7 @@ describe("finding 3: a damaged stored address while the key is available", () =>
     const response = await send();
 
     expect(response.status).toBe(409);
-    expect(await codeOf(response)).toBe("sender_address_unreadable");
+    expect(await envelopeOf(response)).toEqual({ code: "sender_address_unreadable", message: WORDS.unreadable });
     expect(mail.sent).toEqual([]);
   });
 
@@ -318,5 +345,78 @@ describe("finding 4: send times carry over when the registered address changes",
 
     expect(later.status).toBe(429);
     expect(mail.sent).toHaveLength(5);
+  });
+});
+
+describe("ADR-0034 decision 4: the engine words every refusal of the check", () => {
+  it("409 sender_already_verified", async () => {
+    await seedSenderAddress(fixture.users.member.id);
+    await getDb().update(mailInSenderAddresses).set({ verifiedAt: new Date() }).where(eq(mailInSenderAddresses.userId, fixture.users.member.id));
+
+    const response = await send();
+
+    expect(response.status).toBe(409);
+    expect(await envelopeOf(response)).toEqual({ code: "sender_already_verified", message: WORDS.alreadyChecked });
+  });
+
+  it("409 sender_address_unavailable", async () => {
+    await getDb().update(users).set({ emailEnc: null }).where(eq(users.id, fixture.users.member.id));
+
+    const response = await send();
+
+    expect(response.status).toBe(409);
+    expect(await envelopeOf(response)).toEqual({ code: "sender_address_unavailable", message: WORDS.noAddress });
+  });
+
+  it("503 smtp_not_configured", async () => {
+    delete process.env.SMTP_HOST;
+
+    const response = await send();
+
+    expect(response.status).toBe(503);
+    expect(await envelopeOf(response)).toEqual({ code: "smtp_not_configured", message: WORDS.noMail });
+  });
+
+  it("503 app_url_not_configured", async () => {
+    const session = await fixture.session("member");
+    delete process.env.APP_URL;
+
+    const response = await send(session);
+
+    expect(response.status).toBe(503);
+    expect(await envelopeOf(response)).toEqual({ code: "app_url_not_configured", message: WORDS.noAppUrl });
+  });
+
+  it("503 metadata_locked, when the key is gone after the member is signed in", async () => {
+    await seedSenderAddress(fixture.users.member.id);
+    const session = await fixture.session("member");
+    const original = process.env.DOCUMENT_KEK;
+    delete process.env.DOCUMENT_KEK;
+    resetDocumentConfigForTests();
+    resetMetadataKeyCacheForTests();
+    try {
+      const response = await callRouteForSession((await loadRoute("settings/mail-relay/verification")).POST, session, {
+        url: VERIFICATION_URL, method: "POST", body: null,
+      });
+
+      expect(response.status).toBe(503);
+      expect(await envelopeOf(response)).toEqual({ code: "metadata_locked", message: WORDS.locked });
+    } finally {
+      if (original === undefined) delete process.env.DOCUMENT_KEK;
+      else process.env.DOCUMENT_KEK = original;
+      resetDocumentConfigForTests();
+      resetMetadataKeyCacheForTests();
+    }
+  });
+
+  it("429 sender_check_too_soon", async () => {
+    at(0);
+    expect((await send()).status).toBe(202);
+
+    at(10);
+    const response = await send();
+
+    expect(response.status).toBe(429);
+    expect(await envelopeOf(response)).toEqual({ code: "sender_check_too_soon", message: WORDS.tooSoon });
   });
 });
