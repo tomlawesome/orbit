@@ -39,8 +39,9 @@
    * the read filled are named in `marked` and carry "◆ from document" in the
    * label's right-hand slot; typing in one is accepting it, so the mark
    * clears. No accept pill: four of them would push the form down for an act
-   * that only clears a mark. The host attaches the paper to the item it saves
-   * (#1245, both dialects). `readings` are review mode's own rows (§2.6).
+   * that only clears a mark. The host saves the paper with the item, all or
+   * nothing (#1245, #1406, both dialects); a file the server refuses stays,
+   * marked refused, until it is replaced or removed (owner's answer 6a). `readings` are review mode's own rows (§2.6).
    * @typedef {import('./entry.js').FormHousehold} FormHousehold
    * @typedef {{ label: string, value: string, sure: boolean, field: "provider" | "reference" | "dueDate" | "cost" }} Reading
    * @typedef {{
@@ -158,7 +159,8 @@
 
     {#if mode === "create"}
       <!-- Once a file is held, the row's job is done: the reading card takes
-           its place. A refused file is out of the entry, so the row is back. -->
+           its place. A refused file is still held (#1406), so the card
+           offers its replacement instead. -->
       {#if !attachment}
         <button type="button" class="pc-doc" onclick={() => picker?.click()} disabled={disabled}>
           <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
@@ -218,7 +220,15 @@
           </div>
         {/if}
 
-        {#if !picked.refused}
+        {#if picked.refused}
+          <!-- #1406 (owner's answer 6a): the refused file stays in the entry
+               and holds the save until it is replaced or removed. -->
+          <p class="pc-hint">Replace it, or remove it to save without it.</p>
+          <div class="pc-refused-acts">
+            <button type="button" class="p-pill" {disabled} onclick={() => picker?.click()}>replace it</button>
+            <button type="button" class="p-pill pc-drop" {disabled} onclick={dropDocument}>remove it</button>
+          </div>
+        {:else}
           <button type="button" class="p-pill pc-drop" {disabled} onclick={dropDocument}>not this one</button>
         {/if}
       </section>
@@ -559,6 +569,8 @@
   .pc-cap .p-body{display:inline-block;vertical-align:middle;margin:0 8px 2px 0}
   .pc-done .pc-cap .p-body{display:none}
   .pc-reading .pc-drop{margin-top:14px}
+  .pc-refused-acts{display:flex;gap:var(--p-pill-gap);margin-top:14px}
+  .pc-refused-acts .pc-drop{margin-top:0}
 
   @media (prefers-reduced-motion:reduce){
     .pc-chip{transition:none}

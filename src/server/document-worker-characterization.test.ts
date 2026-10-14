@@ -102,6 +102,7 @@ function classifyExecute(text: string): string {
   if (/crypto\.storage_key as "storageKey"/u.test(text)) return "readOwnedPurgeRecord";
   if (/select lifecycle, version as generation/u.test(text)) return "readPurgeDocumentState";
   if (/select lifecycle\s+from documents/u.test(text)) return "readCurrentLifecycle";
+  if (/item_id is null and delete_after <= now\(\)/u.test(text)) return "retireUnboundUploads";
   if (/select id\s+from document_jobs/u.test(text)) {
     if (/kind = 'scan'/u.test(text)) return "fenceScanJob";
     if (/kind = 'purge'/u.test(text)) return "fenceStalePurgeClaim";
@@ -486,7 +487,9 @@ describe("runDocumentMaintenanceCycle — phase order", () => {
       // 4/5. The other retention sweeps.
       "portableArchives.purgeExpired",
       "households.purgeExpired",
-      // 6. Storage reconciliation, due because it has never run.
+      // 6. Storage reconciliation, due because it has never run. It first
+      // retires staged uploads no item bound in time (#1316).
+      "execute:retireUnboundUploads",
       "update:documents",
       "select:documents",
       // Mail-ingestion attachments and their staged objects are a second

@@ -45,6 +45,7 @@ export const SERVER_BODY_LIMIT = Math.ceil(Math.max(DOCUMENT_MAX_BYTES_CEILING +
 
 /** Route ids, not pathnames: the router's own truth, as hooks.server.js's gates use. */
 export const UPLOAD_ROUTES = new Set([
+  "/api/households/[householdId]/documents",
   "/api/households/[householdId]/item-document-preview",
   "/api/households/[householdId]/item-document-inspection",
   "/api/households/[householdId]/items/[itemId]/documents",

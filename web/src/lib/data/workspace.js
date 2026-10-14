@@ -428,6 +428,67 @@ export function wordsOf(error, fallback = "Something went wrong.") {
   return fallback;
 }
 
+/** #1406: a create save that never reached Orbit, or whose answer was lost. */
+export const UNREACHED_WORDS = "not saved — couldn't reach Orbit; check the connection and try again";
+/** #1406: a create save Orbit failed (5xx) without words of its own. */
+export const SERVER_FAULT_WORDS = "not saved — Orbit had a problem; try again";
+
+/**
+ * A failure's words in the save vocabulary: the server's own, led by
+ * "not saved —" unless they already say what did not happen ("not yet — …").
+ * @param {unknown} error
+ * @returns {string}
+ */
+export function notSavedWords(error) {
+  const words = wordsOf(error);
+  return /^not [a-z]+ —/iu.test(words) ? words : `not saved — ${words}`;
+}
+
+/**
+ * #1406: what a create save says when it got no verdict -- the send never
+ * arrived, its answer was lost, or Orbit failed -- or null when the server
+ * answered with a verdict (a 4xx), which the caller words -- except a refused
+ * bind, whose words both forms show alike (see `bindRefused`). Nothing is half
+ * saved in any of these: the item and its document land together or not at
+ * all, so a retry under the same ids is always safe.
+ * @param {unknown} error
+ * @returns {string | null}
+ */
+export function unsavedWords(error) {
+  if (!(error instanceof WorkspaceError)) return UNREACHED_WORDS;
+  const status = error.status ?? 0;
+  if (status >= 500) return error.code ? notSavedWords(error) : SERVER_FAULT_WORDS;
+  if (status < 400) return UNREACHED_WORDS;
+  /* One wording for the desk and the pocket: the server's own, which tells
+     the member to pick the file again. */
+  if (bindRefused(error)) return wordsOf(error);
+  return null;
+}
+
+/**
+ * #1406: whether the create's one `item.upsert` was refused because the
+ * staged file it names is gone -- the 24-hour sweep retired it, so the server
+ * will answer a re-stage under the same document id with "needs recovery" for
+ * ever. The form must mint a fresh document id before its next Add.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+export function bindRefused(error) {
+  return error instanceof WorkspaceError && error.code === "document_not_available";
+}
+
+/**
+ * #1406: whether a failed stage is the server refusing the file itself --
+ * its type, size or structure, or malware -- rather than a failed send.
+ * A refused file stays in the form, marked with these words, and holds Add
+ * until it is replaced or removed (owner's answer 6a).
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+export function refusesFile(error) {
+  return error instanceof WorkspaceError && [413, 415, 422].includes(error.status ?? 0);
+}
+
 /**
  * The decoded body, or a WorkspaceError carrying the server's own words.
  *
@@ -784,10 +845,6 @@ export async function approveReceipt(suggestion, fallbackHouseholdId, operationI
 
 /** The one sentence for a receipt that is recorded but whose documents failed. */
 const PARTIAL_APPROVAL_MESSAGE = "The item is recorded, but its documents need another try — try once more to finish.";
-
-/** The create forms' sentence for an item that is saved but whose picked
- *  document was refused; the refusal's own words follow it. */
-export const PARTIAL_CREATE_MESSAGE = "The item is recorded, but its document needs another try — try once more to finish.";
 
 /**
  * Approve a mail receipt's suggestion under its per-receipt operation id —
@@ -1822,7 +1879,40 @@ export async function attachItemDocument(householdId, itemId, file, documentId, 
 }
 
 /**
- * One raw-body file POST, the shape all three document routes take: the
+ * Stages a file for an item that is about to be created (#1406): the
+ * household's documents route stores, scans and seals it with no item yet,
+ * and the create form's one `item.upsert` names it in `documentIds`, so the
+ * item and its document are saved together or not at all. The ciphertext is
+ * sealed under the draft item's id (`x-orbit-item-id`), so only that item
+ * can bind it.
+ *
+ * `documentId` is minted once per file picked and `itemId` once per draft, so
+ * a retry sends both again and the route hands back what it already holds. A
+ * 202 (held for a scan retry) is still staged; only a refusal or a failed
+ * send throws, with the server's status so the form can tell a refused file
+ * (413/415/422) from one that never got a verdict.
+ *
+ * @param {string} householdId
+ * @param {File} file
+ * @param {string} documentId
+ * @param {string} itemId  the draft item's id
+ * @param {{ retryCsrf?: boolean }} [options]
+ * @returns {Promise<DocumentSummary>}
+ */
+export async function stageDocument(householdId, file, documentId, itemId, { retryCsrf = true } = {}) {
+  const response = await postDocumentBytes(
+    `/api/households/${encodeURIComponent(householdId)}/documents`,
+    file,
+    { "x-orbit-document-id": documentId, "x-orbit-item-id": itemId },
+    { retryCsrf },
+  );
+  /** @type {{ document: DocumentSummary }} */
+  const body = await json(response);
+  return body.document;
+}
+
+/**
+ * One raw-body file POST, the shape all four document routes take: the
  * bytes are the body, so the filename travels encoded in a header, with
  * the CSRF token and whatever else the route asks for. A stale CSRF token
  * is retried once, as applyCommand does. The caller reads the response —
