@@ -298,6 +298,7 @@ page's URL at failure, which this one has to infer.
 - 2026-10-13 · 01666c27 (`fix/1408-invented-names`, a fixture-name sweep; nothing in the ring's motion) · local `pnpm fidelity`, run while other Playwright captures loaded the host · "a jump between frames at 282ms": 26.8 against the < 20 bound, the run's only failure (174 passed). Green on a rerun of door-station.spec.js alone on the same code (29 passed). Fifth sighting, still #1306.
 - 2026-10-13 · a76e6d44 (door branch; nothing in the ring's motion since the fifth sighting) · local `pnpm fidelity`, run while the full e2e suite loaded the host · "a jump between frames at 294ms": 28.9 against the < 20 bound, the run's only failure (488 passed). Green on a rerun of door-station.spec.js alone on the same code. Sixth sighting, still #1306.
 - 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / fidelity (job 36171) · `a jump between frames at 263ms` (spec now at line 130); 174 other fidelity tests and all 488 pocket measurements passed. Seventh sighting.
+- 2026-10-14 · 00987a9d (door branch, !1066) · pipeline 2590 / fidelity retry (job 36215) · `a jump between frames at 402ms`; 174 others and all 488 pocket measurements passed. Eighth sighting. Owner merged !1066 with this red (12b).
 
 ## tour-pocket-webkit.spec.js "plays end to end at 430x932 under normal motion" — pill moving between places (#1174)
 
@@ -449,6 +450,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-10 · d80cf61b (!1054) · pipeline 2392 / fidelity (job 34627) · "/home · document-preview meets the pocket floors" at 390x664, the same wait at `pocket-states.js:61` for Car MOT's opened panel ran to the 60 s timeout; 487 others passed. Third sighting: filed as #1376.
 - 2026-10-10 · e0d5d796 (`dev`, merge of !1057; its head 327d32c1 passed fidelity in pipeline 2440, and the merge adds only `scripts/install.sh`, its test and `scripts/ci/repin-base-image.sh`) · pipeline 2461 / fidelity (job 35271) · "/home · row-complete meets the pocket floors" at 390x664, `locator.waitFor` ran to the 60 s test timeout; 487 of 488 passed.
+- 2026-10-14 · 00987a9d (door branch, !1066) · pipeline 2590 / fidelity (job 36196) · `pocket-measure.spec.js:544` "pocket measurement at 390x664 › /home · row-open meets the pocket floors" — `locator.waitFor: Test timeout of 60000ms exceeded`; 487 others passed. Diff since pipeline 2588 (where it passed) is an e2e keyboard spec and docs only; job retried as 36215.
 
 ## tour-pocket-webkit.spec.js:539 "plays through chapter 3 at 360x780 under normal motion" — chapters skipped
 

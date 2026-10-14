@@ -542,3 +542,44 @@ on slice 1 and is not sliced here.
 - Handing a relay address to a third party, which the 2026-08-13 framing
   allowed and this record's first draft assumed, is unsupported and advised
   against (decision 3).
+
+## Amendment (#745, 2026-10-13): the registered address is the only sending address
+
+Owner decision of 2026-10-13. It amends decision 3 (#745, attribution by
+verified sender).
+
+**One sending address.** A member forwards mail to Orbit from the email
+address their account is registered with — the local account's address or the
+sign-in provider's `email` claim — and from no other. Decision 3's "further
+addresses they send from" and the override box are withdrawn.
+
+**Still proved by a one-use link.** A claimed address proves nothing, so
+Orbit still emails a one-use link to the registered address, and nothing
+attributes until the member has opened it. The attribution rule in decision 3
+is otherwise unchanged.
+
+**What was removed.** Adding, overriding and removing other sending addresses
+(`addSenderAddress`, `removeSenderAddress`), the `manual` source, the route
+that added and removed addresses (`settings/mail-relay/senders`), and its
+helpers and tests. The `mail_in_sender_addresses` row is now only ever the
+seeded registered address (`seedSenderAddress`).
+
+**What stays.** `seedSenderAddress`, `listSenderAddresses` (one row, so the
+screen can show its state), `hasVerifiedSenderAddress`,
+`sendSenderVerification`, `verifySenderAddress` with the
+`settings/mail-relay/verify` route, and `userForVerifiedSender`.
+
+**New route: `POST /api/settings/mail-relay/verification`.** It takes no
+body and sends the check email to the member's registered address, seeding the
+row again first if it is missing. It answers 202 with `{ address, expiresAt }`,
+or 409 `sender_already_verified` if the address is already verified. Only a
+signed-in member may call it. A body that names another address is not read.
+
+**The seeded row follows the registered address.** If the account email is
+edited, or the provider's claim changes, the row follows it and verification
+starts over. The existing seed logic decides this; a test confirms it.
+
+**The settings screen** shows the registered address and its state (checked,
+not yet checked, or link sent with its expiry), one button, "Send the check
+email", and the existing "relay not usable" line until the address is checked.
+It is tracked as a separate issue.
