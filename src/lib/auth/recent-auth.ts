@@ -11,7 +11,7 @@
  * There are two challenges and one rule for choosing between them:
  *
  *  - **Has a password?** Then the password is the challenge, verified through
- *    `verifyCredential` — the same backoff, the same gate, the same one-word
+ *    `verifyCredentialForUser` — the same backoff, the same gate, the same one-word
  *    refusal as a sign-in. Nothing here re-implements any of that.
  *  - **OIDC only?** Then a step-up: `POST /api/auth/step-up/start` sends the
  *    browser to the provider with `max_age=0`, the callback checks the
@@ -37,7 +37,7 @@ import { getAuthConfig, type AuthConfig } from "@/lib/env";
 import type { CookieSink } from "@/lib/http";
 import { log } from "@/lib/logger";
 import { validUuid } from "@/lib/uuid";
-import { verifyCredential } from "@/server/local-credentials";
+import { verifyCredentialForUser } from "@/server/local-credentials";
 
 /** Keeps a step-up proof from opening as a claim cookie or a transaction. */
 export const STEP_UP_PROOF_AUDIENCE = "step-up-proof";
@@ -103,8 +103,8 @@ export interface RecentAuthenticationSubject {
   id: string;
   /**
    * `email` is null when the stored address will not authenticate, so it
-   * cannot be read (#969). The password challenge below resolves an address
-   * to an account, so it has nothing to work with and fails closed.
+   * cannot be read (#969). Neither challenge depends on it: the password is
+   * checked against `user.id`.
    */
   user: { id: string; email: string | null };
 }
@@ -262,19 +262,14 @@ async function verifyPasswordChallenge(
     : undefined;
   if (typeof supplied !== "string" || supplied.length === 0) throw unproven();
 
-  /* An address that will not read resolves to no account, so the challenge
-     cannot be answered. No session exists without a usable key (#1405), so
-     this is a damaged value, never a missing key. */
-  if (session.user.email === null) throw unproven();
-
-  const verdict = await verifyCredential(session.user.email, supplied);
+  /* Checked against the account the session already names, not looked up by
+     its stored address: an address that no longer decrypts must not shut its
+     owner out of every guarded action. */
+  const verdict = await verifyCredentialForUser(session.user.id, supplied);
   if (verdict.outcome === "throttled") {
     throw new AuthError("too_many_attempts", "Too many attempts at once; try again shortly", 429);
   }
-  /* The verdict names the account the address resolved to, and it must be the
-     one holding this session: a second account that somehow shared the address
-     would otherwise let its password answer for this one. */
-  if (verdict.outcome !== "verified" || verdict.userId !== session.user.id) throw unproven();
+  if (verdict.outcome !== "verified") throw unproven();
   return { userId: session.user.id, intent, method: "password" };
 }
 

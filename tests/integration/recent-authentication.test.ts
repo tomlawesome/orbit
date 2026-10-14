@@ -7,7 +7,7 @@
  * challenge itself, not the system it guards.
  */
 
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { eq, inArray, like } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
@@ -234,6 +234,47 @@ describe("recent authentication: the password challenge (ADR-0023 §5)", () => {
     const withPassword = await createSystemAs(actor, ownerId, { currentPassword: PASSWORD });
     expect(withPassword.status).toBe(201);
     expect(await systemsMade()).toBe(1);
+  });
+
+  /* A stored address that fails its integrity check reads back as null on the
+     session, while sign-in still works because it looks the account up by the
+     blind index of the typed address. The step-up must not need the address:
+     the session already says who the member is. */
+  async function damageAddress(userId: string): Promise<void> {
+    await getDb().update(users)
+      .set({ emailEnc: randomBytes(48).toString("base64") })
+      .where(eq(users.id, userId));
+  }
+
+  it("accepts the right password from a member whose stored address is damaged", async () => {
+    const actorId = await localUser("admin-damaged", { administrator: true });
+    const ownerId = await localUser("owner-damaged", { administrator: true });
+    const actor = await actorFor(actorId);
+    await damageAddress(actorId);
+
+    /* The damage is real: the session no longer yields an address. */
+    const config = getAuthConfig();
+    const session = await readSession(
+      { get: (name) => (name === sessionCookieName(config) ? actor.cookie.split("=")[1] : undefined) },
+      config,
+    );
+    expect(session?.user.email).toBeNull();
+
+    const accepted = await createSystemAs(actor, ownerId, { currentPassword: PASSWORD });
+    expect(accepted.status).toBe(201);
+    expect(await systemsMade()).toBe(1);
+  });
+
+  it("still refuses a wrong password from a member whose stored address is damaged", async () => {
+    const actorId = await localUser("admin-damaged-wrong", { administrator: true });
+    const ownerId = await localUser("owner-damaged-wrong", { administrator: true });
+    const actor = await actorFor(actorId);
+    await damageAddress(actorId);
+
+    const wrong = await createSystemAs(actor, ownerId, { currentPassword: WRONG_PASSWORD });
+    expect(wrong.status).toBe(403);
+    expect(await errorCode(wrong)).toBe("recent_authentication_required");
+    expect(await systemsMade()).toBe(0);
   });
 });
 

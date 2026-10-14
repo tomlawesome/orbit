@@ -257,8 +257,25 @@ export type CredentialVerdict =
  * sign in, with no migration.
  */
 export async function verifyCredential(email: string, password: string): Promise<CredentialVerdict> {
+  return verifyWithLookup(() => findAccountByEmail(email), password);
+}
+
+/**
+ * The same check for an account already identified by id — a recent-
+ * authentication challenge, where the session names the principal. Looking the
+ * account up by id rather than by its stored address means a member whose
+ * address no longer decrypts can still prove they hold the password.
+ */
+export async function verifyCredentialForUser(userId: string, password: string): Promise<CredentialVerdict> {
+  return verifyWithLookup(() => findAccountById(userId), password);
+}
+
+async function verifyWithLookup(
+  lookup: () => Promise<CredentialAccount | undefined>,
+  password: string,
+): Promise<CredentialVerdict> {
   try {
-    return await attemptVerification(email, password);
+    return await attemptVerification(await lookup(), password);
   } catch (error) {
     if (error instanceof VerificationGateRefusedError) {
       /* The gate refused before any derivation ran, so this costs an attacker
@@ -276,9 +293,31 @@ export async function verifyCredential(email: string, password: string): Promise
   }
 }
 
-async function attemptVerification(email: string, password: string): Promise<CredentialVerdict> {
-  const db = getDb();
+interface CredentialAccount {
+  userId: string;
+  disabledAt: Date | null;
+  passwordHash: string | null;
+  lockedUntil: Date | null;
+}
 
+const credentialAccountColumns = {
+  userId: users.id,
+  disabledAt: users.disabledAt,
+  passwordHash: localCredentials.passwordHash,
+  lockedUntil: localCredentials.lockedUntil,
+};
+
+async function findAccountById(userId: string): Promise<CredentialAccount | undefined> {
+  const [account] = await getDb()
+    .select(credentialAccountColumns)
+    .from(users)
+    .leftJoin(localCredentials, eq(localCredentials.userId, users.id))
+    .where(eq(users.id, userId))
+    .limit(1);
+  return account;
+}
+
+async function findAccountByEmail(email: string): Promise<CredentialAccount | undefined> {
   /* The address is behind the key now (#969), so the lookup is the blind
      index. An instance with no usable key is in maintenance and nobody signs
      in (#1405), so the only locked cipher here is a fresh, unclaimed
@@ -290,19 +329,21 @@ async function attemptVerification(email: string, password: string): Promise<Cre
   /* Null on an instance whose key row does not exist yet, where asking the
      cipher for one would throw; nothing can match then. */
   const emailIndex = cipher.locked ? null : cipher.emailIndex(trimmed);
-  const [account] = emailIndex === null
-    ? []
-    : await db
-      .select({
-        userId: users.id,
-        disabledAt: users.disabledAt,
-        passwordHash: localCredentials.passwordHash,
-        lockedUntil: localCredentials.lockedUntil,
-      })
-      .from(users)
-      .leftJoin(localCredentials, eq(localCredentials.userId, users.id))
-      .where(eq(users.emailIndex, emailIndex))
-      .limit(1);
+  if (emailIndex === null) return undefined;
+  const [account] = await getDb()
+    .select(credentialAccountColumns)
+    .from(users)
+    .leftJoin(localCredentials, eq(localCredentials.userId, users.id))
+    .where(eq(users.emailIndex, emailIndex))
+    .limit(1);
+  return account;
+}
+
+async function attemptVerification(
+  account: CredentialAccount | undefined,
+  password: string,
+): Promise<CredentialVerdict> {
+  const db = getDb();
 
   /* No such address, a disabled account, or an account that has no password
      yet: all three spend the decoy derivation and answer identically, so the
