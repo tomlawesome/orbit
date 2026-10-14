@@ -60,12 +60,15 @@ let staged = new Set();
 let retired = new Set();
 /** How many binds the server refuses (retiring the file as it does) before it accepts. */
 let refusals = 1;
+/** How many stage calls the server refuses with 409 "document_not_available" before it accepts (#1316). */
+let stageRefusals = 0;
 
 function stubFetch() {
   calls = [];
   staged = new Set();
   retired = new Set();
   refusals = 1;
+  stageRefusals = 0;
   vi.stubGlobal("fetch", vi.fn(async (url, init) => {
     const href = String(url);
     if (href.includes("/api/auth/session")) return json({ user: { id: "u1" }, csrfToken: "t1" });
@@ -88,6 +91,10 @@ function stubFetch() {
     if (/\/api\/households\/[^/]+\/documents$/u.test(href) && init?.method === "POST") {
       calls.push({ kind: "stage", url: href, init });
       const id = init.headers["x-orbit-document-id"];
+      if (stageRefusals > 0) {
+        stageRefusals -= 1;
+        return json({ error: { code: "document_not_available", message: BIND_WORDS } }, 409);
+      }
       if (retired.has(id)) {
         return json({ error: { code: "document_upload_recoverable", message: "That document upload needs recovery" } }, 503);
       }
@@ -360,5 +367,43 @@ describe("#1406: the desk and the pocket say the same words for a bind refusal",
     expect(deskWords, "the desk says something").not.toBe("");
     expect(deskWords).toMatch(/pick it again/iu);
     expect(pocketWords).toBe(deskWords);
+  });
+});
+
+/* ---- #1316: the stage itself says the id is retired --------------------------
+   A staged file the 24-hour sweep retired (pending_deletion, later deleted)
+   used to be answered "needs recovery" for ever when staged again under its id.
+   The server now answers that re-stage 409 "document_not_available" -- the
+   same refusal bindRefused() reads -- so the form must stage the file afresh
+   under a new id and save, whether it does so inside the same Add or on the
+   member's next Add (the member still holds the file either way). */
+describe.each([
+  ["the desk form", fillDesk],
+  ["the pocket form", fillPocket],
+])("#1316: %s when the stage answers 409 document_not_available for the retired id", (_name, fill) => {
+  it("stages the file again under a different document id and then saves", async () => {
+    const form = await fill();
+    refusals = 0; // the bind is not what refuses here: the first stage is
+    stageRefusals = 1;
+    await form.pressAdd();
+    const firstStages = ofKind("stage");
+    expect(firstStages.length, "the first Add reached the stage").toBeGreaterThanOrEqual(1);
+    const firstId = header(firstStages[0], "x-orbit-document-id");
+
+    /* Either the same Add already retried and saved, or the member presses Add
+       again (picking the file again first if the form asks for it). */
+    if (goto.mock.calls.length === 0) {
+      if (form.addHeld()) await form.pickFile(pdf("policy.pdf"));
+      await form.pressAdd();
+    }
+
+    const stages = ofKind("stage");
+    expect(stages.length, "a second stage call followed the refused one").toBeGreaterThanOrEqual(2);
+    const freshId = header(stages[stages.length - 1], "x-orbit-document-id");
+    expect(freshId, "the refused (retired) document id is not staged again").not.toBe(firstId);
+    const commands = ofKind("command");
+    expect(commands, "the item was saved").toHaveLength(1);
+    expect(commands[0].body.documentIds, "bound to the freshly staged id").toEqual([freshId]);
+    expect(goto, "the item and its file saved together").toHaveBeenCalledTimes(1);
   });
 });

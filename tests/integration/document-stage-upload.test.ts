@@ -400,6 +400,21 @@ describe("the storage sweep retires staged uploads nobody bound", () => {
   });
 });
 
+describe("a staged file the sweep has retired cannot be staged again under its id (#1316)", () => {
+  it("answers 409 document_not_available, not a permanent 503 document_upload_recoverable, for a re-stage of a pending_deletion row", async () => {
+    const fixture = await createIntegrationFixture("stage-retired");
+    const member = await fixture.session("member");
+    const documentId = randomUUID();
+    const itemId = randomUUID();
+    expect((await stage(fixture, member, { documentId, itemId })).status).toBe(201);
+    await getDb().update(documents).set({ lifecycle: "pending_deletion" }).where(eq(documents.id, documentId));
+
+    const again = await stage(fixture, member, { documentId, itemId });
+    expect(again.status).toBe(409);
+    expect((await again.json()).error.code).toBe("document_not_available");
+  });
+});
+
 /* Plan risk: "the home drawer's existing attach route is unchanged -- confirm
    by test, not by reading". The drawer attaches to an item that already
    exists through the item's own documents route; that route still needs the

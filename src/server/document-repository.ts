@@ -465,6 +465,12 @@ export async function uploadItemDocument(input: {
         if (existing.lifecycle === "rejected" && existing.failureCode === "malware_detected") {
           throw new AppError("document_malware_detected", "That document upload has already been rejected", 422);
         }
+        // A staged file the sweep retired is gone for good under this id:
+        // answer as the bind does, so the form stages it afresh under a new
+        // id rather than being told "needs recovery" for ever.
+        if (staged && (existing.lifecycle === "pending_deletion" || existing.lifecycle === "deleted")) {
+          throw new AppError("document_not_available", "That document is no longer available — pick it again", 409);
+        }
         if (existing.lifecycle !== "rejected") {
           throw new AppError("document_upload_recoverable", "That document upload needs recovery", 503);
         }

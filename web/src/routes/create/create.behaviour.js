@@ -634,7 +634,16 @@ export function mountCreate() {
          same ids, and the server hands back what it already holds. */
       if (held.attachment) {
         staging = true;
-        await stageDocument(active.id, held.attachment, held.attachmentId, draftId);
+        await stageDocument(active.id, held.attachment, held.attachmentId, draftId).catch(async (error) => {
+          /* The sweep retired the file once staged under this id, and the
+             server will not take it under that id again: stage the same
+             file once more under a fresh id, within this Add. A second
+             failure is shown as any other. */
+          if (!bindRefused(error) || attachmentId !== held.attachmentId) throw error;
+          reissueAttachmentId();
+          held.attachmentId = attachmentId;
+          await stageDocument(active.id, held.attachment, held.attachmentId, draftId);
+        });
         staging = false;
       }
       await applyCommand(held.attachment ? { ...command, documentIds: [held.attachmentId] } : command).catch((error) => {
@@ -663,9 +672,9 @@ export function mountCreate() {
       if (staging && held.attachment && held.attachment === attachment && refusesFile(error)) {
         refuseDocument(held.attachment, wordsOf(error));
       }
-      /* The server no longer holds the staged file (the sweep retired it),
-         and would answer a re-stage under its id "needs recovery" for ever:
-         the next Add stages the same file under a fresh id. */
+      /* The server no longer holds the staged file (the sweep retired it
+         after the stage): the next Add stages the same file under a fresh
+         id, as a refused stage does within the Add above. */
       if (!staging && held.attachment && bindRefused(error) && attachmentId === held.attachmentId) {
         reissueAttachmentId();
       }

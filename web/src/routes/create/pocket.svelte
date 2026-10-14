@@ -275,7 +275,15 @@
          server hands back what it already holds. */
       if (held) {
         staging = true;
-        await stageDocument(household.id, held, documentIdOf(held), draftId);
+        await stageDocument(household.id, held, documentIdOf(held), draftId).catch(async (error) => {
+          /* The sweep retired the file once staged under this id, and the
+             server will not take it under that id again: stage the same
+             file once more under a fresh id, within this Add. A second
+             failure is shown as any other. */
+          if (!bindRefused(error)) throw error;
+          documentIds.delete(held);
+          await stageDocument(household.id, held, documentIdOf(held), draftId);
+        });
         staging = false;
       }
       await applyCommand(held ? { ...command, documentIds: [documentIdOf(held)] } : command).catch((error) => {
@@ -297,8 +305,8 @@
          is ever half saved (#1406): a refused file stays, marked, holding
          Add; a send with no verdict says so; a refusal reads in its own words. */
       if (staging && held && held === attachment && refusesFile(error)) refuse(wordsOf(error));
-      /* The sweep retired the staged file: stage it afresh under a new id on
-         the next Add, not the retired one the server would refuse for ever. */
+      /* The sweep retired the staged file after the stage: stage it afresh
+         under a new id on the next Add, as a refused stage does above. */
       if (!staging && held && bindRefused(error)) documentIds.delete(held);
       problem = unsavedWords(error) ?? notSavedWords(error);
     } finally {
