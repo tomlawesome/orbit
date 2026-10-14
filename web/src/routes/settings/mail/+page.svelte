@@ -12,7 +12,7 @@
   import { reasonWords } from "$lib/pocket/words.js";
   import Pocket from "./pocket.svelte";
   import {
-    ALREADY_CHECKED, checkRow, clearLanding, landingOf, LINK_CHECKED, LINK_FAILED, refusalOf, SENDING, sentWords,
+    checkRow, clearLanding, landingOf, LINK_CHECKED, LINK_FAILED, alreadyCheckedWords, refusalWords, SENDING, sentWords,
     withLearnt,
   } from "./sender.js";
 
@@ -147,15 +147,15 @@
       sentExpires = sent.expiresAt;
       said = sentWords(sent.address ?? sender.address);
     } catch (error) {
-      const refusal = refusalOf(error);
-      if (refusal.already) {
+      const already = alreadyCheckedWords(error);
+      if (already !== null) {
         /* The button stays held until the re-read answers. If it cannot, the
            server has still said so: the row follows it. */
         try { rotated = await readRelay(); } catch { checked = true; }
-        said = ALREADY_CHECKED;
+        said = already;
         focusOn = "said";
       } else {
-        problem = refusal.words;
+        problem = refusalWords(error);
         focusOn = "alert";
       }
     } finally {

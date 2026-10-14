@@ -1,3 +1,4 @@
+import { WorkspaceError } from "$lib/data/workspace.js";
 import { clockOf, dayMonth, localZone } from "$lib/format.js";
 
 /*
@@ -53,25 +54,22 @@ export const LINK_FAILED =
 
 const NOT_REACHED = "not sent — Orbit could not reach your relay. try again";
 
-/** What a refused press says, from the error the seam threw; `already` is not a refusal but good news.
+/** What a refused press says: the engine's own words, exactly as they arrived (ADR-0034
+ *  decision 4). Only when there is no answer, or none with usable words, is it the browser's.
  *  @param {unknown} error
- *  @returns {{ already: true } | { already?: false, words: string }} */
-export function refusalOf(error) {
-  const { status, code } = /** @type {{ status?: number, code?: string }} */ (error ?? {});
-  if (code === "sender_already_verified") return { already: true };
-  if (code === "sender_address_unavailable") {
-    return { words: "not sent — this account has no registered email address to check" };
-  }
-  if (code === "smtp_not_configured") {
-    return { words: "not sent — Orbit has no outbound mail set up yet. ask your administrator" };
-  }
-  if (code === "metadata_locked" || code === "encryption_key_unavailable") {
-    return { words: "not sent — Orbit cannot read your address right now. try again later" };
-  }
-  if (code === "sender_check_too_soon" || status === 429) {
-    return { words: "not sent — too soon. try again in a few minutes" };
-  }
-  return { words: NOT_REACHED };
+ *  @returns {string} */
+export function refusalWords(error) {
+  const spoken = error instanceof WorkspaceError ? error.message.trim() : "";
+  return spoken || NOT_REACHED;
+}
+
+/** The engine's word that the address is checked already, as a status line (good news, not a
+ *  refusal), or null for any other answer. Its own words; the constant only stands in when it sent none.
+ *  @param {unknown} error
+ *  @returns {string | null} */
+export function alreadyCheckedWords(error) {
+  if (!(error instanceof WorkspaceError) || error.code !== "sender_already_verified") return null;
+  return error.message.trim() || ALREADY_CHECKED;
 }
 
 /** The `?sender=` the check email's link lands on (the verify route), or null for anything else.
