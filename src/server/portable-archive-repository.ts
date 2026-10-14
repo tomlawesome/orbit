@@ -165,17 +165,23 @@ export async function createPortableArchive(input: {
   if (metadata.locked && householdItems.some((item) => item.titleEnc || item.providerEnc || item.referenceEnc || item.notesEnc || item.costMinorEnc)) {
     throw archiveMetadataLockedError();
   }
-  const exportedItems = householdItems.map((item) => ({
-    ...item,
-    reference: metadata.text("items.reference", item.id, { encrypted: item.referenceEnc }).value,
-    notes: metadata.text("items.notes", item.id, { encrypted: item.notesEnc }).value,
+  const exportedItems = householdItems.map((item) => {
+    const reference = metadata.text("items.reference", item.id, { encrypted: item.referenceEnc });
+    const notes = metadata.text("items.notes", item.id, { encrypted: item.notesEnc });
     // Tier 2 (#963) exports decrypted for the same reason Tier 1 does: the
     // archive is the deliberate plaintext escape hatch, and an archive holding
     // ciphertext nobody outside this instance can open would not be one.
-    title: metadata.text("items.title", item.id, { encrypted: item.titleEnc }).value ?? "",
-    provider: metadata.text("items.provider", item.id, { encrypted: item.providerEnc }).value,
-    costMinor: metadata.number("items.cost_minor", item.id, { encrypted: item.costMinorEnc }).value,
-  }));
+    const title = metadata.text("items.title", item.id, { encrypted: item.titleEnc });
+    const provider = metadata.text("items.provider", item.id, { encrypted: item.providerEnc });
+    const costMinor = metadata.number("items.cost_minor", item.id, { encrypted: item.costMinorEnc });
+    // A field that fails its integrity check would come out blank, and a blank
+    // title makes the whole archive unimportable, so the export is refused
+    // before anything is written rather than reporting success.
+    if ([reference, notes, title, provider, costMinor].some((field) => field.state === "metadata_integrity_failed")) {
+      throw new AppError("archive_metadata_damaged", "Orbit can't export: an item's stored details are damaged and would come out blank. Open that item, re-enter the damaged field and save it, then export again.", 409);
+    }
+    return { ...item, reference: reference.value, notes: notes.value, title: title.value ?? "", provider: provider.value, costMinor: costMinor.value };
+  });
 
   const payload: Record<string, unknown> = {
     format: "orbit-portable-archive",

@@ -1,8 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { readdir } from "node:fs/promises";
+import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "@/db";
-import { documents, items, sections } from "@/db/schema";
+import { documents, items, portableArchives, sections } from "@/db/schema";
 import { decryptPortableArchive, encryptPortableArchive } from "@/server/portable-archive";
 import { readDocumentDownload } from "@/server/document-repository";
 import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
@@ -180,6 +182,77 @@ describe("portable archive export access and document selection (#1049)", () => 
     const exportedIds = (payload.documents as Array<{ id: string }>).map((document) => document.id);
     expect(exportedIds).toContain(fixture.document.id);
     expect(exportedIds).not.toContain(pendingDeletion.id);
+  });
+
+  describe("an item field whose ciphertext fails its integrity check", () => {
+    // Every file the export has written under the archive store. Compared
+    // before and after a refused export: a refusal must leave no file behind.
+    async function archiveFiles(): Promise<string[]> {
+      try {
+        return (await readdir(join(process.env.DOCUMENTS_ROOT!, "portable-archives"), { recursive: true })).sort();
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw error;
+      }
+    }
+
+    async function archiveRows(householdId: string) {
+      return getDb().select({ id: portableArchives.id }).from(portableArchives)
+        .where(eq(portableArchives.householdId, householdId));
+    }
+
+    async function expectDamagedRefusal(label: string, column: "titleEnc" | "providerEnc") {
+      const fixture = await createIntegrationFixture(label);
+      // Random bytes in place of the envelope: the same corruption
+      // mail-relay-sender-read.test.ts writes over address_enc.
+      await getDb().update(items)
+        .set({ [column]: randomBytes(48).toString("base64") })
+        .where(eq(items.id, fixture.item.id));
+      const rowsBefore = await archiveRows(fixture.household.id);
+      const filesBefore = await archiveFiles();
+
+      const refusal = await createPortableArchive({
+        userId: fixture.users.owner.id,
+        householdId: fixture.household.id,
+        passphrase,
+        includeDocuments: false,
+      }).then(() => null, (error: unknown) => error);
+
+      expect(refusal).toMatchObject({ code: "archive_metadata_damaged", status: 409 });
+      expect(await archiveRows(fixture.household.id)).toEqual(rowsBefore);
+      expect(await archiveFiles()).toEqual(filesBefore);
+    }
+
+    it("refuses the export with archive_metadata_damaged (409) when an item's title is unreadable, writing no archive row or file", async () => {
+      await expectDamagedRefusal("portable-archive-export-damaged-title", "titleEnc");
+    });
+
+    it("refuses the export with archive_metadata_damaged (409) when an item's provider is unreadable, writing no archive row or file", async () => {
+      await expectDamagedRefusal("portable-archive-export-damaged-provider", "providerEnc");
+    });
+
+    it("still exports an untouched household, and that archive imports into a fresh household", async () => {
+      const source = await createIntegrationFixture("portable-archive-export-undamaged");
+      const target = await createIntegrationFixture("portable-archive-export-undamaged-target");
+
+      const archive = await createPortableArchive({
+        userId: source.users.owner.id,
+        householdId: source.household.id,
+        passphrase,
+        includeDocuments: false,
+      });
+      const { bytes } = await readPortableArchive(source.users.owner.id, archive.id);
+      const encrypted = JSON.parse(bytes.toString("utf8"));
+
+      const result = await importPortableArchive({
+        userId: target.users.member.id,
+        householdId: target.household.id,
+        archive: encrypted,
+        passphrase,
+        conflictItemIds: [],
+      });
+      expect(result.importedItems).toBe(1);
+    });
   });
 });
 
