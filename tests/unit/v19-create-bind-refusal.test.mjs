@@ -62,6 +62,11 @@ let retired = new Set();
 let refusals = 1;
 /** How many stage calls the server refuses with 409 "document_not_available" before it accepts (#1316). */
 let stageRefusals = 0;
+/** When true, the first document id a stage sees is answered 409 "document_conflict" (#1316 P-33: the id is held under another household); any other id is accepted. */
+let conflictOnFirstId = false;
+/** The document id the conflict answer was given for. */
+let conflictId = null;
+const CONFLICT_WORDS = "That document identity is already in use";
 
 function stubFetch() {
   calls = [];
@@ -69,6 +74,8 @@ function stubFetch() {
   retired = new Set();
   refusals = 1;
   stageRefusals = 0;
+  conflictOnFirstId = false;
+  conflictId = null;
   vi.stubGlobal("fetch", vi.fn(async (url, init) => {
     const href = String(url);
     if (href.includes("/api/auth/session")) return json({ user: { id: "u1" }, csrfToken: "t1" });
@@ -94,6 +101,10 @@ function stubFetch() {
       if (stageRefusals > 0) {
         stageRefusals -= 1;
         return json({ error: { code: "document_not_available", message: BIND_WORDS } }, 409);
+      }
+      if (conflictOnFirstId) {
+        conflictId ??= id;
+        if (id === conflictId) return json({ error: { code: "document_conflict", message: CONFLICT_WORDS } }, 409);
       }
       if (retired.has(id)) {
         return json({ error: { code: "document_upload_recoverable", message: "That document upload needs recovery" } }, 503);
@@ -405,5 +416,33 @@ describe.each([
     expect(commands, "the item was saved").toHaveLength(1);
     expect(commands[0].body.documentIds, "bound to the freshly staged id").toEqual([freshId]);
     expect(goto, "the item and its file saved together").toHaveBeenCalledTimes(1);
+  });
+});
+
+/* ---- #1316 P-33: the stage says the id is held under another household -----
+   The pocket stages under an id cached per File, with the household read at
+   press time. After a save whose answer was lost, a member of two households
+   picks the other household and presses Add: the same id reaches the stage
+   under another household and is refused 409 "document_conflict". The pocket
+   must stage the same held file afresh under a new id within that press,
+   as it does for "document_not_available", instead of showing the refusal on
+   every press until the file is removed and picked again. */
+describe("#1316: the pocket form when the stage answers 409 document_conflict for the cached id", () => {
+  it("stages the held file again under a different id within the same Add, and saves with the second id", async () => {
+    const form = await fillPocket();
+    refusals = 0; // the bind is not what refuses here: the first stage is
+    conflictOnFirstId = true;
+    await form.pressAdd();
+
+    const stages = ofKind("stage");
+    expect(stages.length, "two stage calls within the one press").toBe(2);
+    const firstId = header(stages[0], "x-orbit-document-id");
+    const secondId = header(stages[1], "x-orbit-document-id");
+    expect(secondId, "the refused id is not staged again").not.toBe(firstId);
+    const commands = ofKind("command");
+    expect(commands, "the item was saved").toHaveLength(1);
+    expect(commands[0].body.documentIds, "bound to the second id").toEqual([secondId]);
+    expect(form.note(), "no conflict wording left on screen").not.toMatch(/already in use/iu);
+    expect(goto, "the form reports added").toHaveBeenCalledTimes(1);
   });
 });

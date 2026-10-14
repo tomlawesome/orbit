@@ -73,6 +73,12 @@
     }
     return id;
   }
+  /** The id is spent: the sweep retired it, or the server already holds it
+      under another household (the household changed, the file did not).
+      @param {unknown} error */
+  function idRefused(error) {
+    return bindRefused(error) || (error instanceof WorkspaceError && error.code === "document_conflict");
+  }
 
   /* ---- reading the picked document (#1279) ----------------------------
      The desk's read ($lib/data/document-read.js, shared with
@@ -279,8 +285,9 @@
           /* The sweep retired the file once staged under this id, and the
              server will not take it under that id again: stage the same
              file once more under a fresh id, within this Add. A second
-             failure is shown as any other. */
-          if (!bindRefused(error)) throw error;
+             failure is shown as any other. The id is reissued too when the
+             server already holds it under another household. */
+          if (!idRefused(error)) throw error;
           documentIds.delete(held);
           await stageDocument(household.id, held, documentIdOf(held), draftId);
         });
@@ -308,8 +315,9 @@
          Add; a send with no verdict says so; a refusal reads in its own words. */
       if (staging && held && held === attachment && refusesFile(error)) refuse(wordsOf(error));
       /* The sweep retired the staged file after the stage: stage it afresh
-         under a new id on the next Add, as a refused stage does above. */
-      if (!staging && held && bindRefused(error)) documentIds.delete(held);
+         under a new id on the next Add, as a refused stage does above;
+         likewise when the server already holds the id under another household. */
+      if (!staging && held && idRefused(error)) documentIds.delete(held);
       problem = unsavedWords(error) ?? notSavedWords(error);
     } finally {
       saving = false;
