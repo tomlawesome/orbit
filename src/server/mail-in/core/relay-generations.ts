@@ -33,7 +33,7 @@ export const RELAY_CUT_OFF_GRACE_MS = 0;
 /**
  * The ceiling on any grace, including the administrator's instance-wide
  * emergency key rotation — the same 90 days the environment-era configuration
- * capped a transition at (`core/config.ts`, `MAX_PREVIOUS_ALIAS_TRANSITION_MS`).
+ * capped a transition at (now removed with the environment-era configuration).
  */
 export const RELAY_MAX_GRACE_MS = 90 * 86_400_000;
 

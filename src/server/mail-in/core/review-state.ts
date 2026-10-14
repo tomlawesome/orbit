@@ -28,7 +28,7 @@ const attachmentTransferFailureCodes = new Set([
 ]);
 
 /**
- * The nine reasons a member can be given for a failed mail-in receipt,
+ * The eight reasons a member can be given for a failed mail-in receipt,
  * folded from the ~25 stored `failure_code` values (#1143). The member
  * needs "what kind of thing went wrong", not the worker's step; the raw
  * `failure_code` stays on the row for support.

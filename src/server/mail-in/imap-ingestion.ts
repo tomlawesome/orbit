@@ -52,7 +52,8 @@ import { getImapIngestionConfig, MailInCredentialLockedError } from "./mailbox-c
 // Re-exported so importers of this module keep one import path.
 // `getImapIngestionConfig` is database-backed as of ADR-0017 slice 1
 // (orbit#742, src/server/mail-in/mailbox-config.ts) — no environment
-// fallback. The others are still the pure helpers in core/config.ts.
+// fallback. `imapProviderConnectionOptions` is in core/provider-options.ts;
+// the rest are the pure helpers in core/config.ts.
 export { getImapIngestionConfig, imapProviderConnectionOptions, imapProviderConfigCommitment, imapAttachmentRetryDelayMs, MailInCredentialLockedError };
 export type { ImapIngestionConfig };
 
