@@ -56,6 +56,8 @@ export interface SenderAddressView {
   verified: boolean;
   /** Set while a link is outstanding, so the screen can say "check your mail". */
   verificationPending: boolean;
+  /** When the outstanding link lapses (ISO); null once checked or when no link is live. */
+  expiresAt: string | null;
   /** Present only when something is unreadable, as elsewhere (ADR-0024 decision 5). */
   metadataStatus?: { address?: MetadataFieldState };
 }
@@ -115,14 +117,16 @@ function viewOf(
   cipher: MetadataCipher,
 ): SenderAddressView {
   const address = readAddress(cipher, row);
+  const linkLive = row.verifiedAt === null
+    && row.verificationExpiresAt !== null
+    && row.verificationExpiresAt.getTime() > now.getTime();
   return {
     id: row.id,
     address: address.value,
     source: row.source,
     verified: row.verifiedAt !== null,
-    verificationPending: row.verifiedAt === null
-      && row.verificationExpiresAt !== null
-      && row.verificationExpiresAt.getTime() > now.getTime(),
+    verificationPending: linkLive,
+    expiresAt: linkLive && row.verificationExpiresAt ? row.verificationExpiresAt.toISOString() : null,
     metadataStatus: address.state ? { address: address.state } : undefined,
   };
 }
