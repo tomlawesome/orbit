@@ -39,5 +39,20 @@ export const RELAY_FIXTURE = {
     lastReceived: "2026-08-11T12:00:00.000Z",
     lastReceivedLabel: relayFixture.lastReceived,
     ingest: relayFixture.ingest,
+    /* #1410: a checked sender, so the gate's relay reads as it always did
+       ("connected · listening"). The screen draws no sender block under
+       fixtures at rest, so the ratified screenshots do not move; the other
+       rows are the `?sender=` scenes below. */
+    sender: { address: "ned.harlow@example.test", verified: true, verificationPending: false, expiresAt: null },
   },
+};
+
+/**
+ * The gate's other two sender rows (#1410), `?sender=unchecked|sent`, fixtures
+ * only. `sent` lapses far ahead so it never reads as lapsed whenever the gate
+ * runs.
+ */
+export const SENDER_SCENES = {
+  unchecked: { address: "ned.harlow@example.test", verified: false, verificationPending: false, expiresAt: null },
+  sent: { address: "ned.harlow@example.test", verified: false, verificationPending: true, expiresAt: "2099-10-14T18:05:00.000Z" },
 };

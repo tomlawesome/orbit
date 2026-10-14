@@ -95,7 +95,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
     const fixture = await createIntegrationFixture("recipient-steady-state-no-refetch");
     const current = config();
     const alias = imapRecipientAlias(fixture.users.member.id, current);
-    const sender = await verifiedSenderFor(fixture.users.member.id, `steady-${fixture.users.member.id}@example.test`);
+    const sender = await verifiedSenderFor(fixture.users.member.id);
     const ranges: string[] = [];
     setImapClientFactoryForTests(() => ({
       // Exactly one message exists, at UID 1, so the mailbox's own uidNext
@@ -134,7 +134,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
     const current = config();
     const ranges: string[] = [];
     let alias = "";
-    const sender = await verifiedSenderFor(fixture.users.member.id, `expiry-${fixture.users.member.id}@example.test`);
+    const sender = await verifiedSenderFor(fixture.users.member.id);
     setImapClientFactoryForTests(() => ({
       // Comfortably above every UID this fixture's fake mailboxes use, so
       // runImapIngestionCycle's "${nextUid}:*" range-collapse guard (#383)
@@ -195,7 +195,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
     const fixture = await createIntegrationFixture("recipient-provider-replay");
     const current = config();
     const alias = imapRecipientAlias(fixture.users.member.id, current);
-    const sender = await verifiedSenderFor(fixture.users.member.id, `replay-${fixture.users.member.id}@example.test`);
+    const sender = await verifiedSenderFor(fixture.users.member.id);
     const verifiedPdfBodyStructure = { part: "1", type: "application", subtype: "pdf", disposition: "attachment", dispositionParameters: { filename: "verified.pdf" }, size: 31 };
     const messages = [
       { uid: 1, headers: attributedHeaders(sender, alias), source: Buffer.from("message-one"), bodyStructure: verifiedPdfBodyStructure },
@@ -251,7 +251,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
     const fixture = await createIntegrationFixture("recipient-uidvalidity-rollover");
     const current = config();
     const alias = imapRecipientAlias(fixture.users.member.id, current);
-    const sender = await verifiedSenderFor(fixture.users.member.id, `rollover-${fixture.users.member.id}@example.test`);
+    const sender = await verifiedSenderFor(fixture.users.member.id);
     const ranges: string[] = [];
     let poll = 0;
     setImapClientFactoryForTests(() => {
@@ -292,7 +292,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
     const fixture = await createIntegrationFixture("recipient-crash-restart-cursor");
     const current = config();
     const alias = imapRecipientAlias(fixture.users.member.id, current);
-    const sender = await verifiedSenderFor(fixture.users.member.id, `restart-${fixture.users.member.id}@example.test`);
+    const sender = await verifiedSenderFor(fixture.users.member.id);
     const ranges: string[] = [];
     let poll = 0;
     setImapClientFactoryForTests(() => {

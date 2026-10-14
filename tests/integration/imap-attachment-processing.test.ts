@@ -139,7 +139,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
     const fixture = await createIntegrationFixture("imap-provider-bounds");
     try {
       const config = attributedConfig();
-      const memberSender = await verifiedSenderFor(fixture.users.member.id, `member-${fixture.users.member.id}@example.test`);
+      const memberSender = await verifiedSenderFor(fixture.users.member.id);
       const alias = imapRecipientAlias(fixture.users.member.id, config);
       const header = attributedHeaders(memberSender, alias);
       await getDb().insert(imapIngestionMessages).values({
@@ -174,7 +174,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
 
       const changedRecipient = fixture.users.owner.id;
       const changedAlias = imapRecipientAlias(changedRecipient, config);
-      const changedSender = await verifiedSenderFor(changedRecipient, `owner-${changedRecipient}@example.test`);
+      const changedSender = await verifiedSenderFor(changedRecipient);
       const mismatchProvider = fakeClient([{ uid: 900, headers: attributedHeaders(changedSender, changedAlias), bodyStructure: pdfBodyStructure(), source: Buffer.from("changed"), size: 7 }]);
       await getDb().insert(imapIngestionMessages).values({
         mailbox: config.mailbox, mailboxUidValidity: "77", mailboxUid: 900, contentSha256: randomUUID().replaceAll("-", ""),
@@ -422,7 +422,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
     const fixture = await createIntegrationFixture("imap-terminal-staging-cleanup");
     try {
       const config = attributedConfig();
-      const memberSender = await verifiedSenderFor(fixture.users.member.id, `terminal-${fixture.users.member.id}@example.test`);
+      const memberSender = await verifiedSenderFor(fixture.users.member.id);
       const alias = imapRecipientAlias(fixture.users.member.id, config);
       const receiptId = randomUUID();
       const leaseToken = randomUUID();

@@ -11,6 +11,7 @@ import {
   mailInSenderAddresses,
   mailInUnattributedReplies,
 } from "@/db/schema";
+import { listSenderAddresses, seedSenderAddress } from "@/server/mail-in/sender-addresses";
 import { getImapIngestionConfig } from "@/server/mail-in/mailbox-config";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import {
@@ -123,8 +124,8 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     const a = fixture.users.owner.id;
     const b = fixture.users.member.id;
     await reconcileImapRecipientAliases(config);
-    const senderA = await verifiedSenderFor(a, "a@example.test");
-    await verifiedSenderFor(b, "b@example.test");
+    const senderA = await verifiedSenderFor(a);
+    await verifiedSenderFor(b);
 
     await collect(1001n, attributedHeaders(senderA));
 
@@ -142,11 +143,11 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     await reconcileImapRecipientAliases(config);
     /* The row exists and names the member; it is simply unverified, which is
        the state Orbit seeds every account in. A claim is not a credential. */
-    await getDb().insert(mailInSenderAddresses).values({
-      userId: fixture.users.member.id, address: "unchecked@example.test", source: "account",
-    });
+    await seedSenderAddress(fixture.users.member.id);
+    const [unchecked] = await listSenderAddresses(fixture.users.member.id);
+    expect(unchecked).toMatchObject({ verified: false });
 
-    await collect(1002n, attributedHeaders("unchecked@example.test"));
+    await collect(1002n, attributedHeaders(unchecked.address!));
 
     expect(await receiptFor("1002")).toEqual({
       userId: null, status: "unattributed", failureCode: "sender_unverified", attributedBy: null,
@@ -158,7 +159,7 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     const a = fixture.users.owner.id;
     const b = fixture.users.member.id;
     await reconcileImapRecipientAliases(config);
-    const senderA = await verifiedSenderFor(a, "a@example.test");
+    const senderA = await verifiedSenderFor(a);
     const relayB = await readRelayRow(b);
     const aliasB = imapRecipientAlias(b, config, relayB!.currentGeneration);
 
@@ -174,12 +175,12 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
   it("deletes a message with no authentication result silently, with no reply (acceptance 4)", async () => {
     const config = await getImapIngestionConfig();
     await reconcileImapRecipientAliases(config);
-    await verifiedSenderFor(fixture.users.member.id, "member@example.test");
+    const memberSender = await verifiedSenderFor(fixture.users.member.id);
 
     /* A verified address, written in `From` by anybody at all, with no
        provider verdict behind it. Answering it would be the backscatter path:
        Orbit emailing whoever a forger names. */
-    await collect(1004n, fixtureHeaders({ from: "member@example.test" }));
+    await collect(1004n, fixtureHeaders({ from: memberSender }));
 
     expect(await receiptFor("1004")).toMatchObject({ userId: null, status: "unattributed", failureCode: "sender_unauthenticated" });
     expect(sent).toEqual([]);
@@ -261,7 +262,7 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     const config = await getImapIngestionConfig();
     const member = fixture.users.member.id;
     await reconcileImapRecipientAliases(config);
-    const victim = await verifiedSenderFor(member, "victim@example.test");
+    const victim = await verifiedSenderFor(member);
     const relay = await readRelayRow(member);
     const alias = imapRecipientAlias(member, config, relay!.currentGeneration);
 

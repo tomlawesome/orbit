@@ -1,15 +1,20 @@
 <script>
   import { dayMonth } from "$lib/format.js";
   import "./relay.css";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { mountSatellites } from "$lib/backdrops/satellites.js";
   import Chrome from "$lib/Chrome.svelte";
   import { createArm } from "$lib/arm.js";
-  import { rotateRelay } from "$lib/data/workspace.js";
+  import { readRelay, rotateRelay, sendSenderCheck } from "$lib/data/workspace.js";
+  import { SENDER_SCENES } from "$lib/data/fixtures/relay.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
-  import { isPocket } from "$lib/pocket/media.js";
+  import { isPocket, POCKET_QUERY } from "$lib/pocket/media.js";
   import { reasonWords } from "$lib/pocket/words.js";
   import Pocket from "./pocket.svelte";
+  import {
+    ALREADY_CHECKED, checkRow, clearLanding, landingOf, LINK_CHECKED, LINK_FAILED, refusalOf, SENDING, sentWords,
+    withLearnt,
+  } from "./sender.js";
 
   /**
    * Your relay — the per-user mail-in address (CON-9: "settings-mail =
@@ -29,6 +34,11 @@
    * addressed to this member is recorded and held — nothing fetched, staged or
    * announced — and resuming stages all of it exactly once. Both act on the
    * signed-in member alone; neither can touch anybody else's relay.
+   *
+   * The sender check (#1410, ADR-0017 decision 7c): the relay cannot match
+   * mail to a member until they have checked the address they send from, so
+   * two rows say where that stands and one button sends the check email. The
+   * words are sender.js's, shared with the phone's layout.
    *
    * The living backdrop (#475, §14) is $lib/backdrops/satellites.js, ported
    * from design/v19/relay-satellites.html — this file only mounts it and
@@ -50,9 +60,50 @@
   const rotateArm = createArm({ onchange: (next) => (armedRotate = Boolean(next)) });
   /** @type {string | null} */
   let problem = $state(null);
-  const relay = $derived(rotated ?? data.relay);
+  /* Good news, in the status line under the buttons (the sender check's 202,
+     an address already checked, the link that worked). */
+  let said = $state("");
+  /** @type {?HTMLElement} */
+  let problemLine = $state(null);
+  /** @type {?HTMLElement} */
+  let saidLine = $state(null);
+  /** @type {?HTMLButtonElement} */
+  let checkButton = $state(null);
+  let sending = $state(false);
+  /* What this visit has learnt since the read -- when the link just sent
+     lapses, or that the address is checked already -- kept here and handed to
+     the phone's layout, so a window resized across the breakpoint shows the
+     same row in both. */
+  let sentExpires = $state(/** @type {string | null} */ (null));
+  let checked = $state(false);
+  /* The gate's sender rows, `?sender=unchecked|sent`, fixtures only. */
+  const scene = data.fixtures ? new URLSearchParams(location.search).get("sender") ?? "" : "";
+  const relay = $derived.by(() => {
+    const base = rotated ?? data.relay;
+    return Object.hasOwn(SENDER_SCENES, scene)
+      ? { ...base, status: "no checked sending address", sender: SENDER_SCENES[/** @type {"sent"} */ (scene)] }
+      : base;
+  });
+  /* The ratified screenshots have no sender block, so the gate draws none at rest. */
+  const sender = $derived.by(() => {
+    const one = data.fixtures && !scene ? null : relay.sender;
+    if (!one) return null;
+    return withLearnt(one, { sentExpires, checked });
+  });
+  const row = $derived(sender ? checkRow(sender) : null);
   const failures = $derived(data.failures ?? []);
-  const pocket = isPocket();
+  /* The phone's layout is chosen by CSS, but the sender block is drawn by one
+     layout only, so the button, its focus and its status line are not twice
+     on the page. */
+  let pocket = $state(isPocket());
+  const listening = $derived(/listen|connect/i.test(relay.status));
+  /** @param {string} words */
+  const refuse = async (words) => {
+    problem = words;
+    said = "";
+    await tick();
+    problemLine?.focus();
+  };
   /* §14 (#471): back to the opener; a deep link with no history goes home. */
   const dismissRelay = () => {
     if (history.length > 1) history.back();
@@ -66,6 +117,7 @@
     if (working) return;
     working = true;
     problem = null;
+    said = "";
     try {
       rotated = await rotateRelay(action);
     } catch {
@@ -74,12 +126,43 @@
          Same wording as the phone layout's own copy of this act
          (pocket.svelte's own `problem`), in the same spot below the
          buttons as that layout's own error text. */
-      problem = action === "rotate"
+      await refuse(action === "rotate"
         ? "not rotated — your address is unchanged. try again"
-        : `not ${action === "pause" ? "paused" : "resumed"} — Orbit could not reach your relay`;
+        : `not ${action === "pause" ? "paused" : "resumed"} — Orbit could not reach your relay`);
     } finally {
       working = false;
     }
+  };
+  /* Nothing here names an address either: the body is empty, the registered
+     address is the only one the server will check. */
+  const sendCheck = async () => {
+    if (sending || !sender) return;
+    sending = true;
+    problem = null;
+    said = "";
+    /** @type {"button" | "said" | "alert"} */
+    let focusOn = "button";
+    try {
+      const sent = await sendSenderCheck();
+      sentExpires = sent.expiresAt;
+      said = sentWords(sent.address ?? sender.address);
+    } catch (error) {
+      const refusal = refusalOf(error);
+      if (refusal.already) {
+        /* The button stays held until the re-read answers. If it cannot, the
+           server has still said so: the row follows it. */
+        try { rotated = await readRelay(); } catch { checked = true; }
+        said = ALREADY_CHECKED;
+        focusOn = "said";
+      } else {
+        problem = refusal.words;
+        focusOn = "alert";
+      }
+    } finally {
+      sending = false;
+    }
+    await tick();
+    (focusOn === "button" ? checkButton : focusOn === "said" ? saidLine : problemLine)?.focus();
   };
   /* #1151 S7: the two-tap protocol (lib/arm.js) — the first tap arms, the
      second fires, and an unfired arm relaxes after four seconds, on scroll,
@@ -96,6 +179,20 @@
     rotateArm.disarm();
     act(relay.ingest === "paused" ? "resume" : "pause");
   };
+
+  /* The check email's link lands here with ?sender=verified|unverified (the
+     verify route). Read once, announced, and taken out of the address bar. */
+  const landing = landingOf(new URLSearchParams(location.search));
+  onMount(() => {
+    /* The phone's layout says it in its own way (pocket.svelte). */
+    if (!pocket && landing === "verified") said = LINK_CHECKED;
+    if (!pocket && landing === "unverified") refuse(LINK_FAILED);
+    if (landing) clearLanding();
+    const query = typeof matchMedia === "function" ? matchMedia(POCKET_QUERY) : null;
+    const follow = () => (pocket = Boolean(query?.matches));
+    query?.addEventListener?.("change", follow);
+    return () => query?.removeEventListener?.("change", follow);
+  });
 
   /** @type {?HTMLDivElement} */
   let backdropRoot = null;
@@ -114,7 +211,7 @@
 </svelte:head>
 
 <!-- #1125, proposal §2.9: the phone's own relay, chosen by CSS. -->
-<Pocket relay={data.relay} bind:rotated {failures} fixtures={Boolean(data.fixtures)} />
+<Pocket relay={data.relay} bind:rotated {failures} fixtures={Boolean(data.fixtures)} live={pocket} {landing} bind:sentExpires bind:checked />
 
 <div class="relay-page">
 <div class="satellites" bind:this={backdropRoot} aria-hidden="true"></div>
@@ -126,15 +223,23 @@
 <!-- §14 (#471): clicking off the card returns to wherever the reader came
      from — the inbox, settings, or home as the deep-link fallback. -->
 <div class="stage" role={pocket ? undefined : "main"} onclick={(event) => { if (event.target === event.currentTarget) dismissRelay(); }}><div class="glass relay-card">
-  <div class="dish" id="relaydish"><span></span><span></span><span></span><i></i></div>
+  <div class="dish" id="relaydish" class:still={!listening}><span></span><span></span><span></span><i></i></div>
   <h1 style="text-align:center">Your relay</h1>
   <div class="sub" style="text-align:center">forward documents to your private address<br>and they arrive in your review queue</div>
   <div class="alias">{relay.address}</div>
+  {#if row && sender && !pocket}
+    <div class="kv"><span>sending from</span><span>{sender.address}</span></div>
+    <div class="kv"><span>sender check</span><b class:warm={row.tone === "warm"}>{row.says}</b></div>
+  {/if}
   <div class="kv"><span>status</span><b>{relay.status}</b></div>
   <div class="kv"><span>last received</span><span>{relay.lastReceived}</span></div>
   <div class="kv"><span>ingest</span><b>{relay.ingest}</b></div>
+  {#if row?.button && !pocket}
+    <div class="btns"><button class="pri" bind:this={checkButton} disabled={sending} onclick={sendCheck}>{sending ? SENDING : row.button}</button></div>
+  {/if}
   <div class="btns"><button class="pri" disabled={working} aria-expanded={armedRotate} onclick={tapRotate}>{armedRotate ? "tap again to rotate" : "rotate address"}</button><button disabled={working} onclick={toggleIngest}>{relay.ingest === "paused" ? "resume ingest" : "pause ingest"}</button></div>
-  {#if problem}<p class="problem">{problem}</p>{/if}
+  {#if problem}<p class="problem" role="alert" tabindex="-1" bind:this={problemLine}>{problem}</p>{/if}
+  <p class="said" role="status" tabindex="-1" bind:this={saidLine}>{said}</p>
   {#if failures.length}
     <!-- #434: arrived-but-unreadable mail, in the server's own bounded words. -->
     <div class="failures">
