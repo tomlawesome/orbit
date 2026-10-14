@@ -9,7 +9,7 @@ import { APP, openRow, settle } from "./pocket-states.js";
  * and opens its row, and the item's own address opens it on arrival. An
  * item the manifest does not list is drawn as one more row when it is
  * asked for (#1319 stage 3b: the belt it used to go to retired, and
- * `/item/<id>` answers with this address). A planet on the dial opens its
+ * `/item/<id>` with it; the drawer opens from `/home?item=<id>`). A planet on the dial opens its
  * row and a second tap on the lit body brings the row back on screen
  * (owner's answer 6a); the dial arrives on every forward arrival, never on
  * Back (round 2, g). A suggestion's row is reviewed in place: its two

@@ -318,7 +318,7 @@
    * address is `/home?item=<id>`, and opening it directly loads home with
    * that row scrolled to and expanded, which is the ruling's own test of the
    * address. (#1319, §34: the two addresses became one. The drawer holds
-   * every command the belt had, and the belt's `/item/<id>` redirects here.)
+   * every command the belt had; the belt's `/item/<id>` was removed.)
    *
    * THE BACK BUTTON. Opening a row PUSHES, so Back closes it and lands you
    * exactly where you were reading. Swapping straight from one open row to

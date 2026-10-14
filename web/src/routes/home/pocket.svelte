@@ -467,8 +467,8 @@
     await openRow(id, { focus: true });
   }
 
-  /* Arriving on an item's address (`copy link`, the desk's own, and the
-     retired belt's `/item/<id>`, which the server answers with it): its
+  /* Arriving on an item's address, `/home?item=<id>` (`copy link`, the
+     desk's own; the retired belt's `/item/<id>` no longer exists): its
      row opens, once, as soon as the manifest has drawn it -- drawn for it if
      the manifest does not list it (openRow). A suggestion's address opens
      its row in the signals, where it is reviewed. An item in another of
