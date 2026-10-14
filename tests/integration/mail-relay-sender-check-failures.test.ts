@@ -17,7 +17,7 @@ import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { provisionIdentity } from "@/lib/auth/provision";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
-import { listSenderAddresses, seedSenderAddress, setSenderSendDeadlineForTests } from "@/server/mail-in/sender-addresses";
+import { listSenderAddresses, requestSenderCheck, seedSenderAddress, setSenderSendDeadlineForTests } from "@/server/mail-in/sender-addresses";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, senderAddressColumns, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 
@@ -27,13 +27,13 @@ import { callRouteForSession, loadRoute } from "./support/request-event";
  * written from the behaviour the review asked for:
  *
  *   1. The whole send has a deadline of about 15 seconds. A mailer that never
- *      answers ends the request with 503 and a stable code, counts nothing,
- *      leaves no pending link, and does not hold the member's relay read up
- *      beyond that deadline. (Real timers, with the deadline shortened by
+ *      answers ends the request with 503 and a stable code, and does not hold
+ *      the member's relay read up. The attempt still counts (release audit,
+ *      #1316: the limit counts attempts, not deliveries). (Real timers, with the deadline shortened by
  *      `setSenderSendDeadlineForTests`; faking timers would also stop the
  *      database driver's own.)
  *   2. A mailer that throws is a 503 with a stable code, not 500
- *      `internal_error`; nothing is counted and no link is left pending.
+ *      `internal_error`; the attempt still counts.
  *   3. A stored address that cannot be read while the key IS available is a
  *      distinct refusal (409 `sender_address_unreadable`), not the "key
  *      unavailable" 503 `metadata_locked`; the relay read reports the state.
@@ -167,19 +167,15 @@ function at(offsetSeconds: number) {
   vi.setSystemTime(T0 + offsetSeconds * SECOND);
 }
 
-/** Nothing counted and nothing pending for this member. */
-async function expectNothingLeft() {
+/** The failed attempt counted once for this member, and nothing was sent. */
+async function expectCountedNotSent() {
   const rows = await rowsOf(fixture.users.member.id);
-  for (const row of rows) {
-    expect(row.checkSentAt).toEqual([]);
-    expect(row.verificationTokenDigest).toBeNull();
-  }
-  for (const view of await listSenderAddresses(fixture.users.member.id)) expect(view.verificationPending).toBe(false);
+  expect(rows.flatMap((row) => row.checkSentAt)).toHaveLength(1);
   expect(mail.sent).toEqual([]);
 }
 
 describe("finding 1: a mailer that never answers", () => {
-  it("ends the request at the send deadline (shortened to 300 ms here) with a stable 503, counts nothing, and does not hold up the relay read", async () => {
+  it("ends the request at the send deadline (shortened to 300 ms here) with a stable 503, still counts, and does not hold up the relay read", async () => {
     await turnMailInOn();
     mail.mode = "stall";
     setSenderSendDeadlineForTests(300);
@@ -202,18 +198,20 @@ describe("finding 1: a mailer that never answers", () => {
     expect(code).not.toBe("internal_error");
     expect(code).not.toBe("metadata_locked");
     expect(message).toBe(WORDS.mailerTimeout);
-    await expectNothingLeft();
+    await expectCountedNotSent();
 
-    /* The stalled attempt was not counted: the next press goes out at once. */
+    /* The stalled attempt counted: an immediate next press is too soon. */
     for (const release of mail.stalled.splice(0)) release();
     mail.mode = "ok";
-    expect((await send()).status).toBe(202);
-    expect(mail.sent).toHaveLength(1);
+    const next = await send();
+    expect(next.status).toBe(429);
+    expect(await codeOf(next)).toBe("sender_check_too_soon");
+    expect(mail.sent).toEqual([]);
   }, 15 * SECOND);
 });
 
 describe("finding 2: the mailer refuses the message", () => {
-  it("answers 503 with a stable code, not 500 internal_error, and counts nothing", async () => {
+  it("answers 503 with a stable code, not 500 internal_error, and still counts", async () => {
     await turnMailInOn();
     mail.mode = "throw";
 
@@ -224,11 +222,11 @@ describe("finding 2: the mailer refuses the message", () => {
     expect(code).toMatch(CODE_SHAPE);
     expect(code).not.toBe("internal_error");
     expect(message).toBe(WORDS.mailerRefused);
-    await expectNothingLeft();
+    await expectCountedNotSent();
 
-    /* Not counted: an immediate second press is not "too soon". */
+    /* Counted: an immediate second press is "too soon". */
     mail.mode = "ok";
-    expect((await send()).status).toBe(202);
+    expect((await send()).status).toBe(429);
   });
 });
 
@@ -422,4 +420,82 @@ describe("ADR-0034 decision 4: the engine words every refusal of the check", () 
     expect(response.status).toBe(429);
     expect(await envelopeOf(response)).toEqual({ code: "sender_check_too_soon", message: WORDS.tooSoon });
   });
+});
+
+/*
+ * Release-audit M-R8 (#1316): an attempt counts the moment it is made, not
+ * only when the mailer accepts. A failing or hanging mailer must neither let
+ * the next press send again nor hold the member's lock (and a pool connection)
+ * across the mailer call, which queued every other press and the relay read.
+ */
+describe("M-R8: a send attempt counts when it starts, and the mailer call holds no lock", () => {
+  type Outcome = { ok: true } | { ok: false; code: string };
+  const outcomeOf = (call: Promise<unknown>): Promise<Outcome> =>
+    call.then(
+      () => ({ ok: true as const }),
+      (error: { code?: string }) => ({ ok: false as const, code: String(error?.code) }),
+    );
+  const within = <T,>(promise: Promise<T>, milliseconds: number) =>
+    Promise.race([promise, new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), milliseconds))]);
+  async function untilMailerHasTheMessage() {
+    const deadline = Date.now() + 5 * SECOND;
+    while (mail.stalled.length < 1) {
+      if (Date.now() > deadline) throw new Error("the first press never reached the mailer");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  /** Lets every stalled and later press finish, then waits for the given calls. */
+  async function releaseAndSettle(...calls: Array<Promise<unknown>>) {
+    mail.mode = "ok";
+    for (const release of mail.stalled.splice(0)) release();
+    await Promise.allSettled(calls);
+  }
+
+  it("a mailer that throws still counts: the press refuses with the mailer code, and a second one second later is sender_check_too_soon", async () => {
+    mail.mode = "throw";
+
+    at(0);
+    const first = await outcomeOf(requestSenderCheck(fixture.users.member.id));
+    expect(first.ok).toBe(false);
+    expect((first as { code: string }).code).toMatch(/^sender_mailer_/);
+
+    at(1);
+    const second = await outcomeOf(requestSenderCheck(fixture.users.member.id));
+
+    expect(second).toEqual({ ok: false, code: "sender_check_too_soon" });
+    expect(mail.sent).toEqual([]);
+  });
+
+  it("a second press while the first is stuck in the mailer is refused sender_check_too_soon within 2 s, not queued behind it", async () => {
+    mail.mode = "stall";
+    const first = outcomeOf(requestSenderCheck(fixture.users.member.id));
+    let second: Promise<Outcome> | undefined;
+    try {
+      await untilMailerHasTheMessage();
+
+      second = outcomeOf(requestSenderCheck(fixture.users.member.id));
+      const result = await within(second, 2 * SECOND);
+
+      expect(result).toEqual({ ok: false, code: "sender_check_too_soon" });
+    } finally {
+      await releaseAndSettle(first, ...(second ? [second] : []));
+    }
+  }, 30 * SECOND);
+
+  it("the relay settings read for that member resolves within 2 s while the mailer is stuck", async () => {
+    await turnMailInOn();
+    mail.mode = "stall";
+    const first = outcomeOf(requestSenderCheck(fixture.users.member.id));
+    let reading: Promise<unknown> | undefined;
+    try {
+      await untilMailerHasTheMessage();
+
+      reading = readRelaySettings(memberActor());
+      const result = await within(reading.then(() => "read" as const), 2 * SECOND);
+
+      expect(result).toBe("read");
+    } finally {
+      await releaseAndSettle(first, ...(reading ? [reading] : []));
+    }
+  }, 30 * SECOND);
 });

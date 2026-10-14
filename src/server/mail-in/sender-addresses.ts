@@ -74,8 +74,8 @@ export const SENDER_CHECK_DAILY_LIMIT = 5;
 
 /**
  * The whole send, mailer included, gives up after this long (review of #1403
- * D2). A mailer that never answers must not hold the member's lock, and with
- * it their relay read, indefinitely. Tests shorten it with
+ * D2), so a mailer that never answers cannot hold the request open
+ * indefinitely. Tests shorten it with
  * `setSenderSendDeadlineForTests`; nothing else changes it.
  */
 export const SENDER_SEND_DEADLINE_MS = 15_000;
@@ -157,14 +157,20 @@ async function existingClaim(
 
 /**
  * Runs `work` in one transaction holding a per-member advisory lock, so a
- * member's seed, list and send queue behind each other (two presses, or a
- * press and a settings read, cannot interleave). Advisory rather than a lock
- * on the `users` row: that would hold up sign-in for as long as the mailer
- * takes to answer.
+ * member's seed, list and send-reservation cannot interleave (two presses, or
+ * a press and a settings read). Advisory rather than a lock on the `users`
+ * row, which would hold up sign-in.
+ *
+ * The lock is tried, never waited for: a busy lock means another check is
+ * already in flight, which is "too soon", and nothing queues holding a pool
+ * connection.
  */
 export async function withSenderLock<T>(userId: string, work: (executor: MetadataExecutor) => Promise<T>): Promise<T> {
   return getDb().transaction(async (transaction) => {
-    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:mail-relay-sender:${userId}`}, 0))`);
+    const rows = await transaction.execute(sql`select pg_try_advisory_xact_lock(hashtextextended(${`orbit:mail-relay-sender:${userId}`}, 0)) as acquired`);
+    if ((rows as unknown as { acquired?: unknown }[])[0]?.acquired !== true) {
+      throw new RateLimitedError("sender_check_too_soon", SENDER_CHECK_WORDS.tooSoon, 5);
+    }
     return work(transaction);
   });
 }
@@ -397,13 +403,15 @@ export async function sendSenderVerification(
   id: string,
   dependencies: SenderAddressDependencies = {},
 ): Promise<{ address: string; expiresAt: Date }> {
-  return withSenderLock(userId, (executor) => sendWithin(executor, userId, id, dependencies));
+  return deliver(await withSenderLock(userId, (executor) => reserveSend(executor, userId, id, dependencies)));
 }
 
 /**
- * The whole "check my address" request for one member: seed, read, send, in
- * ONE transaction under the member's lock. A press that fails anywhere —
- * including the mailer — leaves nothing behind.
+ * The whole "check my address" request for one member: seed, read and
+ * reserve the send in ONE short transaction under the member's lock, then
+ * hand the message to the mailer with nothing held. A press refused before
+ * the reservation leaves nothing behind; once reserved, the attempt counts
+ * whatever the mailer does.
  */
 export async function requestSenderCheck(
   userId: string,
@@ -416,16 +424,30 @@ export async function requestSenderCheck(
       throw new AppError("sender_address_unavailable", SENDER_CHECK_WORDS.noAddress, 409);
     }
     if (row.verified) throw new AppError("sender_already_verified", SENDER_CHECK_WORDS.alreadyChecked, 409);
-    return sendWithin(executor, userId, row.id, dependencies);
-  });
+    return reserveSend(executor, userId, row.id, dependencies);
+  }).then(deliver);
 }
 
-async function sendWithin(
+type MailMessage = { from: string; to: string; subject: string; text: string };
+interface ReservedSend {
+  address: string;
+  expiresAt: Date;
+  send: (message: MailMessage) => Promise<void>;
+  message: MailMessage;
+}
+
+/** The slow part, run after the reservation has committed. */
+async function deliver({ address, expiresAt, send, message }: ReservedSend): Promise<{ address: string; expiresAt: Date }> {
+  await sendWithDeadline(send, message);
+  return { address, expiresAt };
+}
+
+async function reserveSend(
   executor: MetadataExecutor,
   userId: string,
   id: string,
   dependencies: SenderAddressDependencies,
-): Promise<{ address: string; expiresAt: Date }> {
+): Promise<ReservedSend> {
   const now = dependencies.now?.() ?? new Date();
   const [row] = await executor.select().from(mailInSenderAddresses)
     .where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId))).limit(1);
@@ -459,13 +481,11 @@ async function sendWithin(
   const expiresAt = new Date(now.getTime() + SENDER_VERIFICATION_TTL_MS);
   const send = dependencies.sendMail ?? defaultSender(smtp);
 
-  /* Check, write the token, send and record, all in the caller's transaction
-     under the member's lock: two presses by the same member queue on the lock,
-     and the second sees the first's send (two-step "lock, then
-     check-and-record", as the sign-in lockout does for its attempt count). The
-     token and the send are recorded only once the mailer has taken the
-     message; if it throws, the transaction rolls back, so neither the count
-     nor the outstanding link changes. */
+  /* Check, then record the attempt and its token, in the caller's transaction
+     under the member's lock (two-step "lock, then check-and-record", as the
+     sign-in lockout does for its attempt count). The mailer runs only after
+     this commits, so the limit counts attempts: a mailer that fails or never
+     answers still used one. */
   const [locked] = await executor.select({
     verifiedAt: mailInSenderAddresses.verifiedAt,
     checkSentAt: mailInSenderAddresses.checkSentAt,
@@ -483,9 +503,14 @@ async function sendWithin(
     throw new RateLimitedError("sender_check_too_soon", SENDER_CHECK_WORDS.tooSoon, wait);
   }
 
+  const kept = locked.checkSentAt
+    .filter((at) => at.getTime() > sentAt.getTime() - SENDER_CHECK_WINDOW_MS)
+    .sort((a, b) => a.getTime() - b.getTime())
+    .slice(-(SENDER_CHECK_DAILY_LIMIT - 1));
   const [updated] = await executor.update(mailInSenderAddresses).set({
     verificationTokenDigest: digestToken(token),
     verificationExpiresAt: expiresAt,
+    checkSentAt: [...kept, sentAt],
     updatedAt: now,
   }).where(and(
     eq(mailInSenderAddresses.id, id),
@@ -494,41 +519,35 @@ async function sendWithin(
   )).returning({ id: mailInSenderAddresses.id });
   if (!updated) throw new AppError("sender_already_verified", SENDER_CHECK_WORDS.alreadyChecked, 409);
 
-  await sendWithDeadline(send, {
-    from: smtp.smtpFrom,
-    to: address,
-    subject: "Check your Orbit sending address",
-    text: [
-      "Orbit is checking that you send mail from this address.",
-      "",
-      `Open this link while signed in to Orbit, within 24 hours: ${link}`,
-      "",
-      "Until you do, mail you forward to Orbit from this address is not matched to you.",
-      "If you did not ask for this, ignore it — nothing changes.",
-    ].join("\n"),
-  });
-
-  const kept = locked.checkSentAt
-    .filter((at) => at.getTime() > sentAt.getTime() - SENDER_CHECK_WINDOW_MS)
-    .sort((a, b) => a.getTime() - b.getTime())
-    .slice(-(SENDER_CHECK_DAILY_LIMIT - 1));
-  await executor.update(mailInSenderAddresses).set({ checkSentAt: [...kept, sentAt] })
-    .where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId)));
-  return { address, expiresAt };
+  return {
+    address,
+    expiresAt,
+    send,
+    message: {
+      from: smtp.smtpFrom,
+      to: address,
+      subject: "Check your Orbit sending address",
+      text: [
+        "Orbit is checking that you send mail from this address.",
+        "",
+        `Open this link while signed in to Orbit, within 24 hours: ${link}`,
+        "",
+        "Until you do, mail you forward to Orbit from this address is not matched to you.",
+        "If you did not ask for this, ignore it — nothing changes.",
+      ].join("\n"),
+    },
+  };
 }
 
 /**
  * Hands the message to the mailer, but only for so long. A mailer that never
  * answers ends in 503 `sender_mailer_timeout`; one that throws ends in 503
  * `sender_mailer_refused` rather than an unexplained 500. Either way the
- * caller's transaction rolls back, so nothing is counted and no link is left
- * pending. (A mailer that took the message just as the deadline fell may still
- * deliver it: the member gets a link that does not work and presses again.)
+ * attempt was already recorded, so it counts and its link stays outstanding
+ * (a mailer that took the message just as the deadline fell may still deliver
+ * a working link).
  */
-async function sendWithDeadline(
-  send: (message: { from: string; to: string; subject: string; text: string }) => Promise<void>,
-  message: { from: string; to: string; subject: string; text: string },
-): Promise<void> {
+async function sendWithDeadline(send: (message: MailMessage) => Promise<void>, message: MailMessage): Promise<void> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(

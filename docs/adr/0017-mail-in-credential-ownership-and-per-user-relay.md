@@ -586,13 +586,15 @@ the database, and refused with 429 `sender_check_too_soon` and `Retry-After`
 
 **The send has an overall deadline** of 15 seconds, mailer included. A mailer
 that does not answer ends the request with 503 `sender_mailer_timeout`; one that
-throws ends with 503 `sender_mailer_refused`. Either way nothing is counted and
-no link is left pending. The send times belong to the member, not the address:
-they carry over when the registered address changes, even to one another member
-already claims. Accepted risk (review finding): if the mailer has accepted the
-message but recording the send then fails, the transaction rolls back and the
-send goes uncounted, so a mail may go out that the limit does not see. Each
-refusal is worded once, in the engine (ADR-0034 decision 4).
+throws ends with 503 `sender_mailer_refused`. The attempt and its link are
+recorded and committed before the mailer is called, and no lock or transaction
+is held across the call, so either way the attempt still counts and its link
+stays outstanding. The limit counts attempts, not deliveries (release audit,
+#1316). A press made while another check for the same member is in flight is
+refused 429 `sender_check_too_soon` rather than queued. The send times belong
+to the member, not the address: they carry over when the registered address
+changes, even to one another member already claims. Each refusal is worded
+once, in the engine (ADR-0034 decision 4).
 
 **The seeded row follows the registered address.** If the account email is
 edited, or the provider's claim changes, the row follows it and verification

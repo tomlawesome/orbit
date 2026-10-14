@@ -17,10 +17,11 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { imapIngestionMessages } from "@/db/schema";
+import { RateLimitedError } from "@/lib/app-error";
 import { getImapIngestionConfig } from "./mailbox-config";
 import type { ImapIngestionConfig } from "./core/config";
 import { ensureRelayAliases, relayAddressFor, rotateRelay, setRelayIngestPaused, type RelayRotationMode } from "./relays";
-import { hasVerifiedSenderAddress, listSenderAddresses, seedSenderAddress, withSenderLock } from "./sender-addresses";
+import { hasVerifiedSenderAddress, listSenderAddresses, seedSenderAddress } from "./sender-addresses";
 
 /** Mail-in is configured, switched on, and this account has a mailbox. */
 export const RELAY_LISTENING = "connected · listening";
@@ -119,14 +120,17 @@ export async function readRelaySettings(
   }
   /* Seeding here, on the member's own read, is what puts the account address
      in front of them without anybody typing it — still unverified, because
-     Orbit knowing an address is not the member proving they send from it. */
-  const { usable, senderRow } = await withSenderLock(user.id, async (locked) => {
-    await seedSenderAddress(user.id, {}, locked);
-    return {
-      usable: await hasVerifiedSenderAddress(user.id, locked),
-      senderRow: (await listSenderAddresses(user.id, {}, locked))[0],
-    };
-  });
+     Orbit knowing an address is not the member proving they send from it.
+     Seeding takes the member's sender lock; when a check holds it, this read
+     skips seeding rather than waiting (the next read seeds), and reads the
+     rows without the lock. */
+  try {
+    await seedSenderAddress(user.id);
+  } catch (error) {
+    if (!(error instanceof RateLimitedError && error.code === "sender_check_too_soon")) throw error;
+  }
+  const usable = await hasVerifiedSenderAddress(user.id);
+  const senderRow = (await listSenderAddresses(user.id))[0];
   const sender: RelaySender | null = senderRow?.address
     ? {
       address: senderRow.address,
