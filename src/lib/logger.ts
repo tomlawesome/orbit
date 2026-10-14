@@ -96,12 +96,10 @@ export const operationalReasons = [
   "not_configured",
   "disabled",
   "invalid_event",
-  /* Startup refusals that a restart cannot fix (#437). Named separately from
+  /* A startup refusal that a restart cannot fix (#437). Named separately from
      the generic migration_integrity so an operator - and repair.sh - can tell
-     "this database belongs to a different build" from "this database is older
-     than we support", which have different remedies. */
+     "this database belongs to a different build" from a general failure. */
   "database_mismatch",
-  "database_below_floor",
   /* The claim (ADR-0022, ADR-0023 §8). `bootstrap_unclaimed` is the state an
      instance boots into before anyone has claimed it; `bootstrap_rejected` is
      a claim attempt that did not match. Neither record ever carries the code
@@ -173,10 +171,9 @@ export const operationalActions = [
   "restore_backup",
   "run_recovery",
   "contact_operator",
-  /* Neither of these is "restart": both sides of the disagreement survive a
-     restart, so restarting loops forever (#437). */
+  /* Not "restart": both sides of the disagreement survive a restart, so
+     restarting loops forever (#437). */
   "attach_matching_database",
-  "upgrade_from_supported_version",
 ] as const;
 export type OperationalAction = typeof operationalActions[number];
 

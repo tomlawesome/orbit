@@ -149,8 +149,8 @@ Worker invariants:
    failure restores the checkpoint; hard interruption requires explicit
    recovery from the preserved journal and checkpoint.
 
-Never generate or overwrite a KEK implicitly. The supported upgrade floor,
-rollback boundary and recoverable restore protocol are binding in
+Never generate or overwrite a KEK implicitly. The rollback boundary and
+recoverable restore protocol are binding in
 [ADR-0004](adr/0004-supported-upgrades-and-recoverable-restore.md).
 If checkpoint restoration fails, keep Orbit stopped and preserve the recovery
 evidence rather than starting with unproven mixed state.

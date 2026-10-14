@@ -20,7 +20,7 @@ import { formatRecord, operationalReasons, resetLoggerForTests } from "../src/li
 const repairShPath = new URL("../scripts/repair.sh", import.meta.url);
 const repairSh = readFileSync(repairShPath, "utf8");
 
-const requiredSentinels = ["database_mismatch", "database_below_floor", "migration_failed"];
+const requiredSentinels = ["database_mismatch", "migration_failed"];
 
 /*
  * repair.sh also uses `reason=` for an unrelated mini-vocabulary (the

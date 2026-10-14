@@ -61,7 +61,8 @@ remained supported.
 - ADR-0004's upgrade floor — the pre-v1 engineering preview at commit
   `8a8e37e2bbef770de9a203e86a674f70834e2a18` — is superseded for *install*
   and operator tooling by decision 1. ADR-0004's migration, restore and
-  recovery contracts are otherwise unchanged.
+  recovery contracts are otherwise unchanged. (Note, 2026-10-14: the floor
+  itself was later removed from ADR-0004 and the code in #1403.)
 - Historic tags remain immutable audit evidence (ADR-0003). Nothing is
   relabelled or republished; those artifacts simply are not supported install
   targets.

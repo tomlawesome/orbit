@@ -2153,21 +2153,6 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).not.toContain("application-unhealthy");
   });
 
-  it("distinguishes a database below the supported floor (#437)", () => {
-    const targetDir = makeFixture();
-
-    const result = runRepair(targetDir, ["--check"], {
-      app: {
-        present: true,
-        health: "unhealthy",
-        log: "ERROR orbit migrations startup.migration state=exhausted reason=database_below_floor action=upgrade_from_supported_version impact=migration_blocked",
-      },
-    });
-
-    expect(result.status).toBe(4);
-    expect(result.stdout).toContain("finding class=database-below-floor target=application severity=fail");
-  });
-
   it("plans neither of those as a restart (#437)", () => {
     const targetDir = makeFixture();
 
@@ -2944,19 +2929,6 @@ describe("scripts/repair.sh --plan", () => {
           present: true,
           health: "unhealthy",
           log: "ERROR orbit migrations startup.migration state=exhausted reason=database_mismatch action=attach_matching_database impact=migration_blocked",
-        },
-      },
-      withConfigure: true,
-    },
-    {
-      name: "database-below-floor",
-      resolves: "database-below-floor",
-      setup: () => {},
-      dockerOptions: {
-        app: {
-          present: true,
-          health: "unhealthy",
-          log: "ERROR orbit migrations startup.migration state=exhausted reason=database_below_floor action=upgrade_from_supported_version impact=migration_blocked",
         },
       },
       withConfigure: true,

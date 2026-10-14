@@ -951,14 +951,13 @@ configuration-incomplete                managed-file-permissions
 configuration-invalid                   managed-file-symlink
 configuration-migration-interrupted     migration-failed
 container-foreign-owner                 not-orbit-directory
-database-below-floor                    secret-missing
-database-credential-mismatch            secret-permissions
-database-credential-unverifiable        secrets-directory-invalid
-database-schema-mismatch                staging-evidence-present
-database-unreachable                    stale-container
-deployment-version-unsupported          unrelated-resource-present
-docker-unavailable                      volume-retained-without-credentials
-document-volume-retained-without-key
+database-credential-mismatch            secret-missing
+database-credential-unverifiable        secret-permissions
+database-schema-mismatch                secrets-directory-invalid
+database-unreachable                    staging-evidence-present
+deployment-version-unsupported          stale-container
+docker-unavailable                      unrelated-resource-present
+document-volume-retained-without-key    volume-retained-without-credentials
 ```
 
 ### action, mutation and backup
