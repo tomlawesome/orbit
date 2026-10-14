@@ -655,17 +655,33 @@ export async function verifySenderAddress(
  *
  * The match is on the BLIND INDEX (#969), which is what carries an exact
  * address lookup across the encryption. A locked instance cannot produce an
- * index at all; rather than throw, it attributes to nobody (fail closed),
- * because mail-in must keep running while the key is away and an address it
- * cannot read simply belongs to nobody.
+ * index at all; rather than throw, it attributes to nobody (fail closed).
+ * Mail-in reads `verifiedSenderMatch` instead, which tells "nobody" apart from
+ * "cannot tell".
  */
 export async function userForVerifiedSender(address: string): Promise<string | undefined> {
+  const match = await verifiedSenderMatch(address);
+  return match.state === "matched" ? match.userId : undefined;
+}
+
+/**
+ * Who a sending address belongs to: a member, nobody, or "Orbit cannot tell"
+ * — a locked key, or a candidate whose registered address will not decrypt.
+ * Mail-in must not treat the last as nobody: that answers and deletes a
+ * member's mail for a fault of Orbit's own.
+ */
+export type VerifiedSenderMatch =
+  | { state: "matched"; userId: string }
+  | { state: "no_match" }
+  | { state: "unreadable" };
+
+export async function verifiedSenderMatch(address: string): Promise<VerifiedSenderMatch> {
   const normalized = normalizeSenderAddress(address);
-  if (!normalized) return undefined;
+  if (!normalized) return { state: "no_match" };
   const cipher = await openInstanceMetadataReader();
-  if (cipher.locked) return undefined;
+  if (cipher.locked) return { state: "unreadable" };
   const addressIndex = cipher.senderAddressIndex(normalized);
-  if (addressIndex === null) return undefined;
+  if (addressIndex === null) return { state: "no_match" };
   const rows = await getDb().select({
     userId: mailInSenderAddresses.userId,
     disabledAt: users.disabledAt,
@@ -680,9 +696,12 @@ export async function userForVerifiedSender(address: string): Promise<string | u
   /* The row counts only while it is still the member's registered address: a
      member whose account address has since changed no longer attributes the
      old one, with no settings visit needed to say so. */
-  const row = rows.find((candidate) => !candidate.disabledAt
-    && normalizeSenderAddress(
-      cipher.text("users.email", candidate.userId, { encrypted: candidate.emailEnc }).value ?? undefined,
-    ) === normalized);
-  return row?.userId;
+  let unreadable = false;
+  for (const candidate of rows) {
+    if (candidate.disabledAt) continue;
+    const registered = cipher.text("users.email", candidate.userId, { encrypted: candidate.emailEnc });
+    if (registered.state) unreadable = true;
+    if (normalizeSenderAddress(registered.value ?? undefined) === normalized) return { state: "matched", userId: candidate.userId };
+  }
+  return unreadable ? { state: "unreadable" } : { state: "no_match" };
 }

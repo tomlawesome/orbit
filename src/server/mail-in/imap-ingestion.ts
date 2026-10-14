@@ -15,7 +15,7 @@ import { extractTextWithTika } from "@/server/documents/tika";
 import type { SupportedDocumentMediaType } from "@/server/documents/validation";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { reviewDraftMetadataFromProposal } from "@/server/reviewed-intake";
-import { requireReceiptMetadataWriter } from "@/server/metadata/fields";
+import { openInstanceMetadataReader, requireReceiptMetadataWriter } from "@/server/metadata/fields";
 import { classifyImapBodyStructure, IMAP_ATTACHMENT_LIMITS, type ImapAttachmentCandidate } from "./core/imap-attachment-validation";
 import {
   deriveImapRecipientAlias,
@@ -39,7 +39,7 @@ import {
   senderIsAuthenticated,
   type ParsedHeader,
 } from "./core/sender-authentication";
-import { userForVerifiedSender } from "./sender-addresses";
+import { verifiedSenderMatch } from "./sender-addresses";
 import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
 import { imapProviderConnectionOptions } from "./core/provider-options";
 import {
@@ -304,6 +304,8 @@ type SenderResolution = {
   headers?: ParsedHeader[];
   address?: string;
   userId?: string;
+  /** Orbit could not read the stored address a candidate member would match on. */
+  unreadable?: boolean;
   authenticated: boolean;
 };
 
@@ -322,8 +324,9 @@ async function senderResolution(headers: Buffer | undefined, config: ImapIngesti
   const address = senderAddressFromHeaders(parsed);
   if (!address) return { headers: parsed, authenticated: false };
   const authenticated = senderIsAuthenticated(parsed, senderDomainOf(address), config.trustedAuthservId ?? "");
-  const userId = await userForVerifiedSender(address);
-  return { headers: parsed, address, userId, authenticated };
+  const match = await verifiedSenderMatch(address);
+  if (match.state === "unreadable") return { headers: parsed, address, unreadable: true, authenticated };
+  return { headers: parsed, address, userId: match.state === "matched" ? match.userId : undefined, authenticated };
 }
 
 type ImapReceiptValues = {
@@ -871,6 +874,9 @@ async function processImapAttachments(
   }
 }
 
+/** So a key outage is logged once, not on every poll. */
+let ingestionKeyLockedLogged = false;
+
 /**
  * Polls the dedicated mailbox and records only an idempotent receipt. It does
  * not parse, retain, attach, create, or merge household data; later review
@@ -881,6 +887,14 @@ export async function runImapIngestionCycle(
   replyDependencies: UnattributedReplyDependencies = {},
 ): Promise<void> {
   if (!config.enabled) return;
+  /* Without the key no sender can be matched, and every message would read as
+     unattributed and be deleted. Leave the mailbox alone until it is back. */
+  if ((await openInstanceMetadataReader()).locked) {
+    if (!ingestionKeyLockedLogged) log.warn({ event: "imap.ingestion", state: "blocked", reason: "key_unavailable", action: "check_configuration", impact: "mail_receipt_delayed" });
+    ingestionKeyLockedLogged = true;
+    return;
+  }
+  ingestionKeyLockedLogged = false;
   await reconcileImapStagingObjects();
   await reconcileImapRecipientAliases(config);
   const client = createImapClient(config);
@@ -889,6 +903,7 @@ export async function runImapIngestionCycle(
      there is something to delete keeps the destructive action (ADR-0017
      decision 3, mail-in's first) to the messages that earned it. */
   const unattributedUids: number[] = [];
+  let unreadableLogged = false;
   try {
     await client.connect();
     const lock = await client.getMailboxLock(config.mailbox, { readOnly: true });
@@ -970,6 +985,14 @@ export async function runImapIngestionCycle(
         const oversized = !source || (message.size ?? 0) > IMAP_ATTACHMENT_LIMITS.rawMessageBytes || source.length > IMAP_ATTACHMENT_LIMITS.rawMessageBytes;
         const recipient = await userForRecipientAlias(message.headers, config);
         const sender = await senderResolution(message.headers, config);
+        /* A member's stored address that will not decrypt says nothing about
+           the sender: record nothing, answer nothing and delete nothing, so
+           the message stays on the server. */
+        if (sender.unreadable) {
+          if (!unreadableLogged) log.warn({ event: "imap.ingestion", state: "degraded", reason: "metadata_integrity_failed", action: "inspect_admin_diagnostics", impact: "mail_receipt_delayed" });
+          unreadableLogged = true;
+          return;
+        }
         /* THE SENDER ATTRIBUTES, THE ALIAS CORROBORATES (ADR-0017 decision 3).
            Nothing is attributed on an alias alone any more: the alias is a
            capability whoever holds it can post with, so it can confirm an

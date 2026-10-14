@@ -10,8 +10,11 @@ import {
   mailInSecrets,
   mailInSenderAddresses,
   mailInUnattributedReplies,
+  users,
 } from "@/db/schema";
 import { listSenderAddresses, seedSenderAddress } from "@/server/mail-in/sender-addresses";
+import { resetDocumentConfigForTests } from "@/server/documents/config";
+import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import { getImapIngestionConfig } from "@/server/mail-in/mailbox-config";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import {
@@ -292,5 +295,104 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     /* No reply either: the sender is not authenticated, so answering would
        email whoever the forger named. */
     expect(sent).toEqual([]);
+  }, 30_000);
+});
+
+/**
+ * A mailbox holding several messages at once, each under its own UID, with a
+ * provider that records what it deletes.
+ */
+function mailboxHoldingMessages(uidValidity: bigint, messages: Map<number, Buffer>) {
+  setImapClientFactoryForTests(() => ({
+    mailbox: { uidValidity, uidNext: 1_000_000 },
+    async connect() {},
+    async logout() {},
+    async getMailboxLock() { return { release() {} }; },
+    async search() { return [...messages.keys()]; },
+    async messageDelete(range: string) { deleted.push(range); return true; },
+    async fetchOne(uid: string) {
+      const headers = messages.get(Number(uid));
+      return headers ? { uid: Number(uid), headers, source: Buffer.from(`attribution-message-${uid}`) } : false;
+    },
+  } as unknown as import("imapflow").ImapFlow));
+}
+
+/** Takes the metadata key away, the way the key-outage suite does. */
+function lockMetadataKey() {
+  const original = process.env.DOCUMENT_KEK;
+  delete process.env.DOCUMENT_KEK;
+  resetDocumentConfigForTests();
+  return () => {
+    if (original !== undefined) process.env.DOCUMENT_KEK = original;
+    resetDocumentConfigForTests();
+  };
+}
+
+async function receiptsFor(uidValidity: string) {
+  return getDb().select({
+    uid: imapIngestionMessages.mailboxUid,
+    userId: imapIngestionMessages.userId,
+    status: imapIngestionMessages.status,
+  }).from(imapIngestionMessages).where(eq(imapIngestionMessages.mailboxUidValidity, uidValidity));
+}
+
+/*
+ * #1316 (M-S11): a message nobody could be found for is deleted from the
+ * provider's mailbox for good. That is right for a stranger, and wrong when
+ * the reason nobody was found is Orbit's own: a key outage, or one member's
+ * damaged stored address. Those say nothing about the sender, so the message
+ * must stay where the next cycle can try again.
+ */
+describe("a message Orbit cannot attribute through its own fault is kept (#1316)", () => {
+  it("keeps a verified sender's message, unanswered and unrecorded, while the metadata key is locked", async () => {
+    const config = await getImapIngestionConfig();
+    await reconcileImapRecipientAliases(config);
+    const sender = await verifiedSenderFor(fixture.users.member.id);
+
+    const restoreKey = lockMetadataKey();
+    try {
+      expect(metadataCryptoAvailable()).toBe(false);
+      mailboxHoldingMessages(3001n, new Map([[1, attributedHeaders(sender)]]));
+      /* A cycle that gives up and reports the outage is as good as one that
+         skips the message; only deleting or answering it is the fault. */
+      await runImapIngestionCycle(config, replyDependencies).catch(() => undefined);
+    } finally {
+      restoreKey();
+    }
+
+    expect(deleted).toEqual([]);
+    expect(sent).toEqual([]);
+    expect(await receiptsFor("3001")).toEqual([]);
+  }, 30_000);
+
+  it("keeps the message of a member whose stored address is damaged, while a stranger's in the same cycle is still handled as unattributed", async () => {
+    const config = await getImapIngestionConfig();
+    await reconcileImapRecipientAliases(config);
+    const damaged = fixture.users.member.id;
+    const sender = await verifiedSenderFor(damaged);
+
+    /* Flip the last characters of the member's stored envelope so it no longer
+       authenticates. The key is fine; this one member's row is not. */
+    const [stored] = await getDb().select({ emailEnc: users.emailEnc }).from(users).where(eq(users.id, damaged));
+    const envelope = stored!.emailEnc!;
+    const tampered = `${envelope.slice(0, -4)}${envelope.endsWith("AAAA") ? "BBBB" : "AAAA"}`;
+    expect(tampered).not.toBe(envelope);
+    await getDb().update(users).set({ emailEnc: tampered }).where(eq(users.id, damaged));
+
+    mailboxHoldingMessages(3002n, new Map([
+      [1, attributedHeaders(sender)],
+      [2, attributedHeaders("stranger@example.test")],
+    ]));
+    await runImapIngestionCycle(config, replyDependencies).catch(() => undefined);
+
+    /* Message 1 (the damaged member's): not deleted, not answered. Message 2
+       (a genuine stranger): answered once and deleted, as ever. */
+    expect(deleted).toEqual(["2"]);
+    expect(sent.map((message) => message.to)).toEqual(["stranger@example.test"]);
+    const receipts = await receiptsFor("3002");
+    expect(receipts.filter((receipt) => receipt.uid === 1)).toEqual([]);
+    expect(receipts.filter((receipt) => receipt.uid === 2)).toEqual([
+      { uid: 2, userId: null, status: "unattributed" },
+    ]);
   }, 30_000);
 });
