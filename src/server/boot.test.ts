@@ -159,8 +159,8 @@ vi.mock("@/db/migration-outcome", () => ({
 }));
 vi.mock("@/server/notification-worker", () => ({ startNotificationWorker: () => mocks.workerCalls.push("notification") }));
 vi.mock("@/server/document-worker", () => ({ startDocumentWorker: () => mocks.workerCalls.push("document") }));
-vi.mock("@/server/imap-ingestion", () => ({ startImapIngestionWorker: () => mocks.workerCalls.push("imap") }));
-vi.mock("@/server/imap-receipt-worker", () => ({ startImapReceiptWorker: () => mocks.workerCalls.push("receipt") }));
+vi.mock("@/server/mail-in/imap-ingestion", () => ({ startImapIngestionWorker: () => mocks.workerCalls.push("imap") }));
+vi.mock("@/server/mail-in/imap-receipt-worker", () => ({ startImapReceiptWorker: () => mocks.workerCalls.push("receipt") }));
 vi.mock("@/server/portable-archive-repository", () => ({
   rollBackUnfinishedPortableImports: mocks.rollBackUnfinishedPortableImports,
 }));

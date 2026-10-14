@@ -177,7 +177,7 @@
  * @typedef {object} Receipt
  * @property {string} id
  * @property {boolean} canApprove
- * @property {string} classification   "ready" | "waiting" | "cleanup" | ...
+ * @property {string} classification   "ready" | "waiting" | "retry" | ...
  * @property {?string} [householdId]
  * @property {string} [status]
  * @property {number} [draftVersion]
@@ -185,7 +185,6 @@
  * @property {?string} [expiresAt]
  * @property {number} [attachmentCount]
  * @property {boolean} [canDiscard]
- * @property {boolean} [cleanupOnly]
  * @property {string} [message]
  * @property {ItemProposal} [proposal]
  * @property {Record<string, { source: string, confidence: string }>} [fieldEvidence]

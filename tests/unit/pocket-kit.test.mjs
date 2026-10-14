@@ -76,7 +76,6 @@ describe("a failed receipt's reason, in plain words (#1143)", () => {
     expect(reasonWords("not_kept")).toBe("couldn’t be kept");
     expect(reasonWords("wrong_recipient")).toBe("not addressed to you");
     expect(reasonWords("account_disabled")).toBe("account disabled");
-    expect(reasonWords("older_review")).toBe("needs cleanup");
     expect(reasonWords("unknown")).toBe("reason not named");
     expect(reasonWords("some_unlisted_code")).toBe("reason not named");
     expect(reasonWords(null)).toBe("reason not named");

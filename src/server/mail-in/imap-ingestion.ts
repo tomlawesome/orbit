@@ -41,19 +41,19 @@ import {
 } from "./core/sender-authentication";
 import { userForVerifiedSender } from "./sender-addresses";
 import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
+import { imapProviderConnectionOptions } from "./core/provider-options";
 import {
-  imapProviderConnectionOptions,
   imapProviderConfigCommitment,
   imapAttachmentRetryDelayMs,
   type ImapIngestionConfig,
 } from "./core/config";
 import { getImapIngestionConfig, MailInCredentialLockedError } from "./mailbox-config";
 
-// Re-exported so `@/server/imap-ingestion` (now a deprecated stub pointing
-// here) keeps every existing import path working churn-free.
+// Re-exported so importers of this module keep one import path.
 // `getImapIngestionConfig` is database-backed as of ADR-0017 slice 1
 // (orbit#742, src/server/mail-in/mailbox-config.ts) — no environment
-// fallback. The others are still the pure helpers in core/config.ts.
+// fallback. `imapProviderConnectionOptions` is in core/provider-options.ts;
+// the rest are the pure helpers in core/config.ts.
 export { getImapIngestionConfig, imapProviderConnectionOptions, imapProviderConfigCommitment, imapAttachmentRetryDelayMs, MailInCredentialLockedError };
 export type { ImapIngestionConfig };
 

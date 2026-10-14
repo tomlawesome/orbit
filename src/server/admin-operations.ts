@@ -27,7 +27,7 @@ import {
   getImapProviderPreflightState,
   MailInCredentialLockedError,
   verifyImapIngestionProviders,
-} from "@/server/imap-ingestion";
+} from "@/server/mail-in/imap-ingestion";
 import { validUuid } from "@/lib/uuid";
 import { requireInstanceAdministrator } from "@/server/authorization";
 

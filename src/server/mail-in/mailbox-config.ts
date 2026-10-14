@@ -3,10 +3,7 @@
  * configuration (ADR-0017 decision 1 and 6, slice 1, orbit#742).
  *
  * `getImapIngestionConfig` here is what every runtime caller in this module
- * uses; the environment-parsing function of the same old name lives on in
- * `core/config.ts` under `parseImapIngestionConfigFromEnvironment`, kept only
- * so its characterization tests stay exercised — nothing wires it up any
- * more. There is no environment fallback and no one-shot import: the owner's
+ * uses. There is no environment fallback and no one-shot import: the owner's
  * rescoping of orbit#742 removed both, because there are no existing
  * installs to carry forward (mail-in ships its admin-settings surface next,
  * in #743).
