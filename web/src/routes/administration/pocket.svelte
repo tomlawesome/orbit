@@ -44,11 +44,16 @@
   /** @typedef {NonNullable<Awaited<ReturnType<typeof import('$lib/data/workspace.js').readAdminScreen>>>} AdminView */
   /** @typedef {{ email: string, displayName: string, expiresInDays: number }} Draft */
   /** @typedef {(intent: string, open: () => void, report?: (message: string) => void, about?: { resend?: { personId: string, days: number } }) => Promise<void>} Challenge */
-  /** @typedef {AdminView["users"][number]} Person */
+  /** @typedef {NonNullable<AdminView["users"]>[number]} Person */
   /** @typedef {AdminView["households"][number]} System */
 
-  /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, resumedResendPersonId: string | null, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void }} */
-  let { view, fixtures, actorHasPassword, provenIntent, resumedResendPersonId, draft = $bindable(), challenge, reread, spent } = $props();
+  /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, resumedResendPersonId: string | null, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void, screenProblem: string | null, onretry: () => void }} */
+  let { view, fixtures, actorHasPassword, provenIntent, resumedResendPersonId, draft = $bindable(), challenge, reread, spent, screenProblem, onretry } = $props();
+
+  /* A panel whose read failed says so with a "try again" (#1442), as
+     settings does on the phone (#1195): the whole screen is re-read, and a
+     re-read that fails again keeps the screen it has. */
+  const tryAgain = () => reread().catch(() => {});
 
   const people = $derived(view?.users ?? []);
   const systems = $derived(view?.households ?? []);
@@ -89,7 +94,7 @@
     /** @type {{ id: string, word: string }[]} */
     const list = [];
     if (!view) return list;
-    const failing = view.services.filter(([tone]) => tone === "overdue" || tone === "warm");
+    const failing = (view.services ?? []).filter(([tone]) => tone === "overdue" || tone === "warm");
     /* The row's detail leads with the state's own word (#1296): the tell
        repeats it rather than assuming every warm row is retrying. */
     for (const [tone, name, detail] of failing.slice(0, 2)) {
@@ -625,7 +630,7 @@
   /** @type {number | null} */
   let serviceAt = $state(null);
   let serviceOpen = $state(false);
-  const service = $derived(serviceAt === null || !view ? null : view.services[serviceAt] ?? null);
+  const service = $derived(serviceAt === null || !view ? null : view.services?.[serviceAt] ?? null);
   const serviceRaw = $derived(serviceAt === null ? null : view?.health?.services[serviceAt] ?? null);
 
   /* Under fixtures `?localuser=` names a delivery, as on the desk, so both
@@ -647,7 +652,7 @@
     if (provenIntent === "local_user_create") inviteOpen = true;
     if (provenIntent === "system_create") { systemName = ""; systemOpen = true; }
     if (provenIntent === "setup_link_issue" && resumedResendPersonId) {
-      const person = view.users.find((one) => one.id === resumedResendPersonId);
+      const person = view.users?.find((one) => one.id === resumedResendPersonId);
       if (person) {
         resendFor = person;
         resendDays = SETUP_LINK_DAYS.fallback;
@@ -672,7 +677,7 @@
       </svg>
       <div class="ad-named">
         <h1 class="p-title">Administration</h1>
-        <p class="ad-sub">{view ? `${plural(people.length, "person", "people")} · ${plural(systems.length, "system")}` : ""}</p>
+        <p class="ad-sub">{view ? `${view.users ? `${plural(people.length, "person", "people")} · ` : ""}${plural(systems.length, "system")}` : ""}</p>
       </div>
     </header>
 
@@ -693,7 +698,12 @@
       {/each}
     </nav>
 
-    {#if !view}
+    {#if screenProblem && !view}
+      <section class="p-card ad-card" aria-label="Administration">
+        <p class="p-error ad-inset ad-lastline" role="alert">{screenProblem}
+          <button class="p-pill filled" onclick={onretry}>try again</button></p>
+      </section>
+    {:else if !view}
       <section class="p-card ad-card ad-loading" aria-label="Loading administration">
         <div class="p-unlit"></div><div class="p-unlit"></div><div class="p-unlit"></div>
       </section>
@@ -714,10 +724,10 @@
       {/if}
 
       <!-- PEOPLE (§2.12 4). -->
-      <section class="p-card ad-card ad-flush" class:proposed={people.length <= 1} style:--i="3"
+      <section class="p-card ad-card ad-flush" class:proposed={!view.failed.users && people.length <= 1} style:--i="3"
                id="ad-people" tabindex="-1" aria-labelledby="ad-people-head" data-ad="people" data-row-group>
         <div class="ad-cardhead">
-          <h2 class="p-caps" id="ad-people-head">People<span class="p-count">{people.length}</span></h2>
+          <h2 class="p-caps" id="ad-people-head">People{#if view.users}<span class="p-count">{people.length}</span>{/if}</h2>
           <button class="p-pill act-accent" onclick={openInvite}>invite someone</button>
         </div>
         {#if delivery?.sendError}
@@ -744,7 +754,12 @@
             {#snippet mark()}<span class="p-avatar" class:owner={person.isInstanceAdmin} class:ad-off={person.disabledAt}>{initials(person.displayName)}</span>{/snippet}
           </Row>
         {/each}
-        {#if people.length <= 1}<p class="p-empty ad-inset">only you so far</p>{/if}
+        {#if view.failed.users}
+          <p class="p-error ad-inset ad-lastline" role="alert">people not shown — Orbit could not reach the list of people
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+        {:else}
+          {#if people.length <= 1}<p class="p-empty ad-inset">only you so far</p>{/if}
+        {/if}
         {#if peopleProblem}<p class="p-error ad-inset ad-lastline" role="alert">{peopleProblem}</p>{/if}
       </section>
 
@@ -772,6 +787,10 @@
         {:else}
           {#if !recoverable.length}<p class="p-empty ad-inset">no systems yet</p>{/if}
         {/each}
+        {#if view.failed.owners}
+          <p class="p-error ad-inset ad-lastline" role="alert">owners not shown — Orbit could not reach every system’s members
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+        {/if}
         {#each gone as line (line.id)}
           <p class="ad-said ok" role="status">{line.text}</p>
         {/each}
@@ -818,8 +837,11 @@
                onactivate={openContact}>
             {#snippet mark()}<span class="ad-kmark">@</span>{/snippet}
           </Row>
+        {:else if view.failed.contact}
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the public contact
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
         {:else}
-          <p class="p-error ad-inset ad-lastline" role="alert">the public contact couldn’t be read · the rest of the page still works</p>
+          <p class="p-empty ad-inset">not set</p>
         {/if}
       </section>
 
@@ -863,7 +885,11 @@
           {/if}
         {/each}
         {#if testProblem}<p class="p-error ad-inset ad-lastline" role="alert">{testProblem}</p>{/if}
-        {#each view.relay as [label, value, extra] (label)}
+        {#if view.failed.relay}
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the mail settings
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+        {/if}
+        {#each view.relay ?? [] as [label, value, extra] (label)}
           <Row title={label} meta={label === "ingest" ? ingestShort(value) : value} trail={extra === "on" ? "on" : ""} trailTone="var(--ok-text)">
             {#snippet mark()}<span class="p-body {extra === 'on' ? 'ok' : 'ended'}"></span>{/snippet}
           </Row>
@@ -920,7 +946,11 @@
       <section class="p-card ad-card ad-flush" style:--i="7" id="ad-operations" tabindex="-1"
                aria-labelledby="ad-ops-head" data-ad="operations">
         <div class="ad-cardhead"><h2 class="p-caps" id="ad-ops-head">Operations</h2></div>
-        {#each view.services as [tone, name, detail], at (name)}
+        {#if view.failed.services}
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the service checks
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+        {/if}
+        {#each view.services ?? [] as [tone, name, detail], at (name)}
           {@const words = split(detail)}
           <Row title={name} meta={words.rest} trail={words.word} trailTone={INK[tone] ?? ""}
                onactivate={() => { serviceAt = at; serviceOpen = true; }}>
@@ -962,7 +992,12 @@
         </section>
       {/if}
 
-      <p class="ad-strip">{versionLine(view.instance)}</p>
+      {#if view.instance}
+        <p class="ad-strip">{versionLine(view.instance)}</p>
+      {:else if view.failed.instance}
+        <p class="p-error ad-inset" role="alert">version not shown — Orbit could not reach this instance’s build
+          <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+      {/if}
     {/if}
   </main>
 

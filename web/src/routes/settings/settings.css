@@ -212,6 +212,9 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
                border:1px solid var(--line-soft);border-radius:9px;padding:8px 16px;cursor:pointer}
 .helm-page .danger button:hover{color:var(--overdue-text);border-color:var(--overdue)}
 .helm-page .session-row button{flex:none;padding:7px 14px}
+/* #1439: what "sign out of every device" reaches at the provider, said plainly. */
+.helm-page .everywhere-says{margin:10px auto 0;max-width:46ch;font:11px var(--mono);
+      line-height:1.6;color:var(--ink-quiet)}
 @media (prefers-reduced-motion: reduce){
   .helm-page .sky .far,.helm-page .sky .near{animation:none!important}
 }

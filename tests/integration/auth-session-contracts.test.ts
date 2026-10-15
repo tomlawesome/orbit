@@ -209,7 +209,8 @@ describe("PostgreSQL authentication session contracts", () => {
     const response = await callRouteForSession(revokeSessions, laptop, { url: REVOKE_URL, method: "POST" });
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ revoked: 2 });
+    // #1439: password sessions, so there is no provider session to end.
+    expect(await response.json()).toEqual({ revoked: 2, redirectTo: null });
     expect(readSetCookie(response, sessionCookieName(config))?.value).toBe("");
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
 
@@ -376,7 +377,8 @@ describe("PostgreSQL authentication session contracts", () => {
     });
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ revoked: true });
+    // #1439: another device's revoke answers redirectTo too, always null.
+    expect(await response.json()).toEqual({ revoked: true, redirectTo: null });
     // Not the caller's own session, so nothing about this browser's cookie
     // changes.
     expect(response.headers.get("set-cookie")).toBeNull();
@@ -707,4 +709,168 @@ describe("the session keeps the provider's ID token for sign-out (#1316 decision
       resetMetadataKeyCacheForTests();
     }
   }, 120_000);
+});
+
+/* ---- #1439: settings' sign-outs leave through the provider too ------------ */
+
+describe("the settings sign-outs hand back the provider's end-session address (#1439)", () => {
+  type RevokeOneBody = { revoked: boolean; redirectTo: string | null };
+  type RevokeAllBody = { revoked: number; redirectTo: string | null };
+
+  function revokeOne(caller: IntegrationSession, target: IntegrationSession): Promise<Response> {
+    return callRouteForSession(revokeOneSession, caller, {
+      url: revokeOneUrl(target.sessionId),
+      method: "POST",
+      params: { sessionId: target.sessionId },
+    });
+  }
+
+  function revokeAll(caller: IntegrationSession): Promise<Response> {
+    return callRouteForSession(revokeSessions, caller, { url: REVOKE_URL, method: "POST" });
+  }
+
+  it("answers the provider's end-session address with this session's token when the caller revokes their own provider session", async () => {
+    const fixture = await createIntegrationFixture("settings-revoke-self-oidc");
+    const idToken = await signedIdToken();
+    const laptop = await fixture.session("member", { idToken });
+    const config = getAuthConfig();
+    expect(config.oidc).not.toBeNull();
+    mockProvider();
+
+    const response = await revokeOne(laptop, laptop);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = (await response.json()) as RevokeOneBody;
+    expect(body).toEqual({ revoked: true, redirectTo: expect.any(String) });
+    const redirect = new URL(body.redirectTo!);
+    expect(redirect.origin + redirect.pathname).toBe("https://oidc.invalid.example/logout");
+    expect(redirect.searchParams.get("id_token_hint")).toBe(idToken);
+    expect(redirect.searchParams.get("post_logout_redirect_uri")).toBe(new URL("/logout", config.appUrl).href);
+
+    expect(await sessionRows(laptop.sessionId)).toHaveLength(0);
+    expect(readSetCookie(response, sessionCookieName(config))?.value).toBe("");
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+
+    const [entry] = await getDb().select({
+      actorUserId: auditLog.actorUserId,
+      entityType: auditLog.entityType,
+      entityId: auditLog.entityId,
+      action: auditLog.action,
+    }).from(auditLog).where(eq(auditLog.entityId, laptop.sessionId));
+    expect(entry).toEqual({
+      actorUserId: laptop.userId,
+      entityType: "session",
+      entityId: laptop.sessionId,
+      action: "session_revoked",
+    });
+  });
+
+  it("answers redirectTo null when the caller revokes their own password session", async () => {
+    const fixture = await createIntegrationFixture("settings-revoke-self-password");
+    const laptop = await fixture.session("member");
+    mockProvider();
+
+    const response = await revokeOne(laptop, laptop);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ revoked: true, redirectTo: null });
+    expect(await sessionRows(laptop.sessionId)).toHaveLength(0);
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+
+  it("answers redirectTo null for another device's provider session, without asking the provider or touching this cookie", async () => {
+    const fixture = await createIntegrationFixture("settings-revoke-other-oidc");
+    const laptopToken = await signedIdToken();
+    const phoneToken = await signedIdToken();
+    const laptop = await fixture.session("member", { idToken: laptopToken });
+    const phone = await fixture.session("member", { idToken: phoneToken });
+    const discover = mockProvider();
+
+    const response = await revokeOne(laptop, phone);
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(JSON.parse(text)).toEqual({ revoked: true, redirectTo: null });
+    // Neither device's token is handed anywhere.
+    expect(text).not.toContain(phoneToken);
+    expect(text).not.toContain(laptopToken);
+    expect(discover).not.toHaveBeenCalled();
+    expect(response.headers.get("set-cookie")).toBeNull();
+
+    expect(await sessionRows(phone.sessionId)).toHaveLength(0);
+    expect(await sessionRows(laptop.sessionId)).toHaveLength(1);
+    expect((await checkSession(laptop)).status).toBe(200);
+    expect(await fixture.auditCount(phone.sessionId)).toBe(1);
+  });
+
+  it("signs out everywhere and answers the provider's address with the caller's token, never the other device's", async () => {
+    const fixture = await createIntegrationFixture("settings-revoke-all-oidc");
+    const laptopToken = await signedIdToken();
+    const phoneToken = await signedIdToken();
+    expect(laptopToken).not.toBe(phoneToken);
+    const laptop = await fixture.session("member", { idToken: laptopToken });
+    const phone = await fixture.session("member", { idToken: phoneToken });
+    const config = getAuthConfig();
+    mockProvider();
+
+    const response = await revokeAll(laptop);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const text = await response.text();
+    expect(text).not.toContain(phoneToken);
+    const body = JSON.parse(text) as RevokeAllBody;
+    expect(body).toEqual({ revoked: 2, redirectTo: expect.any(String) });
+    const redirect = new URL(body.redirectTo!);
+    expect(redirect.origin + redirect.pathname).toBe("https://oidc.invalid.example/logout");
+    expect(redirect.searchParams.get("id_token_hint")).toBe(laptopToken);
+    expect(redirect.searchParams.get("post_logout_redirect_uri")).toBe(new URL("/logout", config.appUrl).href);
+
+    expect(await sessionRows(laptop.sessionId)).toHaveLength(0);
+    expect(await sessionRows(phone.sessionId)).toHaveLength(0);
+    expect(readSetCookie(response, sessionCookieName(config))?.value).toBe("");
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+
+    const [entry] = await getDb().select({
+      action: auditLog.action,
+      changes: auditLog.changes,
+    }).from(auditLog).where(eq(auditLog.entityId, laptop.userId));
+    expect(entry).toEqual({ action: "sessions_revoked", changes: { sessions: 2 } });
+  });
+
+  it("signs out everywhere from a password session with redirectTo null", async () => {
+    const fixture = await createIntegrationFixture("settings-revoke-all-password");
+    const laptop = await fixture.session("member");
+    // Another device that did sign in at the provider: its token is not this browser's.
+    const phone = await fixture.session("member", { idToken: await signedIdToken() });
+    mockProvider();
+
+    const response = await revokeAll(laptop);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ revoked: 2, redirectTo: null });
+    expect(await sessionRows(laptop.sessionId)).toHaveLength(0);
+    expect(await sessionRows(phone.sessionId)).toHaveLength(0);
+  });
+
+  it("still ends the sessions, and answers redirectTo null, when the provider cannot be reached", async () => {
+    const fixture = await createIntegrationFixture("settings-revoke-provider-down");
+    const laptop = await fixture.session("member", { idToken: await signedIdToken() });
+    const phone = await fixture.session("member", { idToken: await signedIdToken() });
+    const tablet = await fixture.session("member", { idToken: await signedIdToken() });
+    vi.spyOn(oidc, "discoverProvider").mockRejectedValue(new AuthError(
+      "discovery_failed",
+      "The OpenID provider configuration could not be validated",
+      502,
+    ));
+
+    const one = await revokeOne(laptop, laptop);
+    expect(one.status).toBe(200);
+    expect(await one.json()).toEqual({ revoked: true, redirectTo: null });
+    expect(one.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(await sessionRows(laptop.sessionId)).toHaveLength(0);
+
+    const all = await revokeAll(phone);
+    expect(all.status).toBe(200);
+    expect(await all.json()).toEqual({ revoked: 2, redirectTo: null });
+    expect(all.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(await sessionRows(phone.sessionId)).toHaveLength(0);
+    expect(await sessionRows(tablet.sessionId)).toHaveLength(0);
+  });
 });

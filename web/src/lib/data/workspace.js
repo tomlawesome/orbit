@@ -1309,12 +1309,23 @@ export async function commandMailbox(command) {
  */
 export async function readContactSettings() {
   try {
-    /** @type {{ contact?: ?ContactSettings }} */
-    const body = await json(await fetch("/api/admin/contact", { credentials: "same-origin" }));
-    return body.contact ?? null;
+    return await fetchContactSettings();
   } catch {
     return null;
   }
+}
+
+/**
+ * The same read, unguarded: it rejects where the route refuses, breaks or
+ * never answers, so the administration screen can tell a failed read from an
+ * address that is genuinely unset (#1442).
+ *
+ * @returns {Promise<?ContactSettings>}
+ */
+async function fetchContactSettings() {
+  /** @type {{ contact?: ?ContactSettings }} */
+  const body = await json(await fetch("/api/admin/contact", { credentials: "same-origin" }));
+  return body.contact ?? null;
 }
 
 /**
@@ -1396,25 +1407,39 @@ export async function commandUploadLimit(command) {
  * ownership, membership counts — from the admin fixture until #453 makes
  * them real. Live data omits what it cannot know. No join requests: §15-2g
  * moved them to household management, so this screen never asks for them.
+ *
+ * The admin fixture is fixture mode's alone (the fixture workspace carries
+ * `fixtureToday`; a live one never does). On a live instance a read that is
+ * refused, breaks or never arrives gives its panel `null` and a true flag in
+ * `failed`, never the mockup's values (#1442) — the people list and the
+ * public contact included, so a failed read never reads as "nobody" or "not
+ * set". Every panel's read is guarded so one that fails never sinks the rest
+ * of the screen. The workspace read is the exception: without it there is no
+ * screen to draw, so if it fails readAdminScreen() rejects, and both layouts
+ * catch that and say Orbit could not load administration, with a retry.
  */
 export async function readAdminScreen() {
   const [workspace, session, users, mailbox, contact, uploadLimit, rotation, metadata, recoveryBundle, health, operations] =
     await Promise.all([
     readWorkspace(),
     readSession().catch(() => null),
-    json(await fetch("/api/admin/users", { credentials: "same-origin" }))
+    fetch("/api/admin/users", { credentials: "same-origin" }).then((response) => json(response))
       .then(
         (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, disabledAt?: ?string }[] }} */ body) =>
           body.users ?? [],
       )
-      .catch(() => []),
+      /* null, not []: a failed read is not an instance of nobody (#1442). */
+      .catch(() => null),
     readMailboxSettings(),
-    readContactSettings(),
+    fetchContactSettings().then(
+      (answer) => ({ answer, failed: false }),
+      () => ({ answer: null, failed: true }),
+    ),
     readUploadLimitSettings(),
     /* An open document-key rotation (#956). Additive: a route that cannot
        answer (fixture harness, older server) means no card, never a sunk
        screen — and "no rotation open" renders as nothing at all. */
-    json(await fetch("/api/admin/documents/rotation", { credentials: "same-origin" }))
+    fetch("/api/admin/documents/rotation", { credentials: "same-origin" }).then((response) => json(response))
       .then(
         (/** @type {{ rotation?: { inProgress: boolean, startedAt: string | null, secondKeyLoaded: boolean } }} */ body) =>
           body.rotation ?? null,
@@ -1425,7 +1450,7 @@ export async function readAdminScreen() {
        own. Additive on the same terms as the rotation above: a route that
        cannot answer means no cards, never a sunk screen, and an instance with
        nothing wrong renders nothing at all. */
-    json(await fetch("/api/admin/documents/health", { credentials: "same-origin" }))
+    fetch("/api/admin/documents/health", { credentials: "same-origin" }).then((response) => json(response))
       .then(
         (/** @type {{ health?: { metadata?: MetadataHealth } }} */ body) =>
           body.health?.metadata ?? null,
@@ -1435,17 +1460,17 @@ export async function readAdminScreen() {
        KEK (#968, slice 1 of #966). Additive on the same terms as the two
        cards above: a route that cannot answer means no card, never a sunk
        screen. */
-    json(await fetch("/api/admin/recovery-bundle", { credentials: "same-origin" }))
+    fetch("/api/admin/recovery-bundle", { credentials: "same-origin" }).then((response) => json(response))
       .then(
         (/** @type {{ recoveryBundle?: { exported: boolean, exportedAt: string | null } }} */ body) =>
           body.recoveryBundle ?? null,
       )
       .catch(() => null),
-    /* The real Operations panel and instance strip (#1000). Additive on the
-       same terms as the rotation and metadata above: a route that cannot
-       answer (fixture harness, older server) keeps the fixture's rows, so
-       the fixture-mode screen the fidelity gate photographs is unchanged. */
-    json(await fetch("/api/admin/health", { credentials: "same-origin" }))
+    /* The real Operations panel and instance strip (#1000). A route that
+       cannot answer keeps the fixture's rows under the fixture harness only,
+       so the screen the fidelity gate photographs is unchanged; live, the
+       panel says it failed (#1442). */
+    fetch("/api/admin/health", { credentials: "same-origin" }).then((response) => json(response))
       .then((/** @type {{ health?: AdminHealth }} */ body) => body.health ?? null)
       .catch(() => null),
     /* The document jobs (#1071). Additive on the same terms: a route that
@@ -1453,10 +1478,12 @@ export async function readAdminScreen() {
     readAdminOperations().catch(() => null),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
+  const fixtureMode = Boolean(workspace.fixtureToday);
   /* Real owner names where the members route answers (#453); the fixture's
-     stay as the gate's fallback where it doesn't. */
+     stay as the gate's fallback where it doesn't, in fixture mode only. */
   /** @type {Record<string, string>} */
-  const owners = { ...adminFixture.owners };
+  const owners = fixtureMode ? { ...adminFixture.owners } : {};
+  let ownersFailed = false;
   await Promise.all(
     /* A household closed by an import (#1316) is not asked: it would refuse. */
     workspace.households.filter((household) => !household.importInProgress).map(async (household) => {
@@ -1467,7 +1494,11 @@ export async function readAdminScreen() {
         );
         const owner = (body.members ?? []).find((member) => member.role === "owner");
         if (owner?.displayName) owners[household.id] = owner.displayName;
-      } catch { /* additive: a household that cannot answer keeps its label */ }
+      } catch {
+        /* additive: a household that cannot answer keeps its label, and
+           live, the Systems card says some owners could not be read */
+        ownersFailed = true;
+      }
     }),
   );
   /* Pinned under the fidelity gate exactly like the rest of this file's "ago"
@@ -1478,18 +1509,31 @@ export async function readAdminScreen() {
     household: workspace.households.find((one) => one.id === primary) ?? null,
     primary,
     today: todayOf(workspace),
-    users,
+    /* `null` on a live instance whose users read failed (`failed.users`);
+       the empty list under the fixture harness, as before. */
+    users: users ?? (fixtureMode ? [] : null),
     households: workspace.households,
-    ...adminFixture,
-    /* Live where the route answers, and the mockup's rows where it does not,
-       so the fixture-mode screen the fidelity gate photographs is unchanged
-       (#465, §15) while a real deployment shows its real mailbox. */
-    relay: mailbox ? relayRowsOf(mailbox) : adminFixture.relay,
-    /* Same contract, for the Operations panel and instance strip (#1000):
-       the five invented "healthy" rows and the hard-coded version string only
-       render where the route genuinely cannot answer. */
-    services: health ? serviceRowsOf(health, now) : adminFixture.services,
-    instance: health ? instanceLineOf(health.build) : adminFixture.instance,
+    /* The mockup's membership summaries: fixture mode only (#1442). */
+    peopleMeta: fixtureMode ? adminFixture.peopleMeta : /** @type {Record<string, string>} */ ({}),
+    /* Live where the route answers. Where it does not, the mockup's rows
+       under the fixture harness only, so the screen the fidelity gate
+       photographs is unchanged (#465, §15); on a live instance `null`, and
+       the panel says it could not be read (#1442). */
+    relay: mailbox ? relayRowsOf(mailbox) : fixtureMode ? adminFixture.relay : null,
+    /* Same contract, for the Operations panel and instance strip (#1000). */
+    services: health ? serviceRowsOf(health, now) : fixtureMode ? adminFixture.services : null,
+    instance: health ? instanceLineOf(health.build) : fixtureMode ? adminFixture.instance : null,
+    /* Which panels' reads did not answer on a live instance. Always all
+       false in fixture mode, whose fallbacks are the photographed screen. */
+    failed: {
+      relay: !fixtureMode && !mailbox,
+      services: !fixtureMode && !health,
+      instance: !fixtureMode && !health,
+      owners: !fixtureMode && ownersFailed,
+      users: !fixtureMode && users === null,
+      /* A contact the route answers as unset is not a failure. */
+      contact: !fixtureMode && contact.failed,
+    },
     /* The answer itself, for the pocket's per-service callout (#1123): when
        each service was last checked, last succeeded and last failed. Null
        where the route cannot answer, and the callout then says only the row. */
@@ -1500,7 +1544,7 @@ export async function readAdminScreen() {
        (#1001, §19): an instance administrator's workspace lists every one. */
     recoverable: workspace.recoverableHouseholds ?? [],
     mailbox,
-    contact,
+    contact: contact.answer,
     uploadLimit,
     rotation,
     metadata,
@@ -2490,13 +2534,19 @@ export async function readSentLately() {
  * `signOutEverywhere`. If the ended session is this browser's own, the
  * server has already cleared the cookie by the time this resolves, so a
  * caller ending its own session should treat that the same way `signOut`
- * does: there is nothing left to be signed into on this page.
+ * does: there is nothing left to be signed into on this page, and nothing
+ * may call the API again (a 401 would send the reader through the provider's
+ * still-live sign-on, straight back in).
  *
  * @param {string} sessionId
- * @returns {Promise<void>}
+ * @returns {Promise<?string>}  the provider's own logout URL, when this
+ *   browser's own provider session ended with it (#1439); always null for
+ *   another device
  */
 export async function revokeSession(sessionId) {
-  await json(await csrfFetch(`/api/auth/sessions/${sessionId}/revoke`));
+  /** @type {?{ redirectTo?: ?string }} */
+  const body = await json(await csrfFetch(`/api/auth/sessions/${sessionId}/revoke`));
+  return body?.redirectTo ?? null;
 }
 
 /**
@@ -2506,17 +2556,19 @@ export async function revokeSession(sessionId) {
  * The caller's own session goes with them — that is the point, not a side
  * effect: a device the reader no longer trusts must lose access, and there is
  * no way to say which device that was. The route clears this browser's cookie
- * on the way out, so the only honest next page is the sign-in.
+ * on the way out, so this page then plays the goodbye, as `signOut` does.
  *
  * CSRF-carrying, like every other mutation here: an action this destructive
  * must not be reachable from another origin's form post.
  *
- * @returns {Promise<number>}  how many sessions were ended
+ * @returns {Promise<?string>}  the provider's own logout URL for this
+ *   browser, when it has one (#1439)
  */
 export async function signOutEverywhere() {
-  /** @type {?{ revoked?: number }} */
+  /** @type {?{ redirectTo?: ?string }} */
   const body = await json(await csrfFetch("/api/auth/sessions/revoke"));
-  return body?.revoked ?? 0;
+  sessionPromise = null;              /* the cached session is a dead letter now */
+  return body?.redirectTo ?? null;
 }
 
 /**

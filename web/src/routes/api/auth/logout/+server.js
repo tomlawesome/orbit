@@ -3,14 +3,8 @@ import { json } from "@sveltejs/kit";
 import { clearSessionCookie } from "orbit/lib/auth/cookies";
 import { safeReturnPath } from "orbit/lib/auth/crypto";
 import { authErrorResponse } from "orbit/lib/auth/http";
-import { createProviderLogoutUrl, discoverProvider } from "orbit/lib/auth/oidc";
-import {
-  assertCsrf,
-  assertSameOrigin,
-  openSessionIdToken,
-  readSession,
-  takeSessionIdToken,
-} from "orbit/lib/auth/session";
+import { providerLogoutFor } from "orbit/lib/auth/provider-logout";
+import { assertCsrf, assertSameOrigin, readSession, takeSessionIdToken } from "orbit/lib/auth/session";
 import { getAuthConfig } from "orbit/lib/env";
 
 import { api } from "$lib/server/api.js";
@@ -44,26 +38,9 @@ export const POST = api(
     const returnTo = event.url.searchParams.get("returnTo") ?? (wantsJson ? "/logout" : null);
     const postLogoutReturnTo = new URL(safeReturnPath(returnTo), config.appUrl);
 
-    /** @type {URL | null} */
-    let providerLogout = null;
-    if (config.oidc && taken.encrypted) {
-      try {
-        /* No token (a password sign-in, an over-size one), a damaged or moved
-           value, or a locked instance: no hint, so no hand-off. The session
-           here is already ended either way. */
-        const idTokenHint = await openSessionIdToken(taken);
-        /* A failed refresh falls back on the last good document rather than
-           skip the provider sign-out. That needs an earlier good lookup in
-           this process: after a restart with the provider down there is no
-           document to fall back on, and the provider sign-out is skipped. */
-        if (idTokenHint) {
-          const metadata = await discoverProvider(config.oidc, { staleIfError: true });
-          providerLogout = createProviderLogoutUrl(config.oidc, metadata, postLogoutReturnTo, idTokenHint);
-        }
-      } catch {
-        // Local logout must succeed even if the provider is unavailable.
-      }
-    }
+    /* Shared with settings' own sign-outs (#1439); never throws, so a
+       provider that cannot be asked still leaves this sign-out done. */
+    const providerLogout = await providerLogoutFor(config, taken, postLogoutReturnTo);
 
     clearSessionCookie(event.cookies, config);
 
