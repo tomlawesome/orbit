@@ -3,6 +3,7 @@
 **Status:** Accepted (owner, 2026-10-07, with the scan-first amendment)
 **Date:** 2026-10-07
 **Note (2026-10-14, #1399):** this ADR was written with five call sites; the "drafts" one, `document-drafts.ts`, was removed with the document-draft feature, leaving four. The decision is unchanged.
+**Amended by:** [ADR-0038](0038-pdf-structure-check-in-a-sandboxed-worker.md) (item 3: the PDF open runs in a memory-capped, killable worker; the entry-count bound stays as a first fence)
 **Relates to:** #1291 (ordinary PDF refused), #1292 (encrypted object streams
 refused), #1293 (checker and renderer can disagree), #1294 (`isEvalSupported`
 is a dead option); `docs/document-threat-model.md`; ADR-0010 (scanning);

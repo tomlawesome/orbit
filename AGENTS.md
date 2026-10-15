@@ -157,6 +157,10 @@ Reasoning for each is in [docs/testing.md](docs/testing.md#local-traps).
   pnpm.
 - Only ten usable text fonts exist on this host; anything else falls back
   silently; check `fc-list : family` (list in `scripts/corpus/README.md`).
+- Never run Orbit or its tests with `--max-old-space-size` or another heap
+  flag (command line or `NODE_OPTIONS`): Node then silently ignores worker
+  memory caps, so the PDF structure sandbox loses its memory cap and its
+  memory tests prove nothing (ADR-0038; boot logs a warning).
 - `tmp/` is gitignored scratch for prototypes; the gates skip it. Nothing there
   is built or shipped.
 - Every tappable thing on the phone layout is at least 44x44px (`--p-hit`,
