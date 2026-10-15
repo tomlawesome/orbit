@@ -17,6 +17,7 @@ fixing the cause deletes the heading in the same commit.
 - 2026-10-14 · 2c29b2f2 (v0.3 final batch, everything merged) · `scripts/test-backend.sh`, with the integration suite and two e2e stacks running on the host · the "9a no-flight fallback … goes to the provider URL" case saw no navigation (line 431); 7346 others passed; the file passes alone, 9/9. Eighth sighting.
 - 2026-10-15 · eb85eaf2 (v0.3 final audit fix commits; nothing near Chrome.svelte or this file) · local `npx vitest run` (7394 tests), quiet host · both no-flight fallback cases failed; the file alone passed three runs in a row, 9/9. Ninth sighting.
 - 2026-10-15 · c7f0ee1f (#1425 desk create fix and its fixtures; nothing near Chrome.svelte or this file) · local `scripts/test-backend.sh` (7361 passed), e2e stacks running on the host · both no-flight fallback cases saw no navigation, two `ReferenceError: location is not defined`; the file alone passes 9/9. Tenth sighting.
+- 2026-10-15 · e6b249a9 (`fix/v03-security`, the three security fixes; nothing near Chrome.svelte or this file) · local `scripts/test-backend.sh` (7416 passed), fix-review agents reading the tree alongside · the "9a no-flight fallback … goes to the provider URL" case saw no navigation (line 431); the file alone passes 9/9. Eleventh sighting, still #1409.
 
 ## availability-route.test.mjs "GET /api/auth/availability carries phase: starting straight from getBootPhase" (#869)
 
