@@ -383,8 +383,10 @@ export async function handle({ event, resolve }) {
  *
  * In a `finally`, because a redirect or an error is thrown, not returned. A
  * locked body is left alone: a route is still reading it, in the background
- * or through a clone. A used one has been read to its end. Neither the
- * response nor a streamed answer is touched.
+ * or through a clone. A used one has been read to its end. The response is
+ * not touched; a route must not hand the unread body on without reading or
+ * locking it first (an answer built from `request.body`, or a reader started
+ * on a later tick, would find it drained).
  *
  * @param {import("@sveltejs/kit").RequestEvent} event
  */

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { exclusiveSpecFile } from "./support/exclusive-spec";
 import { sessionHeaders } from "./support/households";
 import { ensureLocalPassword } from "./support/local-credentials";
 import { cleanup, READER, seedHousehold, signIn } from "./support/signed-in";
@@ -7,6 +8,9 @@ import { workerFixturePassword } from "./support/worker-identity";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
+
+/* #1316: one worker at a time in the archive-slot specs, in whichever project. */
+exclusiveSpecFile("archive-slot");
 
 /**
  * #1316 (DATA3): the instance handles one archive preview, import or export at
