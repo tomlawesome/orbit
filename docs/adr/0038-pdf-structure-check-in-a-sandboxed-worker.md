@@ -110,10 +110,30 @@ documents in an isolated, memory-capped, killable worker, as browsers do.
    off-heap allowance is the file's size plus twice the check's
    (`externalAllowanceMb`, so 128 MB at the defaults): a 300 dpi A4 scan
    measured 55 MB, and the 128 MB content-stream bomb is stopped in about a
-   second with the process growing about 155 MB. pdf.js's `maxImageSize`
-   (40 Mpx) stays, because Skia's canvas memory is not counted by any V8
-   figure. A scan large enough to pass 128 MB already overruns the ten-second
-   budget.
+   second with the process growing about 155 MB. A scan large enough to pass
+   128 MB already overruns the ten-second budget.
+
+   Skia's canvas memory is counted by no V8 figure, so every scratch canvas
+   pdf.js draws on is booked by the worker's own canvas factory
+   (width x height x 4 bytes; `create` adds, `reset` adjusts, `destroy`
+   subtracts, the preview's own page canvas booked first) against
+   `canvasAllowanceMb`, 256 MiB by default (owner decision 3c, 2026-10-15). A
+   request past it is refused before anything is allocated, and the render
+   is stopped as a memory stop. pdf.js's `maxImageSize` (40 Mpx) stays as the
+   bound on one image. Measured peak live canvas, the 848x1200 page canvas
+   (3.9 MiB) included: a 1-bit image mask of 4960x7016, 182 MiB; of 5316x7522
+   (the largest A4-shaped image the 40 Mpx cap admits), 208 MiB; a 1-bit or
+   8-bit DeviceGray or RGB image at 5316x7522, 204 MiB; a 300 dpi RGB page
+   with a soft-masked transparency group, 53 MiB. A reported 3 KB soft-mask
+   file (80 soft-masked fills; pdf.js keeps every group's scratch canvas until
+   the page ends) reached 1.5 GB in 9.8 s before the allowance. With it, the
+   test suite's copy of that file is stopped as memory in about five seconds
+   at 256 MiB, and well under a second at 32 MiB: live canvas grows at about
+   50 MiB a second, so the stop comes when the allowance is reached, not by
+   the clock. The process bound measured on glibc
+   is roughly four times the allowance, because freed ImageData chunks are
+   not returned to the operating system; the production image's allocator
+   was not measured.
 3. **Answers.** A refusal the check would make answers
    `document_preview_unsupported` with the check's reason; a page past the
    end, `document_preview_page_not_found`; a timeout, `document_preview_failed`

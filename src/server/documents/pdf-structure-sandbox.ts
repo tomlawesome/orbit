@@ -24,14 +24,18 @@ import {
  * The heap cap does not count ArrayBuffer memory, and pdf.js decodes a
  * compressed stream into exactly that, so a watchdog polls the worker's
  * off-heap (`external_memory`) use and kills it past the file's own size plus
- * an allowance, as a cgroup memory limit kills a process. The worker starts
- * with an empty environment: the parser never sees the server's secrets.
+ * an allowance, as a cgroup memory limit kills a process. The worker does
+ * not inherit the server's environment; a worker thread still shares the
+ * process, so this is not isolation from its files or network.
  *
  * Page previews are drawn the same way (#1427, ADR-0038 amendment): one
  * worker opens the file, applies the same gate, and draws the asked-for page
  * to a PNG, so no PDF is read on the server's own thread for any purpose. A
  * render may use twice the check's off-heap allowance, since drawing decodes
- * the content, fonts and images the check never opens.
+ * the content, fonts and images the check never opens. The scratch canvases
+ * pdf.js draws on are native memory neither cap sees, so the render worker's
+ * own canvas factory books every one against `canvasAllowanceMb` and refuses
+ * past it, which stops the render as a memory stop.
  *
  * Every worker must come online within `startupMs`; one that never does is
  * stopped and counted as a crash, so a stuck start cannot hold a slot.
@@ -50,6 +54,8 @@ export type PdfStructureSandboxLimits = {
   stackSizeMb: number;
   /** Off-heap memory a check may use beyond the file itself, which the worker holds; a page render may use twice this. */
   externalAllowanceMb: number;
+  /** Live canvas memory (width x height x 4 bytes, summed) a page render may draw on, the page itself included. */
+  canvasAllowanceMb: number;
   /** Time a worker may take to come online before it is stopped as a crash. */
   startupMs: number;
   /** How often the watchdog reads the worker's off-heap memory. */
@@ -76,6 +82,10 @@ export const PDF_STRUCTURE_SANDBOX_LIMITS: Readonly<PdfStructureSandboxLimits> =
   // beyond their own size (a 98 MB file measured 104 MB in all); a stream
   // bomb is stopped about half a second in, before the process grows much.
   externalAllowanceMb: 64,
+  // Canvases are native memory the two caps above do not see. The largest
+  // image the pixel cap admits (a 1-bit 5316x7522 mask) peaks at 208 MiB of
+  // live canvas; a soft-mask bomb of a few KB otherwise reaches gigabytes.
+  canvasAllowanceMb: 256,
   // A worker comes online in tens of milliseconds; one that has not after
   // this long never will, and would hold its slot forever.
   startupMs: 5_000,
@@ -144,18 +154,46 @@ const { parentPort, workerData } = require("node:worker_threads");
   const { getDocument } = await import(workerData.pdfjsUrl);
   globalThis.Path2D = Path2D;
   globalThis.DOMMatrix = DOMMatrix;
+  // Every canvas this worker draws on is booked here before it is allocated,
+  // and a request past the allowance is refused with nothing allocated.
+  const canvasAllowance = workerData.canvasAllowanceMb * 1024 * 1024;
+  let canvasBytes = 0;
+  const booked = new WeakMap();
+  const book = (bytes) => {
+    if (canvasBytes + bytes > canvasAllowance) {
+      const error = new Error("canvas allowance exceeded");
+      error.code = "canvas_allowance";
+      throw error;
+    }
+    canvasBytes += bytes;
+  };
   class CanvasFactory {
     create(width, height) {
       if (!(width > 0 && height > 0)) throw new Error("empty canvas");
-      const canvas = createCanvas(width, height);
-      return { canvas, context: canvas.getContext("2d") };
+      const bytes = width * height * 4;
+      book(bytes);
+      let canvas;
+      try {
+        canvas = createCanvas(width, height);
+      } catch (error) {
+        canvasBytes -= bytes;
+        throw error;
+      }
+      const canvasAndContext = { canvas, context: canvas.getContext("2d") };
+      booked.set(canvasAndContext, bytes);
+      return canvasAndContext;
     }
     reset(canvasAndContext, width, height) {
       if (!canvasAndContext.canvas || !(width > 0 && height > 0)) throw new Error("empty canvas");
+      const bytes = width * height * 4;
+      book(bytes - (booked.get(canvasAndContext) ?? 0));
+      booked.set(canvasAndContext, bytes);
       canvasAndContext.canvas.width = width;
       canvasAndContext.canvas.height = height;
     }
     destroy(canvasAndContext) {
+      canvasBytes -= booked.get(canvasAndContext) ?? 0;
+      booked.delete(canvasAndContext);
       if (!canvasAndContext.canvas) return;
       canvasAndContext.canvas.width = 0;
       canvasAndContext.canvas.height = 0;
@@ -185,6 +223,8 @@ const { parentPort, workerData } = require("node:worker_threads");
           const width = Math.min(workerData.maxEdge, Math.max(1, Math.round(unscaled.width * workerData.maxEdge / longest)));
           const height = Math.min(workerData.maxEdge, Math.max(1, Math.round(unscaled.height * workerData.maxEdge / longest)));
           const viewport = page.getViewport({ scale: width / unscaled.width });
+          // The preview's own canvas is outside the factory, so it is booked first.
+          book(width * height * 4);
           const canvas = createCanvas(width, height);
           const context = canvas.getContext("2d");
           // Pages are transparent; a preview is shown against unknown chrome.
@@ -200,6 +240,7 @@ const { parentPort, workerData } = require("node:worker_threads");
     }
   } catch (error) {
     if (error && error.name === "PasswordException") result = { outcome: "refused", reason: "password_required" };
+    else if (error && error.code === "canvas_allowance") result = { outcome: "failed", stop: "memory" };
     else if (result.outcome !== "refused") result = { outcome: "failed" };
   } finally {
     if (task) await task.destroy().catch(() => undefined);
@@ -342,12 +383,19 @@ function startWorker(run: WorkerRun, data: ArrayBuffer): Worker {
       maxYoungGenerationSizeMb: limits.maxYoungGenerationSizeMb,
       stackSizeMb: limits.stackSizeMb,
     },
-    // The parser needs no environment, and must not see the server's secrets.
+    // The worker does not inherit the server's environment; a worker thread
+    // still shares the process, so this is not isolation from its files or
+    // network.
     env: {},
     // The parser's own console output can quote the file; it is discarded.
     stdout: true,
     stderr: true,
   });
+}
+
+/** Whether a worker's answer is its own memory stop, which the main thread logs and reports as one. */
+function reportsMemoryStop(message: unknown): boolean {
+  return typeof message === "object" && message !== null && (message as { stop?: unknown }).stop === "memory";
 }
 
 function runWorker(bytes: Buffer, run: WorkerRun): Promise<WorkerOutcome> {
@@ -419,7 +467,9 @@ function runWorker(bytes: Buffer, run: WorkerRun): Promise<WorkerOutcome> {
       timer = setTimeout(() => settle({ stop: "timeout" }), run.wallMs);
       watchdog = setInterval(() => void poll(), limits.pollMs);
     });
-    worker.once("message", (message: unknown) => settle({ message }));
+    // A worker that stops itself on memory (the render's canvas allowance)
+    // says so; it is treated like the watchdog's own stop.
+    worker.once("message", (message: unknown) => settle(reportsMemoryStop(message) ? { stop: "memory" } : { message }));
     worker.once("error", (error: Error & { code?: string }) => {
       settle({ stop: error.code === "ERR_WORKER_OUT_OF_MEMORY" ? "memory" : "crash" });
     });
@@ -474,6 +524,7 @@ export async function renderPdfPageInSandbox(
       standardFontDataUrl: standardFontDirectory(),
       page: request.page,
       maxEdge: request.maxEdge,
+      canvasAllowanceMb: limits.canvasAllowanceMb,
     },
     wallMs: request.wallMs,
     externalAllowanceMb: limits.externalAllowanceMb * RENDER_EXTERNAL_ALLOWANCE_FACTOR,

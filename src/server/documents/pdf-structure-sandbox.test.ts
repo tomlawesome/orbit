@@ -335,6 +335,16 @@ export default { getDocument, GlobalWorkerOptions };
     }
   }, TEST_TIMEOUT_MS);
 
+  it("stops a worker that does not come online within the start-up deadline as a crash, and frees the slot", async () => {
+    setPdfStructureSandboxLimitsForTests({ ...TEST_LIMITS, startupMs: 1 });
+
+    const { result, logged } = await withCapturedLogs(() => classifyDocumentStructure(syntheticPdf(), "application/pdf"));
+
+    expect(result).toBe("unsupported_structure");
+    expect(logged).toMatch(/crash/i);
+    expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+  }, TEST_TIMEOUT_MS);
+
   it("refuses as unsupported_structure, quickly, when the worker cannot load the parser and crashes", async () => {
     // A long wall limit, so a fast answer can only come from handling the crash,
     // not from the timeout.
@@ -396,6 +406,11 @@ export default { getDocument, GlobalWorkerOptions };
     }, TEST_TIMEOUT_MS);
 
     it("accepts a 20 MB PDF, because the memory allowance sits above the file itself", async () => {
+      await expect(classifyDocumentStructure(paddedPdf(20 * MB), "application/pdf")).resolves.toBe("supported_structure");
+    }, TEST_TIMEOUT_MS);
+
+    it("counts the file itself toward the off-heap cap, so a 20 MB PDF passes even with an 8 MB allowance", async () => {
+      setPdfStructureSandboxLimitsForTests({ externalAllowanceMb: 8 });
       await expect(classifyDocumentStructure(paddedPdf(20 * MB), "application/pdf")).resolves.toBe("supported_structure");
     }, TEST_TIMEOUT_MS);
 
