@@ -219,4 +219,70 @@ describe("bounded PDF inspection", () => {
       expect(mocks.getDocument).toHaveBeenCalledOnce();
     });
   });
+
+  describe("the parser's recovery scan and sections it cannot read", () => {
+    const BASE = "%PDF-1.7\n"
+      + "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+      + "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+      + "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n";
+
+    function hiddenXrefObject(index: string): string {
+      return `4 0 obj << /Type /XRef /W [0 0 0] /Index ${index} /Size 3 /Length 0 >>\nstream\n\nendstream\nendobj\n`;
+    }
+
+    function classicTable(headerLine: string, extraObject = ""): Buffer {
+      let value = BASE + extraObject;
+      const xrefOffset = Buffer.byteLength(value);
+      value += `xref\n${headerLine}\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n`;
+      value += `trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+      return Buffer.from(value);
+    }
+
+    function mockParserReachable(): void {
+      mocks.getDocument.mockReturnValue({
+        promise: Promise.resolve({ numPages: 1, getPage: vi.fn().mockResolvedValue({}) }),
+        destroy: vi.fn().mockResolvedValue(undefined),
+      });
+    }
+
+    async function expectRefused(bytes: Buffer): Promise<void> {
+      mockParserReachable();
+      await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");
+      expect(mocks.getDocument).not.toHaveBeenCalled();
+    }
+
+    async function expectReachesParser(bytes: Buffer): Promise<void> {
+      mockParserReachable();
+      await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("supported_structure");
+      expect(mocks.getDocument).toHaveBeenCalledOnce();
+    }
+
+    it("A1: refuses an oversized hidden cross-reference stream when startxref points past the end of the file", async () => {
+      await expectRefused(Buffer.from(`${BASE}${hiddenXrefObject("[0 2000000]")}startxref\n99999999\n%%EOF\n`));
+    });
+
+    it("A2: refuses an oversized hidden cross-reference stream when there is no startxref at all", async () => {
+      await expectRefused(Buffer.from(`${BASE}${hiddenXrefObject("[0 2000000]")}%%EOF\n`));
+    });
+
+    it("A3: still reaches the parser for a hidden cross-reference stream with a small /Index [0 12] behind a broken startxref", async () => {
+      await expectReachesParser(Buffer.from(`${BASE}${hiddenXrefObject("[0 12]")}startxref\n99999999\n%%EOF\n`));
+    });
+
+    it("A4: still reaches the parser for a valid single cross-reference stream that the scan would also find", async () => {
+      await expectReachesParser(xrefStreamPdf());
+    });
+
+    it("B5: refuses a classic subsection header whose count is hidden by a trailing comment", async () => {
+      await expectRefused(classicTable("0 2000000 %pad"));
+    });
+
+    it("B6: still reaches the parser for a classic subsection header with a small count and a trailing comment", async () => {
+      await expectReachesParser(classicTable("0 3 %ok"));
+    });
+
+    it("B7: still reaches the parser when an object has a /XRefStm key and the startxref is good and small", async () => {
+      await expectReachesParser(classicTable("0 3", "5 0 obj\n<< /Type /Foo /XRefStm 0 >>\nendobj\n"));
+    });
+  });
 });
