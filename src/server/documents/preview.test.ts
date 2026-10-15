@@ -202,6 +202,41 @@ function pdfWithSoftMaskGroups(n: number): Buffer {
   return Buffer.concat(parts);
 }
 
+/**
+ * A one-page PDF drawing one 1-bit /ImageMask image of the declared size over
+ * the whole 595x842 page, in black. Every byte is 0x0f, so the file stays small
+ * while the decoded image is ceil(width / 8) x height bytes.
+ */
+function pdfDrawingImageMask(width: number, height: number): Buffer {
+  const pixels = deflateSync(Buffer.alloc(Math.ceil(width / 8) * height, 0x0f), { level: 9 });
+  const content = Buffer.from("q 0 0 0 rg 595 0 0 842 0 0 cm /Im0 Do Q");
+  const objects: Buffer[] = [
+    Buffer.from("<< /Type /Catalog /Pages 2 0 R >>"),
+    Buffer.from("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+    Buffer.from("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>"),
+    Buffer.concat([
+      Buffer.from(`<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ImageMask true /BitsPerComponent 1 /Filter /FlateDecode /Length ${pixels.length} >>\nstream\n`),
+      pixels,
+      Buffer.from("\nendstream"),
+    ]),
+    Buffer.concat([Buffer.from(`<< /Length ${content.length} >>\nstream\n`), content, Buffer.from("\nendstream")]),
+  ];
+  const parts: Buffer[] = [Buffer.from("%PDF-1.7\n")];
+  const offsets: number[] = [];
+  let length = parts[0].length;
+  objects.forEach((object, index) => {
+    offsets.push(length);
+    const wrapped = Buffer.concat([Buffer.from(`${index + 1} 0 obj\n`), object, Buffer.from("\nendobj\n")]);
+    parts.push(wrapped);
+    length += wrapped.length;
+  });
+  let trailer = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  trailer += offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  trailer += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${length}\n%%EOF\n`;
+  parts.push(Buffer.from(trailer));
+  return Buffer.concat(parts);
+}
+
 /** The red, green and blue the preview shows at its centre. */
 async function rgbAtPreviewCentre(preview: { bytes: Buffer }): Promise<[number, number, number]> {
   const image = await loadImage(preview.bytes);
@@ -663,6 +698,17 @@ describe("renderDocumentPagePreview", () => {
         expect(green).toBeLessThanOrEqual(10);
         expect(blue).toBeLessThanOrEqual(10);
       }, 15_000);
+
+      it("still draws the largest image the pixel cap admits, a 1-bit mask of 5316x7522, at the defaults", async () => {
+        // 39,985,752 pixels: the largest A4-shaped image under the 40,000,000 cap.
+        const preview = await renderDocumentPagePreview(pdfDrawingImageMask(5_316, 7_522), "application/pdf");
+
+        expect(preview.mediaType).toBe("image/png");
+        expect(preview.pageCount).toBe(1);
+        // Black over white in a 4-on, 4-off pattern averages to grey: anything but untouched white.
+        const [red, green, blue] = await rgbAtPreviewCentre(preview);
+        expect(Math.min(red, green, blue)).toBeLessThan(250);
+      }, 60_000);
     });
 
     it("refuses a user-password PDF on the render path as unsupported, saying a password is needed", async () => {
