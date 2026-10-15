@@ -2,6 +2,7 @@ import { building } from "$app/environment";
 import { env } from "$env/dynamic/private";
 import { redirect } from "@sveltejs/kit";
 
+import { ARCHIVE_SLOT_ROUTES, holdArchiveSlot } from "$lib/server/archive-slot.js";
 import { bodyLimitFor, limitRequestBody } from "$lib/server/body-limit.js";
 
 /**
@@ -340,6 +341,38 @@ export async function handle({ event, resolve }) {
      database, and no dynamic environment to read. */
   if (building) return resolve(event);
 
+  /* ONE ARCHIVE AT A TIME (#1316), in this order: the session, then the slot,
+     then the body limit below. Signed in first, so a stranger can never hold
+     the slot: without a session nothing is claimed and the route's own
+     write() answers 401 unread. The slot before the body limit, so a second
+     archive is refused with a 429 before its body is buffered. The finally
+     frees the slot however the rest ends: an answer, a 413, a refusal, a
+     throw, a dropped client, the body watchdog.
+     web/src/lib/server/archive-slot.js has the routes and the reasons. */
+  if (event.route.id !== null && ARCHIVE_SLOT_ROUTES.has(event.route.id)
+    && event.request.method === "POST" && event.request.body !== null
+    && await readSessionQuietly(event.cookies)) {
+    const held = holdArchiveSlot(event.route.id, event.request);
+    if (held instanceof Response) return held;
+    if (held) {
+      event.request = held.request;
+      try {
+        return await gated(event, resolve);
+      } finally {
+        held.release();
+      }
+    }
+  }
+  return gated(event, resolve);
+}
+
+/**
+ * Everything `handle` does after the building guard and the archive slot.
+ *
+ * @param {import("@sveltejs/kit").RequestEvent} event
+ * @param {Parameters<import("@sveltejs/kit").Handle>[0]["resolve"]} resolve
+ */
+async function gated(event, resolve) {
   /* Per-route request body limits (#1285), ahead of every other step and for
      every route, the API included: the image lets any body up to the largest
      a route may take through (BODY_SIZE_LIMIT), and this holds each route to

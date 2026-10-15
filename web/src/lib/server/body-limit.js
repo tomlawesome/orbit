@@ -51,6 +51,9 @@ export const UPLOAD_ROUTES = new Set([
   "/api/households/[householdId]/items/[itemId]/documents",
 ]);
 
+/* A body this size is why only one archive runs at a time: archive-slot.js
+   (#1316) holds these two routes and the export to one slot, claimed in
+   hooks.server.js before this module's limit is applied. */
 export const ARCHIVE_ROUTES = new Set([
   "/api/portable-archives/preview",
   "/api/portable-archives/import",
