@@ -7,6 +7,7 @@ import { log } from "@/lib/logger";
 import { useScratchTemporaryDirectory, type ScratchDirectory } from "../../../tests/support/scratch-directory";
 import { syntheticPdf } from "../../../tests/support/synthetic-documents";
 import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../../../tests/support/generated-pdf-documents";
+import { setPdfStructureSandboxLimitsForTests } from "./pdf-structure-sandbox";
 import {
   DOCUMENT_PREVIEW_MAX_EDGE,
   renderDocumentPagePreview,
@@ -84,6 +85,86 @@ async function greyAtFixtureImageCentre(preview: { bytes: Buffer; width: number 
   const scale = preview.width / 612;
   return context.getImageData(Math.round(300 * scale), Math.round((792 - 400) * scale), 1, 1).data[0];
 }
+
+/**
+ * A content-stream bomb: page one's /Contents is a FlateDecode stream of
+ * `megabytes` of spaces behind one drawing operator. The file is a few hundred
+ * kilobytes; only drawing the page decodes the stream.
+ */
+function pdfWithContentStreamBomb(megabytes: number): Buffer {
+  const raw = Buffer.alloc(megabytes * 1024 * 1024, 0x20);
+  raw.write("0 0 1 rg 10 10 100 100 re f\n", 0, "latin1");
+  const packed = deflateSync(raw, { level: 9 });
+  const parts: Buffer[] = [];
+  const offsets: Record<number, number> = {};
+  let length = 0;
+  const push = (piece: Buffer | string): void => {
+    const buffer = Buffer.isBuffer(piece) ? piece : Buffer.from(piece, "latin1");
+    parts.push(buffer);
+    length += buffer.length;
+  };
+  push("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
+  offsets[1] = length;
+  push("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+  offsets[2] = length;
+  push("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+  offsets[3] = length;
+  push("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>\nendobj\n");
+  offsets[4] = length;
+  push(`4 0 obj\n<< /Filter /FlateDecode /Length ${packed.length} >>\nstream\n`);
+  push(packed);
+  push("\nendstream\nendobj\n");
+  const xref = length;
+  push("xref\n0 5\n0000000000 65535 f \n");
+  for (let index = 1; index <= 4; index += 1) push(`${String(offsets[index]).padStart(10, "0")} 00000 n \n`);
+  push(`trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  return Buffer.concat(parts);
+}
+
+/** A one-page PDF: an A4 JPEG "scan" at `dpi`, drawn full page as a DCTDecode image. */
+function scannedA4Pdf(dpi: number): Buffer {
+  const width = Math.round(8.27 * dpi);
+  const height = Math.round(11.69 * dpi);
+  const canvas = createCanvas(width, height);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#f4f1e8";
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = "#222222";
+  context.font = `${dpi / 4}px sans-serif`;
+  for (let y = dpi; y < height; y += dpi / 2) {
+    context.fillText(`Lorem ipsum dolor sit amet, consectetur adipiscing elit ${y}`, dpi / 2, y);
+  }
+  const jpeg = canvas.toBuffer("image/jpeg", 85);
+  const parts: Buffer[] = [];
+  const offsets: Record<number, number> = {};
+  let length = 0;
+  const push = (piece: Buffer | string): void => {
+    const buffer = Buffer.isBuffer(piece) ? piece : Buffer.from(piece, "latin1");
+    parts.push(buffer);
+    length += buffer.length;
+  };
+  const content = "q 595 0 0 842 0 0 cm /Im0 Do Q\n";
+  push("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
+  offsets[1] = length;
+  push("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+  offsets[2] = length;
+  push("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+  offsets[3] = length;
+  push("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>\nendobj\n");
+  offsets[4] = length;
+  push(`4 0 obj\n<< /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj\n`);
+  offsets[5] = length;
+  push(`5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`);
+  push(jpeg);
+  push("\nendstream\nendobj\n");
+  const xref = length;
+  push("xref\n0 6\n0000000000 65535 f \n");
+  for (let index = 1; index <= 5; index += 1) push(`${String(offsets[index]).padStart(10, "0")} 00000 n \n`);
+  push(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  return Buffer.concat(parts);
+}
+
+const MB = 1024 * 1024;
 
 let scratch: ScratchDirectory;
 
@@ -355,5 +436,103 @@ describe("renderDocumentPagePreview", () => {
       expect(info).not.toHaveBeenCalled();
       expect(warn).not.toHaveBeenCalled();
     });
+  });
+
+  describe("the page is drawn in the sandbox, never on the server's own thread (#1427)", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+      setPdfStructureSandboxLimitsForTests(undefined);
+    });
+
+    it("refuses a 128 MB content-stream bomb as a failed preview, quickly, with this thread free and the process not growing", async () => {
+      const bomb = pdfWithContentStreamBomb(128);
+      // Small on the wire, huge once decoded: the point of the fixture.
+      expect(bomb.length).toBeLessThan(1_000_000);
+      let ticks = 0;
+      const timer = setInterval(() => {
+        ticks += 1;
+      }, 50);
+      const rssBefore = process.memoryUsage().rss;
+      let peakRss = rssBefore;
+      const sampler = setInterval(() => {
+        peakRss = Math.max(peakRss, process.memoryUsage().rss);
+      }, 15);
+      const started = Date.now();
+
+      try {
+        await expect(renderDocumentPagePreview(bomb, "application/pdf"))
+          .rejects.toMatchObject({ code: "document_preview_failed", status: 422 });
+      } finally {
+        clearInterval(timer);
+        clearInterval(sampler);
+      }
+      peakRss = Math.max(peakRss, process.memoryUsage().rss);
+
+      expect(Date.now() - started).toBeLessThan(4_000);
+      // A thread busy decoding 128 MB would tick a handful of times, not ten.
+      expect(ticks).toBeGreaterThanOrEqual(10);
+      expect(peakRss - rssBefore).toBeLessThan(250 * MB);
+    }, 15_000);
+
+    it("draws a 300 dpi A4 scan to a PNG of the page's shape with the scan's pixels in it", async () => {
+      const scan = scannedA4Pdf(300);
+
+      const preview = await renderDocumentPagePreview(scan, "application/pdf");
+
+      expect(preview.mediaType).toBe("image/png");
+      expect(preview.pageCount).toBe(1);
+      // A4 is 595x842 points; the preview scales it to the bounded long edge.
+      expect(preview.height).toBe(DOCUMENT_PREVIEW_MAX_EDGE);
+      expect(Math.abs(preview.width - Math.round((595 * DOCUMENT_PREVIEW_MAX_EDGE) / 842))).toBeLessThanOrEqual(1);
+      expect(pngDimensions(preview.bytes)).toEqual({ width: preview.width, height: preview.height });
+      const image = await loadImage(preview.bytes);
+      const canvas = createCanvas(image.width, image.height);
+      const context = canvas.getContext("2d");
+      context.drawImage(image, 0, 0);
+      const pixels = context.getImageData(0, 0, image.width, image.height).data;
+      let nonWhite = 0;
+      let dark = 0;
+      for (let offset = 0; offset < pixels.length; offset += 4) {
+        if (pixels[offset] < 0xf8 || pixels[offset + 1] < 0xf8 || pixels[offset + 2] < 0xf8) nonWhite += 1;
+        if (pixels[offset] < 0x80) dark += 1;
+      }
+      // The scan's paper is off-white and its lines are dark: a blank page has neither.
+      expect(nonWhite).toBeGreaterThan(image.width * image.height * 0.5);
+      expect(dark).toBeGreaterThan(100);
+    }, 30_000);
+
+    it("keeps the render budget, the page-not-found answer and the structure check's reason", async () => {
+      setDocumentPreviewRenderBudgetForTests(0);
+      try {
+        await expect(renderDocumentPagePreview(syntheticPdf("Preview fixture"), "application/pdf"))
+          .rejects.toMatchObject({ code: "document_preview_failed", status: 422 });
+      } finally {
+        setDocumentPreviewRenderBudgetForTests(undefined);
+      }
+      await expect(renderDocumentPagePreview(syntheticPdfWithNumberedPages(3), "application/pdf", 4))
+        .rejects.toMatchObject({ code: "document_preview_page_not_found", status: 404 });
+      await expect(renderDocumentPagePreview(syntheticPdf("Preview fixture").subarray(0, 120), "application/pdf", 1))
+        .rejects.toMatchObject({ code: "document_preview_unsupported", status: 415 });
+    });
+
+    it("logs a memory stop as a bounded record that says memory and carries nothing of the file", async () => {
+      const spies = (["error", "warn", "info", "debug"] as const).map((level) =>
+        vi.spyOn(log, level).mockImplementation(() => undefined));
+      setPdfStructureSandboxLimitsForTests({ wallMs: 8_000, maxOldGenerationSizeMb: 32, externalAllowanceMb: 16 });
+      const bomb = pdfWithContentStreamBomb(128);
+
+      await expect(renderDocumentPagePreview(bomb, "application/pdf"))
+        .rejects.toMatchObject({ code: "document_preview_failed", status: 422 });
+
+      const recorded = spies.flatMap((spy) => spy.mock.calls);
+      const logged = JSON.stringify(recorded);
+      expect(recorded.length).toBeGreaterThan(0);
+      expect(logged).toMatch(/memory/i);
+      expect(logged).not.toMatch(/timeout|timed.?out/i);
+      // Nothing of the document: no PDF syntax, no byte dump, no sizes of its streams.
+      expect(logged).not.toMatch(/%PDF|\bobj\b|endstream|FlateDecode|MediaBox|\/Contents/i);
+      expect(logged.length).toBeLessThan(2_000);
+      expect(logged).not.toContain(String(bomb.length));
+    }, 15_000);
   });
 });
