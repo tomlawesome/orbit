@@ -540,6 +540,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## local-sign-in.spec.ts:330 "no sign-in card sits over the arrival with no climb owed" — desktop-chromium
 
 - 2026-10-15 · 34384732 (v0.3 final batch, !1067; nothing since 15c029b7 touches the arrival, the root route, sign-in or this spec) · pipeline 2624 / smoke_local_only (job 36328) · `the arrival, no climb: the frame sampler never saw the newcomer's frame` at line 275 (`frames` 0) after 2.2s; the spec sets `retries: 0`, so no retry. Locally `scripts/test-e2e-local.sh --profile local-only --project desktop-chromium` passed 3/3. Suspected, not established: no animation frame ran between `.nf` appearing and the check on a loaded runner (the sampler is a `requestAnimationFrame` loop, `:248-261`). First sighting.
+- 2026-10-15 · 53133760 (!1068, #1431: changes only `launcher/pin.json`) · pipeline 2637 / smoke_local_only (job 36409) · the same `the arrival, no climb: the frame sampler never saw the newcomer's frame` (expected > 0); retried as job 36420 by the launcher session. Second sighting.
 
 ## archive-slot.spec.ts:86 "while one archive upload is in progress a second is refused at once, and goes through after it ends" — mobile-chromium
 
