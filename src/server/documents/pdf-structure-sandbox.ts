@@ -27,10 +27,15 @@ import {
  * `VmSwap` in `/proc/<pid>/status`), read every `pollMs`: it counts
  * everything the child allocates, V8 heap, decoded streams, Skia canvases,
  * patterns, images and fonts alike, with no bookkeeping of ours, and a child
- * cannot slip under it by being swapped out. Past the job's ceiling plus the
- * file's size (the child holds a copy) the child is killed with SIGKILL and
- * the stop is memory. The child's own V8 flags cap its heap first, and
- * `ulimit -d` (RLIMIT_DATA) at the ceiling plus 1.5 GB is a kernel-enforced
+ * cannot slip under it by being swapped out. Past the job's ceiling the
+ * child is killed with SIGKILL and the stop is memory. The ceiling is the
+ * job's allowance plus a multiple of the file's size, because the child
+ * holds copies: one for a render, five for a structure check (a clean file
+ * peaks near three times its size, and pdf.js repairing a PDF whose
+ * cross-reference offset is a few bytes out re-indexes the whole file and
+ * holds about five times; owner decision, 2026-10-15). The child's own V8
+ * flags cap its heap first, and `ulimit -d` (RLIMIT_DATA) at the ceiling plus
+ * 1.5 GB is a kernel-enforced
  * backstop should the server's event loop be too busy to poll. `ulimit -t`
  * (RLIMIT_CPU) at the job's start-up and wall clocks plus 5 s stops a child
  * on its own should the server die and leave it running. The child does not
@@ -50,9 +55,9 @@ export type PdfStructureSandboxLimits = {
   wallMs: number;
   /** The child's V8 old-generation heap cap (its own `--max-old-space-size`). */
   heapMb: number;
-  /** Process memory (RSS) a structure check may use beyond the file itself, which the child holds. */
+  /** Process memory (RSS) a structure check may use beyond five times the file, which the child holds and pdf.js may re-index. */
   structureMemoryMb: number;
-  /** Process memory (RSS) a page render may use beyond the file itself. */
+  /** Process memory (RSS) a page render may use beyond one times the file. */
   renderMemoryMb: number;
   /** Time a child may take from spawn to ready, the file's hand-over included, before it is stopped as a crash. */
   startupMs: number;
@@ -71,8 +76,10 @@ export const PDF_STRUCTURE_SANDBOX_LIMITS: Readonly<PdfStructureSandboxLimits> =
   // runaway allocation hits this within a second or two.
   heapMb: 128,
   // Measured child RSS (owner decision, 2026-10-15; reducing these is #1436):
-  // a check of a 98 MB file peaks at 302 MB with the file included, so 320
-  // plus the file is about twice the non-file part.
+  // a clean 98 MB file peaks at 393 MB with the file included (about 3x the
+  // file); a file with an off-by-a-few startxref makes pdf.js re-index it,
+  // about 5x the file: 55 MB peaks at 394, 70 MB at 465, 96 MB at 589. The
+  // ceiling is this plus 5 x the file (STRUCTURE_FILE_COPIES).
   structureMemoryMb: 320,
   // The largest legitimate render measured (a 1-bit 5316x7522 image mask, the
   // biggest image the 40 Mpx cap admits) peaks at 458 MB.
@@ -86,6 +93,12 @@ export const PDF_STRUCTURE_SANDBOX_LIMITS: Readonly<PdfStructureSandboxLimits> =
 
 /** The child's young-generation cap and stack, fixed: no test needs to move them. */
 const SEMI_SPACE_MB = 8;
+/**
+ * Times the file's size that each job's ceiling adds: a render holds the file
+ * once; a structure check allows five, since pdf.js re-indexes a file whose
+ * cross-reference offset is wrong, holding about five times its size.
+ */
+const FILE_COPIES: Readonly<Record<Job, number>> = { structure: 5, render: 1 };
 const STACK_SIZE_KB = 3_900;
 /**
  * RLIMIT_DATA sits this far above the RSS ceiling: V8 reserves about 1 GB of
@@ -378,7 +391,7 @@ function cpuLimitSeconds(startupMs: number, wallMs: number): number {
   return Math.ceil((startupMs + wallMs) / 1000) + CPU_LIMIT_SLACK_SECONDS;
 }
 
-/** RLIMIT_DATA for a job: the ceiling plus the headroom and the file, or none when a test lifts it. */
+/** RLIMIT_DATA for a job: the ceiling plus the headroom and the file copies, or none when a test lifts it. */
 function dataLimitKbFor(memoryMb: number, fileBytes: number): number | undefined {
   if (testDataLimitHeadroom === "unlimited") return undefined;
   const headroomMb = testDataLimitHeadroom ?? DATA_LIMIT_HEADROOM_MB;
@@ -407,7 +420,7 @@ type ChildRun = {
   /** Job-specific fields, beside the file and the parser options, which every job gets. */
   message: Record<string, unknown>;
   wallMs: number;
-  /** The job's memory ceiling (resident plus swapped) before the file's own size is added. */
+  /** The job's memory ceiling (resident plus swapped) before the file's size, times FILE_COPIES, is added. */
   memoryMb: number;
 };
 
@@ -434,8 +447,9 @@ function startChild(run: ChildRun, dataLimitKb: number | undefined): ChildProces
 
 function runChild(bytes: Buffer, run: ChildRun): Promise<ChildOutcome> {
   let started = Date.now();
-  const ceilingBytes = run.memoryMb * MiB + bytes.length;
-  const dataLimitKb = dataLimitKbFor(run.memoryMb, bytes.length);
+  const fileAllowanceBytes = FILE_COPIES[run.job] * bytes.length;
+  const ceilingBytes = run.memoryMb * MiB + fileAllowanceBytes;
+  const dataLimitKb = dataLimitKbFor(run.memoryMb, fileAllowanceBytes);
   let child: ChildProcess;
   try {
     child = startChild(run, dataLimitKb);

@@ -217,9 +217,10 @@ Owner decisions 5a and 6a (2026-10-15): the ceilings below, shipped in v0.3.
    child's memory, resident plus swapped (`VmRSS` plus `VmSwap`, from one
    read of `/proc/<pid>/status`, kB whatever the page size; no `VmSwap` line
    counts as none, so a child cannot slip under the ceiling by being swapped
-   out; round-5 review, #1316) and kills it with SIGKILL once it passes `renderMemoryMb` (768 MB) or
-   `structureMemoryMb` (320 MB) plus the file's size, which the child holds;
-   the stop is logged as memory. This replaces both the `external_memory`
+   out; round-5 review, #1316) and kills it with SIGKILL once it passes `renderMemoryMb` (768 MB) plus the
+   file's size or `structureMemoryMb` (320 MB) plus **five times** the file's
+   size (owner decision 7a, 2026-10-15; see the sizing note below); the stop is
+   logged as memory. This replaces both the `external_memory`
    watchdog (item 6) and the canvas allowance (first amendment, item 2),
    whose paragraphs are marked superseded. Measured child RSS, glibc host and
    the production (musl) image:
@@ -232,8 +233,11 @@ Owner decisions 5a and 6a (2026-10-15): the ceilings below, shipped in v0.3.
    | 1-bit gray 5316x7522 | 406-410 MB | 1.1-1.6 s | drawn |
    | 300 dpi RGB, image soft mask and group | 187-219 MB | 1.1-1.4 s | drawn |
    | 8-bit RGB 5316x7522 | 280-357 MB | times out | #1434, unchanged |
-   | structure: 98 MB legitimate file | 293 MB musl / 393 MB glibc (file included) | 0.6-0.9 s | ceiling 320 + 98 = 418; on glibc the freed IPC buffers are not returned to the system |
-   | structure: 54 MB, 1,000 pages | 257 MB | 1.3 s | ceiling 320 + 54 = 374 |
+   | structure: 98 MB legitimate file | 293 MB musl / 393 MB glibc (file included) | 0.6-0.9 s | ceiling 320 + 5 x 98 = 810; on glibc the freed IPC buffers are not returned to the system |
+   | structure: 54 MB, 1,000 pages | 257 MB | 1.3 s | ceiling 320 + 5 x 54 = 590 |
+   | structure: 55 MB, startxref off by a few bytes | 394 MB | | pdf.js re-indexes the whole file; ceiling 320 + 5 x 55 = 595 |
+   | structure: 70 MB, same | 465 MB | | ceiling 670 |
+   | structure: 96 MB, same | 589 MB | | ceiling 800 |
    | 128 MB object-stream bomb, render, no limit | 355-371 MB | 2.6-3.0 s | draws a blank page; bounded under 768 |
    | same, structure at 256 MB | killed at 264 MB | 0.72 s | at 320: killed in about 1.5 s |
    | heap bomb (2 M xref entries), heap flag 128 | 209-233 MB | 1.1-1.5 s | V8 aborts it, saying so |
@@ -244,7 +248,18 @@ Owner decisions 5a and 6a (2026-10-15): the ceilings below, shipped in v0.3.
    The server process does not grow during any of these: the memory is the
    child's. Sizing follows the usual rule for resource limits (ImageMagick's
    `policy.xml`, Ghostscript's `-dMaxBitmap`): the largest legitimate input
-   measured, with headroom of about its own size. Reducing these figures is
+   measured, with headroom of about its own size. The structure check's file
+   multiple is five, not one (owner decision 7a, 2026-10-15): a clean file
+   peaks at about three times its size, but pdf.js repairs a PDF whose
+   `startxref` is off by a few bytes by re-indexing the whole file, holding
+   about five times its size (measured above: 55 MB peaks at 394 MB, 70 MB at
+   465 MB, 96 MB at 589 MB). With one times the file, such a file near the
+   upload limit was killed and refused; the renderer keeps one times the file
+   because it opens a page, not the whole index. The fixed allowance stays
+   320 MB, so the hostile-file stops above (killed at 256 MB, and in about
+   1.5 s at 320 MB for a 128 MB bomb) are measured on small files and
+   unchanged; the cost is that a file near the limit may use up to about
+   five times its size before it is stopped. Reducing these figures is
    #1436 (v0.4). A poll costs 0.4-6 ms on a loaded host; overshoot past the
    ceiling was 3-18 MB at 150-190 MB/s of growth. A failed read is skipped
    and the clock still applies.
@@ -257,7 +272,7 @@ Owner decisions 5a and 6a (2026-10-15): the ceilings below, shipped in v0.3.
    a sandbox self-check: a trivial child started through the same wrapper
    reports its `VmRSS` and data limit from `/proc`, and boot warns if
    `/bin/sh` is missing, `ulimit -d` did not apply or `/proc` is unreadable.
-4. **`RLIMIT_DATA` at the ceiling plus 1.5 GB** (and the file) is a
+4. **`RLIMIT_DATA` at the ceiling plus 1.5 GB** (and the file multiple above) is a
    kernel-enforced backstop, set by `ulimit -d` in the wrapper: `VmData` sits
    about 1.05 GB above RSS (V8's untouched reservations), so it bites about
    0.5 GB above the watchdog, at allocation time, even if the server's event
