@@ -81,8 +81,9 @@
   /* THE POCKET (#1120): below the CON-10 switch the way back and the orb
      sit in the retracting top chrome, and the orb opens the hatch, a list
      sheet, instead of the desk card. Both are in the page and CSS picks,
-     like home's two dialects. Administration in the hatch is for instance
-     admins only (the root layout's load says who is one). */
+     like home's two dialects. Administration, in the hatch and in the desk
+     menu alike (#1440), is for instance admins only (the root layout's load
+     says who is one). */
   let hatchOpen = $state(false);
   const isAdmin = $derived(Boolean(page.data?.isAdmin));
 
@@ -178,10 +179,12 @@
   <div class="who"><b>{user?.displayName ?? ""}</b><span>{line}</span></div>
   <nav>
     {#each NAV as [key, label, href] (key)}
+      {#if key !== "administration" || isAdmin}
       <a href={href === "/inbox" ? resolve("/inbox")
           : href === "/settings" ? resolve("/settings")
           : href === "/about" ? resolve("/about")
           : resolve("/administration")} aria-current={key === current ? "page" : undefined}>{label}</a>
+      {/if}
     {/each}
   </nav>
   <div class="swatches" role="group" aria-label="Theme">
