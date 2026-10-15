@@ -10,11 +10,12 @@ resetDatabaseBetweenSpecFiles();
 /**
  * WEB6 (#1316): another household's name is drawn in the home sky as text,
  * never as markup. The household is named with an image tag whose onerror
- * would set window.__xss; none of it may become an element or run, on the
- * desk sky or in the phone's "Other skies" list.
+ * would set window.__XSS (the label is upper-cased, so the handler is
+ * written to survive that); none of it may become an element or run, on
+ * the desk sky or in the phone's "Other skies" list.
  */
 
-const NAME = "<img src=x onerror=window.__xss=1>";
+const NAME = "<img src=x onerror=__xss=1>";
 const households = householdRegister();
 let seeded = false;
 
@@ -81,7 +82,7 @@ test("desk: the name is label text in the sky, not an element", async ({ page })
 
   await expect(page.locator(".minisys", { hasText: NAME.toUpperCase() })).toBeVisible();
   await expect(page.locator("#hero img")).toHaveCount(0);
-  expect(await page.evaluate(() => (window as unknown as { __xss?: unknown }).__xss)).toBeUndefined();
+  expect(await page.evaluate(() => (window as unknown as { __XSS?: unknown }).__XSS)).toBeUndefined();
 });
 
 test("phone: the name is listed as text under other skies", async ({ page }) => {

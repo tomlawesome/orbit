@@ -12,7 +12,8 @@ import { mountHome } from "../../web/src/routes/home/home.behaviour.js";
  */
 
 const W = 480, H = 480;
-const PAYLOAD = "<img src=x onerror=window.__xss=1>";
+// The handler survives upper-casing: `__XSS=1` still sets a global (#1316 fix review).
+const PAYLOAD = "<img src=x onerror=__xss=1>";
 const GALAXY = {
   "hh-me": { name: "Household Me", pos: [-500, -40], planets: [] },
   "hh-other": { name: PAYLOAD, pos: [-500, -15], planets: [] },
@@ -32,11 +33,11 @@ describe("WEB6: a household's name is shown as text in the home sky", () => {
       const cards = document.querySelectorAll("#hero .minisys");
       expect(cards).toHaveLength(1);
       const card = cards[0];
-      expect(card.querySelector("text").textContent).toBe("<IMG SRC=X ONERROR=WINDOW.__XSS=1>");
+      expect(card.querySelector("text").textContent).toBe("<IMG SRC=X ONERROR=__XSS=1>");
       expect(card.getAttribute("aria-label")).toBe(`Fly to ${PAYLOAD}`);
 
       expect(document.querySelector("img")).toBeNull();
-      expect(window.__xss).toBeUndefined();
+      expect(window.__XSS).toBeUndefined();
 
       const svg = card.querySelector("svg");
       expect(svg).toBeTruthy();
