@@ -534,10 +534,14 @@ describe("#1439: Chrome exports its descent as descendFrom", () => {
     await vi.waitFor(
       () => {
         if (gateIn() === null) throw new Error("the Sign back in gate never appeared");
+        /* The gate is drawn as the descent starts; the landmark lands on the
+           flight's next beat, so wait for both rather than racing the timer. */
+        if (document.querySelector("#dusk")?.getAttribute("data-landmark") !== "true") {
+          throw new Error("the goodbye never reached its landmark");
+        }
       },
       { timeout: 5000, interval: 10 },
     );
-    expect(document.querySelector("#dusk")?.getAttribute("data-landmark")).toBe("true");
     expect(gateIn()?.getAttribute("href")).toBe("/");
     expect(win.addresses).toContain("/logout");
     expect(win.navigations).toEqual([]);
