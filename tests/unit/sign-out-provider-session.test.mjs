@@ -188,9 +188,6 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-/** A beat for timers and promise chains (the farewell lands on a timer). */
-const settle = () => new Promise((done) => setTimeout(done, 60));
-
 /**
  * Recording stand-ins for window.location and window.history, installed as
  * the globals the components read.
@@ -421,7 +418,17 @@ describe("#1316 9a: the no-flight fallback also ends the provider's session (Chr
     const button = /** @type {HTMLButtonElement} */ (document.querySelector("button.signout"));
     expect(button).not.toBeNull();
     button.click();
-    await settle();
+    // The flight is imported lazily and fails; the fallback navigates after
+    // that. Wait for the navigation itself, not a fixed beat: on a loaded
+    // host the import takes longer than any short delay (#1409).
+    await vi.waitFor(
+      () => {
+        if (win.navigations.length === 0) {
+          throw new Error("the no-flight fallback made no navigation within 2 s of pressing sign out");
+        }
+      },
+      { timeout: 2000, interval: 10 },
+    );
     return win;
   }
 
