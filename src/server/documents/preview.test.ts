@@ -468,9 +468,12 @@ describe("renderDocumentPagePreview", () => {
       }
       peakRss = Math.max(peakRss, process.memoryUsage().rss);
 
-      expect(Date.now() - started).toBeLessThan(4_000);
-      // A thread busy decoding 128 MB would tick a handful of times, not ten.
-      expect(ticks).toBeGreaterThanOrEqual(10);
+      const elapsed = Date.now() - started;
+      expect(elapsed).toBeLessThan(4_000);
+      // Free thread: the 50 ms timer keeps ticking for as long as the call
+      // takes. A thread busy decoding 128 MB ticks a handful of times at
+      // most. Proportional, so a fast refusal is not failed for being fast.
+      expect(ticks).toBeGreaterThanOrEqual(Math.floor((elapsed / 50) * 0.6));
       expect(peakRss - rssBefore).toBeLessThan(250 * MB);
     }, 15_000);
 
