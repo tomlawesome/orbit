@@ -1589,7 +1589,7 @@ test.describe("#1425 review round 1", () => {
         await expect(laneOf(page)).toContainText("replacement-after-refusal.pdf");
 
         // The loud note goes with the file it was about, and Add is released.
-        await expect(note).not.toContainText(REASON);
+        await expect(note.filter({ hasText: REASON })).toHaveCount(0);
         await expect(page.locator("body")).not.toContainText(REASON);
         await expect(add).not.toHaveAttribute("aria-disabled", "true", { timeout: 20_000 });
         expect(posts()).toBe(1);
@@ -1617,7 +1617,7 @@ test.describe("#1425 review round 1", () => {
 
       await laneOf(page).getByRole("button", { name: /remove it|not this one/ }).click();
 
-      await expect(note).not.toContainText(REASON);
+      await expect(note.filter({ hasText: REASON })).toHaveCount(0);
       await expect(page.locator("body")).not.toContainText(REASON);
       await expect(add).not.toHaveAttribute("aria-disabled", "true", { timeout: 10_000 });
       expect(posts()).toBe(1);
