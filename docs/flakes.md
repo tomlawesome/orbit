@@ -366,7 +366,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke_webkit (job 36100), desktop-webkit · the /create announcement check (now :386) failed its first attempt, passed on the in-job retry. Still #1313.
 - 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke_webkit_mobile (job 36101), mobile-webkit · the /create announcement check (now :386) failed its first attempt, passed on the in-job retry. Still #1313.
 - 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / smoke (job 36176) · "a save on /create that cannot reach Orbit" announce and focus cases on desktop-chromium and mobile-chromium failed once each and passed on retry (4 flaky); pipeline 2588 / smoke_webkit (job 36178), the focus case flaky on desktop-webkit.
-- 2026-10-15 · 34384732 (v0.3 final batch, !1067) · pipeline 2624 / smoke (job 36324), desktop-chromium and mobile-chromium, and smoke_firefox (job 36325), smoke_webkit (job 36326) · the :385 announcement and :402 focus cases for /create, /inbox and the household deletion failed their first attempts and passed on the in-job retry (4 flaky in smoke). Still #1313.
+- 2026-10-15 · 34384732 (v0.3 final batch, !1067) · pipeline 2624 / smoke (job 36324), desktop-chromium and mobile-chromium · the /create announcement check (:385) and focus check (:402) failed their first attempts and passed on the in-job retry (the job's 4 flaky). Still #1313.
 
 ## settings-notification-history.spec.ts:137 "a member sees their own last sent reminders, plainly, on both dialects" — desktop-firefox
 
@@ -409,7 +409,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · the same `#1262: the menu is still open after sign-out started` at line 198.
 - 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36018, the second re-run; the job passed) · `#1262: the descent did not keep time`, 13224 ms against 9000; passed on the in-job retry.
 - 2026-10-13 · 7906d9f4 (#1316 audit fixes; no change to the sign-out descent, its spec, or `web/src/lib/flight`) · local `scripts/test-e2e-local.sh --project mobile-webkit`, no retries · the same `#1262: the menu is still open after sign-out started` at line 198. Sixth sighting, the first outside CI (#1367).
-- 2026-10-15 · 34384732 (v0.3 final batch, !1067; no change to the sign-out descent, its spec or `web/src/lib/flight` since 15c029b7) · pipeline 2624 / smoke_webkit (job 36326), **desktop-webkit**, line 193 · `#1262: the menu is still open after sign-out started`, first attempt and in-job retry. Still #1367.
+- 2026-10-15 · 34384732 (v0.3 final batch, !1067; no change to the sign-out descent, its spec or `web/src/lib/flight` since 15c029b7) · pipeline 2624 / smoke_webkit (job 36326), **desktop-webkit**, line 193 · first attempt: `#1262: the menu is still open after sign-out started` (spec :216); in-job retry: the `Sign back in` link not found after /logout (spec :227). Still #1367.
 
 ## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on desktop-webkit
 
