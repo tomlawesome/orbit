@@ -303,6 +303,7 @@ page's URL at failure, which this one has to infer.
 - 2026-10-13 · a76e6d44 (door branch; nothing in the ring's motion since the fifth sighting) · local `pnpm fidelity`, run while the full e2e suite loaded the host · "a jump between frames at 294ms": 28.9 against the < 20 bound, the run's only failure (488 passed). Green on a rerun of door-station.spec.js alone on the same code. Sixth sighting, still #1306.
 - 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / fidelity (job 36171) · `a jump between frames at 263ms` (spec now at line 130); 174 other fidelity tests and all 488 pocket measurements passed. Seventh sighting.
 - 2026-10-14 · 00987a9d (door branch, !1066) · pipeline 2590 / fidelity retry (job 36215) · `a jump between frames at 402ms`; 174 others and all 488 pocket measurements passed. Eighth sighting. Owner merged !1066 with this red (12b).
+- 2026-10-15 · 0a2cec29 (dev, !1067 merged) · dev pipeline 2628 / fidelity (job 36373) · `a jump between frames at 303ms`: 23.19 against the < 20 bound, the job's only failure (174 passed, all 488 pocket measurements passed). Still #1306.
 
 ## tour-pocket-webkit.spec.js "plays end to end at 430x932 under normal motion" — pill moving between places (#1174)
 
@@ -339,6 +340,10 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-07 · the same batch plus its pipeline fixes, uncommitted · local `test-e2e-local.sh`, desktop-chromium · the same two tests, the same shape: failed once, passed on retry. Third sighting: filed as #1307.
 - 2026-10-07 · 68040844 (!1043; the repair-journeys fixture only) · pipeline 2236 / smoke (job 33177, desktop-chromium) · "/household/[id] in the clouds pack" and "… in the dawn pack" failed once each and passed on retry, as before. Still #1307.
 
+## v19-layout-and-themes.spec.ts:288, /settings/mail axe check in the retrograde pack — desktop-firefox
+
+- 2026-10-15 · 0a2cec29 (dev, !1067 merged) · dev pipeline 2628 / smoke_firefox (job 36379) · "/settings/mail in the retrograde pack has no WCAG A/AA violations" failed its first attempt and passed on the in-job retry. The same parametrised axe check as #1307, on another screen. First sighting.
+
 ## v19-arrival.spec.ts:290 — the newcomer never reaches /home — desktop-webkit
 
 - 2026-10-04 · ba984c1b (!1017, the WebKit suite's first full run) · pipeline 2099 / smoke_webkit (job on the desktop-webkit project) · `toHaveURL(/\/home/)` gave up after three polls with no "Timeout" line, so the attempt ended on an error rather than the 30 s wait; the body kept class `instrument`. The in-job retry at line 164 failed too, because the first attempt had already created the newcomer's household (the spec header warns of exactly this; its screenshot shows /home). Seven local runs on desktop-webkit in the pinned Playwright image (alone, under the CI cpu cap, and with two workers beside it) all passed. First sighting; an issue on the third.
@@ -368,6 +373,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke_webkit_mobile (job 36101), mobile-webkit · the /create announcement check (now :386) failed its first attempt, passed on the in-job retry. Still #1313.
 - 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / smoke (job 36176) · "a save on /create that cannot reach Orbit" announce and focus cases on desktop-chromium and mobile-chromium failed once each and passed on retry (4 flaky); pipeline 2588 / smoke_webkit (job 36178), the focus case flaky on desktop-webkit.
 - 2026-10-15 · 34384732 (v0.3 final batch, !1067) · pipeline 2624 / smoke (job 36324), desktop-chromium and mobile-chromium · the /create announcement check (:385) and focus check (:402) failed their first attempts and passed on the in-job retry (the job's 4 flaky). Still #1313.
+- 2026-10-15 · 0a2cec29 (dev, !1067 merged) · dev pipeline 2628 / smoke_firefox (job 36379), desktop-firefox · the /create announcement check (:385) and focus check (:402) failed their first attempts and passed on the in-job retry (two of the job's 3 flaky). Still #1313.
 
 ## settings-notification-history.spec.ts:137 "a member sees their own last sent reminders, plainly, on both dialects" — desktop-firefox
 
@@ -386,6 +392,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-08 · 687cb0f4 (door batch, !1044; its home changes are the flight and the menu, not the suggestion rows or their drawer) · pipeline 2251 / smoke_firefox (job 33370), desktop-firefox · first attempt: the row was shown and clicked, and the drawer (`.itemview.suggestview`) never appeared in 5 s; the snapshot still says "Inbox — 1 waiting". In-job retry: the drawer opened and the approval was sent (`POST /api/reviewed-intake/approve` 200, then home re-read the workspace and the inbox), yet `.item.suggest` stayed at 1 for 30 s; the retry's mail was a second one, so the first attempt's unapproved receipt may be the row that stayed (the trace keeps no response bodies to tell). Passed in pipeline 2248 on the same home code, and in dev pipelines 2244, 2235 and 2230. Second sighting.
 - 2026-10-09 · 40850119 · dev push pipeline 2297 / smoke_firefox (job 33780) · `.itemview.suggestview` not visible after the row click (line 352), on the first attempt and the retry, so the job failed. Passed on desktop-firefox in pipelines 2290 and 2313.
 - 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / smoke (job 36176), desktop-chromium · `apiRequestContext.get: socket hang up` in `waitForReceipts`, first attempt and retry; the job failed. Fourth sighting; #1415 filed.
+- 2026-10-15 · 0a2cec29 (dev, !1067 merged) · dev pipeline 2628 / smoke_firefox (job 36379), desktop-firefox · the test (now :238) failed its first attempt and the retry, the job's only failure (252 passed, 3 flaky). Still #1415.
 
 ## web/tests/fidelity screens.spec.js "household"
 
