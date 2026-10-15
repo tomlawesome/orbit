@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import { documents, items } from "@/db/schema";
+import { documents, items, memberships, sections } from "@/db/schema";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
@@ -244,6 +244,95 @@ describe("item.upsert with documentIds binds staged documents in the same transa
     it("with the first file and the new one is refused the same way", async () => {
       const ran = await landedFirst("bind-retry-added-file");
       await expectRefusedAndUntouched(ran, [ran.first.id, ran.second.id]);
+    });
+  });
+});
+
+/* #1316: the pocket form keeps its draft id when the member switches household
+   after a send whose answer was lost. The item already exists in the first
+   household, and items.id is a global key, so the send under the second
+   household must be refused as item_conflict (409; the dry run answers the
+   same refusal) rather than hit the key and answer 500. */
+describe("a create sent again under another household (the member switched household after a lost answer)", () => {
+  async function landedUnderFirst(label: string) {
+    const fixture = await createIntegrationFixture(label);
+    const owner = await fixture.session("owner");
+    await getDb().insert(memberships).values({
+      householdId: fixture.secondHousehold.id, userId: fixture.users.owner.id, role: "member",
+    });
+    const [secondSection] = await getDb().select({ id: sections.id }).from(sections)
+      .where(eq(sections.householdId, fixture.secondHousehold.id));
+    expect(secondSection, "the fixture makes a section in the second household").toBeDefined();
+    const itemId = randomUUID();
+    expect((await send(owner, create(fixture, itemId))).status).toBe(200);
+    return { fixture, owner, itemId, secondSectionId: secondSection.id };
+  }
+
+  function underSecond(ran: Awaited<ReturnType<typeof landedUnderFirst>>, documentIds?: string[], extra: Record<string, unknown> = {}) {
+    const first = create(ran.fixture, ran.itemId, documentIds, extra);
+    return {
+      ...first,
+      householdId: ran.fixture.secondHousehold.id,
+      item: { ...(first.item as Record<string, unknown>), sectionId: ran.secondSectionId },
+    };
+  }
+
+  async function expectOnlyInFirst(ran: Awaited<ReturnType<typeof landedUnderFirst>>) {
+    const rows = await getDb().select({ householdId: items.householdId, version: items.version })
+      .from(items).where(eq(items.id, ran.itemId));
+    expect(rows, "one items row, still in the first household at version 1").toEqual([
+      { householdId: ran.fixture.household.id, version: 1 },
+    ]);
+  }
+
+  it("is refused as item_conflict, and the item stays in the first household", async () => {
+    const ran = await landedUnderFirst("other-household-resend");
+    const again = await send(ran.owner, underSecond(ran));
+    const body = await again.json();
+    expect(body.error).toMatchObject({ code: "item_conflict" });
+    expect(again.status).toBe(409);
+    await expectOnlyInFirst(ran);
+  });
+
+  it("with a staged file in the second household is the same refusal, and the file stays staged", async () => {
+    const ran = await landedUnderFirst("other-household-resend-file");
+    const staged = await stagedDocument(ran.fixture.secondHousehold.id, ran.fixture.users.owner.id, ran.itemId);
+    const before = await documentRow(staged.id);
+    const again = await send(ran.owner, underSecond(ran, [staged.id]));
+    const body = await again.json();
+    expect(body.error).toMatchObject({ code: "item_conflict" });
+    expect(again.status).toBe(409);
+    const after = await documentRow(staged.id);
+    expect(after).toEqual(before);
+    expect(after?.itemId).toBeNull();
+    expect(after?.deleteAfter?.getTime()).toBe(staged.deleteAfter.getTime());
+    await expectOnlyInFirst(ran);
+  });
+
+  it("in the dry run gives the same refusal and writes nothing", async () => {
+    const ran = await landedUnderFirst("other-household-resend-dry");
+    const dry = await send(ran.owner, underSecond(ran, undefined, { dryRun: true }));
+    // A dry run is a question: it answers 200 with the real call's refusal.
+    expect(dry.status).toBe(200);
+    expect((await dry.json()).refusal).toMatchObject({ code: "item_conflict" });
+    await expectOnlyInFirst(ran);
+  });
+
+  describe("guards", () => {
+    it("a same-household resend is still version_required", async () => {
+      const ran = await landedUnderFirst("other-household-guard-same");
+      const again = await send(ran.owner, create(ran.fixture, ran.itemId));
+      expect((await again.json()).error).toMatchObject({ code: "version_required" });
+      await expectOnlyInFirst(ran);
+    });
+
+    it("a create under the second household with a brand-new id lands", async () => {
+      const ran = await landedUnderFirst("other-household-guard-new");
+      const fresh = randomUUID();
+      const response = await send(ran.owner, underSecond({ ...ran, itemId: fresh }));
+      expect(response.status).toBe(200);
+      const [row] = await getDb().select({ householdId: items.householdId }).from(items).where(eq(items.id, fresh));
+      expect(row?.householdId).toBe(ran.fixture.secondHousehold.id);
     });
   });
 });

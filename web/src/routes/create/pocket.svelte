@@ -54,11 +54,23 @@
   let saved = $state(false);
   /** @type {string | null} */
   let problem = $state(null);
-  /** Minted once for this draft, not per save attempt (#1151 W1-R3): a retry
-      after a dropped response reuses it, so the server's upsert-by-id
-      idempotency absorbs the retry instead of creating a second item. */
-  const draftId = crypto.randomUUID();
-  /** Minted once per file picked, the way `draftId` is per draft (#1245),
+  /** Minted once per household chosen, not per save attempt (#1151 W1-R3):
+      a retry under the same household reuses it, so the server's upsert-by-id
+      idempotency absorbs the retry instead of creating a second item, while
+      a different household is a different request and gets its own id. */
+  /** A plain record, not reactive state: it is written while the dry run reads it.
+      @type {Record<string, string>} */
+  const draftIds = {};
+  /** @param {string} householdId */
+  function draftIdOf(householdId) {
+    let id = draftIds[householdId];
+    if (!id) {
+      id = crypto.randomUUID();
+      draftIds[householdId] = id;
+    }
+    return id;
+  }
+  /** Minted once per file picked, the way `draftIdOf` is per household (#1245),
       as the desk's takeFile does: a retry after a lost answer re-sends the
       same id with the same bytes, so the documents route hands back the copy
       it already holds instead of storing a second. */
@@ -224,7 +236,7 @@
   function commandNow() {
     const household = households.find((one) => one.id === entry.householdId);
     return household
-      ? createCommandOf($state.snapshot(entry), { householdId: household.id, currency: household.currency ?? "GBP", id: draftId })
+      ? createCommandOf($state.snapshot(entry), { householdId: household.id, currency: household.currency ?? "GBP", id: draftIdOf(household.id) })
       : null;
   }
   const dryRun = dryRunner({ onanswer: (answer) => { refusal = answer; }, check: checkDraftCommand });
@@ -281,7 +293,7 @@
          server hands back what it already holds. */
       if (held) {
         staging = true;
-        await stageDocument(household.id, held, documentIdOf(held), draftId).catch(async (error) => {
+        await stageDocument(household.id, held, documentIdOf(held), draftIdOf(household.id)).catch(async (error) => {
           /* The sweep retired the file once staged under this id, and the
              server will not take it under that id again: stage the same
              file once more under a fresh id, within this Add. A second
@@ -289,7 +301,7 @@
              server already holds it under another household. */
           if (!idRefused(error)) throw error;
           documentIds.delete(held);
-          await stageDocument(household.id, held, documentIdOf(held), draftId);
+          await stageDocument(household.id, held, documentIdOf(held), draftIdOf(household.id));
         });
         staging = false;
       }
@@ -307,7 +319,7 @@
       wake(`added to your orbit · ${entry.name.trim()}`);
       /* #1319 (§34): the new item, its drawer open on home, as the desk's
          create lands (create.behaviour.js). */
-      await goto(resolve(`/home?item=${encodeURIComponent(draftId)}`));
+      await goto(resolve(`/home?item=${encodeURIComponent(draftIdOf(household.id))}`));
     } catch (error) {
       /* Loud (#1058): the reason stays above the bar until the next attempt,
          the button comes back, and nothing typed is lost. No wake. Nothing

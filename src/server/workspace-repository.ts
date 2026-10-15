@@ -703,6 +703,7 @@ async function runWorkspaceCommand(
         .where(and(eq(sections.id, sectionId), eq(sections.householdId, householdId))).limit(1);
       if (!ownedSection) throw new AppError("section_not_found", "Choose a section from this household", 422);
       const [existing] = await transaction.select({
+        householdId: items.householdId,
         version: items.version,
         subtype: items.subtype,
         status: items.status,
@@ -710,7 +711,10 @@ async function runWorkspaceCommand(
         serviceDate: items.serviceDate,
         expiryDate: items.expiryDate,
       }).from(items)
-        .where(and(eq(items.id, itemId), eq(items.householdId, householdId))).limit(1);
+        .where(eq(items.id, itemId)).limit(1);
+      // A client-minted id names one request; one that already names an item
+      // in another household is refused, not inserted into a primary-key collision.
+      if (existing && existing.householdId !== householdId) throw new AppError("item_conflict", "That item identity is already in use", 409);
       // The schema tolerates an empty title only so a damaged one can be read
       // back (ADR-0024 decision 5); a write still has to carry a real one, and
       // a client that sends `metadataStatus` to slip past that check is

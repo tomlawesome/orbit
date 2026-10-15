@@ -47,9 +47,12 @@ describe("#1151 W1-R3: the pocket create form mints one id per draft", () => {
   it("mints the id once, outside the save function", () => {
     const saveFn = pocket.slice(pocket.indexOf("async function save()"), pocket.indexOf("/* ---- leaving"));
     expect(saveFn).not.toMatch(/crypto\.randomUUID/u);
-    /* the save sends, attaches to and lands on the one minted id */
-    expect(saveFn).toMatch(/\bdraftId\b/u);
-    expect(pocket.indexOf("const draftId = crypto.randomUUID();"))
+    /* the save sends, attaches to and lands on the one id minted for the
+       household chosen (#1316: another household is another request) */
+    expect(saveFn).toMatch(/\bdraftIdOf\(household\.id\)/u);
+    const minter = pocket.slice(pocket.indexOf("function draftIdOf"), pocket.indexOf("async function save()"));
+    expect(minter).toMatch(/crypto\.randomUUID\(\)/u);
+    expect(pocket.indexOf("function draftIdOf"))
       .toBeLessThan(pocket.indexOf("async function save()"));
   });
 });

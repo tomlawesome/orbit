@@ -67,6 +67,8 @@ let conflictOnFirstId = false;
 /** The document id the conflict answer was given for. */
 let conflictId = null;
 const CONFLICT_WORDS = "That document identity is already in use";
+/** workspace.js UNREACHED_WORDS: what the form shows when the answer never arrived. */
+const UNREACHED_WORDS = "not saved — couldn't reach Orbit; check the connection and try again";
 
 function stubFetch() {
   calls = [];
@@ -462,5 +464,107 @@ describe("#1316: the pocket form when the stage answers 409 document_conflict fo
     expect(commands[0].body.documentIds, "bound to the second id").toEqual([secondId]);
     expect(form.note(), "no conflict wording left on screen").not.toMatch(/already in use/iu);
     expect(goto, "the form reports added").toHaveBeenCalledTimes(1);
+  });
+});
+
+/* ---- #1316: the household changes after a send whose answer was lost --------
+   The pocket mints one draft id for the visit. A save under household A whose
+   answer was lost may have landed; a member of two households then taps B and
+   presses Add. items.id is a global key, so the same item id under B is refused
+   (409 "item_conflict") on every press until a reload. The pocket must mint a
+   new item id when the household it saves under is not the one the earlier send
+   went to, and an Add under the SAME household must keep the id (the retry
+   stays idempotent). The desk fixes the household at open and needs nothing. */
+describe("#1316: the pocket form when the household changes after a send whose answer was lost", () => {
+  const awayHousehold = {
+    id: "hh-2", name: "Away", currency: "GBP", items: [],
+    sections: [{ id: "s-away", name: "Away", accent: "a", visible: true }],
+  };
+  /** Staged document id -> the household its stage URL named. */
+  let stagedUnder;
+  /** Every item id sent, with the household it went to (the first send is recorded before it is lost). */
+  let sentUnder;
+
+  beforeEach(() => {
+    stagedUnder = new Map();
+    sentUnder = [];
+    let firstCommandSeen = false;
+    const twoHouseholds = { ...workspace, households: [...workspace.households, awayHousehold] };
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      const href = String(url);
+      if (href.includes("/api/auth/session")) return json({ user: { id: "u1" }, csrfToken: "t1" });
+      if (href.endsWith("/api/workspace") && !init?.method) return json({ workspace: twoHouseholds });
+      if (href.includes("/api/workspace/commands") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body));
+        if (body.dryRun) return json({});
+        calls.push({ kind: "command", url: href, init, body });
+        const earlier = sentUnder.find((one) => one.itemId === body.item.id);
+        sentUnder.push({ itemId: body.item.id, householdId: body.householdId });
+        if (!firstCommandSeen) {
+          firstCommandSeen = true;
+          throw new TypeError("lost");
+        }
+        if (earlier && earlier.householdId !== body.householdId) {
+          return json({ error: { code: "item_conflict", message: "That item identity is already in use" } }, 409);
+        }
+        if (earlier) return json({ error: { code: "version_required", message: "Reload and try again" } }, 409);
+        return json({ workspace: twoHouseholds });
+      }
+      const stage = /\/households\/([^/]+)\/documents$/u.exec(href);
+      if (stage && init?.method === "POST") {
+        calls.push({ kind: "stage", url: href, init });
+        const id = init.headers["x-orbit-document-id"];
+        const heldUnder = stagedUnder.get(id);
+        if (heldUnder && heldUnder !== stage[1]) {
+          return json({ error: { code: "document_conflict", message: CONFLICT_WORDS } }, 409);
+        }
+        stagedUnder.set(id, stage[1]);
+        return json({ document: { id, displayName: "policy.pdf" } }, 201);
+      }
+      if (href.endsWith("/item-document-inspection") && init?.method === "POST") {
+        return json({ extracted: false, suggestions: [], attachmentDisposition: "attachable", reason: "supported_structure" });
+      }
+      return json({ error: { code: "unavailable", message: "not today" } }, 503);
+    }));
+  });
+
+  it("A: a save under the other household carries a new item id, and the item is opened by it", async () => {
+    const { flushSync } = await import(pathToFileURL(join(svelteSrc, "index-client.js")).href);
+    const form = await fillPocket();
+    await form.pressAdd();
+    expect(words(form.note()), "the lost answer is shown").toContain(words(UNREACHED_WORDS));
+    expect(ofKind("command")).toHaveLength(1);
+    expect(goto).not.toHaveBeenCalled();
+
+    // The member taps the other household, as EntryForm's pickHousehold does: entry and held file stay.
+    entryForm.props.entry = { ...entryForm.props.entry, householdId: "hh-2", sectionId: "s-away" };
+    flushSync();
+    await settle();
+    await form.pressAdd();
+
+    const commands = ofKind("command");
+    expect(commands, "the second press sent a command").toHaveLength(2);
+    expect(commands[1].body.householdId).toBe("hh-2");
+    expect(commands[1].body.item.id, "a new item id, not the one now held in the first household").not.toBe(commands[0].body.item.id);
+    const stages = ofKind("stage");
+    const lastStage = stages[stages.length - 1];
+    expect(lastStage.url, "the file was staged under the other household").toContain("/households/hh-2/documents");
+    expect(commands[1].body.documentIds, "bound to the file staged last").toEqual([header(lastStage, "x-orbit-document-id")]);
+    expect(goto, "the item was saved and opened").toHaveBeenCalledTimes(1);
+    expect(String(goto.mock.calls[0][0])).toMatch(new RegExp(`\\?item=${commands[1].body.item.id}$`, "u"));
+  });
+
+  it("B (guard): another Add under the same household keeps the item id", async () => {
+    const form = await fillPocket();
+    await form.pressAdd();
+    expect(words(form.note())).toContain(words(UNREACHED_WORDS));
+    expect(goto).not.toHaveBeenCalled();
+
+    await form.pressAdd();
+    const commands = ofKind("command");
+    expect(commands).toHaveLength(2);
+    expect(commands[1].body.householdId).toBe("hh-1");
+    expect(commands[1].body.item.id, "the retry is idempotent").toBe(commands[0].body.item.id);
+    expect(goto).toHaveBeenCalledTimes(1);
   });
 });

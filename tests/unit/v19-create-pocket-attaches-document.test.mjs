@@ -37,7 +37,7 @@ describe("#1316: the pocket's create form stages its document, then sends one co
     expect(pocket).not.toMatch(/attachItemDocument/u);
     // The file is taken at submit (`held`), so a read refused mid-save cannot drop it.
     expect(saveFn).toMatch(/const held = attachment;/u);
-    expect(saveFn).toMatch(/stageDocument\(household\.id, held, documentIdOf\(held\), draftId\)/u);
+    expect(saveFn).toMatch(/stageDocument\(household\.id, held, documentIdOf\(held\), draftIdOf\(household\.id\)\)/u);
   });
 
   it("stages before the command and counts the entry as saved only once the command lands", () => {
