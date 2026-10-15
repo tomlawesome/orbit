@@ -1,56 +1,52 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   classicChainPdf,
+  syntheticPdfWithPages,
   xrefStmChainPdf,
   xrefStreamPdf,
 } from "../../../tests/support/generated-pdf-documents";
 import { syntheticPdf } from "../../../tests/support/synthetic-documents";
-
-const mocks = vi.hoisted(() => ({ getDocument: vi.fn() }));
-
-vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({
-  getDocument: mocks.getDocument,
-  VerbosityLevel: { ERRORS: 0 },
-}));
-
 import {
-  classifyDocumentStructure,
-  PDF_STRUCTURE_INSPECTION_BUDGET_MS,
-  PDF_STRUCTURE_MAX_PAGES,
-} from "./validation";
+  pdfStructureSandboxInFlightForTests,
+  setPdfStructureInspectorForTests,
+  setPdfStructureSandboxLimitsForTests,
+} from "./pdf-structure-sandbox";
+import { classifyDocumentStructure } from "./validation";
+
+/**
+ * The parser now runs in a worker thread (pdf-structure-sandbox), so a module
+ * mock can no longer see it. "Was the parser reached" is observed instead
+ * through the sandbox's test inspector: a spy that stands in for the sandbox
+ * call and resolves "supported_structure".
+ */
+let inspector = vi.fn();
+
+function mockParserReachable(): void {
+  inspector = vi.fn().mockResolvedValue("supported_structure");
+  setPdfStructureInspectorForTests(inspector);
+}
 
 describe("bounded PDF inspection", () => {
   afterEach(() => {
-    mocks.getDocument.mockReset();
-    vi.useRealTimers();
+    setPdfStructureInspectorForTests(undefined);
+    setPdfStructureSandboxLimitsForTests(undefined);
+    inspector = vi.fn();
   });
 
   it("maps PDFs over the page cap to unsupported_structure", async () => {
-    const destroy = vi.fn().mockResolvedValue(undefined);
-    mocks.getDocument.mockReturnValue({
-      promise: Promise.resolve({ numPages: PDF_STRUCTURE_MAX_PAGES + 1 }),
-      destroy,
-    });
+    await expect(classifyDocumentStructure(syntheticPdfWithPages(1001), "application/pdf"))
+      .resolves.toBe("unsupported_structure");
+    expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+  });
+
+  it("maps an expired sandbox wall-clock budget to unsupported_structure and leaves no worker running", async () => {
+    setPdfStructureSandboxLimitsForTests({ wallMs: 1 });
 
     await expect(classifyDocumentStructure(syntheticPdf(), "application/pdf"))
       .resolves.toBe("unsupported_structure");
-    expect(destroy).toHaveBeenCalledOnce();
+    expect(pdfStructureSandboxInFlightForTests()).toBe(0);
   });
 
-  it("maps an asynchronous parser budget expiry to unsupported_structure and destroys the task", async () => {
-    vi.useFakeTimers();
-    const destroy = vi.fn().mockResolvedValue(undefined);
-    mocks.getDocument.mockReturnValue({
-      promise: new Promise(() => undefined),
-      destroy,
-    });
-
-    const result = classifyDocumentStructure(syntheticPdf(), "application/pdf");
-    await vi.advanceTimersByTimeAsync(PDF_STRUCTURE_INSPECTION_BUDGET_MS + 1);
-
-    await expect(result).resolves.toBe("unsupported_structure");
-    expect(destroy).toHaveBeenCalledOnce();
-  });
   describe("declared cross-reference entry count", () => {
     function pdfWithXrefStream(dictionaryTail: string): Buffer {
       let value = "%PDF-1.7\n";
@@ -73,19 +69,12 @@ describe("bounded PDF inspection", () => {
       return Buffer.from(value);
     }
 
-    function mockParserReachable(): void {
-      mocks.getDocument.mockReturnValue({
-        promise: Promise.resolve({ numPages: 1, getPage: vi.fn().mockResolvedValue({}) }),
-        destroy: vi.fn().mockResolvedValue(undefined),
-      });
-    }
-
     it("rejects a cross-reference stream whose /Index declares 2,000,000,000 entries without calling the parser", async () => {
       mockParserReachable();
       const bytes = pdfWithXrefStream("/Size 5 /Index [0 2000000000]");
 
       await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");
-      expect(mocks.getDocument).not.toHaveBeenCalled();
+      expect(inspector).not.toHaveBeenCalled();
     });
 
     it("rejects a cross-reference stream with no /Index and /Size 2,000,000,000 without calling the parser", async () => {
@@ -93,7 +82,7 @@ describe("bounded PDF inspection", () => {
       const bytes = pdfWithXrefStream("/Size 2000000000");
 
       await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");
-      expect(mocks.getDocument).not.toHaveBeenCalled();
+      expect(inspector).not.toHaveBeenCalled();
     });
 
     it("rejects a classic xref table whose subsection headers sum to more than 1,250,000 entries without calling the parser", async () => {
@@ -101,7 +90,7 @@ describe("bounded PDF inspection", () => {
       const bytes = pdfWithClassicXref(["0 1000000", "1000000 250001"]);
 
       await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");
-      expect(mocks.getDocument).not.toHaveBeenCalled();
+      expect(inspector).not.toHaveBeenCalled();
     });
 
     it("still reaches the parser for a cross-reference stream declaring a normal /Index [0 12]", async () => {
@@ -109,20 +98,13 @@ describe("bounded PDF inspection", () => {
       const bytes = pdfWithXrefStream("/Size 12 /Index [0 12]");
 
       await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("supported_structure");
-      expect(mocks.getDocument).toHaveBeenCalledOnce();
+      expect(inspector).toHaveBeenCalledOnce();
     });
   });
 
   describe("linearized files, whose parser starts at the first-page cross-reference", () => {
     const pad = (value: number): string => String(value).padStart(10, "0");
     const TINY_XREF = "xref\n0 1\n0000000000 65535 f \n";
-
-    function mockParserReachable(): void {
-      mocks.getDocument.mockReturnValue({
-        promise: Promise.resolve({ numPages: 1, getPage: vi.fn().mockResolvedValue({}) }),
-        destroy: vi.fn().mockResolvedValue(undefined),
-      });
-    }
 
     function linearizationObject(total: number): string {
       return `1 0 obj << /Linearized 1 /L ${pad(total)} /H [0000000100 0000000020] /O 2 /E 100 /N 1 /T 0000000200 >>\nendobj\n`;
@@ -173,7 +155,7 @@ describe("bounded PDF inspection", () => {
 
       await expect(classifyDocumentStructure(linearizedHidingOversizedSection(), "application/pdf"))
         .resolves.toBe("unsupported_structure");
-      expect(mocks.getDocument).not.toHaveBeenCalled();
+      expect(inspector).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -184,7 +166,7 @@ describe("bounded PDF inspection", () => {
       mockParserReachable();
 
       await expect(classifyDocumentStructure(build(), "application/pdf")).resolves.toBe("supported_structure");
-      expect(mocks.getDocument).toHaveBeenCalledOnce();
+      expect(inspector).toHaveBeenCalledOnce();
     });
 
     it("still reaches the parser for a legitimate linearized file with small first-page and /Prev sections", async () => {
@@ -192,7 +174,7 @@ describe("bounded PDF inspection", () => {
 
       await expect(classifyDocumentStructure(linearizedWithSmallSections(), "application/pdf"))
         .resolves.toBe("supported_structure");
-      expect(mocks.getDocument).toHaveBeenCalledOnce();
+      expect(inspector).toHaveBeenCalledOnce();
     });
 
     it.each([
@@ -216,7 +198,7 @@ describe("bounded PDF inspection", () => {
       mockParserReachable();
 
       await expect(classifyDocumentStructure(build(), "application/pdf")).resolves.toBe("supported_structure");
-      expect(mocks.getDocument).toHaveBeenCalledOnce();
+      expect(inspector).toHaveBeenCalledOnce();
     });
   });
 
@@ -238,23 +220,16 @@ describe("bounded PDF inspection", () => {
       return Buffer.from(value);
     }
 
-    function mockParserReachable(): void {
-      mocks.getDocument.mockReturnValue({
-        promise: Promise.resolve({ numPages: 1, getPage: vi.fn().mockResolvedValue({}) }),
-        destroy: vi.fn().mockResolvedValue(undefined),
-      });
-    }
-
     async function expectRefused(bytes: Buffer): Promise<void> {
       mockParserReachable();
       await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");
-      expect(mocks.getDocument).not.toHaveBeenCalled();
+      expect(inspector).not.toHaveBeenCalled();
     }
 
     async function expectReachesParser(bytes: Buffer): Promise<void> {
       mockParserReachable();
       await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("supported_structure");
-      expect(mocks.getDocument).toHaveBeenCalledOnce();
+      expect(inspector).toHaveBeenCalledOnce();
     }
 
     it("A1: refuses an oversized hidden cross-reference stream when startxref points past the end of the file", async () => {

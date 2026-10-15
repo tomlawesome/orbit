@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import { AppError } from "@/lib/app-error";
-import { getDocument, VerbosityLevel } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { type getDocument, VerbosityLevel } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { inspectPdfStructureInSandbox } from "@/server/documents/pdf-structure-sandbox";
 
 export type SupportedDocumentMediaType =
   | "application/pdf"
@@ -16,7 +17,6 @@ const mediaExtensions: Record<SupportedDocumentMediaType, string> = {
 const MAX_IMAGE_DIMENSION = 20_000;
 const MAX_IMAGE_PIXELS = 40_000_000;
 export const PDF_STRUCTURE_MAX_PAGES = 1_000;
-export const PDF_STRUCTURE_INSPECTION_BUDGET_MS = 5_000;
 const MAX_PDF_XREF_ENTRIES = 1_250_000;
 /**
  * The parameters the installed pdf.js's own `getDocument` declares. Options
@@ -108,11 +108,6 @@ async function classifyImageStructure(bytes: Buffer, mediaType: "image/jpeg" | "
   } catch {
     return "unsupported_structure";
   }
-}
-
-/** Whether pdf.js refused because the file needs a password it was not given. */
-function isPasswordRequired(error: unknown): boolean {
-  return (error as { name?: unknown } | null)?.name === "PasswordException";
 }
 
 const PDF_DELIMITERS = new Set([..."()<>[]{}/%"]);
@@ -451,35 +446,14 @@ function hasPdfIndexBudget(bytes: Buffer): boolean {
  * finds page one. Owner-password-only files open (pdf.js decrypts them
  * itself); a file that needs a password to open is refused, because nothing
  * in Orbit could show, read or scan it. Nothing is refused for what the file
- * contains: the renderer runs none of it.
+ * contains: the renderer runs none of it. The open runs in a memory-capped,
+ * killable worker (ADR-0038, pdf-structure-sandbox.ts), never on this thread.
  */
 async function classifyPdfStructure(bytes: Buffer): Promise<DocumentStructureReason> {
-  // A declared entry count pdf.js would loop over on this thread, bounded
-  // before it is opened (ADR-0033 item 3 resource limit).
+  // A cheap first fence: a declared entry count pdf.js would loop over,
+  // refused before any worker starts (ADR-0033 item 3, as amended by ADR-0038).
   if (!hasPdfIndexBudget(bytes)) return "unsupported_structure";
-  let loadingTask: ReturnType<typeof getDocument> | undefined;
-  let budgetTimer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    loadingTask = getDocument({
-      ...PDF_STRUCTURE_PARSER_OPTIONS,
-      data: new Uint8Array(bytes),
-    });
-    const opening = (async (): Promise<DocumentStructureReason> => {
-      const pdf = await loadingTask!.promise;
-      if (pdf.numPages < 1 || pdf.numPages > PDF_STRUCTURE_MAX_PAGES) return "unsupported_structure";
-      await pdf.getPage(1);
-      return "supported_structure";
-    })();
-    const budget = new Promise<never>((_, reject) => {
-      budgetTimer = setTimeout(() => reject(new Error("pdf_inspection_budget_exceeded")), PDF_STRUCTURE_INSPECTION_BUDGET_MS);
-    });
-    return await Promise.race([opening, budget]);
-  } catch (error) {
-    return isPasswordRequired(error) ? "password_required" : "unsupported_structure";
-  } finally {
-    if (budgetTimer) clearTimeout(budgetTimer);
-    if (loadingTask) await loadingTask.destroy().catch(() => undefined);
-  }
+  return inspectPdfStructureInSandbox(bytes);
 }
 
 /** Identifies the deliberately narrow initial document set from magic bytes. */

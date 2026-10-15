@@ -246,6 +246,29 @@ export async function reportKekRotationInProgress(): Promise<void> {
   });
 }
 
+/**
+ * Warns when the PDF structure sandbox's memory cap is not enforced (#1316,
+ * ADR-0038). Node silently ignores a worker's memory limits when the process
+ * runs with a heap flag (`--max-old-space-size` and its kin, on the command
+ * line or in NODE_OPTIONS): the time limit still stops a hostile PDF, but its
+ * memory is no longer capped. A trivial capped worker reports its heap limit.
+ */
+export async function reportPdfSandboxMemoryCap(): Promise<void> {
+  const [{ sandboxMemoryCapEnforced }, { log, operationalDetail }] = await Promise.all([
+    import("@/server/documents/pdf-structure-sandbox"),
+    import("@/lib/logger"),
+  ]);
+  if (await sandboxMemoryCapEnforced()) return;
+  log.warn({
+    event: "document.inspection",
+    state: "degraded",
+    reason: "configuration_invalid",
+    action: "check_configuration",
+    impact: "none",
+    detail: operationalDetail`a Node heap flag such as --max-old-space-size, on the command line or in NODE_OPTIONS, disables the PDF sandbox memory cap; remove it`,
+  });
+}
+
 export async function registerNode(): Promise<void> {
   const [{ validateStartupConfiguration, StartupConfigurationError }, { getDatabaseClient }, { verifyMigrationIntegrity, verifyMigrationJournalComplete, MigrationIntegrityError }, { log, operationalDetail, operationalErrorDetail }, { getConfigurationProblems }] = await Promise.all([
     import("@/lib/startup-config"),
@@ -555,6 +578,10 @@ export async function registerNode(): Promise<void> {
       impact: "document_upload_blocked",
     });
   });
+
+  // Best-effort, like the scanner probe: a heap flag must be visible in the
+  // log, but checking for it never delays or fails start-up.
+  void reportPdfSandboxMemoryCap().catch(() => undefined);
 
   /* The last act of start-up (ADR-0022 §1). On an unclaimed instance this
      prints the claim notice, so it is the last line of `docker logs

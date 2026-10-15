@@ -172,6 +172,7 @@ const run = async () => {
     useWorkerFetch: false,
     verbosity: 0,
   });
+  let nonWhitePixels = 0;
   try {
     const pdf = await renderTask.promise;
     const page = await pdf.getPage(1);
@@ -183,20 +184,41 @@ const run = async () => {
     await page.render({ canvas: renderedCanvas, canvasContext: context, viewport }).promise;
     page.cleanup();
     const pixels = context.getImageData(0, 0, viewport.width, viewport.height).data;
-    let nonWhitePixels = 0;
     for (let offset = 0; offset < pixels.length; offset += 4) {
       if (pixels[offset] !== 255 || pixels[offset + 1] !== 255 || pixels[offset + 2] !== 255) nonWhitePixels += 1;
     }
     if (nonWhitePixels === 0) {
       throw new Error("rendered page has no drawn pixels — text did not reach the canvas");
     }
-    console.log(
-      `Web PDF.js runtime check passed: pdfjs-dist ${runtimeRequire("pdfjs-dist/package.json").version}, ` +
-        `@napi-rs/canvas ${runtimeRequire("@napi-rs/canvas/package.json").version}, ${nonWhitePixels} pixels drawn`,
-    );
   } finally {
     await renderTask.destroy();
   }
+
+  /* The structure check opens PDFs in a worker thread evaluated from source
+     text (ADR-0038), which imports pdf.js by the file URL the built server
+     resolves for it. Nothing above exercises that: a bundle that broke the
+     resolution would refuse every PDF as a "crash" while rendering still
+     worked. So the built server's own classifyDocumentStructure is called,
+     from the chunk that defines it, under whatever name the bundler exported
+     it as. */
+  const structureChunk = javascriptFiles(serverRoot).find((path) =>
+    readFileSync(path, "utf8").includes("function classifyDocumentStructure("));
+  if (!structureChunk) throw new Error("no built server chunk defines classifyDocumentStructure");
+  const exportList = readFileSync(structureChunk, "utf8").match(/^export\s*\{([^}]*)\}/mu)?.[1] ?? "";
+  const exportedAs = exportList.match(/\bclassifyDocumentStructure(?:\s+as\s+([\w$]+))?\s*(?:,|$)/u);
+  if (!exportedAs) throw new Error("the built server does not export classifyDocumentStructure");
+  const classifyDocumentStructure = (await import(pathToFileURL(structureChunk).href))[exportedAs[1] ?? "classifyDocumentStructure"];
+  if (typeof classifyDocumentStructure !== "function") throw new Error("classifyDocumentStructure is not a function in the built server");
+  const structure = await classifyDocumentStructure(syntheticTextPdf("Web structure check"), "application/pdf");
+  if (structure !== "supported_structure") {
+    throw new Error(`the built server's sandboxed structure check answered ${structure} for a valid PDF`);
+  }
+
+  console.log(
+    `Web PDF.js runtime check passed: pdfjs-dist ${runtimeRequire("pdfjs-dist/package.json").version}, ` +
+      `@napi-rs/canvas ${runtimeRequire("@napi-rs/canvas/package.json").version}, ${nonWhitePixels} pixels drawn, ` +
+      "sandboxed structure check supported_structure",
+  );
 };
 
 try {

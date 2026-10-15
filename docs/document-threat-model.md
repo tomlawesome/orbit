@@ -144,10 +144,19 @@ recoverable state.
   PNG, the dimensions declared in the header are read first and must be within
   20,000 pixels a side and 40 million in all, then the preview renderer's own
   decoder must read the image. These limits are Orbit's own because no
-  library sets them. The check is bounded in the same way the renderer is: the
-  timer can abort asynchronous PDF.js work, but cannot pre-empt synchronous
-  JavaScript already executing in Orbit's process. Magic bytes alone are not
-  proof that a file opens.
+  library sets them. Magic bytes alone are not proof that a file opens.
+- The PDF open check runs in a worker thread, not on the server's own thread
+  ([ADR-0038](adr/0038-pdf-structure-check-in-a-sandboxed-worker.md)). A
+  few-kilobyte file can make a PDF parser loop or allocate without end while
+  it reads the cross-reference data, and the cheap pre-parse bound on declared
+  entries modelled the parser's lenient reading and kept missing ways in. So
+  each check gets its own worker with a 128 MB heap cap, a five-second
+  wall-clock limit that kills it, and at most two run at once; running out of
+  memory, timing out or crashing refuses the file as `unsupported_structure`,
+  logs one record with no file detail, and leaves the server answering. The
+  bound stays as a cheap first fence. The memory cap holds only while Node
+  runs without a heap flag (`--max-old-space-size` and its kin, including in
+  `NODE_OPTIONS`); boot warns when one disables it.
 - Orbit does not refuse a PDF for what it contains. JavaScript, open and
   link actions, XFA forms, embedded files, owner-password-only encryption
   ("no editing" certificates) and encrypted object streams are all accepted
@@ -172,9 +181,11 @@ recoverable state.
 - Parser responses must be content-type checked, strictly decoded, and bounded
   before allocation. Redirects and arbitrary request URLs or options are
   rejected. Parser errors expose no provider or document content.
-- PDF.js runs in the Orbit process and is not a separate sandbox; it is the
-  one parser of untrusted bytes there, and it opens only files ClamAV has
-  passed. Keeping it patched is the standing cost. The optional Tika service
+- PDF.js is the one parser of untrusted bytes in the Orbit process, and it
+  opens only files ClamAV has passed. The open check runs it in the worker
+  above; the page renderer still runs it on the server's own thread, after
+  the same bytes passed that check (#1427 moves the renderer into the same
+  worker). Keeping it patched is the standing cost. The optional Tika service
   remains the separately isolated parser/OCR boundary described
   below.
 - The optional Tika service shares only a dedicated internal network with the
