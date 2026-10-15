@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { settleArrival } from "./support/arrival";
-import { gotoCreate } from "./support/keyboard";
+import { gotoCreate, tabTo } from "./support/keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
@@ -1269,4 +1269,376 @@ test.describe(() => {
       }
     });
   }
+});
+
+/**
+ * #1425, review round 1 (owner, 2026-10-15): written from the rulings alone,
+ * before the fixes. Focus after the lane's button is pressed (1); nothing a
+ * preview or a read answers after a refusal changes the lane (2 and 3);
+ * replacing a refused file clears its loud note (6); the pick is announced off
+ * the lane (7). The preview and the read are held with `page.route`, so
+ * WebKit keeps its service worker out, as in the describes above.
+ */
+test.describe("#1425 review round 1", () => {
+  test.use({
+    serviceWorkers: async ({}, use, testInfo) => {
+      await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
+    },
+  });
+
+  const onPhone = () => test.info().project.name.startsWith("mobile");
+  const REASON = "That file is not a PDF or image we can keep";
+  const COULD_NOT_DRAW = /could not turn it into a page/i;
+  const REJECTED = { extracted: false, suggestions: [], attachmentDisposition: "rejected", message: REASON };
+  const ATTACHABLE = { extracted: false, suggestions: [], attachmentDisposition: "attachable" };
+
+  /** The preview route's own 422 for a file it cannot draw. */
+  const previewFailed = {
+    status: 422, contentType: "application/json",
+    body: JSON.stringify({ error: { code: "document_preview_failed", message: "Orbit could not draw that document" } }),
+  };
+
+  /** Everything but the file filled in, so only a refusal can hold Add. */
+  async function fillEntry(page: Page, name: string): Promise<void> {
+    if (onPhone()) {
+      const form = page.getByRole("form", { name: "New entry" });
+      await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
+      await form.getByRole("button", { name: "document", exact: true }).click();
+      await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+    } else {
+      await page.locator("#f-name").fill(name);
+      await page.locator('#types button[data-type="document"]').click();
+      await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+    }
+  }
+
+  /** What a reader sees on the page right now (hidden words do not count). */
+  const seen = (page: Page) => page.evaluate(() => document.body.innerText);
+
+  /**
+   * A refusal cancels the preview request (the browser reports it aborted), so
+   * an answer that arrives later has to be made to arrive: the preview's fetch
+   * is given no abort signal, which is what a preview answering after the
+   * refusal looks like to the page. Only the preview's fetch is touched.
+   */
+  async function previewIgnoresAbort(page: Page): Promise<void> {
+    await page.addInitScript(() => {
+      const real = window.fetch.bind(window);
+      window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (!url.includes("item-document-preview")) return real(input, init);
+        if (input instanceof Request) return real(new Request(input, { signal: null }), init ? { ...init, signal: null } : init);
+        return real(input, init ? { ...init, signal: null } : init);
+      };
+    });
+  }
+
+  const pickerOf = (page: Page) =>
+    onPhone() ? page.getByRole("form", { name: "New entry" }).locator('input[type="file"]') : page.locator('#card input[type="file"]');
+  const laneOf = (page: Page) =>
+    onPhone() ? page.getByRole("form", { name: "New entry" }).locator(".pc-reading") : page.locator("#readcard");
+  const addOf = (page: Page) =>
+    onPhone() ? page.getByRole("button", { name: "Add to orbit" }) : page.locator(".btn-primary");
+
+  /** A file refused at save time: the stage route answers 415 with the reason. */
+  async function refuseEveryStage(page: Page): Promise<() => number> {
+    let posts = 0;
+    await page.route(/\/api\/households\/[^/]+\/documents$/, async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      posts += 1;
+      return route.fulfill({
+        status: 415, contentType: "application/json",
+        body: JSON.stringify({ error: { code: "document_type_unsupported", message: REASON } }),
+      });
+    });
+    return () => posts;
+  }
+
+  /* 1: the lane's button leaves the page, so focus goes to the drop zone. */
+  for (const [title, press] of [
+    ["Tab to it and Enter", "keyboard"],
+    ["a mouse click on it", "mouse"],
+  ] as const) {
+    test(`the desk's lane button, pressed by ${title}, closes the lane and leaves focus on the drop zone`, async ({ page }) => {
+      test.skip(onPhone(), "the desk's #dropzone and lane; the pocket's pill is logged on #1426");
+      test.setTimeout(90_000);
+      await signInWithHousehold(page);
+
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolveHeld) => { release = resolveHeld; });
+      for (const route of ["**/item-document-preview", "**/item-document-inspection"]) {
+        await page.route(route, async (request) => {
+          await held;
+          await request.continue();
+        });
+      }
+
+      try {
+        await gotoCreate(page);
+        await page.locator('#card input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+        await expect(page.locator("#read-head")).toHaveText("Reading your document");
+        const button = page.locator("#readcard").getByRole("button", { name: "not this one" });
+        await expect(button).toBeVisible();
+
+        if (press === "keyboard") {
+          await tabTo(page, { selector: "#rc-drop" }, { screen: "create form, reading lane" });
+          await expect(button).toBeFocused();
+          await page.keyboard.press("Enter");
+        } else {
+          await button.click();
+        }
+
+        await expect(page.locator("body")).not.toHaveClass(/\bdoc\b/);
+        await expect(page.locator("#dropzone")).toBeFocused();
+        expect(await page.evaluate(() => document.activeElement?.id)).toBe("dropzone");
+      } finally {
+        release();
+        await households.sweep(page);
+      }
+    });
+  }
+
+  /* 2 and 3: once a file is refused, nothing a later answer brings changes the lane. */
+  const NO_PAGE_AFTER_REFUSAL = [
+    {
+      title: "(a) a page that lands after the read refused the file is not shown",
+      run: async (page: Page) => {
+        let release: () => void = () => undefined;
+        const held = new Promise<void>((resolveHeld) => { release = resolveHeld; });
+        let previewSent: () => void = () => undefined;
+        const previewAnswered = new Promise<void>((resolveSent) => { previewSent = resolveSent; });
+        await answerInspection(page, REJECTED);
+        await previewIgnoresAbort(page);
+        await page.route("**/item-document-preview", async (route) => {
+          await held;
+          await route.continue();
+          previewSent();
+        });
+        await gotoCreate(page);
+        await fillEntry(page, "Late page proving");
+        await pickerOf(page).setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+        const lane = laneOf(page);
+        await expect(lane).toContainText("Orbit refused this file.", { timeout: 20_000 });
+        await expect(lane).toContainText(REASON);
+        // The held preview is released with a page that can be drawn.
+        release();
+        await previewAnswered;
+        return () => release();
+      },
+      after: async (page: Page) => {
+        const lane = laneOf(page);
+        await page.waitForTimeout(1_500);
+        await expect(page.locator("body")).not.toHaveClass(/\bsnap\b/);
+        if (onPhone()) await expect(lane.getByRole("img")).toHaveCount(0);
+        else await expect(page.locator("#sheet-page")).toBeHidden();
+        await expect(lane).toContainText("Orbit refused this file.");
+        await expect(lane).toContainText(REASON);
+        await expect(lane).toContainText(/refused/);
+        await expect(lane.getByRole("button", { name: /remove it|not this one/ })).toHaveCount(1);
+        await expect(addOf(page)).toHaveAttribute("aria-disabled", "true");
+      },
+    },
+    {
+      title: "(b) a preview that could not draw, answered first, does not hide the refusal that follows",
+      run: async (page: Page) => {
+        let release: () => void = () => undefined;
+        const held = new Promise<void>((resolveHeld) => { release = resolveHeld; });
+        let previewSent: () => void = () => undefined;
+        const previewAnswered = new Promise<void>((resolveSent) => { previewSent = resolveSent; });
+        await page.route("**/item-document-preview", async (route) => {
+          await route.fulfill(previewFailed);
+          previewSent();
+        });
+        await page.route("**/item-document-inspection", async (route) => {
+          await held;
+          await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(REJECTED) });
+        });
+        await gotoCreate(page);
+        await fillEntry(page, "Undrawable then refused proving");
+        await pickerOf(page).setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+        await previewAnswered;
+        await page.waitForTimeout(500);
+        release();
+        return () => release();
+      },
+      after: async (page: Page) => {
+        const lane = laneOf(page);
+        await expect(lane).toContainText("Orbit refused this file.", { timeout: 20_000 });
+        await page.waitForTimeout(1_000);
+        await expect(lane).toContainText("Orbit refused this file.");
+        expect(await seen(page)).not.toMatch(COULD_NOT_DRAW);
+        await expect(lane).toContainText(REASON);
+        await expect(lane.getByRole("button", { name: /remove it|not this one/ })).toHaveCount(1);
+        await expect(addOf(page)).toHaveAttribute("aria-disabled", "true");
+      },
+    },
+    {
+      title: "(c) a preview that could not draw, answered after the refusal, does not replace it",
+      run: async (page: Page) => {
+        let release: () => void = () => undefined;
+        const held = new Promise<void>((resolveHeld) => { release = resolveHeld; });
+        let previewSent: () => void = () => undefined;
+        const previewAnswered = new Promise<void>((resolveSent) => { previewSent = resolveSent; });
+        await answerInspection(page, REJECTED);
+        await previewIgnoresAbort(page);
+        await page.route("**/item-document-preview", async (route) => {
+          await held;
+          await route.fulfill(previewFailed);
+          previewSent();
+        });
+        await gotoCreate(page);
+        await fillEntry(page, "Refused then undrawable proving");
+        await pickerOf(page).setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+        await expect(laneOf(page)).toContainText("Orbit refused this file.", { timeout: 20_000 });
+        release();
+        await previewAnswered;
+        return () => release();
+      },
+      after: async (page: Page) => {
+        const lane = laneOf(page);
+        await page.waitForTimeout(1_500);
+        await expect(lane).toContainText("Orbit refused this file.");
+        expect(await seen(page)).not.toMatch(COULD_NOT_DRAW);
+        await expect(lane).toContainText(REASON);
+        await expect(lane.getByRole("button", { name: /remove it|not this one/ })).toHaveCount(1);
+        await expect(addOf(page)).toHaveAttribute("aria-disabled", "true");
+      },
+    },
+  ];
+
+  for (const layout of ["desk", "phone"] as const) {
+    for (const one of NO_PAGE_AFTER_REFUSAL) {
+      test(`the ${layout}'s lane: ${one.title}`, async ({ page }) => {
+        test.skip(layout === "desk" ? onPhone() : !onPhone(), layout === "desk" ? "the desk's lane; the phone's reading card has its own test" : "the phone's reading card; the desk's lane has its own test");
+        test.setTimeout(90_000);
+        await signInWithHousehold(page);
+        let release: () => void = () => undefined;
+        try {
+          release = await one.run(page);
+          await one.after(page);
+        } finally {
+          release();
+          await households.sweep(page);
+        }
+      });
+    }
+  }
+
+  /* 2 and 3, the other way a file is refused: the save-time stage says no while the preview is still out. */
+  for (const layout of ["desk", "phone"] as const) {
+    test(`the ${layout}'s lane: a page that lands after the save refused the file is not shown`, async ({ page }) => {
+      test.skip(layout === "desk" ? onPhone() : !onPhone(), layout === "desk" ? "the desk's lane; the phone's reading card has its own test" : "the phone's reading card; the desk's lane has its own test");
+      test.setTimeout(90_000);
+      await signInWithHousehold(page);
+      const posts = await refuseEveryStage(page);
+      await answerInspection(page, ATTACHABLE);
+      await previewIgnoresAbort(page);
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolveHeld) => { release = resolveHeld; });
+      let previewSent: () => void = () => undefined;
+      const previewAnswered = new Promise<void>((resolveSent) => { previewSent = resolveSent; });
+      await page.route("**/item-document-preview", async (route) => {
+        await held;
+        await route.continue();
+        previewSent();
+      });
+
+      try {
+        if (layout === "desk") await saveDeskEntryWithDocument(page, "Late page after save proving");
+        else await savePocketEntryWithDocument(page, "Late page after save proving");
+        await expect.poll(() => posts(), { timeout: 30_000 }).toBe(1);
+        const lane = laneOf(page);
+        await expect(lane).toContainText(/refused/);
+        release();
+        await previewAnswered;
+        await page.waitForTimeout(1_500);
+
+        await expect(page.locator("body")).not.toHaveClass(/\bsnap\b/);
+        if (onPhone()) await expect(lane.getByRole("img")).toHaveCount(0);
+        else await expect(page.locator("#sheet-page")).toBeHidden();
+        await expect(lane).toContainText(/refused/);
+        await expect(lane.getByRole("button", { name: /remove it|not this one/ })).toHaveCount(1);
+        await expect(addOf(page)).toHaveAttribute("aria-disabled", "true");
+      } finally {
+        release();
+        await page.unroute(/\/api\/households\/[^/]+\/documents$/).catch(() => {});
+        await households.sweep(page);
+      }
+    });
+  }
+
+  /* 6: the loud "not saved" note raised by a refusal goes when the file leaves. */
+  for (const layout of ["desk", "phone"] as const) {
+    test(`the ${layout}: replacing a file the server refused clears the not-saved note and releases Add once the read settles`, async ({ page }) => {
+      test.skip(layout === "desk" ? onPhone() : !onPhone(), layout === "desk" ? "the desk's lane; the phone has its own test" : "the phone's reading card; the desk has its own test");
+      test.setTimeout(120_000);
+      await signInWithHousehold(page);
+      const posts = await refuseEveryStage(page);
+      await answerInspection(page, ATTACHABLE);
+
+      try {
+        const note = layout === "desk" ? page.locator("#save-note") : page.locator(".pk-problem");
+        const add = addOf(page);
+        if (layout === "desk") await saveDeskEntryWithDocument(page, "Replace clears note proving");
+        else await savePocketEntryWithDocument(page, "Replace clears note proving");
+        await expect.poll(() => posts(), { timeout: 30_000 }).toBe(1);
+        await expect(note).toContainText(REASON, { timeout: 20_000 });
+        await expect(add).toHaveAttribute("aria-disabled", "true");
+
+        await pickerOf(page).setInputFiles({ name: "replacement-after-refusal.pdf", mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+        await expect(laneOf(page)).toContainText("replacement-after-refusal.pdf");
+
+        // The loud note goes with the file it was about, and Add is released.
+        await expect(note).not.toContainText(REASON);
+        await expect(page.locator("body")).not.toContainText(REASON);
+        await expect(add).not.toHaveAttribute("aria-disabled", "true", { timeout: 20_000 });
+        expect(posts()).toBe(1);
+      } finally {
+        await page.unroute(/\/api\/households\/[^/]+\/documents$/).catch(() => {});
+        await households.sweep(page);
+      }
+    });
+  }
+
+  test("the phone: 'remove it' on a file the server refused clears the not-saved note and releases Add", async ({ page }) => {
+    test.skip(!onPhone(), "the desk's 'remove it' is proven above (#1425)");
+    test.setTimeout(120_000);
+    await signInWithHousehold(page);
+    const posts = await refuseEveryStage(page);
+    await answerInspection(page, ATTACHABLE);
+
+    try {
+      await savePocketEntryWithDocument(page, "Phone remove clears note proving");
+      await expect.poll(() => posts(), { timeout: 30_000 }).toBe(1);
+      const note = page.locator(".pk-problem");
+      const add = addOf(page);
+      await expect(note).toContainText(REASON, { timeout: 20_000 });
+      await expect(add).toHaveAttribute("aria-disabled", "true");
+
+      await laneOf(page).getByRole("button", { name: /remove it|not this one/ }).click();
+
+      await expect(note).not.toContainText(REASON);
+      await expect(page.locator("body")).not.toContainText(REASON);
+      await expect(add).not.toHaveAttribute("aria-disabled", "true", { timeout: 10_000 });
+      expect(posts()).toBe(1);
+    } finally {
+      await page.unroute(/\/api\/households\/[^/]+\/documents$/).catch(() => {});
+      await households.sweep(page);
+    }
+  });
+
+  /* 7: every way a file arrives is announced through the always-present live region. */
+  test("the desk announces a picked file in the live region whatever the lane is doing", async ({ page }) => {
+    test.skip(onPhone(), "the desk's #dz-live; the pocket has no drop zone");
+    test.setTimeout(90_000);
+    await signInWithHousehold(page);
+
+    try {
+      await gotoCreate(page);
+      await page.locator('#card input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+      await expect(page.locator("#dz-live")).toHaveText(`${DOCUMENT} added. Reading it in the lane on the right.`);
+    } finally {
+      await households.sweep(page);
+    }
+  });
 });
