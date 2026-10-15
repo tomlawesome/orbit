@@ -1,3 +1,8 @@
+/** What a screen reader hears when a file arrives, however it arrives. */
+export function addedWords(/** @type {string} */ name) {
+  return `${name} added. Reading it in the lane on the right.`;
+}
+
 /**
  * The desk's drop zone while a file is dragged over it (#1244), carried from
  * design/v19/create-dragover.html (owner, 2026-10-07: "8a yes") as Fable's
@@ -28,7 +33,8 @@
  *   live: HTMLElement | null,
  *   takeFile: (file: File) => void,
  * }} wiring
- * @returns {{ clear: () => void }}  hands every class back; for the screen's teardown
+ * @returns {{ clear: () => void, say: (text: string) => void }}  `clear` hands every
+ *   class back, for the screen's teardown; `say` is the polite announcement
  */
 export function wireDropFeedback({ on, dropzone, live, takeFile }) {
   const body = document.body;
@@ -121,10 +127,10 @@ export function wireDropFeedback({ on, dropzone, live, takeFile }) {
     dropzone.classList.remove("landed");
     void dropzone.offsetWidth;
     dropzone.classList.add("landed");
-    say(`${file.name} added. Reading it in the lane on the right.`);
   });
 
   return {
+    say,
     clear() {
       cancelAnimationFrame(frame);
       clearDrag();

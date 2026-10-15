@@ -10,7 +10,7 @@ import {
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
 import { takeHeldDocument } from "$lib/data/held-document.js";
-import { wireDropFeedback } from "./drop-feedback.js";
+import { addedWords, wireDropFeedback } from "./drop-feedback.js";
 import { dryRunner } from "$lib/data/dry-run.js";
 import { REMINDER_DEFAULT, createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, reminderPairOf } from "./entry.js";
 import { sizeLabel } from "$lib/format.js";
@@ -308,7 +308,9 @@ export function mountCreate() {
        same file again still fires `change`. */
     picker.value = "";
     if (saving) return;
-    /* A new file replaces a refused one, and the refusal goes with it. */
+    /* A new file replaces a refused one, and the refusal goes with it, the
+       loud note about the save it refused included. */
+    if (fileRefusal !== null) sticky = null;
     fileRefusal = null;
     attachmentId = crypto.randomUUID();
     attachment = file;
@@ -320,6 +322,8 @@ export function mountCreate() {
     if (!nameInput.value.trim()) {
       nameInput.value = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ");
     }
+    /* Through the live region that is never hidden, whatever the lane is doing. */
+    dropFeedback.say(addedWords(file.name));
     /* The §14 walk, for real (#1245): page one and the read start together
        from the pick, and neither waits for the other. */
     readDocument(file).catch(() => { /* every outcome is drawn in the lane */ });
@@ -582,6 +586,8 @@ export function mountCreate() {
     document.body.classList.remove("doc");
     if (heldName) heldName.textContent = "";
     if (heldSize) heldSize.textContent = "";
+    /* The button has left the page: focus goes to the control that is usable again. */
+    dropzone?.focus({ preventScroll: true });
   });
 
   on(dropzone, "click", () => picker.click());

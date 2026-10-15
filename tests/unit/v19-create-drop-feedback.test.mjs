@@ -51,7 +51,11 @@ let live;
 let outside;
 /** @type {import('vitest').Mock} */
 let takeFile;
-/** @type {{ clear: () => void }} */
+/** @type {typeof import("../../web/src/routes/create/drop-feedback.js").addedWords} */
+let addedWords;
+/** @type {typeof import("../../web/src/routes/create/drop-feedback.js").wireDropFeedback} */
+let wireDropFeedback;
+/** @type {{ clear: () => void, say: (text: string) => void }} */
 let feedback;
 
 beforeEach(async () => {
@@ -67,7 +71,7 @@ beforeEach(async () => {
   live = /** @type {HTMLElement} */ (document.getElementById("dz-live"));
   outside = /** @type {HTMLElement} */ (document.getElementById("outside"));
   takeFile = vi.fn();
-  const { wireDropFeedback } = await import("../../web/src/routes/create/drop-feedback.js");
+  ({ addedWords, wireDropFeedback } = await import("../../web/src/routes/create/drop-feedback.js"));
   const made = screenScope();
   scope = made;
   feedback = wireDropFeedback({ on: made.on, dropzone: zone, live, takeFile });
@@ -135,7 +139,7 @@ describe("#1244: the drop zone answers a file in the air", () => {
     expect(body().contains("dragging")).toBe(false);
   });
 
-  it("takes the dropped file, settles the zone and says so politely", async () => {
+  it("takes the dropped file and settles the zone; the announcement is the screen's, through say", async () => {
     const file = new File(["%PDF"], "renewal.pdf", { type: "application/pdf" });
     drag("dragenter", zone);
     await vi.waitFor(() => expect(live.textContent).toBe("Release to add the document"));
@@ -144,6 +148,7 @@ describe("#1244: the drop zone answers a file in the air", () => {
     expect(takeFile).toHaveBeenCalledWith(file);
     expect(body().contains("dragging") || body().contains("over")).toBe(false);
     expect(zone.classList.contains("landed")).toBe(true);
+    feedback.say(addedWords(file.name));
     await vi.waitFor(() => expect(live.textContent).toBe("renewal.pdf added. Reading it in the lane on the right."));
   });
 

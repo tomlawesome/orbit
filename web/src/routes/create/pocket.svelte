@@ -146,6 +146,8 @@
 
   /** @param {File} file */
   async function readDocument(file) {
+    /* A refused file's loud note goes when a new file replaces it. */
+    if (picked?.refused) problem = null;
     stopReading();
     clearSuggestions();
     const controller = new AbortController();
@@ -216,6 +218,7 @@
     stopReading();
     clearSuggestions();
     picked = null;
+    problem = null;
   }
 
   /* Leaving: a read still in flight is nobody's once the screen has gone,
