@@ -339,6 +339,7 @@ export function mountCreate() {
   const rcSize = /** @type {HTMLElement} */ (document.getElementById("rc-size"));
   const rcScan = /** @type {HTMLElement} */ (document.getElementById("rc-scan"));
   const dropFile = /** @type {HTMLButtonElement} */ (document.getElementById("rc-drop"));
+  const rcRefused = /** @type {HTMLElement} */ (document.getElementById("rc-refused"));
   const docnote = /** @type {HTMLElement} */ (document.getElementById("docnote"));
 
   /* The words for each state (READING_HEAD, FOCUS_*, WHY_*, CAP_*) and the
@@ -402,6 +403,9 @@ export function mountCreate() {
     rcFile.textContent = `◆ ${file.name}`;
     rcSize.textContent = sizeLabel(file.size);
     rcScan.hidden = true;
+    rcRefused.replaceChildren();
+    rcRefused.hidden = true;
+    dropFile.textContent = "not this one";
   }
 
   /** The focus block's settled form (the item page's `still`/`rc-refused`).
@@ -434,6 +438,15 @@ export function mountCreate() {
     readDone = true;
     delete readcard.dataset.reading;
     honest.textContent = "";
+    rcScan.hidden = true;
+    /* Built here, not left hidden in the page: the word is in the lane only
+       while it is true. */
+    const word = document.createElement("span");
+    word.className = "refusedword";
+    word.textContent = "refused";
+    rcRefused.replaceChildren(" \u00b7 ", word);
+    rcRefused.hidden = false;
+    dropFile.textContent = "remove it";
     settleFocus({ line: FOCUS_REFUSED, why, refused: true });
   }
 
@@ -499,7 +512,7 @@ export function mountCreate() {
         sheetUrl = outcome.url;
         sheetPage.alt = `Page one of ${file.name}`;
         sheetPage.src = outcome.url;
-        rcScan.hidden = !outcome.scanned;
+        rcScan.hidden = !outcome.scanned || fileRefusal !== null;
         pageState = "up";
         readcard.dataset.page = "up";
         readHead.textContent = PAGE_HEAD;
@@ -559,8 +572,13 @@ export function mountCreate() {
      the drop target is a drop target again. */
   on(dropFile, "click", () => {
     if (saving) return; /* the entry is the server's until it answers (see takeFile) */
+    /* Removing a refused file also ends the loud note about the save it refused. */
+    if (fileRefusal !== null) sticky = null;
     dropDocument();
     clearSheet();
+    /* The lane is closed, but its words stay in the page until the next pick:
+       the refusal's reason goes with the file it was about. */
+    focusWhy.textContent = "";
     document.body.classList.remove("doc");
     if (heldName) heldName.textContent = "";
     if (heldSize) heldSize.textContent = "";

@@ -288,11 +288,12 @@
       <div class="cap"><b>Page one of the file you added</b><br>
         <span id="rc-capline">orbit is reading the pages it was given</span></div>
       <div class="honest" id="rc-honest"></div>
-      <div class="attach">
-        <span class="file" id="rc-file"></span>
-        <span><span id="rc-size"></span><span id="rc-scan" hidden> &middot; <span class="clean">scanned clean</span></span></span>
-        <button type="button" id="rc-drop">not this one</button></div>
     </div>
+
+    <div class="attach">
+      <span class="file" id="rc-file"></span>
+      <span><span id="rc-size"></span><span id="rc-refused" hidden></span><span id="rc-scan" hidden> &middot; <span class="clean">scanned clean</span></span></span>
+      <button type="button" id="rc-drop">not this one</button></div>
   </aside>
 
   </div>
