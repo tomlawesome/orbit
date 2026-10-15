@@ -165,9 +165,12 @@ async function renderRasterPage(bytes: Buffer, mediaType: "image/jpeg" | "image/
  * caller asks for another (#1300), with the document's page count.
  *
  * The bytes are re-identified and re-inspected here rather than trusted from
- * the stored media type: a preview must refuse exactly what upload refused,
- * and both failure modes are bounded codes a screen can word rather than a
- * 500. The page number changes none of that: identification and the
+ * the stored media type: a preview applies the same gate upload applies,
+ * under the render budget (looser than upload's, so a file at the margin may
+ * preview and still be refused on upload), and both failure modes are
+ * bounded codes a screen can word rather than a 500. A render stopped on
+ * memory, the canvas allowance included, is a failed preview (422). The page
+ * number changes none of that: identification and the
  * structure check's gate run first and unchanged (for a PDF, inside the same
  * sandboxed run that draws), and only then is the requested page looked for,
  * within the render budget. A page past the end is a 404 in its own words;
