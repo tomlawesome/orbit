@@ -990,6 +990,164 @@ test.describe(() => {
   });
 
   /**
+   * #1425: the desk keeps a way to remove a document the server refuses. The
+   * reading lane's file row is its footer for the whole life of the lane, so
+   * "not this one" is there while the lane is still reading, and after a
+   * refusal the same button reads "remove it" beside "<size> · refused".
+   * Desk only: the phone's reading card already holds its own button.
+   */
+  const REFUSED_REASON = "That file is not a PDF or image we can keep";
+  const SIZE_THEN_REFUSED = /\d[\d.,]*\s?(?:B|KB|MB)\s*·\s*refused/i;
+
+  /** The stage route refuses every file with a 415 and counts the tries. */
+  async function refuseEveryStage(page: Page): Promise<{ posts: () => number; upserts: Array<string[] | undefined> }> {
+    let posts = 0;
+    const upserts: Array<string[] | undefined> = [];
+    page.on("request", (request) => {
+      if (request.method() !== "POST" || !request.url().includes("/api/workspace/commands")) return;
+      const body = request.postDataJSON() as { type?: string; dryRun?: boolean; item?: { id?: string }; documentIds?: string[] };
+      if (body.type === "item.upsert" && !body.dryRun && body.item?.id) upserts.push(body.documentIds);
+    });
+    await page.route(/\/api\/households\/[^/]+\/documents$/, async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      posts += 1;
+      return route.fulfill({
+        status: 415, contentType: "application/json",
+        body: JSON.stringify({ error: { code: "document_type_unsupported", message: REFUSED_REASON } }),
+      });
+    });
+    return { posts: () => posts, upserts };
+  }
+
+  test("the desk's lane offers 'not this one' while it is still reading, and pressing it closes the lane", async ({ page }) => {
+    test.skip(test.info().project.name.startsWith("mobile"), "the desk's #dropzone and lane; the phone's reading card is proven above (#1279)");
+    test.setTimeout(90_000);
+    await signInWithHousehold(page);
+
+    // Hold the preview and the read so the lane still says "Reading your document".
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolveHeld) => { release = resolveHeld; });
+    for (const route of ["**/item-document-preview", "**/item-document-inspection"]) {
+      await page.route(route, async (request) => {
+        await held;
+        await request.continue();
+      });
+    }
+
+    try {
+      await gotoCreate(page);
+      const lane = page.locator("#readcard");
+      await page.locator('#card input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+      await expect(page.locator("#read-head")).toHaveText("Reading your document");
+      await expect(page.locator("#dz-held-name")).toContainText(DOCUMENT);
+
+      const notThisOne = lane.getByRole("button", { name: "not this one" });
+      await expect(notThisOne).toBeVisible();
+      await notThisOne.click();
+
+      await expect(page.locator("body")).not.toHaveClass(/\bdoc\b/);
+      await expect(page.locator("#dz-held-name")).not.toContainText(DOCUMENT);
+      await expect(notThisOne).toHaveCount(0);
+    } finally {
+      release();
+      await households.sweep(page);
+    }
+  });
+
+  test("the desk's lane says 'refused' beside the size and offers 'remove it' once the server refuses the file", async ({ page }) => {
+    test.skip(test.info().project.name.startsWith("mobile"), "the desk's #dropzone and lane; the phone's reading card is proven above (#1279)");
+    test.setTimeout(120_000);
+    await signInWithHousehold(page);
+    const stage = await refuseEveryStage(page);
+
+    try {
+      await saveDeskEntryWithDocument(page, "Refused row words proving");
+      await expect.poll(() => stage.posts(), { timeout: 30_000 }).toBe(1);
+
+      const lane = page.locator("#readcard");
+      await expect(lane.getByRole("button", { name: "remove it" })).toBeVisible({ timeout: 20_000 });
+      await expect(lane).toContainText(DOCUMENT);
+      await expect(lane).toContainText(SIZE_THEN_REFUSED);
+      await expect(lane.getByRole("button", { name: "not this one" })).toHaveCount(0);
+      expect(stage.upserts).toHaveLength(0);
+    } finally {
+      await page.unroute(/\/api\/households\/[^/]+\/documents$/).catch(() => {});
+      await households.sweep(page);
+    }
+  });
+
+  test("the desk's 'remove it' clears the not-saved note, frees Add, and the next Add sends no document", async ({ page }) => {
+    test.skip(test.info().project.name.startsWith("mobile"), "the desk's #dropzone and lane; the phone's reading card is proven above (#1279)");
+    test.setTimeout(120_000);
+    await signInWithHousehold(page);
+    const stage = await refuseEveryStage(page);
+
+    try {
+      const name = "Remove it then save proving";
+      const add = page.locator(".btn-primary");
+      const note = page.locator("#save-note");
+      await saveDeskEntryWithDocument(page, name);
+      await expect.poll(() => stage.posts(), { timeout: 30_000 }).toBe(1);
+
+      // The refusal is reported loudly and Add is held.
+      await expect(note).toBeVisible();
+      await expect(note).toContainText(REFUSED_REASON);
+      await expect(add).toHaveAttribute("aria-disabled", "true");
+
+      const removeIt = page.locator("#readcard").getByRole("button", { name: "remove it" });
+      await expect(removeIt).toBeVisible({ timeout: 20_000 });
+      await removeIt.click();
+
+      // What the note reported is gone with the file.
+      await expect(note).not.toContainText(REFUSED_REASON);
+      await expect(note).toBeHidden();
+      await expect(page.locator("body")).not.toContainText(REFUSED_REASON);
+      await expect(add).not.toHaveAttribute("aria-disabled", "true", { timeout: 10_000 });
+
+      await add.click();
+      await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
+      expect(stage.posts()).toBe(1);
+      expect(stage.upserts).toHaveLength(1);
+      expect(stage.upserts[0] === undefined || stage.upserts[0].length === 0).toBe(true);
+    } finally {
+      await page.unroute(/\/api\/households\/[^/]+\/documents$/).catch(() => {});
+      await households.sweep(page);
+    }
+  });
+
+  test("dropping a new file after a refusal relabels the button 'not this one' and hides 'refused'", async ({ page }) => {
+    test.skip(test.info().project.name.startsWith("mobile"), "the desk's #dropzone and lane; the phone's reading card is proven above (#1279)");
+    test.setTimeout(120_000);
+    await signInWithHousehold(page);
+    const stage = await refuseEveryStage(page);
+
+    try {
+      await saveDeskEntryWithDocument(page, "Replace after refusal proving");
+      await expect.poll(() => stage.posts(), { timeout: 30_000 }).toBe(1);
+      const lane = page.locator("#readcard");
+      await expect(lane.getByRole("button", { name: "remove it" })).toBeVisible({ timeout: 20_000 });
+      await expect(lane).toContainText(SIZE_THEN_REFUSED);
+
+      const files = await page.evaluateHandle(({ fileName, bytes }) => {
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([Uint8Array.from(atob(bytes), (c) => c.charCodeAt(0))], fileName, { type: "application/pdf" }));
+        return transfer;
+      }, { fileName: "replacement-after-refusal.pdf", bytes: DOCUMENT_BYTES.toString("base64") });
+      const zone = page.locator("#dropzone");
+      await zone.dispatchEvent("dragenter", { dataTransfer: files });
+      await zone.locator(".dz-main [data-when=rest]").dispatchEvent("drop", { dataTransfer: files });
+
+      await expect(lane).toContainText("replacement-after-refusal.pdf");
+      await expect(lane.getByRole("button", { name: "not this one" })).toBeVisible({ timeout: 20_000 });
+      await expect(lane.getByRole("button", { name: "remove it" })).toHaveCount(0);
+      await expect(lane).not.toContainText(/refused/i);
+    } finally {
+      await page.unroute(/\/api\/households\/[^/]+\/documents$/).catch(() => {});
+      await households.sweep(page);
+    }
+  });
+
+  /**
    * #1316 W1-R5: the desk's save sends the document that was picked when Add
    * was pressed. While "Adding…" shows (the document is already staged and the
    * item write is still in flight), pressing "not this one" or dropping another
