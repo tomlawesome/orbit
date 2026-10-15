@@ -107,6 +107,9 @@ let unmount;
 let Leave;
 /** @type {any} */
 let Chrome;
+/** Chrome over the compiled Leave and the stand-in flight: a flight that can be had (#1439). */
+/** @type {any} */
+let ChromeWithFlight;
 
 /**
  * Compile a Svelte source for the browser and write it, its quoted import
@@ -154,7 +157,8 @@ beforeAll(async () => {
   // loads on demand is one that cannot be had: that is the fallback path.
   const hatch = url(build("StubHatch", STUB_HATCH, {}));
   const topChrome = url(build("StubTopChrome", STUB_TOP_CHROME, {}));
-  const chromeFile = build("Chrome", read("web/src/lib/Chrome.svelte"), {
+  /** @param {string} flightModule what `$lib/flight/Leave.svelte` resolves to */
+  const chromeImports = (flightModule) => ({
     "$lib/format.js": plain("format.mjs", `export const initials = (n) => (n ?? "").slice(0, 2);`),
     "$app/paths": plain("paths.mjs", `export const resolve = (p) => p;`),
     "$app/state": plain("state.mjs", `export const page = { data: {} };`),
@@ -168,9 +172,17 @@ beforeAll(async () => {
     "$lib/tour/watch.js": plain("watch.mjs", `export const watchTour = async () => {};`),
     "$lib/pocket/Hatch.svelte": hatch,
     "$lib/pocket/TopChrome.svelte": topChrome,
-    "$lib/flight/Leave.svelte": plain("no-flight.mjs", `throw new Error("the flight cannot be had");`),
+    "$lib/flight/Leave.svelte": flightModule,
   });
+  const chromeFile = build(
+    "Chrome",
+    read("web/src/lib/Chrome.svelte"),
+    chromeImports(plain("no-flight.mjs", `throw new Error("the flight cannot be had");`)),
+  );
   Chrome = (await nativeImport(url(chromeFile))).default;
+  // #1439: the same Chrome, whose lazy flight is the compiled Leave above.
+  const chromeWithFlightFile = build("ChromeWithFlight", read("web/src/lib/Chrome.svelte"), chromeImports(url(leaveFile)));
+  ChromeWithFlight = (await nativeImport(url(chromeWithFlightFile))).default;
 });
 
 afterAll(() => {
@@ -443,5 +455,91 @@ describe("#1316 9a: the no-flight fallback also ends the provider's session (Chr
     const win = await pressSignOutWithNoFlight(null);
 
     expect(win.navigations.at(-1)?.to).toBe("/logout");
+  });
+});
+
+/*
+ * #1439: settings' sign-outs play the same goodbye through Chrome's own
+ * descent, exported as descendFrom(redirectTo) (the name Leave's has), so
+ * there is one path. settings binds Chrome and hands it to its helper.
+ */
+describe("#1439: Chrome exports its descent as descendFrom", () => {
+  const CHROME_PROPS = { user: { displayName: "Test Person" }, household: null, current: "settings" };
+
+  /** @param {{ navigations: unknown[] }} win */
+  async function firstNavigation(win) {
+    await vi.waitFor(
+      () => {
+        if (win.navigations.length === 0) throw new Error("descendFrom made no navigation within 2 s");
+      },
+      { timeout: 2000, interval: 10 },
+    );
+  }
+
+  it("goes to the provider URL, not /logout, when the flight cannot be had", async () => {
+    const win = fakeWindow();
+    const chrome = mountOnPage(Chrome, CHROME_PROPS);
+    expect(typeof chrome.descendFrom).toBe("function");
+
+    await chrome.descendFrom(PROVIDER);
+    await firstNavigation(win);
+
+    expect(win.navigations.at(-1)?.to).toBe(PROVIDER);
+    expect(win.navigations.map((n) => n.to)).not.toContain("/logout");
+  });
+
+  it("goes to /logout when the flight cannot be had and there is no provider session", async () => {
+    const win = fakeWindow();
+    const chrome = mountOnPage(Chrome, CHROME_PROPS);
+    expect(typeof chrome.descendFrom).toBe("function");
+
+    await chrome.descendFrom(null);
+    await firstNavigation(win);
+
+    expect(win.navigations.at(-1)?.to).toBe("/logout");
+  });
+
+  it("plays the goodbye, moves the address to /logout, then replaces the location with the provider URL once", async () => {
+    const win = fakeWindow();
+    const chrome = mountOnPage(ChromeWithFlight, CHROME_PROPS);
+    expect(typeof chrome.descendFrom).toBe("function");
+
+    await chrome.descendFrom(PROVIDER);
+
+    await vi.waitFor(
+      () => {
+        if (document.querySelector("#dusk")?.getAttribute("data-landmark") !== "true") {
+          throw new Error("the farewell beat never landed");
+        }
+      },
+      { timeout: 5000, interval: 10 },
+    );
+    expect(win.addresses).toContain("/logout");
+    await vi.waitFor(
+      () => {
+        if (win.navigations.length === 0) throw new Error("the goodbye never went to the provider");
+      },
+      { timeout: 5000, interval: 10 },
+    );
+    expect(win.navigations).toEqual([{ how: "replace", to: PROVIDER }]);
+  });
+
+  it("plays the goodbye and shows Sign back in, navigating nowhere, when there is no provider session", async () => {
+    const win = fakeWindow();
+    const chrome = mountOnPage(ChromeWithFlight, CHROME_PROPS);
+    expect(typeof chrome.descendFrom).toBe("function");
+
+    await chrome.descendFrom(null);
+
+    await vi.waitFor(
+      () => {
+        if (gateIn() === null) throw new Error("the Sign back in gate never appeared");
+      },
+      { timeout: 5000, interval: 10 },
+    );
+    expect(document.querySelector("#dusk")?.getAttribute("data-landmark")).toBe("true");
+    expect(gateIn()?.getAttribute("href")).toBe("/");
+    expect(win.addresses).toContain("/logout");
+    expect(win.navigations).toEqual([]);
   });
 });
