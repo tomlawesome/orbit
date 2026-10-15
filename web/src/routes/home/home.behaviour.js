@@ -41,9 +41,9 @@ export const sunHref = (id) => `/household/${encodeURIComponent(id)}`;
  * THE CONSTELLATION MARKER'S OWN GEOMETRY (#1151 W1-Q12): the ring centre
  * and the leader-line's "extends away from the dial" veer path (owner,
  * 2026-08-16), shared between the live sky's renderGalaxy() below and the
- * newcomer's labelled sky's mountEmptySky() further down — one builds its
- * marker as an innerHTML SVG string, the other with createElementNS, but
- * both drew the identical ring/veer numbers from scratch before this. mx()
+ * newcomer's labelled sky's mountEmptySky() further down — both build their
+ * marker node by node with svgChild(), and both drew the identical ring/veer
+ * numbers from scratch before this. mx()
  * mirrors any drawn x through the 210-wide viewBox: a constellation left of
  * centre reads leftward (the original layout, ring at svg x 118), one right
  * of centre is the horizontal mirror (ring at x 92, text end-anchored).
@@ -62,6 +62,24 @@ function markerVeer(width, away) {
   return away
     ? `M 206 21 H ${200 - width} L ${184 - width} 40`
     : `M 4 21 H ${width + 10} L ${width + 26} 40`;
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+/**
+ * Appends one SVG element to `svg`. A household's name is another household's
+ * input, so it only ever goes in as `text` (textContent), never through a
+ * markup string (#1316).
+ * @param {Element} svg
+ * @param {string} tag
+ * @param {Record<string, any>} attrs
+ * @param {string} [text]
+ */
+function svgChild(svg, tag, attrs, text) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
+  if (text !== undefined) el.textContent = text;
+  svg.appendChild(el);
+  return el;
 }
 
 /**
@@ -195,18 +213,24 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
       div.style.setProperty("--dim", dim);
       const label = hh.name.toUpperCase();
       const tw = Math.min(150, label.length * 6.6);
-      div.innerHTML = `<svg width="210" height="160" viewBox="0 0 210 160">
-        <text x="${markerX(6, away)}" y="14" font-size="9.5" letter-spacing=".14em"${away ? ' text-anchor="end"' : ""} style="fill:var(--accent-text)" opacity=".85">${label}</text>
-        <path d="${markerVeer(tw, away)}" fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55"/>
-        <circle class="msring" cx="${ringX}" cy="95" r="40" fill="none" style="stroke:var(--chart-line)" stroke-opacity=".5" stroke-width="1"/>
-        <!-- #638: the real hit target — fill="none" above doesn't hit-test,
-             fill="transparent" does. home.css turns off pointer events on the
-             rest of the (blank) 210x160 box. -->
-        <circle class="mshit" cx="${ringX}" cy="95" r="40" fill="transparent"/>
-        <circle cx="${ringX}" cy="95" r="3" style="fill:var(--ink)" opacity=".8"/>
-        ${hh.planets.map((/** @type {[number, number, number, string]} */ [px, py, pr, tok]) =>
-          `<circle cx="${ringX + px}" cy="${95 + py}" r="${pr}" style="fill:var(${tok})" opacity=".55"/>`).join("")}
-      </svg>`;
+      // built node by node: the name is another household's input, so it
+      // goes in as text and can never become markup (#1316)
+      const svg = document.createElementNS(SVG_NS, "svg");
+      svg.setAttribute("width", "210"); svg.setAttribute("height", "160");
+      svg.setAttribute("viewBox", "0 0 210 160");
+      const name = svgChild(svg, "text", { x: markerX(6, away), y: 14, "font-size": "9.5", "letter-spacing": ".14em", style: "fill:var(--accent-text)", opacity: ".85" }, label);
+      if (away) name.setAttribute("text-anchor", "end");
+      svgChild(svg, "path", { d: markerVeer(tw, away), fill: "none", style: "stroke:var(--accent)", "stroke-width": "1", opacity: ".55" });
+      svgChild(svg, "circle", { class: "msring", cx: ringX, cy: 95, r: 40, fill: "none", style: "stroke:var(--chart-line)", "stroke-opacity": ".5", "stroke-width": "1" });
+      // #638: the real hit target — fill="none" above doesn't hit-test,
+      // fill="transparent" does. home.css turns off pointer events on the
+      // rest of the (blank) 210x160 box.
+      svgChild(svg, "circle", { class: "mshit", cx: ringX, cy: 95, r: 40, fill: "transparent" });
+      svgChild(svg, "circle", { cx: ringX, cy: 95, r: 3, style: "fill:var(--ink)", opacity: ".8" });
+      for (const [px, py, pr, tok] of /** @type {[number, number, number, string][]} */ (hh.planets)) {
+        svgChild(svg, "circle", { cx: ringX + px, cy: 95 + py, r: pr, style: `fill:var(${tok})`, opacity: ".55" });
+      }
+      div.appendChild(svg);
       div.addEventListener("click", () => flyTo(key, div));
       hero.appendChild(div);
       corrections.push({ div, away });
@@ -778,22 +802,11 @@ export function mountEmptySky({ galaxy, onAsk }) {
       const label = hh.name.toUpperCase();
       const tw = Math.min(150, label.length * 6.6);
       const veer = markerVeer(tw, away);
-      const svgNS = "http://www.w3.org/2000/svg";
-      const svg = document.createElementNS(svgNS, "svg");
+      const svg = document.createElementNS(SVG_NS, "svg");
       svg.setAttribute("width", "210"); svg.setAttribute("height", "160");
       svg.setAttribute("viewBox", "0 0 210 160");
-      /**
-       * @param {string} tag
-       * @param {Record<string, any>} attrs
-       * @param {string} [text]
-       */
-      const put = (tag, attrs, text) => {
-        const el = document.createElementNS(svgNS, tag);
-        for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
-        if (text !== undefined) el.textContent = text;
-        svg.appendChild(el);
-        return el;
-      };
+      /** @type {(tag: string, attrs: Record<string, any>, text?: string) => Element} */
+      const put = (tag, attrs, text) => svgChild(svg, tag, attrs, text);
       const name = put("text", { x: markerX(6, away), y: 14, "font-size": "9.5", "letter-spacing": ".14em", style: "fill:var(--accent-text)", opacity: ".85" }, label);
       if (away) name.setAttribute("text-anchor", "end");
       put("path", { d: veer, fill: "none", style: "stroke:var(--accent)", "stroke-width": "1", opacity: ".55" });
