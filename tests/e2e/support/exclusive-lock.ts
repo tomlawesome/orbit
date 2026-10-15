@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -33,10 +33,41 @@ function readOwner(path: string): Owner | null {
   return null;
 }
 
-/** A lock with no readable owner counts as stale: its holder died between
- *  `mkdir` and writing the record, or the record is corrupt. */
-function stale(owner: Owner | null, now: number, staleMs: number): boolean {
-  return owner === null || !alive(owner.pid) || now - owner.since > staleMs;
+/** How long a lock directory with no readable owner record is still given to
+ *  get one: its holder may be between `mkdir` and the record's rename. */
+export const OWNER_GRACE_MS = 5000;
+
+/** Errors a lost race produces: the other side removed, retook or refilled the directory. */
+const RACE_CODES = new Set(["ENOENT", "ENOTEMPTY", "EEXIST"]);
+
+function lostRace(error: unknown): boolean {
+  return RACE_CODES.has((error as NodeJS.ErrnoException).code ?? "");
+}
+
+/** Writes the record through a temp file in the lock directory and a rename,
+ *  so a reader sees the whole record or none, never a half-written one. */
+function writeOwner(path: string, owner: Owner): void {
+  const temp = join(path, `${OWNER_FILE}.${owner.pid}.tmp`);
+  try {
+    writeFileSync(temp, JSON.stringify(owner), "utf8");
+    renameSync(temp, join(path, OWNER_FILE));
+  } catch (error) {
+    rmSync(temp, { force: true });
+    throw error;
+  }
+}
+
+/** A lock with an owner is stale once its pid is gone or its last renew is
+ *  older than `staleMs`. One with no readable owner is stale only once its
+ *  directory is older than the grace period; younger, it is held. */
+function stale(path: string, now: number, staleMs: number): boolean {
+  const owner = readOwner(path);
+  if (owner !== null) return !alive(owner.pid) || now - owner.since > staleMs;
+  try {
+    return now - statSync(path).mtimeMs > OWNER_GRACE_MS;
+  } catch {
+    return true; /* The directory is gone: nothing holds it. */
+  }
 }
 
 export function tryAcquire(
@@ -46,17 +77,36 @@ export function tryAcquire(
   const { pid, now = Date.now(), staleMs = 600_000 } = options;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      mkdirSync(path);
+      try {
+        mkdirSync(path);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        if (!stale(path, now, staleMs)) return false;
+        rmSync(path, { recursive: true, force: true });
+        continue;
+      }
+      writeOwner(path, { pid, since: now });
+      return true;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if (!stale(readOwner(path), now, staleMs)) return false;
-      rmSync(path, { recursive: true, force: true });
-      continue;
+      if (lostRace(error)) return false;
+      throw error;
     }
-    writeFileSync(join(path, OWNER_FILE), JSON.stringify({ pid, since: now }), "utf8");
-    return true;
   }
   return false;
+}
+
+/** Marks the lock as still in use: when `pid` holds it, rewrites its start
+ *  time to `now` and returns true; otherwise changes nothing and returns false. */
+export function renew(path: string, options: { pid: number; now?: number }): boolean {
+  const { pid, now = Date.now() } = options;
+  if (readOwner(path)?.pid !== pid) return false;
+  try {
+    writeOwner(path, { pid, since: now });
+    return true;
+  } catch (error) {
+    if (lostRace(error)) return false;
+    throw error;
+  }
 }
 
 /** Removes the lock only if this process holds it, so a waiter's cleanup can
