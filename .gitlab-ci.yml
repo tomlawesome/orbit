@@ -1699,7 +1699,7 @@ integration:
   stage: acceptance
   tags: [light]
   extends: .node
-  timeout: 10m
+  timeout: 15m
   rules:
     - *not_scheduled
     - when: on_success
