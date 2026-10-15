@@ -210,8 +210,8 @@ function cpuLimitCheckingPdfjsModule(expectedSeconds: number): string {
   return `
 import { readFileSync } from "node:fs";
 function cpuTimeSoftLimit() {
-  const line = readFileSync("/proc/self/limits", "utf8").split("\n").find((entry) => entry.startsWith("Max cpu time"));
-  const match = line && /^Max cpu time\s+(\S+)\s+(\S+)/.exec(line);
+  const line = readFileSync("/proc/self/limits", "utf8").split("\\n").find((entry) => entry.startsWith("Max cpu time"));
+  const match = line && /^Max cpu time\\s+(\\S+)\\s+(\\S+)/.exec(line);
   return match ? match[1] : "missing";
 }
 function getDocument() {
