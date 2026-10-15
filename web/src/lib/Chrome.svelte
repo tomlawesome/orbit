@@ -118,8 +118,13 @@
     await tick();
     leave?.ready();
   }
-  /** @param {string | null} redirectTo the provider's own logout URL, if any */
-  async function descend(redirectTo) {
+  /**
+   * The goodbye, after the session has ended. Exported (#1439) so settings'
+   * own sign-outs play this same descent, under the name Leave's has.
+   *
+   * @param {string | null} redirectTo the provider's own logout URL, if any
+   */
+  export async function descendFrom(redirectTo) {
     try {
       await loadLeave();
       await tick();
@@ -156,7 +161,7 @@
     /* #1262: the menu closes as the sign-out goes ahead, never left standing
        over the descent */
     open = false;
-    await descend(redirectTo);
+    await descendFrom(redirectTo);
   }
 
   const initials = $derived(initialsOf(user?.displayName));
@@ -201,7 +206,7 @@
   </TopChrome>
 </div>
 <Hatch bind:open={hatchOpen} name={user?.displayName ?? ""} roleLine={line} {current} {isAdmin}
-       onopened={wake} onsignedout={descend} />
+       onopened={wake} onsignedout={descendFrom} />
 {#if LeaveView}
   <!-- no household name to hand on a page that is not home's: the void's name line is empty -->
   <LeaveView bind:this={leave} />

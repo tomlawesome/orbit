@@ -174,10 +174,25 @@ export async function openSessionIdToken(taken: { id: string | null; encrypted: 
  * secrets and never appear in it, or anywhere else.
  */
 export async function revokeUserSessions(userId: string): Promise<number> {
+  return (await revokeUserSessionsTakingOwn(userId, null)).revoked;
+}
+
+/**
+ * `revokeUserSessions` for "sign out of every device" in settings (#1439):
+ * the same purge and audit entry, and in the same delete statement it hands
+ * back the caller's own row and its sealed ID token (decision 26a), so the
+ * route can end this browser's provider session too. Every other row's token
+ * is dropped here, never returned: another device's token is never this
+ * browser's hint.
+ */
+export async function revokeUserSessionsTakingOwn(
+  userId: string,
+  ownSessionId: string | null,
+): Promise<{ revoked: number; taken: { id: string | null; encrypted: string | null } }> {
   return getDb().transaction(async (transaction) => {
     const removed = await transaction.delete(sessions)
       .where(eq(sessions.userId, userId))
-      .returning({ id: sessions.id });
+      .returning({ id: sessions.id, encrypted: sessions.idTokenEnc });
     await transaction.insert(auditLog).values({
       householdId: null,
       actorUserId: userId,
@@ -186,7 +201,8 @@ export async function revokeUserSessions(userId: string): Promise<number> {
       action: "sessions_revoked",
       changes: { sessions: removed.length },
     });
-    return removed.length;
+    const own = ownSessionId === null ? undefined : removed.find((row) => row.id === ownSessionId);
+    return { revoked: removed.length, taken: own ?? { id: null, encrypted: null } };
   });
 }
 
@@ -246,12 +262,19 @@ export async function listSessions(userId: string): Promise<SessionSummary[]> {
  * lives on the session as its own entity, unlike the user-scoped
  * `sessions_revoked` count `revokeUserSessions` writes, because this action
  * names one row rather than summarising a purge.
+ *
+ * Answers the ended row's id and sealed ID token from the same delete
+ * (decision 26a). The route uses the token only when the row was the
+ * caller's own session (#1439).
  */
-export async function revokeSession(userId: string, sessionId: string): Promise<void> {
-  await getDb().transaction(async (transaction) => {
+export async function revokeSession(
+  userId: string,
+  sessionId: string,
+): Promise<{ id: string; encrypted: string | null }> {
+  return getDb().transaction(async (transaction) => {
     const [removed] = await transaction.delete(sessions)
       .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
-      .returning({ id: sessions.id });
+      .returning({ id: sessions.id, encrypted: sessions.idTokenEnc });
     if (!removed) throw new AuthError("session_not_found", "That session is not available", 404);
     await transaction.insert(auditLog).values({
       householdId: null,
@@ -261,6 +284,7 @@ export async function revokeSession(userId: string, sessionId: string): Promise<
       action: "session_revoked",
       changes: {},
     });
+    return removed;
   });
 }
 

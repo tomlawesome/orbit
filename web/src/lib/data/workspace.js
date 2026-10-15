@@ -2490,13 +2490,19 @@ export async function readSentLately() {
  * `signOutEverywhere`. If the ended session is this browser's own, the
  * server has already cleared the cookie by the time this resolves, so a
  * caller ending its own session should treat that the same way `signOut`
- * does: there is nothing left to be signed into on this page.
+ * does: there is nothing left to be signed into on this page, and nothing
+ * may call the API again (a 401 would send the reader through the provider's
+ * still-live sign-on, straight back in).
  *
  * @param {string} sessionId
- * @returns {Promise<void>}
+ * @returns {Promise<?string>}  the provider's own logout URL, when this
+ *   browser's own provider session ended with it (#1439); always null for
+ *   another device
  */
 export async function revokeSession(sessionId) {
-  await json(await csrfFetch(`/api/auth/sessions/${sessionId}/revoke`));
+  /** @type {?{ redirectTo?: ?string }} */
+  const body = await json(await csrfFetch(`/api/auth/sessions/${sessionId}/revoke`));
+  return body?.redirectTo ?? null;
 }
 
 /**
@@ -2506,17 +2512,19 @@ export async function revokeSession(sessionId) {
  * The caller's own session goes with them — that is the point, not a side
  * effect: a device the reader no longer trusts must lose access, and there is
  * no way to say which device that was. The route clears this browser's cookie
- * on the way out, so the only honest next page is the sign-in.
+ * on the way out, so this page then plays the goodbye, as `signOut` does.
  *
  * CSRF-carrying, like every other mutation here: an action this destructive
  * must not be reachable from another origin's form post.
  *
- * @returns {Promise<number>}  how many sessions were ended
+ * @returns {Promise<?string>}  the provider's own logout URL for this
+ *   browser, when it has one (#1439)
  */
 export async function signOutEverywhere() {
-  /** @type {?{ revoked?: number }} */
+  /** @type {?{ redirectTo?: ?string }} */
   const body = await json(await csrfFetch("/api/auth/sessions/revoke"));
-  return body?.revoked ?? 0;
+  sessionPromise = null;              /* the cached session is a dead letter now */
+  return body?.redirectTo ?? null;
 }
 
 /**

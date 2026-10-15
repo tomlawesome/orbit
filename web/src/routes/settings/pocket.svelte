@@ -14,8 +14,6 @@
     readSentLately,
     readSignInMethods,
     removeLocalPassword,
-    revokeSession,
-    signOutEverywhere,
     startProviderLink,
     startStepUp,
     unlinkProviderIdentity,
@@ -24,6 +22,7 @@
   } from "$lib/data/workspace.js";
   import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
   import { PACKS, intentOf, issuerHost, methodWords, on } from "./helm.js";
+  import { signOutOfDevice, signOutOfEveryDevice } from "./sign-out.js";
 
   /*
    * SETTINGS ON A PHONE (#1125, proposal §2.7-§2.8). Rendered beside the
@@ -69,6 +68,7 @@
    *   onretry?: () => void,
    *   resumed: string | null,
    *   fixtures: boolean,
+   *   onsignedout?: (redirectTo: string | null) => unknown,
    * }}
    */
   let {
@@ -85,6 +85,9 @@
     onretry = undefined,
     resumed,
     fixtures,
+    /* Chrome's descent, handed down by the desk page (#1439): this layout's
+       own sign-outs play the same goodbye, as the hatch's does. */
+    onsignedout = undefined,
   } = $props();
 
   /* ── reminders ────────────────────────────────────────────────────────── */
@@ -313,27 +316,37 @@
   let everywhereProblem = $state(/** @type {string | null} */ (null));
   const now = new Date().toISOString();
 
+  /* Set while a sign-out request is out, and kept once this device has left:
+     a second press then sends nothing, and after this session has ended any
+     request would answer 401 and sign the reader straight back in through
+     the provider (#1439). */
+  let signingOut = false;
+
   /** @param {Sessions[number]} row */
   async function signOutOf(row) {
+    if (signingOut) return;
+    signingOut = true;
     sessionProblem = null;
     try {
-      await revokeSession(row.id);
-      /* Ending this device's own session leaves nothing to come back to. */
-      if (row.current) { location.assign("/login"); return; }
+      /* This device's own session plays the goodbye (./sign-out.js). */
+      if (await signOutOfDevice(row, onsignedout)) return;
       sessions = sessions.filter((one) => one.id !== row.id);
       wake(`signed out of ${row.device}`);
     } catch {
       sessionProblem = `still signed in on ${row.device} — try again`;
     }
+    signingOut = false;
   }
 
   async function signOutEverywhereNow() {
+    if (signingOut) return;
+    signingOut = true;
     everywhereProblem = null;
     try {
-      await signOutEverywhere();
-      location.assign("/login");
+      await signOutOfEveryDevice(onsignedout);
     } catch {
       everywhereProblem = "still signed in — try again";
+      signingOut = false;
     }
   }
 
@@ -626,6 +639,7 @@
         <ArmButton label="sign out of every device →" armedLabel="tap again to sign out everywhere" wide
                    onfire={signOutEverywhereNow} />
         {#if everywhereProblem}<p class="p-error" role="alert">{everywhereProblem}</p>{/if}
+        <p class="st-everywhere p-prose">This signs Orbit out everywhere, and signs you out of your sign-in provider in this browser only: your other devices stay signed in at the provider.</p>
       </div>
     </section>
   </main>
@@ -813,6 +827,7 @@
   .st-device.here{color:var(--ok)}
   .st-hint{margin:10px 0 0;color:var(--ink-quiet)}
   .st-foot{margin:12px 0 0}
+  .st-everywhere{margin:10px 0 0;color:var(--ink-quiet)}
 
   /* The callouts. */
   .st-form{display:flex;flex-direction:column}
