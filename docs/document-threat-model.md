@@ -145,18 +145,20 @@ recoverable state.
   20,000 pixels a side and 40 million in all, then the preview renderer's own
   decoder must read the image. These limits are Orbit's own because no
   library sets them. Magic bytes alone are not proof that a file opens.
-- The PDF open check runs in a worker thread, not on the server's own thread
-  ([ADR-0038](adr/0038-pdf-structure-check-in-a-sandboxed-worker.md)). A
-  few-kilobyte file can make a PDF parser loop or allocate without end while
+- The PDF open check runs in a child process of its own, not in the server's
+  process ([ADR-0038](adr/0038-pdf-structure-check-in-a-sandboxed-worker.md)).
+  A few-kilobyte file can make a PDF parser loop or allocate without end while
   it reads the cross-reference data, and the cheap pre-parse bound on declared
   entries modelled the parser's lenient reading and kept missing ways in. So
-  each check gets its own worker with a 128 MB heap cap, a five-second
-  wall-clock limit that kills it, and at most two run at once; running out of
-  memory, timing out or crashing refuses the file as `unsupported_structure`,
-  logs one record with no file detail, and leaves the server answering. The
-  bound stays as a cheap first fence. The memory cap holds only while Node
-  runs without a heap flag (`--max-old-space-size` and its kin, including in
-  `NODE_OPTIONS`); boot warns when one disables it.
+  each check gets its own child with a 128 MB heap cap (its own flag), a
+  process-memory ceiling of 320 MB plus the file's size that the server reads
+  from `/proc` every 25 ms and kills it past, a five-second wall-clock limit
+  that kills it, an empty environment, and at most two run at once; running
+  out of memory, timing out or crashing refuses the file as
+  `unsupported_structure`, logs one record with no file detail, and leaves
+  the server answering. The bound stays as a cheap first fence. The child
+  still shares the server's files and network. Boot warns if `/bin/sh`,
+  `ulimit -d` or `/proc`, which the sandbox relies on, is missing.
 - Orbit does not refuse a PDF for what it contains. JavaScript, open and
   link actions, XFA forms, embedded files, owner-password-only encryption
   ("no editing" certificates) and encrypted object streams are all accepted
@@ -181,17 +183,20 @@ recoverable state.
 - Parser responses must be content-type checked, strictly decoded, and bounded
   before allocation. Redirects and arbitrary request URLs or options are
   rejected. Parser errors expose no provider or document content.
-- PDF.js is the one parser of untrusted bytes in the Orbit process, and it
-  opens only files ClamAV has passed. It never runs on the server's own
-  thread: the open check and the page renderer both run it in a sandbox
-  worker (ADR-0038, as amended for #1427). Drawing a page decodes what the
+- PDF.js is the one parser of untrusted bytes in Orbit's own code, and it
+  opens only files ClamAV has passed. It never runs in the server's process:
+  the open check and the page renderer both run it in a sandbox child
+  process, one per job (ADR-0038, as amended for #1427). Drawing a page decodes what the
   open check never touches (content streams, fonts, images), so a small
   emailed PDF whose page decodes to hundreds of megabytes used to stall or
   crash the server when a member opened its preview. Now each preview is one
-  worker run that applies the open check's gate, draws the page and returns a
-  PNG, under the render budget (ten seconds), twice the open check's off-heap
-  allowance and the same heap cap, two-at-once limit and empty environment; a
-  worker that does not start within five seconds is stopped as a crash.
+  child process that applies the open check's gate, draws the page and
+  returns a PNG, under the render budget (ten seconds), a process-memory
+  ceiling of 768 MB plus the file's size (which counts canvases, patterns,
+  images and fonts alike), and the same heap cap, two-at-once limit and empty
+  environment; a child that is not ready within five seconds is stopped as a
+  crash. A few-kilobyte pattern, shading or soft-mask file that would grow a
+  renderer to gigabytes is killed at the ceiling in a few seconds.
   Running out of memory, timing out or crashing answers
   `document_preview_failed` and logs one record with no file detail. A
   source check (`tests/unit/pdf-no-in-process-reader.test.mjs`) fails if
@@ -326,8 +331,8 @@ recoverable state.
 - The read is audited as `document_previewed`, distinct from
   `document_downloaded`, so an image request is never recorded as a
   whole-document export.
-- Rendering is in memory and, for a PDF, in the sandbox worker described
-  above: PDF.js parses into a Skia canvas with the same option set as the
+- Rendering is in memory and, for a PDF, in the sandbox child process
+  described above: PDF.js parses into a Skia canvas with the same option set as the
   open check (`PDF_STRUCTURE_PARSER_OPTIONS`) — no XFA, no network, no
   pdf.js worker, and no scripting layer to run a document's scripts. No
   plaintext temporary file is written, so there

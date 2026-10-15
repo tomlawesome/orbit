@@ -131,7 +131,7 @@ const run = async () => {
      bundler that inlined either would produce an output that fails at the
      first render. @napi-rs/canvas is imported by the server itself (image
      previews), so its bare specifier must survive into a chunk. pdfjs-dist
-     must NOT be imported by any chunk: it runs only in the sandbox worker,
+     must NOT be imported by any chunk: it runs only in the sandbox child,
      which loads it by the file URL the server resolves from the specifier
      string (ADR-0038, #1427), so a static import here means the server reads
      PDFs on its own thread again. The renders through the built server below
@@ -148,17 +148,17 @@ const run = async () => {
     throw new Error("@napi-rs/canvas is not imported as an external package by the built server");
   }
   if (chunkSources.some((source) => importsSpecifier(source, "pdfjs-dist/legacy/build/pdf.mjs"))) {
-    throw new Error("the built server imports pdfjs-dist on its own thread; PDFs must be read only in the sandbox worker");
+    throw new Error("the built server imports pdfjs-dist on its own thread; PDFs must be read only in the sandbox child");
   }
   if (!chunkSources.some((source) => source.includes("pdfjs-dist/legacy/build/pdf.mjs"))) {
-    throw new Error("the built server does not resolve pdfjs-dist for its sandbox worker");
+    throw new Error("the built server does not resolve pdfjs-dist for its sandbox child");
   }
 
   const pdfjs = await import(pathToFileURL(pdfjsEntry).href);
   if (typeof pdfjs.getDocument !== "function") throw new Error("missing PDF.js getDocument export");
 
   /* Draw a text-bearing page with the shipped native canvas, the way the
-     sandbox's render worker does (src/server/documents/pdf-structure-sandbox.ts)
+     sandbox's render child does (src/server/documents/pdf-structure-sandbox.ts)
      — pinning the same globals PDF.js polyfills onto, so a reintroduced
      packaging duplication (foreign Skia types) fails here instead of shipping
      silently. */
@@ -221,8 +221,8 @@ const run = async () => {
     await renderTask.destroy();
   }
 
-  /* The structure check opens PDFs in a worker thread evaluated from source
-     text (ADR-0038), which imports pdf.js by the file URL the built server
+  /* The structure check opens PDFs in a child process run from source text
+     (`node -e`, ADR-0038), which imports pdf.js by the file URL the built server
      resolves for it. Nothing above exercises that: a bundle that broke the
      resolution would refuse every PDF as a "crash" while rendering still
      worked. So the built server's own classifyDocumentStructure is called,
@@ -234,7 +234,7 @@ const run = async () => {
     throw new Error(`the built server's sandboxed structure check answered ${structure} for a valid PDF`);
   }
 
-  /* Page previews are drawn in the same sandbox, by a worker that loads both
+  /* Page previews are drawn in the same sandbox, by a child that loads both
      pdf.js and the native canvas by the file URLs the built server resolves
      (#1427). A bundle that broke either would answer every PDF preview with
      a failure while everything above passed, so the built server's own

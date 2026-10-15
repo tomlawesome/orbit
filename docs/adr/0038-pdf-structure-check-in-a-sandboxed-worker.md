@@ -5,7 +5,8 @@
 **Amends:** [ADR-0033](0033-document-safety-standard-patterns.md) item 3 (the
 open check's resource limits)
 **Relates to:** #1316 (hostile cross-reference data), #1427 (the page renderer
-gets the same treatment, amendment below); `docs/document-threat-model.md`
+gets the same treatment, and each job becomes a child process killed at a
+process-memory ceiling, amendments below); `docs/document-threat-model.md`
 
 ## Context
 
@@ -47,13 +48,17 @@ memory.
    fence that refuses the known shapes before a worker starts. It is no longer
    the thing that keeps the server up, so it is not extended to chase further
    entry paths.
-5. **A heap flag disables the memory cap.** Node silently ignores a worker's
+5. *(Withdrawn by the second amendment, item 3: the heap caps are now the
+   child process's own flags, which a flag on the server cannot override.)*
+   **A heap flag disables the memory cap.** Node silently ignores a worker's
    heap limits when the process runs with `--max-old-space-size` or a similar
    flag, directly or in `NODE_OPTIONS`. Production runs plain `node`; boot
    checks the cap with a trivial worker and logs a warning if it is not
    enforced, and the project's agent instructions forbid the flag in test runs.
    The wall clock still applies either way.
-6. **V8's heap limits do not count ArrayBuffer memory, so a watchdog does.**
+6. *(Superseded by the second amendment, item 2: the watchdog now reads the
+   child process's whole resident memory.)*
+   **V8's heap limits do not count ArrayBuffer memory, so a watchdog does.**
    `resourceLimits` caps the JavaScript heap only; typed arrays and their
    buffers live outside it, and pdf.js decodes a compressed stream into a
    growing buffer until the stream ends. A file of about 130 KB grew the
@@ -113,7 +118,9 @@ documents in an isolated, memory-capped, killable worker, as browsers do.
    second with the process growing about 155 MB. A scan large enough to pass
    128 MB already overruns the ten-second budget.
 
-   Skia's canvas memory is counted by no V8 figure, so every scratch canvas
+   *(This paragraph is superseded by the second amendment, item 2: the canvas
+   booking is removed, and the process-memory ceiling counts canvases with
+   everything else.)* Skia's canvas memory is counted by no V8 figure, so every scratch canvas
    pdf.js draws on is booked by the worker's own canvas factory
    (width x height x 4 bytes; `create` adds, `reset` adjusts, `destroy`
    subtracts, the preview's own page canvas booked first) against
@@ -155,11 +162,19 @@ documents in an isolated, memory-capped, killable worker, as browsers do.
 
 ## Alternatives considered
 
-- **`RLIMIT_AS` on the process.** Rejected: Node crashes at start under any
-  useful limit, because V8 reserves large address ranges it never touches.
-- **`RLIMIT_DATA` on a child process per check.** Rejected for now: the
-  image's Alpine/BusyBox userland could not be verified to apply it here, and
-  it costs a full Node start per check.
+- **`RLIMIT_AS` on the child process.** Rejected (reason corrected in the
+  second amendment): on glibc, malloc arenas put a fresh child at 3.5 GB of
+  address space, so Node fails at start under 2 GB; on musl a child starts,
+  but every page draw fails, because pdf.js reserves a WebAssembly memory with
+  a guard region of about 10 GB while drawing an image. A legitimate scan
+  needs 12-14 GB of address space, so no limit that bounds anything lets it
+  draw (measured at 1.5, 2, 4 and 16 GB).
+- **`RLIMIT_DATA` on the child process.** Adopted as a backstop, not as the
+  fence (second amendment, item 4): verified in the production image, where
+  BusyBox `sh` applies `ulimit -d`. Not the fence because kernels before 4.7
+  count only `brk` and Skia's bitmaps are `mmap`ed, because its value depends
+  on V8's untouched reservations, which a Node upgrade can move, and because
+  it ends the child with an allocator error rather than a clean stop.
 - **A decoded-length limit in pdf.js.** pdf.js has none to set.
 - **Pre-scanning streams for their decoded size.** Unsound, for the same
   reason as item 4: it models a lenient parser and would chase every filter
@@ -168,10 +183,98 @@ documents in an isolated, memory-capped, killable worker, as browsers do.
 - **Keep extending the pre-parse bound.** Rejected: it models a lenient parser
   and kept missing paths; this is the treadmill ADR-0033 retired for content
   checks.
-- **A child process or container per check.** Stronger isolation, but heavier
-  start-up and more moving parts for the same failure classes (memory, time,
-  crash); a worker thread with heap limits covers them. Revisit if pdf.js ever
-  needs native code for the open.
+- **A child process or container per check.** First rejected as heavier
+  start-up for the same failure classes. Adopted for the child process by the
+  second amendment: a process costs only 50-100 ms more than a worker thread
+  (Node boot), and only a process has a memory figure of its own; a worker
+  thread's share of the process cannot be measured, so every worker-side fence
+  counted one allocator at a time and the round-4 review found native memory
+  each of them missed. A container per job is still not used: it would need
+  a container runtime inside the image.
 - **A long-lived worker pool.** Faster, but a worker that has parsed one
   hostile file is not trusted with the next, and a fresh worker per check is
-  what makes the kill simple.
+  what makes the kill simple. The same holds for child processes: one per job,
+  no pool.
+
+## Amendment, 2026-10-15: one process per job, killed at a process-memory ceiling (#1427, round-4 review)
+
+Owner decisions 5a and 6a (2026-10-15): the ceilings below, shipped in v0.3.
+
+1. **The worker thread becomes a child process,** one per job (`node -e`,
+   the same source strings, the same file-URL imports for pdf.js and the
+   canvas backend), started through `/bin/sh -c 'ulimit -d N; exec node …'`
+   with an empty environment, stdout discarded and the file sent over the IPC
+   channel. The reason: canvas, pattern, image and font memory is native
+   memory no V8 figure or allocator hook sees, and a worker thread's share of
+   the process cannot be measured; a process's can. The round-4 finding:
+   pattern and shading snapshots kept native pixel copies the canvas booking
+   never saw; a 1 KB tiling file reached 1.4-1.9 GB, and the soft-mask file
+   the booking was built for drew at 1.5 GB without it. The child now has
+   its own environment, not a copy; it still shares the server's files and
+   network.
+2. **The fence is a process-memory watchdog,** the standard supervisor that
+   kills, as a cgroup `memory.max` does: every 25 ms the server reads the
+   child's `VmRSS` from `/proc/<pid>/status` (kB whatever the page size) and
+   kills it with SIGKILL once it passes `renderMemoryMb` (768 MB) or
+   `structureMemoryMb` (320 MB) plus the file's size, which the child holds;
+   the stop is logged as memory. This replaces both the `external_memory`
+   watchdog (item 6) and the canvas allowance (first amendment, item 2),
+   whose paragraphs are marked superseded. Measured child RSS, glibc host and
+   the production (musl) image:
+
+   | Case | Peak RSS | Time | Note |
+   |---|---|---|---|
+   | child ready | 85 MB musl / 94 MB glibc | 0.23-0.38 s | baseline |
+   | one-page text PDF, render | 105-119 MB | 0.47-0.63 s total | about 0.1 s more than the worker |
+   | 1-bit mask 5316x7522 (largest the 40 Mpx cap admits) | 398-458 MB | 1.1-1.5 s | drawn |
+   | 1-bit gray 5316x7522 | 406-410 MB | 1.1-1.6 s | drawn |
+   | 300 dpi RGB, image soft mask and group | 187-219 MB | 1.1-1.4 s | drawn |
+   | 8-bit RGB 5316x7522 | 280-357 MB | times out | #1434, unchanged |
+   | structure: 98 MB legitimate file | 293 MB musl / 393 MB glibc (file included) | 0.6-0.9 s | ceiling 320 + 98 = 418; on glibc the freed IPC buffers are not returned to the system |
+   | structure: 54 MB, 1,000 pages | 257 MB | 1.3 s | ceiling 320 + 54 = 374 |
+   | 128 MB object-stream bomb, render, no limit | 355-371 MB | 2.6-3.0 s | draws a blank page; bounded under 768 |
+   | same, structure at 256 MB | killed at 264 MB | 0.72 s | at 320: killed in about 1.5 s |
+   | heap bomb (2 M xref entries), heap flag 128 | 209-233 MB | 1.1-1.5 s | V8 aborts it, saying so |
+   | tiling 3000 px, n=60, at 512 / 256 | 515-530 / 259 MB | 2.4-2.7 / 0.83 s | killed |
+   | axial shading, n=150, at 512 / 256 | 515-517 / 257 MB | 2.8-3.2 / 1.2 s | killed |
+   | soft mask, n=80, at 512 / 256 | 517-519 / 260 MB | 1.9-2.3 / 0.89 s | killed |
+
+   The server process does not grow during any of these: the memory is the
+   child's. Sizing follows the usual rule for resource limits (ImageMagick's
+   `policy.xml`, Ghostscript's `-dMaxBitmap`): the largest legitimate input
+   measured, with headroom of about its own size. Reducing these figures is
+   #1436 (v0.4). A poll costs 0.4-6 ms on a loaded host; overshoot past the
+   ceiling was 3-18 MB at 150-190 MB/s of growth. A failed read is skipped
+   and the clock still applies.
+3. **The heap caps are the child's own flags** (`--max-old-space-size=128`,
+   `--max-semi-space-size=8`, `--stack-size=3900`), honoured whatever the
+   server runs with, so item 5 is withdrawn: a heap flag on the server no
+   longer disables anything. A child that dies of its heap cap prints V8's
+   fixed message, which the server recognises in an in-memory tail of the
+   child's stderr (never logged) and logs as memory. The boot check becomes
+   a sandbox self-check: a trivial child started through the same wrapper
+   reports its `VmRSS` and data limit from `/proc`, and boot warns if
+   `/bin/sh` is missing, `ulimit -d` did not apply or `/proc` is unreadable.
+4. **`RLIMIT_DATA` at the ceiling plus 1.5 GB** (and the file) is a
+   kernel-enforced backstop, set by `ulimit -d` in the wrapper: `VmData` sits
+   about 1.05 GB above RSS (V8's untouched reservations), so it bites about
+   0.5 GB above the watchdog, at allocation time, even if the server's event
+   loop is too busy to poll. Legitimate peak `VmData` measured 1.55 GB, so
+   768 + 1,536 leaves 750 MB. Kernels from 4.7 count `mmap` under it; older
+   ones bound nothing extra. When it fires, a musl child aborts with
+   `std::bad_alloc` (logged as memory); a glibc child usually answers a render
+   error instead, a rare misclassification accepted as such. `RLIMIT_AS`
+   stays rejected, for the measured reason now under "Alternatives considered".
+5. **Answers** (first amendment, item 3): a memory stop answers
+   `document_preview_failed` logged as `processing_interrupted`, not as a
+   parser fault; the sandbox's own `document.preview` record names memory.
+6. **Consequences.** Each job costs about 50-100 ms more than the worker did
+   (process start; ready in 0.23-0.38 s) plus about 3 ms per MB of file to
+   hand over, paid before the clock starts; the start-up deadline covers it.
+   Two child processes of about 90 MB each run while jobs run, none between
+   them. The ADR's alternative of no pool stands: a child that has read one
+   hostile file is not trusted with the next. A container memory limit
+   (#1429) now has the kernel's OOM killer pick the largest process, which
+   is the renderer child, not the server. `/bin/sh` and `/proc` become
+   requirements; both are in the image, and a host without `/proc` (macOS
+   development) loses the watchdog, which the self-check reports.

@@ -19,8 +19,8 @@ import {
  * there is no temporary file to leak or forget to unlink; the caller owns
  * zeroing the decrypted buffer it passed in.
  *
- * A PDF page is drawn in the sandbox worker (pdf-structure-sandbox.ts,
- * ADR-0038), never on this thread, with `validation.ts`'s parser options
+ * A PDF page is drawn in a sandbox child process (pdf-structure-sandbox.ts,
+ * ADR-0038), never in the server's process, with `validation.ts`'s parser options
  * (ADR-0033): no XFA, no network, no pdf.js worker, and no annotation layer,
  * so nothing a PDF carries runs. Images are drawn here: the pixel cap and
  * the structure check bound them before any decode.
@@ -121,10 +121,11 @@ async function withRenderBudget<T>(work: () => Promise<T>): Promise<T> {
 
 /**
  * Draws a PDF page in the sandbox (#1427, ADR-0038): the structure check's
- * cheap first fence here, then one worker run that applies the check's gate,
- * finds the page and draws it, under the render budget and the sandbox's
- * memory cap. Nothing of the file is read on this thread, so a page that
- * decodes to hundreds of megabytes costs one killed worker, not the server.
+ * cheap first fence here, then one child process that applies the check's
+ * gate, finds the page and draws it, under the render budget and the
+ * sandbox's process-memory ceiling. Nothing of the file is read in this
+ * process, so a page that decodes to hundreds of megabytes costs one killed
+ * child, not the server.
  */
 async function renderPdfPage(bytes: Buffer, pageNumber: number): Promise<DocumentPagePreview> {
   if (!hasPdfIndexBudget(bytes)) throw unsupportedPreview();
@@ -141,7 +142,7 @@ async function renderPdfPage(bytes: Buffer, pageNumber: number): Promise<Documen
     case "page_not_found":
       throw documentPreviewPageNotFound();
     case "failed":
-      throw failedPreview(rendered.stop === "timeout" ? "processing_interrupted" : undefined);
+      throw failedPreview(rendered.stop === "timeout" || rendered.stop === "memory" ? "processing_interrupted" : undefined);
   }
 }
 
@@ -169,7 +170,8 @@ async function renderRasterPage(bytes: Buffer, mediaType: "image/jpeg" | "image/
  * under the render budget (looser than upload's, so a file at the margin may
  * preview and still be refused on upload), and both failure modes are
  * bounded codes a screen can word rather than a 500. A render stopped on
- * memory, the canvas allowance included, is a failed preview (422). The page
+ * memory is a failed preview (422) logged as interrupted; the sandbox's own
+ * record names memory. The page
  * number changes none of that: identification and the
  * structure check's gate run first and unchanged (for a PDF, inside the same
  * sandboxed run that draws), and only then is the requested page looked for,
