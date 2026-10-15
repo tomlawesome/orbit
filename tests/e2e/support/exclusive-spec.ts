@@ -2,7 +2,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "@playwright/test";
 import { holderOf, release, renew, tryAcquire } from "./exclusive-lock";
-import { GATE_HOOK_TIMEOUT_MS, stackKey, stillInsideSpecFile } from "./reset-gate";
+import { stackKey, stillInsideSpecFile } from "./reset-gate";
 
 const RETRY_MS = 250;
 const STILL_WAITING_MS = 30_000;
@@ -28,7 +28,9 @@ export function exclusiveSpecFile(name: string): void {
 
   test.beforeAll(async () => {
     if (test.info().config.workers <= 1) return;
-    test.setTimeout(GATE_HOOK_TIMEOUT_MS);
+    /* Past this file's own give-up, so the loud error naming the holder fires
+       before Playwright's generic hook timeout (the reset gate's is 660 s). */
+    test.setTimeout(GIVE_UP_MS + 60_000);
 
     const started = Date.now();
     let announced = 0;
