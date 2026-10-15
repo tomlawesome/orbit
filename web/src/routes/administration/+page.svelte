@@ -96,10 +96,14 @@
       backdropMounted = true;
       const seed = data?.fixtures ? seedFromWorkspace(screen.primary ?? "") : rollSeed();
       const galaxy = galaxyOf({ households: screen.households, activeHouseholdId: screen.primary }, screen.today);
-      const domain = (screen.relay ?? []).find(([label]) => label === "collection domain")?.[1] ?? "";
+      /* #1442: a failed mail read (relay null) and a failed users read (users
+         null) are passed on as unknown, never as "" or a crew of 0. */
+      const domain = screen.relay
+        ? ((screen.relay.find(([label]) => label === "collection domain")?.[1]) ?? null)
+        : null;
       backdropTeardown = mountStation(/** @type {HTMLDivElement} */ (backdropRoot), {
         seed, galaxy, primary: screen.primary,
-        facts: { domain, systems: screen.households.length, crew: screen.users?.length ?? 0 },
+        facts: { domain, systems: screen.households.length, crew: screen.users ? screen.users.length : null },
       });
     } catch {
       if (!disposed) screenProblem = "not shown — Orbit could not load administration";
