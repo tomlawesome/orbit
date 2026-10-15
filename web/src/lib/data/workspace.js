@@ -1309,12 +1309,23 @@ export async function commandMailbox(command) {
  */
 export async function readContactSettings() {
   try {
-    /** @type {{ contact?: ?ContactSettings }} */
-    const body = await json(await fetch("/api/admin/contact", { credentials: "same-origin" }));
-    return body.contact ?? null;
+    return await fetchContactSettings();
   } catch {
     return null;
   }
+}
+
+/**
+ * The same read, unguarded: it rejects where the route refuses, breaks or
+ * never answers, so the administration screen can tell a failed read from an
+ * address that is genuinely unset (#1442).
+ *
+ * @returns {Promise<?ContactSettings>}
+ */
+async function fetchContactSettings() {
+  /** @type {{ contact?: ?ContactSettings }} */
+  const body = await json(await fetch("/api/admin/contact", { credentials: "same-origin" }));
+  return body.contact ?? null;
 }
 
 /**
@@ -1400,8 +1411,12 @@ export async function commandUploadLimit(command) {
  * The admin fixture is fixture mode's alone (the fixture workspace carries
  * `fixtureToday`; a live one never does). On a live instance a read that is
  * refused, breaks or never arrives gives its panel `null` and a true flag in
- * `failed`, never the mockup's values (#1442), and every read here is
- * guarded so one that fails never sinks the rest of the screen.
+ * `failed`, never the mockup's values (#1442) — the people list and the
+ * public contact included, so a failed read never reads as "nobody" or "not
+ * set". Every panel's read is guarded so one that fails never sinks the rest
+ * of the screen. The workspace read is the exception: without it there is no
+ * screen to draw, so if it fails readAdminScreen() rejects, and both layouts
+ * catch that and say Orbit could not load administration, with a retry.
  */
 export async function readAdminScreen() {
   const [workspace, session, users, mailbox, contact, uploadLimit, rotation, metadata, recoveryBundle, health, operations] =
@@ -1413,9 +1428,13 @@ export async function readAdminScreen() {
         (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, disabledAt?: ?string }[] }} */ body) =>
           body.users ?? [],
       )
-      .catch(() => []),
+      /* null, not []: a failed read is not an instance of nobody (#1442). */
+      .catch(() => null),
     readMailboxSettings(),
-    readContactSettings(),
+    fetchContactSettings().then(
+      (answer) => ({ answer, failed: false }),
+      () => ({ answer: null, failed: true }),
+    ),
     readUploadLimitSettings(),
     /* An open document-key rotation (#956). Additive: a route that cannot
        answer (fixture harness, older server) means no card, never a sunk
@@ -1490,7 +1509,9 @@ export async function readAdminScreen() {
     household: workspace.households.find((one) => one.id === primary) ?? null,
     primary,
     today: todayOf(workspace),
-    users,
+    /* `null` on a live instance whose users read failed (`failed.users`);
+       the empty list under the fixture harness, as before. */
+    users: users ?? (fixtureMode ? [] : null),
     households: workspace.households,
     /* The mockup's membership summaries: fixture mode only (#1442). */
     peopleMeta: fixtureMode ? adminFixture.peopleMeta : /** @type {Record<string, string>} */ ({}),
@@ -1509,6 +1530,9 @@ export async function readAdminScreen() {
       services: !fixtureMode && !health,
       instance: !fixtureMode && !health,
       owners: !fixtureMode && ownersFailed,
+      users: !fixtureMode && users === null,
+      /* A contact the route answers as unset is not a failure. */
+      contact: !fixtureMode && contact.failed,
     },
     /* The answer itself, for the pocket's per-service callout (#1123): when
        each service was last checked, last succeeded and last failed. Null
@@ -1520,7 +1544,7 @@ export async function readAdminScreen() {
        (#1001, §19): an instance administrator's workspace lists every one. */
     recoverable: workspace.recoverableHouseholds ?? [],
     mailbox,
-    contact,
+    contact: contact.answer,
     uploadLimit,
     rotation,
     metadata,

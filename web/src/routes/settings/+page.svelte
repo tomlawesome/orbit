@@ -345,8 +345,13 @@
   /* Chrome, bound so settings' own sign-outs play its goodbye (#1439). */
   /** @type {{ descendFrom: (redirectTo: string | null) => Promise<void> } | undefined} */
   let chrome = $state();
+  /* With Chrome not bound this throws rather than quietly answering nothing,
+     so sign-out.js's own fallback navigation runs (#1439). */
   /** @param {string | null} redirectTo */
-  const descendFrom = (redirectTo) => chrome?.descendFrom(redirectTo);
+  const descendFrom = (redirectTo) => {
+    if (!chrome) throw new Error("Chrome is not bound");
+    return chrome.descendFrom(redirectTo);
+  };
   /* Set while a sign-out request is out, and kept once this device has left:
      a second press then sends nothing, and after this session has ended any
      request would answer 401 and sign the reader straight back in through
@@ -742,7 +747,7 @@
       </ul>
       {#if sessionsProblem}<div class="note">{sessionsProblem}</div>{/if}
       <button onclick={(event) => tapSignOutEverywhere(event.currentTarget)}>{signOutArmed === "everywhere" ? "tap again to sign out everywhere" : "sign out of every device →"}</button>{#if signOutProblem}<div class="note">{signOutProblem}</div>{/if}
-      <p class="everywhere-says">This signs Orbit out everywhere, and signs you out of your sign-in provider in this browser only: your other devices stay signed in at the provider.</p>
+      <p class="everywhere-says">This signs Orbit out everywhere{#if providerOffered}, and signs you out of your sign-in provider in this browser only: your other devices stay signed in at the provider{/if}.</p>
     </div>
   {/if}
 </div>
