@@ -215,14 +215,16 @@ describe("duplicate detection uses the blind index (ADR-0024 decision 2)", () =>
     // A differently-titled item carrying the same reference: only the
     // reference can flag it, so this is the index and nothing else.
     const archive = archiveWith([{ sectionId: randomUUID(), title: "Buildings cover", reference: "hi-9284712" }]);
-    const preview = await previewPortableImport(fixture.users.member.id, fixture.household.id, archive, passphrase);
+    // Archive preview and import are owner-only since e39183e8; the member
+    // still writes the existing item, so the match does not depend on the writer.
+    const preview = await previewPortableImport(fixture.users.owner.id, fixture.household.id, archive, passphrase);
     expect(preview.conflicts).toHaveLength(1);
     expect(preview.conflicts[0].title).toBe("Buildings cover");
 
     // Importing it without resolving that conflict is refused, exactly as it
     // was when the comparison ran on plaintext.
     await expect(importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive,
       passphrase,
@@ -233,7 +235,7 @@ describe("duplicate detection uses the blind index (ADR-0024 decision 2)", () =>
     // cleared there is nothing left to match on, and the duplicate goes
     // unseen. This is the failure the index prevents.
     await getDb().update(items).set({ referenceIndex: null }).where(eq(items.householdId, fixture.household.id));
-    const blind = await previewPortableImport(fixture.users.member.id, fixture.household.id, archive, passphrase);
+    const blind = await previewPortableImport(fixture.users.owner.id, fixture.household.id, archive, passphrase);
     expect(blind.conflicts).toHaveLength(0);
   });
 
@@ -248,7 +250,7 @@ describe("duplicate detection uses the blind index (ADR-0024 decision 2)", () =>
       reference: "AB-123",
     });
     const archive = archiveWith([{ sectionId: randomUUID(), title: "Something else", reference: "AB123" }]);
-    const preview = await previewPortableImport(fixture.users.member.id, fixture.household.id, archive, passphrase);
+    const preview = await previewPortableImport(fixture.users.owner.id, fixture.household.id, archive, passphrase);
     expect(preview.conflicts).toHaveLength(0);
   });
 });
