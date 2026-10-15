@@ -210,7 +210,9 @@ describe("renderDocumentPagePreview", () => {
     try {
       const preview = await renderDocumentPagePreview(syntheticPdf("Preview fixture"), "application/pdf");
 
-      expect(globals.Path2D).not.toBe(foreignPath2D);
+      // The page is drawn in the sandbox worker, which pins its own canvas
+      // globals; the server thread's global is left exactly as it was.
+      expect(globals.Path2D).toBe(foreignPath2D);
       // A blank white page of this size compresses to a few hundred bytes; the
       // drawn text is what pushes it past this.
       expect(preview.bytes.length).toBeGreaterThan(2_000);
