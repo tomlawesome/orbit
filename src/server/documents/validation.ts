@@ -28,7 +28,7 @@ export type PdfDocumentParameters = NonNullable<Parameters<typeof getDocument>[0
 
 /**
  * How Orbit's one PDF parser opens untrusted bytes, for the structure check
- * and the page renderer alike, both in the sandbox worker (ADR-0033 pattern
+ * and the page renderer alike, both in a sandbox child process (ADR-0033 pattern
  * C, ADR-0038): no XFA, no pdf.js worker, no network or range fetching, no
  * system or browser fonts, no WebAssembly or platform image decoders, and
  * errors stop the parse. Nothing a PDF carries can run: pdf.js runs document
@@ -450,11 +450,12 @@ export function hasPdfIndexBudget(bytes: Buffer): boolean {
  * itself); a file that needs a password to open is refused, because nothing
  * in Orbit could show, read or scan it. Nothing is refused for what the file
  * contains: the renderer runs none of it. The open runs in a memory-capped,
- * killable worker (ADR-0038, pdf-structure-sandbox.ts), never on this thread.
+ * killable child process (ADR-0038, pdf-structure-sandbox.ts), never in the
+ * server's process.
  */
 async function classifyPdfStructure(bytes: Buffer): Promise<DocumentStructureReason> {
   // A cheap first fence: a declared entry count pdf.js would loop over,
-  // refused before any worker starts (ADR-0033 item 3, as amended by ADR-0038).
+  // refused before any child starts (ADR-0033 item 3, as amended by ADR-0038).
   if (!hasPdfIndexBudget(bytes)) return "unsupported_structure";
   return inspectPdfStructureInSandbox(bytes);
 }

@@ -247,38 +247,33 @@ export async function reportKekRotationInProgress(): Promise<void> {
 }
 
 /**
- * Warns when the PDF structure sandbox's memory cap is not enforced (#1316,
- * ADR-0038). Node silently ignores a worker's memory limits when the process
- * runs with a heap flag (`--max-old-space-size` and its kin, on the command
- * line or in NODE_OPTIONS): the time limit still stops a hostile PDF, but its
- * memory is no longer capped. A trivial capped worker reports its heap limit.
- * It also warns when this Node cannot report a worker's off-heap memory, which
- * the sandbox's watchdog reads: the heap cap alone does not count it.
+ * Warns when the PDF sandbox lacks something it relies on (#1316, #1427,
+ * ADR-0038). Each PDF job runs in a child process started through `/bin/sh`
+ * with `ulimit -d`, and is watched through `/proc`; a trivial child started
+ * the same way says whether all three work here. Without `/bin/sh` no child
+ * starts and every PDF is refused; without `ulimit -d` the kernel backstop
+ * is gone; without `/proc` the memory watchdog is blind, leaving the child's
+ * heap cap and the clock.
  */
-export async function reportPdfSandboxMemoryCap(): Promise<void> {
-  const [{ sandboxMemoryCapEnforced }, { log, operationalDetail }, { Worker }] = await Promise.all([
+export async function reportPdfSandboxSelfCheck(): Promise<void> {
+  const [{ pdfSandboxSelfCheck }, { log, operationalDetail }] = await Promise.all([
     import("@/server/documents/pdf-structure-sandbox"),
     import("@/lib/logger"),
-    import("node:worker_threads"),
   ]);
-  if (typeof Worker.prototype.getHeapStatistics !== "function") {
-    log.warn({
-      event: "document.inspection",
-      state: "degraded",
-      reason: "configuration_invalid",
-      action: "check_configuration",
-      impact: "none",
-      detail: operationalDetail`this Node cannot report a worker's off-heap memory, so the PDF sandbox cannot cap it; run the Node version the image ships`,
-    });
-  }
-  if (await sandboxMemoryCapEnforced()) return;
+  const problem = await pdfSandboxSelfCheck();
+  if (!problem) return;
+  const detail = {
+    child_not_started: operationalDetail`the PDF sandbox cannot start node through /bin/sh, so every PDF check and preview fails; run the image as shipped`,
+    data_limit_not_applied: operationalDetail`ulimit -d does not apply here, so the PDF sandbox has no kernel memory backstop; its memory watchdog still applies`,
+    proc_unreadable: operationalDetail`/proc is unreadable, so the PDF sandbox cannot watch a child's memory; only the heap cap and the clock bound a hostile PDF`,
+  }[problem];
   log.warn({
     event: "document.inspection",
     state: "degraded",
     reason: "configuration_invalid",
     action: "check_configuration",
-    impact: "none",
-    detail: operationalDetail`a Node heap flag such as --max-old-space-size, on the command line or in NODE_OPTIONS, disables the PDF sandbox memory cap; remove it`,
+    impact: problem === "child_not_started" ? "document_upload_blocked" : "none",
+    detail,
   });
 }
 
@@ -592,9 +587,9 @@ export async function registerNode(): Promise<void> {
     });
   });
 
-  // Best-effort, like the scanner probe: a heap flag must be visible in the
-  // log, but checking for it never delays or fails start-up.
-  void reportPdfSandboxMemoryCap().catch(() => undefined);
+  // Best-effort, like the scanner probe: a weakened PDF sandbox must be
+  // visible in the log, but checking for it never delays or fails start-up.
+  void reportPdfSandboxSelfCheck().catch(() => undefined);
 
   /* The last act of start-up (ADR-0022 §1). On an unclaimed instance this
      prints the claim notice, so it is the last line of `docker logs
