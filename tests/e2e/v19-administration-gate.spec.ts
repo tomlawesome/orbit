@@ -4,6 +4,8 @@ import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { signInAsWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { sessionHeaders } from "./support/households";
+import { seedHousehold, type Household } from "./support/signed-in";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
@@ -15,6 +17,37 @@ resetDatabaseBetweenSpecFiles();
  * instance-wide reads behind it (403). The administrator keeps all of it.
  * Run once per Playwright project (desktop-chromium, mobile-chromium).
  */
+
+/* A reader with no household is sent from /home and /settings to the front
+   page, where there is no menu: each test seeds one. Afterwards it is
+   scheduled for deletion through the lifecycle route, as v19-about does: the
+   immediate removal is refused to a member (403). */
+let household: Household | undefined;
+test.afterEach(async ({ page }) => {
+  const seeded = household;
+  household = undefined;
+  if (!seeded) return;
+  const response = await page.request.post(`/api/households/${seeded.id}/lifecycle`, {
+    headers: await sessionHeaders(page),
+    data: { action: "delete", confirmation: seeded.name },
+  });
+  if (!response.ok() && response.status() !== 404 && response.status() !== 409) {
+    throw new Error(`could not schedule removal of "${seeded.name}" (HTTP ${response.status()})`);
+  }
+});
+
+/**
+ * A worker's member meets /home as a newcomer, and the first-run walk covers
+ * the phone's menu button. Recorded as taken, through the route "take the
+ * walk again" writes, as support/worker-identity.ts does for the administrator.
+ */
+async function walkTaken(page: Page) {
+  const recorded = await page.request.put("/api/settings/tour", {
+    headers: await sessionHeaders(page),
+    data: { tourSeenAt: new Date().toISOString() },
+  });
+  expect(recorded.ok(), `the walk could not be recorded as taken (HTTP ${recorded.status()})`).toBe(true);
+}
 
 /** The account menu this width draws: the desk's card, or the pocket's hatch. */
 async function openMenu(page: Page, phone: boolean) {
@@ -39,6 +72,8 @@ test("an ordinary member is not offered Administration, is refused the page and 
   test.setTimeout(120_000);
   await claimInstanceAsAdministrator(browser);
   await signInAs(page, workerAccount("member"));
+  household = await seedHousehold(page, "admin-gate");
+  await walkTaken(page);
 
   await page.goto("/settings");
   const menu = await openMenu(page, isMobile);
@@ -60,6 +95,7 @@ test("the instance administrator is offered Administration and the page renders"
   test.setTimeout(120_000);
   await signInAsWorkerAdministrator(page, "/settings");
   await settleArrival(page);
+  household = await seedHousehold(page, "admin-gate");
 
   await page.goto("/settings");
   const menu = await openMenu(page, isMobile);
@@ -78,6 +114,8 @@ test("home does not offer an ordinary member Administration in the account menu"
   test.setTimeout(120_000);
   await claimInstanceAsAdministrator(browser);
   await signInAs(page, workerAccount("member"));
+  household = await seedHousehold(page, "admin-gate");
+  await walkTaken(page);
 
   await page.goto("/home");
   const menu = await openMenu(page, isMobile);
@@ -90,6 +128,7 @@ test("home offers the instance administrator Administration in the account menu"
   test.setTimeout(120_000);
   await signInAsWorkerAdministrator(page, "/home");
   await settleArrival(page);
+  household = await seedHousehold(page, "admin-gate");
 
   await page.goto("/home");
   const menu = await openMenu(page, isMobile);
