@@ -71,3 +71,27 @@ test("the instance administrator is offered Administration and the page renders"
   await expect(page).toHaveTitle("Orbit — administration");
   await expect(page.getByRole("heading", { level: 1, name: "Administration" })).toBeVisible();
 });
+
+/* #1440: home draws its own account menu (the desk's #account card, written
+   in the page rather than by Chrome), so it is checked as its own screen. */
+test("home does not offer an ordinary member Administration in the account menu", async ({ page, browser, isMobile }) => {
+  test.setTimeout(120_000);
+  await claimInstanceAsAdministrator(browser);
+  await signInAs(page, workerAccount("member"));
+
+  await page.goto("/home");
+  const menu = await openMenu(page, isMobile);
+  /* The menu is open and drawn (About is every member's), then the absence means something. */
+  await expect(menu.getByRole("link", { name: "About" })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Administration" })).toHaveCount(0);
+});
+
+test("home offers the instance administrator Administration in the account menu", async ({ page, isMobile }) => {
+  test.setTimeout(120_000);
+  await signInAsWorkerAdministrator(page, "/home");
+  await settleArrival(page);
+
+  await page.goto("/home");
+  const menu = await openMenu(page, isMobile);
+  await expect(menu.getByRole("link", { name: "Administration" })).toBeVisible();
+});

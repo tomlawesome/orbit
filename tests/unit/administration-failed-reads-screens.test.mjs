@@ -167,3 +167,92 @@ describe("administration pocket.svelte's screen-level failure (#1442)", () => {
     expect(hits.some((w) => /\{screenProblem\}/.test(w) && /try again/.test(w) && /onclick=\{onretry\}/.test(w))).toBe(true);
   });
 });
+
+/*
+ * #1442 (review round 3): the same on the other four panels of a live
+ * instance, on both layouts. When the relay (mail settings), services
+ * (service checks), instance (build) or owners (every system's members) read
+ * fails, the panel says so in a note with a "try again" wired to the layout's
+ * retry, and the screen still renders: a failed list is treated as empty at
+ * the point it is iterated (`view.relay ?? []`), never iterated as null.
+ *
+ *   - readAdminScreen() gives `failed.relay`, `failed.services`,
+ *     `failed.instance` and `failed.owners`; relay, services and instance are
+ *     null when their read failed, and owners stays an (incomplete) object;
+ *   - each panel's note is the text from its `failed.<panel>` test to the
+ *     `{/if}` that closes it: it says Orbit could not reach what was read,
+ *     and holds the "try again" button, wired to `rereadScreen` on the desk
+ *     and `tryAgain` on the phone;
+ *   - the version strip's note is the `{:else if view.failed.instance}` of the
+ *     `{#if view.instance}` that draws the line, so a failed read never prints
+ *     a null build.
+ */
+
+/**
+ * The text from each `needle` match to the `{/if}` that closes its block.
+ * @param {string} src @param {string | RegExp} needle
+ */
+function notesAfter(src, needle) {
+  return windowsAfter(src, needle, src.length).map((rest) => {
+    const end = rest.indexOf("{/if}");
+    return end === -1 ? rest : rest.slice(0, end);
+  });
+}
+
+const FAILED_PANELS = [
+  ["relay", "mail settings"],
+  ["services", "service checks"],
+  ["instance", "build"],
+  ["owners", "members"],
+];
+
+describe.each([
+  ["desk (+page.svelte)", DESK_PATH, /onclick=\{rereadScreen\}/],
+  ["phone (pocket.svelte)", POCKET_PATH, /onclick=\{tryAgain\}/],
+])("administration %s names a failed relay, services, instance and owners read (#1442)", (_label, file, retry) => {
+  it.each(FAILED_PANELS)("says the %s read failed, with a 'try again' wired to the retry", (panel, what) => {
+    const notes = notesAfter(read(file), new RegExp(`failed\\.${panel}\\b`));
+    expect(notes.length, `${file} never reads failed.${panel}`).toBeGreaterThan(0);
+    expect(
+      notes.some((note) => /role="alert"/.test(note) && /could not reach/.test(note) && note.includes(what)
+        && /try again/.test(note) && retry.test(note)),
+      `${file}: no alert saying Orbit could not reach the ${what}, with a 'try again' wired to the retry, after failed.${panel}`,
+    ).toBe(true);
+  });
+
+  it("iterates the relay rows and the service rows as empty when their read failed, never as null", () => {
+    const src = read(file);
+    for (const list of ["relay", "services"]) {
+      expect(src, `${file}: view.${list} is iterated without a fallback`).not.toMatch(new RegExp(`\\{#each\\s+view\\.${list}\\s+as\\b`));
+      expect(src, `${file}: view.${list} is not iterated as (view.${list} ?? [])`).toMatch(new RegExp(`\\{#each\\s+view\\.${list}\\s*\\?\\?\\s*\\[\\]\\s+as\\b`));
+    }
+    expect(src, `${file}: view.services is read unguarded`).not.toMatch(/\bview\.services\.(?:filter|map|find|length|forEach|some)\b/);
+    expect(src, `${file}: view.relay is read unguarded`).not.toMatch(/\bview\.relay\.(?:filter|map|find|length|forEach|some)\b/);
+  });
+
+  it("shows the build line only for a build that was read, and the failed note in its else", () => {
+    const src = read(file);
+    const at = src.search(/failed\.instance\b/);
+    expect(at, `${file} never reads failed.instance`).toBeGreaterThan(-1);
+    const guarded = openIfsAt(src, at).some((one) => /\bview\.instance\b/.test(one.cond) && !/failed\./.test(one.cond))
+      || /\{#if\s+view\.instance\s*\}[^]*\{:else if\s+view\.failed\.instance\s*\}/.test(src);
+    expect(guarded, `${file}: the failed-instance note is not the else of the {#if view.instance} that draws the build`).toBe(true);
+  });
+});
+
+describe("administration desk +page.svelte's backdrop caption facts (#1442)", () => {
+  /* The caption itself is tested in administration-station-caption-failed-reads.test.mjs;
+     this is the place the made-up number comes from. */
+  const src = read(DESK_PATH);
+  const at = src.indexOf("facts:");
+  const facts = src.slice(at, src.indexOf("}", at) + 1);
+
+  it("hands the backdrop the caption's facts", () => {
+    expect(at, "no `facts:` handed to mountStation").toBeGreaterThan(-1);
+    expect(facts).toMatch(/\bcrew\b/);
+  });
+
+  it("does not turn a failed users read (null) into a crew of 0", () => {
+    expect(facts).not.toMatch(/\?\?\s*0\b|\|\|\s*0\b/);
+  });
+});
