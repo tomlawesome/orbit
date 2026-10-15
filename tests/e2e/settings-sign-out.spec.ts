@@ -64,10 +64,14 @@ async function signedIn(page: Page): Promise<boolean> {
 /**
  * The sign-out control on a session row, this device's or another's. The
  * row is found from the control upward: the widest ancestor holding only
- * this one row control, and whether it says "this device".
+ * this one row control, and whether it says "this device". The list is read
+ * after the page loads, so this waits for the row to be drawn. Sessions from
+ * earlier tests in this file are still listed, so "another device" is the
+ * first such row; "this device" must be exactly one.
  */
 async function rowControl(page: Page, mobile: boolean, current: boolean): Promise<Locator> {
-  const marked = await page.evaluate(({ mobile, current }) => {
+  if (mobile) return pocketRowControl(page, current);
+  const mark = () => page.evaluate(({ mobile, current }) => {
     const nameOf = (el: Element) => (el.getAttribute("aria-label") ?? el.textContent ?? "").trim();
     const all = mobile
       ? [...document.querySelectorAll("button, [role=button], a")]
@@ -81,18 +85,51 @@ async function rowControl(page: Page, mobile: boolean, current: boolean): Promis
       while (row.parentElement && controls.filter((c) => row.parentElement!.contains(c)).length === 1) row = row.parentElement;
       const says = /this device/iu.test(`${row.textContent ?? ""} ${nameOf(control)}`);
       if (says === current) {
-        control.setAttribute("data-e2e-row", "target");
+        if (found === 0 || current) control.setAttribute("data-e2e-row", "target");
         found += 1;
       }
     }
     return found;
   }, { mobile, current });
-  expect(marked, `exactly one ${current ? "this-device" : "other-device"} row control`).toBe(1);
+  await expect.poll(mark, { message: `a ${current ? "this-device" : "other-device"} row is listed`, timeout: 30_000 }).toBeGreaterThan(0);
+  if (current) expect(await mark(), "exactly one this-device row control").toBe(1);
   return page.locator('[data-e2e-row="target"]');
 }
 
-function everyDeviceControl(page: Page): Locator {
-  return page.getByRole("button", { name: /sign out of every device/iu }).filter({ visible: true }).first();
+/**
+ * The phone's version: each session is a row whose sign-out is an act in a
+ * panel the row opens when tapped. The rows come current first, then most
+ * recently seen, so "another device" is the newest other session.
+ */
+async function pocketRowControl(page: Page, current: boolean): Promise<Locator> {
+  const faces = page.locator("section.st-sessions [data-row-face]");
+  const wanted = current ? faces.filter({ hasText: "this device" }) : faces.filter({ hasNotText: "this device" });
+  await expect(wanted.first(), `a ${current ? "this-device" : "other-device"} row is listed`).toBeVisible({ timeout: 30_000 });
+  if (current) await expect(wanted, "exactly one this-device row").toHaveCount(1);
+  const face = wanted.first();
+  await face.click();
+  const panel = page.locator(`[id="${await face.getAttribute("aria-controls")}"]`);
+  const act = panel.locator("[data-row-acts] button").first();
+  await expect(act).toBeVisible({ timeout: 10_000 });
+  await act.evaluate((el) => el.setAttribute("data-e2e-row", "target"));
+  return page.locator('[data-e2e-row="target"]');
+}
+
+/** How many sessions the page lists: the desk's row buttons, or the phone's rows. */
+async function listedSessions(page: Page, mobile: boolean): Promise<number> {
+  if (mobile) return page.locator("section.st-sessions [data-row-face]").count();
+  return page.locator('button[aria-label^="sign out of"]').filter({ visible: true }).count();
+}
+
+/**
+ * The every-device button, pinned by an attribute: once armed its name
+ * changes ("tap again to sign out everywhere"), so a locator by name would
+ * lose it before the confirming press.
+ */
+async function everyDeviceControl(page: Page): Promise<Locator> {
+  const named = page.getByRole("button", { name: /sign out of every device/iu }).filter({ visible: true }).first();
+  await named.evaluate((el) => el.setAttribute("data-e2e-every", "target"));
+  return page.locator('[data-e2e-every="target"]');
 }
 
 /** An armed control: the first press arms it, the second confirms. A one-press control has gone by the second. */
@@ -134,7 +171,7 @@ function watchLogins(page: Page): string[] {
 
 const LEAVING = [
   { label: "this device's row", press: async (page: Page, mobile: boolean) => pressArmed(await rowControl(page, mobile, true)) },
-  { label: "sign out of every device", press: async (page: Page) => pressArmed(everyDeviceControl(page)) },
+  { label: "sign out of every device", press: async (page: Page) => pressArmed(await everyDeviceControl(page)) },
 ];
 
 for (const leaving of LEAVING) {
@@ -171,17 +208,12 @@ test("settings: signing out another device drops its row and stays on /settings"
     const before = (await endSessionCalls(page)).length;
     const logins = watchLogins(page);
     const control = await rowControl(page, mobile, false);
+    /* Earlier tests here leave sessions behind, so the check is one row fewer, not one row left. */
+    const listed = await listedSessions(page, mobile);
     await pressArmed(control);
 
     await expect(control, "#1439: the other device's row is still listed").toHaveCount(0, { timeout: 10_000 });
-    await expect.poll(async () => {
-      return page.evaluate(() => {
-        const nameOf = (el: Element) => (el.getAttribute("aria-label") ?? el.textContent ?? "").trim();
-        return [...document.querySelectorAll("button, [role=button], a")]
-          .filter((el) => el.getClientRects().length > 0)
-          .filter((el) => /^sign out of/iu.test(nameOf(el)) && !/every device/iu.test(nameOf(el))).length;
-      });
-    }, { message: "#1439: only this device's row should remain", timeout: 10_000 }).toBe(1);
+    await expect.poll(() => listedSessions(page, mobile), { message: "#1439: exactly that one row went", timeout: 10_000 }).toBe(listed - 1);
     await expect(page).toHaveURL(/\/settings$/u);
     await expect(page.locator("#dusk")).toHaveCount(0);
     expect(await signedIn(page), "this device must still be signed in").toBe(true);
@@ -189,7 +221,7 @@ test("settings: signing out another device drops its row and stays on /settings"
     expect((await endSessionCalls(page)).length - before, "#1439: the provider was asked to end a session").toBe(0);
     expect(logins).toEqual([]);
     // The page is still usable: everything on it is still there to press.
-    await expect(everyDeviceControl(page)).toBeEnabled();
+    await expect(await everyDeviceControl(page)).toBeEnabled();
   } finally {
     await elsewhere.close();
     if (!(await signedIn(page))) await signIn(page, "/home");
