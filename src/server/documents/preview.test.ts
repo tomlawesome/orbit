@@ -202,6 +202,99 @@ function pdfWithSoftMaskGroups(n: number): Buffer {
   return Buffer.concat(parts);
 }
 
+/** A classic-xref PDF of the given objects, numbered from 1 in order. */
+function classicPdf(objects: Buffer[]): Buffer {
+  const parts: Buffer[] = [Buffer.from("%PDF-1.7\n")];
+  const offsets: number[] = [];
+  let length = parts[0].length;
+  objects.forEach((object, index) => {
+    offsets.push(length);
+    const wrapped = Buffer.concat([Buffer.from(`${index + 1} 0 obj\n`), object, Buffer.from("\nendobj\n")]);
+    parts.push(wrapped);
+    length += wrapped.length;
+  });
+  let trailer = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  trailer += offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  trailer += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${length}\n%%EOF\n`;
+  parts.push(Buffer.from(trailer));
+  return Buffer.concat(parts);
+}
+
+/** Page one fills itself `n` times with pattern /P0 (object 5, supplied by the caller). */
+function pdfFilledWithPattern(n: number, pattern: Buffer): Buffer {
+  const content = Buffer.from(`/Pattern cs /P0 scn\n${"0 0 612 792 re f\n".repeat(n)}`);
+  return classicPdf([
+    Buffer.from("<< /Type /Catalog /Pages 2 0 R >>"),
+    Buffer.from("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+    Buffer.from("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Pattern << /P0 5 0 R >> >> /Contents 4 0 R >>"),
+    Buffer.concat([Buffer.from(`<< /Length ${content.length} >>\nstream\n`), content, Buffer.from("\nendstream")]),
+    pattern,
+  ]);
+}
+
+/**
+ * A one-page PDF that fills the page `n` times with a coloured tiling pattern
+ * whose one tile is `tile` points square. Each fill draws the tile on a
+ * scratch canvas, so a few kilobytes of file cost memory only when drawn.
+ */
+function pdfWithTilingPattern(n: number, tile = 3000): Buffer {
+  const cell = Buffer.from(`0 0 1 rg 0 0 ${tile} ${tile} re f`);
+  return pdfFilledWithPattern(n, Buffer.concat([
+    Buffer.from(`<< /Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 ${tile} ${tile}] /XStep ${tile} /YStep ${tile} /Resources << >> /Length ${cell.length} >>\nstream\n`),
+    cell,
+    Buffer.from("\nendstream"),
+  ]));
+}
+
+/** A one-page PDF that fills the page `n` times with a skewed, extended axial shading pattern. */
+function pdfWithAxialShading(n: number): Buffer {
+  return pdfFilledWithPattern(n, Buffer.from(
+    "<< /Type /Pattern /PatternType 2 /Matrix [2 1 0.5 3 0 0] /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 300 0] /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> /Extend [true true] >> >>",
+  ));
+}
+
+/** Sandbox limit overrides, including the per-process memory ceilings (#1427). */
+type SandboxLimits = {
+  wallMs?: number;
+  startupMs?: number;
+  pollMs?: number;
+  concurrency?: number;
+  heapMb?: number;
+  structureMemoryMb?: number;
+  renderMemoryMb?: number;
+  pdfjsUrl?: string;
+};
+
+function setSandboxLimits(limits: SandboxLimits | undefined): void {
+  setPdfStructureSandboxLimitsForTests(limits as Parameters<typeof setPdfStructureSandboxLimitsForTests>[0]);
+}
+
+/**
+ * Runs a render that must be refused, with a 50 ms ticker and a 15 ms RSS
+ * sampler on this thread, and reports what they saw.
+ */
+async function refusedRenderWatched(bytes: Buffer): Promise<{ elapsed: number; ticks: number; growth: number }> {
+  let ticks = 0;
+  const timer = setInterval(() => {
+    ticks += 1;
+  }, 50);
+  const rssBefore = process.memoryUsage().rss;
+  let peakRss = rssBefore;
+  const sampler = setInterval(() => {
+    peakRss = Math.max(peakRss, process.memoryUsage().rss);
+  }, 15);
+  const started = Date.now();
+  try {
+    await expect(renderDocumentPagePreview(bytes, "application/pdf"))
+      .rejects.toMatchObject({ code: "document_preview_failed", status: 422 });
+  } finally {
+    clearInterval(timer);
+    clearInterval(sampler);
+  }
+  peakRss = Math.max(peakRss, process.memoryUsage().rss);
+  return { elapsed: Date.now() - started, ticks, growth: peakRss - rssBefore };
+}
+
 /**
  * A one-page PDF drawing one 1-bit /ImageMask image of the declared size over
  * the whole 595x842 page, in black. Every byte is 0x0f, so the file stays small
@@ -539,38 +632,56 @@ describe("renderDocumentPagePreview", () => {
       setPdfStructureSandboxLimitsForTests(undefined);
     });
 
-    it("refuses a 128 MB content-stream bomb as a failed preview, quickly, with this thread free and the process not growing", async () => {
-      const bomb = pdfWithContentStreamBomb(128);
-      // Small on the wire, huge once decoded: the point of the fixture.
-      expect(bomb.length).toBeLessThan(1_000_000);
-      let ticks = 0;
-      const timer = setInterval(() => {
-        ticks += 1;
-      }, 50);
-      const rssBefore = process.memoryUsage().rss;
-      let peakRss = rssBefore;
-      const sampler = setInterval(() => {
+    describe("a 128 MB content-stream bomb is bounded, not necessarily refused (#1427)", () => {
+      it("refuses it on memory at a 256 MB render ceiling, quickly, with this thread free and the process not growing", async () => {
+        const read = captureLogs();
+        setSandboxLimits({ renderMemoryMb: 256 });
+        const bomb = pdfWithContentStreamBomb(128);
+        // Small on the wire, huge once decoded: the point of the fixture.
+        expect(bomb.length).toBeLessThan(1_000_000);
+
+        const { elapsed, ticks, growth } = await refusedRenderWatched(bomb);
+
+        expect(elapsed).toBeLessThan(8_000);
+        // Free thread: the 50 ms timer keeps ticking for as long as the call
+        // takes. Proportional, so a fast refusal is not failed for being fast.
+        expect(ticks).toBeGreaterThanOrEqual(Math.floor((elapsed / 50) * 0.6));
+        expect(growth).toBeLessThan(150 * MB);
+        expect(read().logged).toMatch(/memory/i);
+      }, 15_000);
+
+      it("draws it or refuses it at the defaults, either way with this thread free and the process not growing", async () => {
+        const bomb = pdfWithContentStreamBomb(128);
+        let ticks = 0;
+        const timer = setInterval(() => {
+          ticks += 1;
+        }, 50);
+        const rssBefore = process.memoryUsage().rss;
+        let peakRss = rssBefore;
+        const sampler = setInterval(() => {
+          peakRss = Math.max(peakRss, process.memoryUsage().rss);
+        }, 15);
+        const started = Date.now();
+
+        let outcome: PromiseSettledResult<Awaited<ReturnType<typeof renderDocumentPagePreview>>>;
+        try {
+          [outcome] = await Promise.allSettled([renderDocumentPagePreview(bomb, "application/pdf")]);
+        } finally {
+          clearInterval(timer);
+          clearInterval(sampler);
+        }
         peakRss = Math.max(peakRss, process.memoryUsage().rss);
-      }, 15);
-      const started = Date.now();
+        const elapsed = Date.now() - started;
 
-      try {
-        await expect(renderDocumentPagePreview(bomb, "application/pdf"))
-          .rejects.toMatchObject({ code: "document_preview_failed", status: 422 });
-      } finally {
-        clearInterval(timer);
-        clearInterval(sampler);
-      }
-      peakRss = Math.max(peakRss, process.memoryUsage().rss);
-
-      const elapsed = Date.now() - started;
-      expect(elapsed).toBeLessThan(4_000);
-      // Free thread: the 50 ms timer keeps ticking for as long as the call
-      // takes. A thread busy decoding 128 MB ticks a handful of times at
-      // most. Proportional, so a fast refusal is not failed for being fast.
-      expect(ticks).toBeGreaterThanOrEqual(Math.floor((elapsed / 50) * 0.6));
-      expect(peakRss - rssBefore).toBeLessThan(250 * MB);
-    }, 15_000);
+        if (outcome.status === "fulfilled") {
+          expect(outcome.value.mediaType).toBe("image/png");
+        } else {
+          expect(outcome.reason).toMatchObject({ code: "document_preview_failed", status: 422 });
+        }
+        expect(ticks).toBeGreaterThanOrEqual(Math.floor((elapsed / 50) * 0.6));
+        expect(peakRss - rssBefore).toBeLessThan(150 * MB);
+      }, 30_000);
+    });
 
     it("draws a 300 dpi A4 scan to a PNG of the page's shape with the scan's pixels in it", async () => {
       const scan = scannedA4Pdf(300);
@@ -616,7 +727,7 @@ describe("renderDocumentPagePreview", () => {
     it("logs a memory stop as a bounded record that says memory and carries nothing of the file", async () => {
       const spies = (["error", "warn", "info", "debug"] as const).map((level) =>
         vi.spyOn(log, level).mockImplementation(() => undefined));
-      setPdfStructureSandboxLimitsForTests({ wallMs: 8_000, maxOldGenerationSizeMb: 32, externalAllowanceMb: 16 });
+      setSandboxLimits({ wallMs: 8_000, renderMemoryMb: 256 });
       const bomb = pdfWithContentStreamBomb(128);
 
       await expect(renderDocumentPagePreview(bomb, "application/pdf"))
@@ -633,60 +744,60 @@ describe("renderDocumentPagePreview", () => {
       expect(logged).not.toContain(String(bomb.length));
     }, 15_000);
 
-    describe("a canvas-memory allowance stops a page that draws on too many scratch canvases (#1316)", () => {
-      it("stops a soft-mask canvas bomb on canvas memory at a lowered allowance, quickly, with this thread free and the process not growing", async () => {
+    describe("a process-memory ceiling stops a page whatever it allocates (#1427)", () => {
+      const bombs = [
+        ["a tiling-pattern bomb", () => pdfWithTilingPattern(60)],
+        ["an axial-shading bomb", () => pdfWithAxialShading(150)],
+        ["a soft-mask canvas bomb", () => pdfWithSoftMaskGroups(80)],
+      ] as const;
+
+      /* The render budget is 60 s and the test timeout 30 s, so any stop
+         inside the test can only be memory or a crash, and the log says
+         which. That is what keeps these safe on a loaded runner: no elapsed
+         bound tighter than the clock can reach is asserted. */
+      async function expectStoppedOnMemory(bytes: Buffer): Promise<{ elapsed: number }> {
         const read = captureLogs();
-        setPdfStructureSandboxLimitsForTests({ canvasAllowanceMb: 16 } as Parameters<typeof setPdfStructureSandboxLimitsForTests>[0]);
-        const bomb = pdfWithSoftMaskGroups(80);
         // A few kilobytes on the wire: the cost is all in drawing it.
-        expect(bomb.length).toBeLessThan(8_000);
-        let ticks = 0;
-        const timer = setInterval(() => {
-          ticks += 1;
-        }, 50);
-        const rssBefore = process.memoryUsage().rss;
-        let peakRss = rssBefore;
-        const sampler = setInterval(() => {
-          peakRss = Math.max(peakRss, process.memoryUsage().rss);
-        }, 15);
-        const started = Date.now();
+        expect(bytes.length).toBeLessThan(5_000);
 
-        try {
-          await expect(renderDocumentPagePreview(bomb, "application/pdf"))
-            .rejects.toMatchObject({ code: "document_preview_failed", status: 422 });
-        } finally {
-          clearInterval(timer);
-          clearInterval(sampler);
-        }
-        peakRss = Math.max(peakRss, process.memoryUsage().rss);
+        const { elapsed, ticks, growth } = await refusedRenderWatched(bytes);
 
-        const elapsed = Date.now() - started;
-        expect(elapsed).toBeLessThan(4_000);
+        // Free thread, proportionally: a fast stop is not failed for being fast.
         expect(ticks).toBeGreaterThanOrEqual(Math.floor((elapsed / 50) * 0.6));
-        expect(peakRss - rssBefore).toBeLessThan(250 * MB);
+        // The child's memory is not this process's.
+        expect(growth).toBeLessThan(150 * MB);
         const { logged, calls } = read();
         expect(calls).toBeGreaterThan(0);
         expect(logged).toMatch(/memory/i);
         expect(logged).not.toMatch(/timeout|timed.?out/i);
         // Nothing of the document: no PDF syntax, none of its operators, not its size.
-        expect(logged).not.toMatch(/%PDF|SMask|Luminosity|ExtGState/);
-        expect(logged).not.toContain(String(bomb.length));
-      }, 15_000);
+        for (const fragment of ["%PDF", "Pattern", "Shading", "SMask", "re f", String(bytes.length)]) {
+          expect(logged).not.toContain(fragment);
+        }
+        return { elapsed };
+      }
 
-      it("stops the same file at the default allowance, on memory rather than the clock", async () => {
-        const read = captureLogs();
-        const bomb = pdfWithSoftMaskGroups(80);
+      it.each(bombs)("stops %s on memory at a 256 MB render ceiling, not on the clock, with this thread free", async (_name, build) => {
+        setSandboxLimits({ renderMemoryMb: 256 });
+        setDocumentPreviewRenderBudgetForTests(60_000);
+        try {
+          await expectStoppedOnMemory(build());
+        } finally {
+          setSandboxLimits(undefined);
+          setDocumentPreviewRenderBudgetForTests(undefined);
+        }
+      }, 30_000);
 
-        await expect(renderDocumentPagePreview(bomb, "application/pdf"))
-          .rejects.toMatchObject({ code: "document_preview_failed", status: 422 });
-
-        /* No elapsed bound: at 256 MiB the stop lands about 5 s in, close to
-           any fixed figure on a busy runner. The log is the proof: the
-           unfixed code ends on the clock, and says so. */
-        const { logged } = read();
-        expect(logged).toMatch(/memory/i);
-        expect(logged).not.toMatch(/timeout|timed.?out/i);
-      }, 20_000);
+      it.each(bombs)("stops %s on memory at the defaults too, not on the clock", async (_name, build) => {
+        setDocumentPreviewRenderBudgetForTests(60_000);
+        try {
+          const { elapsed } = await expectStoppedOnMemory(build());
+          // Expected in 2-5 s; nothing tighter than this is asserted.
+          expect(elapsed).toBeLessThan(25_000);
+        } finally {
+          setDocumentPreviewRenderBudgetForTests(undefined);
+        }
+      }, 30_000);
 
       it("still draws a page with a few legitimate soft masks, at the defaults", async () => {
         const preview = await renderDocumentPagePreview(pdfWithSoftMaskGroups(8), "application/pdf");

@@ -25,13 +25,26 @@ import { classifyDocumentStructure } from "./validation";
  * (#1316). These tests use the real parser and the real worker: a hostile file
  * must come back as "unsupported_structure" without stalling this thread, and
  * a legitimate file must get the same answer it always did.
- *
- * Run vitest WITHOUT --max-old-space-size or a NODE_OPTIONS heap flag: such a
- * flag silently disables worker memory caps and makes the memory tests vacuous.
  */
 
 const TEST_TIMEOUT_MS = 10_000;
-const TEST_LIMITS = { wallMs: 1500, maxOldGenerationSizeMb: 32 } as const;
+const TEST_LIMITS = { wallMs: 1500, heapMb: 32 } as const;
+
+/** Sandbox limit overrides, including the per-process memory ceilings (#1427). */
+type SandboxLimits = {
+  wallMs?: number;
+  startupMs?: number;
+  pollMs?: number;
+  concurrency?: number;
+  heapMb?: number;
+  structureMemoryMb?: number;
+  renderMemoryMb?: number;
+  pdfjsUrl?: string;
+};
+
+function setSandboxLimits(limits: SandboxLimits | undefined): void {
+  setPdfStructureSandboxLimitsForTests(limits as Parameters<typeof setPdfStructureSandboxLimitsForTests>[0]);
+}
 
 const chromiumPdf = readFileSync(new URL("../../../tests/support/fixtures/chromium-synthetic.pdf", import.meta.url));
 const qpdfObjectStreamPdf = readFileSync(new URL("../../../tests/support/fixtures/qpdf-object-stream.pdf", import.meta.url));
@@ -165,21 +178,23 @@ const MB = 1024 * 1024;
 
 describe("the PDF structure sandbox", () => {
   beforeEach(() => {
-    setPdfStructureSandboxLimitsForTests({ ...TEST_LIMITS });
+    setSandboxLimits({ ...TEST_LIMITS });
   });
 
   afterEach(() => {
-    setPdfStructureSandboxLimitsForTests(undefined);
+    setSandboxLimits(undefined);
     setPdfStructureInspectorForTests(undefined);
   });
 
   it("publishes the agreed limits", () => {
     expect(PDF_STRUCTURE_SANDBOX_LIMITS).toMatchObject({
       wallMs: 5000,
-      maxOldGenerationSizeMb: 128,
-      maxYoungGenerationSizeMb: 16,
-      stackSizeMb: 4,
+      startupMs: 5000,
+      pollMs: 25,
       concurrency: 2,
+      heapMb: 128,
+      structureMemoryMb: 320,
+      renderMemoryMb: 768,
     });
   });
 
@@ -217,8 +232,10 @@ describe("the PDF structure sandbox", () => {
         vi.restoreAllMocks();
       });
 
+      // The clock is 60 s, so a stop inside 10 s can only be memory or a crash,
+      // and the log says which: safe on a loaded runner.
       it("stops an object-stream bomb on memory, not on the clock, without the process growing", async () => {
-        setPdfStructureSandboxLimitsForTests({ ...TEST_LIMITS, wallMs: 8000, externalAllowanceMb: 16 });
+        setSandboxLimits({ wallMs: 60_000, structureMemoryMb: 192 });
         const bomb = objectStreamBomb(128);
         expect(bomb.length).toBeLessThan(1024 * 1024);
         const started = Date.now();
@@ -228,16 +245,16 @@ describe("the PDF structure sandbox", () => {
         const elapsedMs = Date.now() - started;
 
         expect(captured.result).toBe("unsupported_structure");
-        expect(elapsedMs).toBeLessThan(3000);
+        expect(elapsedMs).toBeLessThan(10_000);
         expect(captured.calls).toBeGreaterThan(0);
         expect(captured.logged).toMatch(/memory/i);
         expect(captured.logged).not.toMatch(/timeout|timed.?out/i);
-        expect(growthBytes).toBeLessThan(250 * MB);
+        expect(growthBytes).toBeLessThan(150 * MB);
         expect(pdfStructureSandboxInFlightForTests()).toBe(0);
-      }, TEST_TIMEOUT_MS);
+      }, 30_000);
 
       it("refuses two object-stream bombs at once without the process growing", async () => {
-        setPdfStructureSandboxLimitsForTests({ ...TEST_LIMITS, wallMs: 8000, externalAllowanceMb: 16 });
+        setSandboxLimits({ wallMs: 60_000, structureMemoryMb: 192 });
         const bomb = objectStreamBomb(128);
 
         const { result, growthBytes } = await peakRssGrowth(() =>
@@ -247,28 +264,29 @@ describe("the PDF structure sandbox", () => {
           ]));
 
         expect(result).toEqual(["unsupported_structure", "unsupported_structure"]);
-        expect(growthBytes).toBeLessThan(400 * MB);
+        expect(growthBytes).toBeLessThan(150 * MB);
         expect(pdfStructureSandboxInFlightForTests()).toBe(0);
-      }, TEST_TIMEOUT_MS);
+      }, 30_000);
 
       it("stops a heap bomb on the heap cap, saying memory, not timeout", async () => {
-        setPdfStructureSandboxLimitsForTests({ wallMs: 4000, maxOldGenerationSizeMb: 32 });
+        setSandboxLimits({ wallMs: 60_000, heapMb: 32 });
         const started = Date.now();
 
         const captured = await withCapturedLogs(() => classifyDocumentStructure(hostilePdf("\f", "%%EOF"), "application/pdf"));
 
         expect(captured.result).toBe("unsupported_structure");
-        expect(Date.now() - started).toBeLessThan(2000);
+        expect(Date.now() - started).toBeLessThan(10_000);
         expect(captured.calls).toBeGreaterThan(0);
         expect(captured.logged).toMatch(/memory/i);
+        expect(captured.logged).not.toMatch(/crash/i);
         expect(captured.logged).not.toMatch(/timeout|timed.?out/i);
         expect(pdfStructureSandboxInFlightForTests()).toBe(0);
-      }, TEST_TIMEOUT_MS);
+      }, 30_000);
     });
   });
 
   it("does not count time spent waiting in the queue, or worker start-up, against a check's limit", async () => {
-    setPdfStructureSandboxLimitsForTests({ ...TEST_LIMITS, concurrency: 1, wallMs: 1000 });
+    setSandboxLimits({ ...TEST_LIMITS, concurrency: 1, wallMs: 1000 });
 
     const results = await Promise.all(
       Array.from({ length: 6 }, () => classifyDocumentStructure(syntheticPdf(), "application/pdf")),
@@ -306,7 +324,7 @@ export default { getDocument, GlobalWorkerOptions };
 `);
     process.env.ORBIT_SANDBOX_CANARY = "must-not-reach-the-worker";
     try {
-      setPdfStructureSandboxLimitsForTests({ ...TEST_LIMITS, wallMs: 5000, pdfjsUrl: pathToFileURL(modulePath).href });
+      setSandboxLimits({ ...TEST_LIMITS, wallMs: 5000, pdfjsUrl: pathToFileURL(modulePath).href });
 
       await expect(inspectPdfStructureInSandbox(syntheticPdf())).resolves.toBe("supported_structure");
     } finally {
@@ -322,7 +340,7 @@ export default { getDocument, GlobalWorkerOptions };
     };
     process.on("unhandledRejection", onUnhandled);
     try {
-      setPdfStructureSandboxLimitsForTests({ ...TEST_LIMITS, wallMs: 1 });
+      setSandboxLimits({ ...TEST_LIMITS, wallMs: 1 });
 
       await expect(inspectPdfStructureInSandbox(syntheticPdf())).resolves.toBe("unsupported_structure");
       expect(pdfStructureSandboxInFlightForTests()).toBe(0);
@@ -336,7 +354,7 @@ export default { getDocument, GlobalWorkerOptions };
   }, TEST_TIMEOUT_MS);
 
   it("stops a worker that does not come online within the start-up deadline as a crash, and frees the slot", async () => {
-    setPdfStructureSandboxLimitsForTests({ ...TEST_LIMITS, startupMs: 1 });
+    setSandboxLimits({ ...TEST_LIMITS, startupMs: 1 });
 
     const { result, logged } = await withCapturedLogs(() => classifyDocumentStructure(syntheticPdf(), "application/pdf"));
 
@@ -348,7 +366,7 @@ export default { getDocument, GlobalWorkerOptions };
   it("refuses as unsupported_structure, quickly, when the worker cannot load the parser and crashes", async () => {
     // A long wall limit, so a fast answer can only come from handling the crash,
     // not from the timeout.
-    setPdfStructureSandboxLimitsForTests({
+    setSandboxLimits({
       ...TEST_LIMITS,
       wallMs: 8000,
       pdfjsUrl: pathToFileURL(join(tmpdir(), "orbit-missing-pdfjs-module.mjs")).href,
@@ -363,7 +381,7 @@ export default { getDocument, GlobalWorkerOptions };
 
   it("runs at most two checks at once, and answers all of six", async () => {
     // Waiting in the queue must not count against a check's own limit.
-    setPdfStructureSandboxLimitsForTests({ ...TEST_LIMITS, wallMs: 8000 });
+    setSandboxLimits({ ...TEST_LIMITS, wallMs: 8000 });
     let highest = 0;
     const sampler = setInterval(() => {
       highest = Math.max(highest, pdfStructureSandboxInFlightForTests());
@@ -389,7 +407,7 @@ export default { getDocument, GlobalWorkerOptions };
   // need more than that to parse.
   describe("legitimate files get the answers they always did", () => {
     beforeEach(() => {
-      setPdfStructureSandboxLimitsForTests(undefined);
+      setSandboxLimits(undefined);
     });
 
     it.each([
@@ -409,10 +427,14 @@ export default { getDocument, GlobalWorkerOptions };
       await expect(classifyDocumentStructure(paddedPdf(20 * MB), "application/pdf")).resolves.toBe("supported_structure");
     }, TEST_TIMEOUT_MS);
 
-    it("counts the file itself toward the off-heap cap, so a 20 MB PDF passes even with an 8 MB allowance", async () => {
-      setPdfStructureSandboxLimitsForTests({ externalAllowanceMb: 8 });
-      await expect(classifyDocumentStructure(paddedPdf(20 * MB), "application/pdf")).resolves.toBe("supported_structure");
-    }, TEST_TIMEOUT_MS);
+    it("accepts a 98 MB PDF within 5 s, under the default memory ceiling", async () => {
+      const bytes = paddedPdf(98 * MB);
+      const started = Date.now();
+
+      await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("supported_structure");
+
+      expect(Date.now() - started).toBeLessThan(5_000);
+    }, 30_000);
 
     it.each(syntheticStructurePdfFixtures)("accepts synthetic standards-valid PDF structure from $name", async ({ bytes }) => {
       await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("supported_structure");
