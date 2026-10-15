@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { readdir } from "node:fs/promises";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
@@ -8,7 +8,7 @@ import { auditLog, documents, dueEvents, items, portableArchiveImports, portable
 import { decryptPortableArchive, encryptPortableArchive } from "@/server/portable-archive";
 import { readDocumentDownload } from "@/server/document-repository";
 import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
-import { createPortableArchive, importPortableArchive, previewPortableArchive, previewPortableImport, readPortableArchive, rollBackUnfinishedPortableImports } from "@/server/portable-archive-repository";
+import { createPortableArchive, importPortableArchive, openPortableArchiveDownload, previewPortableArchive, previewPortableImport, readPortableArchive, rollBackUnfinishedPortableImports } from "@/server/portable-archive-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { readWorkspace } from "@/server/workspace-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
@@ -676,4 +676,129 @@ describe("portable archive document-inclusive export size (#1316, owner decision
     expect(message).not.toMatch(/128 MiB/);
     expect(readDocumentDownload).not.toHaveBeenCalled();
   }, 60_000);
+});
+
+describe("portable archive download is streamed from disk and still refuses a tampered file (#1428, part of #1316)", () => {
+  const MIB = 1_048_576;
+  const realReadDocumentDownload = vi.mocked(readDocumentDownload).getMockImplementation()!;
+
+  afterEach(() => {
+    vi.mocked(readDocumentDownload).mockReset();
+    vi.mocked(readDocumentDownload).mockImplementation(realReadDocumentDownload);
+  });
+
+  type Fixture = Awaited<ReturnType<typeof createIntegrationFixture>>;
+
+  /** Extra available documents on the fixture's item, each read back as `sizeBytes` of zeros. */
+  async function addAvailableDocuments(fixture: Fixture, count: number, sizeBytes: number) {
+    const sizes = new Map<string, number>();
+    for (let index = 0; index < count; index += 1) {
+      const [row] = await getDb().insert(documents).values({
+        householdId: fixture.household.id,
+        itemId: fixture.item.id,
+        uploadedByUserId: fixture.users.owner.id,
+        displayName: `stream-test-${index}.pdf`,
+        mediaType: "application/pdf",
+        sizeBytes,
+        contentSha256: createHash("sha256").update(randomUUID()).digest("hex"),
+        lifecycle: "available",
+        scanStatus: "skipped",
+        availableAt: new Date(),
+      }).returning({ id: documents.id });
+      sizes.set(row.id, sizeBytes);
+    }
+    vi.mocked(readDocumentDownload).mockImplementation(async (_userId, documentId) => ({
+      bytes: Buffer.alloc(sizes.get(documentId) ?? 128),
+      displayName: "stream-test.pdf",
+      mediaType: "application/pdf",
+    }));
+  }
+
+  /** The one stored file for an archive: the file under the document root whose path carries its storage key. */
+  async function storedFilePath(archiveId: string): Promise<string> {
+    const [row] = await getDb().select({ storageKey: portableArchives.storageKey }).from(portableArchives)
+      .where(eq(portableArchives.id, archiveId));
+    const root = process.env.DOCUMENTS_ROOT!;
+    for (const entry of await readdir(root, { recursive: true })) {
+      if (!entry.includes(row.storageKey)) continue;
+      const path = join(root, entry);
+      if ((await stat(path)).isFile()) return path;
+    }
+    throw new Error(`no stored file found for archive ${archiveId}`);
+  }
+
+  async function smallArchive(fixture: Fixture) {
+    return createPortableArchive({
+      userId: fixture.users.owner.id,
+      householdId: fixture.household.id,
+      passphrase,
+      includeDocuments: false,
+    });
+  }
+
+  it("returns exactly the stored file's bytes, in more than one chunk and none over 1 MiB, with sizeBytes equal to their length", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-download-stream");
+    await addAvailableDocuments(fixture, 3, 2 * MIB);
+    const archive = await createPortableArchive({
+      userId: fixture.users.owner.id,
+      householdId: fixture.household.id,
+      passphrase,
+      includeDocuments: true,
+    });
+    const whole = (await readPortableArchive(fixture.users.owner.id, archive.id)).bytes;
+    expect(whole.length).toBeGreaterThan(MIB);
+
+    const { stream, sizeBytes } = await openPortableArchiveDownload(fixture.users.owner.id, archive.id);
+    const chunks: Uint8Array[] = [];
+    const reader = stream.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+
+    expect(sizeBytes).toBe(whole.length);
+    expect(Buffer.concat(chunks).equals(whole)).toBe(true);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(Math.max(...chunks.map((chunk) => chunk.byteLength))).toBeLessThanOrEqual(MIB);
+  }, 120_000);
+
+  it("refuses with archive_integrity_failed (503) when one byte of the stored file was changed", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-download-tampered");
+    const archive = await smallArchive(fixture);
+    const path = await storedFilePath(archive.id);
+    const stored = await readFile(path);
+    stored[Math.floor(stored.length / 2)] ^= 0xff;
+    await writeFile(path, stored);
+
+    await expect(openPortableArchiveDownload(fixture.users.owner.id, archive.id))
+      .rejects.toMatchObject({ code: "archive_integrity_failed", status: 503 });
+  });
+
+  it("refuses another household's member with archive_not_found (404)", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-download-other-household");
+    const archive = await smallArchive(fixture);
+
+    await expect(openPortableArchiveDownload(fixture.users.secondOwner.id, archive.id))
+      .rejects.toMatchObject({ code: "archive_not_found", status: 404 });
+  });
+
+  it("records downloadedAt and one portable_archive_downloaded audit row after a successful open", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-download-recorded");
+    const archive = await smallArchive(fixture);
+    const [before] = await getDb().select({ downloadedAt: portableArchives.downloadedAt }).from(portableArchives)
+      .where(eq(portableArchives.id, archive.id));
+    expect(before.downloadedAt).toBeNull();
+
+    await openPortableArchiveDownload(fixture.users.owner.id, archive.id);
+
+    const [after] = await getDb().select({ downloadedAt: portableArchives.downloadedAt }).from(portableArchives)
+      .where(eq(portableArchives.id, archive.id));
+    expect(after.downloadedAt).not.toBeNull();
+    const audit = await getDb().select({ id: auditLog.id }).from(auditLog).where(and(
+      eq(auditLog.householdId, fixture.household.id),
+      eq(auditLog.action, "portable_archive_downloaded"),
+    ));
+    expect(audit).toHaveLength(1);
+  });
 });

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lt } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -257,7 +258,14 @@ export async function createPortableArchive(input: {
   return { id, expiresAt: expiresAt.toISOString(), includesDocuments: input.includeDocuments };
 }
 
-export async function readPortableArchive(userId: string, archiveId: string): Promise<{ bytes: Buffer }> {
+type StoredArchive = typeof portableArchives.$inferSelect;
+
+/**
+ * The live archive this person may download, or `archive_not_found`: one
+ * lookup and one access rule for both ways of reading it, so they cannot
+ * drift apart.
+ */
+async function findDownloadableArchive(userId: string, archiveId: string): Promise<StoredArchive> {
   const [archive] = await getDb().select().from(portableArchives)
     .where(and(eq(portableArchives.id, archiveId), gt(portableArchives.expiresAt, new Date()), isNull(portableArchives.purgedAt))).limit(1);
   if (!archive) throw new AppError("archive_not_found", "That export is not available", 404);
@@ -269,16 +277,54 @@ export async function readPortableArchive(userId: string, archiveId: string): Pr
     }
     throw error;
   }
-  const bytes = await storage().read(archive.storageKey, archive.sizeBytes);
-  if (createHash("sha256").update(bytes).digest("hex") !== archive.contentSha256) {
-    bytes.fill(0);
-    throw new AppError("archive_integrity_failed", "That export failed its integrity check", 503);
-  }
+  return archive;
+}
+
+function archiveIntegrityError(): AppError {
+  return new AppError("archive_integrity_failed", "That export failed its integrity check", 503);
+}
+
+async function recordArchiveDownload(userId: string, archive: StoredArchive): Promise<void> {
   await getDb().transaction(async (transaction) => {
     await transaction.update(portableArchives).set({ downloadedAt: new Date() }).where(eq(portableArchives.id, archive.id));
     await transaction.insert(auditLog).values({ householdId: archive.householdId, actorUserId: userId, entityType: "portable_archive", entityId: archive.id, action: "portable_archive_downloaded", changes: { includesDocuments: archive.includesDocuments } });
   });
+}
+
+export async function readPortableArchive(userId: string, archiveId: string): Promise<{ bytes: Buffer }> {
+  const archive = await findDownloadableArchive(userId, archiveId);
+  const bytes = await storage().read(archive.storageKey, archive.sizeBytes);
+  if (createHash("sha256").update(bytes).digest("hex") !== archive.contentSha256) {
+    bytes.fill(0);
+    throw archiveIntegrityError();
+  }
+  await recordArchiveDownload(userId, archive);
   return { bytes };
+}
+
+/**
+ * The download route's way in (#1428): verify, then stream, through one open
+ * file handle, so the server never holds the whole file. The first pass hashes
+ * the file in chunks and refuses a mismatch before any byte is sent; the
+ * second streams it from the start. The returned stream closes the handle when
+ * it ends, fails or is cancelled; every refusal before that closes it here.
+ */
+export async function openPortableArchiveDownload(userId: string, archiveId: string): Promise<{ stream: ReadableStream<Uint8Array>; sizeBytes: number }> {
+  const archive = await findDownloadableArchive(userId, archiveId);
+  const { handle, sizeBytes } = await storage().open(archive.storageKey, archive.sizeBytes);
+  // Both passes stop at the size measured on open, so Content-Length holds.
+  const end = Math.max(sizeBytes - 1, 0);
+  try {
+    const hash = createHash("sha256");
+    for await (const chunk of handle.createReadStream({ start: 0, end, autoClose: false })) hash.update(chunk as Buffer);
+    if (hash.digest("hex") !== archive.contentSha256) throw archiveIntegrityError();
+    await recordArchiveDownload(userId, archive);
+    const stream = Readable.toWeb(handle.createReadStream({ start: 0, end })) as ReadableStream<Uint8Array>;
+    return { stream, sizeBytes };
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    throw error;
+  }
 }
 
 /** Removes expired ciphertext and retains only an auditable tombstone. */
