@@ -15,6 +15,7 @@ fixing the cause deletes the heading in the same commit.
 - 2026-10-14 · 78c6d996 (door branch; changes since 0c6e60bf are household.css text colours, e2e spec marks, docs) · local full unit suite (7441 tests), after a browser run on the host · the "9a no-flight fallback … goes to the provider URL" case saw no navigation (`win.navigations.at(-1)?.to` undefined, line 431); the file passes alone, 9/9.
 - 2026-10-14 · 28dfb041 (#1403 slice E, Q3 part B: account email readers) · local full unit suite, seven agents building in parallel on the host · failed in the full run; passes alone. Seventh sighting.
 - 2026-10-14 · 2c29b2f2 (v0.3 final batch, everything merged) · `scripts/test-backend.sh`, with the integration suite and two e2e stacks running on the host · the "9a no-flight fallback … goes to the provider URL" case saw no navigation (line 431); 7346 others passed; the file passes alone, 9/9. Eighth sighting.
+- 2026-10-15 · eb85eaf2 (v0.3 final audit fix commits; nothing near Chrome.svelte or this file) · local `npx vitest run` (7394 tests), quiet host · both no-flight fallback cases failed; the file alone passed three runs in a row, 9/9. Ninth sighting.
 
 ## availability-route.test.mjs "GET /api/auth/availability carries phase: starting straight from getBootPhase" (#869)
 
