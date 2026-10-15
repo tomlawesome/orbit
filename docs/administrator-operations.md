@@ -831,9 +831,10 @@ restart the exact deployed image:
 
 If you have no copy of the key file but do have a recovery bundle, the way
 back is to restore the backup bundle or reinstall. The bundle import needs the
-deployment's current key file and refuses without it, so do not run it in the
-locked deployment. Reinstall Orbit into a fresh directory
-([Installing Orbit](installing.md)), then import the bundle there:
+deployment's current key file and refuses while that file is missing ("the
+configured document key is missing"), so do not run it there. Reinstall
+Orbit into a fresh directory ([Installing Orbit](installing.md)), then import
+the bundle there:
 
 ```sh
 bash scripts/import-recovery-bundle.sh <recovery.tar>
