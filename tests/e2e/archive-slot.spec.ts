@@ -116,6 +116,54 @@ function holdPreviewOpen(origin: string, headers: Record<string, string>) {
   };
 }
 
+/** A second, small archive request from Node, signed in as the holder is; its status says whether the slot is held. */
+function probePreview(origin: string, headers: Record<string, string>) {
+  return fetch(`${origin}${PREVIEW_PATH}`, {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json" },
+    body: "{}",
+  });
+}
+
+/**
+ * Starts a held upload and returns it once it is proved to hold the slot: a
+ * probe is refused with 429 while the holder is still uploading.
+ *
+ * The holder's first chunk leaving this process says nothing about the
+ * server: both requests read the session before the slot is claimed, so a
+ * probe can get there first and the holder is the one refused (desktop-webkit,
+ * pipeline 2640). A holder refused with 429 is ended and another started; any
+ * other end to a holder fails the test. A probe's 429 is the holder's doing
+ * because nothing else here takes the slot: each probe frees it before its
+ * answer is sent. On failure the holder is ended before the error goes up.
+ */
+async function takeSlot(origin: string, headers: Record<string, string>) {
+  let holder = holdPreviewOpen(origin, headers);
+  try {
+    await holder.inFlight;
+    await expect.poll(async () => {
+      const status = (await probePreview(origin, headers)).status;
+      const outcome = holder.outcome();
+      if (outcome !== null && "status" in outcome && outcome.status === 429) {
+        await holder.end();
+        holder = holdPreviewOpen(origin, headers);
+        await holder.inFlight;
+        return "the holder was refused; started another";
+      }
+      failIfHolderSettled(holder);
+      return status;
+    }, {
+      message: "a held upload takes the slot: a second archive request is refused with 429 while the first is in progress",
+      timeout: 30_000,
+      intervals: [250, 500, 1_000],
+    }).toBe(429);
+    return holder;
+  } catch (error) {
+    await holder.end();
+    throw error;
+  }
+}
+
 test("while one archive upload is in progress a second is refused at once, and goes through after it ends", async ({ page, isMobile }) => {
   test.setTimeout(270_000);
   await signIn(page, "/home");
@@ -151,27 +199,8 @@ test("while one archive upload is in progress a second is refused at once, and g
     // ── another signed-in request takes the slot and does not finish ──
     const origin = new URL(page.url()).origin;
     const headers = { ...(await sessionHeaders(page)), cookie: await cookieHeader(page) };
-    const held = holdPreviewOpen(origin, headers);
-    holder = held;
-    await held.inFlight;
-
-    const probe = async () => {
-      const response = await fetch(`${origin}${PREVIEW_PATH}`, {
-        method: "POST",
-        headers: { ...headers, "content-type": "application/json" },
-        body: "{}",
-      });
-      return response;
-    };
-    await expect.poll(async () => {
-      const status = (await probe()).status;
-      failIfHolderSettled(held);
-      return status;
-    }, {
-      message: "the second archive request is refused with 429 while the first is in progress",
-      timeout: 30_000,
-      intervals: [250, 500, 1_000],
-    }).toBe(429);
+    holder = await takeSlot(origin, headers);
+    const probe = () => probePreview(origin, headers);
     const refused = await probe();
     expect(refused.status).toBe(429);
     expect(refused.headers.get("retry-after")).toBe("60");
@@ -258,22 +287,9 @@ test("a 25 MB body sent to a busy archive route still gets its 429 in the browse
 
   const origin = new URL(page.url()).origin;
   const headers = { ...(await sessionHeaders(page)), cookie: await cookieHeader(page) };
-  const holder = holdPreviewOpen(origin, headers);
+  let holder: ReturnType<typeof holdPreviewOpen> | undefined;
   try {
-    await holder.inFlight;
-    await expect.poll(async () => {
-      const status = (await fetch(`${origin}${PREVIEW_PATH}`, {
-        method: "POST",
-        headers: { ...headers, "content-type": "application/json" },
-        body: "{}",
-      })).status;
-      failIfHolderSettled(holder);
-      return status;
-    }, {
-      message: "the slot is held: a small second request is refused with 429",
-      timeout: 30_000,
-      intervals: [250, 500, 1_000],
-    }).toBe(429);
+    holder = await takeSlot(origin, headers);
 
     const started = Date.now();
     const answer = await largePostFromPage(page, PREVIEW_PATH, LARGE_BODY_BYTES);
@@ -284,13 +300,9 @@ test("a 25 MB body sent to a busy archive route still gets its 429 in the browse
     expect(answer.retryAfter).toBe("60");
     expect(Date.now() - started).toBeLessThan(15_000);
   } finally {
-    await holder.end();
+    await holder?.end();
     /* The server frees the slot a moment after it sees the client go; the next test must not start while it is still held. */
-    await expect.poll(async () => (await fetch(`${origin}${PREVIEW_PATH}`, {
-      method: "POST",
-      headers: { ...headers, "content-type": "application/json" },
-      body: "{}",
-    })).status, {
+    await expect.poll(async () => (await probePreview(origin, headers)).status, {
       message: "the slot is free again once the holder has ended",
       timeout: 60_000,
       intervals: [250, 500, 1_000, 2_000],
