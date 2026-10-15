@@ -211,25 +211,57 @@ function isPdfCount(value: PdfValue | undefined): value is number {
 }
 
 /**
+ * Where pdf.js starts reading a file it takes as linearized, which it does
+ * when the first object is a dictionary with a positive /Linearized and an /L
+ * equal to the file length (its Linearization.create). It then ignores
+ * startxref and starts after the first endobj in the first 1,024 bytes,
+ * skipping whitespace, or at 0 if there is none. The hint and page entries
+ * pdf.js also requires are not checked: they only narrow its rule. Anything
+ * this cannot read means no extra root, so the check never refuses by itself.
+ */
+function linearizedXrefOffset(bytes: Buffer, text: string): number | undefined {
+  try {
+    const lexer = new PdfLexer(text, 0);
+    if (!PDF_NUMBER.test(lexer.next() ?? "") || !PDF_NUMBER.test(lexer.next() ?? "") || lexer.next() !== "obj" || lexer.next() !== "<<") return undefined;
+    const dictionary = readPdfDictionary(lexer, 1);
+    const linearized = dictionary.get("/Linearized");
+    if (typeof linearized !== "number" || linearized <= 0 || dictionary.get("/L") !== bytes.length) return undefined;
+  } catch (error) {
+    if (error instanceof PdfSyntaxError) return undefined;
+    throw error;
+  }
+  const endobj = bytes.subarray(0, 1024).indexOf("endobj");
+  if (endobj < 0) return 0;
+  let offset = endobj + "endobj".length;
+  while (offset < text.length && " \t\n\r".includes(text[offset]!)) offset += 1;
+  return offset;
+}
+
+/**
  * Whether every cross-reference section pdf.js would read declares, in all,
  * no more entries than the cap. pdf.js loops over every declared entry on
  * this thread, where the time budget cannot interrupt it, and an xref
  * stream's entries can take no bytes at all, so a tiny file can declare
- * billions. The sections are found as pdf.js's readXRef finds them: the last
- * startxref, then each /Prev and a classic trailer's /XRefStm, read from the
- * top-level dictionary only. A count that is not a non-negative integer, a
- * dictionary this check cannot read or too long a chain refuses the file. A
+ * billions. The sections are found as pdf.js's readXRef finds them, from
+ * both roots it can start at: the last startxref and, for a file it takes as
+ * linearized, the section after the first endobj; then each /Prev and a
+ * classic trailer's /XRefStm, read from the top-level dictionary only. A
+ * count that is not a non-negative integer, a dictionary this check cannot
+ * read or too long a chain refuses the file. A
  * revisited section is skipped, as pdf.js skips it, so a loop adds nothing.
  * A section pdf.js could not read either is skipped: with no readable
  * section pdf.js rebuilds the table by scanning the file, which its size
  * bounds.
  */
 function hasPdfIndexBudget(bytes: Buffer): boolean {
-  // pdf.js takes the last startxref anywhere in the file, %%EOF or not.
-  const keyword = bytes.lastIndexOf("startxref");
-  if (keyword < 0) return true;
   const text = bytes.toString("latin1");
-  const queue = [Number(text.slice(keyword + 9, keyword + 64).match(/^\s*(\d+)/u)?.[1])];
+  const queue: number[] = [];
+  const linearized = linearizedXrefOffset(bytes, text);
+  if (linearized !== undefined) queue.push(linearized);
+  // Otherwise pdf.js takes the last startxref anywhere in the file, %%EOF or
+  // not; it is walked for a linearized file too, which costs one more section.
+  const keyword = bytes.lastIndexOf("startxref");
+  if (keyword >= 0) queue.push(Number(text.slice(keyword + 9, keyword + 64).match(/^\s*(\d+)/u)?.[1]));
   const visited = new Set<number>();
   let total = 0;
   try {
