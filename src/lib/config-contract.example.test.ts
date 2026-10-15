@@ -35,11 +35,7 @@ describe(".env-orbit.example agrees with the configuration contract", () => {
     expect(undocumented).toEqual([]);
   });
 
-  it("documents the retired ORBIT_SECRETS_DIR key in the commented `# KEY=` form", () => {
-    // The key stays allowed so the retired-directory refusal can name it, so
-    // the example must still list it, commented out (never an active value).
-    const lines = readFileSync(examplePath, "utf8").split("\n");
-    expect(lines.some((line) => /^#\s*ORBIT_SECRETS_DIR=/.test(line.trim()))).toBe(true);
-    expect(lines.some((line) => /^ORBIT_SECRETS_DIR=/.test(line.trim()))).toBe(false);
+  it("names a v0.3.0 applied version in its provenance example (#1403 D3)", () => {
+    expect(readFileSync(examplePath, "utf8")).toContain("ORBIT_CONFIG_APPLIED_VERSION=v0.3.0");
   });
 });

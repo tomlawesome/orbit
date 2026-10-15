@@ -38,8 +38,32 @@ export async function rejectInterruptedDocuments(): Promise<void> {
   }
 }
 
+/**
+ * A staged upload (#1316) that no item bound before its `delete_after` goes the
+ * way a member's deletion does: `pending_deletion` with a purge job, which the
+ * retention purge then finishes. Nothing else ever queues a purge for it.
+ */
+async function retireUnboundUploads(): Promise<void> {
+  const retired = await getDb().execute(sql`
+    with expired as (
+      update documents
+      set lifecycle = 'pending_deletion', version = version + 1, updated_at = now()
+      where lifecycle = 'available' and item_id is null and delete_after <= now()
+      returning id, version
+    )
+    insert into document_jobs (document_id, kind, generation)
+    select id, 'purge', version from expired
+    on conflict do nothing
+    returning document_id
+  `);
+  if (retired.length > 0) {
+    log.info({ event: "document.lifecycle", state: "stopping", action: "none" });
+  }
+}
+
 export async function reconcileDocumentStorage(): Promise<void> {
   const storage = openDocumentStorage();
+  await retireUnboundUploads();
   const staleBoundary = new Date(Date.now() - 60 * 60 * 1_000);
   await getDb().update(documents).set({ lifecycle: "rejected", failureCode: "processing_interrupted", updatedAt: new Date() }).where(and(
     eq(documents.lifecycle, "scanning"),

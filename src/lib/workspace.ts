@@ -171,6 +171,9 @@ const householdShapeOf = (rules: FieldRules, item: typeof workspaceItemSchema, a
   onboardingComplete: z.boolean().default(true),
   deletionRequestedAt: z.iso.datetime().optional(),
   deleteAfter: z.iso.datetime().optional(),
+  /** Read-only (#1316): someone else is importing into this household, so it
+   * is closed to this reader and carries nothing but its name and settings. */
+  importInProgress: z.boolean().default(false),
   sections: z.array(workspaceSectionSchema).min(1).max(12),
   items: z.array(item).max(500),
   activities: z.array(activity).max(5_000).default([]),
@@ -184,8 +187,14 @@ const householdShapeOf = (rules: FieldRules, item: typeof workspaceItemSchema, a
 
 /** A household as a write carries it (household.create). */
 export const householdWorkspaceSchema = householdShapeOf(writeRules, workspaceItemSchema, itemActivitySchema);
-/** A household as the workspace read returns it. */
-export const storedHouseholdSchema = householdShapeOf(readRules, storedItemSchema, storedActivitySchema);
+/** A household as the workspace read returns it. One closed by an import
+ * (#1316) is read with no sections at all; every other has at least one. */
+export const storedHouseholdSchema = householdShapeOf(readRules, storedItemSchema, storedActivitySchema)
+  .extend({ sections: z.array(workspaceSectionSchema).max(12) })
+  .refine((household) => household.importInProgress || household.sections.length > 0, {
+    path: ["sections"],
+    message: "A household has at least one section",
+  });
 
 export const recoverableHouseholdSchema = z.object({
   id: z.string().min(1).max(100),
@@ -243,6 +252,8 @@ export type WorkspaceCommand =
       kind?: ItemKind;
       item: ItemIntent;
       activity?: ItemActivityIntent;
+      /** Staged documents to bind to the item in the same transaction (#1316). */
+      documentIds?: string[];
       /** Engine-side callers only, never on the wire (the schema has no
        * such field): what a new item starts from when the engine has
        * already read it -- reviewed intake's relay reading. An edit's basis
@@ -327,6 +338,9 @@ export const itemIntentSchema = workspaceItemShape
  * the command did (ADR-0034, #1325). */
 const activityIntentSchema = itemActivitySchema.extend({ kind: z.never().optional() });
 
+/** The staged documents an `item.upsert` binds (#1316), at most five. */
+const itemDocumentIdsSchema = z.array(z.uuid()).max(5);
+
 /** Runtime contract shared by the browser synchronizer and authenticated command API. */
 export const workspaceCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("household.create"), household: householdCreateSchema }),
@@ -360,6 +374,10 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     kind: z.enum(itemKinds).optional(),
     item: itemIntentSchema,
     activity: activityIntentSchema.optional(),
+    /* #1316: documents staged for this item (POST
+       /api/households/:id/documents), bound in the same transaction that
+       saves it, so an item and its documents are kept together or not at all. */
+    documentIds: itemDocumentIdsSchema.optional(),
   }),
   z.object({
     type: z.literal("item.archive"),
@@ -469,6 +487,9 @@ export function parseWorkspaceCommand(input: unknown): WorkspaceCommand {
         `An item does not send its ${derived.join(", ")}; Orbit works them out from the kind`,
         400,
       );
+    }
+    if (input.documentIds !== undefined && !itemDocumentIdsSchema.safeParse(input.documentIds).success) {
+      throw new AppError("invalid_command", "An item binds at most five documents, each named by its uuid", 400);
     }
     const kind = itemKinds.find((one) => one === input.kind);
     const refused = itemRefusal(input.item, kind);

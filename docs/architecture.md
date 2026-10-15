@@ -41,7 +41,7 @@ The supported topology and deferred alternatives are recorded in
 | Domain and workspace | Item, schedule, section, notification and household command contracts | `src/lib`, `src/server/workspace-*` |
 | Authorization | Instance, household, owner and document access decisions | `src/server/authorization.ts`, `workspace-access.ts`, document authorization |
 | Persistence | Versioned Drizzle schema, migrations and transactional repositories | `src/db`, `drizzle`, repository modules |
-| Documents | Validation, scanning, encryption, storage, drafts and reconciliation | `src/server/documents`, document repositories/workers |
+| Documents | Validation, scanning, encryption, storage and reconciliation | `src/server/documents`, document repositories/workers |
 | Integrations | OIDC, ClamAV, Tika, IMAP, SMTP and Web Push adapters | focused library/server modules |
 | Mail-in | IMAP receipt intake, review-inbox state and failure reasons (#1143) | `src/server/mail-in`, see its own `README.md` |
 | Operations | Health, safe administrator views, backup, restore and release scripts | administrator modules and `scripts` |
@@ -149,8 +149,8 @@ Worker invariants:
    failure restores the checkpoint; hard interruption requires explicit
    recovery from the preserved journal and checkpoint.
 
-Never generate or overwrite a KEK implicitly. The supported upgrade floor,
-rollback boundary and recoverable restore protocol are binding in
+Never generate or overwrite a KEK implicitly. The rollback boundary and
+recoverable restore protocol are binding in
 [ADR-0004](adr/0004-supported-upgrades-and-recoverable-restore.md).
 If checkpoint restoration fails, keep Orbit stopped and preserve the recovery
 evidence rather than starting with unproven mixed state.

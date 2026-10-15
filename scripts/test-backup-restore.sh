@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Backup/restore acceptance drill. Runs in CI against the container-validation
-# deployment (publish-container.yml) and asserts the operator guarantees
+# deployment and asserts the operator guarantees
 # below, cited as Part 2 / script #entry in docs/installer-guarantees.md
 # (issue #290 coverage map; the drill predates the catalogue, so citations
 # are mapped per test function rather than per assertion):
@@ -56,8 +56,8 @@
 # It refuses to start while any Orbit stack holds the fixed container names,
 # and install.sh refuses while any volume ending orbit-db-data exists
 # (docs/testing.md, "Local traps"). Environment values aimed
-# at another deployment (ORBIT_ENV_FILE, ORBIT_SECRETS_DIR, ORBIT_BACKUP_DIR,
-# ORBIT_BIND_ADDRESS, ORBIT_PORT, COMPOSE_FILE, COMPOSE_PROJECT_NAME) are
+# at another deployment (ORBIT_ENV_FILE, ORBIT_BACKUP_DIR, ORBIT_BIND_ADDRESS,
+# ORBIT_PORT, COMPOSE_FILE, COMPOSE_PROJECT_NAME) are
 # ignored. ORBIT_BACKUP_DRILL_IMAGE=<ref> skips the build. CI keeps the
 # borrowed path: its pipeline already supplies a throwaway deployment.
 #
@@ -121,7 +121,7 @@ if [[ "$own_stack" == 1 ]]; then
   # The owned stack answers to its own files and project only: a value
   # exported for another deployment must not point the drill, the scripts it
   # runs or Compose's interpolation at that deployment.
-  unset ORBIT_ENV_FILE ORBIT_SECRETS_DIR ORBIT_BACKUP_DIR ORBIT_BIND_ADDRESS ORBIT_PORT COMPOSE_FILE
+  unset ORBIT_ENV_FILE ORBIT_BACKUP_DIR ORBIT_BIND_ADDRESS ORBIT_PORT COMPOSE_FILE
   export COMPOSE_PROJECT_NAME="$own_project"
   own_workdir="$(mktemp -d "${TMPDIR:-/tmp}/orbit-backup-drill.XXXXXX")"
   deploy_dir="$own_workdir/$own_project"
@@ -129,7 +129,10 @@ if [[ "$own_stack" == 1 ]]; then
 fi
 
 readonly environment_file="${ORBIT_ENV_FILE:-.env-orbit}"
-readonly secrets_directory="${ORBIT_SECRETS_DIR:-$deploy_dir/.orbit-secrets}"
+# The deployment's secrets sit in .orbit-secrets beside its environment file.
+environment_directory="$(dirname -- "$environment_file")"
+[[ "$environment_directory" == /* ]] || environment_directory="$deploy_dir/$environment_directory"
+readonly secrets_directory="${environment_directory%/.}/.orbit-secrets"
 readonly live_kek="$secrets_directory/document-kek"
 readonly document_id="11111111-1111-4111-8111-111111111111"
 readonly recovery_document_id="55555555-5555-4555-8555-555555555555"
@@ -370,9 +373,9 @@ install_own_stack() {
   else
     image="orbit-backup-drill-local:$revision"
     printf 'Orbit backup test: building the working-tree image (this takes several minutes).\n' >&2
-    # Stamped at ADR-0016's supported-install floor, as repair-journeys does.
+    # The development version, as the install acceptance harness stamps.
     docker build --quiet -t "$image" \
-      --build-arg ORBIT_VERSION=v0.3.0 \
+      --build-arg ORBIT_VERSION=v0.0.0 \
       --build-arg ORBIT_REVISION="$revision" \
       --build-arg ORBIT_CHANNEL=ci "$repo_dir" >/dev/null ||
       fail 'working-tree image build failed'
@@ -380,7 +383,7 @@ install_own_stack() {
 
   # From here this run owns Docker objects that teardown must remove.
   own_stack_started=1
-  docker rm -f "$own_registry_name" >/dev/null 2>&1 || true
+  docker rm -f -v "$own_registry_name" >/dev/null 2>&1 || true
   docker run -d --name "$own_registry_name" -p "127.0.0.1:$own_registry_port:5000" \
       "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373" >/dev/null ||
     fail 'local registry did not start'
@@ -439,7 +442,7 @@ remove_own_stack() {
       chmod 600 "$deploy_dir/.env-orbit" 2>/dev/null || true
       (cd "$deploy_dir" && timeout 300 docker compose --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) || true
     fi
-    timeout 60 docker rm -f "$own_registry_name" >/dev/null 2>&1 || true
+    timeout 60 docker rm -f -v "$own_registry_name" >/dev/null 2>&1 || true
     timeout 60 docker ps -aq --filter "$label" 2>/dev/null | xargs -r timeout 60 docker rm -f >/dev/null 2>&1 || true
     timeout 60 docker volume ls -q --filter "$label" 2>/dev/null | xargs -r timeout 60 docker volume rm >/dev/null 2>&1 || true
     timeout 60 docker network ls -q --filter "$label" 2>/dev/null | xargs -r timeout 60 docker network rm >/dev/null 2>&1 || true
@@ -715,8 +718,8 @@ insert_credential_fixture() {
   compose exec -T orbit-db sh -c \
     'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="
       delete from users where id = '\''$1'\'';
-      insert into users (id, email, email_verified, display_name, is_instance_admin)
-        values ('\''$1'\'', '\''backup-drill@example.invalid'\'', false, '\''Backup Drill User'\'', false);
+      insert into users (id, email_verified, display_name, is_instance_admin)
+        values ('\''$1'\'', false, '\''Backup Drill User'\'', false);
       insert into local_credentials (user_id, password_hash)
         values ('\''$1'\'', '\''$2'\'');
       insert into credential_setup_tokens (id, user_id, token_hash, purpose, expires_at)

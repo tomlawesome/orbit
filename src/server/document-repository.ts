@@ -47,7 +47,7 @@ export const listableDocumentLifecycles = [
 
 export type ListableDocumentLifecycle = typeof listableDocumentLifecycles[number];
 
-export type DocumentContentOperation = "summary" | "download" | "draft" | "restore";
+export type DocumentContentOperation = "summary" | "download" | "restore";
 
 /**
  * The single content-readiness boundary for document operations.
@@ -55,8 +55,8 @@ export type DocumentContentOperation = "summary" | "download" | "draft" | "resto
  * A genuinely `clean` scan is always ready. `skipped` is ready only when the
  * runtime scan mode is explicitly `disabled`; any other or unknown scan mode
  * value must not authorize a `skipped` scan status. The operation also
- * supplies its own lifecycle boundary: content reads and draft creation
- * require `available`, while restore is only valid during retention.
+ * supplies its own lifecycle boundary: content reads require `available`,
+ * while restore is only valid during retention.
  */
 export function isDocumentContentReady(
   record: { lifecycle: string; scanStatus: string },
@@ -71,7 +71,6 @@ export function isDocumentContentReady(
     case "summary":
       return record.lifecycle === "available" || record.lifecycle === "pending_deletion";
     case "download":
-    case "draft":
       return record.lifecycle === "available";
     case "restore":
       return record.lifecycle === "pending_deletion";
@@ -90,7 +89,7 @@ export interface DocumentSummary {
   scanStatus: string;
   availableAt: string | null;
   deleteAfter: string | null;
-  /** Whether the document's content can be downloaded or drafted from yet. */
+  /** Whether the document's content can be downloaded yet. */
   ready: boolean;
   /** Bounded failure reason for a rejected document; never provider text. */
   failureCode: string | null;
@@ -121,6 +120,35 @@ async function requireHouseholdAndItemAccess(
   }
 }
 
+/**
+ * The stage route's check (#1316): a household member who may hold documents,
+ * with no item yet. Refused the same way as an unknown household.
+ */
+async function requireHouseholdDocumentAccess(userId: string, householdId: string): Promise<void> {
+  const access = validUuid(householdId) ? await findHouseholdAccess(userId, householdId) : undefined;
+  if (!access || !canAccessHouseholdDocuments(access.administrator, access.role ? userId : null)) {
+    throw new AppError("household_not_found", "That household is not available", 404);
+  }
+}
+
+/**
+ * The item id a document's ciphertext opens under. A staged upload is sealed
+ * under its draft item id before that item exists, so the row keeps it beside
+ * the envelope; rows from before that column read under `item_id` as always.
+ */
+export function sealedItemIdOf(row: { sealedItemId: string | null; itemId: string | null }): string | null {
+  return row.sealedItemId ?? row.itemId;
+}
+
+/**
+ * How long a staged upload waits to be bound before the storage sweep retires
+ * it: at least a day, and never less than scanner recovery keeps the row
+ * recoverable, so a document recovery publishes is still there to bind.
+ */
+function stagedUploadHoldMs(config: { scanRecoveryRetentionHours: number }): number {
+  return Math.max(24, config.scanRecoveryRetentionHours) * 60 * 60 * 1_000;
+}
+
 async function requireDocumentAccess(userId: string, documentId: string) {
   // A malformed id must fail the same way an unknown-but-well-formed one
   // does: postgres.js runs with prepare: false, so an invalid uuid literal
@@ -134,6 +162,7 @@ async function requireDocumentAccess(userId: string, documentId: string) {
       id: documents.id,
       householdId: documents.householdId,
       itemId: documents.itemId,
+      sealedItemId: documents.sealedItemId,
       displayName: documents.displayName,
       mediaType: documents.mediaType,
       sizeBytes: documents.sizeBytes,
@@ -302,7 +331,10 @@ async function reserveDocumentMetadata(input: {
   documentId: string;
   userId: string;
   householdId: string;
+  /** The item id the ciphertext is sealed under. */
   itemId: string;
+  /** A staged upload: stored with no item, due to be retired unless bound in time. */
+  staged: boolean;
   displayName: string;
   mediaType: string;
   sizeBytes: number;
@@ -333,7 +365,9 @@ async function reserveDocumentMetadata(input: {
     await transaction.insert(documents).values({
       id: input.documentId,
       householdId: input.householdId,
-      itemId: input.itemId,
+      itemId: input.staged ? null : input.itemId,
+      sealedItemId: input.itemId,
+      deleteAfter: input.staged ? new Date(Date.now() + stagedUploadHoldMs(config)) : null,
       uploadedByUserId: input.userId,
       displayName: input.displayName,
       mediaType: input.mediaType,
@@ -348,13 +382,24 @@ async function reserveDocumentMetadata(input: {
 export async function uploadItemDocument(input: {
   userId: string;
   householdId: string;
+  /** The item the document belongs to; for a staged upload, the draft item it will be bound to. */
   itemId: string;
+  /**
+   * Stage it (#1316): store it with no item, sealed under `itemId`, for
+   * `item.upsert { documentIds }` to bind in the same transaction that saves
+   * the item. The item need not exist yet.
+   */
+  staged?: boolean;
   filename: string;
   body: ReadableStream<Uint8Array> | null;
   declaredBytes?: number;
   documentId?: string;
 }): Promise<DocumentSummary> {
-  await requireHouseholdAndItemAccess(input.userId, input.householdId, input.itemId);
+  const staged = input.staged === true;
+  if (staged) await requireHouseholdDocumentAccess(input.userId, input.householdId);
+  else await requireHouseholdAndItemAccess(input.userId, input.householdId, input.itemId);
+  /** The item the row is bound to: none yet for a staged upload. */
+  const rowItemId = staged ? null : input.itemId;
   const config = getDocumentConfig();
   // The administrator's limit, read now so a change needs no restart (#1285).
   // Held for the whole upload, so every read below agrees with the receive.
@@ -375,10 +420,11 @@ export async function uploadItemDocument(input: {
       const [identity] = await getDb().select({
         householdId: documents.householdId,
         itemId: documents.itemId,
+        sealedItemId: documents.sealedItemId,
         contentSha256: documents.contentSha256,
         sizeBytes: documents.sizeBytes,
       }).from(documents).where(eq(documents.id, input.documentId)).limit(1);
-      if (identity && (identity.householdId !== input.householdId || identity.itemId !== input.itemId
+      if (identity && (identity.householdId !== input.householdId || sealedItemIdOf(identity) !== input.itemId
         || identity.contentSha256 !== received.contentSha256 || identity.sizeBytes !== received.sizeBytes)) {
         throw new AppError("document_conflict", "That document identity is already in use", 409);
       }
@@ -390,6 +436,7 @@ export async function uploadItemDocument(input: {
       const [existing] = await getDb().select({
         id: documents.id,
         itemId: documents.itemId,
+        sealedItemId: documents.sealedItemId,
         householdId: documents.householdId,
         displayName: documents.displayName,
         mediaType: documents.mediaType,
@@ -407,7 +454,7 @@ export async function uploadItemDocument(input: {
         .leftJoin(documentJobs, and(eq(documentJobs.documentId, documents.id), eq(documentJobs.kind, "scan")))
         .where(eq(documents.id, input.documentId)).limit(1);
       if (existing) {
-        if (existing.householdId !== input.householdId || existing.itemId !== input.itemId
+        if (existing.householdId !== input.householdId || sealedItemIdOf(existing) !== input.itemId
           || existing.contentSha256 !== received.contentSha256
           || existing.sizeBytes !== received.sizeBytes
           || existing.mediaType !== mediaType) {
@@ -423,6 +470,12 @@ export async function uploadItemDocument(input: {
         }
         if (existing.lifecycle === "rejected" && existing.failureCode === "malware_detected") {
           throw new AppError("document_malware_detected", "That document upload has already been rejected", 422);
+        }
+        // A staged file the sweep retired is gone for good under this id:
+        // answer as the bind does, so the form stages it afresh under a new
+        // id rather than being told "needs recovery" for ever.
+        if (staged && (existing.lifecycle === "pending_deletion" || existing.lifecycle === "deleted")) {
+          throw new AppError("document_not_available", "That document is no longer available — pick it again", 409);
         }
         if (existing.lifecycle !== "rejected") {
           throw new AppError("document_upload_recoverable", "That document upload needs recovery", 503);
@@ -486,6 +539,7 @@ export async function uploadItemDocument(input: {
       userId: input.userId,
       householdId: input.householdId,
       itemId: input.itemId,
+      staged,
       displayName,
       mediaType,
       sizeBytes: received.sizeBytes,
@@ -587,7 +641,7 @@ export async function uploadItemDocument(input: {
             });
             return toSummary({
               id: documentId,
-              itemId: input.itemId,
+              itemId: rowItemId,
               displayName,
               mediaType,
               sizeBytes: received.sizeBytes,
@@ -713,7 +767,7 @@ export async function uploadItemDocument(input: {
     log.info({ event: "document.lifecycle", state: "ready", action: "none" });
     return {
       id: documentId,
-      itemId: input.itemId,
+      itemId: rowItemId,
       displayName,
       mediaType,
       sizeBytes: received.sizeBytes,
@@ -802,7 +856,7 @@ export async function readDocumentDownload(
     bytes = decryptDocument(ciphertext, {
       documentId,
       householdId: record.householdId,
-      itemId: record.itemId,
+      itemId: sealedItemIdOf(record)!,
       mediaType: record.mediaType,
       plaintextSize: record.sizeBytes,
     }, envelope, documentKek);

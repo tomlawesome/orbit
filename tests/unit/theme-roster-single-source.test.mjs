@@ -59,7 +59,6 @@ describe("the roster's readers import theme.js and spell out no roster (#1331)",
   const readers = [
     "lib/theme-swatches.js",
     "routes/settings/helm.js",
-    "lib/tour/emphasis.js",
     "lib/sun/furnace.js",
     "routes/home/skies.js",
   ];

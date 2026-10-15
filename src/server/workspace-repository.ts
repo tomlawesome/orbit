@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -9,6 +9,7 @@ import {
   items,
   memberships,
   notificationStates,
+  portableArchiveImports,
   reminderRules,
   sections,
   sessions,
@@ -45,6 +46,7 @@ import {
   sectionSlug,
 } from "@/server/workspace-access";
 import { isInstanceAdministrator } from "@/server/authorization";
+import { PORTABLE_IMPORT_LEASE_MS } from "@/server/portable-archive-limits";
 
 /**
  * Reconstructs the normalized database rows into the UI's versioned workspace
@@ -116,10 +118,23 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     });
   }
 
-  const householdIds = householdRows.map((household) => household.id);
-  const activeHouseholdId = preferredHouseholdId && householdIds.includes(preferredHouseholdId)
+  const listedHouseholdIds = householdRows.map((household) => household.id);
+  const activeHouseholdId = preferredHouseholdId && listedHouseholdIds.includes(preferredHouseholdId)
     ? preferredHouseholdId
-    : householdIds[0];
+    : listedHouseholdIds[0];
+  // A household someone else is importing into is closed to this reader
+  // (#1316, owner 2026-10-14; the gate in workspace-access.ts): it is still
+  // listed, by name, but nothing in it is read, so nothing of it travels.
+  const closedHouseholdIds = new Set((await getDb().select({ householdId: portableArchiveImports.householdId, actorUserId: portableArchiveImports.actorUserId })
+    .from(portableArchiveImports)
+    .where(and(
+      inArray(portableArchiveImports.householdId, listedHouseholdIds),
+      isNull(portableArchiveImports.finishedAt),
+      gt(portableArchiveImports.startedAt, new Date(Date.now() - PORTABLE_IMPORT_LEASE_MS)),
+    )))
+    .filter((row) => row.actorUserId !== userId)
+    .map((row) => row.householdId));
+  const householdIds = listedHouseholdIds.filter((id) => !closedHouseholdIds.has(id));
 
   const [sectionRows, itemRows, eventRows, reminderRows, activityRows, memberRows, stateRows, documentCountRows] = await Promise.all([
     getDb().select().from(sections)
@@ -153,7 +168,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
       .limit(5_000),
     getDb().select({ householdId: memberships.householdId, userId: memberships.userId, role: memberships.role })
       .from(memberships)
-      .where(inArray(memberships.householdId, householdIds)),
+      .where(inArray(memberships.householdId, listedHouseholdIds)),
     getDb().select().from(notificationStates)
       .where(and(eq(notificationStates.userId, userId), inArray(notificationStates.householdId, householdIds)))
       .orderBy(desc(notificationStates.updatedAt)),
@@ -205,17 +220,41 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     activeHouseholdId,
     recoverableHouseholds: recoverableHouseholds.map((household) => ({ id: household.id, name: household.name, deleteAfter: household.deleteAfter!.toISOString() })),
     households: householdRows.map((household) => {
+      const memberCount = memberRows.filter((member) => member.householdId === household.id).length;
+      const canManage = administrator || memberRows.some((member) => (
+        member.householdId === household.id
+        && member.userId === userId
+        && member.role === "owner"
+      ));
+      if (closedHouseholdIds.has(household.id)) {
+        return {
+          id: household.id,
+          name: household.name,
+          timezone: household.timezone,
+          today: householdToday(household.timezone),
+          currency: household.currency,
+          memberCount,
+          canManage,
+          onboardingComplete: household.onboardingComplete,
+          importInProgress: true,
+          sections: [],
+          items: [],
+          activities: [],
+          readNotificationIds: [],
+          dismissedNotificationIds: [],
+        };
+      }
       const metadata = metadataReaders.get(household.id)!;
       const householdItems = itemRows.filter((item) => item.householdId === household.id).map((item) => {
         const event = eventByItem.get(item.id);
-        const reference = metadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference });
-        const notes = metadata.text("items.notes", item.id, { encrypted: item.notesEnc, plaintext: item.notes });
+        const reference = metadata.text("items.reference", item.id, { encrypted: item.referenceEnc });
+        const notes = metadata.text("items.notes", item.id, { encrypted: item.notesEnc });
         // Tier 2 (#963): decrypted here rather than in SQL. Cost totals and
         // search both run on these values in the client, over one household's
         // rows, which is what the tiering decision traded the query for.
-        const title = metadata.text("items.title", item.id, { encrypted: item.titleEnc, plaintext: item.title });
-        const provider = metadata.text("items.provider", item.id, { encrypted: item.providerEnc, plaintext: item.provider });
-        const costMinor = metadata.number("items.cost_minor", item.id, { encrypted: item.costMinorEnc, plaintext: item.costMinor });
+        const title = metadata.text("items.title", item.id, { encrypted: item.titleEnc });
+        const provider = metadata.text("items.provider", item.id, { encrypted: item.providerEnc });
+        const costMinor = metadata.number("items.cost_minor", item.id, { encrypted: item.costMinorEnc });
         const metadataStatus = {
           reference: reference.state,
           notes: notes.state,
@@ -257,12 +296,8 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
         timezone: household.timezone,
         today: householdToday(household.timezone),
         currency: household.currency,
-        memberCount: memberRows.filter((member) => member.householdId === household.id).length,
-        canManage: administrator || memberRows.some((member) => (
-          member.householdId === household.id
-          && member.userId === userId
-          && member.role === "owner"
-        )),
+        memberCount,
+        canManage,
         onboardingComplete: household.onboardingComplete,
         deletionRequestedAt: household.deletionRequestedAt?.toISOString(),
         deleteAfter: household.deleteAfter?.toISOString(),
@@ -497,7 +532,13 @@ async function runWorkspaceCommand(
     command.type === "sections.replace"
       || command.type === "household.setup"
       || command.type === "household.update",
-  );
+  ).catch((error: unknown) => {
+    // A member may still make a household closed by an import their home
+    // household (#1316): choosing it reads nothing of it, and home draws the
+    // notice there.
+    if (command.type === "household.activate" && error instanceof AppError && error.code === "household_import_in_progress") return;
+    throw error;
+  });
   const householdId = command.householdId;
   let preview: CommandPreview | undefined;
 
@@ -662,6 +703,7 @@ async function runWorkspaceCommand(
         .where(and(eq(sections.id, sectionId), eq(sections.householdId, householdId))).limit(1);
       if (!ownedSection) throw new AppError("section_not_found", "Choose a section from this household", 422);
       const [existing] = await transaction.select({
+        householdId: items.householdId,
         version: items.version,
         subtype: items.subtype,
         status: items.status,
@@ -669,7 +711,10 @@ async function runWorkspaceCommand(
         serviceDate: items.serviceDate,
         expiryDate: items.expiryDate,
       }).from(items)
-        .where(and(eq(items.id, itemId), eq(items.householdId, householdId))).limit(1);
+        .where(eq(items.id, itemId)).limit(1);
+      // A client-minted id names one request; one that already names an item
+      // in another household is refused, not inserted into a primary-key collision.
+      if (existing && existing.householdId !== householdId) throw new AppError("item_conflict", "That item identity is already in use", 409);
       // The schema tolerates an empty title only so a damaged one can be read
       // back (ADR-0024 decision 5); a write still has to carry a real one, and
       // a client that sends `metadataStatus` to slip past that check is
@@ -693,6 +738,18 @@ async function runWorkspaceCommand(
       // meant to replace; only a brand new item, which has no version to
       // race against, may omit it.
       if (existing && item.version === undefined) {
+        /* A create sent again after its answer was lost must be the same
+           request. One carrying a file this item does not already hold is a
+           different request: refuse it, rather than let version_required
+           read as "the earlier send landed with this file" and lose it. */
+        const requested = [...new Set((command.documentIds ?? []).map((id) => id.toLowerCase()))];
+        if (requested.length > 0) {
+          const bound = await transaction.select({ id: documents.id }).from(documents)
+            .where(and(inArray(documents.id, requested), eq(documents.householdId, householdId), eq(documents.itemId, itemId)));
+          if (bound.length !== requested.length) {
+            throw new AppError("item_already_saved", "This item was already added, but without this file. Open the item and attach the file there.", 409);
+          }
+        }
         throw new AppError("version_required", "This item changed on another device; refresh and try again", 409);
       }
       // `item.version` is the version the client wants this write to become;
@@ -703,6 +760,26 @@ async function runWorkspaceCommand(
       if (existing && existing.version !== expectedVersion) {
         throw new AppError("version_conflict", "This item changed on another device; refresh and try again", 409);
       }
+      // #1316: each document must be this household's, sealed under this
+      // item, bound to no other item, and not refused or on its way out. One
+      // that is not refuses the whole save, in the same words whatever the
+      // reason, so no item is kept without the paper the member attached and
+      // nothing is learned about another household's documents or drafts.
+      const documentIds = [...new Set((command.documentIds ?? []).map((id) => id.toLowerCase()))];
+      if (documentIds.length > 0) {
+        const bindable = await transaction.select({ id: documents.id }).from(documents)
+          .where(and(
+            inArray(documents.id, documentIds),
+            eq(documents.householdId, householdId),
+            sql`coalesce(${documents.sealedItemId}, ${documents.itemId}) = ${itemId}::uuid`,
+            or(isNull(documents.itemId), eq(documents.itemId, itemId)),
+            notInArray(documents.lifecycle, ["rejected", "deleted", "pending_deletion"]),
+          ))
+          .for("update");
+        if (bindable.length !== documentIds.length) {
+          throw new AppError("document_not_available", "That document is no longer available — pick it again", 422);
+        }
+      }
       if (dryRun) return;
       // Tier 1 and Tier 2 (ADR-0024 decision 3): encrypt and clear the
       // plaintext in the same statement, so the row is never in both states at
@@ -711,15 +788,11 @@ async function runWorkspaceCommand(
       const metadata = await requireMetadataWriter(householdId, transaction);
       const values = {
         sectionId,
-        title: null,
         titleEnc: metadata.encryptText("items.title", itemId, item.title),
         subtype: item.subtype ?? null,
-        provider: null,
         providerEnc: metadata.encryptText("items.provider", itemId, item.provider),
-        reference: null,
         referenceEnc: metadata.encryptText("items.reference", itemId, item.reference),
         referenceIndex: metadata.referenceIndex(item.reference),
-        costMinor: null,
         costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, item.costMinor),
         currency: item.currency,
         /* #1005: belt and braces with `workspaceItemSchema`, which refuses the
@@ -727,7 +800,6 @@ async function runWorkspaceCommand(
            comes round again. */
         recurrenceMonths: item.scheduleKind === "expiry" ? null : item.recurrenceMonths ?? null,
         snoozedUntil: item.snoozedUntil ?? null,
-        notes: null,
         notesEnc: metadata.encryptText("items.notes", itemId, item.notes),
         status: item.status,
         updatedAt: new Date(),
@@ -745,6 +817,10 @@ async function runWorkspaceCommand(
         if (!updated) throw new AppError("version_conflict", "This item changed on another device; refresh and try again", 409);
       } else {
         await transaction.insert(items).values({ id: itemId, householdId, version: 1, ...values });
+      }
+      if (documentIds.length > 0) {
+        await transaction.update(documents).set({ itemId, deleteAfter: null, updatedAt: new Date() })
+          .where(inArray(documents.id, documentIds));
       }
       // Every encrypted column on the row was just rewritten - Tier 1 and, since
       // #963, Tier 2 - so anything this row had been seen damaged in is gone
@@ -901,7 +977,6 @@ async function runWorkspaceCommand(
       const completionCost = command.costMinor === undefined
         ? {}
         : {
-          costMinor: null,
           costMinorEnc: (await requireMetadataWriter(householdId, transaction))
             .encryptNumber("items.cost_minor", itemId, command.costMinor),
         };

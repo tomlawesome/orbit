@@ -3,8 +3,10 @@
   import { beforeNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { PARTIAL_CREATE_MESSAGE, WorkspaceError, applyCommand, attachItemDocument, checkDraftCommand, readReminders, readWorkspace } from "$lib/data/workspace.js";
-  import { saveProblem } from "$lib/data/metadata-status.js";
+  import {
+    WorkspaceError, applyCommand, bindRefused, checkDraftCommand, notSavedWords, readReminders, readWorkspace, refusesFile, stageDocument,
+    unsavedWords, wordsOf,
+  } from "$lib/data/workspace.js";
   import {
     CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
     suggestionsToCarry,
@@ -28,8 +30,9 @@
    * the refusal beside save while something is missing (#1058: no section
    * is chosen for you); saving; a failure that is loud and stays until the
    * next attempt, with nothing typed lost (#1058); saved, which raises the
-   * wake and approaches the new item on its belt. A document picked goes
-   * onto the saved item, as the desk's does (#1245, owner's 11a), and is read
+   * wake and approaches the new item on its belt. A document picked is saved
+   * with the item, all or nothing, as the desk's is (#1245, owner's 11a;
+   * #1406: staged first, then bound by the one command), and is read
    * the moment it is picked, as the desk reads it (#1279, owner's 14a): page
    * one lands in the reading card and the read fills the empty fields.
    * Leaving with something typed asks first.
@@ -51,11 +54,23 @@
   let saved = $state(false);
   /** @type {string | null} */
   let problem = $state(null);
-  /** Minted once for this draft, not per save attempt (#1151 W1-R3): a retry
-      after a dropped response reuses it, so the server's upsert-by-id
-      idempotency absorbs the retry instead of creating a second item. */
-  const draftId = crypto.randomUUID();
-  /** Minted once per file picked, the way `draftId` is per draft (#1245),
+  /** Minted once per household chosen, not per save attempt (#1151 W1-R3):
+      a retry under the same household reuses it, so the server's upsert-by-id
+      idempotency absorbs the retry instead of creating a second item, while
+      a different household is a different request and gets its own id. */
+  /** A plain record, not reactive state: it is written while the dry run reads it.
+      @type {Record<string, string>} */
+  const draftIds = {};
+  /** @param {string} householdId */
+  function draftIdOf(householdId) {
+    let id = draftIds[householdId];
+    if (!id) {
+      id = crypto.randomUUID();
+      draftIds[householdId] = id;
+    }
+    return id;
+  }
+  /** Minted once per file picked, the way `draftIdOf` is per household (#1245),
       as the desk's takeFile does: a retry after a lost answer re-sends the
       same id with the same bytes, so the documents route hands back the copy
       it already holds instead of storing a second. */
@@ -70,14 +85,21 @@
     }
     return id;
   }
+  /** The id is spent: the sweep retired it, or the server already holds it
+      under another household (the household changed, the file did not).
+      @param {unknown} error */
+  function idRefused(error) {
+    return bindRefused(error) || (error instanceof WorkspaceError && error.code === "document_conflict");
+  }
 
   /* ---- reading the picked document (#1279) ----------------------------
      The desk's read ($lib/data/document-read.js, shared with
      create.behaviour.js): two requests from one pick, neither waiting for
      the other. Page one lands the moment it is drawn; the read fills the
      empty fields, never over what someone typed, and names them in `marked`
-     for EntryForm's "◆ from document". A refused file leaves the entry at
-     once, so the save does not send it. Picking again, "not this one" and
+     for EntryForm's "◆ from document". A refused file stays in the entry,
+     marked, and holds the save until it is replaced or removed (#1406,
+     owner's answer 6a). Picking again, "not this one" and
      leaving each abort the read in flight and revoke the page's object URL. */
   /** @type {import('$lib/data/document-read.js').PickedRead | null} */
   let picked = $state(null);
@@ -108,13 +130,13 @@
     picked.why = why;
   }
 
-  /** The server would not keep this file, so it leaves the entry now
-      rather than at the save, and the card says so in the desk's words. */
+  /** The server would not keep this file -- the read found it, or the
+      save's stage did -- so it stays in the entry marked refused, in the
+      server's words, and the save is held until it is replaced or removed
+      (#1406, owner's answer 6a). The card says so in the desk's words. */
   /** @param {string} why */
   function refuse(why) {
     stopReading();
-    attachment = null;
-    clearSuggestions();
     if (!picked) return;
     picked.scanned = false;
     picked.refused = true;
@@ -124,6 +146,8 @@
 
   /** @param {File} file */
   async function readDocument(file) {
+    /* A refused file's loud note goes when a new file replaces it. */
+    if (picked?.refused) problem = null;
     stopReading();
     clearSuggestions();
     const controller = new AbortController();
@@ -194,6 +218,7 @@
     stopReading();
     clearSuggestions();
     picked = null;
+    problem = null;
   }
 
   /* Leaving: a read still in flight is nobody's once the screen has gone,
@@ -214,7 +239,7 @@
   function commandNow() {
     const household = households.find((one) => one.id === entry.householdId);
     return household
-      ? createCommandOf($state.snapshot(entry), { householdId: household.id, currency: household.currency ?? "GBP", id: draftId })
+      ? createCommandOf($state.snapshot(entry), { householdId: household.id, currency: household.currency ?? "GBP", id: draftIdOf(household.id) })
       : null;
   }
   const dryRun = dryRunner({ onanswer: (answer) => { refusal = answer; }, check: checkDraftCommand });
@@ -227,6 +252,8 @@
   });
   onDestroy(() => dryRun.stop());
   const dirty = $derived(!saved && (entryChanged(entry, start) || attachment !== null));
+  /** A refused file is still held: Add waits until it is replaced or removed. */
+  const fileRefused = $derived.by(() => attachment !== null && picked?.refused === true);
 
   async function load() {
     phase = "loading";
@@ -249,47 +276,64 @@
   $effect(() => { load(); });
 
   async function save() {
-    if (saving || saved || refusal !== null || phase !== "ready") return;
+    if (saving || saved || refusal !== null || fileRefused || phase !== "ready") return;
     const household = households.find((one) => one.id === entry.householdId);
     const command = commandNow();
     if (!household || !command) return;
     saving = true;
     problem = null;
-    /* The file is taken now, as the desk's create does: a read refused while
-       the save is in flight drops `attachment`, and testing it after the
-       await would skip the upload and land the item without its paper. */
+    /* The file is taken now, as the desk's create does: what was held at
+       the press is what the stage sends, so the server, not a late read,
+       has the last word on it. */
     const held = attachment;
-    let landed = false;
+    /** Until the stage is answered, a failure is the file's or the send's. */
+    let staging = false;
     try {
-      await applyCommand(command).catch((error) => {
+      /* #1406: all or nothing, as the desk's save. The file is staged first
+         -- stored, scanned and sealed under this draft's id, with no item
+         yet -- and the one command that creates the item binds it in the
+         same transaction. A retry re-sends both under the same ids, and the
+         server hands back what it already holds. */
+      if (held) {
+        staging = true;
+        await stageDocument(household.id, held, documentIdOf(held), draftIdOf(household.id)).catch(async (error) => {
+          /* The sweep retired the file once staged under this id, and the
+             server will not take it under that id again: stage the same
+             file once more under a fresh id, within this Add. A second
+             failure is shown as any other. The id is reissued too when the
+             server already holds it under another household. */
+          if (!idRefused(error)) throw error;
+          documentIds.delete(held);
+          await stageDocument(household.id, held, documentIdOf(held), draftIdOf(household.id));
+        });
+        staging = false;
+      }
+      await applyCommand(held ? { ...command, documentIds: [documentIdOf(held)] } : command).catch((error) => {
         /* This draft id is new to the server, so "this item changed on another
-           device" can only mean the earlier send landed and its answer was
-           lost; refreshing would mint a new id and create the duplicate the
-           retry exists to avoid. */
+           device" can only mean the earlier send landed -- the item and the
+           same document together -- and its answer was lost; refreshing would
+           mint a new id and create the duplicate the retry exists to avoid.
+           A send whose file the landed item does not hold is refused in the
+           server's own words instead, and shown as not saved. */
         if (error instanceof WorkspaceError && error.code === "version_required") return;
         throw error;
       });
-      /* The item is on the server from here; a reload would mint a new draft
-         id and file it twice, so a later refusal must not read as unsaved. */
-      landed = true;
-      /* #1245 (11a): the picked document goes onto the item just saved,
-         through the same route the desk's form uses. A refusal lands in the
-         catch below like any failed save: the entry is kept, and the next
-         attempt re-sends both under the same ids, so neither is stored twice.
-         It sends the file held at submit, so the server, not a late read,
-         has the last word on it. */
-      if (held) await attachItemDocument(household.id, draftId, held, documentIdOf(held));
       saved = true;
       wake(`added to your orbit · ${entry.name.trim()}`);
       /* #1319 (§34): the new item, its drawer open on home, as the desk's
          create lands (create.behaviour.js). */
-      await goto(resolve(`/home?item=${encodeURIComponent(draftId)}`));
+      await goto(resolve(`/home?item=${encodeURIComponent(draftIdOf(household.id))}`));
     } catch (error) {
       /* Loud (#1058): the reason stays above the bar until the next attempt,
-         the button comes back, and nothing typed is lost. No wake. */
-      const words = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
-      if (landed) problem = `${PARTIAL_CREATE_MESSAGE} ${words}`;
-      else problem = /^not [a-z]+ —/i.test(words) ? words : `not saved — ${words}`;
+         the button comes back, and nothing typed is lost. No wake. Nothing
+         is ever half saved (#1406): a refused file stays, marked, holding
+         Add; a send with no verdict says so; a refusal reads in its own words. */
+      if (staging && held && held === attachment && refusesFile(error)) refuse(wordsOf(error));
+      /* The sweep retired the staged file after the stage: stage it afresh
+         under a new id on the next Add, as a refused stage does above;
+         likewise when the server already holds the id under another household. */
+      if (!staging && held && idRefused(error)) documentIds.delete(held);
+      problem = unsavedWords(error) ?? notSavedWords(error);
     } finally {
       saving = false;
     }
@@ -390,7 +434,7 @@
       <div class="pk-bar-acts">
         <a class="p-pill pk-never" href={resolve("/home")}>never mind</a>
         <button type="submit" form="pocket-entry" class="p-pill filled pk-save"
-                aria-disabled={phase !== "ready" || refusal !== null || saving || saved ? "true" : undefined}
+                aria-disabled={phase !== "ready" || refusal !== null || fileRefused || saving || saved ? "true" : undefined}
                 aria-describedby={refusal ? "pk-refusal" : undefined}>
           {saved ? "Added" : saving ? "Adding…" : "Add to orbit"}
         </button>

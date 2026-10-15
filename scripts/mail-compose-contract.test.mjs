@@ -21,7 +21,7 @@ describe("mail provider Compose overlay", () => {
       "SMTP_PASSWORD_FILE: /run/orbit-secrets/orbit-smtp-password",
     );
     expect(overlay).toContain(
-      "file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/smtp-password",
+      "file: ./.orbit-secrets/smtp-password",
     );
     expect(overlay).not.toMatch(/^\s+SMTP_PASSWORD:\s+\S+/mu);
   });

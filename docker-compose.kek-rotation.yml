@@ -15,4 +15,4 @@ services:
 
 secrets:
   orbit-document-kek-next:
-    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/document-kek-next
+    file: ./.orbit-secrets/document-kek-next

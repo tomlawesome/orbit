@@ -1,17 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, gt, lt, sql } from "drizzle-orm";
-import type { CookieReader, CookieSink } from "@/lib/http";
+import type { CookieReader } from "@/lib/http";
 import { getDb } from "@/db";
 import { auditLog, sessions, userPreferences, users } from "@/db/schema";
 import type { AuthConfig } from "@/lib/env";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
-import { clearSessionCookie, sessionCookieName, setSessionCookie } from "@/lib/auth/cookies";
+import { sessionCookieName } from "@/lib/auth/cookies";
 import { constantTimeEqual, createCsrfToken, hashSessionToken, randomUrlSafe } from "@/lib/auth/crypto";
 import { AuthError } from "@/lib/auth/errors";
-import type { TextSize, UrgencyPalette } from "@/lib/preferences";
+import type { TextSize } from "@/lib/preferences";
 import { log, operationalDetail } from "@/lib/logger";
 import { assertKeyUsable } from "@/server/key-state";
-import { openInstanceMetadataCipher, openInstanceMetadataReader } from "@/server/metadata/fields";
+import { openInstanceMetadataReader, requireInstanceMetadataWriter } from "@/server/metadata/fields";
 import { themePackOrDefault } from "@/lib/preferences";
 
 export interface AuthenticatedSession {
@@ -30,10 +30,8 @@ export interface AuthenticatedSession {
     displayName: string;
     avatarUrl: string | null;
     isInstanceAdmin: boolean;
-    themeMode: "system" | "light" | "dark";
     themeId: string;
     textSize: TextSize;
-    urgencyPalette: UrgencyPalette;
     emailNotifications: boolean;
     pushNotifications: boolean;
   };
@@ -99,8 +97,8 @@ export async function createSession(
     }
     let idTokenEnc: string | null = null;
     if (idToken) {
-      const cipher = await openInstanceMetadataCipher(transaction);
-      idTokenEnc = cipher.locked ? null : cipher.encryptText("sessions.id_token", id, idToken);
+      const cipher = await requireInstanceMetadataWriter(transaction);
+      idTokenEnc = cipher.encryptText("sessions.id_token", id, idToken);
     }
     await transaction.insert(sessions).values({
       id,
@@ -159,7 +157,7 @@ export async function takeSessionIdToken(
 export async function openSessionIdToken(taken: { id: string | null; encrypted: string | null }): Promise<string | null> {
   if (!taken.id || !taken.encrypted) return null;
   const cipher = await openInstanceMetadataReader();
-  return cipher.text("sessions.id_token", taken.id, { encrypted: taken.encrypted, plaintext: null }).value;
+  return cipher.text("sessions.id_token", taken.id, { encrypted: taken.encrypted }).value;
 }
 
 /**
@@ -277,17 +275,14 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       expiresAt: sessions.expiresAt,
       lastSeenAt: sessions.lastSeenAt,
       userId: users.id,
-      email: users.email,
       emailEnc: users.emailEnc,
       emailVerified: users.emailVerified,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
       isInstanceAdmin: users.isInstanceAdmin,
       disabledAt: users.disabledAt,
-      themeMode: userPreferences.themeMode,
       themeId: userPreferences.themeId,
       textSize: userPreferences.textSize,
-      urgencyPalette: userPreferences.urgencyPalette,
       emailNotifications: userPreferences.emailNotifications,
       pushNotifications: userPreferences.pushNotifications,
     })
@@ -302,10 +297,11 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
     return null;
   }
   await touchLastSeen(record.id, record.lastSeenAt);
-  /* The address is Tier 2 metadata now (#969). A locked instance still yields
-     a session — sign-in itself never depended on reading the address, and
-     everything else about the session is plaintext — so this reads null rather
-     than refusing, and the surfaces that need an address say so themselves. */
+  /* The address is Tier 2 metadata now (#969). With no usable key, Orbit is in
+     maintenance (#1405) and new sessions cannot be created. This reader is
+     tolerant so existing sessions created before the key became unusable can
+     still be read for sign-out and other operations. It reads null for the
+     address rather than refusing, and surfaces that need an address say so. */
   const cipher = await openInstanceMetadataReader();
   return {
     id: record.id,
@@ -316,13 +312,11 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       id: record.userId,
       email: cipher.text("users.email", record.userId, {
         encrypted: record.emailEnc,
-        plaintext: record.email,
       }).value,
       emailVerified: record.emailVerified,
       displayName: record.displayName,
       avatarUrl: record.avatarUrl,
       isInstanceAdmin: record.isInstanceAdmin,
-      themeMode: record.themeMode ?? "system",
       /* #865: a stale stored value — a removed pack (atlas), or the column's
          own pre-#325 legacy default ("after-dark", with the hyphen, which
          was never a v19 pack id either) — resolves to the current default
@@ -331,7 +325,6 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       textSize: record.textSize === "standard" || record.textSize === "large" || record.textSize === "extra-large"
         ? record.textSize
         : "comfortable",
-      urgencyPalette: record.urgencyPalette === "classic" ? "classic" : "themed",
       emailNotifications: record.emailNotifications ?? true,
       pushNotifications: record.pushNotifications ?? true,
     },
@@ -342,22 +335,6 @@ export async function requireSession(cookies: CookieReader, config: AuthConfig):
   const session = await readSession(cookies, config);
   if (!session) throw new AuthError("session_required", "A valid session is required", 401);
   return session;
-}
-
-export async function rotateSession(session: AuthenticatedSession, cookies: CookieSink, config: AuthConfig): Promise<void> {
-  const nextToken = randomUrlSafe(32);
-  const nextExpiry = new Date(Date.now() + config.sessionTtlSeconds * 1000);
-  const [rotated] = await getDb()
-    .update(sessions)
-    .set({
-      tokenHash: hashSessionToken(nextToken),
-      expiresAt: nextExpiry,
-      rotatedAt: new Date(),
-    })
-    .where(and(eq(sessions.id, session.id), eq(sessions.tokenHash, hashSessionToken(session.token))))
-    .returning({ id: sessions.id });
-  if (!rotated) throw new AuthError("session_required", "The session was replaced by another request", 401);
-  setSessionCookie(cookies, nextToken, config);
 }
 
 export function assertSameOrigin(headers: Headers, config: AuthConfig): void {
@@ -385,9 +362,4 @@ export function assertCsrf(headers: Headers, session: AuthenticatedSession, conf
 
 export function csrfTokenForSession(session: AuthenticatedSession, config: AuthConfig): string {
   return createCsrfToken(session.token, config.sessionSecret);
-}
-
-export async function invalidateSession(cookies: CookieSink, config: AuthConfig): Promise<void> {
-  await deleteSessionToken(cookies.get(sessionCookieName(config)));
-  clearSessionCookie(cookies, config);
 }

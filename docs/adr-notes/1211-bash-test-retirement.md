@@ -18,7 +18,7 @@ changes on purpose.
 Test files named below:
 
 - `src/lib/`: `in-container-adapter.test.ts` (new), `restore-engine.incomplete-correspondence.test.ts` (new),
-  `backup-restore-cli.retired-bash.test.ts` (new: ports), `backup-restore-cli.test.ts`,
+  `backup-restore-cli.characterisation.test.ts` (new: ports), `backup-restore-cli.test.ts`,
   `restore-engine.lifecycle.test.ts`, `recovery-bundle.backup.test.ts`, `restore-engine.parity.test.ts`
 - `src/cli/`: `orbit.backup-restore.test.ts` (new)
 - `scripts/`: `backup-restore-shell.test.mjs` (new), `test-backup-restore.test.mjs`
@@ -49,15 +49,15 @@ Test files named below:
 | fail_correspondence › passes a healthy correspondence check through without failing | restore-engine.incomplete-correspondence.test.ts › (same title) |
 | correspondence call sites › covers every report query in both the staged and the live path | restore-engine.incomplete-correspondence.test.ts › names the %s report as the %s check (six cases); restore-engine.parity.test.ts › restore.sh ran each query against both the staged and the live database |
 | correspondence call sites › names a check and propagates the incomplete status at every call site | restore-engine.incomplete-correspondence.test.ts › every correspondence call site names its stage and check (checkpoint, recovery, cutover) and the preflight cases |
-| sweep_orphaned_checkpoints › removes an abandoned checkpoint directory when no journal exists | backup-restore-cli.retired-bash.test.ts › removes an abandoned checkpoint directory when no journal exists |
-| sweep_orphaned_checkpoints › preserves the checkpoint directory the current journal names, and removes every other one | deliberate: with a journal present the engine sweeps nothing (a restore refuses, `--recover` touches only the journal's checkpoint); backup-restore-cli.retired-bash.test.ts › leaves every checkpoint alone when a journal exists; restore-engine.lifecycle.test.ts › O2-R10: a checkpoint that does get journaled is never reported or removed as an orphan |
-| sweep_orphaned_checkpoints › leaves every checkpoint alone when a journal exists but names no readable restore_id | backup-restore-cli.retired-bash.test.ts › leaves every checkpoint alone when a journal exists (the restore refuses instead) |
-| sweep_orphaned_checkpoints › leaves every checkpoint alone when the journal path is a symlink | backup-restore-cli.retired-bash.test.ts › leaves every checkpoint alone when the journal path is a symlink, which counts as an unfinished restore |
-| sweep_orphaned_checkpoints › does nothing when the restore root does not exist yet | backup-restore-cli.retired-bash.test.ts › does nothing when the restore root does not exist yet |
+| sweep_orphaned_checkpoints › removes an abandoned checkpoint directory when no journal exists | backup-restore-cli.characterisation.test.ts › removes an abandoned checkpoint directory when no journal exists |
+| sweep_orphaned_checkpoints › preserves the checkpoint directory the current journal names, and removes every other one | deliberate: with a journal present the engine sweeps nothing (a restore refuses, `--recover` touches only the journal's checkpoint); backup-restore-cli.characterisation.test.ts › leaves every checkpoint alone when a journal exists; restore-engine.lifecycle.test.ts › O2-R10: a checkpoint that does get journaled is never reported or removed as an orphan |
+| sweep_orphaned_checkpoints › leaves every checkpoint alone when a journal exists but names no readable restore_id | backup-restore-cli.characterisation.test.ts › leaves every checkpoint alone when a journal exists (the restore refuses instead) |
+| sweep_orphaned_checkpoints › leaves every checkpoint alone when the journal path is a symlink | backup-restore-cli.characterisation.test.ts › leaves every checkpoint alone when the journal path is a symlink, which counts as an unfinished restore |
+| sweep_orphaned_checkpoints › does nothing when the restore root does not exist yet | backup-restore-cli.characterisation.test.ts › does nothing when the restore root does not exist yet |
 | refuse_if_rotation_open › returns cleanly when no rotation is open | restore-engine.lifecycle.test.ts › proceeds normally once the rotation marker is gone |
-| refuse_if_rotation_open › refuses when a document-KEK rotation is open (DOCUMENT_KEK_NEXT exists) | backup-restore-cli.retired-bash.test.ts › refuses before reading the key or staging the bundle; restore-engine.lifecycle.test.ts › refuses to prepare a restore while a rotation is open |
-| refuse_if_rotation_open › does not treat a symlinked document-kek-next as an open rotation | backup-restore-cli.retired-bash.test.ts › does not treat a symlinked document-kek-next as an open rotation |
-| refuse_if_rotation_open › calls refuse_if_rotation_open before read_document_kek in the plain restore path, and inside recover_restore | backup-restore-cli.retired-bash.test.ts › refuses before reading the key or staging the bundle; restore-engine.lifecycle.test.ts › refuses --recover while a rotation is open … |
+| refuse_if_rotation_open › refuses when a document-KEK rotation is open (DOCUMENT_KEK_NEXT exists) | backup-restore-cli.characterisation.test.ts › refuses before reading the key or staging the bundle; restore-engine.lifecycle.test.ts › refuses to prepare a restore while a rotation is open |
+| refuse_if_rotation_open › does not treat a symlinked document-kek-next as an open rotation | backup-restore-cli.characterisation.test.ts › does not treat a symlinked document-kek-next as an open rotation |
+| refuse_if_rotation_open › calls refuse_if_rotation_open before read_document_kek in the plain restore path, and inside recover_restore | backup-restore-cli.characterisation.test.ts › refuses before reading the key or staging the bundle; restore-engine.lifecycle.test.ts › refuses --recover while a rotation is open … |
 | refuse_if_rotation_open › re-checks after the RESTORE confirmation and before create_checkpoint | restore-engine.lifecycle.test.ts › refuses to prepare a restore while a rotation is open (RestoreRun.prepare runs after the confirmation) |
 
 ## scripts/import-recovery-bundle.test.mjs
@@ -66,7 +66,7 @@ Test files named below:
 |---|---|
 | baseline › completes successfully: live key replaced, old key cleaned up, staging removed | backup-restore-cli.test.ts › completes: swaps the live KEK, restores the bundle's content, and removes the previous KEK |
 | baseline › reverts the live key and reports failure when the inner restore fails with no durable evidence | backup-restore-cli.test.ts › reverts the live KEK and restarts the app when the inner restore fails before leaving journal evidence |
-| SS1-S3 › refuses outright when .orbit-secrets/document-kek-next is present, before touching anything | backup-restore-cli.retired-bash.test.ts › (same title) |
+| SS1-S3 › refuses outright when .orbit-secrets/document-kek-next is present, before touching anything | backup-restore-cli.characterisation.test.ts › (same title) |
 | SS1-S3 › proceeds normally once the rotation evidence is gone | backup-restore-cli.test.ts › completes: swaps the live KEK, restores the bundle's content, and removes the previous KEK |
 | O2-R1 › SIGTERM between the two renames still restores the live key, and never deletes its only remaining copy | retired: there is no such window. The two renames run in one synchronous step and Node runs a SIGTERM handler only between event-loop turns; the old key is staged beside the live one, never in scratch space, so it always survives: backup-restore-cli.test.ts › O2-S3 › when the revert itself fails, the previous KEK is preserved … |
 
@@ -76,7 +76,7 @@ Test files named below:
 |---|---|
 | a restore waits for a backup already holding the lock, never running concurrently | deliberate: the engine refuses at once instead of waiting (exit 75) and the shell leaves orbit-app to the run holding the lock: backup-restore-cli.test.ts › runRestore cross-process lock › refuses while another process holds the shared flock …; backup-restore-shell.test.mjs › %s leaves the app to the run that holds the backup/restore lock (engine exit 75) |
 | a backup waits for a restore already holding the lock, never running concurrently | deliberate, as above: backup-restore-cli.test.ts › refuses while another process holds the shared flock, and runs once it is released; orbit.backup-restore.test.ts › restore --recover exits 75 while another backup or restore holds the lock … |
-| acquire_backup_restore_lock is called before read_document_kek in the bare (no-argument) dispatch path | backup-restore-cli.retired-bash.test.ts › a backup reads the live key only once it holds the lock |
+| acquire_backup_restore_lock is called before read_document_kek in the bare (no-argument) dispatch path | backup-restore-cli.characterisation.test.ts › a backup reads the live key only once it holds the lock |
 | --verify still reads the document KEK (it needs it to decrypt the bundle) without taking the backup/restore lock | orbit.backup-restore.test.ts › takes no backup/restore lock and creates no backup directory: it only reads a bundle |
 
 ## scripts/backup-publish-race.test.mjs

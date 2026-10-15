@@ -1028,6 +1028,61 @@
       "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; clears only when the image is rebuilt on a newer pebble. 4.1.0-full is still the newest release tag (#1366).",
       "expiresOn": "2026-11-04",
       "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-8286",
+      "package": "libcurl4t64",
+      "installedVersion": "8.14.1-2+deb13u5",
+      "owner": "Orbit maintainers",
+      "rationale": "curl library in clamav/clamav:1.5.4-debian; the distribution fixed it in 8.14.1-2+deb13u7 (DSA-6558-1) on 2026-10-14, but the 1.5.4-debian tag was last rebuilt on 2026-10-12, before the fix. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-8927",
+      "package": "libcurl4t64",
+      "installedVersion": "8.14.1-2+deb13u5",
+      "owner": "Orbit maintainers",
+      "rationale": "curl library in clamav/clamav:1.5.4-debian; the distribution fixed it in 8.14.1-2+deb13u7 (DSA-6558-1) on 2026-10-14, but the 1.5.4-debian tag was last rebuilt on 2026-10-12, before the fix. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-92392",
+      "package": "libcurl4t64",
+      "installedVersion": "8.14.1-2+deb13u5",
+      "owner": "Orbit maintainers",
+      "rationale": "curl library in clamav/clamav:1.5.4-debian; the distribution fixed it in 8.14.1-2+deb13u7 (DSA-6558-1) on 2026-10-14, but the 1.5.4-debian tag was last rebuilt on 2026-10-12, before the fix. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-92392",
+      "package": "libcurl3t64-gnutls",
+      "installedVersion": "8.18.0-1ubuntu2.7",
+      "owner": "Orbit maintainers",
+      "rationale": "curl library in apache/tika:4.1.0-full; the distribution fixed it in 8.18.0-1ubuntu2.8 (USN-8927-1) on 2026-10-14, but 4.1.0-full is still the newest release tag and has not been rebuilt since 2026-09-29. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-92392",
+      "package": "libcurl4t64",
+      "installedVersion": "8.18.0-1ubuntu2.7",
+      "owner": "Orbit maintainers",
+      "rationale": "curl library in apache/tika:4.1.0-full; the distribution fixed it in 8.18.0-1ubuntu2.8 (USN-8927-1) on 2026-10-14, but 4.1.0-full is still the newest release tag and has not been rebuilt since 2026-09-29. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
     }
   ],
   "containerImages": [

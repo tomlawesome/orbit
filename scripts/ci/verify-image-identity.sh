@@ -8,8 +8,7 @@
 # the identity is not pinned here first.
 #
 # Extracted verbatim from the "Record exact local image identity" step of the
-# &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# retired GitHub container workflow, which the GitLab `build_image` job now runs (#801).
 #
 # Inputs (environment):
 #   IMAGE_TAGS           newline-separated tag list from the metadata step;

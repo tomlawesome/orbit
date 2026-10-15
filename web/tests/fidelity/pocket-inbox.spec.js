@@ -110,7 +110,7 @@ test("a failed arrival the server lets go opens on a tap to remove; one it keeps
   await page.route("**/api/imap-inbox", (route) => route.fulfill({
     json: {
       receipts: [
-        { id: "r-gone", receivedAt: "2026-08-09T16:02:00.000Z", classification: "cleanup", canApprove: false,
+        { id: "r-gone", receivedAt: "2026-08-09T16:02:00.000Z", classification: "retry", canApprove: false,
           canDiscard: true, message: "It carried no document Orbit can read." },
         { id: "r-kept", receivedAt: "2026-08-06T08:41:00.000Z", classification: "unavailable", canApprove: false,
           canDiscard: false, message: "Its document could not be prepared." },
@@ -134,7 +134,8 @@ test("a failed arrival the server lets go opens on a tap to remove; one it keeps
 });
 
 /* The suggestion's own address (`/item/<receiptId>`) was the belt on a
-   phone (#1145) until #1319 stage 3b retired it: the address now opens the
-   suggestion's row in home's signals, where it is decided and amended in
-   its own lines. Those checks are in pocket-home-drawers.spec.js; the
-   inbox keeps its review sheet, proved above. */
+   phone (#1145) until #1319 stage 3b retired it: `/item/<id>` no longer
+   exists, and `/home?item=<receiptId>` opens the suggestion's row in home's
+   signals, where it is decided and amended in its own lines. Those checks
+   are in pocket-home-drawers.spec.js; the inbox keeps its review sheet,
+   proved above. */

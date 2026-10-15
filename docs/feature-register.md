@@ -6,9 +6,8 @@ into a release contract; its roadmap disposition makes that explicit. Entries
 describe intended outcomes and constraints, not implementation status or
 permission to expand an active issue.
 
-The [v1 charter](v1-charter.md) defines the release contract, the
-[engineering baseline](engineering-baseline.md) records dated evidence, and
-GitHub milestones/issues own live delivery status.
+The [v1 charter](v1-charter.md) defines the release contract, and GitHub
+milestones/issues own live delivery status.
 
 ## Register conventions
 

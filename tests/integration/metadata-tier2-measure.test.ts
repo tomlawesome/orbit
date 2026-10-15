@@ -39,16 +39,11 @@ async function seedItems(householdId: string, sectionId: string, count: number):
       id,
       householdId,
       sectionId,
-      title: null,
       titleEnc: cipher.encryptText("items.title", id, `Measured item ${index} renewal`),
-      provider: null,
       providerEnc: cipher.encryptText("items.provider", id, PROVIDERS[index % PROVIDERS.length]),
-      reference: null,
       referenceEnc: cipher.encryptText("items.reference", id, `MEAS-${index}`),
       referenceIndex: cipher.referenceIndex(`MEAS-${index}`),
-      notes: null,
       notesEnc: cipher.encryptText("items.notes", id, `A note of some length about item ${index}, as a real one would be.`),
-      costMinor: null,
       costMinorEnc: cipher.encryptNumber("items.cost_minor", id, 1_000 + index),
       currency: "GBP",
       renewalDate: "2027-01-01",
@@ -101,9 +96,9 @@ describe.runIf(process.env.ORBIT_MEASURE_TIER2 === "1")("the in-app Tier 2 path,
       const scanStartedAt = process.hrtime.bigint();
       for (let run = 0; run < runs; run += 1) {
         const decrypted = rows.map((row) => ({
-          title: reader.text("items.title", row.id, { encrypted: row.titleEnc, plaintext: null }).value ?? "",
-          provider: reader.text("items.provider", row.id, { encrypted: row.providerEnc, plaintext: null }).value,
-          costMinor: reader.number("items.cost_minor", row.id, { encrypted: row.costMinorEnc, plaintext: null }).value,
+          title: reader.text("items.title", row.id, { encrypted: row.titleEnc }).value ?? "",
+          provider: reader.text("items.provider", row.id, { encrypted: row.providerEnc }).value,
+          costMinor: reader.number("items.cost_minor", row.id, { encrypted: row.costMinorEnc }).value,
         }));
         total = decrypted.reduce((sum, item) => sum + (item.costMinor ?? 0), 0);
         matches = decrypted.filter((item) => item.title.toLowerCase().includes("renewal")).length;

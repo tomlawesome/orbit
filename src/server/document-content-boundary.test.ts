@@ -10,8 +10,6 @@ const mocks = vi.hoisted(() => ({
   ciphertextExists: vi.fn(),
   decryptDocument: vi.fn(),
   encryptDocument: vi.fn(),
-  extractTextWithTika: vi.fn(),
-  proposalFromText: vi.fn(),
 }));
 
 vi.mock("@/db", async () => {
@@ -75,14 +73,8 @@ vi.mock("@/server/documents/storage", () => {
     openDocumentStorage: () => new LocalDocumentStorage(),
   };
 });
-vi.mock("@/server/documents/tika", () => ({ extractTextWithTika: mocks.extractTextWithTika }));
-vi.mock("@/server/documents/suggestions", async () => ({
-  ...await vi.importActual<typeof import("@/server/documents/suggestions")>("@/server/documents/suggestions"),
-  proposalFromText: mocks.proposalFromText,
-}));
 
 import { readDocumentDownload, restoreDocument } from "./document-repository";
-import { createDocumentDraft } from "./document-drafts";
 
 const config = {
   storageRoot: "/private/documents",
@@ -131,20 +123,6 @@ function seedAccess(row: { administrator: boolean; membershipRole?: unknown; mem
   mocks.rows.users = [{ administrator: row.administrator, role: row.membershipRole ?? "member" }];
 }
 
-function draftMemberRow(overrides: Record<string, unknown> = {}) {
-  return {
-    id: "11111111-1111-4111-8111-111111111111",
-    householdId: "33333333-3333-4333-8333-333333333333",
-    displayName: "policy.pdf",
-    mediaType: "application/pdf",
-    lifecycle: "available",
-    scanStatus: "clean",
-    administrator: false,
-    member: "user-id",
-    ...overrides,
-  };
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.fromNames.length = 0;
@@ -167,9 +145,9 @@ describe("readDocumentDownload boundary", () => {
       });
 
       // Only the authorization/lifecycle lookup (`documents`, then the
-      // household gate's `users`) ran; the crypto row query
+      // household gate's `users` and its look for a running import) ran; the crypto row query
       // (`document_crypto`) never happened.
-      expect(mocks.fromNames).toEqual(["documents", "users"]);
+      expect(mocks.fromNames).toEqual(["documents", "users", "portable_archive_imports"]);
       expect(mocks.readCiphertext).not.toHaveBeenCalled();
       expect(mocks.decryptDocument).not.toHaveBeenCalled();
       expect(mocks.insertNames).not.toContain("audit_log");
@@ -183,35 +161,8 @@ describe("readDocumentDownload boundary", () => {
       code: "document_not_found",
       status: 404,
     });
-    expect(mocks.fromNames).toEqual(["documents", "users"]);
+    expect(mocks.fromNames).toEqual(["documents", "users", "portable_archive_imports"]);
   });
-});
-
-describe("createDocumentDraft boundary", () => {
-  it.each(unsafeScanStatuses)(
-    "rejects an authorized available document with a %s scan status before readDocumentDownload, Tika extraction, proposal parsing or draft insertion",
-    async (scanStatus) => {
-      seedAccess(draftMemberRow({ scanStatus }));
-
-      await expect(createDocumentDraft("user-id", "11111111-1111-4111-8111-111111111111")).rejects.toMatchObject({
-        code: "document_not_found",
-        status: 404,
-        message: "That document is not available",
-      });
-
-      // Only the membership/lifecycle lookup (`documents`, then the household
-      // gate's `users`) ran, once. `readDocumentDownload` repeats that pair
-      // and then reads the crypto row, so a longer list would mean it was
-      // called; no
-      // `document_drafts` select/insert (existing-draft check or creation) ran either.
-      expect(mocks.fromNames).toEqual(["documents", "users"]);
-      expect(mocks.insertNames).toEqual([]);
-      expect(mocks.extractTextWithTika).not.toHaveBeenCalled();
-      expect(mocks.proposalFromText).not.toHaveBeenCalled();
-      expect(mocks.readCiphertext).not.toHaveBeenCalled();
-      expect(mocks.decryptDocument).not.toHaveBeenCalled();
-    },
-  );
 });
 
 describe("restoreDocument boundary", () => {
@@ -230,7 +181,7 @@ describe("restoreDocument boundary", () => {
         message: "That document is not available",
       });
 
-      expect(mocks.fromNames).toEqual(["documents", "users"]);
+      expect(mocks.fromNames).toEqual(["documents", "users", "portable_archive_imports"]);
       expect(mocks.transactionCalls).toBe(0);
       expect(mocks.ciphertextExists).not.toHaveBeenCalled();
       expect(mocks.insertNames).not.toContain("audit_log");

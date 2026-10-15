@@ -295,7 +295,7 @@ describe("[1316] a suggested value someone has begun editing is theirs, not the 
     </form>
     <div id="readcard"></div><div id="read-head"></div><div id="focusline"></div><div id="focuswhy"></div>
     <img id="sheet-page"><div id="rc-capline"></div><div id="rc-honest"></div><div id="rc-file"></div>
-    <div id="rc-size"></div><div id="rc-scan"></div><button id="rc-drop" type="button"></button><div id="docnote"></div>
+    <div id="rc-size"></div><div id="rc-refused"></div><div id="rc-scan"></div><button id="rc-drop" type="button"></button><div id="docnote"></div>
   `;
 
   const reads = (/** @type {{ field: string, value: string }[]} */ suggestions) => ({

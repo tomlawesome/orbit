@@ -6,8 +6,8 @@
 # be caught locally in minutes instead of by promoting to `preview` and
 # waiting on CI.
 #
-# Mirrors the &container_validation_steps sequence in
-# .github/workflows/publish-container.yml (the "Create isolated test
+# Mirrors the validation sequence of
+# the retired GitHub container workflow, now split across the GitLab `smoke` jobs (the "Create isolated test
 # configuration" through "Run browser and accessibility checks" steps):
 # same compose files, same order, same health and OIDC/mail setup. It
 # deliberately does not reproduce that job's image-scanning, installer or
@@ -140,7 +140,7 @@
 # second stack under those names regardless of project;
 # compose/docker-compose.local-e2e.yml renames them to `${COMPOSE_PROJECT_NAME}-*`
 # for this script only, so a per-run project name also gives per-run
-# container names. Never runs `pnpm db:generate` (also a docs/testing.md "Local traps" entry) and
+# container names. Never runs `pnpm db:generate` and
 # never writes to .env-orbit or an existing file under .orbit-secrets/ --
 # scripts/configure.sh and the secret generation below only fill in what is
 # missing.
@@ -910,7 +910,7 @@ if [[ "$in_image" == 1 ]]; then
   [[ -S "$docker_sock" ]] || fail "docker socket not found at ${docker_sock}; the suite needs it inside the image."
   image_env=()
   for kv in "${suite_env[@]}"; do image_env+=(-e "$kv"); done
-  for name in TEST_SMTP_PORT TEST_IMAPS_PORT ORBIT_E2E_ENGINES ORBIT_E2E_WEBKIT_DEVICES ORBIT_E2E_WORKERS ORBIT_IMAGE ORBIT_SECRETS_DIR; do
+  for name in TEST_SMTP_PORT TEST_IMAPS_PORT ORBIT_E2E_ENGINES ORBIT_E2E_WEBKIT_DEVICES ORBIT_E2E_WORKERS ORBIT_IMAGE; do
     [[ -z "${!name:-}" ]] || image_env+=(-e "${name}=${!name}")
   done
   oidc_forward=""

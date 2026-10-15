@@ -28,7 +28,7 @@
  */
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, asc, eq, gt, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { base64url } from "jose";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -52,12 +52,7 @@ import { getAuthConfig } from "@/lib/env";
 import { AppError } from "@/lib/errors";
 import { log } from "@/lib/logger";
 import { validUuid } from "@/lib/uuid";
-import {
-  MetadataCipher,
-  openInstanceMetadataReader,
-  requireInstanceMetadataWriter,
-} from "@/server/metadata/fields";
-import { metadataCryptoAvailable } from "@/server/metadata/keys";
+import { openInstanceMetadataReader, requireInstanceMetadataWriter } from "@/server/metadata/fields";
 
 /** The executor a caller already holds a transaction on, or `getDb()` itself. */
 type Executor = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
@@ -163,36 +158,23 @@ export async function createLocalUser(
       }
     }
 
-    /* Creating an account WRITES an address, so unlike signing in it genuinely
-       needs the key, and the claim — the very first thing a new instance does
-       — needs it most (#969). Refused in its own words: an operator whose key
-       is missing must not read this as their address being rejected. */
-    let cipher: MetadataCipher;
-    try {
-      cipher = await requireInstanceMetadataWriter(transaction);
-    } catch {
-      throw new AuthError(
-        "instance_locked",
-        "This Orbit instance cannot create accounts until its encryption key is available",
-        503,
-      );
-    }
+    /* Creating an account writes an address, so it needs the key (#969); an
+       instance without one is in maintenance and never gets here (#1405). */
+    const cipher = await requireInstanceMetadataWriter(transaction);
 
-    /* Checked rather than left to the case-insensitive unique index, so the
-       answer is Orbit's own bounded refusal instead of a driver error. The
-       wording is ADR-0023 §3's collision refusal: an address belongs to one
-       account, and the way to add a second sign-in method is to link it.
-
-       Both indexes are consulted (#969): the blind one for an encrypted row,
-       the case-insensitive one for a row the backfill has not reached. */
+    /* Checked rather than left to the unique blind index, so the answer is
+       Orbit's own bounded refusal instead of a driver error. The wording is
+       ADR-0023 §3's collision refusal: an address belongs to one account, and
+       the way to add a second sign-in method is to link it. The blind index
+       folds case, so this is case-insensitive (#969, #1403 Q3). */
     const emailIndex = cipher.emailIndex(email);
-    const [taken] = await transaction
-      .select({ id: users.id })
-      .from(users)
-      .where(emailIndex === null
-        ? sql`lower(${users.email}) = lower(${email})`
-        : or(eq(users.emailIndex, emailIndex), sql`lower(${users.email}) = lower(${email})`))
-      .limit(1);
+    const [taken] = emailIndex === null
+      ? []
+      : await transaction
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.emailIndex, emailIndex))
+        .limit(1);
     if (taken) {
       throw new AuthError(
         "link_required",
@@ -209,7 +191,6 @@ export async function createLocalUser(
       .insert(users)
       .values({
         id: userId,
-        email: null,
         emailEnc: cipher.encryptText("users.email", userId, email),
         emailIndex,
         /* Nothing has verified this address: no provider asserted it and Orbit
@@ -265,19 +246,7 @@ export async function createLocalUser(
 export type CredentialVerdict =
   | { outcome: "verified"; userId: string }
   | { outcome: "rejected" }
-  | { outcome: "throttled" }
-  /**
-   * The instance holds no usable encryption key, so no address can be matched
-   * at all (#969). A FIFTH answer, deliberately, and the one exception to the
-   * "every failure looks the same" rule at the top of this file: that rule
-   * exists so a verdict cannot be turned into "that address exists", and this
-   * one says nothing about any address. It is true of the whole instance
-   * before a single character of the address is compared, so an attacker
-   * learns only what the sign-in screen is about to tell everybody anyway —
-   * while the operator learns the thing they actually need to know, instead of
-   * being told their own password is wrong.
-   */
-  | { outcome: "locked" };
+  | { outcome: "throttled" };
 
 /**
  * Verifies an email and password against `local_credentials` (ADR-0023 §4).
@@ -288,8 +257,25 @@ export type CredentialVerdict =
  * sign in, with no migration.
  */
 export async function verifyCredential(email: string, password: string): Promise<CredentialVerdict> {
+  return verifyWithLookup(() => findAccountByEmail(email), password);
+}
+
+/**
+ * The same check for an account already identified by id — a recent-
+ * authentication challenge, where the session names the principal. Looking the
+ * account up by id rather than by its stored address means a member whose
+ * address no longer decrypts can still prove they hold the password.
+ */
+export async function verifyCredentialForUser(userId: string, password: string): Promise<CredentialVerdict> {
+  return verifyWithLookup(() => findAccountById(userId), password);
+}
+
+async function verifyWithLookup(
+  lookup: () => Promise<CredentialAccount | undefined>,
+  password: string,
+): Promise<CredentialVerdict> {
   try {
-    return await attemptVerification(email, password);
+    return await attemptVerification(await lookup(), password);
   } catch (error) {
     if (error instanceof VerificationGateRefusedError) {
       /* The gate refused before any derivation ran, so this costs an attacker
@@ -307,44 +293,57 @@ export async function verifyCredential(email: string, password: string): Promise
   }
 }
 
-async function attemptVerification(email: string, password: string): Promise<CredentialVerdict> {
-  const db = getDb();
+interface CredentialAccount {
+  userId: string;
+  disabledAt: Date | null;
+  passwordHash: string | null;
+  lockedUntil: Date | null;
+}
 
-  /* The address is behind the key now (#969), so the lookup is the blind index
-     — and an instance with no KEK can compute no index. Reported before any
-     derivation runs: there is nothing to guess against, so spending the decoy
-     would only make a locked instance slow as well as locked.
+const credentialAccountColumns = {
+  userId: users.id,
+  disabledAt: users.disabledAt,
+  passwordHash: localCredentials.passwordHash,
+  lockedUntil: localCredentials.lockedUntil,
+};
 
-     The test is "is there a KEK", not "is this cipher locked". They differ on
-     an instance that has simply never written an address — a fresh, unclaimed
-     one — whose key row does not exist yet. That instance is not locked and
-     has no accounts either, so it must keep giving the ordinary answer rather
-     than announcing which of the two states it is in. */
-  if (!metadataCryptoAvailable()) return { outcome: "locked" };
+async function findAccountById(userId: string): Promise<CredentialAccount | undefined> {
+  const [account] = await getDb()
+    .select(credentialAccountColumns)
+    .from(users)
+    .leftJoin(localCredentials, eq(localCredentials.userId, users.id))
+    .where(eq(users.id, userId))
+    .limit(1);
+  return account;
+}
+
+async function findAccountByEmail(email: string): Promise<CredentialAccount | undefined> {
+  /* The address is behind the key now (#969), so the lookup is the blind
+     index. An instance with no usable key is in maintenance and nobody signs
+     in (#1405), so the only locked cipher here is a fresh, unclaimed
+     instance's whose key row does not exist yet: it has never written an
+     address, so no account can match. */
   const cipher = await openInstanceMetadataReader();
 
   const trimmed = email.trim();
-  /* Null on an instance whose key row does not exist yet — it has never
-     written an address, so there is nothing for an index to find, and asking
-     the cipher for one would throw. The plaintext arm below still answers. */
+  /* Null on an instance whose key row does not exist yet, where asking the
+     cipher for one would throw; nothing can match then. */
   const emailIndex = cipher.locked ? null : cipher.emailIndex(trimmed);
-  /* Two matches: the index finds an encrypted row, the case-insensitive
-     comparison finds one the backfill has not reached. A row is in exactly one
-     of those states, so this cannot match twice. */
-  const matchesAddress = emailIndex === null
-    ? sql`lower(${users.email}) = lower(${trimmed})`
-    : or(eq(users.emailIndex, emailIndex), sql`lower(${users.email}) = lower(${trimmed})`);
-  const [account] = await db
-    .select({
-      userId: users.id,
-      disabledAt: users.disabledAt,
-      passwordHash: localCredentials.passwordHash,
-      lockedUntil: localCredentials.lockedUntil,
-    })
+  if (emailIndex === null) return undefined;
+  const [account] = await getDb()
+    .select(credentialAccountColumns)
     .from(users)
     .leftJoin(localCredentials, eq(localCredentials.userId, users.id))
-    .where(matchesAddress)
+    .where(eq(users.emailIndex, emailIndex))
     .limit(1);
+  return account;
+}
+
+async function attemptVerification(
+  account: CredentialAccount | undefined,
+  password: string,
+): Promise<CredentialVerdict> {
+  const db = getDb();
 
   /* No such address, a disabled account, or an account that has no password
      yet: all three spend the decoy derivation and answer identically, so the
@@ -864,13 +863,8 @@ export interface SignInMethods {
  * (ADR-0023 §1, §3). Read at the moment of the decision rather than cached:
  * an operator who has just turned the provider off has changed what "usable"
  * means for the next request.
- *
- * Exported for `admin-repository.ts`'s primary-administrator transfer
- * (#1151 SS1-S1), which owes the target the same answer the unlink checks
- * below give their own caller: an external identity row that still exists
- * is not the same fact as a provider that is still switched on.
  */
-export function identitiesAreUsable(): boolean {
+function identitiesAreUsable(): boolean {
   return getAuthConfig().oidc !== null;
 }
 

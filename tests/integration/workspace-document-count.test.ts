@@ -4,11 +4,11 @@ import { getDb } from "@/db";
 import { documents, items } from "@/db/schema";
 import { readWorkspace } from "@/server/workspace-repository";
 import type { WorkspaceState } from "@/lib/workspace";
-import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedItemColumns } from "./support/fixtures";
 
 /**
  * `readWorkspace` never computed `documentCount` (#1091): items always came
- * back without the field, so `readBelt`'s `(item.documentCount ?? 0) > 0`
+ * back without the field, so the belt's `(item.documentCount ?? 0) > 0`
  * filter was always false for a real household and no document ever reached
  * the belt. Only the demo fixtures hand-wrote the field, which is why
  * nothing that exercised only fixtures noticed.
@@ -44,10 +44,12 @@ describe("workspace document counts (#1091)", () => {
   it("gives an item with no documents a count of zero, not undefined", async () => {
     const fixture = await createIntegrationFixture("document-count-zero");
     const db = getDb();
+    const bareItemId = randomUUID();
     const [bareItem] = await db.insert(items).values({
+      id: bareItemId,
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
-      title: "No documents yet",
+      ...await encryptedItemColumns(fixture.household.id, bareItemId, { title: "No documents yet" }),
       currency: "GBP",
     }).returning({ id: items.id });
 
@@ -81,10 +83,12 @@ describe("workspace document counts (#1091)", () => {
   it("gives two items in one household their own counts, not each other's", async () => {
     const fixture = await createIntegrationFixture("document-count-separate");
     const db = getDb();
+    const secondItemId = randomUUID();
     const [secondItem] = await db.insert(items).values({
+      id: secondItemId,
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
-      title: "Second item, same household",
+      ...await encryptedItemColumns(fixture.household.id, secondItemId, { title: "Second item, same household" }),
       currency: "GBP",
     }).returning({ id: items.id });
     await db.insert(documents).values([

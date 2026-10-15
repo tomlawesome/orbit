@@ -1,6 +1,6 @@
 import { json } from "@sveltejs/kit";
 
-import { listImapInbox } from "orbit/server/imap-inbox";
+import { listImapInbox } from "orbit/server/mail-in/imap-inbox";
 
 import { INBOX_FIXTURE } from "$lib/data/fixtures/inbox.js";
 import { read } from "$lib/server/api.js";

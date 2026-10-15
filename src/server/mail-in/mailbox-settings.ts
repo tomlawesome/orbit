@@ -231,6 +231,15 @@ async function lockMailbox(transaction: Transaction, expectedVersion: number | n
   return row;
 }
 
+/** True for a Postgres unique-constraint violation (SQLSTATE 23505), bare or wrapped by the driver layer. */
+function isUniqueViolation(error: unknown): boolean {
+  for (let current: unknown = error, depth = 0; current && depth < 3; depth += 1) {
+    if ((current as { code?: unknown }).code === "23505") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 /** Requires a configured mailbox for an operation that only makes sense against one. */
 function requireMailbox(row: MailboxRow | undefined): MailboxRow {
   if (!row) throw new AppError("mailbox_not_configured", "Mail-in has not been set up", 409);
@@ -496,9 +505,20 @@ export async function setMailboxSettings(
       if (!updated) throw new AppError("mailbox_version_conflict", "The mailbox settings changed; reload and try again", 409);
       mailboxId = updated.id;
     } else {
-      const [inserted] = await transaction.insert(mailInMailbox)
-        .values({ ...values, enabled: true })
-        .returning({ id: mailInMailbox.id });
+      /* Two first saves at once both saw no row, so lockMailbox could not
+         serialise them. The loser's insert waits for the winner to commit and
+         then hits the singleton primary key; refuse it like any other
+         concurrent edit. Throwing rolls the transaction back, including the
+         secret rows it created. */
+      let inserted: { id: string } | undefined;
+      try {
+        [inserted] = await transaction.insert(mailInMailbox)
+          .values({ ...values, enabled: true })
+          .returning({ id: mailInMailbox.id });
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+      }
+      if (!inserted) throw new AppError("mailbox_version_conflict", "The mailbox settings changed; reload and try again", 409);
       mailboxId = inserted.id;
     }
     /* Deleted only after the row stops referencing them, so the foreign key

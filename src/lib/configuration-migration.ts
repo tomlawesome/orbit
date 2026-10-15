@@ -50,24 +50,13 @@ export interface ConfigurationCommandResult {
   stdout: string;
   /** The single failure code configuration.sh printed on stderr (empty on success). */
   stderr: string;
-  /** The setting a removed, unknown or secret-conflict refusal is about; never printed, so the stdout/stderr contract is unchanged. */
+  /** The setting an unknown-key or secret-conflict refusal is about; never printed, so the stdout/stderr contract is unchanged. */
   key?: string;
 }
 
 function failure(code: ConfigurationFailureCode, stdout = "", key?: string): ConfigurationCommandResult {
   return key === undefined ? { status: 1, stdout, stderr: `${code}\n` } : { status: 1, stdout, stderr: `${code}\n`, key };
 }
-
-const DEPRECATED_SECRET_KEYS = new Set([
-  "OIDC_CLIENT_SECRET",
-  "SESSION_SECRET",
-  "DOCUMENT_KEK",
-  "POSTGRES_PASSWORD",
-  "VAPID_PRIVATE_KEY",
-  "SMTP_PASSWORD",
-  "DATABASE_URL",
-  "SMTP_URL",
-]);
 
 const isValidAppliedVersion = (value: string): boolean => /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(value);
 const isValidAppliedDigest = (value: string): boolean => /^sha256:[0-9a-f]{64}$/.test(value);
@@ -88,8 +77,8 @@ type ParseOutcome = { ok: true; parsed: ParsedConfiguration } | { ok: false; res
  * check_file_safety + parse_file: a regular, non-symlink, mode-600 file,
  * read through the one O_NOFOLLOW descriptor its safety was checked on, then
  * the shared .env-orbit grammar plus the direct/_FILE secret-pair refusal.
- * An unknown or removed key also prints configuration.sh's one-word
- * classification line on stdout before the code (never the key itself).
+ * An unknown key also prints configuration.sh's one-word classification
+ * line on stdout before the code (never the key itself).
  */
 function readConfiguration(file: string): ParseOutcome {
   let descriptor: number;
@@ -114,12 +103,7 @@ function readConfiguration(file: string): ParseOutcome {
   if (content === undefined) return { ok: false, result: failure("configuration_syntax", "not_utf8 configuration\n") };
   const parsed = parseEnvOrbitContent(content, { refuseSecretConflicts: true });
   if (!parsed.ok) {
-    const stdout =
-      parsed.code === "configuration_removed_key"
-        ? "removed_incompatible configuration\n"
-        : parsed.code === "configuration_unknown_key"
-          ? "unknown configuration\n"
-          : "";
+    const stdout = parsed.code === "configuration_unknown_key" ? "unknown configuration\n" : "";
     return { ok: false, result: failure(parsed.code, stdout, parsed.key) };
   }
   const values = parsed.record as Record<string, string>;
@@ -128,7 +112,7 @@ function readConfiguration(file: string): ParseOutcome {
 
 /** report_classification: one category line per key, never a value. */
 function classificationLines(parsed: ParsedConfiguration): string {
-  const lines = parsed.keys.map((key) => `${DEPRECATED_SECRET_KEYS.has(key) ? "deprecated_supported" : "current"} ${key}`);
+  const lines = parsed.keys.map((key) => `current ${key}`);
   if (!parsed.schemaPresent) lines.push("safely_migratable ORBIT_CONFIG_SCHEMA_VERSION");
   if (!("ORBIT_CONFIG_APPLIED_VERSION" in parsed.values) && !("ORBIT_CONFIG_APPLIED_DIGEST" in parsed.values)) {
     lines.push("safely_migratable ORBIT_CONFIG_APPLIED_VERSION", "safely_migratable ORBIT_CONFIG_APPLIED_DIGEST");
@@ -292,8 +276,9 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
   }
 
   const priorSchema = parsed.schemaPresent ? "v1" : "v0";
-  const priorVersion = appliedVersionPresent ? currentVersion : "legacy/unknown";
-  const priorDigest = appliedDigestPresent ? currentDigest : "legacy/unknown";
+  // A first install's file carries no applied stamp yet.
+  const priorVersion = appliedVersionPresent ? currentVersion : "none";
+  const priorDigest = appliedDigestPresent ? currentDigest : "none";
   const managed: Record<(typeof MANAGED_ORDER)[number], string> = {
     ORBIT_IMAGE: desiredImage,
     ORBIT_CONFIG_SCHEMA_VERSION: String(ENV_ORBIT_SCHEMA_VERSION),
@@ -496,15 +481,13 @@ export function isNotUtf8Failure(result: ConfigurationCommandResult): boolean {
 }
 
 // Names the offending line where the parser knows it: without the key an
-// operator whose file still carries a retired setting is rolled back with
+// operator whose file carries an unknown setting is rolled back with
 // nothing to say which line to fix, and stays blocked.
 function preflightFailureMessage(result: ConfigurationCommandResult): string {
   if (isNotUtf8Failure(result)) return NOT_UTF8_FAILURE_MESSAGE;
   const { key } = result;
   if (key !== undefined) {
     switch (result.stderr.trim()) {
-      case "configuration_removed_key":
-        return `Configuration preflight failed: .env-orbit still has ${key}, a setting this release removed (inbound mail is now set up in Administration); delete that line and rerun the update.`;
       case "configuration_unknown_key":
         return `Configuration preflight failed: .env-orbit has ${key}, which is not an Orbit setting; delete or correct that line and rerun the update.`;
       case "configuration_secret_conflict":

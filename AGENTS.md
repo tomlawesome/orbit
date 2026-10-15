@@ -121,9 +121,8 @@ Reasoning for each is in [docs/testing.md](docs/testing.md#local-traps).
   defect, not housekeeping. Run `bash scripts/cleanup-stacks.sh` at session end
   and before acceptance. Plain `--remove` skips running stacks (another session
   may own them); your own running stack goes with `--project NAME --remove`.
-- `pnpm db:generate` is blocked on purpose: `drizzle/meta/` snapshots stop at
-  0004, so it would emit a migration recreating the whole schema. The
-  hand-written procedure is in `docs/testing.md`.
+- `pnpm db:generate` writes the next migration from the schema; read the SQL it
+  wrote before keeping it (`docs/testing.md`, "Writing a migration").
 - `docker compose --env-file .env-orbit` without `-p` silently adopts that
   deployment's project and volumes, from any checkout. Source
   `scripts/compose-isolation-preflight.sh` before an `up` you assemble by hand.

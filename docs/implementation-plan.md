@@ -6,8 +6,6 @@ This file defines delivery order and working policy. It does not repeat live
 feature status.
 
 - Product and release requirements: [v1 charter](v1-charter.md).
-- Current capability evidence and gaps:
-  [engineering baseline](engineering-baseline.md).
 - System boundaries and durable decisions:
   [architecture](architecture.md) and [ADRs](adr/README.md).
 - Tests, CI and definition of done:
@@ -54,9 +52,7 @@ acceptance` label when the change touches schema, migrations or server code.
 
 Delivery is organised as five phases. Each phase makes the next one cheaper.
 The [`ai/orbit` issue list](https://gitlab.tomlawson.io/ai/orbit/-/issues)
-owns live status, and the
-[engineering baseline](engineering-baseline.md) rows moving to proven states
-are the exit evidence.
+owns live status.
 
 The phase *milestones* are retired (owner decision, 2026-08-23, recorded on
 issue #502). A phase is no more finishable than a release, so milestones now

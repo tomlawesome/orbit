@@ -226,7 +226,8 @@ async function arriveAtHome(page: Page, options: { withItem?: boolean } = {}) {
 /** #424: the manifest row expands in place on Enter (it is not a plain
  *  navigation — onRowClick calls preventDefault). #1319 (owner-decisions
  *  §34): the drawer it opens is the item now, holding everything the item
- *  page (the belt) did, and the belt's own address only redirects here. So
+ *  page (the belt) did; the belt's `/item/<id>` no longer exists, and the
+ *  drawer opens from `/home?item=<id>`. So
  *  the item is reached the way a reader reaches it: Tab to its row, Enter,
  *  and the drawer's foot row is next in the order. Shared by the two drawer
  *  tests below so each gets this same path on its own fresh page. */

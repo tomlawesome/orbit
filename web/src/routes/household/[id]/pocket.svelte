@@ -8,6 +8,7 @@
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
+  import HouseholdClosed from "$lib/HouseholdClosed.svelte";
   import { mountReorder } from "$lib/pocket/reorder.js";
   import { standOnKeyboard } from "$lib/pocket/sheet.js";
   import { wake } from "$lib/pocket/wake.js";
@@ -541,10 +542,14 @@
       </svg>
       <div class="hh-named">
         <h1 class="p-title">{v.name}</h1>
-        <p class="hh-sub">{hhSub}</p>
+        <!-- Closed by an import (#1316), its counts would be read from nothing. -->
+        {#if !v.importInProgress}<p class="hh-sub">{hhSub}</p>{/if}
       </div>
     </header>
 
+    {#if v.importInProgress}
+    <HouseholdClosed name={v.name} hasOthers={v.hasOthers} showHomeLink />
+    {:else}
     <!-- MEMBERS FIRST (3b, a trial): on a phone the likely errand is a person. -->
     <h2 class="p-caps p-land" style:--i="1" id="hh-members-head">Members<span class="p-count">{v.memberCount}</span></h2>
     <section class="p-card hh-flush hh-members" style:--i="1" aria-labelledby="hh-members-head" data-hh="members" data-row-group>
@@ -657,6 +662,7 @@
           <button class="p-pill danger wide" onclick={() => { typedName = ""; doomProblem = null; doomOpen = true; }}>delete this system</button>
         {/if}
       </section>
+    {/if}
     {/if}
   </main>
 

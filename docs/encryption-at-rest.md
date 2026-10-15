@@ -109,9 +109,9 @@ locked; the script on `/login` then sends the reader to `/maintenance`, and
 `/auth/error` stays where it is. The container log states the fault, and an
 alert goes to `OPERATOR_ALERT_ADDRESS` when it is set. Fixing the key on the
 host and restarting is the way out. If the key **and** the recovery bundle are
-both gone, the addresses cannot be recovered at all, and a host-shell command
-clears them so that people can be let back in and their addresses re-entered
-by hand — see
+both gone, the addresses cannot be recovered at all and nobody can sign in;
+there is deliberately no command that clears what cannot be read, so the way
+back is to restore the backup bundle or reinstall — see
 [administrator-operations.md](administrator-operations.md#when-the-encryption-key-and-the-recovery-bundle-are-both-lost).
 
 `items.reference`, the invitation address and both account addresses carry a

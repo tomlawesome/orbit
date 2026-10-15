@@ -26,6 +26,18 @@ export class AppError extends Error {
 }
 
 /**
+ * A request refused because the member asked too often (429). It names how
+ * long to wait, in whole seconds, and the response carries that as
+ * `Retry-After` (RFC 6585 section 4, RFC 9110 section 10.2.3).
+ */
+export class RateLimitedError extends AppError {
+  constructor(code: string, message: string, public readonly retryAfterSeconds: number) {
+    super(code, message, 429);
+    this.name = "RateLimitedError";
+  }
+}
+
+/**
  * The bounded blocked-request contract of ADR-0013 decision 2 (#523).
  * Deliberately outside the `{ error: { code, message } }` envelope: the body
  * is the fixed `{"error":"maintenance_active"}` and never carries the

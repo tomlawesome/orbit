@@ -222,3 +222,95 @@ describe("signOut() against a dead or stale session (#1316)", () => {
     expect(failure.status).toBe(403);
   });
 });
+
+/*
+ * #1316: a household an import has closed answers every read with a 409
+ * `household_import_in_progress`. A browser screen already standing in that
+ * household reloads, so it draws the closed-household notice a fresh load
+ * draws; the WorkspaceError is still thrown so pending callers settle while
+ * the reload takes over. Nothing else reloads, and the server never does.
+ */
+describe("json() on a 409 from a household an import has closed (#1316)", () => {
+  const importMessage = "This household's owner is bringing in an archive. Come back when it's finished.";
+
+  /** @type {import("vitest").Mock} */
+  let assign;
+  /** @type {import("vitest").Mock} */
+  let reload;
+
+  /** @param {number} status @param {unknown} body */
+  function failure(status, body) {
+    return fakeResponse({ ok: false, status, body });
+  }
+
+  beforeEach(() => {
+    assign = vi.fn();
+    reload = vi.fn();
+    vi.stubGlobal("window", { location: { assign, reload, pathname: "/household/settings" } });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects with the WorkspaceError and reloads the page exactly once, without navigating", async () => {
+    const response = failure(409, {
+      error: { code: "household_import_in_progress", message: importMessage },
+    });
+
+    const error = await json(response).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(WorkspaceError);
+    expect(error).toMatchObject({
+      status: 409,
+      code: "household_import_in_progress",
+      message: importMessage,
+    });
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("does not reload for a 409 carrying any other code", async () => {
+    const response = failure(409, {
+      error: { code: "household_deletion_pending", message: "This household is being deleted" },
+    });
+
+    await expect(json(response)).rejects.toMatchObject({
+      status: 409,
+      code: "household_deletion_pending",
+    });
+    expect(reload).not.toHaveBeenCalled();
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("sends a 401 into the login journey and does not reload", async () => {
+    const response = failure(401, {
+      error: { code: "unauthenticated", message: "Sign in required" },
+    });
+
+    await expect(json(response)).rejects.toMatchObject({ status: 401, code: "unauthenticated" });
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(assign).toHaveBeenCalledWith(
+      `/api/auth/login?returnTo=${encodeURIComponent("/household/settings")}`,
+    );
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("still rejects with the same WorkspaceError, and no ReferenceError, when there is no window (server side)", async () => {
+    vi.unstubAllGlobals();
+    expect(typeof window).toBe("undefined");
+    const response = failure(409, {
+      error: { code: "household_import_in_progress", message: importMessage },
+    });
+
+    const error = await json(response).catch((caught) => caught);
+
+    expect(error).not.toBeInstanceOf(ReferenceError);
+    expect(error).toBeInstanceOf(WorkspaceError);
+    expect(error).toMatchObject({
+      status: 409,
+      code: "household_import_in_progress",
+      message: importMessage,
+    });
+  });
+});

@@ -100,7 +100,7 @@ const INSTALL_SH_CONTENTS = "#!/usr/bin/env bash\necho fake-install-sh\n";
 function buildRelease({
   dir,
   arch,
-  version = "1.2.3",
+  version = "v1.2.3",
   privatePem,
   manifestOverride,
   sigOverride,
@@ -227,7 +227,7 @@ describe("get-orbit.sh", () => {
   it("runs a pinned ORBIT_VERSION when the signed manifest is for that version", () => {
     const dir = makeDir("get-orbit-");
     const { privatePem, publicPem } = generateKeyPair(dir);
-    const baseUrl = buildRelease({ dir, arch, privatePem, version: "1.2.3", routeDir: "releases/download/v1.2.3", serveBundle: false });
+    const baseUrl = buildRelease({ dir, arch, privatePem, version: "v1.2.3", routeDir: "releases/download/v1.2.3", serveBundle: false });
     const launcherLog = join(dir, "launcher.log");
     const cache = makeDir("get-orbit-cache-");
 
@@ -253,7 +253,7 @@ describe("get-orbit.sh", () => {
       dir,
       arch,
       privatePem,
-      version: "1.3.0-e2e.1",
+      version: "v1.3.0-e2e.1",
       routeDir: "releases/download/v1.3.0-e2e.1",
       serveBundle: false,
     });
@@ -280,7 +280,7 @@ describe("get-orbit.sh", () => {
     const { privatePem, publicPem } = generateKeyPair(dir);
     // A real, correctly signed older release served where v1.2.3 was asked
     // for: the signature passes, so only the version check can catch it.
-    const baseUrl = buildRelease({ dir, arch, privatePem, version: "1.0.0", routeDir: "releases/download/v1.2.3" });
+    const baseUrl = buildRelease({ dir, arch, privatePem, version: "v1.0.0", routeDir: "releases/download/v1.2.3" });
     const launcherLog = join(dir, "launcher.log");
 
     const result = run({
@@ -307,7 +307,7 @@ describe("get-orbit.sh", () => {
     // signed, the way a corrupted or substituted download would look.
     writeFileSync(
       join(dir, "releases", "latest", "download", "orbit-release-manifest.json"),
-      JSON.stringify({ version: "9.9.9", files: {} }, null, 2),
+      JSON.stringify({ version: "v9.9.9", files: {} }, null, 2),
     );
     const launcherLog = join(dir, "launcher.log");
 

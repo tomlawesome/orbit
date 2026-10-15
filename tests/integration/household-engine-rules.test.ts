@@ -4,7 +4,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { households, items, sections } from "@/db/schema";
 import { hardDeleteHousehold, requestHouseholdDeletion } from "@/server/household-lifecycle";
-import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedItemColumns } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 
 /* #1332 (from #1328 WI-2), decided by the owner on 2026-10-09: two household
@@ -129,8 +129,9 @@ describe("removing a section that still has items asks where they go", () => {
   }
 
   async function addItem(fixture: Fixture, sectionId: string, title: string) {
+    const id = randomUUID();
     const [row] = await getDb().insert(items).values({
-      householdId: fixture.household.id, sectionId, title, currency: "GBP",
+      id, householdId: fixture.household.id, sectionId, ...await encryptedItemColumns(fixture.household.id, id, { title }), currency: "GBP",
     }).returning({ id: items.id });
     return row.id;
   }

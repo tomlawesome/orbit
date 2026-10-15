@@ -603,8 +603,8 @@ const SCREENS = [
     /*
      * THE ITEM SCREEN IS HOME'S DRAWER (#1319, owner-decisions §34). The
      * belt that stood here (#458, §15; ported against
-     * design/v19/item-belt.html) retired in stage 3b: `/item/<id>` answers
-     * with a 308 to `/home?item=<id>`, and the item is read, edited and
+     * design/v19/item-belt.html) retired in stage 3b and `/item/<id>` with
+     * it: the drawer opens from `/home?item=<id>`, and the item is read, edited and
      * managed in its drawer on home, the preview card beside it. So this
      * screen is that arrival: the MOT's row open in place, the drawer's
      * rows, notes, documents and foot row (design/v19/belt-purpose/round-3/

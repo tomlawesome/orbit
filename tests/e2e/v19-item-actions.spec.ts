@@ -19,8 +19,8 @@ resetDatabaseBetweenSpecFiles();
  * #1319 (owner-decisions §34): the belt that was "the v19 view" retired;
  * these act through the item's home drawer, which `/home?item=<id>` opens.
  * What only the belt had went with it: `/item` with no id seating the
- * nearest-due item and the belt's empty-household card (`/item` now lands
- * on home: v19-home-drawer.spec.ts, "the belt's old address"), and the
+ * nearest-due item and the belt's empty-household card (`/item` and
+ * `/item/<id>` no longer exist), and the
  * desk card's widening and centring on the belt's apex while editing (the
  * drawer edits in its own rows: v19-home-drawer.spec.ts, "the pencil edits
  * the drawer's own rows; Escape takes the chooser, then the edit").

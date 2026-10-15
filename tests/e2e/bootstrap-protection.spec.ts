@@ -128,10 +128,9 @@ function stackCompose(...args: string[]): string {
  * only the cookies derived from it cross into a test.
  */
 function proofKey(): Uint8Array {
-  const directory = process.env.ORBIT_SECRETS_DIR ?? ".orbit-secrets";
   // The application's own reader strips exactly one trailing newline
   // (src/lib/runtime-secret.ts), so this has to as well.
-  const secret = readFileSync(`${directory}/session-secret`, "utf8").replace(/\r?\n$/u, "");
+  const secret = readFileSync(".orbit-secrets/session-secret", "utf8").replace(/\r?\n$/u, "");
   return createHash("sha256").update(`oidc-transaction:${secret}`, "utf8").digest();
 }
 

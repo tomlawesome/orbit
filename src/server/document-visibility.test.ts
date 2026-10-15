@@ -77,7 +77,6 @@ describe("document visibility boundary", () => {
     const pendingDeletion = { lifecycle: "pending_deletion", scanStatus: "clean" };
 
     expect(isDocumentContentReady(ready, "required", "download")).toBe(true);
-    expect(isDocumentContentReady(ready, "required", "draft")).toBe(true);
     expect(isDocumentContentReady(pendingDeletion, "required", "restore")).toBe(true);
     expect(isDocumentContentReady(pendingDeletion, "required", "download")).toBe(false);
     expect(isDocumentContentReady(ready, "required", "restore")).toBe(false);

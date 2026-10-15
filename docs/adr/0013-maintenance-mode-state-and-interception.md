@@ -387,6 +387,11 @@ carried was dropped on 2026-08-24; see Amendments.
 
 ## Amendments
 
+**2026-10-14 — `session/refresh` no longer exists (#1403 D2).** Decision 3
+names `session/refresh` as a route that is deliberately not exempt from
+maintenance. That route was deleted, so there is nothing left to exempt or
+not exempt; `sessions/revoke` is unaffected.
+
 **2026-10-13 — correction to the amendment below: three screens are static
 files (#1316, #1405).** `/login`, `/logout` and `/auth/error` are prerendered
 to plain HTML (`prerender = true` in each route's `+page.js`) and the server

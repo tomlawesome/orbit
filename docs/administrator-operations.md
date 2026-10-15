@@ -184,10 +184,6 @@ missing, has moved on, was already acted on, is being processed, or the update
 touches no row for any other reason, you get the bounded conflict result and
 no misleading success is written to the audit trail.
 
-- A failed or cancelled notification can be retried. Its attempt count, lock,
-  sent time and failure state are cleared and it is scheduled straight away.
-- A pending, retrying or failed notification can be discarded; it becomes
-  cancelled.
 - A failed scanner recovery job can be retried from attempt zero. Its recovery
   expiry does not change. A failed final stage purge can be retried as a
   deletion only; it never goes back into scanning.
@@ -307,53 +303,23 @@ host access to the running deployment already means full control of it.
 
 ## When the encryption key and the recovery bundle are both lost
 
-This is the last resort, and it recovers nothing. Read the whole section
-before running it.
+Nothing in Orbit can recover an instance whose encryption key and recovery
+bundle are both gone. Orbit encrypts every document and every personal detail,
+including every account's email address, under that key; without it they are
+unreadable, permanently, and nobody can sign in.
 
-Orbit encrypts documents and personal details, including everyone's email
-address, under one key. If that key and the recovery bundle are both gone,
-those things are gone with them, permanently. Nothing here brings them back.
+There are two ways forward:
 
-What it does fix is the second problem that follows. Orbit finds an account by
-its email address, and it can no longer read any address, so **nobody can
-sign in at all**. Without this command the instance is a locked box with
-everyone's accounts intact inside it.
+- restore the most recent recovery bundle you have, with the backup it goes
+  with — see [Restoring the document key-encryption key](#restoring-the-document-key-encryption-key),
+  [Exporting a recovery bundle](#exporting-a-recovery-bundle) and
+  [Back up and restore](operating.md#back-up-and-restore);
+- or reinstall and start again.
 
-```sh
-docker compose --env-file .env-orbit exec orbit-app node /opt/orbit/cli/orbit.js auth clear-addresses
-```
-
-It asks you to type `CLEAR ADDRESSES` before doing anything, and then:
-
-- removes every account address it cannot read — **the accounts themselves
-  survive**, with their households, memberships and history intact;
-- removes every mail-forwarding address it cannot read; members add and prove
-  those again afterwards;
-- leaves alone any address it *can* still read.
-
-Then get back in and put the addresses back:
-
-```sh
-docker compose --env-file .env-orbit exec orbit-app node /opt/orbit/cli/orbit.js auth recovery-link
-```
-
-Open that link to set the primary administrator's password and sign in, then
-re-enter members' addresses by hand from the users screen. Each member sets
-their own password through a setup link as usual.
-
-**It refuses to run while the key still works.** This is deliberate, and it is
-the guard that matters most. If members cannot sign in and the key is fine,
-the fault is something else entirely, and running this would destroy addresses
-that were never in danger, so the command checks first and stops. If you have
-the recovery bundle, restore that instead: it brings the key back and nothing
-is lost.
-
-It can only be run from the host shell. No page, no button and no API request
-can reach it, deliberately: reachable over the network it would be a single
-request that wipes every account's identity. It needs a real terminal, so a
-script or scheduled job cannot run it either. Each run is recorded in the
-audit log as `account_addresses_cleared`, with counts only. The addresses
-could not be read, so there is nothing else to record.
+There is deliberately no command that clears what cannot be read. The result
+would be an instance that looks alive and holds nothing, and sign-in would
+still be refused while the key is away. `orbit auth recovery-link` needs a
+working key too.
 
 ## Provider tests
 
@@ -492,7 +458,6 @@ key-encryption key" is the master key that protects each document's own key.
 | `SMTP_HOST` / `SMTP_PORT` | Orbit | SMTP server host and port. | `smtp.example.com` / `587` |
 | `SMTP_SECURITY` | Orbit | `starttls` (port 587) or `implicit_tls` (port 465); plaintext SMTP is unsupported. | `starttls` |
 | `SMTP_USER` / `SMTP_PASSWORD_FILE` | Orbit | SMTP login and a file containing its password. | `orbit@example.com` / `/run/orbit-secrets/orbit-smtp-password` |
-| `SMTP_URL` / `SMTP_URL_FILE` | Orbit | Deprecated compatibility form, given directly or as a file; do not set it with the individual SMTP settings. | `smtps://orbit%40example.com:password@smtp.example.com:465` |
 | `SMTP_FROM` | Orbit | Display name and sender address for reminder email. | `Orbit <orbit@example.com>` |
 | `OPERATOR_ALERT_ADDRESS` | Orbit | Where Orbit writes when it cannot run safely: today, when its encryption key is missing or wrong. Not a secret. Needs the SMTP settings; unset, Orbit only logs. Set it at install time. | `you@example.com` |
 | `VAPID_SUBJECT` | Orbit | Contact address sent with browser push notifications. VAPID is the standard for browser and PWA push; it is not Pushover. | `mailto:admin@example.com` |
@@ -505,7 +470,6 @@ key-encryption key" is the master key that protects each document's own key.
 | `MIGRATE_ON_START` | Orbit | Applies pending database migrations at startup. Compose sets this to `true`. | `false` |
 | `WORKER_ENABLED` | Orbit | Runs the notification scheduler inside the application container. Compose sets this to `true`. | `false` |
 | `DRIZZLE_MIGRATIONS_PATH` | Orbit | Directory containing versioned SQL migrations. | `drizzle` |
-| `ORBIT_SECRETS_DIR` | Retired | The secrets directory is fixed at `./.orbit-secrets`. Configure and install refuse any other value; move the files there and remove the setting. | `./.orbit-secrets` |
 
 Inbound mail (the mailbox Orbit polls for incoming statements and documents)
 is not set here any more. An instance administrator sets it on the
@@ -535,8 +499,9 @@ base `docker-compose.yml` without mail secret files.
 administrator sets it on the administration screen, and Orbit stores the
 password encrypted in its own database under the document key. No `IMAP_*`
 environment variable is accepted any more; one left in `.env-orbit` fails the
-configuration check as a removed key. Outbound SMTP is unchanged and is still
-deployment configuration.
+configuration check as a setting Orbit does not know ("`.env-orbit` has
+`IMAP_HOST`, which is not an Orbit setting"): delete the line and rerun the
+update. Outbound SMTP is unchanged and is still deployment configuration.
 
 To configure inbound mail:
 
@@ -670,9 +635,8 @@ create more than once, and bounded on failure. Their generic body contains no
 source content and links only to `/?open=inbox` on the configured HTTP(S)
 application origin. The link still needs sign-in and cannot approve, attach or
 write anything. SMTP is at-least-once: if a provider accepts a message just
-before Orbit loses its completion update, an explicit retry can send the
-generic notification twice. The interface warns before retrying exhausted
-deliveries.
+before Orbit loses its completion update, the next attempt can send the
+generic notification twice.
 
 ### Disable, restart, and credential rotation
 
@@ -794,7 +758,10 @@ instance, and it clears the moment `export-recovery-bundle.sh` completes.
 To use a recovery bundle, run `bash scripts/import-recovery-bundle.sh
 <recovery.tar>` (it asks for the passphrase, then for `IMPORT RECOVERY`, then
 for `RESTORE`) and see "Restoring
-the document key-encryption key" below.
+the document key-encryption key" below. The import needs the deployment's
+current key file in `.orbit-secrets/document-kek` and refuses without it
+("the configured document key is missing"); when that file is gone, see the
+same section.
 
 ## Restoring the document key-encryption key
 
@@ -848,8 +815,8 @@ restart the exact deployed image:
    holding. A key that is not the one that wrote them leaves everything locked
    exactly as it was. A wrong key can never damage a value, because
    decryption refuses rather than guesses.
-2. Restore the key file from wherever you kept it, your recovery bundle or
-   the secrets directory backup, with owner-only permissions:
+2. Restore the key file from your copy of the secrets directory, with
+   owner-only permissions:
    ```sh
    install -m 0400 /path/to/your/copy/document-kek .orbit-secrets/document-kek
    ```
@@ -861,6 +828,17 @@ restart the exact deployed image:
    id you expected, that the locked page has gone, and on the administration
    screen that no "Encrypted details are locked" card remains. Nothing needs
    re-encrypting and no backfill runs, because the values were never changed.
+
+If you have no copy of the key file but do have a recovery bundle, the way
+back is to restore the backup bundle or reinstall. The bundle import needs the
+deployment's current key file and refuses while that file is missing ("the
+configured document key is missing"), so do not run it there. Reinstall
+Orbit into a fresh directory ([Installing Orbit](installing.md)), then import
+the bundle there:
+
+```sh
+bash scripts/import-recovery-bundle.sh <recovery.tar>
+```
 
 If the key is really gone and no recovery bundle holds it, this is not a
 restore. Encrypted documents and Tier 1 and Tier 2 metadata, every account

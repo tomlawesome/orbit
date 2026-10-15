@@ -14,7 +14,7 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  * #1319 (owner-decisions §34): a suggestion is reviewed in its home drawer;
  * the belt that seated it at `/item/<receiptId>` (#1145) retired in stage
  * 3b. What the belt's card was proved to do is proved here of the drawer:
- * its old address lands here, the staged paper opens the preview beside
+ * its address `/home?item=<id>` opens it, the staged paper opens the preview beside
  * it, the proposal is amended in the drawer's own rows and accepted, and
  * dismiss takes two presses.
  *
@@ -136,9 +136,9 @@ test("Dismiss arms on the first click and discards on the second, from the drawe
 });
 
 test("the drawer opens from its own address, like a filed row's", async ({ page }) => {
-  /* The retired belt's address for it lands here first (#1319: the server
-     answers `/item/<id>` with a 308 to `/home?item=<id>`). */
-  await page.goto(`${APP}/item/r-insurance`, { waitUntil: "networkidle" });
+  /* Its address is home's (#1319); the retired belt's `/item/<id>` was
+     removed, so nothing redirects here any more. */
+  await page.goto(`${APP}/home?item=r-insurance`, { waitUntil: "networkidle" });
   await expect(page).toHaveURL(/\/home\?item=r-insurance$/);
   const drawer = page.locator(DRAWER);
   await expect(drawer).toBeVisible();

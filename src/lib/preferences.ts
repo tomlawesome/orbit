@@ -4,16 +4,6 @@ import { sectionAccents, sectionIcons } from "./domain";
 export const textSizes = ["standard", "comfortable", "large", "extra-large"] as const;
 export type TextSize = (typeof textSizes)[number];
 
-/**
- * Legacy due-date colour mode. No longer a user-facing choice as of #325:
- * the v19 semantic status tokens (--ok/--warm/--overdue/--upcoming/
- * --degraded) are flat and fixed per theme pack, so there is nothing left
- * for "classic" vs "themed" to switch between. Retained only as a type so
- * the raw session/DB plumbing (lib/auth/session.ts, lib/preview-workspace.ts)
- * still type-checks against stored rows that predate this change.
- */
-export type UrgencyPalette = "classic" | "themed";
-
 /** THE THEME ROSTER, owned here (#1331): every pack the product offers, each
  *  with its dark/light flag. Token values for each pack live in
  *  web/src/lib/packs.css; the browser keeps a table of the same five in
@@ -31,8 +21,7 @@ const themePackFlags = {
 export const themePacks = ["starchart", "afterdark", "clouds", "dawn", "retrograde"] as const;
 export type ThemePack = (typeof themePacks)[number];
 
-/** True for a dark pack, false for a light one (or an id that is no pack).
- *  The stored `themeMode` column is derived from this, never chosen. */
+/** True for a dark pack, false for a light one (or an id that is no pack). */
 export function themePackIsDark(id: string): boolean {
   return (themePacks as readonly string[]).includes(id) && themePackFlags[id as ThemePack].dark;
 }
@@ -142,8 +131,7 @@ export interface ReminderOffset {
 /**
  * Both channels, on (#1151 A4-Q5): what an offset gets when nothing --
  * neither an item's own reminder rule nor a stored column -- says otherwise.
- * Shared by `effectiveReminderOffsets`'s fallback pair below,
- * `src/lib/notifications.ts`'s in-app reminder list, and
+ * Shared by `effectiveReminderOffsets`'s fallback pair below and
  * `notification-worker.ts`'s own candidate offsets, which used to each carry
  * their own copy of this same default.
  */
@@ -173,10 +161,9 @@ export function warningDaysOrDefault(stored: number | null, fallback: number, fl
 /**
  * The offsets a single recipient's reminders for one item actually fire at
  * (#479). Pure and dependency-free by design (#487): it is the one truth
- * both the dispatch worker (src/server/notification-worker.ts, which
- * re-exports this exact function) and the in-app notification list
- * (src/lib/notifications.ts) compute reminder timing from, so it lives
- * somewhere a browser bundle can import safely.
+ * the dispatch worker (src/server/notification-worker.ts, which re-exports
+ * this exact function) computes reminder timing from, and it lives somewhere
+ * a browser bundle can import safely.
  *
  * Precedence, as scoped in #479: an item that carries its own reminder
  * rules keeps them exactly: the reader set those per item, and the settings

@@ -59,8 +59,8 @@ non-v1 maintenance. The pull request links the issue and records:
 - documentation and operator impact;
 - the CI run and, when applicable, preview digest and manual result.
 
-The [engineering baseline](engineering-baseline.md) is a dated audit. GitHub
-issues are the live status; durable requirements remain in version control.
+GitHub issues are the live status; durable requirements remain in version
+control.
 
 ## Coverage policy
 
@@ -92,7 +92,7 @@ had no caller in CI until #620, so 1,644 errors accumulated across 52 files --
 overwhelmingly implicit `any` and DOM narrowing rather than defects.
 
 Gating on zero would have failed every pull request on day one, so from #620
-until #624 `web/svelte-check-ceiling.json` recorded exactly how many errors
+until #624 a per-file ledger recorded exactly how many errors
 each file was still allowed, on the same ratchet principle as the coverage
 floors above: a file that got worse failed, a file that got better also
 failed (asking for its number to be lowered), and a file with no entry had to
@@ -102,23 +102,21 @@ entries in it.
 
 **#624 closed that out.** `scripts/check-v19-types.mjs` is now a plain
 zero-error check: it runs `svelte-check` across `web/` and fails on any error,
-anywhere, with no per-file exemption. `web/svelte-check-ceiling.json` is kept
-only as the empty historical record of the ledger; nothing reads it anymore.
+anywhere, with no per-file exemption. The ledger file is gone.
 
-`due-next/+page.svelte` and `home/+page.svelte` were the two files still
-carrying tolerated errors, both for the same reason: a `{#snippet}` parameter
-is one of the positions where `svelte-check` accepts an inline `@type` cast
-comment but the production rolldown build does not (#782), so the type
-couldn't be written inline in the route's own `<script>`. Both reached zero by
-turning the snippet into a real child component, whose `$props()`
-destructuring is a plain `<script>` statement and takes the annotation
-without issue: `due-next/EntryRow.svelte`, and `home/CorridorRow.svelte` and
-`home/ItemView.svelte` (home's two snippets closed over a large slice of the
-screen's own reactive state and handlers, so those became typed props and
-callback props instead). Both routes' reactive `view` state and lookup
-objects also moved into small companion modules (`due-next-view.svelte.js`,
-`bands.js`) for the same reason. #782 stays open to carry the upstream
-constraint and the workaround, but no file needs it worked around today.
+`home/+page.svelte` was the last file still carrying tolerated errors: a
+`{#snippet}` parameter is one of the positions where `svelte-check` accepts an
+inline `@type` cast comment but the production rolldown build does not (#782),
+so the type couldn't be written inline in the route's own `<script>`. It
+reached zero by turning the snippets into real child components, whose
+`$props()` destructuring is a plain `<script>` statement and takes the
+annotation without issue: `home/CorridorRow.svelte` and `home/ItemView.svelte`
+(home's two snippets closed over a large slice of the screen's own reactive
+state and handlers, so those became typed props and callback props instead).
+The route's reactive `view` state and lookup objects also moved into a small
+companion module (`bands.js`) for the same reason. #782 stays open to carry the
+upstream constraint and the workaround, but no file needs it worked around
+today.
 
 The same job compiles `web/` (`pnpm --filter orbit-web build`, about twenty
 seconds). Before that, a `.svelte` file that did not compile could merge green

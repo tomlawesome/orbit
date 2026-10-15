@@ -35,7 +35,7 @@ import { workspaceItemSchema } from "@/lib/workspace";
 import type { AdjudicatedField } from "@/server/documents/adjudication";
 import { safeDocumentPlainText, scheduleKinds, type DocumentProposal } from "@/server/documents/suggestions";
 import { envelopeOf } from "@/server/documents/crypto";
-import { flagStagingPurgeFailed, readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/imap-attachment-holding";
+import { flagStagingPurgeFailed, readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
 import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { applyWorkspaceCommand } from "@/server/workspace-repository";
@@ -210,16 +210,14 @@ export function reviewDraftMetadataFromProposal(
 }
 
 /**
- * The four columns cleared wherever a receipt's pending review ends —
+ * The columns cleared wherever a receipt's pending review ends —
  * approved, discarded or expired. The rejected reading is only ever kept
  * for the life of the pending review (ADR-0025 section 4), and it rides
  * inside this same blob, so nothing extra is needed to make it go with
  * everything else the review held.
  */
 export const clearedReviewDraftMetadata = {
-  proposal: {},
   proposalEnc: null,
-  fieldEvidence: {},
   fieldEvidenceEnc: null,
 } as const;
 
@@ -348,11 +346,11 @@ async function reviewedItemMatches(input: ReviewedIntakeApproval, itemId: string
     // A damaged value reads as null here, so it can never compare equal to an
     // expected value and the approval is treated as a conflict, not a match.
     const metadata = await openMetadataReader(existing.householdId);
-    const persistedReference = metadata.text("items.reference", existing.id, { encrypted: existing.referenceEnc, plaintext: existing.reference });
-    const persistedNotes = metadata.text("items.notes", existing.id, { encrypted: existing.notesEnc, plaintext: existing.notes });
-    const persistedTitle = metadata.text("items.title", existing.id, { encrypted: existing.titleEnc, plaintext: existing.title });
-    const persistedProvider = metadata.text("items.provider", existing.id, { encrypted: existing.providerEnc, plaintext: existing.provider });
-    const persistedCost = metadata.number("items.cost_minor", existing.id, { encrypted: existing.costMinorEnc, plaintext: existing.costMinor });
+    const persistedReference = metadata.text("items.reference", existing.id, { encrypted: existing.referenceEnc });
+    const persistedNotes = metadata.text("items.notes", existing.id, { encrypted: existing.notesEnc });
+    const persistedTitle = metadata.text("items.title", existing.id, { encrypted: existing.titleEnc });
+    const persistedProvider = metadata.text("items.provider", existing.id, { encrypted: existing.providerEnc });
+    const persistedCost = metadata.number("items.cost_minor", existing.id, { encrypted: existing.costMinorEnc });
     const persisted = {
       id: existing.id,
       sectionId: existing.sectionId,
@@ -1035,10 +1033,4 @@ export async function approveReviewedIntake(userId: string, rawInput: unknown): 
   const requestHash = canonicalReviewedIntakeHash(input);
   if (input.source.kind === "mailbox_draft") return finishMailboxApproval(userId, input as MailboxApproval, requestHash);
   return finishDirectApproval(userId, input as DirectApproval, requestHash);
-}
-
-export async function listStagedAttachmentIds(receiptId: string): Promise<string[]> {
-  const rows = await getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments)
-    .where(and(eq(imapIngestionAttachments.messageId, receiptId), inArray(imapIngestionAttachments.status, ["stored", "assigned"])));
-  return rows.map((row) => row.id);
 }

@@ -50,26 +50,22 @@ administrator operations. For each denied request it asserts the bounded
 error contract, a `no-store` response, an unchanged target and, where the
 request would have changed something, an unchanged audit trail.
 
-## Hand-writing a migration
+## Writing a migration: generate, then read the SQL
 
-`pnpm db:generate` is refused (`scripts/db-generate-refused.mjs`, #535).
-drizzle-kit works out a new migration by comparing the schema with its last
-saved snapshot of it, and `drizzle/meta/` only has snapshots through 0004. So
-`drizzle-kit generate` would compare against that old snapshot and quietly
-write a migration that recreates almost the whole schema. Write migrations by
-hand instead:
+The migration history is one baseline, `drizzle/0000_baseline.sql`, with its
+snapshot `drizzle/meta/0000_snapshot.json` (#1403). `pnpm db:generate` works
+again: drizzle-kit compares `src/db/schema.ts` with the newest snapshot and
+writes the difference.
 
-1. Create `drizzle/NNNN_name.sql`, where `NNNN` is the next number after the
-   last journal entry, in the style of `drizzle/0027_instance_authority.sql`:
-   plain DDL, with `--> statement-breakpoint` between statements. Write a
-   `DO $$ ... END $$` block only when existing rows must be changed, and make
-   that change deliberate and auditable. (0027 seats a primary administrator;
-   when the data is ambiguous it stops rather than guesses.)
-2. Add the matching entry to `drizzle/meta/_journal.json` by hand: `idx` one
-   past the last entry, `version` copied from the file's own top-level
-   `version`, `tag` equal to the migration's filename without `.sql`, `when` a
-   later millisecond timestamp than the previous entry's, and
-   `breakpoints: true`.
+1. Change `src/db/schema.ts`, then run `pnpm db:generate`. It writes
+   `drizzle/NNNN_name.sql`, a new snapshot and a journal entry. Run it once
+   more: on an unchanged schema it must write nothing.
+2. **Read the generated SQL before anything else.** drizzle-kit guesses at
+   renames (it may offer a drop and an add where you meant a rename) and
+   writes only what the schema file says. A `DEFAULT`, `CHECK` or index that
+   the schema does not declare is invisible to it. Edit the file by hand where
+   it is wrong, and add a `DO $$ ... END $$` block only when existing rows must
+   be changed, deliberately and auditably.
 3. Update `tests/integration/support/migration-fixture.ts` for whatever the
    migration changes:
    - New or changed columns go in `EXPECTED_TABLE_COLUMNS` (kept sorted; the
@@ -80,17 +76,25 @@ hand instead:
    - Everything here is compared word for word with `readSchemaContract` in
      `tests/integration/migrations.test.ts`, so a mismatch in either
      direction fails that test rather than passing quietly.
-4. Update `tests/integration/migrations.test.ts` if the migration does more
-   than change the schema. A migration that always seeds or transforms data
-   (as 0028 and 0033 do for their single-row tables) needs an assertion on
-   that seeded state in the "migrates every current migration into a fresh
-   PostgreSQL 18 database" test. A migration that can fail on existing data
-   (as 0022 does) needs its own scenario, following the
-   `document_openable_scan_status_valid` test below it.
+4. A migration that can fail on existing data needs a test that applies the
+   migrations before it, adds the offending row, then applies it and checks the
+   failure message and that nothing was recorded (`runMigrationsWithActionableError`
+   and `createInvalidMigrationDirectory` in `migration-fixture.ts` are the
+   helpers to start from).
 
-`tests/integration/fixtures/migration-baseline.json` freezes the supported
-upgrade starting point (`migrationPrefix`, currently through 0017). An
-ordinary new migration does not touch it.
+The journal-integrity and drift checks hash the `.sql` files themselves, so
+there is nothing to regenerate by hand: never edit a migration that has been
+applied; add a new one.
+
+### After the 0.3 squash: recreate your database
+
+The history `0000`-`0057` was replaced by `0000_baseline` (#1403). A database
+built from the old history records the old migrations, so the integrity check
+refuses it ("applied migration 1 of <N> does not match 0000_baseline; this database was
+migrated by a different build"). Every dev and CI
+database built before the squash must be recreated (drop it and run
+`pnpm db:migrate`, or remove the compose volume). Nobody runs Orbit yet, so
+there is no upgrade path and none is needed.
 
 ## CI relationship
 
@@ -284,12 +288,10 @@ bash scripts/install-test-browser.sh
 bash scripts/test-frontend.sh
 ```
 
-The current measured suite and its known gaps are recorded in the
-[engineering baseline](engineering-baseline.md). Playwright verifies
-signed-out privacy in desktop and mobile Chromium and uses the disposable OIDC
-profile for authenticated household-lifecycle acceptance. Coverage is
-diagnostic while the database/API integration baseline is established; it is
-not an arbitrary release percentage.
+Playwright verifies signed-out privacy in desktop and mobile Chromium and
+uses the disposable OIDC profile for authenticated household-lifecycle
+acceptance. Coverage is diagnostic while the database/API integration baseline
+is established; it is not an arbitrary release percentage.
 
 Every corpus committed to the repository is invented — real paperwork must
 never be committed. If you want to know how extraction does against your own
@@ -351,14 +353,6 @@ Stale containers are a defect, not housekeeping. Run
 Plain `--remove` clears stale stacks and skips running ones (another session
 may own them); a running stack you started yourself goes with
 `--project NAME --remove` (#1241).
-
-### `pnpm db:generate` refuses to run, on purpose
-
-`drizzle/meta/` holds snapshots only up to 0004, so `drizzle-kit generate`
-would diff against a stale snapshot and silently emit a migration that
-recreates almost the whole schema. `scripts/db-generate-refused.mjs` is the
-guard; the hand-written procedure is under "Hand-writing a migration" above.
-See #535.
 
 ### Compose commands attach to whatever project `.env-orbit` names
 

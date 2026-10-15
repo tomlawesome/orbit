@@ -6,8 +6,7 @@
 # stays on the path so a shell-out to git aborts the run.
 #
 # Extracted verbatim from the "Run installer against the pre-provisioned
-# disposable registry" step of the &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801). It deliberately does not
+# disposable registry" step of the retired GitHub container workflow, which the GitLab `acceptance` job now runs (#801). It deliberately does not
 # change directory: the caller runs it from the installer target, which is
 # where the installer must do its work.
 #

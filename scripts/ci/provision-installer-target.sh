@@ -8,8 +8,7 @@
 # a symlinked environment file must fail loudly rather than quietly work.
 #
 # Extracted verbatim from the "Pre-provision unattended installer target"
-# step of the &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# step of the retired GitHub container workflow, which the GitLab `acceptance` job now runs (#801).
 #
 # Inputs (environment):
 #   INSTALL_TARGET    the empty directory prepared earlier

@@ -153,39 +153,6 @@ export async function waitForInvitationLink(
   );
 }
 
-/**
- * Waits for the sender-verification mail Orbit sends to a claimed sending
- * address (ADR-0017 slice 4, #745), and returns the `token=` value from its
- * one-use link.
- *
- * The other direction from `waitForInvitationLink`: there Orbit is proving a
- * mailbox to the person who owns it; here `v19-mail-collection.spec.ts` is
- * proving, to Orbit, that it controls a mailbox it wants to send FROM. Reading
- * this back through GreenMail rather than trusting a token minted in-process
- * is what makes the check exercise the real one-use-link flow end to end.
- */
-export async function waitForSenderVerificationToken(address: string, timeoutMs = 60_000): Promise<string> {
-  const deadline = Date.now() + timeoutMs;
-  const tokenPattern = /[?&]token=([^&\s]+)/u;
-  let lastError: unknown;
-
-  while (Date.now() < deadline) {
-    try {
-      const body = await latestMatchingBody(address, "Check your Orbit sending address");
-      if (body) {
-        const match = body.match(tokenPattern);
-        if (match) return decodeURIComponent(match[1]);
-      }
-    } catch (error) {
-      lastError = error;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
-  }
-
-  const detail = lastError instanceof Error ? `; last error: ${lastError.message}` : "";
-  throw new Error(`#745: no sender-verification mail to ${address} arrived within ${timeoutMs}ms${detail}`);
-}
-
 /** The subject `src/server/sign-in-approvals/mail.ts` sends, pinned by its own test. */
 const APPROVAL_SUBJECT = "Approve your Orbit sign-in";
 
@@ -266,4 +233,86 @@ export async function waitForApprovalLink(
 
   const detail = lastError instanceof Error ? `; last error: ${lastError.message}` : "";
   throw new Error(`#1033: no sign-in approval mail to ${address} arrived within ${timeoutMs}ms${detail}`);
+}
+
+/** The path of the one link the sender-address check email carries (ADR-0017 decision 7c). */
+const SENDER_CHECK_PATH = "/api/settings/mail-relay/verify";
+
+/** Opens `address`'s INBOX read-only, as every reader in this module does. */
+async function withInbox<T>(address: string, read: (client: ImapFlow) => Promise<T>): Promise<T> {
+  const client = new ImapFlow({
+    host: "127.0.0.1",
+    port: IMAPS_PORT,
+    secure: true,
+    tls: { rejectUnauthorized: false },
+    auth: { user: address, pass: "orbit-e2e-mail-helper" },
+    logger: false,
+  });
+  await client.connect();
+  try {
+    await client.mailboxOpen("INBOX", { readOnly: true });
+    return await read(client);
+  } finally {
+    await client.logout().catch(() => client.close());
+  }
+}
+
+/**
+ * What the mailbox already holds of sender-address check mail, before one is
+ * asked for. Handed straight back to `waitForSenderCheckLink` so it answers
+ * with the email THIS request caused: only the newest link works, and a
+ * mailbox kept between runs holds older, dead ones. Zero for a clean mailbox.
+ */
+export async function newestSenderCheckUid(address: string): Promise<number> {
+  return withInbox(address, async (client) => {
+    const uids = await client.search({ body: SENDER_CHECK_PATH }, { uid: true });
+    return !uids || uids.length === 0 ? 0 : Math.max(...uids);
+  });
+}
+
+/**
+ * How many sender-address check emails `address` has received since `afterUid`
+ * (the mark `newestSenderCheckUid` took). One press of the button must be one
+ * email, so a spec asks this rather than assuming the link it found is the
+ * only message.
+ */
+export async function countSenderCheckMails(address: string, afterUid = 0): Promise<number> {
+  return withInbox(address, async (client) => {
+    const found = await client.search({ body: SENDER_CHECK_PATH }, { uid: true });
+    return (found || []).filter((uid) => uid > afterUid).length;
+  });
+}
+
+/**
+ * Waits for the check email sent to the member's registered address (decision
+ * 7c) and returns its one `.../mail-relay/verify?token=...` link. Matched by
+ * the link it carries, not by its subject or wording.
+ */
+export async function waitForSenderCheckLink(address: string, afterUid = 0, timeoutMs = 60_000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  const linkPattern = /https?:\/\/\S+\/api\/settings\/mail-relay\/verify\?token=[A-Za-z0-9_-]+/u;
+  let lastError: unknown;
+
+  while (Date.now() < deadline) {
+    try {
+      const link = await withInbox(address, async (client) => {
+        const found = await client.search({ body: SENDER_CHECK_PATH }, { uid: true });
+        const uids = (found || []).filter((uid) => uid > afterUid);
+        if (uids.length === 0) return null;
+        const newestUid = Math.max(...uids);
+        const message = await client.fetchOne(newestUid, { uid: true, bodyStructure: true }, { uid: true });
+        if (!message) return null;
+        const { content } = await client.download(newestUid, findTextPlainPart(message.bodyStructure), { uid: true });
+        if (!content) return null;
+        return (await streamToString(content)).match(linkPattern)?.[0] ?? null;
+      });
+      if (link) return link;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+
+  const detail = lastError instanceof Error ? `; last error: ${lastError.message}` : "";
+  throw new Error(`#1403: no sender-address check mail to ${address} arrived within ${timeoutMs}ms${detail}`);
 }

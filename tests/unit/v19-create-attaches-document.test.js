@@ -10,7 +10,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * file to the item it has just created, through the item's own documents
  * route.
  *
- * `attachItemDocument` is driven here with a stubbed fetch, the way
+ * #1316 (owner, 2026-10-13): creating an item with a document is
+ * all-or-nothing. The save no longer uploads onto an item it has just
+ * created; it STAGES the file first (`stageDocument`, POST
+ * /api/households/:id/documents, a document with no item) and then sends one
+ * item.upsert carrying `documentIds`. `attachItemDocument` stays for the home
+ * drawer, which attaches to an item that already exists.
+ *
+ * `stageDocument` and `attachItemDocument` are driven here with a stubbed fetch, the way
  * workspace-session-guard.test.js drives workspace.js (re-imported fresh per
  * test: the session is cached at module level). The form itself has no
  * import surface a plain test can drive without a browser, so — as
@@ -90,13 +97,69 @@ describe("#1245: attachItemDocument uploads the picked file onto the saved item"
   });
 });
 
-describe("#1245: the desk form's save attaches the picked document", () => {
+describe("#1316: stageDocument stores the picked file before any item exists", () => {
+  it("posts the file's bytes to the household's documents route, named and with its own id", async () => {
+    stubFetch([201]);
+    const { stageDocument } = await import("../../web/src/lib/data/workspace.js");
+    const picked = file();
+    const document = await stageDocument("h 1", picked, "doc-1", "draft-1");
+
+    expect(document).toEqual({ id: "d1", displayName: "policy.pdf" });
+    expect(posts).toHaveLength(1);
+    expect(posts[0].url).toBe("/api/households/h%201/documents");
+    expect(posts[0].init.body).toBe(picked);
+    expect(posts[0].init.headers).toMatchObject({
+      "content-type": "application/pdf",
+      "x-csrf-token": "t0",
+      "x-orbit-filename": "my%20policy.pdf",
+      "x-orbit-document-id": "doc-1",
+      // The ciphertext is sealed under the draft item's id, so the stage says which.
+      "x-orbit-item-id": "draft-1",
+    });
+  });
+
+  it("treats a 202 (held for a scan retry) as staged", async () => {
+    stubFetch([202]);
+    const { stageDocument } = await import("../../web/src/lib/data/workspace.js");
+    await expect(stageDocument("h1", file(), "doc-1", "draft-1")).resolves.toMatchObject({ id: "d1" });
+  });
+
+  it("retries a stale CSRF token once, under the same document id", async () => {
+    stubFetch([403, 201]);
+    const { stageDocument } = await import("../../web/src/lib/data/workspace.js");
+    await stageDocument("h1", file(), "doc-1", "draft-1");
+    expect(posts.map((one) => /** @type {Record<string, string>} */ (one.init.headers)["x-orbit-document-id"]))
+      .toEqual(["doc-1", "doc-1"]);
+    expect(posts.map((one) => /** @type {Record<string, string>} */ (one.init.headers)["x-orbit-item-id"]))
+      .toEqual(["draft-1", "draft-1"]);
+  });
+
+  it("throws a refusal with the server's words and its status, so the form can tell a refused file from a failed send", async () => {
+    stubFetch([422]);
+    const { stageDocument } = await import("../../web/src/lib/data/workspace.js");
+    await expect(stageDocument("h1", file(), "doc-1", "draft-1")).rejects.toMatchObject({
+      name: "WorkspaceError", status: 422, message: "refused",
+    });
+  });
+
+  it("throws a server error with its status, which is not a verdict on the file", async () => {
+    stubFetch([500]);
+    const { stageDocument } = await import("../../web/src/lib/data/workspace.js");
+    await expect(stageDocument("h1", file(), "doc-1", "draft-1")).rejects.toMatchObject({ name: "WorkspaceError", status: 500 });
+  });
+});
+
+describe("#1316: the desk form's save stages the picked document, then sends one command", () => {
   const behaviour = readFileSync(resolve(import.meta.dirname, "../../web/src/routes/create/create.behaviour.js"), "utf8");
   const submitHandler = behaviour.slice(behaviour.indexOf('on(card, "submit"'));
 
-  it("uploads the attachment onto the draft's item, and no longer says documents are unwired", () => {
+  it("stages the held attachment under its own id, before the command, and no longer attaches onto the saved item", () => {
     expect(behaviour).not.toMatch(/not wired up yet/u);
-    expect(submitHandler).toMatch(/attachItemDocument\(active\.id, draftId, held\.attachment, held\.attachmentId\)/u);
+    expect(behaviour).not.toMatch(/attachItemDocument/u);
+    expect(submitHandler).toMatch(/const file = held\.attachment;/u);
+    expect(submitHandler).toMatch(/stageDocument\(active\.id, file, held\.attachmentId, draftId\)/u);
+    expect(submitHandler.indexOf("stageDocument(")).toBeLessThan(submitHandler.indexOf("applyCommand("));
+    expect(submitHandler).toMatch(/documentIds/u);
   });
 
   it("mints the document id per file picked, not per save attempt", () => {

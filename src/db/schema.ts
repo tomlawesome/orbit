@@ -14,7 +14,6 @@ export const itemStatus = pgEnum("item_status", ["active", "expired", "cancelled
 export const eventKind = pgEnum("event_kind", ["renewal", "service", "expiry"]);
 export const deliveryChannel = pgEnum("delivery_channel", ["email", "web_push"]);
 export const deliveryStatus = pgEnum("delivery_status", ["pending", "processing", "sent", "retry", "failed", "cancelled"]);
-export const themeMode = pgEnum("theme_mode", ["system", "light", "dark"]);
 export const documentLifecycle = pgEnum("document_lifecycle", [
   "receiving",
   "validating",
@@ -36,7 +35,6 @@ export const documentJobStatus = pgEnum("document_job_status", [
   "failed",
   "cancelled",
 ]);
-export const documentDraftStatus = pgEnum("document_draft_status", ["pending_review", "approved", "discarded"]);
 /** Which Tier 1 metadata key a row holds (ADR-0024 decision 1). */
 export const metadataKeyScope = pgEnum("metadata_key_scope", ["household", "instance"]);
 export const imapIngestionStatus = pgEnum("imap_ingestion_status", [
@@ -79,13 +77,11 @@ export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   /**
    * Tier 2 metadata (ADR-0024, #969). `email_enc` holds the `mdv1.` envelope
-   * and `email_index` the blind index; the plaintext column stands only until
-   * the backfill reaches the row, and an encrypted row clears it.
+   * and `email_index` the blind index.
    *
    * Under the INSTANCE key, not a household one: a user belongs to several
    * households, so no household owns their address.
    */
-  email: text("email"),
   emailEnc: text("email_enc"),
   emailIndex: text("email_index"),
   emailVerified: boolean("email_verified").notNull().default(false),
@@ -95,26 +91,17 @@ export const users = pgTable("users", {
   disabledAt: timestamp("disabled_at", { withTimezone: true }),
   ...auditColumns,
 }, (table) => [
-  index("user_email_lookup_idx").on(table.email),
-  // Case-insensitive: sign-in and provisioning treat email as the same
-  // identity regardless of case (ADR-0023 §2). There are no existing rows,
-  // so this ships as a plain index rather than a migration risk.
-  uniqueIndex("user_email_unique_ci").on(sql`lower(${table.email})`),
-  // The blind index carries "one account per address" across the encryption
-  // (#969). Without it, clearing the plaintext would quietly retire that rule:
-  // PostgreSQL treats every NULL as distinct, so the case-insensitive index
-  // above stops constraining a row the moment its plaintext goes. Both stand
-  // through the expand release — that one still holds the rows the backfill
-  // has not reached.
+  // The blind index carries "one account per address" (#969). The address is
+  // normalised (trimmed, lower-cased) before it is indexed, so sign-in and
+  // provisioning treat email as the same identity regardless of case
+  // (ADR-0023 §2).
   uniqueIndex("user_email_unique_index").on(table.emailIndex),
 ]);
 
 export const userPreferences = pgTable("user_preferences", {
   userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
-  themeMode: themeMode("theme_mode").notNull().default("system"),
-  themeId: text("theme_id").notNull().default("after-dark"),
+  themeId: text("theme_id").notNull().default("afterdark"),
   textSize: text("text_size").notNull().default("comfortable"),
-  urgencyPalette: text("urgency_palette").notNull().default("themed"),
   emailNotifications: boolean("email_notifications").notNull().default(true),
   pushNotifications: boolean("push_notifications").notNull().default(true),
   // The reader's own reminder timing (#468, settings §13): how far ahead the
@@ -524,20 +511,10 @@ export const items = pgTable("items", {
   id: uuid("id").primaryKey().defaultRandom(),
   householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
   sectionId: uuid("section_id").notNull().references(() => sections.id, { onDelete: "restrict" }),
-  /**
-   * Tier 2 metadata (ADR-0024, #963). Nullable since 0041: an encrypted row
-   * clears the plaintext, exactly as Tier 1 does, and `title_enc` carries the
-   * value. The column survives only until the contract release drops it.
-   */
-  title: text("title"),
   subtype: text("subtype"),
-  provider: text("provider"),
-  reference: text("reference"),
   /**
    * Tier 1 metadata (ADR-0024). `reference_enc` holds the `mdv1.` envelope and
-   * `reference_index` the blind index; the plaintext `reference` column above
-   * survives only until the contract release drops it, and is read solely for
-   * rows the backfill has not reached yet.
+   * `reference_index` the blind index.
    */
   referenceEnc: text("reference_enc"),
   referenceIndex: text("reference_index"),
@@ -548,12 +525,11 @@ export const items = pgTable("items", {
    */
   titleEnc: text("title_enc"),
   providerEnc: text("provider_enc"),
-  costMinor: integer("cost_minor"),
   /**
    * Tier 2 metadata (ADR-0024, #963): the cost, held as the decimal minor-unit
    * integer rendered into the same `mdv1.` envelope every other value uses.
    * Totals are summed application-side over decrypted values; nothing sums
-   * this column in SQL, and after 0041 nothing can.
+   * this column in SQL.
    */
   costMinorEnc: text("cost_minor_enc"),
   currency: text("currency").notNull(),
@@ -563,7 +539,6 @@ export const items = pgTable("items", {
   serviceDate: date("service_date"),
   recurrenceMonths: integer("recurrence_months"),
   snoozedUntil: date("snoozed_until"),
-  notes: text("notes"),
   /** Tier 1 metadata (ADR-0024); see `referenceEnc`. */
   notesEnc: text("notes_enc"),
   externalDocumentUrl: text("external_document_url"),
@@ -584,6 +559,12 @@ export const documents = pgTable("documents", {
   id: uuid("id").primaryKey().defaultRandom(),
   householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
   itemId: uuid("item_id").references(() => items.id, { onDelete: "set null" }),
+  /**
+   * The item id the ciphertext was sealed under. A staged upload has no item
+   * yet, so this is what binding checks; null on rows from before it existed,
+   * which read under `item_id` (`documentSealedItemId`).
+   */
+  sealedItemId: uuid("sealed_item_id"),
   uploadedByUserId: uuid("uploaded_by_user_id").references(() => users.id, { onDelete: "set null" }),
   displayName: text("display_name").notNull(),
   mediaType: text("media_type").notNull(),
@@ -792,21 +773,6 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-/** Parser evidence and proposed item fields; never applied without approval. */
-export const documentDrafts = pgTable("document_drafts", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  documentId: uuid("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }),
-  householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
-  requestedByUserId: uuid("requested_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  status: documentDraftStatus("status").notNull().default("pending_review"),
-  extractedTextSha256: text("extracted_text_sha256").notNull(),
-  evidence: jsonb("evidence").notNull(),
-  proposal: jsonb("proposal").notNull(),
-  approvedItemId: uuid("approved_item_id").references(() => items.id, { onDelete: "set null" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [uniqueIndex("document_draft_document_unique").on(table.documentId), index("document_draft_household_status_idx").on(table.householdId, table.status)]);
-
 export const notificationStates = pgTable("notification_states", {
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
@@ -908,13 +874,10 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   /** Legacy prototype link. New receipt and approval code must never use it. */
   reviewItemId: uuid("review_item_id").references(() => items.id, { onDelete: "set null" }),
   draftVersion: integer("draft_version").notNull().default(1),
-  proposal: jsonb("proposal").notNull().default({}),
-  fieldEvidence: jsonb("field_evidence").notNull().default({}),
   /**
-   * Tier 1 metadata (ADR-0024): the serialised JSON of the two columns above,
-   * encrypted under the receipt's household DEK, or under the instance DEK
-   * while the receipt is still unattributed. The plaintext columns are reset
-   * to `{}` — they are NOT NULL — as each row is encrypted.
+   * Tier 1 metadata (ADR-0024): the serialised JSON of the proposal and its
+   * field evidence, encrypted under the receipt's household DEK, or under the
+   * instance DEK while the receipt is still unattributed.
    */
   proposalEnc: text("proposal_enc"),
   fieldEvidenceEnc: text("field_evidence_enc"),
@@ -1053,9 +1016,8 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
    * Tier 2 metadata (ADR-0024, #969), under the INSTANCE key: attribution
    * matches a sender before any household is known. `address_enc` holds the
    * envelope, `address_index` the blind index that exact-match attribution
-   * looks up, and the plaintext stands only until the backfill reaches it.
+   * looks up.
    */
-  address: text("address"),
   addressEnc: text("address_enc"),
   addressIndex: text("address_index"),
   source: mailInSenderSource("source").notNull().default("manual"),
@@ -1063,11 +1025,16 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   /** The one-use link's token, digested. The token itself is never stored. */
   verificationTokenDigest: text("verification_token_digest"),
   verificationExpiresAt: timestamp("verification_expires_at", { withTimezone: true }),
+  /**
+   * When the check email was last handed to the mailer, newest last, at most
+   * five entries (#1403 D2): the member's rate limit, one a minute and five in
+   * a rolling day, kept here so a restart does not forget it (the reasoning of
+   * `local_credentials.locked_until`, ADR-0023 section 4).
+   */
+  checkSentAt: timestamp("check_sent_at", { withTimezone: true }).array().notNull().default(sql`'{}'::timestamptz[]`),
   ...auditColumns,
 }, (table) => [
-  uniqueIndex("mail_in_sender_address_unique").on(table.address),
-  // Carries "one account per sender address" across the encryption, for the
-  // same reason as `user_email_unique_index` above (#969).
+  // Carries "one account per sender address" (#969).
   uniqueIndex("mail_in_sender_address_unique_index").on(table.addressIndex),
   index("mail_in_sender_address_user_idx").on(table.userId, table.verifiedAt),
   check("mail_in_sender_address_verification_pair", sql`(${table.verificationTokenDigest} IS NULL) = (${table.verificationExpiresAt} IS NULL)`),
@@ -1255,11 +1222,9 @@ export const householdInvitations = pgTable("household_invitations", {
   householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
   /* Normalised at the seam (trimmed, lower-cased): the address the signed-in
      identity must match, so the comparison is made on stored bytes. */
-  /* Tier 2 metadata (ADR-0024, #963): nullable since 0041, because an
-     encrypted row clears it. `email_enc` carries the address and `email_index`
-     the per-household blind index that keeps "one open invitation per address"
-     a database rule rather than an application hope. */
-  email: text("email"),
+  /* Tier 2 metadata (ADR-0024, #963): `email_enc` carries the address and
+     `email_index` the per-household blind index that keeps "one open
+     invitation per address" a database rule rather than an application hope. */
   emailEnc: text("email_enc"),
   emailIndex: text("email_index"),
   role: membershipRole("role").notNull().default("member"),
@@ -1276,11 +1241,8 @@ export const householdInvitations = pgTable("household_invitations", {
   revokedByUserId: uuid("revoked_by_user_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
-  uniqueIndex("household_invitation_open_once").on(table.householdId, table.email)
-    .where(sql`${table.redeemedAt} IS NULL AND ${table.revokedAt} IS NULL`),
-  /* The encrypted successor to the index above (ADR-0024 decision 2). Both
-     stand through the expand release: the plaintext one still constrains rows
-     the backfill has not reached, and this one constrains every row it has. */
+  /* At most one open invitation per household and address (ADR-0024
+     decision 2). */
   uniqueIndex("household_invitation_open_once_index").on(table.householdId, table.emailIndex)
     .where(sql`${table.redeemedAt} IS NULL AND ${table.revokedAt} IS NULL`),
   /* Not partial: a spent token must still find its row, or a second visit to

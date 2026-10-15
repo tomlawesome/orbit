@@ -27,6 +27,7 @@ import { callRouteForSession, loadRoute } from "./support/request-event";
 
 const { POST: createArchive } = await loadRoute("households/[householdId]/portable-archives");
 const { POST: importArchive } = await loadRoute("portable-archives/import");
+const { POST: previewArchive } = await loadRoute("portable-archives/preview");
 
 const ORIGIN = "http://127.0.0.1:3000";
 const PASSPHRASE = "integration-passphrase";
@@ -73,6 +74,26 @@ function importAs(session: IntegrationSession, fixture: IntegrationFixture, cook
     method: "POST",
     headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
     body: JSON.stringify({ householdId: fixture.household.id, archive, passphrase: PASSPHRASE, conflictItemIds: [] }),
+  });
+}
+
+function previewAs(session: IntegrationSession, fixture: IntegrationFixture, cookie?: string): Promise<Response> {
+  const payload = {
+    format: "orbit-portable-archive",
+    version: 1,
+    household: { name: fixture.household.name },
+    sections: [{ id: fixture.section.id, slug: "imported", name: "Imported", icon: "home", accent: "sage", position: 1, visible: true }],
+    items: [{ id: randomUUID(), sectionId: fixture.section.id, title: `Imported ${randomUUID()}`, currency: "GBP", status: "active" as const }],
+    dueEvents: [],
+    reminderRules: [],
+    documents: [],
+  };
+  const archive = encryptPortableArchive(Buffer.from(JSON.stringify(payload)), PASSPHRASE);
+  return callRouteForSession(previewArchive, session, {
+    url: `${ORIGIN}/api/portable-archives/preview`,
+    method: "POST",
+    headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+    body: JSON.stringify({ householdId: fixture.household.id, archive, passphrase: PASSPHRASE }),
   });
 }
 
@@ -162,5 +183,61 @@ describe("portable archive import: recent authentication (#1132)", () => {
     const response = await importAs(outsider, fixture);
     expect(response.status).toBe(404);
     expect(await errorCode(response)).toBe("household_not_found");
+  });
+});
+
+describe("portable archive import: owners only (#1316, owner 2026-10-14)", () => {
+  it("refuses a plain member holding a valid proof with owner_required, and brings nothing in", async () => {
+    const fixture = await createIntegrationFixture("archive-import-member-proved");
+    const member = await fixture.session("member");
+    const before = await itemCount(fixture.household.id);
+
+    const response = await importAs(member, fixture, await proofCookie(member, "archive_import"));
+    expect(response.status).toBe(403);
+    expect(await errorCode(response)).toBe("owner_required");
+    expect(await itemCount(fixture.household.id)).toBe(before);
+  });
+
+  it("refuses a plain member with no proof with owner_required, not a request to prove anything", async () => {
+    const fixture = await createIntegrationFixture("archive-import-member-bare");
+    const member = await fixture.session("member");
+    const before = await itemCount(fixture.household.id);
+
+    const response = await importAs(member, fixture);
+    expect(response.status).toBe(403);
+    expect(await errorCode(response)).toBe("owner_required");
+    expect(await itemCount(fixture.household.id)).toBe(before);
+  });
+
+  it("refuses a plain member's preview with owner_required", async () => {
+    const fixture = await createIntegrationFixture("archive-preview-member");
+    const member = await fixture.session("member");
+
+    const response = await previewAs(member, fixture);
+    expect(response.status).toBe(403);
+    expect(await errorCode(response)).toBe("owner_required");
+  });
+
+  it("tells somebody outside the household so on both routes", async () => {
+    const fixture = await createIntegrationFixture("archive-import-preview-outsider");
+    const outsider = await fixture.session("outsider");
+
+    const imported = await importAs(outsider, fixture);
+    expect(imported.status).toBe(404);
+    expect(await errorCode(imported)).toBe("household_not_found");
+
+    const previewed = await previewAs(outsider, fixture);
+    expect(previewed.status).toBe(404);
+    expect(await errorCode(previewed)).toBe("household_not_found");
+  });
+
+  it("still lets an owner with a proof bring an archive in", async () => {
+    const fixture = await createIntegrationFixture("archive-import-owner");
+    const owner = await fixture.session("owner");
+    const before = await itemCount(fixture.household.id);
+
+    const response = await importAs(owner, fixture, await proofCookie(owner, "archive_import"));
+    expect(response.status).toBe(200);
+    expect(await itemCount(fixture.household.id)).toBe(before + 1);
   });
 });

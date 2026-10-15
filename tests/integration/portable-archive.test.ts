@@ -1,12 +1,14 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { readdir } from "node:fs/promises";
+import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { documents, items, sections } from "@/db/schema";
+import { auditLog, documents, dueEvents, items, portableArchiveImports, portableArchives, sections } from "@/db/schema";
 import { decryptPortableArchive, encryptPortableArchive } from "@/server/portable-archive";
 import { readDocumentDownload } from "@/server/document-repository";
 import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
-import { createPortableArchive, importPortableArchive, previewPortableArchive, readPortableArchive } from "@/server/portable-archive-repository";
+import { createPortableArchive, importPortableArchive, previewPortableArchive, previewPortableImport, readPortableArchive, rollBackUnfinishedPortableImports } from "@/server/portable-archive-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { readWorkspace } from "@/server/workspace-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
@@ -66,7 +68,7 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(poisoned)), passphrase);
 
     await expect(importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive: encrypted,
       passphrase,
@@ -75,17 +77,18 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
 
     // The household must not be left bricked: no row was written at all.
     // (Import always assigns its own row id rather than reusing the
-    // archive's item id, so title is the only stable handle here.)
+    // archive's item id, so the household's whole item list is the handle.)
+    // (The household holds only the fixture's own item.)
     expect(await getDb().select({ id: items.id }).from(items)
-      .where(and(eq(items.householdId, fixture.household.id), eq(items.title, "Imported item"))))
-      .toHaveLength(0);
+      .where(eq(items.householdId, fixture.household.id)))
+      .toEqual([{ id: fixture.item.id }]);
 
     // The same shape, within the reader's bound, must still import cleanly:
     // the fix tightens the cap, it does not regress ordinary imports.
     const valid = archivePayload({ sectionId, itemId, notes: "x".repeat(2_000) });
     const validEncrypted = encryptPortableArchive(Buffer.from(JSON.stringify(valid)), passphrase);
     const result = await importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive: validEncrypted,
       passphrase,
@@ -96,11 +99,10 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     // clears the plaintext, so the cap is asserted on the decrypted value.
     // Found by its own encrypted notes rather than by title: `items.title` is
     // Tier 2 ciphertext since #963, so a SQL equality on it matches nothing.
-    const [stored] = await getDb().select({ id: items.id, notes: items.notes, notesEnc: items.notesEnc }).from(items)
+    const [stored] = await getDb().select({ id: items.id, notesEnc: items.notesEnc }).from(items)
       .where(and(eq(items.householdId, fixture.household.id), isNotNull(items.notesEnc)));
-    expect(stored?.notes).toBeNull();
     const metadata = await openMetadataReader(fixture.household.id);
-    expect(metadata.text("items.notes", stored.id, { encrypted: stored.notesEnc, plaintext: stored.notes }).value)
+    expect(metadata.text("items.notes", stored.id, { encrypted: stored.notesEnc }).value)
       .toHaveLength(2_000);
   });
 
@@ -111,7 +113,7 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     delete (negativeCost.items[0] as Record<string, unknown>).notes;
     const encryptedNegativeCost = encryptPortableArchive(Buffer.from(JSON.stringify(negativeCost)), passphrase);
     await expect(importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive: encryptedNegativeCost,
       passphrase,
@@ -123,7 +125,7 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     delete (excessiveRecurrence.items[0] as Record<string, unknown>).notes;
     const encryptedRecurrence = encryptPortableArchive(Buffer.from(JSON.stringify(excessiveRecurrence)), passphrase);
     await expect(importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive: encryptedRecurrence,
       passphrase,
@@ -150,6 +152,41 @@ describe("portable archive export access and document selection (#1049)", () => 
       includeDocuments: false,
     });
     expect(archive.id).toBeTruthy();
+  });
+
+  it("refuses a non-owner member's import with owner_required, writing nothing and opening no import row (#1316, owner 2026-10-14)", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-import-owner-only");
+    const encrypted = encryptPortableArchive(
+      Buffer.from(JSON.stringify(archivePayload({ sectionId: randomUUID(), itemId: randomUUID() }))),
+      passphrase,
+    );
+
+    await expect(importPortableArchive({
+      userId: fixture.users.member.id,
+      householdId: fixture.household.id,
+      archive: encrypted,
+      passphrase,
+      conflictItemIds: [],
+    })).rejects.toMatchObject({ code: "owner_required", status: 403 });
+
+    expect(await getDb().select({ id: portableArchiveImports.id }).from(portableArchiveImports)
+      .where(eq(portableArchiveImports.householdId, fixture.household.id))).toEqual([]);
+    expect(await getDb().select({ id: items.id }).from(items)
+      .where(eq(items.householdId, fixture.household.id)))
+      .toEqual([{ id: fixture.item.id }]);
+  });
+
+  it("refuses a non-owner member's import preview with owner_required (#1316, owner 2026-10-14)", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-preview-owner-only");
+    const encrypted = encryptPortableArchive(
+      Buffer.from(JSON.stringify(archivePayload({ sectionId: randomUUID(), itemId: randomUUID() }))),
+      passphrase,
+    );
+
+    await expect(previewPortableImport(fixture.users.member.id, fixture.household.id, encrypted, passphrase))
+      .rejects.toMatchObject({ code: "owner_required", status: 403 });
+    await expect(previewPortableImport(fixture.users.owner.id, fixture.household.id, encrypted, passphrase))
+      .resolves.toMatchObject({ items: 1 });
   });
 
   it("excludes a pending_deletion document from the export, keeping an available one", async () => {
@@ -180,6 +217,243 @@ describe("portable archive export access and document selection (#1049)", () => 
     const exportedIds = (payload.documents as Array<{ id: string }>).map((document) => document.id);
     expect(exportedIds).toContain(fixture.document.id);
     expect(exportedIds).not.toContain(pendingDeletion.id);
+  });
+
+  describe("an item field whose ciphertext fails its integrity check", () => {
+    // Every file the export has written under the archive store. Compared
+    // before and after a refused export: a refusal must leave no file behind.
+    async function archiveFiles(): Promise<string[]> {
+      try {
+        return (await readdir(join(process.env.DOCUMENTS_ROOT!, "portable-archives"), { recursive: true })).sort();
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw error;
+      }
+    }
+
+    async function archiveRows(householdId: string) {
+      return getDb().select({ id: portableArchives.id }).from(portableArchives)
+        .where(eq(portableArchives.householdId, householdId));
+    }
+
+    async function expectDamagedRefusal(label: string, column: "titleEnc" | "providerEnc") {
+      const fixture = await createIntegrationFixture(label);
+      // Random bytes in place of the envelope: the same corruption
+      // mail-relay-sender-read.test.ts writes over address_enc.
+      await getDb().update(items)
+        .set({ [column]: randomBytes(48).toString("base64") })
+        .where(eq(items.id, fixture.item.id));
+      const rowsBefore = await archiveRows(fixture.household.id);
+      const filesBefore = await archiveFiles();
+
+      const refusal = await createPortableArchive({
+        userId: fixture.users.owner.id,
+        householdId: fixture.household.id,
+        passphrase,
+        includeDocuments: false,
+      }).then(() => null, (error: unknown) => error);
+
+      expect(refusal).toMatchObject({ code: "archive_metadata_damaged", status: 409 });
+      expect(await archiveRows(fixture.household.id)).toEqual(rowsBefore);
+      expect(await archiveFiles()).toEqual(filesBefore);
+    }
+
+    it("refuses the export with archive_metadata_damaged (409) when an item's title is unreadable, writing no archive row or file", async () => {
+      await expectDamagedRefusal("portable-archive-export-damaged-title", "titleEnc");
+    });
+
+    it("refuses the export with archive_metadata_damaged (409) when an item's provider is unreadable, writing no archive row or file", async () => {
+      await expectDamagedRefusal("portable-archive-export-damaged-provider", "providerEnc");
+    });
+
+    it("still exports an untouched household, and that archive imports into a fresh household", async () => {
+      const source = await createIntegrationFixture("portable-archive-export-undamaged");
+      const target = await createIntegrationFixture("portable-archive-export-undamaged-target");
+
+      const archive = await createPortableArchive({
+        userId: source.users.owner.id,
+        householdId: source.household.id,
+        passphrase,
+        includeDocuments: false,
+      });
+      const { bytes } = await readPortableArchive(source.users.owner.id, archive.id);
+      const encrypted = JSON.parse(bytes.toString("utf8"));
+
+      const result = await importPortableArchive({
+        userId: target.users.owner.id,
+        householdId: target.household.id,
+        archive: encrypted,
+        passphrase,
+        conflictItemIds: [],
+      });
+      expect(result.importedItems).toBe(1);
+    });
+  });
+});
+
+describe("portable archive import whose closing write fails, and rollback of touched items (#1316, owner decision 2026-10-14)", () => {
+  // importPortableArchive commits the items, restores documents, then writes
+  // finished_at / outcome 'completed' last. If that write fails the import must
+  // fail whole while the administrator is present: roll back and refuse. A row
+  // left open must never later delete items members have since edited or
+  // completed, at boot or before the household's next import.
+  type Fixture = Awaited<ReturnType<typeof createIntegrationFixture>>;
+
+  async function exportedArchive(source: Fixture) {
+    const archive = await createPortableArchive({
+      userId: source.users.owner.id,
+      householdId: source.household.id,
+      passphrase,
+      includeDocuments: false,
+    });
+    const { bytes } = await readPortableArchive(source.users.owner.id, archive.id);
+    return JSON.parse(bytes.toString("utf8"));
+  }
+
+  async function insertOpenImport(fixture: Fixture, startedAt: Date) {
+    const importId = randomUUID();
+    await getDb().insert(portableArchiveImports).values({
+      id: importId,
+      householdId: fixture.household.id,
+      actorUserId: fixture.users.owner.id,
+      startedAt,
+      finishedAt: null,
+      createdSectionIds: [],
+      createdItemIds: [fixture.item.id],
+    });
+    return importId;
+  }
+
+  async function importRow(importId: string) {
+    const [row] = await getDb().select().from(portableArchiveImports).where(eq(portableArchiveImports.id, importId));
+    return row;
+  }
+
+  async function itemExists(itemId: string) {
+    return (await getDb().select({ id: items.id }).from(items).where(eq(items.id, itemId))).length === 1;
+  }
+
+  // A member edited the item since the import: its version moved past 1.
+  async function editItem(itemId: string) {
+    await getDb().update(items).set({ version: 2 }).where(eq(items.id, itemId));
+  }
+
+  // A member completed the item's open due event since the import.
+  async function completeDueEvent(fixture: Fixture) {
+    await getDb().insert(dueEvents).values({
+      householdId: fixture.household.id,
+      itemId: fixture.item.id,
+      kind: "renewal",
+      dueDate: "2027-01-01",
+      completedAt: new Date(),
+      completedByUserId: fixture.users.member.id,
+    });
+  }
+
+  const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+
+  it("fails the whole import with archive_import_failed (422) when the closing write fails, rolling the items back and closing the row as rolled_back", async () => {
+    const source = await createIntegrationFixture("portable-archive-closing-write-source");
+    const target = await createIntegrationFixture("portable-archive-closing-write-target");
+    const encrypted = await exportedArchive(source);
+    const suffix = randomUUID().replaceAll("-", "");
+    const fn = `fail_closing_write_${suffix}`;
+    const trigger = `fail_closing_write_trg_${suffix}`;
+    const db = getDb();
+
+    await db.execute(sql.raw(`create function ${fn}() returns trigger language plpgsql as $$ begin raise exception 'simulated closing write failure'; end $$`));
+    await db.execute(sql.raw(`create trigger ${trigger} before update on portable_archive_imports for each row when (new.outcome = 'completed' and new.household_id = '${target.household.id}') execute function ${fn}()`));
+    let refusal: unknown = null;
+    try {
+      refusal = await importPortableArchive({
+        userId: target.users.owner.id,
+        householdId: target.household.id,
+        archive: encrypted,
+        passphrase,
+        conflictItemIds: [],
+      }).then(() => null, (error: unknown) => error);
+    } finally {
+      await db.execute(sql.raw(`drop trigger if exists ${trigger} on portable_archive_imports`));
+      await db.execute(sql.raw(`drop function if exists ${fn}()`));
+    }
+
+    expect(refusal).toMatchObject({ code: "archive_import_failed", status: 422 });
+    const rows = await db.select().from(portableArchiveImports).where(eq(portableArchiveImports.householdId, target.household.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].finishedAt).not.toBeNull();
+    expect(rows[0].outcome).toBe("rolled_back");
+    expect(rows[0].createdItemIds).toHaveLength(1);
+    expect(await db.select({ id: items.id }).from(items).where(inArray(items.id, rows[0].createdItemIds))).toEqual([]);
+    const audit = await db.select({ id: auditLog.id }).from(auditLog).where(and(
+      eq(auditLog.householdId, target.household.id),
+      eq(auditLog.action, "portable_archive_import_rolled_back"),
+      eq(auditLog.entityId, rows[0].id),
+    ));
+    expect(audit).toHaveLength(1);
+  });
+
+  it("keeps an item edited since the import (version 2) when the boot-time sweep finds its import row open, leaving the row open", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-sweep-edited");
+    const importId = await insertOpenImport(fixture, minutesAgo(5));
+    await editItem(fixture.item.id);
+    try {
+      await rollBackUnfinishedPortableImports();
+
+      expect(await itemExists(fixture.item.id)).toBe(true);
+      expect((await importRow(importId)).finishedAt).toBeNull();
+    } finally {
+      await getDb().delete(portableArchiveImports).where(eq(portableArchiveImports.id, importId));
+    }
+  });
+
+  it("keeps an item whose due event was completed since the import (version 1) when the boot-time sweep finds its import row open", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-sweep-completed");
+    const importId = await insertOpenImport(fixture, minutesAgo(5));
+    await completeDueEvent(fixture);
+    try {
+      await rollBackUnfinishedPortableImports();
+
+      expect(await itemExists(fixture.item.id)).toBe(true);
+      expect((await importRow(importId)).finishedAt).toBeNull();
+    } finally {
+      await getDb().delete(portableArchiveImports).where(eq(portableArchiveImports.id, importId));
+    }
+  });
+
+  it("keeps an edited item when the pre-import sweep meets a two-hour-old open row, and the new import succeeds", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-pre-import-sweep");
+    const importId = await insertOpenImport(fixture, minutesAgo(120));
+    await editItem(fixture.item.id);
+    const archive = encryptPortableArchive(
+      Buffer.from(JSON.stringify(archivePayload({ sectionId: randomUUID(), itemId: randomUUID() }))),
+      passphrase,
+    );
+    try {
+      const result = await importPortableArchive({
+        userId: fixture.users.owner.id,
+        householdId: fixture.household.id,
+        archive,
+        passphrase,
+        conflictItemIds: [],
+      });
+
+      expect(result.importedItems).toBe(1);
+      expect(await itemExists(fixture.item.id)).toBe(true);
+    } finally {
+      await getDb().delete(portableArchiveImports).where(eq(portableArchiveImports.id, importId));
+    }
+  });
+
+  it("guard: still rolls back an untouched item (version 1, no completed event) from an open row, closing it as rolled_back", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-sweep-untouched");
+    const importId = await insertOpenImport(fixture, minutesAgo(5));
+
+    await rollBackUnfinishedPortableImports();
+
+    expect(await itemExists(fixture.item.id)).toBe(false);
+    const row = await importRow(importId);
+    expect(row.finishedAt).not.toBeNull();
+    expect(row.outcome).toBe("rolled_back");
   });
 });
 
@@ -240,7 +514,7 @@ describe("portable archive import section bounds (#1316)", () => {
     const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase);
 
     const failure = await importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive: encrypted,
       passphrase,
@@ -269,7 +543,7 @@ describe("portable archive import section bounds (#1316)", () => {
     const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase);
 
     await expect(importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive: encrypted,
       passphrase,
@@ -285,7 +559,7 @@ describe("portable archive import section bounds (#1316)", () => {
     const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase);
 
     await expect(importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive: encrypted,
       passphrase,
@@ -301,7 +575,7 @@ describe("portable archive import section bounds (#1316)", () => {
     const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase);
 
     const result = await importPortableArchive({
-      userId: fixture.users.member.id,
+      userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       archive: encrypted,
       passphrase,

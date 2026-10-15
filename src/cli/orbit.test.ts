@@ -454,8 +454,8 @@ describe("backup/restore scratch directories are cleaned up on exit and on SIGIN
   );
 });
 
-// #1151 O1-R6: commandEndMaintenance, commandAuthRecoveryLink and
-// commandAuthClearAddresses each resolve their dynamic import()s inside a
+// #1151 O1-R6: commandEndMaintenance and commandAuthRecoveryLink each
+// resolve their dynamic import()s inside a
 // `void (async () => {...})()` IIFE; a module-load failure in one of those
 // imports used to escape as an unhandled promise rejection instead of the
 // command's own clean, bounded failure message, because the imports ran
@@ -474,7 +474,7 @@ describe("orbit end-maintenance/auth commands keep their dynamic imports inside 
     return match[1];
   }
 
-  it.each(["commandEndMaintenance", "commandAuthRecoveryLink", "commandAuthClearAddresses"])(
+  it.each(["commandEndMaintenance", "commandAuthRecoveryLink"])(
     "%s's first import( call comes after its first try {",
     (name) => {
       const body = functionBody(name);

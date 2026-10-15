@@ -125,7 +125,7 @@ describe("account disable, session and ownership invariants", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ userId: fixture.users.member.id, disabled: true }),
     });
-    const [beforeUser] = await getDb().select({ email: users.email, displayName: users.displayName, avatarUrl: users.avatarUrl, emailVerified: users.emailVerified, updatedAt: users.updatedAt })
+    const [beforeUser] = await getDb().select({ emailEnc: users.emailEnc, displayName: users.displayName, avatarUrl: users.avatarUrl, emailVerified: users.emailVerified, updatedAt: users.updatedAt })
       .from(users).where(eq(users.id, fixture.users.member.id));
     const beforeIdentity = identity?.lastLoginAt?.getTime();
     const sessionsBeforeRejectedSignIn = await getDb().select({ id: sessions.id }).from(sessions)
@@ -141,7 +141,7 @@ describe("account disable, session and ownership invariants", () => {
     })).rejects.toMatchObject({ code: "account_disabled", status: 403 });
     await expect(createSession(fixture.users.member.id, getAuthConfig())).rejects.toBeInstanceOf(AuthError);
 
-    const [afterUser] = await getDb().select({ email: users.email, displayName: users.displayName, avatarUrl: users.avatarUrl, emailVerified: users.emailVerified, updatedAt: users.updatedAt })
+    const [afterUser] = await getDb().select({ emailEnc: users.emailEnc, displayName: users.displayName, avatarUrl: users.avatarUrl, emailVerified: users.emailVerified, updatedAt: users.updatedAt })
       .from(users).where(eq(users.id, fixture.users.member.id));
     const [afterIdentity] = await getDb().select({ lastLoginAt: externalIdentities.lastLoginAt }).from(externalIdentities).where(eq(externalIdentities.userId, fixture.users.member.id));
     expect(afterUser).toEqual(beforeUser);

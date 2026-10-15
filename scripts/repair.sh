@@ -160,15 +160,12 @@ set -Eeuo pipefail
 #                                   deterministically recoverable interrupted
 #                                   `configuration.sh --migrate` run.
 #   deployment-version-unsupported — .env-orbit is readable but its
-#                                   ORBIT_CONFIG_APPLIED_VERSION is absent,
-#                                   malformed, or names a published release
-#                                   below ADR-0016's supported-install floor
-#                                   (v0.3.0), or on the retracted 1.x alpha
-#                                   line (any major version 1 or above).
-#                                   Absence fails closed: every supported
-#                                   install writes the key, so a readable
-#                                   file without it is the signature of a
-#                                   pre-floor or hand-assembled deployment.
+#                                   ORBIT_CONFIG_APPLIED_VERSION is absent
+#                                   or not a well-formed vX.Y.Z (ADR-0016).
+#                                   Absence fails closed: every install
+#                                   writes the key, so a readable file
+#                                   without it is the signature of a
+#                                   hand-assembled deployment.
 #                                   The check is skipped (never
 #                                   failed) while a configuration finding
 #                                   is present this run — a half-written
@@ -245,9 +242,6 @@ set -Eeuo pipefail
 #                                   build. Reported instead of, not as well
 #                                   as, application-unhealthy: restarting
 #                                   cannot change either side (#437).
-#   database-below-floor            — the application refused to start because
-#                                   the database predates the supported
-#                                   migration floor. Also not restartable.
 #   migration-failed                 — the migrator (drizzle) threw applying a
 #                                   migration and rolled it back, leaving no
 #                                   applied journal row: detected primarily by
@@ -1388,13 +1382,6 @@ readonly secrets_directory=".orbit-secrets"
 # migration was NOT already running inside install's own transaction.
 readonly configuration_rollback_suffix=".orbit-config.rollback"
 
-# ADR-0016's supported-install floor, as comparable components. repair.sh is
-# deliberately source-less, so the floor is mirrored here rather than shared
-# — the authoritative statement is docs/adr/0016 (amended 2026-10-04, #1213:
-# the floor is v0.3.0 and the 1.x tags are retracted).
-readonly supported_floor_major=0
-readonly supported_floor_minor=3
-readonly supported_floor_patch=0
 readonly database_volume_key="orbit-db-data"
 # ADR-0014 decision 5's second retention guard (document-kek): mirrors
 # database_volume_key exactly, matched the same way against
@@ -1486,7 +1473,6 @@ readonly -a class_order=(
   image-identity-mismatch
   application-unhealthy
   database-schema-mismatch
-  database-below-floor
   migration-failed
 )
 
@@ -1522,10 +1508,9 @@ readonly -A action_for_class=(
   [stale-container]=restart-services
   [application-unhealthy]=restart-services
   # Both sides of a schema disagreement survive a restart, so restart-services
-  # would loop forever (#437). These need an operator decision: attach the
-  # matching database, or upgrade from a supported version.
+  # would loop forever (#437). This needs an operator decision: attach the
+  # matching database.
   [database-schema-mismatch]=manual
-  [database-below-floor]=manual
   # A failed, rolled-back migration leaves no applied row and no safe
   # automatic remedy: the migrator's own idempotent retry already happens on
   # any restart (issue #528 decision), so repair must not invent a competing
@@ -1536,11 +1521,11 @@ readonly -A action_for_class=(
   # same wrong image running); recreating a container from a different image
   # is outside repair's safe, reversible action set.
   [image-identity-mismatch]=manual
-  # ADR-0016: a deployment installed by a release below the supported floor
-  # is not a supported repair target. Nothing here is executable — and
+  # ADR-0016: a deployment with no well-formed applied version is not a
+  # supported repair target. Nothing here is executable — and
   # execute_repair additionally refuses the ENTIRE batch when this finding
-  # is present, because running even the safe executors against a pre-floor
-  # layout would mutate files this script was never proven against.
+  # is present, because running even the safe executors against an
+  # unidentified layout would mutate files this script was never proven against.
   [deployment-version-unsupported]=manual
   [not-orbit-directory]=manual
   [managed-file-missing]=manual
@@ -1641,12 +1626,11 @@ readonly -A manual_guidance=(
   # still recognises its migration history. repair never merges or migrates
   # a database on the operator's behalf.
   [database-schema-mismatch]="attach the database this build's migrations expect, or restore this deployment to the build that matches the current database, before starting either again"
-  [database-below-floor]="this database predates the oldest migration history this build supports; restore it from a backup made by a supported version, or run that version's upgrade path first, before pointing this build at it"
   # ADR-0004's recovery point is the actual rollback boundary here; repair
   # itself never applies, retries, or reverses a migration.
   [migration-failed]="restore this deployment from the pre-update recovery point captured before the migration ran, per the supported-upgrade recovery contract"
   [image-identity-mismatch]="recreate the flagged container from the locally pinned image so its running image identity matches; repair never recreates a container on the operator's behalf"
-  [deployment-version-unsupported]="this deployment was installed by a release below the supported floor (docs/adr/0016); reinstall or upgrade it with a supported release before running repair here. The 1.x versions were mislabelled early builds and are retracted, so a 1.x deployment is below the floor too"
+  [deployment-version-unsupported]="this deployment's .env-orbit has no well-formed ORBIT_CONFIG_APPLIED_VERSION (docs/adr/0016); reinstall or update it with an Orbit release before running repair here"
   [document-volume-retained-without-key]="a document volume is retained for this deployment while document-kek is missing; restore the original key from backup, or knowingly accept the retained documents are unreadable, before creating a new key"
   # Keyed by the reason class (secret-missing), not by target, like every
   # other entry here — but this one only ever fires for one specific target:
@@ -2301,19 +2285,12 @@ run_diagnosis() {
     fi
   fi
 
-  # --- Step 5b: deployment version vs the supported-install floor (ADR-0016) -
+  # --- Step 5b: deployment version present and well-formed (ADR-0016) -------
   #
-  # ORBIT_CONFIG_APPLIED_VERSION is written by configuration.sh on every
-  # supported install, so its absence from a readable .env-orbit is not a
-  # gap to shrug at: it is the signature of a deployment installed before
-  # the floor existed (a v1.0.0-era install carries no configuration.sh at
-  # all), or of a hand-assembled file this script has no business mutating.
-  # Both refuse — fail closed. Releases are numbered 0.x (ADR-0016
-  # amendment of 2026-10-04, #1213), so the old major-0 development
-  # exemption is withdrawn: a version is supported only when its major is
-  # the floor's and (minor, patch) is at or above the floor's. Any major of
-  # 1 or above is the retracted alpha line (scripts/retracted-tags.json) and
-  # is refused like any other version below the floor.
+  # ORBIT_CONFIG_APPLIED_VERSION is written by every install, so its absence
+  # from a readable .env-orbit is not a gap to shrug at: it is the signature
+  # of a hand-assembled file this script has no business mutating. Absent or
+  # malformed refuses — fail closed. Any well-formed vX.Y.Z is accepted.
   # When .env-orbit itself is untrustworthy (missing, symlink, wrong mode)
   # this check is skipped rather than failed: those states are findings of
   # their own, fixing them is exactly what repair is for, and the version
@@ -2326,18 +2303,8 @@ run_diagnosis() {
   if [[ "$env_status" == ok && "$configuration_finding" == 0 ]]; then
     checked=$((checked + 1))
     applied_version="$(read_environment_value ORBIT_CONFIG_APPLIED_VERSION 2>/dev/null || true)"
-    version_supported=0
-    if [[ "$applied_version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-      version_major="${BASH_REMATCH[1]}"
-      version_minor="${BASH_REMATCH[2]}"
-      version_patch="${BASH_REMATCH[3]}"
-      if ((version_major == supported_floor_major && version_minor > supported_floor_minor)); then
-        version_supported=1
-      elif ((version_major == supported_floor_major && version_minor == supported_floor_minor && version_patch >= supported_floor_patch)); then
-        version_supported=1
-      fi
-    fi
-    [[ "$version_supported" == 1 ]] || add_finding deployment-version-unsupported deployment fail
+    [[ "$applied_version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
+      add_finding deployment-version-unsupported deployment fail
   fi
 
   # --- Step 6: Compose project name derivation (read-only) -------------------
@@ -3008,12 +2975,10 @@ check_application_container() {
     # by scripts/repair-log-contract.test.mjs (#447) — do not rename one without the other.
     if [[ "$app_log" == *"reason=database_mismatch"* ]]; then
       add_finding database-schema-mismatch application fail
-    elif [[ "$app_log" == *"reason=database_below_floor"* ]]; then
-      add_finding database-below-floor application fail
     elif [[ "$app_log" == *"reason=migration_failed"* ]]; then
       # issue #528: the migrator's own wrapper (src/instrumentation-node.ts)
       # writes this sentinel before the crash-looping/exited container's
-      # process exits, exactly like the two #437 sentinels above — same
+      # process exits, exactly like the #437 sentinel above — same
       # bounded `docker logs` read, same fixed-token match, no new docker
       # verb. Primary migration-failed detection path: the SQL backstop
       # (check_migration_failed_backstop, for the rotated-logs/no-container
@@ -4258,7 +4223,7 @@ execute_repair() {
 
   # ADR-0016 refusal (criterion 9, #681): an unsupported deployment version
   # refuses the whole execution, not just its own (manual) plan entry.
-  # Running even the safe executors against a pre-floor deployment would
+  # Running even the safe executors against an unidentified deployment would
   # mutate a layout this script was never proven against, so nothing is
   # allowed to run — mirroring the dangerous batch's own refusal grammar,
   # with the reason carried on the line.

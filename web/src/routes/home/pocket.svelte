@@ -4,6 +4,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
+  import HouseholdClosed from "$lib/HouseholdClosed.svelte";
   import { applyCommand, attachItemDocument, dueDateIn, householdElsewhereFor, readItemDocuments, readReminders, removeDocument, restoreDocument, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
@@ -467,8 +468,8 @@
     await openRow(id, { focus: true });
   }
 
-  /* Arriving on an item's address (`copy link`, the desk's own, and the
-     retired belt's `/item/<id>`, which the server answers with it): its
+  /* Arriving on an item's address, `/home?item=<id>` (`copy link`, the
+     desk's own; the retired belt's `/item/<id>` no longer exists): its
      row opens, once, as soon as the manifest has drawn it -- drawn for it if
      the manifest does not list it (openRow). A suggestion's address opens
      its row in the signals, where it is reviewed. An item in another of
@@ -611,7 +612,7 @@
       const raw = localStorage.getItem(HELD_COMPLETION_KEY);
       if (!raw) return [];
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [parsed.command].filter(Boolean);
+      return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
     }
@@ -637,15 +638,8 @@
       Runs once, on mount: nothing it reads is reactive state. */
   $effect(() => {
     for (const command of readHeldCompletionStash()) {
-      /* A stash written before ADR-0034 carried a next due date and the
-         activity's kind, which the engine now refuses; the completion is
-         still the member's, so it is sent in today's shape. */
       /** @type {any} */
-      const sent = structuredClone(command);
-      if (sent.type === "item.complete") {
-        delete sent.nextDate;
-        if (sent.activity) { delete sent.activity.kind; delete sent.activity.nextDate; }
-      }
+      const sent = command;
       applyCommand(sent).then(async () => {
         clearHeldCompletionStash(command);
         await onchanged?.();
@@ -1191,7 +1185,11 @@
       {/snippet}
     </Row>
   {/snippet}
-  {#if groups?.attention.length}
+  <!-- #1316: closed while its owner brings an archive in; the other skies
+       above stay, and are the way to them. -->
+  {#if view?.household?.importInProgress}
+    <HouseholdClosed name={view.household.name} hasOthers={view.households.length > 1} />
+  {:else if groups?.attention.length}
     <h2 class="p-caps">Needs attention</h2>
     <div class="pk-list" data-row-group data-row-cards>
       {#each askedRow ? byDate([...groups.attention, askedRow]) : groups.attention as one (one.id)}

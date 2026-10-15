@@ -45,8 +45,9 @@ export async function GET(event) {
   try {
     session = await requireSession(event.cookies, getAuthConfig());
   } catch {
+    // returnTo is the only parameter the login page reads to come back here.
     const back = encodeURIComponent(`${event.url.pathname}${event.url.search}`);
-    return seeOther(`/login?redirect=${back}`);
+    return seeOther(`/login?returnTo=${back}`);
   }
 
   try {

@@ -31,6 +31,8 @@ vi.mock("$lib/data/workspace.js", () => ({
   }),
   applyCommand: (...args) => applyCommand(...args),
   attachItemDocument: async () => ({}),
+  // #1316: the create saves stage the file first, then send one command.
+  stageDocument: async () => ({}),
   checkCommand: () => new Promise((done) => { pendingCheck = { resolve: done }; }),
   // The desk form checks through checkDraftCommand (a create under a draft id).
   checkDraftCommand: () => new Promise((done) => { pendingCheck = { resolve: done }; }),
@@ -59,7 +61,7 @@ const MARKUP = `
   </form>
   <div id="readcard"></div><div id="read-head"></div><div id="focusline"></div><div id="focuswhy"></div>
   <img id="sheet-page"><div id="rc-capline"></div><div id="rc-honest"></div><div id="rc-file"></div>
-  <div id="rc-size"></div><div id="rc-scan"></div><button id="rc-drop" type="button"></button><div id="docnote"></div>
+  <div id="rc-size"></div><div id="rc-refused"></div><div id="rc-scan"></div><button id="rc-drop" type="button"></button><div id="docnote"></div>
 `;
 
 /** @type {{ teardown: () => void } | null} */

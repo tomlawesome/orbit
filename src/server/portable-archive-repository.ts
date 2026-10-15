@@ -18,7 +18,7 @@ import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 import { normalizeComparableMetadata } from "@/server/metadata/crypto";
 import { MetadataCipher, openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
 import { loadMetadataKey, metadataCryptoAvailable, MetadataKeyLockedError, receiptKeyScope } from "@/server/metadata/keys";
-import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS, MAX_ARCHIVE_DOCUMENT_MIB } from "@/server/portable-archive-limits";
+import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS, MAX_ARCHIVE_DOCUMENT_MIB, PORTABLE_IMPORT_LEASE_MS } from "@/server/portable-archive-limits";
 import { acquireActiveHouseholdLock, requireHouseholdAccess } from "@/server/workspace-access";
 
 const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -71,16 +71,17 @@ function storage(): PortableArchiveStorage {
  * Whether this person may write the household out or bring an archive in,
  * answered before anyone is asked to prove it is them (#1132): a person who
  * may not do the act at all is told that, rather than being challenged and
- * then refused. Export is the owner's act (#1049); import is open to any
- * member. `createPortableArchive` and `importPortableArchive` check again, so
- * nothing relies on a route having called this.
+ * then refused. Both acts are the owner's (#1049; import since 2026-10-14,
+ * #1316): `act` only names which one the route is taking.
+ * `createPortableArchive`, `previewPortableImport` and `importPortableArchive`
+ * check again, so nothing relies on a route having called this.
  */
 export async function requirePortableArchiveAccess(
   userId: string,
   householdId: string,
-  act: "export" | "import",
+  _act: "export" | "import",
 ): Promise<void> {
-  await requireHouseholdAccess(userId, householdId, act === "export");
+  await requireHouseholdAccess(userId, householdId, true);
 }
 
 function jsonBuffer(value: unknown): Buffer {
@@ -104,9 +105,8 @@ function rejectOversizedCiphertext(archive: EncryptedPortableArchive): void {
  *
  * Not `openMetadataReader`: that one answers "locked" for a household whose
  * key has not been minted yet as well, and never throws, because a plain
- * read of such a household is fine -- nothing of its has ever been
- * encrypted, so its rows still hold plaintext and read normally. The same
- * is true of its export. The refusal belongs to the key that exists but
+ * read of such a household is fine -- it has never written an encrypted
+ * value, so it has none to read. The same is true of its export. The refusal belongs to the key that exists but
  * cannot be used: no KEK, or one that will not unwrap it.
  */
 async function openExportMetadataReader(householdId: string): Promise<MetadataCipher> {
@@ -166,17 +166,23 @@ export async function createPortableArchive(input: {
   if (metadata.locked && householdItems.some((item) => item.titleEnc || item.providerEnc || item.referenceEnc || item.notesEnc || item.costMinorEnc)) {
     throw archiveMetadataLockedError();
   }
-  const exportedItems = householdItems.map((item) => ({
-    ...item,
-    reference: metadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference }).value,
-    notes: metadata.text("items.notes", item.id, { encrypted: item.notesEnc, plaintext: item.notes }).value,
+  const exportedItems = householdItems.map((item) => {
+    const reference = metadata.text("items.reference", item.id, { encrypted: item.referenceEnc });
+    const notes = metadata.text("items.notes", item.id, { encrypted: item.notesEnc });
     // Tier 2 (#963) exports decrypted for the same reason Tier 1 does: the
     // archive is the deliberate plaintext escape hatch, and an archive holding
     // ciphertext nobody outside this instance can open would not be one.
-    title: metadata.text("items.title", item.id, { encrypted: item.titleEnc, plaintext: item.title }).value ?? "",
-    provider: metadata.text("items.provider", item.id, { encrypted: item.providerEnc, plaintext: item.provider }).value,
-    costMinor: metadata.number("items.cost_minor", item.id, { encrypted: item.costMinorEnc, plaintext: item.costMinor }).value,
-  }));
+    const title = metadata.text("items.title", item.id, { encrypted: item.titleEnc });
+    const provider = metadata.text("items.provider", item.id, { encrypted: item.providerEnc });
+    const costMinor = metadata.number("items.cost_minor", item.id, { encrypted: item.costMinorEnc });
+    // A field that fails its integrity check would come out blank, and a blank
+    // title makes the whole archive unimportable, so the export is refused
+    // before anything is written rather than reporting success.
+    if ([reference, notes, title, provider, costMinor].some((field) => field.state === "metadata_integrity_failed")) {
+      throw new AppError("archive_metadata_damaged", "Orbit can't export: an item's stored details are damaged and would come out blank. Open that item, re-enter the damaged field and save it, then export again.", 409);
+    }
+    return { ...item, reference: reference.value, notes: notes.value, title: title.value ?? "", provider: provider.value, costMinor: costMinor.value };
+  });
 
   const payload: Record<string, unknown> = {
     format: "orbit-portable-archive",
@@ -367,12 +373,9 @@ function decodeImportArchive(serialized: unknown, passphrase: string) {
  * Which of `references` the household already holds, as normalised strings
  * (ADR-0024 decision 2).
  *
- * The plaintext `items.reference` column is cleared the moment a row is
- * encrypted, so an encrypted row is found only through `reference_index` —
- * an HMAC-SHA-256 keyed by a derivation of the household DEK. Take the index
- * away and duplicate detection stops finding anything the application wrote.
- * The second query is the dual-read leg for rows the backfill has not reached
- * yet, and it goes away with the plaintext column in the contract release.
+ * A row is found only through `reference_index` — an HMAC-SHA-256 keyed by a
+ * derivation of the household DEK. Take the index away and duplicate detection
+ * stops finding anything the application wrote.
  */
 async function existingReferenceMatches(
   executor: MetadataExecutor,
@@ -404,12 +407,6 @@ async function existingReferenceMatches(
     }
   }
 
-  const remaining = await executor.select({ reference: items.reference }).from(items)
-    .where(and(eq(items.householdId, householdId), isNotNull(items.reference)));
-  for (const row of remaining) {
-    const normalized = normalizeComparableMetadata(row.reference);
-    if (normalized && wanted.has(normalized)) found.add(normalized);
-  }
   return found;
 }
 
@@ -430,9 +427,8 @@ function duplicatesExistingItem(
 }
 
 /**
- * The household's item titles, decrypted (#963). A locked instance yields the
- * plaintext of any row the backfill has not reached and nothing for the rest,
- * which is the correct conservative answer: an unreadable title cannot be
+ * The household's item titles, decrypted (#963). A locked instance yields
+ * nothing, which is the correct conservative answer: an unreadable title cannot be
  * shown to be a duplicate, so the import proceeds rather than being blocked by
  * a comparison nobody can make.
  */
@@ -440,17 +436,17 @@ async function existingItemTitles(
   executor: MetadataExecutor,
   householdId: string,
 ): Promise<Array<{ title: string }>> {
-  const rows = await executor.select({ id: items.id, title: items.title, titleEnc: items.titleEnc })
+  const rows = await executor.select({ id: items.id, titleEnc: items.titleEnc })
     .from(items).where(eq(items.householdId, householdId));
   const metadata = await openMetadataReader(householdId, executor);
   return rows.flatMap((row) => {
-    const title = metadata.text("items.title", row.id, { encrypted: row.titleEnc, plaintext: row.title }).value;
+    const title = metadata.text("items.title", row.id, { encrypted: row.titleEnc }).value;
     return title ? [{ title }] : [];
   });
 }
 
 export async function previewPortableImport(userId: string, householdId: string, serialized: unknown, passphrase: string) {
-  await requireHouseholdAccess(userId, householdId);
+  await requireHouseholdAccess(userId, householdId, true);
   const archive = decodeImportArchive(serialized, passphrase);
   const existing = await existingItemTitles(getDb(), householdId);
   const duplicateReferences = await existingReferenceMatches(getDb(), householdId, archive.items.map((item) => item.reference));
@@ -463,15 +459,6 @@ export async function previewPortableImport(userId: string, householdId: string,
   const documentsExcluded = archive.documents.some((document) => document.lifecycle === "available" && !documentBytesById.has(document.id));
   return { householdName: archive.household.name, sections: archive.sections.length, items: archive.items.length, documents: archive.documents.length, conflicts, documentsExcluded };
 }
-
-/**
- * Past this age an unfinished import row (`finished_at` still null) is not a
- * concurrent request in flight -- it is a crash or timeout mid-restore
- * (#1151 RANGE-R2). Deliberately generous: the document-restore loop can
- * legitimately take a while for a large archive, and rolling back a request
- * that is merely slow would be worse than leaving it a little longer.
- */
-const STALE_UNFINISHED_IMPORT_MS = 60 * 60 * 1_000;
 
 /** Why a document restore failed, in words the admin can act on without a stack trace. */
 function documentFailureReason(error: unknown): string {
@@ -500,6 +487,31 @@ export async function rollBackPortableImport(importId: string): Promise<void> {
 
     const createdItemIds: string[] = importRow.createdItemIds ?? [];
     const createdSectionIds: string[] = importRow.createdSectionIds ?? [];
+
+    // Recovery undoes only what a crash left, never items already in use: an
+    // imported item a member has edited (every edit bumps `version` past the
+    // 1 it was inserted at) or whose due event they completed keeps the whole
+    // import. The row stays open, so this is logged again at every boot and
+    // before the household's next import. Not detected: a document a member
+    // added without editing the item; that needs the import's own rollback to
+    // have failed first, and the log names the import for the administrator.
+    if (createdItemIds.length > 0) {
+      const [edited] = await transaction.select({ id: items.id }).from(items)
+        .where(and(inArray(items.id, createdItemIds), gt(items.version, 1))).limit(1);
+      const [completed] = edited ? [] : await transaction.select({ id: dueEvents.id }).from(dueEvents)
+        .where(and(inArray(dueEvents.itemId, createdItemIds), isNotNull(dueEvents.completedAt))).limit(1);
+      if (edited || completed) {
+        log.error({
+          event: "portable_archive.import",
+          state: "degraded",
+          reason: "unexpected_failure",
+          action: "inspect_admin_diagnostics",
+          impact: "application_degraded",
+          detail: operationalDetail`${importId}.household.${importRow.householdId}.unfinished_import_in_use_not_rolled_back`,
+        });
+        return undefined;
+      }
+    }
 
     const documentRows = createdItemIds.length > 0
       ? await transaction.select({ documentId: documents.id, storageKey: documentCrypto.storageKey })
@@ -575,9 +587,16 @@ export async function rollBackUnfinishedPortableImports(): Promise<void> {
   }
 }
 
-/** Rolls back this household's own stranded import before starting a new one, if it is old enough to be a crash rather than a concurrent request. */
+/**
+ * Rolls back this household's own stranded import before starting a new one,
+ * if it is old enough to be a crash rather than a concurrent request (#1151
+ * RANGE-R2). Deliberately generous: the document-restore loop can take a
+ * while for a large archive, and rolling back a request that is merely slow
+ * would be worse than leaving it a little longer. The lease is the one the
+ * household-access gate closes the household for (#1316), so the two agree.
+ */
 async function rollBackStaleUnfinishedPortableImport(householdId: string): Promise<void> {
-  const cutoff = new Date(Date.now() - STALE_UNFINISHED_IMPORT_MS);
+  const cutoff = new Date(Date.now() - PORTABLE_IMPORT_LEASE_MS);
   const stale = await getDb().select({ id: portableArchiveImports.id }).from(portableArchiveImports)
     .where(and(eq(portableArchiveImports.householdId, householdId), isNull(portableArchiveImports.finishedAt), lt(portableArchiveImports.startedAt, cutoff)));
   for (const row of stale) await rollBackPortableImport(row.id);
@@ -601,7 +620,7 @@ async function rollBackStaleUnfinishedPortableImport(householdId: string): Promi
  * leave nothing behind to retry against).
  */
 export async function importPortableArchive(input: { userId: string; householdId: string; archive: unknown; passphrase: string; conflictItemIds: string[] }) {
-  await requireHouseholdAccess(input.userId, input.householdId);
+  await requireHouseholdAccess(input.userId, input.householdId, true);
   await rollBackStaleUnfinishedPortableImport(input.householdId);
   const archive = decodeImportArchive(input.archive, input.passphrase);
   const skipped = new Set(input.conflictItemIds);
@@ -641,7 +660,7 @@ export async function importPortableArchive(input: { userId: string; householdId
       if (duplicate && !skipped.has(source.id)) throw new AppError("archive_conflict_unresolved", "Review every duplicate before importing", 409);
       if (duplicate || !sectionMap.has(source.sectionId)) continue;
       const itemId = randomUUID();
-      await transaction.insert(items).values({ id: itemId, householdId: input.householdId, sectionId: sectionMap.get(source.sectionId)!, title: null, titleEnc: metadata.encryptText("items.title", itemId, source.title), subtype: source.subtype ?? null, provider: null, providerEnc: metadata.encryptText("items.provider", itemId, source.provider), reference: null, referenceEnc: metadata.encryptText("items.reference", itemId, source.reference), referenceIndex: metadata.referenceIndex(source.reference), costMinor: null, costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, source.costMinor), currency: source.currency, startDate: source.startDate ?? null, expiryDate: source.expiryDate ?? null, renewalDate: source.renewalDate ?? null, serviceDate: source.serviceDate ?? null, recurrenceMonths: source.recurrenceMonths ?? null, snoozedUntil: source.snoozedUntil ?? null, notes: null, notesEnc: metadata.encryptText("items.notes", itemId, source.notes), externalDocumentUrl: source.externalDocumentUrl ?? null, status: source.status });
+      await transaction.insert(items).values({ id: itemId, householdId: input.householdId, sectionId: sectionMap.get(source.sectionId)!, titleEnc: metadata.encryptText("items.title", itemId, source.title), subtype: source.subtype ?? null, providerEnc: metadata.encryptText("items.provider", itemId, source.provider), referenceEnc: metadata.encryptText("items.reference", itemId, source.reference), referenceIndex: metadata.referenceIndex(source.reference), costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, source.costMinor), currency: source.currency, startDate: source.startDate ?? null, expiryDate: source.expiryDate ?? null, renewalDate: source.renewalDate ?? null, serviceDate: source.serviceDate ?? null, recurrenceMonths: source.recurrenceMonths ?? null, snoozedUntil: source.snoozedUntil ?? null, notesEnc: metadata.encryptText("items.notes", itemId, source.notes), externalDocumentUrl: source.externalDocumentUrl ?? null, status: source.status });
       itemIdMap.set(source.id, itemId);
       count++;
     }
@@ -692,6 +711,30 @@ export async function importPortableArchive(input: { userId: string; householdId
       bytes.fill(0);
     }
   }
-  await getDb().update(portableArchiveImports).set({ finishedAt: new Date(), outcome: "completed" }).where(eq(portableArchiveImports.id, importId));
+  // A failed closing write fails the whole import now, while the administrator
+  // is here, rather than leaving an open row for a later restart to undo after
+  // members have started using the items.
+  try {
+    await getDb().update(portableArchiveImports).set({ finishedAt: new Date(), outcome: "completed" }).where(eq(portableArchiveImports.id, importId));
+  } catch {
+    try {
+      await rollBackPortableImport(importId);
+    } catch (rollbackError) {
+      log.error({
+        event: "portable_archive.import",
+        state: "degraded",
+        reason: "unexpected_failure",
+        action: "inspect_admin_diagnostics",
+        impact: "application_degraded",
+        detail: operationalDetail`${importId}.${rollbackError instanceof Error ? rollbackError.name : "unknown"}`,
+      });
+      throw new AppError(
+        "archive_import_failed",
+        "The import failed and could not be undone either: Orbit could not record it as finished. Restart Orbit to finish undoing it, then try the import again.",
+        422,
+      );
+    }
+    throw new AppError("archive_import_failed", "Nothing was imported: Orbit could not record the import as finished. Try the import again.", 422);
+  }
   return { importedItems: imported, documentsExcluded: archive.documents.length - documentsRestored };
 }

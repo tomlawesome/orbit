@@ -18,7 +18,7 @@ describe("file-backed OIDC client secret contract", () => {
   it("mounts the persistent host file into the application without a direct Compose value", () => {
     expect(serviceBlock("orbit-app")).toContain("      - orbit-oidc-client-secret");
     expect(compose).toContain(
-      "orbit-oidc-client-secret:\n    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/oidc-client-secret",
+      "orbit-oidc-client-secret:\n    file: ./.orbit-secrets/oidc-client-secret",
     );
     expect(compose).not.toMatch(/^\s+OIDC_CLIENT_SECRET:\s+\S+/mu);
   });

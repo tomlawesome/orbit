@@ -324,7 +324,7 @@ export const SIGNED_IN = [
   } },
 
   /* #1319 stage 3b (owner-decisions §34): the belt and its sheets retired,
-     and `/item/<id>` answers with home's drawer. What a phone did on the
+     with `/item/<id>`; the drawer opens from `/home?item=<id>`. What a phone did on the
      belt it does in the MOT's row on home: the foot row's snooze (the
      calendar as the bottom sheet), complete and the pencil (the rows in
      their completing and editing modes, a chooser as the bottom sheet), an

@@ -74,20 +74,6 @@ const PLATFORM_KEYS = new Set([
   "ORBIT_INSTALLER_ELAPSED",
   "ORBIT_INSTALL_TEST_ASSETS_ROOT",
   "ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE",
-  // ADR-0017 slice 2 (#743): inbound mail (IMAP) credentials moved out of
-  // the environment entirely — every IMAP_* key was removed from
-  // ALLOWED_KEYS and no longer appears in .env-orbit.example. These five
-  // literal `environment.IMAP_ALIAS_*` reads remain only inside
-  // parseImapIngestionConfigFromEnvironment (src/server/mail-in/core/
-  // config.ts), which nothing in the running application calls any more
-  // (src/lib/startup-config.ts stopped calling it) but which stays because
-  // its characterization tests still exercise it. Dead code, not
-  // configuration; remove this exemption if that function is ever deleted.
-  "IMAP_ALIAS_CURRENT_GENERATION",
-  "IMAP_ALIAS_GENERATION",
-  "IMAP_ALIAS_PREVIOUS_GENERATION",
-  "IMAP_ALIAS_PREVIOUS_EXPIRES_AT",
-  "IMAP_ALIAS_PREVIOUS_EXPIRY",
   // Release metadata baked into the image at build time (Dockerfile's
   // runner stage, from the ORBIT_VERSION/ORBIT_REVISION/ORBIT_CHANNEL
   // ARGs), read back by GET /api/admin/health (#1000,

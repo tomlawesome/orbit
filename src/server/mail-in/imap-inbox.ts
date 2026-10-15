@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, lt, or, sql } from "drizzle-orm";
 import { AppError } from "@/lib/app-error";
 import { getDb } from "@/db";
-import { documents, households, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, items, memberships, metadataKeyOutages, sections, users } from "@/db/schema";
+import { households, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, items, memberships, metadataKeyOutages, sections, users } from "@/db/schema";
 import { clearMetadataDamageForColumn } from "@/server/metadata/damage-sightings";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import { flagStagingPurgeFailed, purgeHeldImapAttachment } from "./imap-attachment-holding";
-import { requestDocumentDeletion, requireDocumentDeletionAccess } from "@/server/document-repository";
+import { requestDocumentDeletion } from "@/server/document-repository";
 import { clearedReviewDraftMetadata, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
 import { validUuid } from "@/lib/uuid";
@@ -23,8 +23,7 @@ import {
   type ReviewInboxStateContext,
 } from "./core/review-state";
 
-// Re-exported so `@/server/imap-inbox` (now a deprecated stub pointing here)
-// keeps every existing import path working churn-free. See
+// Re-exported so importers of this module keep one import path. See
 // src/server/mail-in/core/review-state.ts for the implementations.
 export { reviewInboxState, failureReasonOf, findReviewedIntakeCandidateReason, reviewAttachmentDisplayName, reviewAttachmentMediaType, reviewAttachmentScanState };
 export type { FailureReason, ReviewAttachmentMediaType, ReviewInboxClassification, ReviewInboxStateContext };
@@ -37,8 +36,6 @@ export type { FailureReason, ReviewAttachmentMediaType, ReviewInboxClassificatio
  */
 function readReceiptDraft(metadata: MetadataCipher, receipt: {
   id: string;
-  proposal: unknown;
-  fieldEvidence: unknown;
   proposalEnc: string | null;
   fieldEvidenceEnc: string | null;
 }): {
@@ -46,8 +43,8 @@ function readReceiptDraft(metadata: MetadataCipher, receipt: {
   fieldEvidence: Record<string, unknown>;
   metadataStatus?: { proposal?: MetadataFieldState; fieldEvidence?: MetadataFieldState };
 } {
-  const proposal = metadata.json("imap_ingestion_messages.proposal", receipt.id, { encrypted: receipt.proposalEnc, plaintext: receipt.proposal });
-  const fieldEvidence = metadata.json("imap_ingestion_messages.field_evidence", receipt.id, { encrypted: receipt.fieldEvidenceEnc, plaintext: receipt.fieldEvidence });
+  const proposal = metadata.json("imap_ingestion_messages.proposal", receipt.id, { encrypted: receipt.proposalEnc });
+  const fieldEvidence = metadata.json("imap_ingestion_messages.field_evidence", receipt.id, { encrypted: receipt.fieldEvidenceEnc });
   return {
     proposal: proposal.value,
     fieldEvidence: fieldEvidence.value,
@@ -74,9 +71,8 @@ async function rekeyReceiptDraft(
   const changes: Record<string, unknown> = {};
 
   if (current.proposalEnc !== null) {
-    const proposal = source.json("imap_ingestion_messages.proposal", current.id, { encrypted: current.proposalEnc, plaintext: {} });
+    const proposal = source.json("imap_ingestion_messages.proposal", current.id, { encrypted: current.proposalEnc });
     if (!proposal.state) {
-      changes.proposal = {};
       changes.proposalEnc = target.encryptJson("imap_ingestion_messages.proposal", current.id, proposal.value);
       // The value just re-encrypted cleanly, so whatever sighting this column
       // carried is resolved (#971) — cleared here rather than left to the
@@ -85,9 +81,8 @@ async function rekeyReceiptDraft(
     }
   }
   if (current.fieldEvidenceEnc !== null) {
-    const evidence = source.json("imap_ingestion_messages.field_evidence", current.id, { encrypted: current.fieldEvidenceEnc, plaintext: {} });
+    const evidence = source.json("imap_ingestion_messages.field_evidence", current.id, { encrypted: current.fieldEvidenceEnc });
     if (!evidence.state) {
-      changes.fieldEvidence = {};
       changes.fieldEvidenceEnc = target.encryptJson("imap_ingestion_messages.field_evidence", current.id, evidence.value);
       await clearMetadataDamageForColumn("imap_ingestion_messages.field_evidence", current.id, executor);
     }
@@ -177,8 +172,6 @@ export async function listImapInbox(userId: string) {
       status: imapIngestionMessages.status,
       householdId: imapIngestionMessages.householdId,
       draftVersion: imapIngestionMessages.draftVersion,
-      proposal: imapIngestionMessages.proposal,
-      fieldEvidence: imapIngestionMessages.fieldEvidence,
       proposalEnc: imapIngestionMessages.proposalEnc,
       fieldEvidenceEnc: imapIngestionMessages.fieldEvidenceEnc,
       expiresAt: imapIngestionMessages.expiresAt,
@@ -221,7 +214,6 @@ export async function listImapInbox(userId: string) {
     getDb().select({
       itemId: items.id,
       householdId: items.householdId,
-      title: items.title,
       titleEnc: items.titleEnc,
       itemStatus: items.status,
       messageId: imapIngestionMessages.id,
@@ -271,7 +263,6 @@ export async function listImapInbox(userId: string) {
         attachmentCount: receipt.attachmentCount,
         attachments: orderedAttachments(attachmentsByMessage.get(receipt.id) ?? []),
         ...state,
-        cleanupOnly: state.classification === "cleanup",
         ...metadata,
       };
     }),
@@ -285,7 +276,7 @@ export async function listImapInbox(userId: string) {
       // under that household's key rather than the receipt's, which may be the
       // instance scope. `filedReaders` holds one per household, not one per row.
       const filedTitle = filedReaders.get(row.householdId)!
-        .text("items.title", row.itemId, { encrypted: row.titleEnc, plaintext: row.title });
+        .text("items.title", row.itemId, { encrypted: row.titleEnc });
       return {
         itemId: row.itemId,
         householdId: row.householdId,
@@ -312,8 +303,6 @@ export async function getImapReview(userId: string, receiptId: string, household
     status: imapIngestionMessages.status,
     householdId: imapIngestionMessages.householdId,
     draftVersion: imapIngestionMessages.draftVersion,
-    proposal: imapIngestionMessages.proposal,
-    fieldEvidence: imapIngestionMessages.fieldEvidence,
     proposalEnc: imapIngestionMessages.proposalEnc,
     fieldEvidenceEnc: imapIngestionMessages.fieldEvidenceEnc,
     expiresAt: imapIngestionMessages.expiresAt,
@@ -347,7 +336,7 @@ export async function getImapReview(userId: string, receiptId: string, household
     // by title in the application — the decrypt-and-scan the tiering decision
     // traded for. The 200 cap stands as the same safety bound it always was;
     // at household scale it is never the thing that decides what is returned.
-    getDb().select({ id: items.id, title: items.title, titleEnc: items.titleEnc, provider: items.provider, providerEnc: items.providerEnc, reference: items.reference, referenceEnc: items.referenceEnc, subtype: items.subtype })
+    getDb().select({ id: items.id, titleEnc: items.titleEnc, providerEnc: items.providerEnc, referenceEnc: items.referenceEnc, subtype: items.subtype })
       .from(items).where(and(eq(items.householdId, householdId), inArray(items.status, ["active", "expired", "cancelled"]))).orderBy(asc(items.createdAt), asc(items.id)).limit(200),
     getDb().select({
       id: imapIngestionAttachments.id,
@@ -366,9 +355,9 @@ export async function getImapReview(userId: string, receiptId: string, household
   const decryptedItems = householdItems
     .map((item) => ({
       ...item,
-      title: householdMetadata.text("items.title", item.id, { encrypted: item.titleEnc, plaintext: item.title }).value ?? "",
-      provider: householdMetadata.text("items.provider", item.id, { encrypted: item.providerEnc, plaintext: item.provider }).value,
-      reference: householdMetadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference }).value,
+      title: householdMetadata.text("items.title", item.id, { encrypted: item.titleEnc }).value ?? "",
+      provider: householdMetadata.text("items.provider", item.id, { encrypted: item.providerEnc }).value,
+      reference: householdMetadata.text("items.reference", item.id, { encrypted: item.referenceEnc }).value,
     }))
     .sort((left, right) => left.title.localeCompare(right.title));
   const candidates = decryptedItems.flatMap((item) => {
@@ -396,16 +385,6 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
   if (receipt.householdId && !(await hasHouseholdMembership(userId, receipt.householdId))) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   if (["discarded", "expired"].includes(receipt.status)) return;
 
-  // A legacy receipt's documents are deleted below through the accepted,
-  // authorised path. Check that authorisation now, before the receipt is
-  // claimed: refused after the claim, the claim stood (locked, then purged
-  // by the staging job) while the document and its item stayed behind, and
-  // the retry reported the discard done.
-  if (receipt.failureCode === "legacy_review_item" && receipt.reviewItemId) {
-    const legacyDocuments = await getDb().select({ id: documents.id }).from(documents).where(and(eq(documents.itemId, receipt.reviewItemId), eq(documents.lifecycle, "available")));
-    for (const document of legacyDocuments) await requireDocumentDeletionAccess(userId, document.id);
-  }
-
   const cleanupToken = randomUUID();
   const now = new Date();
   const claimed = await getDb().transaction(async (transaction) => {
@@ -413,10 +392,7 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
       .where(and(
         eq(imapIngestionMessages.id, receipt.id),
         eq(imapIngestionMessages.userId, userId),
-        or(
-          inArray(imapIngestionMessages.status, ["pending_review", "recoverable"]),
-          and(eq(imapIngestionMessages.status, "failed"), eq(imapIngestionMessages.failureCode, "legacy_review_item")),
-        ),
+        inArray(imapIngestionMessages.status, ["pending_review", "recoverable"]),
       )).for("update").limit(1);
     if (!current || (current.lockedAt && current.lockedAt.getTime() > now.getTime() - 10 * 60_000)) return false;
     const [changed] = await transaction.update(imapIngestionMessages).set({ status: "recoverable", receiptStatus: "pending", failureCode: "staging_purge_pending", attachmentProcessingLockedAt: now, attachmentProcessingLeaseToken: cleanupToken, attachmentProcessingNextAttemptAt: null, updatedAt: now })
@@ -433,21 +409,6 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
     const [latest] = await getDb().select({ status: imapIngestionMessages.status }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receipt.id)).limit(1);
     if (latest && ["discarded", "expired"].includes(latest.status)) return;
     throw new AppError("staging_cleanup_busy", "The incoming document is already being cleaned up; retry discard", 409);
-  }
-
-  // Rows created by the prototype remain linked to their item so encrypted
-  // bytes and foreign-key targets can be cleaned through the accepted path.
-  if (receipt.failureCode === "legacy_review_item" && receipt.reviewItemId) {
-    const documentRows = await getDb().select({ id: documents.id }).from(documents).where(and(eq(documents.itemId, receipt.reviewItemId), eq(documents.lifecycle, "available")));
-    // A document that left "available" between the read above and its
-    // deletion (another tab, the retention purge) is already gone as far as
-    // this discard is concerned; thrown here, with the claim standing, it
-    // left the receipt locked with its item behind -- the shape A3-S1 closes.
-    for (const document of documentRows) await requestDocumentDeletion(userId, document.id).catch((error: unknown) => {
-      if (error instanceof AppError && error.code === "document_not_found") return;
-      throw error;
-    });
-    await getDb().delete(items).where(eq(items.id, receipt.reviewItemId));
   }
 
   const assigned = await getDb().select({ documentId: imapIngestionAttachments.assignedDocumentId }).from(imapIngestionAttachments).where(and(

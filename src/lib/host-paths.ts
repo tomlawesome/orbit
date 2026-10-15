@@ -1,5 +1,5 @@
 // The backup/restore shells (scripts/backup.sh and its siblings, #1211) run
-// the engine with the deployment, an outside backup or secrets directory,
+// the engine with the deployment, an outside backups directory,
 // and the bundle being read mounted at fixed container paths (build note
 // E5), and pass the host path each one stands for. A path the engine prints
 // is then one the operator can open on the host: "Orbit backup created:
@@ -9,7 +9,6 @@ export const HOST_PATH_MOUNTS: readonly (readonly [mount: string, variable: stri
   ["/orbit-input/bundle.tar", "ORBIT_HOST_INPUT_FILE"],
   ["/orbit-deploy", "ORBIT_HOST_DEPLOY_DIR"],
   ["/orbit-backups", "ORBIT_HOST_BACKUP_DIR"],
-  ["/orbit-secrets", "ORBIT_HOST_SECRETS_DIR"],
 ];
 
 function escapeRegExp(text: string): string {

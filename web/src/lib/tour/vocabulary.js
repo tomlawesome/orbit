@@ -36,7 +36,7 @@
  * rises, glows and presses.
  *
  * THE LIT ELEMENT IS NEVER CLASSED. Same rule veil.js states and for the
- * same reason — `emphasis.js`'s `.lit` already collides with `home.css:495`
+ * same reason — a `.lit` class already collides with `home.css:495`
  * and is zeroed outright at `create.css:221`. The lift is applied as inline
  * style and the element's own inline values are saved and put back exactly,
  * so the film leaves the product's DOM as it found it.

@@ -216,7 +216,7 @@ closed.
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-107 | Export and import a household with its documents, owner-only, previewed, atomic and audited | ORB-FUT-006; owner-decisions §21 | M14 | delivered | #1002, #1049, a0f4308d; #1290 (body limit sized to the archive cap) |
+| RM-107 | Export and import a household with its documents, owner-only (import narrowed to owners 2026-10-14, #1316), previewed, atomic and audited; while an import runs the household is closed to everyone but the importer (#1316, owner 2026-10-14) | ORB-FUT-006; owner-decisions §21 | M14 | delivered | #1002, #1049, a0f4308d; #1290 (body limit sized to the archive cap) |
 | RM-108 | A human-readable export and a per-document hash manifest | ORB-FUT-006 | unscheduled | not started | only the machine archive exists; no issue |
 
 ### Delivery and release
@@ -274,4 +274,3 @@ closed.
 
 - ORB-FUT-008 calls GitLab validation a contingency; it has been the primary path since #801. Needs removing from the register.
 - The charter's release acceptance cites GitHub issues; the work lives on GitLab.
-- `docs/engineering-baseline.md` evidence column dates from 2026-07 and is not a source for current status.

@@ -33,8 +33,8 @@ vi.mock("@/server/metadata/fields", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/server/metadata/fields")>();
   return {
     ...original,
-    /* Every address in this suite is plaintext (no backfill involved), so an
-       unlocked reader over no key is all a list read needs. */
+    /* A reader over no key is all a list read needs: this suite stores no
+       ciphertext, so there is nothing to decrypt. */
     openMetadataReader: async () => new original.MetadataCipher(undefined),
   };
 });

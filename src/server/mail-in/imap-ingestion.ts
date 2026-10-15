@@ -15,7 +15,7 @@ import { extractTextWithTika } from "@/server/documents/tika";
 import type { SupportedDocumentMediaType } from "@/server/documents/validation";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { reviewDraftMetadataFromProposal } from "@/server/reviewed-intake";
-import { requireReceiptMetadataWriter } from "@/server/metadata/fields";
+import { openInstanceMetadataReader, requireReceiptMetadataWriter } from "@/server/metadata/fields";
 import { classifyImapBodyStructure, IMAP_ATTACHMENT_LIMITS, type ImapAttachmentCandidate } from "./core/imap-attachment-validation";
 import {
   deriveImapRecipientAlias,
@@ -39,21 +39,21 @@ import {
   senderIsAuthenticated,
   type ParsedHeader,
 } from "./core/sender-authentication";
-import { userForVerifiedSender } from "./sender-addresses";
+import { verifiedSenderMatch } from "./sender-addresses";
 import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
+import { imapProviderConnectionOptions } from "./core/provider-options";
 import {
-  imapProviderConnectionOptions,
   imapProviderConfigCommitment,
   imapAttachmentRetryDelayMs,
   type ImapIngestionConfig,
 } from "./core/config";
 import { getImapIngestionConfig, MailInCredentialLockedError } from "./mailbox-config";
 
-// Re-exported so `@/server/imap-ingestion` (now a deprecated stub pointing
-// here) keeps every existing import path working churn-free.
+// Re-exported so importers of this module keep one import path.
 // `getImapIngestionConfig` is database-backed as of ADR-0017 slice 1
 // (orbit#742, src/server/mail-in/mailbox-config.ts) — no environment
-// fallback. The others are still the pure helpers in core/config.ts.
+// fallback. `imapProviderConnectionOptions` is in core/provider-options.ts;
+// the rest are the pure helpers in core/config.ts.
 export { getImapIngestionConfig, imapProviderConnectionOptions, imapProviderConfigCommitment, imapAttachmentRetryDelayMs, MailInCredentialLockedError };
 export type { ImapIngestionConfig };
 
@@ -200,12 +200,6 @@ export function matchesImapRecipientAlias(value: string, userId: string, config:
   return matchImapRecipientAliasGeneration(value, userId, config.aliasBase, { generation, secret: config.aliasCurrent.secret });
 }
 
-/** Reads one provider-injected recipient header without retaining raw mail headers. */
-export function trustedRecipientFromHeaders(headers: Buffer | undefined, headerName: string): string | undefined {
-  const result = parseTrustedRecipientHeader(headers, headerName);
-  return result.kind === "value" ? result.value : undefined;
-}
-
 type RecipientResolution = {
   userId?: string;
   generation?: number;
@@ -310,6 +304,8 @@ type SenderResolution = {
   headers?: ParsedHeader[];
   address?: string;
   userId?: string;
+  /** Orbit could not read the stored address a candidate member would match on. */
+  unreadable?: boolean;
   authenticated: boolean;
 };
 
@@ -328,8 +324,9 @@ async function senderResolution(headers: Buffer | undefined, config: ImapIngesti
   const address = senderAddressFromHeaders(parsed);
   if (!address) return { headers: parsed, authenticated: false };
   const authenticated = senderIsAuthenticated(parsed, senderDomainOf(address), config.trustedAuthservId ?? "");
-  const userId = await userForVerifiedSender(address);
-  return { headers: parsed, address, userId, authenticated };
+  const match = await verifiedSenderMatch(address);
+  if (match.state === "unreadable") return { headers: parsed, address, unreadable: true, authenticated };
+  return { headers: parsed, address, userId: match.state === "matched" ? match.userId : undefined, authenticated };
 }
 
 type ImapReceiptValues = {
@@ -351,16 +348,30 @@ type ImapReceiptValues = {
 
 async function recordImapReceipt(_config: ImapIngestionConfig, values: ImapReceiptValues) {
   return getDb().transaction(async (transaction) => {
-    const inserted = await transaction.insert(imapIngestionMessages).values(values).onConflictDoNothing().returning({ id: imapIngestionMessages.id, userId: imapIngestionMessages.userId, status: imapIngestionMessages.status });
-    if (inserted.length) return inserted;
-    return transaction.select({ id: imapIngestionMessages.id, userId: imapIngestionMessages.userId, status: imapIngestionMessages.status })
+    const inserted = await transaction.insert(imapIngestionMessages).values(values).onConflictDoNothing().returning(imapReceiptColumns);
+    if (inserted.length) return inserted.map((row) => ({ ...row, created: true }));
+    const existing = await transaction.select(imapReceiptColumns)
       .from(imapIngestionMessages)
       .where(and(
         eq(imapIngestionMessages.mailbox, values.mailbox),
         eq(imapIngestionMessages.mailboxUidValidity, values.mailboxUidValidity),
         eq(imapIngestionMessages.mailboxUid, values.mailboxUid),
       )).limit(1);
+    return existing.map((row) => ({ ...row, created: false }));
   });
+}
+
+const imapReceiptColumns = {
+  id: imapIngestionMessages.id,
+  userId: imapIngestionMessages.userId,
+  status: imapIngestionMessages.status,
+  failureCode: imapIngestionMessages.failureCode,
+  attempts: imapIngestionMessages.attachmentProcessingAttempts,
+};
+
+/** A receipt kept only because Orbit could not read the sender's registered address; see processMessage. */
+function isFaultHeld(receipt: { userId: string | null; status: string; failureCode: string | null }): boolean {
+  return receipt.status === "held" && receipt.userId === null && receipt.failureCode === "sender_unreadable";
 }
 
 export function safeAttachmentFailure(error: unknown): string {
@@ -724,8 +735,8 @@ const DRAFT_PROPOSAL_MAX_EXTRACTED_CHARACTERS = 250_000;
  * The text the receipt's draft proposal reads, from the first staged
  * attachment that yields any: this is a best-effort suggestion source, not
  * part of the attachment's own commit, so a parser failure here must never
- * fail the attachment it was reading (mirrors `document-drafts.ts` and
- * `item-document-inspection.ts`, the other two document paths' extraction).
+ * fail the attachment it was reading (mirrors `item-document-inspection.ts`,
+ * the other document path's extraction).
  */
 async function draftProposalTextFromAttachment(
   bytes: Buffer,
@@ -757,7 +768,7 @@ export function draftProposalTextForTests(bytes: Buffer, mediaType: SupportedDoc
 async function draftProposalColumns(
   source: { text: string; filename: string },
   receiptId: string,
-): Promise<{ proposal: Record<string, unknown>; proposalEnc: string; fieldEvidence: Record<string, unknown>; fieldEvidenceEnc: string } | undefined> {
+): Promise<{ proposalEnc: string; fieldEvidenceEnc: string } | undefined> {
   try {
     const heuristic = proposalFromText(source.text, source.filename);
     const adjudication = await adjudicateProposal({
@@ -772,9 +783,7 @@ async function draftProposalColumns(
     // `imap-inbox.ts` already reads an unattributed receipt.
     const cipher = await requireReceiptMetadataWriter(null);
     return {
-      proposal: {},
       proposalEnc: cipher.encryptJson("imap_ingestion_messages.proposal", receiptId, proposal),
-      fieldEvidence: {},
       fieldEvidenceEnc: cipher.encryptJson("imap_ingestion_messages.field_evidence", receiptId, fieldEvidence),
     };
   } catch {
@@ -879,6 +888,9 @@ async function processImapAttachments(
   }
 }
 
+/** So a key outage is logged once, not on every poll. */
+let ingestionKeyLockedLogged = false;
+
 /**
  * Polls the dedicated mailbox and records only an idempotent receipt. It does
  * not parse, retain, attach, create, or merge household data; later review
@@ -889,6 +901,14 @@ export async function runImapIngestionCycle(
   replyDependencies: UnattributedReplyDependencies = {},
 ): Promise<void> {
   if (!config.enabled) return;
+  /* Without the key no sender can be matched, and every message would read as
+     unattributed and be deleted. Leave the mailbox alone until it is back. */
+  if ((await openInstanceMetadataReader()).locked) {
+    if (!ingestionKeyLockedLogged) log.warn({ event: "imap.ingestion", state: "blocked", reason: "key_unavailable", action: "check_configuration", impact: "mail_receipt_delayed" });
+    ingestionKeyLockedLogged = true;
+    return;
+  }
+  ingestionKeyLockedLogged = false;
   await reconcileImapStagingObjects();
   await reconcileImapRecipientAliases(config);
   const client = createImapClient(config);
@@ -897,6 +917,7 @@ export async function runImapIngestionCycle(
      there is something to delete keeps the destructive action (ADR-0017
      decision 3, mail-in's first) to the messages that earned it. */
   const unattributedUids: number[] = [];
+  let unreadableLogged = false;
   try {
     await client.connect();
     const lock = await client.getMailboxLock(config.mailbox, { readOnly: true });
@@ -953,6 +974,18 @@ export async function runImapIngestionCycle(
         lastPendingUid = page.at(-1)?.uid;
         if (page.length < 100) break;
       }
+      // Messages held because a sender's registered address would not read;
+      // re-read each time one is due, so they are ingested once it reads again.
+      const faultHeldRows = await getDb().select({
+        uid: imapIngestionMessages.mailboxUid,
+      }).from(imapIngestionMessages).where(and(
+        eq(imapIngestionMessages.mailbox, config.mailbox),
+        eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
+        eq(imapIngestionMessages.status, "held"),
+        isNull(imapIngestionMessages.userId),
+        eq(imapIngestionMessages.failureCode, "sender_unreadable"),
+        or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, new Date())),
+      )).orderBy(asc(imapIngestionMessages.mailboxUid)).limit(25);
       /* Both header sets in one fetch: the provider's envelope recipient, and
          everything the sender rules read (ADR-0017 decision 3). A header
          nobody fetched reads exactly like a header nobody sent, so the list
@@ -978,6 +1011,36 @@ export async function runImapIngestionCycle(
         const oversized = !source || (message.size ?? 0) > IMAP_ATTACHMENT_LIMITS.rawMessageBytes || source.length > IMAP_ATTACHMENT_LIMITS.rawMessageBytes;
         const recipient = await userForRecipientAlias(message.headers, config);
         const sender = await senderResolution(message.headers, config);
+        const contentSha256 = oversized
+          ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
+          : createHash("sha256").update(source!).digest("hex");
+        const aliasSha256 = recipient.digest ?? createHash("sha256").update("").digest("hex");
+        /* A member's stored address that will not decrypt says nothing about
+           the sender: answer nothing and delete nothing, so the message stays
+           on the server. It is held under a receipt with no user, because the
+           cursor is max(uid) and an unrecorded UID would never be fetched
+           again; the fault-held pass re-reads it until the sender resolves. */
+        if (sender.unreadable) {
+          if (!unreadableLogged) log.warn({ event: "imap.ingestion", state: "degraded", reason: "metadata_integrity_failed", action: "inspect_admin_diagnostics", impact: "mail_receipt_delayed" });
+          unreadableLogged = true;
+          const [kept] = await recordImapReceipt(config, {
+            mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
+            contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
+            userId: null, householdId: null,
+            expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
+            status: "held", attributedBy: null, failureCode: "sender_unreadable", receiptStatus: "cancelled",
+            receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
+          });
+          // Still unreadable on a re-read: back off before the next try.
+          if (kept && !kept.created && isFaultHeld(kept)) {
+            await getDb().update(imapIngestionMessages).set({
+              attachmentProcessingAttempts: kept.attempts + 1,
+              attachmentProcessingNextAttemptAt: new Date(Date.now() + imapAttachmentRetryDelayMs(kept.attempts + 1)),
+              updatedAt: new Date(),
+            }).where(and(eq(imapIngestionMessages.id, kept.id), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)));
+          }
+          return;
+        }
         /* THE SENDER ATTRIBUTES, THE ALIAS CORROBORATES (ADR-0017 decision 3).
            Nothing is attributed on an alias alone any more: the alias is a
            capability whoever holds it can post with, so it can confirm an
@@ -995,14 +1058,8 @@ export async function runImapIngestionCycle(
            because the cursor is max(uid) — a UID nobody recorded would never
            be revisited, so skipping would lose the message outright. */
         const held = Boolean(userId) && await relayIngestIsPaused(userId!);
-        const contentSha256 = oversized
-          ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
-          : createHash("sha256").update(source!).digest("hex");
-        const aliasSha256 = recipient.digest ?? createHash("sha256").update("").digest("hex");
-        const [receipt] = await recordImapReceipt(config, {
-          mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
-          contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
-          userId: userId ?? null, householdId: null,
+        const outcome = {
+          userId: userId ?? null,
           expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
           status: oversized ? "failed" : held ? "held" : userId ? "processing" : "unattributed",
           attributedBy: userId ? attribution.attributedBy ?? null : null,
@@ -1013,8 +1070,27 @@ export async function runImapIngestionCycle(
           // telling them something arrived is the one thing they asked not to
           // happen.
           receiptStatus: userId && !oversized && !held ? "processing" : "cancelled",
+        } satisfies Partial<ImapReceiptValues>;
+        const [recorded] = await recordImapReceipt(config, {
+          mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
+          contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
+          householdId: null, ...outcome,
           receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
         });
+        let receipt: typeof recorded | undefined = recorded;
+        /* A message held because its sender would not read, re-read now that
+           it does: give the kept receipt the outcome a fresh one would get and
+           carry on down the ordinary path. */
+        if (receipt && !receipt.created && isFaultHeld(receipt)) {
+          const [resolved] = await getDb().update(imapIngestionMessages).set({
+            ...outcome,
+            attachmentProcessingAttempts: 0,
+            attachmentProcessingNextAttemptAt: null,
+            updatedAt: new Date(),
+          }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)))
+            .returning(imapReceiptColumns);
+          receipt = resolved ? { ...resolved, created: false } : undefined;
+        }
         if (receipt && userId !== (receipt.userId ?? undefined) && receipt.status === "processing") {
           await getDb().update(imapIngestionMessages).set({ status: "quarantined", receiptStatus: "cancelled", failureCode: "recipient_mismatch", attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: new Date() })
             .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "processing")));
@@ -1068,6 +1144,7 @@ export async function runImapIngestionCycle(
       };
       // Retries are fetched by exact UID in a bounded batch. A poison retry
       // therefore cannot force a mailbox-wide rescan or starve newer mail.
+      for (const kept of faultHeldRows) await fetchThenProcess(kept.uid);
       for (const retry of retryRows) await fetchThenProcess(retry.uid);
       // New mail is a separate bounded pass from the highest durable UID: one
       // cheap UID SEARCH, then a capped batch. The cap bounds work even when

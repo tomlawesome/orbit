@@ -14,7 +14,7 @@ match yet; those rows block the deletion until fixed.
 
 Test files named below, by directory:
 
-- `src/lib/`: `configure-engine.test.ts`, `configure-engine.retired-bash.test.ts`
+- `src/lib/`: `configure-engine.test.ts`, `configure-engine.characterisation.test.ts`
   (new: ports), `config-contract.parity.test.ts`,
   `configuration-migration.parity.test.ts`, `configuration-migration.port.test.ts`,
   `deploy-lock.test.ts`, `env-orbit-file.test.ts`
@@ -27,24 +27,24 @@ Test files named below, by directory:
 
 | bash test title | covered by |
 |---|---|
-| orders its headings as required | configure-engine.retired-bash.test.ts › orders its headings as required |
-| keeps the active-assignment surface to the bounded allowlist | configure-engine.retired-bash.test.ts › keeps the active-assignment surface to the bounded allowlist |
-| uses HTTPS for every ordinary production URL example | configure-engine.retired-bash.test.ts › uses HTTPS for every ordinary production URL example |
-| documents no IMAP_* key: inbound mail is configured on the administration screen (ADR-0017) | configure-engine.retired-bash.test.ts › documents no IMAP_* key: inbound mail is configured on the administration screen (ADR-0017) |
-| keeps the deprecated SMTP_URL compatibility form out of the active surface | configure-engine.retired-bash.test.ts › keeps the deprecated SMTP_URL compatibility form out of the active surface |
+| orders its headings as required | configure-engine.characterisation.test.ts › orders its headings as required |
+| keeps the active-assignment surface to the bounded allowlist | configure-engine.characterisation.test.ts › keeps the active-assignment surface to the bounded allowlist |
+| uses HTTPS for every ordinary production URL example | configure-engine.characterisation.test.ts › uses HTTPS for every ordinary production URL example |
+| documents no IMAP_* key: inbound mail is configured on the administration screen (ADR-0017) | configure-engine.characterisation.test.ts › documents no IMAP_* key: inbound mail is configured on the administration screen (ADR-0017) |
+| keeps the deprecated SMTP_URL compatibility form out of the active surface | retired: the `SMTP_URL` form itself was removed (#1403) |
 | honours ORBIT_SECRETS_DIR, writing generated secrets there instead of the default .orbit-secrets (#1151 SF2-F8) | retired: deliberate change, the engine always writes `.orbit-secrets` |
 | ignores a stale ambient ORBIT_IMAGE on an existing deployment without the installer's trust marker, printing what it ignored (#1151 O1-S4) | configure-engine.test.ts › an existing deployment keeps its pinned image unless the installer's trust marker says otherwise (configure.sh's persist_orbit_image rule) |
 | still seeds ORBIT_IMAGE from the environment on a brand-new deployment, even without the trust marker | orbit.configure.test.ts › persists a valid ORBIT_IMAGE from the environment |
-| creates a concise operator environment while leaving reference-only defaults in the example | configure-engine.retired-bash.test.ts › creates a concise operator environment while leaving reference-only defaults in the example |
-| persists the %s deployment profile atomically (4 presets) | configure-engine.retired-bash.test.ts › persists the %s deployment profile atomically |
-| leaves the environment unchanged when atomic profile staging fails | configure-engine.retired-bash.test.ts › leaves the environment unchanged when atomic profile staging fails |
+| creates a concise operator environment while leaving reference-only defaults in the example | configure-engine.characterisation.test.ts › creates a concise operator environment while leaving reference-only defaults in the example |
+| persists the %s deployment profile atomically (4 presets) | configure-engine.characterisation.test.ts › persists the %s deployment profile atomically |
+| leaves the environment unchanged when atomic profile staging fails | configure-engine.characterisation.test.ts › leaves the environment unchanged when atomic profile staging fails |
 | rejects missing or hostile local-model identifiers without mutation or disclosure | orbit.configure.test.ts › rejects missing or hostile local-model identifiers without mutation or disclosure |
-| updates an existing active ORBIT_IMAGE assignment atomically | configure-engine.retired-bash.test.ts › updates an existing active ORBIT_IMAGE assignment atomically |
-| appends ORBIT_IMAGE when no active assignment exists | configure-engine.retired-bash.test.ts › appends ORBIT_IMAGE when no active assignment exists |
+| updates an existing active ORBIT_IMAGE assignment atomically | configure-engine.characterisation.test.ts › updates an existing active ORBIT_IMAGE assignment atomically |
+| appends ORBIT_IMAGE when no active assignment exists | configure-engine.characterisation.test.ts › appends ORBIT_IMAGE when no active assignment exists |
 | collapses duplicate active ORBIT_IMAGE assignments into one | configure-engine.test.ts › guarantee #7: collapses duplicate active assignments into one, at the first occurrence |
-| preserves unrelated comments and operator values byte-for-byte | configure-engine.retired-bash.test.ts › preserves unrelated comments and operator values byte-for-byte |
-| preserves an existing file's final newline state around managed updates | configure-engine.retired-bash.test.ts › preserves an existing file's final newline state around managed updates |
-| places the canonical OIDC client secret file key in the authentication section | configure-engine.retired-bash.test.ts › places the canonical OIDC client secret file key in the authentication section |
+| preserves unrelated comments and operator values byte-for-byte | configure-engine.characterisation.test.ts › preserves unrelated comments and operator values byte-for-byte |
+| preserves an existing file's final newline state around managed updates | configure-engine.characterisation.test.ts › preserves an existing file's final newline state around managed updates |
+| places the canonical OIDC client secret file key in the authentication section | configure-engine.characterisation.test.ts › places the canonical OIDC client secret file key in the authentication section |
 | keeps .env-orbit restricted to owner-only permissions | configure-engine.test.ts › guarantee #5: forces an existing regular file's permissions to 600 |
 | never discloses configured values in --check mode, only fixed categories and names | orbit.check.test.ts › never discloses configured values, only fixed categories and names |
 | does not treat example placeholders as configured when the real environment file is absent | config-contract.parity.test.ts › no .env-orbit reports every field missing, as bash did |
@@ -64,7 +64,7 @@ Test files named below, by directory:
 | rejects an unrecognised argument with a concise usage message | configure-engine-delegation.test.mjs › usage errors are exit 2 and never reach docker; orbit.configure.test.ts › exits 2 with a usage message for an unrecognised flag |
 | creates a zero-byte, mode-0600 OIDC client secret placeholder when absent | configure-engine.test.ts › guarantee #19: creates a zero-byte, mode-0600 placeholder when absent |
 | preserves a valid direct OIDC client secret without creating a conflicting file form | configure-engine.test.ts › guarantee #18: does not create a placeholder when a direct OIDC_CLIENT_SECRET is already active alone |
-| preserves an existing OIDC client secret file byte-for-byte on an ordinary run | configure-engine.retired-bash.test.ts › preserves an existing OIDC client secret file byte-for-byte on an ordinary run |
+| preserves an existing OIDC client secret file byte-for-byte on an ordinary run | configure-engine.characterisation.test.ts › preserves an existing OIDC client secret file byte-for-byte on an ordinary run |
 | rejects a symlinked OIDC client secret file on an ordinary run | configure-engine.test.ts › guarantee #19: refuses a symlinked placeholder path |
 | --check-rollback › passes on a good rollback copy and resolves .orbit-secrets from the real installation directory (file-backed OIDC secret) | orbit.check.test.ts › passes on a good rollback copy and resolves .orbit-secrets from the real installation directory (file-backed OIDC secret) |
 | --check-rollback › fails cleanly, non-zero, without inventing a result, when the rollback copy is missing | config-contract.parity.test.ts › --rollback with no rollback copy reports every field missing, as --check-rollback did |
@@ -77,11 +77,11 @@ Test files named below, by directory:
 | --set-oidc-secret › rejects empty standard input without creating an environment file or secret | orbit.configure.test.ts › --set-oidc-secret rejects an empty line on standard input without creating an environment file or secret |
 | --set-oidc-secret › rejects EOF without a newline instead of accepting a partial secret | open: the engine accepts the partial line (`readSyncLine` in src/cli/orbit.ts returns it at end of input) and saves it; bash refused |
 | --set-oidc-secret › rejects a secret larger than the 65,536-byte bound | configure-engine.test.ts › guarantee #22: refuses a secret exceeding the maximum byte size |
-| --set-oidc-secret › applies the 65,536-byte bound to multibyte input rather than character count | configure-engine.retired-bash.test.ts › applies the 65,536-byte bound to multibyte input rather than character count |
+| --set-oidc-secret › applies the 65,536-byte bound to multibyte input rather than character count | configure-engine.characterisation.test.ts › applies the 65,536-byte bound to multibyte input rather than character count |
 | --set-oidc-secret › keeps CRLF line endings on rewritten managed keys, not just on untouched lines | open: the engine's `updateManagedKeys` writes rewritten and inserted lines with LF only, so a CRLF file ends up with mixed endings; bash kept each line's CR |
-| --set-oidc-secret › leaves an LF file entirely LF, gaining no stray carriage returns | configure-engine.retired-bash.test.ts › leaves an LF file entirely LF, gaining no stray carriage returns |
-| --set-oidc-secret › converges byte-identically when --set-oidc-secret runs twice with the same secret | configure-engine.retired-bash.test.ts › converges byte-identically when --set-oidc-secret runs twice with the same secret |
-| --set-oidc-secret › replaces an existing OIDC client secret file and leaves no staging leftovers | configure-engine.retired-bash.test.ts › replaces an existing OIDC client secret file and leaves no staging leftovers |
+| --set-oidc-secret › leaves an LF file entirely LF, gaining no stray carriage returns | configure-engine.characterisation.test.ts › leaves an LF file entirely LF, gaining no stray carriage returns |
+| --set-oidc-secret › converges byte-identically when --set-oidc-secret runs twice with the same secret | configure-engine.characterisation.test.ts › converges byte-identically when --set-oidc-secret runs twice with the same secret |
+| --set-oidc-secret › replaces an existing OIDC client secret file and leaves no staging leftovers | configure-engine.characterisation.test.ts › replaces an existing OIDC client secret file and leaves no staging leftovers |
 | --init › derives and atomically writes all four values from a complete environment set without printing them | orbit.configure.test.ts › --init derives and atomically writes all four values and ORBIT_AUTH_OIDC=true from a complete environment set without printing them |
 | --init › derives and atomically writes ORBIT_AUTH_OIDC=true alongside a complete environment set (ADR-0023 section 1) | orbit.configure.test.ts › --init derives and atomically writes all four values and ORBIT_AUTH_OIDC=true from a complete environment set without printing them |
 | --init › ORBIT_CONFIGURE_AUTH_MODE=local writes only APP_URL and ORBIT_AUTH_OIDC=false, never the OIDC trio | orbit.configure.test.ts › --init with ORBIT_CONFIGURE_AUTH_MODE=local writes only APP_URL and ORBIT_AUTH_OIDC=false, never the OIDC trio |
@@ -93,16 +93,16 @@ Test files named below, by directory:
 | --init › refuses a partial non-interactive environment input set without mutating the file | orbit.configure.test.ts › refuses a partial ORBIT_CONFIGURE_* triad rather than blending in a missing field |
 | --init › refuses non-TTY guided mode when no complete environment input set is supplied | orbit.configure.test.ts › refuses (no crash, no partial write) with no answers, no machine prompts and no terminal; configure-engine-delegation.test.mjs › --init without a terminal or answers does not ask for one and the engine refuses |
 | --init › uses the controlling terminal when stdin is occupied by the installer script | configure-sh-terminal.test.ts › uses the controlling terminal when stdin is occupied by the installer script (the bash line-editing keys it also typed are retired with installer-ui.sh's widget) |
-| --init › refuses an invalid APP_URL %s (%s) without mutation (10 cases) | configure-engine.retired-bash.test.ts › refuses an invalid APP_URL %s (%s) without mutation |
-| --init › refuses an invalid OIDC_ISSUER %s (%s) without mutation (8 cases) | configure-engine.retired-bash.test.ts › refuses an invalid OIDC_ISSUER %s (%s) without mutation |
-| --init › collapses duplicate managed keys during a guided write while preserving unrelated lines byte-for-byte | configure-engine.retired-bash.test.ts › collapses duplicate managed keys during a guided write while preserving unrelated lines byte-for-byte |
-| --init › removes the guided atomic update file when securing it fails, leaving the original unchanged | configure-engine.retired-bash.test.ts › removes the guided atomic update file when securing it fails, leaving the original unchanged |
-| leaves no temporary files behind after success or a later failure | configure-engine.retired-bash.test.ts › leaves no temporary files behind after success or a later failure |
-| removes the atomic update file when securing it fails | configure-engine.retired-bash.test.ts › removes the atomic update file when securing it fails |
+| --init › refuses an invalid APP_URL %s (%s) without mutation (10 cases) | configure-engine.characterisation.test.ts › refuses an invalid APP_URL %s (%s) without mutation |
+| --init › refuses an invalid OIDC_ISSUER %s (%s) without mutation (8 cases) | configure-engine.characterisation.test.ts › refuses an invalid OIDC_ISSUER %s (%s) without mutation |
+| --init › collapses duplicate managed keys during a guided write while preserving unrelated lines byte-for-byte | configure-engine.characterisation.test.ts › collapses duplicate managed keys during a guided write while preserving unrelated lines byte-for-byte |
+| --init › removes the guided atomic update file when securing it fails, leaving the original unchanged | configure-engine.characterisation.test.ts › removes the guided atomic update file when securing it fails, leaving the original unchanged |
+| leaves no temporary files behind after success or a later failure | configure-engine.characterisation.test.ts › leaves no temporary files behind after success or a later failure |
+| removes the atomic update file when securing it fails | configure-engine.characterisation.test.ts › removes the atomic update file when securing it fails |
 | refuses to regenerate a missing document-kek on an existing deployment instead of silently replacing it | configure-engine.test.ts › O1-S1: refuses rather than regenerating a document KEK lost from an existing deployment; configure-engine.test.ts › O1-S1: refuses rather than regenerates a missing secret on an existing deployment (isFreshInstall=false) |
 | generates all three secrets on the install shape: --init writes .env-orbit, then a bare run in a second process | configure-engine.test.ts › RANGE-F1: generates all three secrets on the install shape (guided init wrote .env-orbit first) |
 | still generates secrets normally on a genuinely fresh install (neither .env-orbit nor .orbit-secrets existed before this run) | orbit.configure.test.ts › creates .env-orbit and .orbit-secrets, generating the three secrets and the VAPID pair |
-| refuses for postgres-password and generates nothing when only session-secret already exists | configure-engine.retired-bash.test.ts › refuses for postgres-password and generates nothing when only session-secret already exists |
+| refuses for postgres-password and generates nothing when only session-secret already exists | configure-engine.characterisation.test.ts › refuses for postgres-password and generates nothing when only session-secret already exists |
 | refuses to replace a missing OIDC client secret file with an empty placeholder when OIDC_CLIENT_SECRET_FILE is already configured | configure-engine.test.ts › O1-S5: refuses rather than writing an empty placeholder when OIDC_CLIENT_SECRET_FILE is already configured and the file is missing |
 | refuses a write while another run's deploy lock is held | configure-engine.test.ts › O1-R8: refuses when another writer already holds the deployment lock; deploy-lock.test.ts › refuses with the caller's own error while a fresh lock is held |
 | reclaims a stale deploy lock left by a crashed run instead of blocking forever | configure-engine.test.ts › O1-R8: a stale lock (older than the staleness window) is taken over rather than blocking forever; deploy-lock.test.ts › reclaims a lock older than the staleness window |

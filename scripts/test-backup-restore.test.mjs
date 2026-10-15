@@ -554,7 +554,7 @@ describe("scripts/test-backup-restore.sh teardown removes a stack it owns (#1273
     expect(result.status).toBe(status);
     expect(result.stderr.match(/teardown: starting/g)).toHaveLength(1);
     expect(calls).toContain("docker compose --env-file .env-orbit down --volumes --remove-orphans");
-    expect(calls).toContain("docker rm -f orbit-backup-drill-registry");
+    expect(calls).toContain("docker rm -f -v orbit-backup-drill-registry");
     expect(calls).toContain(`docker ps -aq --filter ${label}`);
     expect(calls).toContain(`docker volume ls -q --filter ${label}`);
     expect(calls).toContain(`docker network ls -q --filter ${label}`);
@@ -599,7 +599,7 @@ async function prepareDrill(mode) {
   const dir = makeFixture();
   const binDir = join(dir, "bin");
   mkdirSync(binDir);
-  const secrets = join(dir, "secrets");
+  const secrets = join(dir, ".orbit-secrets");
   mkdirSync(secrets);
   writeFileSync(join(secrets, "document-kek"), "kek\n");
   const envFile = join(dir, ".env-orbit");
@@ -643,7 +643,6 @@ exit 0
       ...process.env,
       PATH: `${binDir}:${process.env.PATH}`,
       ORBIT_ENV_FILE: envFile,
-      ORBIT_SECRETS_DIR: secrets,
       ORBIT_BACKUP_DIR: join(dir, "backups"),
       ORBIT_EVIDENCE_ROOT: join(dir, "evidence"),
       TMPDIR: dir,
@@ -779,7 +778,7 @@ describe("scripts/test-backup-restore.sh --own-stack wiring (#1273)", () => {
     const log = readLines(calls);
     expect(log.some((c) => c.startsWith("build "))).toBe(true);
     // Once at the start, once in teardown.
-    expect(log.filter((c) => c === "rm -f orbit-backup-drill-registry")).toHaveLength(2);
+    expect(log.filter((c) => c === "rm -f -v orbit-backup-drill-registry")).toHaveLength(2);
     expect(log).toContain("ps -aq --filter label=com.docker.compose.project=orbit-backup-drill");
     expect(log).toContain("volume ls -q --filter label=com.docker.compose.project=orbit-backup-drill");
     expect(log).toContain("network ls -q --filter label=com.docker.compose.project=orbit-backup-drill");

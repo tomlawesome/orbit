@@ -3,12 +3,14 @@
 # Decides whether the exact hostile-document processor check has to run for
 # this commit. It is minutes of a live Tika stack, so it is skipped when
 # nothing it covers moved -- the processor configuration, the compose file,
-# the document code paths, the test itself, or the workflow that runs it.
+# the document code paths, the test itself (test-tika-processor.mjs and the
+# confinement assertions in verify-tika-processor.sh), this gate and
+# .gitlab-ci.yml, which runs both. A change to any of those must trigger the
+# check, or weakening it merges unverified.
 # Unable to compare (no parent commit) means required, never skipped.
 #
 # Extracted verbatim from the "Detect exact processor validation scope" step
-# of the &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# of the retired GitHub container workflow, which the GitLab `acceptance` job now runs (#801).
 #
 # Inputs: the Git checkout. Outputs `required=true|false` on standard output,
 # and appends the same line to $GITHUB_OUTPUT when that variable is set.
@@ -22,11 +24,12 @@ if git rev-parse --verify HEAD^ >/dev/null 2>&1 &&
    git diff --quiet HEAD^ HEAD -- \
      config/tika-config.json \
      docker-compose.yml \
-     src/server/document-drafts.ts \
      src/server/documents \
      src/server/item-document-inspection.ts \
      scripts/test-tika-processor.mjs \
-     .github/workflows/publish-container.yml; then
+     scripts/ci/verify-tika-processor.sh \
+     scripts/ci/detect-processor-scope.sh \
+     .gitlab-ci.yml; then
   required=false
 else
   required=true

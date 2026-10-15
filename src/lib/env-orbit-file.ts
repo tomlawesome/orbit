@@ -11,7 +11,6 @@ export const ENV_ORBIT_SCHEMA_VERSION = 1;
 export type EnvOrbitFailureCode =
   | "configuration_syntax"
   | "configuration_unknown_key"
-  | "configuration_removed_key"
   | "configuration_project"
   | "configuration_version"
   | "configuration_provenance"
@@ -19,42 +18,9 @@ export type EnvOrbitFailureCode =
 
 export type ParseEnvOrbitResult =
   | { ok: true; record: EnvOrbitRecord; schemaPresent: boolean }
-  // key: the offending setting, for a removed, unknown or secret-conflict
+  // key: the offending setting, for an unknown or secret-conflict
   // refusal, so the operator can be told which line to fix.
   | { ok: false; code: EnvOrbitFailureCode; key?: string };
-
-// Mirrors scripts/configuration.sh's `removed_keys` (SQ1-Q1): keys this
-// project used to accept and now refuses with a dedicated
-// configuration_removed_key code, rather than the generic
-// configuration_unknown_key an operator would otherwise get.
-const REMOVED_KEYS: readonly string[] = [
-  "IMAP_ENABLED",
-  "IMAP_HOST",
-  "IMAP_PORT",
-  "IMAP_USER",
-  "IMAP_PASSWORD",
-  "IMAP_PASSWORD_FILE",
-  "IMAP_MAILBOX",
-  "IMAP_TLS_SERVER_NAME",
-  "IMAP_RECIPIENT_DOMAIN",
-  "IMAP_TRUSTED_RECIPIENT_HEADER",
-  "IMAP_POLL_SECONDS",
-  "IMAP_ALIAS_CURRENT_GENERATION",
-  "IMAP_ALIAS_CURRENT_SECRET",
-  "IMAP_ALIAS_CURRENT_SECRET_FILE",
-  "IMAP_ALIAS_PREVIOUS_GENERATION",
-  "IMAP_ALIAS_PREVIOUS_SECRET",
-  "IMAP_ALIAS_PREVIOUS_SECRET_FILE",
-  "IMAP_ALIAS_PREVIOUS_EXPIRES_AT",
-  "IMAP_ALIAS_GENERATION",
-  "IMAP_ALIAS_CURRENT_KEY",
-  "IMAP_ALIAS_CURRENT_KEY_FILE",
-  "IMAP_ALIAS_SECRET",
-  "IMAP_ALIAS_SECRET_FILE",
-  "IMAP_ALIAS_PREVIOUS_KEY",
-  "IMAP_ALIAS_PREVIOUS_KEY_FILE",
-  "IMAP_ALIAS_PREVIOUS_EXPIRY",
-];
 
 // Strict UTF-8 decode: undefined on any malformed byte sequence. A lossy
 // decode would turn a stray byte into U+FFFD, and rewriting the file from that
@@ -124,7 +90,6 @@ const SECRET_FILE_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ["VAPID_PRIVATE_KEY", "VAPID_PRIVATE_KEY_FILE"],
   ["SMTP_PASSWORD", "SMTP_PASSWORD_FILE"],
   ["DATABASE_URL", "DATABASE_URL_FILE"],
-  ["SMTP_URL", "SMTP_URL_FILE"],
 ];
 
 export interface ParseEnvOrbitOptions {
@@ -156,13 +121,7 @@ export function parseEnvOrbitContent(content: string, options: ParseEnvOrbitOpti
     seen.add(key);
     assignmentCount += 1;
     if (!(ALLOWED_KEYS as readonly string[]).includes(key)) {
-      return {
-        ok: false,
-        code: REMOVED_KEYS.includes(key)
-          ? "configuration_removed_key"
-          : "configuration_unknown_key",
-        key,
-      };
+      return { ok: false, code: "configuration_unknown_key", key };
     }
     if (!isValidValue(value)) return { ok: false, code: "configuration_syntax" };
     switch (key) {

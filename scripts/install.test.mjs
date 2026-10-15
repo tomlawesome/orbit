@@ -81,7 +81,7 @@ writeFileSync(
   JSON.stringify(
     {
       schema: "https://tomlawson.io/schemas/orbit-release-manifest/v1",
-      version: "1.2.0",
+      version: "v1.2.0",
       channel: "preview",
       commit: revision,
       image: { repository: imageRepository, digest: `sha256:${digest}` },
@@ -1036,7 +1036,7 @@ describe("install.sh release manifest (ADR-0031 #7)", () => {
     mkdirSync(assetsDir, { recursive: true });
     const manifest = {
       schema: "https://tomlawson.io/schemas/orbit-release-manifest/v1",
-      version: "1.2.0",
+      version: "v1.2.0",
       channel: "latest",
       commit: revision,
       image: { repository: imageRepository, digest: `sha256:${digest}` },
@@ -1095,7 +1095,7 @@ describe("install.sh release manifest (ADR-0031 #7)", () => {
   });
 
   it("refuses a validly signed manifest for another version than the pinned channel", () => {
-    const result = runInstall(makeTarget(), selfFetch({ ORBIT_CHANNEL: "v1.2.0" }, { version: "1.0.0" }, ["releases", "download", "v1.2.0"]));
+    const result = runInstall(makeTarget(), selfFetch({ ORBIT_CHANNEL: "v1.2.0" }, { version: "v1.0.0" }, ["releases", "download", "v1.2.0"]));
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Asked for v1.2.0 but the signed release manifest is for v1.0.0");
     expect(result.calls).not.toContain("docker pull");

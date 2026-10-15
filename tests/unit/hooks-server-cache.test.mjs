@@ -71,7 +71,7 @@ describe("hooks.server handle: cache-control on gated screens (#1264)", () => {
     mocks.readEffectiveMaintenance.mockResolvedValue({ effectivelyActive: false, expectedEndAt: null });
   });
 
-  it.each(["/home", "/settings", "/item/[itemId]", "/administration", "/household"])(
+  it.each(["/home", "/settings", "/inbox", "/administration", "/household"])(
     "sends no-store on the gated screen %s",
     async (routeId) => {
       const { response, resolve } = await handleRoute(routeId);

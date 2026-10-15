@@ -6,8 +6,8 @@
  * chapter 1 sets out: `{ id, name, play }`, the vocabulary's words only, no
  * pixel coordinate.
  *
- * THE COPY IS ALREADY RATIFIED. The real, non-cinematic tour
- * (web/src/lib/tour/stops.js) already has a stop with `id: "relay"` carrying
+ * THE COPY IS ALREADY RATIFIED. The real, non-cinematic tour this film
+ * replaced had a stop with `id: "relay"` carrying
  * these exact two lines, pointed at `route: "/settings/mail"` and
  * `target: ".relay-card"` — so this chapter reuses that ratified route and
  * selector rather than inventing its own; the design decision was already
@@ -61,7 +61,7 @@
 export const SELECTORS = Object.freeze({
   DESK: Object.freeze({
     /** The relay card — the same target the ratified walk already points at
-     *  for this exact copy (stops.js's own "relay" stop). */
+     *  for this exact copy (its own "relay" stop). */
     card: ".relay-card",
   }),
   POCKET: Object.freeze({

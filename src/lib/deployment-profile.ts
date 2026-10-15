@@ -109,11 +109,11 @@ export interface UpdateTarget {
 
 /** show_update_identity: what is deployed now and what this update installs, from recorded values only. */
 export function updateIdentityLines(targetDir: string, existingProfile: DeploymentProfile, target: UpdateTarget): string[] {
-  const schema = readEnvironmentValue(targetDir, "ORBIT_CONFIG_SCHEMA_VERSION") === "1" ? "v1" : "legacy/unknown";
+  const schema = readEnvironmentValue(targetDir, "ORBIT_CONFIG_SCHEMA_VERSION") === "1" ? "v1" : "none";
   const appliedVersion = readEnvironmentValue(targetDir, "ORBIT_CONFIG_APPLIED_VERSION") ?? "";
-  const version = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(appliedVersion) ? appliedVersion : "legacy/unknown";
+  const version = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(appliedVersion) ? appliedVersion : "none";
   const appliedDigest = readEnvironmentValue(targetDir, "ORBIT_CONFIG_APPLIED_DIGEST") ?? "";
-  let digest = "legacy/unknown";
+  let digest = "none";
   if (/^sha256:[0-9a-f]{64}$/.test(appliedDigest)) {
     digest = appliedDigest;
   } else {

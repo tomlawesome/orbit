@@ -1,19 +1,18 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, ne, or, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { auditLog, externalIdentities, instanceAuthority, userPreferences, users } from "@/db/schema";
 import { getDb } from "@/db";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY, INSTANCE_BOOTSTRAP_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { AuthError } from "@/lib/auth/errors";
 import type { VerifiedIdentity } from "@/lib/auth/oidc";
-import { MetadataCipher, openInstanceMetadataCipher } from "@/server/metadata/fields";
+import { MetadataCipher, requireInstanceMetadataWriter } from "@/server/metadata/fields";
 
 export interface ProvisionedUser {
   id: string;
   /**
-   * Null when the instance has no usable encryption key, so the stored address
-   * cannot be read (#969). Never an empty string: "we cannot read it" and "it
-   * is blank" are different facts and the caller must be able to tell them
-   * apart.
+   * Null when the stored address will not authenticate (#969). Never an empty
+   * string: "we cannot read it" and "it is blank" are different facts and the
+   * caller must be able to tell them apart.
    */
   email: string | null;
   emailVerified: boolean;
@@ -91,26 +90,15 @@ export function resolveRefreshedEmail(
 }
 
 /**
- * The refusal when a path that must WRITE an address meets an instance with no
- * usable encryption key (#969). Registering an identity and claiming the
- * instance both write the first address, so both need the key; signing an
- * already-known identity in does not, and deliberately still works.
- *
- * Distinct from every other refusal here on purpose: an operator who has lost
- * the key must be told that, not told their provider was rejected.
- */
-const INSTANCE_LOCKED_REFUSAL = "This Orbit instance cannot be set up until its encryption key is available";
-
-/**
- * The dual read for an account address: an encrypted row is decrypted, a row
- * the backfill has not reached is read from its plaintext column, and a locked
- * or damaged value reads as null rather than as an empty address (#969).
+ * An account address is read from its encrypted column only (#1403 Q3). A row
+ * with no usable ciphertext, or a damaged one, reads as null rather than as an
+ * empty address (#969).
  */
 function readEmail(
   cipher: MetadataCipher,
-  row: { id: string; email: string | null; emailEnc: string | null },
+  row: { id: string; emailEnc: string | null },
 ): string | null {
-  return cipher.text("users.email", row.id, { encrypted: row.emailEnc, plaintext: row.email }).value;
+  return cipher.text("users.email", row.id, { encrypted: row.emailEnc }).value;
 }
 
 const refusals = {
@@ -146,7 +134,6 @@ export async function provisionIdentity(
     const [existing] = await transaction
       .select({
         id: users.id,
-        email: users.email,
         emailEnc: users.emailEnc,
         emailVerified: users.emailVerified,
         displayName: users.displayName,
@@ -166,11 +153,9 @@ export async function provisionIdentity(
        instance-wide lock. Reading them UNDER the bootstrap lock is what makes
        the race safe: N racing claimants queue here, and every one after the
        winner sees the authority row the winner wrote. */
-    /* One instance-scope cipher for the whole transaction. It is locked, not
-       refused, when there is no usable key: signing a known identity in must
-       still work without one, and the paths that must WRITE an address refuse
-       explicitly below rather than failing here (#969). */
-    const cipher = await openInstanceMetadataCipher(transaction);
+    /* One instance-scope cipher for the whole transaction. Strict: an instance
+       with no usable key is in maintenance and nobody signs in (#1405). */
+    const cipher = await requireInstanceMetadataWriter(transaction);
 
     const identityKnown = Boolean(existing);
     let claimed = false;
@@ -208,21 +193,14 @@ export async function provisionIdentity(
       }
       const incomingTakenByAnother = (await ownerOfEmail(transaction, cipher, identity.email, existing.id)) !== undefined;
 
-      /* An identity Orbit already knows signs in on issuer and subject alone,
-         which never touch the address (#969). So a locked instance must not
-         block this: the refresh of the stored address is skipped and the row's
-         existing ciphertext is left exactly as it stands, while the name and
-         picture — neither encrypted — refresh as usual. Writing here instead
-         would clear a plaintext address it could not replace. */
       const refreshed = resolveRefreshedEmail(
-        cipher.locked ? null : readEmail(cipher, existing),
+        readEmail(cipher, existing),
         identity.email,
         incomingTakenByAnother,
       );
-      const addressColumns = cipher.locked || refreshed === null
+      const addressColumns = refreshed === null
         ? {}
         : {
-          email: null,
           emailEnc: cipher.encryptText("users.email", existing.id, refreshed),
           emailIndex: cipher.emailIndex(refreshed),
         };
@@ -239,7 +217,6 @@ export async function provisionIdentity(
         .where(eq(users.id, existing.id))
         .returning({
           id: users.id,
-          email: users.email,
           emailEnc: users.emailEnc,
           emailVerified: users.emailVerified,
           displayName: users.displayName,
@@ -258,15 +235,6 @@ export async function provisionIdentity(
 
     const claiming = decision.kind === "claim";
 
-    /* Registering writes the account's first address, so unlike signing in it
-       genuinely cannot proceed without the key (#969). Refused in its own
-       words: an operator whose key is missing must not be told their identity
-       provider was rejected. Claiming is the same case and the louder one —
-       it is the first thing a new instance does. */
-    if (cipher.locked) {
-      throw new AuthError("instance_locked", INSTANCE_LOCKED_REFUSAL, 503);
-    }
-
     /* The id is minted here rather than by the database, because the address
        is bound to its own row id by the envelope's AAD: the ciphertext cannot
        be written before the id it belongs to is known. */
@@ -275,7 +243,6 @@ export async function provisionIdentity(
       .insert(users)
       .values({
         id: userId,
-        email: null,
         emailEnc: cipher.encryptText("users.email", userId, identity.email),
         emailIndex: cipher.emailIndex(identity.email),
         emailVerified: identity.emailVerified,
@@ -285,7 +252,6 @@ export async function provisionIdentity(
       })
       .returning({
         id: users.id,
-        email: users.email,
         emailEnc: users.emailEnc,
         emailVerified: users.emailVerified,
         displayName: users.displayName,
@@ -325,14 +291,9 @@ type ProvisioningTransaction = Parameters<Parameters<ReturnType<typeof getDb>["t
 /**
  * The id of the user holding this email, ignoring case and one excluded id.
  *
- * Two matches, not one (#969): the blind index finds an encrypted row, and the
- * case-insensitive plaintext comparison finds a row the backfill has not
- * reached yet. Both stand for the length of the expand release, and a row is
- * only ever in one of the two states, so this cannot double-count.
- *
- * A locked instance can produce no index, so only the plaintext half runs. That
- * is not a hole: the only path that reaches here without a key is one that is
- * about to be refused anyway.
+ * Matched through the blind index only (#1403 Q3); it folds case when it is
+ * computed. A cipher that cannot produce an index (locked) matches nothing,
+ * and `requireInstanceMetadataWriter` has already refused that case.
  */
 async function ownerOfEmail(
   transaction: ProvisioningTransaction,
@@ -340,11 +301,9 @@ async function ownerOfEmail(
   email: string,
   exceptUserId?: string,
 ): Promise<string | undefined> {
-  const plaintextMatch = sql`lower(${users.email}) = lower(${email})`;
-  const index = cipher.locked ? null : cipher.emailIndex(email);
-  const matchesEmail = index === null
-    ? plaintextMatch
-    : or(eq(users.emailIndex, index), plaintextMatch);
+  const index = cipher.emailIndex(email);
+  if (index === null) return undefined;
+  const matchesEmail = eq(users.emailIndex, index);
   const [row] = await transaction
     .select({ id: users.id })
     .from(users)

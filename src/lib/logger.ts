@@ -96,12 +96,10 @@ export const operationalReasons = [
   "not_configured",
   "disabled",
   "invalid_event",
-  /* Startup refusals that a restart cannot fix (#437). Named separately from
+  /* A startup refusal that a restart cannot fix (#437). Named separately from
      the generic migration_integrity so an operator - and repair.sh - can tell
-     "this database belongs to a different build" from "this database is older
-     than we support", which have different remedies. */
+     "this database belongs to a different build" from a general failure. */
   "database_mismatch",
-  "database_below_floor",
   /* The claim (ADR-0022, ADR-0023 §8). `bootstrap_unclaimed` is the state an
      instance boots into before anyone has claimed it; `bootstrap_rejected` is
      a claim attempt that did not match. Neither record ever carries the code
@@ -173,10 +171,9 @@ export const operationalActions = [
   "restore_backup",
   "run_recovery",
   "contact_operator",
-  /* Neither of these is "restart": both sides of the disagreement survive a
-     restart, so restarting loops forever (#437). */
+  /* Not "restart": both sides of the disagreement survive a restart, so
+     restarting loops forever (#437). */
   "attach_matching_database",
-  "upgrade_from_supported_version",
 ] as const;
 export type OperationalAction = typeof operationalActions[number];
 
@@ -200,6 +197,9 @@ export const operationalImpacts = [
   "worker_degraded",
   /* One field is unreadable, not the row and not the application. */
   "metadata_field_unreadable",
+  /* A member's sending address must be checked again before their forwarded
+     mail is attributed to them. */
+  "sender_check_required",
 ] as const;
 export type OperationalImpact = typeof operationalImpacts[number];
 
@@ -261,6 +261,8 @@ export const operationalEvents = {
   "document.model_extraction": "document",
   "imap.ingestion": "ingestion",
   "imap.receipt": "mail",
+  /* A member's stored sending address (the mail relay's sender check). */
+  "mail-relay.sender": "mail",
   "delivery.smtp": "delivery",
   "delivery.push": "delivery",
   "backup.operation": "backup",
@@ -268,9 +270,8 @@ export const operationalEvents = {
   "maintenance.worker": "maintenance",
   "configuration.problem": "configuration",
   /* Tier 1 metadata encryption (ADR-0024): a value that failed its integrity
-     check, and the resumable backfill that converts pre-encryption rows. */
+     check. */
   "metadata.integrity": "metadata",
-  "metadata.backfill": "metadata",
   /* The document KEK rewrap worker (#932, ADR-0017): reports beside
      "document.job" rather than reusing it, because this is a whole rotation's
      outcome across all three key populations, not one job's. */

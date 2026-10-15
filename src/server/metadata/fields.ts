@@ -1,15 +1,12 @@
 /**
  * The one place encrypted metadata columns are read and written (ADR-0024
  * decisions 3 and 5), for Tier 1 (#931) and Tier 2 (#963) alike. Repositories
- * call these accessors instead of touching `notes`, `reference`, `title`,
- * `provider`, `cost_minor`, `proposal`, `field_evidence` or the invitation
- * address directly, so the dual-read window, the blind index and the
- * damaged-value behaviour each have exactly one definition.
+ * call these accessors instead of touching the `*_enc` columns directly, so
+ * the blind index and the damaged-value behaviour each have exactly one
+ * definition.
  *
- * Dual read, for the length of the expand release: a row whose `*_enc` column
- * is non-null is decrypted, and a row the backfill has not reached yet is read
- * from its plaintext column. Every write encrypts and clears the plaintext in
- * the same statement, so a row never sits in both states.
+ * Only the `*_enc` column is read: the plaintext columns were dropped in the
+ * contract release, so a row with no ciphertext reads as empty.
  */
 import { getDb } from "@/db";
 import { AppError } from "@/lib/app-error";
@@ -51,19 +48,17 @@ export interface MetadataJsonResult {
   state?: MetadataFieldState;
 }
 
+/** A stored value is its `*_enc` column alone (ADR-0024 contract release). */
 export interface StoredText {
   encrypted: string | null;
-  plaintext: string | null;
 }
 
 export interface StoredJson {
   encrypted: string | null;
-  plaintext: unknown;
 }
 
 export interface StoredNumber {
   encrypted: string | null;
-  plaintext: number | null;
 }
 
 export interface MetadataNumberResult {
@@ -104,13 +99,9 @@ export class MetadataCipher {
     return this.material;
   }
 
-  /** Decrypts an encrypted text column, falling back to plaintext for a row the backfill has not reached. */
+  /** Decrypts an encrypted text column. A row with no ciphertext reads as empty. */
   text(column: MetadataColumn, rowId: string, stored: StoredText): MetadataTextResult {
-    if (stored.encrypted === null) {
-      // No ciphertext at all: this row is still pre-encryption, and its
-      // plaintext is readable whether or not the instance holds a KEK.
-      return { value: stored.plaintext };
-    }
+    if (stored.encrypted === null) return { value: null };
     if (!this.material) return { value: null, state: "metadata_locked" };
     try {
       const value = decryptMetadataValue(stored.encrypted, this.material.dataKey, { column, rowId });
@@ -125,7 +116,7 @@ export class MetadataCipher {
 
   /** As `text`, for the JSONB columns: the object is serialised whole and encrypted as one envelope. */
   json(column: MetadataColumn, rowId: string, stored: StoredJson): MetadataJsonResult {
-    if (stored.encrypted === null) return { value: asRecord(stored.plaintext) };
+    if (stored.encrypted === null) return { value: {} };
     if (!this.material) return { value: {}, state: "metadata_locked" };
     let decrypted: string;
     try {
@@ -155,11 +146,9 @@ export class MetadataCipher {
 
   /**
    * Produces the `*_enc` value for a JSONB column. The value is serialised
-   * exactly as it was found rather than normalised through `asRecord` first:
-   * the writer that uses this — the backfill — clears the plaintext column in
-   * the same statement, so normalising here would silently discard anything
-   * that was not already an object. Reads normalise instead, where it costs
-   * nothing.
+   * exactly as given rather than normalised through `asRecord` first, so
+   * nothing that was not already an object is silently discarded. Reads
+   * normalise instead, where it costs nothing.
    */
   encryptJson(column: MetadataColumn, rowId: string, value: unknown): string {
     const key = this.requireKey();
@@ -177,7 +166,7 @@ export class MetadataCipher {
    * of which would be a fabricated figure in a money field.
    */
   number(column: MetadataColumn, rowId: string, stored: StoredNumber): MetadataNumberResult {
-    if (stored.encrypted === null) return { value: stored.plaintext };
+    if (stored.encrypted === null) return { value: null };
     if (!this.material) return { value: null, state: "metadata_locked" };
     let decrypted: string;
     try {
@@ -225,11 +214,7 @@ export class MetadataCipher {
     return this.blindIndex("items.reference", value);
   }
 
-  /**
-   * `blindIndex` for `users.email` (#969). A locked instance cannot produce
-   * one, which is what makes sign-in by address refusable rather than merely
-   * unsuccessful: the caller distinguishes "no key" from "no such account".
-   */
+  /** `blindIndex` for `users.email` (#969). A locked cipher cannot produce one. */
   emailIndex(value: string | null | undefined): string | null {
     return this.blindIndex("users.email", value);
   }
@@ -307,7 +292,7 @@ export async function requireReceiptMetadataWriter(
 /**
  * A cipher for reading. Never throws for want of a key: an instance with no
  * KEK, or a household whose key has not been minted yet, yields a locked
- * cipher, and rows still holding plaintext read normally through it.
+ * cipher, which reads every encrypted value as locked.
  */
 export async function openMetadataReader(
   householdId: string | null,
@@ -340,29 +325,6 @@ export async function openInstanceMetadataReader(
   executor: MetadataExecutor = getDb(),
 ): Promise<MetadataCipher> {
   return openMetadataReader(null, executor);
-}
-
-/**
- * An instance cipher that can read AND write when the instance holds a usable
- * KEK, and is locked rather than throwing when it does not (#969).
- *
- * The sign-in paths need exactly this: they must keep working with no key at
- * all — an identity provider matches on issuer and subject, never on the
- * address — while still refreshing the stored address when the key is there.
- * `openInstanceMetadataReader` is not enough, because it will not MINT the
- * instance key on an instance that has never written one, and
- * `requireInstanceMetadataWriter` is too much, because it refuses.
- */
-export async function openInstanceMetadataCipher(
-  executor: MetadataExecutor = getDb(),
-): Promise<MetadataCipher> {
-  if (!metadataCryptoAvailable()) return new MetadataCipher(undefined);
-  try {
-    return await openReceiptMetadataWriter(null, executor);
-  } catch (error) {
-    if (error instanceof MetadataKeyLockedError) return new MetadataCipher(undefined);
-    throw error;
-  }
 }
 
 /**

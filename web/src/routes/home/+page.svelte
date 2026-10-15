@@ -23,6 +23,7 @@
   import { ago, agoLong, dayMonth, initials as initialsOf, money, MONTHS, plural, weekdayOf } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
+  import HouseholdClosed from "$lib/HouseholdClosed.svelte";
   import { attachIdFor, forget as forgetAttachId } from "./attach-id.js";
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
@@ -318,7 +319,7 @@
    * address is `/home?item=<id>`, and opening it directly loads home with
    * that row scrolled to and expanded, which is the ruling's own test of the
    * address. (#1319, §34: the two addresses became one. The drawer holds
-   * every command the belt had, and the belt's `/item/<id>` redirects here.)
+   * every command the belt had; the belt's `/item/<id>` was removed.)
    *
    * THE BACK BUTTON. Opening a row PUSHES, so Back closes it and lands you
    * exactly where you were reading. Swapping straight from one open row to
@@ -2154,7 +2155,11 @@
     <div class="manifest" id="manifest-top" bind:this={manifestEl}
          style:max-width={pair ? `${pair.maxWidth}px` : undefined}
          style:transform={pair ? `translateX(${pair.shift}px)` : undefined}>
-    {#if corridor && !view?.emptySky}
+    <!-- #1316: closed while its owner brings an archive in; the dial and the
+         other systems around it stay, and are the way to them. -->
+    {#if view?.household?.importInProgress}
+      <HouseholdClosed name={view.household.name} hasOthers={view.households.length > 1} />
+    {:else if corridor && !view?.emptySky}
       <div class="corridor">
         {#if corridor.overdue.length}
           <div class="redzone">
