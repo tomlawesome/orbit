@@ -1,8 +1,10 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { deflateSync } from "node:zlib";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { log } from "@/lib/logger";
 import {
   syntheticPdfWithPages,
   syntheticStructurePdfFixtures,
@@ -55,6 +57,112 @@ function hostilePdfWithSignedStartxref(): Buffer {
   );
 }
 
+
+/**
+ * An object-stream bomb: a ~130 KB file whose one FlateDecode /ObjStm holds the
+ * catalog and then `paddingMb` of spaces. The parser decodes it to the end, so
+ * it grows far past any V8 heap cap, in ArrayBuffer memory the cap cannot see.
+ */
+function objectStreamBomb(paddingMb: number): Buffer {
+  const head = "2 0 ";
+  const body = "<< /Type /Catalog /Pages 3 0 R >>";
+  const first = head.length;
+  const raw = Buffer.alloc(first + body.length + paddingMb * 1024 * 1024, 0x20);
+  raw.write(head + body, 0, "latin1");
+  const packed = deflateSync(raw, { level: 9 });
+  const parts: Buffer[] = [];
+  const offsets: Record<number, number> = {};
+  let length = 0;
+  const push = (piece: Buffer | string): void => {
+    const buffer = Buffer.isBuffer(piece) ? piece : Buffer.from(piece, "latin1");
+    parts.push(buffer);
+    length += buffer.length;
+  };
+  push("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
+  offsets[1] = length;
+  push(`1 0 obj\n<< /Type /ObjStm /N 1 /First ${first} /Filter /FlateDecode /Length ${packed.length} >>\nstream\n`);
+  push(packed);
+  push("\nendstream\nendobj\n");
+  offsets[3] = length;
+  push("3 0 obj\n<< /Type /Pages /Kids [4 0 R] /Count 1 >>\nendobj\n");
+  offsets[4] = length;
+  push("4 0 obj\n<< /Type /Page /Parent 3 0 R /MediaBox [0 0 200 200] >>\nendobj\n");
+  offsets[5] = length;
+  const row = (type: number, a: number, b: number): Buffer => {
+    const entry = Buffer.alloc(7);
+    entry[0] = type;
+    entry.writeUInt32BE(a, 1);
+    entry.writeUInt16BE(b, 5);
+    return entry;
+  };
+  const table = Buffer.concat([
+    row(0, 0, 65535),
+    row(1, offsets[1], 0),
+    row(2, 1, 0),
+    row(1, offsets[3], 0),
+    row(1, offsets[4], 0),
+    row(1, offsets[5], 0),
+  ]);
+  push(`5 0 obj\n<< /Type /XRef /Size 6 /W [1 4 2] /Root 2 0 R /Length ${table.length} >>\nstream\n`);
+  push(table);
+  push("\nendstream\nendobj\n");
+  push(`startxref\n${offsets[5]}\n%%EOF\n`);
+  return Buffer.concat(parts);
+}
+
+/** A valid one-page classic PDF whose page content is one uncompressed stream of `paddingBytes` spaces. */
+function paddedPdf(paddingBytes: number): Buffer {
+  const padding = " ".repeat(paddingBytes);
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>",
+    `<< /Length ${paddingBytes} >>\nstream\n${padding}\nendstream`,
+  ];
+  let value = "%PDF-1.7\n";
+  const offsets: number[] = [];
+  objects.forEach((object, index) => {
+    offsets.push(Buffer.byteLength(value, "latin1"));
+    value += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = Buffer.byteLength(value, "latin1");
+  value += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  value += offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  value += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(value, "latin1");
+}
+
+/** Everything logged at any level while `run` executes, as one string, plus the run's result. */
+async function withCapturedLogs<T>(run: () => Promise<T>): Promise<{ result: T; logged: string; calls: number }> {
+  const spies = (["error", "warn", "info", "debug"] as const).map((level) =>
+    vi.spyOn(log, level).mockImplementation(() => undefined));
+  try {
+    const result = await run();
+    const recorded = spies.flatMap((spy) => spy.mock.calls);
+    return { result, logged: JSON.stringify(recorded), calls: recorded.length };
+  } finally {
+    for (const spy of spies) spy.mockRestore();
+  }
+}
+
+/** Highest process RSS seen while `run` executes, minus the RSS before it started. */
+async function peakRssGrowth<T>(run: () => Promise<T>): Promise<{ result: T; growthBytes: number }> {
+  const before = process.memoryUsage().rss;
+  let peak = before;
+  const sampler = setInterval(() => {
+    peak = Math.max(peak, process.memoryUsage().rss);
+  }, 15);
+  try {
+    const result = await run();
+    peak = Math.max(peak, process.memoryUsage().rss);
+    return { result, growthBytes: peak - before };
+  } finally {
+    clearInterval(sampler);
+  }
+}
+
+const MB = 1024 * 1024;
+
 describe("the PDF structure sandbox", () => {
   beforeEach(() => {
     setPdfStructureSandboxLimitsForTests({ ...TEST_LIMITS });
@@ -103,7 +211,109 @@ describe("the PDF structure sandbox", () => {
       expect(ticks).toBeGreaterThanOrEqual(Math.floor(elapsedMs / 10) * 0.6);
       expect(pdfStructureSandboxInFlightForTests()).toBe(0);
     }, TEST_TIMEOUT_MS);
+
+    describe("memory the V8 heap cap cannot see or does not stop in time", () => {
+      afterEach(() => {
+        vi.restoreAllMocks();
+      });
+
+      it("stops an object-stream bomb on memory, not on the clock, without the process growing", async () => {
+        setPdfStructureSandboxLimitsForTests({ ...TEST_LIMITS, wallMs: 8000, externalAllowanceMb: 16 });
+        const bomb = objectStreamBomb(128);
+        expect(bomb.length).toBeLessThan(1024 * 1024);
+        const started = Date.now();
+
+        const { result: captured, growthBytes } = await peakRssGrowth(() =>
+          withCapturedLogs(() => classifyDocumentStructure(bomb, "application/pdf")));
+        const elapsedMs = Date.now() - started;
+
+        expect(captured.result).toBe("unsupported_structure");
+        expect(elapsedMs).toBeLessThan(3000);
+        expect(captured.calls).toBeGreaterThan(0);
+        expect(captured.logged).toMatch(/memory/i);
+        expect(captured.logged).not.toMatch(/timeout|timed.?out/i);
+        expect(growthBytes).toBeLessThan(250 * MB);
+        expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+      }, TEST_TIMEOUT_MS);
+
+      it("refuses two object-stream bombs at once without the process growing", async () => {
+        setPdfStructureSandboxLimitsForTests({ ...TEST_LIMITS, wallMs: 8000, externalAllowanceMb: 16 });
+        const bomb = objectStreamBomb(128);
+
+        const { result, growthBytes } = await peakRssGrowth(() =>
+          Promise.all([
+            classifyDocumentStructure(bomb, "application/pdf"),
+            classifyDocumentStructure(bomb, "application/pdf"),
+          ]));
+
+        expect(result).toEqual(["unsupported_structure", "unsupported_structure"]);
+        expect(growthBytes).toBeLessThan(400 * MB);
+        expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+      }, TEST_TIMEOUT_MS);
+
+      it("stops a heap bomb on the heap cap, saying memory, not timeout", async () => {
+        setPdfStructureSandboxLimitsForTests({ wallMs: 4000, maxOldGenerationSizeMb: 32 });
+        const started = Date.now();
+
+        const captured = await withCapturedLogs(() => classifyDocumentStructure(hostilePdf("\f", "%%EOF"), "application/pdf"));
+
+        expect(captured.result).toBe("unsupported_structure");
+        expect(Date.now() - started).toBeLessThan(2000);
+        expect(captured.calls).toBeGreaterThan(0);
+        expect(captured.logged).toMatch(/memory/i);
+        expect(captured.logged).not.toMatch(/timeout|timed.?out/i);
+        expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+      }, TEST_TIMEOUT_MS);
+    });
   });
+
+  it("does not count time spent waiting in the queue, or worker start-up, against a check's limit", async () => {
+    setPdfStructureSandboxLimitsForTests({ ...TEST_LIMITS, concurrency: 1, wallMs: 1000 });
+
+    const results = await Promise.all(
+      Array.from({ length: 6 }, () => classifyDocumentStructure(syntheticPdf(), "application/pdf")),
+    );
+
+    expect(results).toEqual(Array(6).fill("supported_structure"));
+    expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+  }, 20_000);
+
+  it("does not hand the worker this process's environment", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "orbit-sandbox-canary-"));
+    const modulePath = join(directory, "fake-pdfjs.mjs");
+    writeFileSync(modulePath, `
+function getDocument() {
+  if (process.env.ORBIT_SANDBOX_CANARY !== undefined) {
+    throw new Error("the worker inherited the parent environment");
+  }
+  const page = {
+    getViewport: () => ({ width: 200, height: 200 }),
+    cleanup: () => undefined,
+    destroy: () => undefined,
+  };
+  const document = {
+    numPages: 1,
+    getPage: async () => page,
+    getMetadata: async () => ({ info: {}, metadata: null }),
+    cleanup: async () => undefined,
+    destroy: async () => undefined,
+  };
+  return { promise: Promise.resolve(document), onPassword: undefined, destroy: async () => undefined };
+}
+export { getDocument };
+export const GlobalWorkerOptions = {};
+export default { getDocument, GlobalWorkerOptions };
+`);
+    process.env.ORBIT_SANDBOX_CANARY = "must-not-reach-the-worker";
+    try {
+      setPdfStructureSandboxLimitsForTests({ ...TEST_LIMITS, wallMs: 5000, pdfjsUrl: pathToFileURL(modulePath).href });
+
+      await expect(inspectPdfStructureInSandbox(syntheticPdf())).resolves.toBe("supported_structure");
+    } finally {
+      delete process.env.ORBIT_SANDBOX_CANARY;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, TEST_TIMEOUT_MS);
 
   it("refuses a legitimate file as unsupported_structure when the wall-clock limit is 1 ms, and frees the worker", async () => {
     const unhandled: unknown[] = [];
@@ -183,6 +393,10 @@ describe("the PDF structure sandbox", () => {
       ["a PDF with exactly 1000 pages", syntheticPdfWithPages(1000)],
     ] as const)("accepts %s", async (_name, bytes) => {
       await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("supported_structure");
+    }, TEST_TIMEOUT_MS);
+
+    it("accepts a 20 MB PDF, because the memory allowance sits above the file itself", async () => {
+      await expect(classifyDocumentStructure(paddedPdf(20 * MB), "application/pdf")).resolves.toBe("supported_structure");
     }, TEST_TIMEOUT_MS);
 
     it.each(syntheticStructurePdfFixtures)("accepts synthetic standards-valid PDF structure from $name", async ({ bytes }) => {
