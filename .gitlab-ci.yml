@@ -2296,13 +2296,15 @@ smoke_firefox:
 # Everything else is `smoke` exactly -- same gates, `needs`, stack, image,
 # reuse key (scripts/ci/job-inputs.json) and artefacts -- so a red here means
 # the same as a red there.
+# Desktop alone now runs 28-31 minutes (pipelines 2640 and 2643, two jobs cut
+# off at 30m before the suite finished), so it gets 45m.
 smoke_webkit:
   stage: acceptance
   extends: .privileged_runner
   image:
     name: $ORBIT_ACCEPTANCE_IMAGE
     pull_policy: if-not-present
-  timeout: 30m
+  timeout: 45m
   needs: *needs_gated_image
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
