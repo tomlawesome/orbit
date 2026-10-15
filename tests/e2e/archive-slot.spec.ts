@@ -28,11 +28,28 @@ resetDatabaseBetweenSpecFiles();
  * a message on the archive card, and the pocket has its own dialect of it.
  */
 
+/* One archive request is held at a time, so the specs in this file take turns (#1316). */
+test.describe.configure({ mode: "serial" });
+
+/** Large enough that a server which stops reading cannot hide it in socket buffers. */
+const LARGE_BODY_BYTES = 25_000_000;
+
 const PASSPHRASE = "correct-horse-battery-staple";
 const PREVIEW_PATH = "/api/portable-archives/preview";
 const BUSY_SENTENCE = "Orbit\u2019s processing another request right now, please try again in a few minutes.";
 /** Browsers that must receive a refusal for a large body they are still sending. */
 const LARGE_BODY_PROJECTS = ["desktop-firefox", "desktop-chromium"];
+
+/**
+ * The holder must still be uploading when a probe is answered; if it has
+ * already settled, the slot is not held by it and a 429 (or the lack of one)
+ * would prove nothing.
+ */
+function failIfHolderSettled(holder: ReturnType<typeof holdPreviewOpen>) {
+  const outcome = holder.outcome();
+  if (outcome === null) return;
+  throw new Error("status" in outcome ? `the holder lost the slot: HTTP ${outcome.status}` : `the holder lost the slot: ${outcome.error}`);
+}
 
 /** The archive card of whichever layout this project draws: the desk card, or the pocket's. */
 const archiveCard = (page: Page, isMobile: boolean) =>
@@ -51,10 +68,16 @@ async function cookieHeader(page: Page): Promise<string> {
 /**
  * A signed-in POST that is still uploading: the headers and a first chunk go
  * out at once, then one more chunk every five seconds until aborted. Returns
- * the way to end it.
+ * the way to end it, `inFlight` (settles once the first chunk has been taken
+ * up for sending, or the request has already failed) and `outcome()`: null
+ * while the request is in flight, else `{ status }` if the server answered or
+ * `{ error }` if it died.
  */
 function holdPreviewOpen(origin: string, headers: Record<string, string>) {
   const controller = new AbortController();
+  let outcome: { status: number } | { error: string } | null = null;
+  let taken = () => {};
+  const firstChunkTaken = new Promise<void>((resolve) => { taken = resolve; });
   let timer: ReturnType<typeof setInterval> | undefined;
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
@@ -64,6 +87,7 @@ function holdPreviewOpen(origin: string, headers: Record<string, string>) {
         try { stream.enqueue(encoder.encode(" ")); } catch { clearInterval(timer); }
       }, 5_000);
     },
+    pull() { taken(); },
     cancel() { clearInterval(timer); },
   });
   const settled = fetch(`${origin}${PREVIEW_PATH}`, {
@@ -73,8 +97,13 @@ function holdPreviewOpen(origin: string, headers: Record<string, string>) {
     /* Node's fetch needs `duplex` for a streamed request body. */
     duplex: "half",
     signal: controller.signal,
-  } as RequestInit & { duplex: "half" }).then(() => null, () => null);
+  } as RequestInit & { duplex: "half" }).then(
+    (response) => { outcome = { status: response.status }; },
+    (error) => { outcome = { error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) }; },
+  );
   return {
+    inFlight: Promise.race([firstChunkTaken, settled]).then(() => undefined),
+    outcome: () => outcome,
     async end() {
       controller.abort();
       clearInterval(timer);
@@ -118,7 +147,9 @@ test("while one archive upload is in progress a second is refused at once, and g
     // ── another signed-in request takes the slot and does not finish ──
     const origin = new URL(page.url()).origin;
     const headers = { ...(await sessionHeaders(page)), cookie: await cookieHeader(page) };
-    holder = holdPreviewOpen(origin, headers);
+    const held = holdPreviewOpen(origin, headers);
+    holder = held;
+    await held.inFlight;
 
     const probe = async () => {
       const response = await fetch(`${origin}${PREVIEW_PATH}`, {
@@ -128,7 +159,11 @@ test("while one archive upload is in progress a second is refused at once, and g
       });
       return response;
     };
-    await expect.poll(async () => (await probe()).status, {
+    await expect.poll(async () => {
+      const status = (await probe()).status;
+      failIfHolderSettled(held);
+      return status;
+    }, {
       message: "the second archive request is refused with 429 while the first is in progress",
       timeout: 30_000,
       intervals: [250, 500, 1_000],
@@ -192,8 +227,9 @@ test("while one archive upload is in progress a second is refused at once, and g
  * CSRF token, and report how the browser's own fetch settled within 15 s: the
  * status, the refusal code and Retry-After, or the network error it died with.
  */
-async function largePostFromPage(page: Page, path: string, size: number) {
-  const { "X-CSRF-Token": csrfToken } = await sessionHeaders(page);
+async function largePostFromPage(page: Page, path: string, size: number, csrfOverride?: string) {
+  const { "X-CSRF-Token": sessionToken } = await sessionHeaders(page);
+  const csrfToken = csrfOverride ?? sessionToken;
   return await page.evaluate(async ({ path, size, csrfToken }) => {
     try {
       const response = await fetch(path, {
@@ -211,7 +247,7 @@ async function largePostFromPage(page: Page, path: string, size: number) {
   }, { path, size, csrfToken });
 }
 
-test("a 10 MB body sent to a busy archive route still gets its 429 in the browser", async ({ page }, testInfo) => {
+test("a 25 MB body sent to a busy archive route still gets its 429 in the browser", async ({ page }, testInfo) => {
   test.skip(!LARGE_BODY_PROJECTS.includes(testInfo.project.name), "the large-body refusal is proved on Firefox and Chromium on the desk");
   test.setTimeout(120_000);
   await signIn(page, "/home");
@@ -220,18 +256,23 @@ test("a 10 MB body sent to a busy archive route still gets its 429 in the browse
   const headers = { ...(await sessionHeaders(page)), cookie: await cookieHeader(page) };
   const holder = holdPreviewOpen(origin, headers);
   try {
-    await expect.poll(async () => (await fetch(`${origin}${PREVIEW_PATH}`, {
-      method: "POST",
-      headers: { ...headers, "content-type": "application/json" },
-      body: "{}",
-    })).status, {
+    await holder.inFlight;
+    await expect.poll(async () => {
+      const status = (await fetch(`${origin}${PREVIEW_PATH}`, {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: "{}",
+      })).status;
+      failIfHolderSettled(holder);
+      return status;
+    }, {
       message: "the slot is held: a small second request is refused with 429",
       timeout: 30_000,
       intervals: [250, 500, 1_000],
     }).toBe(429);
 
     const started = Date.now();
-    const answer = await largePostFromPage(page, PREVIEW_PATH, 10_000_000);
+    const answer = await largePostFromPage(page, PREVIEW_PATH, LARGE_BODY_BYTES);
 
     expect(answer.failure, "the browser got an answer rather than a network error").toBeNull();
     expect(answer.status).toBe(429);
@@ -240,19 +281,42 @@ test("a 10 MB body sent to a busy archive route still gets its 429 in the browse
     expect(Date.now() - started).toBeLessThan(15_000);
   } finally {
     await holder.end();
+    /* The server frees the slot a moment after it sees the client go; the next test must not start while it is still held. */
+    await expect.poll(async () => (await fetch(`${origin}${PREVIEW_PATH}`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: "{}",
+    })).status, {
+      message: "the slot is free again once the holder has ended",
+      timeout: 60_000,
+      intervals: [250, 500, 1_000, 2_000],
+    }).not.toBe(429);
   }
 });
 
-test("a 2 MB body sent to an ordinary route gets its 413 in the browser", async ({ page }, testInfo) => {
+test("a 25 MB body sent to an ordinary route gets its 413 in the browser", async ({ page }, testInfo) => {
   test.skip(!LARGE_BODY_PROJECTS.includes(testInfo.project.name), "the large-body refusal is proved on Firefox and Chromium on the desk");
   test.setTimeout(60_000);
   await signIn(page, "/home");
 
   const started = Date.now();
-  const answer = await largePostFromPage(page, "/api/workspace/commands", 2_000_000);
+  const answer = await largePostFromPage(page, "/api/workspace/commands", LARGE_BODY_BYTES);
 
   expect(answer.failure, "the browser got an answer rather than a network error").toBeNull();
   expect(answer.status).toBe(413);
   expect(answer.code).toBe("request_too_large");
+  expect(Date.now() - started).toBeLessThan(15_000);
+});
+
+test("a 25 MB body sent to an archive route with the wrong CSRF token still gets its 403 in the browser", async ({ page }, testInfo) => {
+  test.skip(!LARGE_BODY_PROJECTS.includes(testInfo.project.name), "the large-body refusal is proved on Firefox and Chromium on the desk");
+  test.setTimeout(120_000);
+  await signIn(page, "/home");
+
+  const started = Date.now();
+  const answer = await largePostFromPage(page, PREVIEW_PATH, LARGE_BODY_BYTES, "not-the-session-token");
+
+  expect(answer.failure, "the browser got an answer rather than a network error").toBeNull();
+  expect(answer.status).toBe(403);
   expect(Date.now() - started).toBeLessThan(15_000);
 });
