@@ -151,7 +151,7 @@ recoverable state.
   it reads the cross-reference data, and the cheap pre-parse bound on declared
   entries modelled the parser's lenient reading and kept missing ways in. So
   each check gets its own child with a 128 MB heap cap (its own flag), a
-  process-memory ceiling of 320 MB plus the file's size that the server reads
+  process-memory ceiling of 320 MB plus five times the file's size (resident plus swapped) that the server reads
   from `/proc` every 25 ms and kills it past, a five-second wall-clock limit
   that kills it, an empty environment, and at most two run at once; running
   out of memory, timing out or crashing refuses the file as

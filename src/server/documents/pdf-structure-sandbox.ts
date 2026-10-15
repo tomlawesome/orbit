@@ -79,7 +79,7 @@ export const PDF_STRUCTURE_SANDBOX_LIMITS: Readonly<PdfStructureSandboxLimits> =
   // a clean 98 MB file peaks at 393 MB with the file included (about 3x the
   // file); a file with an off-by-a-few startxref makes pdf.js re-index it,
   // about 5x the file: 55 MB peaks at 394, 70 MB at 465, 96 MB at 589. The
-  // ceiling is this plus 5 x the file (STRUCTURE_FILE_COPIES).
+  // ceiling is this plus 5 x the file (FILE_COPIES).
   structureMemoryMb: 320,
   // The largest legitimate render measured (a 1-bit 5316x7522 image mask, the
   // biggest image the 40 Mpx cap admits) peaks at 458 MB.
@@ -123,7 +123,9 @@ const MiB = 1024 * 1024;
  * shell text.
  */
 const SANDBOX_SHELL = "/bin/sh";
-const SANDBOX_WRAPPER = 'ulimit -t "$1"; if [ -n "$2" ]; then ulimit -d "$2"; fi; shift 2; exec "$@"';
+// A limit the shell refuses must not run unlimited: the wrapper exits instead,
+// which the server reads as a crash and refuses the job.
+const SANDBOX_WRAPPER = 'ulimit -t "$1" || exit 126; if [ -n "$2" ]; then ulimit -d "$2" || exit 126; fi; shift 2; exec "$@"';
 
 type Inspector = (bytes: Buffer) => Promise<DocumentStructureReason>;
 type StopKind = "timeout" | "memory" | "crash";
