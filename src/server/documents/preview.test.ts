@@ -676,12 +676,13 @@ describe("renderDocumentPagePreview", () => {
       it("stops the same file at the default allowance, on memory rather than the clock", async () => {
         const read = captureLogs();
         const bomb = pdfWithSoftMaskGroups(80);
-        const started = Date.now();
 
         await expect(renderDocumentPagePreview(bomb, "application/pdf"))
           .rejects.toMatchObject({ code: "document_preview_failed", status: 422 });
 
-        expect(Date.now() - started).toBeLessThan(8_000);
+        /* No elapsed bound: at 256 MiB the stop lands about 5 s in, close to
+           any fixed figure on a busy runner. The log is the proof: the
+           unfixed code ends on the clock, and says so. */
         const { logged } = read();
         expect(logged).toMatch(/memory/i);
         expect(logged).not.toMatch(/timeout|timed.?out/i);
