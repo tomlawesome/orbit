@@ -71,6 +71,22 @@ function javascriptFiles(directory) {
   return found;
 }
 
+/**
+ * A function the built server defines, imported from the chunk that defines
+ * it under whatever name the bundler exported it as.
+ */
+async function builtServerFunction(serverRoot, name) {
+  const chunk = javascriptFiles(serverRoot).find((path) =>
+    readFileSync(path, "utf8").includes(`function ${name}(`));
+  if (!chunk) throw new Error(`no built server chunk defines ${name}`);
+  const exportList = readFileSync(chunk, "utf8").match(/^export\s*\{([^}]*)\}/mu)?.[1] ?? "";
+  const exportedAs = exportList.match(new RegExp(`\\b${name}(?:\\s+as\\s+([\\w$]+))?\\s*(?:,|$)`, "u"));
+  if (!exportedAs) throw new Error(`the built server does not export ${name}`);
+  const found = (await import(pathToFileURL(chunk).href))[exportedAs[1] ?? name];
+  if (typeof found !== "function") throw new Error(`${name} is not a function in the built server`);
+  return found;
+}
+
 const run = async () => {
   const projectRoot = resolve(import.meta.dirname, "..");
   const runtimeRoot = resolve(process.env.ORBIT_WEB_RUNTIME_ROOT ?? join(projectRoot, "web"));
@@ -103,7 +119,7 @@ const run = async () => {
      whole packages, so this is not the file-tracing hazard it was under Next —
      but a pruning change that dropped the font data would still show up only
      as blank text in a shipped image, so it is asserted rather than assumed.
-     The path is taken the same way src/server/documents/preview.ts takes it:
+     The path is taken the way src/server/documents/pdf-structure-sandbox.ts takes it:
      from the resolved entry point, up three, then look beside it. */
   const standardFonts = resolve(pdfjsEntry, "..", "..", "..", "standard_fonts");
   if (!existsSync(standardFonts) || !readdirSync(standardFonts).includes("LiberationSans-Regular.ttf")) {
@@ -112,27 +128,38 @@ const run = async () => {
 
   /* Both packages must stay OUTSIDE the bundle: pdfjs-dist resolves worker and
      cmap assets by on-disk path, @napi-rs/canvas is a native addon, and a
-     bundler that inlined either would produce an output that imports nothing
-     and fails at the first render. The bare specifier surviving into a server
-     chunk is what proves the adapter externalised them; this is the successor
-     to the traced-chunk assertion the Next-era check made. */
+     bundler that inlined either would produce an output that fails at the
+     first render. @napi-rs/canvas is imported by the server itself (image
+     previews), so its bare specifier must survive into a chunk. pdfjs-dist
+     must NOT be imported by any chunk: it runs only in the sandbox worker,
+     which loads it by the file URL the server resolves from the specifier
+     string (ADR-0038, #1427), so a static import here means the server reads
+     PDFs on its own thread again. The renders through the built server below
+     prove the resolution itself. */
   const serverRoot = join(buildRoot, "server");
   if (!existsSync(serverRoot) || !statSync(serverRoot).isDirectory()) {
     throw new Error(`no adapter-node server output under ${buildRoot}`);
   }
   const chunkSources = javascriptFiles(serverRoot).map((path) => readFileSync(path, "utf8"));
-  for (const specifier of ["pdfjs-dist/legacy/build/pdf.mjs", "@napi-rs/canvas"]) {
-    if (!chunkSources.some((source) => source.includes(`from '${specifier}'`) || source.includes(`from "${specifier}"`))) {
-      throw new Error(`${specifier} is not imported as an external package by the built server`);
-    }
+  const importsSpecifier = (source, specifier) =>
+    source.includes(`from '${specifier}'`) || source.includes(`from "${specifier}"`) ||
+    source.includes(`import('${specifier}')`) || source.includes(`import("${specifier}")`);
+  if (!chunkSources.some((source) => importsSpecifier(source, "@napi-rs/canvas"))) {
+    throw new Error("@napi-rs/canvas is not imported as an external package by the built server");
+  }
+  if (chunkSources.some((source) => importsSpecifier(source, "pdfjs-dist/legacy/build/pdf.mjs"))) {
+    throw new Error("the built server imports pdfjs-dist on its own thread; PDFs must be read only in the sandbox worker");
+  }
+  if (!chunkSources.some((source) => source.includes("pdfjs-dist/legacy/build/pdf.mjs"))) {
+    throw new Error("the built server does not resolve pdfjs-dist for its sandbox worker");
   }
 
   const pdfjs = await import(pathToFileURL(pdfjsEntry).href);
   if (typeof pdfjs.getDocument !== "function") throw new Error("missing PDF.js getDocument export");
 
-  /* Draw a text-bearing page with the shipped native canvas, the way
-     src/server/documents/preview.ts does — pinning the same globals PDF.js
-     polyfills onto (see that file's `pinRenderingGlobals`), so a reintroduced
+  /* Draw a text-bearing page with the shipped native canvas, the way the
+     sandbox's render worker does (src/server/documents/pdf-structure-sandbox.ts)
+     — pinning the same globals PDF.js polyfills onto, so a reintroduced
      packaging duplication (foreign Skia types) fails here instead of shipping
      silently. */
   const { createCanvas, Path2D, DOMMatrix } = canvas;
@@ -201,23 +228,38 @@ const run = async () => {
      worked. So the built server's own classifyDocumentStructure is called,
      from the chunk that defines it, under whatever name the bundler exported
      it as. */
-  const structureChunk = javascriptFiles(serverRoot).find((path) =>
-    readFileSync(path, "utf8").includes("function classifyDocumentStructure("));
-  if (!structureChunk) throw new Error("no built server chunk defines classifyDocumentStructure");
-  const exportList = readFileSync(structureChunk, "utf8").match(/^export\s*\{([^}]*)\}/mu)?.[1] ?? "";
-  const exportedAs = exportList.match(/\bclassifyDocumentStructure(?:\s+as\s+([\w$]+))?\s*(?:,|$)/u);
-  if (!exportedAs) throw new Error("the built server does not export classifyDocumentStructure");
-  const classifyDocumentStructure = (await import(pathToFileURL(structureChunk).href))[exportedAs[1] ?? "classifyDocumentStructure"];
-  if (typeof classifyDocumentStructure !== "function") throw new Error("classifyDocumentStructure is not a function in the built server");
+  const classifyDocumentStructure = await builtServerFunction(serverRoot, "classifyDocumentStructure");
   const structure = await classifyDocumentStructure(syntheticTextPdf("Web structure check"), "application/pdf");
   if (structure !== "supported_structure") {
     throw new Error(`the built server's sandboxed structure check answered ${structure} for a valid PDF`);
   }
 
+  /* Page previews are drawn in the same sandbox, by a worker that loads both
+     pdf.js and the native canvas by the file URLs the built server resolves
+     (#1427). A bundle that broke either would answer every PDF preview with
+     a failure while everything above passed, so the built server's own
+     renderDocumentPagePreview draws a page here and its pixels are counted. */
+  const renderDocumentPagePreview = await builtServerFunction(serverRoot, "renderDocumentPagePreview");
+  const preview = await renderDocumentPagePreview(syntheticTextPdf("Web sandbox render check"), "application/pdf", 1);
+  if (preview?.mediaType !== "image/png" || preview.pageCount !== 1) {
+    throw new Error("the built server's sandboxed page render did not answer a one-page PNG");
+  }
+  const drawn = await canvas.loadImage(preview.bytes);
+  const previewContext = createCanvas(drawn.width, drawn.height).getContext("2d");
+  previewContext.drawImage(drawn, 0, 0);
+  const previewPixels = previewContext.getImageData(0, 0, drawn.width, drawn.height).data;
+  let previewInk = 0;
+  for (let offset = 0; offset < previewPixels.length; offset += 4) {
+    if (previewPixels[offset] < 128) previewInk += 1;
+  }
+  if (previewInk === 0) {
+    throw new Error("the built server's sandboxed page render drew no text");
+  }
+
   console.log(
     `Web PDF.js runtime check passed: pdfjs-dist ${runtimeRequire("pdfjs-dist/package.json").version}, ` +
       `@napi-rs/canvas ${runtimeRequire("@napi-rs/canvas/package.json").version}, ${nonWhitePixels} pixels drawn, ` +
-      "sandboxed structure check supported_structure",
+      `sandboxed structure check supported_structure, sandboxed page render ${preview.width}x${preview.height} with ${previewInk} dark pixels`,
   );
 };
 

@@ -5,7 +5,7 @@
 **Amends:** [ADR-0033](0033-document-safety-standard-patterns.md) item 3 (the
 open check's resource limits)
 **Relates to:** #1316 (hostile cross-reference data), #1427 (the page renderer
-gets the same treatment); `docs/document-threat-model.md`
+gets the same treatment, amendment below); `docs/document-threat-model.md`
 
 ## Context
 
@@ -85,9 +85,53 @@ memory.
   no separate worker file; it imports pdf.js by the file URL the server
   resolves. `scripts/web-pdfjs-runtime-check.mjs` calls the built server's
   check to prove that resolution survives the build.
-- The page renderer (`preview.ts`) still opens PDFs on the server's thread,
-  after the same bytes passed this check; #1427 moves it into the same kind
-  of worker.
+- The page renderer runs in the same sandbox (amendment below, #1427), so
+  pdf.js never runs on the server's thread.
+
+## Amendment, 2026-10-15: the page renderer runs in the sandbox too (#1427)
+
+Owner decision 5a (2026-10-15). The renderer (`preview.ts`) opened PDFs on the
+server's thread after the same bytes passed the check, and drawing a page
+decodes what the check never opens: content streams, fonts and images. A
+131 KB content-stream bomb passed the check and decoded 260 MB in 2.0 s on the
+server's thread when its preview was opened, beyond the reach of the render
+budget's timer. The standard pattern applies unchanged: render untrusted
+documents in an isolated, memory-capped, killable worker, as browsers do.
+
+1. **One worker run per preview,** in `pdf-structure-sandbox.ts`: open, the
+   check's own gate (no password, 1 to 1,000 pages, page one found), the
+   asked-for page, drawn on white to a PNG at most 1,200 pixels a side, sent
+   back as a transferred buffer. The preview path no longer runs a separate
+   check first, so a preview costs one worker, not two (about 0.4 s for a
+   text page). The pre-parse entry-count bound still runs first.
+2. **Limits.** The same heap caps, two-at-once slots (shared with the check),
+   `env: {}` and 25 ms memory poll. The wall clock is the render budget
+   (`DOCUMENT_PREVIEW_RENDER_BUDGET_MS`, ten seconds, from `online`). The
+   off-heap allowance is the file's size plus twice the check's
+   (`externalAllowanceMb`, so 128 MB at the defaults): a 300 dpi A4 scan
+   measured 55 MB, and the 128 MB content-stream bomb is stopped in about a
+   second with the process growing about 155 MB. pdf.js's `maxImageSize`
+   (40 Mpx) stays, because Skia's canvas memory is not counted by any V8
+   figure. A scan large enough to pass 128 MB already overruns the ten-second
+   budget.
+3. **Answers.** A refusal the check would make answers
+   `document_preview_unsupported` with the check's reason; a page past the
+   end, `document_preview_page_not_found`; a timeout, `document_preview_failed`
+   logged as `processing_interrupted`; a memory stop, a crash or a render
+   error, `document_preview_failed`. A memory or crash stop also logs one
+   bounded `document.preview` record naming which it was; a timeout is
+   already named by the refusal record.
+4. **The canvas backend loads in the worker** by the file URL the server
+   resolves, like pdf.js; the worker pins its own `Path2D`, `DOMMatrix` and
+   canvas factory to that copy (#476, #493). The image gate
+   (`scripts/web-pdfjs-runtime-check.mjs`) draws a page through the built
+   server's renderer to prove the bundle still finds both.
+5. **A start-up deadline, for both jobs.** A worker that is not online within
+   five seconds (`startupMs`) is stopped and counted as a crash: before this,
+   a worker that never came online had no clock and held its slot.
+6. **No in-process reader.** `tests/unit/pdf-no-in-process-reader.test.mjs`
+   fails if anything under `src/server` other than the sandbox names
+   `pdfjs-dist` outside a type-only import.
 
 ## Alternatives considered
 

@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { AppError } from "@/lib/app-error";
-import { type getDocument, VerbosityLevel } from "pdfjs-dist/legacy/build/pdf.mjs";
+import type { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { inspectPdfStructureInSandbox } from "@/server/documents/pdf-structure-sandbox";
 
 export type SupportedDocumentMediaType =
@@ -28,11 +28,12 @@ export type PdfDocumentParameters = NonNullable<Parameters<typeof getDocument>[0
 
 /**
  * How Orbit's one PDF parser opens untrusted bytes, for the structure check
- * and the page-one renderer alike (ADR-0033 pattern C): no XFA, no worker,
- * no network or range fetching, no system or browser fonts, no WebAssembly
- * or platform image decoders, and errors stop the parse. Nothing a PDF
- * carries can run: pdf.js runs document scripts only through the viewer's
- * annotation layer and scripting manager, which Orbit never builds.
+ * and the page renderer alike, both in the sandbox worker (ADR-0033 pattern
+ * C, ADR-0038): no XFA, no pdf.js worker, no network or range fetching, no
+ * system or browser fonts, no WebAssembly or platform image decoders, and
+ * errors stop the parse. Nothing a PDF carries can run: pdf.js runs document
+ * scripts only through the viewer's annotation layer and scripting manager,
+ * which Orbit never builds.
  */
 export const PDF_STRUCTURE_PARSER_OPTIONS = Object.freeze({
   disableAutoFetch: true,
@@ -50,7 +51,9 @@ export const PDF_STRUCTURE_PARSER_OPTIONS = Object.freeze({
   useSystemFonts: false,
   useWasm: false,
   useWorkerFetch: false,
-  verbosity: VerbosityLevel.ERRORS,
+  // pdf.js's VerbosityLevel.ERRORS, written as its value: this module only
+  // names pdf.js's types, so the server never loads the reader (#1427).
+  verbosity: 0,
 } satisfies PdfDocumentParameters);
 
 function startsWith(bytes: Buffer, signature: number[]): boolean {
@@ -391,7 +394,7 @@ function readPdfXrefSection(text: string, offset: number): PdfXrefSection | unde
  * is neither xref nor a number, is skipped: pdf.js reads nothing there and
  * falls back to the scan, which is modelled.
  */
-function hasPdfIndexBudget(bytes: Buffer): boolean {
+export function hasPdfIndexBudget(bytes: Buffer): boolean {
   const text = bytes.toString("latin1");
   const recovery = recoveryXrefOffsets(bytes, text);
   if (recovery === null) return false;
