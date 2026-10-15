@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, readlink, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
@@ -790,7 +790,8 @@ describe("portable archive download is streamed from disk and still refuses a ta
       .where(eq(portableArchives.id, archive.id));
     expect(before.downloadedAt).toBeNull();
 
-    await openPortableArchiveDownload(fixture.users.owner.id, archive.id);
+    const { stream } = await openPortableArchiveDownload(fixture.users.owner.id, archive.id);
+    await stream.cancel();
 
     const [after] = await getDb().select({ downloadedAt: portableArchives.downloadedAt }).from(portableArchives)
       .where(eq(portableArchives.id, archive.id));
@@ -801,14 +802,20 @@ describe("portable archive download is streamed from disk and still refuses a ta
     ));
     expect(audit).toHaveLength(1);
   });
-  async function openFileHandles(): Promise<string[]> {
-    // listing the directory opens one descriptor itself; it does so both times, so the lists stay comparable
-    return (await readdir("/proc/self/fd")).sort();
+  /** The descriptors this process holds open on `path`; entries that close while the directory is listed are skipped. */
+  async function handlesOpenTo(path: string): Promise<string[]> {
+    const open: string[] = [];
+    for (const fd of await readdir("/proc/self/fd")) {
+      try {
+        if ((await readlink(`/proc/self/fd/${fd}`)) === path) open.push(fd);
+      } catch {
+        // closed between the listing and the read
+      }
+    }
+    return open.sort();
   }
 
-  async function settle(): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
+  const closedWithin = { timeout: 2_000, interval: 25 };
 
   async function documentArchive(fixture: Fixture) {
     await addAvailableDocuments(fixture, 3, 2 * MIB);
@@ -827,10 +834,11 @@ describe("portable archive download is streamed from disk and still refuses a ta
     await writeFile(path, stored);
   }
 
-  it("leaves the open-file list unchanged 100 ms after the stream is read to its end", async () => {
+  it("holds one handle on the stored file while streaming and none once the stream is read to its end", async () => {
     const fixture = await createIntegrationFixture("portable-archive-download-fd-end");
     const archive = await documentArchive(fixture);
-    const before = await openFileHandles();
+    const path = await storedFilePath(archive.id);
+    expect(await handlesOpenTo(path)).toEqual([]);
 
     const { stream } = await openPortableArchiveDownload(fixture.users.owner.id, archive.id);
     const reader = stream.getReader();
@@ -839,39 +847,42 @@ describe("portable archive download is streamed from disk and still refuses a ta
       const { done } = await reader.read();
       if (done) break;
       chunks += 1;
+      if (chunks === 1) expect(await handlesOpenTo(path)).toHaveLength(1);
     }
-    await settle();
 
     expect(chunks).toBeGreaterThan(1);
-    expect(await openFileHandles()).toEqual(before);
+    await vi.waitFor(() => expect(handlesOpenTo(path)).resolves.toEqual([]), closedWithin);
   }, 120_000);
 
-  it("leaves the open-file list unchanged 100 ms after the stream is cancelled following its first chunk", async () => {
+  it("holds one handle on the stored file after the first chunk and none once the stream is cancelled", async () => {
     const fixture = await createIntegrationFixture("portable-archive-download-fd-cancel");
     const archive = await documentArchive(fixture);
-    const before = await openFileHandles();
+    const path = await storedFilePath(archive.id);
+    expect(await handlesOpenTo(path)).toEqual([]);
 
     const { stream } = await openPortableArchiveDownload(fixture.users.owner.id, archive.id);
     const reader = stream.getReader();
     const first = await reader.read();
     expect(first.done).toBe(false);
+    expect(await handlesOpenTo(path)).toHaveLength(1);
     await reader.cancel();
-    await settle();
 
-    expect(await openFileHandles()).toEqual(before);
+    await vi.waitFor(() => expect(handlesOpenTo(path)).resolves.toEqual([]), closedWithin);
   }, 120_000);
 
-  it("leaves the open-file list unchanged 100 ms after a tampered file is refused", async () => {
+  it("holds no handle on the stored file once a tampered file is refused", async () => {
     const fixture = await createIntegrationFixture("portable-archive-download-fd-refused");
     const archive = await smallArchive(fixture);
     await tamper(archive.id);
-    const before = await openFileHandles();
+    const path = await storedFilePath(archive.id);
+    expect(await handlesOpenTo(path)).toEqual([]);
 
     await expect(openPortableArchiveDownload(fixture.users.owner.id, archive.id))
       .rejects.toMatchObject({ code: "archive_integrity_failed", status: 503 });
-    await settle();
 
-    expect(await openFileHandles()).toEqual(before);
+    // The refusal awaits the close before it rejects, so no waiting is allowed here: a handle left to the
+    // garbage collector would also vanish within a polling window and hide the fault.
+    expect(await handlesOpenTo(path)).toEqual([]);
   });
 
   it("records no download time and no audit row when a tampered file is refused", async () => {
