@@ -3,7 +3,7 @@ import { env } from "$env/dynamic/private";
 import { redirect } from "@sveltejs/kit";
 
 import { ARCHIVE_SLOT_ROUTES, holdArchiveSlot } from "$lib/server/archive-slot.js";
-import { bodyLimitFor, limitRequestBody } from "$lib/server/body-limit.js";
+import { bodyLimitFor, discardBody, limitRequestBody } from "$lib/server/body-limit.js";
 
 /**
  * The screens a reader may open without a session (#789).
@@ -359,11 +359,38 @@ export async function handle({ event, resolve }) {
       try {
         return await gated(event, resolve);
       } finally {
+        drainUnread(event);
         held.release();
       }
     }
   }
-  return gated(event, resolve);
+  try {
+    return await gated(event, resolve);
+  } finally {
+    drainUnread(event);
+  }
+}
+
+/**
+ * Reads away an upload the route answered without reading (#1316).
+ *
+ * A route may refuse before it reads: a stale CSRF token, maintenance, the
+ * key gate, a signed-out redirect. Node would read such a body away itself
+ * once the answer is sent, but adapter-node's early data listener stops it,
+ * so the upload sits paused and a browser still sending it never sees the
+ * answer -- Firefox reports a network error instead. So the answer goes first
+ * and the rest is read and thrown away after it, the same as the 413 and 429.
+ *
+ * In a `finally`, because a redirect or an error is thrown, not returned. A
+ * locked body is left alone: a route is still reading it, in the background
+ * or through a clone. A used one has been read to its end. Neither the
+ * response nor a streamed answer is touched.
+ *
+ * @param {import("@sveltejs/kit").RequestEvent} event
+ */
+function drainUnread(event) {
+  const { body, bodyUsed } = event.request;
+  if (body !== null && !body.locked && !bodyUsed) discardBody(event.request);
 }
 
 /**

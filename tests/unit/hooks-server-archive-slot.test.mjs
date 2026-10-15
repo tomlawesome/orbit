@@ -52,16 +52,16 @@ let started = [];
  * An archive-style request: a POST with a JSON body, as the cookie-carrying
  * browser would send it.
  * @param {string} id
- * @param {{ body?: BodyInit | null, headers?: Record<string, string> }} [options]
+ * @param {{ body?: BodyInit | null, headers?: Record<string, string>, method?: string }} [options]
  */
-function eventFor(id, { body = JSON.stringify({ passphrase: "p" }), headers = {} } = {}) {
+function eventFor(id, { body = JSON.stringify({ passphrase: "p" }), headers = {}, method = "POST" } = {}) {
   const path = id.replace("[householdId]", "household-1");
   const cookies = { "orbit-session": "token" };
   return {
     route: { id },
     url: new URL(`http://orbit.invalid${path}`),
     request: new Request(`http://orbit.invalid${path}`, {
-      method: "POST",
+      method,
       headers: { "content-type": "application/json", ...headers },
       body,
       duplex: "half",
@@ -93,6 +93,29 @@ function gatedResolver(status = 200) {
     return new Response("done", { status });
   });
   return { resolve, open };
+}
+
+/**
+ * An upload of `total` bytes that counts what has been pulled from it: nothing
+ * is pulled until something reads, so `pulled` is the bytes the server has read
+ * and `closed` says it was read to the end.
+ * @param {number} total
+ */
+function countingUpload(total, chunkSize = 64 * 1024) {
+  const stats = { pulled: 0, closed: false };
+  const body = new ReadableStream({
+    pull(controller) {
+      if (stats.pulled < total) {
+        const size = Math.min(chunkSize, total - stats.pulled);
+        stats.pulled += size;
+        controller.enqueue(new Uint8Array(size));
+      } else {
+        stats.closed = true;
+        controller.close();
+      }
+    },
+  }, { highWaterMark: 0 });
+  return { body, stats };
 }
 
 /** A resolve that reads the body and answers at once. */
@@ -253,6 +276,96 @@ describe("hooks.server handle and the one-archive-at-a-time slot (#1316)", () =>
       expect(resolve).not.toHaveBeenCalled();
       expect(slot.archiveSlotHeld()).toBe(false);
       await expectSlotFree(route);
+    });
+  });
+
+  describe("a route that answers without reading its body", () => {
+    /* An archive route takes up to the instance's upload limit; an ordinary route's own limit is far lower, so its body stays under it. */
+    const ARCHIVE_BYTES = 3 * MIB;
+    const ORDINARY_BYTES = 512 * 1024;
+    const bytesFor = (route) => (SLOT_ROUTES.includes(route) ? ARCHIVE_BYTES : ORDINARY_BYTES);
+    const drainedWithinASecond = (stats, total) =>
+      vi.waitFor(() => {
+        expect(stats.pulled).toBe(total);
+        expect(stats.closed).toBe(true);
+      }, { timeout: 1_000, interval: 10 });
+
+    it("an ordinary route answering 403 untouched: the browser's whole upload is still read away and thrown out", async () => {
+      const { body, stats } = countingUpload(ORDINARY_BYTES);
+      const resolve = vi.fn(async () => new Response("no", { status: 403 }));
+
+      const response = await handle({ event: eventFor("/api/admin/contact", { body }), resolve });
+
+      expect(response.status).toBe(403);
+      expect(resolve).toHaveBeenCalledTimes(1);
+      await drainedWithinASecond(stats, ORDINARY_BYTES);
+    });
+
+    it("an archive route answering 503 untouched: the upload is read away and the slot is free", async () => {
+      const { body, stats } = countingUpload(ARCHIVE_BYTES);
+      const resolve = vi.fn(async () => new Response("down", { status: 503 }));
+
+      const response = await handle({ event: eventFor(PREVIEW, { body }), resolve });
+
+      expect(response.status).toBe(503);
+      expect(resolve).toHaveBeenCalledTimes(1);
+      await drainedWithinASecond(stats, ARCHIVE_BYTES);
+      expect(slot.archiveSlotHeld()).toBe(false);
+      await expectSlotFree();
+    });
+
+    it.each(["/api/admin/contact", PREVIEW])("%s: a route that reads the body itself gets no error and its own response back", async (route) => {
+      const total = bytesFor(route);
+      const { body, stats } = countingUpload(total);
+      const resolve = vi.fn(async (event) => {
+        await event.request.arrayBuffer();
+        return new Response("done", { status: 200 });
+      });
+
+      const response = await handle({ event: eventFor(route, { body }), resolve });
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("done");
+      expect(stats.pulled).toBe(total);
+      expect(stats.closed).toBe(true);
+      expect(slot.archiveSlotHeld()).toBe(false);
+    });
+
+    it("a route that returns while still reading in the background keeps every byte it is reading", async () => {
+      const { body, stats } = countingUpload(ORDINARY_BYTES);
+      let received = 0;
+      let finished = false;
+      const resolve = vi.fn(async (event) => {
+        const reader = event.request.body.getReader();
+        void (async () => {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            received += value.byteLength;
+          }
+          finished = true;
+        })();
+        return new Response("accepted", { status: 202 });
+      });
+
+      const response = await handle({ event: eventFor("/api/admin/contact", { body }), resolve });
+
+      expect(response.status).toBe(202);
+      await vi.waitFor(() => expect(finished).toBe(true), { timeout: 2_000, interval: 10 });
+      expect(received).toBe(ORDINARY_BYTES);
+      expect(stats.pulled).toBe(ORDINARY_BYTES);
+    });
+
+    it("a GET has no body to drain: nothing happens and the response comes back as it was", async () => {
+      const resolve = vi.fn(async () => new Response("fine", { status: 200 }));
+      const event = eventFor("/home", { body: null, method: "GET" });
+      expect(event.request.body).toBeNull();
+
+      const response = await handle({ event, resolve });
+
+      expect(response.status).toBe(200);
+      expect(resolve).toHaveBeenCalledTimes(1);
+      expect(await response.text()).toBe("fine");
     });
   });
 
