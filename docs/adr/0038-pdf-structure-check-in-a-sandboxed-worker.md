@@ -209,13 +209,15 @@ Owner decisions 5a and 6a (2026-10-15): the ceilings below, shipped in v0.3.
    the process cannot be measured; a process's can. The round-4 finding:
    pattern and shading snapshots kept native pixel copies the canvas booking
    never saw; a 1 KB tiling file reached 1.4-1.9 GB, and the soft-mask file
-   the booking was built for drew at 1.5 GB without it. The child now has
-   its own environment, not a copy; it still shares the server's files and
-   network.
+   the booking was built for drew at 1.5 GB without it. The child does not
+   inherit the server's environment; it runs as the same user, so this is
+   not isolation from the server's files or /proc (or the network).
 2. **The fence is a process-memory watchdog,** the standard supervisor that
    kills, as a cgroup `memory.max` does: every 25 ms the server reads the
-   child's `VmRSS` from `/proc/<pid>/status` (kB whatever the page size) and
-   kills it with SIGKILL once it passes `renderMemoryMb` (768 MB) or
+   child's memory, resident plus swapped (`VmRSS` plus `VmSwap`, from one
+   read of `/proc/<pid>/status`, kB whatever the page size; no `VmSwap` line
+   counts as none, so a child cannot slip under the ceiling by being swapped
+   out; round-5 review, #1316) and kills it with SIGKILL once it passes `renderMemoryMb` (768 MB) or
    `structureMemoryMb` (320 MB) plus the file's size, which the child holds;
    the stop is logged as memory. This replaces both the `external_memory`
    watchdog (item 6) and the canvas allowance (first amendment, item 2),
@@ -265,9 +267,19 @@ Owner decisions 5a and 6a (2026-10-15): the ceilings below, shipped in v0.3.
    `std::bad_alloc` (logged as memory); a glibc child usually answers a render
    error instead, a rare misclassification accepted as such. `RLIMIT_AS`
    stays rejected, for the measured reason now under "Alternatives considered".
+   The same wrapper also sets **`RLIMIT_CPU`** (`ulimit -t`) to the job's
+   start-up and wall clocks, rounded up to whole seconds, plus 5 s (70 s for
+   a 60 s render budget and 5 s start-up), so a child orphaned by a dead
+   server stops on its own (round-5 review). Both values reach the shell as
+   positional arguments, never as part of its script.
 5. **Answers** (first amendment, item 3): a memory stop answers
    `document_preview_failed` logged as `processing_interrupted`, not as a
    parser fault; the sandbox's own `document.preview` record names memory.
+   A render answer is checked like any other input from a child that read
+   a hostile file (round-5 review): width and height whole numbers from 1 to
+   the asked-for long edge, and the bytes starting with the 8-byte PNG
+   signature; anything else is a failed render, the same 422, logged without
+   any of the answer.
 6. **Consequences.** Each job costs about 50-100 ms more than the worker did
    (process start; ready in 0.23-0.38 s) plus about 3 ms per MB of file to
    hand over, paid before the clock starts; the start-up deadline covers it.

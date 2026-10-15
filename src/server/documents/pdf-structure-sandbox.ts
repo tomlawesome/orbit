@@ -23,15 +23,19 @@ import {
  * The cheap pre-parse bound in validation.ts still runs first; this is the
  * fence behind it, for every entry path that bound does not model.
  *
- * The fence is the child's resident-set size (`VmRSS` in `/proc/<pid>/status`),
- * read every `pollMs`: it counts everything the child allocates, V8 heap,
- * decoded streams, Skia canvases, patterns, images and fonts alike, with no
- * bookkeeping of ours. Past the job's ceiling plus the file's size (the child
- * holds a copy) the child is killed with SIGKILL and the stop is memory. The
- * child's own V8 flags cap its heap first, and `ulimit -d` (RLIMIT_DATA) at
- * the ceiling plus 1.5 GB is a kernel-enforced backstop should the server's
- * event loop be too busy to poll. The child gets an empty environment; it
- * still shares the server's files and network.
+ * The fence is the child's memory, resident plus swapped (`VmRSS` plus
+ * `VmSwap` in `/proc/<pid>/status`), read every `pollMs`: it counts
+ * everything the child allocates, V8 heap, decoded streams, Skia canvases,
+ * patterns, images and fonts alike, with no bookkeeping of ours, and a child
+ * cannot slip under it by being swapped out. Past the job's ceiling plus the
+ * file's size (the child holds a copy) the child is killed with SIGKILL and
+ * the stop is memory. The child's own V8 flags cap its heap first, and
+ * `ulimit -d` (RLIMIT_DATA) at the ceiling plus 1.5 GB is a kernel-enforced
+ * backstop should the server's event loop be too busy to poll. `ulimit -t`
+ * (RLIMIT_CPU) at the job's start-up and wall clocks plus 5 s stops a child
+ * on its own should the server die and leave it running. The child does not
+ * inherit the server's environment; it runs as the same user, so this is not
+ * isolation from the server's files or /proc.
  *
  * Page previews are drawn the same way: one child opens the file, applies the
  * same gate, and draws the asked-for page to a PNG, so no PDF is read in the
@@ -89,6 +93,8 @@ const STACK_SIZE_KB = 3_900;
  * a gigabyte above the watchdog's.
  */
 const DATA_LIMIT_HEADROOM_MB = 1_536;
+/** CPU seconds a child may use beyond its start-up and wall clocks before the kernel stops it. */
+const CPU_LIMIT_SLACK_SECONDS = 5;
 /** How much of the child's stderr is kept, in memory only, to recognise an out-of-memory end. */
 const STDERR_TAIL_CHARS = 4_096;
 /** Fixed library messages a child prints when it dies of memory: V8's heap cap, and the allocator under RLIMIT_DATA. */
@@ -97,9 +103,14 @@ const OUT_OF_MEMORY_MESSAGES = ["JavaScript heap out of memory", "std::bad_alloc
 const EXIT_BACKSTOP_MS = 1_000;
 const MiB = 1024 * 1024;
 
-/** Runs `node` under `ulimit -d`; the limit and node's own arguments follow as positional parameters. */
+/**
+ * Runs `node` under `ulimit -t` and `ulimit -d`: the CPU-time limit, the data
+ * limit (empty to leave RLIMIT_DATA alone, for tests only) and node's own
+ * arguments follow as positional parameters, so no value is ever part of the
+ * shell text.
+ */
 const SANDBOX_SHELL = "/bin/sh";
-const SANDBOX_WRAPPER = 'ulimit -d "$1"; shift; exec "$@"';
+const SANDBOX_WRAPPER = 'ulimit -t "$1"; if [ -n "$2" ]; then ulimit -d "$2"; fi; shift 2; exec "$@"';
 
 type Inspector = (bytes: Buffer) => Promise<DocumentStructureReason>;
 type StopKind = "timeout" | "memory" | "crash";
@@ -107,6 +118,8 @@ type Job = "structure" | "render";
 
 let limits: PdfStructureSandboxLimits = { ...PDF_STRUCTURE_SANDBOX_LIMITS };
 let testInspector: Inspector | undefined;
+let testDataLimitHeadroom: "unlimited" | number | undefined;
+let lastChildPid: number | undefined;
 let inFlight = 0;
 let running = 0;
 const waiting: Array<() => void> = [];
@@ -340,26 +353,50 @@ function logStop(job: Job, kind: StopKind, durationMs: number): void {
 
 /**
  * Starts `node` with `nodeArgs` under the sandbox's wrapper: `/bin/sh` sets
- * RLIMIT_DATA and execs node, so the limit is the node process's own. The
- * environment is empty: the server's secrets are not the child's business.
+ * RLIMIT_CPU and RLIMIT_DATA and execs node, so the limits are the node
+ * process's own. `dataLimitKb` undefined leaves RLIMIT_DATA as inherited
+ * (tests only). The environment is empty: the child does not inherit the
+ * server's environment, so the server's secrets are not the child's business;
+ * it runs as the same user, so this is not isolation from the server's files
+ * or /proc.
  */
 function spawnSandboxedNode(
-  dataLimitKb: number,
+  limitsFor: { cpuSeconds: number; dataLimitKb: number | undefined },
   nodeArgs: string[],
   stdio: Array<"ignore" | "pipe" | "ipc">,
 ): ChildProcess {
-  return spawn(SANDBOX_SHELL, ["-c", SANDBOX_WRAPPER, "sh", String(dataLimitKb), process.execPath, ...nodeArgs], {
+  const shellArgs = [String(limitsFor.cpuSeconds), limitsFor.dataLimitKb === undefined ? "" : String(limitsFor.dataLimitKb)];
+  return spawn(SANDBOX_SHELL, ["-c", SANDBOX_WRAPPER, "sh", ...shellArgs, process.execPath, ...nodeArgs], {
     stdio,
     serialization: "advanced",
     env: {},
   });
 }
 
-/** The child's resident-set size in bytes, from the kernel; undefined if it cannot be read. */
-function residentBytes(pid: number): number | undefined {
+/** CPU seconds a child may use: its start-up and wall clocks, rounded up, plus the slack. */
+function cpuLimitSeconds(startupMs: number, wallMs: number): number {
+  return Math.ceil((startupMs + wallMs) / 1000) + CPU_LIMIT_SLACK_SECONDS;
+}
+
+/** RLIMIT_DATA for a job: the ceiling plus the headroom and the file, or none when a test lifts it. */
+function dataLimitKbFor(memoryMb: number, fileBytes: number): number | undefined {
+  if (testDataLimitHeadroom === "unlimited") return undefined;
+  const headroomMb = testDataLimitHeadroom ?? DATA_LIMIT_HEADROOM_MB;
+  return (memoryMb + headroomMb) * 1024 + Math.ceil(fileBytes / 1024);
+}
+
+/**
+ * The child's memory in bytes, resident plus swapped, from one read of the
+ * kernel's status file; undefined if it cannot be read. `VmSwap` may be
+ * absent (no swap support), which counts as none.
+ */
+function memoryBytes(pid: number): number | undefined {
   // `status` reports kB whatever the page size, unlike `statm`.
-  const match = /^VmRSS:\s+(\d+)\s+kB/m.exec(readFileSync(`/proc/${pid}/status`, "latin1"));
-  return match ? Number(match[1]) * 1024 : undefined;
+  const status = readFileSync(`/proc/${pid}/status`, "latin1");
+  const resident = /^VmRSS:\s+(\d+)\s+kB/m.exec(status);
+  if (!resident) return undefined;
+  const swapped = /^VmSwap:\s+(\d+)\s+kB/m.exec(status);
+  return (Number(resident[1]) + (swapped ? Number(swapped[1]) : 0)) * 1024;
 }
 
 type ChildRun = {
@@ -370,7 +407,7 @@ type ChildRun = {
   /** Job-specific fields, beside the file and the parser options, which every job gets. */
   message: Record<string, unknown>;
   wallMs: number;
-  /** The job's RSS ceiling before the file's own size is added. */
+  /** The job's memory ceiling (resident plus swapped) before the file's own size is added. */
   memoryMb: number;
 };
 
@@ -381,8 +418,9 @@ function isReady(message: unknown): boolean {
   return typeof message === "object" && message !== null && (message as { ready?: unknown }).ready === true;
 }
 
-function startChild(run: ChildRun, dataLimitKb: number): ChildProcess {
-  return spawnSandboxedNode(dataLimitKb, [
+function startChild(run: ChildRun, dataLimitKb: number | undefined): ChildProcess {
+  const cpuSeconds = cpuLimitSeconds(limits.startupMs, run.wallMs);
+  return spawnSandboxedNode({ cpuSeconds, dataLimitKb }, [
     `--max-old-space-size=${limits.heapMb}`,
     `--max-semi-space-size=${SEMI_SPACE_MB}`,
     `--stack-size=${STACK_SIZE_KB}`,
@@ -397,7 +435,7 @@ function startChild(run: ChildRun, dataLimitKb: number): ChildProcess {
 function runChild(bytes: Buffer, run: ChildRun): Promise<ChildOutcome> {
   let started = Date.now();
   const ceilingBytes = run.memoryMb * MiB + bytes.length;
-  const dataLimitKb = (run.memoryMb + DATA_LIMIT_HEADROOM_MB) * 1024 + Math.ceil(bytes.length / 1024);
+  const dataLimitKb = dataLimitKbFor(run.memoryMb, bytes.length);
   let child: ChildProcess;
   try {
     child = startChild(run, dataLimitKb);
@@ -406,6 +444,7 @@ function runChild(bytes: Buffer, run: ChildRun): Promise<ChildOutcome> {
     logStop(run.job, "crash", Date.now() - started);
     return Promise.resolve({ stop: "crash" });
   }
+  lastChildPid = child.pid;
   inFlight += 1;
   const exited = new Promise<void>((done) => {
     child.once("exit", () => done());
@@ -444,14 +483,14 @@ function runChild(bytes: Buffer, run: ChildRun): Promise<ChildOutcome> {
         resolve(outcome);
       });
     };
-    // The fence: the child's whole resident memory, from spawn on. A failed
+    // The fence: the child's whole memory, resident plus swapped, from spawn on. A failed
     // read (the child already gone, or no /proc; boot warns) is skipped, and
     // the clock still stops the job.
     const watchdog = setInterval(() => {
       if (settled || child.pid === undefined) return;
       try {
-        const resident = residentBytes(child.pid);
-        if (resident !== undefined && resident > ceilingBytes) settle({ stop: "memory" });
+        const used = memoryBytes(child.pid);
+        if (used !== undefined && used > ceilingBytes) settle({ stop: "memory" });
       } catch {
         // Nothing to judge this time.
       }
@@ -535,6 +574,19 @@ export async function inspectPdfStructureInSandbox(bytes: Buffer): Promise<Docum
   return typeof message === "string" && REASONS.has(message) ? message as DocumentStructureReason : "unsupported_structure";
 }
 
+/** The 8 bytes every PNG file starts with. */
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/** A drawn page's edge: a whole number of pixels, at least one and at most the asked-for long edge. */
+function isEdge(value: unknown, maxEdge: number): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= maxEdge;
+}
+
+function isPng(value: unknown): value is ArrayBufferView {
+  if (!ArrayBuffer.isView(value) || value.byteLength < PNG_SIGNATURE.length) return false;
+  return Buffer.from(value.buffer, value.byteOffset, PNG_SIGNATURE.length).equals(PNG_SIGNATURE);
+}
+
 function isRenderAnswer(message: unknown): message is Record<string, unknown> & { outcome: string } {
   return typeof message === "object" && message !== null && typeof (message as { outcome?: unknown }).outcome === "string";
 }
@@ -574,8 +626,11 @@ export async function renderPdfPageInSandbox(
   const pageCount = answer.pageCount;
   if (typeof pageCount !== "number" || !Number.isSafeInteger(pageCount)) return { outcome: "failed" };
   if (answer.outcome === "page_not_found") return { outcome: "page_not_found", pageCount };
+  // The child read a hostile file, so its answer is checked like any other
+  // input: whole-pixel edges within the asked-for size, and PNG bytes. Anything
+  // else is a failed render; nothing of the answer is logged.
   const { png, width, height } = answer;
-  if (answer.outcome === "drawn" && ArrayBuffer.isView(png) && typeof width === "number" && typeof height === "number") {
+  if (answer.outcome === "drawn" && isPng(png) && isEdge(width, request.maxEdge) && isEdge(height, request.maxEdge)) {
     return { outcome: "drawn", pageCount, png: Buffer.from(png.buffer, png.byteOffset, png.byteLength), width, height };
   }
   return { outcome: "failed" };
@@ -585,7 +640,7 @@ export async function renderPdfPageInSandbox(
 export type PdfSandboxSelfCheckProblem = "child_not_started" | "data_limit_not_applied" | "proc_unreadable";
 
 /**
- * A child started exactly as a job's is, `ulimit -d` wrapper and all, with a
+ * A child started exactly as a job's is, `ulimit` wrapper and all, with a
  * trivial script that reports its own `VmRSS` and data limit from `/proc`;
  * the server also reads the child's `/proc/<pid>/status` once. Resolves with
  * the first thing missing, or undefined when the sandbox has everything it
@@ -593,6 +648,7 @@ export type PdfSandboxSelfCheckProblem = "child_not_started" | "data_limit_not_a
  */
 export function pdfSandboxSelfCheck(): Promise<PdfSandboxSelfCheckProblem | undefined> {
   const dataLimitKb = (PDF_STRUCTURE_SANDBOX_LIMITS.renderMemoryMb + DATA_LIMIT_HEADROOM_MB) * 1024;
+  const cpuSeconds = cpuLimitSeconds(PDF_STRUCTURE_SANDBOX_LIMITS.startupMs, PDF_STRUCTURE_SANDBOX_LIMITS.wallMs);
   const source = `
 const { readFileSync } = require("node:fs");
 const read = (path, pattern) => { try { return pattern.exec(readFileSync(path, "latin1"))?.[1] ?? null; } catch { return null; } };
@@ -605,7 +661,7 @@ process.send({
   return new Promise((resolve) => {
     let child: ChildProcess;
     try {
-      child = spawnSandboxedNode(dataLimitKb, ["-e", source], ["ignore", "ignore", "ignore", "ipc"]);
+      child = spawnSandboxedNode({ cpuSeconds, dataLimitKb }, ["-e", source], ["ignore", "ignore", "ignore", "ipc"]);
     } catch {
       resolve("child_not_started");
       return;
@@ -624,7 +680,7 @@ process.send({
     child.once("message", (message: { residentKb?: unknown; dataLimit?: unknown }) => {
       let readByServer = false;
       try {
-        readByServer = child.pid !== undefined && residentBytes(child.pid) !== undefined;
+        readByServer = child.pid !== undefined && memoryBytes(child.pid) !== undefined;
       } catch {
         readByServer = false;
       }
@@ -643,6 +699,20 @@ export function setPdfStructureSandboxLimitsForTests(override: Partial<PdfStruct
 /** Replaces the sandbox call with `fn(bytes)` for a test; `undefined` restores it. */
 export function setPdfStructureInspectorForTests(fn: Inspector | undefined): void {
   testInspector = fn;
+}
+
+/**
+ * Moves RLIMIT_DATA's headroom above the job's ceiling for a test, in MB;
+ * "unlimited" leaves `ulimit -d` out of the wrapper, so only the watchdog
+ * bounds memory; `undefined` restores the default.
+ */
+export function setPdfSandboxDataLimitHeadroomForTests(headroom: "unlimited" | number | undefined): void {
+  testDataLimitHeadroom = headroom;
+}
+
+/** The pid of the most recently started child, stopped at start-up or not; undefined before the first. */
+export function lastPdfSandboxChildPidForTests(): number | undefined {
+  return lastChildPid;
 }
 
 /** Child processes currently running. */
