@@ -252,12 +252,25 @@ export async function reportKekRotationInProgress(): Promise<void> {
  * runs with a heap flag (`--max-old-space-size` and its kin, on the command
  * line or in NODE_OPTIONS): the time limit still stops a hostile PDF, but its
  * memory is no longer capped. A trivial capped worker reports its heap limit.
+ * It also warns when this Node cannot report a worker's off-heap memory, which
+ * the sandbox's watchdog reads: the heap cap alone does not count it.
  */
 export async function reportPdfSandboxMemoryCap(): Promise<void> {
-  const [{ sandboxMemoryCapEnforced }, { log, operationalDetail }] = await Promise.all([
+  const [{ sandboxMemoryCapEnforced }, { log, operationalDetail }, { Worker }] = await Promise.all([
     import("@/server/documents/pdf-structure-sandbox"),
     import("@/lib/logger"),
+    import("node:worker_threads"),
   ]);
+  if (typeof Worker.prototype.getHeapStatistics !== "function") {
+    log.warn({
+      event: "document.inspection",
+      state: "degraded",
+      reason: "configuration_invalid",
+      action: "check_configuration",
+      impact: "none",
+      detail: operationalDetail`this Node cannot report a worker's off-heap memory, so the PDF sandbox cannot cap it; run the Node version the image ships`,
+    });
+  }
   if (await sandboxMemoryCapEnforced()) return;
   log.warn({
     event: "document.inspection",
