@@ -34,10 +34,10 @@ export const ARCHIVE_BODY_STALL_MS = 30_000;
 export const ARCHIVE_BODY_DEADLINE_MS = 300_000;
 
 /* The browser shows both verbatim (DeskArchive.svelte, PocketArchive.svelte).
-   The busy words are the owner's (2026-10-15): generic, since the other
-   request may be an export as well as an import. */
+   Both are the owner's words (2026-10-15); the busy one is generic, since
+   the other request may be an export as well as an import. */
 export const ARCHIVE_BUSY_MESSAGE = "Orbit’s processing another request right now, please try again in a few minutes.";
-export const ARCHIVE_BODY_TIMED_OUT_MESSAGE = "the archive took too long to arrive · check the connection and try again";
+export const ARCHIVE_BODY_TIMED_OUT_MESSAGE = "The archive failed to upload, please try again.";
 
 /**
  * The one holder's token, or null. One per process: see docs/architecture.md.
