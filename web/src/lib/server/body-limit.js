@@ -16,10 +16,12 @@
  *  - every other route gets `SMALL_BODY_LIMIT`, twice the 512 KB every route
  *    has run under until now.
  *
- * A declared Content-Length over the limit is refused before a byte is read;
- * adapter-node already holds a body to the length it declared. A body with no
- * declared length is counted as it streams and fails at the limit. Either way
- * the answer is a 413 in the API's own error envelope, never a 500.
+ * A declared Content-Length over the limit is refused before a byte is
+ * buffered: the 413 goes first, then the body is read and thrown away
+ * (`discardBody`); adapter-node already holds a body to the length it
+ * declared. A body with no declared length is counted as it streams and
+ * fails at the limit. Either way the answer is a 413 in the API's own error
+ * envelope, never a 500.
  */
 import { AppError } from "orbit/lib/app-error";
 import { DOCUMENT_MAX_BYTES_CEILING } from "orbit/server/documents/config";
@@ -87,15 +89,31 @@ export async function bodyLimitFor(routeId, readUploadLimit) {
 }
 
 /**
- * The refusal. It is sent before the body has been read, so the rest of that
- * body is still on its way: `Connection: close` tells the client not to send
- * its next request down the same connection behind it, which it would
- * otherwise find hung up.
+ * Reads a refused request's body to its end and throws it away, as Node does
+ * for a request nobody touched. adapter-node starts reading every body itself
+ * and pauses after the first chunk, so Node never does this for us: a body
+ * left there stalls the connection, and a browser still sending it never
+ * sees the answer (Firefox reports a network error instead). Draining costs
+ * bandwidth, not memory; a sender that stalls is cut by Node's keep-alive and
+ * request timeouts. Never rejects; a request with no body is left alone.
+ *
+ * @param {Request} request
+ * @returns {Promise<void>}
+ */
+export function discardBody(request) {
+  if (request.body === null) return Promise.resolve();
+  return request.body.pipeTo(new WritableStream()).catch(() => undefined);
+}
+
+/**
+ * The refusal. It is sent before the body has been read; the caller then
+ * reads the rest away (`discardBody`), so the connection stays usable for the
+ * client's next request and no `Connection: close` is needed.
  *
  * @param {{ code: string, message: string }} refusal
  */
 export function tooLarge({ code, message }) {
-  return Response.json({ error: { code, message } }, { status: 413, headers: { "Cache-Control": "no-store", Connection: "close" } });
+  return Response.json({ error: { code, message } }, { status: 413, headers: { "Cache-Control": "no-store" } });
 }
 
 /**
@@ -112,7 +130,9 @@ export function limitRequestBody(request, rule) {
   const declared = request.headers.get("content-length");
   if (declared !== null) {
     const length = Number(declared);
-    return Number.isFinite(length) && length > rule.limit ? tooLarge(rule) : request;
+    if (!Number.isFinite(length) || length <= rule.limit) return request;
+    discardBody(request);
+    return tooLarge(rule);
   }
   let seen = 0;
   const counted = request.body.pipeThrough(new TransformStream({
