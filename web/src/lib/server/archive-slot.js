@@ -33,9 +33,10 @@ export const ARCHIVE_BODY_TIMED_OUT_CODE = "request_timeout";
 export const ARCHIVE_BODY_STALL_MS = 30_000;
 export const ARCHIVE_BODY_DEADLINE_MS = 300_000;
 
-/* Placeholder wording until the owner chooses it; the browser shows both
-   verbatim (DeskArchive.svelte, PocketArchive.svelte). */
-export const ARCHIVE_BUSY_MESSAGE = "orbit is busy with another archive · try again in a minute";
+/* The browser shows both verbatim (DeskArchive.svelte, PocketArchive.svelte).
+   The busy words are the owner's (2026-10-15): generic, since the other
+   request may be an export as well as an import. */
+export const ARCHIVE_BUSY_MESSAGE = "Orbit’s processing another request right now, please try again in a few minutes.";
 export const ARCHIVE_BODY_TIMED_OUT_MESSAGE = "the archive took too long to arrive · check the connection and try again";
 
 /**
