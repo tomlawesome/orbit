@@ -62,6 +62,9 @@
   /* Declared before `view` because `view` starts from it; the launch below is
      what the rest of this prop is for. */
   let { data } = $props();
+  /* #1440: Administration is the instance administrator's screen; the root
+     layout says whether the reader is one (the phone hatch reads it alike). */
+  const isAdmin = $derived(Boolean(page.data?.isAdmin));
 
   /** @typedef {import('$lib/data/workspace.js').HomeView} HomeView */
   /* Straight from the server's read (#842), so the FIRST render already has
@@ -1817,7 +1820,7 @@
   <nav>
     <a href={resolve("/inbox")}>Inbox</a>
     <a href={resolve("/settings")}>Settings</a>
-    <a href={resolve("/administration")}>Administration</a>
+    {#if isAdmin}<a href={resolve("/administration")}>Administration</a>{/if}
     <a href={resolve("/about")}>About</a>
   </nav>
   <div class="swatches" role="group" aria-label="Theme">
