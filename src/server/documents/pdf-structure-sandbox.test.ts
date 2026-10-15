@@ -539,6 +539,15 @@ export default { getDocument, GlobalWorkerOptions };
       expect(Date.now() - started).toBeLessThan(5_000);
     }, 30_000);
 
+    // A clean 98 MB file peaks at 393 MB. 32 + 1 x 98 = 130 would kill the
+    // child; 32 + 5 x 98 = 522 leaves room, as pdf.js needs when it re-indexes
+    // a file whose cross-reference offset is a few bytes out (about 5x the file).
+    it("accepts a 98 MB PDF when the structure ceiling adds five times the file to the allowance", async () => {
+      setSandboxLimits({ wallMs: 60_000, structureMemoryMb: 32 });
+
+      await expect(classifyDocumentStructure(paddedPdf(98 * MB), "application/pdf")).resolves.toBe("supported_structure");
+    }, 30_000);
+
     it.each(syntheticStructurePdfFixtures)("accepts synthetic standards-valid PDF structure from $name", async ({ bytes }) => {
       await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("supported_structure");
     }, TEST_TIMEOUT_MS);
