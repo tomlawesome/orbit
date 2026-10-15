@@ -173,8 +173,8 @@ describe("a second archive request while one is in progress", () => {
     expect(answer.status).toBe(429);
     expect(answer.headers.get("retry-after")).toBe("60");
     expect(answer.headers.get("cache-control")).toBe("no-store");
-    // Refused unread: the client must not queue its next request behind it.
-    expect(answer.headers.get("connection")).toBe("close");
+    // The refused upload is read and thrown away, not abandoned: no "close" demand on the connection.
+    expect(answer.headers.get("connection")).toBeNull();
     const { error } = await answer.json();
     expect(error.code).toBe("archive_busy");
     expect(error.message).toEqual(expect.stringMatching(/\S/));
@@ -191,18 +191,63 @@ describe("a second archive request while one is in progress", () => {
     }
   });
 
-  it("never reads the refused caller's upload", async () => {
+  it("returns the refusal at once and reads the refused upload to its end, throwing it away", async () => {
     hold(PREVIEW, post(100));
-    const pull = vi.fn();
-    const body = new ReadableStream({ start() {}, pull }, { highWaterMark: 0 });
-    const refused = streamed(body);
+    const chunks = 5;
+    let pulled = 0;
+    let closed = false;
+    let cancelled = false;
+    const body = new ReadableStream({
+      pull(controller) {
+        if (pulled < chunks) {
+          pulled += 1;
+          controller.enqueue(new Uint8Array(1024));
+        } else {
+          closed = true;
+          controller.close();
+        }
+      },
+      cancel() { cancelled = true; },
+    }, { highWaterMark: 0 });
 
-    const answer = hold(IMPORT, refused);
+    const answer = hold(IMPORT, streamed(body));
 
+    // Synchronous: a Response, not a promise of one, and nothing read yet.
+    expect(answer).toBeInstanceOf(Response);
     expect(answer.status).toBe(429);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(refused.bodyUsed).toBe(false);
-    expect(pull).not.toHaveBeenCalled();
+    expect(pulled).toBeLessThanOrEqual(1);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(pulled).toBe(chunks);
+    expect(closed).toBe(true);
+    expect(cancelled).toBe(false);
+  });
+
+  it("causes no unhandled rejection when the refused upload errors while it is being read away", async () => {
+    hold(PREVIEW, post(100));
+    /** @type {unknown[]} */
+    const unhandled = [];
+    const listener = (reason) => { unhandled.push(reason); };
+    process.on("unhandledRejection", listener);
+    try {
+      let pulls = 0;
+      const body = new ReadableStream({
+        pull(controller) {
+          pulls += 1;
+          if (pulls === 1) controller.enqueue(new Uint8Array(1024));
+          else controller.error(new Error("the client went away"));
+        },
+      }, { highWaterMark: 0 });
+
+      const answer = hold(IMPORT, streamed(body));
+      expect(answer.status).toBe(429);
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(pulls).toBeGreaterThanOrEqual(2);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", listener);
+    }
   });
 
   it("builds the same answer as archiveBusy()", async () => {
@@ -285,6 +330,50 @@ describe("an upload that stalls", () => {
     }
     await reader.cancel();
   });
+
+  it("still delivers the 408 to the caller, never cancels the original source, and reads it on to its end", async () => {
+    let cancelled = false;
+    let pulls = 0;
+    let lateChunksPulled = 0;
+    let ended = false;
+    let open = () => {};
+    const gate = new Promise((resolve) => { open = resolve; });
+    // Drips two chunks, then stops until the gate opens; then three more chunks and the end.
+    const source = new ReadableStream({
+      async pull(controller) {
+        pulls += 1;
+        if (pulls <= 2) {
+          controller.enqueue(new Uint8Array([pulls]));
+          return;
+        }
+        await gate;
+        if (lateChunksPulled < 3) {
+          lateChunksPulled += 1;
+          controller.enqueue(new Uint8Array([9]));
+        } else {
+          ended = true;
+          controller.close();
+        }
+      },
+      cancel() { cancelled = true; },
+    }, { highWaterMark: 0 });
+
+    const outcome = hold(PREVIEW, streamed(source), { stallMs: 50, deadlineMs: 10_000 });
+    expect(outcome).not.toBeInstanceOf(Response);
+
+    const failure = await failureOf(outcome.request);
+
+    expect(failure).toMatchObject({ code: "request_timeout", status: 408 });
+    expect(appErrorResponse(failure).status).toBe(408);
+    expect(cancelled).toBe(false);
+
+    // The sender carries on after the cut: everything it still sends is read away to the end.
+    open();
+    for (let waited = 0; !ended && waited < 1000; waited += 10) await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(lateChunksPulled).toBe(3);
+    expect(ended).toBe(true);
+    expect(cancelled).toBe(false);
+  });
 });
 
 describe("an upload that drips for too long", () => {
@@ -335,5 +424,21 @@ describe("a client that goes away", () => {
     outcome.release();
     expect(vi.getTimerCount()).toBe(0);
     expect(slot.archiveSlotHeld()).toBe(false);
+  });
+});
+
+/* Last in the file: until the slot is fixed, a failure here leaves it held with no handle to release. */
+describe("a request that cannot be prepared", () => {
+  it("throws, and does not leave the slot held, when the body is already locked", () => {
+    const request = streamed(silentAfterOneChunk());
+    request.body.getReader();
+
+    expect(() => slot.holdArchiveSlot(PREVIEW, request)).toThrow();
+
+    expect(slot.archiveSlotHeld()).toBe(false);
+    // The next caller gets in.
+    const next = hold(IMPORT, post(100));
+    expect(next).not.toBeInstanceOf(Response);
+    expect(next).not.toBeNull();
   });
 });

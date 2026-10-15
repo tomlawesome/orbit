@@ -30,6 +30,9 @@ resetDatabaseBetweenSpecFiles();
 
 const PASSPHRASE = "correct-horse-battery-staple";
 const PREVIEW_PATH = "/api/portable-archives/preview";
+const BUSY_SENTENCE = "Orbit\u2019s processing another request right now, please try again in a few minutes.";
+/** Browsers that must receive a refusal for a large body they are still sending. */
+const LARGE_BODY_PROJECTS = ["desktop-firefox", "desktop-chromium"];
 
 /** The archive card of whichever layout this project draws: the desk card, or the pocket's. */
 const archiveCard = (page: Page, isMobile: boolean) =>
@@ -139,7 +142,8 @@ test("while one archive upload is in progress a second is refused at once, and g
     await card.getByRole("button", { name: "look inside" }).click();
     const refusal = refusalIn(page, isMobile);
     await expect(refusal).toBeVisible({ timeout: 15_000 });
-    await expect(refusal).toHaveText(/\S/);
+    /* The owner's sentence, word for word (the desk card puts a prefix before it). */
+    await expect(refusal).toContainText(BUSY_SENTENCE);
     await expect(refusal).not.toContainText("The passphrase or archive is invalid");
     await expect(card.locator(".inside, .hh-preview")).toHaveCount(0);
     // Still on the "file chosen" step: the file's name, its passphrase and the button to try again.
@@ -181,4 +185,74 @@ test("while one archive upload is in progress a second is refused at once, and g
     await cleanup(page, source);
     await cleanup(page, target);
   }
+});
+
+/**
+ * From inside the page, POST `size` bytes of text to `path` with the session's
+ * CSRF token, and report how the browser's own fetch settled within 15 s: the
+ * status, the refusal code and Retry-After, or the network error it died with.
+ */
+async function largePostFromPage(page: Page, path: string, size: number) {
+  const { "X-CSRF-Token": csrfToken } = await sessionHeaders(page);
+  return await page.evaluate(async ({ path, size, csrfToken }) => {
+    try {
+      const response = await fetch(path, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
+        body: "x".repeat(size),
+        signal: AbortSignal.timeout(15_000),
+      });
+      const body = (await response.json().catch(() => null)) as { error?: { code?: string } } | null;
+      return { status: response.status, code: body?.error?.code ?? null, retryAfter: response.headers.get("retry-after"), failure: null as string | null };
+    } catch (error) {
+      return { status: 0, code: null, retryAfter: null, failure: error instanceof Error ? `${error.name}: ${error.message}` : String(error) };
+    }
+  }, { path, size, csrfToken });
+}
+
+test("a 10 MB body sent to a busy archive route still gets its 429 in the browser", async ({ page }, testInfo) => {
+  test.skip(!LARGE_BODY_PROJECTS.includes(testInfo.project.name), "the large-body refusal is proved on Firefox and Chromium on the desk");
+  test.setTimeout(120_000);
+  await signIn(page, "/home");
+
+  const origin = new URL(page.url()).origin;
+  const headers = { ...(await sessionHeaders(page)), cookie: await cookieHeader(page) };
+  const holder = holdPreviewOpen(origin, headers);
+  try {
+    await expect.poll(async () => (await fetch(`${origin}${PREVIEW_PATH}`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: "{}",
+    })).status, {
+      message: "the slot is held: a small second request is refused with 429",
+      timeout: 30_000,
+      intervals: [250, 500, 1_000],
+    }).toBe(429);
+
+    const started = Date.now();
+    const answer = await largePostFromPage(page, PREVIEW_PATH, 10_000_000);
+
+    expect(answer.failure, "the browser got an answer rather than a network error").toBeNull();
+    expect(answer.status).toBe(429);
+    expect(answer.code).toBe("archive_busy");
+    expect(answer.retryAfter).toBe("60");
+    expect(Date.now() - started).toBeLessThan(15_000);
+  } finally {
+    await holder.end();
+  }
+});
+
+test("a 2 MB body sent to an ordinary route gets its 413 in the browser", async ({ page }, testInfo) => {
+  test.skip(!LARGE_BODY_PROJECTS.includes(testInfo.project.name), "the large-body refusal is proved on Firefox and Chromium on the desk");
+  test.setTimeout(60_000);
+  await signIn(page, "/home");
+
+  const started = Date.now();
+  const answer = await largePostFromPage(page, "/api/workspace/commands", 2_000_000);
+
+  expect(answer.failure, "the browser got an answer rather than a network error").toBeNull();
+  expect(answer.status).toBe(413);
+  expect(answer.code).toBe("request_too_large");
+  expect(Date.now() - started).toBeLessThan(15_000);
 });

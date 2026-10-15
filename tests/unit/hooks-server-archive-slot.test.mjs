@@ -126,7 +126,7 @@ async function expectBusy(response) {
   expect(response.status).toBe(429);
   expect(response.headers.get("retry-after")).toBe("60");
   expect(response.headers.get("cache-control")).toBe("no-store");
-  expect(response.headers.get("connection")).toBe("close");
+  expect(response.headers.get("connection")).toBeNull();
   const { error } = await response.json();
   expect(error.code).toBe("archive_busy");
   expect(error.message).toEqual(expect.stringMatching(/\S/));
@@ -172,21 +172,34 @@ describe("hooks.server handle and the one-archive-at-a-time slot (#1316)", () =>
       expect((await running).status).toBe(200);
     });
 
-    it("never reads the refused caller's upload", async () => {
+    it("never buffers the refused caller's upload: it is answered, then read to its end and thrown away", async () => {
       const first = gatedResolver();
       begin(eventFor(IMPORT), first.resolve);
       await entered(first.resolve);
 
-      const pull = vi.fn();
-      const body = new ReadableStream({ start() {}, pull }, { highWaterMark: 0 });
+      const chunks = 4;
+      let pulled = 0;
+      let closed = false;
+      const body = new ReadableStream({
+        pull(controller) {
+          if (pulled < chunks) {
+            pulled += 1;
+            controller.enqueue(new Uint8Array(1024));
+          } else {
+            closed = true;
+            controller.close();
+          }
+        },
+      }, { highWaterMark: 0 });
       const event = eventFor(PREVIEW, { body });
       const second = readingResolver();
       const refused = await handle({ event, resolve: second });
 
       await expectBusy(refused);
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(pull).not.toHaveBeenCalled();
-      expect(event.request.bodyUsed).toBe(false);
+      expect(second).not.toHaveBeenCalled();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(pulled).toBe(chunks);
+      expect(closed).toBe(true);
     });
 
     it("gets in again once the first request has settled", async () => {

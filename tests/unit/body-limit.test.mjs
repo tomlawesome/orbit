@@ -27,6 +27,7 @@ import {
   SERVER_BODY_LIMIT,
   SMALL_BODY_LIMIT,
   bodyLimitFor,
+  discardBody,
   limitRequestBody,
 } from "../../web/src/lib/server/body-limit.js";
 
@@ -118,15 +119,50 @@ describe("holding a request to its limit", () => {
     const answer = limitRequestBody(post(2 * MIB), { ...upload, limit: MIB });
     expect(answer).toBeInstanceOf(Response);
     expect(answer.status).toBe(413);
-    // Refused unread: the client must not queue its next request behind it.
-    expect(answer.headers.get("connection")).toBe("close");
+    // The refused body is read and thrown away, not abandoned: no "close" demand on the connection.
+    expect(answer.headers.get("connection")).toBeNull();
     await expect(answer.json()).resolves.toMatchObject({ error: { code: "document_too_large" } });
   });
 
   it("refuses a large declared body to an ordinary route with a 413", async () => {
     const answer = limitRequestBody(post(2 * MIB), small);
     expect(answer.status).toBe(413);
+    expect(answer.headers.get("connection")).toBeNull();
     await expect(answer.json()).resolves.toMatchObject({ error: { code: "request_too_large" } });
+  });
+
+  it("reads an over-declared body to its end and throws it away after the 413 is returned", async () => {
+    const chunks = 6;
+    let pulled = 0;
+    let closed = false;
+    let cancelled = false;
+    const body = new ReadableStream({
+      pull(controller) {
+        if (pulled < chunks) {
+          pulled += 1;
+          controller.enqueue(new Uint8Array(64 * 1024));
+        } else {
+          closed = true;
+          controller.close();
+        }
+      },
+      cancel() { cancelled = true; },
+    }, { highWaterMark: 0 });
+    const request = new Request("http://127.0.0.1:3000/api/anything", {
+      method: "POST",
+      headers: { "content-length": String(2 * MIB), "content-type": "application/octet-stream" },
+      body,
+      duplex: "half",
+    });
+
+    const answer = limitRequestBody(request, small);
+
+    expect(answer).toBeInstanceOf(Response);
+    expect(answer.status).toBe(413);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(pulled).toBe(chunks);
+    expect(closed).toBe(true);
+    expect(cancelled).toBe(false);
   });
 
   it("counts a body with no declared length as it streams, and refuses it at the limit with a 413", async () => {
@@ -140,6 +176,55 @@ describe("holding a request to its limit", () => {
   it("delivers an undeclared body under the limit in full", async () => {
     const held = limitRequestBody(post(700 * 1024, { declare: false }), small);
     expect((await held.arrayBuffer()).byteLength).toBe(700 * 1024);
+  });
+});
+
+describe("discarding an unread body", () => {
+  const url = "http://127.0.0.1:3000/api/anything";
+
+  it("reads a stream to its end", async () => {
+    let pulled = 0;
+    let closed = false;
+    const body = new ReadableStream({
+      pull(controller) {
+        if (pulled < 4) {
+          pulled += 1;
+          controller.enqueue(new Uint8Array(1024));
+        } else {
+          closed = true;
+          controller.close();
+        }
+      },
+    }, { highWaterMark: 0 });
+    const request = new Request(url, { method: "POST", body, duplex: "half" });
+
+    await discardBody(request);
+
+    expect(pulled).toBe(4);
+    expect(closed).toBe(true);
+  });
+
+  it("never rejects, even when the stream errors", async () => {
+    let pulls = 0;
+    const body = new ReadableStream({
+      pull(controller) {
+        pulls += 1;
+        if (pulls === 1) controller.enqueue(new Uint8Array(1024));
+        else controller.error(new Error("the client went away"));
+      },
+    }, { highWaterMark: 0 });
+    const request = new Request(url, { method: "POST", body, duplex: "half" });
+
+    await expect((async () => discardBody(request))()).resolves.not.toThrow();
+    expect(pulls).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does nothing for a request with no body", async () => {
+    const request = new Request(url, { method: "POST" });
+    expect(request.body).toBeNull();
+
+    await expect((async () => discardBody(request))()).resolves.not.toThrow();
+    expect(request.bodyUsed).toBe(false);
   });
 });
 
