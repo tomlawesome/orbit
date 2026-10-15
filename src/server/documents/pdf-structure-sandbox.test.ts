@@ -13,7 +13,9 @@ import { syntheticOwnerPasswordPdf, syntheticUserPasswordPdf } from "../../../te
 import { syntheticPdf, syntheticPdfWithXrefStream } from "../../../tests/support/synthetic-documents";
 import {
   inspectPdfStructureInSandbox,
+  lastPdfSandboxChildPidForTests,
   PDF_STRUCTURE_SANDBOX_LIMITS,
+  pdfSandboxSelfCheck,
   pdfStructureSandboxInFlightForTests,
   setPdfStructureInspectorForTests,
   setPdfStructureSandboxLimitsForTests,
@@ -176,6 +178,67 @@ async function peakRssGrowth<T>(run: () => Promise<T>): Promise<{ result: T; gro
 
 const MB = 1024 * 1024;
 
+/**
+ * Waits up to 2 s for the job's child to be gone: `process.kill(pid, 0)`
+ * throwing ESRCH. `before` is the last child pid seen before the job, so the
+ * pid checked is this job's own child, not an earlier one.
+ */
+async function expectChildGone(before: number | undefined): Promise<void> {
+  const pid = lastPdfSandboxChildPidForTests();
+  expect(pid).toEqual(expect.any(Number));
+  expect(pid).not.toBe(before);
+  const deadline = Date.now() + 2_000;
+  for (;;) {
+    try {
+      process.kill(pid as number, 0);
+    } catch (error) {
+      expect((error as NodeJS.ErrnoException).code).toBe("ESRCH");
+      return;
+    }
+    if (Date.now() > deadline) throw new Error(`the job's child ${pid} was still running 2 s after the job settled`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+/**
+ * A stand-in parser module (as in the environment canary below) that reads
+ * its own process's CPU-time limit and refuses to parse unless the soft limit
+ * is exactly `expectedSeconds`, so the job answers normally only when the
+ * child has the backstop the limits call for.
+ */
+function cpuLimitCheckingPdfjsModule(expectedSeconds: number): string {
+  return `
+import { readFileSync } from "node:fs";
+function cpuTimeSoftLimit() {
+  const line = readFileSync("/proc/self/limits", "utf8").split("\\n").find((entry) => entry.startsWith("Max cpu time"));
+  const match = line && /^Max cpu time\\s+(\\S+)\\s+(\\S+)/.exec(line);
+  return match ? match[1] : "missing";
+}
+function getDocument() {
+  const soft = cpuTimeSoftLimit();
+  if (soft !== ${JSON.stringify(String(expectedSeconds))}) {
+    throw new Error("the child's CPU-time limit is " + soft + ", not ${expectedSeconds}");
+  }
+  const page = {
+    getViewport: () => ({ width: 200, height: 200 }),
+    cleanup: () => undefined,
+    destroy: () => undefined,
+  };
+  const document = {
+    numPages: 1,
+    getPage: async () => page,
+    getMetadata: async () => ({ info: {}, metadata: null }),
+    cleanup: async () => undefined,
+    destroy: async () => undefined,
+  };
+  return { promise: Promise.resolve(document), onPassword: undefined, destroy: async () => undefined };
+}
+export { getDocument };
+export const GlobalWorkerOptions = {};
+export default { getDocument, GlobalWorkerOptions };
+`;
+}
+
 describe("the PDF structure sandbox", () => {
   beforeEach(() => {
     setSandboxLimits({ ...TEST_LIMITS });
@@ -251,6 +314,15 @@ describe("the PDF structure sandbox", () => {
         expect(captured.logged).not.toMatch(/timeout|timed.?out/i);
         expect(growthBytes).toBeLessThan(150 * MB);
         expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+      }, 30_000);
+
+      it("leaves no child process behind once an object-stream bomb is stopped", async () => {
+        setSandboxLimits({ wallMs: 60_000, structureMemoryMb: 192 });
+        const before = lastPdfSandboxChildPidForTests();
+
+        await expect(classifyDocumentStructure(objectStreamBomb(128), "application/pdf")).resolves.toBe("unsupported_structure");
+
+        await expectChildGone(before);
       }, 30_000);
 
       it("refuses two object-stream bombs at once without the process growing", async () => {
@@ -363,6 +435,37 @@ export default { getDocument, GlobalWorkerOptions };
     expect(pdfStructureSandboxInFlightForTests()).toBe(0);
   }, TEST_TIMEOUT_MS);
 
+  it("leaves no child process behind once a start-up stop is settled", async () => {
+    setSandboxLimits({ ...TEST_LIMITS, startupMs: 1 });
+    const before = lastPdfSandboxChildPidForTests();
+
+    await expect(classifyDocumentStructure(syntheticPdf(), "application/pdf")).resolves.toBe("unsupported_structure");
+
+    await expectChildGone(before);
+  }, TEST_TIMEOUT_MS);
+
+  // ceil((startupMs + wallMs) / 1000) + 5 seconds of CPU: a child orphaned by
+  // a dead server still stops on its own.
+  it.each([
+    [{ wallMs: 60_000, startupMs: 5_000 }, 70],
+    [{ wallMs: 5_000, startupMs: 5_000 }, 15],
+  ] as const)("gives the child a CPU-time limit from its clocks (%o: %i s), and answers as normal under it", async (clocks, seconds) => {
+    const directory = mkdtempSync(join(tmpdir(), "orbit-sandbox-cpu-limit-"));
+    const modulePath = join(directory, "fake-pdfjs.mjs");
+    writeFileSync(modulePath, cpuLimitCheckingPdfjsModule(seconds));
+    try {
+      setSandboxLimits({ ...TEST_LIMITS, ...clocks, pdfjsUrl: pathToFileURL(modulePath).href });
+
+      await expect(inspectPdfStructureInSandbox(syntheticPdf())).resolves.toBe("supported_structure");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, TEST_TIMEOUT_MS);
+
+  it("passes its own boot self-check on this host", async () => {
+    await expect(pdfSandboxSelfCheck()).resolves.toBeUndefined();
+  }, TEST_TIMEOUT_MS);
+
   it("refuses as unsupported_structure, quickly, when the worker cannot load the parser and crashes", async () => {
     // A long wall limit, so a fast answer can only come from handling the crash,
     // not from the timeout.
@@ -434,6 +537,15 @@ export default { getDocument, GlobalWorkerOptions };
       await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("supported_structure");
 
       expect(Date.now() - started).toBeLessThan(5_000);
+    }, 30_000);
+
+    // A clean 98 MB file peaks at 393 MB. 32 + 1 x 98 = 130 would kill the
+    // child; 32 + 5 x 98 = 522 leaves room, as pdf.js needs when it re-indexes
+    // a file whose cross-reference offset is a few bytes out (about 5x the file).
+    it("accepts a 98 MB PDF when the structure ceiling adds five times the file to the allowance", async () => {
+      setSandboxLimits({ wallMs: 60_000, structureMemoryMb: 32 });
+
+      await expect(classifyDocumentStructure(paddedPdf(98 * MB), "application/pdf")).resolves.toBe("supported_structure");
     }, 30_000);
 
     it.each(syntheticStructurePdfFixtures)("accepts synthetic standards-valid PDF structure from $name", async ({ bytes }) => {

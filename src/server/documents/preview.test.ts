@@ -1,5 +1,7 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { deflateSync } from "node:zlib";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,7 +10,11 @@ import { useScratchTemporaryDirectory, type ScratchDirectory } from "../../../te
 import { syntheticPdf } from "../../../tests/support/synthetic-documents";
 import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../../../tests/support/generated-pdf-documents";
 import { syntheticUserPasswordPdf } from "../../../tests/support/encrypted-pdf-documents";
-import { setPdfStructureSandboxLimitsForTests } from "./pdf-structure-sandbox";
+import {
+  lastPdfSandboxChildPidForTests,
+  setPdfSandboxDataLimitHeadroomForTests,
+  setPdfStructureSandboxLimitsForTests,
+} from "./pdf-structure-sandbox";
 import {
   DOCUMENT_PREVIEW_MAX_EDGE,
   renderDocumentPagePreview,
@@ -351,6 +357,71 @@ function captureLogs(): () => { logged: string; calls: number } {
 }
 
 const MB = 1024 * 1024;
+
+/**
+ * Waits up to 2 s for the job's child to be gone: `process.kill(pid, 0)`
+ * throwing ESRCH. `before` is the last child pid seen before the job, so the
+ * pid checked is this job's own child, not an earlier one.
+ */
+async function expectChildGone(before: number | undefined): Promise<void> {
+  const pid = lastPdfSandboxChildPidForTests();
+  expect(pid).toEqual(expect.any(Number));
+  expect(pid).not.toBe(before);
+  const deadline = Date.now() + 2_000;
+  for (;;) {
+    try {
+      process.kill(pid as number, 0);
+    } catch (error) {
+      expect((error as NodeJS.ErrnoException).code).toBe("ESRCH");
+      return;
+    }
+    if (Date.now() > deadline) throw new Error(`the job's child ${pid} was still running 2 s after the job settled`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+type RenderAnswerTamper = "none" | "nan-width" | "not-png";
+
+/**
+ * A parser module for the child that is the real pdf.js, plus a wrapper on
+ * the child's `process.send` that rewrites a drawn page's answer before it
+ * leaves the child: its width to NaN, or its PNG to bytes that are not a PNG
+ * (in whatever form the answer carries them). It writes `marker` when it has
+ * rewritten an answer, so a test can tell the rewrite happened.
+ */
+function tamperingPdfjsModule(tamper: RenderAnswerTamper, marker: string): string {
+  const realPdfjs = pathToFileURL(createRequire(import.meta.url).resolve("pdfjs-dist/legacy/build/pdf.mjs")).href;
+  return `
+import { writeFileSync } from "node:fs";
+export * from ${JSON.stringify(realPdfjs)};
+const tamper = ${JSON.stringify(tamper)};
+const marker = ${JSON.stringify(marker)};
+const notPng = Buffer.concat([Buffer.from("GIF89a"), Buffer.alloc(58, 0x41)]);
+function replacePng(png) {
+  if (Buffer.isBuffer(png)) return Buffer.from(notPng);
+  if (png instanceof Uint8Array) return new Uint8Array(notPng);
+  if (typeof png === "string") return notPng.toString("base64");
+  if (png && png.type === "Buffer" && Array.isArray(png.data)) return { type: "Buffer", data: [...notPng] };
+  return png;
+}
+function rewrite(value, depth) {
+  if (!value || typeof value !== "object" || depth > 4) return false;
+  if (value.outcome === "drawn") {
+    if (tamper === "nan-width") value.width = Number.NaN;
+    if (tamper === "not-png") value.png = replacePng(value.png);
+    return true;
+  }
+  return Object.values(value).some((child) => rewrite(child, depth + 1));
+}
+if (tamper !== "none" && typeof process.send === "function") {
+  const send = process.send.bind(process);
+  process.send = (message, ...rest) => {
+    if (rewrite(message, 0)) writeFileSync(marker, tamper);
+    return send(message, ...rest);
+  };
+}
+`;
+}
 
 let scratch: ScratchDirectory;
 
@@ -788,6 +859,23 @@ describe("renderDocumentPagePreview", () => {
         }
       }, 30_000);
 
+      // No RLIMIT_DATA at all: only the watchdog can stop these, and the
+      // child it stops must be gone afterwards.
+      it.each(bombs)("stops %s on memory with no data limit, by the watchdog alone, leaving no child", async (_name, build) => {
+        setPdfSandboxDataLimitHeadroomForTests("unlimited");
+        setSandboxLimits({ renderMemoryMb: 256 });
+        setDocumentPreviewRenderBudgetForTests(60_000);
+        const before = lastPdfSandboxChildPidForTests();
+        try {
+          await expectStoppedOnMemory(build());
+          await expectChildGone(before);
+        } finally {
+          setPdfSandboxDataLimitHeadroomForTests(undefined);
+          setSandboxLimits(undefined);
+          setDocumentPreviewRenderBudgetForTests(undefined);
+        }
+      }, 30_000);
+
       it.each(bombs)("stops %s on memory at the defaults too, not on the clock", async (_name, build) => {
         setDocumentPreviewRenderBudgetForTests(60_000);
         try {
@@ -821,6 +909,43 @@ describe("renderDocumentPagePreview", () => {
         const [red, green, blue] = await rgbAtPreviewCentre(preview);
         expect(Math.min(red, green, blue)).toBeLessThan(250);
       }, 60_000);
+    });
+
+    describe("a malformed answer from the child is a failed render", () => {
+      function useTamperingParser(tamper: RenderAnswerTamper): string {
+        const marker = join(scratch.path, `tampered-${tamper}`);
+        const modulePath = join(scratch.path, `tampering-pdfjs-${tamper}.mjs`);
+        writeFileSync(modulePath, tamperingPdfjsModule(tamper, marker));
+        setSandboxLimits({ pdfjsUrl: pathToFileURL(modulePath).href });
+        return marker;
+      }
+
+      it("still draws the page through the pass-through parser, so a refusal below is the answer's fault", async () => {
+        useTamperingParser("none");
+
+        const preview = await renderDocumentPagePreview(syntheticPdf("Preview fixture"), "application/pdf");
+
+        expect(preview.mediaType).toBe("image/png");
+        expect(pngDimensions(preview.bytes)).toEqual({ width: preview.width, height: preview.height });
+      }, 15_000);
+
+      it.each([
+        ["a width that is not a number", "nan-width"],
+        ["bytes that are not a PNG", "not-png"],
+      ] as const)("refuses an answer with %s as a 422", async (_name, tamper) => {
+        const marker = useTamperingParser(tamper);
+        const read = captureLogs();
+
+        const [outcome] = await Promise.allSettled([renderDocumentPagePreview(syntheticPdf("Preview fixture"), "application/pdf")]);
+
+        // The child's answer really was rewritten; otherwise this proves nothing.
+        expect(existsSync(marker)).toBe(true);
+        expect(outcome.status).toBe("rejected");
+        expect((outcome as PromiseRejectedResult).reason).toMatchObject({ code: "document_preview_failed", status: 422 });
+        const { logged } = read();
+        expect(logged.length).toBeLessThan(2_000);
+        expect(logged).not.toMatch(/%PDF|GIF89a|Preview fixture/);
+      }, 15_000);
     });
 
     it("refuses a user-password PDF on the render path as unsupported, saying a password is needed", async () => {
