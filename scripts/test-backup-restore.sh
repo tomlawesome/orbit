@@ -383,7 +383,7 @@ install_own_stack() {
 
   # From here this run owns Docker objects that teardown must remove.
   own_stack_started=1
-  docker rm -f "$own_registry_name" >/dev/null 2>&1 || true
+  docker rm -f -v "$own_registry_name" >/dev/null 2>&1 || true
   docker run -d --name "$own_registry_name" -p "127.0.0.1:$own_registry_port:5000" \
       "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373" >/dev/null ||
     fail 'local registry did not start'
@@ -442,7 +442,7 @@ remove_own_stack() {
       chmod 600 "$deploy_dir/.env-orbit" 2>/dev/null || true
       (cd "$deploy_dir" && timeout 300 docker compose --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) || true
     fi
-    timeout 60 docker rm -f "$own_registry_name" >/dev/null 2>&1 || true
+    timeout 60 docker rm -f -v "$own_registry_name" >/dev/null 2>&1 || true
     timeout 60 docker ps -aq --filter "$label" 2>/dev/null | xargs -r timeout 60 docker rm -f >/dev/null 2>&1 || true
     timeout 60 docker volume ls -q --filter "$label" 2>/dev/null | xargs -r timeout 60 docker volume rm >/dev/null 2>&1 || true
     timeout 60 docker network ls -q --filter "$label" 2>/dev/null | xargs -r timeout 60 docker network rm >/dev/null 2>&1 || true
