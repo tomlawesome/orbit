@@ -19,6 +19,12 @@ import {
  * The cheap pre-parse bound in validation.ts still runs first; this is the
  * fence behind it, for every entry path that bound does not model.
  *
+ * The heap cap does not count ArrayBuffer memory, and pdf.js decodes a
+ * compressed stream into exactly that, so a watchdog polls the worker's
+ * off-heap (`external_memory`) use and kills it past the file's own size plus
+ * an allowance, as a cgroup memory limit kills a process. The worker starts
+ * with an empty environment: the parser never sees the server's secrets.
+ *
  * TRAP: Node silently ignores a worker's `resourceLimits` when the process
  * runs with a heap flag (`--max-old-space-size`, `--max-semi-space-size`,
  * directly or in NODE_OPTIONS). The wall-clock limit still applies, but the
@@ -26,11 +32,15 @@ import {
  */
 
 export type PdfStructureSandboxLimits = {
-  /** Time a running check may take, from worker start; time queued does not count. */
+  /** Time a running check may take, from the worker coming online; queueing and start-up do not count. */
   wallMs: number;
   maxOldGenerationSizeMb: number;
   maxYoungGenerationSizeMb: number;
   stackSizeMb: number;
+  /** Off-heap memory a check may use beyond the file itself, which the worker holds. */
+  externalAllowanceMb: number;
+  /** How often the watchdog reads the worker's off-heap memory. */
+  pollMs: number;
   /** Checks running at once; more wait their turn. */
   concurrency: number;
   /** File URL of the parser module; tests point it elsewhere to force a crash. */
@@ -46,6 +56,11 @@ export const PDF_STRUCTURE_SANDBOX_LIMITS: Readonly<PdfStructureSandboxLimits> =
   maxOldGenerationSizeMb: 128,
   maxYoungGenerationSizeMb: 16,
   stackSizeMb: 4,
+  // Decoded streams live outside the heap cap. Legitimate files use a few MB
+  // beyond their own size (a 98 MB file measured 104 MB in all); a stream
+  // bomb is stopped about half a second in, before the process grows much.
+  externalAllowanceMb: 64,
+  pollMs: 25,
   concurrency: 2,
 });
 
@@ -137,6 +152,8 @@ function startWorker(data: ArrayBuffer): Worker {
       maxYoungGenerationSizeMb: limits.maxYoungGenerationSizeMb,
       stackSizeMb: limits.stackSizeMb,
     },
+    // The parser needs no environment, and must not see the server's secrets.
+    env: {},
     // The parser's own console output can quote the file; it is discarded.
     stdout: true,
     stderr: true,
@@ -145,7 +162,8 @@ function startWorker(data: ArrayBuffer): Worker {
 
 function runWorker(bytes: Buffer): Promise<DocumentStructureReason> {
   const data = new Uint8Array(bytes).buffer;
-  const started = Date.now();
+  const capBytes = bytes.length + limits.externalAllowanceMb * 1024 * 1024;
+  let started = Date.now();
   let worker: Worker;
   try {
     worker = startWorker(data);
@@ -160,10 +178,13 @@ function runWorker(bytes: Buffer): Promise<DocumentStructureReason> {
 
   return new Promise((resolve) => {
     let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let watchdog: ReturnType<typeof setInterval> | undefined;
     const settle = (reason: DocumentStructureReason, stop?: StopKind): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearInterval(watchdog);
       if (stop) logStop(stop, Date.now() - started);
       // Wait for the thread to be gone, so the slot and the count mean what
       // they say; a kill that hangs is given up on after a second.
@@ -179,7 +200,30 @@ function runWorker(bytes: Buffer): Promise<DocumentStructureReason> {
         resolve(reason);
       });
     };
-    const timer = setTimeout(() => settle("unsupported_structure", "timeout"), limits.wallMs);
+    // Polls the worker's off-heap memory, which its heap cap does not count.
+    // A failed read (the worker already gone, or a Node without the call;
+    // boot warns) is skipped, and the clock still stops the check.
+    let polling = false;
+    const poll = async (): Promise<void> => {
+      if (polling || settled) return;
+      polling = true;
+      try {
+        const { external_memory: external } = await worker.getHeapStatistics();
+        if (external > capBytes) settle("unsupported_structure", "memory");
+      } catch {
+        // Nothing to judge this time.
+      } finally {
+        polling = false;
+      }
+    };
+    // The clock and the watchdog start once the thread is running, so a slow
+    // start-up does not eat the check's budget.
+    worker.once("online", () => {
+      if (settled) return;
+      started = Date.now();
+      timer = setTimeout(() => settle("unsupported_structure", "timeout"), limits.wallMs);
+      watchdog = setInterval(() => void poll(), limits.pollMs);
+    });
     worker.once("message", (message: unknown) => {
       settle(typeof message === "string" && REASONS.has(message) ? message as DocumentStructureReason : "unsupported_structure");
     });

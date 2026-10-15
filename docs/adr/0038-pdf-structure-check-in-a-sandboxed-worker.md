@@ -34,8 +34,9 @@ memory.
 2. **Limits, and why.** 128 MB old-generation heap, 16 MB young generation and
    4 MB of stack: legitimate files, a thousand pages included, parse in about
    20 MB, and a runaway allocation hits the cap within a second. A five-second
-   wall clock from worker start, the check's existing budget: a worker can be
-   terminated mid-loop, unlike a promise. At most two checks at once, so a
+   wall clock from the moment the worker is running (its `online` event), the
+   check's existing budget: a worker can be terminated mid-loop, unlike a
+   promise, and a slow thread start-up does not eat the budget. At most two checks at once, so a
    burst of hostile files costs two capped heaps, not one per file; the rest
    wait, and waiting does not count against their limit.
 3. **Running out of memory, timing out or crashing refuses the file** as
@@ -52,6 +53,25 @@ memory.
    checks the cap with a trivial worker and logs a warning if it is not
    enforced, and the project's agent instructions forbid the flag in test runs.
    The wall clock still applies either way.
+6. **V8's heap limits do not count ArrayBuffer memory, so a watchdog does.**
+   `resourceLimits` caps the JavaScript heap only; typed arrays and their
+   buffers live outside it, and pdf.js decodes a compressed stream into a
+   growing buffer until the stream ends. A file of about 130 KB grew the
+   process to 391 MB and was accepted in 2.8 s; two 510 KB ones at
+   once reached 2,211 MB. The fix is the standard resource watchdog, as a
+   cgroup memory limit kills a process (here the worker is the unit): from
+   the moment the worker is online the server polls
+   `worker.getHeapStatistics()` every 25 ms and kills the worker, logging a
+   memory stop, once its `external_memory` passes the file's own size plus
+   64 MB. The file counts because the worker holds it (a 98 MB legitimate
+   file measured 104 MB in all). Measured with the watchdog: the 130 KB file
+   is stopped at 0.54 s with the process at 184 MB, the two 510 KB ones at once
+   peak at 274 MB, and every legitimate test file still passes. A Node that
+   lacks `getHeapStatistics` on workers leaves only the heap cap and the
+   clock; boot logs a warning.
+7. **The worker gets an empty environment** (`env: {}`). By default a worker
+   sees a copy of `process.env`, which holds the server's secrets; the parser
+   needs none of it.
 
 ## Consequences
 
@@ -70,6 +90,16 @@ memory.
   of worker.
 
 ## Alternatives considered
+
+- **`RLIMIT_AS` on the process.** Rejected: Node crashes at start under any
+  useful limit, because V8 reserves large address ranges it never touches.
+- **`RLIMIT_DATA` on a child process per check.** Rejected for now: the
+  image's Alpine/BusyBox userland could not be verified to apply it here, and
+  it costs a full Node start per check.
+- **A decoded-length limit in pdf.js.** pdf.js has none to set.
+- **Pre-scanning streams for their decoded size.** Unsound, for the same
+  reason as item 4: it models a lenient parser and would chase every filter
+  chain.
 
 - **Keep extending the pre-parse bound.** Rejected: it models a lenient parser
   and kept missing paths; this is the treadmill ADR-0033 retired for content
