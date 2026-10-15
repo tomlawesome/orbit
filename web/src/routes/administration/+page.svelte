@@ -62,6 +62,16 @@
      admin-screen function (§15-2g). */
   /** @type {string | null} */
   let busy = $state(null);
+  /**
+   * A panel whose read failed says so with a "try again" (#1442), the way
+   * settings recovers from its own failed read (#1195): the whole screen is
+   * re-read, and a re-read that fails again keeps the screen it has.
+   */
+  async function rereadScreen() {
+    try {
+      view = await readAdminScreen();
+    } catch { /* the failed panels still say so */ }
+  }
   /** @type {string | null} */
   let problem = $state(null);
   /** @type {string | null} */
@@ -782,7 +792,7 @@
       view = screen;
       const seed = data?.fixtures ? seedFromWorkspace(screen.primary ?? "") : rollSeed();
       const galaxy = galaxyOf({ households: screen.households, activeHouseholdId: screen.primary }, screen.today);
-      const domain = screen.relay.find(([label]) => label === "collection domain")?.[1] ?? "";
+      const domain = (screen.relay ?? []).find(([label]) => label === "collection domain")?.[1] ?? "";
       backdropTeardown = mountStation(/** @type {HTMLDivElement} */ (backdropRoot), {
         seed, galaxy, primary: screen.primary,
         facts: { domain, systems: screen.households.length, crew: screen.users.length },
@@ -1119,6 +1129,9 @@
             </div>
           </div>
         {/each}
+        {#if view.failed.owners}
+          <div class="adminproblem" role="alert">owners not shown — Orbit could not reach every system’s members<button class="retry" onclick={rereadScreen}>try again</button></div>
+        {/if}
 
         <!-- ON THE CLOCK (#1001): readWorkspace excludes a household with a
              deletion requested from `households` outright
@@ -1287,7 +1300,10 @@
               <button onclick={openMailboxEditor}>{view.mailbox.configured ? "change mailbox…" : "set up mailbox…"}</button>
             {/if}
           </div>
-          {#each view.relay as [label, value, extra] (label)}
+          {#if view.failed.relay}
+            <div class="adminproblem" role="alert">not shown — Orbit could not reach the mail settings<button class="retry" onclick={rereadScreen}>try again</button></div>
+          {/if}
+          {#each view.relay ?? [] as [label, value, extra] (label)}
             <div class="kv"><span>{label}</span>
               {#if extra === "on"}<b class="on">{value}</b>
               {:else if extra}<span><b>{value.split(" · ")[0]}</b> · {value.split(" · ")[1]}</span><button>{extra}</button>
@@ -1430,15 +1446,22 @@
 
         <div class="half">
           <div class="cardhead"><h2>Operations</h2></div>
-          {#each view.services as [tone, name, detail] (name)}
+          {#each view.services ?? [] as [tone, name, detail] (name)}
             <div class="svc"><i style="background:var(--{tone})"></i><b>{name}</b><small>{detail}</small></div>
           {/each}
+          {#if view.failed.services}
+            <div class="adminproblem" role="alert">not shown — Orbit could not reach the service checks<button class="retry" onclick={rereadScreen}>try again</button></div>
+          {/if}
         </div>
       </div>
 
     </div>
 
-    <div class="strip">{view.instance}</div>
+    {#if view.instance}
+      <div class="strip">{view.instance}</div>
+    {:else if view.failed.instance}
+      <div class="strip" role="alert">version not shown — Orbit could not reach this instance’s build<button class="retry" onclick={rereadScreen}>try again</button></div>
+    {/if}
   {/if}
 </div>
 </div>

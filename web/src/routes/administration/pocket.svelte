@@ -50,6 +50,11 @@
   /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, resumedResendPersonId: string | null, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void }} */
   let { view, fixtures, actorHasPassword, provenIntent, resumedResendPersonId, draft = $bindable(), challenge, reread, spent } = $props();
 
+  /* A panel whose read failed says so with a "try again" (#1442), as
+     settings does on the phone (#1195): the whole screen is re-read, and a
+     re-read that fails again keeps the screen it has. */
+  const tryAgain = () => reread().catch(() => {});
+
   const people = $derived(view?.users ?? []);
   const systems = $derived(view?.households ?? []);
   const meId = $derived(view?.user?.id ?? null);
@@ -89,7 +94,7 @@
     /** @type {{ id: string, word: string }[]} */
     const list = [];
     if (!view) return list;
-    const failing = view.services.filter(([tone]) => tone === "overdue" || tone === "warm");
+    const failing = (view.services ?? []).filter(([tone]) => tone === "overdue" || tone === "warm");
     /* The row's detail leads with the state's own word (#1296): the tell
        repeats it rather than assuming every warm row is retrying. */
     for (const [tone, name, detail] of failing.slice(0, 2)) {
@@ -625,7 +630,7 @@
   /** @type {number | null} */
   let serviceAt = $state(null);
   let serviceOpen = $state(false);
-  const service = $derived(serviceAt === null || !view ? null : view.services[serviceAt] ?? null);
+  const service = $derived(serviceAt === null || !view ? null : view.services?.[serviceAt] ?? null);
   const serviceRaw = $derived(serviceAt === null ? null : view?.health?.services[serviceAt] ?? null);
 
   /* Under fixtures `?localuser=` names a delivery, as on the desk, so both
@@ -772,6 +777,10 @@
         {:else}
           {#if !recoverable.length}<p class="p-empty ad-inset">no systems yet</p>{/if}
         {/each}
+        {#if view.failed.owners}
+          <p class="p-error ad-inset ad-lastline" role="alert">owners not shown — Orbit could not reach every system’s members
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+        {/if}
         {#each gone as line (line.id)}
           <p class="ad-said ok" role="status">{line.text}</p>
         {/each}
@@ -863,7 +872,11 @@
           {/if}
         {/each}
         {#if testProblem}<p class="p-error ad-inset ad-lastline" role="alert">{testProblem}</p>{/if}
-        {#each view.relay as [label, value, extra] (label)}
+        {#if view.failed.relay}
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the mail settings
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+        {/if}
+        {#each view.relay ?? [] as [label, value, extra] (label)}
           <Row title={label} meta={label === "ingest" ? ingestShort(value) : value} trail={extra === "on" ? "on" : ""} trailTone="var(--ok-text)">
             {#snippet mark()}<span class="p-body {extra === 'on' ? 'ok' : 'ended'}"></span>{/snippet}
           </Row>
@@ -920,7 +933,11 @@
       <section class="p-card ad-card ad-flush" style:--i="7" id="ad-operations" tabindex="-1"
                aria-labelledby="ad-ops-head" data-ad="operations">
         <div class="ad-cardhead"><h2 class="p-caps" id="ad-ops-head">Operations</h2></div>
-        {#each view.services as [tone, name, detail], at (name)}
+        {#if view.failed.services}
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the service checks
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+        {/if}
+        {#each view.services ?? [] as [tone, name, detail], at (name)}
           {@const words = split(detail)}
           <Row title={name} meta={words.rest} trail={words.word} trailTone={INK[tone] ?? ""}
                onactivate={() => { serviceAt = at; serviceOpen = true; }}>
@@ -962,7 +979,12 @@
         </section>
       {/if}
 
-      <p class="ad-strip">{versionLine(view.instance)}</p>
+      {#if view.instance}
+        <p class="ad-strip">{versionLine(view.instance)}</p>
+      {:else if view.failed.instance}
+        <p class="p-error ad-inset" role="alert">version not shown — Orbit could not reach this instance’s build
+          <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+      {/if}
     {/if}
   </main>
 
