@@ -156,7 +156,8 @@ describe("#1316: the desk form's save stages the picked document, then sends one
   it("stages the held attachment under its own id, before the command, and no longer attaches onto the saved item", () => {
     expect(behaviour).not.toMatch(/not wired up yet/u);
     expect(behaviour).not.toMatch(/attachItemDocument/u);
-    expect(submitHandler).toMatch(/stageDocument\(active\.id, held\.attachment, held\.attachmentId, draftId\)/u);
+    expect(submitHandler).toMatch(/const file = held\.attachment;/u);
+    expect(submitHandler).toMatch(/stageDocument\(active\.id, file, held\.attachmentId, draftId\)/u);
     expect(submitHandler.indexOf("stageDocument(")).toBeLessThan(submitHandler.indexOf("applyCommand("));
     expect(submitHandler).toMatch(/documentIds/u);
   });
