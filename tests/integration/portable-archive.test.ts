@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { readdir, readFile, readlink, stat, writeFile } from "node:fs/promises";
+import { open as openFile, readdir, readFile, readlink, stat, writeFile } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
@@ -817,6 +818,31 @@ describe("portable archive download is streamed from disk and still refuses a ta
 
   const closedWithin = { timeout: 2_000, interval: 25 };
 
+  /**
+   * Notes every FileHandle a read stream is made from, and the descriptors that then get an explicit close
+   * (the handle's 'close' event). A handle the garbage collector closes emits no such event, so it never
+   * counts: the polling window alone cannot tell the two apart, because the collector closes a leaked handle
+   * inside it. (`close` is an own property of each handle, not on the prototype, so the prototype's
+   * createReadStream is the place to reach them.)
+   */
+  async function recordExplicitHandleCloses() {
+    const probe = await openFile(process.execPath, "r");
+    const prototype = Object.getPrototypeOf(probe) as FileHandle;
+    await probe.close();
+    const original = prototype.createReadStream;
+    const seen = new Set<FileHandle>();
+    const closedDescriptors: string[] = [];
+    const spy = vi.spyOn(prototype, "createReadStream").mockImplementation(function (this: FileHandle, ...args: Parameters<FileHandle["createReadStream"]>) {
+      if (!seen.has(this)) {
+        seen.add(this);
+        const descriptor = String(this.fd);
+        (this as unknown as NodeJS.EventEmitter).once("close", () => closedDescriptors.push(descriptor));
+      }
+      return original.apply(this, args);
+    });
+    return { closedDescriptors, stop: () => spy.mockRestore() };
+  }
+
   async function documentArchive(fixture: Fixture) {
     await addAvailableDocuments(fixture, 3, 2 * MIB);
     return createPortableArchive({
@@ -834,40 +860,57 @@ describe("portable archive download is streamed from disk and still refuses a ta
     await writeFile(path, stored);
   }
 
-  it("holds one handle on the stored file while streaming and none once the stream is read to its end", async () => {
+  it("holds one handle on the stored file while streaming and none once the stream is read to its end, closed explicitly rather than by the garbage collector", async () => {
     const fixture = await createIntegrationFixture("portable-archive-download-fd-end");
     const archive = await documentArchive(fixture);
     const path = await storedFilePath(archive.id);
     expect(await handlesOpenTo(path)).toEqual([]);
 
-    const { stream } = await openPortableArchiveDownload(fixture.users.owner.id, archive.id);
-    const reader = stream.getReader();
-    let chunks = 0;
-    for (;;) {
-      const { done } = await reader.read();
-      if (done) break;
-      chunks += 1;
-      if (chunks === 1) expect(await handlesOpenTo(path)).toHaveLength(1);
-    }
+    const closes = await recordExplicitHandleCloses();
+    try {
+      const { stream } = await openPortableArchiveDownload(fixture.users.owner.id, archive.id);
+      const reader = stream.getReader();
+      let chunks = 0;
+      let held: string[] = [];
+      for (;;) {
+        const { done } = await reader.read();
+        if (done) break;
+        chunks += 1;
+        if (chunks === 1) {
+          held = await handlesOpenTo(path);
+          expect(held).toHaveLength(1);
+        }
+      }
 
-    expect(chunks).toBeGreaterThan(1);
-    await vi.waitFor(() => expect(handlesOpenTo(path)).resolves.toEqual([]), closedWithin);
+      expect(chunks).toBeGreaterThan(1);
+      await vi.waitFor(() => expect(handlesOpenTo(path)).resolves.toEqual([]), closedWithin);
+      expect(closes.closedDescriptors).toContain(held[0]);
+    } finally {
+      closes.stop();
+    }
   }, 120_000);
 
-  it("holds one handle on the stored file after the first chunk and none once the stream is cancelled", async () => {
+  it("holds one handle on the stored file after the first chunk and none once the stream is cancelled, closed explicitly rather than by the garbage collector", async () => {
     const fixture = await createIntegrationFixture("portable-archive-download-fd-cancel");
     const archive = await documentArchive(fixture);
     const path = await storedFilePath(archive.id);
     expect(await handlesOpenTo(path)).toEqual([]);
 
-    const { stream } = await openPortableArchiveDownload(fixture.users.owner.id, archive.id);
-    const reader = stream.getReader();
-    const first = await reader.read();
-    expect(first.done).toBe(false);
-    expect(await handlesOpenTo(path)).toHaveLength(1);
-    await reader.cancel();
+    const closes = await recordExplicitHandleCloses();
+    try {
+      const { stream } = await openPortableArchiveDownload(fixture.users.owner.id, archive.id);
+      const reader = stream.getReader();
+      const first = await reader.read();
+      expect(first.done).toBe(false);
+      const held = await handlesOpenTo(path);
+      expect(held).toHaveLength(1);
+      await reader.cancel();
 
-    await vi.waitFor(() => expect(handlesOpenTo(path)).resolves.toEqual([]), closedWithin);
+      await vi.waitFor(() => expect(handlesOpenTo(path)).resolves.toEqual([]), closedWithin);
+      expect(closes.closedDescriptors).toContain(held[0]);
+    } finally {
+      closes.stop();
+    }
   }, 120_000);
 
   it("holds no handle on the stored file once a tampered file is refused", async () => {
