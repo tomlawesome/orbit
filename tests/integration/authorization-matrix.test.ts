@@ -27,6 +27,15 @@ const { POST: previewImport } = await loadRoute("portable-archives/preview");
 const { POST: importArchive } = await loadRoute("portable-archives/import");
 const { GET: listUsers, PATCH: disableUser } = await loadRoute("admin/users");
 const { GET: listOperations } = await loadRoute("admin/operations");
+const administratorReads = {
+  "admin/mailbox": await loadRoute("admin/mailbox"),
+  "admin/contact": await loadRoute("admin/contact"),
+  "admin/upload-limit": await loadRoute("admin/upload-limit"),
+  "admin/health": await loadRoute("admin/health"),
+  "admin/documents/health": await loadRoute("admin/documents/health"),
+  "admin/documents/rotation": await loadRoute("admin/documents/rotation"),
+  "admin/recovery-bundle": await loadRoute("admin/recovery-bundle"),
+} as const;
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -420,6 +429,29 @@ describe("portable archive and administrator authorization", () => {
     const missing = await callRouteForSession(downloadArchive, outsider, { url: "http://127.0.0.1:3000/api/archives/download", params: archiveContext(randomUUID()) });
     await expectError(existing, 404, "archive_not_found", "That export is not available");
     await expectError(missing, 404, "archive_not_found", "That export is not available");
+  });
+
+  /* #1440: the administration screen reads all of these; every one refuses
+     anyone who is not an active instance administrator, and a refusal that
+     covered everyone would be a broken route, so the administrator is asked too. */
+  describe.each(Object.entries(administratorReads))("GET /api/%s (#1440)", (family, { GET }) => {
+    const url = `http://127.0.0.1:3000/api/${family}`;
+
+    it("refuses an ordinary member, a household owner and an outsider, and answers an administrator", async () => {
+      const fixture = await createIntegrationFixture("administrator-reads");
+      const admin = await fixture.session("admin");
+      const owner = await fixture.session("owner");
+      const member = await fixture.session("member");
+      const outsider = await fixture.session("outsider");
+
+      for (const session of [member, owner, outsider]) {
+        const refused = await callRouteForSession(GET, session, { url });
+        await expectError(refused, 403, "administrator_required", "Orbit administrator access is required");
+      }
+
+      const allowed = await callRouteForSession(GET, admin, { url });
+      expect(allowed.status).toBe(200);
+    });
   });
 
   it("restricts administrator operations and invalidates disabled-user sessions", async () => {
