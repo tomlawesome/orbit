@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { readdir } from "node:fs/promises";
+import { open as openFile, readdir, readFile, readlink, stat, writeFile } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
@@ -8,7 +9,7 @@ import { auditLog, documents, dueEvents, items, portableArchiveImports, portable
 import { decryptPortableArchive, encryptPortableArchive } from "@/server/portable-archive";
 import { readDocumentDownload } from "@/server/document-repository";
 import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
-import { createPortableArchive, importPortableArchive, previewPortableArchive, previewPortableImport, readPortableArchive, rollBackUnfinishedPortableImports } from "@/server/portable-archive-repository";
+import { createPortableArchive, importPortableArchive, openPortableArchiveDownload, previewPortableArchive, previewPortableImport, readPortableArchive, rollBackUnfinishedPortableImports } from "@/server/portable-archive-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { readWorkspace } from "@/server/workspace-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
@@ -676,4 +677,295 @@ describe("portable archive document-inclusive export size (#1316, owner decision
     expect(message).not.toMatch(/128 MiB/);
     expect(readDocumentDownload).not.toHaveBeenCalled();
   }, 60_000);
+});
+
+describe("portable archive download is streamed from disk and still refuses a tampered file (#1428, part of #1316)", () => {
+  const MIB = 1_048_576;
+  const realReadDocumentDownload = vi.mocked(readDocumentDownload).getMockImplementation()!;
+
+  afterEach(() => {
+    vi.mocked(readDocumentDownload).mockReset();
+    vi.mocked(readDocumentDownload).mockImplementation(realReadDocumentDownload);
+  });
+
+  type Fixture = Awaited<ReturnType<typeof createIntegrationFixture>>;
+
+  /** Extra available documents on the fixture's item, each read back as `sizeBytes` of zeros. */
+  async function addAvailableDocuments(fixture: Fixture, count: number, sizeBytes: number) {
+    const sizes = new Map<string, number>();
+    for (let index = 0; index < count; index += 1) {
+      const [row] = await getDb().insert(documents).values({
+        householdId: fixture.household.id,
+        itemId: fixture.item.id,
+        uploadedByUserId: fixture.users.owner.id,
+        displayName: `stream-test-${index}.pdf`,
+        mediaType: "application/pdf",
+        sizeBytes,
+        contentSha256: createHash("sha256").update(randomUUID()).digest("hex"),
+        lifecycle: "available",
+        scanStatus: "skipped",
+        availableAt: new Date(),
+      }).returning({ id: documents.id });
+      sizes.set(row.id, sizeBytes);
+    }
+    vi.mocked(readDocumentDownload).mockImplementation(async (_userId, documentId) => ({
+      bytes: Buffer.alloc(sizes.get(documentId) ?? 128),
+      displayName: "stream-test.pdf",
+      mediaType: "application/pdf",
+    }));
+  }
+
+  /** The one stored file for an archive: the file under the document root whose path carries its storage key. */
+  async function storedFilePath(archiveId: string): Promise<string> {
+    const [row] = await getDb().select({ storageKey: portableArchives.storageKey }).from(portableArchives)
+      .where(eq(portableArchives.id, archiveId));
+    const root = process.env.DOCUMENTS_ROOT!;
+    for (const entry of await readdir(root, { recursive: true })) {
+      if (!entry.includes(row.storageKey)) continue;
+      const path = join(root, entry);
+      if ((await stat(path)).isFile()) return path;
+    }
+    throw new Error(`no stored file found for archive ${archiveId}`);
+  }
+
+  async function smallArchive(fixture: Fixture) {
+    return createPortableArchive({
+      userId: fixture.users.owner.id,
+      householdId: fixture.household.id,
+      passphrase,
+      includeDocuments: false,
+    });
+  }
+
+  it("returns exactly the stored file's bytes, in more than one chunk and none over 1 MiB, with sizeBytes equal to their length", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-download-stream");
+    await addAvailableDocuments(fixture, 3, 2 * MIB);
+    const archive = await createPortableArchive({
+      userId: fixture.users.owner.id,
+      householdId: fixture.household.id,
+      passphrase,
+      includeDocuments: true,
+    });
+    const whole = (await readPortableArchive(fixture.users.owner.id, archive.id)).bytes;
+    expect(whole.length).toBeGreaterThan(MIB);
+
+    const { stream, sizeBytes } = await openPortableArchiveDownload(fixture.users.owner.id, archive.id);
+    const chunks: Uint8Array[] = [];
+    const reader = stream.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+
+    expect(sizeBytes).toBe(whole.length);
+    expect(Buffer.concat(chunks).equals(whole)).toBe(true);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(Math.max(...chunks.map((chunk) => chunk.byteLength))).toBeLessThanOrEqual(MIB);
+  }, 120_000);
+
+  it("refuses with archive_integrity_failed (503) when one byte of the stored file was changed", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-download-tampered");
+    const archive = await smallArchive(fixture);
+    const path = await storedFilePath(archive.id);
+    const stored = await readFile(path);
+    stored[Math.floor(stored.length / 2)] ^= 0xff;
+    await writeFile(path, stored);
+
+    await expect(openPortableArchiveDownload(fixture.users.owner.id, archive.id))
+      .rejects.toMatchObject({ code: "archive_integrity_failed", status: 503 });
+  });
+
+  it("refuses another household's member with archive_not_found (404)", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-download-other-household");
+    const archive = await smallArchive(fixture);
+
+    await expect(openPortableArchiveDownload(fixture.users.secondOwner.id, archive.id))
+      .rejects.toMatchObject({ code: "archive_not_found", status: 404 });
+  });
+
+  it("records downloadedAt and one portable_archive_downloaded audit row after a successful open", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-download-recorded");
+    const archive = await smallArchive(fixture);
+    const [before] = await getDb().select({ downloadedAt: portableArchives.downloadedAt }).from(portableArchives)
+      .where(eq(portableArchives.id, archive.id));
+    expect(before.downloadedAt).toBeNull();
+
+    const { stream } = await openPortableArchiveDownload(fixture.users.owner.id, archive.id);
+    await stream.cancel();
+
+    const [after] = await getDb().select({ downloadedAt: portableArchives.downloadedAt }).from(portableArchives)
+      .where(eq(portableArchives.id, archive.id));
+    expect(after.downloadedAt).not.toBeNull();
+    const audit = await getDb().select({ id: auditLog.id }).from(auditLog).where(and(
+      eq(auditLog.householdId, fixture.household.id),
+      eq(auditLog.action, "portable_archive_downloaded"),
+    ));
+    expect(audit).toHaveLength(1);
+  });
+  /** The descriptors this process holds open on `path`; entries that close while the directory is listed are skipped. */
+  async function handlesOpenTo(path: string): Promise<string[]> {
+    const open: string[] = [];
+    for (const fd of await readdir("/proc/self/fd")) {
+      try {
+        if ((await readlink(`/proc/self/fd/${fd}`)) === path) open.push(fd);
+      } catch {
+        // closed between the listing and the read
+      }
+    }
+    return open.sort();
+  }
+
+  const closedWithin = { timeout: 2_000, interval: 25 };
+
+  /**
+   * Notes every FileHandle a read stream is made from, and the descriptors that then get an explicit close
+   * (the handle's 'close' event). A handle the garbage collector closes emits no such event, so it never
+   * counts: the polling window alone cannot tell the two apart, because the collector closes a leaked handle
+   * inside it. (`close` is an own property of each handle, not on the prototype, so the prototype's
+   * createReadStream is the place to reach them.)
+   */
+  async function recordExplicitHandleCloses() {
+    const probe = await openFile(process.execPath, "r");
+    const prototype = Object.getPrototypeOf(probe) as FileHandle;
+    await probe.close();
+    const original = prototype.createReadStream;
+    const seen = new Set<FileHandle>();
+    const closedDescriptors: string[] = [];
+    const spy = vi.spyOn(prototype, "createReadStream").mockImplementation(function (this: FileHandle, ...args: Parameters<FileHandle["createReadStream"]>) {
+      if (!seen.has(this)) {
+        seen.add(this);
+        const descriptor = String(this.fd);
+        (this as unknown as NodeJS.EventEmitter).once("close", () => closedDescriptors.push(descriptor));
+      }
+      return original.apply(this, args);
+    });
+    return { closedDescriptors, stop: () => spy.mockRestore() };
+  }
+
+  async function documentArchive(fixture: Fixture) {
+    await addAvailableDocuments(fixture, 3, 2 * MIB);
+    return createPortableArchive({
+      userId: fixture.users.owner.id,
+      householdId: fixture.household.id,
+      passphrase,
+      includeDocuments: true,
+    });
+  }
+
+  async function tamper(archiveId: string) {
+    const path = await storedFilePath(archiveId);
+    const stored = await readFile(path);
+    stored[Math.floor(stored.length / 2)] ^= 0xff;
+    await writeFile(path, stored);
+  }
+
+  it("holds one handle on the stored file while streaming and none once the stream is read to its end, closed explicitly rather than by the garbage collector", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-download-fd-end");
+    const archive = await documentArchive(fixture);
+    const path = await storedFilePath(archive.id);
+    expect(await handlesOpenTo(path)).toEqual([]);
+
+    const closes = await recordExplicitHandleCloses();
+    try {
+      const { stream } = await openPortableArchiveDownload(fixture.users.owner.id, archive.id);
+      const reader = stream.getReader();
+      let chunks = 0;
+      let held: string[] = [];
+      for (;;) {
+        const { done } = await reader.read();
+        if (done) break;
+        chunks += 1;
+        if (chunks === 1) {
+          held = await handlesOpenTo(path);
+          expect(held).toHaveLength(1);
+        }
+      }
+
+      expect(chunks).toBeGreaterThan(1);
+      await vi.waitFor(() => expect(handlesOpenTo(path)).resolves.toEqual([]), closedWithin);
+      expect(closes.closedDescriptors).toContain(held[0]);
+    } finally {
+      closes.stop();
+    }
+  }, 120_000);
+
+  it("holds one handle on the stored file after the first chunk and none once the stream is cancelled, closed explicitly rather than by the garbage collector", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-download-fd-cancel");
+    const archive = await documentArchive(fixture);
+    const path = await storedFilePath(archive.id);
+    expect(await handlesOpenTo(path)).toEqual([]);
+
+    const closes = await recordExplicitHandleCloses();
+    try {
+      const { stream } = await openPortableArchiveDownload(fixture.users.owner.id, archive.id);
+      const reader = stream.getReader();
+      const first = await reader.read();
+      expect(first.done).toBe(false);
+      const held = await handlesOpenTo(path);
+      expect(held).toHaveLength(1);
+      await reader.cancel();
+
+      await vi.waitFor(() => expect(handlesOpenTo(path)).resolves.toEqual([]), closedWithin);
+      expect(closes.closedDescriptors).toContain(held[0]);
+    } finally {
+      closes.stop();
+    }
+  }, 120_000);
+
+  it("holds no handle on the stored file once a tampered file is refused", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-download-fd-refused");
+    const archive = await smallArchive(fixture);
+    await tamper(archive.id);
+    const path = await storedFilePath(archive.id);
+    expect(await handlesOpenTo(path)).toEqual([]);
+
+    await expect(openPortableArchiveDownload(fixture.users.owner.id, archive.id))
+      .rejects.toMatchObject({ code: "archive_integrity_failed", status: 503 });
+
+    // The refusal awaits the close before it rejects, so no waiting is allowed here: a handle left to the
+    // garbage collector would also vanish within a polling window and hide the fault.
+    expect(await handlesOpenTo(path)).toEqual([]);
+  });
+
+  it("records no download time and no audit row when a tampered file is refused", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-download-tampered-unrecorded");
+    const archive = await smallArchive(fixture);
+    await tamper(archive.id);
+
+    await expect(openPortableArchiveDownload(fixture.users.owner.id, archive.id))
+      .rejects.toMatchObject({ code: "archive_integrity_failed", status: 503 });
+
+    const [row] = await getDb().select({ downloadedAt: portableArchives.downloadedAt }).from(portableArchives)
+      .where(eq(portableArchives.id, archive.id));
+    expect(row.downloadedAt).toBeNull();
+    const audit = await getDb().select({ id: auditLog.id }).from(auditLog).where(and(
+      eq(auditLog.householdId, fixture.household.id),
+      eq(auditLog.action, "portable_archive_downloaded"),
+    ));
+    expect(audit).toHaveLength(0);
+  });
+
+  it("reports sizeBytes equal to the stored file's length and streams bytes that hash to the stored contentSha256", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-download-size-hash");
+    const archive = await documentArchive(fixture);
+    const path = await storedFilePath(archive.id);
+    const [row] = await getDb().select({ contentSha256: portableArchives.contentSha256 }).from(portableArchives)
+      .where(eq(portableArchives.id, archive.id));
+
+    const { stream, sizeBytes } = await openPortableArchiveDownload(fixture.users.owner.id, archive.id);
+    const hash = createHash("sha256");
+    let streamed = 0;
+    const reader = stream.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      hash.update(value);
+      streamed += value.byteLength;
+    }
+
+    expect(sizeBytes).toBe((await stat(path)).size);
+    expect(streamed).toBe(sizeBytes);
+    expect(hash.digest("hex")).toBe(row.contentSha256);
+  }, 120_000);
 });

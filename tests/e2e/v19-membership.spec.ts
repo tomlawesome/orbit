@@ -2,7 +2,7 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 import { cleanupHousehold, householdRegister, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
-import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
+import { ensureWorkerAdministrator, signInAsWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 
@@ -187,13 +187,24 @@ test("a newcomer sees the labelled sky, asks, is approved, and enters the system
   const decided = await approveJoinRequest(ownerPage, HOUSEHOLD, workerAccount("outsider"));
   expect(decided.request.status).toBe("approved");
 
-  /* And administration honours the ruling: no join-request UI on it at all. */
-  await ownerPage.goto("/administration");
-  await expect(ownerPage.getByRole("heading", { name: "Administration" })).toBeVisible();
-  /* the panels have rendered, so their absence below is a real absence */
-  await expect(ownerPage.locator(".card").first()).toBeVisible();
-  await expect(ownerPage.locator(".joinreq")).toHaveCount(0);
-  await expect(ownerPage.locator(".joinbadge")).toHaveCount(0);
+  /* And administration honours the ruling: no join-request UI on it at all.
+     Since #1440 the screen is the instance administrator's alone, so the
+     member who owns the household is refused it, and the administrator is
+     the one who looks. */
+  expect((await ownerPage.goto("/administration"))?.status()).toBe(404);
+  const adminContext = await browser.newContext({ ignoreHTTPSErrors: true });
+  try {
+    const adminPage = await adminContext.newPage();
+    await signInAsWorkerAdministrator(adminPage, "/administration");
+    await adminPage.goto("/administration");
+    await expect(adminPage.getByRole("heading", { name: "Administration" })).toBeVisible();
+    /* the panels have rendered, so their absence below is a real absence */
+    await expect(adminPage.locator(".card").first()).toBeVisible();
+    await expect(adminPage.locator(".joinreq")).toHaveCount(0);
+    await expect(adminPage.locator(".joinbadge")).toHaveCount(0);
+  } finally {
+    await adminContext.close();
+  }
 
   /* The newcomer's next visit is a member's home: the dial exists now. */
   await page.goto("/home");

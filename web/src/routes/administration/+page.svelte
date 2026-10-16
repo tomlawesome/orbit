@@ -62,6 +62,53 @@
      admin-screen function (§15-2g). */
   /** @type {string | null} */
   let busy = $state(null);
+  /**
+   * A panel whose read failed says so with a "try again" (#1442), the way
+   * settings recovers from its own failed read (#1195): the whole screen is
+   * re-read, and a re-read that fails again keeps the screen it has.
+   */
+  async function rereadScreen() {
+    try {
+      view = await readAdminScreen();
+    } catch { /* the failed panels still say so */ }
+  }
+  /* Set when the screen's first read fails outright — readAdminScreen()
+     rejects when the workspace itself cannot be read (#1442) — so the page
+     says so with a "try again" instead of staying blank. */
+  /** @type {string | null} */
+  let screenProblem = $state(null);
+  /* The people list, or null where its read failed (#1442). */
+  const people = $derived.by(() => view?.users ?? null);
+  let disposed = false;
+  let backdropMounted = false;
+  let backdropTeardown = () => {};
+  /**
+   * The screen's first read, and its retry while there is no screen yet. The
+   * backdrop mounts once, off the first answer that arrives.
+   */
+  async function loadScreen() {
+    try {
+      const screen = await readAdminScreen();
+      if (disposed) return;
+      view = screen;
+      screenProblem = null;
+      if (backdropMounted) return;
+      backdropMounted = true;
+      const seed = data?.fixtures ? seedFromWorkspace(screen.primary ?? "") : rollSeed();
+      const galaxy = galaxyOf({ households: screen.households, activeHouseholdId: screen.primary }, screen.today);
+      /* #1442: a failed mail read (relay null) and a failed users read (users
+         null) are passed on as unknown, never as "" or a crew of 0. */
+      const domain = screen.relay
+        ? ((screen.relay.find(([label]) => label === "collection domain")?.[1]) ?? null)
+        : null;
+      backdropTeardown = mountStation(/** @type {HTMLDivElement} */ (backdropRoot), {
+        seed, galaxy, primary: screen.primary,
+        facts: { domain, systems: screen.households.length, crew: screen.users ? screen.users.length : null },
+      });
+    } catch {
+      if (!disposed) screenProblem = "not shown — Orbit could not load administration";
+    }
+  }
   /** @type {string | null} */
   let problem = $state(null);
   /** @type {string | null} */
@@ -745,8 +792,6 @@
     constellationPlanetsOf(household.items ?? [], need().today).map(ringDot);
 
   onMount(() => {
-    let disposed = false;
-    let backdropTeardown = () => {};
     /* The backdrop mounts once the screen's own data has loaded — its
        households (galaxyOf) and its caption's real facts both come from the
        same readAdminScreen() answer this screen renders from, so there is no
@@ -777,17 +822,7 @@
       }
     }
 
-    readAdminScreen().then((screen) => {
-      if (disposed) return;
-      view = screen;
-      const seed = data?.fixtures ? seedFromWorkspace(screen.primary ?? "") : rollSeed();
-      const galaxy = galaxyOf({ households: screen.households, activeHouseholdId: screen.primary }, screen.today);
-      const domain = screen.relay.find(([label]) => label === "collection domain")?.[1] ?? "";
-      backdropTeardown = mountStation(/** @type {HTMLDivElement} */ (backdropRoot), {
-        seed, galaxy, primary: screen.primary,
-        facts: { domain, systems: screen.households.length, crew: screen.users.length },
-      });
-    });
+    loadScreen();
     return () => {
       disposed = true;
       backdropTeardown();
@@ -808,13 +843,13 @@
      so both dialects answer the server the same way. -->
 <Pocket {view} fixtures={Boolean(data?.fixtures)} {actorHasPassword} {provenIntent} {resumedResendPersonId} bind:draft={localDraft}
         challenge={challengeThen} reread={async () => { view = await readAdminScreen(); }}
-        spent={() => (provenIntent = "")} />
+        spent={() => (provenIntent = "")} {screenProblem} onretry={loadScreen} />
 
 <div class="page" role={pocket ? undefined : "main"}>
   <header class="screen">
     <h1>Administration</h1>
     <div class="sub">{view
-      ? `the instance from above · admins see everything by design · ${view.users.length} people · ${view.households.length} systems`
+      ? `the instance from above · admins see everything by design · ${people ? `${people.length} people · ` : ""}${view.households.length} systems`
       : "the instance from above · admins see everything by design"}</div>
     {#if tells.length}
       <div class="tells" aria-label="needs attention">
@@ -826,6 +861,10 @@
       </div>
     {/if}
   </header>
+
+  {#if screenProblem && !view}
+    <div class="adminproblem" role="alert">{screenProblem}<button class="retry" onclick={loadScreen}>try again</button></div>
+  {/if}
 
   {#if view}
     <div class="grid">
@@ -991,7 +1030,10 @@
         {/if}
         {#if localProblem}<div class="adminproblem">{localProblem}</div>{/if}
 
-        {#each view.users as person (person.id)}
+        {#if view.failed.users}
+          <div class="adminproblem" role="alert">people not shown — Orbit could not reach the list of people<button class="retry" onclick={rereadScreen}>try again</button></div>
+        {/if}
+        {#each view.users ?? [] as person (person.id)}
           <div class="person">
             <span class="avatar">{initials(person.displayName)}</span>
             <div class="who">
@@ -1091,7 +1133,7 @@
             {/if}
             <div class="placerow localuserrow" role="group"
                  aria-label="choose who will own the new system">
-              {#each view.users as person (person.id)}
+              {#each view.users ?? [] as person (person.id)}
                 <button disabled={systemBusy || systemName.trim().length === 0}
                         onclick={() => createSystemNow(person.id)}>{person.displayName}</button>
               {/each}
@@ -1119,6 +1161,9 @@
             </div>
           </div>
         {/each}
+        {#if view.failed.owners}
+          <div class="adminproblem" role="alert">owners not shown — Orbit could not reach every system’s members<button class="retry" onclick={rereadScreen}>try again</button></div>
+        {/if}
 
         <!-- ON THE CLOCK (#1001): readWorkspace excludes a household with a
              deletion requested from `households` outright
@@ -1189,7 +1234,11 @@
             <button onclick={openContactEditor}>{view.contact.address ? "change…" : "set…"}</button>
           {/if}
         </div>
-        <div class="kv"><span>address</span><b>{view.contact?.address ?? "not set"}</b></div>
+        {#if view.failed.contact}
+          <div class="adminproblem" role="alert">not shown — Orbit could not reach the public contact<button class="retry" onclick={rereadScreen}>try again</button></div>
+        {:else}
+          <div class="kv"><span>address</span><b>{view.contact?.address ?? "not set"}</b></div>
+        {/if}
         {#if view.contact}
           {#if editingContact}
             <form class="mailboxform" onsubmit={(event) => {
@@ -1287,7 +1336,10 @@
               <button onclick={openMailboxEditor}>{view.mailbox.configured ? "change mailbox…" : "set up mailbox…"}</button>
             {/if}
           </div>
-          {#each view.relay as [label, value, extra] (label)}
+          {#if view.failed.relay}
+            <div class="adminproblem" role="alert">not shown — Orbit could not reach the mail settings<button class="retry" onclick={rereadScreen}>try again</button></div>
+          {/if}
+          {#each view.relay ?? [] as [label, value, extra] (label)}
             <div class="kv"><span>{label}</span>
               {#if extra === "on"}<b class="on">{value}</b>
               {:else if extra}<span><b>{value.split(" · ")[0]}</b> · {value.split(" · ")[1]}</span><button>{extra}</button>
@@ -1430,15 +1482,22 @@
 
         <div class="half">
           <div class="cardhead"><h2>Operations</h2></div>
-          {#each view.services as [tone, name, detail] (name)}
+          {#each view.services ?? [] as [tone, name, detail] (name)}
             <div class="svc"><i style="background:var(--{tone})"></i><b>{name}</b><small>{detail}</small></div>
           {/each}
+          {#if view.failed.services}
+            <div class="adminproblem" role="alert">not shown — Orbit could not reach the service checks<button class="retry" onclick={rereadScreen}>try again</button></div>
+          {/if}
         </div>
       </div>
 
     </div>
 
-    <div class="strip">{view.instance}</div>
+    {#if view.instance}
+      <div class="strip">{view.instance}</div>
+    {:else if view.failed.instance}
+      <div class="strip" role="alert">version not shown — Orbit could not reach this instance’s build<button class="retry" onclick={rereadScreen}>try again</button></div>
+    {/if}
   {/if}
 </div>
 </div>

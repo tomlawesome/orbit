@@ -81,8 +81,9 @@
   /* THE POCKET (#1120): below the CON-10 switch the way back and the orb
      sit in the retracting top chrome, and the orb opens the hatch, a list
      sheet, instead of the desk card. Both are in the page and CSS picks,
-     like home's two dialects. Administration in the hatch is for instance
-     admins only (the root layout's load says who is one). */
+     like home's two dialects. Administration, in the hatch and in the desk
+     menu alike (#1440), is for instance admins only (the root layout's load
+     says who is one). */
   let hatchOpen = $state(false);
   const isAdmin = $derived(Boolean(page.data?.isAdmin));
 
@@ -118,8 +119,13 @@
     await tick();
     leave?.ready();
   }
-  /** @param {string | null} redirectTo the provider's own logout URL, if any */
-  async function descend(redirectTo) {
+  /**
+   * The goodbye, after the session has ended. Exported (#1439) so settings'
+   * own sign-outs play this same descent, under the name Leave's has.
+   *
+   * @param {string | null} redirectTo the provider's own logout URL, if any
+   */
+  export async function descendFrom(redirectTo) {
     try {
       await loadLeave();
       await tick();
@@ -156,7 +162,7 @@
     /* #1262: the menu closes as the sign-out goes ahead, never left standing
        over the descent */
     open = false;
-    await descend(redirectTo);
+    await descendFrom(redirectTo);
   }
 
   const initials = $derived(initialsOf(user?.displayName));
@@ -173,10 +179,12 @@
   <div class="who"><b>{user?.displayName ?? ""}</b><span>{line}</span></div>
   <nav>
     {#each NAV as [key, label, href] (key)}
+      {#if key !== "administration" || isAdmin}
       <a href={href === "/inbox" ? resolve("/inbox")
           : href === "/settings" ? resolve("/settings")
           : href === "/about" ? resolve("/about")
           : resolve("/administration")} aria-current={key === current ? "page" : undefined}>{label}</a>
+      {/if}
     {/each}
   </nav>
   <div class="swatches" role="group" aria-label="Theme">
@@ -201,7 +209,7 @@
   </TopChrome>
 </div>
 <Hatch bind:open={hatchOpen} name={user?.displayName ?? ""} roleLine={line} {current} {isAdmin}
-       onopened={wake} onsignedout={descend} />
+       onopened={wake} onsignedout={descendFrom} />
 {#if LeaveView}
   <!-- no household name to hand on a page that is not home's: the void's name line is empty -->
   <LeaveView bind:this={leave} />

@@ -157,6 +157,7 @@ Reasoning for each is in [docs/testing.md](docs/testing.md#local-traps).
   pnpm.
 - Only ten usable text fonts exist on this host; anything else falls back
   silently; check `fc-list : family` (list in `scripts/corpus/README.md`).
+- A heap flag (`--max-old-space-size`, `NODE_OPTIONS`) no longer weakens the PDF sandbox: each job is a child process with its own heap flag (ADR-0038).
 - `tmp/` is gitignored scratch for prototypes; the gates skip it. Nothing there
   is built or shipped.
 - Every tappable thing on the phone layout is at least 44x44px (`--p-hit`,

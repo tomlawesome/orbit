@@ -2,7 +2,8 @@ import { building } from "$app/environment";
 import { env } from "$env/dynamic/private";
 import { redirect } from "@sveltejs/kit";
 
-import { bodyLimitFor, limitRequestBody } from "$lib/server/body-limit.js";
+import { ARCHIVE_SLOT_ROUTES, holdArchiveSlot } from "$lib/server/archive-slot.js";
+import { bodyLimitFor, discardBody, limitRequestBody } from "$lib/server/body-limit.js";
 
 /**
  * The screens a reader may open without a session (#789).
@@ -340,6 +341,67 @@ export async function handle({ event, resolve }) {
      database, and no dynamic environment to read. */
   if (building) return resolve(event);
 
+  /* ONE ARCHIVE AT A TIME (#1316), in this order: the session, then the slot,
+     then the body limit below. Signed in first, so a stranger can never hold
+     the slot: without a session nothing is claimed and the route's own
+     write() answers 401 unread. The slot before the body limit, so a second
+     archive is refused with a 429 before its body is buffered. The finally
+     frees the slot however the rest ends: an answer, a 413, a refusal, a
+     throw, a dropped client, the body watchdog.
+     web/src/lib/server/archive-slot.js has the routes and the reasons. */
+  if (event.route.id !== null && ARCHIVE_SLOT_ROUTES.has(event.route.id)
+    && event.request.method === "POST" && event.request.body !== null
+    && await readSessionQuietly(event.cookies)) {
+    const held = holdArchiveSlot(event.route.id, event.request);
+    if (held instanceof Response) return held;
+    if (held) {
+      event.request = held.request;
+      try {
+        return await gated(event, resolve);
+      } finally {
+        drainUnread(event);
+        held.release();
+      }
+    }
+  }
+  try {
+    return await gated(event, resolve);
+  } finally {
+    drainUnread(event);
+  }
+}
+
+/**
+ * Reads away an upload the route answered without reading (#1316).
+ *
+ * A route may refuse before it reads: a stale CSRF token, maintenance, the
+ * key gate, a signed-out redirect. Node would read such a body away itself
+ * once the answer is sent, but adapter-node's early data listener stops it,
+ * so the upload sits paused and a browser still sending it never sees the
+ * answer -- Firefox reports a network error instead. So the answer goes first
+ * and the rest is read and thrown away after it, the same as the 413 and 429.
+ *
+ * In a `finally`, because a redirect or an error is thrown, not returned. A
+ * locked body is left alone: a route is still reading it, in the background
+ * or through a clone. A used one has been read to its end. The response is
+ * not touched; a route must not hand the unread body on without reading or
+ * locking it first (an answer built from `request.body`, or a reader started
+ * on a later tick, would find it drained).
+ *
+ * @param {import("@sveltejs/kit").RequestEvent} event
+ */
+function drainUnread(event) {
+  const { body, bodyUsed } = event.request;
+  if (body !== null && !body.locked && !bodyUsed) discardBody(event.request);
+}
+
+/**
+ * Everything `handle` does after the building guard and the archive slot.
+ *
+ * @param {import("@sveltejs/kit").RequestEvent} event
+ * @param {Parameters<import("@sveltejs/kit").Handle>[0]["resolve"]} resolve
+ */
+async function gated(event, resolve) {
   /* Per-route request body limits (#1285), ahead of every other step and for
      every route, the API included: the image lets any body up to the largest
      a route may take through (BODY_SIZE_LIMIT), and this holds each route to

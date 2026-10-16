@@ -9,11 +9,15 @@ import { ensureLocalPassword } from "./support/local-credentials";
 import { ensureWorkerAdministrator, workerAccount, workerEmail, workerFixturePassword } from "./support/worker-identity";
 import { waitForInvitationLink } from "./support/mail";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { exclusiveSpecFile } from "./support/exclusive-spec";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
+
+/* #1316: one worker at a time in the archive-slot specs, in whichever project. */
+exclusiveSpecFile("archive-slot");
 
 /**
  * #1002 — the desk archive card: export, preview and import, built from

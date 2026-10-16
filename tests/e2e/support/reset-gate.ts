@@ -136,9 +136,12 @@ const STILL_WAITING_MS = 30_000;
  * empties its `outputDir` at the start of a run and collects it as the job's
  * artifact, and this is neither a result nor something to publish.
  */
+export function stackKey(): string {
+  return process.env.COMPOSE_PROJECT_NAME ?? "orbit-acceptance";
+}
+
 function gatePath(suffix: string): string {
-  const stack = process.env.COMPOSE_PROJECT_NAME ?? "orbit-acceptance";
-  return join(tmpdir(), `orbit-e2e-reset-gate-${stack}${suffix}`);
+  return join(tmpdir(), `orbit-e2e-reset-gate-${stackKey()}${suffix}`);
 }
 
 function readGate(): Gate {

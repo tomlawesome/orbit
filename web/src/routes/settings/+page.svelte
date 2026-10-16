@@ -8,8 +8,6 @@
     readSettingsScreen,
     readSignInMethods,
     removeLocalPassword,
-    revokeSession,
-    signOutEverywhere,
     startProviderLink,
     startStepUp,
     unlinkProviderIdentity,
@@ -27,6 +25,7 @@
   import { createArm } from "$lib/arm.js";
   import SignInChallenge from "./SignInChallenge.svelte";
   import { PACKS, intentOf, issuerHost, methodWords, on } from "./helm.js";
+  import { signOutOfDevice, signOutOfEveryDevice } from "./sign-out.js";
   import Pocket from "./pocket.svelte";
   import "./settings.css";
 
@@ -343,50 +342,65 @@
   /** @type {Record<string, string>} */
   let revokeProblem = $state({});
 
+  /* Chrome, bound so settings' own sign-outs play its goodbye (#1439). */
+  /** @type {{ descendFrom: (redirectTo: string | null) => Promise<void> } | undefined} */
+  let chrome = $state();
+  /* With Chrome not bound this throws rather than quietly answering nothing,
+     so sign-out.js's own fallback navigation runs (#1439). */
+  /** @param {string | null} redirectTo */
+  const descendFrom = (redirectTo) => {
+    if (!chrome) throw new Error("Chrome is not bound");
+    return chrome.descendFrom(redirectTo);
+  };
+  /* Set while a sign-out request is out, and kept once this device has left:
+     a second press then sends nothing, and after this session has ended any
+     request would answer 401 and sign the reader straight back in through
+     the provider (#1439). */
+  let signingOut = false;
+
   /**
    * Sign out of one device — armed by a first tap, done by a second, same
    * family protocol as `tapSignOutEverywhere` below. Ending the current
-   * device's own session leaves nothing to come back to, so that case goes
-   * straight to the sign-in the way `tapSignOutEverywhere` does; ending any
-   * other device just drops its row.
+   * device's own session plays the goodbye, as the ordinary sign-out does
+   * (./sign-out.js); ending any other device just drops its row.
    *
    * @param {Awaited<ReturnType<typeof readSessions>>[number]} row
    * @param {HTMLElement | null} button
    */
   async function tapRevokeSession(row, button) {
+    if (signingOut) return;
     revokeProblem = { ...revokeProblem, [row.id]: "" };
     if (!signOutArm.tap(`session:${row.id}`, button)) return;
+    signingOut = true;
     try {
-      await revokeSession(row.id);
-      if (row.current) {
-        location.assign("/login");
-        return;
-      }
+      if (await signOutOfDevice(row, descendFrom)) return;
       sessions = sessions.filter((session) => session.id !== row.id);
     } catch {
       revokeProblem = { ...revokeProblem, [row.id]: "still signed in — try again" };
     }
+    signingOut = false;
   }
 
   /**
    * "Sign out of every device" — armed by a first tap, done by a second, the
    * family protocol the inbox and the item view already use for anything
    * that cannot be undone. This one ends the caller's own session too, so on
-   * success there is no page left to return to: the cookie is dead and the
-   * sign-in is the only honest destination.
+   * success it plays the goodbye, as the ordinary sign-out does.
    */
   /** @type {string | null} */
   let signOutProblem = $state(null);
 
   /** @param {HTMLElement | null} button */
   async function tapSignOutEverywhere(button) {
+    if (signingOut) return;
     signOutProblem = null;
     if (!signOutArm.tap("everywhere", button)) return;
+    signingOut = true;
     try {
-      await signOutEverywhere();
-      location.assign("/login");
+      await signOutOfEveryDevice(descendFrom);
     } catch {
       signOutProblem = "still signed in — try again";
+      signingOut = false;
     }
   }
 
@@ -478,7 +492,7 @@
      twice, and hides this page's sky and cards below the switch; the chrome
      stays, because on a phone Chrome.svelte draws the kit's top chrome. -->
 <Pocket bind:view bind:methods bind:sessions bind:active {initials} {providerOffered} {emailApproval} {screenProblem} onretry={loadScreen}
-        {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} />
+        {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} onsignedout={descendFrom} />
 
 <div class="helm-page">
 <div class="sky" aria-hidden="true">
@@ -489,7 +503,7 @@
 </div>
 <div class="vignette" aria-hidden="true"></div>
 
-<Chrome user={view?.user} current="settings" household={view?.household} />
+<Chrome bind:this={chrome} user={view?.user} current="settings" household={view?.household} />
 
 <div class="page" role="main">
   <header class="screen">
@@ -733,6 +747,7 @@
       </ul>
       {#if sessionsProblem}<div class="note">{sessionsProblem}</div>{/if}
       <button onclick={(event) => tapSignOutEverywhere(event.currentTarget)}>{signOutArmed === "everywhere" ? "tap again to sign out everywhere" : "sign out of every device →"}</button>{#if signOutProblem}<div class="note">{signOutProblem}</div>{/if}
+      <p class="everywhere-says">This signs Orbit out everywhere{#if providerOffered}, and signs you out of your sign-in provider in this browser only: your other devices stay signed in at the provider{/if}.</p>
     </div>
   {/if}
 </div>

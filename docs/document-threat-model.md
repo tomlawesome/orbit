@@ -144,17 +144,28 @@ recoverable state.
   PNG, the dimensions declared in the header are read first and must be within
   20,000 pixels a side and 40 million in all, then the preview renderer's own
   decoder must read the image. These limits are Orbit's own because no
-  library sets them. The check is bounded in the same way the renderer is: the
-  timer can abort asynchronous PDF.js work, but cannot pre-empt synchronous
-  JavaScript already executing in Orbit's process. Magic bytes alone are not
-  proof that a file opens.
+  library sets them. Magic bytes alone are not proof that a file opens.
+- The PDF open check runs in a child process of its own, not in the server's
+  process ([ADR-0038](adr/0038-pdf-structure-check-in-a-sandboxed-worker.md)).
+  A few-kilobyte file can make a PDF parser loop or allocate without end while
+  it reads the cross-reference data, and the cheap pre-parse bound on declared
+  entries modelled the parser's lenient reading and kept missing ways in. So
+  each check gets its own child with a 128 MB heap cap (its own flag), a
+  process-memory ceiling of 320 MB plus five times the file's size (resident plus swapped) that the server reads
+  from `/proc` every 25 ms and kills it past, a five-second wall-clock limit
+  that kills it, an empty environment, and at most two run at once; running
+  out of memory, timing out or crashing refuses the file as
+  `unsupported_structure`, logs one record with no file detail, and leaves
+  the server answering. The bound stays as a cheap first fence. The child
+  still shares the server's files and network. Boot warns if `/bin/sh`,
+  `ulimit -d` or `/proc`, which the sandbox relies on, is missing.
 - Orbit does not refuse a PDF for what it contains. JavaScript, open and
   link actions, XFA forms, embedded files, owner-password-only encryption
   ("no editing" certificates) and encrypted object streams are all accepted
   when PDF.js opens the file. A PDF that needs a password to open is refused,
   as a product limit rather than a safety one: nothing in Orbit could show,
   read or scan it. Nothing in a PDF runs in Orbit. The server renderer has
-  XFA off, no worker, no network, no system fonts and no WebAssembly, and
+  XFA off, no pdf.js worker, no network, no system fonts and no WebAssembly, and
   PDF.js runs document scripts only through the viewer's annotation layer and
   scripting manager, which Orbit never builds. Orbit shows people only a
   picture it draws on the server. The options are typed against the installed
@@ -172,9 +183,25 @@ recoverable state.
 - Parser responses must be content-type checked, strictly decoded, and bounded
   before allocation. Redirects and arbitrary request URLs or options are
   rejected. Parser errors expose no provider or document content.
-- PDF.js runs in the Orbit process and is not a separate sandbox; it is the
-  one parser of untrusted bytes there, and it opens only files ClamAV has
-  passed. Keeping it patched is the standing cost. The optional Tika service
+- PDF.js is the one parser of untrusted bytes in Orbit's own code, and it
+  opens only files ClamAV has passed. It never runs in the server's process:
+  the open check and the page renderer both run it in a sandbox child
+  process, one per job (ADR-0038, as amended for #1427). Drawing a page decodes what the
+  open check never touches (content streams, fonts, images), so a small
+  emailed PDF whose page decodes to hundreds of megabytes used to stall or
+  crash the server when a member opened its preview. Now each preview is one
+  child process that applies the open check's gate, draws the page and
+  returns a PNG, under the render budget (ten seconds), a process-memory
+  ceiling of 768 MB plus the file's size (which counts canvases, patterns,
+  images and fonts alike), and the same heap cap, two-at-once limit and empty
+  environment; a child that is not ready within five seconds is stopped as a
+  crash. A few-kilobyte pattern, shading or soft-mask file that would grow a
+  renderer to gigabytes is killed at the ceiling in a few seconds.
+  Running out of memory, timing out or crashing answers
+  `document_preview_failed` and logs one record with no file detail. A
+  source check (`tests/unit/pdf-no-in-process-reader.test.mjs`) fails if
+  anything else on the server loads PDF.js. Keeping it patched is the
+  standing cost. The optional Tika service
   remains the separately isolated parser/OCR boundary described
   below.
 - The optional Tika service shares only a dedicated internal network with the
@@ -304,10 +331,11 @@ recoverable state.
 - The read is audited as `document_previewed`, distinct from
   `document_downloaded`, so an image request is never recorded as a
   whole-document export.
-- Rendering is in-process and in-memory: PDF.js parses into a Skia canvas with
-  the same option set as the open check (`PDF_STRUCTURE_PARSER_OPTIONS`) — no
-  XFA, no network, no worker, and no scripting layer to run a document's
-  scripts. No plaintext temporary file is written, so there
+- Rendering is in memory and, for a PDF, in the sandbox child process
+  described above: PDF.js parses into a Skia canvas with the same option set as the
+  open check (`PDF_STRUCTURE_PARSER_OPTIONS`) — no XFA, no network, no
+  pdf.js worker, and no scripting layer to run a document's scripts. No
+  plaintext temporary file is written, so there
   is nothing to unlink; the decrypted buffer is zeroed on every exit, including
   failures.
 - Bytes are re-identified and re-inspected before rendering rather than trusted

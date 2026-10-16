@@ -127,7 +127,10 @@ for (const motion of /** @type {const} */ (["no-preference", "reduce"])) {
   test.describe(`the ring's hand-over to a card at 390x664, motion ${motion}`, () => {
     test.use({ viewport: { width: 390, height: 664 }, hasTouch: true, isMobile: true, reducedMotion: motion });
 
-    test(motion === "reduce" ? "the ring stands at the card's station at once" : "the ring travels from the door's station to the card's", async ({ page }) => {
+    /* Quarantined (#1306, agent-infra#30): the travelling ring's frame-to-frame
+       check measures how fast a loaded runner paints, not the hand-over. It
+       still runs, outside the merge gate (`fidelity:quarantine`). */
+    test(motion === "reduce" ? "the ring stands at the card's station at once" : "the ring travels from the door's station to the card's", { tag: motion === "reduce" ? [] : ["@quarantine"] }, async ({ page }) => {
       const door = DOOR_STATES.find((s) => s.slug === "login" && s.state === "mixed");
       if (!door) throw new Error("no door state login · mixed in pocket-states.js");
       await door.reach(page);

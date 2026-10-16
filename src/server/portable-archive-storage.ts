@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { validUuid } from "@/lib/uuid";
 
 export interface StoredPortableArchive { storageKey: string; modifiedAt: Date }
+export interface OpenedPortableArchive { handle: FileHandle; sizeBytes: number }
 
 /** Private local storage for encrypted portability exports. */
 export class PortableArchiveStorage {
@@ -37,6 +38,23 @@ export class PortableArchiveStorage {
       throw new Error("Portable archive exceeds its expected size");
     }
     return contents;
+  }
+
+  /**
+   * The stored file as an open handle and its size, for reading in chunks
+   * rather than whole (#1428). The caller owns the handle and closes it. An
+   * open handle keeps reading the same file even if a purge unlinks it.
+   */
+  async open(storageKey: string, maximumBytes: number): Promise<OpenedPortableArchive> {
+    const handle = await open(this.pathFor(storageKey), "r");
+    try {
+      const { size } = await handle.stat();
+      if (size > maximumBytes) throw new Error("Portable archive exceeds its expected size");
+      return { handle, sizeBytes: size };
+    } catch (error) {
+      await handle.close().catch(() => undefined);
+      throw error;
+    }
   }
 
   async delete(storageKey: string): Promise<void> {
