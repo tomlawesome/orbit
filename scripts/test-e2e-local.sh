@@ -532,6 +532,13 @@ if [[ -n "$reuse_project" ]]; then
   app_container="$(container_for_service orbit-app)"
   [[ -n "$app_container" ]] ||
     fail "--reuse ${project_name}: no running orbit-app container for this project. Start one first with --keep -- its startup log line names the project to pass here -- or check the project name."
+  # The suite resets this project's database, so it must be a stack this
+  # script started: every one includes compose/docker-compose.local-e2e.yml,
+  # which Compose records on each container, and a real install never does.
+  # Without this, --reuse with a real install's name would wipe it.
+  app_config_files="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$app_container" 2>/dev/null || true)"
+  [[ ",${app_config_files}," == *"/compose/docker-compose.local-e2e.yml,"* ]] ||
+    fail "--reuse ${project_name}: not an e2e stack (it was not started with compose/docker-compose.local-e2e.yml, so it may be a real install). Refusing to reset its database."
   db_container="$(container_for_service orbit-db)"
   [[ -n "$db_container" ]] ||
     fail "--reuse ${project_name}: found orbit-app but no running orbit-db container; the stack is only partly up. Refusing to reuse it."
@@ -854,9 +861,8 @@ reuse_env=()
 # or tests/e2e/support/database.ts refuses to reset a database it believes it
 # did not create.
 # A --reuse project too, now that ORBIT_E2E_REUSE no longer lifts the guard
-# by itself. The script checked only that it is a running, healthy Compose
-# project, not that it is an e2e stack: --reuse trusts the name it is given
-# (#947), so `--reuse` with a real install's name resets that install.
+# by itself: the reuse checks above refused it unless it is a healthy stack
+# started with this script's e2e overlay.
 reuse_env+=("ORBIT_E2E_OWNED_PROJECT=$project_name")
 # COMPOSE_PROJECT_NAME is handed to the suite because a spec may need to ask
 # the stack's own database a question -- tests/e2e/v19-tour.spec.ts proves the

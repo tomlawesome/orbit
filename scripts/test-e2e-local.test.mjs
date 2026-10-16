@@ -241,6 +241,7 @@ case "$1" in
       case "$*" in
         *State.Health.Status*) echo healthy; exit 0 ;;
         *HostPort*) echo 4000; exit 0 ;;
+        *config_files*) echo "/stub/docker-compose.yml,/stub/compose/docker-compose.local-e2e.yml"; exit 0 ;;
       esac
     fi
     exit 1 ;;
