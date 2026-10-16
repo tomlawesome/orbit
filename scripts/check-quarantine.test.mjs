@@ -258,21 +258,74 @@ describe("check-quarantine", () => {
     expect(r.stdout.trim()).toBe("quarantine list: 2 tags in 1 files, all listed");
   });
 
-  it("ignores files that Playwright's default testMatch would not run", () => {
+  it("ignores non-code files, even inside tests/e2e and web/tests", () => {
     const root = fixture(
       {
         [A]: specA,
-        "tests/e2e/helper.ts": specA,
         "tests/e2e/notes.md": specA,
+        "tests/e2e/data.json": specA,
         "tests/e2e/a.spec.json": specA,
         "tests/e2e/a.spec.ts.snap": specA,
-        "web/tests/support.js": specA,
+        "web/tests/readme.txt": specA,
       },
       `${A} 2 #1085\n`,
     );
     const r = run(root);
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe("quarantine list: 2 tags in 1 files, all listed");
+  });
+
+  it("counts a helper that is not a spec or test file (helper.ts is now scanned)", () => {
+    const root = fixture(
+      { [A]: specA, "tests/e2e/helper.ts": specA, "web/tests/support.js": specA },
+      `${A} 2 #1085\ntests/e2e/helper.ts 2 #1086\nweb/tests/support.js 2 #1087\n`,
+    );
+    const r = run(root);
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe("quarantine list: 6 tags in 3 files, all listed");
+  });
+
+  it("fails an unlisted helper exporting the tag, naming its path", () => {
+    const helper = "tests/e2e/support/tags.ts";
+    const root = fixture(
+      { [A]: specA, [helper]: `export const QUARANTINE = "@quarantine";\n` },
+      `${A} 2 #1085\n`,
+    );
+    const r = run(root);
+    expectFails(r, helper);
+    expect(r.stderr).not.toContain(`${A}`);
+  });
+
+  it("passes a listed helper exporting the tag", () => {
+    const helper = "tests/e2e/support/tags.ts";
+    const root = fixture({ [helper]: `export const QUARANTINE = "@quarantine";\n` }, `${helper} 1 #1\n`);
+    const r = run(root);
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe("quarantine list: 1 tags in 1 files, all listed");
+  });
+
+  it("scans every code extension, not only spec and test files", () => {
+    const exts = ["js", "ts", "mjs", "cjs", "jsx", "tsx", "mts", "cts"];
+    const files = Object.fromEntries(exts.map((e) => [`web/tests/support/h.${e}`, specB]));
+    const root = fixture(files, exts.map((e, i) => `web/tests/support/h.${e} 1 #${i + 1}`).join("\n") + "\n");
+    const r = run(root);
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe(`quarantine list: ${exts.length} tags in ${exts.length} files, all listed`);
+  });
+
+  it("counts @quarantine case-insensitively", () => {
+    const root = fixture(
+      { [A]: `test("a", { tag: "@QUARANTINE" }, () => {});\ntest("b", { tag: "@Quarantine" }, () => {});\n` },
+      `${A} 2 #1\n`,
+    );
+    const r = run(root);
+    expect(r.error).toBeUndefined();
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe("quarantine list: 2 tags in 1 files, all listed");
+  });
+
+  it("fails an unlisted file whose only tag is in capitals", () => {
+    expectFails(run(fixture({ [A]: `test("a", { tag: "@QUARANTINE" }, () => {});\n` }, `# empty\n`)), A);
   });
 
   it("scans every file Playwright's default testMatch runs", () => {

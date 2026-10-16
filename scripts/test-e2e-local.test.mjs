@@ -296,6 +296,7 @@ exit 0
 `,
 };
 
+const checkQuarantine = fileURLToPath(new URL("./check-quarantine.mjs", import.meta.url));
 const fixtures = [];
 afterEach(() => {
   for (const dir of fixtures.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -319,6 +320,8 @@ function makeFixture() {
     join(dir, "scripts/dev-greenmail-cert.sh"),
     "for f in greenmail.p12 greenmail-ca.pem greenmail-key.pem; do touch .orbit-secrets/$f; done\n",
   );
+  copyFileSync(checkQuarantine, join(dir, "scripts/check-quarantine.mjs"));
+  writeFileSync(join(dir, "tests/quarantine.txt"), "# no quarantined tests\n");
   writeFileSync(join(dir, "scripts/calculate-version.mjs"), 'console.log("0.0.0-test");\n');
   writeFileSync(join(dir, "scripts/install-test-browser.sh"), "exit 0\n");
   writeFileSync(join(dir, ".env-orbit.example"), "");
@@ -612,5 +615,52 @@ describe("the environment the script hands to Playwright (#1077)", () => {
       expect(env.ORBIT_E2E_OWNED_PROJECT).toBe(fx.project);
       expect(env.COMPOSE_PROJECT_NAME).toBe(fx.project);
     }
+  });
+});
+
+/*
+ * The quarantine list guard: the script runs `node scripts/check-quarantine.mjs`
+ * before its gate run, so an unlisted @quarantine tag (which would drop a test
+ * from every merge gate) stops a local run too. When the check fails the script
+ * exits non-zero and Playwright is never started. Same stubbed fixture; the
+ * fixture holds the real check and an empty tests/quarantine.txt, and the fake
+ * Playwright CLI records every call.
+ */
+describe("the quarantine list guard before the gate run", () => {
+  function recordCalls(fx) {
+    const log = join(fx.dir, "playwright-calls.log");
+    writeFileSync(
+      join(fx.dir, "node_modules/@playwright/test/cli.js"),
+      `require("fs").appendFileSync(process.env.PW_CALL_LOG, "called\\n");\n`,
+    );
+    return log;
+  }
+
+  it("runs Playwright when the list is clean (control)", async () => {
+    const fx = makeFixture();
+    const log = recordCalls(fx);
+    const result = await runToEnd(fx, chromium, { PW_CALL_LOG: log });
+    expect(result.status, result.stderr).toBe(0);
+    expect(existsSync(log)).toBe(true);
+  });
+
+  it("exits non-zero and never runs Playwright when a tag is not on the list", async () => {
+    const fx = makeFixture();
+    const log = recordCalls(fx);
+    writeFileSync(join(fx.dir, "tests/e2e/x.spec.ts"), 'test("x", { tag: "@quarantine" }, () => {});\n');
+    const result = await runToEnd(fx, chromium, { PW_CALL_LOG: log });
+    expect(result.status, result.stderr).not.toBe(0);
+    expect(result.stderr).toContain("tests/e2e/x.spec.ts");
+    expect(existsSync(log), "Playwright ran despite the failed check").toBe(false);
+  });
+
+  it("exits non-zero and never runs Playwright when tests/quarantine.txt is missing", async () => {
+    const fx = makeFixture();
+    const log = recordCalls(fx);
+    rmSync(join(fx.dir, "tests/quarantine.txt"));
+    const result = await runToEnd(fx, chromium, { PW_CALL_LOG: log });
+    expect(result.status, result.stderr).not.toBe(0);
+    expect(result.stderr).toContain("tests/quarantine.txt");
+    expect(existsSync(log), "Playwright ran despite the failed check").toBe(false);
   });
 });
