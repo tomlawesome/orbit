@@ -297,7 +297,8 @@ test("a removed document shows its own line, honestly, and no page", async ({ pa
    each of its pages is its own width, so the drawn picture's own width says
    which page the server actually drew, not only what the foot claims. */
 test("the reader turns a multi-page document to its last page and back, by arrows and by keys", async ({ page }) => {
-  test.setTimeout(90_000);
+  /* Each turn is a fresh render that can wait up to 20 s on a busy server (below), and there are about ten. */
+  test.setTimeout(240_000);
   await signInAsAdmin(page);
   const { itemId, householdId } = await seedHouseholdWithItem(page);
 
@@ -315,11 +316,14 @@ test("the reader turns a multi-page document to its last page and back, by arrow
     const previous = reader.getByRole("button", { name: "Previous page" });
     const next = reader.getByRole("button", { name: "Next page" });
     const picture = reader.getByRole("img", { name: /pages-proving\.pdf/ });
-    /** The page the reader says it is on, and the one the server drew. */
+    /** The page the reader says it is on, and the one the server drew. The
+        count arrives with the page's own render, so the words wait as long
+        as the picture does: on a busy server a render queues for a slot
+        (pipeline 2645: "· page 1" for the whole 5 s default). */
     const onPage = async (n: number) => {
-      await expect(head).toHaveText(`· page ${n} of 3`);
-      await expect.poll(() => shownText(foot)).toBe(`${n} of 3`);
-      await expect(foot).toHaveText(`page ${n} of 3`);
+      await expect(head).toHaveText(`· page ${n} of 3`, { timeout: 20_000 });
+      await expect.poll(() => shownText(foot), { timeout: 20_000 }).toBe(`${n} of 3`);
+      await expect(foot).toHaveText(`page ${n} of 3`, { timeout: 20_000 });
       await expect(foot).toHaveAttribute("aria-live", "polite");
       await expect(picture).toHaveAccessibleName(`Page ${n} of pages-proving.pdf`, { timeout: 20_000 });
       await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: 20_000 })
