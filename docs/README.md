@@ -17,6 +17,8 @@ has the friendly introduction; these pages are the detail behind it.
 
 - [Installing Orbit](installing.md): the install command, what the installer
   asks, unattended installs, what gets installed, and building from source.
+- [Installing a preview build](installing-preview.md): installing a preview by
+  digest from its signed manifest, with the signature checked by hand.
 - [Installer guarantees](installer-guarantees.md): what every install,
   configuration, backup and restore script promises, with the upgrade
   procedure at the head of its second part.
