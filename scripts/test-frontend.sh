@@ -21,7 +21,12 @@ readonly base_url="${PLAYWRIGHT_BASE_URL:-http://127.0.0.1:3000}"
 #     would otherwise exit non-zero with "No tests found".
 extra_args=()
 case "${1:-}" in
-  "") export ORBIT_E2E_QUARANTINE=exclude ;;
+  "")
+    export ORBIT_E2E_QUARANTINE=exclude
+    # Every @quarantine tag leaves this gate, so each must be on the reviewed
+    # list (tests/quarantine.txt, scripts/check-quarantine.mjs).
+    node scripts/check-quarantine.mjs || exit 1
+    ;;
   --quarantine)
     export ORBIT_E2E_QUARANTINE=only
     export PLAYWRIGHT_HTML_OUTPUT_DIR="${PLAYWRIGHT_HTML_OUTPUT_DIR:-playwright-report/quarantine}"

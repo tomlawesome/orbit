@@ -1,0 +1,17 @@
+# Browser tests taken out of the merge gate (agent-infra#30: a test at its
+# third flaky sighting runs after the gate and only reports). Tagging a test
+# @quarantine removes it from every gate, so each tag is listed here with its
+# issue, and scripts/check-quarantine.mjs fails the smoke and fidelity jobs on
+# any tag this list does not account for.
+#
+# <path> <tag count> <issue refs> [note]. docs/flakes.md has the sightings.
+tests/e2e/sign-out-descent.spec.ts 2 #1367 the :195 dusk test has no issue of its own yet
+tests/e2e/v19-keyboard-pocket.spec.ts 1 #1381
+tests/e2e/v19-feedback-recovery.spec.ts 1 #1313
+tests/e2e/v19-mail-collection.spec.ts 2 #1415 serial file: the test after it is quarantined with it
+tests/e2e/v19-administration.spec.ts 1 #1448
+tests/e2e/v19-layout-and-themes.spec.ts 1 #1307
+tests/e2e/v19-arrival.spec.ts 2 #1085 serial file: the test after it is quarantined with it; #1085 is closed
+web/tests/fidelity/door-station.spec.js 1 #1306
+web/tests/fidelity/pocket-measure.spec.js 1 #1376
+web/tests/fidelity/tour-pocket-webkit.spec.js 1 #1449
