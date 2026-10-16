@@ -36,12 +36,16 @@ That person becomes the first instance administrator.
 [Claiming a fresh install](authentication.md#claiming-a-fresh-install) has
 the detail, including who else could read that link.
 
-Next, Orbit asks for three things to create the first household: its name,
-its time zone and its currency. It starts every household with four
-sections, Home, Vehicles, Devices and Services, which you can rename,
-reorder, recolour or add to later on the household screen.
+Next, Orbit shows the "where do you belong?" card. On a new install there is
+nothing to ask to join, so the card's "name your own system" drawer is already
+open. (If other households exist, they are listed with "ask to join", and you
+open the drawer with "name your own system".) The drawer asks for three things
+to create the first household: its name, its time zone and its currency. It
+starts every household with four sections, Home, Vehicles, Devices and
+Services, which you can rename, reorder, recolour or add to later on the
+household screen.
 
-![Creating the first household: a name, a time zone and a currency, with a note that four sections come to start](images/first-run-sections-step.png)
+![The create form in the belong card's drawer: a name, a time zone and a currency, with a note that four sections come to start](images/first-run-sections-step.png)
 
 Instance administrators can manage every household and can give or take
 away administrator access for other people. Orbit will not let the last
@@ -87,6 +91,23 @@ value. Three more commands help:
 - `bash scripts/configure.sh` on its own fills in any setting or secret that
   is missing and leaves the rest alone.
 
+All of these run inside the Orbit image: `configure.sh` starts a short-lived
+container from it, with no network, and that container reads and writes the
+files. Docker must therefore be running and the image must be available,
+even to change one setting. The image comes from `ORBIT_IMAGE` in your
+environment, or else from the `ORBIT_IMAGE=` line in `.env-orbit`, which the
+installer writes. With neither, it stops with:
+
+```text
+Orbit configuration: No Orbit image to run configuration with. Set ORBIT_IMAGE to an immutable registry digest (or the local tag scripts/build-container.sh builds), or install with get-orbit.sh, which records it in .env-orbit.
+```
+
+Set `ORBIT_IMAGE` to the build's registry digest (on a source checkout, the
+local tag `scripts/build-container.sh` builds) and run it again. A digest
+that is not on this machine is pulled first; a local tag that is not on this
+machine is refused, because there is nothing to pull. Files it creates belong
+to the user who ran it.
+
 [Deployment configuration readiness](administrator-operations.md#deployment-configuration-readiness)
 explains each of these in full, and [Authentication](authentication.md)
 covers identity providers.
@@ -102,9 +123,9 @@ without them:
   It does not read text out of scanned images: that feature (OCR) is
   switched off.
 - **Ollama**, a private AI model server. With a model chosen, Orbit also
-  asks the model to suggest a document's title, provider and reference, and
-  checks the answer against its own rules. Either way, nothing is added
-  until you review it.
+  asks the model to suggest a document's provider, reference, type, cost, how
+  often it recurs and its dates, and checks the answer against its own
+  rules. Either way, nothing is added until you review it.
 
 To turn both on, add these lines to `.env-orbit`:
 
@@ -167,7 +188,23 @@ bash scripts/restore.sh backups/orbit-YYYYMMDD-HHMMSS.tar
 ```
 
 The restore asks you to type `RESTORE`, stops Orbit itself, and either
-completes fully or puts everything back as it was.
+completes fully or puts everything back as it was. Orbit stays stopped for
+the whole restore, including the checks on the backup before anything is
+replaced, and starts again once it is done. If a restore is interrupted
+part-way, Orbit stays stopped and `bash scripts/restore.sh --recover` puts
+the previous state back. Both scripts run the Orbit engine inside the
+deployment, so the host needs Docker with Compose v2; restore also needs
+`curl`, to wait for Orbit to answer (backup does not). Keep `backups/` on a
+local disk (a backups directory on NFS is not supported).
+
+An unattended restore skips the typed `RESTORE` only when given both
+switches, so that neither alone can replace your data:
+
+```sh
+ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes backups/orbit-YYYYMMDD-HHMMSS.tar
+```
+
+`--yes` without the variable stops before Orbit is touched.
 
 A backup deliberately leaves out the document encryption key, so it is only
 useful on a machine that still has that key. To survive losing the machine,
@@ -200,13 +237,18 @@ Build the image and start the stack with:
 bash scripts/deploy-container.sh --build
 ```
 
-It refreshes the settings, builds the image, takes a backup if the
-database is already running, starts everything and waits until it is
-healthy. `bash scripts/deploy-container.sh --pull` does the same with the
-published build named in `ORBIT_IMAGE` instead of building one. To build
-only, run `bash scripts/build-container.sh`; the base Compose file has no
-build instructions, so it builds through the `compose/docker-compose.build.yml`
-overlay.
+It builds the image first, because `configure.sh` runs inside it, then
+refreshes the settings, takes a backup if the database is already running,
+starts everything and waits until it is healthy. Your secrets and data are
+left as they are, and so is `.env-orbit` apart from `ORBIT_IMAGE`, which moves
+to the image just built or pulled so a later `docker compose --env-file
+.env-orbit up -d` starts the same build. `bash scripts/deploy-container.sh
+--pull` does the same with the published build named in `ORBIT_IMAGE`
+instead of building one: it pulls that digest first. Neither needs an
+existing `.env-orbit`: `configure.sh` creates it once the image exists. To
+build only, run `bash scripts/build-container.sh`; it builds the image
+straight from the Dockerfile (the base Compose file has no build
+instructions) and needs no `.env-orbit`.
 
 To update a checkout and start it in one go:
 

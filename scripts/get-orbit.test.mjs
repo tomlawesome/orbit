@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -99,7 +100,7 @@ const INSTALL_SH_CONTENTS = "#!/usr/bin/env bash\necho fake-install-sh\n";
 function buildRelease({
   dir,
   arch,
-  version = "1.2.3",
+  version = "v1.2.3",
   privatePem,
   manifestOverride,
   sigOverride,
@@ -226,7 +227,7 @@ describe("get-orbit.sh", () => {
   it("runs a pinned ORBIT_VERSION when the signed manifest is for that version", () => {
     const dir = makeDir("get-orbit-");
     const { privatePem, publicPem } = generateKeyPair(dir);
-    const baseUrl = buildRelease({ dir, arch, privatePem, version: "1.2.3", routeDir: "releases/download/v1.2.3", serveBundle: false });
+    const baseUrl = buildRelease({ dir, arch, privatePem, version: "v1.2.3", routeDir: "releases/download/v1.2.3", serveBundle: false });
     const launcherLog = join(dir, "launcher.log");
     const cache = makeDir("get-orbit-cache-");
 
@@ -252,7 +253,7 @@ describe("get-orbit.sh", () => {
       dir,
       arch,
       privatePem,
-      version: "1.3.0-e2e.1",
+      version: "v1.3.0-e2e.1",
       routeDir: "releases/download/v1.3.0-e2e.1",
       serveBundle: false,
     });
@@ -279,7 +280,7 @@ describe("get-orbit.sh", () => {
     const { privatePem, publicPem } = generateKeyPair(dir);
     // A real, correctly signed older release served where v1.2.3 was asked
     // for: the signature passes, so only the version check can catch it.
-    const baseUrl = buildRelease({ dir, arch, privatePem, version: "1.0.0", routeDir: "releases/download/v1.2.3" });
+    const baseUrl = buildRelease({ dir, arch, privatePem, version: "v1.0.0", routeDir: "releases/download/v1.2.3" });
     const launcherLog = join(dir, "launcher.log");
 
     const result = run({
@@ -306,7 +307,7 @@ describe("get-orbit.sh", () => {
     // signed, the way a corrupted or substituted download would look.
     writeFileSync(
       join(dir, "releases", "latest", "download", "orbit-release-manifest.json"),
-      JSON.stringify({ version: "9.9.9", files: {} }, null, 2),
+      JSON.stringify({ version: "v9.9.9", files: {} }, null, 2),
     );
     const launcherLog = join(dir, "launcher.log");
 
@@ -475,5 +476,224 @@ describe("get-orbit.sh", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("refusing to swap the trust anchor");
     expect(() => readFileSync(launcherLog)).toThrow();
+  });
+
+  /*
+   * #1316 D1-F1: scripts/ci/write-release-manifest.sh writes the version as
+   * vX.Y.Z (the one form on every Orbit surface), so get-orbit.sh must accept
+   * that form in a signed manifest, pinned or not, and still run the launcher.
+   */
+  describe("manifest version written as vX.Y.Z (#1316 D1-F1)", () => {
+    const NO_VERSION = "the manifest has no valid version.";
+
+    function runVPrefixed({ pinned }) {
+      const dir = makeDir("get-orbit-");
+      const { privatePem, publicPem } = generateKeyPair(dir);
+      const baseUrl = buildRelease({
+        dir,
+        arch,
+        privatePem,
+        version: "v1.2.3",
+        routeDir: pinned ? "releases/download/v1.2.3" : "releases/latest/download",
+      });
+      const launcherLog = join(dir, "launcher.log");
+      const cache = makeDir("get-orbit-cache-");
+      const result = run({
+        baseUrl,
+        launcherLog,
+        env: {
+          XDG_CACHE_HOME: cache,
+          ...(pinned ? { ORBIT_VERSION: "v1.2.3" } : {}),
+          ORBIT_GET_TEST_PUBLIC_KEY_FILE: publicPem,
+          ORBIT_GET_TEST_ALLOW_KEY_OVERRIDE: "1",
+        },
+      });
+      return { result, launcherLog, cache };
+    }
+
+    function expectLauncherRanFromCache({ result, launcherLog, cache }) {
+      expect(result.stderr).not.toContain(NO_VERSION);
+      expect(result.status).toBe(0);
+      const logged = readFileSync(launcherLog, "utf8");
+      expect(logged).toMatch(new RegExp(`ORBIT_LAUNCHER_INSTALL_SCRIPT_PATH=${cache}/orbit/v?1\\.2\\.3/install\\.sh`, "u"));
+      expect(logged).toMatch(new RegExp(`ORBIT_RELEASE_MANIFEST=${cache}/orbit/v?1\\.2\\.3/orbit-release-manifest\\.json`, "u"));
+      expect(logged).toContain("install-script-contents=#!/usr/bin/env bash");
+    }
+
+    it("runs the launcher when ORBIT_VERSION=v1.2.3 is pinned and the manifest says v1.2.3", () => {
+      expectLauncherRanFromCache(runVPrefixed({ pinned: true }));
+    });
+
+    it("runs the launcher unpinned when the manifest says v1.2.3", () => {
+      expectLauncherRanFromCache(runVPrefixed({ pinned: false }));
+    });
+
+    it("still refuses a manifest for v1.0.0 when v1.2.3 is pinned, naming both versions", () => {
+      const dir = makeDir("get-orbit-");
+      const { privatePem, publicPem } = generateKeyPair(dir);
+      const baseUrl = buildRelease({ dir, arch, privatePem, version: "v1.0.0", routeDir: "releases/download/v1.2.3" });
+      const launcherLog = join(dir, "launcher.log");
+
+      const result = run({
+        baseUrl,
+        launcherLog,
+        env: {
+          XDG_CACHE_HOME: makeDir("get-orbit-cache-"),
+          ORBIT_VERSION: "v1.2.3",
+          ORBIT_GET_TEST_PUBLIC_KEY_FILE: publicPem,
+          ORBIT_GET_TEST_ALLOW_KEY_OVERRIDE: "1",
+        },
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("v1.2.3");
+      expect(result.stderr).toContain("v1.0.0");
+      expect(result.stderr).not.toContain(NO_VERSION);
+      expect(() => readFileSync(launcherLog)).toThrow();
+    });
+
+    it("accepts the real output of write-release-manifest.sh (cross-check)", () => {
+      const dir = makeDir("get-orbit-");
+      const { privatePem, publicPem } = generateKeyPair(dir);
+      const baseUrl = buildRelease({ dir, arch, privatePem, routeDir: "releases/download/v1.2.3" });
+      const assetsDir = join(dir, "releases", "download", "v1.2.3");
+
+      // Run a scratch copy of the real writer (it finds its root from
+      // BASH_SOURCE) over the very archives and install.sh the release serves.
+      const scratch = makeDir("get-orbit-writer-");
+      const scriptDir = join(scratch, "scripts", "ci");
+      mkdirSync(scriptDir, { recursive: true });
+      const ciDir = new URL("./ci/", import.meta.url).pathname;
+      copyFileSync(join(ciDir, "write-release-manifest.sh"), join(scriptDir, "write-release-manifest.sh"));
+      copyFileSync(join(ciDir, "channel-name.sh"), join(scriptDir, "channel-name.sh"));
+      copyFileSync(new URL("./release-metadata-patterns.sh", import.meta.url).pathname, join(scratch, "scripts", "release-metadata-patterns.sh"));
+      const archivePath = join(dir, `orbit-launcher_linux_${arch}.tar.gz`);
+      const otherArch = arch === "amd64" ? "arm64" : "amd64";
+      const otherArchive = join(scratch, `orbit-launcher_linux_${otherArch}.tar.gz`);
+      writeFileSync(otherArchive, "other arch bytes");
+      const getOrbitCopy = join(scratch, "get-orbit.sh");
+      copyFileSync(script, getOrbitCopy);
+      execFileSync("bash", [join(scriptDir, "write-release-manifest.sh"), "registry.example/ai/orbit", `sha256:${"1".repeat(64)}`], {
+        encoding: "utf8",
+        env: {
+          PATH: process.env.PATH,
+          CI_COMMIT_SHA: "a".repeat(40),
+          CI_COMMIT_BRANCH: "preview",
+          ORBIT_VERSION: "v1.2.3",
+          ORBIT_LAUNCHER_TAG: "v1.0.0",
+          ORBIT_LAUNCHER_COMMIT: "b".repeat(40),
+          ORBIT_LAUNCHER_AMD64_ARCHIVE: arch === "amd64" ? archivePath : otherArchive,
+          ORBIT_LAUNCHER_ARM64_ARCHIVE: arch === "arm64" ? archivePath : otherArchive,
+          ORBIT_INSTALL_SCRIPT: join(dir, "install.sh"),
+          ORBIT_GET_ORBIT_SCRIPT: getOrbitCopy,
+        },
+      });
+      const realManifest = readFileSync(join(scratch, ".orbit-supply-chain", "orbit-release-manifest.json"), "utf8");
+      expect(JSON.parse(realManifest).version).toBe("v1.2.3");
+
+      const manifestPath = join(assetsDir, "orbit-release-manifest.json");
+      writeFileSync(manifestPath, realManifest);
+      writeFileSync(join(assetsDir, "orbit-release-manifest.json.sig"), signBase64(manifestPath, privatePem));
+
+      const launcherLog = join(dir, "launcher.log");
+      const cache = makeDir("get-orbit-cache-");
+      const result = run({
+        baseUrl,
+        launcherLog,
+        env: {
+          XDG_CACHE_HOME: cache,
+          ORBIT_VERSION: "v1.2.3",
+          ORBIT_GET_TEST_PUBLIC_KEY_FILE: publicPem,
+          ORBIT_GET_TEST_ALLOW_KEY_OVERRIDE: "1",
+        },
+      });
+      expectLauncherRanFromCache({ result, launcherLog, cache });
+    });
+  });
+});
+
+describe("docs/releasing.md key rotation (#1316)", () => {
+  const releasingDoc = readFileSync(new URL("../docs/releasing.md", import.meta.url), "utf8");
+  const paragraphStartingWith = (prefix) => {
+    const paragraph = releasingDoc.split(/\n\s*\n/).find((p) => p.startsWith(prefix));
+    expect(paragraph, `paragraph starting ${prefix}`).toBeDefined();
+    return paragraph.replace(/\s+/g, " ");
+  };
+
+  it("Key rotation re-signs the published latest manifest and replaces its .sig asset", () => {
+    // The re-sign runs as separate steps, so read the whole subsection, not its first paragraph.
+    const at = releasingDoc.indexOf("**Key rotation:**");
+    expect(at, "Key rotation subsection").toBeGreaterThanOrEqual(0);
+    const rotation = releasingDoc.slice(at, releasingDoc.indexOf("\n## ", at));
+    expect(rotation).toContain("sign-blob");
+    expect(rotation).toContain("--clobber");
+    expect(rotation).toMatch(/latest/i);
+    expect(rotation).toContain(".sig");
+  });
+
+  it("launcher Rotation no longer claims latest unconditionally carries a current-key manifest", () => {
+    const rotation = paragraphStartingWith("**Rotation.**");
+    expect(rotation).not.toMatch(/`latest` always carries a manifest signed under the current key/);
+  });
+});
+
+describe("docs/releasing.md key rotation re-sign split by account (#1316)", () => {
+  // The re-sign must not hand gitlab-signer a GitHub credential: the owner's
+  // account downloads and uploads, gitlab-signer only signs, in a directory
+  // both can reach.
+  const releasingDoc = readFileSync(new URL("../docs/releasing.md", import.meta.url), "utf8");
+  const start = releasingDoc.indexOf("**Key rotation:**");
+  const section = releasingDoc.slice(start, releasingDoc.indexOf("\n## ", start));
+  const fences = [...section.matchAll(/```[a-z]*\n([\s\S]*?)```/g)].map((match) => ({
+    body: match[1],
+    index: match.index,
+  }));
+  const fenceWith = (needle) => fences.find((fence) => fence.body.includes(needle));
+
+  it("has a Key rotation section with code blocks to check", () => {
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(fences.length).toBeGreaterThan(0);
+  });
+
+  it("signs in its own step, with the password read from the signing directory, and no gh in it", () => {
+    const sign = fenceWith("cosign sign-blob");
+    expect(sign, "a code block with cosign sign-blob").toBeDefined();
+    expect(sign.body).toContain('COSIGN_PASSWORD="$(< /etc/orbit-signing/password)"');
+    expect(sign.body).toContain("--key /etc/orbit-signing/cosign.key");
+    expect(sign.body).not.toMatch(/\bgh\b/);
+  });
+
+  it("downloads and uploads with gh in steps that do not sign and do not run as gitlab-signer", () => {
+    const download = fenceWith("gh release download");
+    const upload = fenceWith("gh release upload");
+    expect(download, "a code block with gh release download").toBeDefined();
+    expect(upload, "a code block with gh release upload").toBeDefined();
+    expect(upload.body).toContain("--clobber");
+    for (const ghStep of [download, upload]) {
+      expect(ghStep.body).not.toContain("cosign");
+      expect(ghStep.body).not.toMatch(/gitlab-signer/);
+    }
+  });
+
+  it("downloads into a directory gitlab-signer can write, before signing, and uploads after", () => {
+    expect(section).toMatch(/(install -d|mkdir)[^\n]*(0700|700)[^\n]*gitlab-signer|chown[^\n]*gitlab-signer/);
+    const downloadAt = section.indexOf("gh release download");
+    const signAt = section.indexOf("cosign sign-blob");
+    const uploadAt = section.indexOf("gh release upload");
+    expect(downloadAt).toBeGreaterThanOrEqual(0);
+    expect(signAt).toBeGreaterThan(downloadAt);
+    expect(uploadAt).toBeGreaterThan(signAt);
+  });
+
+  it("never gives gitlab-signer a GitHub credential", () => {
+    expect(section).not.toMatch(/gitlab-signer[^\n]*\b(gh auth|GH_TOKEN|GITHUB_TOKEN|GH_CONFIG_DIR)\b/);
+    expect(section).not.toMatch(/\b(gh auth login|GH_TOKEN|GITHUB_TOKEN)\b/);
+    // A step introduced as run by gitlab-signer must not contain gh at all.
+    for (const fence of fences) {
+      const lead = section.slice(0, fence.index).split(/\n\s*\n/).pop();
+      if (/as `gitlab-signer`|sudo -u gitlab-signer|su -[^\n]*gitlab-signer/.test(lead + fence.body)) {
+        expect(fence.body, `step run as gitlab-signer: ${fence.body}`).not.toMatch(/\bgh\b/);
+      }
+    }
   });
 });

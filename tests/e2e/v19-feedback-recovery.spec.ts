@@ -23,18 +23,17 @@ resetDatabaseBetweenSpecFiles();
  * actually has:
  *
  *   online-workspace policy  a save on /create that cannot reach Orbit
- *   IMAP review              a mail suggestion whose approval fails, from the
- *                            item view and from /inbox
+ *   IMAP review              a mail suggestion whose approval fails, from its
+ *                            home drawer and from /inbox
  *   signed-in lifecycle      a household deletion request that fails
- *   document-assisted item   a document picked on /create: v19 has no upload
- *                            yet, so the save says the file was not kept, and
- *                            that is the feedback to announce
  *
- * What did not come across, because v19 has no equivalent to drive: the old
- * document journey's upload conflict, scanner-unavailable retry and
- * inspection rejection (no v19 screen uploads a document), and the old
- * lifecycle's member-management toasts and disabled-account page
- * (auth-error.spec.ts covers the v19 error page itself).
+ * What did not come across: the old document journey's upload conflict,
+ * scanner-unavailable retry and inspection rejection (v19-create.spec.ts
+ * proves the create form's attach, #1245; its pocket "was not kept" check
+ * went when the pocket started keeping documents, owner's 11a), and,
+ * because v19 has no equivalent to drive, the old lifecycle's
+ * member-management toasts and disabled-account page (auth-error.spec.ts
+ * covers the v19 error page itself).
  *
  * Every failure journey is two tests, so one defect cannot hide the other
  * check behind it:
@@ -50,7 +49,6 @@ resetDatabaseBetweenSpecFiles();
 
 const isPocket = () => test.info().project.name.startsWith("mobile");
 const isFirefox = () => test.info().project.use.defaultBrowserType === "firefox";
-const isWebkit = () => test.info().project.use.defaultBrowserType === "webkit";
 
 /** Focus on `selector` by keyboard: already there, or Tab onward to it. */
 async function reach(page: Page, selector: string, screen: string, cap = 60) {
@@ -139,6 +137,13 @@ const createOffline: Journey = {
     const nameField = page.getByRole("textbox", { name: "name", exact: true }).filter({ visible: true });
     await expect(nameField).toBeVisible({ timeout: 30_000 });
     await nameField.fill(name);
+    /* Every entry needs a type (#1316 A4-F3, item_kind_missing); a document
+       is the type that asks for no date, as v19-create.spec.ts's undated save. */
+    if (isPocket()) {
+      await page.getByRole("form", { name: "New entry" }).getByRole("button", { name: "document", exact: true }).click();
+    } else {
+      await page.locator('#types button[data-type="document"]').click();
+    }
     await page.getByRole("group", { name: /^section/ }).filter({ visible: true }).getByRole("button", { name: "Home" }).click();
 
     await page.route("**/api/workspace/commands", failCommands);
@@ -153,14 +158,15 @@ const createOffline: Journey = {
       await page.unroute("**/api/workspace/commands", failCommands);
       await reach(page, save, "create, retry");
       await page.keyboard.press("Enter");
-      /* Saved: the desk returns to the orbit, the pocket approaches the item. */
-      await expect(page).toHaveURL(isPocket() ? /\/item\/[0-9a-f-]{36}$/ : /\/home$/, { timeout: 30_000 });
+      /* Saved: both close onto the main screen at the saved item's own
+         address (#1246; the pocket since #1319, when the belt it used to
+         approach retired). */
+      await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
     };
   },
-  /* #1192: WebKit keeps focus on the pressed button while it is disabled
-     (pipeline 1989, mobile-webkit) -- the opposite of Chromium's #1178
-     defect, not a timing race like Firefox's. Nothing to expect-fail here. */
-  focusDefect: () => isWebkit() ? undefined : FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket create bar (.pk-save)" : "the desk create card (#card .btn-primary)"),
+  /* No focus defect to expect here any more (#1327): the save button is held
+     with aria-disabled, never `disabled`, so it keeps focus while the request
+     is out (#1178's own remedy). */
 };
 
 /* ── IMAP review ───────────────────────────────────────────────────────── */
@@ -188,7 +194,6 @@ async function interceptFailingMail(page: Page, household: Household) {
     classification: "ready",
     canApprove: true,
     canDiscard: true,
-    cleanupOnly: false,
     message: "Ready for your review.",
     proposal: { title, provider: "Synthetic Cover", costMinor: 9900, currency: "GBP", dueDate: "2031-03-01", scheduleKind: "renewal", recurrenceMonths: 12 },
     fieldEvidence: { title: { source: "parser", confidence: "medium" } },
@@ -218,28 +223,50 @@ async function interceptFailingMail(page: Page, household: Household) {
 
 const APPROVAL_FAILED = /could not complete the request/;
 
-const itemViewApproval: Journey = {
-  name: "a mail suggestion whose approval fails, in the item view",
+/* #1319 (owner-decisions §34): the belt's suggestion card retired; a
+   suggestion is decided in its home drawer, which its address opens. */
+const drawerApproval: Journey = {
+  name: "a mail suggestion whose approval fails, in its home drawer",
   words: APPROVAL_FAILED,
   fire: async (page, household) => {
     const mail = await interceptFailingMail(page, household);
-    await page.goto(`/item/${mail.receiptId}`);
-    /* Pocket: the suggestion card's ArmButton (Enter arms, Enter fires);
-       desk: the amend card's "accept into orbit". */
-    const act = isPocket() ? `button[aria-label="Add ${mail.title} to your orbit"]` : ".save-row .btn-primary";
+    /* Both ask twice, Enter arms and Enter fires: the pocket row's
+       ArmButton, the desk drawer's "Add to orbit" (SuggestionView). */
+    const act = isPocket()
+      ? `button[aria-label="Add ${mail.title} to your orbit"]`
+      : `[id="${mail.receiptId}-view"] .actions button.yes`;
     const press = async () => {
       await page.keyboard.press("Enter");
-      if (isPocket()) await page.keyboard.press("Enter");
+      await page.keyboard.press("Enter");
     };
+    if (isPocket()) {
+      /* The phone opens the suggestion's row by keyboard. Not by its
+         address: home's first view is read on the server, which this
+         file's page.route mock of the inbox never reaches, and the
+         pocket's address opens only what that first view holds. */
+      await page.goto("/home");
+      const face = `.pocket .pk-signals [data-row-key="${mail.receiptId}"] [data-row-face]`;
+      await expect(page.locator(face)).toBeVisible({ timeout: 30_000 });
+      await tabTo(page, { selector: face }, { screen: "home, signals" });
+      await page.keyboard.press("Enter");
+    } else {
+      await page.goto(`/home?item=${mail.receiptId}`);
+    }
     await expect(page.locator(act)).toBeEnabled({ timeout: 30_000 });
-    await tabTo(page, { selector: act }, { screen: "item, suggestion" });
+    await tabTo(page, { selector: act }, { screen: "home, suggestion drawer" });
     await press();
     await expect.poll(mail.approvals).toBe(1);
     return async () => {
-      await reach(page, act, "item, retry");
+      /* The failure stays where it is said: the phone's row stays open,
+         its words and its decisions with it. */
+      if (isPocket()) {
+        await expect(page.locator(`.pocket .pk-signals [data-row-key="${mail.receiptId}"]`)).toHaveAttribute("data-open", "");
+      }
+      await reach(page, act, "home drawer, retry");
       await press();
       await expect.poll(mail.approvals).toBe(2);
-      await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
+      /* Approved: the suggestion leaves home, its decisions with it. */
+      await expect(page.locator(act)).toHaveCount(0, { timeout: 30_000 });
     };
   },
   /* #1233: desktop WebKit kept focus on the amend card's button (pipeline
@@ -249,7 +276,9 @@ const itemViewApproval: Journey = {
      certainty either way, so on desktop-webkit this check is fixme, as the
      create card's document check is below; the phone and the other engines
      keep their marks. */
-  focusDefect: () => FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket suggestion card's Add to orbit" : "the desk amend card's accept into orbit"),
+  /* The phone's row puts focus on its own face when the act returns
+     (Row.svelte run), so focus is never dropped there. */
+  focusDefect: () => isPocket() ? undefined : FOCUS_LOST_TO_DISABLED_BUTTON("the desk suggestion drawer's Add to orbit"),
   focusFixme: () => test.info().project.name === "desktop-webkit" ? FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT : undefined,
 };
 
@@ -284,11 +313,15 @@ const inboxApproval: Journey = {
   /* Desktop Safari keeps focus on the disabled button here (pipeline 2011
      passed the focus check twice under an expect-fail), as every WebKit
      does on /create above; the pocket keeps its mark, which held on
-     mobile-webkit in the same run. */
+     mobile-webkit in the same run. Then on 2026-10-06 a traced local
+     desktop-webkit run (#1235) dropped it to <body> -- so on desktop
+     WebKit this one is the same race the item view has (line 253), not a
+     certainty either way, and cannot report either way: fixme there. */
   focusDefect: () =>
     test.info().project.name === "desktop-webkit"
       ? undefined
       : FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket inbox's ReviewCard" : "the desk /inbox row's Add to orbit"),
+  focusFixme: () => test.info().project.name === "desktop-webkit" ? FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT : undefined,
 };
 
 /* ── signed-in lifecycle ───────────────────────────────────────────────── */
@@ -346,7 +379,7 @@ const householdDeletion: Journey = {
         + "problems likewise) with no role=\"alert\", and the success line has no role=\"status\" either",
 };
 
-const JOURNEYS = [createOffline, itemViewApproval, inboxApproval, householdDeletion];
+const JOURNEYS = [createOffline, drawerApproval, inboxApproval, householdDeletion];
 
 for (const journey of JOURNEYS) {
   test(`${journey.name} is announced, and the act can be repeated by keyboard`, async ({ page }) => {
@@ -384,76 +417,3 @@ for (const journey of JOURNEYS) {
     }
   });
 }
-
-/* ── document-assisted item ────────────────────────────────────────────── */
-
-/* Desk: "Saved. renewal-letter.pdf was not attached …" in #save-note
-   (aria-live="polite"), and the page stays; pocket: "… was not kept" in the
-   wake's status region (lib/pocket/Wake.svelte) as the new item opens. */
-const DOCUMENT_NOT_KEPT = /renewal-letter\.pdf was not (attached|kept)/;
-
-/** Picks a document and saves an entry with it, by keyboard; returns its name. */
-async function saveWithDocument(page: Page): Promise<string> {
-  const name = `Document proving ${randomUUID().slice(0, 8)}`;
-  /* Listened for BEFORE the page loads: Playwright switches the browser's
-     file-chooser interception on when the first listener arrives, and a key
-     that lands before that switch has taken opens the native chooser, which
-     no event reports -- seen twice in five desk runs while this file was
-     written, as a 15s wait right after the Enter. */
-  const chooser = page.waitForEvent("filechooser", { timeout: 45_000 });
-  await gotoCreate(page);
-  const nameField = page.getByRole("textbox", { name: "name", exact: true }).filter({ visible: true });
-  await expect(nameField).toBeVisible({ timeout: 30_000 });
-
-  /* The picker, by keyboard: the desk's drop target is a role="button" that
-     opens the file chooser on Enter or Space; the pocket's is "add a
-     document". */
-  const picker = isPocket() ? "#pocket-entry .pc-doc" : "#dropzone";
-  await tabTo(page, { selector: picker }, { screen: "create, document" });
-  await page.keyboard.press("Enter");
-  await (await chooser).setFiles({ name: "renewal-letter.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF\n") });
-
-  await nameField.fill(name);
-  await page.getByRole("group", { name: /^section/ }).filter({ visible: true }).getByRole("button", { name: "Home" }).click();
-  await tabTo(page, { selector: isPocket() ? ".pk-save" : "#card .btn-primary" }, { screen: "create, document" });
-  await page.keyboard.press("Enter");
-  return name;
-}
-
-test("a document picked on /create is announced as not kept, and the entry still saves", async ({ page }) => {
-  test.setTimeout(90_000);
-  await signIn(page, "/home");
-  const household = await seedHousehold(page, "feedback-recovery");
-  try {
-    const name = await saveWithDocument(page);
-    await expect.poll(() => liveRegionFor(page, DOCUMENT_NOT_KEPT), { timeout: 15_000 }).not.toMatch(/^(none|absent)$/);
-
-    /* And the entry itself is in the orbit, whatever became of the file. */
-    const listed = await page.request.get("/api/workspace", { timeout: 15_000 });
-    expect(listed.ok()).toBe(true);
-    const { workspace } = (await listed.json()) as { workspace: { households: Array<{ id: string; items: Array<{ title: string }> }> } };
-    expect(workspace.households.find((one) => one.id === household.id)?.items.map((item) => item.title)).toContain(name);
-  } finally {
-    await cleanup(page, household);
-  }
-});
-
-test("a document picked on /create leaves focus where the reader was", async ({ page }) => {
-  /* The pocket saves by opening the new item: a navigation, where focus
-     starting over is SvelteKit's own reset, not a loss. The desk stays put. */
-  test.skip(isPocket(), "the pocket save navigates to the new item; focus starting over there is not a loss");
-  test.fixme(isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
-  test.fixme(test.info().project.name === "desktop-webkit", FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT);
-  const defect = FOCUS_LOST_TO_DISABLED_BUTTON("the desk create card (#card .btn-primary)");
-  test.fail(Boolean(defect), defect);
-  test.setTimeout(90_000);
-  await signIn(page, "/home");
-  const household = await seedHousehold(page, "feedback-recovery");
-  try {
-    await saveWithDocument(page);
-    await expect(shownText(page, DOCUMENT_NOT_KEPT)).toBeVisible({ timeout: 15_000 });
-    expect(await focusedElement(page), "create, document: focus is not dropped to the page").not.toBe("body");
-  } finally {
-    await cleanup(page, household);
-  }
-});

@@ -1,0 +1,8 @@
+{
+  "result": {
+    "status": 2,
+    "stdout": "",
+    "stderr": "Usage: scripts/configure.sh [--check|--check-rollback|--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]]\n"
+  },
+  "env": null
+}

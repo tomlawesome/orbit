@@ -25,11 +25,14 @@ services:
     container_name: orbit
     # No build declaration: this file describes a deployment, which fetches
     # compose assets and a published image but no source tree. Building from
-    # source is an explicit developer workflow through compose/docker-compose.build.yml.
+    # source is an explicit developer workflow through scripts/build-container.sh.
     image: "${ORBIT_IMAGE:?Set ORBIT_IMAGE to an immutable registry digest or a local build tag}"
     restart: unless-stopped
     env_file: .env-orbit
     environment:
+      # The image reference itself, so the About page can say which image
+      # this is (#1256): a container cannot read its own digest.
+      ORBIT_IMAGE: "${ORBIT_IMAGE}"
       POSTGRES_HOST: orbit-db
       POSTGRES_PASSWORD_FILE: /run/orbit-secrets/orbit-postgres-password
       SESSION_SECRET_FILE: /run/orbit-secrets/orbit-session-secret
@@ -45,7 +48,10 @@ services:
       # see those files (#1151 SF2-F1).
       - orbit-documents-data:${DOCUMENTS_ROOT:-/var/lib/orbit/documents}
     tmpfs:
-      - /tmp/orbit-document-quarantine:rw,noexec,nosuid,nodev,uid=1001,gid=1001,mode=0700,size=64m
+      # The quarantine must hold two uploads at DOCUMENT_MAX_BYTES_CEILING
+      # (src/server/documents/config.ts); raise this if that ceiling rises.
+      # tmpfs only uses memory for bytes actually in flight.
+      - /tmp/orbit-document-quarantine:rw,noexec,nosuid,nodev,uid=1001,gid=1001,mode=0700,size=256m
       - /run/orbit-secrets:rw,noexec,nosuid,nodev,uid=0,gid=1001,mode=0750,size=1m
     secrets:
       - orbit-postgres-password
@@ -68,6 +74,30 @@ services:
     container_name: orbit-clamav
     image: clamav/clamav:1.5.4-debian@sha256:38482a33c6791529d57ece99e5fda54ab94f85534d43306a0b37f5c5bd0aa498
     restart: unless-stopped
+    # The image starts freshclam and clamd side by side. On a volume that
+    # already holds an older database, freshclam downloads the newer one while
+    # clamd is still starting, cannot notify it, and clamd keeps the older set
+    # until a later download (#1295). So when a database is already there, run
+    # one blocking update first, then hand over to the image's own entrypoint:
+    # clamd then loads the newest database on disk, and freshclam's later
+    # updates reach it through NotifyClamd. NotifyClamd is left off for this
+    # run only, as the image does for its own first download. The update is
+    # bounded and never blocks startup: an offline host still starts the
+    # scanner on what it has. With no database yet (a fresh install) this is
+    # skipped: the image's entrypoint downloads one itself, with no time
+    # limit, before clamd starts, and a bounded run here would cut a slow
+    # download short and make the image start it over.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        chown -R clamav:clamav /var/lib/clamav
+        if find /var/lib/clamav -maxdepth 1 \( -name 'daily.c[vl]d' -o -name 'main.c[vl]d' \) | grep -q .; then
+          sed -e 's|^\(NotifyClamd \)|#\1|' /etc/clamav/freshclam.conf > /tmp/freshclam-first.conf
+          timeout 120 freshclam --foreground --stdout --user=clamav --config-file=/tmp/freshclam-first.conf || echo "First signature update did not finish; starting the scanner on the current database."
+          rm -f /tmp/freshclam-first.conf
+        fi
+        exec /init
     networks:
       # clamd shares only the hostile-document channel with Orbit. A separate
       # egress network lets FreshClam update signatures without a route to
@@ -266,12 +296,12 @@ configs:
 
 secrets:
   orbit-postgres-password:
-    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/postgres-password
+    file: ./.orbit-secrets/postgres-password
   orbit-session-secret:
-    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/session-secret
+    file: ./.orbit-secrets/session-secret
   orbit-document-kek:
-    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/document-kek
+    file: ./.orbit-secrets/document-kek
   orbit-vapid-private-key:
-    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/vapid-private-key
+    file: ./.orbit-secrets/vapid-private-key
   orbit-oidc-client-secret:
-    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/oidc-client-secret
+    file: ./.orbit-secrets/oidc-client-secret

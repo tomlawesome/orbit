@@ -5,11 +5,16 @@
  * `svelte-check` reads the SvelteKit front end in web/, which the root
  * `pnpm typecheck` cannot see: tsconfig.json sets "allowJs": false and
  * includes only **\/*.ts and **\/*.tsx, while web/src holds no TypeScript at
- * all. From #620 until #624 this ran against a per-file error ledger
- * (`web/svelte-check-ceiling.json`, kept only as an empty historical record
- * now) while the v19 rebuild worked file by file down to zero. That rebuild
+ * all. From #620 until #624 this ran against a per-file error ledger while
+ * the v19 rebuild worked file by file down to zero. That rebuild
  * is done, so this is now a plain gate: any `svelte-check` error, in any
  * file, fails the fast checks. No per-file tolerance is left anywhere.
+ *
+ * It reads web/tsconfig.check.json, not tsconfig.json (#1371): the shared
+ * door's folder (web/src/lib/door/, orbit-site's, never edited here) is plain
+ * JavaScript that does not pass the strict check. The check config leaves it
+ * out and maps `$lib/door/*` to the declarations in web/types/door/, because
+ * a file that Orbit's code imports is checked whatever `exclude` says.
  */
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
@@ -41,7 +46,7 @@ function runSvelteCheck() {
   try {
     return execFileSync(
       "node_modules/.bin/svelte-check",
-      ["--tsconfig", "./tsconfig.json", "--output", "machine"],
+      ["--tsconfig", "./tsconfig.check.json", "--output", "machine"],
       { cwd: `${repositoryRoot}web`, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
     );
   } catch (error) {
@@ -57,7 +62,7 @@ function runSvelteCheck() {
  * Whether `orbit/server/*` resolves to THIS checkout (#1029).
  *
  * `web/node_modules` is a workspace link, and in a worktree it usually points
- * at the main checkout: `web/node_modules/orbit -> /srv/checkouts/orbit`.
+ * at the main checkout: `web/node_modules/orbit -> ~/projects/orbit`.
  * The `.svelte` and `.js` files being checked are then read from the worktree
  * while the server modules they import are read from whatever branch the main
  * checkout happens to have out. The answer belongs to neither branch.

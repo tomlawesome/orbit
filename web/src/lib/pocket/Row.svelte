@@ -1,4 +1,5 @@
 <script>
+  import { tick } from "svelte";
   import { dev } from "$app/environment";
   import ArmButton from "./ArmButton.svelte";
   import { mountRow } from "./row.js";
@@ -52,6 +53,16 @@
    * ellipsis guard trims the name and never the number. The one exception
    * is an email address alone (proposal §2.12), which may wrap once.
    *
+   * `metaline` draws the meta line's words itself, when one of them wears
+   * its own colour (#1319: the section word, option-colour.js); `meta`
+   * still says what the line holds, for its length and its face.
+   *
+   * `heading` draws the title itself, live, while the row's item is being
+   * edited (#1319; round 8 edits the title in the row's head at every
+   * width): the face is then not a button but the same line with the
+   * snippet in the title's place, so a press in the title never folds the
+   * row. The button stays in the page, hidden, for row.js to keep hold of.
+   *
    * `below` draws a line under the row that is always there, not behind a
    * tap (a knock's approve and decline, which are the point of the row).
    *
@@ -73,6 +84,8 @@
    *   acts?: import("./row.js").RowAct[],
    *   onmove?: (direction: -1 | 1) => void,
    *   mark?: import('svelte').Snippet,
+   *   metaline?: import('svelte').Snippet,
+   *   heading?: import('svelte').Snippet,
    *   end?: import('svelte').Snippet,
    *   detail?: import('svelte').Snippet,
    *   after?: import('svelte').Snippet,
@@ -97,6 +110,8 @@
     acts = [],
     onmove = undefined,
     mark = undefined,
+    metaline = undefined,
+    heading = undefined,
     end = undefined,
     detail = undefined,
     after = undefined,
@@ -121,9 +136,25 @@
     return () => control?.destroy();
   });
 
-  /** @param {import("./row.js").RowAct} act */
+  /**
+   * An act ran: the row folds away -- unless the act failed (#1319). An act
+   * that answers `false`, or leaves an alert in the row's panel (the
+   * screen's own refusal, said under the row's detail), keeps the row open
+   * and puts focus on the alert, so the reason is seen and read out rather
+   * than folded out of sight.
+   * @param {import("./row.js").RowAct} act
+   */
   async function run(act) {
-    await act.onact?.();
+    const result = await act.onact?.();
+    await tick();
+    const alert = /** @type {HTMLElement | null} */ (row?.querySelector("[data-row-panel] [role=alert]") ?? null);
+    if (result === false || alert) {
+      if (alert) {
+        if (!alert.hasAttribute("tabindex")) alert.setAttribute("tabindex", "-1");
+        alert.focus({ preventScroll: true });
+      }
+      return;
+    }
     control?.close(true);
   }
 
@@ -134,7 +165,7 @@
     else if (event.key === "ArrowDown") { event.preventDefault(); onmove(1); }
   }
   /** @param {import("./row.js").RowAct} act */
-  const tone = (act) => (act.tone === "filled" ? "filled" : act.tone ? `act-${act.tone}` : "");
+  const tone = (act) => (act.tone === "filled" || act.tone === "danger" ? act.tone : act.tone ? `act-${act.tone}` : "");
   const tag = $derived(href ? "a" : opens || onactivate ? "button" : "div");
   /* An email address alone: the meta line's one exception (R5). */
   const EMAIL = /^[^\s@]+@[^\s@]+$/;
@@ -142,6 +173,19 @@
 
 <div class="p-row" class:current class:opens data-row data-row-key={key} bind:this={row}>
   <div class="face">
+    {#if heading}
+      <!-- The live head: the face's own line, the title live (heading). -->
+      <div class="hit live">
+        <span class="mark" aria-hidden="true">{@render mark?.()}</span>
+        <span class="text">
+          <span class="title live">{@render heading()}</span>
+          {#if meta}<span class="meta" class:ui={metaFace === "ui"} class:email={EMAIL.test(meta)}>{#if metaline}{@render metaline()}{:else}{meta}{/if}</span>{/if}
+        </span>
+        {#if trail || trailSub}
+          <span class="trail" class:bead style:color={trailTone || undefined}><span aria-hidden={trailName ? "true" : undefined}>{trail}</span>{#if trailName}<span class="sr-only">{trailName}</span>{/if}{#if trailSub}<small>{trailSub}</small>{/if}</span>
+        {/if}
+      </div>
+    {/if}
     <!-- One face whatever the row does: a link when it navigates, a button
          when it summons a sheet or opens in place, else inert. A dynamic
          element rather than three branches sharing a snippet: a snippet
@@ -150,7 +194,7 @@
     <!-- The key handler only ever acts on a row with `onmove`, and every
          row that moves opens, so its face is a button then. -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <svelte:element this={tag} class="hit" data-row-face
+    <svelte:element this={tag} class="hit" data-row-face hidden={heading ? true : undefined}
         href={href || undefined}
         type={tag === "button" ? "button" : undefined}
         aria-current={href && current ? "page" : undefined}
@@ -162,7 +206,7 @@
       <span class="mark" aria-hidden="true">{@render mark?.()}</span>
       <span class="text">
         <span class="title">{title}</span>
-        {#if meta}<span class="meta" class:ui={metaFace === "ui"} class:email={EMAIL.test(meta)}>{meta}</span>{/if}
+        {#if meta}<span class="meta" class:ui={metaFace === "ui"} class:email={EMAIL.test(meta)}>{#if metaline}{@render metaline()}{:else}{meta}{/if}</span>{/if}
       </span>
       {#if trail || trailSub}
         <span class="trail" class:bead style:color={trailTone || undefined}><span aria-hidden={trailName ? "true" : undefined}>{trail}</span>{#if trailName}<span class="sr-only">{trailName}</span>{/if}{#if trailSub}<small>{trailSub}</small>{/if}</span>
@@ -223,6 +267,9 @@
   .title{font:500 var(--p-type-body)/1.3 var(--ui);color:var(--ink);
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .current .title{color:var(--accent-text)}
+  /* the live title may wrap: it is being written, not read at a glance */
+  .title.live{white-space:normal;overflow:visible}
+  .hit[hidden]{display:none}
   /* One line, guarded (R8): the words are the fix, the ellipsis only the
      guard. An address may wrap once, anywhere, and no further. */
   .meta{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);

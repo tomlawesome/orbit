@@ -1,29 +1,43 @@
 <script>
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { browser } from "$app/environment";
-  import { afterNavigate, goto, pushState, replaceState } from "$app/navigation";
+  import { afterNavigate, beforeNavigate, goto, pushState, replaceState } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import { mountAccount, mountEmptySky, mountHome } from "./home.behaviour.js";
-  import Flight from "$lib/flight/Flight.svelte";
+  import Leave from "$lib/flight/Leave.svelte";
+  import Sun from "$lib/sun/Sun.svelte";
+  import { SUN_R } from "$lib/sun/furnace.js";
+  import { swatchStyle } from "$lib/theme-swatches.js";
+  import { othersOf } from "$lib/flight/homes.js";
   import Dawn from "$lib/flight/Dawn.svelte";
-  import Dusk from "$lib/flight/Dusk.svelte";
   import { consumeLaunch } from "$lib/flight/arrival.js";
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { applyCommand, approveReceipt, dismissReceipt, readHome, readItem, readItemDocuments, requestToJoin, signOut } from "$lib/data/workspace.js";
-  import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
-  import { createArm } from "$lib/pocket/arm.js";
+  import { applyCommand, approveWithOperation, attachItemDocument, dismissReceipt, dueDateIn, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, readReminders, removeDocument, requestToJoin, restoreDocument, signOut, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
+  import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
+  import { createHeldCompletion, droppedCompletionWords, isRefused } from "$lib/data/held-completion.js";
+  import { createArm } from "$lib/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
-  import { ago, agoLong, money } from "$lib/format.js";
+  import { ago, agoLong, dayMonth, initials as initialsOf, money, MONTHS, plural, weekdayOf } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
+  import HouseholdClosed from "$lib/HouseholdClosed.svelte";
+  import { attachIdFor, forget as forgetAttachId } from "./attach-id.js";
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
-  import { tlabel } from "./bands.js";
+  import { tlabel } from "$lib/data/bands.js";
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
+  import { addDays } from "$lib/editing/calendar.js";
   import CorridorRow from "./CorridorRow.svelte";
+  import PreviewCard from "$lib/reading/PreviewCard.svelte";
+  import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
+  import { amendedOf, proposedItemOf } from "$lib/editing/item-draft.js";
+  import { WIDE_QUERY, cardWidthOf, pairOf, trackOf } from "./preview-pair.js";
+  import { isPocket } from "$lib/pocket/media.js";
+  import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
   import NorthStarMark from "$lib/NorthStarMark.svelte";
   import { watchTour } from "$lib/tour/watch.js";
   import "./home.css";
@@ -48,6 +62,9 @@
   /* Declared before `view` because `view` starts from it; the launch below is
      what the rest of this prop is for. */
   let { data } = $props();
+  /* #1440: Administration is the instance administrator's screen; the root
+     layout says whether the reader is one (the phone hatch reads it alike). */
+  const isAdmin = $derived(Boolean(page.data?.isAdmin));
 
   /** @typedef {import('$lib/data/workspace.js').HomeView} HomeView */
   /* Straight from the server's read (#842), so the FIRST render already has
@@ -145,7 +162,7 @@
        coming back from the identity provider and the dawn must already be
        over home. A fixture waits for the household to arrive first, so the
        beats after the landing have a dial to land on. */
-    if (launching && !fixtureFlight) flight?.ascend();
+    if (launching && !fixtureFlight) leave?.ascend();
   });
 
   /* ---- A REFUSED SIGN-IN, SAID ONCE (#1033, ADR-0027 consequences) -------
@@ -177,12 +194,12 @@
   async function driveFixture() {
     if (!fixtureFlight) return;
     await tick();
-    if (fixtureFlight === "up") flight?.ascend({ at: fixtureAt });
+    if (fixtureFlight === "up") leave?.ascend({ at: fixtureAt });
     else if (fixtureFlight === "down") {
       /* the descent leaves from a settled arrival, so it starts from one */
       document.body.classList.add("instrument");
       await tick();
-      flight?.descend({ at: fixtureAt });
+      leave?.descend({ at: fixtureAt });
     }
   }
 
@@ -203,22 +220,27 @@
    * backwards, the name is written on the void with "signing out" under it,
    * and the mark sets down on the dusk's own lockup.
    */
-  /** @type {import('$lib/flight/Flight.svelte').default | null} */
-  let flight = $state(null);
-  let leaving = $state(fixtureFlight === "down");
-  let armedOut = $state(false);
-  /** Set for the span of the actual signOut() request (#1151 W1-R7):
-      armedOut alone stays true for that whole span too, so a third rapid
-      tap — while the second tap's request is still in flight — fell
-      through the `if (!armedOut)` guard and fired a second, concurrent
-      signOut() call. */
+  /* The descent, its dusk and the farewell are $lib/flight/Leave.svelte,
+     shared with every other page's menu (#1253). */
+  /** @type {import('$lib/flight/Leave.svelte').default | null} */
+  let leave = $state(null);
+  /** Set for the span of the actual signOut() request (#1151 W1-R7), so a
+      second press while it is still in flight never fires a second,
+      concurrent signOut() call. */
   let signingOut = $state(false);
   /** @type {string | null} */
   let signOutProblem = $state(null);
 
+  const readyDescent = () => leave?.ready();
+
+  /* #1299: the descent never waits for its world, so it is readied well before
+     the sign-out, a few seconds after home has arrived and its painted
+     animations are done, as orbit-site does on any page but the door. The
+     climb (a launch) readies its own world as it starts. */
+  onMount(() => (launching ? undefined : leave?.readyAtLeisure()));
+
   async function tapSignOut() {
-    /* Two taps, as every destructive control in this app arms and fires. */
-    if (!armedOut) { armedOut = true; return; }
+    /* One press (owner, 2026-10-06): the plain sign-out does not arm first. */
     if (signingOut) return;
     signingOut = true;
     signOutProblem = null;
@@ -234,32 +256,21 @@
     try {
       redirectTo = await signOut();
     } catch (error) {
-      armedOut = false;
       signingOut = false;
-      signOutProblem = /** @type {any} */ (error)?.message ?? "still signed in — try again";
+      signOutProblem = wordsOf(error, "still signed in — try again");
       return;
     }
-    providerLogout = redirectTo;
-    leaving = true;
-    await tick();
-    flight?.descend();
+    /* #1262: the menu goes as the descent begins, never left open over it
+       (it stands above the flight's canvas). Closed the way "watch the
+       tour" closes it; kept open on a refusal above, so its line is read. */
+    closeAccount();
+    await leave?.descendFrom(redirectTo);
   }
-  /* The provider's own end-session URL, kept for the way back: following it
-     now would yank the reader off the ratified goodbye, so "sign back in"
-     carries it instead, and the identity provider asks its question again. */
-  /** @type {string | null} */
-  let providerLogout = $state(null);
-  const backIn = $derived(providerLogout ?? "/");
-
-  function onFarewell() {
-    /*
-     * The address catches up with the state. The descent plays over home, but
-     * the reader is signed out when it ends, and /home is no longer theirs: a
-     * refresh here would bounce them at the identity provider instead of
-     * showing them the goodbye. Replace, never push — Back must not walk into
-     * a signed-out /home either.
-     */
-    try { history.replaceState(history.state, "", "/logout"); } catch { /* no history, no harm */ }
+  /* The account card closes the way home.behaviour.js's closeOverlays
+     closes it. */
+  function closeAccount() {
+    document.getElementById("account")?.classList.remove("open");
+    document.querySelector("button.orb")?.setAttribute("aria-expanded", "false");
   }
   export const snapshot = {
     capture: () => window.scrollY,
@@ -294,7 +305,7 @@
       await tick();
       resync();
     } catch (error) {
-      askProblem = /** @type {any} */ (error)?.message ?? String(error);
+      askProblem = wordsOf(error);
     } finally {
       askBusy = false;
     }
@@ -310,10 +321,8 @@
    * interface, only offered by the copy-link button on the open row. The
    * address is `/home?item=<id>`, and opening it directly loads home with
    * that row scrolled to and expanded, which is the ruling's own test of the
-   * address. (`/item/<id>` remains the item's full-command surface, #455; the
-   * open row links to it quietly. Whether the two addresses should become one
-   * is the open question in the report — the row's read view is what the
-   * owner ratified, and the commands have never been designed into it.)
+   * address. (#1319, §34: the two addresses became one. The drawer holds
+   * every command the belt had; the belt's `/item/<id>` was removed.)
    *
    * THE BACK BUTTON. Opening a row PUSHES, so Back closes it and lands you
    * exactly where you were reading. Swapping straight from one open row to
@@ -346,16 +355,35 @@
   /** @type {string | null} */
   let revealTarget = null;
 
+  /* Back (or Forward) over the drawer's shallow entry reaches no
+     beforeNavigate, so only the effect below sees it: rows holding changes
+     put their row back and arm the cancel pill; a second press inside the
+     hold discards, as a close does. True when the row was put back. */
+  function holdRows() {
+    const held = untrack(() => modes.id);
+    if (!held || untrack(() => modes.cancel())) return false;
+    pushedEntry = true;
+    pushState(resolve(`/home?item=${encodeURIComponent(held)}`), { orbitItem: held });
+    return true;
+  }
+
   $effect(() => {
     const id = expanded;
     if (!id) {
+      if (holdRows()) return;
       pushedEntry = false;
       detailFor = null;
       detail = null;
       detailProblem = null;
+      previewDoc = null;
+      modes.end();
       return;
     }
     if (detailFor === id) return;
+    if (holdRows()) return;
+    previewDoc = null;
+    modes.end();
+    footProblem = null;
     /* Everything Orbit holds, read through the same seam the item view reads
        (#446) — documents included, so "everything" is not a euphemism. */
     detailFor = id;
@@ -368,6 +396,13 @@
         if (detailFor !== id) return;
         if (!found) detailProblem = "Orbit no longer holds this item.";
         detail = found;
+        if (docsTarget === id) {
+          revealTarget = null;
+          await tick();
+          document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "auto" });
+          await focusFirstDocument(id);
+          return;
+        }
         /* A row opened FROM the address is put on screen twice: once as soon
            as it opens, and again once the detail has given it its full height
            — otherwise the record you asked for settles half off the bottom. */
@@ -377,11 +412,137 @@
         document.getElementById(id)?.scrollIntoView({ block: "center", behavior: "auto" });
       })
       .catch((error) => {
-        if (detailFor === id) detailProblem = /** @type {any} */ (error)?.message ?? String(error);
+        if (detailFor === id) detailProblem = wordsOf(error);
       })
       .finally(() => {
         if (detailFor === id) detailBusy = false;
       });
+  });
+
+  /** Reads the open row's record again after something changed it from the
+      drawer (#1319): a paper attached, removed or restored, a snooze. */
+  async function rereadDetail() {
+    const id = detailFor;
+    if (!id) return;
+    try {
+      const found = await readItem(id);
+      if (detailFor === id && found) detail = found;
+    } catch (error) {
+      if (detailFor === id) detailProblem = wordsOf(error);
+    }
+  }
+
+  /* ---- #1319: a document's preview, from the open drawer -----------------
+     design/v19/belt-purpose/round-3/f-preview-beside-tracked.html (F),
+     owner-decisions §34. A row in the drawer's documents opens the preview
+     card (PreviewCard.svelte): on a wide screen beside the drawer, its top
+     level with the item card's, riding the page with it and sticky beside a
+     card taller than the window; under 1200px the phone's bottom sheet. A
+     press anywhere off it, or Escape, removes it at once and leaves the
+     drawer open: that press is swallowed by the drawer once. */
+  /** @type {import('$lib/data/workspace.js').DrawerDocument | null} */
+  let previewDoc = $state(null);
+  /** The document row that opened the card, for focus to return to. @type {HTMLElement | null} */
+  let previewFrom = null;
+  /* A press that only closed the card must not also close the drawer. Every
+     press starts with it down (the capture listener below), so it swallows
+     one click, never a later one. */
+  let swallowClick = false;
+  /** @type {HTMLElement | undefined} */
+  let manifestEl = $state();
+  /** @type {HTMLElement | undefined} */
+  let trackEl = $state();
+  let track = $state({ top: 0, height: 0 });
+  let readw = $state(480);
+  /** @type {{ maxWidth: number, shift: number } | null} */
+  let pair = $state(null);
+
+  /** @param {import('$lib/data/workspace.js').DrawerDocument} doc @param {HTMLElement} from */
+  function openDoc(doc, from) {
+    /* one card beside at a time: a document's preview puts a chooser away */
+    modes.closeChooser(false);
+    previewFrom = from;
+    if (previewDoc?.id !== doc.id) previewDoc = doc;
+  }
+  /** @param {{ refocus: boolean, press: boolean }} how */
+  function closeDoc({ refocus, press }) {
+    previewDoc = null;
+    if (press) swallowClick = true;
+    if (refocus && previewFrom?.isConnected) previewFrom.focus({ preventScroll: true });
+  }
+  /* The reader's remove (#1054): the paper goes, the card and the reader
+     close onto the drawer, and the wake offers it back. */
+  /** @param {import('$lib/data/belt.js').BeltDocumentRow} doc */
+  async function removeDoc(doc) {
+    await removeDocument(doc.id);
+    previewDoc = null;
+    await rereadDetail();
+    wake(`${doc.name} removed`, {
+      // The removed wake is already gone by now, so a refused restore must
+      // say so or the paper silently stays removed.
+      undo: () => { restoreDocument(doc.id).then(rereadDetail).catch(() => wake(`couldn't restore ${doc.name} — try again`, { failure: true })); },
+    });
+  }
+  /** @param {import('$lib/data/belt.js').BeltDocumentRow} doc */
+  async function restoreDoc(doc) {
+    await restoreDocument(doc.id);
+    previewDoc = null;
+    await rereadDetail();
+  }
+
+  /* The column beside the open drawer, and the pair centred together, kept
+     in step with the drawer's height and the window (preview-pair.js). */
+  $effect(() => {
+    const id = expanded;
+    /* the preview, or the chooser card: whichever stands beside (#1319) */
+    const paper = previewDoc ?? chooserAsk;
+    const manifest = manifestEl;
+    if (!id || !paper || !manifest) { pair = null; return; }
+    const media = matchMedia(WIDE_QUERY);
+    const measure = () => {
+      readw = cardWidthOf(window.innerHeight);
+      const row = document.getElementById(id);
+      const view = document.getElementById(`${id}-view`);
+      if (!media.matches || !row || !view) { pair = null; return; }
+      let rowTop = 0;
+      for (let el = /** @type {HTMLElement | null} */ (row); el && el !== manifest;
+        el = /** @type {HTMLElement | null} */ (el.offsetParent)) rowTop += el.offsetTop;
+      track = trackOf({ rowTop, rowOffsetTop: row.offsetTop, viewOffsetTop: view.offsetTop, viewHeight: view.offsetHeight });
+      const host = /** @type {HTMLElement} */ (manifest.parentElement);
+      const hs = getComputedStyle(host);
+      const box = host.getBoundingClientRect();
+      const padL = parseFloat(hs.paddingLeft) || 0;
+      const padR = parseFloat(hs.paddingRight) || 0;
+      pair = pairOf({
+        viewportWidth: document.documentElement.clientWidth,
+        hostLeft: box.left + padL,
+        hostWidth: box.width - padL - padR,
+        /* the width the card settled on once its page landed, else the
+           A4 width it opens at */
+        cardWidth: trackEl?.offsetWidth || readw,
+      });
+    };
+    const watch = new ResizeObserver(() => measure());
+    tick().then(() => {
+      measure();
+      const row = document.getElementById(id);
+      const view = document.getElementById(`${id}-view`);
+      if (row) watch.observe(row);
+      if (view) watch.observe(view);
+      if (trackEl) watch.observe(trackEl);
+    });
+    window.addEventListener("resize", measure);
+    media.addEventListener("change", measure);
+    return () => {
+      watch.disconnect();
+      window.removeEventListener("resize", measure);
+      media.removeEventListener("change", measure);
+    };
+  });
+  $effect(() => {
+    const down = () => { swallowClick = false; };
+    window.addEventListener("pointerdown", down, true);
+    return () => window.removeEventListener("pointerdown", down, true);
   });
 
   /**
@@ -394,6 +555,7 @@
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
     event.preventDefault();
     if (expanded === id) return collapseRow();
+    if (expanded !== null && modes.id === expanded && !modes.cancel()) return;
     if (expanded === null) {
       pushedEntry = true;
       pushState(resolve(`/home?item=${encodeURIComponent(id)}`), { orbitItem: id });
@@ -404,6 +566,9 @@
 
   function collapseRow() {
     if (expanded === null) return;
+    /* #1319: rows holding changes are not thrown away by a close; the first
+       try arms the cancel pill's "discard changes?" (DrawerModes.cancel) */
+    if (modes.id === expanded && !modes.cancel()) return;
     if (pushedEntry) {
       pushedEntry = false;
       history.back();
@@ -422,6 +587,8 @@
   function openSearchResult(id) {
     stripOpen = false;
     if (expanded === id) return;
+    /* rows holding changes are not thrown away by opening another row */
+    if (expanded !== null && modes.id === expanded && !modes.cancel()) { docsTarget = null; return; }
     revealTarget = id;
     if (expanded === null) {
       pushedEntry = true;
@@ -431,6 +598,32 @@
     }
   }
 
+  /* #1305: the dial callout's documents chip opens the item's drawer with
+     its documents -- the real ones, read with the record -- in place of the
+     old documents dialog, which showed the mockup's two made-up papers under
+     any item's name. Once the record lands, the first document row is
+     brought into view and focused. */
+  /** @type {string | null} */
+  let docsTarget = null;
+  /** @param {string} id */
+  function openItemDocuments(id) {
+    docsTarget = id;
+    if (expanded === id && detail) { focusFirstDocument(id); return; }
+    openSearchResult(id);
+  }
+  /** @param {string} id */
+  async function focusFirstDocument(id) {
+    if (docsTarget !== id) return;
+    docsTarget = null;
+    await tick();
+    const first = /** @type {HTMLElement | null} */ (
+      document.getElementById(`${id}-view`)?.querySelector("[data-doc-row]") ?? null);
+    if (!first) return;
+    first.scrollIntoView({ block: "nearest", behavior: "auto" });
+    first.focus({ preventScroll: true });
+  }
+
+  /** @returns {Promise<boolean>} whether the address reached the clipboard */
   async function copyAddress() {
     try {
       await navigator.clipboard.writeText(new URL(addressOf(expanded), location.origin).href);
@@ -440,7 +633,275 @@
          already in the browser's own bar, which is where it lives. */
       copied = false;
     }
+    return copied;
   }
+
+  /* ---- #1319: THE DRAWER'S FOOT ROW (FootRow.svelte) ----------------------
+     Every act the belt had, from the open drawer, through the belt's own
+     commands (commands.js): snooze, complete, attach a document, retire, and
+     copy link. Since stage 2, complete asks for its date, cost and notes in
+     the rows and records them at once (recordCompletion, below); `held`
+     still sends what an earlier visit held and never saw confirmed
+     (held-completion.js). */
+  /** @type {"snooze" | "complete" | "attach" | "retire" | "restore" | null} */
+  let footBusy = $state(null);
+  /** @type {string | null} */
+  let footProblem = $state(null);
+  /** The open item as a command addresses it. @returns {any} */
+  const commandItem = () => (detail?.householdId && !detail.suggestion ? detail : null);
+  async function rereadAll() {
+    view = await readHome();
+    await rereadDetail();
+  }
+  const held = createHeldCompletion({
+    apply: applyCommand,
+    holdMs: WAKE_HOLD_MS,
+    onsent: () => rereadAll().catch(() => {}),
+    onfailed: (error, command) => {
+      /* A refusal means the tick was not recorded: name the item, when home
+         still holds it, rather than echo the engine's "refresh and try again". */
+      const title = isRefused(error) ? rawItems.get(/** @type {any} */ (command)?.itemId)?.title : null;
+      wake(title ? droppedCompletionWords(title) : wordsOf(error, "couldn't complete it — try again"), { failure: true });
+    },
+  });
+  beforeNavigate(() => { held.flush(); });
+  $effect(() => {
+    const flush = () => held.flush();
+    addEventListener("pagehide", flush);
+    return () => removeEventListener("pagehide", flush);
+  });
+  /* A completion a previous visit held and never saw confirmed (#1151
+     W1-S3). The pocket picks it up itself when it is the dialect showing. */
+  onMount(() => {
+    if (!matchMedia(DESK).matches) return;
+    held.retryStashed((error) => error instanceof WorkspaceError && error.code === "version_conflict");
+  });
+
+  /**
+   * One act that changes the item and then reads it again.
+   * @param {"snooze" | "retire" | "restore"} kind
+   * @param {() => object} build
+   * @param {string} words  what the wake says once it has landed
+   * @param {{ leave?: boolean }} [options]  the item leaves the manifest: put the drawer away
+   */
+  async function runFoot(kind, build, words, { leave = false } = {}) {
+    if (footBusy) return;
+    footBusy = kind;
+    footProblem = null;
+    try {
+      await applyCommand(build());
+      if (leave) collapseRow();
+      view = await readHome();
+      if (!leave) await rereadDetail();
+      wake(words);
+    } catch (error) {
+      footProblem = wordsOf(error, `couldn't ${kind} it — try again`);
+    } finally {
+      footBusy = null;
+    }
+  }
+
+  /* ---- #1319 stage 2: EDITING IN THE ROWS, AND THE CHOOSER BESIDE --------
+     design/v19/belt-purpose/round-8/m-colour-per-option.html (approved
+     2026-10-08). The pencil puts the drawer's own rows into edit mode; due
+     date, section, type and orbital period open the chooser card beside the
+     drawer, in the preview's column (one card beside at a time), or as the
+     bottom sheet under 1200px. Snooze opens the same calendar ("snooze
+     until"); complete asks for its date, cost and notes in the rows
+     (owner, 2026-10-08). Escape takes the chooser, then the edit. */
+  const modes = new DrawerModes({
+    save: async (item, edits) => {
+      if (item.status === "suggested") { await addSuggestion(item, edits); return; }
+      await applyCommand(upsertCommand(item, edits));
+      await rereadAll();
+    },
+    onchoose: () => { previewDoc = null; },
+  });
+  /** The open item's household's sections, for the section's name, colour and tiles.
+      A suggestion not yet given a household files into the account's primary one. */
+  const detailSections = $derived.by(() => {
+    if (!view) return [];
+    const { households, primary, suggestions } = asView(view);
+    const suggested = suggestions.find((one) => one.id === expanded);
+    const householdId = suggested ? (suggested.householdId ?? primary) : detail?.householdId;
+    return households.find((one) => one.id === householdId)?.sections ?? [];
+  });
+  /* .by, not a bare expression: read at the top level, `detail` would be
+     narrowed to its initial null. */
+  const chooserAsk = $derived.by(() => {
+    const today = detail?.today ?? (view ? asView(view).today : null);
+    return today ? modes.askOf(detailSections, today) : null;
+  });
+  let wide = $state(false);
+  $effect(() => {
+    const media = matchMedia(WIDE_QUERY);
+    const set = () => { wide = media.matches; };
+    set();
+    media.addEventListener("change", set);
+    return () => media.removeEventListener("change", set);
+  });
+
+  /* Where focus goes back to when the rows stop editing: the pencil, or a
+     suggestion's `review & amend →`. */
+  const EDIT_HOME = ".ivedit, .ivamend";
+  /** Focus a control in the open drawer (or its head), once it is drawn. @param {string} selector */
+  async function focusInDrawer(selector) {
+    await tick();
+    const id = expanded;
+    if (!id) return;
+    const el = /** @type {HTMLElement | null} */ (
+      document.getElementById(`${id}-view`)?.querySelector(selector) ?? document.getElementById(id)?.querySelector(selector));
+    el?.focus({ preventScroll: true });
+    if (el?.isContentEditable) getSelection()?.collapse(el, el.childNodes.length);
+  }
+
+  /** The chooser card's pick: the row takes it, or the snooze is sent. @param {string} value */
+  function pickChoice(value) {
+    const snooze = modes.pick(value);
+    if (!snooze || !detail) return;
+    const { item, until } = snooze;
+    /* Whether the day will do is the engine's (#1325): its refusal lands
+       in footProblem, in its words. */
+    /* #1319: every pill is disabled while the snooze is sent, which drops
+       the focus the calendar handed back to the snooze pill; put it back
+       once the pills are live again, as complete does. */
+    runFoot("snooze", () => snoozeCommand(item, until), `${item.title} snoozed until ${dayMonth(until)}`)
+      .then(() => { if (expanded === item.id) focusInDrawer('[aria-label^="Snooze "]'); });
+  }
+
+  async function saveEdit() {
+    const title = modes.edit.draft?.title.trim() ?? "";
+    if (await modes.edit.commit()) {
+      wake(`saved · ${title}`);
+      focusInDrawer(".ivedit");
+    }
+  }
+
+  /* Complete records what the rows hold: the date, the cost, the notes.
+     The next due date is the engine's (#1324), read back from its reply.
+     Sent on `record`, not held for an undo: the rows were the chance to
+     change it. */
+  async function recordCompletion() {
+    const out = modes.completion();
+    if ("refusal" in out) { modes.completeProblem = out.refusal; return; }
+    if (footBusy) return;
+    const { item, fields } = out;
+    footBusy = "complete";
+    modes.completeProblem = null;
+    modes.recording = true;
+    try {
+      const nextDate = dueDateIn(await applyCommand(completeCommand(item, fields)), item.householdId, item.id);
+      modes.cancelComplete();
+      if (!nextDate) collapseRow();
+      view = await readHome();
+      if (nextDate) await rereadDetail();
+      wake(`Completed${nextDate ? ` · next due ${dayMonth(nextDate)}` : ""} · ${item.title}`);
+      if (nextDate) focusInDrawer('[aria-label^="Complete "]');
+    } catch (error) {
+      modes.completeProblem = wordsOf(error, "couldn't complete it — try again");
+    } finally {
+      footBusy = null;
+      modes.recording = false;
+    }
+  }
+
+  /* Escape: the chooser first (focus back to its value; the card hears it
+     itself too, and whichever hears it first marks it handled), then the
+     edit or the completion (focus back to the pencil or the pill). Ahead of
+     home's own Escape, which puts the drawer away; the preview's Escape is
+     the preview's. */
+  $effect(() => {
+    if (!modes.id) return;
+    /** @param {KeyboardEvent} event */
+    const onKey = (event) => {
+      if (event.key !== "Escape" || event.defaultPrevented || previewDoc) return;
+      const chooser = modes.choosing;
+      const editing = Boolean(modes.edit.id);
+      if (!modes.escape()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      /* a guarded cancel that only armed "discard changes?" leaves focus be */
+      if (!chooser && !modes.id) focusInDrawer(editing ? EDIT_HOME : '[aria-label^="Complete "]');
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  });
+  /* A press off the chooser card puts it away at once; a press on another
+     value switches it, on its own value closes it (EditSession.choose).
+     That press is swallowed by the drawer once, as the preview's is. */
+  $effect(() => {
+    if (!modes.choosing) return;
+    /** @param {PointerEvent} event */
+    const onPress = (event) => {
+      if (pressKeepsChooser(event.target)) return;
+      modes.closeChooser(false);
+      swallowClick = true;
+    };
+    window.addEventListener("pointerdown", onPress, true);
+    return () => window.removeEventListener("pointerdown", onPress, true);
+  });
+
+  /** @type {import('./drawer-acts.js').DrawerActs} */
+  const drawerActs = $derived({
+    busy: footBusy ?? (modes.edit.busy ? "save" : null),
+    problem: modes.edit.problem ?? modes.edit.refusal ?? modes.completeProblem ?? footProblem,
+    modes,
+    sections: detailSections,
+    onsnooze: (from) => {
+      const item = commandItem();
+      footProblem = null;
+      if (item) modes.snooze(item, from);
+    },
+    oncomplete: () => {
+      const item = commandItem();
+      if (!item) return;
+      footProblem = null;
+      modes.startComplete(item, item.today);
+      focusInDrawer("[data-pick]");
+    },
+    onedit: () => {
+      const item = commandItem();
+      if (!item) return;
+      footProblem = null;
+      modes.startEdit(item);
+      focusInDrawer('[data-ed="title"]');
+    },
+    onsave: saveEdit,
+    onrecord: recordCompletion,
+    oncancel: () => {
+      const editing = Boolean(modes.edit.id);
+      /* rows holding changes: the first press arms "discard changes?" */
+      if (!modes.cancel()) return;
+      focusInDrawer(editing ? EDIT_HOME : '[aria-label^="Complete "]');
+    },
+    onamend: startAmend,
+    onaccept: addAmended,
+    onattach: async (file) => {
+      const item = commandItem();
+      if (!item || footBusy) return;
+      footBusy = "attach";
+      footProblem = null;
+      try {
+        await attachItemDocument(item.householdId, item.id, file, attachIdFor(item.id, file));
+        forgetAttachId(item.id, file);
+        await rereadAll();
+        wake(`${file.name} attached to ${item.title}`);
+      } catch (error) {
+        footProblem = wordsOf(error, "couldn't attach it — try again");
+      } finally {
+        footBusy = null;
+      }
+    },
+    onretire: () => {
+      const item = commandItem();
+      if (item) runFoot("retire", () => archiveCommand(item), `${item.title} retired`, { leave: true });
+    },
+    onrestore: () => {
+      const item = commandItem();
+      if (item) runFoot("restore", () => statusCommand(item, "active"), `${item.title} restored`);
+    },
+    oncopy: copyAddress,
+  });
 
   /** @param {KeyboardEvent} event */
   function onWindowKeydown(event) {
@@ -449,10 +910,24 @@
   /** @param {MouseEvent} event */
   function onWindowClick(event) {
     if (!expanded) return;
-    const target = event.target instanceof Element ? event.target : null;
+    /* #1319: the desk's rule only. Both dialects are on the page and CSS
+       picks one, so this handler also hears the phone's presses; there a
+       paper's tap would close the desk's row and rewrite the address to
+       bare /home, dropping `?item=`. The pocket's rows close themselves. */
+    if (isPocket()) return;
+    if (swallowClick) { swallowClick = false; return; }
+    /* #1319: while the rows are being edited or a completion asked for, a
+       press elsewhere leaves the drawer as it is (round 8's own rule) */
+    if (modes.id === expanded && (modes.edit.id || modes.completing)) return;
     /* Inside the open row or its panel: stay. On another expandable row: that
-       row's own handler is switching to it. Anywhere else: close. */
-    if (target?.closest("a.item, .itemview")) return;
+       row's own handler is switching to it. On the preview card beside the
+       drawer, or the reader over home (#1319): stay. Anywhere else: close.
+       Read off the event's path, not the target's ancestors: a press that
+       replaces its own button (the foot row's snooze) has left the target
+       detached by the time the click reaches the window. */
+    const inside = event.composedPath().some((node) =>
+      node instanceof Element && node.matches("a.item, .itemview, [data-preview-card], [data-chooser-card], .rd-layer"));
+    if (inside) return;
     collapseRow();
   }
 
@@ -466,6 +941,87 @@
     replaceState(resolve(`/home?item=${encodeURIComponent(id)}`), { orbitItem: id });
     await tick();
     document.getElementById(id)?.scrollIntoView({ block: "center", behavior: "auto" });
+  }
+
+  /* ---- #1319: A SUGGESTION REVIEWED IN ITS DRAWER -----------------------
+     owner-decisions §34 ("suggestions are reviewed in their home drawer",
+     superseding §27's belt card). `review & amend →` puts the suggestion's
+     drawer into the rows' own editing (EditRows.svelte), the relay's
+     proposal standing in for the item it would become (proposedItemOf); the
+     choosers stand beside it as a filed item's do. `add to orbit` sends the
+     rows as the amended item on the two-tap decision's own operation id
+     (amendReceipt), into the section the rows chose. */
+  /* #1316: the latest review & amend press still waiting on the reminder
+     read; an earlier press, or one the screen has moved on from, opens
+     nothing when its answer lands. */
+  /** @type {object | null} */
+  let amendAsk = null;
+  async function startAmend() {
+    const suggestion = asView(view).suggestions.find((one) => one.id === expanded);
+    if (!suggestion?.receiptId) return;
+    /* Already amending this one: keep what was typed (#1316). */
+    if (modes.id === suggestion.id) return;
+    const householdId = suggestion.householdId ?? asView(view).primary;
+    if (!householdId) {
+      armed = { id: suggestion.id, act: null };
+      mailProblem = "This account has no household yet";
+      return;
+    }
+    const sections = asView(view).households.find((one) => one.id === householdId)?.sections
+      ?? asView(view).household?.sections ?? [];
+    const sectionId = (sections.find((one) => one.visible !== false) ?? sections[0])?.id ?? null;
+    mailProblem = null;
+    armed = { id: null, act: null };
+    previewDoc = null;
+    /* The rows start the reminders at the member's own pair from Settings,
+       read before they open so no late answer has to be reconciled with an
+       edit; a failed read, or one past 1.5 s (#1316), falls back to the
+       default pair. */
+    const ask = {};
+    amendAsk = ask;
+    const reminders = await readReminders({ within: 1500 }).catch(() => null);
+    if (amendAsk !== ask) return;
+    amendAsk = null;
+    /* #1316: the drawer may have closed, moved to another row or begun
+       another item's edit while the read was out: then the rows stay shut. */
+    if (expanded !== suggestion.id || (modes.id != null && modes.id !== suggestion.id)
+      || !asView(view).suggestions.some((one) => one.id === suggestion.id)) return;
+    modes.startEdit(proposedItemOf(suggestion, { householdId, sectionId }, { reminders }));
+    focusInDrawer('[data-ed="title"]');
+  }
+  /**
+   * The rows' save for a suggestion: approved as amended, or refused in the
+   * rows' own words (EditSession says it under the rows).
+   * @param {import('$lib/data/commands.js').CommandItem} item
+   * @param {Partial<import('$lib/data/commands.js').CommandItem>} edits
+   */
+  async function addSuggestion(item, edits) {
+    const suggestion = asView(view).suggestions.find((one) => one.id === item.id);
+    if (!suggestion) throw new Error("not added — this suggestion has gone");
+    const { item: amended, sectionId } = amendedOf(item, edits);
+    const problem = await amendReceipt(suggestion, amended, sectionId);
+    if (problem && typeof problem === "object") {
+      /* A partial approval has filed the item: the rows close, or a corrected
+         re-send under the same operation id is refused for good. The drawer
+         says what tapReceipt says of a partial, armed for the plain retry. */
+      armed = { id: suggestion.id, act: "approve" };
+      mailProblem = problem.message;
+      landedPartial = true;
+      return;
+    }
+    if (problem) throw new Error(`not added — ${problem}`);
+  }
+  /* Set by addSuggestion when the add landed partly: addAmended then leaves
+     the drawer open on the recorded-but-pending sentence instead. */
+  let landedPartial = false;
+  async function addAmended() {
+    landedPartial = false;
+    const title = modes.edit.draft?.title.trim() ?? "";
+    if (await modes.edit.commit()) {
+      if (landedPartial) return;
+      collapseRow();
+      wake(`added to your orbit · ${title}`);
+    }
   }
 
   const operationIds = new SvelteMap();
@@ -483,22 +1039,20 @@
     busyReceipt = suggestion.id;
     try {
       if (act === "approve") {
-        if (!operationIds.has(suggestion.receiptId)) operationIds.set(suggestion.receiptId, crypto.randomUUID());
-        const result = await approveReceipt(suggestion, asView(view).primary, operationIds.get(suggestion.receiptId));
-        if (result.outcome === "partial_success") {
+        const result = await approveWithOperation(suggestion, operationIds, asView(view).primary);
+        if ("partial" in result) {
           /* The item exists but its documents didn't make it: the SAME
              operation id retries the SAME body — never a second item. */
-          mailProblem = "The item is recorded, but its documents need another try — tap again to finish.";
+          mailProblem = result.message;
           return;
         }
-        operationIds.delete(suggestion.receiptId);
       } else {
         await dismissReceipt(suggestion.receiptId);
       }
       armed = { id: null, act: null };
       view = await readHome();
     } catch (error) {
-      mailProblem = /** @type {any} */ (error)?.message ?? String(error);
+      mailProblem = wordsOf(error);
     } finally {
       busyReceipt = null;
     }
@@ -512,22 +1066,23 @@
    * @param {import('$lib/data/workspace.js').ReceiptSuggestion} suggestion
    * @param {import('$lib/data/workspace.js').ItemProposal} item
    * @param {string | null} sectionId
-   * @returns {Promise<string | null>}
+   * @returns {Promise<string | { partial: true, message: string } | null>}
    */
   async function amendReceipt(suggestion, item, sectionId) {
     if (!suggestion.receiptId) return "not added — try again";
     busyReceipt = suggestion.id;
     try {
-      if (!operationIds.has(suggestion.receiptId)) operationIds.set(suggestion.receiptId, crypto.randomUUID());
-      const result = await approveReceipt(suggestion, asView(view).primary, operationIds.get(suggestion.receiptId), item, sectionId);
-      if (result.outcome === "partial_success") {
-        return "The item is recorded, but its documents need another try — add it again to finish.";
+      const result = await approveWithOperation(suggestion, operationIds, asView(view).primary, item, sectionId);
+      if ("partial" in result) {
+        /* the item exists now: home shows it, and a failed re-read must not
+           turn what landed into a refusal */
+        view = await readHome().catch(() => view);
+        return result;
       }
-      operationIds.delete(suggestion.receiptId);
       view = await readHome();
       return null;
     } catch (error) {
-      return /** @type {any} */ (error)?.message ?? String(error);
+      return wordsOf(error);
     } finally {
       busyReceipt = null;
     }
@@ -544,7 +1099,9 @@
     view ? manifestGroupsOf(asView(view).household, { suggestions: /** @type {any} */ (asView(view).suggestions), today: asView(view).today }) : null,
   );
   /* §14 (#469): the manifest rendered as the corridor — this household's
-     full scrollback, suggestions merged in date order. */
+     full scrollback, suggestions merged in date order. #1319: the open item
+     is put on the line whatever its status (retired, cancelled, expired),
+     at its own date, so its drawer can open: the drawer opens any item. */
   const corridor = $derived(
     (() => {
       const current = view ? asView(view) : null;
@@ -552,7 +1109,7 @@
         ? corridorOf(
             { households: [current.household], activeHouseholdId: current.primary },
             current.today,
-            { suggestions: /** @type {any} */ (current.suggestions) },
+            { suggestions: /** @type {any} */ (current.suggestions), include: expanded },
           )
         : null;
     })(),
@@ -616,14 +1173,13 @@
 
   /* #1162: the two note-line acts BUILD.md left inert. "complete" fires the
      same completeCommand the item page and the pocket's own quick-complete
-     use, arm-then-fire (`$lib/pocket/arm.js`, the shared helper arm.js's own
-     header says the desk should reach for rather than a sixth inline copy).
+     use, arm-then-fire (`$lib/arm.js`, the one shared helper).
      "add" carries the typed name to /create exactly as the pocket's search
      already does (#1120). Both show together at rest; a typed query with
      real matches shows neither (BUILD.md §1). */
   let completeArmed = $state(false);
   const completeArm = createArm({ onchange: (next) => { completeArmed = next; } });
-  let stripProblem = $state(null);
+  let stripProblem = $state(/** @type {string | null} */ (null));
 
   const stripActs = $derived(stripActsOf({
     searchQuery, nothing: searchResults.nothing, query: searchResults.query,
@@ -638,14 +1194,11 @@
     if (!raw || !view?.primary) return;
     try {
       const completedDate = asView(view).today;
-      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), {
-        completedDate,
-        nextDate: nextDateAfter(completedDate, raw.recurrenceMonths) ?? undefined,
-      }));
+      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), { completedDate }));
       stripOpen = false;
       view = await readHome();
     } catch (error) {
-      stripProblem = /** @type {any} */ (error)?.message ?? "couldn't complete it — try again";
+      stripProblem = wordsOf(error, "couldn't complete it — try again");
     }
   }
 
@@ -754,13 +1307,12 @@
   /* ---- the strip's own layout: the dial's bodies, never recomputed, plus
      the pure geometry in strip-layout.js (BUILD.md §3/§4). ---- */
   const bodiesById = $derived(new Map(bodies.map((b) => [b.id, b])));
-  const stripToday = $derived(view ? asView(view).today : new Date().toISOString().slice(0, 10));
+  const stripToday = $derived(view ? asView(view).today : "");
   const stripTodayX = $derived(xOfDays(0));
-  const stripMonthTicks = $derived(stripOpen ? monthTicks(stripToday) : []);
+  const stripMonthTicks = $derived(stripOpen && stripToday ? monthTicks(stripToday) : []);
   /** @param {number} days */
   const stripDateOf = (days) =>
-    new Date(Date.parse(`${stripToday}T00:00:00Z`) + days * 86400000)
-      .toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+    stripToday ? dayMonth(addDays(stripToday, days)) : "";
 
   const stripMarks = $derived.by(() => {
     if (!stripOpen) return [];
@@ -824,9 +1376,7 @@
 
   const todayLine = $derived(
     view
-      ? new Date(asView(view).today + "T00:00:00Z")
-          .toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", timeZone: "UTC" })
-          .replace(",", "").toUpperCase()
+      ? `${weekdayOf(asView(view).today)} ${dayMonth(asView(view).today)}`.toUpperCase()
       : "",
   );
   /* the inbox orb's truth: arrivals awaiting the two-tap */
@@ -837,7 +1387,7 @@
   const suggestions = $derived(view ? asView(view).suggestions : undefined);
   /* #1145: the suggestion drawer counts the days to burn-up from the
      workspace's own today (pinned under fixtures), as the phone's does. */
-  const today = $derived(view ? asView(view).today : new Date().toISOString().slice(0, 10));
+  const today = $derived(view ? asView(view).today : "");
   /* #763: how many are overdue right now — the OS badge and the tab title
      both read this, never the server, so both hold whatever this browser's
      own chart just worked out. */
@@ -845,14 +1395,7 @@
   $effect(() => {
     showUrgentCount(overdueCount);
   });
-  const initials = $derived(
-    (view ? (asView(view).user?.displayName ?? "") : "")
-      .split(/\s+/)
-      .map((word) => word[0] ?? "")
-      .join("")
-      .slice(0, 2)
-      .toUpperCase(),
-  );
+  const initials = $derived(initialsOf(view ? asView(view).user?.displayName : null));
 
   /* The month ring: positions are the design's own (hand-nudged a few px off
      the pure circle, kept verbatim); the TEXT walks with the real date, the
@@ -861,11 +1404,10 @@
     [190, 31], [271, 53], [330, 112], [352, 194], [330, 274], [271, 333],
     [190, 355], [109, 333], [50, 274], [28, 194], [50, 112], [109, 53],
   ];
-  const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
   const monthLabels = $derived(
     MONTH_POS.map(([x, y], k) => ({
       x, y,
-      label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k) % 12],
+      label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k) % 12].toUpperCase(),
     })),
   );
 
@@ -890,27 +1432,8 @@
   const trailed = $derived(
     bodies.filter((b) => (b.suggestion ? b.trail : b.trail && (b.overdue || b.paint === "amber"))),
   );
-  /* The dotted accent line strings the next three routine services together. */
-  const constellationPoints = $derived(
-    bodies
-      .filter((b) => !b.suggestion && b.kind === "service")
-      .slice(0, 3)
-      .map((b) => `${b.placement.x},${b.placement.y}`)
-      .join(" "),
-  );
   const closest = $derived(bodies.find((b) => b.closest) ?? null);
   const firstOverdue = $derived(bodies.find((b) => b.overdue) ?? null);
-  /* #1005: a one-off is a dashed ring in its own band's colour -- an outline
-     with nothing inside it, because there is nothing coming round. Past its
-     date it wears the quiet ink tone: ended, not owed. */
-  /** @type {(b: any) => string} */
-  const expiryStroke = (b) =>
-    b.paint === "ended" ? "var(--ink-mid)"
-      : b.paint === "amber" ? "var(--warm)"
-        : b.paint === "sky" ? "var(--upcoming)"
-          : "var(--ok)";
-
-
   onMount(() => {
     const query = window.matchMedia(DESK);
     /** @type {(() => void) | null} */
@@ -927,6 +1450,12 @@
      * keystroke was lost the same way, and it takes the same two answers —
      * catch up on the press nobody was listening for, and say out loud when
      * the screen went live.
+     *
+     * #1243: the north star is the same kind of press. It opens the quick add
+     * (or, on the empty sky, sends the reader to "/"), and it was left out of
+     * the catch-up, so a reader who pressed it while readHome() was still out
+     * saw nothing happen and had to press again. CI caught it as the quick
+     * add test's drawer never opening (pipeline 2236).
      */
     /** @type {HTMLElement | null} */
     let missedPress = null;
@@ -934,7 +1463,7 @@
     const rememberPress = (event) => {
       const target = event.target;
       if (target instanceof Element)
-        missedPress = /** @type {HTMLElement | null} */ (target.closest("button.orb, #morb"));
+        missedPress = /** @type {HTMLElement | null} */ (target.closest("button.orb, #morb, #nstar"));
     };
     /* Capture phase, so the press is recorded before anything else can stop
        it. A keyboard reader is recorded here too: both dialects' toggles are
@@ -1002,7 +1531,8 @@
            to the workspace under ORBIT_FIXTURES, which is what lets the gate
            photograph the same sky twice. */
         ? mountHome({ galaxy: asView(view).galaxy, primary: asView(view).primary,
-                      fixtures: Boolean(data?.fixtures), workspace: asView(view).primary ?? "" })
+                      fixtures: Boolean(data?.fixtures), workspace: asView(view).primary ?? "",
+                      onopendocs: openItemDocuments })
         /* #1120: the pocket binds its own controls (pocket.svelte, the kit's
            sheets and rows); its approve, dismiss and refresh are handed to it
            as props below. */
@@ -1024,8 +1554,16 @@
        resolves into a closure and mounting follows it, after tick() has put
        the data-driven markup in the document for the behaviour to bind. */
     readHome().then(async (data) => {
+      /* #1319 (2026-10-09): an address naming an item in another of the
+         reader's households switches home to that household first, so the
+         drawer opens there, on the desk and the phone alike. Done here, on
+         arriving, and never in the server's load: a GET that switched the
+         household would let a preloaded link switch it. If the switch is
+         refused, home stays where it was and the address opens nothing. */
+      const away = householdElsewhereFor(data, page.url.searchParams.get("item"));
+      const read = away ? await readHomeIn(away).catch(() => data) : data;
       if (disposed) return;
-      view = data;
+      view = read;
       /* #1151 F8: a later successful read must clear an earlier failure's
          banner — it never did, so the page kept claiming it could not
          reach the home even once it plainly could again. */
@@ -1053,7 +1591,7 @@
          — no listeners, no error, just a screen that looked alive and
          answered nothing. */
       if (disposed) return;
-      homeLoadProblem = /** @type {any} */ (error)?.message ?? String(error);
+      homeLoadProblem = wordsOf(error);
     });
     return () => {
       disposed = true;
@@ -1081,7 +1619,7 @@
 <!-- #466/#1120: the pocket's two-tap decisions land on the same idempotent
      approve protocol the desk rows use (one operation id per receipt), and
      answer with the problem, if any, for the sheet to show. -->
-<Pocket {view} {arrive}
+<Pocket {view} {arrive} onsignedout={(redirectTo) => leave?.descendFrom(redirectTo)} onmenu={readyDescent}
         onapprove={async (suggestion) => { armed = { id: suggestion.id, act: "approve" }; await tapReceipt(suggestion, "approve"); return mailProblem; }}
         ondismiss={async (suggestion) => { armed = { id: suggestion.id, act: "dismiss" }; await tapReceipt(suggestion, "dismiss"); return mailProblem; }}
         onamend={amendReceipt}
@@ -1095,26 +1633,16 @@
             // here must clear a banner an earlier failure left behind.
             homeLoadProblem = null;
           } catch (error) {
-            homeLoadProblem = /** @type {any} */ (error)?.message ?? String(error);
+            homeLoadProblem = wordsOf(error);
           }
         }} />
 
 <!-- The flight's surfaces: the dawn the climb leaves from, the dusk the
      descent lands on, and the canvas, mark and void-name between them. Each
      is here only for the journey that needs it. -->
-{#if launching}<Dawn />{/if}
-{#if leaving}
-  <Dusk>
-    <!-- `backIn` is the identity provider's own end-session URL as often as
-         it is "/": genuinely external, not a route this app can resolve(),
-         which is what `rel="external"` tells the lint rule (and anyone
-         reading the markup) rather than a suppression. -->
-    <a class="again" rel="external" href={backIn}>Sign back in</a>
-  </Dusk>
-{/if}
-{#if launching || leaving}
-  <Flight bind:this={flight} name={view?.household?.name ?? ""} onfarewell={onFarewell} />
-{/if}
+{#if launching}<Dawn heading={false} />{/if}
+<Leave bind:this={leave} leaving={fixtureFlight === "down"} name={view?.household?.name ?? ""}
+       homes={view && !view.emptySky ? othersOf(view.galaxy, view.primary) : []} />
 
 <div class="desk" class:arrive role="main">
 <!-- #843: sr-only, since the wordmark and dial carry the title visually. -->
@@ -1285,43 +1813,42 @@
   </svg>
   {#if mailWaiting > 0}<i class="count">{mailWaiting}</i>{/if}
 </a>
-<button class="orb" aria-expanded="false" aria-controls="account" title="Menu">{initials}</button>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick={readyDescent}>{initials}</button>
 <div class="account" id="account" role="region" aria-label="Account and menu">
   <div class="who"><b>{view?.user?.displayName ?? ""}</b><span id="who-role"
     >{view ? `${view.household?.name ?? ""} · ${view.galaxy[/** @type {string} */ (view.primary)]?.role ?? "member"}` : ""}</span></div>
   <nav>
     <a href={resolve("/inbox")}>Inbox</a>
     <a href={resolve("/settings")}>Settings</a>
-    <a href={resolve("/administration")}>Administration</a>
+    {#if isAdmin}<a href={resolve("/administration")}>Administration</a>{/if}
+    <a href={resolve("/about")}>About</a>
   </nav>
   <div class="swatches" role="group" aria-label="Theme">
     <span>THEME</span>
-    <button style="background:#070d1f" title="star-chart" aria-pressed="true"></button>
-    <button style="background:#05070d" title="after dark" aria-pressed="false"></button>
-    <!-- THE v1.3.0 ROSTER, FINAL (§15, owner): five packs, five swatches.
-         CLOUDS joins as its own selectable pack, carrying the lighter end of
+    <!-- THE v1.3.0 ROSTER, FINAL (§15, owner): five packs, five swatches. The
+         titles stay written out because the tour's selectors match on them
+         (chapter 11); every colour is read from theme.js's table (#1331)
+         through theme-swatches.js, so there is no second copy of a ground to
+         drift. CLOUDS is its own selectable pack, carrying the lighter end of
          the range; dawn's dot follows its ground onto the temperature story.
          Atlas, hanami, porcelain, miami and solarium are on the records shelf —
          their packs still exist in packs.css and still render if forced, but
          they are no longer offered. -->
-    <button style="background:#eef2f9" title="clouds" aria-pressed="false"></button>
-    <button style="background:#d2d3d4" title="dawn" aria-pressed="false"></button>
-    <button style="background:#080a14;box-shadow:inset 0 0 0 1px #ff4fd8" title="retrograde"
-            aria-pressed="false"></button>
+    <button style={swatchStyle("star-chart")} title="star-chart" aria-pressed="true"></button>
+    <button style={swatchStyle("after dark")} title="after dark" aria-pressed="false"></button>
+    <button style={swatchStyle("clouds")} title="clouds" aria-pressed="false"></button>
+    <button style={swatchStyle("dawn")} title="dawn" aria-pressed="false"></button>
+    <button style={swatchStyle("retrograde")} title="retrograde" aria-pressed="false"></button>
   </div>
   <!-- "Watch the tour" (#1189), beside the theme as in every account menu.
        The card closes the way home.behaviour.js's closeOverlays closes it,
        so the film opens over the sky rather than under the card. -->
-  <button class="watch" onclick={() => {
-    document.getElementById("account")?.classList.remove("open");
-    document.querySelector("button.orb")?.setAttribute("aria-expanded", "false");
-    void watchTour();
-  }}>↻ watch the tour</button>
-  <!-- Two taps to leave, and the second one revokes the session before a
+  <button class="watch" onclick={() => { closeAccount(); void watchTour(); }}>↻ watch the tour</button>
+  <!-- One press to leave, and it revokes the session before a
        single frame of the descent is drawn (§15: logout is the login played
        backwards, and it is a real sign-out, not an animation about one). -->
   <button class="signout" onclick={tapSignOut} disabled={signingOut}>
-    {armedOut ? "tap again to sign out" : "sign out →"}
+    sign out →
   </button>
   {#if signOutProblem}<div class="signout-problem">{signOutProblem}</div>{/if}
 </div>
@@ -1338,13 +1865,15 @@
   <div class="inner">
     <h2>Add to your orbit</h2>
     <div class="ctypes">
-      <button class="ctype"><span class="dot con"></span>renewal</button>
+      <button class="ctype"><span class="dot"></span>renewal</button>
       <button class="ctype"><span class="dot"></span>service</button>
-      <button class="ctype"><span class="dot ter"></span>inspection</button>
+      <button class="ctype"><span class="dot"></span>inspection</button>
       <button class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
     </div>
     <div class="crow">
-      <div class="cdrop">drop a document here — we'll read what we can</div>
+      <!-- #1243: a real drop target, and a button that opens the file
+           picker; either way the file goes to the full form, which reads it. -->
+      <div class="cdrop" id="cdrop" role="button" tabindex="0" aria-label="drop a document, or press enter to choose one">drop a document here — we'll read what we can</div>
       <a class="cfull" href={resolve("/create")}>open the full form →</a>
     </div>
   </div>
@@ -1371,9 +1900,10 @@
     {#snippet bodyMark(b = EMPTY_BODY, cx = 0, cy = 0, r = 0)}
       {#if b.suggestion}
         <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--accent)" stroke-width="1.6"/>
-      {:else if b.kind === "expiry"}
-        <!-- #1005: no fill, no core, no highlight -- the ring IS the body. -->
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke={expiryStroke(b)} stroke-width="2" stroke-dasharray="2.6 2.2"/>
+      {:else if b.paint === "ended"}
+        <!-- #1005: a one-off past its date is ended, not owed -- the same plain
+             body in the quiet ink tone (#1322: no type marks, only paint). -->
+        <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2;fill:var(--ink-mid)"/>
       {:else if b.paint === "ruby" || b.paint === "amber"}
         <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2" fill="url(#p-{b.paint})"/>
       {:else if b.paint === "sky"}
@@ -1383,14 +1913,7 @@
       {:else}
         <circle cx={cx} cy={cy} r={r} fill="url(#p-jade)"/>
       {/if}
-      {#if !b.suggestion && b.kind === "inspection"}
-        <path d="M {cx} {cy - r} A {r} {r} 0 0 1 {cx} {cy + r} Z" fill="rgba(0,0,0,.42)"/>
-      {/if}
-      {#if !b.suggestion && b.kind === "renewal"}
-        <circle cx={cx} cy={cy} r={r * 0.57} style="fill:var(--bg)"/>
-        <circle cx={cx} cy={cy} r={r * 0.28} fill="url(#p-{b.paint})"/>
-      {/if}
-      {#if !b.suggestion && b.kind !== "expiry" && r >= 4}
+      {#if !b.suggestion && r >= 4}
         <circle cx={cx - 0.2 * r} cy={cy + 0.25 * r} r={0.33 * r} fill="rgba(255,255,255,.38)"/>
       {/if}
     {/snippet}
@@ -1401,9 +1924,6 @@
       <defs aria-hidden="true">
         <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
           <feGaussianBlur stdDeviation="4"/>
-        </filter>
-        <filter id="sun" x="-200%" y="-200%" width="500%" height="500%">
-          <feGaussianBlur stdDeviation="9"/>
         </filter>
         <radialGradient id="p-ruby" cx="34%" cy="30%" r="72%">
           <stop offset="0%" stop-color="var(--p-ruby-1, #ffb3ab)"/><stop offset="42%" stop-color="var(--p-ruby-2, #e0453e)"/>
@@ -1437,11 +1957,6 @@
           <line x1="14" y1="190" x2="34" y2="190"/><line x1="65.5" y1="65.5" x2="80" y2="80"/>
         </g>
         <circle cx="190" cy="190" r="168" fill="none" stroke="var(--chart-line-soft)" stroke-width=".5"/>
-      </g>
-      <g class="celestial">
-        <polyline points={constellationPoints} fill="none"
-                  stroke="var(--accent)" stroke-opacity=".38" stroke-width="1"
-                  stroke-dasharray="1 5" stroke-linecap="round"/>
       </g>
 
       <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
@@ -1505,8 +2020,9 @@
       <a class="sun-link" href={view?.primary ? resolve("/household/[id]", { id: encodeURIComponent(view.primary) }) : undefined}
          onclick={() => markDoor("sky")}
          aria-label={view?.household?.name ? `Open ${view.household.name}` : undefined}>
-        <circle cx="190" cy="190" r="13" style="fill:var(--sun)" filter="url(#sun)" opacity=".8"/>
-        <circle cx="190" cy="190" r="7" style="fill:var(--sun-core)"/>
+        <!-- #1250: the sun itself is drawn by the layer over the dial (Sun.svelte,
+             Furnace); this is its disc, kept in the link as what a pointer lands on -->
+        <circle class="sun-disc" cx="190" cy="190" r={SUN_R} fill="transparent"/>
         <text id="dial-name" x="190" y="212" font-size="10" fill="var(--ink-mid)" text-anchor="middle" style="font-family:var(--ui)">{view?.household?.name ?? ""}</text>
       </a>
 
@@ -1527,7 +2043,7 @@
           <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
              data-cost={money(b.costMinor, b.currency, b.costIsEstimate)}
              data-docs={b.documentCount > 0 ? b.documentCount : undefined} href="#{b.id}"
-             aria-label={`${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, b.costIsEstimate)}${b.documentCount > 0 ? `, ${b.documentCount} document${b.documentCount === 1 ? "" : "s"}` : ""}`}><g
+             aria-label={`${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, b.costIsEstimate)}${b.documentCount > 0 ? `, ${plural(b.documentCount, "document")}` : ""}`}><g
              id={b.closest ? "b-closest" : undefined}
              class={b.overdue || b.paint === "amber" ? "breathe" : undefined}>
             {@render bodyMark(b, b.placement.x, b.placement.y, b.size)}
@@ -1542,6 +2058,7 @@
         </g>
       {/each}
     </svg>
+    <Sun r={SUN_R} />
     </div>
     <div class="hero-foot">
       <div class="splash-search" style="position:relative">
@@ -1605,7 +2122,7 @@
               <span>{searchResults.items.length} in your orbit</span>
               {#if searchResults.documents.length}
                 <span class="sep">·</span>
-                <span>{searchResults.documents.length} document{searchResults.documents.length === 1 ? "" : "s"}</span>
+                <span>{plural(searchResults.documents.length, "document")}</span>
               {/if}
               <span class="sep">·</span>
               <span class="hint">←→ step · ↵ open</span>
@@ -1638,15 +2155,21 @@
     <!-- §14 (#469): ONE schedule surface. The manifest IS the corridor — a
          full scrollback through events, nearest at the top down to the
          furthest away, suggestions riding the same line in date order. -->
-    <div class="manifest" id="manifest-top">
-    {#if corridor && !view?.emptySky}
+    <div class="manifest" id="manifest-top" bind:this={manifestEl}
+         style:max-width={pair ? `${pair.maxWidth}px` : undefined}
+         style:transform={pair ? `translateX(${pair.shift}px)` : undefined}>
+    <!-- #1316: closed while its owner brings an archive in; the dial and the
+         other systems around it stay, and are the way to them. -->
+    {#if view?.household?.importInProgress}
+      <HouseholdClosed name={view.household.name} hasOthers={view.households.length > 1} />
+    {:else if corridor && !view?.emptySky}
       <div class="corridor">
         {#if corridor.overdue.length}
           <div class="redzone">
             {#each corridor.overdue as row (row.id)}
               <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
                 onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-                onCopyAddress={copyAddress} />
+                onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} acts={drawerActs} />
             {/each}
           </div>
         {/if}
@@ -1654,20 +2177,25 @@
         {#each corridor.current as row (row.id)}
           <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-            onCopyAddress={copyAddress} />
+            onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} acts={drawerActs} />
         {/each}
         {#each corridor.months as month (month.key)}
           <div class="month"><span>{month.label}</span><div class="rule"></div><small>{month.rows.length} approaching</small></div>
           {#each month.rows as row (row.id)}
             <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
               onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-              onCopyAddress={copyAddress} />
+              onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} acts={drawerActs} />
           {/each}
         {/each}
+        <!-- #1281: what is kept without a date rides at the foot under its
+             own quiet rule, after the last month — never on the dial. -->
+        {#if corridor.undated.length}
+          <div class="month undated"><span>no date</span><div class="rule"></div><small>{corridor.undated.length} kept without a date</small></div>
+        {/if}
         {#each corridor.undated as row (row.id)}
           <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-            onCopyAddress={copyAddress} />
+            onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} acts={drawerActs} />
         {/each}
       </div>
       {#if corridor.total === 0}
@@ -1676,6 +2204,19 @@
         <div class="horizon">— beyond the horizon: nothing scheduled past {corridor.horizon} —</div>
       {/if}
     {/if}
+    <!-- #1319, round 3 (F): the preview's column beside the open drawer. -->
+    <div class="pvtrack" bind:this={trackEl} style:--pv-y="{track.top}px" style:--pv-h="{track.height}px" style:--readw="{readw}px">
+      <PreviewCard doc={previewDoc} itemTitle={detail?.title ?? ""} documentDays={view?.retention?.documentDays} onclose={closeDoc}
+                   onremove={removeDoc} onrestore={restoreDoc} />
+      <!-- #1319 stage 2 (round 8): the chooser card, in the preview's seat;
+           under 1200px it is the bottom sheet -->
+      {#if chooserAsk}
+        <div class="chseat" class:sheet={!wide} data-chooser-card>
+          <ChooserCard ask={chooserAsk} layout={wide ? "beside" : "sheet"} onpick={pickChoice}
+                       onclose={() => modes.closeChooser(true)} />
+        </div>
+      {/if}
+    </div>
   </div>
 </div>
 
@@ -1703,11 +2244,6 @@
   <div class="keyrow"><span class="sw" style="background:var(--warm)"></span>due soon</div>
   <div class="keyrow"><span class="sw" style="background:var(--upcoming)"></span>upcoming</div>
   <div class="keyrow"><span class="sw" style="background:var(--ok)"></span>on track &mdash; wide orbit</div>
-  <h2>Types</h2>
-  <div class="keyrow"><span class="sw" style="background:var(--ink-mid)"></span>routine service</div>
-  <div class="keyrow"><span class="sw" style="background:radial-gradient(circle,var(--ink-mid) 24%,var(--panel-raised) 34%,var(--ink-mid) 52%)"></span>renewal / contract</div>
-  <div class="keyrow"><span class="sw" style="background:none;border:2px dashed var(--ink-mid)"></span>expiry &mdash; ends, does not come round</div>
-  <div class="keyrow"><span class="sw" style="background:linear-gradient(90deg,var(--ink-mid) 50%,rgba(0,0,0,.55) 50%)"></span>inspection / certification</div>
   <div class="keyrow"><span class="sw" style="background:none;border:1.6px solid var(--accent)"></span>suggestion &mdash; not yet accepted</div>
   <h2>Physics</h2>
   <div class="keyrow">closer = sooner</div>
@@ -1715,13 +2251,6 @@
   <div class="keyrow">belt = documents attached</div>
   <div class="keyrow">the sky&rsquo;s weather = your workload</div>
 </aside>
-<div class="docview" id="docview" role="dialog" aria-label="Documents">
-  <button class="close">×</button>
-  <h2 id="docview-title">Car full service</h2>
-  <div class="sub">2 documents · encrypted · scanned clean</div>
-  <div class="doc">◆<span>service-invoice-2026.pdf<small>added 12 Jun · 240 KB</small></span></div>
-  <div class="doc">◆<span>service-checklist.pdf<small>added 12 Jun · 88 KB</small></span></div>
-</div>
 {/if}
 {#if askTarget}
 <!-- §11 (#453): the question IS the dialogue — one ask, two honest answers. -->

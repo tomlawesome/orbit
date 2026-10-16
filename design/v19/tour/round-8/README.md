@@ -1,5 +1,7 @@
 # First-run tour — round 8 (#1083): the pocket cut
 
+The screenshots and recordings this page shows are kept outside git (#1408): frames are blank in a clone or on the mirror.
+
 Round 5 is the ratified film (owner-decisions.md §23), round 6 re-cut
 chapter 8 and round 7 gave it a script. All three are drawn for the desk
 dialect only — `(min-width: 901px)`, the cut home itself uses (CON-10) — and
@@ -315,4 +317,3 @@ every sheet.
 **3** *later → steps the belt — so do the arrow keys.* on a phone:
 - a. verbatim, as drawn (ratified copy; a keyboard is possible);
 - b. the pocket drops the clause — *later → steps the belt.*
-

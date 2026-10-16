@@ -1,9 +1,24 @@
 import { randomUUID } from "node:crypto";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { settleArrival } from "./support/arrival";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { ensureLocalPassword } from "./support/local-credentials";
 import { ensureWorkerAdministrator, workerAccount, workerFixturePassword, workerScopedAddress } from "./support/worker-identity";
+
+/* #1235's first traced local WebKit run: the "press before home goes live"
+   test below holds home back by delaying `/api/workspace` through
+   page.route, and on desktop-webkit the trace showed both workspace reads
+   answered in 13 ms and 36 ms -- the delay never applied, home went live,
+   and the test's own precondition (`body[data-home-ready]` absent) failed.
+   WebKit serves a request the service worker handles without going through
+   Playwright's route. Same cure as v19-feedback-recovery.spec.ts,
+   v19-mail-review.spec.ts and v19-hit-routing.spec.ts (#1219): nothing
+   here is about the worker, so on WebKit it is kept out. */
+test.use({
+  serviceWorkers: async ({}, use, testInfo) => {
+    await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
+  },
+});
 import {
   auditLightDismiss,
   auditTabOrder,
@@ -16,6 +31,7 @@ import {
 } from "./support/keyboard";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -84,6 +100,7 @@ resetDatabaseBetweenSpecFiles();
 
 /* #1080: this worker's own administrator, resolved lazily (worker env only). */
 const READER = () => workerAccount("administrator");
+const ITEM_TITLE = "Keyboard-reached boiler service";
 
 /* The pocket layouts are different screens with their own chrome; their walk
    is #849. This file covers the desktop screens. */
@@ -152,23 +169,22 @@ async function seedHousehold(page: Page, options: { withItem?: boolean } = {}) {
   let itemId: string | undefined;
   if (options.withItem) {
     itemId = randomUUID();
-    const dueDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+    const dueDate = householdDateFromToday(20);
     const itemCreated = await page.request.post("/api/workspace/commands", {
       headers,
       data: {
         type: "item.upsert",
         householdId,
+        kind: "service",
         item: {
           id: itemId,
           sectionId,
-          title: "Keyboard-reached boiler service",
+          title: ITEM_TITLE,
           currency: "GBP",
-          scheduleKind: "service",
           dueDate,
           recurrenceMonths: 12,
-          status: "active",
         },
-        activity: { id: randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+        activity: { id: randomUUID(), itemId, occurredAt: new Date().toISOString() },
       },
     });
     if (!itemCreated.ok()) {
@@ -208,18 +224,41 @@ async function arriveAtHome(page: Page, options: { withItem?: boolean } = {}) {
 }
 
 /** #424: the manifest row expands in place on Enter (it is not a plain
- *  navigation — onRowClick calls preventDefault), and its "manage this item"
- *  link is the real way onto /item/[id] by keyboard. Shared by the two item
- *  tests below so each gets this same real path on its own fresh page. */
-async function openItemPageFromHome(page: Page, itemId: string) {
+ *  navigation — onRowClick calls preventDefault). #1319 (owner-decisions
+ *  §34): the drawer it opens is the item now, holding everything the item
+ *  page (the belt) did; the belt's `/item/<id>` no longer exists, and the
+ *  drawer opens from `/home?item=<id>`. So
+ *  the item is reached the way a reader reaches it: Tab to its row, Enter,
+ *  and the drawer's foot row is next in the order. Shared by the two drawer
+ *  tests below so each gets this same path on its own fresh page. */
+async function openDrawerFromHome(page: Page, itemId: string) {
   await page.goto("/home");
   await settled(page);
   await tabTo(page, { selector: `a.item[id="${itemId}"]` }, { screen: "home corridor row" });
   await page.keyboard.press("Enter");
   await expect(page.locator(`a.item[id="${itemId}"]`)).toHaveClass(/open/);
-  await tabTo(page, { selector: ".ivfull" }, { screen: "home expanded row" });
+  await expect(page.locator(`[id="${itemId}-view"]`).getByRole("group", { name: `Actions for ${ITEM_TITLE}` }))
+    .toBeVisible({ timeout: 20_000 });
+}
+
+/** The item as the server holds it now. */
+async function serverItem(page: Page, householdId: string, itemId: string) {
+  const response = await page.request.get("/api/workspace", { headers: await sessionHeaders(page) });
+  const body = (await response.json()) as {
+    workspace: { households: { id: string; items?: { id: string; dueDate?: string | null; snoozedUntil?: string | null }[] }[] };
+  };
+  return body.workspace.households.find((one) => one.id === householdId)?.items?.find((one) => one.id === itemId) ?? null;
+}
+
+/** Waits for the chooser card's calendar to take focus (it moves focus in
+ *  the frame the card is seen), then pages a month on and picks that day:
+ *  PageDown and Enter, the calendar's own keys (calendar.js stepDay). */
+async function pickNextMonthByKeyboard(page: Page, chooser: Locator) {
+  await expect(chooser).toBeVisible();
+  await expect.poll(() => chooser.evaluate((el) => el.contains(document.activeElement) && document.activeElement?.matches("button.day"))).toBe(true);
+  await page.keyboard.press("PageDown");
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/item\//);
+  await expect(chooser).toHaveCount(0);
 }
 
 /** Reaches household management the way the sun's own door works (§15,
@@ -404,44 +443,81 @@ test("home: a dial planet link is reachable and activates by keyboard", async ({
   }
 });
 
-test("item page: reached from home's manifest by keyboard, is fully reachable", async ({ page }) => {
+/* #1319: was "item page: reached from home's manifest by keyboard, is fully
+   reachable", which audited /item/<id>. The item is home's drawer now, so
+   the same audit runs over home with the drawer open: every control the
+   drawer shows (its documents, the foot row's pills, the pencil, the copy
+   link) is reached by Tab, focus is visible on each, and Tab is not trapped. */
+test("item drawer: opened from home's manifest by keyboard, is fully reachable", async ({ page }) => {
   test.setTimeout(60_000);
   const household = await arriveAtHome(page, { withItem: true });
   try {
-    await openItemPageFromHome(page, household.itemId as string);
-    await auditTabOrder(page, "item page");
+    await openDrawerFromHome(page, household.itemId as string);
+    await auditTabOrder(page, "home with the item drawer open");
   } finally {
     await cleanup(page, household);
   }
 });
 
-test("item page: actions and the back link work by keyboard", async ({ page }) => {
+/* #1319: was "item page: actions and the back link work by keyboard"
+   (reschedule through the belt's panel, then its "← YOUR SKY" link). The
+   drawer's acts are snooze (the calendar, "snooze until") and the pencil,
+   whose due date is the reschedule; the way back is Escape, which puts the
+   drawer away (owner-decisions "Light dismiss"). */
+test("item drawer: rescheduling, snooze and the way back work by keyboard", async ({ page }) => {
   test.setTimeout(60_000);
   const household = await arriveAtHome(page, { withItem: true });
+  const itemId = household.itemId as string;
   try {
-    await openItemPageFromHome(page, household.itemId as string);
+    await openDrawerFromHome(page, itemId);
+    const drawer = page.locator(`[id="${itemId}-view"]`);
+    const dueBefore = (await serverItem(page, household.id, itemId))?.dueDate;
 
-    /* Reschedule: open the panel, change the date, save, and the panel closes
-       without a `.problem` alert. */
-    await tabTo(page, { tag: "BUTTON", textIncludes: "reschedule" }, { screen: "item page actions" });
+    /* Reschedule: the pencil puts the rows into edit, the due date opens
+       the calendar, a day picked and save sends it. */
+    await tabTo(page, { selector: 'button[aria-label="Edit this item"]' }, { screen: "item drawer foot row" });
+    const pencil = await currentFocus(page);
+    expect(pencil?.focusVisible, "item drawer: the pencil has no visible focus indicator").toBe(true);
     await page.keyboard.press("Enter");
-    await expect(page.locator(".panel")).toBeVisible();
-    await tabTo(page, { selector: "#a-due" }, { screen: "item page reschedule panel" });
-    const dueField = await currentFocus(page);
-    expect(dueField?.focusVisible, "item page: the reschedule date field has no visible focus indicator").toBe(true);
-    // See fillCreateForm's #f-date: `fill()`, not typed digits, sidesteps the locale-dependent segment order.
-    const newDue = new Date(Date.now() + 40 * 86400000).toISOString().slice(0, 10);
-    await page.locator("#a-due").fill(newDue);
-    await tabTo(page, { selector: ".panel .btn-primary" }, { screen: "item page reschedule panel" });
+    await expect(page.locator(`[id="${itemId}"]`).getByRole("textbox", { name: "title" })).toBeFocused();
+    await tabTo(page, { selector: '[aria-label^="due: "]' }, { screen: "item drawer, editing" });
+    const due = await currentFocus(page);
+    expect(due?.focusVisible, "item drawer: the due date has no visible focus indicator").toBe(true);
     await page.keyboard.press("Enter");
-    await expect(page.locator(".panel")).toBeHidden();
-    await expect(page.locator(".problem")).toBeHidden();
+    await pickNextMonthByKeyboard(page, page.getByRole("dialog", { name: /due date/i }));
+    /* save waits on the engine's dry run of the rows (edit-session.svelte.js
+       `refused`); until then the button is aria-disabled (still in the Tab
+       order, #1327) and Enter on it does nothing */
+    const save = drawer.getByRole("group", { name: `Editing ${ITEM_TITLE}` }).getByRole("button", { name: "save" });
+    await expect(save).toBeEnabled({ timeout: 10_000 }).catch(async () => {
+      throw new Error(`item drawer: save stayed disabled; the drawer read: ${await drawer.innerText()}`);
+    });
+    await tabTo(page, { tag: "BUTTON", textIncludes: "save" }, { screen: "item drawer, editing" });
+    await page.keyboard.press("Enter");
+    await expect(drawer.getByRole("group", { name: `Actions for ${ITEM_TITLE}` })).toBeVisible({ timeout: 10_000 });
+    await expect(drawer.getByRole("alert")).toHaveCount(0);
+    await expect.poll(async () => (await serverItem(page, household.id, itemId))?.dueDate).not.toBe(dueBefore);
 
-    await tabTo(page, { selector: "a.back" }, { screen: "item page" });
-    const back = await currentFocus(page);
-    expect(back?.focusVisible, "item page: the back link has no visible focus indicator").toBe(true);
+    /* Snooze: the pill opens the calendar beside the drawer; a day picked
+       by keyboard snoozes the item. */
+    await tabTo(page, { selector: `[aria-label="Snooze ${ITEM_TITLE}"]` }, { screen: "item drawer foot row" });
+    const snooze = await currentFocus(page);
+    expect(snooze?.focusVisible, "item drawer: the snooze pill has no visible focus indicator").toBe(true);
     await page.keyboard.press("Enter");
-    await expect(page).toHaveURL(/\/home/);
+    await pickNextMonthByKeyboard(page, page.getByRole("dialog", { name: /snooze until/i }));
+    await expect(drawer.getByText("snoozed until")).toBeVisible({ timeout: 10_000 });
+    await expect.poll(async () => (await serverItem(page, household.id, itemId))?.snoozedUntil ?? null).not.toBeNull();
+    /* The pick hands focus back to the snooze pill (drawer-modes.svelte.js
+       closeChooser); a keyboard reader carries on from there, so it must
+       still be in the drawer once the snooze has landed. */
+    await expect.poll(() => drawer.evaluate((el) => el.contains(document.activeElement)),
+      { message: "item drawer: focus left the drawer after the snooze" }).toBe(true);
+
+    /* The way back: Escape puts the drawer away and leaves home as it was. */
+    await page.keyboard.press("Escape");
+    await expect(drawer).toHaveCount(0);
+    await expect(page.locator(`a.item[id="${itemId}"]`)).not.toHaveClass(/open/);
+    await expect(page).toHaveURL(/\/home$/);
   } finally {
     await cleanup(page, household);
   }
@@ -470,7 +546,8 @@ test("create: fillable and submittable by keyboard alone", async ({ page }) => {
     expect(submit?.focusVisible, "create: the submit button has no visible focus indicator").toBe(true);
     await page.keyboard.press("Enter");
 
-    await expect(page).toHaveURL(/\/home$/, { timeout: 10_000 });
+    /* #1246: a save lands on home with the item it saved open. */
+    await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]+$/, { timeout: 10_000 });
     await expect(page.locator(".item", { hasText: name })).toBeVisible();
   } finally {
     await cleanup(page, household);
@@ -572,7 +649,10 @@ test("inbox: reachable via the account panel, and keyboard-navigable", async ({ 
   }
 });
 
-test("sign out: the two-tap control ends the session by keyboard alone", async ({ page }) => {
+/** The test identity provider (tests/oidc/server.mjs); its end-session path sends the browser back to Orbit's /logout. */
+const PROVIDER_ORIGIN = "https://orbit-oidc:4443";
+
+test("sign out: the one-press control ends the session by keyboard alone", async ({ page }) => {
   test.setTimeout(60_000);
   const household = await arriveAtHome(page);
   try {
@@ -581,16 +661,50 @@ test("sign out: the two-tap control ends the session by keyboard alone", async (
     await tabTo(page, { selector: ".signout" }, { screen: "home account panel" });
     const signOut = await currentFocus(page);
     expect(signOut?.focusVisible, "home: the sign-out control has no visible focus indicator").toBe(true);
-    await page.keyboard.press("Enter"); // arms
-    await expect(page.locator(".signout")).toHaveText(/tap again/);
-    await page.keyboard.press("Enter"); // fires — revokes the session, then plays the descent
+    /* The goodbye hands the browser to the identity provider's end-session
+       address, and the provider sends it back to Orbit's /logout. The /logout
+       the URL shows first is only a replaceState during the goodbye, so
+       navigating on at once races that hand-off (Firefox lost the race in
+       pipeline 2588: "Navigation to /api/auth/login is interrupted by another
+       navigation to /logout"). The first fix waited for the /logout response
+       redirected from the provider and then called waitForLoadState, but a
+       response resolves when its headers arrive, before the new document has
+       replaced the goodbye: waitForLoadState saw the old, already loaded page
+       and returned, and the goto was aborted by the commit (ERR_ABORTED). So
+       wait for what proves the trip is over: the response from the provider,
+       then the load of the document it brought back. Both are registered
+       before the press so neither can be missed, and settled to true/false so
+       a failure earlier in the test leaves no unhandled rejection. */
+    const cameBackFromProvider = page
+      .waitForResponse(
+        (response) => {
+          const request = response.request();
+          return (
+            request.isNavigationRequest() &&
+            new URL(response.url()).pathname === "/logout" &&
+            (request.redirectedFrom()?.url().startsWith(`${PROVIDER_ORIGIN}/`) ?? false)
+          );
+        },
+        { timeout: 30_000 },
+      )
+      .then(
+        () => true,
+        () => false,
+      );
+    const returnedDocumentLoaded = page.waitForEvent("load", { timeout: 30_000 }).then(
+      () => true,
+      () => false,
+    );
+    await page.keyboard.press("Enter"); // revokes the session, then plays the descent (one press: owner, 2026-10-06)
 
     await expect(page).toHaveURL(/\/logout$/, { timeout: 15_000 });
+    expect(await cameBackFromProvider, "sign out: the browser never came back from the provider's end-session page to /logout").toBe(true);
+    expect(await returnedDocumentLoaded, "sign out: the /logout document the provider returned to never finished loading").toBe(true);
     const session = await page.evaluate(async () => {
       const response = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
       return (await response.json()) as { authenticated?: boolean };
     });
-    expect(session.authenticated, "sign out: the session is still authenticated after the two-tap control fired").toBeFalsy();
+    expect(session.authenticated, "sign out: the session is still authenticated after the sign-out control fired").toBeFalsy();
 
     /* Cleanup needs a live session again — sign back in the same keyboard way
        the arrival journey proved, so this test's own household can still be

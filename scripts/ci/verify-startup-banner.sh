@@ -7,8 +7,7 @@
 # the stack is running something other than the image under test.
 #
 # Extracted verbatim from the "Verify startup banner and immutable identity"
-# step of the &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# step of the retired GitHub container workflow, which the GitLab `smoke` job and its browser variants now run (#801).
 #
 # Inputs (environment):
 #   TESTED_IMAGE_VERSION  version the banner must report

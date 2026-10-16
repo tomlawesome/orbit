@@ -3,7 +3,7 @@ import { householdRegister } from "./support/households";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { bodyClassSeen, witnessBodyClasses } from "./support/arrival";
+import { bodyClassAdds, bodyClassSeen, witnessBodyClasses } from "./support/arrival";
 import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -11,7 +11,7 @@ import { answerPushWithoutAService } from "./support/webkit-push";
 resetDatabaseBetweenSpecFiles();
 
 /**
- * #410/§15: THE ARRIVAL. The newcomer's journey and the create-system card,
+ * #410/§15: THE ARRIVAL. The newcomer's journey and its create drawer,
  * end to end, through the real pipe — the real identity provider, the real
  * front door, the real workspace read, the real join-request route and the real
  * `household.create` command. No interception anywhere.
@@ -19,9 +19,10 @@ resetDatabaseBetweenSpecFiles();
  * THE LAW THIS GUARDS (owner, 2026-08-16, sealed): "the first-run screen
  * doesn't get its own page — it sits ON TOP of the login screen." So the door
  * at "/" is a switchboard: a member is handed on to /home, a reader with no
- * household stays and gets either the create card (an empty instance) or the
- * newcomer's climb, the labelled sky, the boxless count and the question (an
- * instance that already has systems).
+ * household stays and gets the newcomer's climb, the labelled sky, the
+ * boxless count and the question, whose "name your own system" drawer holds
+ * the three create questions (#1263: one flight per arrival, and /home never
+ * flies a second time).
  *
  * WHY A FOURTH IDENTITY. The three the harness has always had all end up
  * owning or joining something during an acceptance run — the administrator
@@ -33,19 +34,10 @@ resetDatabaseBetweenSpecFiles();
  * else, and #1077's reset between spec files does not change that: it puts
  * this FILE back to the seed, not each test within it.
  *
- * THE GAP, stated rather than papered over. The FIRST ADMIN's automatic route
- * to the create card needs an instance with ZERO households. Since #1077 this
- * file does now begin on one -- the reset is what makes that true -- but the
- * journeys below run one after another and the first of them makes a
- * household, so the second still cannot see an empty instance. What is proved
- * here is
- * the create card's own journey by the road a reader can always reach it on —
- * the newcomer's "or name your own system" — which is the SAME card, the same
- * command, the same hand-over and the same landing; the only unproved step is
- * the branch that chooses it automatically, and that is covered by unit test
- * (tests/unit/v19-arrival.test.mjs, `arrivalStageOf`) and photographed by the
- * fidelity gate's `first-run` entry. Proving it here would need a
- * freshly-volumed stack, which is a harness change and not a product one.
+ * THE EMPTY INSTANCE is not walked here: the journeys below run one after
+ * another and the first of them makes a household. Its drawer-open landing is
+ * the local-only first run in v19-first-run-door.spec.ts (#1263), and the
+ * fidelity gate photographs the drawer as `newcomer-drawer`.
  *
  * ONE-WAY, like the membership journey it stands beside: the second test leaves
  * the reader owning a system, so a retry of it on the same stack finds a member
@@ -220,6 +212,8 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
      Asked of the witness, not of <body> at the moment of asking: the warp is
      a 4.6 s window a stalled poll can miss entirely (#1233). */
   await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: 20_000 }).toBe(true);
+  /* #1263: once. */
+  expect(await bodyClassAdds(page, "showwarp")).toBe(1);
   /* and while it flies, the question has not arrived: the staging is
      class-driven, so the beat that has not happened is a class that is absent */
   await expect(page.locator("body")).not.toHaveClass(/belong/);
@@ -270,6 +264,11 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
      and the owner's own listing has the request in it. */
   await row.getByRole("button").click();
   await expect(row.locator(".act")).toHaveText("waiting", { timeout: 15_000 });
+  /* #1263: the reader stays on the card — no navigation and no polling;
+     approval lands on their next sign-in, which is that arrival's flight. */
+  await expect(row).toHaveClass(/waiting/);
+  await expect(page).toHaveURL(/\/$/);
+  expect(await bodyClassAdds(page, "showwarp")).toBe(1);
   await expect(target).toContainText("ASKED TO JOIN · WAITING");
 
   /* #866 (owner-decisions §23): the "waiting" word is a marker, not an
@@ -294,25 +293,45 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   await ownerContext.close();
 });
 
-test("naming your own system: the sealed refusal, then the create, then the launch home", async ({ page }) => {
+test("naming your own system: one climb, the drawer, the refusal, then home without a second flight", async ({ page }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the journey is asserted on the desk dialect");
   test.setTimeout(180_000);
 
-  /* The same reader, still belonging to nothing: a pending request is not a
-     membership. Straight at the login route this time — no marker, so no climb;
-     the question is served already arrived at, the way /logout serves the
-     goodbye already arrived at. */
-  await signInAs(page, workerAccount("newcomer"));
+  /* #1263: ONE FLIGHT PER ARRIVAL. The same reader, still belonging to
+     nothing (a pending request is not a membership), through the door by its
+     own button, so a launch is owed and the climb plays here on `/`. The
+     witness records every class <body> wears in each document. */
+  await witnessBodyClasses(page);
+  await signInThroughTheDoor(page, workerAccount("newcomer"));
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
-  await expect(page.getByRole("heading", { name: "where do you belong?" })).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: 20_000 }).toBe(true);
+  /* the card is in the document, transparent, for the whole climb; the
+     question has arrived when `belong` does (13.8s in, after the count) */
+  await expect(page.locator("body")).toHaveClass(/\bbelong\b/, { timeout: 40_000 });
+  await expect(page.getByRole("heading", { name: "where do you belong?" })).toBeVisible();
   expect((await workspaceOf(page)).households).toEqual([]);
 
-  /* THE OTHER ROAD: the same three questions the first admin is asked. */
-  await page.getByRole("button", { name: "or name your own system" }).click();
-  await expect(page.locator(".card")).toBeVisible();
-  /* the login chrome is gone while the card shows (§15, fourth pass) */
-  await expect(page.locator("#gate")).toHaveCount(0);
-  await expect(page.locator("#formlayer .note")).toHaveText("4 sections to start · change them later");
+  /* THE OTHER ROAD is a drawer in the card, not a second stage. On an
+     instance with systems it starts closed. */
+  const handle = page.getByRole("button", { name: "name your own system" });
+  await expect(handle).toHaveAttribute("aria-expanded", "false");
+  await expect(handle).toHaveAttribute("aria-controls", "own-drawer");
+  await expect(page.locator("#hhname")).toHaveCount(0);
+  /* it opens by grid rows over .3s, and with no transition under reduced
+     motion (arrival.css's reduced-motion block) */
+  const drawer = page.locator("#own-drawer");
+  expect(await drawer.evaluate((el) => getComputedStyle(el).transitionDuration)).toBe("0.3s");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await drawer.evaluate((el) => getComputedStyle(el).transitionDuration)).toBe("0s");
+  await handle.click();
+  await expect(handle).toHaveAttribute("aria-expanded", "true");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  /* the fields stand IN the belong card: no ring, no card of their own */
+  await expect(page.locator(".nf .belong #hhname")).toBeVisible();
+  await expect(page.locator(".nf .belong #tz")).toBeVisible();
+  await expect(page.locator(".nf .belong #cur")).toBeVisible();
+  await expect(page.locator(".ringcard")).toHaveCount(0);
+  await expect(page.locator(".nf .belong .create .note")).toHaveText("4 sections to start · change them later");
 
   /* THE SEALED REFUSAL, in one warm line: a name that is already out there is
      not created, and the line offers the road it names. */
@@ -329,25 +348,41 @@ test("naming your own system: the sealed refusal, then the create, then the laun
      words in them; that holds across the whole page, not just the card. */
   const spoken = page.getByRole("alert").filter({ hasText: /\S/ });
   await expect(spoken).toContainText("already exists here");
-  await expect(spoken.getByRole("link", { name: "ask to join it" })).toBeVisible();
   /* nothing was created and nothing flew */
   await expect(page).toHaveURL(/\/$/);
   expect((await workspaceOf(page)).households).toEqual([]);
+  /* "ask to join it →" closes the drawer and puts focus on the row */
+  await spoken.getByRole("link", { name: "ask to join it" }).click();
+  await expect(handle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator("#hhname")).toHaveCount(0);
+  /* the row that holds the name: its button, or (as here, where the reader
+     already asked to join it) the row itself */
+  expect(await page.evaluate(() => document.activeElement?.closest(".nf .belong li")?.textContent ?? ""))
+    .toContain(HOUSEHOLD);
+
+  /* A second press opens it again with the answers kept. */
+  await handle.click();
+  await expect(page.locator("#hhname")).toHaveValue(HOUSEHOLD);
 
   /* Typing disarms the rejection, because the rejection was about the NAME. */
   await page.fill("#hhname", OWN_SYSTEM);
   await expect(spoken).toHaveCount(0);
 
-  /* AND THE CREATE: the server makes the system, the lockup is reclaimed, and
-     the ratified climb plays over the populated home. The two answers the card
-     reads off the browser are read back off the card, because the machine
-     running the suite is what decides them. */
+  /* AND THE CREATE: the server makes the system and the reader goes home. The
+     two answers the drawer reads off the browser are read back off it,
+     because the machine running the suite is what decides them. */
   const zone = await page.locator("#tz").inputValue();
   const money = await page.locator("#cur").inputValue();
+  expect(await bodyClassAdds(page, "showwarp"), "one climb on /").toBe(1);
+  expect(await bodyClassSeen(page, "reclaimed"), "no reclaim of the door").toBe(false);
   await page.locator("#gobtn").click();
   await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
-  await expect(page.locator("body")).toHaveClass(/instrument/, { timeout: 60_000 });
-  await expect(page.locator("#dial-name")).toHaveText(OWN_SYSTEM);
+  /* the ordinary arrival: POL-1 brings the dial in with the new name */
+  await expect(page.locator("#dial-name")).toHaveText(OWN_SYSTEM, { timeout: 30_000 });
+  /* #1263: the arrival already flew once on `/`, so /home must not fly a
+     second time: no climb and no dawn. */
+  expect(await bodyClassSeen(page, "showwarp"), "showwarp seen on /home").toBe(false);
+  expect(await bodyClassSeen(page, "showdawn"), "showdawn seen on /home").toBe(false);
 
   /* The server's own account of it: one system, theirs, with the four default
      sections the command applied and the answers the card asked for. */

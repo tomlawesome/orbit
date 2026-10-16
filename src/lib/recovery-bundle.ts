@@ -4,6 +4,7 @@ import {
   constants,
   fchmodSync,
   fstatSync,
+  fsyncSync,
   linkSync,
   lstatSync,
   mkdtempSync,
@@ -15,7 +16,7 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   createCipheriv,
   createDecipheriv,
@@ -26,6 +27,9 @@ import {
   scryptSync,
   timingSafeEqual,
 } from "node:crypto";
+
+import { applyHostOwnership } from "./host-ownership";
+import { MIN_PASSWORD_LENGTH, passwordLength } from "./password-length";
 
 // The backup-bundle and recovery-bundle *format* core (issue #296 slice 1),
 // ported from:
@@ -76,6 +80,9 @@ export function writeSecretFile(path: string, content: string | Buffer, mode: nu
   const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC, mode);
   try {
     fchmodSync(descriptor, mode);
+    // #1211 E6: written as root inside the deployment, owned by the operator
+    // on the host (a no-op outside the one-off, see host-ownership.ts).
+    applyHostOwnership(path);
     writeSync(descriptor, typeof content === "string" ? Buffer.from(content, "utf8") : content);
   } finally {
     closeSync(descriptor);
@@ -110,7 +117,8 @@ export type RecoveryBundleRefusalCode =
   | "app-stop-failed"
   | "app-start-failed"
   | "bundle-already-exists"
-  | "recovery-bundle-record-failed";
+  | "recovery-bundle-record-failed"
+  | "insufficient-space";
 
 /**
  * Thrown for every fail-closed refusal this module makes. Never carries
@@ -146,7 +154,7 @@ const ORBKEK_KEY_BYTES = 32;
 const ORBKEK_SCRYPT = { N: 131_072, r: 8, p: 1, maxmem: 256 * 1024 * 1024 };
 
 /** recovery-crypto.mjs guarantee #1: enforced independently of every caller's own check. */
-export const MIN_RECOVERY_PASSPHRASE_LENGTH = 12;
+export const MIN_RECOVERY_PASSPHRASE_LENGTH = MIN_PASSWORD_LENGTH;
 
 /** The exact algorithm identifier the recovery-bundle manifest records (export-recovery-bundle.sh #14). */
 export const RECOVERY_KEY_ENCRYPTION_ALGORITHM = "aes-256-gcm-scrypt-n131072-r8-p1";
@@ -161,7 +169,7 @@ export function isValidDocumentKekHex(value: string): boolean {
 
 /** recovery-crypto.mjs guarantee #1 / export-recovery-bundle.sh #6. */
 export function isValidPassphrase(value: string): boolean {
-  return value.length >= MIN_RECOVERY_PASSPHRASE_LENGTH;
+  return passwordLength(value) >= MIN_RECOVERY_PASSPHRASE_LENGTH;
 }
 
 function deriveRecoveryKey(passphrase: string, salt: Buffer): Buffer {
@@ -404,7 +412,61 @@ export function listTarEntriesVerbose(tarPath: string): TarEntry[] {
   return names.map((name, index) => ({ name, typeChar: typeChars[index] }));
 }
 
-export function extractTar(tarPath: string, destinationDir: string): void {
+const TAR_MAGIC = Buffer.from("ustar");
+const TAR_MAGIC_OFFSET = 257;
+// Leading bytes GNU tar and BusyBox tar use to auto-detect a compressed
+// archive: gzip, compress, bzip2, xz, zstd, lzip, lzop, lzma, lz4.
+const COMPRESSED_MAGICS = [
+  [0x1f, 0x8b], [0x1f, 0x9d], [0x42, 0x5a, 0x68], [0xfd, 0x37, 0x7a, 0x58, 0x5a], [0x28, 0xb5, 0x2f, 0xfd],
+  [0x4c, 0x5a, 0x49, 0x50], [0x89, 0x4c, 0x5a, 0x4f], [0x5d, 0x00, 0x00], [0x04, 0x22, 0x4d, 0x18],
+].map((bytes) => Buffer.from(bytes));
+
+/**
+ * tar auto-detects compression on both list and extract, so a small
+ * compressed file could expand without bound past any size check. Only an
+ * uncompressed ustar/GNU archive is accepted: the magic at offset 257 of the
+ * first header alone is not enough, because a gzip header's extra field can
+ * carry those bytes while tar still decompresses the rest.
+ */
+function requirePlainTar(tarPath: string): void {
+  let descriptor: number;
+  try {
+    descriptor = openSync(tarPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    refuse("archive-invalid", "Bundle archive is invalid.");
+  }
+  const header = Buffer.alloc(TAR_MAGIC_OFFSET + TAR_MAGIC.length);
+  let bytesRead: number;
+  try {
+    bytesRead = readSync(descriptor, header, 0, header.length, 0);
+  } finally {
+    closeSync(descriptor);
+  }
+  const plain =
+    bytesRead === header.length &&
+    header.subarray(TAR_MAGIC_OFFSET).equals(TAR_MAGIC) &&
+    !COMPRESSED_MAGICS.some((magic) => header.subarray(0, magic.length).equals(magic));
+  if (!plain) refuse("archive-invalid", "Bundle archive is invalid.");
+}
+
+/**
+ * Refuses before writing anything when the destination filesystem cannot
+ * hold the archive's contents: work directories live in temp space that may
+ * share a disk with the live database. A plain tar (requirePlainTar) cannot
+ * unpack to more than its own size, so that size is the bound; it needs no
+ * second pass over the archive and cannot be misstated by a crafted listing.
+ * `measureAvailable` defaults to the real statfs call; tests inject it, as
+ * for requireCapacityForDocumentArchive.
+ */
+export function extractTar(
+  tarPath: string,
+  destinationDir: string,
+  measureAvailable: (destinationDir: string) => number = measureAvailableBytes,
+): void {
+  requirePlainTar(tarPath);
+  if (measureAvailable(destinationDir) < measureEnvelopeBytes(tarPath)) {
+    refuse("insufficient-space", "Bundle archive could not be extracted; not enough space to stage its contents.");
+  }
   const { status } = runTar(["-xf", tarPath, "-C", destinationDir]);
   if (status !== 0) refuse("archive-invalid", "Bundle archive could not be extracted.");
 }
@@ -430,6 +492,18 @@ export function createTar(workDir: string, outputPath: string, members: readonly
   const result = spawnSync("tar", ["-C", workDir, "-cf", outputPath, ...members], { encoding: "utf8" });
   if (result.status !== 0) {
     throw new Error(`tar failed to package the bundle: ${result.stderr ?? ""}`);
+  }
+  // tar's writes may still be only in the page cache; the data must be on
+  // disk before publishBundleAtomically gives it its final name.
+  fsyncPath(outputPath);
+}
+
+function fsyncPath(path: string): void {
+  const descriptor = openSync(path, constants.O_RDONLY);
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
   }
 }
 
@@ -732,6 +806,7 @@ export function buildBackupManifest(fields: BackupManifestFields): string {
  * before any extraction is attempted.
  */
 export function validateBackupBundleLayout(tarPath: string): void {
+  requirePlainTar(tarPath);
   const members = [...listTarMembers(tarPath)].sort();
   const expected = [...BACKUP_BUNDLE_MEMBERS].sort();
   if (members.length !== expected.length || !members.every((name, index) => name === expected[index])) {
@@ -861,18 +936,15 @@ export function verifyChecksumsFile(extractedDir: string, checksumsPath: string)
 
 // ---------------------------------------------------------------------------
 // BackupDockerAdapter — the thin, injectable edge over the handful of
-// operations that genuinely need a live Docker/Postgres deployment
-// (`pg_restore --list`, `pg_dump`, the document-tar collection, and
-// stopping/starting `orbit-app` around a point-in-time backup). Mirrors the
-// plan's "thin injected adapter" shape (docs/adr-notes/296-backup-port-plan.md):
-// the orchestration functions below (validateBackupBundleContents,
-// createBackupBundle) depend only on this interface, never on `docker`
-// directly, so they are fully testable with an in-memory fake and require no
-// live daemon. createDockerComposeBackupAdapter is the real implementation,
-// spawning the exact `docker compose ...` argument lists backup.sh uses
-// (:30-32,126-127,147,149-157) — its own shape is exercised in
-// recovery-bundle.docker-adapter.test.ts via a PATH-shim fake `docker`
-// executable, never a real daemon.
+// operations that genuinely need a live Postgres deployment (`pg_restore
+// --list`, `pg_dump`, the document-tar collection, and stopping/starting
+// `orbit-app` around a point-in-time backup). Mirrors the plan's "thin
+// injected adapter" shape (docs/adr-notes/296-backup-port-plan.md): the
+// orchestration functions below (validateBackupBundleContents,
+// createBackupBundle) depend only on this interface, so they are fully
+// testable with an in-memory fake. The shipped implementation is
+// src/lib/in-container-adapter.ts (#1211): the engine runs inside the
+// deployment and reaches Postgres and the document volume directly.
 // ---------------------------------------------------------------------------
 
 export interface BackupDockerAdapter {
@@ -889,10 +961,8 @@ export interface BackupDockerAdapter {
    * Records that a recovery bundle export just completed (#968, slice 1 of
    * #966): one `audit_log` row (`entity_type = 'recovery_bundle'`,
    * `action = 'recovery_bundle_exported'`), written the same way `dumpDatabase`
-   * reaches Postgres — a `psql` call shelled through `orbit-db`, because
-   * `orbit export-recovery-bundle` runs on the host (`refuseDockerInContainer`
-   * forbids it inside `orbit-app`) and the host has no other path to the
-   * database. Carries no bundle content, no passphrase and no key material —
+   * reaches Postgres — a `psql` call against `orbit-db` from inside the
+   * deployment (#1211). Carries no bundle content, no passphrase and no key material —
    * `changes` is the empty object — because the fact and the timestamp are
    * everything the administration card needs, and everything the issue's
    * "nothing about the bundle or its passphrase is persisted" line allows.
@@ -900,135 +970,11 @@ export interface BackupDockerAdapter {
   recordRecoveryBundleExported(): void;
 }
 
-export interface DockerComposeAdapterOptions {
-  /** The `--env-file` path passed to every `docker compose` invocation, mirroring backup.sh's `compose()` helper. */
-  envFile: string;
-  /** Working directory for the `docker` subprocess (defaults to the current process's cwd, matching backup.sh's own `cd "$repo_dir"`). */
-  cwd?: string;
-  /** Overrides the `docker` executable name/path. Defaults to `"docker"`. */
-  dockerBinary?: string;
-  /**
-   * Environment for the `docker` subprocess (defaults to `process.env`). The
-   * PATH-shim test seam: tests prepend a directory holding a fake `docker`
-   * executable to `PATH` here instead of mutating `process.env` globally —
-   * see recovery-bundle.docker-adapter.test.ts, following the same technique
-   * as scripts/configure.test.mjs's `fakeDockerScript`.
-   */
-  env?: NodeJS.ProcessEnv;
-}
-
 function openWriteSecretDescriptor(path: string, mode: number = SECURE_FILE_MODE): number {
   const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, mode);
   fchmodSync(descriptor, mode);
+  applyHostOwnership(path);
   return descriptor;
-}
-
-/**
- * The real BackupDockerAdapter: spawns the literal `docker compose` argument
- * lists backup.sh uses, over the exact fixed command shape (no shell
- * interpolation of caller-controlled data beyond the two path/envFile
- * arguments Node's `spawnSync` array form passes as discrete argv entries,
- * never through a shell).
- */
-export function createDockerComposeBackupAdapter(options: DockerComposeAdapterOptions): BackupDockerAdapter {
-  const dockerBinary = options.dockerBinary ?? "docker";
-  const cwd = options.cwd;
-  const env = options.env ?? process.env;
-  const composeArgs = (...args: string[]): string[] => ["compose", "--env-file", options.envFile, ...args];
-
-  return {
-    stopApp(): void {
-      const result = spawnSync(dockerBinary, composeArgs("stop", "orbit-app"), { cwd, env, stdio: ["ignore", "ignore", "inherit"] });
-      if (result.status !== 0) refuse("app-stop-failed", "The Orbit application could not be stopped for the backup.");
-    },
-    startApp(): void {
-      const result = spawnSync(dockerBinary, composeArgs("start", "orbit-app"), { cwd, env, stdio: ["ignore", "ignore", "inherit"] });
-      if (result.status !== 0) refuse("app-start-failed", "The Orbit application could not be restarted after the backup.");
-    },
-    dumpDatabase(outputPath: string): void {
-      const descriptor = openWriteSecretDescriptor(outputPath);
-      try {
-        const result = spawnSync(
-          dockerBinary,
-          composeArgs(
-            "exec",
-            "-T",
-            "orbit-db",
-            "sh",
-            "-c",
-            'exec pg_dump --format=custom --compress=6 --no-owner --no-acl --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"',
-          ),
-          { cwd, env, stdio: ["ignore", descriptor, "inherit"] },
-        );
-        if (result.status !== 0) refuse("database-dump-failed", "PostgreSQL could not be dumped.");
-        if (fstatSync(descriptor).size === 0) refuse("empty-database-dump", "PostgreSQL produced an empty backup.");
-      } finally {
-        closeSync(descriptor);
-      }
-    },
-    pgRestoreListOk(dumpPath: string): boolean {
-      const descriptor = openSync(dumpPath, constants.O_RDONLY | constants.O_NOFOLLOW);
-      try {
-        const result = spawnSync(dockerBinary, composeArgs("exec", "-T", "orbit-db", "pg_restore", "--list"), {
-          cwd,
-          env,
-          stdio: [descriptor, "ignore", "ignore"],
-        });
-        return result.status === 0;
-      } finally {
-        closeSync(descriptor);
-      }
-    },
-    collectDocumentsArchive(outputPath: string): void {
-      const descriptor = openWriteSecretDescriptor(outputPath);
-      try {
-        const result = spawnSync(
-          dockerBinary,
-          composeArgs(
-            "run",
-            "--rm",
-            "--no-deps",
-            // The container's own DOCUMENTS_ROOT (env_file: .env-orbit), not
-            // a value read on the host: matches wherever the app actually
-            // writes documents (#1151 RANGE-F2, the TS-side counterpart of
-            // SF2-F1's backup.sh fix). `--entrypoint tar` cannot expand a
-            // variable in its own argument, so this runs through sh instead.
-            "--entrypoint",
-            "sh",
-            "orbit-app",
-            "-c",
-            // SS2-S1: excludes the household portable-archive export, not
-            // an entry validateDocumentArchiveEntries's allow-list
-            // recognizes. Before this exclusion, any export sitting on disk
-            // made `orbit backup` refuse outright the moment it
-            // re-validated its own freshly collected archive.
-            'exec tar -C "${DOCUMENTS_ROOT:-/var/lib/orbit/documents}" --exclude=./portable-archives -cf - .',
-          ),
-          { cwd, env, stdio: ["ignore", descriptor, "inherit"] },
-        );
-        if (result.status !== 0) refuse("document-archive-collection-failed", "The document archive could not be collected.");
-      } finally {
-        closeSync(descriptor);
-      }
-    },
-    recordRecoveryBundleExported(): void {
-      const result = spawnSync(
-        dockerBinary,
-        composeArgs(
-          "exec",
-          "-T",
-          "orbit-db",
-          "sh",
-          "-c",
-          `exec psql -v ON_ERROR_STOP=1 --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -c "insert into audit_log (entity_type, entity_id, action, changes) values ('recovery_bundle', gen_random_uuid(), 'recovery_bundle_exported', '{}'::jsonb)"`,
-        ),
-        { cwd, env, stdio: ["ignore", "ignore", "inherit"] },
-      );
-      if (result.status !== 0) {
-        refuse("recovery-bundle-record-failed", "The recovery bundle was created but could not be recorded; the administration card will not clear.");
-      }
-    },
-  };
 }
 
 /**
@@ -1081,6 +1027,9 @@ export function publishBundleAtomically(temporaryPath: string, finalPath: string
     throw error;
   }
   unlinkSync(temporaryPath);
+  // A link is metadata: fsync the directory so the final name survives a
+  // power loss, not just the (already fsynced) data.
+  fsyncPath(dirname(finalPath));
 }
 
 export interface CreateBackupBundleResult {
@@ -1114,6 +1063,7 @@ export function createBackupBundle(
   createdAt: string,
 ): CreateBackupBundleResult {
   const workDir = mkdtempSync(join(backupDirectory, ".orbit-backup."));
+  applyHostOwnership(workDir);
   const temporaryPath = `${finalTarPath}.installing`;
   let published = false;
 
@@ -1207,6 +1157,7 @@ export function buildRecoveryManifest(): string {
  * layer).
  */
 export function validateRecoveryBundleLayout(tarPath: string): void {
+  requirePlainTar(tarPath);
   const members = [...listTarMembers(tarPath)].sort();
   const expected = [...RECOVERY_BUNDLE_MEMBERS].sort();
   if (members.length !== expected.length || !members.every((name, index) => name === expected[index])) {

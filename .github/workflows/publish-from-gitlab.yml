@@ -14,8 +14,8 @@ name: Publish the GitLab-tested image to GHCR
 # pipeline fails, this fails too and publishes nothing; run it again from the
 # Actions tab once GitLab is green.
 #
-# The channel tag is `preview` for hotfix branches as well, as the GitHub build
-# always did (see publish-container.yml's metadata step): verify_preview and
+# The channel tag is `preview` for hotfix branches as well, as the retired
+# GitHub build did: verify_preview and
 # GitLab's `promote_stable` job (scripts/ci/promote-stable.sh, #821) resolve
 # `:preview` for both.
 #

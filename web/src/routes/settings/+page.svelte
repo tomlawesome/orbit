@@ -8,8 +8,6 @@
     readSettingsScreen,
     readSignInMethods,
     removeLocalPassword,
-    revokeSession,
-    signOutEverywhere,
     startProviderLink,
     startStepUp,
     unlinkProviderIdentity,
@@ -18,14 +16,16 @@
   } from "$lib/data/workspace.js";
   import { SIGN_IN_METHODS_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
-  import { agoLong } from "$lib/format.js";
+  import { agoLong, clockOf, dayMonth, initials as initialsOf, localZone, plural } from "$lib/format.js";
   import { alertsSupported, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
   import { watchTour } from "$lib/tour/watch.js";
   import { fillStarTiles } from "$lib/sky.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
   import Chrome from "$lib/Chrome.svelte";
+  import { createArm } from "$lib/arm.js";
   import SignInChallenge from "./SignInChallenge.svelte";
   import { PACKS, intentOf, issuerHost, methodWords, on } from "./helm.js";
+  import { signOutOfDevice, signOutOfEveryDevice } from "./sign-out.js";
   import Pocket from "./pocket.svelte";
   import "./settings.css";
 
@@ -72,8 +72,10 @@
   /** @type {string | null} */
   let reminderProblem = $state(null);
 
+  let emailSaving = $state(false);
   async function toggleEmailReminders() {
-    if (!view) return;
+    if (!view || emailSaving) return;
+    emailSaving = true;
     const previous = emailReminders;
     /* Optimistic: a toggle that waits for a round trip reads as a dead
        control. The revert below is what makes that honest. */
@@ -91,6 +93,8 @@
     } catch {
       emailReminders = previous;
       reminderProblem = "not saved — Orbit could not reach your reminder settings";
+    } finally {
+      emailSaving = false;
     }
   }
 
@@ -176,11 +180,8 @@
 
   /** @param {string} iso */
   function whenSent(iso) {
-    const date = new Date(iso);
-    const zone = data?.fixtures ? "UTC" : undefined;
-    const day = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: zone });
-    const time = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: zone });
-    return `${day} · ${time}`;
+    const zone = data?.fixtures ? "UTC" : localZone();
+    return `${dayMonth(iso, zone)} · ${clockOf(iso, zone)}`;
   }
 
   /** @param {import('$lib/data/fixtures/settings.js').SentRow} row */
@@ -301,7 +302,7 @@
       if (action === "password_set" || action === "password_change") {
         const outcome = await writeLocalPassword({ password: newPassword, ...challenge });
         methodOutcome = outcome.changed
-          ? "password changed — every other device was signed out"
+          ? "password changed · every other device was signed out"
           : "password set";
       } else if (action === "password_remove") {
         await removeLocalPassword(challenge);
@@ -332,63 +333,74 @@
   let sessions = $state([]);
   /** @type {string | null} */
   let sessionsProblem = $state(null);
-  /** @type {Record<string, boolean>} */
-  let armedRevoke = $state({});
+  /* One arm for the sessions list and "sign out of every device" (lib/arm.js):
+     keyed "session:<id>" and "everywhere"; 4 s, scroll, Escape and a tap
+     elsewhere put it down again. */
+  /** @type {string | boolean} */
+  let signOutArmed = $state(false);
+  const signOutArm = createArm({ onchange: (next) => (signOutArmed = next) });
   /** @type {Record<string, string>} */
   let revokeProblem = $state({});
+
+  /* Chrome, bound so settings' own sign-outs play its goodbye (#1439). */
+  /** @type {{ descendFrom: (redirectTo: string | null) => Promise<void> } | undefined} */
+  let chrome = $state();
+  /* With Chrome not bound this throws rather than quietly answering nothing,
+     so sign-out.js's own fallback navigation runs (#1439). */
+  /** @param {string | null} redirectTo */
+  const descendFrom = (redirectTo) => {
+    if (!chrome) throw new Error("Chrome is not bound");
+    return chrome.descendFrom(redirectTo);
+  };
+  /* Set while a sign-out request is out, and kept once this device has left:
+     a second press then sends nothing, and after this session has ended any
+     request would answer 401 and sign the reader straight back in through
+     the provider (#1439). */
+  let signingOut = false;
 
   /**
    * Sign out of one device — armed by a first tap, done by a second, same
    * family protocol as `tapSignOutEverywhere` below. Ending the current
-   * device's own session leaves nothing to come back to, so that case goes
-   * straight to the sign-in the way `tapSignOutEverywhere` does; ending any
-   * other device just drops its row.
+   * device's own session plays the goodbye, as the ordinary sign-out does
+   * (./sign-out.js); ending any other device just drops its row.
    *
    * @param {Awaited<ReturnType<typeof readSessions>>[number]} row
+   * @param {HTMLElement | null} button
    */
-  async function tapRevokeSession(row) {
+  async function tapRevokeSession(row, button) {
+    if (signingOut) return;
     revokeProblem = { ...revokeProblem, [row.id]: "" };
-    if (!armedRevoke[row.id]) {
-      armedRevoke = { ...armedRevoke, [row.id]: true };
-      return;
-    }
+    if (!signOutArm.tap(`session:${row.id}`, button)) return;
+    signingOut = true;
     try {
-      await revokeSession(row.id);
-      if (row.current) {
-        location.assign("/login");
-        return;
-      }
+      if (await signOutOfDevice(row, descendFrom)) return;
       sessions = sessions.filter((session) => session.id !== row.id);
-      armedRevoke = { ...armedRevoke, [row.id]: false };
     } catch {
-      armedRevoke = { ...armedRevoke, [row.id]: false };
       revokeProblem = { ...revokeProblem, [row.id]: "still signed in — try again" };
     }
+    signingOut = false;
   }
 
   /**
    * "Sign out of every device" — armed by a first tap, done by a second, the
    * family protocol the inbox and the item view already use for anything
    * that cannot be undone. This one ends the caller's own session too, so on
-   * success there is no page left to return to: the cookie is dead and the
-   * sign-in is the only honest destination.
+   * success it plays the goodbye, as the ordinary sign-out does.
    */
-  let armedSignOut = $state(false);
   /** @type {string | null} */
   let signOutProblem = $state(null);
 
-  async function tapSignOutEverywhere() {
+  /** @param {HTMLElement | null} button */
+  async function tapSignOutEverywhere(button) {
+    if (signingOut) return;
     signOutProblem = null;
-    if (!armedSignOut) {
-      armedSignOut = true;
-      return;
-    }
+    if (!signOutArm.tap("everywhere", button)) return;
+    signingOut = true;
     try {
-      await signOutEverywhere();
-      location.assign("/login");
+      await signOutOfEveryDevice(descendFrom);
     } catch {
-      armedSignOut = false;
       signOutProblem = "still signed in — try again";
+      signingOut = false;
     }
   }
 
@@ -411,10 +423,7 @@
     }
   }
 
-  const initials = $derived(
-    (/** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */ (view)?.user?.displayName ?? "")
-      .split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
-  );
+  const initials = $derived(initialsOf(/** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */ (view)?.user?.displayName));
 
   onMount(async () => {
     fillStarTiles(
@@ -483,7 +492,7 @@
      twice, and hides this page's sky and cards below the switch; the chrome
      stays, because on a phone Chrome.svelte draws the kit's top chrome. -->
 <Pocket bind:view bind:methods bind:sessions bind:active {initials} {providerOffered} {emailApproval} {screenProblem} onretry={loadScreen}
-        {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} />
+        {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} onsignedout={descendFrom} />
 
 <div class="helm-page">
 <div class="sky" aria-hidden="true">
@@ -494,8 +503,7 @@
 </div>
 <div class="vignette" aria-hidden="true"></div>
 
-<Chrome user={view?.user} current="settings"
-        role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
+<Chrome bind:this={chrome} user={view?.user} current="settings" household={view?.household} />
 
 <div class="page" role="main">
   <header class="screen">
@@ -655,7 +663,7 @@
       </div>
 
       <div role="tabpanel" id="rem-panel-reminders" aria-labelledby="rem-tab-reminders" hidden={tab !== "reminders"}>
-        <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-label="Email reminders" onclick={toggleEmailReminders}><i></i></button></div>
+        <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-busy={emailSaving} aria-label="Email reminders" onclick={toggleEmailReminders}><i></i></button></div>
         <div class="kv"><span>browser alerts · this device</span><button class="toggle" aria-pressed={browserAlerts} aria-label="Browser alerts on this device" disabled={alertsBusy || !alertsAvailable} onclick={toggleBrowserAlerts}><i></i></button></div>
         <!-- #1151 W2-S4: this used to show only on the "sent" tab, downstream
              of the switches that actually cause it rather than beside them. -->
@@ -679,7 +687,7 @@
           <p class="sent-none">nothing sent yet · the first warning goes out <b>{view.reminders.firstWarning}</b>, by email and by browser alert if they are on</p>
         {:else}
           {#each sent as row (row.id)}
-            <a class="sent" href={resolve("/item/[[id]]", { id: row.itemId })} aria-label={sentLabel(row)}>
+            <a class="sent" href={resolve(`/home?item=${encodeURIComponent(row.itemId)}`)} aria-label={sentLabel(row)}>
               {#if row.channel === "email"}
                 <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><rect x="2" y="4" width="14" height="10" rx="2"/><path d="m2.5 5 6.5 5 6.5-5"/></svg>
               {:else}
@@ -697,7 +705,7 @@
       <h2>Your relay</h2>
       <div class="kv"><span>address</span><b style="color:var(--accent-text)">{view.relay.address}</b></div>
       <div class="kv"><span>status</span><b class="on">{view.relay.status}</b></div>
-      <div class="kv"><span>waiting for review</span><a href={resolve("/inbox")}>{view.waiting} arrival{view.waiting === 1 ? "" : "s"} — open your inbox →</a></div>
+      <div class="kv"><span>waiting for review</span><a href={resolve("/inbox")}>{plural(view.waiting, "arrival")} — open your inbox →</a></div>
       <div class="kv"><span>rotate · pause · details</span><a href={resolve("/settings/mail")}>open the relay →</a></div>
     </div>
 
@@ -712,7 +720,7 @@
       {#each view.memberships as membership (membership.id)}
         <a class="memb" href={resolve("/household/[id]", { id: membership.id })}>
           <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" style="stroke:var(--chart-line)"/><circle cx="13" cy="13" r="2.4" style="fill:var({membership.primary ? "--sun" : "--ink-mid"})"/></svg>
-          <b>{membership.name}</b><small>{membership.memberCount} member{membership.memberCount === 1 ? "" : "s"} · {membership.itemCount} item{membership.itemCount === 1 ? "" : "s"}</small><span class="role" class:owner={membership.role === "owner"}>{membership.role}</span>
+          <b>{membership.name}</b><small>{membership.memberCount === null ? "? members" : plural(membership.memberCount, "member")} · {plural(membership.itemCount, "item")}</small><span class="role" class:owner={membership.role === "owner"}>{membership.role}</span>
         </a>
       {/each}
     </div>
@@ -728,8 +736,8 @@
               <b>{row.device}</b>
               <span>{row.current ? "this device" : row.lastSeenAt ? `last seen ${agoLong(row.lastSeenAt, new Date().toISOString())}` : "never used"}</span>
             </div>
-            <button onclick={() => tapRevokeSession(row)} aria-label={`sign out of ${row.device}`}>
-              {armedRevoke[row.id]
+            <button onclick={(event) => tapRevokeSession(row, event.currentTarget)} aria-label={`sign out of ${row.device}`}>
+              {signOutArmed === `session:${row.id}`
                 ? `tap again to sign out${row.current ? " here" : ""}`
                 : row.current ? "sign out here" : "sign out"}
             </button>
@@ -738,7 +746,8 @@
         {/each}
       </ul>
       {#if sessionsProblem}<div class="note">{sessionsProblem}</div>{/if}
-      <button onclick={tapSignOutEverywhere}>{armedSignOut ? "tap again to sign out everywhere" : "sign out of every device →"}</button>{#if signOutProblem}<div class="note">{signOutProblem}</div>{/if}
+      <button onclick={(event) => tapSignOutEverywhere(event.currentTarget)}>{signOutArmed === "everywhere" ? "tap again to sign out everywhere" : "sign out of every device →"}</button>{#if signOutProblem}<div class="note">{signOutProblem}</div>{/if}
+      <p class="everywhere-says">This signs Orbit out everywhere{#if providerOffered}, and signs you out of your sign-in provider in this browser only: your other devices stay signed in at the provider{/if}.</p>
     </div>
   {/if}
 </div>

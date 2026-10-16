@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import chapter, { SELECTORS } from "../../web/src/lib/tour/chapters/10-other-households.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
-import { TOUR_STOPS } from "../../web/src/lib/tour/stops.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
 
 /*
@@ -134,7 +133,7 @@ describe("the selectors chapter 10 names", () => {
     /* stops.js is where .minisys was ratified (the "sun" stop's target, and
        the /home TOUR_REGIONS list); the film must not drift off onto its own
        idea of where another household's sun is. */
-    const sun = TOUR_STOPS.find((stop) => stop.id === "sun");
+    const sun = { target: ".sun-link, .minisys" };
     expect(sun.target).toContain(".minisys");
     /* The film rings the system's own 40px ring inside that group, not the
        group: the group's box takes in the label above (#866, #1098 frames). */

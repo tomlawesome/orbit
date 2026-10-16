@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Backup/restore acceptance drill. Runs in CI against the container-validation
-# deployment (publish-container.yml) and asserts the operator guarantees
+# deployment and asserts the operator guarantees
 # below, cited as Part 2 / script #entry in docs/installer-guarantees.md
 # (issue #290 coverage map; the drill predates the catalogue, so citations
 # are mapped per test function rather than per assertion):
@@ -11,7 +11,11 @@
 #     match refused before any mutation; wrong and missing key)
 #   make_corrupt_{manifest,hmac,checksum}_bundle  restore.sh #3, #6 (HMAC and
 #     checksum chain re-verified before the bundle is trusted)
-#   make_{missing,extra,truncated,size_mismatch}* variants  restore.sh #9
+#   make_{missing,truncated,size_mismatch}* variants  restore.sh #9 (every
+#     referenced object is present and intact)
+#   make_extra_object_bundle                    restore.sh #9 (28e24e0c): an
+#     object no row references is residue of an interrupted upload, swept
+#     later, so restore accepts the bundle rather than refusing it
 #   test_missing_crypto_metadata                restore.sh #9 (transient or
 #     crypto-incomplete rows refuse a point-in-time restore)
 #   test_journal_publication_failures           restore.sh #15-#17 (crash-safe
@@ -23,18 +27,112 @@
 #     reopens it afterwards
 #   recovery-bundle export/import path          export/import-recovery-bundle.sh
 #     entries (Part 2)
+#   test_restore_removes_post_backup_table      restore.sh #8 (#1316): a table
+#     created after the backup point does not survive restoring it, Orbit
+#     boots healthy and the restore does not roll back.
 #   assert_credential_fixture_present            restore.sh #49 (authentication
 #     data and the revocation boundary, #917, ADR-0022 §6, ADR-0023 §7): a
 #     local credential and an unconsumed setup token seeded before the backup
 #     restore intact, and a session created after the backup point does not
 #     survive restoring to before it existed.
+#
+# Usage: scripts/test-backup-restore.sh [--own-stack]
+#
+# Ownership (#1241, #1273). By default this drill does NOT bring up a stack of
+# its own: it runs against the deployment that ORBIT_ENV_FILE (default
+# .env-orbit) names, in CI the disposable container-validation one. The rest
+# of this paragraph describes that borrowed path.
+#
+# --own-stack is the local way to run it (#1273): the drill builds an image
+# from this working tree, installs a throwaway deployment with install.sh into
+# a `mktemp -d` target under its own Compose project (orbit-backup-drill,
+# app on 127.0.0.1:3212, local registry on 5302), copies this checkout's
+# backup, restore, recovery-bundle and end-maintenance scripts into it, and
+# runs against that. It owns the whole stack, so teardown removes it all on
+# every exit, as scripts/test-repair-journeys.sh does: `compose down --volumes
+# --remove-orphans`, every container, volume and network carrying the
+# project's label, the registry container and the target directory. The
+# working-tree image and its registry tag stay, like repair-journeys' own.
+# It refuses to start while any Orbit stack holds the fixed container names,
+# and install.sh refuses while any volume ending orbit-db-data exists
+# (docs/testing.md, "Local traps"). Environment values aimed
+# at another deployment (ORBIT_ENV_FILE, ORBIT_BACKUP_DIR, ORBIT_BIND_ADDRESS,
+# ORBIT_PORT, COMPOSE_FILE, COMPOSE_PROJECT_NAME) are
+# ignored. ORBIT_BACKUP_DRILL_IMAGE=<ref> skips the build. CI keeps the
+# borrowed path: its pipeline already supplies a throwaway deployment.
+#
+#   Borrowed, never removed: the Compose project and its orbit-app and orbit-db
+#   containers, every volume and network, the images, the live document KEK and
+#   the backup directory itself. Nothing here runs `compose down`, removes a
+#   volume, network or image, or deletes the deployment's data. The restore
+#   steps rewind the database and documents to the backup the drill took at its
+#   own start, which is the point of the drill.
+#
+#   Owned, removed on every exit: the fixture rows (household, documents,
+#   IMAP message, credential user and the post-backup session) and the three
+#   fixture files in orbit-app; the backup bundle, the recovery bundle and the
+#   maintenance-window bundle; the temp directory of corrupted-bundle variants;
+#   the one-off container `compose run` starts for the HMAC refresh (named, so
+#   it can be found).
+#
+#   Borrowed state it changes, and puts back: the live document KEK (swapped to
+#   a wrong and then a missing key), the maintenance flag, a restore journal
+#   left by a drill step that did not finish (`restore.sh --recover`), and a
+#   stopped or unhealthy orbit-app (restarted).
+#
+# The teardown is one trap on EXIT, INT and TERM and runs exactly once; with
+# --own-stack it removes the owned stack instead of putting a borrowed one
+# back, and a failed run's evidence also keeps install.sh's log. A failed
+# or interrupted run first copies compose state and logs, the restore journal
+# and the failure reason to $ORBIT_EVIDENCE_ROOT/test-backup-restore-<timestamp>/
+# (default ~/projects/.backups/orbit) and prints the path. A fixture-free
+# deployment before the run is a fixture-free deployment after it.
 set -Eeuo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
+own_stack=0
+while (($#)); do
+  case "$1" in
+    --own-stack) own_stack=1 ;;
+    *) printf 'Orbit backup test: unknown option %s (usage: scripts/test-backup-restore.sh [--own-stack])\n' "$1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+# The deployment the drill runs against: this checkout's, or with --own-stack
+# the throwaway one it installs (#1273). own_stack_started is set just before
+# the drill starts anything of its own in Docker, so a run that stops earlier
+# -- including one refused because another stack holds the container names --
+# never sweeps a project label it did not populate.
+deploy_dir="$repo_dir"
+own_workdir=""
+own_stack_started=0
+readonly own_project="orbit-backup-drill"
+readonly own_registry_name="orbit-backup-drill-registry"
+# Not the install harness's 5300/3210 nor repair-journeys' 5301/3211, so the
+# ports never collide with theirs.
+readonly own_registry_port=5302
+readonly own_orbit_port=3212
+readonly own_repository="backup-drill/orbit"
+readonly own_issuer="https://oidc.backup-drill.invalid/application/o/orbit/"
+if [[ "$own_stack" == 1 ]]; then
+  # The owned stack answers to its own files and project only: a value
+  # exported for another deployment must not point the drill, the scripts it
+  # runs or Compose's interpolation at that deployment.
+  unset ORBIT_ENV_FILE ORBIT_BACKUP_DIR ORBIT_BIND_ADDRESS ORBIT_PORT COMPOSE_FILE
+  export COMPOSE_PROJECT_NAME="$own_project"
+  own_workdir="$(mktemp -d "${TMPDIR:-/tmp}/orbit-backup-drill.XXXXXX")"
+  deploy_dir="$own_workdir/$own_project"
+  ORBIT_ENV_FILE="$deploy_dir/.env-orbit"
+fi
+
 readonly environment_file="${ORBIT_ENV_FILE:-.env-orbit}"
-readonly secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
+# The deployment's secrets sit in .orbit-secrets beside its environment file.
+environment_directory="$(dirname -- "$environment_file")"
+[[ "$environment_directory" == /* ]] || environment_directory="$deploy_dir/$environment_directory"
+readonly secrets_directory="${environment_directory%/.}/.orbit-secrets"
 readonly live_kek="$secrets_directory/document-kek"
 readonly document_id="11111111-1111-4111-8111-111111111111"
 readonly recovery_document_id="55555555-5555-4555-8555-555555555555"
@@ -63,32 +161,364 @@ readonly credential_setup_token_hash="606060606060606060606060606060606060606060
 readonly credential_identity_issuer="https://idp.backup-test.invalid/"
 readonly credential_identity_subject="backup-drill-subject"
 readonly credential_session_token_hash="7070707070707070707070707070707070707070707070707070707070707070"
+# #1316: a table that exists only after the backup point, standing in for a
+# later migration. Restoring the backup must remove it.
+readonly post_backup_table="orbit_drill_post_backup_table"
 backup_path=""
 recovery_bundle_path=""
+maintenance_backup_path=""
 test_directory=""
 key_backup=""
 variant_directory=""
+# Teardown state (#1241). `touched` is set before the drill first changes the
+# deployment, so a run that fails a precondition never reaches for docker.
+# `journal_at_start` records whether an unfinished restore journal already
+# existed, so teardown only recovers one this run left behind.
+restore_state_directory="${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore"
+drill_run_container="orbit-backup-drill-$$"
+touched=0
+fixtures_seeded=0
+fixtures_removed=0
+maintenance_touched=0
+maintenance_initial=""
+journal_at_start=0
+torn_down=0
+failure_reason=""
+last_error=""
+evidence_dir=""
+if [[ -f "$restore_state_directory/restore.journal" ]]; then journal_at_start=1; fi
 
 fail() {
+  failure_reason="$*"
   printf 'Orbit backup test: %s\n' "$*" >&2
   exit 1
 }
 
+# What a failed run needs to be diagnosed, copied before teardown changes the
+# deployment (#1241). Compose state and logs only for a run that touched it.
+collect_evidence() {
+  local status="$1" root dir
+  root="${ORBIT_EVIDENCE_ROOT:-${HOME:-/nonexistent}/projects/.backups/orbit}"
+  dir="$root/test-backup-restore-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p -- "$root" && mkdir -m 700 -- "$dir" 2>/dev/null || return 1
+  {
+    printf 'exit_status=%s\nfailure_reason=%s\nlast_failed_command=%s\n' "$status" "$failure_reason" "$last_error"
+    printf 'environment_file=%s\nbackup_directory=%s\n' "$environment_file" "${ORBIT_BACKUP_DIR:-$deploy_dir/backups}"
+  } > "$dir/run-info.txt"
+  if [[ "$touched" == 1 ]]; then
+    compose ps -a > "$dir/compose-ps.txt" 2>&1 || true
+    compose logs --no-color --timestamps --tail 500 orbit-app orbit-db > "$dir/compose.log" 2>&1 || true
+    maintenance_active > "$dir/maintenance-active.txt" 2>&1 || true
+  fi
+  if [[ -f "$restore_state_directory/restore.journal" ]]; then
+    cp -- "$restore_state_directory/restore.journal" "$dir/restore.journal" 2>/dev/null || true
+  fi
+  ls -laR -- "$restore_state_directory" > "$dir/restore-state-listing.txt" 2>&1 || true
+  if [[ -n "$test_directory" ]]; then
+    ls -la -- "$test_directory" > "$dir/test-directory-listing.txt" 2>&1 || true
+  fi
+  if [[ -n "$own_workdir" && -f "$own_workdir/install.log" ]]; then
+    cp -- "$own_workdir/install.log" "$dir/install.log" 2>/dev/null || true
+  fi
+  evidence_dir="$dir"
+}
+
+# Put back what the drill changed in the deployment it borrows (#1241). Never
+# removes the deployment or any of its data: only the drill's own fixtures, and
+# state the drill moved (an unfinished restore, a stopped app, the maintenance
+# flag).
+restore_deployment() {
+  local health_deadline
+
+  if [[ "$journal_at_start" == 0 && -f "$restore_state_directory/restore.journal" ]]; then
+    printf 'Orbit backup test: teardown: recovering the unfinished restore this run left.\n' >&2
+    timeout 600 bash scripts/restore.sh --recover >/dev/null 2>&1 ||
+      printf 'Orbit backup test: teardown: restore recovery failed; run: bash scripts/restore.sh --recover\n' >&2
+  fi
+
+  if ! health_check; then
+    compose start orbit-app >/dev/null 2>&1 || true
+    health_deadline=$((SECONDS + teardown_health_seconds))
+    until health_check || (( SECONDS >= health_deadline )); do sleep 1; done
+  fi
+
+  if [[ "$maintenance_touched" == 1 && "$maintenance_initial" == f && "$(maintenance_active 2>/dev/null)" == t ]]; then
+    timeout 300 bash scripts/end-maintenance.sh >/dev/null 2>&1 ||
+      printf 'Orbit backup test: teardown: could not reopen the instance; run: bash scripts/end-maintenance.sh\n' >&2
+  fi
+
+  if [[ "$fixtures_seeded" == 1 && "$fixtures_removed" == 0 ]]; then
+    remove_document_fixture >/dev/null 2>&1 || true
+    remove_credential_fixture >/dev/null 2>&1 || true
+    drop_post_backup_table >/dev/null 2>&1 || true
+  fi
+  # The one-off container `compose run` starts is named, so it is found by name
+  # and nothing else of the deployment's is touched.
+  timeout 60 docker rm -f -v "$drill_run_container" >/dev/null 2>&1 || true
+}
+
+# --- --own-stack: install, and remove, a throwaway deployment (#1273) -------
+#
+# Copied from scripts/test-repair-journeys.sh rather than shared with it: its
+# install helpers read that harness's own globals and apply its CI healthcheck
+# override, so sharing them would mean changing it. Same shape: a curl shim
+# serving a fixture OIDC discovery document, a throwaway local registry
+# holding the image, a release manifest naming the pushed digest, and
+# install.sh run under this drill's own COMPOSE_PROJECT_NAME.
+
+# Only one Orbit stack fits on a host: docker-compose.yml pins the container
+# names. Refuse before starting anything, so teardown has nothing to remove.
+refuse_foreign_stack() {
+  local existing owner
+  for existing in orbit orbit-postgres; do
+    owner="$(docker inspect "$existing" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)"
+    [[ -n "$owner" ]] || continue
+    [[ "$owner" == "$own_project" ]] &&
+      fail "a previous --own-stack run left '$existing' behind; remove it with: bash scripts/cleanup-stacks.sh --project $own_project --remove"
+    fail "container '$existing' already exists, owned by Compose project '$owner'. Only one Orbit stack can run at a time; stop that one first."
+  done
+}
+
+write_own_stack_shim() {
+  mkdir -p "$own_workdir/shim"
+  cat > "$own_workdir/discovery.json" <<EOF
+{
+  "issuer": "$own_issuer",
+  "authorization_endpoint": "https://oidc.backup-drill.invalid/application/o/authorize/",
+  "token_endpoint": "https://oidc.backup-drill.invalid/application/o/token/",
+  "jwks_uri": "https://oidc.backup-drill.invalid/application/o/orbit/jwks/",
+  "response_types_supported": ["code"],
+  "code_challenge_methods_supported": ["S256"],
+  "scopes_supported": ["openid", "profile", "email"],
+  "id_token_signing_alg_values_supported": ["RS256"]
+}
+EOF
+  cat > "$own_workdir/shim/curl" <<SHIM
+#!/usr/bin/env bash
+# Serves the fixture discovery document; every other URL fails closed, so an
+# unexpected network dependency surfaces as a failure. Same option grammar as
+# scripts/test-repair-journeys.sh's shim (curl 8.14.1).
+set -Eeuo pipefail
+discovery_url="${own_issuer}.well-known/openid-configuration"
+output="" write_out="" url=""
+refuse_option() {
+  printf 'curl: option %s: is unknown\\n' "\$1" >&2
+  exit 2
+}
+require_parameter() {
+  printf 'curl: option %s: requires parameter\\n' "\$1" >&2
+  exit 2
+}
+args=("\$@")
+for ((i = 0; i < \${#args[@]}; i++)); do
+  case "\${args[i]}" in
+    --output|-o)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      output="\${args[i+1]}"; ((i++)) ;;
+    --write-out|-w)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      write_out="\${args[i+1]}"; ((i++)) ;;
+    --header|-H|--connect-timeout|--max-time|-m|--max-filesize|--proto|--proto-redir|--retry|--resolve)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      ((i++)) ;;
+    --fail|-f|--silent|-s|--show-error|-S|--location|-L|--tlsv1.2|--tlsv1.3) ;;
+    -*) refuse_option "\${args[i]}" ;;
+    *) url="\${args[i]}" ;;
+  esac
+done
+serve() {
+  [[ -z "\$output" ]] || cp -- "\$1" "\$output"
+  [[ -z "\$write_out" ]] || printf '200'
+}
+case "\$url" in
+  "\$discovery_url") serve "$own_workdir/discovery.json" ;;
+  *) [[ -z "\$write_out" ]] || printf '000'; exit 6 ;;
+esac
+SHIM
+  chmod 755 "$own_workdir/shim/curl"
+  # This image is built here and never signed, so a host cosign would refuse
+  # it (install.sh verifies only when cosign answers `cosign version`). CI's
+  # job image has no cosign; hide this host's so the install takes the same
+  # path, and leave signature checks to the harnesses that test them.
+  printf '#!/bin/sh\nexit 127\n' > "$own_workdir/shim/cosign"
+  chmod 755 "$own_workdir/shim/cosign"
+}
+
+# install.sh accepts a non-empty target only as a pre-provisioned input
+# holding exactly .env-orbit and .orbit-secrets.
+make_own_stack_target() {
+  rm -rf -- "$deploy_dir"
+  mkdir -p -- "$deploy_dir/.orbit-secrets"
+  chmod 700 "$deploy_dir/.orbit-secrets"
+  printf 'backup-drill-client-secret\n' > "$deploy_dir/.orbit-secrets/oidc-client-secret"
+  chmod 600 "$deploy_dir/.orbit-secrets/oidc-client-secret"
+  {
+    printf 'APP_URL=https://orbit.backup-drill.invalid\n'
+    printf 'ORBIT_PORT=%s\n' "$own_orbit_port"
+    printf 'ORBIT_BIND_ADDRESS=127.0.0.1\n'
+    printf 'OIDC_ISSUER=%s\n' "$own_issuer"
+    printf 'OIDC_CLIENT_ID=orbit-backup-drill\n'
+    printf 'OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n'
+    printf 'OIDC_CALLBACK_URL=https://orbit.backup-drill.invalid/api/auth/callback\n'
+  } > "$deploy_dir/.env-orbit"
+  chmod 600 "$deploy_dir/.env-orbit"
+}
+
+install_own_stack() {
+  local image revision local_tag pushed_digest release_manifest owner script
+  refuse_foreign_stack
+  revision="$(git -C "$repo_dir" rev-parse HEAD)"
+  if [[ -n "${ORBIT_BACKUP_DRILL_IMAGE:-}" ]]; then
+    image="$ORBIT_BACKUP_DRILL_IMAGE"
+  else
+    image="orbit-backup-drill-local:$revision"
+    printf 'Orbit backup test: building the working-tree image (this takes several minutes).\n' >&2
+    # The development version, as the install acceptance harness stamps.
+    docker build --quiet -t "$image" \
+      --build-arg ORBIT_VERSION=v0.0.0 \
+      --build-arg ORBIT_REVISION="$revision" \
+      --build-arg ORBIT_CHANNEL=ci "$repo_dir" >/dev/null ||
+      fail 'working-tree image build failed'
+  fi
+
+  # From here this run owns Docker objects that teardown must remove.
+  own_stack_started=1
+  docker rm -f -v "$own_registry_name" >/dev/null 2>&1 || true
+  docker run -d --name "$own_registry_name" -p "127.0.0.1:$own_registry_port:5000" \
+      "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373" >/dev/null ||
+    fail 'local registry did not start'
+  local_tag="127.0.0.1:$own_registry_port/$own_repository:latest"
+  docker tag "$image" "$local_tag"
+  docker push --quiet "$local_tag" >/dev/null || fail 'push to the local registry failed'
+  # install.sh needs a release manifest it can verify (ADR-0031 #7); hand it
+  # one naming the digest this push just gave the registry.
+  pushed_digest="$(
+    docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$local_tag" |
+      grep -m1 -F "127.0.0.1:$own_registry_port/$own_repository@"
+  )" || true
+  pushed_digest="${pushed_digest#*@}"
+  [[ "$pushed_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    fail "could not read the digest the local registry gave $local_tag"
+  release_manifest="$own_workdir/orbit-release-manifest.json"
+  bash "$repo_dir/scripts/ci/write-test-manifest.sh" \
+    "$release_manifest" "127.0.0.1:$own_registry_port/$own_repository" "$pushed_digest" >/dev/null ||
+    fail 'could not write the test release manifest'
+
+  write_own_stack_shim
+  make_own_stack_target
+
+  printf 'Orbit backup test: installing a throwaway deployment as Compose project %s.\n' "$own_project" >&2
+  (cd "$deploy_dir" && env PATH="$own_workdir/shim:$PATH" \
+      COMPOSE_PROJECT_NAME="$own_project" \
+      ORBIT_REGISTRY="127.0.0.1:$own_registry_port" ORBIT_REPOSITORY="$own_repository" \
+      ORBIT_RELEASE_MANIFEST="$release_manifest" \
+      bash "$repo_dir/scripts/install.sh" </dev/null) > "$own_workdir/install.log" 2>&1 ||
+    { tail -n 30 "$own_workdir/install.log" >&2; fail 'install.sh failed; its log is kept with the evidence'; }
+
+  # Prove the isolation rather than trust it: teardown removes this project's
+  # volumes, so the wrong label would aim it at somebody else's stack.
+  owner="$(docker inspect orbit-postgres --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)"
+  [[ "$owner" == "$own_project" ]] ||
+    fail "the stack is not owned by $own_project (got '${owner:-none}'); refusing to continue"
+
+  # The drill drives five scripts by relative path; a deployment carries only
+  # backup.sh and restore.sh. Put this checkout's copies of all five in place,
+  # so the drill exercises the working tree's scripts, as the borrowed path
+  # does, against this deployment's own files.
+  for script in backup restore export-recovery-bundle import-recovery-bundle end-maintenance; do
+    install -m 755 -- "$repo_dir/scripts/$script.sh" "$deploy_dir/scripts/$script.sh" ||
+      fail "could not place scripts/$script.sh in the throwaway deployment"
+  done
+}
+
+# Removes everything --own-stack created (#1273): the same steps as
+# scripts/test-repair-journeys.sh's cleanup, each bounded so a hung docker
+# cannot hang the teardown. Docker is touched only once this run started
+# something of its own there; the work directory goes either way.
+remove_own_stack() {
+  local label="label=com.docker.compose.project=$own_project"
+  if [[ "$own_stack_started" == 1 ]]; then
+    if [[ -f "$deploy_dir/.env-orbit" && -f "$deploy_dir/docker-compose.yml" ]]; then
+      chmod 600 "$deploy_dir/.env-orbit" 2>/dev/null || true
+      (cd "$deploy_dir" && timeout 300 docker compose --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) || true
+    fi
+    timeout 60 docker rm -f -v "$own_registry_name" >/dev/null 2>&1 || true
+    timeout 60 docker ps -aq --filter "$label" 2>/dev/null | xargs -r timeout 60 docker rm -f >/dev/null 2>&1 || true
+    timeout 60 docker volume ls -q --filter "$label" 2>/dev/null | xargs -r timeout 60 docker volume rm >/dev/null 2>&1 || true
+    timeout 60 docker network ls -q --filter "$label" 2>/dev/null | xargs -r timeout 60 docker network rm >/dev/null 2>&1 || true
+  fi
+  [[ -z "$own_workdir" ]] || rm -rf -- "$own_workdir" 2>/dev/null ||
+    printf 'Orbit backup test: teardown: could not remove %s\n' "$own_workdir" >&2
+}
+
+# Teardown is the one exit path: EXIT runs it, and INT/TERM turn into an exit
+# so the same trap runs it. `torn_down` makes it fire exactly once however the
+# run ends, and signals are ignored while it runs so a second Ctrl-C cannot
+# abandon it half way.
+readonly teardown_health_seconds="${ORBIT_BACKUP_TEST_TEARDOWN_HEALTH_SECONDS:-60}"
 cleanup() {
+  local status=$?
+  [[ "$torn_down" == 0 ]] || return 0
+  torn_down=1
+  trap '' INT TERM
+  trap - ERR
+  set +e +E +u
+  printf 'Orbit backup test: teardown: starting (exit status %s)\n' "$status" >&2
+
+  # Bounded: a hung docker must not hang the teardown.
+  compose() { timeout 120 docker compose --env-file "$environment_file" "$@"; }
+
+  if [[ "$status" -ne 0 ]]; then collect_evidence "$status"; fi
+
   if [[ -n "$key_backup" && -f "$key_backup" ]]; then
     mv -f -- "$key_backup" "$live_kek" || true
   fi
+  # An owned stack is about to be removed whole, so there is nothing to put
+  # back in it first.
+  if [[ "$touched" == 1 && "$own_stack" != 1 ]]; then restore_deployment; fi
   [[ -z "$backup_path" ]] || rm -f -- "$backup_path"
   [[ -z "$recovery_bundle_path" ]] || rm -f -- "$recovery_bundle_path"
+  [[ -z "$maintenance_backup_path" ]] || rm -f -- "$maintenance_backup_path"
   [[ -z "$test_directory" ]] || rm -rf -- "$test_directory"
+  if [[ "$own_stack" == 1 ]]; then remove_own_stack; fi
+  printf 'Orbit backup test: teardown: complete.\n' >&2
+  if [[ -n "$evidence_dir" ]]; then
+    printf 'Orbit backup test: evidence kept in: %s\n' "$evidence_dir" >&2
+  fi
+}
+# bash runs a trap only after its foreground command ends. A terminal's Ctrl-C,
+# a runner's cancel and `timeout` signal the whole process group, so that
+# command dies with the script and the trap runs at once; on_signal also stops
+# anything still running underneath. A signal sent to this one process alone
+# is acted on when the command it is waiting for returns.
+kill_descendants() {
+  local child
+  for child in $(pgrep -P "$1" 2>/dev/null || true); do
+    kill_descendants "$child"
+    kill -TERM "$child" 2>/dev/null || true
+  done
+}
+on_signal() {
+  trap '' INT TERM
+  kill_descendants "$$"
+  exit "$1"
 }
 
 trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+trap 'last_error="line $LINENO: $BASH_COMMAND"' ERR
 command -v docker >/dev/null 2>&1 || fail 'Docker is required.'
 command -v openssl >/dev/null 2>&1 || fail 'OpenSSL is required.'
 command -v sha256sum >/dev/null 2>&1 || fail 'sha256sum is required.'
 command -v tar >/dev/null 2>&1 || fail 'tar is required.'
 command -v head >/dev/null 2>&1 || fail 'head is required.'
+if [[ "$own_stack" == 1 ]]; then
+  install_own_stack
+  # Every relative path below -- Compose's project directory and the
+  # `bash scripts/...` calls -- now resolves in the owned deployment.
+  cd "$deploy_dir"
+fi
 [[ -f "$environment_file" ]] || fail "Missing ${environment_file}."
 [[ -f "$live_kek" && ! -L "$live_kek" ]] || fail 'Missing regular disposable document key.'
 
@@ -110,10 +540,12 @@ compose() {
 health_probe_url() {
   local bind_address port
 
-  bind_address="$(awk -F= '$1 == "ORBIT_BIND_ADDRESS" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
-  port="$(awk -F= '$1 == "ORBIT_PORT" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
-  bind_address="${bind_address:-0.0.0.0}"
-  port="${port:-3000}"
+  bind_address="$(awk -F= '$1 == "ORBIT_BIND_ADDRESS" { sub(/\r$/, ""); sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  port="$(awk -F= '$1 == "ORBIT_PORT" { sub(/\r$/, ""); sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  # An exported value wins over the file, exactly as it does for Compose's
+  # own interpolation, so the probe reaches the port Compose published (#1241).
+  bind_address="${ORBIT_BIND_ADDRESS:-${bind_address:-0.0.0.0}}"
+  port="${ORBIT_PORT:-${port:-3000}}"
 
   # 0.0.0.0 means "listen on every interface"; it is not itself a
   # connectable address, so probe via loopback there, same as any other
@@ -164,18 +596,22 @@ assert_staging_fixture_present() {
   fi
 }
 
+# The restored generation-1 scan job may still be pending, be mid-attempt, or
+# have run once: its stage is wrapped under 'backup-stage-key', which this
+# instance does not hold, so the attempt is retried as key_unavailable and the
+# stage row and file are kept (6bf40cd0). A retry comes round again about 8
+# minutes later, so a check made that long after its restore (the
+# wrong-material case restores nothing) sees a second attempt: attempts 3 or 4
+# are both bounded. Purging the stage fails the drill.
 assert_recovery_jobs_restored() {
   local recovery_state recovery_deadline=$((SECONDS + 10))
   while (( SECONDS < recovery_deadline )); do
     recovery_state="$(compose exec -T orbit-db sh -c \
-      'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select case when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''pending'\'' and attempts = 2 and locked_at is null and lease_token is null and lease_expires_at is null) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''pending'\'' when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''processing'\'' and attempts = 3 and locked_at is not null and lease_token is not null and lease_expires_at > now()) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''processing'\'' when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''completed'\'' and attempts = 3 and completed_at is not null and locked_at is null and lease_token is null and lease_expires_at is null) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''rejected'\'' and scan_status = '\''error'\'' and failure_code = '\''staging_object_invalid'\'') and not exists (select 1 from document_staging_objects where document_id = '\''$1'\'') then '\''purged'\'' else '\''invalid'\'' end from document_jobs where document_id = '\''$1'\'' and kind = '\''scan'\'';"' \
+      'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select case when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''pending'\'' and attempts = 2 and locked_at is null and lease_token is null and lease_expires_at is null) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''pending'\'' when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''processing'\'' and attempts in (3, 4) and locked_at is not null and lease_token is not null and lease_expires_at > now()) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''processing'\'' when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''retry'\'' and attempts in (3, 4) and last_error = '\''key_unavailable'\'' and locked_at is null and lease_token is null and lease_expires_at is null and next_attempt_at > now()) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''retry'\'' else '\''invalid'\'' end from document_jobs where document_id = '\''$1'\'' and kind = '\''scan'\'';"' \
       sh "$recovery_document_id" 2>/dev/null | tr -d '[:space:]')" || recovery_state=invalid
     case "$recovery_state" in
-      pending|processing)
+      pending|processing|retry)
         compose exec -T orbit-app test -f "$staging_path" >/dev/null 2>&1 && return 0
-        ;;
-      purged)
-        ! compose exec -T orbit-app test -e "$staging_path" >/dev/null 2>&1 && return 0
         ;;
     esac
     sleep 1
@@ -282,8 +718,8 @@ insert_credential_fixture() {
   compose exec -T orbit-db sh -c \
     'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="
       delete from users where id = '\''$1'\'';
-      insert into users (id, email, email_verified, display_name, is_instance_admin)
-        values ('\''$1'\'', '\''backup-drill@example.invalid'\'', false, '\''Backup Drill User'\'', false);
+      insert into users (id, email_verified, display_name, is_instance_admin)
+        values ('\''$1'\'', false, '\''Backup Drill User'\'', false);
       insert into local_credentials (user_id, password_hash)
         values ('\''$1'\'', '\''$2'\'');
       insert into credential_setup_tokens (id, user_id, token_hash, purpose, expires_at)
@@ -344,8 +780,8 @@ assert_credential_fixture_present() {
 
 remove_credential_fixture() {
   compose exec -T orbit-db sh -c \
-    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="delete from users where id = '\''$1'\'';"' \
-    sh "$credential_user_id" >/dev/null
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="delete from sessions where id = '\''$2'\''; delete from users where id = '\''$1'\'';"' \
+    sh "$credential_user_id" "$credential_session_id" >/dev/null
 }
 
 prepare_variant() {
@@ -374,7 +810,7 @@ package_variant() {
   fi
   if [[ "$refresh_auth" == true ]]; then
     cat "$variant_directory/manifest" "$variant_directory/checksums.sha256" > "$variant_directory/manifest-and-checksums"
-    compose run --rm --no-deps -T --entrypoint node orbit-app \
+    compose run --rm --no-deps -T --name "$drill_run_container" --entrypoint node orbit-app \
       /opt/orbit/scripts/recovery-crypto.mjs hmac /run/secrets/orbit-document-kek \
       < "$variant_directory/manifest-and-checksums" > "$variant_directory/manifest.hmac"
   fi
@@ -478,6 +914,22 @@ expect_preflight_rejection() {
   assert_staging_fixture_present
 }
 
+# The opposite of expect_preflight_rejection: restore must take this bundle.
+# A full restore to the backup point, checked as run_valid_restore checks
+# one; the post-backup session it removes is put back, so the restores after
+# this one still prove the revocation boundary.
+expect_restore_acceptance() {
+  local bundle_path="$1" label="$2" output=""
+  if ! output="$(ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$bundle_path" 2>&1)"; then
+    fail "Restore refused the ${label} case, which it must accept: ${output}"
+  fi
+  wait_for_health
+  assert_fixture_present
+  assert_staging_fixture_present
+  assert_credential_fixture_present
+  insert_post_backup_session_fixture
+}
+
 run_valid_restore() {
   ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$backup_path" >/dev/null
   wait_for_health
@@ -518,13 +970,15 @@ close_instance_for_maintenance() {
 # checked, which is a poor place to discover a mistake: the one moment it
 # runs is the moment nobody can sign in.
 test_restore_during_maintenance() {
+  maintenance_initial="$(maintenance_active)"
+  maintenance_touched=1
   close_instance_for_maintenance
   [[ "$(maintenance_active)" == 't' ]] || fail 'Maintenance did not become active for the restore drill.'
   # Maintenance is a healthy category, not an outage, so the readiness probe
   # restore.sh waits on must keep answering while the instance is closed.
   health_check || fail 'Health stopped answering while maintenance was active.'
 
-  local maintenance_backup_output maintenance_backup_path
+  local maintenance_backup_output
   maintenance_backup_output="$(bash scripts/backup.sh)"
   maintenance_backup_path="${maintenance_backup_output#Orbit backup created: }"
   [[ -f "$maintenance_backup_path" ]] || fail 'Backup during maintenance did not return a bundle path.'
@@ -541,8 +995,53 @@ test_restore_during_maintenance() {
   [[ "$(maintenance_active)" == 'f' ]] || fail 'Re-running the recovery path did not leave Orbit open.'
 
   rm -f -- "$maintenance_backup_path"
+  maintenance_backup_path=""
   # Leave the canonical bundle applied for the assertions that follow.
   run_valid_restore
+}
+
+# The restore-removes-later-schema drill (#1316). A backup is taken, then a
+# table the backup has never heard of is created in the live database, as a
+# later migration would. Restoring that backup must leave the database exactly
+# as the backup had it: the table gone (pg_restore --clean only drops what the
+# archive names, so a table outside the archive survives it), Orbit healthy on
+# the restored data, and no rollback -- restore.sh exits 0 and leaves no
+# journal. A surviving table would make the migration that creates it fail on
+# boot with 'relation already exists', which the restore reads as a failed
+# cutover and rolls back.
+drop_post_backup_table() {
+  maintenance_sql "drop table if exists public.${post_backup_table};" >/dev/null
+}
+
+post_backup_table_exists() {
+  maintenance_sql "select to_regclass('public.${post_backup_table}') is not null;"
+}
+
+test_restore_removes_post_backup_table() {
+  local drill_backup_output drill_backup_path restore_status=0
+
+  drill_backup_output="$(bash scripts/backup.sh)"
+  drill_backup_path="${drill_backup_output#Orbit backup created: }"
+  [[ -f "$drill_backup_path" ]] || fail 'Backup for the post-backup table drill did not return a bundle path.'
+
+  maintenance_sql "drop table if exists public.${post_backup_table}; create table public.${post_backup_table} (id integer primary key);" >/dev/null
+  [[ "$(post_backup_table_exists)" == 't' ]] ||
+    fail 'The post-backup table was not created for the schema drill.'
+
+  ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$drill_backup_path" >/dev/null 2>&1 ||
+    restore_status=$?
+  rm -f -- "$drill_backup_path"
+
+  [[ "$restore_status" == 0 ]] ||
+    fail "Restoring a backup older than a later table exited $restore_status; the restore rolled back or failed."
+  [[ ! -f "$restore_state_directory/restore.journal" ]] ||
+    fail 'Restoring a backup older than a later table left a restore journal behind.'
+  wait_for_health
+  [[ "$(post_backup_table_exists)" == 'f' ]] || {
+    drop_post_backup_table
+    fail 'A table created after the backup survived the restore; the database is not as the backup had it.'
+  }
+  assert_fixture_present
 }
 
 test_local_key_rejections() {
@@ -610,7 +1109,7 @@ test_incomplete_correspondence_query() {
 }
 
 test_journal_publication_failures() {
-  local restore_root="${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore"
+  local restore_root="${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore"
   if ORBIT_RESTORE_TEST_MODE=true ORBIT_RESTORE_TEST_SYNC_FAILURE_STAGE=journal-file \
     ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$backup_path" >/dev/null 2>&1; then
     fail 'Restore unexpectedly succeeded when initial journal file synchronization failed.'
@@ -658,7 +1157,7 @@ test_checkpoint_failure_recovery() {
     ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$backup_path" >/dev/null 2>&1; then
     fail 'The forced checkpoint restoration failure unexpectedly succeeded.'
   fi
-  [[ -f "${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore/restore.journal" ]] ||
+  [[ -f "${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore/restore.journal" ]] ||
     fail 'Checkpoint failure did not preserve a restore journal.'
   if health_check; then fail 'Orbit restarted after checkpoint restoration failure.'; fi
   bash scripts/restore.sh --recover >/dev/null
@@ -712,13 +1211,13 @@ test_hard_interruption_recovery() {
     ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$backup_path" >/dev/null 2>&1; then
     fail 'The hard-interruption seam unexpectedly returned success.'
   fi
-  [[ -f "${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore/restore.journal" ]] ||
+  [[ -f "${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore/restore.journal" ]] ||
     fail 'Hard interruption did not preserve a restore journal.'
-  grep -Eq '^database_sha256=[0-9a-f]{64}$' "${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore/restore.journal" ||
+  grep -Eq '^database_sha256=[0-9a-f]{64}$' "${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore/restore.journal" ||
     fail 'Hard interruption journal did not persist a database checkpoint digest.'
-  grep -Eq '^documents_sha256=[0-9a-f]{64}$' "${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore/restore.journal" ||
+  grep -Eq '^documents_sha256=[0-9a-f]{64}$' "${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore/restore.journal" ||
     fail 'Hard interruption journal did not persist a document checkpoint digest.'
-  grep -Eq '^document_kek_sha256=[0-9a-f]{64}$' "${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore/restore.journal" ||
+  grep -Eq '^document_kek_sha256=[0-9a-f]{64}$' "${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore/restore.journal" ||
     fail 'Hard interruption journal did not persist a checkpoint-key digest.'
   if health_check; then fail 'Orbit restarted after hard interruption.'; fi
   test_import_refuses_existing_journal
@@ -740,7 +1239,7 @@ test_import_refuses_existing_journal() {
     ORBIT_RECOVERY_TEST_MODE=true bash scripts/import-recovery-bundle.sh "$recovery_bundle_path" >/dev/null 2>&1; then
     fail 'Recovery import accepted an unfinished restore journal.'
   fi
-  [[ -f "${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore/restore.journal" ]] ||
+  [[ -f "${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore/restore.journal" ]] ||
     fail 'Recovery import removed unfinished restore evidence.'
   if health_check; then fail 'Recovery import restarted Orbit despite unfinished restore evidence.'; fi
   after_started_at="$(docker inspect --format '{{.State.StartedAt}}' orbit)"
@@ -751,7 +1250,7 @@ test_import_refuses_existing_journal() {
 }
 
 test_corrupted_checkpoint_integrity() {
-  local restore_root="${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore"
+  local restore_root="${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore"
   local restore_id checkpoint_key checkpoint_documents checkpoint_documents_backup before_key_hash output
   restore_id="$(awk -F= '$1 == "restore_id" { print $2 }' "$restore_root/restore.journal")"
   checkpoint_key="$restore_root/checkpoint-$restore_id/document-kek"
@@ -801,6 +1300,9 @@ test_wrong_recovery_material() {
 }
 
 test_directory="$(mktemp -d "${TMPDIR:-/tmp}/orbit-backup-test.XXXXXX")"
+# From here the deployment is changed, so teardown puts it back (#1241).
+touched=1
+fixtures_seeded=1
 compose exec -T --user orbit:orbit orbit-app sh -c \
   'mkdir -p /var/lib/orbit/documents/objects/aa/aa /var/lib/orbit/documents/objects/cc/cc /var/lib/orbit/documents/staging && printf "%s" "orbit-backup-ciphertext-00001" > "$1" && printf "%s" "orbit-imap-attachment-00001" > "$2" && printf "%s" "orbit-encrypted-recovery-00001" > "$3"' \
   sh "$storage_path" "$attachment_storage_path" "$staging_path"
@@ -826,7 +1328,7 @@ expect_preflight_rejection "$test_directory/missing-attachment-object.tar" 'miss
 make_cross_table_duplicate_bundle
 expect_preflight_rejection "$test_directory/cross-table-duplicate.tar" 'cross-table duplicate object reference'
 make_extra_object_bundle
-expect_preflight_rejection "$test_directory/extra-object.tar" 'extra ciphertext object'
+expect_restore_acceptance "$test_directory/extra-object.tar" 'unreferenced ciphertext object'
 make_truncated_object_bundle
 expect_preflight_rejection "$test_directory/truncated-object.tar" 'truncated ciphertext object'
 make_size_mismatch_bundle
@@ -848,10 +1350,13 @@ test_ordinary_rollback
 test_checkpoint_failure_recovery
 test_hard_interruption_recovery
 test_wrong_recovery_material
+test_restore_removes_post_backup_table
 test_restore_during_maintenance
 
 remove_document_fixture
 assert_fixture_absent
 remove_credential_fixture
+drop_post_backup_table
+fixtures_removed=1
 
 printf 'Orbit backup test: staged correspondence, rollback, interruption recovery, key handling, restore during maintenance, document/crypto round trip, and the authentication-data revocation boundary passed.\n'

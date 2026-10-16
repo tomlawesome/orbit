@@ -11,13 +11,14 @@ means the tuning set:
 
 | directory   | documents | what it is for |
 | ----------- | --------- | -------------- |
-| `sources/`  | the tuning set (48) | read it, tune against it, argue with it |
+| `sources/`  | the tuning set (60) | read it, tune against it, argue with it |
 | `holdout3/` | an unseen set (12) | scored, never read, never tuned against |
 | `holdout4/` | an unseen set (12) | scored, never read, never tuned against |
 
 Hold-outs 1 and 2 are retired: both were spent (#996, and the shape of its
 misses read during tuning, #998) and rolled into `sources/` on 2026-09-12,
-which is why the tuning set is 48 rather than 24. `holdout3/` and `holdout4/`
+which made the tuning set 48 rather than 24; twelve long, noisy household
+documents joined it on 2026-09-13 (#1007), making 60. `holdout3/` and `holdout4/`
 are the two unseen sets left; a further one follows this file's shape and
 `generate.mjs`'s directory-derived naming.
 
@@ -120,8 +121,8 @@ documents got through because they were reviewed one PDF at a time.
 
 ## Fonts
 
-`fetch-fonts.sh` downloads eleven files across eight families, all **SIL Open
-Font License 1.1**, into `scripts/corpus/fonts/` — which is **not committed**.
+`fetch-fonts.sh` downloads the typefaces it lists (about 120 files from roughly
+100 Google Fonts families), all **SIL Open Font License 1.1**, into `scripts/corpus/fonts/` — which is **not committed**.
 Fetching rather than vendoring keeps the project from redistributing copies
 and taking on the obligations that go with that. The corpus text is committed,
 so this is only needed to regenerate the fixtures.
@@ -131,10 +132,23 @@ served to a user, or is redistributed.
 
 Two traps, both of which have already cost a rebuild:
 
-- **Only ten fonts are installed on this host** (see the root `AGENTS.md`).
-  Anything else falls back silently. Six documents were once built to look
-  deliberately unlike each other and rendered in a single face because every
-  one asked for Helvetica or Times New Roman.
+- **Only ten usable text faces are installed on this host** (the rest are CJK,
+  Unifont and emoji fallbacks), and anything else falls back with no warning:
+
+  ```
+  Bitstream Charter   Courier 10 Pitch   Liberation Serif
+  Liberation Sans     Liberation Mono    FreeSerif
+  FreeSans            FreeMono           Loma
+  WenQuanYi Zen Hei
+  ```
+
+  Ask for Helvetica, Arial, Georgia or Times New Roman and you get a
+  substitute, and nothing tells you. Rendering anything to PDF or an image (a
+  mockup, a test document, a screenshot) uses these. Six documents were once
+  built in parallel to look deliberately unlike each other, every one named a
+  font from the uninstalled list, and all six rendered in the same face: the
+  variety was requested but never existed (#981, 2026-09-11). Check with
+  `fc-list : family` rather than assuming a common font is present.
 - **Google ships variable fonts as `Name[wght].ttf`.** Brackets do not resolve
   in a CSS `url()`, so the fetch script drops the axis tag from the filename.
 
@@ -163,7 +177,7 @@ but enough to change stage 1 with.
 
 Rather than write a fourth set immediately, both retired hold-outs were
 rolled into `sources/` on 2026-09-12 (#998): their 24 documents joined the
-original 24 to make the 48-document tuning set this file now describes, and
+original 24 to make a 48-document tuning set (60 since #1007's twelve), and
 `holdout3/` took over as the only unseen set. Nothing about a document
 changed in the move -- same HTML, same ground truth, same fonts -- only its
 directory and, for the two generated modules it came from
@@ -175,7 +189,7 @@ no longer exist.
 `holdout3/` is twelve documents written after the extractor was tuned, by
 someone who had not read `sources/` or either retired hold-out. It is the
 only measurement the project has of whether the extractor generalises rather
-than fits the 48 pages it was built against, and that is true only while
+than fits the 60 pages it was built against, and that is true only while
 nobody working on the extractor has seen the pages.
 
 Twelve documents, real Tika output: about 19,200 characters in total, 97

@@ -109,14 +109,20 @@ vi.mock("@/server/documents/config", () => ({
   wrappingKey: () => ({ keyEncryptionKey: Buffer.alloc(32, 1), keyId: "key-1" }),
   keyEncryptionKeyFor: () => Buffer.alloc(32, 1),
 }));
+// The administrator's upload limit (#1285) is proven in
+// src/server/upload-limit.test.ts; here it answers the configured default.
+vi.mock("@/server/upload-limit", () => ({
+  readEffectiveUploadLimit: async (config: { maxBytes: number }) => config.maxBytes,
+}));
 
 vi.mock("@/server/documents/validation", () => ({
   detectDocumentMediaType: () => "application/pdf",
   normalizedDocumentFilename: (name: string) => name,
-  validateSupportedDocumentStructure: async () => true,
+  classifyDocumentStructure: async () => "supported_structure",
 }));
 
-vi.mock("@/server/documents/crypto", () => ({
+vi.mock("@/server/documents/crypto", async (importActual) => ({
+  envelopeOf: (await importActual<typeof import("@/server/documents/crypto")>()).envelopeOf,
   encryptDocument: () => ({
     ciphertext: Buffer.from("ciphertext"),
     envelope: {
@@ -131,8 +137,8 @@ vi.mock("@/server/documents/crypto", () => ({
   }),
 }));
 
-vi.mock("@/server/documents/storage", () => ({
-  LocalDocumentStorage: class {
+vi.mock("@/server/documents/storage", () => {
+  class LocalDocumentStorage {
     async receive() {
       return { quarantinePath: "/tmp/q", sizeBytes: 5, contentSha256: "hash", leadingBytes: Buffer.from("%PDF") };
     }
@@ -146,8 +152,12 @@ vi.mock("@/server/documents/storage", () => ({
     async deleteCiphertext() {}
     async deleteStagingCiphertext() {}
     async discardQuarantine() {}
-  },
-}));
+  }
+  return {
+    LocalDocumentStorage,
+    openDocumentStorage: () => new LocalDocumentStorage(),
+  };
+});
 
 const { uploadItemDocument } = await import("./document-repository");
 
@@ -160,8 +170,10 @@ function fakeBody(): ReadableStream<Uint8Array> {
 }
 
 function seedUploadHappyPath() {
-  // requireHouseholdAndItemAccess selects `.from(users)`, joining the rest.
-  queue(mocks.selectQueues, "users", [{ itemId, administrator: true, membershipUserId: userId }]);
+  // requireHouseholdAndItemAccess: the household gate answers from the users
+  // table, then the item is looked up in that household.
+  queue(mocks.selectQueues, "users", [{ administrator: true, role: "owner" }]);
+  queue(mocks.selectQueues, "items", [{ id: itemId }]);
   // reserveDocumentMetadata's instance/household quota totals.
   queue(mocks.selectQueues, "documents", [{ total: 0 }]);
   queue(mocks.selectQueues, "documents", [{ total: 0 }]);

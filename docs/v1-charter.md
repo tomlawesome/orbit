@@ -127,7 +127,8 @@ Requirement identifiers are stable. GitHub issues and tests should cite them.
 - **Accessibility:** keyboard operation, readable focus and contrast, text
   scaling, and automated plus manual checks on authenticated workflows.
 - **Operability:** actionable health, deterministic update and rollback
-  guidance, backup scheduling, and real restore exercises.
+  guidance, backup guidance (operators schedule their own backups; owner,
+  2026-10-07), and real restore exercises.
 - **Maintainability:** issue-led vertical slices, durable ADRs, replaceable
   adapters, and tests at the cheapest layer that proves the requirement.
 
@@ -149,8 +150,7 @@ when they cannot weaken the supported core.
 
 Stable v1 requires:
 
-1. Every requirement above to map to an open gap issue or passing evidence in
-   the [engineering baseline](engineering-baseline.md).
+1. Every requirement above to map to an open gap issue or passing evidence.
 2. All release-blocking issues closed with linked tests and review evidence.
 3. The [quality strategy](quality-strategy.md) and required CI gates passing.
 4. A versioned-release preview deployed by digest and exercised on a

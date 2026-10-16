@@ -32,22 +32,17 @@ import {
   normalizeImapRecipientAlias,
   parseTrustedRecipientHeader,
 } from "@/server/mail-in/core/imap-recipient";
-// Pinning the pure environment-parsing contract this file's suite is named
-// for (ADR-0017 slice 1, orbit#742): the app's runtime IMAP configuration is
-// now database-backed (src/server/mail-in/mailbox-config.ts), so the
-// `getImapIngestionConfig` name moved there; this parser is what it used to
-// be, renamed, imported here under its old local name so the fixtures below
-// need no other change.
-import { parseImapIngestionConfigFromEnvironment as getImapIngestionConfig } from "@/server/mail-in/core/config";
+import { testImapConfig } from "../../tests/support/imap-config";
 import {
   imapAttachmentRetryDelayMs,
   imapProviderConfigCommitment,
   imapProviderConnectionOptions,
   imapRecipientAlias,
   matchesImapRecipientAlias,
-} from "@/server/imap-ingestion";
+  safeAttachmentFailure,
+} from "@/server/mail-in/imap-ingestion";
 import { getNotificationWorkerConfig } from "@/server/notification-worker";
-import { failureReasonOf, findReviewedIntakeCandidateReason, reviewInboxState } from "@/server/imap-inbox";
+import { failureReasonOf, findReviewedIntakeCandidateReason, reviewInboxState } from "@/server/mail-in/imap-inbox";
 import { sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 
 // --- self-contained fixtures (no repo-relative test-support imports, so
@@ -90,105 +85,45 @@ function leaf(overrides: Record<string, unknown> = {}) {
   } as never;
 }
 
-const baseImapEnv: Record<string, string> = {
-  IMAP_HOST: "imap.example.test",
-  IMAP_USER: "orbit",
-  IMAP_PASSWORD: "test-password",
-  IMAP_RECIPIENT_DOMAIN: "ingest.example.test",
-  IMAP_ALIAS_CURRENT_GENERATION: "2",
-  IMAP_ALIAS_CURRENT_SECRET: "current-alias-secret-that-is-at-least-32-chars",
-  IMAP_TRUSTED_RECIPIENT_HEADER: "X-Original-To",
+const smtpEnvironment = {
   SMTP_HOST: "smtp.example.test",
   SMTP_USER: "orbit-notifications",
   SMTP_PASSWORD: "test-smtp-password",
-};
-
-function env(overrides: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
-  return { ...baseImapEnv, ...overrides } as NodeJS.ProcessEnv;
-}
+} as NodeJS.ProcessEnv;
 
 // ---------------------------------------------------------------------------
 // 1. Config handling — scenarios not already pinned by imap-ingestion.test.ts
 // ---------------------------------------------------------------------------
 
-describe("IMAP config handling — previous alias generation edge cases", () => {
-  it("requires the previous alias generation, secret, and expiry all together", () => {
-    expect(() => getImapIngestionConfig(env({ IMAP_ALIAS_PREVIOUS_GENERATION: "1" })))
-      .toThrow("must be configured together");
-  });
-
-  it("rejects a previous generation equal to the current generation", () => {
-    expect(() => getImapIngestionConfig(env({
-      IMAP_ALIAS_PREVIOUS_GENERATION: "2",
-      IMAP_ALIAS_PREVIOUS_SECRET: "previous-alias-secret-that-is-at-least-32-chars",
-      IMAP_ALIAS_PREVIOUS_EXPIRES_AT: new Date(Date.now() + 86_400_000).toISOString(),
-    }))).toThrow("must be distinct");
-  });
-
-  it("enforces a 32-character floor independently for current and previous secrets", () => {
-    expect(() => getImapIngestionConfig(env({ IMAP_ALIAS_CURRENT_SECRET: "too-short" })))
-      .toThrow("current secret must be at least 32 characters");
-    expect(() => getImapIngestionConfig(env({
-      IMAP_ALIAS_PREVIOUS_GENERATION: "1",
-      IMAP_ALIAS_PREVIOUS_SECRET: "too-short",
-      IMAP_ALIAS_PREVIOUS_EXPIRES_AT: new Date(Date.now() + 86_400_000).toISOString(),
-    }))).toThrow("previous secret must be at least 32 characters");
-  });
-
-  it("requires an explicit UTC timestamp for the previous alias expiry, not a bare date", () => {
-    expect(() => getImapIngestionConfig(env({
-      IMAP_ALIAS_PREVIOUS_GENERATION: "1",
-      IMAP_ALIAS_PREVIOUS_SECRET: "previous-alias-secret-that-is-at-least-32-chars",
-      IMAP_ALIAS_PREVIOUS_EXPIRES_AT: "2026-08-01",
-    }))).toThrow("explicit UTC timestamp");
-  });
-
-  it("bounds the previous alias transition window to 90 days from now", () => {
-    expect(() => getImapIngestionConfig(env({
-      IMAP_ALIAS_PREVIOUS_GENERATION: "1",
-      IMAP_ALIAS_PREVIOUS_SECRET: "previous-alias-secret-that-is-at-least-32-chars",
-      IMAP_ALIAS_PREVIOUS_EXPIRES_AT: new Date(Date.now() + 91 * 86_400_000).toISOString(),
-    }))).toThrow("bounded rotation window");
-  });
-
-  it("accepts a fully-specified previous generation inside the bounded window", () => {
-    const expiresAt = new Date(Date.now() + 5 * 86_400_000).toISOString();
-    const config = getImapIngestionConfig(env({
-      IMAP_ALIAS_PREVIOUS_GENERATION: "1",
-      IMAP_ALIAS_PREVIOUS_SECRET: "previous-alias-secret-that-is-at-least-32-chars",
-      IMAP_ALIAS_PREVIOUS_EXPIRES_AT: expiresAt,
-    }));
-    expect(config.aliasPrevious).toMatchObject({ generation: 1 });
-    expect(config.aliasPrevious?.expiresAt?.toISOString()).toBe(expiresAt);
-  });
-});
-
 describe("IMAP config handling — TLS options and non-secret commitment", () => {
   it("defaults SNI/servername to the host, but an explicit tlsServerName overrides it", () => {
-    const defaulted = getImapIngestionConfig(env());
+    const defaulted = testImapConfig();
     expect(imapProviderConnectionOptions(defaulted)).toMatchObject({
       secure: true,
       logger: false,
       tls: { rejectUnauthorized: true, servername: "imap.example.test" },
       maxLiteralSize: IMAP_ATTACHMENT_LIMITS.rawMessageBytes,
     });
-    const overridden = getImapIngestionConfig(env({ IMAP_TLS_SERVER_NAME: "pinned.example.test" }));
+    const overridden = testImapConfig({ tlsServerName: "pinned.example.test" });
     expect(imapProviderConnectionOptions(overridden).tls).toMatchObject({ servername: "pinned.example.test" });
   });
 
   it("changes the commitment when identity/topology fields change, but not when only a secret rotates", () => {
-    const smtp = getNotificationWorkerConfig(env());
-    const baseline = getImapIngestionConfig(env());
-    const sameGenerationDifferentSecret = getImapIngestionConfig(env({
-      IMAP_ALIAS_CURRENT_SECRET: "a-completely-different-alias-secret-value-here",
-    }));
+    const smtp = getNotificationWorkerConfig(smtpEnvironment);
+    const baseline = testImapConfig();
+    const differentSecret = "a-completely-different-alias-secret-value-here";
+    const sameGenerationDifferentSecret = testImapConfig({
+      currentAliasSecret: differentSecret,
+      aliasCurrent: { generation: 1, secret: differentSecret },
+      aliasSecret: differentSecret,
+    });
     // Rotating only the secret bytes for the same generation does not change
     // the commitment: the hash is over host/port/user/mailbox/tlsServerName/
     // recipientDomain/header/generation numbers and SMTP security+from only.
     expect(imapProviderConfigCommitment(sameGenerationDifferentSecret, smtp))
       .toBe(imapProviderConfigCommitment(baseline, smtp));
 
-    const differentHost = getImapIngestionConfig(env({ IMAP_HOST: "other-imap.example.test" }));
+    const differentHost = testImapConfig({ host: "other-imap.example.test" });
     expect(imapProviderConfigCommitment(differentHost, smtp))
       .not.toBe(imapProviderConfigCommitment(baseline, smtp));
 
@@ -216,7 +151,7 @@ describe("IMAP attachment-processing backoff schedule", () => {
 
 describe("IMAP recipient alias helpers wired through config", () => {
   it("derives and matches an alias at the generation it is given, and refuses when disabled", () => {
-    const config = getImapIngestionConfig(env());
+    const config = testImapConfig();
     const userId = "9c3b6f0a-2222-4aaa-8bbb-000000000001";
     const generation = config.aliasCurrent.generation;
     const alias = imapRecipientAlias(userId, config, generation);
@@ -224,7 +159,7 @@ describe("IMAP recipient alias helpers wired through config", () => {
     expect(matchesImapRecipientAlias(alias, userId, config, generation)).toBe(true);
     expect(matchesImapRecipientAlias(alias, "a-different-user-id", config, generation)).toBe(false);
 
-    const disabled = getImapIngestionConfig(env({ IMAP_ENABLED: "false" }));
+    const disabled = testImapConfig({ enabled: false });
     expect(() => imapRecipientAlias(userId, disabled, generation)).toThrow("IMAP ingestion is not configured");
     expect(matchesImapRecipientAlias(alias, userId, disabled, generation)).toBe(false);
   });
@@ -236,7 +171,7 @@ describe("IMAP recipient alias helpers wired through config", () => {
        row's `active_until`, not a property of the key, and is proved in
        tests/integration/mail-in-relay-rotation.test.ts against a real
        database. */
-    const config = getImapIngestionConfig(env());
+    const config = testImapConfig();
     const userId = "9c3b6f0a-2222-4aaa-8bbb-000000000002";
     const generation = config.aliasCurrent.generation;
     const alias = imapRecipientAlias(userId, config, generation);
@@ -438,8 +373,8 @@ describe("reviewInboxState — status/failure to UI classification mapping", () 
     expect(reviewInboxState("approving", null)).toMatchObject({ classification: "waiting", canApprove: false, canDiscard: false });
   });
 
-  it("only the specific legacy_review_item failure code unlocks cleanup-only discard on a failed row", () => {
-    expect(reviewInboxState("failed", "legacy_review_item")).toMatchObject({ classification: "cleanup", canApprove: false, canDiscard: true });
+  it("no failure code unlocks cleanup-only discard on a failed row (#1403 D4)", () => {
+    expect(reviewInboxState("failed", "some_unmapped_code")).toMatchObject({ classification: "unavailable", canApprove: false, canDiscard: false });
     expect(reviewInboxState("failed", "attachment_processing_exhausted")).toMatchObject({ classification: "unavailable", canApprove: false, canDiscard: false });
   });
 
@@ -454,7 +389,7 @@ describe("reviewInboxState — status/failure to UI classification mapping", () 
     expect(reviewInboxState("recoverable", "some_other_code", fullContext)).toMatchObject({ canApprove: false, classification: "retry" });
   });
 
-  it("folds every stored failure_code into one of the nine reasons (#1143), one per table row plus null → unknown", () => {
+  it("folds every stored failure_code into one of the eight reasons (#1143), one per table row plus null → unknown", () => {
     expect(failureReasonOf("no_supported_pdf")).toBe("no_document");
     expect(failureReasonOf("message_too_large")).toBe("too_large");
     expect(failureReasonOf("malware_detected")).toBe("malware");
@@ -462,15 +397,24 @@ describe("reviewInboxState — status/failure to UI classification mapping", () 
     expect(failureReasonOf("attachment_download_failed")).toBe("not_kept");
     expect(failureReasonOf("recipient_mismatch")).toBe("wrong_recipient");
     expect(failureReasonOf("account_disabled")).toBe("account_disabled");
-    expect(failureReasonOf("legacy_review_item")).toBe("older_review");
     expect(failureReasonOf(null)).toBe("unknown");
     expect(failureReasonOf(undefined)).toBe("unknown");
     expect(failureReasonOf("some_unmapped_code")).toBe("unknown");
   });
 
+  it("keeps every scanner outcome a member can meet as 'scanner unavailable', not 'not kept' (engine-7)", () => {
+    for (const code of ["scanner_unavailable", "scanner_timeout", "scanner_protocol", "scanner_failed"]) {
+      expect(failureReasonOf(code)).toBe("scanner_off");
+      // The code the holding step throws must survive to the stored receipt,
+      // or the member is told the attachment was not kept instead.
+      expect(safeAttachmentFailure(new Error(code))).toBe(code);
+    }
+    expect(safeAttachmentFailure(new Error("some_unlisted_code"))).toBe("attachment_processing_failed");
+  });
+
   it("carries the derived reason on reviewInboxState's return alongside message", () => {
     expect(reviewInboxState("failed", "message_too_large")).toMatchObject({ classification: "unavailable", reason: "too_large" });
-    expect(reviewInboxState("failed", "legacy_review_item")).toMatchObject({ classification: "cleanup", reason: "older_review" });
+    expect(reviewInboxState("failed", "some_unmapped_code")).toMatchObject({ classification: "unavailable", reason: "unknown" });
     expect(reviewInboxState("failed", null)).toMatchObject({ classification: "unavailable", reason: "unknown" });
   });
 });
@@ -504,17 +448,18 @@ describe("findReviewedIntakeCandidateReason — comparableText normalization and
 });
 
 describe("sanitizeReviewDraftMetadata — bounded field mapping from a proposal blob", () => {
-  it("keeps a syntactically valid currency/date/scheduleKind and drops the invalid variants of each", () => {
+  it("keeps a valid currency/date/scheduleKind and drops the invalid variants of each", () => {
     expect(sanitizeReviewDraftMetadata({ proposal: { currency: "gbp" } }).proposal.currency).toBeUndefined();
     expect(sanitizeReviewDraftMetadata({ proposal: { currency: "GB" } }).proposal.currency).toBeUndefined();
     expect(sanitizeReviewDraftMetadata({ proposal: { currency: "GBP" } }).proposal.currency).toBe("GBP");
     expect(sanitizeReviewDraftMetadata({ proposal: { scheduleKind: "monthly" } }).proposal.scheduleKind).toBeUndefined();
     expect(sanitizeReviewDraftMetadata({ proposal: { scheduleKind: "renewal" } }).proposal.scheduleKind).toBe("renewal");
-    // NOTE (flagged, not fixed): dueDate is only checked against the
-    // \d{4}-\d{2}-\d{2} shape — it is never parsed as a real calendar date,
-    // so a syntactically-shaped but impossible date currently survives
-    // sanitization unchanged.
-    expect(sanitizeReviewDraftMetadata({ proposal: { dueDate: "2026-13-40" } }).proposal.dueDate).toBe("2026-13-40");
+    // Fixed in #1333: this pinned a flaw (a date of the right shape but not a
+    // real day, such as month 13, survived sanitisation). A due date is now a
+    // day that exists.
+    expect(sanitizeReviewDraftMetadata({ proposal: { dueDate: "2026-13-40" } }).proposal.dueDate).toBeUndefined();
+    expect(sanitizeReviewDraftMetadata({ proposal: { dueDate: "2026-02-30" } }).proposal.dueDate).toBeUndefined();
+    expect(sanitizeReviewDraftMetadata({ proposal: { dueDate: "2026-08-13" } }).proposal.dueDate).toBe("2026-08-13");
     expect(sanitizeReviewDraftMetadata({ proposal: { dueDate: "13 Aug 2026" } }).proposal.dueDate).toBeUndefined();
   });
 

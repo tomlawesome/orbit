@@ -15,6 +15,7 @@ import { completeStepUp, isStepUpIntent, setStepUpProofCookie } from "orbit/lib/
 import { createSession, deleteSessionToken } from "orbit/lib/auth/session";
 import { getAuthConfig } from "orbit/lib/env";
 import { readInvitationCookie } from "orbit/server/invitations/cookie";
+import { assertKeyUsable, KeyUnavailableError, noteRefusedSignIn } from "orbit/server/key-state";
 import { linkIdentity } from "orbit/server/local-credentials";
 
 /**
@@ -36,6 +37,19 @@ import { linkIdentity } from "orbit/server/local-credentials";
  * @returns {Response}
  */
 function callbackFailure(error, config, event) {
+  /* No usable encryption key (#1405): a refused sign-in, logged as one, not
+     a provider failure. The error screen it lands on is answered with the
+     locked screen by the page gate in hooks.server.js. */
+  if (error instanceof KeyUnavailableError) {
+    noteRefusedSignIn();
+    clearTransactionCookie(event.cookies, config);
+    const locked = new URL("/auth/error", config.appUrl);
+    locked.searchParams.set("code", "encryption_key_unavailable");
+    return new Response(null, {
+      status: 303,
+      headers: { location: locked.href, "cache-control": "no-store" },
+    });
+  }
   const authError = asAuthError(error);
   reportAuthCallbackFailure(authError.code, authError.tokenExchangeReason);
   const target = new URL("/auth/error", config.appUrl);
@@ -59,6 +73,10 @@ export async function GET(event) {
   }
 
   try {
+    /* Not wrapped by `api()`, so the encryption key gate is here, first
+       (#1405): no exchange with the provider and no session without a key,
+       even for a sign-in that started while the key was fine. */
+    assertKeyUsable();
     if (!config.oidc) {
       throw new AuthError("auth_not_configured", "OpenID Connect sign-in is not configured on this instance", 503);
     }
@@ -83,7 +101,10 @@ export async function GET(event) {
     }
 
     const metadata = await discoverProvider(config.oidc);
-    const identity = await completeAuthorization(config.oidc, metadata, code, transaction);
+    /* The ID token travels on only to a new session (#1316 decision 26a):
+       sign-out sends it back to the provider as `id_token_hint`. A step-up and
+       a link create no session, so they drop it. */
+    const { identity, idToken } = await completeAuthorization(config.oidc, metadata, code, transaction);
 
     /* What the provider's answer is FOR is decided by the transaction this
        process sealed, never by anything on the request (ADR-0022 §2). Four
@@ -163,7 +184,7 @@ export async function GET(event) {
        error, say -- the reader would be left with neither session, signed
        out by a blip that had nothing to do with their sign-in. */
     const previousSessionToken = event.cookies.get(sessionCookieName(config));
-    const session = await createSession(user.id, config, event.request.headers.get("user-agent"));
+    const session = await createSession(user.id, config, event.request.headers.get("user-agent"), { idToken });
     await deleteSessionToken(previousSessionToken);
 
     clearTransactionCookie(event.cookies, config);

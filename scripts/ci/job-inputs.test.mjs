@@ -71,7 +71,7 @@ const tree = [
   entry("docs/architecture.md", "b1"),
   entry("docs/installer-guarantees.md", "b2"),
   entry("docs/engine-events.md", "b6"),
-  entry(".github/workflows/publish-container.yml", "b7"),
+  entry(".github/workflows/publish-from-gitlab.yml", "b7"),
   entry("README.md", "b3"),
   entry("compose/docker-compose.acceptance.yml", "b4"),
   entry("drizzle/0001_init.sql", "b5"),
@@ -158,10 +158,9 @@ describe("the deny-lists", () => {
 
   /*
    * ADR-0028's list for `fast` also names `.github/**`, which this checkout
-   * disproves: eight suites `fast` runs read a file there --
-   * exact-image-workflow, launcher-compat-job, preview-lane-preflight,
-   * processor-compose-contract, publish-from-gitlab-workflow, sidecar-pins,
-   * supply-chain-policy and trivy-db-retry. The ADR's admissibility rule
+   * disproves: four suites `fast` runs read a file there --
+   * launcher-compat-job, publish-from-gitlab-workflow, sidecar-pins and
+   * supply-chain-policy. The ADR's admissibility rule
    * ("only when the job reaches it solely through its artefact or not at
    * all") outranks its example list, and the same rule keeps three named
    * files in: docs/engine-events.md (configure-check-contract,
@@ -170,7 +169,7 @@ describe("the deny-lists", () => {
    * (test-e2e-local, which spawns the real script).
    */
   it("keeps the files fast's own suites read out of fast's deny-list", () => {
-    expect(covers("fast", ".github/workflows/publish-container.yml")).toBe(true);
+    expect(covers("fast", ".github/workflows/publish-from-gitlab.yml")).toBe(true);
     expect(covers("fast", "docs/engine-events.md")).toBe(true);
     expect(covers("fast", "docs/installer-guarantees.md")).toBe(true);
     expect(covers("fast", "tests/e2e/local-only-specs.txt")).toBe(true);
@@ -179,6 +178,16 @@ describe("the deny-lists", () => {
     expect(covers("fast", "README.md")).toBe(false);
     expect(covers("fast", "web/tests/fidelity/dashboard.png")).toBe(false);
     expect(covers("fast", "tests/e2e/local-sign-in.spec.ts")).toBe(false);
+  });
+
+  // The names guard reads every tracked file, so it cannot share fast's narrowed
+  // key (ADR-0028 section 6): its own job takes the docs, root markdown, e2e
+  // specs and web tests that fast's key leaves out.
+  it("keys names_guard on the whole checkout, docs and tests included", () => {
+    expect(covers("names_guard", "docs/architecture.md")).toBe(true);
+    expect(covers("names_guard", "README.md")).toBe(true);
+    expect(covers("names_guard", "tests/e2e/local-sign-in.spec.ts")).toBe(true);
+    expect(covers("names_guard", "web/tests/fidelity/dashboard.png")).toBe(true);
   });
 
   // fast_docker runs three files and builds one Dockerfile target,
@@ -190,7 +199,7 @@ describe("the deny-lists", () => {
   });
 
   it("denies nothing at all for the two jobs ADR-0028 gives no deny-list", () => {
-    for (const job of ["fidelity", "fidelity_webkit", "integration"]) {
+    for (const job of ["fidelity", "fidelity_webkit", "integration", "names_guard"]) {
       expect(denyGlobs(config, job)).toEqual([]);
       expect(covers(job, "docs/architecture.md"), `${job} takes the whole checkout`).toBe(true);
     }

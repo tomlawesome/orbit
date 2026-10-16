@@ -51,7 +51,7 @@ readonly journeys=(cancelled-repair signal-cleanup credential-drift idempotent-r
                    hostile-value-privacy-negatives retained-volume-new-target
                    interrupted-configuration-migration
                    unsafe-permissions missing-files failed-db-migration
-                   unhealthy-app successful-rollback)
+                   unhealthy-app successful-rollback locked-key)
 
 # Acceptance criteria of #532 with no live evidence yet. Printed on every run
 # so the gap is visible in the log rather than implied by a green tick.
@@ -197,6 +197,12 @@ case "\$url" in
 esac
 SHIM
   chmod 755 "$workdir/shim/curl"
+  # This image is built here and never signed, so a host cosign would refuse
+  # it (install.sh verifies only when cosign answers `cosign version`). CI's
+  # job image has no cosign; hide this host's so the install takes the same
+  # path, and leave signature checks to the harnesses that test them.
+  printf '#!/bin/sh\nexit 127\n' > "$workdir/shim/cosign"
+  chmod 755 "$workdir/shim/cosign"
 }
 
 make_target() {
@@ -225,11 +231,9 @@ install_deployment() {
   else
     image="orbit-repair-journeys-local:$revision"
     note 'building working-tree image (this takes several minutes)'
-    # Stamped at ADR-0016's supported-install floor, not v0.0.0: repair.sh
-    # refuses every version below the floor (#1213 withdrew the major-0
-    # exemption), and these journeys need repair to act on the deployment.
+    # The development version, as the install acceptance harness stamps.
     docker build --quiet -t "$image" \
-      --build-arg ORBIT_VERSION=v0.3.0 \
+      --build-arg ORBIT_VERSION=v0.0.0 \
       --build-arg ORBIT_REVISION="$revision" \
       --build-arg ORBIT_CHANNEL=ci "$repo_root" >/dev/null ||
       fail 'working-tree image build failed'
@@ -284,7 +288,7 @@ install_deployment() {
 
   # Confirm the isolation claim rather than trusting it: the wrong project
   # label would attach this run to somebody else's stack, and the teardown
-  # below removes volumes (AGENTS.md, compose trap). The name is set on the
+  # below removes volumes (docs/testing.md, "Local traps": compose). The name is set on the
   # install above; this proves install.sh honoured it.
   # The container name is the fixed pin from docker-compose.yml, not a
   # project-prefixed one, which is also why refuse_foreign_stack runs first.
@@ -558,6 +562,39 @@ deployment_manifest() {
     done)
 }
 
+# Say on stderr what differs between two manifests: each path added, removed,
+# re-moded or with new content, by path and mode only. Never the hashes:
+# .env-orbit and .orbit-secrets/* are secrets, and a CI log is no place for
+# even a digest of one. A plain `diff` of the manifests printed them.
+manifest_diff() {
+  awk '
+    NF < 3 { next }
+    {
+      hash = $NF; mode = $(NF - 1)
+      path = substr($0, 1, length($0) - length(hash) - length(mode) - 2)
+    }
+    FILENAME == ARGV[1] { was_mode[path] = mode; was_hash[path] = hash; next }
+    {
+      seen[path] = 1
+      if (!(path in was_mode)) { printf "  added    %s (mode %s)\n", path, mode; next }
+      if (was_mode[path] != mode) printf "  mode     %s %s -> %s\n", path, was_mode[path], mode
+      if (was_hash[path] != hash) printf "  content  %s (mode %s)\n", path, mode
+    }
+    END { for (path in was_mode) if (!(path in seen)) printf "  removed  %s (mode %s)\n", path, was_mode[path] }
+  ' <(printf '%s\n' "$1") <(printf '%s\n' "$2") >&2
+}
+
+# Fail with message $2 unless the live deployment still matches manifest $1,
+# naming what differs first.
+assert_manifest() {
+  local now
+  now="$(deployment_manifest)"
+  [[ "$now" == "$1" ]] && return 0
+  printf '[repair-journeys] the deployment differs from its earlier manifest:\n' >&2
+  manifest_diff "$1" "$now"
+  fail "$2"
+}
+
 # --- the drift every journey below is built on ----------------------------
 
 drift_the_credential() {
@@ -631,7 +668,7 @@ journey_cancelled_repair() {
 
   after="$(deployment_manifest)"
   [[ "$before" == "$after" ]] || {
-    diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") >&2 || true
+    manifest_diff "$before" "$after"
     fail 'a cancelled repair changed the deployment'
   }
   health_check && fail 'a cancelled repair silently fixed the drift'
@@ -817,7 +854,7 @@ SHIM
 
   after="$(deployment_manifest)"
   [[ "$before" == "$after" ]] || {
-    diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") >&2 || true
+    manifest_diff "$before" "$after"
     fail 'an interrupted repair left the deployment changed'
   }
 
@@ -929,7 +966,7 @@ journey_retained_volume_new_target() {
   cp -a -- "$target/.env-orbit" "$newtarget/.env-orbit"
   cp -a -- "$target/docker-compose.yml" "$newtarget/docker-compose.yml"
   cp -a -- "$target/scripts/repair.sh" "$newtarget/scripts/repair.sh"
-  for helper in configuration.sh recovery-crypto.mjs release-metadata-patterns.sh; do
+  for helper in recovery-crypto.mjs release-metadata-patterns.sh; do
     [[ -f "$target/scripts/$helper" ]] && cp -a -- "$target/scripts/$helper" "$newtarget/scripts/$helper"
   done
 
@@ -982,8 +1019,7 @@ journey_retained_volume_new_target() {
   # a health check would make this journey pass or fail for reasons that have
   # nothing to do with what it tests. The manifest is the honest question --
   # did diagnosing a second directory alter the first one.
-  [[ "$(deployment_manifest)" == "$before" ]] ||
-    fail 'retained-volume-new-target: diagnosing a new target changed the live deployment'
+  assert_manifest "$before" 'retained-volume-new-target: diagnosing a new target changed the live deployment'
 
   rm -rf -- "$newtarget"
   result_line retained-volume-new-target pass
@@ -1137,8 +1173,7 @@ journey_interrupted_configuration_migration() {
     { printf '%s\n' "$output" >&2
       fail 'interrupted-configuration-migration: a configuration finding survived the restore'; }
 
-  [[ "$(deployment_manifest)" == "$before" ]] ||
-    fail 'interrupted-configuration-migration: repairing a copy changed the live deployment'
+  assert_manifest "$before" 'interrupted-configuration-migration: repairing a copy changed the live deployment'
 
   rm -rf -- "$newtarget"
   result_line interrupted-configuration-migration pass
@@ -1216,7 +1251,7 @@ journey_hostile_value_privacy_negatives() {
 
   after="$(deployment_manifest)"
   [[ "$before" == "$after" ]] || {
-    diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") >&2 || true
+    manifest_diff "$before" "$after"
     fail 'hostile-value: the journey did not restore the deployment it borrowed'
   }
   result_line hostile-value-privacy-negatives pass
@@ -1264,8 +1299,7 @@ journey_unsafe_permissions() {
   [[ "$(stat -c '%a' "$target/.orbit-secrets/postgres-password")" == 600 ]] ||
     fail 'unsafe-permissions: postgres-password was not restored to mode 600'
 
-  [[ "$(deployment_manifest)" == "$before" ]] ||
-    fail 'unsafe-permissions: the repaired deployment does not match its pre-breakage manifest'
+  assert_manifest "$before" 'unsafe-permissions: the repaired deployment does not match its pre-breakage manifest'
   health_check || fail 'unsafe-permissions: the deployment is unhealthy after a permissions repair'
   result_line unsafe-permissions pass
 }
@@ -1300,8 +1334,7 @@ journey_missing_files() {
   status=0
   repair --check >/dev/null 2>&1 || status=$?
   [[ "$status" == 0 ]] || fail "missing-files: --check after restoring the file exited $status, expected 0"
-  [[ "$(deployment_manifest)" == "$before" ]] ||
-    fail 'missing-files: the restored deployment does not match its pre-breakage manifest'
+  assert_manifest "$before" 'missing-files: the restored deployment does not match its pre-breakage manifest'
   result_line missing-files pass
 }
 
@@ -1349,8 +1382,7 @@ journey_failed_db_migration() {
   status=0
   repair --check >/dev/null 2>&1 || status=$?
   [[ "$status" == 0 ]] || fail "failed-db-migration: --check after cleanup exited $status, expected 0"
-  [[ "$(deployment_manifest)" == "$before" ]] ||
-    fail 'failed-db-migration: diagnosing a database state changed the deployment files'
+  assert_manifest "$before" 'failed-db-migration: diagnosing a database state changed the deployment files'
   result_line failed-db-migration pass
 }
 
@@ -1416,8 +1448,7 @@ journey_unhealthy_app() {
     { printf '%s\n' "$output" >&2; fail 'unhealthy-app: restart-services did not report done'; }
 
   wait_for_health
-  [[ "$(deployment_manifest)" == "$before" ]] ||
-    fail 'unhealthy-app: a service restart changed the deployment files'
+  assert_manifest "$before" 'unhealthy-app: a service restart changed the deployment files'
   [[ "$(household_name)" == 'repair-journeys-household' ]] ||
     fail 'unhealthy-app: the restart disturbed the fixture data'
   result_line unhealthy-app pass
@@ -1448,13 +1479,19 @@ journey_successful_rollback() {
   # rolled the deployment's own scripts out of existence (exit 127 on the
   # next repair invocation). The list mirrors repair.sh's
   # restore_transaction_paths, the same way interrupted-configuration-
-  # migration's whole-directory copy already leans on it.
+  # migration's whole-directory copy already leans on it, and
+  # src/lib/deployment-assets.test.ts holds the two equal: when #1212 added
+  # the recovery-bundle scripts there and not here, the rollback removed
+  # both from the deployment as paths the transaction had created.
   local managed
   for managed in docker-compose.yml docker-compose.mail.yml \
-      .env-orbit.example \
+      docker-compose.kek-rotation.yml .env-orbit.example \
       config/tika-config.json scripts/configure.sh scripts/installer-ui.sh \
-      scripts/configuration.sh scripts/backup.sh scripts/restore.sh \
-      scripts/repair.sh scripts/engine-check.sh .env-orbit .orbit-secrets; do
+      scripts/backup.sh scripts/restore.sh \
+      scripts/repair.sh \
+      scripts/export-recovery-bundle.sh scripts/import-recovery-bundle.sh \
+      scripts/end-maintenance.sh \
+      .env-orbit .orbit-secrets; do
     [[ -e "$target/$managed" ]] || continue
     mkdir -p -- "$staging/rollback/original/$(dirname -- "$managed")"
     cp -a -- "$target/$managed" "$staging/rollback/original/$managed"
@@ -1530,12 +1567,114 @@ journey_successful_rollback() {
   status=0
   repair --check >/dev/null 2>&1 || status=$?
   [[ "$status" == 0 ]] || fail "successful-rollback: --check after the rollback exited $status, expected 0"
-  [[ "$(deployment_manifest | grep -vE '^\./\.(env-orbit|orbit-secrets)\.pre-restore\.')" == "$before" ]] ||
+  local after
+  after="$(deployment_manifest | grep -vE '^\./\.(env-orbit|orbit-secrets)\.pre-restore\.' || true)"
+  [[ "$after" == "$before" ]] || {
+    printf '[repair-journeys] the rolled-back deployment differs from its pre-drift manifest:\n' >&2
+    manifest_diff "$before" "$after"
     fail 'successful-rollback: the rolled-back deployment does not match its pre-drift manifest'
+  }
   health_check || fail 'successful-rollback: the deployment is unhealthy after the rollback'
   [[ "$(household_name)" == 'repair-journeys-household' ]] ||
     fail 'successful-rollback: the rollback disturbed the fixture data'
   result_line successful-rollback pass
+}
+
+# #1405: no usable encryption key puts Orbit into maintenance. This is the
+# stack-level check no browser spec can make, because it changes the key the
+# container runs with. The instance has written no encrypted value yet, so
+# there is no key row to disagree with; one is seeded by SQL, wrapped under a
+# key id this deployment does not hold (the probe reads the row's key id and
+# never unwraps a row it has no key for, so the bytes need not be a real
+# envelope), then the app is restarted so its startup self-test sees it.
+#
+# While locked: every screen (the prerendered /login and /logout aside) and
+# every sign-in answers 503 with the one screen; the healthcheck still says "maintenance" at 200 and the container is
+# neither unhealthy nor restarting (a restart cannot help, ADR-0013 decision
+# 6); the log states the fault once at startup, names both key ids and never
+# the key. Then the row is removed, the app restarted, and the deployment is
+# what it was, with the log saying which key it holds.
+journey_locked_key() {
+  local before stored_id held_id kek restarts body status headers
+  before="$(deployment_manifest)"
+  stored_id=ffffffffffffffffffffffff
+  kek="$(tr -d '\r\n' < "$target/.orbit-secrets/document-kek")"
+  [[ "$kek" =~ ^[0-9a-fA-F]{64}$ ]] || fail 'locked-key: the deployment has no 64-hex document key to hold'
+  held_id="$(node -e 'const c=require("node:crypto");process.stdout.write(c.createHash("sha256").update("orbit-document-kek-v1\0").update(Buffer.from(process.argv[1],"hex")).digest("hex").slice(0,24))' "$kek")"
+
+  compose exec -T orbit-db sh -c \
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="
+      delete from metadata_keys where scope = '\''instance'\'';
+      insert into metadata_keys (scope, envelope_version, wrapped_dek, wrap_iv, wrap_auth_tag, key_id)
+        values ('\''instance'\'', 1, '\''seeded'\'', '\''seeded'\'', '\''seeded'\'', '\''$1'\'');"' \
+    sh "$stored_id" >/dev/null || fail 'locked-key: could not seed an instance key written under another key'
+  mark_setup_done instance-key-row-under-another-key
+
+  compose restart orbit-app >/dev/null 2>&1 || fail 'locked-key: could not restart the app'
+  locked_health_wait() {
+    local deadline=$((SECONDS + 90)) answer
+    until answer="$(curl --silent --max-time 5 "http://127.0.0.1:$orbit_port/api/health" || true)"; [[ "$answer" == *'"status":"maintenance"'* ]]; do
+      ((SECONDS < deadline)) || { container_snapshot orbit >&2; fail 'locked-key: health never answered maintenance'; }
+      sleep 2
+    done
+  }
+  locked_health_wait
+
+  # Every screen: 503, the same body, at the address that was asked for, never stored.
+  # (/login is a prerendered page that adapter-node serves before the server's
+  # gate ever runs, so curl sees it answer 200; the door's own script is what
+  # sends a reader on, and that is the browser's to prove, in door-state.test.mjs.)
+  local path
+  for path in / /home /settings; do
+    headers="$(curl --silent --max-time 10 --output "$workdir/locked-body" --dump-header - --write-out '' "http://127.0.0.1:$orbit_port$path" | tr -d '\r')"
+    status="$(sed -n '1s/^HTTP[^ ]* \([0-9]*\).*/\1/p' <<<"$headers")"
+    [[ "$status" == 503 ]] || { printf '%s\n' "$headers" >&2; fail "locked-key: $path answered $status, expected 503"; }
+    grep -qi '^cache-control:.*no-store' <<<"$headers" || fail "locked-key: $path was not marked no-store"
+    ! grep -qi '^retry-after:' <<<"$headers" || fail "locked-key: $path promised a return time"
+    grep -q 'locked' "$workdir/locked-body" || fail "locked-key: $path did not carry the locked screen"
+  done
+
+  # Every sign-in: 503, named for what is wrong.
+  body="$(curl --silent --max-time 10 --write-out '\n%{http_code}' -X POST \
+    -H 'content-type: application/json' -H "origin: http://127.0.0.1:$orbit_port" \
+    --data '{"email":"someone@example.invalid","password":"not-checked"}' \
+    "http://127.0.0.1:$orbit_port/api/auth/local/login")"
+  [[ "$(tail -1 <<<"$body")" == 503 ]] || fail 'locked-key: password sign-in was not refused with 503'
+  grep -q '"error":"encryption_key_unavailable"' <<<"$body" || fail 'locked-key: password sign-in did not say the key is unavailable'
+  body="$(curl --silent --max-time 10 "http://127.0.0.1:$orbit_port/api/auth/availability")"
+  grep -q '"encryptionKey":"unusable"' <<<"$body" || fail 'locked-key: availability did not name the lock'
+
+  # The container is up, healthy as far as Docker knows, and not restarting.
+  [[ "$(docker inspect orbit --format '{{.State.Health.Status}}')" != unhealthy ]] || fail 'locked-key: the locked container is marked unhealthy'
+  restarts="$(docker inspect orbit --format '{{.RestartCount}}')"
+  sleep 5
+  [[ "$(docker inspect orbit --format '{{.RestartCount}}')" == "$restarts" ]] || fail 'locked-key: the locked container is restarting'
+
+  # The log: one blocked line, both ids, no key.
+  local log_text blocked blocked_line ready_line
+  log_text="$(docker logs orbit 2>&1)"
+  blocked="$(grep -c 'encryption\.key.*state=blocked.*reason=key_unavailable' <<<"$log_text" || true)"
+  [[ "$blocked" -ge 1 ]] || { printf '%s\n' "$log_text" | tail -40 >&2; fail 'locked-key: the log never stated the fault'; }
+  # Capture first, test second (issue #809): no pipeline into `grep -q`.
+  blocked_line="$(grep -m1 'encryption\.key.*state=blocked' <<<"$log_text" || true)"
+  [[ "$blocked_line" == *"$stored_id"* ]] || fail 'locked-key: the log line does not name the key the database was written under'
+  [[ "$blocked_line" == *"$held_id"* ]] || fail 'locked-key: the log line does not name the key held'
+  ! grep -qi "$kek" <<<"$log_text" || fail 'locked-key: the key itself is in the log'
+
+  # Put it right: remove the foreign row, restart, and the door is back.
+  compose exec -T orbit-db sh -c \
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="delete from metadata_keys where scope = '\''instance'\'';"' \
+    >/dev/null || fail 'locked-key: could not remove the seeded key row'
+  compose restart orbit-app >/dev/null 2>&1 || fail 'locked-key: could not restart the app after the fix'
+  wait_for_health
+  [[ "$(curl --silent --max-time 10 --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:$orbit_port/")" == 200 ]] ||
+    fail 'locked-key: the door did not come back after the fix'
+  log_text="$(docker logs orbit 2>&1)"
+  ready_line="$(grep -m1 'encryption\.key.*state=ready' <<<"$log_text" || true)"
+  [[ "$ready_line" == *"$held_id"* ]] || fail 'locked-key: the log did not say which key it holds once fixed'
+  assert_manifest "$before" 'locked-key: the journey changed the deployment files'
+  [[ "$(household_name)" == 'repair-journeys-household' ]] || fail 'locked-key: the journey disturbed the fixture data'
+  result_line locked-key pass
 }
 
 # --- run ------------------------------------------------------------------

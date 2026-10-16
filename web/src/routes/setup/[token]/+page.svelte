@@ -106,7 +106,7 @@
   <h1 class="sr-only">Choose a password for your Orbit account</h1>
 
   <div class="signin-stage" aria-hidden="true"></div>
-  <Dawn shown={true} />
+  <Dawn shown={true} heading={false} />
   <Grain slope={0.08} />
 
   <div class="bigring" aria-hidden="true">
@@ -115,7 +115,7 @@
          closes on the compositor, this closes by width/height so the
          4.2px stroke never thins. See ringcard.css. -->
     <div class="ringstroke"></div>
-    <div class="ringorbit"><i></i></div>
+    <div class="ringorbit"><b class="trail"></b><i></i></div>
   </div>
   <Identity mode="setup" bind:password bind:again {busy} {message} signInLine={spent} onsubmit={submit} />
 </main>

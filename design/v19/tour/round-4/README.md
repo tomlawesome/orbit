@@ -1,5 +1,7 @@
 # First-run tour — round 4 (#866)
 
+The screenshots and recordings this page shows are kept outside git (#1408): frames are blank in a clone or on the mirror.
+
 Rounds 1–3 ratified **across the ship**, **watch-only**, the ten beats, the Car
 MOT data story and the **Lift** mechanic — no pointer, the control itself rises,
 glows and presses (verdicts in `../round-1/`, `../round-2/`, `../round-3/`).

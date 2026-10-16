@@ -6,7 +6,7 @@ import { documents, imapIngestionAttachments, imapIngestionMessages } from "@/db
 import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { holdImapAttachment } from "@/server/mail-in/imap-attachment-holding";
-import { discardImapReviewItem, purgeExpiredImapStaging } from "@/server/imap-inbox";
+import { discardImapReviewItem, purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf } from "../support/synthetic-documents";

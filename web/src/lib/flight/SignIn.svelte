@@ -1,13 +1,16 @@
 <script>
   import { onMount } from "svelte";
   import Grain from "$lib/Grain.svelte";
+  import { image } from "$lib/door-host.js";
   import Dawn from "./Dawn.svelte";
   import Claim from "./Claim.svelte";
   import Identity from "./Identity.svelte";
   import Waiting from "./Waiting.svelte";
   import { clearLaunch, markLaunch } from "./arrival.js";
+  import { fetchFlightAhead } from "./fetch-ahead.js";
+  import { isFirstVisit } from "./door-seen.js";
   import {
-    APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, STARTING, STARTING_BACKSTOP_MS,
+    APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, LOCKED, STARTING, STARTING_BACKSTOP_MS, STARTING_POLL_MS,
     applyStartingBackstop, availabilityOf, cardMessageFor, claimFromHash, doorMessageFor,
     doorModeOf, nextDoorState, phaseOf, readinessOf,
   } from "./door-state.js";
@@ -32,9 +35,9 @@
    * THE HONEST DEVIATION, stated where it happens. The mockup's flight runs
    * unbroken from this button. Pressing it in the product leaves Orbit for the
    * identity provider, so the journey is cut at the departure and nowhere
-   * else: the gate flashes over the mockup's own 420 → 900ms window, and at
-   * 900 — exactly the beat the mockup hands over to the climb — this page
-   * hands over to /api/auth/login instead. The climb itself, whole and
+   * else: the gate flashes as it does on orbit-site's door (at the press) and
+   * this page hands over to /api/auth/login at once (#1222, owner 2026-10-07:
+   * no waiting gap — it used to flash at 420 ms and leave at 900 ms). The climb itself, whole and
    * unaltered, plays on the authenticated return (see Flight.svelte and the
    * launch overlay on /home). A one-shot marker written here and consumed
    * there is what tells the landing that a genuine sign-in just happened; see
@@ -68,9 +71,14 @@
     /* One <title> per document: the arrival's stages stand on this surface, so
        they name it rather than adding a second one. */
     title = "Orbit — sign in",
+    /* The door's wordmark is the screen's <h1> unless the page standing on it
+       has its own (the arrival's stages do: `title` above is theirs). */
+    heading = true,
   } = $props();
 
   let leaving = false;
+  /** @type {import('./Dawn.svelte').default | null} */
+  let dawnView = $state(null);
 
   const reduced = () =>
     typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -177,11 +185,28 @@
   /** @param {boolean} on */
   function showCard(on) {
     if (on) {
+      /* the ring a card opens from is the door's own, as the site sizes it:
+         its diameter is .72 of the glyph and its top edge is where the glyph's
+         centre less its radius falls. Seeded as custom properties for
+         door-phone.css's @starting-style, so the card's ring travels from the
+         bare ring, not from a station it no longer has (#1253) */
+      const glyph = document.querySelector("#login-glyph svg");
+      if (glyph) {
+        const r = glyph.getBoundingClientRect();
+        if (r.width > 0) {
+          const ring = r.width * 0.72;
+          const root = document.documentElement.style;
+          root.setProperty("--door-from-ring", `${ring.toFixed(2)}px`);
+          root.setProperty("--door-from-top", `${(r.top + r.height / 2 - ring / 2).toFixed(2)}px`);
+        }
+      }
       raised = true;
       document.body.classList.add("showform");
     } else if (raised) {
       raised = false;
       document.body.classList.remove("showform");
+      document.documentElement.style.removeProperty("--door-from-ring");
+      document.documentElement.style.removeProperty("--door-from-top");
     }
   }
 
@@ -260,6 +285,7 @@
    *  entered exactly as an identity provider's callback enters it. */
   async function submitCreate() {
     if (busy) return;
+    fetchFlightAhead({ hurry: true });
     if (await present("/api/auth/bootstrap/local", { email, displayName, password })) {
       password = "";
       markLaunch();
@@ -279,6 +305,7 @@
    */
   async function submitSignIn() {
     if (busy) return;
+    fetchFlightAhead({ hurry: true });
     const answer = await present("/api/auth/local/login", { email, password });
     if (!answer) return;
     password = "";
@@ -347,6 +374,7 @@
         /* The session is already in this browser's cookie jar: the poll route
            minted it for THIS tab and nobody else. The ratified launch plays
            from here exactly as it does after any other way in. */
+        fetchFlightAhead({ hurry: true });
         markLaunch();
         location.href = returnTo;
         return;
@@ -385,6 +413,13 @@
     message = "";
     card = "signin";
     showCard(true);
+  }
+
+  /** The sign-in card's one provider line, on a mixed door (#1278): the
+   *  gate's own way out, launch marker and all, so the arrival flies. */
+  function toProviderFromSignIn() {
+    markLaunch();
+    location.href = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
   }
 
   /** The create card's one provider line — the claim cookie authorises the
@@ -452,12 +487,41 @@
     const timers = [];
     /** @param {number} ms @param {() => void} fn */
     const after = (ms, fn) => timers.push(setTimeout(fn, ms));
-    /* first light: the dawn breaks once on load (CON-9, POL-13) */
-    const frame = requestAnimationFrame(() => after(180, () => document.body.classList.add("lit")));
-
     let disposed = false;
     /** @type {ReturnType<typeof setTimeout> | undefined} */
     let pollTimer;
+
+    /*
+     * THE FLIGHT'S PICTURES, ASKED FOR IN THE DOOR'S QUIET MOMENTS (#1253,
+     * fetch-ahead.js). Only once the door can open and its face is showing,
+     * and only once first light has finished drawing in (the folder's `onOpen`
+     * below: the chores are open, the painted animations have ended, which is
+     * what the door waited for by its own guess before #1371).
+     */
+    let opened = false;
+    let wanted = false;
+    let readying = false;
+    function ask() {
+      if (!opened || !wanted || readying || disposed) return;
+      readying = true;
+      fetchFlightAhead();
+    }
+    function readyWhenDrawn() {
+      wanted = true;
+      ask();
+    }
+
+    /* first light: the dawn breaks once on load (CON-9, POL-13), as
+       orbit-site's door does it, by the shared door's own `dawn.light()`
+       (#1371): `lit` waits for the fonts and the Earth's first picture and,
+       on a first visit, for at least one lap of the ring's running light
+       (`body.loading`), which is on while the door waits and comes off in
+       the same frame that `lit` starts the ring drawing. The door has no
+       journey on it, so it has no world to compile behind the ring (the
+       folder's `wait`/`after`): the flight is the next page's. `onOpen`: the
+       door is lit and the painted part of its reveal done, which is when the
+       flight's pictures may be asked for (readyWhenDrawn, below). */
+    dawnView?.light({ firstVisit: isFirstVisit(() => localStorage), onOpen: () => { opened = true; ask(); } });
 
     /**
      * Shows a state other than the door: fixed words, styled to match it.
@@ -524,8 +588,16 @@
     async function run() {
       const first = await checkOnce();
       if (disposed) return;
+      /* No usable encryption key (#1405): this page is static HTML served
+         before the server's gate, so it is this script that must not offer a
+         sign-in nobody can complete. `replace`, so Back is not a loop. */
+      if (first.state === LOCKED) {
+        location.replace("/maintenance");
+        return;
+      }
       if (first.state === DOOR) {
         wearFace(first.face);
+        readyWhenDrawn();
         return;
       }
       const wasStarting = first.state === STARTING;
@@ -543,8 +615,12 @@
         const next = await checkOnce();
         if (disposed) return;
         const resolved = applyStartingBackstop(next.state, backstopAt, Date.now());
+        if (resolved === LOCKED) {
+          location.replace("/maintenance");
+          return;
+        }
         if (resolved === STARTING) {
-          pollTimer = setTimeout(poll, 4000);
+          pollTimer = setTimeout(poll, STARTING_POLL_MS);
           return;
         }
         if (resolved === DOOR) {
@@ -552,9 +628,10 @@
              is the one the released dawn hands over to. */
           wearFace(next.face);
           recoverToDoor();
+          readyWhenDrawn();
         } else showState(resolved, next.contactAddress);
       };
-      pollTimer = setTimeout(poll, 4000);
+      pollTimer = setTimeout(poll, STARTING_POLL_MS);
     }
     run();
 
@@ -563,9 +640,8 @@
       approvalStopped = true;
       clearTimeout(approvalTimer);
       clearTimeout(pollTimer);
-      cancelAnimationFrame(frame);
       timers.forEach(clearTimeout);
-      document.body.classList.remove("lit", "switched", "returning", "returned");
+      document.body.classList.remove("loading", "lit", "switched", "returning", "returned");
       /* Same rule as showCard: never take down a card somebody else put up. */
       showCard(false);
       delete document.body.dataset.state;
@@ -577,24 +653,26 @@
     const gate = /** @type {HTMLElement} */ (event.currentTarget);
     if (leaving) return;
     leaving = true;
+    fetchFlightAhead({ hurry: true });
     markLaunch();
-    const rm = reduced();
-    setTimeout(() => gate.classList.add("flash"), rm ? 0 : 420);
-    setTimeout(() => {
-      location.href = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
-    }, rm ? 200 : 900);
+    gate.classList.add("flash");
+    location.href = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
   }
 </script>
 
 <svelte:head>
   <title>{title}</title>
+  <!-- the door's Earth comes with the page, the sunrise picture just after it
+       (orbit-site's index.html:26-27) -->
+  <link rel="preload" as="image" href={image("dawn/dawn-pre.webp")} fetchpriority="high" />
+  <link rel="preload" as="image" href={image("dawn/dawn.webp")} fetchpriority="low" />
 </svelte:head>
 
 <!-- The mockup's own page ground (#04060e), carried as a layer rather than as
      a rule on <body>: a stylesheet that reached the document would follow the
      reader onto every other screen once its chunk had loaded. -->
 <div class="signin-stage" aria-hidden="true"></div>
-<Dawn shown={dawnShown} {statePrimary} {stateSub}>
+<Dawn bind:this={dawnView} shown={dawnShown} {statePrimary} {stateSub} {heading}>
   <!-- `Sign in`, the ratified word (08-14), and the word the sunset's own
        pill was reworded to match. The sheet's longer
        "Continue with your identity provider" belonged to the v18 chrome
@@ -637,7 +715,7 @@
            closes on the compositor, this closes by width/height so the
            4.2px stroke never thins. See ringcard.css. -->
       <div class="ringstroke"></div>
-      <div class="ringorbit"><i></i></div>
+      <div class="ringorbit"><b class="trail"></b><i></i></div>
       <!-- the claim card has no heading, so on a phone the ring keeps the
            word (door-phone.css; hidden on the desk, where it never stood) -->
       {#if card === "claim"}<div class="ringword">orbit</div>{/if}
@@ -651,7 +729,8 @@
                 provider={providerOffered} {busy} {message}
                 onsubmit={submitCreate} onprovider={toProvider} />
     {:else}
-      <Identity mode="signin" bind:email bind:password {busy} {message} onsubmit={submitSignIn} />
+      <Identity mode="signin" bind:email bind:password {busy} {message} onsubmit={submitSignIn}
+                provider={providerOffered} onprovider={toProviderFromSignIn} />
     {/if}
   </div>
 {/if}

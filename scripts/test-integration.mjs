@@ -36,7 +36,7 @@ function run(command, args, env, label) {
 function cleanup() {
   if (!containerStarted || cleanupStarted) return;
   cleanupStarted = true;
-  const result = spawnSync(docker, ["rm", "--force", containerName], { stdio: "ignore" });
+  const result = spawnSync(docker, ["rm", "--force", "--volumes", containerName], { stdio: "ignore" });
   if (result.error || result.status !== 0) {
     console.error(`Could not remove disposable container ${containerName}`);
     process.exitCode = 1;

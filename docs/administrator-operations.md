@@ -138,6 +138,7 @@ The event groups you will see:
 | Component | Starting and healthy path | Failure, and what you do |
 | --- | --- | --- |
 | Application and configuration | `application.startup` and `configuration.problem` | an invalid or optional setting is blocked or degraded with a safe fallback and a fixed remediation |
+| Encryption key | `encryption.key` (`state=ready`, naming the key id held) | `state=blocked reason=key_unavailable`: no usable key, the instance is locked (see "Restoring the document key-encryption key"); also each refused sign-in, at most ten a minute, and what happened to the operator alert |
 | Authentication | `auth.configuration`, `auth.provider` | discovery, token and callback failures block sign-in without provider detail |
 | Database and migrations | `database.connection`, `database.migration` | notices, unavailable connections and migration integrity failures stay bounded |
 | Document, scanner and parser | `document.lifecycle`, `document.scan`, `document.parse`, `document.worker` | required scanning fails closed; retries, recovery and exhaustion name the safe action |
@@ -183,13 +184,12 @@ missing, has moved on, was already acted on, is being processed, or the update
 touches no row for any other reason, you get the bounded conflict result and
 no misleading success is written to the audit trail.
 
-- A failed or cancelled notification can be retried. Its attempt count, lock,
-  sent time and failure state are cleared and it is scheduled straight away.
-- A pending, retrying or failed notification can be discarded; it becomes
-  cancelled.
 - A failed scanner recovery job can be retried from attempt zero. Its recovery
   expiry does not change. A failed final stage purge can be retried as a
   deletion only; it never goes back into scanning.
+- A staged upload wrapped under a key this instance does not hold is never
+  deleted for that reason: its job retries as `key_unavailable` until you put
+  the key back, or until its recovery expiry rejects it.
 - A restore keeps a scanner job's attempt count and its failed or manual
   state; only live pending, retry or processing leases are put back in the
   queue.
@@ -219,7 +219,8 @@ administrator and tries the control during maintenance gets the same bounded
 `503` as on any other path; from outside, the control cannot be found or
 used.
 
-Sign-in stays open during maintenance: the sign-in page and the OIDC login,
+Sign-in stays open during maintenance: the sign-in page, the emailed
+sign-in approval page, setup and recovery links, and the OIDC login,
 callback, session and logout routes are exempt. So the ordinary way back in
 is to sign in and end maintenance from the control.
 
@@ -302,53 +303,23 @@ host access to the running deployment already means full control of it.
 
 ## When the encryption key and the recovery bundle are both lost
 
-This is the last resort, and it recovers nothing. Read the whole section
-before running it.
+Nothing in Orbit can recover an instance whose encryption key and recovery
+bundle are both gone. Orbit encrypts every document and every personal detail,
+including every account's email address, under that key; without it they are
+unreadable, permanently, and nobody can sign in.
 
-Orbit encrypts documents and personal details, including everyone's email
-address, under one key. If that key and the recovery bundle are both gone,
-those things are gone with them, permanently. Nothing here brings them back.
+There are two ways forward:
 
-What it does fix is the second problem that follows. Orbit finds an account by
-its email address, and it can no longer read any address, so **nobody can
-sign in at all**. Without this command the instance is a locked box with
-everyone's accounts intact inside it.
+- restore the most recent recovery bundle you have, with the backup it goes
+  with — see [Restoring the document key-encryption key](#restoring-the-document-key-encryption-key),
+  [Exporting a recovery bundle](#exporting-a-recovery-bundle) and
+  [Back up and restore](operating.md#back-up-and-restore);
+- or reinstall and start again.
 
-```sh
-docker compose --env-file .env-orbit exec orbit-app node /opt/orbit/cli/orbit.js auth clear-addresses
-```
-
-It asks you to type `CLEAR ADDRESSES` before doing anything, and then:
-
-- removes every account address it cannot read — **the accounts themselves
-  survive**, with their households, memberships and history intact;
-- removes every mail-forwarding address it cannot read; members add and prove
-  those again afterwards;
-- leaves alone any address it *can* still read.
-
-Then get back in and put the addresses back:
-
-```sh
-docker compose --env-file .env-orbit exec orbit-app node /opt/orbit/cli/orbit.js auth recovery-link
-```
-
-Open that link to set the primary administrator's password and sign in, then
-re-enter members' addresses by hand from the users screen. Each member sets
-their own password through a setup link as usual.
-
-**It refuses to run while the key still works.** This is deliberate, and it is
-the guard that matters most. If members cannot sign in and the key is fine,
-the fault is something else entirely, and running this would destroy addresses
-that were never in danger, so the command checks first and stops. If you have
-the recovery bundle, restore that instead: it brings the key back and nothing
-is lost.
-
-It can only be run from the host shell. No page, no button and no API request
-can reach it, deliberately: reachable over the network it would be a single
-request that wipes every account's identity. It needs a real terminal, so a
-script or scheduled job cannot run it either. Each run is recorded in the
-audit log as `account_addresses_cleared`, with counts only. The addresses
-could not be read, so there is nothing else to record.
+There is deliberately no command that clears what cannot be read. The result
+would be an instance that looks alive and holds nothing, and sign-in would
+still be refused while the key is away. `orbit auth recovery-link` needs a
+working key too.
 
 ## Provider tests
 
@@ -446,11 +417,11 @@ key-encryption key" is the master key that protects each document's own key.
 | `SESSION_SECRET_FILE` | Orbit | File containing the session-signing secret. The Compose stack sets this to `/run/orbit-secrets/orbit-session-secret`. | `.orbit-secrets/session-secret` |
 | `SESSION_TTL_SECONDS` | Orbit | How long a sign-in lasts, in seconds. | `604800` |
 | `DOCUMENTS_ROOT` | Orbit | Where encrypted documents are kept inside the container. | `/var/lib/orbit/documents` |
-| `DOCUMENTS_QUARANTINE_ROOT` | Orbit | Temporary holding area for an upload while it is scanned; Compose supplies a private in-memory folder that disappears on restart. | `/tmp/orbit-document-quarantine` |
+| `DOCUMENTS_QUARANTINE_ROOT` | Orbit | Temporary holding area for an upload while it is scanned; Compose supplies a private 256 MiB in-memory folder that disappears on restart; it must hold two uploads at the 100 MiB size-limit ceiling, and a member who finds it full is told to try again shortly. | `/tmp/orbit-document-quarantine` |
 | `DOCUMENT_KEK` | Orbit | Direct 32-byte hexadecimal document key-encryption key. Leave empty when the file form is used. | `<64-character-random-hex>` |
 | `DOCUMENT_KEK_FILE` | Orbit | File containing the document key-encryption key. Compose mounts the generated file at `/run/orbit-secrets/orbit-document-kek`. | `.orbit-secrets/document-kek` |
 | `DOCUMENT_KEK_NEXT` / `DOCUMENT_KEK_NEXT_FILE` | Orbit | Second document key-encryption key, held alongside the first only while a key rotation is in progress (#954). Set only via the `docker-compose.kek-rotation.yml` overlay — see "Rotating the document key-encryption key" in `docs/administrator-operations.md`. | `<64-character-random-hex>` |
-| `DOCUMENT_MAX_BYTES` | Orbit | Largest upload accepted, in bytes. | `26214400` |
+| `DOCUMENT_MAX_BYTES` | Orbit | Largest upload accepted, in bytes, until an administrator sets their own limit under "Upload size limit" in Administration (1 to 100 MiB, no restart). "use the default" there goes back to this value. Allowed: 1048576 to 104857600. Mail-in has a separate fixed cap of 25 MiB per message and per set of attachments, so a higher limit does not raise what mail accepts. | `52428800` |
 | `DOCUMENT_HOUSEHOLD_QUOTA_BYTES` | Orbit | Most document storage one household may keep. | `5368709120` |
 | `DOCUMENT_INSTANCE_QUOTA_BYTES` | Orbit | Most document storage the whole instance may keep. | `21474836480` |
 | `DOCUMENT_RETENTION_DAYS` | Orbit | Days a deleted document can still be restored before it is purged for good. | `30` |
@@ -466,7 +437,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `OLLAMA_MODEL` | Orbit and Compose | The local model the private model server uses and the pull helper fetches. | `<a-local-model-name>` |
 | `OLLAMA_MEMORY_LIMIT` / `OLLAMA_CPUS` | Compose | Memory and CPU limits for the model server. | `6g` / `2.0` |
 | `OLLAMA_MAX_QUEUE` / `OLLAMA_KEEP_ALIVE` | Compose | Most requests the model server queues, and how long it keeps a model loaded after use. | `8` / `0` |
-| `DATABASE_URL` | Orbit | Complete PostgreSQL connection URL. Leave empty when using the individual PostgreSQL settings. | `postgres://orbit:example-password@postgres:5432/orbit` |
+| `DATABASE_URL` | Orbit | Complete PostgreSQL connection URL. Leave empty when using the individual PostgreSQL settings. Backup, restore and recovery export cover only the bundled `orbit-db` database and refuse to run while this or `DATABASE_URL_FILE` is set. | `postgres://orbit:example-password@postgres:5432/orbit` |
 | `DATABASE_URL_FILE` | Orbit | File containing a complete database URL instead of `DATABASE_URL`. | `/run/secrets/orbit-database-url` |
 | `POSTGRES_HOST` | Orbit | PostgreSQL hostname. Compose overrides the host-local default with the database service name. | `localhost` |
 | `POSTGRES_PORT` | Orbit | PostgreSQL TCP port. | `5432` |
@@ -487,8 +458,8 @@ key-encryption key" is the master key that protects each document's own key.
 | `SMTP_HOST` / `SMTP_PORT` | Orbit | SMTP server host and port. | `smtp.example.com` / `587` |
 | `SMTP_SECURITY` | Orbit | `starttls` (port 587) or `implicit_tls` (port 465); plaintext SMTP is unsupported. | `starttls` |
 | `SMTP_USER` / `SMTP_PASSWORD_FILE` | Orbit | SMTP login and a file containing its password. | `orbit@example.com` / `/run/orbit-secrets/orbit-smtp-password` |
-| `SMTP_URL` / `SMTP_URL_FILE` | Orbit | Deprecated compatibility form, given directly or as a file; do not set it with the individual SMTP settings. | `smtps://orbit%40example.com:password@smtp.example.com:465` |
 | `SMTP_FROM` | Orbit | Display name and sender address for reminder email. | `Orbit <orbit@example.com>` |
+| `OPERATOR_ALERT_ADDRESS` | Orbit | Where Orbit writes when it cannot run safely: today, when its encryption key is missing or wrong. Not a secret. Needs the SMTP settings; unset, Orbit only logs. Set it at install time. | `you@example.com` |
 | `VAPID_SUBJECT` | Orbit | Contact address sent with browser push notifications. VAPID is the standard for browser and PWA push; it is not Pushover. | `mailto:admin@example.com` |
 | `VAPID_PUBLIC_KEY` | Orbit and the browser | Public push key generated for this deployment. | `<base64url-public-key>` |
 | `VAPID_PRIVATE_KEY` | Orbit | Direct private push key. Leave empty when the file form is used. | `<base64url-private-key>` |
@@ -499,7 +470,6 @@ key-encryption key" is the master key that protects each document's own key.
 | `MIGRATE_ON_START` | Orbit | Applies pending database migrations at startup. Compose sets this to `true`. | `false` |
 | `WORKER_ENABLED` | Orbit | Runs the notification scheduler inside the application container. Compose sets this to `true`. | `false` |
 | `DRIZZLE_MIGRATIONS_PATH` | Orbit | Directory containing versioned SQL migrations. | `drizzle` |
-| `ORBIT_SECRETS_DIR` | Compose | Host directory containing files mounted as Compose secrets. | `./.orbit-secrets` |
 
 Inbound mail (the mailbox Orbit polls for incoming statements and documents)
 is not set here any more. An instance administrator sets it on the
@@ -515,6 +485,11 @@ connection, and working identity-provider, SMTP and push credentials. Keep
 recovery bundles somewhere other than the Docker host before storing real
 household data.
 
+Once SMTP works, set `OPERATOR_ALERT_ADDRESS` to an inbox you read. It is the
+one way Orbit can tell you it has locked itself for want of its encryption key
+(see "Restoring the document key-encryption key"): administrators' own
+addresses are encrypted under that key, so Orbit cannot read them then.
+
 ## Mailbox provider operation
 
 Mailbox ingestion is optional. An installation that does not use mail runs the
@@ -524,13 +499,14 @@ base `docker-compose.yml` without mail secret files.
 administrator sets it on the administration screen, and Orbit stores the
 password encrypted in its own database under the document key. No `IMAP_*`
 environment variable is accepted any more; one left in `.env-orbit` fails the
-configuration check as a removed key. Outbound SMTP is unchanged and is still
-deployment configuration.
+configuration check as a setting Orbit does not know ("`.env-orbit` has
+`IMAP_HOST`, which is not an Orbit setting"): delete the line and rerun the
+update. Outbound SMTP is unchanged and is still deployment configuration.
 
 To configure inbound mail:
 
 1. Configure SMTP first, and deploy the mail overlay so the SMTP password is
-   mounted from `${ORBIT_SECRETS_DIR}/smtp-password`. Put it there from a
+   mounted from `.orbit-secrets/smtp-password`. Put it there from a
    secret manager or a private editor, not a command argument. The path must
    be a non-empty ordinary file, not a symbolic link, and readable only by the
    deployment operator.
@@ -659,9 +635,8 @@ create more than once, and bounded on failure. Their generic body contains no
 source content and links only to `/?open=inbox` on the configured HTTP(S)
 application origin. The link still needs sign-in and cannot approve, attach or
 write anything. SMTP is at-least-once: if a provider accepts a message just
-before Orbit loses its completion update, an explicit retry can send the
-generic notification twice. The interface warns before retrying exhausted
-deliveries.
+before Orbit loses its completion update, the next attempt can send the
+generic notification twice.
 
 ### Disable, restart, and credential rotation
 
@@ -753,14 +728,19 @@ below). Making a bundle is a deliberate step, and one every deployment should
 take before it holds real data:
 
 ```sh
-orbit backup
-orbit export-recovery-bundle <backup.tar>
+bash scripts/backup.sh
+bash scripts/export-recovery-bundle.sh backups/orbit-<timestamp>.tar
 ```
 
-`orbit export-recovery-bundle` locks the live `DOCUMENT_KEK` under a
-passphrase you choose (the passphrase is stretched with scrypt and the key
-encrypted with AES-256-GCM) and packages it with the backup you just made into
-one file, `orbit-recovery-<timestamp>.tar`.
+Run them from the deployment directory. Each runs the Orbit engine's own
+command (`orbit backup`, then `orbit export-recovery-bundle <backup.tar>`)
+inside the deployment, as a one-off container on the app service, so the host
+needs Docker with Compose v2 and nothing else.
+
+`export-recovery-bundle.sh` asks for a passphrase of your choice twice, then
+locks the live `DOCUMENT_KEK` under it (the passphrase is stretched with scrypt
+and the key encrypted with AES-256-GCM) and packages it with the backup you
+just made into one file, `orbit-recovery-<timestamp>.tar`.
 
 Keep its two parts apart: the bundle file on storage separate from this
 instance, and its passphrase in a password manager or on paper — never both
@@ -771,27 +751,59 @@ The administration screen shows a "No recovery bundle exported" card until a
 bundle has been recorded, and again after every `DOCUMENT_KEK` rotation,
 because a bundle wrapped under the previous key can no longer recover the
 current one. The card is a reminder, not a gate: it never blocks use of the
-instance, and it clears the moment `orbit export-recovery-bundle` completes.
+instance, and it clears the moment `export-recovery-bundle.sh` completes.
 
 ![The "No recovery bundle exported" card, persistent until a bundle is recorded](images/admin-no-recovery-bundle.png)
 
-To use a recovery bundle, see `orbit import-recovery-bundle` and "Restoring
-the document key-encryption key" below.
+To use a recovery bundle, run `bash scripts/import-recovery-bundle.sh
+<recovery.tar>` (it asks for the passphrase, then for `IMPORT RECOVERY`, then
+for `RESTORE`) and see "Restoring
+the document key-encryption key" below. The import needs the deployment's
+current key file in `.orbit-secrets/document-kek` and refuses without it
+("the configured document key is missing"); when that file is gone, see the
+same section.
 
 ## Restoring the document key-encryption key
 
-An instance that starts without `DOCUMENT_KEK` is **locked**, not damaged.
-Nothing is lost and nothing is overwritten. Documents cannot be opened;
-encrypted notes, references and mail-in extracts cannot be read or written;
-and every item edit is refused with a 503, because saving an item rewrites its
-encrypted fields. The rest of Orbit stays usable, deliberately (ADR-0024
-decision 5): a missing key must not take the household's list down with it.
+An instance that starts with no usable key is **locked**, not damaged
+(#1405, ADR-0024 amendment). That covers a `DOCUMENT_KEK` that is missing,
+unreadable, malformed or set both directly and as a file, and a key that is
+not the one this database was written under: Orbit opens its own instance key
+with the key it holds once at startup, and a key that will not open it is the
+wrong key. Nothing is lost and nothing is overwritten. While locked:
 
-Members see this at the field: "locked — safe, but unreadable right now", and
-a paused edit panel that says an administrator is who fixes it. The
-administration screen shows one "Encrypted details are locked" card with how
-many items and mail-in messages are waiting. No count and no detail of the key
-reaches a member, and Orbit never says the data is gone, because it is not.
+- every dynamic screen answers 503 with one page: "locked — back once the key is
+  restored", that nothing is lost, that an administrator has to fix it on the
+  server, the instance's public contact address when one is set, and that the
+  details are in the container log. The static pages
+  `/login`, `/logout` and `/auth/error` are plain files and still load with a
+  200; the sign-in page then moves the reader to the locked page;
+- every API answers `503 {"error":"encryption_key_unavailable"}`, and nobody
+  signs in by any method, administrators included; signing out still works.
+  The exceptions are `/api/health` (below) and `/api/auth/availability`, which
+  the sign-in page reads to learn that the instance is locked;
+- `/api/health` answers 200 `maintenance`, so the container stays healthy and
+  is not restarted: a restart cannot fix the key;
+- only the scheduled-maintenance worker runs; reminders, documents and mail
+  wait for the restart;
+- the container log has one line, `encryption.key state=blocked
+  reason=key_unavailable`, naming the fault (for a wrong key, the key id
+  Orbit holds and the key id the database was written under), and a line for
+  each refused sign-in;
+- when `OPERATOR_ALERT_ADDRESS` and outbound mail are set, Orbit mails that
+  address once (again after 24 hours if it is still locked), and once more
+  when the key is back. Unset, the log is the only record.
+
+`bash scripts/repair.sh --check` already names a missing host key file; the
+container log line and the locked page are how you recognise the state from
+the outside.
+
+A household's own key wrapped under a key the instance does not hold is the
+narrower case: members see "locked — safe, but unreadable right now" at the
+field and a paused edit panel, and the administration screen shows one
+"Encrypted details are locked" card with how many items and mail-in messages
+are waiting. No count and no detail of the key reaches a member, and Orbit
+never says the data is gone, because it is not.
 
 ![The "Encrypted details are locked" card, with counts of affected items and mail-in messages](images/admin-encrypted-details-locked.png)
 
@@ -803,8 +815,8 @@ restart the exact deployed image:
    holding. A key that is not the one that wrote them leaves everything locked
    exactly as it was. A wrong key can never damage a value, because
    decryption refuses rather than guesses.
-2. Restore the key file from wherever you kept it, your recovery bundle or
-   the secrets directory backup, with owner-only permissions:
+2. Restore the key file from your copy of the secrets directory, with
+   owner-only permissions:
    ```sh
    install -m 0400 /path/to/your/copy/document-kek .orbit-secrets/document-kek
    ```
@@ -812,14 +824,26 @@ restart the exact deployed image:
    ```sh
    bash scripts/deploy-container.sh --pull
    ```
-4. Confirm on the administration screen that the "Encrypted details are
-   locked" card has gone. It disappears the moment the instance holds a usable
-   key. Nothing needs re-encrypting and no backfill runs, because the values
-   were never changed.
+4. Confirm the container log says `encryption.key state=ready` with the key
+   id you expected, that the locked page has gone, and on the administration
+   screen that no "Encrypted details are locked" card remains. Nothing needs
+   re-encrypting and no backfill runs, because the values were never changed.
+
+If you have no copy of the key file but do have a recovery bundle, the way
+back is to restore the backup bundle or reinstall. The bundle import needs the
+deployment's current key file and refuses while that file is missing ("the
+configured document key is missing"), so do not run it there. Reinstall
+Orbit into a fresh directory ([Installing Orbit](installing.md)), then import
+the bundle there:
+
+```sh
+bash scripts/import-recovery-bundle.sh <recovery.tar>
+```
 
 If the key is really gone and no recovery bundle holds it, this is not a
-restore. Encrypted documents and Tier 1 metadata are unrecoverable by design
-when both the key and the bundle are lost; that is the whole point of the
+restore. Encrypted documents and Tier 1 and Tier 2 metadata, every account
+address included, are unrecoverable by design when both the key and the bundle
+are lost; that is the whole point of the
 encryption. The way back is to restore both the database and the key from a
 backup that has them together (ADR-0004).
 
@@ -837,6 +861,13 @@ application holds **both** the current key and the next one
 (`DOCUMENT_KEK_NEXT`, #954, ADR-0024 decision 4). Every row records which key
 protects it, so every row stays readable whether or not the rewrap worker has
 reached it yet. No maintenance window is needed at any step below.
+
+Take a backup (`bash scripts/backup.sh`) just before step 1, and another
+straight after step 4. In between, backups and recovery-bundle exports are
+refused, including the scheduled nightly one: rows written during the
+rotation are under the next key, which a backup does not carry, so it could
+not bring them back. They work again as soon as step 4 is done (or the
+rotation is undone).
 
 1. Generate a fresh key and put it where the rotation overlay expects it,
    with owner-only permissions:
@@ -882,8 +913,12 @@ reached it yet. No maintenance window is needed at any step below.
    ```sh
    pnpm rewrap-kek --next-key-file .orbit-secrets/document-kek-next
    ```
-   It reports progress and keeps going until every `document_crypto`,
-   `metadata_keys` and `mail_in_secrets` row is under the next key. You can
+   It reports progress and keeps going until every row in all five places
+   that hold a wrapped key is under the next key: `document_crypto` (stored
+   documents), `metadata_keys`, `mail_in_secrets`,
+   `imap_ingestion_attachments` (mailed attachments waiting for a household)
+   and `document_staging_objects` (uploads held while the scanner was down).
+   You can
    stop it (Ctrl-C, a crash, a host reboot) and run it again; it carries on
    from where it was. Every row it has not reached is still readable under
    the current key, and every row it has moved is readable under the next
@@ -907,6 +942,9 @@ reached it yet. No maintenance window is needed at any step below.
    current; nothing needs to know the id in advance. Dropping the overlay (by
    deploying with just `docker-compose.yml` again) removes
    `DOCUMENT_KEK_NEXT`; with the rewrap complete, no row depended on it.
+
+   Now take the backup (`bash scripts/backup.sh`): it is the first one since
+   step 1 that holds everything written during the rotation.
 
 ### If you are rotating because a key may have leaked
 

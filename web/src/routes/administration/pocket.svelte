@@ -4,18 +4,16 @@
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import { wake } from "$lib/pocket/wake.js";
-  import {
-    addMember, commandContact, commandMailbox, createLocalUser, createSystem, hardDeleteHousehold,
-    restoreHousehold, retryDocumentJob, sendSetupLink, setUserDisabled, testMail,
-  } from "$lib/data/workspace.js";
+  import { addMember, commandContact, commandMailbox, commandUploadLimit, createLocalUser, createSystem, hardDeleteHousehold, restoreHousehold, retryDocumentJob, sendSetupLink, setUserDisabled, testMail, wordsOf } from "$lib/data/workspace.js";
   import { deletionNameMatches } from "$lib/data/household.js";
-  import { ago } from "$lib/format.js";
+  import { ago, dayMonth, initials, plural } from "$lib/format.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
+  import { BAND_VAR } from "$lib/data/bands.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
-    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, ingestShort, initialsOf, lapsesShort, openFor, plainly,
-    sendWords, setupWords, shortDay, stamp, testVerdict, versionLine,
+    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, ingestShort, lapsesShort,
+    megabytes, openFor, plainly, sendWords, setupWords, shortDay, stamp, testVerdict, versionLine,
   } from "./words.js";
 
   /*
@@ -46,16 +44,16 @@
   /** @typedef {NonNullable<Awaited<ReturnType<typeof import('$lib/data/workspace.js').readAdminScreen>>>} AdminView */
   /** @typedef {{ email: string, displayName: string, expiresInDays: number }} Draft */
   /** @typedef {(intent: string, open: () => void, report?: (message: string) => void, about?: { resend?: { personId: string, days: number } }) => Promise<void>} Challenge */
-  /** @typedef {AdminView["users"][number]} Person */
+  /** @typedef {NonNullable<AdminView["users"]>[number]} Person */
   /** @typedef {AdminView["households"][number]} System */
 
-  /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, resumedResendPersonId: string | null, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void }} */
-  let { view, fixtures, actorHasPassword, provenIntent, resumedResendPersonId, draft = $bindable(), challenge, reread, spent } = $props();
+  /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, resumedResendPersonId: string | null, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void, screenProblem: string | null, onretry: () => void }} */
+  let { view, fixtures, actorHasPassword, provenIntent, resumedResendPersonId, draft = $bindable(), challenge, reread, spent, screenProblem, onretry } = $props();
 
-  /** @param {unknown} error */
-  const said = (error) => /** @type {{ message?: string }} */ (error)?.message ?? String(error);
-  /** @param {number} n @param {string} one @param {string} [many] */
-  const count = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  /* A panel whose read failed says so with a "try again" (#1442), as
+     settings does on the phone (#1195): the whole screen is re-read, and a
+     re-read that fails again keeps the screen it has. */
+  const tryAgain = () => reread().catch(() => {});
 
   const people = $derived(view?.users ?? []);
   const systems = $derived(view?.households ?? []);
@@ -79,7 +77,7 @@
     }
     if ((view.metadata?.damagedValues ?? 0) > 0) {
       list.push({ id: "damaged", title: "Damaged encrypted details",
-        say: `${count(view.metadata?.damagedValues ?? 0, "value")} failed the integrity check and can’t be recovered.` });
+        say: `${plural(view.metadata?.damagedValues ?? 0, "value")} failed the integrity check and can’t be recovered.` });
     }
     if (view.recoveryBundle && !view.recoveryBundle.exported) {
       list.push({ id: "bundle", title: "No recovery bundle exported",
@@ -96,13 +94,15 @@
     /** @type {{ id: string, word: string }[]} */
     const list = [];
     if (!view) return list;
-    const failing = view.services.filter(([tone]) => tone === "overdue" || tone === "warm");
-    for (const [tone, name] of failing.slice(0, 2)) {
-      list.push({ id: "ad-operations", word: `${name} ${tone === "overdue" ? "down" : "retrying"}` });
+    const failing = (view.services ?? []).filter(([tone]) => tone === "overdue" || tone === "warm");
+    /* The row's detail leads with the state's own word (#1296): the tell
+       repeats it rather than assuming every warm row is retrying. */
+    for (const [tone, name, detail] of failing.slice(0, 2)) {
+      list.push({ id: "ad-operations", word: `${name} ${tone === "overdue" ? "down" : detail.split(" · ")[0]}` });
     }
     if (failing.length > 2) list.push({ id: "ad-operations", word: `${failing.length - 2} more failing` });
     const failedJobs = jobs.filter((job) => job.status === "failed").length;
-    if (failedJobs) list.unshift({ id: "ad-documents", word: `${count(failedJobs, "job")} failed` });
+    if (failedJobs) list.unshift({ id: "ad-documents", word: `${plural(failedJobs, "job")} failed` });
     /* #1151 A1-Q6: carried over from `tests` (#1071's throwaway,
        reload-forgetting local copy), removed when A1-Q6 moved this screen
        onto the server-backed `mailProbes` the desk layout already reads —
@@ -255,7 +255,7 @@
       wake(`${person.displayName} is in ${system.name}`);
       await reread();
     } catch (error) {
-      peopleProblem = said(error);
+      peopleProblem = wordsOf(error);
       wake(peopleProblem, { failure: true });
     }
   }
@@ -287,7 +287,7 @@
       else wake(`${person.displayName} can sign in again`);
       await reread();
     } catch (error) {
-      peopleProblem = said(error);
+      peopleProblem = wordsOf(error);
       wake(peopleProblem, { failure: true });
     }
   }
@@ -349,14 +349,12 @@
   /* Round 3 §3.9: members and items at rest; the owner is the panel's. */
   /** @param {System} system */
   const systemMeta = (system) =>
-    `${count(system.memberCount ?? 0, "member")} · ${count((system.items ?? []).length, "item")}`;
+    `${plural(system.memberCount ?? 0, "member")} · ${plural((system.items ?? []).length, "item")}`;
 
   /* A system on the clock (§2.11, §19 "56 b the row", "57 admin only"). */
   const recoverable = $derived(view?.recoverable ?? []);
   /** @param {string} iso */
   const daysLeft = (iso) => Math.max(0, Math.ceil((Date.parse(iso) - Date.parse(view?.now ?? new Date().toISOString())) / 86_400_000));
-  /** @param {string} iso */
-  const goneOn = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
   /** @param {{ deleteAfter: string }} row */
   const expired = (row) => Date.parse(row.deleteAfter) <= Date.parse(view?.now ?? new Date().toISOString());
   /** What was said on a row after its act, keyed by the system's id. @type {Record<string, { ok: boolean, text: string }>} */
@@ -368,7 +366,7 @@
       clockSaid[row.id] = { ok: true, text: `restored · ${row.name} is back exactly as it was` };
       await reread();
     } catch (error) {
-      clockSaid[row.id] = { ok: false, text: `not restored — ${said(error)}` };
+      clockSaid[row.id] = { ok: false, text: `not restored — ${wordsOf(error)}` };
     }
   }
   /** @typedef {{ id: string, name: string, deleteAfter: string }} OnTheClock */
@@ -388,7 +386,7 @@
       gone = [...gone, { id: row.id, text: `deleted · ${row.name} is gone for good · its members keep their accounts` }];
       await reread();
     } catch (error) {
-      doomProblem = `not deleted — ${said(error)}`;
+      doomProblem = `not deleted — ${wordsOf(error)}`;
     }
   }
   /** Rows replaced by their said-line after a hard delete. @type {{ id: string, text: string }[]} */
@@ -422,9 +420,40 @@
       wake(partial.action === "clear" ? "the public contact is cleared" : `the public contact is ${partial.address}`);
       await reread();
     } catch (error) {
-      contactProblem = said(error);
+      contactProblem = wordsOf(error);
     } finally {
       contactBusy = false;
+    }
+  }
+
+  /* ── upload size limit (#1285) ───────────────────────────────────────── */
+  let uploadLimitOpen = $state(false);
+  /** @type {number | null} */
+  let uploadLimitDraft = $state(null);
+  let uploadLimitBusy = $state(false);
+  /** @type {string | null} */
+  let uploadLimitProblem = $state(null);
+  function openUploadLimit() {
+    const current = view?.uploadLimit;
+    uploadLimitDraft = current ? Math.round(current.maxBytes / 1048576) : null;
+    uploadLimitProblem = null;
+    uploadLimitOpen = true;
+  }
+  /** @param {{ action: "set", megabytes: number } | { action: "default" }} partial */
+  async function uploadLimitAction(partial) {
+    const current = view?.uploadLimit;
+    if (!current || uploadLimitBusy) return;
+    uploadLimitBusy = true;
+    uploadLimitProblem = null;
+    try {
+      const { uploadLimit } = await commandUploadLimit({ ...partial, expectedVersion: current.version });
+      uploadLimitOpen = false;
+      wake(`the upload size limit is ${megabytes(uploadLimit.maxBytes)}`);
+      await reread();
+    } catch (error) {
+      uploadLimitProblem = wordsOf(error);
+    } finally {
+      uploadLimitBusy = false;
     }
   }
 
@@ -469,14 +498,22 @@
     mailBusy = label;
     mailProblem = null;
     mailOutcome = null;
+    let answer;
     try {
-      const answer = await commandMailbox(command);
-      await reread();
-      mailOutcome = answer.outcome ?? null;
-      if (!answer.outcome || answer.outcome === "verified") { editOpen = false; rotateOpen = false; }
-      mailPassword = "";
+      answer = await commandMailbox(command);
     } catch (error) {
-      mailProblem = said(error);
+      mailProblem = wordsOf(error);
+      mailBusy = null;
+      return;
+    }
+    mailOutcome = answer.outcome ?? null;
+    if (!answer.outcome || answer.outcome === "verified") { editOpen = false; rotateOpen = false; }
+    mailPassword = "";
+    // The command landed; a failed re-read must not read back as a failed command.
+    try {
+      await reread();
+    } catch {
+      mailProblem = "done — Orbit could not refresh this screen, so reload to see the new version";
     } finally {
       mailBusy = null;
     }
@@ -504,7 +541,7 @@
       await testMail(which);
       await reread();
     } catch (error) {
-      testProblem = said(error);
+      testProblem = wordsOf(error);
     } finally {
       testing = null;
     }
@@ -567,15 +604,24 @@
       retried[job.id] = { status: "pending", at: new Date().toISOString() };
       wake(`${JOB_KINDS[job.kind] ?? job.kind} is queued to try again`);
     } catch (error) {
-      jobsProblem = said(error);
+      jobsProblem = wordsOf(error);
     }
   }
 
   /* ── operations (#1000) ───────────────────────────────────────────────── */
   /** @type {Record<string, string>} */
   const BODY = { ok: "ok", warm: "soon", overdue: "over", "ink-quiet": "ended" };
+  /* The band's token from BAND_VAR, in its text-safe variant (--ok-text,
+     --warm-text, --overdue-text exist in every pack, packs.css). */
+  /** @param {string} band */
+  const bandText = (band) => `var(${BAND_VAR[band]}-text)`;
   /** @type {Record<string, string>} */
-  const INK = { ok: "var(--ok-text)", warm: "var(--warm-text)", overdue: "var(--overdue-text)", "ink-quiet": "var(--ink-quiet)" };
+  const INK = {
+    ok: bandText("ok"),
+    warm: bandText("due-soon"),
+    overdue: bandText("overdue"),
+    "ink-quiet": "var(--ink-quiet)",
+  };
   /** "healthy · 40s ago" → the word on the trail, the rest as the meta. @param {string} detail */
   const split = (detail) => {
     const [word, ...rest] = detail.split(" · ");
@@ -584,7 +630,7 @@
   /** @type {number | null} */
   let serviceAt = $state(null);
   let serviceOpen = $state(false);
-  const service = $derived(serviceAt === null || !view ? null : view.services[serviceAt] ?? null);
+  const service = $derived(serviceAt === null || !view ? null : view.services?.[serviceAt] ?? null);
   const serviceRaw = $derived(serviceAt === null ? null : view?.health?.services[serviceAt] ?? null);
 
   /* Under fixtures `?localuser=` names a delivery, as on the desk, so both
@@ -606,7 +652,7 @@
     if (provenIntent === "local_user_create") inviteOpen = true;
     if (provenIntent === "system_create") { systemName = ""; systemOpen = true; }
     if (provenIntent === "setup_link_issue" && resumedResendPersonId) {
-      const person = view.users.find((one) => one.id === resumedResendPersonId);
+      const person = view.users?.find((one) => one.id === resumedResendPersonId);
       if (person) {
         resendFor = person;
         resendDays = SETUP_LINK_DAYS.fallback;
@@ -631,7 +677,7 @@
       </svg>
       <div class="ad-named">
         <h1 class="p-title">Administration</h1>
-        <p class="ad-sub">{view ? `${count(people.length, "person", "people")} · ${count(systems.length, "system")}` : ""}</p>
+        <p class="ad-sub">{view ? `${view.users ? `${plural(people.length, "person", "people")} · ` : ""}${plural(systems.length, "system")}` : ""}</p>
       </div>
     </header>
 
@@ -652,7 +698,12 @@
       {/each}
     </nav>
 
-    {#if !view}
+    {#if screenProblem && !view}
+      <section class="p-card ad-card" aria-label="Administration">
+        <p class="p-error ad-inset ad-lastline" role="alert">{screenProblem}
+          <button class="p-pill filled" onclick={onretry}>try again</button></p>
+      </section>
+    {:else if !view}
       <section class="p-card ad-card ad-loading" aria-label="Loading administration">
         <div class="p-unlit"></div><div class="p-unlit"></div><div class="p-unlit"></div>
       </section>
@@ -673,10 +724,10 @@
       {/if}
 
       <!-- PEOPLE (§2.12 4). -->
-      <section class="p-card ad-card ad-flush" class:proposed={people.length <= 1} style:--i="3"
+      <section class="p-card ad-card ad-flush" class:proposed={!view.failed.users && people.length <= 1} style:--i="3"
                id="ad-people" tabindex="-1" aria-labelledby="ad-people-head" data-ad="people" data-row-group>
         <div class="ad-cardhead">
-          <h2 class="p-caps" id="ad-people-head">People<span class="p-count">{people.length}</span></h2>
+          <h2 class="p-caps" id="ad-people-head">People{#if view.users}<span class="p-count">{people.length}</span>{/if}</h2>
           <button class="p-pill act-accent" onclick={openInvite}>invite someone</button>
         </div>
         {#if delivery?.sendError}
@@ -700,10 +751,15 @@
                trail={person.isInstanceAdmin ? "admin" : "user"}
                trailTone={person.isInstanceAdmin ? "var(--accent-text)" : ""} acts={personActs(person)}
                detail={standing ? personDetail : undefined}>
-            {#snippet mark()}<span class="p-avatar" class:owner={person.isInstanceAdmin} class:ad-off={person.disabledAt}>{initialsOf(person.displayName)}</span>{/snippet}
+            {#snippet mark()}<span class="p-avatar" class:owner={person.isInstanceAdmin} class:ad-off={person.disabledAt}>{initials(person.displayName)}</span>{/snippet}
           </Row>
         {/each}
-        {#if people.length <= 1}<p class="p-empty ad-inset">only you so far</p>{/if}
+        {#if view.failed.users}
+          <p class="p-error ad-inset ad-lastline" role="alert">people not shown — Orbit could not reach the list of people
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+        {:else}
+          {#if people.length <= 1}<p class="p-empty ad-inset">only you so far</p>{/if}
+        {/if}
         {#if peopleProblem}<p class="p-error ad-inset ad-lastline" role="alert">{peopleProblem}</p>{/if}
       </section>
 
@@ -731,6 +787,10 @@
         {:else}
           {#if !recoverable.length}<p class="p-empty ad-inset">no systems yet</p>{/if}
         {/each}
+        {#if view.failed.owners}
+          <p class="p-error ad-inset ad-lastline" role="alert">owners not shown — Orbit could not reach every system’s members
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+        {/if}
         {#each gone as line (line.id)}
           <p class="ad-said ok" role="status">{line.text}</p>
         {/each}
@@ -741,10 +801,10 @@
         {#each recoverable.filter((row) => !gone.some((line) => line.id === row.id)) as row (row.id)}
           <!-- Round 3 §3.9: the state and the days at rest; the date sits in
                the panel beside `delete now`. -->
-          {#snippet clockDetail()}<div class="p-kv"><span>gone for good</span><b>{goneOn(row.deleteAfter)}</b></div>{/snippet}
+          {#snippet clockDetail()}<div class="p-kv"><span>gone for good</span><b>{dayMonth(row.deleteAfter)}</b></div>{/snippet}
           <Row title={row.name} metaFace="ui"
                meta={expired(row) ? "past its window · removing"
-                 : `deleted · ${count(daysLeft(row.deleteAfter), "day")} left`}
+                 : `deleted · ${plural(daysLeft(row.deleteAfter), "day")} left`}
                acts={expired(row) ? [] : clockActs(row)} detail={expired(row) ? undefined : clockDetail}>
             {#snippet mark()}
               <svg class="ad-ring ad-clockring" width="30" height="30" viewBox="0 0 34 34" aria-hidden="true">
@@ -777,10 +837,30 @@
                onactivate={openContact}>
             {#snippet mark()}<span class="ad-kmark">@</span>{/snippet}
           </Row>
+        {:else if view.failed.contact}
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the public contact
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
         {:else}
-          <p class="p-error ad-inset ad-lastline" role="alert">the public contact couldn’t be read · the rest of the page still works</p>
+          <p class="p-empty ad-inset">not set</p>
         {/if}
       </section>
+
+      <!-- UPLOAD SIZE LIMIT (#1285): absent where the route cannot answer. -->
+      {#if view.uploadLimit}
+        {@const limit = view.uploadLimit}
+        <section class="p-card ad-card ad-flush" style:--i="5" id="ad-uploads" tabindex="-1"
+                 aria-labelledby="ad-uploads-head" data-ad="uploads">
+          <div class="ad-cardhead"><h2 class="p-caps" id="ad-uploads-head">Upload size limit</h2></div>
+          <Row title={megabytes(limit.maxBytes)}
+               meta={limit.overrideBytes === null ? "the default" : "set here"}
+               trail="change" trailTone="var(--accent-text)" trailName="change the upload size limit"
+               onactivate={openUploadLimit}>
+            {#snippet mark()}<span class="ad-kmark">↑</span>{/snippet}
+          </Row>
+          <p class="ad-note ad-inset ad-lastline">A reverse proxy in front of Orbit must allow uploads at least this large —
+            <a href="https://github.com/tomlawesome/orbit/blob/main/docs/installing.md#what-you-need" target="_blank" rel="noopener noreferrer">see the install guide</a>.</p>
+        </section>
+      {/if}
 
       <!-- MAIL MACHINERY (§2.12 7, §15, #743). -->
       <section class="p-card ad-card ad-flush" style:--i="6" id="ad-mail" tabindex="-1"
@@ -805,7 +885,11 @@
           {/if}
         {/each}
         {#if testProblem}<p class="p-error ad-inset ad-lastline" role="alert">{testProblem}</p>{/if}
-        {#each view.relay as [label, value, extra] (label)}
+        {#if view.failed.relay}
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the mail settings
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+        {/if}
+        {#each view.relay ?? [] as [label, value, extra] (label)}
           <Row title={label} meta={label === "ingest" ? ingestShort(value) : value} trail={extra === "on" ? "on" : ""} trailTone="var(--ok-text)">
             {#snippet mark()}<span class="p-body {extra === 'on' ? 'ok' : 'ended'}"></span>{/snippet}
           </Row>
@@ -862,7 +946,11 @@
       <section class="p-card ad-card ad-flush" style:--i="7" id="ad-operations" tabindex="-1"
                aria-labelledby="ad-ops-head" data-ad="operations">
         <div class="ad-cardhead"><h2 class="p-caps" id="ad-ops-head">Operations</h2></div>
-        {#each view.services as [tone, name, detail], at (name)}
+        {#if view.failed.services}
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the service checks
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+        {/if}
+        {#each view.services ?? [] as [tone, name, detail], at (name)}
           {@const words = split(detail)}
           <Row title={name} meta={words.rest} trail={words.word} trailTone={INK[tone] ?? ""}
                onactivate={() => { serviceAt = at; serviceOpen = true; }}>
@@ -904,7 +992,12 @@
         </section>
       {/if}
 
-      <p class="ad-strip">{versionLine(view.instance)}</p>
+      {#if view.instance}
+        <p class="ad-strip">{versionLine(view.instance)}</p>
+      {:else if view.failed.instance}
+        <p class="p-error ad-inset" role="alert">version not shown — Orbit could not reach this instance’s build
+          <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+      {/if}
     {/if}
   </main>
 
@@ -937,7 +1030,7 @@
     {:else if reading?.id === "bundle"}
       <p class="p-prose ad-sheet-say">If the encryption key is ever lost with no recovery bundle to recover it, every
         document, all encrypted metadata, and — once account addresses are encrypted — every stored address are gone for
-        good. Run <code>orbit backup</code> then <code>orbit export-recovery-bundle &lt;backup.tar&gt;</code> to make one.</p>
+        good. Run <code>bash scripts/backup.sh</code> then <code>bash scripts/export-recovery-bundle.sh &lt;backup.tar&gt;</code> to make one.</p>
       <p class="p-prose ad-sheet-say">Keep its two parts apart: the bundle file on storage separate from this instance, and
         its passphrase in a password manager or on paper — never both together, because that separation is what keeps
         anyone who gets hold of the file alone from being able to use it. This reappears after every encryption-key
@@ -958,7 +1051,7 @@
       <div class="ad-stepper" role="group" aria-labelledby="ad-inv-days">
         <button type="button" class="p-pill" aria-label="One day fewer" disabled={Number(draft.expiresInDays) <= SETUP_LINK_DAYS.min}
                 onclick={() => (draft.expiresInDays = stepped(draft.expiresInDays, -1))}>−</button>
-        <output aria-live="polite">{count(Number(draft.expiresInDays), "day")}</output>
+        <output aria-live="polite">{plural(Number(draft.expiresInDays), "day")}</output>
         <button type="button" class="p-pill" aria-label="One day more" disabled={Number(draft.expiresInDays) >= SETUP_LINK_DAYS.max}
                 onclick={() => (draft.expiresInDays = stepped(draft.expiresInDays, 1))}>+</button>
       </div>
@@ -984,7 +1077,7 @@
         <div class="ad-stepper" role="group" aria-labelledby="ad-re-days">
           <button type="button" class="p-pill" aria-label="One day fewer" disabled={resendDays <= SETUP_LINK_DAYS.min}
                   onclick={() => (resendDays = stepped(resendDays, -1))}>−</button>
-          <output aria-live="polite">{count(resendDays, "day")}</output>
+          <output aria-live="polite">{plural(resendDays, "day")}</output>
           <button type="button" class="p-pill" aria-label="One day more" disabled={resendDays >= SETUP_LINK_DAYS.max}
                   onclick={() => (resendDays = stepped(resendDays, 1))}>+</button>
         </div>
@@ -1032,7 +1125,7 @@
         <Row title="{person.displayName}{person.id === meId ? ' · you' : ''}" meta={person.email ?? ""}
              trail="owner" trailTone="var(--accent-text)" trailName="make it, owned by {person.displayName}"
              onactivate={() => createSystemFor(person)}>
-          {#snippet mark()}<span class="p-avatar">{initialsOf(person.displayName)}</span>{/snippet}
+          {#snippet mark()}<span class="p-avatar">{initials(person.displayName)}</span>{/snippet}
         </Row>
       {/each}
     </div>
@@ -1052,6 +1145,29 @@
       <button class="p-pill filled" type="submit" form="ad-contact-form" disabled={contactBusy}>{contactBusy ? "saving…" : "save"}</button>
       {#if view?.contact?.address}
         <button class="p-pill danger" type="button" disabled={contactBusy} onclick={() => contactAction({ action: "clear" })}>clear</button>
+      {/if}
+    {/snippet}
+  </Sheet>
+
+  <Sheet bind:open={uploadLimitOpen} size="callout" title="Upload size limit">
+    <form id="ad-uploads-form" onsubmit={(event) => { event.preventDefault();
+      if (uploadLimitDraft !== null) uploadLimitAction({ action: "set", megabytes: uploadLimitDraft }); }}>
+      <label class="ad-label" for="ad-uploads-field">limit in MB</label>
+      <input id="ad-uploads-field" class="ad-input" type="number" inputmode="numeric" step="1" enterkeyhint="done"
+             min={view?.uploadLimit ? Math.round(view.uploadLimit.minBytes / 1048576) : 1}
+             max={view?.uploadLimit ? Math.round(view.uploadLimit.ceilingBytes / 1048576) : 100}
+             bind:value={uploadLimitDraft} required>
+      {#if view?.uploadLimit}
+        <p class="ad-note">From {megabytes(view.uploadLimit.minBytes)} to {megabytes(view.uploadLimit.ceilingBytes)}. It applies to
+          the next upload; documents already kept are unaffected.</p>
+      {/if}
+      {#if uploadLimitProblem}<p class="p-error" role="alert">{uploadLimitProblem}</p>{/if}
+    </form>
+    {#snippet foot()}
+      <button class="p-pill filled" type="submit" form="ad-uploads-form" disabled={uploadLimitBusy}>{uploadLimitBusy ? "saving…" : "save"}</button>
+      {#if view?.uploadLimit && view.uploadLimit.overrideBytes !== null}
+        <button class="p-pill" type="button" disabled={uploadLimitBusy}
+                onclick={() => uploadLimitAction({ action: "default" })}>use the default</button>
       {/if}
     {/snippet}
   </Sheet>
@@ -1107,7 +1223,7 @@
 
   <Sheet bind:open={doomOpen} size="callout" title="Delete {doomed?.name ?? 'it'} now?">
     {#if doomed}
-      <p class="p-prose ad-sheet-say">Deleting now skips the {count(daysLeft(doomed.deleteAfter), "day")}. Nothing comes back
+      <p class="p-prose ad-sheet-say">Deleting now skips the {plural(daysLeft(doomed.deleteAfter), "day")}. Nothing comes back
         after this — not for you, not for anyone.</p>
       <label class="ad-label" for="ad-doom-name">type the system’s name exactly to wake the button</label>
       <input id="ad-doom-name" class="ad-input" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"
@@ -1131,13 +1247,13 @@
     <p class="ad-label" id="ad-grace">old addresses keep working for</p>
     <div class="ad-stepper" role="group" aria-labelledby="ad-grace">
       <button type="button" class="p-pill" aria-label="Seven days fewer" disabled={graceDays <= 0} onclick={() => graceStep(-7)}>−</button>
-      <output aria-live="polite">{count(graceDays, "day")}</output>
+      <output aria-live="polite">{plural(graceDays, "day")}</output>
       <button type="button" class="p-pill" aria-label="Seven days more" disabled={graceDays >= 90} onclick={() => graceStep(7)}>+</button>
     </div>
     {#if mailProblem}<p class="p-error" role="alert">{mailProblem}</p>{/if}
     {#snippet foot()}
       <ArmButton label="rotate every address" armedLabel="tap again to rotate every address"
-                 onfire={() => { if (view?.mailbox) mailAction("alias", { action: "rotate_alias_key", expectedVersion: view.mailbox.version, graceDays }).then(() => { if (!mailProblem) { aliasOpen = false; wake("every address is new · the old ones keep working for " + count(graceDays, "day")); } }); }} />
+                 onfire={() => { if (view?.mailbox) mailAction("alias", { action: "rotate_alias_key", expectedVersion: view.mailbox.version, graceDays }).then(() => { if (!mailProblem) { aliasOpen = false; wake("every address is new · the old ones keep working for " + plural(graceDays, "day")); } }); }} />
     {/snippet}
   </Sheet>
 
@@ -1146,6 +1262,7 @@
       <div class="p-kv"><span>state</span><b class={BODY[service[0]] ?? ""}>{split(service[2]).word}</b></div>
       {#if serviceRaw}
         <div class="p-kv"><span>last checked</span><b>{stamp(serviceRaw.checkedAt)}</b></div>
+        {#if serviceRaw.signaturesAt}<div class="p-kv"><span>signatures from</span><b>{stamp(serviceRaw.signaturesAt)}</b></div>{/if}
         {#if serviceRaw.lastSuccessAt}<div class="p-kv"><span>last success</span><b>{stamp(serviceRaw.lastSuccessAt)}</b></div>{/if}
         {#if serviceRaw.lastErrorAt}<div class="p-kv"><span>last error</span><b class="over">{stamp(serviceRaw.lastErrorAt)}</b></div>{/if}
       {:else}
@@ -1274,6 +1391,11 @@
   .ad-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
   .ad-input::placeholder{color:var(--ink-quiet)}
   .ad-note{margin:12px 0 0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet)}
+  /* A link inside the note keeps the pocket's 44px tap floor: vertical
+     padding on an inline box widens what a finger hits without moving the
+     line it sits on, and it reads at the controls' colour: the browser's
+     own link blue fails WCAG AA contrast here (#1285). */
+  .ad-note a{padding:14px 0;color:var(--ink-mid)}
   .ad-sheet-say{color:var(--ink-mid);margin:4px 0 12px}
   .ad-sheet-say code{font:var(--p-type-meta) var(--mono);color:var(--ink)}
   .ad-stepper{display:flex;align-items:center;gap:12px}

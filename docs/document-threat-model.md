@@ -9,7 +9,8 @@ Orbit will attach encrypted documents to household items using a local
 persistent volume. The first release supports:
 
 - PDF, JPEG, and PNG content identified from file signatures;
-- a 25 MiB maximum file size;
+- a 50 MiB default maximum file size, which an administrator can change
+  in Administration within hard bounds of 1 to 100 MiB (#1285);
 - a 5 GiB default quota per household;
 - a 20 GiB default quota per instance;
 - 30-day soft deletion before irreversible purge;
@@ -38,8 +39,10 @@ quota never bypasses per-request limits.
    submits metadata and bytes over HTTPS.
 2. **Orbit authorization:** server-side session, household membership, and item
    ownership checks decide whether an operation is allowed.
-3. **Quarantine:** untrusted plaintext exists temporarily while Orbit validates
-   and scans it. It is never served to users from this state.
+3. **Quarantine:** untrusted plaintext exists temporarily while Orbit types it
+   by magic bytes, scans it and then opens it to find a page. It is never
+   served to users from this state, and nothing opens it until the scan has
+   passed ([ADR-0033](adr/0033-document-safety-standard-patterns.md)).
 4. **ClamAV:** Orbit sends bounded plaintext over an internal-only Compose
    network using `clamd`'s streaming protocol. ClamAV receives no filesystem
    mount containing Orbit documents, database credentials, application
@@ -98,14 +101,18 @@ recoverable state.
 
 ### Upload and validation
 
-- Reject requests exceeding 25 MiB before buffering the complete body where
-  platform support permits, and enforce the limit again while streaming.
+- Reject requests exceeding the effective size limit (the administrator's
+  setting, or `DOCUMENT_MAX_BYTES` when none is set; never over 100 MiB)
+  before buffering the complete body where platform support permits, and
+  enforce the limit again while streaming.
 - Normalize display filenames, remove path components/control characters, and
   cap their encoded length. Storage keys never derive from user filenames.
 - Identify supported types using magic bytes. Supplied media type and extension
   are advisory only.
 - Reject archives, executables, polyglot signatures detected by validation,
-  truncated signatures, empty files, and unsupported formats.
+  truncated signatures, empty files, and unsupported formats. A file that is
+  not a PDF, JPEG or PNG by magic bytes is refused before it is scanned or
+  opened.
 - Calculate a SHA-256 content hash while receiving bytes.
 - Quotas are reserved transactionally before durable finalisation to prevent
   concurrent uploads from exceeding limits.
@@ -118,28 +125,84 @@ recoverable state.
   hostile throughout parsing and review. The PDF-only mailbox rule narrows
   transport input; it does not make mailbox PDFs more trusted or manual image
   uploads less dangerous.
-- Validate the complete bounded container before reserving durable upload
-  metadata or invoking a scanner or parser. PDF structure is parsed by a
-  maintained, bounded in-process PDF.js structure parser with error recovery
-  disabled, range/stream/prefetch/network/font/eval/rendering/WASM paths
-  disabled, and XFA inspected only for rejection. Inspection is capped at
-  1,000 pages and five seconds; the timer can abort asynchronous PDF.js work,
-  but cannot pre-empt synchronous JavaScript already executing in Orbit's
-  process. PDF active/embedded-file
-  features are classified separately from unfamiliar structure; names are
-  inspected outside comments, strings, and stream payloads so harmless text in
-  compressed page content does not become active content. Malformed JPEG
-  marker streams, malformed PNG chunk/CRC structure, and decompression-risk
-  image dimensions are rejected. Magic bytes alone are not structural
-  validation.
+- Scan first: ClamAV scans every file before anything opens it. The order on
+  every route in (upload, the create form's inspection, mail-in and the
+  pre-attachment preview) is magic-byte typing, then the ClamAV scan, then
+  the open check below, then reserving durable upload metadata. No PDF.js,
+  image decoder or Tika call sees a byte of a file that has not passed the
+  scan. An upload held for a scanner outage is opened only after its recovery
+  scan; one the open check then refuses is rejected as
+  `unsupported_structure` with scan status clean and is never encrypted for
+  durable storage or published. The reading card tells the reader it is
+  scanning, then that it has moved on to generating the preview
+  ([ADR-0033](adr/0033-document-safety-standard-patterns.md)).
+- The open check is pattern E of ADR-0033: the library that will draw the file
+  opens it and finds a page. For a PDF, PDF.js, the one PDF parser inside Orbit's own process,
+  opens it with no password and finds page one, within 1,000 pages and five
+  seconds (`password_required` when it needs a password to open,
+  `unsupported_structure` for anything else it cannot open). For a JPEG or
+  PNG, the dimensions declared in the header are read first and must be within
+  20,000 pixels a side and 40 million in all, then the preview renderer's own
+  decoder must read the image. These limits are Orbit's own because no
+  library sets them. Magic bytes alone are not proof that a file opens.
+- The PDF open check runs in a child process of its own, not in the server's
+  process ([ADR-0038](adr/0038-pdf-structure-check-in-a-sandboxed-worker.md)).
+  A few-kilobyte file can make a PDF parser loop or allocate without end while
+  it reads the cross-reference data, and the cheap pre-parse bound on declared
+  entries modelled the parser's lenient reading and kept missing ways in. So
+  each check gets its own child with a 128 MB heap cap (its own flag), a
+  process-memory ceiling of 320 MB plus five times the file's size (resident plus swapped) that the server reads
+  from `/proc` every 25 ms and kills it past, a five-second wall-clock limit
+  that kills it, an empty environment, and at most two run at once; running
+  out of memory, timing out or crashing refuses the file as
+  `unsupported_structure`, logs one record with no file detail, and leaves
+  the server answering. The bound stays as a cheap first fence. The child
+  still shares the server's files and network. Boot warns if `/bin/sh`,
+  `ulimit -d` or `/proc`, which the sandbox relies on, is missing.
+- Orbit does not refuse a PDF for what it contains. JavaScript, open and
+  link actions, XFA forms, embedded files, owner-password-only encryption
+  ("no editing" certificates) and encrypted object streams are all accepted
+  when PDF.js opens the file. A PDF that needs a password to open is refused,
+  as a product limit rather than a safety one: nothing in Orbit could show,
+  read or scan it. Nothing in a PDF runs in Orbit. The server renderer has
+  XFA off, no pdf.js worker, no network, no system fonts and no WebAssembly, and
+  PDF.js runs document scripts only through the viewer's annotation layer and
+  scripting manager, which Orbit never builds. Orbit shows people only a
+  picture it draws on the server. The options are typed against the installed
+  PDF.js, so an option the pinned version drops fails the type check.
+- The original is kept as it arrived and is downloadable. A downloaded PDF
+  carries whatever it carries, scripts and attachments included, and a person
+  who opens it in another reader is in the same position as with any email
+  attachment. Orbit serves downloads as attachments under
+  `default-src 'none'; sandbox` and `nosniff`, and has no in-browser PDF
+  viewer. If one is ever added it gets PDF.js with scripting off and a page
+  content security policy.
 - ClamAV detects known file threats. Parsers and OCR engines extract content.
   Neither function proves that extracted text, metadata, or suggested values
   are safe, accurate, or authoritative.
 - Parser responses must be content-type checked, strictly decoded, and bounded
   before allocation. Redirects and arbitrary request URLs or options are
   rejected. Parser errors expose no provider or document content.
-- PDF.js runs in the Orbit process and is not a separate sandbox. The optional
-  Tika service remains the separately isolated parser/OCR boundary described
+- PDF.js is the one parser of untrusted bytes in Orbit's own code, and it
+  opens only files ClamAV has passed. It never runs in the server's process:
+  the open check and the page renderer both run it in a sandbox child
+  process, one per job (ADR-0038, as amended for #1427). Drawing a page decodes what the
+  open check never touches (content streams, fonts, images), so a small
+  emailed PDF whose page decodes to hundreds of megabytes used to stall or
+  crash the server when a member opened its preview. Now each preview is one
+  child process that applies the open check's gate, draws the page and
+  returns a PNG, under the render budget (ten seconds), a process-memory
+  ceiling of 768 MB plus the file's size (which counts canvases, patterns,
+  images and fonts alike), and the same heap cap, two-at-once limit and empty
+  environment; a child that is not ready within five seconds is stopped as a
+  crash. A few-kilobyte pattern, shading or soft-mask file that would grow a
+  renderer to gigabytes is killed at the ceiling in a few seconds.
+  Running out of memory, timing out or crashing answers
+  `document_preview_failed` and logs one record with no file detail. A
+  source check (`tests/unit/pdf-no-in-process-reader.test.mjs`) fails if
+  anything else on the server loads PDF.js. Keeping it patched is the
+  standing cost. The optional Tika service
+  remains the separately isolated parser/OCR boundary described
   below.
 - The optional Tika service shares only a dedicated internal network with the
   Orbit application. It has no network path to PostgreSQL, default-network
@@ -187,6 +250,9 @@ recoverable state.
   60-second/2-minute/4-minute/8-minute/15-minute delays, and immutable 24-hour
   retention. Manual retry does not extend retention. Terminal purge failure
   leaves an inaccessible `purge_pending` backlog and never claims success.
+- The scan precedes every parser (see "Parsing, OCR, and indirect prompt
+  injection"). Scanner-unavailable behaviour is unchanged: the upload is held
+  for recovery, and inspection, preview and mail-in are refused.
 - When scanning is explicitly disabled, validation continues, the document
   records `scan_status=skipped`, and administrators see a persistent warning.
 - Scanner responses are normalized to safe classifications; raw filenames or
@@ -229,6 +295,15 @@ recoverable state.
   deletion windows.
 - Unknown or inconsistent states fail closed and surface a safe administrator
   health warning.
+- A file staged for an item that has not been saved yet (#1406, see
+  [the design note](adr-notes/1406-stage-then-bind.md)) is an unbound
+  `available` document, held for at least 24 hours (longer when scanner recovery
+  keeps rows for longer; see the design note) and counted against the household's
+  quota while it is held. A member of the household can create one without ever
+  saving an item. The storage sweep moves an expired unbound document to
+  `pending_deletion` for the normal purge. Binding it to an item requires the
+  same household, a document that is not rejected, deleted or pending
+  deletion, and a sealed item id that matches the item being saved; anything else is refused with one identical 422.
 
 ### Download safety
 
@@ -240,28 +315,51 @@ recoverable state.
 - Authentication-tag verification must complete successfully; corrupt content
   is not partially returned as a successful download.
 
-### Page-one preview safety
+### Page preview safety
 
-- `GET /api/documents/{documentId}/preview` renders page one of a stored
-  document as an image so a person can recognise it visually (#476). It is
+- `GET /api/documents/{documentId}/preview` renders one page of a stored
+  document as an image so a person can recognise and read it (#476): page one,
+  or any requested page `?page=N` bounded by the page cap (#1300). A malformed,
+  zero, negative or past-the-cap page is refused with a 400 before the
+  document is read; a page past the document's end is a 404 answered only
+  after every check below has passed. The response's `X-Orbit-Page-Count`
+  header is pdf.js's own page count, read after the open check (1 for an
+  image), so no count is stored. It is
   reachable exactly where a download is: it obtains plaintext through the same
   authorization, readiness and integrity path, and refuses everything a
   download refuses with the same non-disclosing response.
 - The read is audited as `document_previewed`, distinct from
   `document_downloaded`, so an image request is never recorded as a
   whole-document export.
-- Rendering is in-process and in-memory: PDF.js parses into a Skia canvas with
-  the same parser posture as structure validation — no scripting, no eval, no
-  XFA, no network, no worker. No plaintext temporary file is written, so there
+- Rendering is in memory and, for a PDF, in the sandbox child process
+  described above: PDF.js parses into a Skia canvas with the same option set as the
+  open check (`PDF_STRUCTURE_PARSER_OPTIONS`) — no XFA, no network, no
+  pdf.js worker, and no scripting layer to run a document's scripts. No
+  plaintext temporary file is written, so there
   is nothing to unlink; the decrypted buffer is zeroed on every exit, including
   failures.
 - Bytes are re-identified and re-inspected before rendering rather than trusted
-  from the stored media type. Anything the structure check refuses answers
+  from the stored media type. Anything the open check refuses answers
   `document_preview_unsupported`; a render that fails or exceeds its wall-clock
   budget answers `document_preview_failed`. Neither becomes a server error.
 - Output is bounded to a 1200-pixel long edge and carries the download
   response's headers: `Cache-Control: private, no-store`,
   `X-Content-Type-Options: nosniff` and a restrictive content security policy.
+- `GET /api/imap-inbox/{receiptId}/attachments/{attachmentId}/preview` draws
+  a page of an attachment still waiting in a mail receipt (#1155), for the
+  mail's recipient only, through the same renderer, `page` parameter and
+  headers.
+- `POST /api/households/{householdId}/item-document-preview` draws the same
+  page (one, or `?page=N`) from a file the create form has just been given, before any item
+  exists for it (#1245). It takes the inspection route's temporary-upload
+  shape and retains nothing: the bytes are received into quarantine,
+  identified, scanned by ClamAV where the instance scans (a scanner refusal
+  answers exactly as the inspection and upload paths do, and malware is
+  refused before anything is drawn), rendered in memory through the renderer
+  above, then zeroed and discarded. The answer is a private, unsniffed NDJSON
+  stream: a line saying whether the scan passed or scanning is off, so a
+  screen says "scanned clean" only when something scanned it, then the page
+  and the page count, or an error line. Household membership is required, as for inspection.
 
 ### Availability and resource controls
 
@@ -272,9 +370,9 @@ recoverable state.
   rest of the application unhealthy.
 - Disk exhaustion, quota exhaustion, and key unavailability return distinct
   administrator diagnostics but non-sensitive user errors.
-- The application remains usable when the KEK is missing, but all document
-  upload/download/rotation operations remain locked. Orbit never generates a
-  replacement key automatically.
+- An instance with no usable KEK locks itself to everyone until the key is
+  restored (#1405, ADR-0024 amendment; see "Household metadata encryption"
+  below). Orbit never generates a replacement key automatically.
 
 ## Household metadata encryption (Tiers 1 and 2)
 
@@ -282,13 +380,20 @@ ADR-0024 extends the same envelope encryption to household metadata, in the
 tiers #365 names.
 
 **Tier 1** is `items.notes`, `items.reference`,
-`imap_ingestion_messages.proposal` and `.field_evidence`.
+`imap_ingestion_messages.proposal` and
+`imap_ingestion_messages.field_evidence`.
 
 **Tier 2** is `items.title`, `items.provider` (a provider *name*), the cost
-`items.cost_minor`, and the invited member address
-`household_invitations.email`. It uses the same household key, the same
-envelope and the same rotation path as Tier 1 — no second key and no second
-cipher. What it costs is queries: the database can no longer search titles,
+`items.cost_minor`, the invited member address `household_invitations.email`,
+and, since #969, every account address: `users.email` and the mail-forwarding
+sender address `mail_in_sender_addresses.address`. Those two account addresses
+sit under the instance key rather than a household one, because a person
+belongs to several households and a forwarded message is matched to its sender
+before any household is known. Since #1316 the identity provider's ID token
+kept for sign-out, `sessions.id_token`, sits under the instance key too, bound
+to its own session row and deleted with it. Everything else in Tier 2 uses the same
+household key as Tier 1, and all of it the same envelope and the same rotation
+path — no second cipher. What it costs is queries: the database can no longer search titles,
 match provider names or add up costs, so Orbit does all three in the
 application over one household's decrypted rows. Measured on a seeded
 database, that decrypt-and-scan takes about 4.5 ms for a 100-item household
@@ -311,7 +416,9 @@ surface may describe it as more than this.
 
 - One random 32-byte metadata data-encryption key per household, wrapped under
   the existing instance KEK (`DOCUMENT_KEK`), plus one instance-scope key for
-  mail-in receipts that are not attributed to a household yet. Deleting a
+  mail-in receipts that are not attributed to a household yet, account
+  addresses (#969), and the identity provider's ID token kept on each session
+  that began at the provider so sign-out can name it (#1316). Deleting a
   household deletes its key, which crypto-shreds any stray copy of that
   household's ciphertext.
 - Each value is one AES-256-GCM envelope, `mdv1.<iv>.<tag>.<ciphertext>`,
@@ -338,13 +445,16 @@ surface may describe it as more than this.
   the rest of the row renders normally. Each failure logs an administrator
   diagnostic naming the column and row and nothing else. Writing to the field
   is the repair.
-- A missing KEK is the separate, already-defined state: the application stays
-  usable, encrypted fields read as locked rather than damaged, and writes to
-  them are refused, exactly as document operations lock today. Signing in is
-  not affected: the account address `users.email` is deliberately not
-  encrypted, so a missing KEK never locks anybody out of the instance. Whether
-  that stays true is the open decision on #966 (the Tier 2 remainder), which
-  records the trade in full.
+- An instance with no usable KEK (missing, unreadable, malformed, set in both
+  forms, or not the key the instance-scope `metadata_keys` row was wrapped
+  under) is locked as a whole (#1405, ADR-0024 amendment): every screen and
+  API answers 503, nobody signs in, administrators included, and only the
+  scheduled-maintenance worker runs, until the key is fixed on the host and
+  the container restarted. Account addresses (`users.email`) are encrypted
+  since #969, so a session could not even show who is signed in. A
+  household-scope key wrapped under a key the instance does not hold is the
+  narrower case: those fields read as locked rather than damaged, and writes
+  to them are refused, exactly as document operations lock.
 - A reminder whose item name will not decrypt is not sent with an empty or
   invented name: the delivery is retried, like any other transient fault,
   until the key or the value is repaired.
@@ -438,8 +548,8 @@ Bounded document parsing and dedicated-mailbox ingestion are required v1
 inputs to the same private, editable review flow. Direct upload accepts the
 three document types above, while mailbox ingestion deliberately accepts only
 PDF candidates. Incidental non-PDF MIME parts are ignored without download or
-staging; a claimed PDF must pass bounded structural detection, malware
-scanning, and encryption. A message with no PDF reaches a content-free private
+staging; a claimed PDF must pass magic-byte typing, malware scanning, the
+bounded open check, and encryption, in that order. A message with no PDF reaches a content-free private
 terminal outcome rather than an empty review draft. Before mailbox enablement,
 this model must cover authenticated envelope identity, hostile MIME and archive
 limits, receipt idempotency, quarantine, retry/reconnect behaviour, cross-
@@ -449,8 +559,7 @@ approval before any item write or attachment.
 [ADR-0005](adr/0005-reviewed-ingestion-and-mailbox-staging.md) establishes that
 boundary. Mailbox input is identified only through a configured
 provider-preserved envelope-recipient header and a versioned HMAC alias. Orbit
-does not persist raw messages, active content, archives, malware, or incomplete
-staging. Supported clean PDFs are encrypted into user-owned staging
+does not persist raw messages, archives, malware, or incomplete staging. Supported clean PDFs are encrypted into user-owned staging
 that is neither household data nor downloadable through item routes. Receipt
 identity, recipient-scoped content identity, leases, bounded retries, expiry,
 and purge must remain idempotent across polling, restart, UIDVALIDITY rollover,

@@ -1,5 +1,7 @@
 # First-run tour — round 2 (#866)
 
+The screenshots and recordings this page shows are kept outside git (#1408): frames are blank in a clone or on the mirror.
+
 Round 1 ratified **B — across the ship**, **watch-only**, ten beats
 (verdicts in `../round-1/README.md`). Round 2 takes B onto the three
 surfaces it has not yet stood on: the pocket, the adrift screen, and an

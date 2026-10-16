@@ -11,16 +11,12 @@
 # `apk upgrade` this replaces is no longer needed here. #649 also stops
 # applying: that upgrade froze behind the layer cache, and there is no upgrade
 # layer left to freeze.
-FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:8c4f684bf363c1bfd3858bd569d63392780322fb9ec57954b2d04b69b739824f AS base
+FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:b0ec1e181077b68385b2a63b60fee05708a7f765a695750d9d7236af2b553bd3 AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
 WORKDIR /opt/orbit
-
-FROM base AS vapid-generator
-COPY scripts/generate-vapid.mjs ./scripts/generate-vapid.mjs
-ENTRYPOINT ["node", "/opt/orbit/scripts/generate-vapid.mjs"]
 
 FROM base AS deps
 COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
@@ -41,7 +37,14 @@ FROM base AS web-builder
 COPY --from=deps /opt/orbit/node_modules ./node_modules
 COPY --from=deps /opt/orbit/web/node_modules ./web/node_modules
 COPY . .
-RUN pnpm --filter orbit-web build
+# The About page's bill of materials (#1256): every shipped package, as SPDX,
+# written into web/static before the build so it ships as a static file. It
+# has to be made here, from the tree being built: CI's image SBOM only exists
+# once this image does. Same walk and scope as the licence gate
+# (scripts/ci/licence-policy.mjs), and deterministic, so ADR-0028's content
+# ID still sees one tree as one image.
+RUN node scripts/about-sbom.mjs web/static/about/sbom.spdx.json \
+  && pnpm --filter orbit-web build
 
 # The front end's production node_modules, pruned by pnpm to what actually
 # runs (#735). The engine's own code is bundled by the stage above, but its
@@ -79,7 +82,7 @@ RUN pnpm run build:cli
 
 # The runtime stage starts from the base image again rather than from `base`,
 # so it pins the same digest for the same reasons (see the base stage).
-FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:8c4f684bf363c1bfd3858bd569d63392780322fb9ec57954b2d04b69b739824f AS runner
+FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:b0ec1e181077b68385b2a63b60fee05708a7f765a695750d9d7236af2b553bd3 AS runner
 
 # The three release-metadata patterns, copied in early because this layer's
 # content never varies between builds; the values themselves are declared,
@@ -96,14 +99,21 @@ ENV PORT=3000
 # both default to these values, and they are set explicitly so the listening
 # address is visible in `docker inspect` rather than only in the adapter.
 ENV HOST=0.0.0.0
+# adapter-node's server-wide request body limit (#1285). Its 512K default
+# refused every document over 512 KB. Set to the largest body any route may
+# take -- a portable-archive import at the archive format's cap, about
+# 342 MiB (#1290) -- and the request pipeline then holds each route to its
+# own, smaller limit (web/src/lib/server/body-limit.js, SERVER_BODY_LIMIT
+# must match this).
+ENV BODY_SIZE_LIMIT=343M
 ENV MIGRATE_ON_START=true
 ENV WORKER_ENABLED=true
 # Baked into the image config itself, so it is present in every container
 # started from this image regardless of --entrypoint/--user overrides —
 # unlike CMD/ENTRYPOINT, ENV is not replaced by `docker compose run
-# --entrypoint`. This is the one fact src/cli/orbit.ts's in-container
-# fail-closed guard (refuseDockerInContainer) trusts to refuse any command
-# whose adapters would spawn `docker` before that spawn is ever attempted.
+# --entrypoint`. This is the one fact src/cli/orbit.ts trusts about where it
+# runs: install/update refuse without it, and backup/restore and the
+# recovery-bundle commands refuse without it. No engine command spawns `docker`.
 # See docs/engine-events.md, "In-container engine invocation".
 ENV ORBIT_ENGINE_CONTEXT=container
 LABEL org.opencontainers.image.title="Orbit"
@@ -130,8 +140,15 @@ WORKDIR /opt/orbit
 # only the literal orbit:orbit is ever passed to su-exec, never a numeric
 # id. Reconsider if numeric IDs are ever passed here, or if su-exec goes
 # unmaintained.
+# postgresql18-client (owner, 2026-10-06, #1211 answer 11a): pg_dump,
+# pg_restore and psql for the backup/restore engine, which runs inside this
+# image against orbit-db rather than exec-ing into the database container
+# (#1211 build note E2). Its major must match docker-compose.yml's
+# postgres server; src/lib/postgres-client-major.test.ts holds the two
+# together. Licence: PostgreSQL. BusyBox already provides the flock the
+# engine's backup/restore lock uses, so util-linux is not needed.
 RUN apk_retry() { "$@" || { sleep 5; "$@"; } || { sleep 10; "$@"; }; } \
-  && apk_retry apk add --no-cache su-exec \
+  && apk_retry apk add --no-cache su-exec postgresql18-client \
   && rm -rf /usr/local/lib/node_modules /opt/yarn-v* \
   && rm -f \
     /usr/local/bin/corepack \
@@ -173,23 +190,23 @@ COPY scripts/web-pdfjs-runtime-check.mjs ./scripts/web-pdfjs-runtime-check.mjs
 RUN ORBIT_WEB_BUILD_ROOT=/opt/orbit/web node scripts/web-pdfjs-runtime-check.mjs \
   && rm -f /opt/orbit/scripts/web-pdfjs-runtime-check.mjs
 COPY --chown=orbit:orbit scripts/recovery-crypto.mjs ./scripts/recovery-crypto.mjs
-COPY --chown=orbit:orbit scripts/generate-vapid.mjs ./scripts/generate-vapid.mjs
 COPY --chown=root:root scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
-# The eleven deployment assets, at the same relative paths an install uses
+# The twelve deployment assets, at the same relative paths an install uses
 # them at (ADR-0019). They travel with the digest, so the compose file an
 # operator runs and the image it configures are the same artifact, and an
-# install needs nothing but the registry. Root-owned data: the installer
-# copies them out and sets its own modes; nothing in the container reads them.
-COPY --chown=root:root docker-compose.yml docker-compose.mail.yml .env-orbit.example ./deploy/
+# install needs nothing but the registry. Root-owned data: the install engine
+# copies them into the deployment and sets its own modes (#1212).
+COPY --chown=root:root docker-compose.yml docker-compose.mail.yml docker-compose.kek-rotation.yml .env-orbit.example ./deploy/
 COPY --chown=root:root config/tika-config.json ./deploy/config/
 COPY --chown=root:root \
   scripts/configure.sh \
   scripts/installer-ui.sh \
-  scripts/configuration.sh \
   scripts/backup.sh \
   scripts/restore.sh \
   scripts/repair.sh \
-  scripts/engine-check.sh \
+  scripts/export-recovery-bundle.sh \
+  scripts/import-recovery-bundle.sh \
+  scripts/end-maintenance.sh \
   ./deploy/scripts/
 # The bundled engine CLI (single file, no node_modules dependency at
 # runtime — see scripts/bundle-orbit-cli.mjs). Root-owned and read-only,

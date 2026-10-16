@@ -356,7 +356,7 @@ export function drawFigureMark(g, rng, fig, { x, y, scale, dim, rotateDeg = 0 },
  *   seed: number,
  *   galaxy: Record<string, { name: string, pos: [number, number], planets: Array<[number, number, number, string]>, items?: number }>,
  *   primary: ?string,
- *   facts: { domain: string, systems: number, crew: number },
+ *   facts: { domain?: ?string, systems?: ?number, crew?: ?number },
  * }} args
  * @returns {() => void}
  */
@@ -497,9 +497,15 @@ export function mountStation(root, { seed, galaxy, primary, facts }) {
        facts — the same ones the panels above state in words. */
     const cap = svgEl("g", { fill: "var(--chart-ink)", "font-family": MONO, opacity: ".94" });
     const l1 = /** @type {SVGTextElement} */ (svgEl("text", { x: "-250", y: "378", "font-size": "11", "letter-spacing": ".18em" }));
-    l1.textContent = `THE PLATFORM · ${facts.domain.toUpperCase()}`;
+    /* #1442: what a failed read could not tell is left out, never blank, 0 or "null". */
+    const domain = typeof facts.domain === "string" ? facts.domain.trim() : "";
+    l1.textContent = domain ? `THE PLATFORM · ${domain.toUpperCase()}` : "THE PLATFORM";
     const l2 = /** @type {SVGTextElement} */ (svgEl("text", { x: "-250", y: "395", "font-size": "9.5", "letter-spacing": ".14em", opacity: ".88" }));
-    l2.textContent = `${facts.systems} SYSTEM${facts.systems === 1 ? "" : "S"} ABOARD · ${facts.crew} CREW`;
+    const known = (/** @type {unknown} */ n) => typeof n === "number" && Number.isFinite(n);
+    l2.textContent = [
+      known(facts.systems) ? `${facts.systems} SYSTEM${facts.systems === 1 ? "" : "S"} ABOARD` : "",
+      known(facts.crew) ? `${facts.crew} CREW` : "",
+    ].filter(Boolean).join(" · ");
     const l3 = /** @type {SVGTextElement} */ (svgEl("text", { x: "-250", y: "412", "font-size": "9.5", "letter-spacing": ".14em", opacity: ".88" }));
     l3.textContent = `PASS ${pass} · ATTITUDE ${rot >= 0 ? "+" : "−"}` +
       `${Math.abs(rot).toFixed(1)}° · RESUPPLY ` +

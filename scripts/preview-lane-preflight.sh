@@ -38,13 +38,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
-git_directory="$(git rev-parse --absolute-git-dir)"
 git ls-files --cached --others --exclude-standard -z \
   | tar --null -T - -cf - \
   | tar -xf - -C "$sandbox"
 
 cd "$sandbox"
-GIT_DIR="$git_directory" GIT_WORK_TREE="$sandbox" bash scripts/configure.sh
+# Compose validation only needs a configuration that parses and secret files
+# that exist, so write a fixture rather than running the configuration engine
+# (which runs inside the Orbit image; this preflight never builds or pulls one).
+# One placeholder file per entry in docker-compose.yml's top-level secrets block.
+cp .env-orbit.example .env-orbit
+chmod 600 .env-orbit
+mkdir -m 700 .orbit-secrets
+for secret_name in postgres-password session-secret document-kek vapid-private-key oidc-client-secret; do
+  printf 'preflight-only\n' > ".orbit-secrets/${secret_name}"
+  chmod 600 ".orbit-secrets/${secret_name}"
+done
 # SMTP only: the mailbox credential is app-managed since ADR-0017 slice 2.
 printf 'preflight-only\n' > .orbit-secrets/smtp-password
 chmod 600 .orbit-secrets/smtp-password

@@ -3,26 +3,25 @@ import { and, desc, eq, notInArray, sql } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import * as database from "@/db";
-import { auditLog, documentCrypto, documentDrafts, documentJobs, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionMessages, items, reviewedIntakeOperations } from "@/db/schema";
+import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionMessages, reviewedIntakeOperations } from "@/db/schema";
 import { updateDocumentJob } from "@/server/admin-operations";
 import { reconcileDocumentStorage, runDocumentMaintenanceCycle } from "@/server/document-worker";
 import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
-import { purgeHeldImapAttachment, scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/imap-attachment-holding";
+import { purgeHeldImapAttachment, scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
 } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf as createSyntheticPdf } from "../support/synthetic-documents";
+import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../support/generated-pdf-documents";
 
 const { GET: downloadDocument } = await loadRoute("documents/[documentId]/download");
 const { DELETE: deleteDocument } = await loadRoute("documents/[documentId]");
 const { POST: restoreDocumentRoute } = await loadRoute("documents/[documentId]/restore");
-const { POST: createDocumentDraftRoute } = await loadRoute("documents/[documentId]/draft");
-const { POST: approveDocumentDraftRoute } = await loadRoute("document-drafts/[draftId]/approve");
 const { GET: listDocuments, POST: uploadDocument } = await loadRoute("households/[householdId]/items/[itemId]/documents");
 const { GET: previewDocument } = await loadRoute("documents/[documentId]/preview");
 
@@ -112,22 +111,21 @@ function documentContext(documentId: string) {
   return { documentId };
 }
 
-function draftContext(draftId: string) {
-  return { draftId };
-}
-
-async function uploadSyntheticDocument(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>) {
+async function uploadSyntheticDocument(
+  fixture: Awaited<ReturnType<typeof createIntegrationFixture>>,
+  bytes: Buffer = syntheticPdf,
+) {
   const session = await fixture.session("member");
   const url = `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`;
   const response = await callRouteForSession(uploadDocument, session, {
     url,
     method: "POST",
     headers: {
-      "content-length": String(syntheticPdf.length),
+      "content-length": String(bytes.length),
       "content-type": "application/pdf",
       "x-orbit-filename": encodeURIComponent("synthetic-policy.pdf"),
     },
-    body: syntheticPdf,
+    body: new Uint8Array(bytes),
     params: itemDocumentsContext(fixture.household.id, fixture.item.id),
   });
   expect(response.status).toBe(201);
@@ -141,14 +139,6 @@ describe("authenticated encrypted document lifecycle", () => {
     const fixture = await createIntegrationFixture("document-lifecycle");
     const { session, documentId } = await uploadSyntheticDocument(fixture);
     const downloadUrl = `http://127.0.0.1:3000/api/documents/${documentId}/download`;
-    await getDb().insert(documentDrafts).values({
-      documentId,
-      householdId: fixture.household.id,
-      requestedByUserId: fixture.users.member.id,
-      extractedTextSha256: createHash("sha256").update("synthetic draft evidence").digest("hex"),
-      evidence: { excerpt: "synthetic draft evidence" },
-      proposal: { title: "Synthetic draft" },
-    });
 
     const downloaded = await callRouteForSession(downloadDocument, session, { url: downloadUrl, params: documentContext(documentId) });
     expect(downloaded.status).toBe(200);
@@ -203,7 +193,6 @@ describe("authenticated encrypted document lifecycle", () => {
       .from(documents).where(eq(documents.id, documentId));
     expect(terminal?.lifecycle).toBe("deleted");
     expect(await getDb().select().from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
-    expect(await getDb().select().from(documentDrafts).where(eq(documentDrafts.documentId, documentId))).toHaveLength(0);
     expect(await storage.ciphertextExists(cryptoBeforePurge!.storageKey)).toBe(false);
 
     const [job] = await getDb().select({ status: documentJobs.status, generation: documentJobs.generation })
@@ -249,7 +238,7 @@ describe("authenticated encrypted document lifecycle", () => {
     expect(await fixture.auditCount(documentId)).toBe(beforeAudits);
   });
 
-  it("bounds a malformed document or draft id to 404 instead of a driver-error 500 (#383)", async () => {
+  it("bounds a malformed document id to 404 instead of a driver-error 500 (#383)", async () => {
     const fixture = await createIntegrationFixture("document-malformed-id");
     const session = await fixture.session("member");
     const malformedId = "not-a-uuid";
@@ -259,21 +248,10 @@ describe("authenticated encrypted document lifecycle", () => {
       await callRouteForSession(downloadDocument, session, { url: downloadUrl, params: documentContext(malformedId) }),
       await callRouteForSession(deleteDocument, session, { url: downloadUrl, method: "DELETE", params: documentContext(malformedId) }),
       await callRouteForSession(restoreDocumentRoute, session, { url: `${downloadUrl}/restore`, method: "POST", params: documentContext(malformedId) }),
-      await callRouteForSession(createDocumentDraftRoute, session, { url: `http://127.0.0.1:3000/api/documents/${malformedId}/draft`, method: "POST", params: documentContext(malformedId) }),
     ]) {
       expect(response.status).toBe(404);
       expect((await response.json()).error).toMatchObject({ code: "document_not_found" });
     }
-
-    const draftApproval = await callRouteForSession(approveDocumentDraftRoute, session, {
-      url: "http://127.0.0.1:3000/api/document-drafts/not-a-uuid/approve",
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sectionId: fixture.section.id, title: "Test", provider: null, reference: null, mode: "create" }),
-      params: draftContext(malformedId),
-    });
-    expect(draftApproval.status).toBe(404);
-    expect((await draftApproval.json()).error).toMatchObject({ code: "draft_not_found" });
   });
 
   it("finalizes a purge when ciphertext was already removed by an interrupted attempt", async () => {
@@ -310,7 +288,7 @@ describe("authenticated encrypted document lifecycle", () => {
     expect(job).toMatchObject({ status: "retry", lastError: "purge_failed" });
   });
 
-  it("rejects structurally invalid supported uploads before durable metadata or scanning", async () => {
+  it("rejects structurally invalid supported uploads after the scan and before durable metadata (ADR-0033)", async () => {
     const fixture = await createIntegrationFixture("document-invalid-structure");
     const session = await fixture.session("member");
     const beforeDocuments = await getDb().select({ id: documents.id })
@@ -339,7 +317,7 @@ describe("authenticated encrypted document lifecycle", () => {
       expect(await response.json()).toEqual({
         error: {
           code: "document_structure_invalid",
-          message: "Choose a structurally valid PDF, JPEG, or PNG document",
+          message: "Orbit could not open this document. Choose another PDF, JPEG, or PNG.",
         },
       });
     }
@@ -350,141 +328,10 @@ describe("authenticated encrypted document lifecycle", () => {
       .from(auditLog).where(eq(auditLog.householdId, fixture.household.id))).toEqual(beforeAudits);
   });
 
-  it("applies only explicitly reviewed draft fields and sanitizes stored parser evidence", async () => {
-    const fixture = await createIntegrationFixture("document-explicit-draft-review");
-    const { session, documentId } = await uploadSyntheticDocument(fixture);
-    await getDb().update(items).set({ provider: "Old Provider", reference: "OLD-12345" })
-      .where(eq(items.id, fixture.item.id));
-    const createResponse = await callRouteForSession(createDocumentDraftRoute, session, {
-      url: `http://127.0.0.1:3000/api/documents/${documentId}/draft`,
-      method: "POST",
-      params: documentContext(documentId),
-    });
-    expect(createResponse.status).toBe(200);
-    const created = await createResponse.json() as { draft: { id: string } };
-    await getDb().update(documentDrafts).set({
-      evidence: {
-        excerpt: "<script>fetch('https://example.invalid')</script>\u202e private parser sentinel",
-        characters: 9_999,
-        extracted: true,
-      },
-      proposal: {
-        title: "<img src=x>",
-        provider: "Parser\u202e Provider",
-        reference: "<PARSER-SECRET>",
-        tool: "delete",
-        householdId: "other-household",
-      },
-    }).where(eq(documentDrafts.id, created.draft.id));
-
-    const sanitizedResponse = await callRouteForSession(createDocumentDraftRoute, session, {
-      url: `http://127.0.0.1:3000/api/documents/${documentId}/draft`,
-      method: "POST",
-      params: documentContext(documentId),
-    });
-    const sanitizedBody = await sanitizedResponse.json() as {
-      draft: { proposal: Record<string, unknown>; evidence: { excerpt: string; characters: number } };
-    };
-    expect(sanitizedBody.draft.proposal).toEqual({
-      title: "synthetic-policy",
-      provider: "Parser Provider",
-      dates: [],
-    });
-    expect(sanitizedBody.draft.proposal).not.toHaveProperty("reference");
-    expect(sanitizedBody.draft.proposal).not.toHaveProperty("tool");
-    expect(sanitizedBody.draft.proposal).not.toHaveProperty("householdId");
-    expect(sanitizedBody.draft.evidence.excerpt).not.toMatch(/[<>\u202e]/u);
-    expect(sanitizedBody.draft.evidence.characters).toBe(sanitizedBody.draft.evidence.excerpt.length);
-
-    const rejectedAuthority = await callRouteForSession(approveDocumentDraftRoute, session, {
-      url: `http://127.0.0.1:3000/api/document-drafts/${created.draft.id}/approve`,
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        sectionId: fixture.section.id,
-        title: "Reviewed title",
-        provider: "Reviewed Provider",
-        reference: null,
-        mode: "merge",
-        targetItemId: fixture.item.id,
-        tool: "delete",
-        url: "https://example.invalid",
-        secret: "parser-controlled",
-      }),
-      params: draftContext(created.draft.id),
-    });
-    expect(rejectedAuthority.status).toBe(422);
-    expect(await getDb().select({ provider: items.provider, reference: items.reference })
-      .from(items).where(eq(items.id, fixture.item.id)))
-      .toEqual([{ provider: "Old Provider", reference: "OLD-12345" }]);
-
-    const approval = await callRouteForSession(approveDocumentDraftRoute, session, {
-      url: `http://127.0.0.1:3000/api/document-drafts/${created.draft.id}/approve`,
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        sectionId: fixture.section.id,
-        title: "Reviewed title",
-        provider: "Reviewed Provider",
-        reference: null,
-        mode: "merge",
-        targetItemId: fixture.item.id,
-      }),
-      params: draftContext(created.draft.id),
-    });
-    expect(approval.status).toBe(200);
-    expect(await getDb().select({ provider: items.provider, reference: items.reference })
-      .from(items).where(eq(items.id, fixture.item.id)))
-      .toEqual([{ provider: "Reviewed Provider", reference: null }]);
-  });
-
-  it("serializes duplicate draft approval so one explicit write wins", async () => {
-    const fixture = await createIntegrationFixture("document-draft-approval-race");
-    const { session, documentId } = await uploadSyntheticDocument(fixture);
-    const draftResponse = await callRouteForSession(createDocumentDraftRoute, session, {
-      url: `http://127.0.0.1:3000/api/documents/${documentId}/draft`,
-      method: "POST",
-      params: documentContext(documentId),
-    });
-    const payload = await draftResponse.json() as { draft: { id: string } };
-    const approve = () => callRouteForSession(approveDocumentDraftRoute, session, {
-      url: `http://127.0.0.1:3000/api/document-drafts/${payload.draft.id}/approve`,
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        sectionId: fixture.section.id,
-        title: "Concurrent reviewed draft",
-        provider: null,
-        reference: null,
-        mode: "create",
-      }),
-      params: draftContext(payload.draft.id),
-    });
-
-    const responses = await Promise.all([approve(), approve()]);
-    expect(responses.map((response) => response.status).sort()).toEqual([200, 404]);
-    expect(await getDb().select({ id: items.id }).from(items).where(and(
-      eq(items.householdId, fixture.household.id),
-      eq(items.title, "Concurrent reviewed draft"),
-    ))).toHaveLength(1);
-    expect(await getDb().select({ id: auditLog.id }).from(auditLog).where(and(
-      eq(auditLog.entityId, payload.draft.id),
-      eq(auditLog.action, "document_draft_create"),
-    ))).toHaveLength(1);
-  });
-
   it("keeps a failed ciphertext purge recoverable through bounded administrator retry", async () => {
     const fixture = await createIntegrationFixture("document-storage-delete-failure");
     const { session, documentId } = await uploadSyntheticDocument(fixture);
     const downloadUrl = `http://127.0.0.1:3000/api/documents/${documentId}/download`;
-    await getDb().insert(documentDrafts).values({
-      documentId,
-      householdId: fixture.household.id,
-      requestedByUserId: fixture.users.member.id,
-      extractedTextSha256: createHash("sha256").update("retryable draft evidence").digest("hex"),
-      evidence: { excerpt: "retryable draft evidence" },
-      proposal: { title: "Retryable draft" },
-    });
     await callRouteForSession(deleteDocument, session, { url: downloadUrl, method: "DELETE", params: documentContext(documentId) });
     await getDb().update(documents).set({ deleteAfter: new Date(Date.now() - 1_000) })
       .where(eq(documents.id, documentId));
@@ -501,8 +348,6 @@ describe("authenticated encrypted document lifecycle", () => {
       expect(await storage.ciphertextExists(crypto!.storageKey)).toBe(true);
       expect(await getDb().select({ documentId: documentCrypto.documentId }).from(documentCrypto)
         .where(eq(documentCrypto.documentId, documentId))).toEqual([{ documentId }]);
-      expect(await getDb().select({ documentId: documentDrafts.documentId }).from(documentDrafts)
-        .where(eq(documentDrafts.documentId, documentId))).toEqual([{ documentId }]);
       expect(await getDb().select({ lifecycle: documents.lifecycle }).from(documents)
         .where(eq(documents.id, documentId))).toEqual([{ lifecycle: "pending_deletion" }]);
       expect(await getDb().select({ status: documentJobs.status, attempts: documentJobs.attempts, lastError: documentJobs.lastError })
@@ -549,8 +394,6 @@ describe("authenticated encrypted document lifecycle", () => {
       .where(eq(documents.id, documentId))).toEqual([{ lifecycle: "deleted" }]);
     expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto)
       .where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
-    expect(await getDb().select({ id: documentDrafts.id }).from(documentDrafts)
-      .where(eq(documentDrafts.documentId, documentId))).toHaveLength(0);
     expect(await getDb().select({ status: documentJobs.status, attempts: documentJobs.attempts })
       .from(documentJobs).where(eq(documentJobs.id, failedJob!.id)))
       .toEqual([{ status: "completed", attempts: 1 }]);
@@ -703,13 +546,11 @@ describe("authenticated encrypted document lifecycle", () => {
         expect(stage).toMatchObject({ status: "pending" });
         expect(stage?.storageKey).toMatch(/^[a-f0-9]{64}$/u);
         expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
-        expect(await getDb().select({ id: documentDrafts.id }).from(documentDrafts).where(eq(documentDrafts.documentId, documentId))).toHaveLength(0);
         const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
         expect(await storage.stagingExists(stage!.storageKey)).toBe(true);
         expect(await storage.listQuarantineFiles()).toHaveLength(0);
         const documentUrl = `http://127.0.0.1:3000/api/documents/${documentId}`;
         expect((await callRouteForSession(downloadDocument, session, { url: `${documentUrl}/download`, params: documentContext(documentId) })).status).toBe(404);
-        expect((await callRouteForSession(createDocumentDraftRoute, session, { url: `${documentUrl}/draft`, method: "POST", params: documentContext(documentId) })).status).toBe(404);
       });
     } finally {
       capture.restore();
@@ -727,6 +568,60 @@ describe("authenticated encrypted document lifecycle", () => {
       const [stored] = await getDb().select({ lifecycle: documents.lifecycle, failureCode: documents.failureCode })
         .from(documents).where(eq(documents.id, documentId));
       expect(stored).toMatchObject({ lifecycle: "rejected", failureCode: "scanner_failed" });
+      expect(await getDb().select({ documentId: documentStagingObjects.documentId }).from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId))).toHaveLength(0);
+    });
+  });
+
+  it("never makes a document available on a scan outcome it does not recognise", async () => {
+    const fixture = await createIntegrationFixture("document-scan-unknown-outcome");
+    const documentId = randomUUID();
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "quarantined" } as never);
+    await withRequiredScanMode(async () => {
+      const { response } = await uploadWithFilename(fixture, "policy.pdf", documentId);
+      expect(response.status).toBe(503);
+      expect((await response.json() as { error: { code: string } }).error.code).toBe("document_scanner_failed");
+      const [stored] = await getDb().select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus, failureCode: documents.failureCode })
+        .from(documents).where(eq(documents.id, documentId));
+      expect(stored).toEqual({ lifecycle: "rejected", scanStatus: "error", failureCode: "scanner_failed" });
+      expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
+      expect(await getDb().select({ documentId: documentStagingObjects.documentId }).from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId))).toHaveLength(0);
+    });
+  });
+
+  it("keeps a staged upload unavailable while its recovery scan keeps meeting a protocol error or an unknown outcome", async () => {
+    const fixture = await createIntegrationFixture("document-scan-recovery-never-clean");
+    const documentId = randomUUID();
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "protocol" });
+    await withRequiredScanMode(async () => {
+      expect((await uploadWithFilename(fixture, "policy.pdf", documentId)).response.status).toBe(202);
+      const makeDue = () => getDb().update(documentJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) })
+        .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+      const state = async () => {
+        const [document] = await getDb().select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus, failureCode: documents.failureCode })
+          .from(documents).where(eq(documents.id, documentId));
+        const [job] = await getDb().select({ status: documentJobs.status, lastError: documentJobs.lastError })
+          .from(documentJobs).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+        const crypto = await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId));
+        return { document, job, crypto: crypto.length };
+      };
+
+      // A protocol error on the recovery scan is retried, never cleared.
+      await makeDue();
+      await runDocumentMaintenanceCycle();
+      expect(await state()).toEqual({
+        document: { lifecycle: "scanning", scanStatus: "error", failureCode: "scanner_protocol" },
+        job: { status: "retry", lastError: "scanner_protocol" },
+        crypto: 0,
+      });
+
+      // An outcome nobody recognises ends the recovery as a scanner failure.
+      vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "quarantined" } as never);
+      await makeDue();
+      await runDocumentMaintenanceCycle();
+      expect(await state()).toMatchObject({
+        document: { lifecycle: "rejected", scanStatus: "error", failureCode: "scanner_failed" },
+        crypto: 0,
+      });
       expect(await getDb().select({ documentId: documentStagingObjects.documentId }).from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId))).toHaveLength(0);
     });
   });
@@ -769,6 +664,29 @@ describe("authenticated encrypted document lifecycle", () => {
       const [job] = await getDb().select({ status: documentJobs.status, attempts: documentJobs.attempts })
         .from(documentJobs).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
       expect(job).toEqual({ status: "completed", attempts: 1 });
+      const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
+      expect(await storage.listQuarantineFiles()).toHaveLength(0);
+    });
+  });
+
+  it("opens an outage-staged upload only after its recovery scan, and rejects one the renderer cannot open (ADR-0033)", async () => {
+    const fixture = await createIntegrationFixture("document-scan-recovery-structure");
+    const documentId = randomUUID();
+    const unopenable = Buffer.from("%PDF-1.7\ntruncated");
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
+    await withRequiredScanMode(async () => {
+      // Nothing opens the file while the scanner is away, so it is held for
+      // recovery like any other upload rather than refused unscanned.
+      const first = await uploadWithFilename(fixture, "policy.pdf", documentId, unopenable);
+      expect(first.response.status).toBe(202);
+      await getDb().update(documentJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) })
+        .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+      vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+      await runDocumentMaintenanceCycle();
+      const [document] = await getDb().select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus, failureCode: documents.failureCode })
+        .from(documents).where(eq(documents.id, documentId));
+      expect(document).toEqual({ lifecycle: "rejected", scanStatus: "clean", failureCode: "unsupported_structure" });
+      expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
       const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
       expect(await storage.listQuarantineFiles()).toHaveLength(0);
     });
@@ -996,6 +914,49 @@ describe("authenticated encrypted document lifecycle", () => {
     });
   });
 
+  it("keeps a staged object under a key this instance does not hold recoverable until its recovery expiry, then rejects it (#1316 A2-S1)", async () => {
+    const fixture = await createIntegrationFixture("document-scan-unheld-key-stage");
+    const documentId = randomUUID();
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
+    await withRequiredScanMode(async () => {
+      expect((await uploadWithFilename(fixture, "policy.pdf", documentId)).response.status).toBe(202);
+      const [stageBefore] = await getDb().select({ storageKey: documentStagingObjects.storageKey, recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt })
+        .from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId));
+      // The backup drill's fixture: a stage wrapped under a key id that is
+      // neither the current nor the next key here. The key may simply not be
+      // loaded yet, so the stage must survive until its recovery window ends.
+      await getDb().update(documentStagingObjects).set({ keyId: "key-this-instance-never-held" })
+        .where(eq(documentStagingObjects.documentId, documentId));
+      const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
+      await getDb().update(documentJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) })
+        .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+      await runDocumentMaintenanceCycle();
+
+      expect(await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId)))
+        .toEqual([{ lifecycle: "scanning" }]);
+      expect(await getDb().select({ status: documentStagingObjects.status, recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt })
+        .from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId)))
+        .toEqual([{ status: "pending", recoveryExpiresAt: stageBefore!.recoveryExpiresAt }]);
+      expect(await storage.stagingExists(stageBefore!.storageKey)).toBe(true);
+      await expect(storage.readStagingCiphertext(stageBefore!.storageKey, getDocumentConfig().maxBytes)).resolves.toBeDefined();
+      expect(await getDb().select({ status: documentJobs.status, lastError: documentJobs.lastError }).from(documentJobs)
+        .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan"))))
+        .toEqual([{ status: "retry", lastError: "key_unavailable" }]);
+
+      // Once the recovery window has ended the unreadable stage is given up on.
+      await getDb().update(documentStagingObjects).set({ recoveryExpiresAt: new Date(Date.now() - 1_000) })
+        .where(eq(documentStagingObjects.documentId, documentId));
+      await getDb().update(documentJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) })
+        .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+      await runDocumentMaintenanceCycle();
+
+      expect(await getDb().select({ lifecycle: documents.lifecycle, failureCode: documents.failureCode }).from(documents).where(eq(documents.id, documentId)))
+        .toEqual([{ lifecycle: "rejected", failureCode: "scan_recovery_expired" }]);
+      expect(await getDb().select({ documentId: documentStagingObjects.documentId }).from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId))).toHaveLength(0);
+      await expect(storage.readStagingCiphertext(stageBefore!.storageKey, getDocumentConfig().maxBytes)).rejects.toThrow();
+    });
+  });
+
   it("keeps reviewed direct intake pending until a recovery worker makes the document available", async () => {
     const fixture = await createIntegrationFixture("reviewed-document-recovery");
     const member = await fixture.session("member");
@@ -1006,7 +967,7 @@ describe("authenticated encrypted document lifecycle", () => {
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
       action: "create_separate",
-      item: { title: "Reviewed recovery item", currency: "GBP", status: "active" },
+      item: { kind: "service", title: "Reviewed recovery item", currency: "GBP", status: "active" },
       attachmentIds: [],
     });
     const documentId = randomUUID();
@@ -1068,7 +1029,7 @@ describe("authenticated encrypted document lifecycle", () => {
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
       action: "create_separate" as const,
-      item: { title: "Mailbox recovery value", currency: "GBP", status: "active" },
+      item: { kind: "service", title: "Mailbox recovery value", currency: "GBP", status: "active" },
       attachmentIds: [held.id],
     };
 
@@ -1143,7 +1104,7 @@ describe("authenticated encrypted document lifecycle", () => {
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
       action: "create_separate",
-      item: { title: "Reviewed terminal recovery", currency: "GBP", status: "active" },
+      item: { kind: "service", title: "Reviewed terminal recovery", currency: "GBP", status: "active" },
       attachmentIds: [],
     });
     const documentId = randomUUID();
@@ -1207,7 +1168,7 @@ describe("authenticated encrypted document lifecycle", () => {
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
       action: "create_separate",
-      item: { title: "Reviewed clean unchanged", currency: "GBP", status: "active" },
+      item: { kind: "service", title: "Reviewed clean unchanged", currency: "GBP", status: "active" },
       attachmentIds: [],
     });
     const documentId = randomUUID();
@@ -1256,6 +1217,56 @@ describe("authenticated encrypted document lifecycle", () => {
     } finally {
       capture.restore();
     }
+  });
+
+  it("lets the same bytes be uploaded again under the same id after the first attempt failed writing ciphertext (#1316)", async () => {
+    const fixture = await createIntegrationFixture("document-upload-retry-after-write-failure");
+    const documentId = randomUUID();
+    const writeFailure = vi.spyOn(LocalDocumentStorage.prototype, "writeCiphertext")
+      .mockRejectedValueOnce(new Error("synthetic ciphertext write outage"));
+    try {
+      const { response: failed } = await uploadWithFilename(fixture, "policy.pdf", documentId);
+      expect(failed.status).toBeGreaterThanOrEqual(400);
+      expect(writeFailure).toHaveBeenCalledTimes(1);
+      const [rejected] = await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId));
+      expect(rejected?.lifecycle).toBe("rejected");
+    } finally {
+      writeFailure.mockRestore();
+    }
+
+    // The failure was ours (storage), not a verdict on the file, so the same
+    // bytes under the same id must now go through rather than hit the
+    // "already been rejected" refusal.
+    const { session, response: retried } = await uploadWithFilename(fixture, "policy.pdf", documentId);
+    expect(retried.status).toBe(201);
+    const [available] = await getDb().select({ lifecycle: documents.lifecycle, failureCode: documents.failureCode }).from(documents).where(eq(documents.id, documentId));
+    expect(available).toEqual({ lifecycle: "available", failureCode: null });
+    const downloaded = await callRouteForSession(downloadDocument, session, {
+      url: "http://127.0.0.1:3000/api/documents/" + documentId + "/download",
+      params: documentContext(documentId),
+    });
+    expect(downloaded.status).toBe(200);
+    expect(Buffer.from(await downloaded.arrayBuffer())).toEqual(syntheticPdf);
+  });
+
+  it("still refuses a retry of the same id and bytes once the first attempt was rejected as malware (#1316)", async () => {
+    const fixture = await createIntegrationFixture("document-upload-retry-after-malware");
+    const documentId = randomUUID();
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "infected", signature: "Eicar-Test-Signature" });
+    await withRequiredScanMode(async () => {
+      const { response: first } = await uploadWithFilename(fixture, "policy.pdf", documentId);
+      expect(first.status).toBe(422);
+      expect((await first.json() as { error: { code: string } }).error.code).toBe("document_malware_detected");
+
+      // Even if the scanner would now say clean, a malware verdict is final.
+      vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+      const { response: retried } = await uploadWithFilename(fixture, "policy.pdf", documentId);
+      expect(retried.status).toBe(422);
+      expect((await retried.json() as { error: { code: string } }).error.code).toBe("document_malware_detected");
+      const [stored] = await getDb().select({ lifecycle: documents.lifecycle, failureCode: documents.failureCode }).from(documents).where(eq(documents.id, documentId));
+      expect(stored).toEqual({ lifecycle: "rejected", failureCode: "malware_detected" });
+      expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
+    });
   });
 
   it("records bounded lifecycle and job diagnostics across delete, restore and purge", async () => {
@@ -1416,6 +1427,52 @@ describe("document page-one preview over HTTP", () => {
     expect(await response.json()).toEqual({
       error: { code: "document_not_found", message: "That document is not available" },
     });
+  });
+
+  /* #1300: page turning. The same route, the same checks, any page. */
+  it("draws the page asked for and carries the page count, page one when none is asked for", async () => {
+    const fixture = await createIntegrationFixture("document-preview-pages");
+    const { session, documentId } = await uploadSyntheticDocument(fixture, syntheticPdfWithNumberedPages(3));
+    const ask = (query: string) => callRouteForSession(previewDocument, session, {
+      url: `http://127.0.0.1:3000/api/documents/${documentId}/preview${query}`,
+      params: documentContext(documentId),
+    });
+    /* Each page of the fixture is its own width, so the PNG's own header
+       says which page was drawn: 1200px tall, width scaled to match. */
+    const drawnWidth = async (response: Response) => Buffer.from(await response.arrayBuffer()).readUInt32BE(16);
+    const expectedWidth = (page: number) => Math.round(syntheticNumberedPageWidth(page) * (1_200 / 792));
+
+    const first = await ask("");
+    expect(first.status).toBe(200);
+    expect(first.headers.get("x-orbit-page-count")).toBe("3");
+    expect(await drawnWidth(first)).toBe(expectedWidth(1));
+
+    const last = await ask("?page=3");
+    expect(last.status).toBe(200);
+    expect(last.headers.get("x-orbit-page-count")).toBe("3");
+    expect(last.headers.get("cache-control")).toBe("private, no-store");
+    expect(await drawnWidth(last)).toBe(expectedWidth(3));
+  });
+
+  it("refuses a page past the end, page 0 and a non-number in words, never as a picture", async () => {
+    const fixture = await createIntegrationFixture("document-preview-bad-pages");
+    const { session, documentId } = await uploadSyntheticDocument(fixture, syntheticPdfWithNumberedPages(3));
+    const ask = (query: string) => callRouteForSession(previewDocument, session, {
+      url: `http://127.0.0.1:3000/api/documents/${documentId}/preview${query}`,
+      params: documentContext(documentId),
+    });
+
+    const pastEnd = await ask("?page=4");
+    expect(pastEnd.status).toBe(404);
+    expect(await pastEnd.json()).toEqual({
+      error: { code: "document_preview_page_not_found", message: "That page is past the end of this document" },
+    });
+    for (const query of ["?page=0", "?page=-2", "?page=two", "?page=1.5"]) {
+      const refused = await ask(query);
+      expect(refused.status).toBe(400);
+      expect(refused.headers.get("cache-control")).toContain("no-store");
+      expect((await refused.json()).error.code).toBe("document_preview_page_invalid");
+    }
   });
 
   it("answers nothing without a session", async () => {

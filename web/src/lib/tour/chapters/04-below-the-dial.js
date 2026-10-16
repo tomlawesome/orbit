@@ -9,9 +9,9 @@
  * WHAT THIS CHAPTER TEACHES. The manifest — the real corridor of what's
  * ahead, read top to bottom below the dial — and that it keeps the same law
  * the dial itself does (nearest first), in a different geometry. Both lines
- * and the manifest's own target are the ratified "manifest" stop
- * (web/src/lib/tour/stops.js), which is where this copy and `#manifest-top`
- * were already ratified for the eight-stop walk this film replaces.
+ * and the manifest's own target are the "manifest" stop of the retired
+ * eight-stop walk this film replaces, which is where this copy and
+ * `#manifest-top` were ratified.
  *
  * THE SCROLL. The mockup fakes scrolling by translating a screenshot of the
  * whole scrollable strip (`scrollImg`) because it has no real page under it.
@@ -46,6 +46,8 @@
  * the manifest is full, thin, or empty.
  */
 
+import { dayMonth, tminusOf } from "../../format.js";
+
 /**
  * Every element this chapter names, in one place, so
  * tests/unit/v19-tour-chapter-below-the-dial.test.mjs can pin them against
@@ -54,7 +56,7 @@
 export const SELECTORS = Object.freeze({
   DESK: Object.freeze({
     /** The manifest column itself — always rendered, and the ratified
-     *  "manifest" stop's own target (stops.js). */
+     *  "manifest" stop's own target in the retired walk. */
     manifest: "#manifest-top",
     /** The manifest's own "TODAY ·" header row. */
     today: "#manifest-top .today",
@@ -107,16 +109,10 @@ export const EXAMPLE = Object.freeze({
   row: ".pocket .pk-below .tourfilm-example-row",
 });
 
-/** @param {number} days */
-function countdown(days) {
-  return days < 0 ? `T+${-days}d` : `T−${days}d`;
-}
-
 /** The date `days` from today, as home's rows print one (pocket.svelte's
  *  `short`). @param {number} days */
 function shortDate(days) {
-  return new Date(Date.now() + days * 86_400_000)
-    .toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+  return dayMonth(new Date(Date.now() + days * 86_400_000).toISOString());
 }
 
 /**
@@ -157,7 +153,7 @@ function stageExample(doc, column) {
     const meta = el("span", "font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);white-space:nowrap;overflow:hidden;text-overflow:ellipsis");
     meta.append(el("span", "color:var(--accent-text)", "example"), ` · ${one.cost}`);
     text.append(meta);
-    const trail = el("span", `flex:none;text-align:right;font:500 var(--p-type-meta)/1.3 var(--mono);color:var(${one.tone})`, countdown(one.days));
+    const trail = el("span", `flex:none;text-align:right;font:500 var(--p-type-meta)/1.3 var(--mono);color:var(${one.tone})`, tminusOf(one.days));
     trail.append(el("small", "display:block;font-size:var(--p-type-meta);color:var(--ink-quiet);font-weight:400", shortDate(one.days)));
     face.append(mark, text, trail);
     row.append(face);

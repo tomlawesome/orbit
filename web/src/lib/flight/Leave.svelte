@@ -1,0 +1,151 @@
+<script>
+  import { onMount, tick } from "svelte";
+  import Flight from "./Flight.svelte";
+  import Dusk from "./Dusk.svelte";
+
+  /**
+   * SIGNING OUT, ONE WAY EVERYWHERE (#1253; owner, 2026-10-07: "signing out
+   * should always play the reverse flight. No matter where you are.").
+   *
+   * Everything a sign-out puts on the page after the session is ended: the
+   * dusk with its "Sign back in" way, the flight that plays the descent over
+   * whatever is showing, and the farewell that moves the address to /logout.
+   * Home's desk menu, the pocket's hatch (through home) and Chrome's menu on
+   * every other page all use this, so the three cannot drift.
+   *
+   * The caller revokes first (the revocation beat: a closed lid at any point
+   * of the flight can never leave a live session behind) and then hands over
+   * what the provider answered. A page that never signs out should not pay
+   * for the flight: import this component lazily (Chrome does); home, which
+   * flies the climb on the same Flight, imports it as it always imported it.
+   *
+   * The flight is always mounted (#1371), so `ascend` plays home's own
+   * launch on it; `descend` is the descent alone (home's fixtures).
+   */
+  let {
+    /* the household's name, written on the void */
+    name = "",
+    /* the reader's other households, met again on the way down */
+    homes = [],
+    /* mount the dusk and flight from the start (home's pinned descent fixture) */
+    leaving: startLeaving = false,
+  } = $props();
+
+  /** @type {import('./Flight.svelte').default | null} */
+  let flight = $state(null);
+  // svelte-ignore state_referenced_locally
+  let leaving = $state(startLeaving);
+  /* The provider's own end-session URL. The goodbye plays first; the page
+     goes there as soon as the goodbye's words are fully on the screen (owner,
+     2026-10-13: "play the goodbye and as soon as it finishes, go to authentik
+     before the sign in again shows"), or at once if the page is hidden before
+     then, since the flight's clock stops in a hidden tab. Its
+     post_logout_redirect_uri brings the browser back to /logout. */
+  /** @type {string | null} */
+  let providerLogout = $state(null);
+  /* the farewell has landed: the goodbye is now the screen (Dusk gets the landmark) */
+  let farewelled = $state(false);
+  /* how long after the farewell beat the goodbye's words are fully in:
+     door.css `#dusk .farewell`, an opacity transition of .9s after .3s */
+  const GOODBYE_SHOWN_MS = 1200;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let handOff;
+  let handedOff = false;
+  function toProvider() {
+    if (!providerLogout || handedOff) return;
+    handedOff = true;
+    letGo();
+    location.replace(providerLogout);
+  }
+  function onVisibility() {
+    if (document.visibilityState === "hidden") toProvider();
+  }
+  function letGo() {
+    clearTimeout(handOff);
+    document.removeEventListener("visibilitychange", onVisibility);
+  }
+  onMount(() => letGo);
+
+  /* #1253, #1262: the menu holds the sign-out, so when it opens the descent's
+     world is readied and proved (never a compile that would stop the page:
+     Flight.svelte readyWorld), and it is there by the time the one press has
+     revoked the session */
+  export function ready() {
+    flight?.readyWorld({ hurry: true, gentle: true });
+  }
+
+  /**
+   * The unhurried readying, a few seconds after the page has arrived and its
+   * painted animations are done (#1299): a descent that waits for nothing finds
+   * its world already made. Home asks it on arriving.
+   * @param {{ after?: number }} [how]
+   * @returns {(() => void) | undefined} stops it, if the page is left first
+   */
+  export function readyAtLeisure(how) {
+    return flight?.readyAtLeisure(how);
+  }
+
+  /** The launch: the climb, from the page that has just been signed in to. */
+  /** @param {{ at?: number }} [options] */
+  export function ascend(options) {
+    flight?.ascend(options);
+  }
+
+  /** The descent alone, with the dusk already mounted (a pinned fixture). */
+  /** @param {{ at?: number }} [options] */
+  export function descend(options) {
+    flight?.descend(options);
+  }
+
+  /**
+   * The descent, once the session is ended.
+   * @param {string | null} redirectTo the provider's own logout URL, if any
+   */
+  export async function descendFrom(redirectTo) {
+    /* #1299: the page's unhurried readying, if still to come, would land in
+       the middle of the descent: the folder drops it as the descent begins
+       (journey.later, README.md) */
+    providerLogout = redirectTo;
+    if (redirectTo) document.addEventListener("visibilitychange", onVisibility);
+    /* the page may already be hidden by the time the sign-out request
+       returns: no visibilitychange will come, so hand off now */
+    onVisibility();
+    leaving = true;
+    await tick();
+    flight?.descend();
+  }
+
+  function onFarewell() {
+    /*
+     * The address catches up with the state. The descent plays over the page,
+     * but the reader is signed out when it ends, and this page is no longer
+     * theirs: a refresh here would bounce them at the identity provider
+     * instead of showing them the goodbye. Replace, never push -- Back must
+     * not walk into a signed-out page either.
+     */
+    try { history.replaceState(history.state, "", "/logout"); } catch { /* no history, no harm */ }
+    farewelled = true;
+    /* the provider's own sign-out, once the goodbye's words are in: Orbit's
+       session is already gone, but the provider's would seat this reader
+       again on the next sign-in at a shared computer. A plain timer, not the
+       flight's clock, so it still fires in a background tab. */
+    if (providerLogout) handOff = setTimeout(toProvider, GOODBYE_SHOWN_MS);
+  }
+</script>
+
+{#if leaving}
+  <!-- the ground under the dusk, so a daylight theme's page background never
+       shows beneath it (as the sign-in's own dawn has) -->
+  <div class="signin-stage" aria-hidden="true"></div>
+  <!-- The way back in, written as the dusk's gate markup (the shared door's
+       slot, #1371), once: it is known before the sign-out mounts the dusk.
+       `rel="external"` makes it a full page load, not a client route. With a
+       provider to hand off to, the page leaves before the way back in would
+       show, so it is never drawn: an empty pill, hidden (flight.css), holds
+       its place so the goodbye stands where it always does. -->
+  <Dusk landmark={farewelled} gate={providerLogout ? '<span class="gate held" aria-hidden="true">&nbsp;</span>' : '<a class="gate" rel="external" href="/">Sign back in</a>'} />
+{/if}
+<!-- The flight is mounted with the page, not with the sign-out (#1371): the
+     descent's world belongs to its journey now, and is readied at leisure
+     (readyAtLeisure) only once there is a journey to ready. -->
+<Flight bind:this={flight} {name} onfarewell={onFarewell} {homes} />

@@ -18,7 +18,7 @@ import {
   users,
 } from "@/db/schema";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
-import { log, operationalReasons, type OperationalReason } from "@/lib/logger";
+import { asOperationalReason, log, type OperationalReason } from "@/lib/logger";
 import {
   DEFAULT_ENABLED_CHANNELS,
   DEFAULT_FINAL_WARNING_DAYS,
@@ -31,11 +31,9 @@ import { readRuntimeSecret } from "@/lib/runtime-secret";
 import { openInstanceMetadataReader, openMetadataReaders } from "@/server/metadata/fields";
 
 // Re-exported so every existing import of these from this module (the
-// dispatch worker) keeps working: the pure logic itself now lives in
-// src/lib/preferences.ts so src/lib/notifications.ts (imported by a client
-// component) can share the exact same truth without pulling this module's
-// server-only dependencies (nodemailer, web-push, the database) into a
-// browser bundle (#487).
+// dispatch worker) keeps working: the pure logic itself lives in
+// src/lib/preferences.ts, free of this module's server-only dependencies
+// (nodemailer, web-push, the database) (#487).
 export { effectiveReminderOffsets };
 export type { ReminderOffset, RecipientWarningDays };
 
@@ -56,8 +54,6 @@ const notificationEnvironmentSchema = z.object({
   ),
   SMTP_USER: z.string().trim().max(320).optional().default(""),
   SMTP_PASSWORD: z.string().optional().default(""),
-  // Deprecated compatibility input. New deployments should use the fields above.
-  SMTP_URL: z.string().optional().default(""),
   SMTP_FROM: z.string().min(1).default("Orbit <orbit@localhost>"),
   VAPID_SUBJECT: z.string().optional().default(""),
   VAPID_PUBLIC_KEY: z.string().optional().default(""),
@@ -113,9 +109,7 @@ export type NotificationFailureCategory = typeof notificationFailureCategories[n
 
 function operationalNotificationReason(category: NotificationFailureCategory): OperationalReason {
   if (category === "unknown") return "provider_error";
-  return (operationalReasons as readonly string[]).includes(category)
-    ? category as OperationalReason
-    : "unexpected_failure";
+  return asOperationalReason(category);
 }
 
 export interface NotificationWorkerHealth {
@@ -189,6 +183,10 @@ type ProviderErrorDetails = {
   statusCode?: unknown;
 };
 
+function isRevokedPushStatus(statusCode: number | undefined): boolean {
+  return statusCode === 401 || statusCode === 403 || statusCode === 404 || statusCode === 410;
+}
+
 /**
  * Maps provider failures to the administrator-safe vocabulary before they are
  * persisted. Provider messages can contain addresses, hosts, or credentials.
@@ -209,7 +207,10 @@ export function categorizeProviderError(channel: "email" | "web_push", error: un
     return "unknown";
   }
 
-  if (statusCode === 404 || statusCode === 410) return "push_unsubscribed";
+  // 401/403 is what a push service answers for a subscription made with a
+  // different VAPID key (a recovered host generates a new pair): it will never
+  // succeed, so it is gone, not transient.
+  if (isRevokedPushStatus(statusCode)) return "push_unsubscribed";
   if (["ECONNREFUSED", "ECONNRESET", "ENETUNREACH", "ENOTFOUND", "ETIMEDOUT", "EHOSTUNREACH"].includes(code)
     || (statusCode !== undefined && statusCode >= 500)) {
     return "push_unavailable";
@@ -244,29 +245,16 @@ export function notificationRetryDelayMs(attempts: number): number {
 export function getNotificationWorkerConfig(environment: NodeJS.ProcessEnv = process.env): NotificationWorkerConfig {
   const parsed = notificationEnvironmentSchema.parse({
     ...environment,
-    SMTP_URL: readRuntimeSecret(environment, "SMTP_URL"),
     SMTP_PASSWORD: readRuntimeSecret(environment, "SMTP_PASSWORD"),
     VAPID_PRIVATE_KEY: readRuntimeSecret(environment, "VAPID_PRIVATE_KEY"),
   });
   const smtpRequested = Boolean(parsed.SMTP_HOST || parsed.SMTP_USER || parsed.SMTP_PASSWORD);
   if (smtpRequested && !(parsed.SMTP_HOST && parsed.SMTP_USER && parsed.SMTP_PASSWORD)) throw new Error("SMTP_HOST, SMTP_USER, and SMTP_PASSWORD must be configured together");
-  if (parsed.SMTP_URL && smtpRequested) throw new Error("Use either SMTP_URL or individual SMTP settings, not both");
-  const hasExplicitSmtpSecurity = typeof environment.SMTP_SECURITY === "string" && environment.SMTP_SECURITY.length > 0;
-  let smtpSecurity = parsed.SMTP_SECURITY;
-  if (parsed.SMTP_URL) {
-    let smtpUrl: URL;
-    try { smtpUrl = new URL(parsed.SMTP_URL); } catch { throw new Error("SMTP_URL must be a valid SMTP URL"); }
-    if (!smtpUrl.hostname || !["smtp:", "smtps:"].includes(smtpUrl.protocol)) throw new Error("SMTP_URL must use smtp or smtps");
-    const inferredSecurity = smtpUrl.protocol === "smtps:" ? "implicit_tls" : "starttls";
-    if (hasExplicitSmtpSecurity && inferredSecurity !== parsed.SMTP_SECURITY) {
-      throw new Error(parsed.SMTP_SECURITY === "implicit_tls" ? "SMTP_URL must use implicit TLS" : "SMTP_URL requires STARTTLS");
-    }
-    smtpSecurity = inferredSecurity;
-  }
+  const smtpSecurity = parsed.SMTP_SECURITY;
   const smtpPort = parsed.SMTP_PORT ?? (smtpSecurity === "implicit_tls" ? 465 : 587);
   const smtpUrl = smtpRequested
     ? `${smtpSecurity === "implicit_tls" ? "smtps" : "smtp"}://${encodeURIComponent(parsed.SMTP_USER)}:${encodeURIComponent(parsed.SMTP_PASSWORD)}@${parsed.SMTP_HOST}:${smtpPort}`
-    : parsed.SMTP_URL;
+    : "";
   return {
     smtpUrl,
     smtpSecurity,
@@ -856,9 +844,7 @@ async function deliverClaimed(
       attempts: notificationDeliveries.attempts,
       userId: notificationDeliveries.userId,
       householdId: notificationDeliveries.householdId,
-      email: users.email,
       emailEnc: users.emailEnc,
-      title: items.title,
       titleEnc: items.titleEnc,
       dueDate: dueEvents.dueDate,
       kind: dueEvents.kind,
@@ -958,12 +944,12 @@ async function deliverClaimed(
       // Tier 2 (#963): the reminder worker holds key access, exactly as the
       // tiering decision assumed, so the item's name decrypts here. A name it
       // cannot read is not sent as an empty or invented one: the delivery is
-      // failed like any other transient fault, so it retries once the key or
+      // deferred without spending an attempt, so it goes out once the key or
       // the value is repaired rather than mailing a nameless reminder.
       const decryptedTitle = titleReaders.get(delivery.householdId)!
-        .text("items.title", delivery.itemId, { encrypted: delivery.titleEnc, plaintext: delivery.title });
+        .text("items.title", delivery.itemId, { encrypted: delivery.titleEnc });
       if (!decryptedTitle.value) {
-        await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "item_title_unreadable", now, retryDelay);
+        await deferDelivery(db, delivery.id, leaseToken, delivery.attempts, "item_title_unreadable", now, retryDelay);
         continue;
       }
       const title = decryptedTitle.value.trim().slice(0, 160);
@@ -975,13 +961,15 @@ async function deliverClaimed(
         }
         /* Tier 2 (#969): the address decrypts here, exactly as the item's name
            does above. An address this run cannot read leaves the reminder for
-           a later one — the row goes back to `retry` and is neither consumed
-           nor cancelled, because a locked key and a damaged value are both
-           repairable and neither is a reason to drop somebody's reminder. */
+           a later one — the row goes back to `retry` without spending an
+           attempt, so it is neither consumed nor cancelled, because a locked
+           key and a damaged value are both repairable and neither is a reason
+           to drop somebody's reminder. A reminder whose window passes while it
+           waits is still cancelled as stale above. */
         const address = addressReader!
-          .text("users.email", delivery.userId, { encrypted: delivery.emailEnc, plaintext: delivery.email });
+          .text("users.email", delivery.userId, { encrypted: delivery.emailEnc });
         if (!address.value) {
-          await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "recipient_address_unreadable", now, retryDelay);
+          await deferDelivery(db, delivery.id, leaseToken, delivery.attempts, "recipient_address_unreadable", now, retryDelay);
           continue;
         }
         const recipientAddress = address.value;
@@ -1067,7 +1055,7 @@ async function deliverClaimed(
                 delivered = true;
               } catch (error) {
                 const statusCode = (error as { statusCode?: number }).statusCode;
-                if (statusCode === 404 || statusCode === 410) {
+                if (isRevokedPushStatus(statusCode)) {
                   await transaction.update(pushSubscriptions).set({ revokedAt: now })
                     .where(and(eq(pushSubscriptions.id, subscription.id), isNull(pushSubscriptions.revokedAt)));
                   continue;
@@ -1149,6 +1137,34 @@ export async function failDelivery(
     eq(notificationDeliveries.leaseToken, leaseToken),
   ));
   return status;
+}
+
+/**
+ * Puts a delivery back to `retry` over a reversible condition (an unreadable
+ * key or value) and hands back the attempt the claim took, so waiting for a
+ * repair never exhausts the attempt bound. Staleness still ends the wait.
+ */
+async function deferDelivery(
+  db: NotificationDatabase,
+  id: string,
+  leaseToken: string,
+  attempts: number,
+  category: NotificationFailureCategory,
+  now: Date,
+  retryDelay: (attempts: number) => number,
+): Promise<void> {
+  await db.update(notificationDeliveries).set({
+    status: "retry",
+    lockedAt: new Date(now.getTime() + retryDelay(attempts)),
+    leaseToken: null,
+    attempts: Math.max(0, attempts - 1),
+    lastError: category,
+    updatedAt: now,
+  }).where(and(
+    eq(notificationDeliveries.id, id),
+    eq(notificationDeliveries.status, "processing"),
+    eq(notificationDeliveries.leaseToken, leaseToken),
+  ));
 }
 
 /**

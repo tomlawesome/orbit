@@ -42,6 +42,8 @@
 // order" is the structure of a flattened table, which every table has, and
 // is as far as position goes.
 
+import { isCalendarDate } from "@/lib/calendar-date";
+import { addCalendarMonths } from "@/lib/next-due-date";
 import { CONTEXT_TERMINATION_TERMS, type ContextRoleAssignment } from "./context-roles";
 import {
   STRENGTH_GUESS,
@@ -89,6 +91,7 @@ export { STRENGTH_GUESS, STRENGTH_STATED, STRENGTH_WEAK };
 // ------------------------------------------------------------ date arithmetic
 
 function parseIso(value: string): { year: number; month: number; day: number } | undefined {
+  if (!isCalendarDate(value)) return undefined;
   const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
   if (!match) return undefined;
   return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
@@ -102,13 +105,7 @@ function iso(year: number, month: number, day: number): string {
  * month it lands in -- 31 January plus one month is 28 February, which is
  * how a term printed in months is read. */
 export function addMonths(value: string, months: number): string | undefined {
-  const parsed = parseIso(value);
-  if (!parsed) return undefined;
-  const total = parsed.year * 12 + (parsed.month - 1) + months;
-  const year = Math.floor(total / 12);
-  const month = (total % 12) + 1;
-  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  return iso(year, month, Math.min(parsed.day, lastDay));
+  return parseIso(value) ? addCalendarMonths(value, months) : undefined;
 }
 
 /** The day before `value`, because half of UK paper ends a term on the

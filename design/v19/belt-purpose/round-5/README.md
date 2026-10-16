@@ -1,0 +1,59 @@
+# What the belt is for — round 5 (#1304): the chooser beside, revised
+
+Round 4's verdict:
+
+> chooser beside, but I don't like the radio dials and the N in orbit is
+> useless information. The box should also have the proper outline
+> colour, as it looks odd without it
+
+One direction, I, from `../round-4/h-chooser-beside.html` with three
+changes and nothing else:
+
+- `i-chooser-beside-revised.html` — no marks before the section and
+  period choices (the type list keeps its key colours); no item count on
+  sections or types; the chooser card wears the accent outline the open
+  item card beside it wears.
+
+Scenes `?scene=`: `editing-date`, `editing-section`, `editing-period`,
+`narrow-editing-date` (view at 390x844), plus round 3's. Packs by
+`?theme=`.
+
+## Notes from the build
+
+- The document preview card in that same place keeps its plain `--line`
+  border; the chooser matches the item card instead. On a phone the
+  chooser's bottom sheet keeps the preview sheet's plain top edge.
+- With the marks gone, the choice words start at the card's content edge,
+  level with its heading.
+- Screenshots of every new scene in starchart and clouds, checked by eye.
+
+## Verdicts (owner, 2026-10-08)
+
+On the section chooser (starchart, Devices chosen):
+
+> This looks rubbish and it could be visually easier to see the choices
+> rather than left align words in a list.
+
+Then:
+
+> The card itself is fine, it's the words in a list that doesn't look
+> good, as it's visually more taxing
+
+And on the type chooser's key marks (a filled, a ringed and a half dot):
+
+> Not sure I love these weird little symbols at all, anywhere tbh.
+
+> It makes the dial overly complex and adds little value.
+
+(The same marks are the faces of the dial's bodies and the chart key's
+type rows: crescent = inspection, cored = renewal, dashed ring = expiry,
+plain = service; `web/src/lib/data/chart.js` `dialBodiesOf`.)
+
+> The only useful one is the suggestion
+
+So the type marks go from the dial and its key; the suggestion's hollow
+accent body stays (`design/owner-decisions.md` §35).
+
+Not approved. The chooser card itself stays as it is; the section, type and period
+choices need a more visual layout than a left-aligned list of words.
+Round 6 tries that. The calendar was not criticised.

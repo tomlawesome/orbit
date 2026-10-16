@@ -162,6 +162,22 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .field input:focus,.household-page .field select:focus{border-color:var(--accent)}
 .household-page .field input:disabled,.household-page .field select:disabled{opacity:.62;cursor:default}
 .household-page .field select{appearance:none;-webkit-appearance:none;padding-right:30px}
+/* #1338: the time zone and currency open the shared list sheet (a filter and
+   the favourites first) instead of a native select; the button wears the
+   select's own face so the card looks as it did. Its 17px line is the
+   select's: at line-height normal the button stood 1px shorter, enough to
+   fail the household fidelity gate (pipeline 2327). */
+.household-page .field .pickbtn{display:block;width:100%;box-sizing:border-box;text-align:left;background:var(--panel);
+       border:1px solid var(--line);border-radius:9px;color:var(--ink);font:13.5px/17px var(--ui);padding:9px 30px 9px 12px;
+       cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.household-page .field .pickbtn:hover,.household-page .field .pickbtn:focus-visible{border-color:var(--accent)}
+.household-page .field .pickbtn:disabled{opacity:.62;cursor:default}
+/* #1338: on a wide screen the chooser card stands under the pressed field
+   (356px, the chooser card's own width), above the cards below it; the
+   currency's, at the card's right edge, stays inside the card. */
+.household-page .card.lifted{position:relative;z-index:30}
+.household-page .pickseat{position:absolute;top:calc(100% + 8px);left:0;z-index:40;width:356px;max-width:calc(100vw - 32px)}
+.household-page .pickseat.atright{left:auto;right:0}
 /* 2c: each field wears its own quiet save. It sits on the label line, in
    pen-grey until the field is touched, then in accent; it answers with a
    tick and goes quiet again. No save bar, no "remember to press this". */
@@ -182,7 +198,8 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 /* round 2 (#481): a member's identity card prints values, not greyed
    controls — the shape says read-only, so no caption has to. */
 .household-page.member .c-system .field input:disabled,
-.household-page.member .c-system .field select:disabled{
+.household-page.member .c-system .field select:disabled,
+.household-page.member .c-system .field .pickbtn:disabled{
   background:none;border-color:transparent;opacity:1;color:var(--ink);padding:9px 0}
 .household-page.member .c-system .selwrap::after{display:none}
 
@@ -203,21 +220,24 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .note b{color:var(--ink-mid);font-weight:400}
 .household-page .said{display:none;margin-top:12px;font:11px var(--mono);color:var(--ok-text);line-height:1.8}
 .household-page .said.show{display:block}
+/* #1332: the status line under the sections list, said once a section is removed */
+.household-page .moved{margin:0;font:11px var(--mono);color:var(--ok-text);line-height:1.8}
+.household-page .moved.show{margin-top:12px}
 /* a line that exists only at the moment it applies (#481 round 2): the screen
    does not print a rule everybody has to read, it answers the person the rule
    stops, while it is stopping them. */
 .household-page .moment{margin-top:10px;font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.85}
-.household-page .moment.warn{color:var(--warm)}
+.household-page .moment.warn{color:var(--warm-text)}
 /* and it points at the way out rather than describing it */
 .household-page .ghost.beckon{border-color:var(--accent);color:var(--accent-text);
        box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
 /* What a control says when it could not do what it looked like it did — the
    helm's .note in the warm ink, never on the happy path. */
-.household-page .problem{margin-top:12px;font:11px var(--mono);color:var(--warm);line-height:1.8}
+.household-page .problem{margin-top:12px;font:11px var(--mono);color:var(--warm-text);line-height:1.8}
 
 /* sections: one editable list, saved whole. OWNER-ONLY (2b) — a plain
    member never sees this card at all, not even read-only. */
-.household-page .sec{display:flex;align-items:center;gap:12px;padding:7px 2px;
+.household-page .sec{position:relative;display:flex;align-items:center;gap:12px;padding:7px 2px;
      border-bottom:1px solid var(--line-soft)}
 
 /* 2b — the section mark: a chart-pen glyph (drawn in the same ink as every
@@ -256,8 +276,9 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .sec.off{opacity:.55}
 .household-page .sec.off .state{color:var(--ink-quiet)}
 .household-page .sec .drop{font:12px var(--mono);color:var(--ink-quiet);background:none;border:0;
-           cursor:pointer;padding:0 2px;flex:none;visibility:hidden}
-.household-page .sec.empty .drop{visibility:visible}
+           cursor:pointer;padding:0 2px;flex:none}
+/* the last kept section has nowhere to send its entries: no ×, its place held */
+.household-page .sec .drop.gone{visibility:hidden}
 .household-page .sec .drop:hover{color:var(--overdue-text)}
 /* the switch that tells the truth: filled when on, hollow when off */
 .household-page .toggle{width:34px;height:19px;border-radius:99px;border:1px solid var(--line);
@@ -386,7 +407,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 /* the card's prose is 13px; its mono lines are not — say so, or the prose
    rule out-specifies .said and .problem and swallows them */
 .household-page .dangercard .said{font-size:11px;color:var(--ok-text);max-width:none}
-.household-page .dangercard .problem{font-size:11px;color:var(--warm);max-width:none}
+.household-page .dangercard .problem{font-size:11px;color:var(--warm-text);max-width:none}
 
 /* the button: red on the outside at rest, SOLID red once armed */
 .household-page .dangerbtn{font:600 11px var(--mono);letter-spacing:.15em;text-transform:uppercase;
@@ -445,7 +466,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .arch .man .lab{color:var(--ink-mid)}
 .household-page .arch .man small{margin-left:auto;font:10.5px var(--mono);color:var(--ink-faint);
       letter-spacing:.04em;text-align:right}
-.household-page .arch .man small.zero,.household-page .arch .man small.warm{color:var(--warm)}
+.household-page .arch .man small.zero,.household-page .arch .man small.warm{color:var(--warm-text)}
 .household-page .arch .man li.head{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.06em;
       padding-bottom:7px}
 .household-page .arch .act{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:0}
@@ -455,9 +476,9 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .arch .step.open{display:block}
 .household-page .arch .step .field{max-width:430px}
 .household-page .arch .field input.pw{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em}
-.household-page .arch .never{margin:0 0 13px;font:11px var(--mono);color:var(--warm);line-height:1.75;
+.household-page .arch .never{margin:0 0 13px;font:11px var(--mono);color:var(--warm-text);line-height:1.75;
       max-width:60ch}
-.household-page .arch .never b{color:var(--warm);font-weight:600}
+.household-page .arch .never b{color:var(--warm-text);font-weight:600}
 .household-page .arch .fname{margin:0 0 12px;font-size:13px;color:var(--ink)}
 .household-page .arch .fname b{font-weight:530}
 .household-page .arch .fname small{margin-left:8px;font:10.5px var(--mono);color:var(--ink-quiet)}
@@ -465,7 +486,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .arch .dup{margin:0 0 12px;padding:0;list-style:none}
 .household-page .arch .dup li{display:flex;align-items:center;gap:10px;padding:4px 2px;
       font-size:13px;color:var(--ink)}
-.household-page .arch .dup li span{margin-left:auto;font:10.5px var(--mono);color:var(--warm);
+.household-page .arch .dup li span{margin-left:auto;font:10.5px var(--mono);color:var(--warm-text);
       letter-spacing:.06em;white-space:nowrap}
 .household-page .arch .refuse{margin:12px 0 0;font:11.5px var(--mono);color:var(--overdue-text);line-height:1.7}
 /* the reactive step-up challenge (#1132): the same "type your password,

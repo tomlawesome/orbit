@@ -1,94 +1,215 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# Orbit recovery export: the host shell around `orbit export-recovery-bundle`
+# (#1211). Verifying the source backup, the passphrase prompts, wrapping the
+# document key and packaging the bundle all run in the engine inside the
+# Orbit image (src/lib/backup-restore-cli.ts) as a `docker compose run --rm
+# --no-deps` one-off on orbit-app, the deployment mounted at /orbit-deploy.
+# orbit-app keeps running: an export reads a backup and changes nothing live.
+# The passphrase only ever travels on standard input, or the terminal.
+
+repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_dir"
 
-readonly source_bundle="${1:-}"
 readonly environment_file="${ORBIT_ENV_FILE:-.env-orbit}"
-readonly backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
-readonly kek_file="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}/document-kek"
-readonly timestamp="$(date -u +%Y%m%d-%H%M%S)"
-temporary_directory=""
-temporary_path=""
+# A relative directory is relative to the deployment directory; passed bare to -v it would be a named volume.
+backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
+[[ "$backup_directory" == /* ]] || backup_directory="$repo_dir/$backup_directory"
+readonly backup_directory
+readonly secrets_directory="$repo_dir/.orbit-secrets"
+# The engine one-off's container name: unique to this run, so the EXIT trap can `docker wait` for it.
+readonly engine_name="orbit-export-engine-$$"
 
 fail() { printf 'Orbit recovery export: %s\n' "$*" >&2; exit 1; }
+# --- Shared by backup.sh, restore.sh, export-recovery-bundle.sh and ----------
+# --- import-recovery-bundle.sh (#1345). The same text in all four, pinned by
+# --- scripts/compose-project-name-resolution.test.mjs: these scripts stay
+# --- standalone (no sourced library), so "shared" means "identical", proved
+# --- rather than assumed. Change one, change all four. A script that does not
+# --- wait for health still carries health_probe_url and wait_for_health.
 
-# Race-free equivalent of `mv --no-clobber`: `ln` succeeds atomically only
-# if $final_path does not already exist (POSIX EEXIST). `mv --no-clobber`'s
-# own existence check is a separate stat-then-rename, not atomic, and on a
-# same-second timestamp collision it silently exits 0 without moving
-# anything -- the script then reports success naming the OLD recovery
-# bundle, while the new one is forgotten as a stale .tar.installing file
-# cleanup never runs for, since temporary_path is cleared right after.
-# Mirrors publish_bundle_atomically in scripts/backup.sh.
-# $temporary_path and $final_path must be on the same filesystem, which they
-# already are (both under $backup_directory).
-publish_bundle_atomically() {
-  local link_error=""
-  if ! link_error="$(ln -- "$temporary_path" "$final_path" 2>&1)"; then
-    # Only a name that is really taken is a collision; anything else (a
-    # full or read-only disk) is reported as what it is, or the operator
-    # retries a timestamp forever.
-    [[ -e "$final_path" ]] && fail "A recovery bundle already exists at $final_path; rerun to get a distinct timestamp."
-    fail "Could not publish the recovery bundle at $final_path: ${link_error#ln: }"
-  fi
-  rm -f -- "$temporary_path"
-}
-cleanup() { [[ -z "$temporary_directory" ]] || rm -rf -- "$temporary_directory"; [[ -z "$temporary_path" ]] || rm -f -- "$temporary_path"; }
-trap cleanup EXIT
-
-read_recovery_passphrase() {
-  if [[ "${ORBIT_RECOVERY_TEST_MODE:-false}" == true ]]; then
-    read -r -s -p '' recovery_passphrase || fail "A recovery passphrase is required on standard input."
-  else
-    read -r -s -p 'Recovery passphrase: ' recovery_passphrase </dev/tty || fail "An interactive terminal is required."
-    printf '\n' >&2
-  fi
+# Reads a single KEY=value line out of $environment_file (the last one wins).
+read_environment_value() {
+  local requested_key="$1" line value="" found=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "${requested_key}="* ]]; then
+      # A CRLF .env-orbit is valid; drop the CR.
+      value="${line#*=}"
+      value="${value%$'\r'}"
+      found=1
+    fi
+  done < "$environment_file"
+  [[ "$found" == 1 ]] || return 1
+  printf '%s' "$value"
 }
 
-[[ -n "$source_bundle" && -f "$source_bundle" && ! -L "$source_bundle" ]] ||
-  fail "Usage: bash scripts/export-recovery-bundle.sh <backup.tar>"
-command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required."
-command -v tar >/dev/null 2>&1 || fail "tar is required."
-command -v docker >/dev/null 2>&1 || fail "Docker is required."
-[[ -f "$environment_file" ]] || fail "Missing ${environment_file}."
-[[ -f "$kek_file" && ! -L "$kek_file" ]] || fail "Missing regular document KEK file."
-bash scripts/backup.sh --verify "$source_bundle" >/dev/null
+# read_compose_project_name <compose-manifest>
+#
+# Prints <compose-manifest>'s own top-level `name:` value and returns 0, or
+# returns 1 with nothing printed when the file has no such line (#921: a
+# worktree or an operator directory not literally called "orbit" must not
+# guess the project from the directory). A top-level-key line read, not a
+# YAML parse, and dependency-free. Identical text in end-maintenance.sh and
+# repair.sh -- scripts/compose-project-name-resolution.test.mjs proves that.
+read_compose_project_name() {
+  local compose_manifest="$1" line value
+  [[ -f "$compose_manifest" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^name:[[:space:]]*(.*)$ ]]; then
+      value="${BASH_REMATCH[1]%%#*}"
+      value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      value="${value%\"}"
+      value="${value#\"}"
+      value="${value%\'}"
+      value="${value#\'}"
+      [[ -n "$value" ]] || return 1
+      printf '%s' "$value"
+      return 0
+    fi
+  done < "$compose_manifest"
+  return 1
+}
 
-read_recovery_passphrase
-[[ "${#recovery_passphrase}" -ge 12 ]] || fail "Use a recovery passphrase of at least 12 characters."
-if [[ "${ORBIT_RECOVERY_TEST_MODE:-false}" == true ]]; then
-  read -r -s -p '' recovery_passphrase_confirmation || fail "A recovery passphrase confirmation is required on standard input."
-else
-  read -r -s -p 'Confirm recovery passphrase: ' recovery_passphrase_confirmation </dev/tty || fail "An interactive terminal is required."
-  printf '\n' >&2
-fi
-[[ "$recovery_passphrase" == "$recovery_passphrase_confirmation" ]] || fail "Recovery passphrases do not match."
-unset recovery_passphrase_confirmation
+# The Compose project to address, with the precedence repair.sh and
+# end-maintenance.sh use: .env-orbit's own COMPOSE_PROJECT_NAME, then the
+# caller's environment, then docker-compose.yml's own `name:` (#921), then a
+# sanitized guess from the current directory's basename. Compose's own order
+# puts the caller's environment first, so without an explicit --project-name
+# an exported COMPOSE_PROJECT_NAME addressed a different project from the one
+# install created (#1345).
+derive_compose_project_name() {
+  local candidate
+  candidate="$(read_environment_value COMPOSE_PROJECT_NAME 2>/dev/null || true)"
+  if [[ "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+  if [[ -n "${COMPOSE_PROJECT_NAME:-}" && "$COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    printf '%s' "$COMPOSE_PROJECT_NAME"
+    return 0
+  fi
+  candidate="$(read_compose_project_name docker-compose.yml 2>/dev/null || true)"
+  if [[ "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+  candidate="$(basename -- "$(pwd -P)" 2>/dev/null || true)"
+  candidate="$(printf '%s' "$candidate" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-' 2>/dev/null || true)"
+  while [[ "$candidate" == [-_]* ]]; do
+    candidate="${candidate:1}"
+  done
+  if [[ -n "$candidate" && "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+  return 1
+}
 
-mkdir -p -- "$backup_directory"
-chmod 700 "$backup_directory"
-umask 077
-temporary_directory="$(mktemp -d "$backup_directory/.orbit-recovery.XXXXXX")"
-cp -- "$source_bundle" "$temporary_directory/orbit-backup.tar"
 compose() {
-  docker compose --env-file "$environment_file" "$@"
+  local project
+  project="$(derive_compose_project_name)" || fail 'preflight/configuration failed; could not derive a Compose project name.'
+  docker compose --project-name "$project" --env-file "$environment_file" "$@"
 }
-printf '%s' "$recovery_passphrase" |
-  compose run --rm --no-deps -T --entrypoint node orbit-app \
-    /opt/orbit/scripts/recovery-crypto.mjs encrypt /run/secrets/orbit-document-kek \
-    > "$temporary_directory/document-kek.enc"
-unset recovery_passphrase
-[[ "$(head -c 8 "$temporary_directory/document-kek.enc")" == "ORBKEK01" ]] ||
-  fail "Could not create a valid authenticated recovery-key envelope."
-(cd "$temporary_directory" && sha256sum orbit-backup.tar document-kek.enc > checksums.sha256)
-printf 'format_version=1\nkey_encryption=aes-256-gcm-scrypt-n131072-r8-p1\n' > "$temporary_directory/manifest"
-temporary_path="$backup_directory/orbit-recovery-$timestamp.tar.installing"
-tar -C "$temporary_directory" -cf "$temporary_path" manifest checksums.sha256 orbit-backup.tar document-kek.enc
-final_path="$backup_directory/orbit-recovery-$timestamp.tar"
-publish_bundle_atomically
-# Cleared only once the publish succeeded: a refused publish exits above
-# with temporary_path still set, so the cleanup trap removes it.
-temporary_path=""
-printf 'Orbit recovery bundle created: %s\n' "$final_path"
+
+# require_deployment [health]: "health" is for a script that waits for Orbit
+# to answer, which needs curl; the others do not ask for it.
+# shellcheck disable=SC2120  # not every script passes the argument
+require_deployment() {
+  command -v docker >/dev/null 2>&1 || fail 'preflight/tools failed; Docker is required.'
+  docker compose version >/dev/null 2>&1 || fail 'preflight/tools failed; Docker Compose v2 is required.'
+  [[ "${1:-}" != health ]] || command -v curl >/dev/null 2>&1 || fail 'preflight/tools failed; curl is required.'
+  [[ -f "$environment_file" ]] || fail 'preflight/configuration failed; the Orbit environment file is missing.'
+  [[ -d "$secrets_directory" && ! -L "$secrets_directory" ]] || fail 'preflight/configuration failed; the secrets directory must be a regular directory.'
+  [[ -f "$secrets_directory/document-kek" && ! -L "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; the configured document key is missing.'
+}
+
+# Who owns what the engine writes (#1210 D5, #1258). The one-off runs as the
+# image's root. Under rootless Docker that root is the operator already, so
+# 0:0; under rootful Docker the engine hands each file it creates to the
+# operator's own uid/gid. Never `--user`: under rootless Docker a numeric
+# --user maps to a subordinate uid the operator cannot access.
+engine_host_identity() {
+  # Read whole, then matched: `docker info | grep -q` under pipefail could
+  # report a SIGPIPE'd docker as "not rootless", the dangerous answer here.
+  local security_options
+  # Fail closed: a guessed "not rootless" hands the files to a uid the
+  # operator cannot reach.
+  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null)" ||
+    fail "Could not tell whether Docker is rootless, so refusing to guess who should own the deployment files. Check that 'docker info' works, then rerun."
+  if [[ "$security_options" == *rootless* ]]; then
+    host_uid=0
+    host_gid=0
+  else
+    host_uid="$(id -u)"
+    host_gid="$(id -g)"
+  fi
+}
+
+# run_engine <bundle|""> <orbit args...>: one compose one-off (#1211 E1/E5).
+# A backups directory outside the deployment gets its own mount;
+# the bundle being read is mounted read-only. The ORBIT_HOST_* paths let the
+# engine print host paths. The drill's switches are forwarded when set (the
+# engine ignores the ones its command does not use). Exit status passes through.
+# The one-off is named $engine_name so an EXIT trap can wait for it to end.
+run_engine() {
+  local input_file="$1" name
+  shift
+  local -a run_args=(run --rm --no-deps --name "$engine_name" -i) directory_args=()
+  if [[ -t 0 && -t 1 ]]; then run_args+=(-t); else run_args+=(-T); fi
+  run_args+=(-e "ORBIT_HOST_UID=$host_uid" -e "ORBIT_HOST_GID=$host_gid" -e "ORBIT_HOST_DEPLOY_DIR=$repo_dir")
+  for name in ORBIT_NONINTERACTIVE_RESTORE ORBIT_RECOVERY_PROMPTS ORBIT_RECOVERY_TEST_MODE ORBIT_RESTORE_TEST_MODE ORBIT_RESTORE_TEST_SYNC_FAILURE_STAGE \
+    ORBIT_RESTORE_TEST_FAILURE_STAGE ORBIT_RESTORE_TEST_CHECKPOINT_FAILURE ORBIT_RESTORE_TEST_HARD_INTERRUPT_STAGE; do
+    [[ -z "${!name:-}" ]] || run_args+=(-e "$name=${!name}")
+  done
+  run_args+=(-v "$repo_dir:/orbit-deploy:rw")
+  if [[ "$backup_directory" != "$repo_dir/backups" ]]; then
+    { mkdir -p -- "$backup_directory" && chmod 700 -- "$backup_directory"; } || fail "Could not create ${backup_directory}."
+    run_args+=(-v "$backup_directory:/orbit-backups:rw" -e "ORBIT_HOST_BACKUP_DIR=$backup_directory")
+    directory_args+=(--backup-dir /orbit-backups)
+  fi
+  if [[ -n "$input_file" ]]; then
+    run_args+=(-v "$input_file:/orbit-input/bundle.tar:ro" -e "ORBIT_HOST_INPUT_FILE=$input_file")
+  fi
+  compose "${run_args[@]}" --entrypoint node orbit-app /opt/orbit/cli/orbit.js "$@" --dir /orbit-deploy "${directory_args[@]}"
+}
+
+# Where compose published orbit-app: the drill's own text, word for word (#383, #684, #1241).
+health_probe_url() {
+  local bind_address port
+
+  bind_address="$(awk -F= '$1 == "ORBIT_BIND_ADDRESS" { sub(/\r$/, ""); sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  port="$(awk -F= '$1 == "ORBIT_PORT" { sub(/\r$/, ""); sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  # An exported value wins over the file, exactly as it does for Compose's
+  # own interpolation, so the probe reaches the port Compose published (#1241).
+  bind_address="${ORBIT_BIND_ADDRESS:-${bind_address:-0.0.0.0}}"
+  port="${ORBIT_PORT:-${port:-3000}}"
+
+  # 0.0.0.0 means "listen on every interface"; it is not itself a
+  # connectable address, so probe via loopback there, same as any other
+  # client on the host would have to.
+  [[ "$bind_address" == "0.0.0.0" ]] && bind_address="127.0.0.1"
+
+  printf 'http://%s:%s/api/health' "$bind_address" "$port"
+}
+
+# 45s; ORBIT_RESTORE_HEALTH_SECONDS is for the shell's own tests.
+wait_for_health() {
+  local health_deadline=$((SECONDS + ${ORBIT_RESTORE_HEALTH_SECONDS:-45})) probe_url
+  probe_url="$(health_probe_url)"
+  until curl --fail --silent --max-time 2 "$probe_url" >/dev/null 2>&1; do
+    (( SECONDS < health_deadline )) || return 1
+    sleep 1
+  done
+}
+# --- End of the shared functions. -------------------------------------------
+
+[[ "$#" == 1 ]] || fail "Usage: bash scripts/export-recovery-bundle.sh <backup.tar>"
+source_bundle="$1"
+[[ "$source_bundle" == /* ]] || source_bundle="$PWD/$source_bundle"
+[[ -f "$source_bundle" && ! -L "$source_bundle" && "$source_bundle" != *:* ]] ||
+  fail "Usage: bash scripts/export-recovery-bundle.sh <backup.tar>"
+# shellcheck disable=SC2119  # this script does not wait for health
+require_deployment
+engine_host_identity
+run_engine "$source_bundle" export-recovery-bundle /orbit-input/bundle.tar

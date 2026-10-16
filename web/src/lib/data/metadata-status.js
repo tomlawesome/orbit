@@ -15,6 +15,8 @@
  * prevent, and it is what the unit suite pins.
  */
 
+import { wordsOf } from "./workspace.js";
+
 /** The marker the API sends for a value that failed its integrity check. */
 export const DAMAGED = "metadata_integrity_failed";
 /** The marker the API sends when the instance holds no usable encryption key. */
@@ -50,13 +52,6 @@ export const PANEL_LOCKED = "Editing is paused — this item's encrypted details
  * rest of the panel stays live.
  */
 export const COST_LOCKED = "Cost is locked — this item's encrypted details are locked until an administrator restores Orbit's encryption key. Complete without a cost, or wait.";
-
-/**
- * The stale submit: a panel opened before the key went away, sent afterwards.
- * The server refuses it with a 503 and this is that refusal in the member's
- * words, in the `.problem` alert the panel already has.
- */
-export const SAVE_REFUSED = "not saved — encrypted details are locked until the key is restored. The stored values are intact.";
 
 /** A mail-in message whose extract cannot be read, in the two states. */
 export const RECEIPT_WORDS = {
@@ -113,13 +108,12 @@ export function receiptWords(status) {
 }
 
 /**
- * The message the `.problem` alert shows for a failed save. Only the locked
- * refusal is rewritten; every other failure keeps the server's own words,
- * which are already the ones the member needs.
+ * The message the `.problem` alert shows for a failed save: the server's own
+ * words, for every refusal including the locked-key one (ADR-0034 decision 4,
+ * #1335) -- the engine words what it refuses and the browser never rewrites it.
  * @param {{ code?: string, message?: string }} error
  * @returns {string}
  */
 export function saveProblem(error) {
-  if (error?.code === "metadata_locked") return SAVE_REFUSED;
-  return error?.message ?? String(error);
+  return wordsOf(error);
 }

@@ -21,6 +21,7 @@
  * the token and claim rules.
  */
 
+import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -35,7 +36,7 @@ import { sealStepUpProof, stepUpProofCookieName } from "@/lib/auth/recent-auth";
 import { createSession, csrfTokenForSession, readSession } from "@/lib/auth/session";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { createLocalUser, listMethods, verifyCredential } from "@/server/local-credentials";
-import { cleanupIntegrationEnvironment } from "./support/fixtures";
+import { accountAddressColumns, cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute } from "./support/request-event";
 import { readSetCookie } from "./support/set-cookie";
 
@@ -130,8 +131,10 @@ async function localUser(label: string, options: { identity?: boolean } = {}): P
 
 /** A user with a provider identity and no password. */
 async function oidcUser(label: string): Promise<string> {
+  const id = randomUUID();
   const [user] = await getDb().insert(users).values({
-    email: `${label}@methods.invalid`,
+    id,
+    ...(await accountAddressColumns(id, `${label}@methods.invalid`)),
     emailVerified: true,
     displayName: `Methods ${label}`,
   }).returning({ id: users.id });
@@ -239,7 +242,7 @@ async function completeLink(actor: Actor, identity: VerifiedIdentity, challenge:
   const authorizationUrl = new URL(started.headers.get("location") ?? "");
   const transactionCookie = readSetCookie(started, transactionCookieName(config))?.value ?? "";
 
-  vi.spyOn(oidc, "completeAuthorization").mockResolvedValue(identity);
+  vi.spyOn(oidc, "completeAuthorization").mockResolvedValue({ identity, idToken: "header.payload.signature-sentinel" });
   return callRoute(callback, {
     url: `${ORIGIN}/api/auth/callback?code=provider-code&state=${authorizationUrl.searchParams.get("state")}`,
     headers: { cookie: `${transactionCookieName(config)}=${transactionCookie}` },
@@ -320,7 +323,7 @@ describe("linking a provider identity (ADR-0023 §6)", () => {
     // A link is not a re-authentication, so it asks for no `max_age`.
     expect(authorizationUrl.searchParams.get("max_age")).toBeNull();
 
-    vi.spyOn(oidc, "completeAuthorization").mockResolvedValue(identity);
+    vi.spyOn(oidc, "completeAuthorization").mockResolvedValue({ identity, idToken: "header.payload.signature-sentinel" });
     const returned = await callRoute(callback, {
       url: `${ORIGIN}/api/auth/callback?code=provider-code&state=${authorizationUrl.searchParams.get("state")}`,
       headers: { cookie: `${transactionCookieName(config)}=${sealed}` },

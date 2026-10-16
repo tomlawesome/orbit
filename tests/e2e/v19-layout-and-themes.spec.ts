@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { homeIsLive } from "./support/keyboard";
 import { entrancesSettled } from "./support/motion";
 import {
   axeViolations,
@@ -21,7 +22,9 @@ resetDatabaseBetweenSpecFiles();
    cannot type an import of it. tests/unit/v19-theme-roster.test.mjs holds the
    module to the same two literals this reads. */
 const THEME_SOURCE = readFileSync(resolve(__dirname, "../../web/src/lib/theme.js"), "utf8");
-const THEME_PACKS: string[] = JSON.parse(/export const THEME_PACKS = (\[[^\]]*\]);/.exec(THEME_SOURCE)?.[1] ?? "[]");
+/* #1331: THEME_PACKS is derived from THEME_TABLE, so the ids are its rows' `id:` fields, in table order. */
+const THEME_TABLE_SOURCE = /export const THEME_TABLE = \[([\s\S]*?)\n\];/.exec(THEME_SOURCE)?.[1] ?? "";
+const THEME_PACKS: string[] = [...THEME_TABLE_SOURCE.matchAll(/\bid: "([\w-]+)"/g)].map((match) => match[1]);
 const DEFAULT_THEME = /export const DEFAULT_THEME = "([\w-]+)";/.exec(THEME_SOURCE)?.[1];
 if (THEME_PACKS.length < 2 || !DEFAULT_THEME) throw new Error("#1178: could not read the theme roster from web/src/lib/theme.js");
 
@@ -30,7 +33,8 @@ if (THEME_PACKS.length < 2 || !DEFAULT_THEME) throw new Error("#1178: could not 
  * and themes before the Next.js removal (8a315e18), ported to the v19
  * screens.
  *
- * 1. THE VIEWPORT MATRIX. Every signed-in v19 screen at the three sizes the
+ * 1. THE VIEWPORT MATRIX. Every signed-in v19 screen (the item's own
+ *    screen being home with its drawer open since #1319) at the three sizes the
  *    old spec used -- 1440×900, 820×1180 and 412×915 -- with no
  *    document-level sideways scroll, every visible control inside the
  *    viewport and not cut off by a box that hides its overflow, and no axe
@@ -117,11 +121,22 @@ const SCREENS: Screen[] = [
       await entrancesSettled(page.locator(".hh-pocket"));
     },
   },
+  /* #1319 (owner-decisions §34): was "/item/[id]", the belt. The item is
+     home's drawer now, so the item screen is home with it open: the desk's
+     drawer under its row, or (under the 900px switch, so the tablet too)
+     the pocket row's own panel, with its foot row of pills and icons. */
   {
-    name: "/item/[id]",
+    name: "/home?item=<id>",
     seed: "item",
-    path: (household) => `/item/${household?.itemId}`,
-    ready: (page, household) => expect(page.getByRole("heading", { name: household?.itemTitle })).toBeVisible(),
+    path: (household) => `/home?item=${household?.itemId}`,
+    ready: async (page, household) => {
+      const id = household?.itemId ?? "";
+      const drawer = page.locator(`[id="${id}-view"], .pocket .pk-below [data-row-key="${id}"][data-open]`).filter({ visible: true });
+      await expect(drawer.getByRole("group", { name: `Actions for ${household?.itemTitle}` })).toBeVisible({ timeout: 30_000 });
+      await homeIsLive(page);
+      /* a phone's row unfolds; measure it drawn */
+      await entrancesSettled(drawer);
+    },
   },
 ];
 
@@ -217,21 +232,8 @@ async function layoutProblems(page: Page): Promise<string[]> {
 }
 
 /* Real contrast failures the pack sweep found, left failing rather than
-   excluded (#1178's report lists them for filing). Keyed "screen pack project". */
-const ZERO_ON_LIGHT_PACK =
-  "DEFECT (#1178): the desk household archive card's \"never in the file\" (small.zero, household.css:448) is drawn in "
-  + "--warm (#c06a12), which fails 4.5:1 on the light packs; --warm-text is the pack's darker text shade for exactly this";
-const PACK_DEFECTS: Record<string, string> = {
-  "/household/[id] clouds desktop-chromium": ZERO_ON_LIGHT_PACK,
-  "/household/[id] dawn desktop-chromium": ZERO_ON_LIGHT_PACK,
-  /* #1183: the same .zero contrast failure, found again by desktop-firefox. */
-  "/household/[id] clouds desktop-firefox": ZERO_ON_LIGHT_PACK,
-  "/household/[id] dawn desktop-firefox": ZERO_ON_LIGHT_PACK,
-  /* #1219: and by desktop-webkit (pipeline 2131), the same rule on the same
-     node in ten runs of ten in the pinned Playwright image. */
-  "/household/[id] clouds desktop-webkit": ZERO_ON_LIGHT_PACK,
-  "/household/[id] dawn desktop-webkit": ZERO_ON_LIGHT_PACK,
-};
+   excluded. Keyed "screen pack project". Empty since #854's household --warm-text fix. */
+const PACK_DEFECTS: Record<string, string> = {};
 
 const VIEWPORTS = [
   { name: "desktop", width: 1440, height: 900 },
@@ -284,6 +286,9 @@ test.describe("the signed-in v19 screens at every size and in every theme pack",
   for (const pack of THEME_PACKS.filter((id) => id !== DEFAULT_THEME)) {
     for (const screen of SCREENS) {
       test(`${screen.name} in the ${pack} pack has no WCAG A/AA violations`, async ({ page }) => {
+        /* Owner, 2026-10-14: the default theme is checked at every size (above);
+           every other pack at one size, the desktop project's. */
+        test.skip(test.info().project.name.startsWith("mobile"), "other packs are checked at one size; the desktop project runs them");
         const defect = PACK_DEFECTS[`${screen.name} ${pack} ${test.info().project.name}`];
         test.fail(Boolean(defect), defect);
         await page.addInitScript((id: string) => {

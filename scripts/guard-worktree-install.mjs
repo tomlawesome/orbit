@@ -58,8 +58,8 @@ export function checkWorktreeInstall({ repoDir, gitDir, gitCommonDir, nodeModule
     reason:
       `node_modules resolves to ${target}, outside this worktree (${repoDir}). ` +
       "Installing here would rewrite that shared node_modules's workspace-state " +
-      "metadata to point at this worktree instead (AGENTS.md worktree-install " +
-      "trap, #784) -- silently, until the next install from the main checkout " +
+      "metadata to point at this worktree instead (docs/testing.md, Local " +
+      "traps: worktree install, #784) -- silently, until the next install from the main checkout " +
       "reconciles and breaks its own build. Run `pnpm install` from the main " +
       "checkout, not from this worktree.",
   };

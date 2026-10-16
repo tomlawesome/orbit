@@ -59,8 +59,8 @@ non-v1 maintenance. The pull request links the issue and records:
 - documentation and operator impact;
 - the CI run and, when applicable, preview digest and manual result.
 
-The [engineering baseline](engineering-baseline.md) is a dated audit. GitHub
-issues are the live status; durable requirements remain in version control.
+GitHub issues are the live status; durable requirements remain in version
+control.
 
 ## Coverage policy
 
@@ -92,7 +92,7 @@ had no caller in CI until #620, so 1,644 errors accumulated across 52 files --
 overwhelmingly implicit `any` and DOM narrowing rather than defects.
 
 Gating on zero would have failed every pull request on day one, so from #620
-until #624 `web/svelte-check-ceiling.json` recorded exactly how many errors
+until #624 a per-file ledger recorded exactly how many errors
 each file was still allowed, on the same ratchet principle as the coverage
 floors above: a file that got worse failed, a file that got better also
 failed (asking for its number to be lowered), and a file with no entry had to
@@ -102,23 +102,21 @@ entries in it.
 
 **#624 closed that out.** `scripts/check-v19-types.mjs` is now a plain
 zero-error check: it runs `svelte-check` across `web/` and fails on any error,
-anywhere, with no per-file exemption. `web/svelte-check-ceiling.json` is kept
-only as the empty historical record of the ledger; nothing reads it anymore.
+anywhere, with no per-file exemption. The ledger file is gone.
 
-`due-next/+page.svelte` and `home/+page.svelte` were the two files still
-carrying tolerated errors, both for the same reason: a `{#snippet}` parameter
-is one of the positions where `svelte-check` accepts an inline `@type` cast
-comment but the production rolldown build does not (#782), so the type
-couldn't be written inline in the route's own `<script>`. Both reached zero by
-turning the snippet into a real child component, whose `$props()`
-destructuring is a plain `<script>` statement and takes the annotation
-without issue: `due-next/EntryRow.svelte`, and `home/CorridorRow.svelte` and
-`home/ItemView.svelte` (home's two snippets closed over a large slice of the
-screen's own reactive state and handlers, so those became typed props and
-callback props instead). Both routes' reactive `view` state and lookup
-objects also moved into small companion modules (`due-next-view.svelte.js`,
-`bands.js`) for the same reason. #782 stays open to carry the upstream
-constraint and the workaround, but no file needs it worked around today.
+`home/+page.svelte` was the last file still carrying tolerated errors: a
+`{#snippet}` parameter is one of the positions where `svelte-check` accepts an
+inline `@type` cast comment but the production rolldown build does not (#782),
+so the type couldn't be written inline in the route's own `<script>`. It
+reached zero by turning the snippets into real child components, whose
+`$props()` destructuring is a plain `<script>` statement and takes the
+annotation without issue: `home/CorridorRow.svelte` and `home/ItemView.svelte`
+(home's two snippets closed over a large slice of the screen's own reactive
+state and handlers, so those became typed props and callback props instead).
+The route's reactive `view` state and lookup objects also moved into a small
+companion module (`bands.js`) for the same reason. #782 stays open to carry the
+upstream constraint and the workaround, but no file needs it worked around
+today.
 
 The same job compiles `web/` (`pnpm --filter orbit-web build`, about twenty
 seconds). Before that, a `.svelte` file that did not compile could merge green
@@ -174,6 +172,43 @@ Pull requests also receive a read-only dependency-diff review. Newly
 introduced high or critical vulnerabilities in any dependency scope and
 dependencies outside the approved SPDX licence policy block integration.
 
+### Who starts a pipeline, and where it runs
+
+A push starts a pipeline only on `dev`, `preview`, `main` and `hotfix/*`. A
+working branch is tested by its merge request; one with no merge request has no
+pipeline until it gets one. `~/.local/bin/gl-pipeline-run ai/orbit <ref>` starts
+a pipeline on any branch. `dev`, `preview` and `main` all take push
+"No one", merge "Maintainers".
+
+Two runners serve the project, both on the host `gitlab-runners` (32 cores,
+48 GB): the shared group runner, and runner 8, a privileged project runner owned
+by `ai/orbit` and tagged `orbit-build`, which every job needing a Docker daemon
+reaches through `.privileged_runner` (#811). Its `/builds` persists between
+jobs, so a job that must start clean says so (#813, and the data-root wipe in
+`.docker_in_job`). Three facts about that host live in its `config.toml` and
+root cron, not in the repository:
+
+- `dns` is 9.9.9.9 (owner, 2026-09-05), superseding `.dind_service`'s
+  2026-09-04 note.
+- `pull_policy = ["if-not-present"]` covers a job's own image but not a
+  service's, which needs its own `pull_policy` line in `.gitlab-ci.yml`.
+- `/usr/local/sbin/runner-docker-tidy.sh` prunes containers, volumes, untagged
+  images and the builder cache (3 GB reserve) nightly, logging to
+  `/var/log/runner-docker-tidy.log`; pinned job images survive it (owner,
+  2026-09-08). It was set to 02:15; a later flake entry says 03:15, so read the
+  cron entry for the real time.
+
+Renovate replaces Dependabot on this host: `renovate.json` at the repo root, the
+`renovate` job in `.gitlab-ci.yml`, and pipeline schedule 5 (`Renovate`,
+Mondays 05:00 London, ref `dev`, variable `RENOVATE=true`). It runs nowhere else
+and covers GitHub Actions too; `.github/dependabot.yml` is gone. It deliberately
+excludes the Orbit base image (`renovate.json`'s `matchPackageNames` entry says
+why); the `base_image_repin` job (#708) owns that one: it needs its own schedule
+(variable `BASE_IMAGE_REPIN=true`), never rebuilds anything, never pushes to
+`dev`/`preview`/`main` and never merges; it pushes `chore/base-image-repin` and
+opens or refreshes one merge request. The header of
+`scripts/ci/repin-base-image.sh` holds how it is authorised.
+
 ### Risk-proportional pull-request lanes
 
 Every pull request runs lint, type checking and the complete unit suite. A
@@ -228,6 +263,9 @@ sometimes a change deserves the whole gate before it merges. The label
 launcher install compatibility included — and says so in its log, so a full
 run on a small diff is never a mystery. Remove the label and the next pipeline
 is classified again.
+
+A branch pipeline leaves the acceptance jobs manual, so playing one there asks
+for the same thing.
 
 `scripts/ci/` sits in the CI lane by the owner's decision on #889. Several of
 those scripts are the acceptance stage's own checks, so a change confined to
@@ -461,7 +499,7 @@ the launcher contract (`--plain`, `--install|--update|--repair`) and the
 journey it drives both hold for this commit. Line grammars are still enforced
 per merge request, against `docs/engine-events.md`, by
 `scripts/engine-events.test.mjs` (the `phase=...` event stream) and
-`scripts/configure.test.mjs` (`configure.sh --check`'s readiness lines).
+`scripts/configure-check-contract.test.mjs` (`configure.sh --check`'s readiness lines).
 Ruling: #606; pairing against the pipeline's own image: #736, delivered with
 #890.
 

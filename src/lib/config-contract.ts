@@ -74,8 +74,7 @@ export const ALLOWED_KEYS = [
   "SMTP_PASSWORD",
   "SMTP_PASSWORD_FILE",
   "SMTP_FROM",
-  "SMTP_URL",
-  "SMTP_URL_FILE",
+  "OPERATOR_ALERT_ADDRESS",
   "VAPID_SUBJECT",
   "SESSION_TTL_SECONDS",
   "OIDC_SCOPES",
@@ -89,7 +88,6 @@ export const ALLOWED_KEYS = [
   "MIGRATE_ON_START",
   "WORKER_ENABLED",
   "DRIZZLE_MIGRATIONS_PATH",
-  "ORBIT_SECRETS_DIR",
   "ORBIT_CONFIG_SCHEMA_VERSION",
 ] as const;
 
@@ -362,7 +360,6 @@ export const envOrbitSchema = z
       ["VAPID_PRIVATE_KEY", "VAPID_PRIVATE_KEY_FILE"],
       ["SMTP_PASSWORD", "SMTP_PASSWORD_FILE"],
       ["DATABASE_URL", "DATABASE_URL_FILE"],
-      ["SMTP_URL", "SMTP_URL_FILE"],
     ];
     for (const [direct, file] of exclusivePairs) {
       if (record[direct] && record[file]) {
@@ -514,22 +511,10 @@ export function evaluateReadiness(
     "SMTP_USER",
     "SMTP_PASSWORD",
     "SMTP_PASSWORD_FILE",
-    "SMTP_URL",
-    "SMTP_URL_FILE",
   );
-  let mailReady = false;
-  if (
-    exactlyOneSet(record, "SMTP_URL", "SMTP_URL_FILE") &&
-    !anySet(record, "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SMTP_PASSWORD_FILE")
-  ) {
-    mailReady = true;
-  } else if (
+  const mailReady =
     allSet(record, "SMTP_HOST", "SMTP_USER") &&
-    exactlyOneSet(record, "SMTP_PASSWORD", "SMTP_PASSWORD_FILE") &&
-    !anySet(record, "SMTP_URL", "SMTP_URL_FILE")
-  ) {
-    mailReady = true;
-  }
+    exactlyOneSet(record, "SMTP_PASSWORD", "SMTP_PASSWORD_FILE");
   optional("mail", mailReady, mailPresent);
 
   appManaged("imap");

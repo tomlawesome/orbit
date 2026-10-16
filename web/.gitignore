@@ -7,3 +7,7 @@ test-results
 # rebuilding build/ cannot pull the assets out from under a live page.
 .preview
 static/licenses
+
+# The About page's bill of materials (#1256): written by scripts/about-sbom.mjs
+# in the image build only, so a development build carries none.
+static/about

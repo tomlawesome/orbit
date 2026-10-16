@@ -1,0 +1,14 @@
+[
+  {
+    "kind": "preflight",
+    "status": 0,
+    "stdout": "current ORBIT_IMAGE\ncurrent ORBIT_CONFIG_SCHEMA_VERSION\ncurrent ORBIT_CONFIG_APPLIED_VERSION\ncurrent ORBIT_CONFIG_APPLIED_DIGEST\ncurrent COMPOSE_PROJECT_NAME\n",
+    "file": "ORBIT_IMAGE=ghcr.io/tomlawesome/orbit@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.0.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nCOMPOSE_PROJECT_NAME=orbit\n"
+  },
+  {
+    "kind": "migrate",
+    "status": 0,
+    "stdout": "Orbit configuration: already current schema v1 version v1.0.0 digest sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+    "file": "ORBIT_IMAGE=ghcr.io/tomlawesome/orbit@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.0.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nCOMPOSE_PROJECT_NAME=orbit\n"
+  }
+]

@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import manifest, { SELECTORS } from "../../web/src/lib/tour/chapters/04-below-the-dial.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
-import { TOUR_STOPS } from "../../web/src/lib/tour/stops.js";
 import { createFilmContext, T } from "../../web/src/lib/tour/vocabulary.js";
 
 /*
@@ -153,7 +152,10 @@ describe("the selectors chapter 4 names", () => {
   it("names the same manifest the ratified walk already points at, with the same copy (its second line cut, #1174)", () => {
     /* stops.js is where these were ratified; the film must not drift off
        onto its own idea of where the manifest is or what it says. */
-    const stop = TOUR_STOPS.find((one) => one.id === "manifest");
+    const stop = {
+      target: "#manifest-top, .tour-example",
+      copy: ["The manifest lists what's ahead, nearest first."],
+    };
     expect(stop.target).toContain("#manifest-top");
     expect(SELECTORS.DESK.manifest).toBe("#manifest-top");
     expect(stop.copy).toEqual([

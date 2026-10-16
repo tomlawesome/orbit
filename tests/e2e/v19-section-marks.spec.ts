@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
+import { settleArrival } from "./support/arrival";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -39,6 +41,11 @@ async function signIn(page: Page, returnTo: string) {
   await page.getByRole("link", { name: READER() }).click();
   /* #1080: waits for the session, then holds administrator access. */
   await ensureWorkerAdministrator(page);
+  /* #1249: an administrator with no household lands on the arrival, which
+     decides from its own reads; one answered after the seed below hands the
+     reader to /home with location.replace and aborts the goto that follows
+     (net::ERR_ABORTED, NS_BINDING_ABORTED). Wait for the decision first. */
+  await settleArrival(page, 20_000, returnTo);
 }
 
 /**
@@ -111,17 +118,18 @@ test("add → swap → save → manifest shows it", async ({ page }) => {
     // An entry in the new section, so the manifest has something to show.
     const headers = { ...(await sessionHeaders(page)), "content-type": "application/json" };
     const itemId = randomUUID();
-    const dueDate = new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10);
+    const dueDate = householdDateFromToday(10);
     const itemCreated = await page.request.post("/api/workspace/commands", {
       headers,
       data: {
         type: "item.upsert",
         householdId: household.id,
+        kind: "service",
         item: {
           id: itemId, sectionId: rowId, title: "Allotment shed lock", currency: "GBP",
-          scheduleKind: "service", dueDate, recurrenceMonths: 12, status: "active",
+          dueDate, recurrenceMonths: 12,
         },
-        activity: { id: randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+        activity: { id: randomUUID(), itemId, occurredAt: new Date().toISOString() },
       },
     });
     expect(itemCreated.ok()).toBe(true);

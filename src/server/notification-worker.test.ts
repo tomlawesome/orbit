@@ -185,15 +185,6 @@ describe("notification worker scheduling", () => {
     expect(config.smtpUrl).not.toContain("IMAP");
   });
 
-  it("rejects an SMTP plaintext downgrade or mismatched security URL", () => {
-    expect(() => getNotificationWorkerConfig({
-      NODE_ENV: "test", SMTP_URL: "smtp://smtp.example.test:25", SMTP_SECURITY: "implicit_tls",
-    } as NodeJS.ProcessEnv)).toThrow("implicit TLS");
-    expect(() => getNotificationWorkerConfig({
-      NODE_ENV: "test", SMTP_URL: "smtps://smtp.example.test:465", SMTP_SECURITY: "starttls",
-    } as NodeJS.ProcessEnv)).toThrow("STARTTLS");
-  });
-
   it("suppresses only reminders scheduled before the household snooze resume date", () => {
     const earlyReminder = householdReminderTime("2026-08-31", 30, "Europe/London");
     const laterReminder = householdReminderTime("2026-08-31", 7, "Europe/London");
@@ -212,6 +203,18 @@ describe("notification worker scheduling", () => {
     expect(categorizeProviderError("web_push", { statusCode: 503 }))
       .toBe("push_unavailable");
     expect(categorizeProviderError("email", { message: "password=secret" })).toBe("unknown");
+  });
+
+  it("treats a 401 or 403 from the push service as a revoked subscription, not a transient failure (#1316)", () => {
+    // A push service answering 401/403 has rejected this subscription's
+    // credentials (for instance after the server's VAPID key changed); retrying
+    // can never succeed, so it must be handled like a 404/410: revoked and
+    // cancelled, not left active and retried.
+    for (const statusCode of [401, 403]) {
+      const category = categorizeProviderError("web_push", { statusCode, message: "https://push.example/subscription" });
+      expect(category, `status ${statusCode}`).toBe("push_unsubscribed");
+      expect(deliveryFailureState(category, 1, 5), `status ${statusCode}`).toBe("cancelled");
+    }
   });
 
   it("retries only transient delivery categories and cancels corrective failures", () => {

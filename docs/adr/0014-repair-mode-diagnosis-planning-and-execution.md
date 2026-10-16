@@ -306,7 +306,10 @@ that could drift.
   deletes recovery material it created for the operator.
 - Schema-class diagnosis depends on the application's stable
   `reason=database_mismatch`/`database_below_floor` log vocabulary — a
-  cross-layer contract that now must be kept like any other.
+  cross-layer contract that now must be kept like any other. (Note,
+  2026-10-14: the floor was removed in #1403; `database_below_floor` and the
+  `database-below-floor` finding no longer exist, and only
+  `database_mismatch` remains.)
 - Credential rotation depends on local-socket trust inside the `orbit-db`
   container; a change to the Postgres image's auth model revisits decision 6.
 - `install.sh --repair` and `repair.sh` keep different exit vocabularies; the

@@ -7,6 +7,7 @@ import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: this file's own copy of the seed-restore discipline every spec
    under tests/e2e/ follows -- see support/database.ts for why. */
@@ -97,7 +98,7 @@ async function seedHouseholdAndItem(page: Page, name: string, itemTitle: string)
   const householdId = randomUUID();
   const sectionId = randomUUID();
   const itemId = randomUUID();
-  const { userId } = await page.evaluate(async ({ householdId, sectionId, itemId, householdName, itemTitle }) => {
+  const { userId } = await page.evaluate(async ({ householdId, sectionId, itemId, householdName, itemTitle, dueDate }) => {
     const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { user: { id: string }, csrfToken: string };
     const command = async (body: Record<string, unknown>) => {
       const response = await fetch("/api/workspace/commands", {
@@ -120,15 +121,15 @@ async function seedHouseholdAndItem(page: Page, name: string, itemTitle: string)
     await command({
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
         id: itemId, sectionId, title: itemTitle, currency: "GBP",
-        scheduleKind: "service", dueDate: new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10),
-        status: "active",
+        dueDate,
       },
-      activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
     });
     return { userId: session.user.id };
-  }, { householdId, sectionId, itemId, householdName: name, itemTitle });
+  }, { householdId, sectionId, itemId, householdName: name, itemTitle, dueDate: householdDateFromToday(20) });
   return { householdId, itemId, userId };
 }
 
@@ -196,9 +197,17 @@ test("a member sees their own last sent reminders, plainly, on both dialects", a
     await expect(rows.nth(0)).not.toContainText("smtp_unconfigured");
     await expect(outcome(1)).not.toContainText("couldn’t send");
 
-    /* The row leads to the item on the belt. */
+    /* The row leads to the item's drawer on home (#1319, owner-decisions
+       §34: the belt it used to lead to retired). */
+    await expect(rows.nth(1)).toHaveAttribute("href", `/home?item=${itemId}`);
     await rows.nth(1).click();
-    await expect(page).toHaveURL(new RegExp(`/item/${itemId}`));
+    await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}$`));
+    if (isMobile) {
+      await expect(page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`))
+        .toHaveAttribute("data-open", "", { timeout: 20_000 });
+    } else {
+      await expect(page.locator(`[id="${itemId}-view"]`)).toBeVisible({ timeout: 20_000 });
+    }
   } finally {
     runSql(`delete from notification_deliveries where household_id = '${householdId}';`);
     await scheduleHouseholdDeletion(page, householdId, name);

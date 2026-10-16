@@ -57,6 +57,7 @@ const mocks = vi.hoisted(() => ({
   decryptDocument: vi.fn(),
   encryptDocument: vi.fn(),
   scanFile: vi.fn(),
+  validateStructure: vi.fn(),
   readStagingCiphertext: vi.fn(),
   writeQuarantineBytes: vi.fn(),
   discardQuarantine: vi.fn(),
@@ -68,6 +69,7 @@ const mocks = vi.hoisted(() => ({
   listCiphertextObjects: vi.fn(),
   listStagingObjects: vi.fn(),
   listQuarantineFiles: vi.fn(),
+  sweepTemporaryFiles: vi.fn(),
   purgeExpiredPortableArchives: vi.fn(),
   reconcilePortableArchiveStorage: vi.fn(),
   purgeExpiredHouseholds: vi.fn(),
@@ -100,6 +102,7 @@ function classifyExecute(text: string): string {
   if (/crypto\.storage_key as "storageKey"/u.test(text)) return "readOwnedPurgeRecord";
   if (/select lifecycle, version as generation/u.test(text)) return "readPurgeDocumentState";
   if (/select lifecycle\s+from documents/u.test(text)) return "readCurrentLifecycle";
+  if (/item_id is null and delete_after <= now\(\)/u.test(text)) return "retireUnboundUploads";
   if (/select id\s+from document_jobs/u.test(text)) {
     if (/kind = 'scan'/u.test(text)) return "fenceScanJob";
     if (/kind = 'purge'/u.test(text)) return "fenceStalePurgeClaim";
@@ -236,19 +239,25 @@ vi.mock("@/server/documents/config", async (importActual) => ({
   getDocumentConfig: mocks.config,
 }));
 
-vi.mock("@/server/documents/crypto", () => ({
+vi.mock("@/server/documents/crypto", async (importActual) => ({
+  envelopeOf: (await importActual<typeof import("@/server/documents/crypto")>()).envelopeOf,
   decryptDocument: mocks.decryptDocument,
   encryptDocument: mocks.encryptDocument,
 }));
 
 vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scanFile }));
 
-vi.mock("@/server/documents/storage", async (importActual) => ({
+vi.mock("@/server/documents/validation", async (importActual) => ({
+  ...await importActual<typeof import("@/server/documents/validation")>(),
+  validateSupportedDocumentStructure: mocks.validateStructure,
+}));
+
+vi.mock("@/server/documents/storage", async (importActual) => {
   // STORAGE_KEY_PATTERN is real (#1151 A2-Q4): purge-jobs.ts now imports it
   // from here instead of restating its own copy, so the mock must still
   // export it or that import throws before a single purge test can run.
-  ...await importActual<typeof import("@/server/documents/storage")>(),
-  LocalDocumentStorage: class {
+  const actual = await importActual<typeof import("@/server/documents/storage")>();
+  class LocalDocumentStorage {
     readStagingCiphertext = mocks.readStagingCiphertext;
     writeQuarantineBytes = mocks.writeQuarantineBytes;
     discardQuarantine = mocks.discardQuarantine;
@@ -260,8 +269,14 @@ vi.mock("@/server/documents/storage", async (importActual) => ({
     listCiphertextObjects = mocks.listCiphertextObjects;
     listStagingObjects = mocks.listStagingObjects;
     listQuarantineFiles = mocks.listQuarantineFiles;
-  },
-}));
+    sweepTemporaryFiles = mocks.sweepTemporaryFiles;
+  }
+  return {
+    ...actual,
+    LocalDocumentStorage,
+    openDocumentStorage: () => new LocalDocumentStorage(),
+  };
+});
 
 vi.mock("@/server/portable-archive-repository", () => ({
   purgeExpiredPortableArchives: mocks.purgeExpiredPortableArchives,
@@ -401,6 +416,10 @@ beforeEach(() => {
     mocks.steps.push("scanner.scan");
     return { status: "clean" };
   });
+  mocks.validateStructure.mockImplementation(async () => {
+    mocks.steps.push("validation.structure");
+    return true;
+  });
   mocks.readStagingCiphertext.mockImplementation(async () => {
     mocks.steps.push("storage.readStagingCiphertext");
     return Buffer.alloc(64, 3);
@@ -468,9 +487,15 @@ describe("runDocumentMaintenanceCycle — phase order", () => {
       // 4/5. The other retention sweeps.
       "portableArchives.purgeExpired",
       "households.purgeExpired",
-      // 6. Storage reconciliation, due because it has never run.
+      // 6. Storage reconciliation, due because it has never run. It first
+      // retires staged uploads no item bound in time (#1316).
+      "execute:retireUnboundUploads",
       "update:documents",
       "select:documents",
+      // Mail-ingestion attachments and their staged objects are a second
+      // stored population, reconciled before the storage listings (#1316).
+      "select:imap_ingestion_attachments",
+      "select:imap_ingestion_staging_objects",
       "storage.listCiphertextObjects",
       "select:document_staging_objects",
       "storage.listStagingObjects",
@@ -588,6 +613,8 @@ describe("scanner recovery — the clean path publishes only after a clean scan"
       "scanner.scan",
       // The plaintext leaves the disk before anything else happens.
       "storage.discardQuarantine",
+      // Nothing opens the file until the scan has passed (ADR-0033).
+      "validation.structure",
       "crypto.encrypt",
       "storage.writeCiphertext",
       // The publish transaction: fenced, then the document becomes available.
@@ -733,7 +760,31 @@ describe("scanner recovery — fail-closed scanning order", () => {
     expect(documentTransitions()).toEqual([
       expect.objectContaining({ lifecycle: "rejected", scanStatus: "infected", failureCode: "malware_detected" }),
     ]);
+    expect(mocks.validateStructure).not.toHaveBeenCalled();
     expectNoPublish();
+  });
+
+  it("rejects a clean file the renderer cannot open, after the scan and never before it (ADR-0033)", async () => {
+    armScanJob();
+    mocks.validateStructure.mockImplementation(async () => {
+      mocks.steps.push("validation.structure");
+      return false;
+    });
+
+    await runDocumentMaintenanceCycle();
+
+    expect(traceAfter("execute:claimScanJobs").slice(4, 7)).toEqual([
+      "scanner.scan",
+      "storage.discardQuarantine",
+      "validation.structure",
+    ]);
+    expect(documentTransitions()).toEqual([
+      expect.objectContaining({ lifecycle: "rejected", scanStatus: "clean", failureCode: "unsupported_structure" }),
+    ]);
+    // Not expectNoPublish(): the scan really did pass, so scanStatus is clean.
+    expect(mocks.encryptDocument).not.toHaveBeenCalled();
+    expect(mocks.writeCiphertext).not.toHaveBeenCalled();
+    expect(mocks.steps).not.toContain("insert:document_crypto");
   });
 
   it("treats a non-retryable scanner error as terminal scanner_failed, not as a retry", async () => {
@@ -777,6 +828,22 @@ describe("scanner recovery — fail-closed scanning order", () => {
     expect(documentTransitions()).toEqual([
       expect.objectContaining({ lifecycle: "rejected", failureCode: "staging_object_invalid" }),
     ]);
+    expectNoPublish();
+  });
+
+  it("retries a staged object under a key this instance does not hold as key_unavailable, keeping the stage (#1316)", async () => {
+    armScanJob();
+    mocks.executeRows.readOwnedScanRecord = [{ ...scanRecoveryRecord(), keyId: "key-this-instance-never-held" }];
+
+    await runDocumentMaintenanceCycle();
+
+    expect(mocks.decryptDocument).not.toHaveBeenCalled();
+    expect(mocks.scanFile).not.toHaveBeenCalled();
+    expect(documentTransitions()).toEqual([]);
+    expect(mocks.writes.some((write) => write.table === "document_staging_objects")).toBe(false);
+    expect(mocks.deleteStagingCiphertext).not.toHaveBeenCalled();
+    const jobWrite = mocks.writes.find((write) => write.table === "document_jobs" && write.operation === "update");
+    expect(jobWrite?.values).toMatchObject({ status: "retry", lastError: "key_unavailable" });
     expectNoPublish();
   });
 
@@ -919,7 +986,6 @@ describe("purge jobs — irreversible ordering", () => {
       "execute:readOwnedPurgeRecord",
       "update:documents",
       "delete:document_crypto",
-      "delete:document_drafts",
       "update:document_jobs",
       "insert:audit_log",
       "tx:commit",

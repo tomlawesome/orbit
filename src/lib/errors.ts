@@ -26,6 +26,18 @@ export class AppError extends Error {
 }
 
 /**
+ * A request refused because the member asked too often (429). It names how
+ * long to wait, in whole seconds, and the response carries that as
+ * `Retry-After` (RFC 6585 section 4, RFC 9110 section 10.2.3).
+ */
+export class RateLimitedError extends AppError {
+  constructor(code: string, message: string, public readonly retryAfterSeconds: number) {
+    super(code, message, 429);
+    this.name = "RateLimitedError";
+  }
+}
+
+/**
  * The bounded blocked-request contract of ADR-0013 decision 2 (#523).
  * Deliberately outside the `{ error: { code, message } }` envelope: the body
  * is the fixed `{"error":"maintenance_active"}` and never carries the
@@ -35,5 +47,20 @@ export class MaintenanceActiveError extends Error {
   constructor(public readonly expectedEndAt: Date | null) {
     super("Orbit is in maintenance");
     this.name = "MaintenanceActiveError";
+  }
+}
+
+/**
+ * Orbit holds no usable encryption key (#1405, ADR-0024 amendment): the
+ * instance is locked, and every API answers the bounded
+ * `{"error":"encryption_key_unavailable"}` 503 with no `Retry-After`, because
+ * nothing says when the key will be back. Like `MaintenanceActiveError` it
+ * sits outside the `{ error: { code, message } }` envelope, and its message
+ * names no key, no key id and no setting.
+ */
+export class KeyUnavailableError extends Error {
+  constructor() {
+    super("Orbit's encryption key is not available");
+    this.name = "KeyUnavailableError";
   }
 }

@@ -7,6 +7,7 @@ import { gotoCreate } from "./support/keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -161,6 +162,7 @@ const households = householdRegister();
 let householdId: string;
 let householdName: string;
 let itemId: string;
+let itemTitle: string;
 
 /*
  * Deliberately NOT serial mode: this is a walkthrough of every core-journey
@@ -212,21 +214,21 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
       if (!createHousehold.ok()) throw new Error(`household.create failed: ${createHousehold.status()}`);
       households.track({ id: householdId, name: householdName });
 
+      itemTitle = `${NAME_PREFIX}item ${randomUUID().slice(0, 8)}`;
       const upsertItem = await page.request.post("/api/workspace/commands", {
         headers,
         data: {
           type: "item.upsert",
           householdId,
+          kind: "renewal",
           item: {
             id: itemId,
             sectionId,
-            title: `${NAME_PREFIX}item ${randomUUID().slice(0, 8)}`,
+            title: itemTitle,
             currency: "GBP",
             costMinor: 4500,
-            scheduleKind: "renewal",
-            dueDate: new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10),
+            dueDate: householdDateFromToday(20),
             recurrenceMonths: 12,
-            status: "active",
             version: 1,
             updatedAt: new Date().toISOString(),
           },
@@ -273,10 +275,38 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     await assertLiveRegionIsSafe(drawer, "home", "#statusdrawer (system status)");
   });
 
-  test("/item/[id]", async ({ page }, testInfo) => {
+  /* #1319 (owner-decisions §34): was "/item/[id]", the belt. That address
+     no longer exists; the drawer opens from `/home?item=<id>` and holds
+     everything the belt did, so the drawer is what is read back: the
+     screen with it open, then with its rows in edit and the chooser up
+     (the due date's calendar), every control named and the landmarks and headings whole
+     in both states. The desk's drawer is a named region; the phone's is
+     the row's own panel. */
+  test("/home?item=<id>: the item drawer, read and edited", async ({ page, isMobile }, testInfo) => {
     await signIn(page);
-    await page.goto(`/item/${itemId}`);
-    await walkScreen(page, testInfo, "item-id");
+    await page.goto(`/home?item=${itemId}`);
+    const drawer = isMobile
+      ? page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`)
+      : page.getByRole("region", { name: `${itemTitle} — full detail` });
+    if (isMobile) await expect(drawer).toHaveAttribute("data-open", "", { timeout: 30_000 });
+    const acts = drawer.getByRole("group", { name: `Actions for ${itemTitle}` });
+    await expect(acts).toBeVisible({ timeout: 30_000 });
+    await walkScreen(page, testInfo, "home-item-drawer");
+    await expect(acts.getByRole("button")).toHaveText(["snooze", "complete", "attach a document", "retire"]);
+    await expect(drawer.getByRole("button", { name: "Edit this item" })).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "Copy link" })).toBeVisible();
+
+    await drawer.getByRole("button", { name: "Edit this item" }).click();
+    await expect(drawer.getByRole("group", { name: `Editing ${itemTitle}` })).toBeVisible();
+    await drawer.getByRole("button", { name: /^due: / }).click();
+    const chooser = page.getByRole("dialog", { name: /due date/i });
+    await expect(chooser).toBeVisible();
+    await walkScreen(page, testInfo, "home-item-drawer-editing");
+    await expect(chooser.getByRole("grid")).toHaveAccessibleName(/\S/);
+    /* Put back as found: the chooser, then the unchanged edit. */
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await expect(acts).toBeVisible();
   });
 
   test("/household/[id]", async ({ page }, testInfo) => {
@@ -412,9 +442,9 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
 
   /**
    * Sign-out, last: this is the one destructive journey, so it runs after
-   * every other screen has been walked. It uses Chrome.svelte's own two-tap
-   * control (arm, then confirm) reached from a sub-screen, which is the real
-   * product path: the confirm tap revokes the session for real before
+   * every other screen has been walked. It uses Chrome.svelte's own sign-out
+   * control reached from a sub-screen, which is the real product path: its
+   * one press (owner, 2026-10-06) revokes the session for real before
    * handing the reader to /logout.
    */
   test("sign-out screen", async ({ page }, testInfo) => {
@@ -422,17 +452,15 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     await page.goto("/settings");
     if (test.info().project.name.startsWith("mobile")) {
       /* #1120: on a phone the sub-screen chrome's orb opens the hatch, and
-         its sign-out pill arms on the first tap and fires on the second --
-         the same two-tap control, in the pocket's own sheet. */
+         its sign-out pill is the same one-press control, in the pocket's
+         own sheet. */
       await page.getByRole("button", { name: "Account and menu" }).click();
       const signOutPill = page.getByRole("dialog").getByRole("button", { name: /sign out/ });
-      await signOutPill.click();
-      await expect(signOutPill).toHaveAccessibleName("tap again to sign out");
+      await expect(signOutPill).toHaveAccessibleName("sign out →");
       await signOutPill.click();
     } else {
       await page.locator("button.orb").click();
       const signOutButton = page.locator(".account .signout");
-      await signOutButton.click();
       await signOutButton.click();
     }
     await expect(page).toHaveURL(/\/logout$/, { timeout: 30_000 });

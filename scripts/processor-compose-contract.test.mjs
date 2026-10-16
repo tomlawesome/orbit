@@ -5,10 +5,10 @@ const compose = readFileSync(new URL("../docker-compose.yml", import.meta.url), 
 const tikaConfig = readFileSync(new URL("../config/tika-config.json", import.meta.url), "utf8");
 const tikaAdapter = readFileSync(new URL("../src/server/documents/tika.ts", import.meta.url), "utf8");
 const exactProcessorTest = readFileSync(new URL("./test-tika-processor.mjs", import.meta.url), "utf8");
-const workflow = readFileSync(new URL("../.github/workflows/publish-container.yml", import.meta.url), "utf8");
-// #801 moved the processor steps' shell into scripts/ci/. The workflow still
-// owns the step names, the scope gate and the `if:` that reads it; the runtime
-// assertions live in the two scripts it calls.
+const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
+// #801 moved the processor steps' shell into scripts/ci/. The GitLab pipeline
+// owns the scope gate and the condition that reads it; the runtime assertions
+// live in the two scripts it calls.
 const processorScope = readFileSync(new URL("./ci/detect-processor-scope.sh", import.meta.url), "utf8");
 const processorRuntime = readFileSync(new URL("./ci/verify-tika-processor.sh", import.meta.url), "utf8");
 // The resolved-configuration half of the model server's no-egress proof (#935):
@@ -105,14 +105,17 @@ describe("hostile document processor contract", () => {
   });
 
   it("retains protected exact-image runtime evidence for processor changes", () => {
-    expect(workflow).toContain("Detect exact processor validation scope");
-    expect(workflow).toContain("Verify exact hostile-document processor");
     // The step still runs only when the scope gate says so, and still calls
     // the script that carries the evidence.
-    expect(workflow).toContain("bash scripts/ci/detect-processor-scope.sh");
-    expect(workflow).toContain("steps.processor_scope.outputs.required == 'true'");
-    expect(workflow).toContain("bash scripts/ci/verify-tika-processor.sh");
+    expect(gitlabCi).toContain("bash scripts/ci/detect-processor-scope.sh");
+    expect(gitlabCi).toContain('[ "$(orbit_output required)" = "true" ]');
+    expect(gitlabCi).toContain("bash scripts/ci/verify-tika-processor.sh");
     expect(processorScope).toContain("scripts/test-tika-processor.mjs");
+    // The confinement assertions, the step that calls them and the gate itself
+    // must also trigger the check, or weakening any of them merges unverified.
+    expect(processorScope).toContain("scripts/ci/verify-tika-processor.sh");
+    expect(processorScope).toContain("scripts/ci/detect-processor-scope.sh");
+    expect(processorScope).toContain(".gitlab-ci.yml");
     expect(processorRuntime).toContain("scripts/test-tika-processor.mjs");
     expect(processorRuntime).toContain('test "${tika_uid}" = "35002"');
     expect(processorRuntime).toContain('test "${tika_read_only}" = "true"');

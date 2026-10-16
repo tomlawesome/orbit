@@ -497,6 +497,11 @@ change in the same pull request as the code, per that document's rule.
    with stale keys fails closed with the distinct removed-key message;
    guarantee catalogue updated.
 
+   *Note (2026-10-14):* the distinct removed-key message was retired with
+   the rest of the compatibility code in #1403, nobody having run Orbit yet.
+   A stale `IMAP_*` key now fails closed as an unknown setting
+   (`configuration_unknown_key`), like any other key Orbit does not know.
+
 Slices 1–2 are hard to reverse (migration, config format) and cut alone
 (`Cut: risk`); 3–5 may share a branch, with 4 landing before 5 because pause
 applies to attributed mail. XOAUTH2 (device-code sign-in, refresh token as
@@ -543,3 +548,72 @@ on slice 1 and is not sliced here.
   allowed and this record's first draft assumed, is unsupported and advised
   against (decision 3).
 
+## Amendment (#745, 2026-10-13): the registered address is the only sending address
+
+Owner decision of 2026-10-13. It amends decision 3 (#745, attribution by
+verified sender).
+
+**One sending address.** A member forwards mail to Orbit from the email
+address their account is registered with — the local account's address or the
+sign-in provider's `email` claim — and from no other. Decision 3's "further
+addresses they send from" and the override box are withdrawn.
+
+**Still proved by a one-use link.** A claimed address proves nothing, so
+Orbit still emails a one-use link to the registered address, and nothing
+attributes until the member has opened it. The attribution rule in decision 3
+is otherwise unchanged.
+
+**What was removed.** Adding, overriding and removing other sending addresses
+(`addSenderAddress`, `removeSenderAddress`), the `manual` source, the route
+that added and removed addresses (`settings/mail-relay/senders`), and its
+helpers and tests. The `mail_in_sender_addresses` row is now only ever the
+seeded registered address (`seedSenderAddress`).
+
+*Note (2026-10-14):* nothing writes the `manual` source any more, but the
+enum value, the column default and the `SenderAddressSource` type member
+remain in code, and the seed does not look at the source: an existing `manual`
+row is kept if it reads as the registered address, and otherwise is replaced
+(dropped, or made inert if another member already holds that address).
+
+**What stays.** `seedSenderAddress`, `listSenderAddresses` (one row, so the
+screen can show its state), `hasVerifiedSenderAddress`,
+`sendSenderVerification`, `verifySenderAddress` with the
+`settings/mail-relay/verify` route, and `userForVerifiedSender`.
+
+**New route: `POST /api/settings/mail-relay/verification`.** It takes no
+body and sends the check email to the member's registered address, seeding the
+row again first if it is missing. It answers 202 with `{ address, expiresAt }`,
+or 409 `sender_already_verified` if the address is already verified. Only a
+signed-in member may call it. A body that names another address is not read.
+The send is rate-limited to one a minute and five a day per member, stored in
+the database, and refused with 429 `sender_check_too_soon` and `Retry-After`
+(owner, 2026-10-14). Once the five are used, the refusal is instead 429
+`sender_check_daily_limit`, worded "not sent — daily limit reached. try again
+tomorrow.", with `Retry-After` until the oldest of the five is a day old.
+
+**The send has an overall deadline** of 15 seconds, mailer included. A mailer
+that does not answer ends the request with 503 `sender_mailer_timeout`; one that
+throws ends with 503 `sender_mailer_refused`. The attempt and its link are
+recorded and committed before the mailer is called, and no lock or transaction
+is held across the call. A refused send puts back whatever link stood before
+(none, or an earlier delivered one); a timed-out send leaves the new link
+outstanding, because the mailer may still deliver it; the attempt counts
+either way. The limit counts attempts, not deliveries (release audit,
+#1316). A press made while another check for the same member is in flight is
+refused 429 `sender_check_too_soon` rather than queued. The send times belong
+to the member, not the address: they carry over when the registered address
+changes, even to one another member already claims. Each refusal is worded
+once, in the engine (ADR-0034 decision 4).
+
+**The seeded row follows the registered address.** If the account email is
+edited, or the provider's claim changes, the row follows it and verification
+starts over. The existing seed logic decides this; a test confirms it.
+
+**The settings screen** shows the registered address and its state (checked,
+not yet checked, or link sent with its expiry), one button, "Send the check
+email", and the existing "relay not usable" line until the address is checked.
+It is tracked as a separate issue.
+
+*Note (2026-10-14):* the screen was built in #1410
+(`web/src/routes/settings/mail/sender.js`); the button reads "send the check
+email".

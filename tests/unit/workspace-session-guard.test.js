@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
  * #1151 W2-R4: readSettingsScreen (and its siblings — readHome,
- * readInboxScreen, readAdminScreen, readHouseholdScreen, readBelt) build
+ * readInboxScreen, readAdminScreen, readHouseholdScreen) build
  * their screen from `Promise.all([readWorkspace(), readSession(), ...])`.
  * Every other read in that array was already wrapped in its own
  * `.catch(...)` — additive, so a route that cannot answer costs the reader

@@ -3,9 +3,11 @@ import { AppError } from "@/lib/app-error";
 import { log } from "@/lib/logger";
 import { adjudicateProposal, type AdjudicatedField } from "@/server/documents/adjudication";
 import { getDocumentConfig } from "@/server/documents/config";
+import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { MODEL_INTERACTIVE_DEADLINE_MS } from "@/server/documents/model-extraction";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { classifyScan, documentScanCodes, scanRefusal } from "@/server/documents/scan-outcome";
+import { openDocumentStorage } from "@/server/documents/storage";
 import {
   proposalFromText,
   safeDocumentFilenameTitle,
@@ -17,8 +19,8 @@ import { extractTextWithTika, MAX_EXTRACTED_CHARACTERS } from "@/server/document
 import { requireHouseholdAccess } from "@/server/workspace-access";
 const parserRecoveryMessage = "Suggestions are unavailable right now. Review the fields manually; the document can still be attached.";
 const processorDisabledMessage = "Automatic suggestions require the optional document processor. You can still attach this file.";
-const unsupportedStructureMessage = "Orbit could not safely inspect this document structure. Choose another PDF, JPEG, or PNG before adding the item.";
-const prohibitedContentMessage = "Orbit rejected this document because it contains prohibited active or embedded content. Choose another document.";
+const unsupportedStructureMessage = "Orbit could not open this document. Choose another PDF, JPEG, or PNG.";
+const passwordRequiredMessage = "This document needs a password to open, so Orbit cannot show or read it. Choose a copy without a password.";
 
 export const itemDocumentSuggestionFields = [
   "title",
@@ -138,13 +140,39 @@ export async function inspectItemDocument(input: {
 }): Promise<ItemDocumentInspectionResult> {
   await requireHouseholdAccess(input.userId, input.householdId);
   const config = getDocumentConfig();
-  const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  // The administrator's limit, read now so a change needs no restart (#1285).
+  const maxBytes = await readEffectiveUploadLimit(config);
+  const storage = openDocumentStorage(config);
   // Ephemeral opaque reference for this pre-attachment inspection only; never persisted.
   const operationId = randomUUID();
-  const received = await storage.receive(input.body, operationId, config.maxBytes, input.declaredBytes);
+  const received = await storage.receive(input.body, operationId, maxBytes, input.declaredBytes);
   try {
     const mediaType = detectDocumentMediaType(received.leadingBytes);
-    const bytes = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
+    // ADR-0033: the scan comes before anything opens the file -- not the
+    // structure check's pdf.js or image decoder, not Tika. ClamAV reads the
+    // quarantine copy over its own socket; nothing here has read it yet.
+    if (config.scanMode === "required") {
+      log.info({ event: "document.scan", state: "starting", action: "check_scanner" });
+      const scanStartedAt = Date.now();
+      const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
+      const scanMs = Math.max(0, Date.now() - scanStartedAt);
+      const outcome = classifyScan(scan, documentScanCodes);
+      if (outcome.status !== "clean") {
+        log.warn({
+          event: "document.scan",
+          state: outcome.status === "infected" ? "exhausted" : "degraded",
+          // A fixed enumeration, never provider text or the scanner's virus
+          // signature, so it is safe to record.
+          reason: outcome.logReason,
+          action: "check_scanner",
+          impact: "document_upload_blocked",
+          durationMs: scanMs,
+        });
+        throw scanRefusal(outcome, "inspection");
+      }
+      log.info({ event: "document.scan", state: "ready", action: "none", durationMs: scanMs });
+    }
+    const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
     try {
       const structureReason = await classifyDocumentStructure(bytes, mediaType);
       if (structureReason !== "supported_structure") {
@@ -157,7 +185,7 @@ export async function inspectItemDocument(input: {
         });
         return {
           extracted: false,
-          message: structureReason === "prohibited_content" ? prohibitedContentMessage : unsupportedStructureMessage,
+          message: structureReason === "password_required" ? passwordRequiredMessage : unsupportedStructureMessage,
           suggestions: [],
           attachmentDisposition: "rejected",
           reason: structureReason,
@@ -173,50 +201,6 @@ export async function inspectItemDocument(input: {
           reason: structureReason,
         };
       }
-      log.info({ event: "document.scan", state: "starting", action: "check_scanner" });
-      const scanStartedAt = Date.now();
-      const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
-      const scanMs = Math.max(0, Date.now() - scanStartedAt);
-      if (scan.status !== "clean") {
-        const infected = scan.status === "infected";
-        // `scan.reason` is a fixed enumeration from the scanner adapter, never
-        // provider text or the scanner's virus signature, so it is safe to record.
-        const scannerReason = infected
-          ? "malware_detected"
-          : scan.reason === "unavailable"
-            ? "scanner_unavailable"
-            : scan.reason === "timeout"
-              ? "scanner_timeout"
-              : scan.reason === "protocol"
-                ? "scanner_protocol"
-                : "scanner_failed";
-        log.warn({
-          event: "document.scan",
-          state: infected ? "exhausted" : "degraded",
-          reason: scannerReason,
-          action: "check_scanner",
-          impact: "document_upload_blocked",
-          durationMs: scanMs,
-        });
-        if (infected) {
-          throw new AppError(
-            "document_malware_detected",
-            "Orbit rejected that document because malware was detected",
-            422,
-          );
-        }
-        // Attribute the failure exactly as the upload path does, so both
-        // scanner-dependent journeys report the same actionable cause.
-        const unreachable = scan.reason === "unavailable" || scan.reason === "timeout";
-        throw new AppError(
-          unreachable ? "document_scanner_unreachable" : "document_scanner_failed",
-          unreachable
-            ? "Document inspection is not possible because the malware scanner cannot be reached. It stays blocked until the scanner is running."
-            : "Document inspection is not possible because the malware scanner reported a failure. It stays blocked until the scanner is healthy.",
-          503,
-        );
-      }
-      log.info({ event: "document.scan", state: "ready", action: "none", durationMs: scanMs });
       let text = "";
       let extracted = false;
       let message: string | undefined;

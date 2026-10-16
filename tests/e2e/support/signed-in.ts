@@ -6,6 +6,7 @@ import { homeIsLive } from "./keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./worker-identity";
 import { settleArrival } from "./arrival";
 import { answerPushWithoutAService } from "./webkit-push";
+import { householdDateFromToday } from "./household-dates";
 
 /**
  * #1178: the signed-in fixtures v19-axe-sweep.spec.ts grew (#496), lifted
@@ -62,6 +63,10 @@ export type Household = { id: string; name: string; sectionId: string; itemId?: 
  * names the spec so a leak says where it came from.
  */
 export async function seedHousehold(page: Page, prefix: string, options: { withItem?: boolean } = {}): Promise<Household> {
+  /* A household name is at most 60 characters (src/lib/workspace.ts); the
+     dash and the id take 37, so a longer prefix is refused with a bare 422
+     (#1316: sign-out-provider-return failed on every browser that way). */
+  if (prefix.length > 23) throw new Error(`#1316: seed prefix "${prefix}" is over 23 characters; the household name would pass the 60-character limit`);
   const name = `${prefix}-${randomUUID()}`;
   const householdId = randomUUID();
   const sectionId = randomUUID();
@@ -84,29 +89,28 @@ export async function seedHousehold(page: Page, prefix: string, options: { withI
       },
     },
   });
-  if (!created.ok()) throw new Error(`#1178: could not seed household "${name}" (${created.status()})`);
+  if (!created.ok()) throw new Error(`#1178: could not seed household "${name}" (${created.status()}): ${await created.text()}`);
 
   if (!options.withItem) return { id: householdId, name, sectionId };
 
   const itemId = randomUUID();
   const itemTitle = `${prefix} item`;
-  const dueDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+  const dueDate = householdDateFromToday(20);
   const itemCreated = await page.request.post("/api/workspace/commands", {
     headers,
     data: {
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
         id: itemId,
         sectionId,
         title: itemTitle,
         currency: "GBP",
-        scheduleKind: "service",
         dueDate,
         recurrenceMonths: 12,
-        status: "active",
       },
-      activity: { id: randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: randomUUID(), itemId, occurredAt: new Date().toISOString() },
     },
   });
   if (!itemCreated.ok()) throw new Error(`#1178: could not seed item for "${name}" (${itemCreated.status()})`);

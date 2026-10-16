@@ -30,6 +30,11 @@ const mocks = vi.hoisted(() => ({
   transactionCookieName: vi.fn(() => "orbit_txn"),
   readInvitationCookie: vi.fn(() => null),
   reportAuthCallbackFailure: vi.fn(),
+  completeStepUp: vi.fn(),
+  isStepUpIntent: vi.fn(),
+  setStepUpProofCookie: vi.fn(),
+  linkIdentity: vi.fn(),
+  clearClaimCookie: vi.fn(),
 }));
 
 vi.mock("orbit/lib/auth/cookies", () => ({
@@ -38,7 +43,7 @@ vi.mock("orbit/lib/auth/cookies", () => ({
   sessionCookieName: mocks.sessionCookieName,
   transactionCookieName: mocks.transactionCookieName,
 }));
-vi.mock("orbit/lib/auth/bootstrap", () => ({ clearClaimCookie: vi.fn() }));
+vi.mock("orbit/lib/auth/bootstrap", () => ({ clearClaimCookie: mocks.clearClaimCookie }));
 vi.mock("orbit/lib/auth/crypto", () => ({
   openLoginTransaction: mocks.openLoginTransaction,
   constantTimeEqual: mocks.constantTimeEqual,
@@ -51,9 +56,9 @@ vi.mock("orbit/lib/auth/oidc", () => ({
 }));
 vi.mock("orbit/lib/auth/provision", () => ({ provisionIdentity: mocks.provisionIdentity }));
 vi.mock("orbit/lib/auth/recent-auth", () => ({
-  completeStepUp: vi.fn(),
-  isStepUpIntent: vi.fn(() => false),
-  setStepUpProofCookie: vi.fn(),
+  completeStepUp: mocks.completeStepUp,
+  isStepUpIntent: mocks.isStepUpIntent,
+  setStepUpProofCookie: mocks.setStepUpProofCookie,
 }));
 vi.mock("orbit/lib/auth/session", () => ({
   createSession: mocks.createSession,
@@ -61,8 +66,17 @@ vi.mock("orbit/lib/auth/session", () => ({
 }));
 vi.mock("orbit/lib/env", () => ({ getAuthConfig: mocks.getAuthConfig }));
 vi.mock("orbit/server/invitations/cookie", () => ({ readInvitationCookie: mocks.readInvitationCookie }));
-vi.mock("orbit/server/local-credentials", () => ({ linkIdentity: vi.fn() }));
+vi.mock("orbit/server/local-credentials", () => ({ linkIdentity: mocks.linkIdentity }));
 
+const ID_TOKEN = "header.payload.signature-sentinel";
+const verifiedIdentity = {
+  issuer: "https://idp.example",
+  subject: "subject-1",
+  email: "person@example.invalid",
+  emailVerified: true,
+  displayName: "Person",
+  avatarUrl: null,
+};
 const config = { oidc: { issuer: "https://idp.example" }, appUrl: "https://orbit.example" };
 
 function event() {
@@ -81,7 +95,11 @@ beforeEach(() => {
   mocks.constantTimeEqual.mockReturnValue(true);
   mocks.transactionKind.mockReturnValue("login");
   mocks.discoverProvider.mockResolvedValue({});
-  mocks.completeAuthorization.mockResolvedValue({});
+  /* #1316: the exchange hands back the verified identity AND the raw ID token. */
+  mocks.completeAuthorization.mockResolvedValue({ identity: verifiedIdentity, idToken: ID_TOKEN });
+  mocks.isStepUpIntent.mockReturnValue(false);
+  mocks.completeStepUp.mockResolvedValue("proof");
+  mocks.linkIdentity.mockResolvedValue(undefined);
   mocks.provisionIdentity.mockResolvedValue({ id: "u1", disabledAt: null });
   mocks.readInvitationCookie.mockReturnValue(null);
   mocks.sessionCookieName.mockReturnValue("orbit_session");
@@ -113,5 +131,56 @@ describe("GET /api/auth/callback session replacement (#1151 A1-R6)", () => {
     expect(response.status).toBe(303);
     expect(mocks.createSession).toHaveBeenCalled();
     expect(mocks.deleteSessionToken).toHaveBeenCalled();
+  });
+});
+
+/*
+ * #1316 decision 26a: the ID token the provider issued travels to the session
+ * row so sign-out can name the provider's session. Only a sign-in keeps it; a
+ * step-up or a link creates no session and drops it.
+ */
+describe("GET /api/auth/callback hands the ID token to the new session (#1316)", () => {
+  it.each(["login", "bootstrap"])("passes the provider's ID token to createSession on a %s sign-in", async (kind) => {
+    mocks.transactionKind.mockReturnValue(kind);
+    mocks.createSession.mockResolvedValue({ token: "new-token", expiresAt: new Date() });
+
+    const { GET } = await import("../../web/src/routes/api/auth/callback/+server.js");
+    const response = await GET(event());
+
+    expect(response.status).toBe(303);
+    expect(mocks.provisionIdentity).toHaveBeenCalledWith(
+      verifiedIdentity,
+      ...(kind === "bootstrap" ? [{ bootstrap: true }] : []),
+    );
+    expect(mocks.createSession).toHaveBeenCalledTimes(1);
+    const options = mocks.createSession.mock.calls[0][3];
+    expect(options).toEqual({ idToken: ID_TOKEN });
+  });
+
+  it("creates no session on a step-up", async () => {
+    mocks.transactionKind.mockReturnValue("step-up");
+    mocks.isStepUpIntent.mockReturnValue(true);
+    mocks.openLoginTransaction.mockResolvedValue({
+      state: "s", returnTo: "/settings", intent: "archive", stepUpSessionId: "session-1",
+    });
+
+    const { GET } = await import("../../web/src/routes/api/auth/callback/+server.js");
+    const response = await GET(event());
+
+    expect(response.status).toBe(303);
+    expect(mocks.completeStepUp).toHaveBeenCalledWith(expect.objectContaining({ identity: verifiedIdentity }));
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("creates no session on a link", async () => {
+    mocks.transactionKind.mockReturnValue("link");
+    mocks.openLoginTransaction.mockResolvedValue({ state: "s", returnTo: "/settings", linkUserId: "u1" });
+
+    const { GET } = await import("../../web/src/routes/api/auth/callback/+server.js");
+    const response = await GET(event());
+
+    expect(response.status).toBe(303);
+    expect(mocks.linkIdentity).toHaveBeenCalledWith("u1", verifiedIdentity);
+    expect(mocks.createSession).not.toHaveBeenCalled();
   });
 });

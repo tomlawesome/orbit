@@ -1,12 +1,13 @@
-import { spawn, spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
-import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard, processWatchdog } from "../../scripts/process-budget.mjs";
+import { readGolden } from "./__fixtures__/golden";
+import { PROCESS_TEST_TIMEOUT_MS, processWatchdog } from "../../scripts/process-budget.mjs";
 import {
   missingConfigurationFields,
   missingGuidedFields,
@@ -19,135 +20,103 @@ import {
   type MachinePromptSessionResult,
 } from "./guided-configuration";
 
-// Two independent parity strategies for issue #295 slice 4, mirroring the
-// two shapes prior slices already established:
+// Two independent parity strategies for issue #295 slice 4:
 //
-// 1. Source-extraction parity (missing_*_fields,
-//    print_noninteractive_configuration_guidance): install.sh has no
-//    standalone entry point for these helpers, so — exactly like
-//    install-transaction.parity.test.ts and target-identity.parity.test.ts —
-//    this test extracts (via awk, by function name, never hand-copied) the
-//    exact current bodies from the real, unmodified scripts/install.sh,
-//    wraps them in a minimal driver, and compares byte-for-byte against
-//    this module's pure functions.
-// 2. Whole-script parity for the #297 machine-prompt grammar itself:
-//    scripts/configure.sh already has real, independently-invocable --init
-//    and --set-oidc-secret entry points, so — exactly like
-//    configuration-migration.parity.test.ts — this test spawns the real,
-//    unmodified script directly with ORBIT_CONFIGURE_PROMPTS=machine, and
-//    drives it through a reference adapter local to this file (not shipped)
-//    built only from this module's own parseMachinePromptLine, proving the
-//    exported grammar parser actually drives the live script to a
-//    completed guided configuration — not just a stub.
+// 1. Golden-file parity (missing_*_fields,
+//    print_noninteractive_configuration_guidance): what install.sh's own
+//    helpers printed for each fixture, captured before #1212 deleted them,
+//    compared byte-for-byte against this module's pure functions.
+// 2. Machine-prompt grammar parity (#297): the engine's
+//    `orbit configure` is spawned with ORBIT_CONFIGURE_PROMPTS=machine and
+//    driven through a reference adapter local to this file (not shipped)
+//    built only from this module's own parseMachinePromptLine, and each
+//    transcript is compared with what the retired configure.sh printed.
 
-// This file spawns real awk and the real configure.sh under bash; a spawn
-// that takes 0.7s quiet took 4.3s on a starved core (#698). Budget and
-// reasoning: scripts/process-budget.mjs.
+// This file spawns the engine CLI under node; a spawn that takes 0.7s quiet
+// took 4.3s on a starved core (#698). Budget and reasoning:
+// scripts/process-budget.mjs.
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
-const installScriptPath = join(repoRoot, "scripts", "install.sh");
+// install.sh half: what its missing_*_fields and
+// print_noninteractive_configuration_guidance produced, captured from
+// 9757e42f before #1212 deleted them (src/lib/__fixtures__/README.md,
+// flow install-guided-configuration). Golden-file characterization: the
+// fixtures are bash's, never regenerated from this module. bash printed the
+// field list with no trailing newline.
 
-function extractFunction(name: string): string {
-  const script = `
-    $0 ~ "^${name}\\\\(\\\\) \\\\{" { found = 1 }
-    found { print; if ($0 == "}") { found = 0; exit } }
-  `;
-  const result = failOnProcessDeadline(spawnSync("awk", [script, installScriptPath], { encoding: "utf8", ...processGuard() }), { label: "extractFunction" });
-  if (result.status !== 0 || !result.stdout.trim()) {
-    throw new Error(`Could not extract ${name}() from install.sh; it may have been renamed.`);
-  }
-  return result.stdout;
+interface MissingFieldsGolden {
+  cases: Array<{
+    readiness: string;
+    bash: Record<"required" | "guided" | "configuration", { stdout: string; stderr: string }>;
+  }>;
 }
 
-const driverDir = mkdtempSync(join(tmpdir(), "orbit-guided-configuration-parity-driver-"));
-const driverPath = join(driverDir, "driver.sh");
+const missingFields = readGolden<MissingFieldsGolden>("install-guided-configuration", "missing fields");
 
-function buildDriverScript(): string {
-  const functions = [
-    "missing_required_fields",
-    "missing_guided_fields",
-    "missing_configuration_fields",
-    "print_noninteractive_configuration_guidance",
-  ]
-    .map(extractFunction)
-    .join("\n");
-
-  return [
-    "#!/usr/bin/env bash",
-    "set -Eeuo pipefail",
-    "",
-    functions,
-    "",
-    'mode="$1"; shift',
-    'case "$mode" in',
-    "  required) missing_required_fields \"$(cat)\" ;;",
-    "  guided) missing_guided_fields \"$(cat)\" ;;",
-    "  configuration) missing_configuration_fields \"$(cat)\" ;;",
-    '  guidance) print_noninteractive_configuration_guidance "$1" ;;',
-    "esac",
-    "",
-  ].join("\n");
-}
-
-writeFileSync(driverPath, buildDriverScript(), { mode: 0o755 });
-
-afterAll(() => {
-  rmSync(driverDir, { recursive: true, force: true });
-});
-
-function runDriver(mode: "required" | "guided" | "configuration", readiness: string): { stdout: string; stderr: string };
-function runDriver(mode: "guidance", missing: string): { stdout: string; stderr: string };
-function runDriver(mode: string, input: string): { stdout: string; stderr: string } {
-  const args = mode === "guidance" ? [driverPath, mode, input] : [driverPath, mode];
-  const result = failOnProcessDeadline(spawnSync("bash", args, {
-    encoding: "utf8",
-    input: mode === "guidance" ? undefined : input,
-    ...processGuard(),
-  }), { label: "runDriver" });
-  return { stdout: result.stdout, stderr: result.stderr };
-}
-
-const READINESS_FIXTURES = [
-  "ready APP_URL\nready ORBIT_IMAGE\nready OIDC_ISSUER\nready OIDC_CLIENT_ID\nready OIDC_CLIENT_SECRET\nready OIDC_CALLBACK_URL\noptional processing\noptional ai\noptional mail\noptional imap\noptional push\n",
-  "missing APP_URL\nmissing ORBIT_IMAGE\nmissing OIDC_ISSUER\nmissing OIDC_CLIENT_ID\nmissing OIDC_CLIENT_SECRET\nmissing OIDC_CALLBACK_URL\noptional processing\noptional ai\noptional mail\noptional imap\noptional push\n",
-  "ready APP_URL\nready ORBIT_IMAGE\nmissing OIDC_ISSUER\nready OIDC_CLIENT_ID\nmissing OIDC_CLIENT_SECRET\nready OIDC_CALLBACK_URL\nmissing processing\nmissing ai\noptional mail\noptional imap\noptional push\n",
-  "",
-];
-
-describe("missing_*_fields parity (install.sh:843-877)", () => {
-  it.each(READINESS_FIXTURES)("agrees on missing_required_fields for fixture %#", (readiness) => {
-    const bash = runDriver("required", readiness);
-    expect(bash.stdout).toBe(missingRequiredFields(readiness).join(" "));
+describe("missing_*_fields parity (golden)", () => {
+  it("has every captured readiness fixture", () => {
+    expect(missingFields.cases.length).toBe(4);
   });
 
-  it.each(READINESS_FIXTURES)("agrees on missing_guided_fields for fixture %#", (readiness) => {
-    const bash = runDriver("guided", readiness);
-    expect(bash.stdout).toBe(missingGuidedFields(readiness).join(" "));
-  });
+  missingFields.cases.forEach((testCase, index) => {
+    it(`agrees on missing_required_fields for fixture ${index}`, () => {
+      expect(missingRequiredFields(testCase.readiness).join(" ")).toBe(testCase.bash.required.stdout);
+    });
 
-  it.each(READINESS_FIXTURES)("agrees on missing_configuration_fields for fixture %#", (readiness) => {
-    const bash = runDriver("configuration", readiness);
-    expect(bash.stdout).toBe(missingConfigurationFields(readiness).join(" "));
+    it(`agrees on missing_guided_fields for fixture ${index}`, () => {
+      expect(missingGuidedFields(testCase.readiness).join(" ")).toBe(testCase.bash.guided.stdout);
+    });
+
+    it(`agrees on missing_configuration_fields for fixture ${index}`, () => {
+      expect(missingConfigurationFields(testCase.readiness).join(" ")).toBe(testCase.bash.configuration.stdout);
+    });
   });
 });
 
-describe("print_noninteractive_configuration_guidance parity (install.sh:879-885, guarantee #24)", () => {
+describe("print_noninteractive_configuration_guidance parity, guarantee #24 (golden)", () => {
   it("agrees byte-for-byte on the exact remediation lines", () => {
-    const missing = "APP_URL OIDC_CLIENT_SECRET";
-    const bash = runDriver("guidance", missing);
-    expect(bash.stderr).toBe(noninteractiveConfigurationGuidance(missing.split(" ")).join("\n") + "\n");
+    const golden = readGolden<{ missing: string; bash: { stdout: string; stderr: string } }>(
+      "install-guided-configuration",
+      "noninteractive configuration guidance",
+    );
+    expect(golden.bash.stdout).toBe("");
+    expect(noninteractiveConfigurationGuidance(golden.missing.split(" ")).join("\n") + "\n").toBe(golden.bash.stderr);
   });
 });
 
-// --- Real machine-prompt exchange against the unmodified configure.sh ---
+// --- Real machine-prompt exchange against the engine ---------------------
+//
+// configure.sh's machine-prompt server is the engine since #1210 (configure.sh
+// runs `orbit configure` in a container). These sessions drive this
+// checkout's CLI directly, and each transcript is also compared with what
+// the retired bash printed for the same answers
+// (src/lib/__fixtures__/configure-machine-prompts).
+
+const tsx = join(repoRoot, "node_modules", "tsx", "dist", "cli.mjs");
+const cli = join(repoRoot, "src", "cli", "orbit.ts");
+
+interface CapturedSession {
+  status: number;
+  stdout: string;
+  env: string | null;
+  secret: string | null;
+}
+
+function expectSameAsBash(name: string, sandbox: string, result: { ok: boolean; stdout: string }): void {
+  const bash = readGolden<CapturedSession>("configure-machine-prompts", name);
+  expect(result.ok).toBe(bash.status === 0);
+  expect(result.stdout).toBe(bash.stdout);
+  const envPath = join(sandbox, ".env-orbit");
+  expect(existsSync(envPath) ? readFileSync(envPath, "utf8") : null).toBe(bash.env);
+  const secretPath = join(sandbox, ".orbit-secrets", "oidc-client-secret");
+  expect(existsSync(secretPath) ? readFileSync(secretPath, "utf8") : null).toBe(bash.secret);
+}
 
 const configureSandboxes: string[] = [];
 function makeConfigureSandbox(): string {
   const dir = mkdtempSync(join(tmpdir(), "orbit-guided-configuration-configure-parity-"));
   configureSandboxes.push(dir);
-  mkdirSync(join(dir, "scripts"));
-  cpSync(join(repoRoot, "scripts", "configure.sh"), join(dir, "scripts", "configure.sh"));
   cpSync(join(repoRoot, ".env-orbit.example"), join(dir, ".env-orbit.example"));
   return dir;
 }
@@ -173,7 +142,7 @@ function runMachinePromptSession(
   answers: MachinePromptAnswerProvider,
 ): Promise<MachinePromptSessionResult & { stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn("bash", args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn("node", [tsx, cli, "configure", ...args, "--dir", cwd], { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     const events: MachinePromptLine[] = [];
     let stdout = "";
     let stderr = "";
@@ -226,7 +195,7 @@ describe("real ORBIT_CONFIGURE_PROMPTS=machine --init parity", () => {
     const sandbox = makeConfigureSandbox();
     const env = { ...process.env, ORBIT_CONFIGURE_PROMPTS: "machine" };
     const result = await runMachinePromptSession(
-      [join(sandbox, "scripts", "configure.sh"), "--init"],
+      ["--init"],
       sandbox,
       env,
       fixedAnswers({
@@ -254,13 +223,14 @@ describe("real ORBIT_CONFIGURE_PROMPTS=machine --init parity", () => {
     expect(envOrbit).toContain("OIDC_ISSUER=https://issuer.parity.test");
     expect(envOrbit).toContain("OIDC_CLIENT_ID=parity-client");
     expect(envOrbit).toContain("OIDC_CALLBACK_URL=https://guided.parity.test/api/auth/callback");
+    expectSameAsBash("init oidc complete", sandbox, result);
   });
 
   it("rejects an invalid answer, reports the exact reason class, then accepts the retry (attempt=2)", async () => {
     const sandbox = makeConfigureSandbox();
     const env = { ...process.env, ORBIT_CONFIGURE_PROMPTS: "machine" };
     const result = await runMachinePromptSession(
-      [join(sandbox, "scripts", "configure.sh"), "--init"],
+      ["--init"],
       sandbox,
       env,
       fixedAnswers({
@@ -276,13 +246,14 @@ describe("real ORBIT_CONFIGURE_PROMPTS=machine --init parity", () => {
       { type: "prompt-reject", field: "APP_URL", reason: "not-https" },
       { type: "prompt", field: "APP_URL", kind: "url", required: "true", attempt: 2 },
     ]);
+    expectSameAsBash("init reject then accept", sandbox, result);
   });
 
   it("aborts after a third rejected answer without a fourth prompt, and writes nothing (docs/engine-events.md 'attempt is bounded at 3')", async () => {
     const sandbox = makeConfigureSandbox();
     const env = { ...process.env, ORBIT_CONFIGURE_PROMPTS: "machine" };
     const result = await runMachinePromptSession(
-      [join(sandbox, "scripts", "configure.sh"), "--init"],
+      ["--init"],
       sandbox,
       env,
       fixedAnswers({ APP_URL: "" }),
@@ -301,6 +272,18 @@ describe("real ORBIT_CONFIGURE_PROMPTS=machine --init parity", () => {
     // guarantee (configure.sh:529-549): nothing is written until every
     // field validates — an aborted guided init leaves no .env-orbit behind.
     expect(() => readFileSync(join(sandbox, ".env-orbit"), "utf8")).toThrow();
+    expectSameAsBash("init abort after three", sandbox, result);
+  });
+
+  it("asks for APP_URL alone when ORBIT_CONFIGURE_AUTH_MODE=local (O1-F1)", async () => {
+    const sandbox = makeConfigureSandbox();
+    const env = { ...process.env, ORBIT_CONFIGURE_PROMPTS: "machine", ORBIT_CONFIGURE_AUTH_MODE: "local" };
+    const result = await runMachinePromptSession(["--init"], sandbox, env, fixedAnswers({ APP_URL: "https://guided.parity.test" }));
+    expect(result.events).toEqual([
+      { type: "prompt", field: "APP_URL", kind: "url", required: "true", attempt: 1 },
+      { type: "prompt-accept", field: "APP_URL" },
+    ]);
+    expectSameAsBash("init local mode", sandbox, result);
   });
 });
 
@@ -319,7 +302,7 @@ describe("real ORBIT_CONFIGURE_PROMPTS=machine --set-oidc-secret parity", () => 
     const env = { ...process.env, ORBIT_CONFIGURE_PROMPTS: "machine" };
     const secretValue = "s3cr3t-parity-value";
     const result = await runMachinePromptSession(
-      [join(sandbox, "scripts", "configure.sh"), "--set-oidc-secret"],
+      ["--set-oidc-secret"],
       sandbox,
       env,
       fixedAnswers({ OIDC_CLIENT_SECRET: secretValue }),
@@ -335,6 +318,7 @@ describe("real ORBIT_CONFIGURE_PROMPTS=machine --set-oidc-secret parity", () => 
 
     const secretFile = readFileSync(join(sandbox, ".orbit-secrets", "oidc-client-secret"), "utf8");
     expect(secretFile).toBe(secretValue);
+    expectSameAsBash("secret accepted", sandbox, result);
   });
 
   it("rejects an empty secret with reason=empty", async () => {
@@ -342,7 +326,7 @@ describe("real ORBIT_CONFIGURE_PROMPTS=machine --set-oidc-secret parity", () => 
     seedDeployment(sandbox);
     const env = { ...process.env, ORBIT_CONFIGURE_PROMPTS: "machine" };
     const result = await runMachinePromptSession(
-      [join(sandbox, "scripts", "configure.sh"), "--set-oidc-secret"],
+      ["--set-oidc-secret"],
       sandbox,
       env,
       fixedAnswers({ OIDC_CLIENT_SECRET: "" }),
@@ -350,6 +334,7 @@ describe("real ORBIT_CONFIGURE_PROMPTS=machine --set-oidc-secret parity", () => 
 
     expect(result.events[0]).toEqual({ type: "prompt", field: "OIDC_CLIENT_SECRET", kind: "secret", required: "true", attempt: 1 });
     expect(result.events[1]).toEqual({ type: "prompt-reject", field: "OIDC_CLIENT_SECRET", reason: "empty" });
+    expectSameAsBash("secret empty", sandbox, result);
   });
 
   it("rejects an oversized secret with reason=too-large", async () => {
@@ -358,7 +343,7 @@ describe("real ORBIT_CONFIGURE_PROMPTS=machine --set-oidc-secret parity", () => 
     const env = { ...process.env, ORBIT_CONFIGURE_PROMPTS: "machine" };
     const oversized = "a".repeat(65537);
     const result = await runMachinePromptSession(
-      [join(sandbox, "scripts", "configure.sh"), "--set-oidc-secret"],
+      ["--set-oidc-secret"],
       sandbox,
       env,
       fixedAnswers({ OIDC_CLIENT_SECRET: [oversized, "final-value"] }),
@@ -366,5 +351,6 @@ describe("real ORBIT_CONFIGURE_PROMPTS=machine --set-oidc-secret parity", () => 
 
     expect(result.events[1]).toEqual({ type: "prompt-reject", field: "OIDC_CLIENT_SECRET", reason: "too-large" });
     expect(result.ok).toBe(true);
+    expectSameAsBash("secret too large then accepted", sandbox, result);
   });
 });

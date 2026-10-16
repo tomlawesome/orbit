@@ -4,11 +4,13 @@
 # Runs the working tree's install.sh unmocked — real Docker, real Compose,
 # real PostgreSQL and ClamAV, real health checks — from a clean
 # pre-provisioned directory to a healthy /api/health, then asserts
-# operator-facing guarantees from docs/installer-guarantees.md. The one
-# network path intercepted is OIDC discovery (a PATH curl shim serving a
-# fixture document); the deployment assets come out of the image the
-# installer resolved, exactly as they do for an operator (ADR-0019), so no
-# external GitHub/registry state can influence the result.
+# operator-facing guarantees from docs/installer-guarantees.md. The identity
+# provider is this run's own disposable tests/oidc sidecar, which the install
+# engine reaches from its container exactly as it would reach a real one
+# (#1212 note 30988): the PATH docker shim adds the sidecar's host entry and
+# CA to the engine run, and nothing else. The deployment assets come out of
+# the image the installer resolved, exactly as they do for an operator
+# (ADR-0019), so no external GitHub/registry state can influence the result.
 #
 # Asserted guarantees (docs/installer-guarantees.md):
 #   Part 1 / install.sh #6      unattended pre-provisioning contract
@@ -21,6 +23,9 @@
 # With --lifecycle (issue #291), additionally:
 #   Part 1 / install.sh #31     hard interruption leaves the target
 #                               byte-identical; staging evidence owner-only
+#                               (the engine SIGKILLs itself right after its
+#                               transaction begins, ORBIT_INSTALL_TEST_HARD_
+#                               INTERRUPT_STAGE=transaction-begun)
 #   Part 1 / configure.sh #33, #24; install.sh #19  recognized-deployment
 #                               rerun never rotates or rewrites a secret
 #   Part 1 / install.sh #13, #21  fresh install refused while another
@@ -29,10 +34,38 @@
 # Usage:
 #   bash scripts/test-install-acceptance.sh [--negative-only] [--red] [--keep] [--lifecycle]
 #
-#   --negative-only  run only the fast refusal scenarios (no image build)
+#   --negative-only  run only the refusal scenarios. They still need the
+#                    image: target validation runs in the install engine
+#                    inside it since #1212.
 #   --red            after a green run, deliberately violate an asserted
 #                    guarantee and prove the assertions fail (red-run demo)
-#   --keep           keep the work directory and containers on exit
+#   --keep           keep everything the run created, and print the exact
+#                    commands that tear it down. The only way to leave
+#                    anything behind (#1241).
+#
+# What a run creates, and what its teardown removes (#1241). Every run tears
+# down all of it and nothing else, on success, on failure and on SIGINT or
+# SIGTERM, exactly once:
+#   - the work directory /tmp/orbit-acceptance.* (shim, manifest, targets)
+#   - Compose project <project> and <project>-local: containers, profile
+#     services and orphans, named volumes, networks (removed by `compose
+#     down`, then by the project label so a SIGKILLed run's debris goes too)
+#   - the local registry container <project>-registry and its anonymous
+#     volume (`docker rm -v`; registry:2 declares a VOLUME)
+#   - the disposable OIDC sidecar container <project>-oidc and the image
+#     <project>-oidc:test this run built for it
+#   - the image tags it made: 127.0.0.1:<port>/acceptance/orbit (the tag and
+#     any digest reference the installer pulled) and, only when this run built
+#     it, orbit-acceptance-local:<revision>. An image named by
+#     ORBIT_ACCEPTANCE_IMAGE is borrowed and left alone.
+# It never touches another Compose project, another run's registry, or images
+# pulled from public registries.
+#
+# A failed run keeps its evidence: before anything is removed, the installer
+# log, the compose logs and state, the registry log and the failure reason are
+# copied to $ORBIT_EVIDENCE_ROOT/test-install-acceptance-<timestamp>/
+# (default ~/projects/.backups/orbit), and that path is printed on exit. The
+# copy leaves out .env-orbit and .orbit-secrets.
 #
 # Environment:
 #   ORBIT_ACCEPTANCE_IMAGE  prebuilt orbit image reference to test; when
@@ -40,6 +73,8 @@
 #   COMPOSE_PROJECT_NAME    override the per-run Compose project name derived
 #                           below (#894); install.sh honours the same
 #                           variable, so an explicit value here reaches it.
+#   ORBIT_EVIDENCE_ROOT     where a failed run's evidence is copied (default
+#                           ~/projects/.backups/orbit).
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -55,18 +90,27 @@ for arg in "$@"; do
 done
 
 note() { printf '[acceptance] %s\n' "$*"; }
-fail() { printf '[acceptance] FAIL: %s\n' "$*" >&2; exit 1; }
-
 workdir="$(mktemp -d /tmp/orbit-acceptance.XXXXXX)"
+# The reason is kept beside the installer log so the evidence copy explains
+# the run without the terminal scrollback (#1241).
+fail() {
+  printf '[acceptance] FAIL: %s\n' "$*" >&2
+  printf '%s\n' "$*" >> "$workdir/failure.txt" 2>/dev/null || true
+  exit 1
+}
 # Set once positive_scenario pushes the image under test and writes a manifest
 # for it (ADR-0031 #7); empty until then. run_installer() hands it to
 # install.sh via ORBIT_RELEASE_MANIFEST whenever it is set, so install.sh does
 # not self-fetch a signed manifest that does not exist for this locally built,
-# unpublished image (#1107). negative_scenarios() calls run_installer() before
-# this is set, but every one of its scenarios is refused by validate_target
-# before install.sh ever reaches manifest resolution, so an empty value there
-# is harmless -- install.sh treats it exactly like an absent one.
+# unpublished image (#1107). The refusal scenarios run after it is set too:
+# since #1212 the target is validated by the engine, inside the image.
 release_manifest=""
+# The image under test is pushed to this run's own throwaway registry, so it
+# can never carry the GitHub countersignature a stable channel demands when
+# cosign is installed (install.sh's release_manifest_stable, ADR-0031 #7).
+# What is being accepted is a preview digest, so install it as one (#1257);
+# stable_channel_refusal proves the stable rule still bites.
+readonly install_channel=preview
 
 free_port() {
   node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{process.stdout.write(String(s.address().port));s.close();});'
@@ -93,7 +137,16 @@ while [[ "$orbit_port" == "$registry_port" ]]; do
   orbit_port="$(free_port)"
 done
 repository="acceptance/orbit"
-issuer="https://oidc.acceptance.invalid/application/o/orbit/"
+# The tests/oidc sidecar, under the dotted alias its certificate also names:
+# the configuration contract (src/lib/config-contract.ts) accepts only a
+# dotted issuer host, so the bare orbit-oidc that compose/docker-compose.
+# acceptance.yml and scripts/test-e2e-local.sh use (they never run configure
+# on it) would be refused. It resolves only inside the engine run, through
+# the host entry the docker shim adds.
+oidc_host="orbit-oidc.invalid"
+issuer="https://${oidc_host}:4443/"
+oidc_container="${project_name}-oidc"
+oidc_image=""
 # The target directory is named after this run's project so debris is
 # recognisable by eye. The project name itself is stated to the installer by
 # run_installer below rather than inferred from that directory: since #999 a
@@ -106,46 +159,177 @@ issuer="https://oidc.acceptance.invalid/application/o/orbit/"
 target="$workdir/$project_name"
 # Slice 4 (#907): the local-only run (local_only_scenario) gets its own
 # target directory and its own Compose project name, so the sweep can tell
-# the two deployments' debris apart. It still cannot run while the primary
-# deployment's database volume exists: install.sh #13/#21 refuse a fresh
-# install whenever any `*orbit-db-data` volume is on the host, whatever
-# project owns it (the lifecycle run asserts exactly that), so the primary
-# deployment is taken down, volumes included, before the local-only install.
+# the two deployments' debris apart. The primary deployment is still taken
+# down, volumes included, before the local-only install, so the two never
+# hold ports or volumes at once.
 local_only_target="$workdir/local-only-deploy"
 local_only_project_name="${project_name}-local"
 
+# Image references this run created, for teardown (#1241). built_image is set
+# only once this run's own `docker build` succeeded, so a borrowed
+# ORBIT_ACCEPTANCE_IMAGE is never removed; pushed_digest is set once the push
+# is recorded. The registry-side reference is derived, not recorded, because it
+# is unique to this run's port and removing a reference that was never made is
+# a harmless no-op.
+built_image=""
+pushed_digest=""
+registry_image="127.0.0.1:$registry_port/$repository"
+evidence_dir=""
+
 sweep_debris() {
   local sweep_project="${1:-$project_name}"
-  docker rm -f "$registry_name" >/dev/null 2>&1 || true
+  # -v: a container's anonymous volumes die with it. registry:2 declares a
+  # VOLUME, so a plain `rm -f` left one dangling per run (#1241).
+  docker rm -f -v "$registry_name" >/dev/null 2>&1 || true
+  docker rm -f -v "$oidc_container" >/dev/null 2>&1 || true
   docker ps -aq --filter label=com.docker.compose.project="$sweep_project" |
-    xargs -r docker rm -f >/dev/null 2>&1 || true
+    xargs -r docker rm -f -v >/dev/null 2>&1 || true
   docker volume ls -q --filter label=com.docker.compose.project="$sweep_project" |
     xargs -r docker volume rm >/dev/null 2>&1 || true
   docker network ls -q --filter label=com.docker.compose.project="$sweep_project" |
     xargs -r docker network rm >/dev/null 2>&1 || true
 }
 
+# Remove only the image references this run made. Never by image ID: an ID can
+# carry other tags, including a borrowed ORBIT_ACCEPTANCE_IMAGE.
+remove_run_images() {
+  local repo tag digest
+  docker rmi "$registry_image:latest" >/dev/null 2>&1 || true
+  [[ -z "$pushed_digest" ]] || docker rmi "$registry_image@$pushed_digest" >/dev/null 2>&1 || true
+  # Anything else the installer pulled under this run's registry address.
+  while read -r repo tag digest; do
+    [[ -n "$repo" ]] || continue
+    if [[ "$tag" != "<none>" ]]; then
+      docker rmi "$repo:$tag" >/dev/null 2>&1 || true
+    elif [[ -n "$digest" && "$digest" != "<none>" ]]; then
+      docker rmi "$repo@$digest" >/dev/null 2>&1 || true
+    fi
+  done < <(docker image ls "$registry_image" --digests --format '{{.Repository}} {{.Tag}} {{.Digest}}' 2>/dev/null || true)
+  [[ -z "$built_image" ]] || docker rmi "$built_image" >/dev/null 2>&1 || true
+  [[ -z "$oidc_image" ]] || docker rmi "$oidc_image" >/dev/null 2>&1 || true
+}
+
+compose_down_target() {
+  local dir="$1"
+  if [[ -f "$dir/.env-orbit" && -f "$dir/docker-compose.yml" ]]; then
+    chmod 600 "$dir/.env-orbit" 2>/dev/null || true
+    (cd "$dir" && timeout 180 docker compose --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) || true
+  fi
+}
+
+# Copy what a failed run needs to be diagnosed, before teardown removes it
+# (#1241; the installer log used to die with the work directory, #1239). The
+# deployment's .env-orbit and .orbit-secrets are deliberately left out.
+collect_evidence() {
+  local status="$1" root dir target_dir f
+  root="${ORBIT_EVIDENCE_ROOT:-${HOME:-/nonexistent}/projects/.backups/orbit}"
+  dir="$root/test-install-acceptance-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p -- "$root" && mkdir -m 700 -- "$dir" 2>/dev/null || return 1
+  {
+    printf 'exit_status=%s\nproject=%s\nlocal_only_project=%s\nregistry=%s\nworkdir=%s\n' \
+      "$status" "$project_name" "$local_only_project_name" "$registry_name" "$workdir"
+  } > "$dir/run-info.txt"
+  for f in "$workdir"/*.log "$workdir"/failure.txt "$workdir"/orbit-release-manifest.json; do
+    if [[ -f "$f" ]]; then cp -- "$f" "$dir/" 2>/dev/null || true; fi
+  done
+  for target_dir in "$target" "$local_only_target"; do
+    [[ -f "$target_dir/.env-orbit" && -f "$target_dir/docker-compose.yml" ]] || continue
+    f="$dir/compose-$(basename -- "$target_dir")"
+    chmod 600 "$target_dir/.env-orbit" 2>/dev/null || true
+    (cd "$target_dir" && timeout 60 docker compose --env-file .env-orbit ps -a) > "$f.ps.txt" 2>&1 || true
+    (cd "$target_dir" && timeout 120 docker compose --env-file .env-orbit logs --no-color --timestamps) > "$f.log" 2>&1 || true
+    ls -la -- "$target_dir" > "$f.listing.txt" 2>&1 || true
+  done
+  docker logs "$registry_name" > "$dir/registry.log" 2>&1 || true
+  docker logs "$oidc_container" > "$dir/oidc.log" 2>&1 || true
+  evidence_dir="$dir"
+}
+
+print_keep_instructions() {
+  local dir
+  note "kept by --keep: work directory $workdir, project $project_name (and ${local_only_project_name}), registry $registry_name"
+  note "to tear it all down, run:"
+  for dir in "$target" "$local_only_target"; do
+    if [[ -f "$dir/docker-compose.yml" ]]; then
+      printf '  (cd %q && docker compose --env-file .env-orbit down --volumes --remove-orphans)\n' "$dir"
+    fi
+  done
+  for dir in "$project_name" "$local_only_project_name"; do
+    printf '  docker ps -aq --filter label=com.docker.compose.project=%s | xargs -r docker rm -f -v\n' "$dir"
+    printf '  docker volume ls -q --filter label=com.docker.compose.project=%s | xargs -r docker volume rm\n' "$dir"
+    printf '  docker network ls -q --filter label=com.docker.compose.project=%s | xargs -r docker network rm\n' "$dir"
+  done
+  printf '  docker rm -f -v %s\n' "$registry_name"
+  printf '  docker rm -f -v %s\n' "$oidc_container"
+  [[ -z "$oidc_image" ]] || printf '  docker rmi %s\n' "$oidc_image"
+  printf '  docker rmi %s:latest\n' "$registry_image"
+  [[ -z "$pushed_digest" ]] || printf '  docker rmi %s@%s\n' "$registry_image" "$pushed_digest"
+  [[ -z "$built_image" ]] || printf '  docker rmi %s\n' "$built_image"
+  printf '  rm -rf -- %q\n' "$workdir"
+}
+
+# Teardown is the one exit path (#1241): EXIT runs it, and INT/TERM turn into
+# an exit so the same trap runs it. `torn_down` makes it fire exactly once
+# however the run ends; signals are ignored while it runs so a second Ctrl-C
+# cannot abandon it half way.
+torn_down=0
 cleanup() {
   local status=$?
-  if [[ "$keep_mode" == 1 || ( "$status" -ne 0 && -n "${ORBIT_ACCEPTANCE_KEEP_ON_FAIL:-}" ) ]]; then
-    note "keeping work directory: $workdir (project $project_name)"
-    return
+  [[ "$torn_down" == 0 ]] || return 0
+  torn_down=1
+  trap '' INT TERM
+  set +e +E +u
+  note "teardown: starting (exit status $status)"
+
+  local evidence_failed=0
+  if [[ "$status" -ne 0 ]]; then
+    collect_evidence "$status" || evidence_failed=1
   fi
-  if [[ -f "$target/.env-orbit" && -f "$target/docker-compose.yml" ]]; then
-    chmod 600 "$target/.env-orbit" 2>/dev/null || true
-    (cd "$target" && docker compose --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) || true
+
+  if [[ "$keep_mode" == 1 ]]; then
+    print_keep_instructions
+  else
+    compose_down_target "$target"
+    compose_down_target "$local_only_target"
+    sweep_debris "$project_name"
+    sweep_debris "$local_only_project_name"
+    remove_run_images
+    if [[ "$evidence_failed" == 1 ]]; then
+      # The logs only exist here, so the directory is the one thing kept.
+      note "teardown: could not write evidence; keeping $workdir so the logs survive"
+    else
+      rm -rf -- "$workdir"
+      note "teardown: complete"
+    fi
   fi
-  if [[ -f "$local_only_target/.env-orbit" && -f "$local_only_target/docker-compose.yml" ]]; then
-    chmod 600 "$local_only_target/.env-orbit" 2>/dev/null || true
-    (cd "$local_only_target" && docker compose --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) || true
+  if [[ -n "$evidence_dir" ]]; then
+    note "evidence kept in: $evidence_dir"
   fi
-  sweep_debris "$project_name"
-  sweep_debris "$local_only_project_name"
-  rm -rf -- "$workdir"
+}
+# bash runs a trap only after its foreground command ends. A terminal's Ctrl-C,
+# a runner's cancel and `timeout` signal the whole process group, so that
+# command dies with the script and the trap runs at once; on_signal also stops
+# anything still running underneath (an installer left running would go on
+# creating containers after teardown). A signal sent to this one process alone
+# is acted on when the command it is waiting for returns.
+kill_descendants() {
+  local child
+  for child in $(pgrep -P "$1" 2>/dev/null || true); do
+    kill_descendants "$child"
+    kill -TERM "$child" 2>/dev/null || true
+  done
+}
+on_signal() {
+  local code="$1"
+  trap '' INT TERM
+  kill_descendants "$$"
+  exit "$code"
 }
 trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
-# --- negative scenarios (no image, no network, fail-closed refusals) -------
+# --- refusal scenarios (fail-closed, before anything is written) -----------
 
 make_preprovisioned_target() {
   rm -rf -- "$target"
@@ -210,11 +394,34 @@ run_installer() {
   (cd "$target" && env PATH="$workdir/shim:$PATH" \
     COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$project_name}" \
     ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
-    ORBIT_RELEASE_MANIFEST="$release_manifest" \
+    ORBIT_RELEASE_MANIFEST="$release_manifest" ORBIT_CHANNEL="${ORBIT_CHANNEL_UNDER_TEST:-$install_channel}" \
     timeout 900 bash "$repo_root/scripts/install.sh" </dev/null) \
     > "$workdir/install.log" 2>&1
 }
 
+# With cosign installed, the same unsigned image on channel latest must be
+# refused at the identity phase, before anything in the target changes
+# (#1257). Without cosign install.sh cannot check signatures at all, so there
+# is nothing to prove and it says so.
+stable_channel_refusal() {
+  if ! command -v cosign >/dev/null 2>&1; then
+    note "stable-channel refusal: skipped, cosign is not installed"
+    return 0
+  fi
+  cp -- "$target/.env-orbit" "$workdir/env-before-stable"
+  if ORBIT_CHANNEL_UNDER_TEST=latest run_installer; then
+    fail "stable-channel refusal: install.sh accepted an unsigned image on channel latest"
+  fi
+  grep -q 'could not verify the countersignature' "$workdir/install.log" ||
+    fail "stable-channel refusal: install.sh failed for another reason (see install.log)"
+  cmp -s "$target/.env-orbit" "$workdir/env-before-stable" ||
+    fail "stable-channel refusal: the refused install changed .env-orbit"
+  note "negative: unsigned image refused on channel latest (ADR-0031 #7)"
+}
+
+# The engine validates the target inside the image (#1212), so these run once
+# the image, the manifest and the shims exist; each must be refused for the
+# reason it exists to prove, before anything is written.
 negative_scenarios() {
   # catalogue Part 1 / configure.sh #5 and install.sh #6: a symlinked
   # .env-orbit in a pre-provisioned target is refused before any deployment.
@@ -222,6 +429,8 @@ negative_scenarios() {
   mv "$target/.env-orbit" "$target/.env-orbit.real"
   ln -s .env-orbit.real "$target/.env-orbit"
   if run_installer; then fail "installer accepted a symlinked .env-orbit"; fi
+  grep -q 'not a recognizable Orbit deployment or safe pre-provisioned bootstrap' "$workdir/install.log" ||
+    fail "symlinked .env-orbit refused for another reason (see install.log)"
   [[ ! -f "$target/docker-compose.yml" ]] ||
     fail "refusal still fetched deployment assets into the target"
   note "negative: symlinked .env-orbit refused (configure.sh #5, install.sh #6)"
@@ -231,6 +440,8 @@ negative_scenarios() {
   make_preprovisioned_target
   chmod 755 "$target/.orbit-secrets"
   if run_installer; then fail "installer accepted a mode-755 .orbit-secrets"; fi
+  grep -q 'not a recognizable Orbit deployment or safe pre-provisioned bootstrap' "$workdir/install.log" ||
+    fail "mode-755 .orbit-secrets refused for another reason (see install.log)"
   [[ ! -f "$target/docker-compose.yml" ]] ||
     fail "refusal still fetched deployment assets into the target"
   note "negative: mode-755 .orbit-secrets refused (install.sh #6)"
@@ -240,105 +451,92 @@ negative_scenarios() {
   make_preprovisioned_target
   touch "$target/unexpected-file"
   if run_installer; then fail "installer accepted an extraneous target entry"; fi
+  grep -q 'not a recognizable Orbit deployment or safe pre-provisioned bootstrap' "$workdir/install.log" ||
+    fail "extraneous target entry refused for another reason (see install.log)"
   note "negative: extraneous target entry refused (install.sh #7)"
 }
 
-# --- shims: the one intercepted network path, and the assets-phase gate ----
+# --- the identity provider, and the shims --------------------------------
+
+# This run's own disposable provider: the tests/oidc sidecar, issuing as
+# $issuer on the default bridge network, where the install
+# engine's one-off also runs. Its certificate is generated at start, so it is
+# taken from the running service over a loopback port published only for
+# that, and the engine is told to trust it -- verification is never turned
+# off. Sets oidc_address, the sidecar's bridge address.
+start_oidc() {
+  local waited=0 host_port
+  oidc_image="${project_name}-oidc:test"
+  # OIDC_BASE_IMAGE_PREFIX routes the sidecar's base image through the group
+  # dependency proxy in CI (ai/orbit#1111); empty everywhere else.
+  docker build --quiet -t "$oidc_image" \
+    --build-arg "OIDC_BASE_IMAGE_PREFIX=${OIDC_BASE_IMAGE_PREFIX:-}" \
+    "$repo_root/tests/oidc" >/dev/null ||
+    fail "could not build the disposable OIDC sidecar"
+  docker rm -f -v "$oidc_container" >/dev/null 2>&1 || true
+  docker run --detach --name "$oidc_container" \
+    --env TEST_OIDC_ISSUER="$issuer" \
+    --publish "127.0.0.1::4443" \
+    "$oidc_image" >/dev/null ||
+    fail "could not start the disposable OIDC sidecar"
+  host_port="$(docker port "$oidc_container" 4443/tcp | sed -n 's/^127\.0\.0\.1:\([0-9]*\)$/\1/p')"
+  [[ "$host_port" =~ ^[0-9]+$ ]] || fail "could not read the OIDC sidecar's published port"
+  oidc_address="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$oidc_container")"
+  [[ "$oidc_address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+    fail "could not read the OIDC sidecar's bridge address"
+  until openssl s_client -connect "127.0.0.1:${host_port}" -showcerts </dev/null 2>/dev/null |
+    openssl x509 -outform pem > "$workdir/oidc-ca.pem" 2>/dev/null &&
+    [[ -s "$workdir/oidc-ca.pem" ]]; do
+    waited=$((waited + 1))
+    [[ "$waited" -lt 30 ]] || fail "the OIDC sidecar did not serve TLS within 30s"
+    sleep 1
+  done
+  chmod 644 "$workdir/oidc-ca.pem"
+  /usr/bin/curl --fail --silent --show-error --cacert "$workdir/oidc-ca.pem" \
+    --resolve "${oidc_host}:${host_port}:127.0.0.1" \
+    "https://${oidc_host}:${host_port}/.well-known/openid-configuration" > "$workdir/oidc-discovery.json" ||
+    fail "the OIDC sidecar did not serve a discovery document"
+  grep -qF "\"issuer\":\"$issuer\"" "$workdir/oidc-discovery.json" ||
+    fail "the OIDC sidecar's discovery document does not name $issuer"
+  note "disposable OIDC provider ${oidc_container} at ${oidc_address}, issuing as $issuer"
+}
 
 write_shim() {
   local real_docker
   real_docker="$(command -v docker)" || fail "docker is required"
   [[ "$real_docker" != "$workdir/shim/docker" ]] || fail "the docker shim resolved to itself"
   mkdir -p "$workdir/shim"
-  cat > "$workdir/discovery.json" <<EOF
-{
-  "issuer": "$issuer",
-  "authorization_endpoint": "https://oidc.acceptance.invalid/application/o/authorize/",
-  "token_endpoint": "https://oidc.acceptance.invalid/application/o/token/",
-  "jwks_uri": "https://oidc.acceptance.invalid/application/o/orbit/jwks/",
-  "response_types_supported": ["code"],
-  "code_challenge_methods_supported": ["S256"],
-  "scopes_supported": ["openid", "profile", "email"],
-  "id_token_signing_alg_values_supported": ["RS256"]
-}
-EOF
   cat > "$workdir/shim/curl" <<SHIM
 #!/usr/bin/env bash
-# Acceptance shim: serves the fixture OIDC discovery document. Deployment
-# assets do not come over curl any more (ADR-0019), so every other URL fails
-# closed and an unexpected network dependency surfaces as a test failure.
-set -Eeuo pipefail
-discovery_url="${issuer}.well-known/openid-configuration"
-output="" write_out="" url=""
-# Real curl refuses an option it does not know with exit 2 and this message,
-# and refuses an option given no value with exit 2 as well (curl 8.14.1;
-# scripts/tool-parity.test.mjs re-asserts both against the real binary). The
-# shim used to ignore every unrecognised flag, so install.sh could have grown
-# one curl has never had and this harness would still have gone green -- the
-# same class of blindness as the plain 'docker exec -T' that shipped in #607.
-refuse_option() {
-  printf 'curl: option %s: is unknown\\n' "\$1" >&2
-  exit 2
-}
-require_parameter() {
-  printf 'curl: option %s: requires parameter\\n' "\$1" >&2
-  exit 2
-}
-args=("\$@")
-for ((i = 0; i < \${#args[@]}; i++)); do
-  case "\${args[i]}" in
-    --output|-o)
-      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
-      output="\${args[i+1]}"; ((i++)) ;;
-    --write-out|-w)
-      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
-      write_out="\${args[i+1]}"; ((i++)) ;;
-    --header|-H|--connect-timeout|--max-time|-m|--max-filesize|--proto|--proto-redir|--retry|--resolve)
-      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
-      ((i++)) ;;
-    --fail|-f|--silent|-s|--show-error|-S|--location|-L|--tlsv1.2|--tlsv1.3) ;;
-    -*) refuse_option "\${args[i]}" ;;
-    *) url="\${args[i]}" ;;
-  esac
-done
-serve() {
-  [[ -z "\$output" ]] || cp -- "\$1" "\$output"
-  [[ -z "\$write_out" ]] || printf '200'
-}
-case "\$url" in
-  "\$discovery_url")
-    serve "$workdir/discovery.json"
-    ;;
-  *)
-    # Real curl still writes the --write-out template when the transfer never
-    # happened; %{http_code} is 000 with no response, and a host that will not
-    # resolve exits 6 (curl 8.14.1; scripts/tool-parity.test.mjs).
-    [[ -z "\$write_out" ]] || printf '000'
-    exit 6
-    ;;
-esac
+# Fail-closed guard: install.sh fetches nothing over curl in this harness.
+# The release manifest is handed over (ORBIT_RELEASE_MANIFEST), the
+# deployment assets come out of the image (ADR-0019) and OIDC discovery runs
+# inside the install engine (#1212). Any curl call is therefore an unexpected
+# network dependency, and fails the way an unreachable host does
+# (curl 8.14.1: exit 6; scripts/tool-parity.test.mjs).
+printf 'curl: (6) Could not resolve host\\n' >&2
+exit 6
 SHIM
   chmod 755 "$workdir/shim/curl"
 
   cat > "$workdir/shim/docker" <<SHIM
 #!/usr/bin/env bash
-# Everything reaches the real docker. The single interception is the assets
-# gate (issue #677): when the lifecycle interruption scenario arms it, the
-# installer's single docker-cp of the bundled deployment assets (ADR-0019)
-# parks here — it announces that the installer is inside the assets phase,
-# then blocks until the test releases the FIFO. The installer physically
-# cannot advance past this call, so the kill point is fixed rather than raced
-# against a poll interval.
-#
-# There is deliberately no argument validation here: every call, including the
-# gated one, is handed to the real docker, so this shim cannot be more
-# permissive than the tool it stands in front of (#616).
+# Everything reaches the real docker unchanged (#616: this shim can never be
+# more permissive than the tool it stands in front of), except the one install
+# engine run, which also gets what a test provider needs: the host entry for
+# the provider and the sidecar's CA, as test-e2e-local.sh hands them to its own
+# containers. While the interruption scenario is armed it also gets the
+# engine's kill point (ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE). Production
+# install.sh passes none of these.
 set -Eeuo pipefail
-if [[ "\${1:-}" == "cp" && "\$*" == *":/opt/orbit/deploy/."* ]]; then
-  if [[ -e "$workdir/assets-gate.armed" && ! -e "$workdir/assets-gate.reached" ]]; then
-    : > "$workdir/assets-gate.reached"
-    read -r _ < "$workdir/assets-gate.release" || true
+if [[ "\${1:-}" == "run" && " \$* " == *" /opt/orbit/cli/orbit.js install "* ]]; then
+  extra=(--add-host "${oidc_host}:${oidc_address}"
+    -v "$workdir/oidc-ca.pem:/orbit-test-oidc-ca.pem:ro"
+    -e NODE_EXTRA_CA_CERTS=/orbit-test-oidc-ca.pem)
+  if [[ -e "$workdir/interrupt.armed" ]]; then
+    extra+=(-e ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE=transaction-begun)
   fi
+  exec "$real_docker" run "\${extra[@]}" "\${@:2}"
 fi
 exec "$real_docker" "\$@"
 SHIM
@@ -399,8 +597,13 @@ assert_green() {
   note "green: fresh install healthy with $events documented events"
 }
 
-positive_scenario() {
-  local image revision digest
+# Builds (or borrows) the image under test, pushes it to this run's own
+# registry, writes the release manifest for it, starts the identity provider
+# and writes the shims. Every installer run needs all of it since #1212: the
+# target itself is validated by the engine inside the image.
+digest=""
+prepare_image() {
+  local image revision
   revision="$(git -C "$repo_root" rev-parse HEAD)"
   if [[ -n "${ORBIT_ACCEPTANCE_IMAGE:-}" ]]; then
     image="$ORBIT_ACCEPTANCE_IMAGE"
@@ -414,9 +617,12 @@ positive_scenario() {
       --build-arg ORBIT_REVISION="$revision" \
       --build-arg ORBIT_CHANNEL=ci "$repo_root" >/dev/null ||
       fail "working-tree image build failed"
+    # Recorded only after a successful build, so teardown removes exactly the
+    # tag this run made and never a borrowed ORBIT_ACCEPTANCE_IMAGE.
+    built_image="$image"
   fi
 
-  docker rm -f "$registry_name" >/dev/null 2>&1 || true
+  docker rm -f -v "$registry_name" >/dev/null 2>&1 || true
   # Pinned by digest, the same one scripts/ci/start-installer-registry.sh uses
   # (ai/orbit#1111): a moving `:2` tag is what let this local-run harness keep
   # hitting Docker Hub's anonymous pull rate limit.
@@ -426,13 +632,16 @@ positive_scenario() {
   docker tag "$image" "127.0.0.1:$registry_port/$repository:latest"
   docker push --quiet "127.0.0.1:$registry_port/$repository:latest" >/dev/null ||
     fail "push to the local registry failed"
-  # grep -m1, not `| head -1` (issue #809): docker inspect's one line can hold
-  # more than one digest, and head -1 exiting after the first would SIGPIPE
-  # grep while it still had output queued, turning a captured digest into a
-  # 141. -m1 makes grep itself the one process that stops once it has enough.
+  # docker inspect's one line can hold more than one digest -- a pulled
+  # ORBIT_ACCEPTANCE_IMAGE carries its registry's digest beside the local
+  # one -- and `grep -m1 -o` stops after the first LINE, not the first
+  # match, so it printed both and the manifest refused a two-line digest
+  # (#1238). Not `| head -1` either (issue #809): head exiting early would
+  # SIGPIPE grep into a 141. sed reads to the end and prints the first.
   digest="$(docker inspect --format '{{index .RepoDigests}}' "127.0.0.1:$registry_port/$repository:latest" |
-    grep -m1 -oE 'sha256:[0-9a-f]{64}')"
+    grep -oE 'sha256:[0-9a-f]{64}' | sed -n '1p')"
   [[ -n "$digest" ]] || fail "could not capture the pushed digest"
+  pushed_digest="$digest"
 
   # ADR-0031 #7: install.sh now refuses to run without a release manifest it
   # can verify, and this is a locally built, unpublished image, so hand it one
@@ -444,98 +653,49 @@ positive_scenario() {
     "$release_manifest" "127.0.0.1:$registry_port/$repository" "$digest" >/dev/null ||
     fail "could not write the test release manifest"
 
+  start_oidc
   write_shim
+}
+
+positive_scenario() {
   make_preprovisioned_target
+  stable_channel_refusal
 
   if [[ "$lifecycle_mode" == 1 ]]; then
-    # catalogue Part 1 / install.sh #31: a hard interruption before the
-    # commit point leaves the pre-provisioned target byte-identical; any
-    # staging evidence stays owner-only.
+    # catalogue Part 1 / install.sh #31: a hard interruption inside the
+    # transaction leaves the pre-provisioned target byte-identical; the
+    # staging evidence stays owner-only. The kill point is the engine's own
+    # (#1212 note 30988): armed, it SIGKILLs itself right after the
+    # transaction begins -- staging and rollback areas made, nothing written
+    # yet -- as restore.sh's drill stage does. No poll, no race.
     cp -- "$target/.env-orbit" "$workdir/env-before-interrupt"
-    # The kill point is a rendezvous, not a poll (issue #677). Neither a
-    # '^phase=assets' log line nor the staging directory can locate it: UI
-    # events are queued (installer_ui_event) until load_installer_ui sources
-    # the just-extracted installer-ui.sh, which happens only after the whole
-    # bundle is staged and bash -n checked, so the assets "starting" event
-    # reaches the log already batched with "completed"; and while the staging
-    # directory is mkdir'd first thing in the phase, install.sh reaches its
-    # first legitimate in-transaction mutation of .env-orbit
-    # (run_configuration_migration) a few hundred milliseconds later. Both
-    # made the assertion a race against how promptly this loop noticed —
-    # measured at ~300ms of headroom against a 0.2s poll, and lost outright on
-    # a runner whose process spawns are cheaper.
-    #
-    # So the shim's assets gate parks the installer inside the phase instead:
-    # the `docker cp` that extracts the bundle touches assets-gate.reached and
-    # then blocks reading the release FIFO. Waiting for that marker is still a
-    # poll, but
-    # it is a poll for a state the installer holds indefinitely, so noticing
-    # late costs time rather than correctness. Opening the FIFO read-write
-    # here means neither side's open() can block.
-    rm -f "$workdir/assets-gate.reached" "$workdir/assets-gate.release"
-    mkfifo -m 600 "$workdir/assets-gate.release" ||
-      fail "interruption: could not create the assets-gate FIFO"
-    local release_fd
-    exec {release_fd}<>"$workdir/assets-gate.release"
-    : > "$workdir/assets-gate.armed"
-    # set -m gives the background job its own process group so the hard kill
-    # reaches the whole installer tree and nothing else.
-    set -m
-    ( cd "$target" && env PATH="$workdir/shim:$PATH" \
-        ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
-        ORBIT_RELEASE_MANIFEST="$release_manifest" \
-        bash "$repo_root/scripts/install.sh" </dev/null ) \
-        > "$workdir/install.log" 2>&1 &
-    local install_bg=$! waited=0 install_status=0
-    set +m
-    # The bound only has to cover host checks, the image pull and the banner
-    # render before the assets phase begins; a slow runner spends longer there
-    # without making the kill point any less exact. An installer that dies
-    # first is caught by the liveness check, not by this bound.
-    until [[ -e "$workdir/assets-gate.reached" ]]; do
-      sleep 0.2; waited=$((waited + 1))
-      if [[ "$waited" -ge 600 ]]; then
-        # Never abandon a live installer: one left running past this point
-        # goes on to create the deployment's database volume, which then
-        # fails every later scenario for a reason that has nothing to do
-        # with the scenario that leaked it.
-        kill -9 -- "-$install_bg" 2>/dev/null || true
-        wait "$install_bg" 2>/dev/null || true
-        fail "interruption: assets phase never observed"
-      fi
-      kill -0 "$install_bg" 2>/dev/null || fail "interruption: installer exited before the assets phase"
-    done
-    kill -9 -- "-$install_bg" 2>/dev/null || true
-    wait "$install_bg" 2>/dev/null || install_status=$?
-    printf 'go\n' >&"$release_fd"
-    exec {release_fd}>&-
-    rm -f "$workdir/assets-gate.armed"
-    # A scenario that reports success without having interrupted a running
-    # installer is worse than one that flakes, so prove the interruption
-    # happened: SIGKILL leaves 128+9, and an installer that had already left
-    # the assets phase would have exited on its own with a status of its own.
-    [[ "$install_status" == 137 ]] ||
-      fail "interruption: installer was not killed mid-assets-phase (status $install_status)"
-    # `-print -quit`, not a bare `| grep -q .` (issue #809): bounding find to
-    # one line of output means it never has a second line queued when grep
-    # exits, so it cannot take SIGPIPE and turn a real answer into a 141 --
-    # the same reasoning as the existing find check in
-    # scripts/test-backup-restore.sh.
+    : > "$workdir/interrupt.armed"
+    local install_status=0
+    run_installer || install_status=$?
+    rm -f "$workdir/interrupt.armed"
+    # A scenario that reports success without having interrupted anything is
+    # worse than one that flakes, so prove the engine died by the signal.
+    [[ "$install_status" == 1 ]] ||
+      fail "interruption: installer exited with status $install_status, not the failure of an interrupted engine"
+    grep -q 'The install engine stopped without reporting a result (docker run exit status 137)' "$workdir/install.log" ||
+      fail "interruption: the engine was not killed inside its transaction (see install.log)"
+    # `-print -quit`, not a bare `| grep -q .` (issue #809).
     local staging_dir
     staging_dir="$(find "$target" -maxdepth 1 -name '.orbit-install-staging.*' -type d -print -quit)"
     [[ -n "$staging_dir" ]] ||
-      fail "interruption: no staging directory, so the assets phase was never entered"
+      fail "interruption: no staging directory, so the transaction was never entered"
     cmp -s "$workdir/env-before-interrupt" "$target/.env-orbit" ||
-      fail "interruption during assets phase mutated .env-orbit"
+      fail "interruption inside the transaction mutated .env-orbit"
     local lax_staging_dir
     lax_staging_dir="$(find "$target" -maxdepth 1 -name '.orbit-install-staging*' -type d ! -perm 700 -print -quit)"
     [[ -z "$lax_staging_dir" ]] ||
       fail "interruption left staging evidence that is not owner-only"
     note "lifecycle: hard interruption left the target byte-identical (install.sh #31)"
-    # Recovery is the operator's documented step: staging evidence is kept
-    # until inspected, then removed before rerunning — validate_target
-    # (install.sh #7) deliberately refuses a target containing it.
-    rm -rf -- "$target"/.orbit-install-staging.* 2>/dev/null || true
+    # Recovery is the operator's documented step: staging evidence, and the
+    # deploy lock the killed engine held, are kept until inspected, then
+    # removed before rerunning -- the engine's target validation (install.sh
+    # #7) deliberately refuses a target containing them, and names both.
+    rm -rf -- "$target"/.orbit-install-staging.* "$target/.orbit-engine.lock" 2>/dev/null || true
   fi
 
   note "running unmocked install.sh against 127.0.0.1:$registry_port/$repository"
@@ -652,11 +812,38 @@ sweep_debris
 # container. This hook stops right after the one real sweep_debris call
 # above (itself a no-op against a fresh fake docker) so the test can inspect
 # what it invoked without going anywhere near install.sh.
+#
+# #1241: the same test also proves teardown, so two more values leave the run
+# in the state a real one reaches mid-scenario -- a target holding Compose
+# files and an installer log -- and then end it the two ways that matter:
+#   fail  exits through fail(), as an assertion would
+#   wait  announces itself and blocks until a signal arrives
 if [[ -n "${TEST_INSTALL_ACCEPTANCE_DRY_RUN:-}" ]]; then
+  case "$TEST_INSTALL_ACCEPTANCE_DRY_RUN" in
+    fail | wait)
+      mkdir -p -- "$target" "$local_only_target"
+      : > "$target/docker-compose.yml"
+      : > "$target/.env-orbit"
+      : > "$local_only_target/docker-compose.yml"
+      : > "$local_only_target/.env-orbit"
+      printf 'installer log marker for %s\n' "$project_name" > "$workdir/install.log"
+      built_image="orbit-acceptance-local:dry-run"
+      pushed_digest="sha256:$(printf '0%.0s' {1..64})"
+      ;;
+  esac
+  case "$TEST_INSTALL_ACCEPTANCE_DRY_RUN" in
+    fail) fail "dry run: simulated assertion failure" ;;
+    wait)
+      note "dry run: waiting for a signal"
+      sleep 300 &
+      wait "$!"
+      ;;
+  esac
   note "dry run: exiting after sweep_debris, before any installer run"
   exit 0
 fi
 
+prepare_image
 negative_scenarios
 if [[ "$negative_only" == 1 ]]; then
   note "negative-only run complete"

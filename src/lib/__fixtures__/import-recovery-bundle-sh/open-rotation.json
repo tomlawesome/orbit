@@ -1,0 +1,5 @@
+{
+  "status": 1,
+  "stdout": "",
+  "stderr": "Orbit recovery import: preflight/rotation failed; a document-KEK rotation is open (<deployment>/secrets/document-kek-next exists). Finish it (pnpm rewrap-kek --next-key-file <deployment>/secrets/document-kek-next, then mv <deployment>/secrets/document-kek-next <deployment>/secrets/document-kek and redeploy) or abort it (remove <deployment>/secrets/document-kek-next and redeploy without the docker-compose.kek-rotation.yml overlay) before importing a recovery bundle.\n"
+}

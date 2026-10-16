@@ -10,6 +10,7 @@ import {
   currentSubscription,
   disableAlerts,
   enableAlerts,
+  syncAlerts,
 } from "../../web/src/lib/push/alerts.js";
 import { showUrgentCount } from "../../web/src/lib/urgent-badge.js";
 
@@ -69,6 +70,136 @@ describe("currentSubscription", () => {
       navigator: { serviceWorker: { getRegistration: vi.fn(async () => registration) } },
     };
     expect(await currentSubscription(scope)).toBe(subscription);
+  });
+
+  /* Firefox rejects the lookup with AbortError ("Error retrieving push
+     subscription.") when it has no push service to ask or the page is
+     leaving. Nobody is waiting on that answer to show an error: a lookup that
+     could not be had is no subscription, not an unhandled rejection. */
+  it("is null, not a rejection, when the browser cannot answer the lookup", async () => {
+    const registration = fakeRegistration(null);
+    registration.pushManager.getSubscription = vi.fn(async () => {
+      throw new DOMException("Error retrieving push subscription.", "AbortError");
+    });
+    const scope = {
+      ...SUPPORTED_SCOPE,
+      navigator: { serviceWorker: { getRegistration: vi.fn(async () => registration) } },
+    };
+    expect(await currentSubscription(scope)).toBeNull();
+  });
+
+  it("is null when the registration itself cannot be read", async () => {
+    const scope = {
+      ...SUPPORTED_SCOPE,
+      navigator: {
+        serviceWorker: {
+          getRegistration: vi.fn(async () => {
+            throw new DOMException("The operation was aborted.", "AbortError");
+          }),
+        },
+      },
+    };
+    expect(await currentSubscription(scope)).toBeNull();
+  });
+});
+
+describe("syncAlerts — the lookup cannot be had", () => {
+  it("reads as off and sends nothing, rather than rejecting", async () => {
+    const registration = fakeRegistration(null);
+    registration.pushManager.getSubscription = vi.fn(async () => {
+      throw new DOMException("Error retrieving push subscription.", "AbortError");
+    });
+    const scope = {
+      ...SUPPORTED_SCOPE,
+      navigator: { serviceWorker: { getRegistration: vi.fn(async () => registration) } },
+    };
+    const writePushSubscription = vi.fn();
+    await expect(syncAlerts({ scope, writePushSubscription })).resolves.toBeNull();
+    expect(writePushSubscription).not.toHaveBeenCalled();
+  });
+});
+
+describe("syncAlerts — the subscription's server key (#1316)", () => {
+  const SERVER_KEY = "AQIDBA"; // base64url of bytes 1,2,3,4
+
+  function scopeFor(registration) {
+    return {
+      ...SUPPORTED_SCOPE,
+      navigator: { serviceWorker: { getRegistration: vi.fn(async () => registration) } },
+    };
+  }
+
+  it("unsubscribes a stale subscription made with a different server key, subscribes afresh and writes the new one", async () => {
+    const staleJson = { endpoint: "https://push.example/stale", expirationTime: null, keys: { p256dh: "old", auth: "old" } };
+    const order = [];
+    const unsubscribe = vi.fn(async () => { order.push("unsubscribe"); return true; });
+    const stale = {
+      endpoint: staleJson.endpoint,
+      options: { applicationServerKey: new Uint8Array([9, 9, 9, 9]).buffer },
+      unsubscribe,
+      toJSON: () => staleJson,
+    };
+    const freshJson = { endpoint: "https://push.example/fresh", expirationTime: null, keys: { p256dh: "new", auth: "new" } };
+    const fresh = { endpoint: freshJson.endpoint, toJSON: () => freshJson };
+    const subscribe = vi.fn(async () => { order.push("subscribe"); return fresh; });
+    const registration = fakeRegistration(stale, { subscribe });
+    const writePushSubscription = vi.fn(async () => ({ subscribed: true }));
+
+    const result = await syncAlerts({
+      scope: scopeFor(registration),
+      readPushConfig: vi.fn(async () => ({ publicKey: SERVER_KEY })),
+      writePushSubscription,
+    });
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    const options = subscribe.mock.calls[0][0];
+    expect(options.userVisibleOnly).toBe(true);
+    expect(Array.from(new Uint8Array(options.applicationServerKey))).toEqual([1, 2, 3, 4]);
+    expect(order).toEqual(["unsubscribe", "subscribe"]);
+    expect(writePushSubscription).toHaveBeenCalledExactlyOnceWith(freshJson);
+    expect(writePushSubscription).not.toHaveBeenCalledWith(staleJson);
+    expect(result).toBe(fresh);
+  });
+
+  it("writes a subscription whose key matches the server's unchanged, without unsubscribing or subscribing", async () => {
+    const json = { endpoint: "https://push.example/current", expirationTime: null, keys: { p256dh: "a", auth: "b" } };
+    const unsubscribe = vi.fn(async () => true);
+    const existing = {
+      endpoint: json.endpoint,
+      options: { applicationServerKey: new Uint8Array([1, 2, 3, 4]).buffer },
+      unsubscribe,
+      toJSON: () => json,
+    };
+    const subscribe = vi.fn();
+    const registration = fakeRegistration(existing, { subscribe });
+    const writePushSubscription = vi.fn(async () => ({ subscribed: true }));
+
+    const result = await syncAlerts({
+      scope: scopeFor(registration),
+      readPushConfig: vi.fn(async () => ({ publicKey: SERVER_KEY })),
+      writePushSubscription,
+    });
+
+    expect(result).toBe(existing);
+    expect(unsubscribe).not.toHaveBeenCalled();
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(writePushSubscription).toHaveBeenCalledExactlyOnceWith(json);
+  });
+});
+
+describe("syncAlerts — the browser holds an incomplete subscription", () => {
+  it("reads as off and sends nothing, as a server refusal would", async () => {
+    const existing = { endpoint: "https://push.example/partial", toJSON: () => ({ endpoint: "https://push.example/partial", keys: {} }) };
+    const registration = fakeRegistration(existing);
+    const scope = {
+      ...SUPPORTED_SCOPE,
+      navigator: { serviceWorker: { getRegistration: vi.fn(async () => registration) } },
+    };
+    const writePushSubscription = vi.fn(async () => ({ subscribed: true }));
+
+    await expect(syncAlerts({ scope, readPushConfig: vi.fn(async () => null), writePushSubscription })).resolves.toBeNull();
+    expect(writePushSubscription).not.toHaveBeenCalled();
   });
 });
 
@@ -163,6 +294,27 @@ describe("enableAlerts — permission granted, not yet subscribed", () => {
   });
 });
 
+describe("enableAlerts — the browser returns an incomplete subscription", () => {
+  it("refuses with code invalid_subscription and sends nothing to the server", async () => {
+    const subscribed = { toJSON: () => ({ endpoint: "https://push.example/partial", keys: { p256dh: "p256dh-value" } }) };
+    const registration = fakeRegistration(null, { subscribe: vi.fn(async () => subscribed) });
+    const writePushSubscription = vi.fn(async () => ({ subscribed: true }));
+
+    const refusal = await enableAlerts({
+      scope: SUPPORTED_SCOPE,
+      getRegistration: vi.fn(async () => registration),
+      register: vi.fn(),
+      requestPermission: vi.fn(async () => "granted"),
+      readPushConfig: vi.fn(async () => ({ publicKey: "AAAA" })),
+      writePushSubscription,
+    }).then(() => null, (error) => error);
+
+    expect(refusal).toBeInstanceOf(AlertsError);
+    expect(refusal.code).toBe("invalid_subscription");
+    expect(writePushSubscription).not.toHaveBeenCalled();
+  });
+});
+
 describe("enableAlerts — already subscribed", () => {
   it("skips the permission prompt but still (re)sends the subscription to the server", async () => {
     // W2-S1: a device that looks subscribed in the browser may have never
@@ -193,11 +345,81 @@ describe("enableAlerts — already subscribed", () => {
     expect(writePushSubscription).toHaveBeenCalledExactlyOnceWith(subscriptionJson);
   });
 
+  it("unsubscribes a stale subscription made with a different server key and subscribes afresh (#1316)", async () => {
+    // The server's public key (VAPID) can change; a subscription bound to the
+    // old key can never receive a push, so reusing it leaves alerts silently dead.
+    const serverKey = "AQIDBA"; // base64url of bytes 1,2,3,4
+    const staleKeyBytes = new Uint8Array([9, 9, 9, 9]).buffer;
+    const staleJson = { endpoint: "https://push.example/stale", expirationTime: null, keys: { p256dh: "old", auth: "old" } };
+    const order = [];
+    const unsubscribe = vi.fn(async () => { order.push("unsubscribe"); return true; });
+    const stale = {
+      endpoint: staleJson.endpoint,
+      options: { applicationServerKey: staleKeyBytes },
+      unsubscribe,
+      toJSON: () => staleJson,
+    };
+    const freshJson = { endpoint: "https://push.example/fresh", expirationTime: null, keys: { p256dh: "new", auth: "new" } };
+    const fresh = { endpoint: freshJson.endpoint, toJSON: () => freshJson };
+    const subscribe = vi.fn(async (options) => {
+      order.push("subscribe");
+      expect(options.userVisibleOnly).toBe(true);
+      expect(Array.from(new Uint8Array(options.applicationServerKey))).toEqual([1, 2, 3, 4]);
+      return fresh;
+    });
+    const registration = fakeRegistration(stale, { subscribe });
+    const writePushSubscription = vi.fn(async () => ({ subscribed: true }));
+
+    const result = await enableAlerts({
+      scope: SUPPORTED_SCOPE,
+      getRegistration: vi.fn(async () => registration),
+      register: vi.fn(),
+      requestPermission: vi.fn(),
+      readPushConfig: vi.fn(async () => ({ publicKey: serverKey })),
+      writePushSubscription,
+    });
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["unsubscribe", "subscribe"]);
+    expect(result).toBe(fresh);
+    expect(writePushSubscription).toHaveBeenCalledExactlyOnceWith(freshJson);
+  });
+
+  it("reuses an existing subscription whose key matches the server's (#1316)", async () => {
+    const serverKey = "AQIDBA";
+    const json = { endpoint: "https://push.example/current", expirationTime: null, keys: { p256dh: "a", auth: "b" } };
+    const unsubscribe = vi.fn(async () => true);
+    const existing = {
+      endpoint: json.endpoint,
+      options: { applicationServerKey: new Uint8Array([1, 2, 3, 4]).buffer },
+      unsubscribe,
+      toJSON: () => json,
+    };
+    const subscribe = vi.fn();
+    const registration = fakeRegistration(existing, { subscribe });
+    const writePushSubscription = vi.fn(async () => ({ subscribed: true }));
+
+    const result = await enableAlerts({
+      scope: SUPPORTED_SCOPE,
+      getRegistration: vi.fn(async () => registration),
+      register: vi.fn(),
+      requestPermission: vi.fn(),
+      readPushConfig: vi.fn(async () => ({ publicKey: serverKey })),
+      writePushSubscription,
+    });
+
+    expect(result).toBe(existing);
+    expect(unsubscribe).not.toHaveBeenCalled();
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(writePushSubscription).toHaveBeenCalledExactlyOnceWith(json);
+  });
+
   it("propagates a failed server write instead of swallowing it", async () => {
     // So a device whose write failed once stays correctly "not confirmed
     // on" rather than the switch claiming success — the caller (the
     // settings screen) is the one that decides what the reader sees.
-    const existing = { endpoint: "e", toJSON: () => ({ endpoint: "e", keys: {} }) };
+    const existing = { endpoint: "e", toJSON: () => ({ endpoint: "e", expirationTime: null, keys: { p256dh: "a", auth: "b" } }) };
     const registration = fakeRegistration(existing);
     const writePushSubscription = vi.fn(async () => { throw new Error("network down"); });
 

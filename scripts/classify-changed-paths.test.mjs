@@ -35,7 +35,6 @@ describe("changed-path CI risk classification", () => {
       "scripts/supply-chain-policy.test.mjs",
       "scripts/stable-promotion-policy.mjs",
       "scripts/stable-promotion-policy.test.mjs",
-      "scripts/exact-image-workflow.test.mjs",
       "scripts/esbuild-override-policy.test.mjs",
     ]) {
       expect(pathRisk(path)).toBe(CI_RISK.FAST);
@@ -66,7 +65,7 @@ describe("changed-path CI risk classification", () => {
 
   it("runs exact-image system validation for cross-boundary and unknown changes", () => {
     for (const path of [
-      ".github/workflows/publish-container.yml",
+      ".github/workflows/publish-from-gitlab.yml",
       "Dockerfile",
       "docker-compose.yml",
       // The test/CI-only overlays moved under compose/ in #442 and must keep

@@ -5,6 +5,7 @@ import { settleArrival } from "./support/arrival";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -54,7 +55,7 @@ async function seedHouseholdWithTwoItems(page: Page): Promise<{
   otherTitle: string;
 }> {
   const name = `${HOUSEHOLD_PREFIX} ${randomUUID().slice(0, 8)}`;
-  const seeded = await page.evaluate(async (householdName) => {
+  const seeded = await page.evaluate(async ({ householdName, matchDue, otherDue }) => {
     const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
     const session = (await sessionResponse.json()) as { csrfToken: string };
     const command = async (payload: unknown) => {
@@ -79,30 +80,30 @@ async function seedHouseholdWithTwoItems(page: Page): Promise<{
     });
     const matchId = crypto.randomUUID();
     const matchTitle = "Kwik-Fit MOT proving";
-    const matchDue = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
     await command({
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
-        id: matchId, sectionId, title: matchTitle, currency: "GBP", scheduleKind: "service",
-        provider: "Kwik-Fit", dueDate: matchDue, recurrenceMonths: 12, status: "active",
+        id: matchId, sectionId, title: matchTitle, currency: "GBP",
+        provider: "Kwik-Fit", dueDate: matchDue, recurrenceMonths: 12,
       },
-      activity: { id: crypto.randomUUID(), itemId: matchId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: crypto.randomUUID(), itemId: matchId, occurredAt: new Date().toISOString() },
     });
     const otherId = crypto.randomUUID();
     const otherTitle = "Boiler service proving";
-    const otherDue = new Date(Date.now() + 95 * 86400000).toISOString().slice(0, 10);
     await command({
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
-        id: otherId, sectionId, title: otherTitle, currency: "GBP", scheduleKind: "service",
-        dueDate: otherDue, recurrenceMonths: 12, status: "active",
+        id: otherId, sectionId, title: otherTitle, currency: "GBP",
+        dueDate: otherDue, recurrenceMonths: 12,
       },
-      activity: { id: crypto.randomUUID(), itemId: otherId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: crypto.randomUUID(), itemId: otherId, occurredAt: new Date().toISOString() },
     });
     return { householdId, matchId, matchTitle, otherId, otherTitle };
-  }, name);
+  }, { householdName: name, matchDue: householdDateFromToday(90), otherDue: householdDateFromToday(95) });
   households.track({ id: seeded.householdId, name });
   return seeded;
 }
@@ -115,7 +116,7 @@ async function seedHouseholdWithTwoItems(page: Page): Promise<{
  */
 async function seedHouseholdWithSoonItem(page: Page): Promise<{ householdId: string; itemId: string; title: string }> {
   const name = `${HOUSEHOLD_PREFIX} ${randomUUID().slice(0, 8)}`;
-  const seeded = await page.evaluate(async (householdName) => {
+  const seeded = await page.evaluate(async ({ householdName, dueDate }) => {
     const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
     const session = (await sessionResponse.json()) as { csrfToken: string };
     const command = async (payload: unknown) => {
@@ -140,18 +141,18 @@ async function seedHouseholdWithSoonItem(page: Page): Promise<{ householdId: str
     });
     const itemId = crypto.randomUUID();
     const title = "Nearest due proving";
-    const dueDate = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
     await command({
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
-        id: itemId, sectionId, title, currency: "GBP", scheduleKind: "service",
-        dueDate, recurrenceMonths: 12, status: "active",
+        id: itemId, sectionId, title, currency: "GBP",
+        dueDate, recurrenceMonths: 12,
       },
-      activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
     });
     return { householdId, itemId, title };
-  }, name);
+  }, { householdName: name, dueDate: householdDateFromToday(5) });
   households.track({ id: seeded.householdId, name });
   return seeded;
 }

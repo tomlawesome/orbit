@@ -280,7 +280,6 @@ export async function runImapReceiptCycle(): Promise<void> {
     leaseToken: imapNotificationDeliveries.leaseToken,
     attempts: imapNotificationDeliveries.attempts,
     userId: users.id,
-    email: users.email,
     emailEnc: users.emailEnc,
     disabledAt: users.disabledAt,
   }).from(imapNotificationDeliveries)
@@ -304,7 +303,6 @@ export async function runImapReceiptCycle(): Promise<void> {
            stays waiting for a cycle that can read it. */
         const recipient = metadata.text("users.email", delivery.userId, {
           encrypted: delivery.emailEnc,
-          plaintext: delivery.email,
         }).value;
         if (!recipient) {
           await deferNotification(delivery.id, leaseToken, delivery.attempts, now);

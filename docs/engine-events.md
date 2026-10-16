@@ -47,12 +47,16 @@ handoff stretch), then retry.
 A consumer that wants to run that configuration itself sets
 `ORBIT_LAUNCHER_CONFIG_TREE` to an empty directory it created (mode 0700,
 owned by the running user) (#1225). On any exit whose event reason is
-`configuration-failure`, before the event and before rolling back,
-`install.sh` copies the configure tree it verified from the digest-pinned
-image into it at the same relative paths: `scripts/configure.sh`,
-`scripts/configuration.sh`, `scripts/installer-ui.sh` and
-`.env-orbit.example`, as owner-only (0600/0700) regular files, all or
-nothing: a failed copy removes what it wrote. If the directory is missing,
+`configuration-failure`, before the event and before rolling back, the
+install engine copies the configure tree from its own digest-pinned image
+into it at the same relative paths (`src/lib/launcher-config-tree.ts`;
+`install.sh` only mounts the directory into the engine, #1212): `scripts/configure.sh`,
+`scripts/installer-ui.sh` and `.env-orbit.example`, plus the image pin
+`.orbit-image`, which holds the resolved digest reference
+(`ghcr.io/<repo>@sha256:<64 hex>`) on one newline-terminated line. All are
+owner-only (0600/0700) regular files, written all or nothing: a failed copy
+removes what it wrote. The pin is written only into this launcher tree; a
+deployment never has an `.orbit-image`. If the directory is missing,
 not a directory, a symlink, not mode 0700, not empty or not owned by the
 current user, it writes nothing and prints one stderr line; the event,
 guidance and exit status are unchanged either way. Unset or empty, nothing
@@ -334,8 +338,9 @@ breaking change requiring a version bump and coordination with consumers.
 
 `scripts/configure.sh --check` (and `--check-rollback`, identical in every
 respect but the file it checks) emits a fixed-vocabulary readiness summary on
-stdout: one line per required field or optional group, from `run_check`
-(`scripts/configure.sh`). This is orbit-launcher's own machine interface
+stdout: one line per required field or optional group, from `evaluateReadiness`
+(`src/lib/config-contract.ts`), run in the engine as `orbit check` (and
+`orbit check --rollback`). This is orbit-launcher's own machine interface
 onto configuration state — separate from the `phase=...` event stream and
 from the "Machine prompts (v0)" prompt grammar above, sharing neither their
 line shape nor `installer_ui_emit`. orbit-launcher's `RunConfigCheck`
@@ -411,6 +416,16 @@ App-managed groups — always reported as `app-managed <FIELD>`, never `ready`,
 imap
 ```
 
+Shape-checked fields — reported only as `missing <FIELD>`, and only when the
+value is present but invalid; nothing is printed when it is absent or valid:
+
+```
+session-ttl
+```
+
+`session-ttl` is `SESSION_TTL_SECONDS` set to anything other than a whole
+number of seconds from 900 to 2592000 (15 minutes to 30 days).
+
 ### Consumer guidance
 
 - orbit-launcher's `ConfigCheck.Missing` collects every field reported
@@ -435,16 +450,6 @@ and back) by `scripts/configure-check-contract.test.mjs`, mirroring
 `scripts/engine-events.test.mjs` above. Renaming or removing a field, or
 changing whether it can report `optional`, is a breaking change requiring a
 version bump and coordination with orbit-launcher.
-
-`imap` moved from "Optional groups" to "App-managed groups" in the same
-change that removed every `IMAP_*` .env-orbit key (ADR-0017 slice 2, issue
-#743): a consumer that still expects `optional imap`/`missing imap`/
-`ready imap` will not see any of those three words for this field again.
-This is exactly the breaking change the paragraph above describes; it ships
-without a version bump only because there are no external operators of this
-interface to coordinate with yet (the same reasoning ADR-0017 gives for
-dropping the deployment contract's `IMAP_*` deprecation window). Coordinate
-with orbit-launcher before relying on this if that stops being true.
 
 ## Machine prompts: backup/restore/recovery (v0)
 
@@ -577,51 +582,222 @@ request, never continuous or backgrounded. The TypeScript engine (this
 repository's `src/cli/orbit.ts`) ships INSIDE the app image, bundled to a
 single dependency-free file at `/opt/orbit/cli/orbit.js`
 (`scripts/bundle-orbit-cli.mjs`, wired into the Dockerfile's `cli-builder`
-stage), and is invoked by host scripts as a disposable
-`docker compose run --rm --no-deps` one-off — the exact pattern
-`scripts/repair.sh` already uses to call `scripts/recovery-crypto.mjs`
-(see that script's "Passphrase — the checkpoint" section), generalized to
-the engine CLI. The engine container is never handed the Docker socket,
-never starts/stops/inspects other containers, and no host in this
-architecture is ever required to have Node installed outside the image.
+stage), and is invoked by host scripts as a disposable one-off container, in
+one of two shapes (below) — the same idea `scripts/repair.sh` already uses to
+call `scripts/recovery-crypto.mjs` (see that script's "Passphrase — the
+checkpoint" section), generalized to the engine CLI. The engine container is
+never handed the Docker socket, never starts/stops/inspects other containers,
+and no host in this architecture is ever required to have Node installed
+outside the image.
 
 ### Invocation contract
 
+Two shapes, chosen by what the command needs from the host.
+
+**File-only commands (`check`, `configure`): a plain `docker run --rm`.**
+These need only the deployment directory, so the one-off does not go through
+Compose. Compose's `--env-file` requires `.env-orbit` to exist before the
+container can start, which is the file `configure` creates; a plain `docker
+run` has no such precondition. `scripts/configure.sh` runs (#1210):
+
 ```
-docker compose --project-name "$project" --env-file "$environment_file" \
-  run --rm --no-deps -T --entrypoint node \
-  --volume "<host-deployment-dir>:/orbit-deploy:<ro|rw>" \
-  orbit-app /opt/orbit/cli/orbit.js <command> --dir /orbit-deploy
+docker run --rm --network none [-i [-t]] \
+  -e ORBIT_HOST_UID=<uid> -e ORBIT_HOST_GID=<gid> -e ORBIT_IMAGE \
+  -e ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE -e ORBIT_CONFIGURE_PROMPTS \
+  -e ORBIT_CONFIGURE_APP_URL -e ORBIT_CONFIGURE_OIDC_ISSUER \
+  -e ORBIT_CONFIGURE_OIDC_CLIENT_ID -e ORBIT_CONFIGURE_AUTH_MODE \
+  -v "<host-deployment-dir>:/orbit-deploy:<ro|rw>" \
+  --entrypoint node "$engine_image" /opt/orbit/cli/orbit.js \
+  <check [--rollback] | configure ...> --dir /orbit-deploy
 ```
 
-- `--rm --no-deps` — a throwaway container, and only the named service's own
-  image is used; no dependent service (`orbit-db`, etc.) is started for a
-  one-off that does not need one, mirroring `recovery-crypto.mjs`'s own call
-  sites in `scripts/repair.sh`.
-- `-T` — disables pseudo-TTY allocation, the same choice `repair.sh`'s own
-  `recovery-crypto.mjs` invocations make, so stdio behaves predictably for a
-  scripted caller (machine prompts, if any, flow over stdio exactly as the
-  "Machine prompts (v0)" grammar above already defines — no new protocol).
+- `--rm --network none` — a throwaway container with no network: the work is
+  file work only.
+- `-e NAME` with no value — Docker reads the value from the script's own
+  environment and passes it only when set, so no configured value or secret is
+  ever on a command line. The OIDC client secret arrives only on standard
+  input.
+- `-i` for a flow that reads standard input (a piped OIDC secret, machine
+  prompts); `-t` as well only when `--init` or `--set-oidc-secret` will
+  prompt a person on a terminal (no `ORBIT_CONFIGURE_*` answers and not
+  `ORBIT_CONFIGURE_PROMPTS=machine`). The engine prompts on that terminal
+  itself. `--check` never gets `-t`, so its output stays plain lines. Without
+  `-t` the engine's stdio is the caller's, and the "Machine prompts (v0)"
+  grammar above flows over it unchanged.
 - `--entrypoint node` — bypasses `container-entrypoint.sh` (the secret
   bootstrap/privilege-drop entrypoint the normal `orbit-app` service uses)
-  entirely, the same substitution `recovery-crypto.mjs`'s call sites make;
-  the process runs as the image's own declared `USER` (`root`), same as
-  every other `--entrypoint`-overridden one-off already shipped.
+  entirely; the process runs as the image's own declared `USER` (`root`).
 - The deployment directory is bind-mounted at the fixed in-container path
-  `/orbit-deploy`, `:ro` for a read-only command (`check`) and `:rw` only for
-  a command that legitimately needs to write host files. `configure` (issue
-  #294 — `scripts/configure.sh`'s write flows: the bare/default flow minus
-  `ensure_vapid_keys`, `--init`, `--set-oidc-secret`, `--set-deployment-
-  profile`) is the first `:rw` command: pure file work against the mounted
-  deployment directory, never Docker (see "Fail-closed guard" below —
-  `configure`, like `check`, never calls `refuseDockerInContainer` and is
-  unaffected by container mode). Every other command that would otherwise
-  need to mutate a live deployment is Docker-backed and therefore refuses
-  before touching the mount either way.
-- `$project`/`$environment_file` resolve exactly as `repair.sh`'s own
-  "Compose project name derivation" step does, so the one-off targets the
-  same Compose project and `.env-orbit` the rest of the deployment's Docker
-  operations already use.
+  `/orbit-deploy`: `:ro` for `check`, `:rw` for `configure`, which writes
+  `.env-orbit`, `.orbit-secrets/` and the VAPID keys. For `--preflight` and
+  `--migrate` the mount is the directory of the `--file`, `:ro` and `:rw`
+  respectively, because the rollback copy and the deploy lock sit beside it.
+  `configure` is pure file work, never Docker (see "Fail-closed guard"
+  below).
+- The image is resolved by the script before the first engine call, and the
+  script never writes configuration itself: `ORBIT_IMAGE` from the
+  environment, else the last `ORBIT_IMAGE=` line in `.env-orbit` (read as
+  text, never sourced; `--check-rollback` also looks in the rollback copy),
+  else it refuses with `No Orbit image to run configuration with. Set
+  ORBIT_IMAGE to an immutable registry digest (or the local tag
+  scripts/build-container.sh builds), or install with get-orbit.sh, which
+  records it in .env-orbit.` The reference must be a digest or the
+  installer-generated local tag. A digest that is not present locally is
+  pulled; a local tag that is not present is refused, because there is
+  nothing to pull.
+- Ownership of what the engine writes: the one-off runs as the image's
+  `root`, so on rootful Docker the files it created would be root-owned and
+  `install.sh` would refuse them. The script passes `ORBIT_HOST_UID` and
+  `ORBIT_HOST_GID` (the operator's own ids on rootful Docker; `0:0` on
+  rootless Docker, which it detects from `docker info --format
+  '{{.SecurityOptions}}'` containing `rootless`, because there container root
+  already is the operator), and the engine hands every file and directory it
+  creates under `--dir` to that pair (`src/lib/host-ownership.ts`, called by
+  every writer). It never uses `--user`: under rootless Docker a numeric
+  `--user` maps to a subordinate id the operator cannot access. If it cannot
+  hand a file over it refuses rather than leave one behind (#1258).
+
+**`install`/`update`: the install engine one-off.** `scripts/install.sh`
+runs the engine once, from the image it has just pulled and verified, as a
+plain `docker run` with the deployment directory mounted (#1212):
+
+```
+docker run --rm --init [-i [-t]] [-e ORBIT_INSTALL_INTERACTIVE=1] \
+  [-e ORBIT_INSTALLER_PLAIN=1] [-e COMPOSE_PROJECT_NAME] \
+  [-v "<launcher-tree>:/orbit-launcher-config-tree:rw" \
+   -e ORBIT_LAUNCHER_CONFIG_TREE=/orbit-launcher-config-tree
+   | -e ORBIT_LAUNCHER_CONFIG_TREE_UNAVAILABLE=<reason>] \
+  -e ORBIT_HOST_UID=<uid> -e ORBIT_HOST_GID=<gid> \
+  -e ORBIT_IMAGE=<verified digest reference> -e ORBIT_CHANNEL=<channel> \
+  -e ORBIT_INSTALLER_ELAPSED=<seconds> -e ORBIT_INSTALL_HOST_FACTS \
+  -e ORBIT_CONFIGURE_PROMPTS -e ORBIT_CONFIGURE_APP_URL \
+  -e ORBIT_CONFIGURE_OIDC_ISSUER -e ORBIT_CONFIGURE_OIDC_CLIENT_ID \
+  -e ORBIT_CONFIGURE_AUTH_MODE \
+  -v "<host-deployment-dir>:/orbit-deploy:rw" \
+  -v "<private-temp-dir>:/orbit-install-result:rw" \
+  --entrypoint node "$resolved_reference" /opt/orbit/cli/orbit.js \
+  install --action <install|update|auto> --dir /orbit-deploy \
+  --outcome /orbit-install-result/outcome
+```
+
+- Unlike `configure`, the default network: OIDC discovery runs in here,
+  over the network the application itself will use.
+- `--init` makes the engine an ordinary child of a minimal init, so a
+  signal reaches it as a signal; the engine rolls its transaction back on
+  SIGINT/SIGTERM before exiting.
+- `ORBIT_INSTALL_HOST_FACTS` is JSON: every Docker output the engine's
+  volume-safety check needs, gathered by the shell with the argv
+  `src/lib/database-volume-safety.ts` documents and base64-encoded byte for
+  byte, `null` for a call that failed (`src/lib/host-facts.ts`). Anything
+  malformed fails closed.
+- A terminal is passed through (`-i -t`, `ORBIT_INSTALL_INTERACTIVE=1`)
+  when install.sh has one; under `ORBIT_CONFIGURE_PROMPTS=machine` stdin is
+  passed without `-t`; otherwise stdin is closed, so a piped `curl | bash`
+  never feeds the rest of the script to the engine.
+- The engine prints its own events (assets, configuration, oidc) as plain
+  lines and asks its own questions; the shell renders the phases before and
+  after it. The outcome file is owner-only `key=value` lines: `status=ok`
+  with `fresh`, `profile`, `model-pull` and `database-volume`;
+  `status=failed` with `phase`, `component`, `reason`, `action` and
+  `message`; `status=stopped` with `message`; or `status=repair`. Exit
+  status 0, 1, 130 (cancelled), 2 (an answer refused) or 3 (Repair). The
+  terminal `failed` event is the shell's to emit. An engine that leaves no
+  usable outcome is reported with `docker run`'s exit status and
+  `reason=failure`.
+- `orbit install` refuses to run outside the image
+  (`ORBIT_ENGINE_CONTEXT=container`).
+
+**Commands that need the deployment itself (`backup`, `restore`,
+`export-recovery-bundle`, `import-recovery-bundle`): the compose-attached
+one-off.** They read and write the database, the document volume and the
+mounted secrets, so they run on the `orbit-app` service, inside the
+deployment (#1211). `scripts/backup.sh`, `restore.sh`,
+`export-recovery-bundle.sh` and `import-recovery-bundle.sh` run:
+
+```
+docker compose --env-file "$environment_file" \
+  run --rm --no-deps -i <-t|-T> \
+  -e ORBIT_HOST_UID=<uid> -e ORBIT_HOST_GID=<gid> -e ORBIT_HOST_DEPLOY_DIR=<host-deployment-dir> \
+  [-e <switch>=<value> ...] \
+  -v "<host-deployment-dir>:/orbit-deploy:rw" \
+  [-v "<backup-dir>:/orbit-backups:rw" -e ORBIT_HOST_BACKUP_DIR=<backup-dir>] \
+  [-v "<bundle>:/orbit-input/bundle.tar:ro" -e ORBIT_HOST_INPUT_FILE=<bundle>] \
+  --entrypoint node orbit-app /opt/orbit/cli/orbit.js <command> ... \
+  --dir /orbit-deploy [--backup-dir /orbit-backups]
+```
+
+- `--rm --no-deps` — a throwaway container on the `orbit-app` service; no
+  other service is started. The one-off is on the project network, so the
+  engine reaches `orbit-db` over TCP, has the compose secrets under
+  `/run/secrets`, and has the document volume at `DOCUMENTS_ROOT`. It runs
+  `pg_dump`, `pg_restore` and `psql` from the image (PostgreSQL 18 client,
+  pinned to the server's major by `src/lib/postgres-client-major.test.ts`;
+  the engine refuses with `preflight/tools failed` before a dump if the
+  server is a different major) and `tar` on the volume, all locally
+  (`src/lib/in-container-adapter.ts`). The database password reaches each
+  tool as `PGPASSWORD` in its own environment, never on a command line.
+- `-i` always; `-t` when both standard input and standard output are a
+  terminal, otherwise `-T`. On a terminal the engine prompts for the
+  recovery passphrase and the `RESTORE`/`IMPORT RECOVERY` confirmations
+  itself. `ORBIT_RECOVERY_TEST_MODE=true` reads each answer as a plain line
+  on standard input with no prompt text, as the scripts' test mode always
+  did; the "Machine prompts: backup/restore/recovery (v0)" grammar above is
+  unchanged.
+- Switches travel as `-e NAME=value`, only when set: `ORBIT_NONINTERACTIVE_RESTORE`,
+  `ORBIT_RECOVERY_PROMPTS`, `ORBIT_RECOVERY_TEST_MODE`, and restore.sh's test switches
+  (`ORBIT_RESTORE_TEST_*`, which `scripts/test-backup-restore.sh` sets). None
+  is a secret; passphrases only ever travel on standard input.
+- `ORBIT_ENV_FILE` is the `--env-file`. `ORBIT_BACKUP_DIR`, when it names
+  somewhere other than the deployment's own `backups/`, gets a mount of its
+  own and is passed as `--backup-dir`; the script creates an outside backup
+  directory (mode 700) itself, so Docker never creates it as root. The
+  secrets are always the deployment's own `.orbit-secrets/`.
+  The bundle being read is mounted read-only at `/orbit-input/bundle.tar`.
+  The `ORBIT_HOST_*` variables let the engine print host paths
+  (`src/lib/host-paths.ts`): `Orbit backup created: /srv/orbit/backups/...`,
+  never the mount point.
+- Ownership: the one-off runs as the image's `root` (it must read the
+  `orbit`-owned document objects). Every file and directory it creates under
+  `/orbit-deploy` or `/orbit-backups` (the secrets live under
+  `/orbit-deploy/.orbit-secrets`) — the backups
+  directory, the lock file, bundles, the restore journal and checkpoints, a
+  swapped document key — is handed to `ORBIT_HOST_UID:ORBIT_HOST_GID`, as for
+  `configure` above. The document tree on the volume keeps the owners in its
+  archive, as `tar` running as root always gave it.
+- The backup/restore lock is the engine's: a `flock` on
+  `backups/.orbit-backup-restore.lock`, on the bind mount, so it excludes a
+  second run on the same host kernel (a backups directory on NFS is not
+  supported). Only runs whose shell stopped `orbit-app` take it; a run that
+  finds it held refuses at once and exits `75`, and the shell then leaves
+  `orbit-app` to the run that holds it.
+- The shell stops and starts `orbit-app`; the engine never does. `backup.sh`
+  stops it, runs `backup`, and starts it again. `restore.sh <bundle>` and
+  `import-recovery-bundle.sh` validate first: while Orbit still runs, they
+  run the engine once with `--preflight` (`restore --preflight` or
+  `import-recovery-bundle --preflight`, standard input `/dev/null`, so `-T`
+  and no prompt; the passphrase is asked once, in the full run). It stops
+  nothing, so it takes no lock (the lock's holder owns `orbit-app`) and
+  leaves any killed run's checkpoint to the full run to remove; it creates
+  no checkpoint or journal, drops its stage database and scratch on exit,
+  and prints nothing when the bundle passes. Any refusal ends the script
+  there with Orbit untouched
+  (amendment E3a on #1211: validate before taking the service down). Only
+  then do they stop `orbit-app` and run the full command, which repeats
+  every check; `restore.sh --recover` has no bundle and stops first. After
+  the full run they start it and wait up to 45 seconds for `/api/health`.
+  A failed run that leaves `backups/.orbit-restore/restore.journal` keeps
+  Orbit stopped for `bash scripts/restore.sh --recover`. A successful
+  restore or import also leaves the journal and its checkpoint: the shell
+  starts Orbit, and only once health passes runs `restore --finish`
+  (standard input `/dev/null`), which removes them under the lock. If Orbit
+  never becomes healthy on the restored data (say, a bundle from a newer
+  build than the running image), the shell stops `orbit-app` again, prints
+  the `--recover` line and exits 1; nothing rolls back automatically.
+  `backup.sh --verify` and `export-recovery-bundle.sh` leave it
+  running. The engine reports, once, on standard error, that it left the
+  app's lifecycle to the shell:
+  `phase=application component=application state=skipped reason=application-startup action=skip elapsed=0s`.
+- Exit statuses pass through unchanged.
 
 ### Fail-closed guard: no Docker access from inside the engine container
 
@@ -636,28 +812,29 @@ any such attempt.
 1. The Dockerfile's `runner` stage sets `ENV ORBIT_ENGINE_CONTEXT=container`.
    `ENV` (unlike `CMD`/`ENTRYPOINT`) is part of the image's own config and is
    present in every container started from it regardless of
-   `--entrypoint`/`--user` overrides — the one fact the guard trusts. A
+   `--entrypoint`/`--user` overrides — the one fact the engine trusts. A
    container started any other way (a host checkout run directly via
    `pnpm run orbit`/`tsx`, with no image involved) never has it set.
-2. Every command whose adapters would ever spawn `docker`
-   (`install`/`update` via `src/lib/install-docker-adapter.ts`;
-   `backup`/`restore`/`export-recovery-bundle`/`import-recovery-bundle` via
-   `src/lib/recovery-bundle.ts`'s/`src/lib/restore-engine.ts`'s
-   `createDockerCompose*Adapter`) calls `refuseDockerInContainer` as the
-   FIRST statement in its command function — before any adapter is
-   constructed, so the code path that would spawn `docker` is never
-   reached, not merely made to fail once reached. When
-   `ORBIT_ENGINE_CONTEXT=container` is set, that call prints
-   `orbit: refused command=<command> reason=docker-command-forbidden-in-container`
-   to stderr and exits `9`, before touching the target directory or any
-   subprocess. `check` and `configure` (the pure-logic commands — `configure`
-   added by issue #294; see "Invocation contract" above for why it is the
-   first `:rw` command despite never touching Docker) never call this guard
-   and are unaffected: they work fully against a bind-mounted deploy
-   directory, in or out of a container, and never spawn `docker` under any
-   invocation — `src/cli/orbit.test.ts`, `src/cli/orbit.configure.test.ts`,
-   and the bundle's own smoke test assert this with a booby-trapped `docker`
-   on `PATH`.
+2. No command spawns `docker`, so nothing is left to refuse: the
+   `refuseDockerInContainer` guard (exit `9`,
+   `reason=docker-command-forbidden-in-container`) went once the
+   backup/restore commands (#1211) and `install`/`update` (#1212) stopped
+   spawning it. `check` and `configure` (the pure-logic commands — `configure`
+   added by issue #294, and the commands that run in the plain `docker run`
+   shape above) work fully
+   against a bind-mounted deploy directory, in or out of a container, and
+   never spawn `docker` under any invocation — `src/cli/orbit.test.ts`,
+   `src/cli/orbit.configure.test.ts`, and the bundle's own smoke test assert
+   this with a booby-trapped `docker` on `PATH`.
+3. `backup`, `restore`, `export-recovery-bundle` and `import-recovery-bundle`
+   spawn no `docker` at all since #1211: they run only inside the
+   deployment, and anywhere else refuse with `orbit: <command> runs inside
+   the deployment; use bash scripts/<script>.sh.` (exit 1).
+   `src/cli/orbit.test.ts` asserts a booby-trapped `docker` is never called.
+   `install`/`update` spawn no `docker` at all since #1212: everything they
+   need from Docker arrives as data, and they refuse to run anywhere but
+   inside the image (`scripts/bundle-orbit-cli.test.mjs` traps `docker`
+   around them too).
 
 This is a permanent architectural boundary, not a placeholder pending a
 future slice: any command that genuinely needs to touch Docker stays a
@@ -667,34 +844,41 @@ layer that ever runs `docker`.
 
 ### Delegation points
 
-`scripts/engine-check.sh` was the first host script wired onto this
-contract: by default it is a behavior-preserving proxy onto the existing
-`bash scripts/configure.sh --check`, and only when `ORBIT_ENGINE_CHECK=
-container` is set in its environment does it instead compose the one-off
-`check` invocation documented above.
+Since #1210 every flow of `scripts/configure.sh` runs in the engine. There is
+no opt-in variable and no bash fallback. With no image to run,
+`configure.sh` refuses (message above) rather than configure by other means.
 
-`scripts/configure.sh` itself (issue #294) extends the same opt-in pattern
-to its own write flows, with its own sibling variable,
-`ORBIT_CONFIGURE_ENGINE=container`: unset (the default), every dispatch
-path is byte-identical to before this section existed. When set, each of
-the bare/default flow, `--init`, `--set-oidc-secret`, and
-`--set-deployment-profile` delegates to the one-off `configure` invocation
-above whenever every precondition holds (docker present, a valid and
-already locally-present `ORBIT_IMAGE`, an already-existing `.env-orbit` —
-the very first creation of `.env-orbit` on a fresh checkout always stays
-bash, since `docker compose --env-file` requires the file to already
-exist), falling back to the original bash logic otherwise. `--init` and
-`--set-oidc-secret` are additionally scoped to the two shapes with no real
-controlling-terminal interaction — the fully-scripted `ORBIT_CONFIGURE_*`
-environment triad or the `ORBIT_CONFIGURE_PROMPTS=machine` grammar above (the
-container speaks it itself over `configure.sh`'s own inherited stdio) — a
-genuine human TTY session is never delegated. `ensure_vapid_keys` (the one
-sub-step that genuinely needs `docker` to run or build an image) always
-stays in `scripts/configure.sh`, delegated or not — the containerized engine
-can never touch Docker itself (see "Fail-closed guard" above). See
-`docs/adr-notes/294-configure-write-port-plan.md` for the full design and
-its flags. No existing script's *default* observable behavior changes;
-`install.sh` and `repair.sh` are unmodified by this slice.
+| `configure.sh` flow | Engine command | Mount |
+|---|---|---|
+| (no flag) | `configure` | `:rw` |
+| `--init` | `configure --init` | `:rw` |
+| `--set-oidc-secret` | `configure --set-oidc-secret` | `:rw` |
+| `--set-deployment-profile PRESET [MODEL]` | `configure --set-deployment-profile PRESET [MODEL]` | `:rw` |
+| `--check` | `check` | `:ro` |
+| `--check-rollback` | `check --rollback` | `:ro` |
+| `--preflight`, `--migrate` | `configure --preflight`, `configure --migrate` (with `--file`; the arguments install.sh passed before #1212) | the file's directory, `:ro` and `:rw` |
+
+- The exit status and standard output are the engine's, unchanged: `--check`
+  and `--check-rollback` print the same enum-only readiness report (see
+  "Configuration readiness report (v0)") and exit codes `repair.sh` and
+  `orbit-launcher` already read.
+- VAPID keys are generated by the engine, as the last step of the bare flow
+  (`src/lib/vapid-keys.ts`); nothing in `configure.sh` builds or runs another
+  image for them.
+- A real terminal is passed through to the engine, which does all the
+  prompting itself (`--init`, `--set-oidc-secret`). The non-terminal shapes
+  are the same as before: the fully-scripted `ORBIT_CONFIGURE_*` environment
+  triad, the `ORBIT_CONFIGURE_PROMPTS=machine` grammar above, and a piped
+  secret line.
+- `repair.sh` calls `scripts/configure.sh`; `deploy-container.sh` builds or
+  pulls the image first, then runs `configure.sh`. `install.sh` no longer
+  calls it: since #1212 the install engine runs the configure engine and the
+  configuration migration in its own process.
+- `backup`, `restore` and the recovery-bundle commands use the compose-attached
+  shape above (#1211).
+
+`docs/adr-notes/294-configure-write-port-plan.md` records the design of the
+opt-in era this replaced.
 
 ## Repair stream (v0)
 
@@ -768,14 +952,13 @@ configuration-incomplete                managed-file-permissions
 configuration-invalid                   managed-file-symlink
 configuration-migration-interrupted     migration-failed
 container-foreign-owner                 not-orbit-directory
-database-below-floor                    secret-missing
-database-credential-mismatch            secret-permissions
-database-credential-unverifiable        secrets-directory-invalid
-database-schema-mismatch                staging-evidence-present
-database-unreachable                    stale-container
-deployment-version-unsupported          unrelated-resource-present
-docker-unavailable                      volume-retained-without-credentials
-document-volume-retained-without-key
+database-credential-mismatch            secret-missing
+database-credential-unverifiable        secret-permissions
+database-schema-mismatch                secrets-directory-invalid
+database-unreachable                    staging-evidence-present
+deployment-version-unsupported          stale-container
+docker-unavailable                      unrelated-resource-present
+document-volume-retained-without-key    volume-retained-without-credentials
 ```
 
 ### action, mutation and backup

@@ -5,6 +5,8 @@
 **Amended:** 2026-08-30 — the upgrade floor's tag is named as historic audit
 evidence rather than as a current scheme. Orbit publishes previews, not release
 candidates. The floor itself is unchanged.
+**Amended:** 2026-10-14 — the floor was removed in #1403; see the note under
+"Migration contract".
 
 ## Context
 
@@ -21,28 +23,23 @@ unverifiable claim of cross-resource atomicity.
 
 ## Decision
 
-### Upgrade floor and migration contract
+### Migration contract
 
-- The oldest supported pre-v1 installation is the engineering preview at
-  commit `8a8e37e2bbef770de9a203e86a674f70834e2a18`. Its migration journal ends
-  at `0017_imap_recipient_alias_index`. That preview's published image carries
-  the tag `rc-2026.07.27.96`, which is history and not a scheme: Orbit publishes
-  previews, and `rc-*` tags survive only as immutable audit evidence
-  ([ADR-0003](0003-gitflow-preview-and-stable-channels.md), `docs/releasing.md`).
-  Cite the commit when the floor is meant; cite the tag only when the published
-  artifact is meant.
-- A checked-in, synthetic fixture records that provenance, the PostgreSQL 17
-  requirement, the migration-prefix checksums and representative fake data. It
-  is not generated from a live database and contains no real identities,
-  sessions, documents or provider data.
-- Migrations at or below the supported floor are immutable. New schema changes
-  append migrations. A reviewed, independent catalogue contract verifies enum
-  labels, columns, primary/unique/foreign-key constraints, delete behaviour and
-  required indexes after both fresh and upgraded paths.
-- The current baseline-to-head upgrade is intentionally a no-op because the
-  baseline already contains migrations `0000` through `0017`. The fixture still
-  protects data and makes the next appended migration exercise a real upgrade
-  without changing the supported floor.
+> **Note (2026-10-14, #1403):** the upgrade floor this section used to define
+> (the engineering preview whose journal ended at
+> `0017_imap_recipient_alias_index`) was removed, together with the startup
+> check and the `database_below_floor` log reason that enforced it. The
+> migration history was squashed to one baseline (`0000_baseline`) in #1403, so no pre-baseline
+> database is supported and nothing in the code names a floor any more. The
+> text that stood here is in the git history.
+
+- Applied migrations are immutable. New schema changes append migrations. A
+  reviewed, independent catalogue contract verifies enum labels, columns,
+  primary/unique/foreign-key constraints, delete behaviour and required indexes
+  on a freshly migrated database.
+- A database that has product tables but no migration journal is refused at
+  startup (`migration_integrity`), as is one whose journal does not match the
+  image's migrations.
 - Re-running the migrator must be idempotent. A failed migration must return an
   actionable bounded error and must not record the failed entry as applied.
 

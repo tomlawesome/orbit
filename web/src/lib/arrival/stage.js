@@ -3,7 +3,7 @@
  *
  * Everything the arrival decides, decided in one pure file so it can be read
  * and tested without a browser: WHICH surface an authenticated reader lands
- * on, what the create card may ask, what the create command looks like, and
+ * on, what the create drawer may ask, what the create command looks like, and
  * how the newcomer's count reads.
  *
  * THE LAW THIS FILE SERVES (owner, 2026-08-16, sealed): "the first-run screen
@@ -26,15 +26,18 @@
  * @property {VisibleHousehold[]} [visibleHouseholds]
  */
 
+import { CURRENCY_FAVOURITES, REGION_CURRENCIES, ZONE_FAVOURITES, zoneLabel } from "../pick-lists.js";
+
 /** The reader is signed out, or we have not asked yet: the door is the door. */
 export const DOOR = "door";
 /** Asked, not answered. The dawn is up and the login chrome is held back, so
  *  a reader who is already through the door never sees it flash past. */
 export const ASKING = "asking";
-/** Zero households, and none out there either: the first admin names the
- *  first system (design/v19/first-run.html's create card). */
-export const CREATE = "create";
-/** Zero households on an instance that has some: the newcomer's arrival. */
+/** Zero households: the newcomer's arrival — one climb, the labelled sky and
+ *  the question, whose "name your own system" drawer holds the three create
+ *  questions (#1263). An empty instance lands here too, on a sky with nothing
+ *  in it, and gets the card with the drawer already open. There is no create
+ *  stage any more: the arrival flies once, and never again on /home. */
 export const NEWCOMER = "newcomer";
 /** A member. Home is theirs; the door hands them on to it. */
 export const ONWARD = "onward";
@@ -58,7 +61,9 @@ export const INVITED = "invited";
 export function arrivalStageOf(workspace) {
   if (!workspace) return ASKING;
   if ((workspace.households ?? []).length > 0) return ONWARD;
-  return (workspace.visibleHouseholds ?? []).length > 0 ? NEWCOMER : CREATE;
+  /* #1263: an empty instance is a newcomer's arrival too, on an empty sky —
+     the first administrator names their system in the belong card's drawer. */
+  return NEWCOMER;
 }
 
 /**
@@ -134,25 +139,19 @@ function normaliseName(name) {
 
 /**
  * The three questions, and only the three (§15, "first-run asks three things
- * only"). The lists are design/v19/first-run.html's own, in its own order,
- * because the card is ported pixel for pixel and a select's first option is
- * what the frame shows.
+ * only"). The card offers the six favourites of the shared pick-lists
+ * (`$lib/pick-lists.js`, #1338), in their order, because the card is ported
+ * pixel for pixel and a select's first option is what the frame shows. The
+ * full lists live on the household screen, where the card says every one of
+ * these answers moves to.
  *
  * `label` is what the sheet prints; `value` is what a server can act on. They
- * differ in exactly one place — the sheet writes "America/New York" where the
- * zone database writes "America/New_York" — and the reader is shown the
- * sheet's word.
+ * differ in exactly one place — an underscore in a zone reads as a space
+ * (New York is shown with a space where the zone database has an underscore).
  */
-export const TIME_ZONES = [
-  { value: "Europe/London", label: "Europe/London" },
-  { value: "Europe/Dublin", label: "Europe/Dublin" },
-  { value: "Europe/Paris", label: "Europe/Paris" },
-  { value: "America/New_York", label: "America/New York" },
-  { value: "Australia/Sydney", label: "Australia/Sydney" },
-  { value: "UTC", label: "UTC" },
-];
+export const TIME_ZONES = ZONE_FAVOURITES.map((value) => ({ value, label: zoneLabel(value) }));
 
-export const CURRENCIES = ["GBP", "EUR", "USD", "CAD", "AUD", "NZD"];
+export const CURRENCIES = CURRENCY_FAVOURITES;
 
 /** The name the field will take, bounded the way the server bounds it. */
 export const NAME_LIMIT = 60;
@@ -172,6 +171,22 @@ export function preferredTimeZone(detected) {
   return TIME_ZONES.some((zone) => zone.value === detected)
     ? /** @type {string} */ (detected)
     : TIME_ZONES[0].value;
+}
+
+/**
+ * The browser's currency, by its language's region, or null when the region
+ * is absent or not one Orbit maps. One copy for the card and its host, so the
+ * helper's claim and the chosen value cannot disagree (#1316).
+ * @returns {string | null}
+ */
+export function browserCurrency() {
+  try {
+    const region = new Intl.Locale(navigator.language).region;
+    if (!region) return null;
+    return REGION_CURRENCIES[region] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** @param {string | null} [detected] */

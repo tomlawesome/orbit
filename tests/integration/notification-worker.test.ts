@@ -1,9 +1,10 @@
+import { randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { and, eq, sql } from "drizzle-orm";
-import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
+import { accountAddressColumns, cleanupIntegrationEnvironment, createIntegrationFixture, encryptedItemColumns, type IntegrationFixture } from "./support/fixtures";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import {
@@ -746,11 +747,15 @@ describe("notification worker PostgreSQL contracts", () => {
     // test fast at a row count large enough to make an unbounded scan obvious.
     const farRowCount = 60;
     const farItems = await getDb().insert(items).values(
-      Array.from({ length: farRowCount }, (_, index) => ({
-        householdId: fixture.household.id,
-        sectionId: fixture.section.id,
-        title: `Far future item ${index}`,
-        currency: "GBP",
+      await Promise.all(Array.from({ length: farRowCount }, async (_, index) => {
+        const id = randomUUID();
+        return {
+          id,
+          householdId: fixture.household.id,
+          sectionId: fixture.section.id,
+          ...await encryptedItemColumns(fixture.household.id, id, { title: `Far future item ${index}` }),
+          currency: "GBP",
+        };
       })),
     ).returning({ id: items.id });
     await getDb().insert(dueEvents).values(
@@ -1069,5 +1074,141 @@ describe("notification worker PostgreSQL contracts", () => {
     expect(deliveries).toHaveLength(1);
     expect(deliveries[0].scheduledFor.toISOString()).toBe(finalWarningTime.toISOString());
     expect(deliveries[0].status).toBe("sent");
+  });
+});
+
+/*
+ * P-34: a reminder whose recipient address or item title cannot be read is
+ * left for a later cycle, "neither consumed nor cancelled". The unreadable
+ * read is a repairable fault, so it must not use up the delivery's attempts:
+ * a key locked for a quarter of an hour would otherwise turn every reminder
+ * that came due into a permanently failed row, and nothing claims a failed
+ * row again.
+ */
+describe("P-34: an unreadable recipient address or item title defers the reminder", () => {
+  const maxAttempts = 3;
+  const stepMs = 30 * 60_000;
+  let leaseSequence = 700;
+
+  function corruptValue(): string {
+    return randomBytes(48).toString("base64");
+  }
+
+  async function corruptAddress(fixture: IntegrationFixture) {
+    await getDb().update(users).set({ emailEnc: corruptValue() }).where(eq(users.id, fixture.users.owner.id));
+  }
+
+  async function repairAddress(fixture: IntegrationFixture) {
+    const columns = await accountAddressColumns(fixture.users.owner.id, fixture.users.owner.email);
+    await getDb().update(users).set({ emailEnc: columns.emailEnc }).where(eq(users.id, fixture.users.owner.id));
+  }
+
+  async function corruptTitle(fixture: IntegrationFixture) {
+    await getDb().update(items).set({ titleEnc: corruptValue() }).where(eq(items.id, fixture.item.id));
+  }
+
+  async function repairTitle(fixture: IntegrationFixture) {
+    const columns = await encryptedItemColumns(fixture.household.id, fixture.item.id, { title: "Repaired reminder title" });
+    await getDb().update(items).set({ titleEnc: columns.titleEnc }).where(eq(items.id, fixture.item.id));
+  }
+
+  /** One cycle at `cycleTime + step * stepMs`; returns what the mail stub sent to this recipient. */
+  async function cycleAt(fixture: IntegrationFixture, step: number): Promise<string[]> {
+    const sent: string[] = [];
+    leaseSequence += 1;
+    await runNotificationCycle(workerConfig({ maxAttempts }), {
+      now: () => new Date(cycleTime.getTime() + step * stepMs),
+      providers: fakeProviders((notification) => {
+        if (notification.to === fixture.users.owner.email) sent.push(notification.to);
+      }),
+      nextLeaseToken: () => deterministicLeaseToken(leaseSequence),
+    });
+    return sent;
+  }
+
+  async function runUnreadableCycles(fixture: IntegrationFixture): Promise<string[]> {
+    const sent: string[] = [];
+    for (let step = 0; step < maxAttempts + 2; step += 1) {
+      sent.push(...await cycleAt(fixture, step));
+    }
+    return sent;
+  }
+
+  it("keeps the row in retry, without spending attempts, while the recipient address is unreadable", async () => {
+    const fixture = await ownerOnlyFixture("worker-p34-address-retry");
+    const eventId = await seedEvent(fixture, { pushEnabled: false });
+    await corruptAddress(fixture);
+
+    const sent = await runUnreadableCycles(fixture);
+
+    const delivery = await deliveryForEvent(eventId);
+    expect(delivery?.status).toBe("retry");
+    expect(delivery?.attempts).toBeLessThanOrEqual(1);
+    expect(delivery?.lastError).toBe("recipient_address_unreadable");
+    expect(sent).toEqual([]);
+  });
+
+  it("sends the reminder once the recipient address is readable again", async () => {
+    const fixture = await ownerOnlyFixture("worker-p34-address-repair");
+    const eventId = await seedEvent(fixture, { pushEnabled: false });
+    await corruptAddress(fixture);
+    expect(await runUnreadableCycles(fixture)).toEqual([]);
+
+    await repairAddress(fixture);
+    const sent = await cycleAt(fixture, maxAttempts + 2);
+
+    expect(sent).toEqual([fixture.users.owner.email]);
+    expect((await deliveryForEvent(eventId))?.status).toBe("sent");
+  });
+
+  it("keeps the row in retry, without spending attempts, while the item title is unreadable", async () => {
+    const fixture = await ownerOnlyFixture("worker-p34-title-retry");
+    const eventId = await seedEvent(fixture, { pushEnabled: false });
+    await corruptTitle(fixture);
+
+    const sent = await runUnreadableCycles(fixture);
+
+    const delivery = await deliveryForEvent(eventId);
+    expect(delivery?.status).toBe("retry");
+    expect(delivery?.attempts).toBeLessThanOrEqual(1);
+    expect(delivery?.lastError).toBe("item_title_unreadable");
+    expect(sent).toEqual([]);
+  });
+
+  it("sends the reminder once the item title is readable again", async () => {
+    const fixture = await ownerOnlyFixture("worker-p34-title-repair");
+    const eventId = await seedEvent(fixture, { pushEnabled: false });
+    await corruptTitle(fixture);
+    expect(await runUnreadableCycles(fixture)).toEqual([]);
+
+    await repairTitle(fixture);
+    const sent = await cycleAt(fixture, maxAttempts + 2);
+
+    expect(sent).toEqual([fixture.users.owner.email]);
+    expect((await deliveryForEvent(eventId))?.status).toBe("sent");
+  });
+
+  it("guard: a provider that keeps throwing still ends in failed at the attempt bound", async () => {
+    const fixture = await ownerOnlyFixture("worker-p34-provider-guard");
+    const eventId = await seedEvent(fixture, { pushEnabled: false });
+    let calls = 0;
+
+    for (let step = 0; step < maxAttempts + 2; step += 1) {
+      leaseSequence += 1;
+      await runNotificationCycle(workerConfig({ maxAttempts }), {
+        now: () => new Date(cycleTime.getTime() + step * stepMs),
+        providers: fakeProviders((notification) => {
+          if (notification.to !== fixture.users.owner.email) return;
+          calls += 1;
+          throw { code: "ETIMEDOUT", message: "private smtp detail" };
+        }),
+        nextLeaseToken: () => deterministicLeaseToken(leaseSequence),
+      });
+    }
+
+    const delivery = await deliveryForEvent(eventId);
+    expect(delivery?.status).toBe("failed");
+    expect(delivery?.attempts).toBe(maxAttempts);
+    expect(calls).toBe(maxAttempts);
   });
 });

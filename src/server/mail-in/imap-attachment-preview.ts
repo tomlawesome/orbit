@@ -2,8 +2,9 @@ import { and, eq, gt } from "drizzle-orm";
 import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import { envelopeOf } from "@/server/documents/crypto";
 import { renderDocumentPagePreview, type DocumentPagePreview } from "@/server/documents/preview";
-import { validUuid } from "@/server/workspace-access";
+import { validUuid } from "@/lib/uuid";
 import { readHeldImapAttachment } from "./imap-attachment-holding";
 import { privateMailboxUser } from "./imap-inbox";
 
@@ -12,9 +13,10 @@ function inboxReceiptNotFound(): AppError {
 }
 
 /**
- * A page-one picture of an attachment still staged inside a waiting mail
- * receipt (#1155) — decrypted under the same holding context acceptance
- * uses, rendered by the same `renderDocumentPagePreview` an accepted
+ * A picture of one page (page one unless asked otherwise, #1300) of an
+ * attachment still staged inside a waiting mail receipt (#1155) — decrypted
+ * under the same holding context acceptance uses, rendered by the same
+ * `renderDocumentPagePreview` an accepted
  * document's preview uses, and answered only to the recipient the mail is
  * addressed to. No `documents` row is read or created; acceptance is
  * unchanged.
@@ -36,6 +38,7 @@ export async function readHeldImapAttachmentPreview(
   userId: string,
   receiptId: string,
   attachmentId: string,
+  page = 1,
 ): Promise<DocumentPagePreview> {
   const user = await privateMailboxUser(userId);
   if (user.isInstanceAdmin) throw inboxReceiptNotFound();
@@ -75,16 +78,7 @@ export async function readHeldImapAttachmentPreview(
       mediaType: row.mediaType,
       sizeBytes: row.sizeBytes,
       storageKey: row.storageKey,
-      envelope: {
-        envelopeVersion: row.envelopeVersion as 1,
-        algorithm: "aes-256-gcm",
-        contentIv: row.contentIv,
-        contentAuthTag: row.contentAuthTag,
-        wrappedDek: row.wrappedDek,
-        wrapIv: row.wrapIv,
-        wrapAuthTag: row.wrapAuthTag,
-        keyId: row.keyId,
-      },
+      envelope: envelopeOf(row),
     }, { recipientUserId: userId, receiptId });
   } catch (error) {
     // A concurrent purge or discard can remove the ciphertext between the
@@ -100,7 +94,7 @@ export async function readHeldImapAttachmentPreview(
     // The row's real mediaType, not reviewAttachmentMediaType() -- that one
     // narrows to pdf/octet-stream for the list display and would misdraw
     // (or wrongly refuse) anything else the renderer actually supports.
-    return await renderDocumentPagePreview(bytes, row.mediaType);
+    return await renderDocumentPagePreview(bytes, row.mediaType, page);
   } finally {
     bytes.fill(0);
   }

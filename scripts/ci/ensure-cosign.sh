@@ -21,6 +21,16 @@
 # stderr. An already-installed cosign of exactly the pinned version is used as
 # is; anything else is downloaded, checksum-verified and cached under
 # ORBIT_COSIGN_DIR (default: .orbit-cosign/ in the repository root).
+#
+# Except on the signing path (#1368): with the signing key in reach it never
+# downloads. The signing path is keyed on the key mount itself --
+# ORBIT_SIGNING_DIR set, as sign_evidence sets it for both signing scripts,
+# or the runner's mount point /etc/orbit-signing present -- never on a
+# variable an image could set. There the pinned cosign must already be on
+# PATH, baked into sign_evidence's $ORBIT_SIGNING_IMAGE by
+# ai/orbit-base-image's Dockerfile.signing; anything else is refused. The
+# download below stays for every other caller: publish_channel's and
+# promote_stable's verifiers, and local runs, none of which can reach the key.
 set -Eeuo pipefail
 
 # Renovate bumps COSIGN_VERSION on its own (renovate.json's custom regex
@@ -32,9 +42,18 @@ readonly COSIGN_VERSION="3.1.3"
 readonly COSIGN_SHA256="4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71"
 readonly COSIGN_URL="https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-amd64"
 
+# Where the orbit-signing runner mounts the key (docs/releasing.md).
+readonly SIGNING_MOUNT="/etc/orbit-signing"
+
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 
 fail() { printf 'ensure-cosign: %s\n' "$1" >&2; exit 1; }
+
+signing_path=false
+if [[ -n "${ORBIT_SIGNING_DIR:-}" || -e "$SIGNING_MOUNT" ]]; then
+  signing_path=true
+fi
+installed=""
 
 # A cosign already on PATH is only trusted at exactly the pinned version:
 # "some cosign" is not a pin.
@@ -46,8 +65,22 @@ if command -v cosign > /dev/null 2>&1; then
     command -v cosign
     exit 0
   fi
-  printf 'ensure-cosign: PATH has cosign %s, not the pinned %s; installing the pin.\n' \
-    "${installed:-<unknown>}" "$COSIGN_VERSION" >&2
+  if [[ "$signing_path" == false ]]; then
+    printf 'ensure-cosign: PATH has cosign %s, not the pinned %s; installing the pin.\n' \
+      "${installed:-<unknown>}" "$COSIGN_VERSION" >&2
+  fi
+fi
+
+# Checked before the cache as well as the download: on the signing path the
+# only cosign trusted is the one the signing image was built with, and no
+# directory is created for a download that will not happen.
+if [[ "$signing_path" == true ]]; then
+  if command -v cosign > /dev/null 2>&1; then
+    found="cosign ${installed:-<unknown version>} on PATH"
+  else
+    found="no cosign on PATH"
+  fi
+  fail "refusing to download cosign with the signing key in reach (${ORBIT_SIGNING_DIR:-$SIGNING_MOUNT}): found ${found}, need v${COSIGN_VERSION}. sign_evidence must run on \$ORBIT_SIGNING_IMAGE, which bakes in this exact cosign (ai/orbit-base-image Dockerfile.signing, #1368); if the pin moved here, rebuild that image and re-pin it."
 fi
 
 cache_dir="${ORBIT_COSIGN_DIR:-${repo_root}/.orbit-cosign}"

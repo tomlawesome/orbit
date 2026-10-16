@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useScratchTemporaryDirectory, type ScratchDirectory } from "../../tests/support/scratch-directory";
 import { syntheticPdf } from "../../tests/support/synthetic-documents";
+import { syntheticPdfWithNumberedPages } from "../../tests/support/generated-pdf-documents";
 
 /**
  * The page-one preview's authorization and plaintext boundary (#476).
@@ -60,16 +61,21 @@ vi.mock("@/server/documents/config", async (importActual) => ({
   ...await importActual<typeof import("@/server/documents/config")>(),
   getDocumentConfig: mocks.config,
 }));
-vi.mock("@/server/documents/crypto", () => ({
+vi.mock("@/server/documents/crypto", async (importActual) => ({
+  envelopeOf: (await importActual<typeof import("@/server/documents/crypto")>()).envelopeOf,
   decryptDocument: mocks.decryptDocument,
   encryptDocument: vi.fn(),
 }));
-vi.mock("@/server/documents/storage", () => ({
-  LocalDocumentStorage: class {
+vi.mock("@/server/documents/storage", () => {
+  class LocalDocumentStorage {
     readCiphertext = mocks.readCiphertext;
     ciphertextExists = vi.fn();
-  },
-}));
+  }
+  return {
+    LocalDocumentStorage,
+    openDocumentStorage: () => new LocalDocumentStorage(),
+  };
+});
 
 import { readDocumentPagePreview } from "./document-preview";
 
@@ -128,9 +134,15 @@ function cryptoRow() {
   };
 }
 
+/** The document row, plus the household gate's answer from the users table. */
+function seedAccess(row: { administrator: boolean; membershipUserId: unknown }): void {
+  mocks.rows.documents = [row];
+  mocks.rows.users = [{ administrator: row.administrator, role: row.membershipUserId ? "member" : null }];
+}
+
 /** Arranges a readable document whose plaintext is the supplied bytes. */
 function arrangeReadable(plaintext: Buffer, rowOverrides: Record<string, unknown> = {}): Buffer {
-  mocks.rows.users = [accessRow(rowOverrides)];
+  seedAccess(accessRow(rowOverrides));
   mocks.rows.document_crypto = [cryptoRow()];
   mocks.readCiphertext.mockResolvedValue(Buffer.alloc(plaintext.length + 64));
   mocks.decryptDocument.mockReturnValue(plaintext);
@@ -164,7 +176,7 @@ describe("readDocumentPagePreview", () => {
   });
 
   it("refuses a document in a household the reader does not belong to, before any decryption", async () => {
-    mocks.rows.users = [accessRow({ administrator: false, membershipUserId: null })];
+    seedAccess(accessRow({ administrator: false, membershipUserId: null }));
     mocks.rows.document_crypto = [cryptoRow()];
 
     await expect(readDocumentPagePreview(READER, DOCUMENT)).rejects.toMatchObject({
@@ -173,22 +185,24 @@ describe("readDocumentPagePreview", () => {
       message: "That document is not available",
     });
 
-    // Only the authorization lookup ran: the crypto row was never read, so
-    // nothing reached storage, decryption or the renderer.
-    expect(mocks.fromNames).toEqual(["users"]);
+    // Only the authorization lookups ran (the document, then the household
+    // gate): the crypto row was never read, so nothing reached storage,
+    // decryption or the renderer.
+    expect(mocks.fromNames).toEqual(["documents", "users"]);
     expect(mocks.readCiphertext).not.toHaveBeenCalled();
     expect(mocks.decryptDocument).not.toHaveBeenCalled();
     expect(mocks.audits).toEqual([]);
   });
 
-  it("refuses a document that no household row matched at all", async () => {
+  it("refuses a document that no household access row matched at all", async () => {
+    mocks.rows.documents = [accessRow()];
     mocks.rows.users = [];
 
     await expect(readDocumentPagePreview(READER, DOCUMENT)).rejects.toMatchObject({
       code: "document_not_found",
       status: 404,
     });
-    expect(mocks.fromNames).toEqual(["users"]);
+    expect(mocks.fromNames).toEqual(["documents", "users"]);
   });
 
   it("refuses a malformed document identifier the same bounded way as an unknown one", async () => {
@@ -234,6 +248,19 @@ describe("readDocumentPagePreview", () => {
 
     expect(plaintext.every((byte) => byte === 0)).toBe(true);
     expect(scratch.entries()).toEqual([]);
+  });
+
+  it("draws the page asked for and says how many there are; past the end is refused, and still zeroed (#1300)", async () => {
+    arrangeReadable(syntheticPdfWithNumberedPages(3));
+    const second = await readDocumentPagePreview(READER, DOCUMENT, 2);
+    expect(second).toMatchObject({ mediaType: "image/png", pageCount: 3 });
+
+    const plaintext = arrangeReadable(syntheticPdfWithNumberedPages(3));
+    await expect(readDocumentPagePreview(READER, DOCUMENT, 4)).rejects.toMatchObject({
+      code: "document_preview_page_not_found",
+      status: 404,
+    });
+    expect(plaintext.every((byte) => byte === 0)).toBe(true);
   });
 
   it("zeroes the decrypted plaintext even when the document cannot be previewed", async () => {

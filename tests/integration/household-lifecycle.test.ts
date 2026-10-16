@@ -6,7 +6,6 @@ import { getDb } from "@/db";
 import {
   auditLog,
   documentCrypto,
-  documentDrafts,
   documents,
   documentStagingObjects,
   households,
@@ -37,8 +36,6 @@ const { GET: workspace } = await loadRoute("workspace");
 const { GET: listDocuments, POST: uploadDocument } = await loadRoute("households/[householdId]/items/[itemId]/documents");
 const { DELETE: deleteDocument } = await loadRoute("documents/[documentId]");
 const { GET: downloadDocument } = await loadRoute("documents/[documentId]/download");
-const { POST: createDocumentDraft } = await loadRoute("documents/[documentId]/draft");
-const { POST: approveDocumentDraft } = await loadRoute("document-drafts/[draftId]/approve");
 const { POST: createArchive } = await loadRoute("households/[householdId]/portable-archives");
 const { GET: downloadArchive } = await loadRoute("portable-archives/[archiveId]/download");
 
@@ -65,10 +62,6 @@ function documentContext(documentId: string) {
 
 function archiveContext(archiveId: string) {
   return { archiveId };
-}
-
-function draftContext(draftId: string) {
-  return { draftId };
 }
 
 function householdContext(householdId: string) {
@@ -199,13 +192,13 @@ async function uploadStagedDocument(fixture: Awaited<ReturnType<typeof createInt
 }
 
 describe("transactional household lifecycle", () => {
-  it("requires exact confirmation and rechecks active authority inside the mutation", async () => {
+  it("requires the right name as confirmation and rechecks active authority inside the mutation", async () => {
     const fixture = await createIntegrationFixture("lifecycle-confirmation");
     const member = await fixture.session("member");
     const outsider = await fixture.session("outsider");
     const beforeAudit = await fixture.auditCount(fixture.household.id);
 
-    await expect(requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, ` ${fixture.household.name} `))
+    await expect(requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, `${fixture.household.name} too`))
       .rejects.toMatchObject({ code: "household_confirmation_failed" });
     await expect(requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, ""))
       .rejects.toMatchObject({ code: "household_confirmation_failed" });
@@ -245,14 +238,6 @@ describe("transactional household lifecycle", () => {
       passphrase: "integration-passphrase",
       includeDocuments: false,
     });
-    const [draft] = await getDb().insert(documentDrafts).values({
-      documentId,
-      householdId: fixture.household.id,
-      requestedByUserId: fixture.users.member.id,
-      extractedTextSha256: "0".repeat(64),
-      evidence: { excerpt: "private lifecycle evidence", characters: 26 },
-      proposal: { title: "Private lifecycle proposal" },
-    }).returning({ id: documentDrafts.id });
 
     const [first, second] = await Promise.allSettled([
       requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, fixture.household.name),
@@ -303,31 +288,8 @@ describe("transactional household lifecycle", () => {
     });
     await expectApiError(deniedDocumentDeletion, 404, "document_not_found");
 
-    const hiddenDraft = await callRouteForSession(createDocumentDraft, member, {
-      url: "http://127.0.0.1:3000/api/documents/draft",
-      method: "POST",
-      params: documentContext(documentId),
-    });
-    await expectApiError(hiddenDraft, 404, "document_not_found");
-
-    const deniedDraftApproval = await callRouteForSession(approveDocumentDraft, member, {
-      url: "http://127.0.0.1:3000/api/document-drafts/approve",
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        sectionId: fixture.section.id,
-        title: "Should not be created",
-        provider: null,
-        reference: null,
-        mode: "create",
-      }),
-      params: draftContext(draft.id),
-    });
-    await expectApiError(deniedDraftApproval, 404, "document_not_found");
     expect(await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId)))
       .toEqual([{ lifecycle: "available" }]);
-    expect(await getDb().select({ id: items.id }).from(items).where(eq(items.title, "Should not be created")))
-      .toHaveLength(0);
 
     await expect(requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, fixture.household.name))
       .rejects.toMatchObject({ code: "household_deletion_pending" });
@@ -453,7 +415,7 @@ describe("transactional household lifecycle", () => {
       .rejects.toMatchObject({ code: "household_not_found" });
     await getDb().update(users).set({ disabledAt: null }).where(eq(users.id, fixture.users.admin.id));
 
-    await expect(hardDeleteHousehold(fixture.users.admin.id, fixture.household.id, ` ${fixture.household.name} `))
+    await expect(hardDeleteHousehold(fixture.users.admin.id, fixture.household.id, `${fixture.household.name} too`))
       .rejects.toMatchObject({ code: "household_hard_delete_confirmation_failed" });
     await hardDeleteHousehold(fixture.users.admin.id, fixture.household.id, fixture.household.name);
 

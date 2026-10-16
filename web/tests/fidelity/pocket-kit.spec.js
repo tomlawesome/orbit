@@ -249,23 +249,27 @@ test("sheets: dragging the handle down dismisses", async ({ page }) => {
   await expect(dialog).toBeHidden();
 });
 
-test("the hatch: the orb opens the account sheet; sign-out arms", async ({ page }) => {
+test("the hatch: the orb opens the account sheet; sign-out is one tap", async ({ page }) => {
   await open(page);
   const orb = page.getByRole("button", { name: "Account and menu" });
   await orb.tap();
   const hatch = page.getByRole("dialog", { name: "Emma Harlow" });
   await expect(hatch).toBeVisible();
-  for (const name of ["Add an item", "Items", "Inbox", "Settings"])
+  for (const name of ["Add an item", "Inbox", "Settings"])
     await expect(hatch.getByRole("link", { name, exact: true })).toBeVisible();
+  /* #1319 stage 3b: the belt's "Items" front door went with the belt; an
+     item is managed in its drawer on home. */
+  await expect(hatch.getByRole("link", { name: "Items", exact: true })).toHaveCount(0);
   /* The fixtures instance has no session, so no admin. */
   await expect(hatch.getByRole("link", { name: "Administration" })).toHaveCount(0);
   await page.waitForTimeout(350);
   expect(await floors(page, "[role=dialog]")).toEqual([]);
   await shot(page, "09-hatch");
-  await hatch.getByRole("button", { name: "sign out →" }).tap();
-  await expect(hatch.getByRole("button", { name: "tap again to sign out" })).toBeVisible();
-  await page.waitForTimeout(200);
-  await shot(page, "10-hatch-signout-armed");
+  /* one tap, not arm-then-fire (owner, 2026-10-06): it is a plain pill,
+     never an arming one, and it is not tapped here (it would sign out) */
+  const signOut = hatch.getByRole("button", { name: "sign out →" });
+  await expect(signOut).toBeVisible();
+  await expect(signOut).not.toHaveClass(/\barm\b/);
   await page.keyboard.press("Escape");
   await expect(hatch).toBeHidden();
   await expect(orb).toBeFocused();

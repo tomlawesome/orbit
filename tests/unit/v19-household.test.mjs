@@ -10,15 +10,15 @@ import {
   entriesLabel,
   householdScreenOf,
   householdUpdateCommandOf,
-  initialsOf,
   invitationRowsOf,
   sectionRowsOf,
-  sectionsCommandOf,
+  sectionCommandsOf,
 } from "../../web/src/lib/data/household.js";
+import { initials as initialsOf } from "../../web/src/lib/format.js";
 import { WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
 import { MEMBERS_FIXTURE } from "../../web/src/lib/data/fixtures/household.js";
 
-const TOM = { id: "u-fixture", displayName: "Ned Harlow", email: "ned@harlow.example" };
+const NED = { id: "u-fixture", displayName: "Ned Harlow", email: "ned@harlow.example" };
 const TODAY = "2026-08-13"; // DESIGN_TODAY: the date every mockup was drawn against
 const NOON = "2026-08-13T12:00:00Z";
 
@@ -28,7 +28,7 @@ const ownerScreen = (overrides = {}) =>
   householdScreenOf({
     workspace: WORKSPACE_FIXTURE,
     householdId: "hh-harlow-1",
-    user: TOM,
+    user: NED,
     members: MEMBERS_FIXTURE["hh-harlow-1"].members,
     candidates: MEMBERS_FIXTURE["hh-harlow-1"].candidates,
     today: TODAY,
@@ -38,7 +38,7 @@ const ownerScreen = (overrides = {}) =>
 
 describe("initials", () => {
   it("takes two letters from a chosen display name", () => {
-    expect(initialsOf("Ned Harlow")).toBe("TL");
+    expect(initialsOf("Ned Harlow")).toBe("NH");
     expect(initialsOf("Ada Reid")).toBe("AR");
   });
 
@@ -79,12 +79,12 @@ describe("the sections editor", () => {
     expect(entriesLabel(3)).toBe("3 entries");
   });
 
-  it("treats an archived entry as no longer sitting in its section", () => {
+  it("counts an archived entry as still sitting in its section", () => {
     const household = {
       sections: [{ id: "s-a", name: "A", icon: "home", accent: "sage", visible: true }],
       items: [{ id: "i-1", sectionId: "s-a", status: "archived" }],
     };
-    expect(sectionRowsOf(household)[0]).toMatchObject({ count: 0, removable: true });
+    expect(sectionRowsOf(household)[0]).toMatchObject({ count: 1, removable: false });
   });
 
   it("shows a section whose payload never said otherwise", () => {
@@ -116,7 +116,7 @@ describe("the sections editor", () => {
   // behind.
   it("sends the whole list in the engine's field names", () => {
     const rows = sectionRowsOf(harlow());
-    expect(sectionsCommandOf("hh-harlow-1", rows)).toEqual({
+    expect(sectionCommandsOf("hh-harlow-1", rows)).toEqual([{
       type: "sections.replace",
       householdId: "hh-harlow-1",
       sections: [
@@ -126,7 +126,7 @@ describe("the sections editor", () => {
         { id: "s-services", name: "Services", icon: "service", accent: "plum", visible: true },
         { id: "s-dates", name: "Dates & renewals", icon: "calendar", accent: "coral", visible: true },
       ],
-    });
+    }]);
   });
 
   it("never sends more sections than the schema accepts", () => {
@@ -207,7 +207,7 @@ describe("the owner's screen", () => {
       { id: "jr-2", householdId: "hh-seaside-4551", userId: "u-rob", displayName: "Rob Harlow", createdAt: "2026-08-11T12:00:00.000Z" },
     ];
     expect(ownerScreen({ joinRequests: requests }).joinRequests).toEqual([
-      { id: "jr-1", userId: "u-sue", name: "Sue Harlow", initials: "SL", waited: "2d ago" },
+      { id: "jr-1", userId: "u-sue", name: "Sue Harlow", initials: "SH", waited: "2d ago" },
     ]);
   });
 
@@ -224,7 +224,7 @@ describe("the non-owner's screen", () => {
   const memberScreen = householdScreenOf({
     workspace: WORKSPACE_FIXTURE,
     householdId: "hh-seaside-4551",
-    user: TOM,
+    user: NED,
     members: MEMBERS_FIXTURE["hh-seaside-4551"].members,
     candidates: MEMBERS_FIXTURE["hh-seaside-4551"].candidates,
     today: TODAY,
@@ -336,7 +336,7 @@ describe("invitations on the household screen", () => {
     const screen = householdScreenOf({
       workspace: WORKSPACE_FIXTURE,
       householdId: "hh-seaside-4551",
-      user: TOM,
+      user: NED,
       members: MEMBERS_FIXTURE["hh-seaside-4551"].members,
       candidates: MEMBERS_FIXTURE["hh-seaside-4551"].candidates,
       invitations: [{ ...INVITATION, householdId: "hh-seaside-4551" }],

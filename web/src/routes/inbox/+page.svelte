@@ -1,14 +1,16 @@
 <script>
   import { onMount } from "svelte";
-  import { goto } from "$app/navigation";
-  import { readInboxScreen, approveReceipt, dismissReceipt } from "$lib/data/workspace.js";
-  import { ago, agoLong } from "$lib/format.js";
+  import { approveWithOperation, dismissReceipt, readInboxScreen, wordsOf } from "$lib/data/workspace.js";
+  import { ago, agoLong, dayMonth, dayMonthYear } from "$lib/format.js";
+  import { daysWords } from "$lib/data/engine-limits.js";
   import { LOCKED, fieldState, receiptWords } from "$lib/data/metadata-status.js";
   import { papersOf, readingsOf } from "$lib/pocket/review.js";
+  import { burnsInOf } from "$lib/pocket/review.js";
   import { reasonWords } from "$lib/pocket/words.js";
-  import { daysUntil } from "$lib/data/chart.js";
+  import { BAND_VAR } from "$lib/data/bands.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
+  import { createArm } from "$lib/arm.js";
   import { resolve } from "$app/paths";
   import { SvelteMap } from "svelte/reactivity";
   import Pocket from "./pocket.svelte";
@@ -32,8 +34,15 @@
      the check. */
   const need = () => /** @type {NonNullable<typeof view>} */ (view);
 
-  /** @type {{ id: string | null, act: "approve" | "dismiss" | null }} */
-  let armed = $state({ id: null, act: null });
+  /* One arm for every receipt's two buttons (lib/arm.js), keyed "<id>:<act>":
+     4 s, scroll, Escape and a tap elsewhere put it down again. */
+  /** @type {string | boolean} */
+  let armed = $state(false);
+  const arm = createArm({ onchange: (next) => (armed = next) });
+  /** @param {{ id: string }} receipt @param {"approve" | "dismiss"} act */
+  const isArmed = (receipt, act) => armed === `${receipt.id}:${act}`;
+  /** The receipt whose last act failed, so its problem line stays up. */
+  let problemId = $state(/** @type {string | null} */ (null));
   /** @type {string | null} */
   let busy = $state(null);
   /** @type {string | null} */
@@ -45,54 +54,43 @@
    * receipt or a failed-to-process entry alike, both of which call in.
    * @param {{ id: string }} receipt
    * @param {"approve" | "dismiss"} act
+   * @param {HTMLElement | null} button
    */
-  async function tap(receipt, act) {
+  async function tap(receipt, act, button) {
     problem = null;
-    if (armed.id !== receipt.id || armed.act !== act) {
-      armed = { id: receipt.id, act };
-      return;
-    }
+    if (!arm.tap(`${receipt.id}:${act}`, button)) return;
     busy = receipt.id;
     try {
       if (act === "approve") {
         const found = need().suggestions.find((one) => one.receiptId === receipt.id);
-        if (!operationIds.has(receipt.id)) operationIds.set(receipt.id, crypto.randomUUID());
         /* The review lane's own receipts are exactly receiptSuggestionsOf's
            input, so a receipt armed to approve is always found here. */
         const suggestion = /** @type {import('$lib/data/workspace.js').ReceiptSuggestion} */ (found);
-        const result = await approveReceipt(suggestion, need().primary, operationIds.get(receipt.id));
-        if (result.outcome === "partial_success") {
-          problem = "The item is recorded, but its documents need another try — tap again to finish.";
+        const result = await approveWithOperation(suggestion, operationIds, need().primary);
+        if ("partial" in result) {
+          problem = result.message;
+          problemId = receipt.id;
           return;
         }
-        operationIds.delete(receipt.id);
       } else {
         await dismissReceipt(receipt.id);
       }
-      armed = { id: null, act: null };
       view = await readInboxScreen();
     } catch (error) {
-      problem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      problem = wordsOf(error);
+      problemId = receipt.id;
     } finally {
       busy = null;
     }
   }
 
-  /** @param {string} iso */
-  const short = (iso) =>
-    new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
-  /** @param {string} iso */
-  const fullDate = (iso) =>
-    new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
   /* Filed dates carry their year only once it stops being obvious. */
   /** @param {string} iso */
   const filedDate = (iso) =>
-    iso.slice(0, 4) === need().today.slice(0, 4) ? short(iso) : fullDate(iso);
+    iso.slice(0, 4) === need().today.slice(0, 4) ? dayMonth(iso) : dayMonthYear(iso);
   /* The filed dot follows the chart key — the item's urgency band, today. */
-  /** @type {Record<string, string>} */
-  const TONES = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", unscheduled: "--ink-faint" };
   /** @param {import('$lib/data/workspace.js').Receipt} receipt */
-  const burnsIn = (receipt) => daysUntil(/** @type {string} */ (receipt.expiresAt).slice(0, 10), need().today);
+  const burnsIn = (receipt) => burnsInOf(receipt, need().today);
   /* "Still reading" only ever holds receipts that have already arrived. */
   /** @param {import('$lib/data/workspace.js').Receipt} receipt */
   const readAgo = (receipt) => agoLong(/** @type {string} */ (receipt.receivedAt), need().now);
@@ -129,8 +127,7 @@
 </div>
 <div class="vignette" aria-hidden="true"></div>
 
-<Chrome user={view?.user} current="inbox"
-        role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
+<Chrome user={view?.user} current="inbox" household={view?.household} />
 
 <!-- #1120, proposal §2.6: the pocket's own inbox, chosen by CSS. -->
 <Pocket bind:view />
@@ -148,8 +145,8 @@
       <div class="group">
         <h2>Filed{view.filed.length ? ` · ${view.filed.length}` : ""}</h2>
         {#each view.filed as entry (entry.itemId)}
-          <a class="item" href={resolve("/item/[[id]]", { id: entry.itemId })}>
-            <span class="dot" style="background:var({TONES[entry.band]})" aria-hidden="true"></span>
+          <a class="item" href={resolve(`/home?item=${encodeURIComponent(entry.itemId)}`)}>
+            <span class="dot" style="background:var({BAND_VAR[entry.band]})" aria-hidden="true"></span>
             <div class="flex"><b>{entry.title}</b><span>from {entry.sourceDocument} · added {filedDate(/** @type {string} */ (entry.filedAt))}</span></div>
           </a>
         {/each}
@@ -171,7 +168,7 @@
             <div class="head">
               <span class="dot" aria-hidden="true"></span>
               <b>{receipt.proposal?.title ?? "Forwarded email"}</b>
-              <small>caught {short(/** @type {string} */ (receipt.receivedAt))} · <span class="exp">burns up in {burnsIn(receipt)}d</span></small>
+              <small>caught {dayMonth(/** @type {string} */ (receipt.receivedAt))}{#if burnsIn(receipt) !== null} · <span class="exp">burns up in {burnsIn(receipt)}d</span>{/if}</small>
             </div>
             <div class="fields">
               {#each readingsOf(receipt) as reading (reading.field)}
@@ -180,10 +177,9 @@
               {/each}
             </div>
             {#each papersOf(receipt) as paper (paper.id ?? paper.name)}
-              {@const itemHref = resolve("/item/[[id]]", { id: receipt.id })}
               {#if paper.drawable}
-                <a class="attach" href={itemHref}
-                   onclick={(event) => { event.preventDefault(); goto(itemHref, { state: { pocketPaper: paper.id } }); }}>
+                <!-- #1319: the suggestion's home drawer, where its paper opens the preview -->
+                <a class="attach" href={resolve(`/home?item=${encodeURIComponent(receipt.id)}`)}>
                   ◆ <span class="name">{paper.name}</span>{#if paper.meta} · {paper.meta}{/if}{#if paper.clean} · <span class="clean">scanned clean</span>{/if} · <span class="view">view →</span>
                 </a>
               {:else}
@@ -197,18 +193,18 @@
               <div class="twotap" style="margin-top:10px">{unreadable(receipt)}</div>
             {/if}
             <div class="actions">
-              <button class="yes" disabled={busy === receipt.id || locked(receipt)} onclick={() => tap(receipt, "approve")}>
-                {armed.id === receipt.id && armed.act === "approve" ? "tap again to approve" : "Add to orbit"}
+              <button class="yes" disabled={busy === receipt.id || locked(receipt)} onclick={(event) => tap(receipt, "approve", event.currentTarget)}>
+                {isArmed(receipt, "approve") ? "tap again to approve" : "Add to orbit"}
               </button>
-              <button disabled={busy === receipt.id} onclick={() => tap(receipt, "dismiss")}>
-                {armed.id === receipt.id && armed.act === "dismiss" ? "tap again to dismiss" : "Dismiss"}
+              <button disabled={busy === receipt.id} onclick={(event) => tap(receipt, "dismiss", event.currentTarget)}>
+                {isArmed(receipt, "dismiss") ? "tap again to dismiss" : "Dismiss"}
               </button>
               <span class="twotap">— both ask twice</span>
               {#if !locked(receipt)}
-                <a href={resolve("/item/[[id]]", { id: receipt.id })}>review &amp; amend →</a>
+                <a href={resolve(`/home?item=${encodeURIComponent(receipt.id)}`)}>review &amp; amend →</a>
               {/if}
             </div>
-            {#if problem && armed.id === receipt.id}
+            {#if problem && problemId === receipt.id}
               <div class="mail-problem">{problem}</div>
             {/if}
           </div>
@@ -240,12 +236,12 @@
           <div class="failed">
             <i aria-hidden="true"></i>
             <div class="body">
-              <b>A message from {short(failure.receivedAt)}</b>
+              <b>A message from {dayMonth(failure.receivedAt)}</b>
               <span>{unreadable(failure) ?? `${reasonWords(failure.reason)} · ${failure.message}`}</span>
             </div>
             {#if failure.canDiscard}
-              <button disabled={busy === failure.id} onclick={() => tap(failure, "dismiss")}>
-                {armed.id === failure.id && armed.act === "dismiss" ? "tap again to remove" : "remove"}
+              <button disabled={busy === failure.id} onclick={(event) => tap(failure, "dismiss", event.currentTarget)}>
+                {isArmed(failure, "dismiss") ? "tap again to remove" : "remove"}
               </button>
             {/if}
           </div>
@@ -257,7 +253,7 @@
     {/if}
 
     {#if !emptyQueue}
-      <div class="retention">unreviewed arrivals burn up after 45 days · originals stay in your mailbox — Orbit only ever reads copies</div>
+      <div class="retention">unreviewed arrivals burn up after {daysWords(view.retention?.receiptDays)} · originals stay in your mailbox — Orbit only ever reads copies</div>
     {:else}
       <div class="quietnote">
         <div class="dish" aria-hidden="true"><span></span><span></span><span></span><i></i></div>

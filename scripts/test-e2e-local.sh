@@ -6,8 +6,8 @@
 # be caught locally in minutes instead of by promoting to `preview` and
 # waiting on CI.
 #
-# Mirrors the &container_validation_steps sequence in
-# .github/workflows/publish-container.yml (the "Create isolated test
+# Mirrors the validation sequence of
+# the retired GitHub container workflow, now split across the GitLab `smoke` jobs (the "Create isolated test
 # configuration" through "Run browser and accessibility checks" steps):
 # same compose files, same order, same health and OIDC/mail setup. It
 # deliberately does not reproduce that job's image-scanning, installer or
@@ -72,22 +72,47 @@
 #   --project NAME  Playwright project from tests/e2e/playwright.config.ts:
 #                    desktop-chromium, mobile-chromium, desktop-firefox,
 #                    desktop-webkit or mobile-webkit. Default: all of them,
-#                    plus the maintenance-* tail.
-#   --keep          Leave the stack up on exit instead of tearing it down, so a
+#                    plus the maintenance-* tail. A run that includes WebKit
+#                    (either WebKit project, or the default) runs Playwright
+#                    inside CI's Playwright image, because WebKit cannot
+#                    launch on this host (#1235); see the comment above the
+#                    `docker run` below. Chromium and Firefox runs stay on
+#                    the host.
+#   --keep          The only way to leave anything up. Skips teardown on exit so a
 #                    failed run can be inspected: query the database, read the
 #                    container logs, open the app. The run logs its own
 #                    profile, project name and app port at startup ("starting
 #                    the acceptance stack (profile ..., project ..., app on
-#                    ...)"); tear that project down afterwards with the file
-#                    set its profile used -- the oidc profile's is:
-#                      COMPOSE_PROFILES=processing \
-#                        docker compose -p <project> --env-file .env-orbit \
-#                        -f docker-compose.yml -f docker-compose.mail.yml \
-#                        -f compose/docker-compose.acceptance.yml \
-#                        -f compose/docker-compose.local-e2e.yml down --volumes
-#                    COMPOSE_PROFILES is not optional there: without it
-#                    Compose does not consider the `processing` profile's
-#                    orbit-tika part of the project and leaves it running.
+#                    ...)") and, on exit, prints the exact command that tears
+#                    that project down completely -- its containers (profile
+#                    services such as orbit-tika included), volumes, networks
+#                    and the image this run built.
+#
+# #1241: every stack this script brings up tears itself down completely, and
+# never leaves a stale container behind, whatever ends the run. The EXIT trap
+# (and INT/TERM, which exit through it) runs one teardown, exactly once, on
+# success, on failure and on interruption:
+#   - `docker compose -p <project> --profile '*' down --volumes
+#     --remove-orphans --rmi local`: every container of this run's project,
+#     profile services included (orbit-tika used to be left running, on the
+#     reasoning that Compose ignores a profile it was not told about; the
+#     wildcard profile is the fix, not a COMPOSE_PROFILES the caller must
+#     remember), its volumes, its networks (orbit-document-processing and
+#     the rest are project-scoped) and the sidecar images Compose built for it;
+#   - the application image this run built, tagged orbit-local:<12 hex> from
+#     the commit and this run's pid, so the tag is this run's alone and
+#     removing it can never pull the rug from a concurrent run at the same
+#     commit;
+#   - the Playwright container of a WebKit run, found by the label this run
+#     gave it;
+#   - a final sweep of anything still carrying this project's Compose label.
+# Nothing outside this run's own project is ever touched, and a stack it did
+# not start (--reuse) is never torn down, whatever --keep says.
+#
+# A failed run keeps its evidence: before anything is removed, `compose logs`,
+# `compose ps` and Playwright's test-results/ (the traces) are copied to
+# ~/projects/.backups/orbit/e2e-<project>-<timestamp>/ (ORBIT_E2E_ARTIFACT_ROOT
+# overrides the root), and the path is printed on exit.
 #
 # #875: the Compose project name and app port used to be fixed
 # ("orbit-e2e-local" on 13777), so two concurrent runs -- two worktrees, two
@@ -105,7 +130,7 @@
 #   docker exec <project>-db sh -c \
 #     'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select name from households"'
 #
-# AGENTS.md "Traps when running things locally" applies here directly: this
+# docs/testing.md "Local traps" applies here directly: this
 # script always passes an explicit Compose `-p` project name (below, per-run
 # rather than fixed since #875) so it can never attach to whatever project a
 # real deployment's .env-orbit happens to name, it checks that name against
@@ -115,7 +140,7 @@
 # second stack under those names regardless of project;
 # compose/docker-compose.local-e2e.yml renames them to `${COMPOSE_PROJECT_NAME}-*`
 # for this script only, so a per-run project name also gives per-run
-# container names. Never runs `pnpm db:generate` (also an AGENTS.md trap) and
+# container names. Never runs `pnpm db:generate` and
 # never writes to .env-orbit or an existing file under .orbit-secrets/ --
 # scripts/configure.sh and the secret generation below only fill in what is
 # missing.
@@ -125,7 +150,7 @@
 # main checkout's, and its web/node_modules is a real directory of per-
 # package symlinks into the main checkout's web/node_modules -- so a
 # worktree that has been set up this way shares the main checkout's install
-# rather than owning one (AGENTS.md's worktree-install trap, #784, diagnosed
+# rather than owning one (docs/testing.md's "Local traps" worktree-install entry, #784, diagnosed
 # twice). An install run with a worktree as the working directory writes
 # through that symlink and rewires the main checkout -- invisibly, until the
 # worktree is later removed and the main checkout's own build breaks. Three
@@ -303,7 +328,10 @@ readonly compose_files
 # it. compose/docker-compose.local-e2e.yml carries the other half -- the
 # TIKA_URL the application reads, and the parser's per-run container name.
 compose() {
-  env ORBIT_IMAGE="$orbit_image" COMPOSE_PROJECT_NAME="$project_name" \
+  # ORBIT_IMAGE is empty until the build step names it; docker-compose.yml's
+  # `${ORBIT_IMAGE:?...}` guard would then fail a teardown that has nothing to
+  # remove yet, so give the guard a placeholder rather than an empty value.
+  env ORBIT_IMAGE="${orbit_image:-not-built-yet:none}" COMPOSE_PROJECT_NAME="$project_name" \
     COMPOSE_PROFILES=processing \
     docker compose -p "$project_name" --env-file .env-orbit "${compose_files[@]}" "$@"
 }
@@ -335,13 +363,53 @@ assert_document_parser_ready() {
 # Registered before anything is built or started, so any failure from here
 # on -- including one added later by an edit to this script -- attempts
 # teardown of project "$project_name" rather than silently leaking
-# containers, volumes or networks. Before ".env-orbit" exists or the image is
-# built this is a harmless no-op (nothing to tear down; `compose down` itself
-# fails cleanly and is swallowed below).
+# containers, volumes or networks. INT and TERM exit (130, 143) so the EXIT
+# trap is the one place teardown happens: a handler that merely ran cleanup
+# and returned would let the script carry on running the suite after Ctrl-C.
+# created_anything is set immediately before the first build, so a run that
+# stopped at a precondition has nothing to tear down and does not try.
 cleaned_up=0
+created_anything=0
+orbit_image_built=0
+artifact_root="${ORBIT_E2E_ARTIFACT_ROOT:-${HOME}/projects/.backups/orbit}"
+
+# The exact command that removes everything this run created, printed on a
+# --keep exit and after a teardown that did not finish. ORBIT_IMAGE has to be
+# there because docker-compose.yml refuses to render without it.
+teardown_command() {
+  local arg
+  printf 'cd %q && ORBIT_IMAGE=%q docker compose -p %q --env-file .env-orbit' \
+    "$repo_dir" "${orbit_image:-not-built-yet:none}" "$project_name"
+  for arg in "${compose_files[@]}"; do printf ' %q' "$arg"; done
+  printf ' --profile %q down --volumes --remove-orphans --rmi local' '*'
+  [[ -z "$orbit_image" ]] || printf ' && docker image rm %q' "$orbit_image"
+  printf '\n'
+}
+
+# A failed run's evidence, copied out before the containers that hold it go.
+save_failure_artifacts() {
+  local dir
+  dir="${artifact_root}/e2e-${project_name}-$(date +%Y%m%d-%H%M%S)"
+  if ! mkdir -p "$dir" 2>/dev/null; then
+    log "could not create ${dir}; the failed run's logs are lost with the stack"
+    return 0
+  fi
+  compose --profile '*' ps --all > "${dir}/compose-ps.txt" 2>&1 || true
+  compose --profile '*' logs --no-color > "${dir}/compose-logs.txt" 2>&1 || true
+  # Playwright's outputDir (tests/e2e/playwright.config.ts) is test-results/
+  # at the repository root: traces, screenshots, page snapshots.
+  if [[ -d test-results ]]; then
+    cp -a test-results "${dir}/test-results" 2>/dev/null || log "could not copy test-results/ to ${dir}"
+  fi
+  log "failed run: logs and Playwright traces saved to ${dir}"
+}
+
 cleanup() {
+  local status=$?
   [[ "$cleaned_up" == 0 ]] || return 0
   cleaned_up=1
+  # A second Ctrl-C while teardown runs must not abandon it half done.
+  trap '' INT TERM
   # --reuse (#947) means this run never created project "$project_name" --
   # it is reusing a stack an earlier --keep run left up, or it failed before
   # ever confirming one exists -- so, unlike --keep, this is not a choice
@@ -352,13 +420,18 @@ cleanup() {
     return 0
   fi
   if [[ "$keep" == 1 ]]; then
-    log "leaving project ${project_name} up (--keep); tear it down with the command in this script's usage"
+    log "leaving project ${project_name} up (--keep). Tear it down completely with:"
+    printf '  %s' "$(teardown_command)" >&2
+    printf '\n' >&2
     return 0
   fi
-  # AGENTS.md's standing Compose trap ("Compose commands attach to whatever
-  # project .env-orbit names") is exactly the failure #875 hit, so confirm
+  if [[ "$created_anything" == 0 ]]; then
+    return 0
+  fi
+  # The standing Compose trap in docs/testing.md ("Compose commands attach to
+  # whatever project .env-orbit names") is exactly the failure #875 hit, so confirm
   # this run's own db container still carries the label "$project_name"
-  # before running `down --volumes` against it -- the same check AGENTS.md
+  # before running `down --volumes` against it -- the same check docs/testing.md
   # asks for before trusting Compose isolation. A container that does not
   # exist (nothing ever came up) is fine to "tear down" (a no-op below);
   # one that exists under a different project's label means this run's
@@ -370,10 +443,42 @@ cleanup() {
     log "refusing to tear down: ${db_container} belongs to project '${actual_label}', not '${project_name}'. Leaving it alone -- investigate manually."
     return 0
   fi
+  [[ "$status" == 0 ]] || save_failure_artifacts
   log "tearing down project ${project_name}"
-  compose down --volumes --remove-orphans > /dev/null 2>&1 || true
+  # The WebKit run's Playwright container is not a Compose service, so `down`
+  # cannot see it; it carries this run's label instead. Docker's own `--rm`
+  # covers a normal exit, not a killed client.
+  local leftover
+  leftover="$(docker ps --all --quiet --filter "label=orbit-e2e-run=${project_name}" 2>/dev/null || true)"
+  # shellcheck disable=SC2086 # ids, split on purpose
+  [[ -z "$leftover" ]] || docker rm --force $leftover > /dev/null 2>&1 || true
+  # `--profile '*'` is every profile, so the processing parser (orbit-tika) is
+  # part of the project whatever COMPOSE_PROFILES says.
+  local down_ok=1
+  compose --profile '*' down --volumes --remove-orphans --rmi local > /dev/null 2>&1 || down_ok=0
+  if [[ "$orbit_image_built" == 1 ]]; then
+    docker image rm "$orbit_image" > /dev/null 2>&1 || true
+  fi
+  # Final sweep by this project's own label: whatever `down` could not see.
+  leftover="$(docker ps --all --quiet --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null || true)"
+  # shellcheck disable=SC2086
+  [[ -z "$leftover" ]] || { down_ok=0; docker rm --force --volumes $leftover > /dev/null 2>&1 || true; }
+  leftover="$(docker volume ls --quiet --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null || true)"
+  # shellcheck disable=SC2086
+  [[ -z "$leftover" ]] || { down_ok=0; docker volume rm $leftover > /dev/null 2>&1 || true; }
+  leftover="$(docker network ls --quiet --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null || true)"
+  # shellcheck disable=SC2086
+  [[ -z "$leftover" ]] || { down_ok=0; docker network rm $leftover > /dev/null 2>&1 || true; }
+  if [[ "$down_ok" == 0 ]]; then
+    log "teardown of project ${project_name} needed more than \`compose down\`; if anything is still listed by \`docker ps --all --filter label=com.docker.compose.project=${project_name}\`, run:"
+    printf '  %s' "$(teardown_command)" >&2
+    printf '\n' >&2
+  fi
+  return 0
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # --- Preconditions -----------------------------------------------------------
 
@@ -384,7 +489,7 @@ docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 plugin is requ
 docker info >/dev/null 2>&1 || fail "Docker daemon is not reachable."
 [[ -f .env-orbit.example && -f docker-compose.yml ]] || fail "run from the Orbit repository root."
 
-# #876 / AGENTS.md worktree-install trap (#784): a git worktree's git-dir
+# #876 / docs/testing.md "Local traps" worktree-install entry (#784): a git worktree's git-dir
 # sits under the main checkout's, so the two differ from --git-common-dir
 # only in a worktree. Used by the dependency step below -- see the header
 # comment for the three cases.
@@ -547,9 +652,38 @@ else
     fi
   done
 
+  # --- Build the app image: configuration runs inside it (#1210) ------------
+
+  orbit_revision="$(git rev-parse HEAD)"
+  orbit_version="$(node scripts/calculate-version.mjs --channel preview)"
+  # Per-run tag (#1241): the image is this run's to remove at teardown, which
+  # is only safe if no other run at the same commit shares the tag. Layers
+  # stay cached by the builder, so a rebuild costs nothing extra. It must
+  # also have the installer's local-tag shape, orbit-local:<12 hex>, because
+  # configure now runs inside this image and refuses any other (#1210,
+  # isValidOrbitImage), so the run's uniqueness goes into the hex: a hash of
+  # the commit and this process.
+  readonly orbit_image="orbit-local:$(printf '%s-%s' "$(git rev-parse HEAD)" "$$" | sha256sum | cut -c1-12)"
+  readonly orbit_revision
+  readonly orbit_version
+  readonly orbit_channel="dev"
+
+  # From here on there is something to tear down, even if the build fails
+  # half way (a built image, a created network).
+  created_anything=1
+  orbit_image_built=1
+  log "building ${orbit_image} (version ${orbit_version})"
+  # Straight from the Dockerfile, as scripts/build-container.sh does, but
+  # with this suite's own dev channel (build-container.sh stamps preview).
+  docker buildx build --load \
+    --build-arg ORBIT_VERSION="$orbit_version" \
+    --build-arg ORBIT_REVISION="$orbit_revision" \
+    --build-arg ORBIT_CHANNEL="$orbit_channel" \
+    --tag "$orbit_image" --file Dockerfile .
+
   # --- Local secrets and TLS material: generate only what is missing --------
 
-  bash scripts/configure.sh
+  ORBIT_IMAGE="$orbit_image" bash scripts/configure.sh
   [[ -f .env-orbit ]] || fail "scripts/configure.sh did not create .env-orbit."
 
   # docker-compose.yml's orbit-oidc-client-secret Compose secret always needs a
@@ -569,8 +703,15 @@ else
     chmod 600 .orbit-secrets/oidc-client-secret
   fi
 
+  # dev-greenmail-cert.sh signs for 30 days. Past that, Orbit refuses the
+  # sidecar's certificate, every mail step fails with "no mail arrived", and
+  # nothing says why -- the stack passed its health check. So an expired or
+  # nearly expired CA is regenerated the same as a missing one (#1236).
   if [[ ! -f .orbit-secrets/greenmail.p12 || ! -f .orbit-secrets/greenmail-ca.pem || ! -f .orbit-secrets/greenmail-key.pem ]]; then
     log "generating GreenMail TLS material (missing from .orbit-secrets/)"
+    bash scripts/dev-greenmail-cert.sh
+  elif ! openssl x509 -in .orbit-secrets/greenmail-ca.pem -noout -checkend 86400 >/dev/null 2>&1; then
+    log "regenerating GreenMail TLS material (.orbit-secrets/greenmail-ca.pem has expired or expires within a day)"
     bash scripts/dev-greenmail-cert.sh
   fi
   for required in .orbit-secrets/greenmail.p12 .orbit-secrets/greenmail-ca.pem; do
@@ -613,7 +754,7 @@ else
     shared_node_modules=1
   fi
   if [[ "$shared_node_modules" != 1 || ! -f "$main_installed_lock" ]]; then
-    fail "refusing: this worktree has no usable dependencies to run against -- node_modules is either missing or is not the main checkout's shared install -- and installing them here would rewire the main checkout instead (AGENTS.md worktree-install trap, #784/#876). Run this script from the main Orbit checkout."
+    fail "refusing: this worktree has no usable dependencies to run against -- node_modules is either missing or is not the main checkout's shared install -- and installing them here would rewire the main checkout instead (docs/testing.md, Local traps, worktree install, #784/#876). Run this script from the main Orbit checkout."
   fi
   # Compare the PROJECT document, not the whole file. Since pnpm 12 (#882)
   # pnpm-lock.yaml is two YAML documents: first the packageManagerDependencies
@@ -628,7 +769,7 @@ else
     awk '/^---$/ { doc = ""; next } { doc = doc $0 "\n" } END { printf "%s", doc }' "$1"
   }
   if ! cmp -s <(project_lock_document "$worktree_lock") "$main_installed_lock"; then
-    fail "refusing: this branch's pnpm-lock.yaml differs from what pnpm actually installed in the main checkout (node_modules/.pnpm/lock.yaml) -- this branch changes dependencies, so they must be installed from the main checkout, not from a worktree (AGENTS.md worktree-install trap, #784/#876)."
+    fail "refusing: this branch's pnpm-lock.yaml differs from what pnpm actually installed in the main checkout (node_modules/.pnpm/lock.yaml) -- this branch changes dependencies, so they must be installed from the main checkout, not from a worktree (docs/testing.md, Local traps, worktree install, #784/#876)."
   fi
   log "worktree dependencies already match the main checkout's installed lockfile; skipping pnpm install (#876)"
 fi
@@ -638,19 +779,6 @@ fi
 if [[ -n "$reuse_project" ]]; then
   : # already identified, health-checked and logged above (#947).
 else
-  orbit_short_sha="$(git rev-parse --short=12 HEAD)"
-  orbit_revision="$(git rev-parse HEAD)"
-  orbit_version="$(node scripts/calculate-version.mjs --channel preview)"
-  readonly orbit_image="orbit-local:${orbit_short_sha}"
-  readonly orbit_revision
-  readonly orbit_version
-  readonly orbit_channel="dev"
-
-  log "building ${orbit_image} (version ${orbit_version})"
-  env ORBIT_IMAGE="$orbit_image" ORBIT_VERSION="$orbit_version" ORBIT_REVISION="$orbit_revision" ORBIT_CHANNEL="$orbit_channel" \
-    docker compose -p "$project_name" --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.build.yml \
-    build orbit-app
-
   if [[ "$profile" == "local-only" ]]; then
     log "local-only profile: no identity provider to build"
   else
@@ -685,11 +813,22 @@ fi
 # --- Run the Playwright suite -------------------------------------------------
 # playwright_args was assembled right after argument parsing, above.
 
+# #1235: a run that includes a WebKit project happens inside CI's Playwright
+# image (the `docker run` below says why and how); the decision is made here
+# so the host browser download can skip WebKit, whose download on this host
+# only ends in a "missing dependencies" warning nobody can act on.
+in_image=0
+if [[ "$playwright_project" == *webkit* ]]; then
+  in_image=1
+elif [[ -z "$playwright_project" ]]; then
+  case "${ORBIT_E2E_ENGINES:-}" in chromium | firefox) ;; *) in_image=1 ;; esac
+fi
+
 log "installing Playwright's Chromium, Firefox and WebKit builds"
 # scripts/install-test-browser.sh (README "Local development"): a plain
 # --only-shell install, not CI's --with-deps. --with-deps apt-get-installs
 # system libraries and needs root; a local checkout is not guaranteed sudo.
-bash scripts/install-test-browser.sh
+ORBIT_E2E_SKIP_WEBKIT_DOWNLOAD="$in_image" bash scripts/install-test-browser.sh
 
 log "running the Playwright suite (profile: ${profile})${spec:+ (spec: $spec)}${playwright_project:+ (project: $playwright_project)}"
 suite_status=0
@@ -720,17 +859,76 @@ reuse_env=()
 # tour's example body is never written down, which only the database can
 # answer. Every other `compose` call in this script passes an explicit `-p`;
 # the suite has no way to know that name, and without it its `docker compose`
-# would adopt whatever project .env-orbit happens to name (AGENTS.md, "Compose
-# commands attach to whatever project .env-orbit names") -- a different stack,
+# would adopt whatever project .env-orbit happens to name (docs/testing.md, "Local traps":
+# "Compose commands attach to whatever project .env-orbit names") -- a different stack,
 # or none. CI needs no equivalent: it runs compose without `-p`, so the
 # environment there already agrees with .env-orbit.
 # node_modules/@playwright/test/cli.js directly, not `pnpm exec playwright`:
 # in a worktree `pnpm exec` re-verifies node_modules against the lockfile and
 # can abort trying to repair a node_modules it does not own (#858, same
 # reasoning as install-test-browser.sh's header comment). Same binary.
-env PLAYWRIGHT_BASE_URL="$base_url" COMPOSE_PROJECT_NAME="$project_name" "${acceptance_oidc[@]}" "${reuse_env[@]}" \
-  node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts \
-  "${playwright_args[@]}" || suite_status=$?
+suite_env=(PLAYWRIGHT_BASE_URL="$base_url" COMPOSE_PROJECT_NAME="$project_name" "${acceptance_oidc[@]}" "${reuse_env[@]}")
+# tests/e2e/playwright.config.ts records a trace "on-first-retry", and local
+# runs retry nothing, so a local failure used to leave only a page snapshot
+# -- not enough to tell a harness race from a product one (docs/flakes.md,
+# the 2026-10-06 spoofed-PDF sighting). Locally, keep a trace of every
+# failure; ORBIT_E2E_TRACE overrides (Playwright's own values: off, on,
+# retain-on-failure, on-first-retry).
+playwright_cmd=(node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts \
+  "--trace=${ORBIT_E2E_TRACE:-retain-on-failure}" "${playwright_args[@]}")
+
+# #1235: WebKit cannot launch on this host -- its system packages need root
+# -- so a run that includes a WebKit project happens inside the Playwright
+# image CI runs it in, on the host network with this checkout bind-mounted
+# at its own path. The image is read from .gitlab-ci.yml so local and CI use
+# the same browser build. Chromium-only and Firefox-only runs stay on the
+# host: nothing there needs the container and the host browsers are already
+# downloaded. Inside the image:
+#   - `--network host` puts the browsers where the stack's published ports
+#     are; `--ipc=host` is what Playwright's own image documentation asks for.
+#   - the suite shells out to `docker` (tests/e2e/support/database.ts,
+#     bootstrap.ts), so the host CLI, its compose plugin and the rootless
+#     socket are bind-mounted in.
+#   - WebKit has no host-resolver or port-forcing option, so, exactly as the
+#     `.webkit_oidc_hosts` jobs in .gitlab-ci.yml do, `orbit-oidc` is mapped
+#     to 127.0.0.1 and a forward from 4443 -- the port in the fixed
+#     https://orbit-oidc:4443/ issuer URL -- reaches the random host port the
+#     sidecar was actually published on. The suite is told TEST_OIDC_PORT=4443
+#     for the same reason.
+#   - Only `node` runs on the mounted tree: never `pnpm install` in here, which
+#     rewrites the host's node_modules (environment skill, 2026-08-24).
+# in_image was decided above, before the browser download.
+if [[ "$in_image" == 1 ]]; then
+  # grep -m1, not `| head` (scripts/acceptance-sigpipe-safety.test.mjs, #809).
+  playwright_image="$(grep -m1 '^  PLAYWRIGHT_IMAGE: ' .gitlab-ci.yml | sed 's/^  PLAYWRIGHT_IMAGE: *//')"
+  [[ -n "$playwright_image" ]] || fail "could not read PLAYWRIGHT_IMAGE from .gitlab-ci.yml; the WebKit run needs CI's Playwright image."
+  docker_cli="$(command -v docker)"
+  compose_plugin="$(docker info --format '{{range .ClientInfo.Plugins}}{{if eq .Name "compose"}}{{.Path}}{{end}}{{end}}')"
+  [[ -n "$compose_plugin" ]] || fail "docker's compose plugin was not found; the suite needs it inside the image."
+  docker_sock="$(docker context inspect --format '{{(index .Endpoints "docker").Host}}')"
+  docker_sock="${docker_sock#unix://}"
+  [[ -S "$docker_sock" ]] || fail "docker socket not found at ${docker_sock}; the suite needs it inside the image."
+  image_env=()
+  for kv in "${suite_env[@]}"; do image_env+=(-e "$kv"); done
+  for name in TEST_SMTP_PORT TEST_IMAPS_PORT ORBIT_E2E_ENGINES ORBIT_E2E_WEBKIT_DEVICES ORBIT_E2E_WORKERS ORBIT_IMAGE; do
+    [[ -z "${!name:-}" ]] || image_env+=(-e "${name}=${!name}")
+  done
+  oidc_forward=""
+  if [[ "$profile" == "oidc" ]]; then
+    image_env+=(-e TEST_OIDC_PORT=4443)
+    oidc_forward="node -e 'const n=require(\"net\");n.createServer(s=>{const c=n.connect(${TEST_OIDC_PORT},\"127.0.0.1\");s.pipe(c).pipe(s);s.on(\"error\",()=>c.destroy());c.on(\"error\",()=>s.destroy())}).listen(4443,\"127.0.0.1\")' & sleep 1;"
+  fi
+  log "running Playwright inside ${playwright_image} (WebKit needs it; #1235)"
+  docker run --rm --label "orbit-e2e-run=${project_name}" --network host --ipc=host --add-host orbit-oidc:127.0.0.1 \
+    -v "${repo_dir}:${repo_dir}" -w "$repo_dir" \
+    -v "${docker_cli}:/usr/local/bin/docker:ro" \
+    -v "$(dirname -- "$compose_plugin"):/usr/local/lib/docker/cli-plugins:ro" \
+    -v "${docker_sock}:/var/run/docker.sock" -e DOCKER_HOST=unix:///var/run/docker.sock \
+    "${image_env[@]}" "$playwright_image" \
+    sh -c "${oidc_forward} exec \"\$@\"" sh "${playwright_cmd[@]}" || suite_status=$?
+else
+  env "${suite_env[@]}" "${playwright_cmd[@]}" || suite_status=$?
+fi
 
 if [[ "$keep" == 1 ]]; then
   log "stack still up: ${base_url}"

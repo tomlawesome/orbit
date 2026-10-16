@@ -13,14 +13,9 @@ import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const script = new URL("./trivy-db-retry.sh", import.meta.url).pathname;
-const workflow = readFileSync(
-  new URL("../.github/workflows/publish-container.yml", import.meta.url),
-  "utf8",
-).replaceAll("\r\n", "\n");
-// #801 moved the exact-image scan out of the workflow and into
-// scripts/ci/scan-image.sh, so two of the four DB-downloading sites now live
-// there. The rule is about every scan site, wherever it is written, so both
-// files are read and the assertions below run over the pair.
+// The exact-image scan lives in scripts/ci/scan-image.sh (#801), and it is the
+// only place Orbit's own scripts download the Trivy database through Docker.
+// The GitLab source-scan job runs Trivy as its job image instead.
 const imageScan = readFileSync(
   new URL("./ci/scan-image.sh", import.meta.url),
   "utf8",
@@ -132,14 +127,14 @@ describe("trivy-db-retry.sh", () => {
   });
 });
 
-describe("Trivy wiring in publish-container.yml and scripts/ci", () => {
-  const lines = [...workflow.split("\n"), ...imageScan.split("\n")];
+describe("Trivy wiring in scripts/ci/scan-image.sh", () => {
+  const lines = imageScan.split("\n");
 
   it("routes every DB-downloading Trivy invocation through the retry wrapper", () => {
     const scanSites = lines
       .map((line, index) => ({ line, index }))
       .filter(({ line }) => /"\$\{TRIVY_IMAGE\}" (fs|image) \\/.test(line));
-    expect(scanSites.length).toBe(4);
+    expect(scanSites.length).toBe(2);
     for (const site of scanSites) {
       let start = site.index;
       while (start >= 0 && !lines[start].includes("docker run")) {

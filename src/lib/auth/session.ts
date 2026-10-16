@@ -1,14 +1,17 @@
-import { and, eq, gt, sql } from "drizzle-orm";
-import type { CookieReader, CookieSink } from "@/lib/http";
+import { randomUUID } from "node:crypto";
+import { and, eq, gt, lt, sql } from "drizzle-orm";
+import type { CookieReader } from "@/lib/http";
 import { getDb } from "@/db";
 import { auditLog, sessions, userPreferences, users } from "@/db/schema";
 import type { AuthConfig } from "@/lib/env";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
-import { clearSessionCookie, sessionCookieName, setSessionCookie } from "@/lib/auth/cookies";
+import { sessionCookieName } from "@/lib/auth/cookies";
 import { constantTimeEqual, createCsrfToken, hashSessionToken, randomUrlSafe } from "@/lib/auth/crypto";
 import { AuthError } from "@/lib/auth/errors";
-import type { TextSize, UrgencyPalette } from "@/lib/preferences";
-import { openInstanceMetadataReader } from "@/server/metadata/fields";
+import type { TextSize } from "@/lib/preferences";
+import { log, operationalDetail } from "@/lib/logger";
+import { assertKeyUsable } from "@/server/key-state";
+import { openInstanceMetadataReader, requireInstanceMetadataWriter } from "@/server/metadata/fields";
 import { themePackOrDefault } from "@/lib/preferences";
 
 export interface AuthenticatedSession {
@@ -27,10 +30,8 @@ export interface AuthenticatedSession {
     displayName: string;
     avatarUrl: string | null;
     isInstanceAdmin: boolean;
-    themeMode: "system" | "light" | "dark";
     themeId: string;
     textSize: TextSize;
-    urgencyPalette: UrgencyPalette;
     emailNotifications: boolean;
     pushNotifications: boolean;
   };
@@ -47,33 +48,116 @@ export interface AuthenticatedSession {
  */
 const USER_AGENT_MAX_LENGTH = 256;
 
+/**
+ * The largest provider ID token a session keeps, in UTF-8 bytes, before
+ * encryption (#1316 decision 26a, owner answer 4a). Real tokens with group
+ * claims run to a few KiB; this is the per-row cap, in the style of
+ * `USER_AGENT_MAX_LENGTH`, on top of the 1 MiB cap on the whole token
+ * response. A larger token is not kept, and that session signs out of Orbit
+ * only.
+ */
+export const ID_TOKEN_MAX_BYTES = 16 * 1024;
+
+export interface CreateSessionOptions {
+  /**
+   * The provider's ID token, exactly as issued, for a session that began at
+   * the provider. Sealed on the row so sign-out can send it as
+   * `id_token_hint`; never returned by any read.
+   */
+  idToken?: string | null;
+}
+
 export async function createSession(
   userId: string,
   config: AuthConfig,
   userAgent?: string | null,
+  options: CreateSessionOptions = {},
 ): Promise<{ token: string; expiresAt: Date }> {
+  /* Belt and braces (#1405): no usable encryption key, no session, whatever
+     wrapper a future route forgot. Every route that reaches here is behind
+     the API key gate, or (the provider callback) calls it first. */
+  assertKeyUsable();
   const token = randomUrlSafe(32);
   const expiresAt = new Date(Date.now() + config.sessionTtlSeconds * 1000);
+  /* Generated here rather than by the column default, because the ID token
+     is sealed to the row id (the AAD) before the row exists. */
+  const id = randomUUID();
+  const idToken = keepableIdToken(options.idToken, id);
   await getDb().transaction(async (transaction) => {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`);
+    /* Sweep on insert (#1316): nothing else deletes a session whose cookie is
+       never shown again, and such a row now holds an ID token. Sessions are
+       created rarely enough that one statement here costs nothing; it is the
+       shape `sealStepUpProof` already uses. */
+    await transaction.delete(sessions).where(lt(sessions.expiresAt, new Date()));
     const [user] = await transaction.select({ disabledAt: users.disabledAt }).from(users)
       .where(eq(users.id, userId)).limit(1);
     if (!user || user.disabledAt) {
       throw new AuthError("account_disabled", "This Orbit account is disabled", 403);
     }
+    let idTokenEnc: string | null = null;
+    if (idToken) {
+      const cipher = await requireInstanceMetadataWriter(transaction);
+      idTokenEnc = cipher.encryptText("sessions.id_token", id, idToken);
+    }
     await transaction.insert(sessions).values({
+      id,
       userId,
       tokenHash: hashSessionToken(token),
       expiresAt,
       userAgent: userAgent ? userAgent.slice(0, USER_AGENT_MAX_LENGTH) : null,
+      idTokenEnc,
     });
   });
   return { token, expiresAt };
 }
 
+/** The token to seal, or null for none or one over the bound; never logs the value. */
+function keepableIdToken(idToken: string | null | undefined, sessionId: string): string | null {
+  if (!idToken) return null;
+  if (Buffer.byteLength(idToken, "utf8") <= ID_TOKEN_MAX_BYTES) return idToken;
+  log.warn({
+    event: "auth.provider",
+    state: "degraded",
+    reason: "oversized_response",
+    action: "none",
+    impact: "none",
+    detail: operationalDetail`ID token over ${ID_TOKEN_MAX_BYTES} bytes not kept for session ${sessionId}; its sign-out ends the Orbit session only`,
+  });
+  return null;
+}
+
 export async function deleteSessionToken(token: string | undefined): Promise<void> {
   if (!token) return;
   await getDb().delete(sessions).where(eq(sessions.tokenHash, hashSessionToken(token)));
+}
+
+/**
+ * Ends one session and hands back what sign-out needs to tell the provider
+ * (#1316 decision 26a): delete-and-return, so the row and its sealed ID token
+ * are gone in the same statement that yields the ciphertext, before anything
+ * that could fail. No token, or no such row, answers nulls.
+ */
+export async function takeSessionIdToken(
+  token: string | undefined,
+): Promise<{ id: string | null; encrypted: string | null }> {
+  if (!token) return { id: null, encrypted: null };
+  const [removed] = await getDb().delete(sessions)
+    .where(eq(sessions.tokenHash, hashSessionToken(token)))
+    .returning({ id: sessions.id, encrypted: sessions.idTokenEnc });
+  return removed ?? { id: null, encrypted: null };
+}
+
+/**
+ * Opens the ID token `takeSessionIdToken` returned, or null. Never throws for
+ * a bad value: a damaged or moved ciphertext reads as damaged (and records a
+ * sighting), a locked instance as locked, and either way sign-out carries on
+ * as Orbit-only.
+ */
+export async function openSessionIdToken(taken: { id: string | null; encrypted: string | null }): Promise<string | null> {
+  if (!taken.id || !taken.encrypted) return null;
+  const cipher = await openInstanceMetadataReader();
+  return cipher.text("sessions.id_token", taken.id, { encrypted: taken.encrypted }).value;
 }
 
 /**
@@ -90,10 +174,25 @@ export async function deleteSessionToken(token: string | undefined): Promise<voi
  * secrets and never appear in it, or anywhere else.
  */
 export async function revokeUserSessions(userId: string): Promise<number> {
+  return (await revokeUserSessionsTakingOwn(userId, null)).revoked;
+}
+
+/**
+ * `revokeUserSessions` for "sign out of every device" in settings (#1439):
+ * the same purge and audit entry, and in the same delete statement it hands
+ * back the caller's own row and its sealed ID token (decision 26a), so the
+ * route can end this browser's provider session too. Every other row's token
+ * is dropped here, never returned: another device's token is never this
+ * browser's hint.
+ */
+export async function revokeUserSessionsTakingOwn(
+  userId: string,
+  ownSessionId: string | null,
+): Promise<{ revoked: number; taken: { id: string | null; encrypted: string | null } }> {
   return getDb().transaction(async (transaction) => {
     const removed = await transaction.delete(sessions)
       .where(eq(sessions.userId, userId))
-      .returning({ id: sessions.id });
+      .returning({ id: sessions.id, encrypted: sessions.idTokenEnc });
     await transaction.insert(auditLog).values({
       householdId: null,
       actorUserId: userId,
@@ -102,7 +201,8 @@ export async function revokeUserSessions(userId: string): Promise<number> {
       action: "sessions_revoked",
       changes: { sessions: removed.length },
     });
-    return removed.length;
+    const own = ownSessionId === null ? undefined : removed.find((row) => row.id === ownSessionId);
+    return { revoked: removed.length, taken: own ?? { id: null, encrypted: null } };
   });
 }
 
@@ -162,12 +262,19 @@ export async function listSessions(userId: string): Promise<SessionSummary[]> {
  * lives on the session as its own entity, unlike the user-scoped
  * `sessions_revoked` count `revokeUserSessions` writes, because this action
  * names one row rather than summarising a purge.
+ *
+ * Answers the ended row's id and sealed ID token from the same delete
+ * (decision 26a). The route uses the token only when the row was the
+ * caller's own session (#1439).
  */
-export async function revokeSession(userId: string, sessionId: string): Promise<void> {
-  await getDb().transaction(async (transaction) => {
+export async function revokeSession(
+  userId: string,
+  sessionId: string,
+): Promise<{ id: string; encrypted: string | null }> {
+  return getDb().transaction(async (transaction) => {
     const [removed] = await transaction.delete(sessions)
       .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
-      .returning({ id: sessions.id });
+      .returning({ id: sessions.id, encrypted: sessions.idTokenEnc });
     if (!removed) throw new AuthError("session_not_found", "That session is not available", 404);
     await transaction.insert(auditLog).values({
       householdId: null,
@@ -177,6 +284,7 @@ export async function revokeSession(userId: string, sessionId: string): Promise<
       action: "session_revoked",
       changes: {},
     });
+    return removed;
   });
 }
 
@@ -191,17 +299,14 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       expiresAt: sessions.expiresAt,
       lastSeenAt: sessions.lastSeenAt,
       userId: users.id,
-      email: users.email,
       emailEnc: users.emailEnc,
       emailVerified: users.emailVerified,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
       isInstanceAdmin: users.isInstanceAdmin,
       disabledAt: users.disabledAt,
-      themeMode: userPreferences.themeMode,
       themeId: userPreferences.themeId,
       textSize: userPreferences.textSize,
-      urgencyPalette: userPreferences.urgencyPalette,
       emailNotifications: userPreferences.emailNotifications,
       pushNotifications: userPreferences.pushNotifications,
     })
@@ -216,10 +321,11 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
     return null;
   }
   await touchLastSeen(record.id, record.lastSeenAt);
-  /* The address is Tier 2 metadata now (#969). A locked instance still yields
-     a session — sign-in itself never depended on reading the address, and
-     everything else about the session is plaintext — so this reads null rather
-     than refusing, and the surfaces that need an address say so themselves. */
+  /* The address is Tier 2 metadata now (#969). With no usable key, Orbit is in
+     maintenance (#1405) and new sessions cannot be created. This reader is
+     tolerant so existing sessions created before the key became unusable can
+     still be read for sign-out and other operations. It reads null for the
+     address rather than refusing, and surfaces that need an address say so. */
   const cipher = await openInstanceMetadataReader();
   return {
     id: record.id,
@@ -230,13 +336,11 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       id: record.userId,
       email: cipher.text("users.email", record.userId, {
         encrypted: record.emailEnc,
-        plaintext: record.email,
       }).value,
       emailVerified: record.emailVerified,
       displayName: record.displayName,
       avatarUrl: record.avatarUrl,
       isInstanceAdmin: record.isInstanceAdmin,
-      themeMode: record.themeMode ?? "system",
       /* #865: a stale stored value — a removed pack (atlas), or the column's
          own pre-#325 legacy default ("after-dark", with the hyphen, which
          was never a v19 pack id either) — resolves to the current default
@@ -245,7 +349,6 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       textSize: record.textSize === "standard" || record.textSize === "large" || record.textSize === "extra-large"
         ? record.textSize
         : "comfortable",
-      urgencyPalette: record.urgencyPalette === "classic" ? "classic" : "themed",
       emailNotifications: record.emailNotifications ?? true,
       pushNotifications: record.pushNotifications ?? true,
     },
@@ -256,22 +359,6 @@ export async function requireSession(cookies: CookieReader, config: AuthConfig):
   const session = await readSession(cookies, config);
   if (!session) throw new AuthError("session_required", "A valid session is required", 401);
   return session;
-}
-
-export async function rotateSession(session: AuthenticatedSession, cookies: CookieSink, config: AuthConfig): Promise<void> {
-  const nextToken = randomUrlSafe(32);
-  const nextExpiry = new Date(Date.now() + config.sessionTtlSeconds * 1000);
-  const [rotated] = await getDb()
-    .update(sessions)
-    .set({
-      tokenHash: hashSessionToken(nextToken),
-      expiresAt: nextExpiry,
-      rotatedAt: new Date(),
-    })
-    .where(and(eq(sessions.id, session.id), eq(sessions.tokenHash, hashSessionToken(session.token))))
-    .returning({ id: sessions.id });
-  if (!rotated) throw new AuthError("session_required", "The session was replaced by another request", 401);
-  setSessionCookie(cookies, nextToken, config);
 }
 
 export function assertSameOrigin(headers: Headers, config: AuthConfig): void {
@@ -299,9 +386,4 @@ export function assertCsrf(headers: Headers, session: AuthenticatedSession, conf
 
 export function csrfTokenForSession(session: AuthenticatedSession, config: AuthConfig): string {
   return createCsrfToken(session.token, config.sessionSecret);
-}
-
-export async function invalidateSession(cookies: CookieSink, config: AuthConfig): Promise<void> {
-  await deleteSessionToken(cookies.get(sessionCookieName(config)));
-  clearSessionCookie(cookies, config);
 }

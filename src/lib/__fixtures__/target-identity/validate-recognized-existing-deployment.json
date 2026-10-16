@@ -1,0 +1,27 @@
+{
+  "name": "validate recognized existing deployment",
+  "mode": "validate",
+  "setup": [
+    {
+      "path": ".env-orbit",
+      "file": "APP_URL=https://parity.invalid\n",
+      "mode": 384
+    },
+    {
+      "path": "docker-compose.yml",
+      "file": "services: {}\n"
+    },
+    {
+      "path": ".orbit-secrets",
+      "dir": true,
+      "mode": 448
+    }
+  ],
+  "requested": null,
+  "targetBasename": "_Parity.Target",
+  "bash": {
+    "status": 0,
+    "stdout": "target_was_empty=0",
+    "stderr": ""
+  }
+}

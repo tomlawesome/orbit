@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
@@ -7,6 +9,7 @@ import { ensureWorkerAdministrator, workerAccount } from "./support/worker-ident
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { entrancesSettled } from "./support/motion";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -21,11 +24,6 @@ resetDatabaseBetweenSpecFiles();
  * draws one of two dialects chosen by viewport (gravity-well dial on desktop,
  * the pocket dial on mobile) — the other routes are dialect-blind, but
  * running them twice costs little and is never wrong.
- *
- * `/mobile` is not swept on its own: web/src/routes/mobile/+page.js is a bare
- * 308 redirect onto `/home` (the pocket dialect moved onto home's own URL,
- * CON-10/#430), so there is no second screen there to check — `/home`'s own
- * tests already cover what renders.
  *
  * Each test signs in as "Orbit Administrator" fresh (the disposable OIDC
  * provider's identity list, same as v19-tour.spec.ts) and asserts one route
@@ -55,12 +53,16 @@ async function signIn(page: Page, returnTo: string) {
  */
 const DECORATIVE_BACKDROP = '.layer[aria-hidden="true"]';
 
-async function axeCheck(page: Page) {
+/* The real PDF fixture the document specs upload, so the preview drawn is a
+   real render through the real pipeline (v19-home-drawer.spec.ts). */
+const DOCUMENT_FIXTURE = resolve(__dirname, "../support/fixtures/chromium-synthetic.pdf");
+
+async function axeCheck(page: Page, state?: string) {
   const results = await new AxeBuilder({ page })
     .withTags(WCAG_TAGS)
     .exclude(DECORATIVE_BACKDROP)
     .analyze();
-  expect(results.violations).toEqual([]);
+  expect(results.violations, state).toEqual([]);
 }
 
 /**
@@ -130,23 +132,22 @@ async function seedHousehold(page: Page, options: { withItem?: boolean } = {}) {
   let itemId: string | undefined;
   if (options.withItem) {
     itemId = randomUUID();
-    const dueDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+    const dueDate = householdDateFromToday(20);
     const itemCreated = await page.request.post("/api/workspace/commands", {
       headers,
       data: {
         type: "item.upsert",
         householdId,
+        kind: "service",
         item: {
           id: itemId,
           sectionId,
           title: "axe-sweep item",
           currency: "GBP",
-          scheduleKind: "service",
           dueDate,
           recurrenceMonths: 12,
-          status: "active",
         },
-        activity: { id: randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+        activity: { id: randomUUID(), itemId, occurredAt: new Date().toISOString() },
       },
     });
     if (!itemCreated.ok()) {
@@ -407,14 +408,45 @@ test.describe("the signed-in v19 sweep", () => {
     }
   });
 
-  test("/item/[id] has no automated WCAG A/AA violations", async ({ page }) => {
-    test.setTimeout(60_000);
+  /* #1319 (owner-decisions §34): was "/item/[id] has no automated WCAG
+     A/AA violations", the belt. The item is home's drawer now, so the item
+     screen is home with that drawer open: swept as it opens, with a
+     document's preview up beside it (the bottom sheet on a phone), and with
+     its rows in edit and the chooser up (the due date's calendar). */
+  test("/home with an item's drawer open, its preview up, then its chooser up, has no automated WCAG A/AA violations", async ({ page, isMobile }) => {
+    test.setTimeout(120_000);
+    /* The preview and the chooser slide in; sweep them drawn, not mid-fade. */
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await signIn(page, "/home");
     const household = await seedHousehold(page, { withItem: true });
     try {
-      await page.goto(`/item/${household.itemId}`);
-      await expect(page.getByRole("heading", { name: "axe-sweep item" })).toBeVisible();
-      await axeCheck(page);
+      const itemId = household.itemId as string;
+      const upload = await page.request.post(`/api/households/${household.id}/items/${itemId}/documents`, {
+        headers: { ...(await sessionHeaders(page)), "x-orbit-filename": encodeURIComponent("axe-sweep.pdf") },
+        data: readFileSync(DOCUMENT_FIXTURE),
+      });
+      if (!upload.ok()) throw new Error(`#1319: could not attach the sweep's document (${upload.status()})`);
+
+      await page.goto(`/home?item=${itemId}`);
+      const drawer = isMobile
+        ? page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`)
+        : page.locator(`[id="${itemId}-view"]`);
+      await expect(drawer.getByRole("group", { name: "Actions for axe-sweep item" })).toBeVisible({ timeout: 30_000 });
+      await homeIsLive(page);
+      await axeCheck(page, "the drawer open");
+
+      await drawer.getByRole("button", { name: "Open axe-sweep.pdf" }).click();
+      const preview = page.getByRole("dialog", { name: /^axe-sweep\.pdf/ });
+      await expect(preview.getByRole("button", { name: "Read axe-sweep.pdf" })).toBeEnabled({ timeout: 30_000 });
+      await expect(preview.getByRole("img", { name: "Page one of axe-sweep.pdf" })).toBeVisible();
+      await axeCheck(page, "the drawer open, its document's preview up");
+      await page.keyboard.press("Escape");
+      await expect(preview).toHaveCount(0);
+
+      await drawer.getByRole("button", { name: "Edit this item" }).click();
+      await drawer.getByRole("button", { name: /^due: / }).click();
+      await expect(page.getByRole("dialog", { name: /due date/i })).toBeVisible();
+      await axeCheck(page, "the drawer editing, the chooser up");
     } finally {
       await cleanup(page, household);
     }

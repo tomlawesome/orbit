@@ -206,7 +206,7 @@ test("a first-time reader gets the film, works its transport, and a second arriv
     expect(await reading(page)).toMatchObject({ chapter: 0, name: "Arrive" });
 
     await page.evaluate(() => (window as unknown as { __jump(n: number): void }).__jump(7));
-    expect(await reading(page)).toMatchObject({ chapter: 7, name: "The belt" });
+    expect(await reading(page)).toMatchObject({ chapter: 7, name: "The item" });
 
     await page.evaluate(() => (window as unknown as { __jump(n: number): void }).__jump(11));
     expect(await reading(page)).toMatchObject({ chapter: 11, name: "Yours" });

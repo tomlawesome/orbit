@@ -1,5 +1,17 @@
 # The launch animation's frame timings (#873, step 1)
 
+> **Since #1263 this describes a hand-off that no longer exists.** The create
+> card, its `/?arrival=create` fixture, the reclaim (`body.reclaimed`) and the
+> launch marker Create used to set are gone. The arrival flies once, on `/`,
+> and the create questions stand in the belong card's drawer; Create goes to
+> `/home` with no launch marker and no second climb. The spec
+> (`web/tests/fidelity/launch-timing.spec.js`) now drives
+> `/?arrival=newcomer&drawer=1`; its "create" phase is the drawer's Create up
+> to the navigation and its "home" phase is home's ordinary arrival, not an
+> ascent. The numbers below were taken before the change and are not like for
+> like with a run today. The text and tables that follow are kept as the
+> record of the old hand-off.
+
 This is a measurement, not a fix. It records how the launch actually moves,
 so the next step can name what to change instead of guessing. Nothing about
 the animation — its timing, easing, transforms or geometry — was touched to

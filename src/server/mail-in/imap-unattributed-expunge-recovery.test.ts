@@ -72,21 +72,18 @@ vi.mock("./relays", () => ({
   retireAliasesForDisabledUsers: async () => undefined,
 }));
 
+// The cycle leaves the mailbox alone while the metadata key is locked, and
+// this file has no key; a cipher that reads as unlocked lets it run.
+vi.mock("@/server/metadata/fields", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/metadata/fields")>();
+  return { ...actual, openInstanceMetadataReader: async () => new actual.MetadataCipher({} as never) };
+});
+
 const { runImapIngestionCycle, setImapClientFactoryForTests } = await import("./imap-ingestion");
-const { parseImapIngestionConfigFromEnvironment } = await import("./core/config");
+const { testImapConfig } = await import("../../../tests/support/imap-config");
 
 function testConfig() {
-  return parseImapIngestionConfigFromEnvironment({
-    IMAP_HOST: "imap.example.test",
-    IMAP_USER: "orbit",
-    IMAP_PASSWORD: "test-password",
-    IMAP_RECIPIENT_DOMAIN: "ingest.example.test",
-    IMAP_ALIAS_CURRENT_GENERATION: "1",
-    IMAP_ALIAS_CURRENT_SECRET: "test-current-alias-secret-that-is-long-enough",
-    IMAP_TRUSTED_RECIPIENT_HEADER: "X-Original-To",
-    SMTP_HOST: "smtp.example.test",
-    NODE_ENV: "test",
-  } as NodeJS.ProcessEnv);
+  return testImapConfig();
 }
 
 function fakeClient() {

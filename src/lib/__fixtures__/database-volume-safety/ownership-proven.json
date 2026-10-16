@@ -1,0 +1,28 @@
+{
+  "name": "ownership proven",
+  "kind": "ownership",
+  "candidate": "orbit_orbit-db-data",
+  "expectedImage": "ghcr.io/tomlawesome/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "scenario": {
+    "volumeLabels": {
+      "orbit_orbit-db-data": "orbit|orbit-db-data"
+    },
+    "volumeProjectLabel": {
+      "orbit_orbit-db-data": "orbit"
+    },
+    "containersByVolume": {
+      "orbit_orbit-db-data": "aaaaaaaaaaaa|orbit|orbit-db"
+    },
+    "containersByProject": {
+      "orbit": "bbbbbbbbbbbb|orbit|orbit-app"
+    },
+    "containerImage": {
+      "bbbbbbbbbbbb": "ghcr.io/tomlawesome/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "bash": {
+    "status": 0,
+    "stdout": "status=0",
+    "stderr": ""
+  }
+}

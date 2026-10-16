@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import {
@@ -28,10 +27,10 @@ import {
   getImapProviderPreflightState,
   MailInCredentialLockedError,
   verifyImapIngestionProviders,
-} from "@/server/imap-ingestion";
+} from "@/server/mail-in/imap-ingestion";
+import { validUuid } from "@/lib/uuid";
 import { requireInstanceAdministrator } from "@/server/authorization";
 
-const uuidSchema = z.uuid();
 const auditCursorSchema = z.object({
   createdAt: z.iso.datetime(),
   id: z.uuid(),
@@ -69,11 +68,8 @@ const actionLabels: Record<string, string> = {
   document_available: "Document made available",
   document_crypto_missing: "Document protection issue detected",
   document_storage_invalid: "Document storage issue detected",
-  notification_delivery_retried: "Notification delivery retried",
-  notification_delivery_discarded: "Notification delivery discarded",
   document_job_retried: "Document maintenance job retried",
   document_job_discarded: "Document maintenance job discarded",
-  imap_notification_delivery_retried: "Mailbox notification delivery retried",
   document_purged: "Document retention completed",
   document_storage_missing: "Missing document storage detected",
   // M7 (ADR-0023 §8): the audit record the claim writes, so the
@@ -103,7 +99,6 @@ const actionLabels: Record<string, string> = {
 /** Maps persisted actions to a bounded administrator-facing label. */
 export function safeAdministratorAuditLabel(action: string): string {
   if (actionLabels[action]) return actionLabels[action];
-  if (action.startsWith("document_draft_")) return "Document review updated";
   if (action.startsWith("reviewed_intake_")) return "Reviewed intake updated";
   return "Orbit administration activity";
 }
@@ -323,67 +318,6 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
   };
 }
 
-type DeliveryAction = "retry" | "discard";
-type DeliveryStatus = typeof notificationDeliveries.$inferSelect.status;
-
-export async function updateNotificationDelivery(
-  actorUserId: string,
-  deliveryId: string,
-  action: DeliveryAction,
-  expectedStatus: DeliveryStatus,
-): Promise<void> {
-  if (!uuidSchema.safeParse(deliveryId).success) {
-    throw new AppError("operation_conflict", "That operation is no longer available", 409);
-  }
-  await requireInstanceAdministrator(actorUserId);
-  await getDb().transaction(async (transaction) => {
-    const [record] = await transaction.select({
-      householdId: notificationDeliveries.householdId,
-      status: notificationDeliveries.status,
-    }).from(notificationDeliveries)
-      .where(eq(notificationDeliveries.id, deliveryId))
-      .for("update")
-      .limit(1);
-    const permitted = action === "retry"
-      ? record?.status === expectedStatus && ["failed", "cancelled"].includes(expectedStatus)
-      : record?.status === expectedStatus && ["pending", "retry", "failed"].includes(expectedStatus);
-    if (!record || !permitted) {
-      throw new AppError("operation_conflict", "That operation is no longer available", 409);
-    }
-
-    const updated = await transaction.update(notificationDeliveries).set(action === "retry" ? {
-      status: "pending",
-      attempts: 0,
-      scheduledFor: new Date(),
-      lockedAt: null,
-      leaseToken: null,
-      lastError: null,
-      sentAt: null,
-      updatedAt: new Date(),
-    } : {
-      status: "cancelled",
-      lockedAt: null,
-      leaseToken: null,
-      lastError: null,
-      updatedAt: new Date(),
-    }).where(and(
-      eq(notificationDeliveries.id, deliveryId),
-      eq(notificationDeliveries.status, expectedStatus),
-    )).returning({ id: notificationDeliveries.id });
-    if (!updated.length) {
-      throw new AppError("operation_conflict", "That operation is no longer available", 409);
-    }
-    await transaction.insert(auditLog).values({
-      householdId: record.householdId,
-      actorUserId,
-      entityType: "notification_delivery",
-      entityId: deliveryId,
-      action: action === "retry" ? "notification_delivery_retried" : "notification_delivery_discarded",
-      changes: { previousStatus: expectedStatus },
-    });
-  });
-}
-
 type DocumentJobAction = "retry" | "discard";
 type DocumentJobStatus = typeof documentJobs.$inferSelect.status;
 
@@ -393,7 +327,7 @@ export async function updateDocumentJob(
   action: DocumentJobAction,
   expectedStatus: DocumentJobStatus,
 ): Promise<void> {
-  if (!uuidSchema.safeParse(jobId).success) {
+  if (!validUuid(jobId)) {
     throw new AppError("operation_conflict", "That operation is no longer available", 409);
   }
   await requireInstanceAdministrator(actorUserId);
@@ -512,38 +446,6 @@ export async function verifySmtpProvider(actorUserId: string): Promise<{ result:
     const state = providerVerificationState.__orbitAdminSmtpVerification;
     if (state?.inFlight === inFlight) providerVerificationState.__orbitAdminSmtpVerification = { lastStartedAt: now };
   }
-}
-
-/** Retries only terminal content-free mailbox notifications, in a bounded batch. */
-export async function retryExhaustedImapNotifications(actorUserId: string): Promise<{ queued: number }> {
-  await requireInstanceAdministrator(actorUserId);
-  return getDb().transaction(async (transaction) => {
-    const candidates = await transaction.select({ id: imapNotificationDeliveries.id }).from(imapNotificationDeliveries)
-      .where(eq(imapNotificationDeliveries.status, "failed"))
-      .orderBy(imapNotificationDeliveries.updatedAt)
-      .limit(25)
-      .for("update", { skipLocked: true });
-    const rows = candidates.length ? await transaction.update(imapNotificationDeliveries).set({
-      status: "retry",
-      attempts: 0,
-      nextAttemptAt: new Date(),
-      lockedAt: null,
-      leaseToken: null,
-      failureCode: null,
-      updatedAt: new Date(),
-    }).where(and(eq(imapNotificationDeliveries.status, "failed"), inArray(imapNotificationDeliveries.id, candidates.map((row) => row.id)))).returning({ id: imapNotificationDeliveries.id }) : [];
-    if (rows.length) {
-      await transaction.insert(auditLog).values({
-        householdId: null,
-        actorUserId,
-        entityType: "imap_notification_delivery",
-        entityId: randomUUID(),
-        action: "imap_notification_delivery_retried",
-        changes: { previousStatus: "failed", count: rows.length },
-      });
-    }
-    return { queued: rows.length };
-  });
 }
 
 /** Administrator-only bounded preflight for the independent IMAP provider. */

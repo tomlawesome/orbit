@@ -559,6 +559,39 @@
     {
       "kind": "vulnerability",
       "scope": "image",
+      "id": "CVE-2026-78667",
+      "package": "stdlib",
+      "installedVersion": "v1.24.6",
+      "owner": "Orbit maintainers",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78669",
+      "package": "stdlib",
+      "installedVersion": "v1.24.6",
+      "owner": "Orbit maintainers",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-97031",
+      "package": "stdlib",
+      "installedVersion": "v1.24.6",
+      "owner": "Orbit maintainers",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
       "id": "CVE-2026-25679",
       "package": "stdlib",
       "installedVersion": "v1.26.0",
@@ -801,6 +834,50 @@
     {
       "kind": "vulnerability",
       "scope": "image",
+      "id": "CVE-2026-78667",
+      "package": "stdlib",
+      "installedVersion": "v1.26.0",
+      "owner": "Orbit maintainers",
+      "rationale": "Compiled into /usr/bin/ollama; ollama's go.mod still names Go 1.26.0 at 0.40.2 (2026-10-08), the newest release, so no release yet carries the fix (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78669",
+      "package": "stdlib",
+      "installedVersion": "v1.26.0",
+      "owner": "Orbit maintainers",
+      "rationale": "Compiled into /usr/bin/ollama; ollama's go.mod still names Go 1.26.0 at 0.40.2 (2026-10-08), the newest release, so no release yet carries the fix (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-97031",
+      "package": "stdlib",
+      "installedVersion": "v1.26.0",
+      "owner": "Orbit maintainers",
+      "rationale": "Compiled into /usr/bin/ollama; ollama's go.mod still names Go 1.26.0 at 0.40.2 (2026-10-08), the newest release, so no release yet carries the fix (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78669",
+      "package": "golang.org/x/net",
+      "installedVersion": "v0.46.0",
+      "owner": "Orbit maintainers",
+      "rationale": "golang.org/x/net compiled into /usr/bin/ollama; 0.40.2 (2026-10-08), the newest release, still pins v0.46.0, so no release yet carries the fix (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
       "id": "CVE-2026-73566",
       "package": "tar",
       "installedVersion": "7.5.19",
@@ -918,14 +995,102 @@
       "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
       "expiresOn": "2026-11-04",
       "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78667",
+      "package": "stdlib",
+      "installedVersion": "v1.26.7",
+      "owner": "Orbit maintainers",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; clears only when the image is rebuilt on a newer pebble. 4.1.0-full is still the newest release tag (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78669",
+      "package": "stdlib",
+      "installedVersion": "v1.26.7",
+      "owner": "Orbit maintainers",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; clears only when the image is rebuilt on a newer pebble. 4.1.0-full is still the newest release tag (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-97031",
+      "package": "stdlib",
+      "installedVersion": "v1.26.7",
+      "owner": "Orbit maintainers",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; clears only when the image is rebuilt on a newer pebble. 4.1.0-full is still the newest release tag (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-8286",
+      "package": "libcurl4t64",
+      "installedVersion": "8.14.1-2+deb13u5",
+      "owner": "Orbit maintainers",
+      "rationale": "curl library in clamav/clamav:1.5.4-debian; the distribution fixed it in 8.14.1-2+deb13u7 (DSA-6558-1) on 2026-10-14, but the 1.5.4-debian tag was last rebuilt on 2026-10-12, before the fix. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-8927",
+      "package": "libcurl4t64",
+      "installedVersion": "8.14.1-2+deb13u5",
+      "owner": "Orbit maintainers",
+      "rationale": "curl library in clamav/clamav:1.5.4-debian; the distribution fixed it in 8.14.1-2+deb13u7 (DSA-6558-1) on 2026-10-14, but the 1.5.4-debian tag was last rebuilt on 2026-10-12, before the fix. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-92392",
+      "package": "libcurl4t64",
+      "installedVersion": "8.14.1-2+deb13u5",
+      "owner": "Orbit maintainers",
+      "rationale": "curl library in clamav/clamav:1.5.4-debian; the distribution fixed it in 8.14.1-2+deb13u7 (DSA-6558-1) on 2026-10-14, but the 1.5.4-debian tag was last rebuilt on 2026-10-12, before the fix. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-92392",
+      "package": "libcurl3t64-gnutls",
+      "installedVersion": "8.18.0-1ubuntu2.7",
+      "owner": "Orbit maintainers",
+      "rationale": "curl library in apache/tika:4.1.0-full; the distribution fixed it in 8.18.0-1ubuntu2.8 (USN-8927-1) on 2026-10-14, but 4.1.0-full is still the newest release tag and has not been rebuilt since 2026-09-29. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-92392",
+      "package": "libcurl4t64",
+      "installedVersion": "8.18.0-1ubuntu2.7",
+      "owner": "Orbit maintainers",
+      "rationale": "curl library in apache/tika:4.1.0-full; the distribution fixed it in 8.18.0-1ubuntu2.8 (USN-8927-1) on 2026-10-14, but 4.1.0-full is still the newest release tag and has not been rebuilt since 2026-09-29. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
     }
   ],
   "containerImages": [
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:8c4f684bf363c1bfd3858bd569d63392780322fb9ec57954b2d04b69b739824f",
-      "indexDigest": "sha256:2b6bb1d1105268683579a6523bf93c5e63cf4c4b9d39cf204c75a3f85a6c5cf7",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:b0ec1e181077b68385b2a63b60fee05708a7f765a695750d9d7236af2b553bd3",
+      "indexDigest": "sha256:c3448847796f019728077caf63ddb20d9861e22fbd8f92c33de7b13a9e0335af",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -935,7 +1100,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-05",
+      "resolvedOn": "2026-10-06",
       "reviewBy": "2026-11-30"
     },
     {

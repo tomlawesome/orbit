@@ -10,25 +10,22 @@
  *    account, which now happens through a blind index rather than `lower()`;
  *  - a KEK rotation covers both new columns (ADR-0017's contract, the #955
  *    failure, checked rather than assumed);
- *  - and the behaviour when the key is missing, which is the whole reason
- *    slice 3 (#970) exists: an operator must be able to tell "this instance
- *    cannot read any address" from "your password is wrong", and an identity
- *    provider's users must still get in, because that path never touched the
- *    address in the first place.
+ *  - and the behaviour when the key is missing: since #1405 the instance is in
+ *    maintenance and no session can be created.
  */
 import { randomBytes, randomUUID } from "node:crypto";
-import { eq, isNotNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, externalIdentities, instanceAuthority, localCredentials, mailInSenderAddresses, metadataKeys, users } from "@/db/schema";
-import { AuthError } from "@/lib/auth/errors";
 import { provisionIdentity } from "@/lib/auth/provision";
 import type { VerifiedIdentity } from "@/lib/auth/oidc";
 import { hashPassword } from "@/lib/auth/password";
+import { createSession } from "@/lib/auth/session";
+import { getAuthConfig } from "@/lib/env";
 import { deriveDocumentKeyId, getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { rotationComplete, runKekRotationToCompletion, type RotationKeys } from "@/server/documents/rewrap-worker";
 import { createLocalUser, verifyCredential } from "@/server/local-credentials";
-import { backfillComplete, runMetadataBackfillBatch } from "@/server/metadata/backfill";
 import { isMetadataEnvelope } from "@/server/metadata/crypto";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
 import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
@@ -73,7 +70,7 @@ function lockTheInstance(): () => void {
 
 async function storedUser(id: string) {
   const [row] = await getDb()
-    .select({ email: users.email, emailEnc: users.emailEnc, emailIndex: users.emailIndex })
+    .select({ emailEnc: users.emailEnc, emailIndex: users.emailIndex })
     .from(users).where(eq(users.id, id));
   return row;
 }
@@ -98,7 +95,6 @@ describe("an account address is written and read encrypted (#969)", () => {
     );
 
     const stored = await storedUser(created.id);
-    expect(stored.email).toBeNull();
     expect(isMetadataEnvelope(stored.emailEnc!)).toBe(true);
     expect(stored.emailEnc).not.toContain(address);
     expect(stored.emailIndex).not.toBeNull();
@@ -113,7 +109,7 @@ describe("an account address is written and read encrypted (#969)", () => {
     expect((await verifyCredential("ENCRYPTED-LOCAL@Example.Invalid", PASSWORD)).outcome).toBe("verified");
 
     const reader = await openInstanceMetadataReader();
-    expect(reader.text("users.email", created.id, { encrypted: stored.emailEnc, plaintext: stored.email }).value)
+    expect(reader.text("users.email", created.id, { encrypted: stored.emailEnc }).value)
       .toBe(address);
   });
 
@@ -133,134 +129,37 @@ describe("an account address is written and read encrypted (#969)", () => {
     expect(provisioned.email).toBe(address);
 
     const stored = await storedUser(provisioned.id);
-    expect(stored.email).toBeNull();
     expect(isMetadataEnvelope(stored.emailEnc!)).toBe(true);
-  });
-});
-
-describe("the backfill converts addresses written before the release (#969)", () => {
-  it("encrypts a plaintext account and sender address, clears both, and keeps sign-in working", async () => {
-    const address = "pre-release@example.invalid";
-    const senderAddress = "pre-release-sender@example.invalid";
-
-    /* The state migration 0044 leaves behind: plaintext present, ciphertext
-       absent. Written straight to the table, because no application path
-       produces it any more. */
-    const userId = randomUUID();
-    await getDb().insert(users).values({
-      id: userId, email: address, emailVerified: true, displayName: "Pre-release person",
-    });
-    await getDb().insert(mailInSenderAddresses).values({
-      userId, address: senderAddress, source: "manual", verifiedAt: new Date(),
-    });
-    await getDb().insert(localCredentials).values({ userId, passwordHash: await hashPassword(PASSWORD) });
-
-    expect((await verifyCredential(address, PASSWORD)).outcome).toBe("verified");
-    expect(await userForVerifiedSender(senderAddress)).toBe(userId);
-
-    const batch = await runMetadataBackfillBatch();
-    expect(batch.users).toBe(1);
-    expect(batch.senderAddresses).toBe(1);
-
-    const stored = await storedUser(userId);
-    expect(stored.email).toBeNull();
-    expect(isMetadataEnvelope(stored.emailEnc!)).toBe(true);
-    const [sender] = await getDb()
-      .select({ address: mailInSenderAddresses.address, addressEnc: mailInSenderAddresses.addressEnc })
-      .from(mailInSenderAddresses).where(eq(mailInSenderAddresses.userId, userId));
-    expect(sender.address).toBeNull();
-    expect(isMetadataEnvelope(sender.addressEnc!)).toBe(true);
-
-    // The point of the whole slice: the same two lookups still answer.
-    expect((await verifyCredential(address, PASSWORD)).outcome).toBe("verified");
-    expect(await userForVerifiedSender(senderAddress)).toBe(userId);
-  });
-});
-
-describe("no readable address survives anywhere (#969, the #966 failure)", () => {
-  it("finds no plaintext address in any address-bearing column after the backfill drains", async () => {
-    const address = "sweep@example.invalid";
-    const created = await createLocalUser(
-      { email: address, displayName: "Swept", passwordHash: await hashPassword(PASSWORD) },
-      { bootstrap: true },
-    );
-    await getDb().insert(mailInSenderAddresses).values({
-      userId: created.id, address: "sweep-sender@example.invalid", source: "manual",
-    });
-    while (!backfillComplete(await runMetadataBackfillBatch())) { /* drain */ }
-
-    /* Asserted over the stored shapes rather than by inspection: any row still
-       holding a readable address fails this, including one a future column
-       introduces and forgets to encrypt. */
-    const leftovers = await getDb().select({ id: users.id }).from(users).where(isNotNull(users.email));
-    expect(leftovers).toEqual([]);
-    const senderLeftovers = await getDb().select({ id: mailInSenderAddresses.id })
-      .from(mailInSenderAddresses).where(isNotNull(mailInSenderAddresses.address));
-    expect(senderLeftovers).toEqual([]);
   });
 });
 
 describe("an instance with no usable key (#969, and why #970 exists)", () => {
-  it("refuses local sign-in as locked, never as a wrong password", async () => {
-    const address = "locked-out@example.invalid";
-    await createLocalUser(
-      { email: address, displayName: "Locked out", passwordHash: await hashPassword(PASSWORD) },
-      { bootstrap: true },
-    );
-
-    const restore = lockTheInstance();
-    try {
-      const verdict = await verifyCredential(address, PASSWORD);
-      /* The distinction the operator's whole recovery depends on: not
-         `rejected`, which is what a wrong password gets. */
-      expect(verdict.outcome).toBe("locked");
-      expect((await verifyCredential(address, "the-wrong-password")).outcome).toBe("locked");
-    } finally {
-      restore();
-    }
-  });
-
-  it("still signs an identity the provider already knows in, because that never touched the address", async () => {
+  /* With no usable key Orbit is in maintenance and nobody signs in (#1405);
+     the tolerant sign-in code that once let a known identity in is gone
+     (#1407). */
+  it("lets no session follow for an identity the provider already knows (#1405)", async () => {
     const identity = identityFor("oidc-survivor@example.invalid");
     const provisioned = await provisionIdentity(identity, { bootstrap: true });
 
     const restore = lockTheInstance();
     try {
-      /* The regression #969 names explicitly. `external_identities` matches on
-         issuer and subject, so a missing key must not shut these people out. */
-      const again = await provisionIdentity(identity);
-      expect(again.id).toBe(provisioned.id);
-      // The address cannot be read, and is reported as unreadable rather than blank.
-      expect(again.email).toBeNull();
-
-      // And the stored ciphertext was not touched by a sign-in that could not read it.
-      const stored = await storedUser(provisioned.id);
-      expect(stored.emailEnc).not.toBeNull();
-      expect(stored.email).toBeNull();
+      const { KeyUnavailableError, setKeyStateForTests } = await import("@/server/key-state");
+      setKeyStateForTests({ verdict: "unusable", reason: "missing" });
+      await expect(createSession(provisioned.id, getAuthConfig())).rejects.toBeInstanceOf(KeyUnavailableError);
     } finally {
       restore();
+      await import("@/server/key-state")
+        .then((module) => module.setKeyStateForTests({ verdict: "usable", heldKeyId: getDocumentConfig().keyId }))
+        .catch(() => undefined);
     }
   });
 
-  it("refuses to create an account, in its own words", async () => {
-    const restore = lockTheInstance();
-    try {
-      const attempt = createLocalUser(
-        { email: "never-created@example.invalid", displayName: "Never", passwordHash: await hashPassword(PASSWORD) },
-        { bootstrap: true },
-      );
-      await expect(attempt).rejects.toBeInstanceOf(AuthError);
-      await expect(attempt).rejects.toMatchObject({ code: "instance_locked" });
-    } finally {
-      restore();
-    }
-  });
 });
 
 describe("a KEK rotation covers the address rows (#969, ADR-0017's contract)", () => {
   it("re-reads both addresses after a full rotation, with no value rewritten", async () => {
     const address = "rotated@example.invalid";
-    const senderAddress = "rotated-sender@example.invalid";
+    const senderAddress = address;
     const created = await createLocalUser(
       { email: address, displayName: "Rotated", passwordHash: await hashPassword(PASSWORD) },
       { bootstrap: true },
@@ -270,10 +169,9 @@ describe("a KEK rotation covers the address rows (#969, ADR-0017's contract)", (
     await getDb().insert(mailInSenderAddresses).values({
       id: senderId,
       userId: created.id,
-      address: null,
       addressEnc: writer.encryptText("mail_in_sender_addresses.address", senderId, senderAddress),
       addressIndex: writer.senderAddressIndex(senderAddress),
-      source: "manual",
+      source: "account",
       verifiedAt: new Date(),
     });
 

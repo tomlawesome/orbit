@@ -1,15 +1,23 @@
 <script>
+  import { onDestroy } from "svelte";
   import { beforeNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { WorkspaceError, applyCommand, readWorkspace } from "$lib/data/workspace.js";
-  import { saveProblem } from "$lib/data/metadata-status.js";
+  import {
+    WorkspaceError, applyCommand, bindRefused, checkDraftCommand, notSavedWords, readReminders, readWorkspace, refusesFile, stageDocument,
+    unsavedWords, wordsOf,
+  } from "$lib/data/workspace.js";
+  import {
+    CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
+    suggestionsToCarry,
+  } from "$lib/data/document-read.js";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { standOnKeyboard } from "$lib/pocket/sheet.js";
   import { wake } from "$lib/pocket/wake.js";
   import EntryForm from "./EntryForm.svelte";
-  import { blankEntry, createCommandOf, entryChanged, refusalOf } from "./entry.js";
+  import { dryRunner } from "$lib/data/dry-run.js";
+  import { blankEntry, createCommandOf, entryChanged, reminderPairOf } from "./entry.js";
 
   /**
    * NEW ENTRY ON A PHONE (#1120, proposal §2.5). Server-rendered beside the
@@ -22,8 +30,12 @@
    * the refusal beside save while something is missing (#1058: no section
    * is chosen for you); saving; a failure that is loud and stays until the
    * next attempt, with nothing typed lost (#1058); saved, which raises the
-   * wake and approaches the new item on its belt. Leaving with something
-   * typed asks first.
+   * wake and approaches the new item on its belt. A document picked is saved
+   * with the item, all or nothing, as the desk's is (#1245, owner's 11a;
+   * #1406: staged first, then bound by the one command), and is read
+   * the moment it is picked, as the desk reads it (#1279, owner's 14a): page
+   * one lands in the reading card and the read fills the empty fields.
+   * Leaving with something typed asks first.
    *
    * `?name=` prefills the name (search's `add "x" as an item`, §2.4).
    */
@@ -42,24 +54,219 @@
   let saved = $state(false);
   /** @type {string | null} */
   let problem = $state(null);
-  /** Minted once for this draft, not per save attempt (#1151 W1-R3): a retry
-      after a dropped response reuses it, so the server's upsert-by-id
-      idempotency absorbs the retry instead of creating a second item. */
-  const draftId = crypto.randomUUID();
+  /** Minted once per household chosen, not per save attempt (#1151 W1-R3):
+      a retry under the same household reuses it, so the server's upsert-by-id
+      idempotency absorbs the retry instead of creating a second item, while
+      a different household is a different request and gets its own id. */
+  /** A plain record, not reactive state: it is written while the dry run reads it.
+      @type {Record<string, string>} */
+  const draftIds = {};
+  /** @param {string} householdId */
+  function draftIdOf(householdId) {
+    let id = draftIds[householdId];
+    if (!id) {
+      id = crypto.randomUUID();
+      draftIds[householdId] = id;
+    }
+    return id;
+  }
+  /** Minted once per file picked, the way `draftIdOf` is per household (#1245),
+      as the desk's takeFile does: a retry after a lost answer re-sends the
+      same id with the same bytes, so the documents route hands back the copy
+      it already holds instead of storing a second. */
+  /** @type {WeakMap<File, string>} */
+  const documentIds = new WeakMap();
+  /** @param {File} file */
+  function documentIdOf(file) {
+    let id = documentIds.get(file);
+    if (!id) {
+      id = crypto.randomUUID();
+      documentIds.set(file, id);
+    }
+    return id;
+  }
+  /** The id is spent: the sweep retired it, or the server already holds it
+      under another household (the household changed, the file did not).
+      @param {unknown} error */
+  function idRefused(error) {
+    return bindRefused(error) || (error instanceof WorkspaceError && error.code === "document_conflict");
+  }
 
-  const refusal = $derived(phase === "ready" ? refusalOf(entry) : null);
+  /* ---- reading the picked document (#1279) ----------------------------
+     The desk's read ($lib/data/document-read.js, shared with
+     create.behaviour.js): two requests from one pick, neither waiting for
+     the other. Page one lands the moment it is drawn; the read fills the
+     empty fields, never over what someone typed, and names them in `marked`
+     for EntryForm's "◆ from document". A refused file stays in the entry,
+     marked, and holds the save until it is replaced or removed (#1406,
+     owner's answer 6a). Picking again, "not this one" and
+     leaving each abort the read in flight and revoke the page's object URL. */
+  /** @type {import('$lib/data/document-read.js').PickedRead | null} */
+  let picked = $state(null);
+  /** @type {import('$lib/data/document-read.js').SuggestionField[]} */
+  let marked = $state([]);
+  /** @type {AbortController | null} */
+  let reading = null;
+  let picks = 0;
+
+  function stopReading() {
+    reading?.abort();
+    reading = null;
+    if (picked?.page) URL.revokeObjectURL(picked.page);
+    if (picked) picked.page = null;
+  }
+
+  /** Clears the suggested values nobody accepted, and their marks. */
+  function clearSuggestions() {
+    for (const field of marked) entry[field] = "";
+    marked = [];
+  }
+
+  /** @param {string} line @param {string} why */
+  function settle(line, why) {
+    if (!picked) return;
+    picked.settled = true;
+    picked.line = line;
+    picked.why = why;
+  }
+
+  /** The server would not keep this file -- the read found it, or the
+      save's stage did -- so it stays in the entry marked refused, in the
+      server's words, and the save is held until it is replaced or removed
+      (#1406, owner's answer 6a). The card says so in the desk's words. */
+  /** @param {string} why */
+  function refuse(why) {
+    stopReading();
+    if (!picked) return;
+    picked.scanned = false;
+    picked.refused = true;
+    picked.read = true;
+    settle(FOCUS_REFUSED, why);
+  }
+
+  /** @param {File} file */
+  async function readDocument(file) {
+    /* A refused file's loud note goes when a new file replaces it. */
+    if (picked?.refused) problem = null;
+    stopReading();
+    clearSuggestions();
+    const controller = new AbortController();
+    reading = controller;
+    const current = () => reading === controller && attachment === file;
+    picks += 1;
+    picked = {
+      key: picks, name: file.name, size: file.size, page: null, scanned: false, refused: false,
+      settled: false, line: FOCUS_SCANNING, why: WHY_READING, read: false, caption: CAP_READING,
+    };
+    const householdId = entry.householdId;
+    if (!householdId) return;
+    /* ADR-0033 step 5: the focus line moves on from the virus check to the
+       preview the moment the scan has passed, before anything opens the file. */
+    /** @type {(scanned: boolean) => void} */
+    const onScanned = (scanned) => {
+      if (!current() || !picked || picked.page || picked.settled) return;
+      picked.line = focusAfterScan(scanned);
+    };
+    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned });
+    /** @type {string | null} */
+    let undrawable = null;
+
+    const page = outcomes.page.then((outcome) => {
+      if (!current() || !picked) {
+        if (outcome.kind === "up") URL.revokeObjectURL(outcome.url);
+        return;
+      }
+      if (outcome.kind === "up") {
+        picked.page = outcome.url;
+        picked.scanned = outcome.scanned;
+      } else if (outcome.kind === "refused") {
+        refuse(outcome.why);
+      } else {
+        undrawable = outcome.why;
+        if (picked.read) settle(FOCUS_UNDRAWABLE, undrawable);
+      }
+    });
+
+    const read = outcomes.read.then((outcome) => {
+      if (!current() || !picked) return;
+      if (outcome.kind === "refused") {
+        refuse(outcome.why);
+        return;
+      }
+      let carried = 0;
+      if (outcome.kind === "read") {
+        const carry = suggestionsToCarry(outcome.suggestions, (field) => entry[field]);
+        for (const one of carry) {
+          /* The cost field holds a bare amount, as the review's accept()
+             copies it in. */
+          entry[one.field] = one.field === "cost" ? one.value.replace(/[^\d.]/g, "") : one.value;
+        }
+        marked = [...marked, ...carry.map((one) => one.field)];
+        carried = carry.length;
+      }
+      picked.caption = captionOf(outcome, carried);
+      picked.read = true;
+      if (undrawable) settle(FOCUS_UNDRAWABLE, undrawable);
+    });
+
+    await Promise.allSettled([page, read]);
+  }
+
+  /* "not this one": the file has already left the entry (EntryForm), and
+     what it suggested goes with it. */
+  function dropDocument() {
+    stopReading();
+    clearSuggestions();
+    picked = null;
+    problem = null;
+  }
+
+  /* Leaving: a read still in flight is nobody's once the screen has gone,
+     and the page's object URL goes with it. */
+  onDestroy(() => {
+    reading?.abort();
+    reading = null;
+    if (picked?.page) URL.revokeObjectURL(picked.page);
+  });
+
+  /* The engine's last word on the entry (ADR-0034, #1325): null when it can
+     be saved, its refusal otherwise, asked once when the form is ready and
+     again ~300 ms after each change. "" until the first answer: nothing to
+     say yet, and nothing to save. */
+  /** @type {string | null} */
+  let refusal = $state("");
+  /** The command the form would send now; null before a household is known. */
+  function commandNow() {
+    const household = households.find((one) => one.id === entry.householdId);
+    return household
+      ? createCommandOf($state.snapshot(entry), { householdId: household.id, currency: household.currency ?? "GBP", id: draftIdOf(household.id) })
+      : null;
+  }
+  const dryRun = dryRunner({ onanswer: (answer) => { refusal = answer; }, check: checkDraftCommand });
+  let asked = false;
+  $effect(() => {
+    if (phase !== "ready") return;
+    JSON.stringify(entry); // every field is the question
+    if (asked) dryRun.ask(commandNow);
+    else { asked = true; dryRun.now(commandNow); }
+  });
+  onDestroy(() => dryRun.stop());
   const dirty = $derived(!saved && (entryChanged(entry, start) || attachment !== null));
+  /** A refused file is still held: Add waits until it is replaced or removed. */
+  const fileRefused = $derived.by(() => attachment !== null && picked?.refused === true);
 
   async function load() {
     phase = "loading";
     try {
-      const workspace = await readWorkspace();
+      const [workspace, reminders] = await Promise.all([readWorkspace(), readReminders().catch(() => null)]);
       households = (workspace.households ?? []).map((one) => ({
         id: one.id, name: one.name, currency: one.currency, sections: one.sections ?? [],
       }));
       if (!households.length) { phase = "none"; return; }
       const active = workspace.activeHouseholdId ?? households[0].id;
       entry.householdId = households.some((one) => one.id === active) ? active : households[0].id;
+      /* A new entry starts from the member's own pair, which they can still change on the entry. */
+      entry.reminderDays = reminderPairOf(reminders);
       start = $state.snapshot(entry);
       phase = "ready";
     } catch {
@@ -69,29 +276,64 @@
   $effect(() => { load(); });
 
   async function save() {
-    if (saving || saved || refusal || phase !== "ready") return;
+    if (saving || saved || refusal !== null || fileRefused || phase !== "ready") return;
     const household = households.find((one) => one.id === entry.householdId);
-    if (!household) return;
+    const command = commandNow();
+    if (!household || !command) return;
     saving = true;
     problem = null;
+    /* The file is taken now, as the desk's create does: what was held at
+       the press is what the stage sends, so the server, not a late read,
+       has the last word on it. */
+    const held = attachment;
+    /** Until the stage is answered, a failure is the file's or the send's. */
+    let staging = false;
     try {
-      await applyCommand(createCommandOf(entry, { householdId: household.id, currency: household.currency ?? "GBP", id: draftId })).catch((error) => {
+      /* #1406: all or nothing, as the desk's save. The file is staged first
+         -- stored, scanned and sealed under this draft's id, with no item
+         yet -- and the one command that creates the item binds it in the
+         same transaction. A retry re-sends both under the same ids, and the
+         server hands back what it already holds. */
+      if (held) {
+        staging = true;
+        await stageDocument(household.id, held, documentIdOf(held), draftIdOf(household.id)).catch(async (error) => {
+          /* The sweep retired the file once staged under this id, and the
+             server will not take it under that id again: stage the same
+             file once more under a fresh id, within this Add. A second
+             failure is shown as any other. The id is reissued too when the
+             server already holds it under another household. */
+          if (!idRefused(error)) throw error;
+          documentIds.delete(held);
+          await stageDocument(household.id, held, documentIdOf(held), draftIdOf(household.id));
+        });
+        staging = false;
+      }
+      await applyCommand(held ? { ...command, documentIds: [documentIdOf(held)] } : command).catch((error) => {
         /* This draft id is new to the server, so "this item changed on another
-           device" can only mean the earlier send landed and its answer was
-           lost; refreshing would mint a new id and create the duplicate the
-           retry exists to avoid. */
+           device" can only mean the earlier send landed -- the item and the
+           same document together -- and its answer was lost; refreshing would
+           mint a new id and create the duplicate the retry exists to avoid.
+           A send whose file the landed item does not hold is refused in the
+           server's own words instead, and shown as not saved. */
         if (error instanceof WorkspaceError && error.code === "version_required") return;
         throw error;
       });
       saved = true;
-      wake(attachment ? `added to your orbit · ${attachment.name} was not kept` : `added to your orbit · ${entry.name.trim()}`);
-      /* The approach (§2.5): the new item, seated on its belt. */
-      await goto(resolve("/item/[[id]]", { id: draftId }));
+      wake(`added to your orbit · ${entry.name.trim()}`);
+      /* #1319 (§34): the new item, its drawer open on home, as the desk's
+         create lands (create.behaviour.js). */
+      await goto(resolve(`/home?item=${encodeURIComponent(draftIdOf(household.id))}`));
     } catch (error) {
       /* Loud (#1058): the reason stays above the bar until the next attempt,
-         the button comes back, and nothing typed is lost. No wake. */
-      const words = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
-      problem = /^not saved/i.test(words) ? words : `not saved — ${words}`;
+         the button comes back, and nothing typed is lost. No wake. Nothing
+         is ever half saved (#1406): a refused file stays, marked, holding
+         Add; a send with no verdict says so; a refusal reads in its own words. */
+      if (staging && held && held === attachment && refusesFile(error)) refuse(wordsOf(error));
+      /* The sweep retired the staged file after the stage: stage it afresh
+         under a new id on the next Add, as a refused stage does above;
+         likewise when the server already holds the id under another household. */
+      if (!staging && held && idRefused(error)) documentIds.delete(held);
+      problem = unsavedWords(error) ?? notSavedWords(error);
     } finally {
       saving = false;
     }
@@ -175,7 +417,9 @@
       </div>
     {:else}
       <form id="pocket-entry" aria-label="New entry" onsubmit={(event) => { event.preventDefault(); save(); }}>
-        <EntryForm bind:entry bind:attachment {households} disabled={saving || saved} />
+        <EntryForm bind:entry bind:attachment bind:marked {households} {picked} disabled={saving || saved}
+                   onpick={(file) => { readDocument(file).catch(() => { /* every outcome is drawn in the card */ }); }}
+                   ondrop={dropDocument} />
       </form>
     {/if}
   </main>
@@ -190,7 +434,7 @@
       <div class="pk-bar-acts">
         <a class="p-pill pk-never" href={resolve("/home")}>never mind</a>
         <button type="submit" form="pocket-entry" class="p-pill filled pk-save"
-                disabled={phase !== "ready" || Boolean(refusal) || saving || saved}
+                aria-disabled={phase !== "ready" || refusal !== null || fileRefused || saving || saved ? "true" : undefined}
                 aria-describedby={refusal ? "pk-refusal" : undefined}>
           {saved ? "Added" : saving ? "Adding…" : "Add to orbit"}
         </button>
@@ -254,7 +498,7 @@
   .pk-bar-in{max-width:var(--p-column);margin:0 auto}
   .pk-bar-acts{display:flex;gap:var(--p-pill-gap)}
   .pk-save{flex:1}
-  .pk-save:disabled{opacity:.5;cursor:default;box-shadow:none}
+  .pk-save[aria-disabled="true"]{opacity:.5;cursor:default;box-shadow:none}
   .pk-refusal,.pk-problem{margin:0 0 8px;font:var(--p-type-meta)/1.4 var(--mono)}
   .pk-refusal{color:var(--ink-mid)}
   .pk-problem{color:var(--overdue-text);animation:p-errin 200ms var(--p-ease) both}

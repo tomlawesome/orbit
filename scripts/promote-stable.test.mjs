@@ -257,6 +257,7 @@ function run({
   previewTagDigest = PREVIEW_DIGEST,
   shaTagDigest = PREVIEW_DIGEST,
   versionTagDigest = null,
+  latestTagDigest = null,
   tagExistsOnGitLab = false,
   stableTags = "v1.3.0",
   labelRevision = GOOD_SHA,
@@ -273,6 +274,7 @@ function run({
   stubs.seedDigest(`${IMAGE}:preview`, previewTagDigest);
   stubs.seedDigest(`${IMAGE}:sha-${mainHead}`, shaTagDigest);
   if (versionTagDigest) stubs.seedDigest(`${IMAGE}:${labelVersion}`, versionTagDigest);
+  if (latestTagDigest) stubs.seedDigest(`${IMAGE}:latest`, latestTagDigest);
 
   const result = failOnProcessDeadline(
     spawnSync("bash", [script], {
@@ -381,8 +383,8 @@ describe("scripts/ci/promote-stable.sh", () => {
     );
   });
 
-  it("refuses when the version tag already exists in GHCR, without logging into GHCR or tagging", () => {
-    const { result, calls } = run({ versionTagDigest: PREVIEW_DIGEST });
+  it("refuses when the version tag already exists in GHCR at another digest, without logging into GHCR or tagging", () => {
+    const { result, calls } = run({ versionTagDigest: OTHER_DIGEST });
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("already exists in GHCR");
     expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login ghcr.io"))).toBe(
@@ -390,6 +392,30 @@ describe("scripts/ci/promote-stable.sh", () => {
     );
     expect(
       calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),
+    ).toBe(false);
+  });
+
+  it("resumes a half-finished promotion: GHCR tags already on the accepted digest, no GitLab tag, so it only creates the GitLab tag", () => {
+    const { result, calls } = run({ versionTagDigest: PREVIEW_DIGEST, latestTagDigest: PREVIEW_DIGEST });
+    expect(result.status, result.stderr).toBe(0);
+    const recordedCalls = calls();
+    expect(
+      recordedCalls.some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),
+    ).toBe(false);
+    const curlCall = recordedCalls.find((call) => call[0] === "curl");
+    expect(curlCall).toBeDefined();
+    expect(curlCall.join(" ")).toContain("projects/49/repository/tags");
+    expect(curlCall.join(" ")).toContain(`tag_name=${VERSION}`);
+  });
+
+  it("still refuses when the version tag in GHCR resolves to a different digest, even if :latest matches", () => {
+    const { result, calls } = run({ versionTagDigest: OTHER_DIGEST, latestTagDigest: PREVIEW_DIGEST });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("already exists in GHCR");
+    const recordedCalls = calls();
+    expect(recordedCalls.some((call) => call[0] === "curl")).toBe(false);
+    expect(
+      recordedCalls.some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),
     ).toBe(false);
   });
 
@@ -406,6 +432,9 @@ describe("scripts/ci/promote-stable.sh", () => {
     expect(createCall[1]).toContain(`--tag ${IMAGE}:latest`);
     expect(createCall[1]).toContain(`${IMAGE}@${PREVIEW_DIGEST}`);
     expect(createCall[1]).not.toContain(":stable");
+    // Copy the tested manifest unchanged: without this flag buildx wraps a
+    // single-manifest source in a new, unsigned index with a new digest (#1179).
+    expect(createCall[1]).toContain("--prefer-index=false");
 
     // Two logins: registry.tomlawson.io (so the verifier below can read the
     // attestation) then GHCR (to publish). Both piped on stdin, never argv.

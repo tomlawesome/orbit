@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
-import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { claimCodeFromLog, claimInstanceAsAdministrator, stackLog } from "./support/bootstrap";
+import { bodyClassAdds, bodyClassOrder, bodyClassSeen, witnessBodyClasses } from "./support/arrival";
 import { householdRegister } from "./support/households";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
@@ -14,13 +15,13 @@ resetDatabaseBetweenSpecFiles();
  * THE FIRST-RUN DOOR, EVERYWHERE (#840).
  *
  * `/` is the only screen that ever reads GET /api/workspace and decides
- * create vs. newcomer vs. onward (web/src/lib/arrival/stage.js's
+ * newcomer vs. onward (web/src/lib/arrival/stage.js's
  * arrivalStageOf) -- but a signed-out reader who first tried to open /home
  * (every "start your own system" pointer on it used to lead straight to the
  * item form) was bounced by hooks.server.js to
  * `/login?returnTo=/home`, and the OIDC callback returned them to exactly
  * that path afterwards. Nothing then sent them on to the arrival: they landed
- * on /home itself, having never met the create card at all.
+ * on /home itself, having never met the create questions at all.
  *
  * This spec is the one journey v19-arrival.spec.ts cannot be: every other
  * arrival test signs in AT `/` (through its own gate, or straight at the
@@ -56,8 +57,85 @@ test.describe.configure({ mode: "serial" });
  * the container's own log, so this file no longer depends on running after
  * somebody else. Idempotent -- an already-claimed instance just signs in.
  */
-test.beforeAll(async ({ browser }) => {
+test.beforeAll(async ({ browser, request }) => {
+  /* The local-only profile has no provider to sign the administrator in
+     through, and its first run is this file's own journey below (#1263). */
+  if (!(await providerConfigured(request))) return;
   await claimInstanceAsAdministrator(browser);
+});
+
+/** Whether this stack has an identity provider (the oidc profile) at all. */
+async function providerConfigured(request: import("@playwright/test").APIRequestContext) {
+  const availability = await (await request.get("/api/auth/availability")).json() as { methods: { oidc: boolean } };
+  return availability.methods.oidc;
+}
+
+/*
+ * THE LOCAL FIRST RUN, ONE FLIGHT (#1263). On a provider-less instance
+ * nobody has claimed: the claim card, then the first-administrator card
+ * (SignIn.svelte's `submitCreate`, which writes the launch marker and goes
+ * to `/`), then the newcomer's climb on `/` over an empty labelled sky, no
+ * count, and the belong card with its drawer already open. Create goes to
+ * /home with no marker: no dawn, no second climb.
+ *
+ * Runs only where that state exists: `scripts/test-e2e-local.sh --profile
+ * local-only --spec tests/e2e/v19-first-run-door.spec.ts`, on a fresh stack.
+ * The profile's own list claims the instance in local-sign-in.spec.ts first,
+ * so in that lane (and in the oidc lane) this skips.
+ */
+const LOCAL_ADMINISTRATOR = {
+  email: "first-run@example.invalid",
+  displayName: "Orbit First Run",
+  password: "orbit-e2e-first-run-placeholder",
+};
+const LOCAL_SYSTEM = `First Run's Own ${Date.now()}`;
+
+test("the local first run flies once and lands on the drawer, then home without a second flight", async ({ page, request }) => {
+  test.skip(test.info().project.name.startsWith("mobile"), "the unclaimed state exists once per stack: walked on the desk");
+  test.skip(await providerConfigured(request), "provider configured: the local first run is the local-only profile's");
+  const availability = await (await request.get("/api/auth/availability")).json() as { claimed: boolean };
+  test.skip(availability.claimed, "already claimed: the first run needs a fresh local-only stack");
+  test.setTimeout(120_000);
+
+  await witnessBodyClasses(page);
+  const code = claimCodeFromLog(stackLog());
+  expect(code, "no claim notice in the stack's log: has orbit-app started?").toBeDefined();
+  await page.goto("/login");
+  await page.fill("#claimcode", code as string);
+  await page.locator("#claimbtn").click();
+  await expect(page.locator("#idname")).toBeVisible();
+  await page.fill("#idemail", LOCAL_ADMINISTRATOR.email);
+  await page.fill("#idname", LOCAL_ADMINISTRATOR.displayName);
+  await page.fill("#idpassword", LOCAL_ADMINISTRATOR.password);
+  await page.locator("#idbtn").click();
+
+  /* `/`, the climb once, and the card with the drawer down, unprompted */
+  await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
+  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: 20_000 }).toBe(true);
+  /* the card is in the document, transparent, for the whole climb; it has
+     arrived when `belong` does */
+  await expect(page.locator("body")).toHaveClass(/\bbelong\b/, { timeout: 40_000 });
+  await expect(page.getByRole("heading", { name: "where do you belong?" })).toBeVisible();
+  const handle = page.getByRole("button", { name: "name your own system" });
+  await expect(handle).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".nf .belong #hhname")).toBeVisible();
+  /* the owner's answer (2026-10-06): an empty instance skips the count — the
+     card lands with the sky's chrome, ahead of where the count would start,
+     and no count is drawn at all */
+  const order = await bodyClassOrder(page);
+  expect(order).toContain("instrument");
+  if (order.includes("counting")) {
+    expect(order.indexOf("belong"), "the card waited for the count beat").toBeLessThan(order.indexOf("counting"));
+  }
+  await expect(page.locator(".nf .disc")).toHaveCount(0);
+  expect(await bodyClassAdds(page, "showwarp")).toBe(1);
+
+  await page.fill("#hhname", LOCAL_SYSTEM);
+  await page.locator("#gobtn").click();
+  await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
+  await expect(page.locator("#dial-name")).toHaveText(LOCAL_SYSTEM, { timeout: 30_000 });
+  expect(await bodyClassSeen(page, "showwarp"), "showwarp seen on /home").toBe(false);
+  expect(await bodyClassSeen(page, "showdawn"), "showdawn seen on /home").toBe(false);
 });
 
 test.afterAll(async ({ browser }) => {
@@ -78,7 +156,8 @@ test.afterAll(async ({ browser }) => {
   }
 });
 
-test("a fresh sign-in returned to /home meets the arrival, not the item form", async ({ page }) => {
+test("a fresh sign-in returned to /home meets the arrival, not the item form", async ({ page, request }) => {
+  test.skip(!(await providerConfigured(request)), "signs in through the identity provider");
   test.setTimeout(120_000);
 
   /* THE WHOLE POINT: a signed-out visit to /home is exactly what carries this
@@ -92,26 +171,17 @@ test("a fresh sign-in returned to /home meets the arrival, not the item form", a
   await signInAs(page, workerAccount("doorstep"), "/home");
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
 
-  /* Whichever stage answers. A genuinely empty instance answers with the
-     create card directly (arrivalStageOf's CREATE); the likelier case, since
-     the database survives every spec in a run, is the newcomer's arrival,
-     whose own "or name your own system" reaches the identical card
-     (v19-arrival.spec.ts's "THE GAP" note explains why this suite cannot
-     promise CREATE outright). Either way the card, the command and the
-     landing under test are the same one. */
-  const newcomerQuestion = page.getByRole("heading", { name: "where do you belong?" });
-  const createCard = page.locator(".card");
-  await expect(newcomerQuestion.or(createCard)).toBeVisible({ timeout: 30_000 });
-  if (await newcomerQuestion.isVisible()) {
-    await page.getByRole("button", { name: "or name your own system" }).click();
-  }
-  await expect(createCard).toBeVisible({ timeout: 30_000 });
-  /* the login chrome is gone while the card shows (§15, fourth pass) */
+  /* The newcomer's question either way (#1263): on an empty instance its
+     "name your own system" drawer is already open, otherwise it opens it. */
+  await expect(page.getByRole("heading", { name: "where do you belong?" })).toBeVisible({ timeout: 30_000 });
+  const handle = page.getByRole("button", { name: "name your own system" });
+  if ((await handle.getAttribute("aria-expanded")) !== "true") await handle.click();
+  await expect(page.locator(".nf .belong #hhname")).toBeVisible();
   await expect(page.locator("#gate")).toHaveCount(0);
 
-  /* THE CREATE, through the card itself -- not the seam -- because the point
-     of this spec is that a first-timer returned to /home reaches this UI at
-     all. */
+  /* THE CREATE, through the drawer itself -- not the seam -- because the
+     point of this spec is that a first-timer returned to /home reaches this
+     UI at all. */
   await page.fill("#hhname", OWN_SYSTEM);
   /* #862 round 3: the act reads `Create`, one word, and no longer grows with
      the typed name — the owner's ratified rule, so what is asserted is that
@@ -122,14 +192,14 @@ test("a fresh sign-in returned to /home meets the arrival, not the item form", a
   const money = await page.locator("#cur").inputValue();
   await page.locator("#gobtn").click();
 
-  /* THE LANDING: the reclaim plays and the browser actually reaches /home --
+  /* THE LANDING: the browser actually reaches /home --
      the door handed a first-timer on, the same promise its own returnTo made
      and, before #840, never kept. */
   await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
   await expect(page.locator("#dial-name")).toHaveText(OWN_SYSTEM);
 
   /* The server's own account of it: one system, theirs, with the answers the
-     card asked for. */
+     drawer asked for. */
   const workspace = await page.evaluate(async () => {
     const response = await fetch("/api/workspace", { credentials: "same-origin", cache: "no-store" });
     if (!response.ok) throw new Error(`workspace read failed: ${response.status}`);
@@ -296,6 +366,7 @@ test.describe("the door's cards", () => {
        in front of a provider this instance does not have. */
     await expect(page.locator("#idname")).toHaveCount(0);
     await expect(page.locator("#gate")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "continue with your identity provider" })).toHaveCount(0);
     await expect(page.locator("#idbtn")).toHaveText("Sign in");
     await expect(page.locator(".bigring .ringglass")).toBeAttached();
 
@@ -319,8 +390,16 @@ test.describe("the door's cards", () => {
     await expect(page.locator("#idemail")).toBeVisible();
     await expect(page.locator("#idpassword")).toBeVisible();
     await expect(page.locator("#gate")).toHaveCount(0);
+    /* ...with the provider still in reach: §2.7's one line under the fields
+       (#1278; the owner was left with no way to it after a wrong password) */
+    const provider = page.getByRole("button", { name: "continue with your identity provider" });
+    await expect(provider).toBeVisible();
 
     await sweep(page);
+
+    const toProvider = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/auth/login");
+    await provider.click();
+    await toProvider;
   });
 
   test("the local login line stays off when no local credential exists", async ({ page }) => {

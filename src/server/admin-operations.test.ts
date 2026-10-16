@@ -13,7 +13,7 @@ vi.mock("@/server/notification-worker", () => ({
   notificationFailureCategories: [],
   verifySmtpProviderConnection: vi.fn(),
 }));
-vi.mock("@/server/imap-ingestion", () => ({
+vi.mock("@/server/mail-in/imap-ingestion", () => ({
   getImapIngestionConfig: vi.fn(() => ({})),
   getImapIngestionWorkerHealth: vi.fn(() => ({ started: false, running: false, lastSuccessAt: null, lastErrorAt: null, lastErrorCode: null, preflightStatus: "not_configured" })),
   getImapProviderPreflightState: vi.fn(() => ({ status: "not_configured", smtp: "not_configured", imap: "not_configured", checkedAt: null })),
@@ -24,7 +24,7 @@ vi.mock("@/server/imap-ingestion", () => ({
   verifyImapIngestionProviders: mocks.verify,
 }));
 
-import { MailInCredentialLockedError } from "@/server/imap-ingestion";
+import { MailInCredentialLockedError } from "@/server/mail-in/imap-ingestion";
 import { verifySmtpProviderConnection } from "@/server/notification-worker";
 import {
   safeAdministratorAuditLabel, setImapProviderVerificationDependenciesForTests, verifyImapIngestionProvider,
@@ -103,7 +103,6 @@ describe("administrator SMTP relay verification", () => {
 describe("administrator audit labels", () => {
   it("uses explicit safe labels for critical actions and a generic label for unknown values", () => {
     expect(safeAdministratorAuditLabel("ownership_transferred")).toBe("Household ownership transferred");
-    expect(safeAdministratorAuditLabel("document_draft_approved")).toBe("Document review updated");
     expect(safeAdministratorAuditLabel("raw recipient=recipient@example.invalid secret=not-real")).toBe("Orbit administration activity");
   });
 });

@@ -11,47 +11,29 @@ export const ENV_ORBIT_SCHEMA_VERSION = 1;
 export type EnvOrbitFailureCode =
   | "configuration_syntax"
   | "configuration_unknown_key"
-  | "configuration_removed_key"
   | "configuration_project"
   | "configuration_version"
-  | "configuration_provenance";
+  | "configuration_provenance"
+  | "configuration_secret_conflict";
 
 export type ParseEnvOrbitResult =
   | { ok: true; record: EnvOrbitRecord; schemaPresent: boolean }
-  | { ok: false; code: EnvOrbitFailureCode };
+  // key: the offending setting, for an unknown or secret-conflict
+  // refusal, so the operator can be told which line to fix.
+  | { ok: false; code: EnvOrbitFailureCode; key?: string };
 
-// Mirrors scripts/configuration.sh's `removed_keys` (SQ1-Q1): keys this
-// project used to accept and now refuses with a dedicated
-// configuration_removed_key code, rather than the generic
-// configuration_unknown_key an operator would otherwise get.
-const REMOVED_KEYS: readonly string[] = [
-  "IMAP_ENABLED",
-  "IMAP_HOST",
-  "IMAP_PORT",
-  "IMAP_USER",
-  "IMAP_PASSWORD",
-  "IMAP_PASSWORD_FILE",
-  "IMAP_MAILBOX",
-  "IMAP_TLS_SERVER_NAME",
-  "IMAP_RECIPIENT_DOMAIN",
-  "IMAP_TRUSTED_RECIPIENT_HEADER",
-  "IMAP_POLL_SECONDS",
-  "IMAP_ALIAS_CURRENT_GENERATION",
-  "IMAP_ALIAS_CURRENT_SECRET",
-  "IMAP_ALIAS_CURRENT_SECRET_FILE",
-  "IMAP_ALIAS_PREVIOUS_GENERATION",
-  "IMAP_ALIAS_PREVIOUS_SECRET",
-  "IMAP_ALIAS_PREVIOUS_SECRET_FILE",
-  "IMAP_ALIAS_PREVIOUS_EXPIRES_AT",
-  "IMAP_ALIAS_GENERATION",
-  "IMAP_ALIAS_CURRENT_KEY",
-  "IMAP_ALIAS_CURRENT_KEY_FILE",
-  "IMAP_ALIAS_SECRET",
-  "IMAP_ALIAS_SECRET_FILE",
-  "IMAP_ALIAS_PREVIOUS_KEY",
-  "IMAP_ALIAS_PREVIOUS_KEY_FILE",
-  "IMAP_ALIAS_PREVIOUS_EXPIRY",
-];
+// Strict UTF-8 decode: undefined on any malformed byte sequence. A lossy
+// decode would turn a stray byte into U+FFFD, and rewriting the file from that
+// string would change a value the operator never touched.
+const strictUtf8Decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+export function decodeUtf8Strict(buffer: Uint8Array): string | undefined {
+  try {
+    return strictUtf8Decoder.decode(buffer);
+  } catch {
+    return undefined;
+  }
+}
 
 function isControlFree(value: string): boolean {
   for (const char of value) {
@@ -94,7 +76,28 @@ function isValidImmutableImage(value: string): boolean {
   return /^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$/.test(value);
 }
 
-export function parseEnvOrbitContent(content: string): ParseEnvOrbitResult {
+// Direct-value/_FILE pairs the app's own contract (config-contract.ts's
+// exclusivePairs) rejects as mutually exclusive, in the same order. The
+// configuration migration refuses a file that sets both (#1151 O1-Q1);
+// `orbit check` reports readiness without this refusal, as configure.sh
+// --check always did.
+const SECRET_FILE_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ["SESSION_SECRET", "SESSION_SECRET_FILE"],
+  ["DOCUMENT_KEK", "DOCUMENT_KEK_FILE"],
+  ["DOCUMENT_KEK_NEXT", "DOCUMENT_KEK_NEXT_FILE"],
+  ["POSTGRES_PASSWORD", "POSTGRES_PASSWORD_FILE"],
+  ["OIDC_CLIENT_SECRET", "OIDC_CLIENT_SECRET_FILE"],
+  ["VAPID_PRIVATE_KEY", "VAPID_PRIVATE_KEY_FILE"],
+  ["SMTP_PASSWORD", "SMTP_PASSWORD_FILE"],
+  ["DATABASE_URL", "DATABASE_URL_FILE"],
+];
+
+export interface ParseEnvOrbitOptions {
+  /** Refuse a populated direct secret beside its populated _FILE twin (configuration_secret_conflict). */
+  refuseSecretConflicts?: boolean;
+}
+
+export function parseEnvOrbitContent(content: string, options: ParseEnvOrbitOptions = {}): ParseEnvOrbitResult {
   const record: EnvOrbitRecord = {};
   const seen = new Set<string>();
   let assignmentCount = 0;
@@ -118,12 +121,7 @@ export function parseEnvOrbitContent(content: string): ParseEnvOrbitResult {
     seen.add(key);
     assignmentCount += 1;
     if (!(ALLOWED_KEYS as readonly string[]).includes(key)) {
-      return {
-        ok: false,
-        code: REMOVED_KEYS.includes(key)
-          ? "configuration_removed_key"
-          : "configuration_unknown_key",
-      };
+      return { ok: false, code: "configuration_unknown_key", key };
     }
     if (!isValidValue(value)) return { ok: false, code: "configuration_syntax" };
     switch (key) {
@@ -152,6 +150,14 @@ export function parseEnvOrbitContent(content: string): ParseEnvOrbitResult {
   }
 
   if (assignmentCount === 0) return { ok: false, code: "configuration_syntax" };
+  if (options.refuseSecretConflicts) {
+    const values = record as Record<string, string | undefined>;
+    for (const [direct, file] of SECRET_FILE_PAIRS) {
+      // An empty direct placeholder beside a populated _FILE value (the shape
+      // configure writes for OIDC_CLIENT_SECRET) is not a conflict.
+      if (values[direct] && values[file]) return { ok: false, code: "configuration_secret_conflict", key: direct };
+    }
+  }
   if (schemaValue && schemaValue !== String(ENV_ORBIT_SCHEMA_VERSION)) {
     return { ok: false, code: "configuration_version" };
   }

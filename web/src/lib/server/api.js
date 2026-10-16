@@ -15,7 +15,23 @@ import { env } from "$env/dynamic/private";
 import { appErrorResponse } from "orbit/lib/app-error";
 import { assertCsrf, requireSession } from "orbit/lib/auth/session";
 import { getAuthConfig } from "orbit/lib/env";
+import { assertKeyUsable, noteRefusedSignIn } from "orbit/server/key-state";
 import { assertOutsideMaintenance } from "orbit/server/maintenance";
+
+/**
+ * The sign-in routes (#1405 section 4): a refusal on one of these is a person
+ * being turned away, so it is logged, boundedly. The provider's return,
+ * `/api/auth/callback`, is not wrapped and logs its own.
+ */
+const SIGN_IN_ROUTES = new Set([
+  "/api/auth/login",
+  "/api/auth/local/login",
+  "/api/auth/local/login/pending",
+  "/api/auth/local/setup",
+  "/api/auth/bootstrap/claim",
+  "/api/auth/bootstrap/local",
+  "/api/auth/approve",
+]);
 
 /**
  * True when the harness has asked for fixture data.
@@ -54,17 +70,35 @@ export function fixturesRequested() {
  * maintenance case back to `appErrorResponse` so the bounded 503 contract
  * (#523) holds either way.
  *
+ * THE ENCRYPTION KEY GATE (#1405). With no usable key every wrapped route
+ * answers `503 {"error":"encryption_key_unavailable"}` before anything else is
+ * looked at: the maintenance guard, the session, a credential. A fail-closed
+ * interceptor, like the maintenance guard (ADR-0013 §2-3): a route added
+ * tomorrow is closed the day it exists. `openWhileKeyUnusable` is the one way
+ * out, and exactly one route takes it: sign-out, so a member may still leave
+ * (tests/unit/api-key-gate-coverage.test.mjs holds that list). The fixture
+ * harness never boots, so it never has a verdict, and is left alone.
+ *
  * @param {(event: import("@sveltejs/kit").RequestEvent) => Promise<Response> | Response} handler
  * @param {{
- *   fixture?: (event: import("@sveltejs/kit").RequestEvent) => Response,
+ *   fixture?: (event: import("@sveltejs/kit").RequestEvent) => Response | Promise<Response>,
  *   errorResponse?: (error: unknown) => Response,
+ *   openWhileKeyUnusable?: boolean,
  * }} [options]
  * @returns {(event: import("@sveltejs/kit").RequestEvent) => Promise<Response>}
  */
-export function api(handler, { fixture, errorResponse = appErrorResponse } = {}) {
+export function api(handler, { fixture, errorResponse = appErrorResponse, openWhileKeyUnusable = false } = {}) {
   return async (event) => {
     try {
-      if (fixture && fixturesRequested()) return fixture(event);
+      if (fixture && fixturesRequested()) return await fixture(event);
+      if (!openWhileKeyUnusable && !fixturesRequested()) {
+        try {
+          assertKeyUsable();
+        } catch (error) {
+          if (SIGN_IN_ROUTES.has(event.route?.id ?? "")) noteRefusedSignIn();
+          throw error;
+        }
+      }
       return await handler(event);
     } catch (error) {
       /* The envelope owns the status, the code and the no-store header. */
@@ -84,8 +118,16 @@ export function api(handler, { fixture, errorResponse = appErrorResponse } = {})
  * The handler receives the session it already had to establish, so no route
  * reads it twice.
  *
+ * A `fixture` answers before any of that, exactly as `read`'s does: the
+ * pre-attachment document routes (#1245) use it so the fixture harness's
+ * create form reads a file without an engine, or a session, behind it.
+ *
  * @param {(event: import("@sveltejs/kit").RequestEvent, session: import("orbit/lib/auth/session").AuthenticatedSession) => Promise<Response> | Response} handler
- * @param {{ errorResponse?: (error: unknown) => Response }} [options]
+ * @param {{
+ *   fixture?: (event: import("@sveltejs/kit").RequestEvent) => Response | Promise<Response>,
+ *   errorResponse?: (error: unknown) => Response,
+ *   openWhileKeyUnusable?: boolean,
+ * }} [options]
  * @returns {(event: import("@sveltejs/kit").RequestEvent) => Promise<Response>}
  */
 export function write(handler, options) {
@@ -103,8 +145,9 @@ export function write(handler, options) {
  *
  * @param {(event: import("@sveltejs/kit").RequestEvent, session: import("orbit/lib/auth/session").AuthenticatedSession) => Promise<Response> | Response} handler
  * @param {{
- *   fixture?: (event: import("@sveltejs/kit").RequestEvent) => Response,
+ *   fixture?: (event: import("@sveltejs/kit").RequestEvent) => Response | Promise<Response>,
  *   errorResponse?: (error: unknown) => Response,
+ *   openWhileKeyUnusable?: boolean,
  * }} [options]
  * @returns {(event: import("@sveltejs/kit").RequestEvent) => Promise<Response>}
  */

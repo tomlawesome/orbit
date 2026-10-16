@@ -1,5 +1,7 @@
 # First-run tour — round 3 (#866)
 
+The screenshots and recordings this page shows are kept outside git (#1408): frames are blank in a clone or on the mirror.
+
 Rounds 1–2 ratified **B — across the ship**, **watch-only**, ten beats and the
 Car MOT data story (verdicts in `../round-1/README.md` and `../round-2/README.md`).
 Round 3 reopens none of that. It settles one thing: **how the film moves**.
@@ -131,4 +133,3 @@ button instead of next back and skip."*
 - Round 4 must show: the manifest below the dial, a document brought in from
   the belt and the belt cycled, the way to the inbox, the account menu and its
   themes — and carry more of the ratified copy along the way.
-

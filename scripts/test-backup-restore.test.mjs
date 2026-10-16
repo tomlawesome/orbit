@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,9 +31,9 @@ vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 // the answer.
 //
 // This is the same defect scripts/restore.sh had and fixed under #383
-// finding 3, which is why health_probe_url exists there. The suite below
-// mirrors scripts/restore.test.mjs deliberately, and like it tests the real
-// functions extracted verbatim out of the live shell script — never a
+// finding 3, which is why health_probe_url exists there (restore.sh keeps
+// this drill's own function, word for word, since #1211). The suite below
+// tests the real functions extracted verbatim out of the live shell script — never a
 // hand-typed duplicate — so a regression in the actual fix is caught here
 // rather than only in a copy.
 
@@ -102,9 +103,12 @@ function harnessPrelude(environmentFile) {
   ];
 }
 
-function runHealthProbeUrl(environmentFile) {
+function runHealthProbeUrl(environmentFile, exported = {}) {
   const harness = [...harnessPrelude(environmentFile), healthProbeUrlSource, "health_probe_url"].join("\n");
-  return failOnProcessDeadline(spawnSync("bash", ["-c", harness], { encoding: "utf8", ...processGuard() }), { label: "runHealthProbeUrl" });
+  const env = { ...process.env, ...exported };
+  if (!("ORBIT_PORT" in exported)) delete env.ORBIT_PORT;
+  if (!("ORBIT_BIND_ADDRESS" in exported)) delete env.ORBIT_BIND_ADDRESS;
+  return failOnProcessDeadline(spawnSync("bash", ["-c", harness], { encoding: "utf8", env, ...processGuard() }), { label: "runHealthProbeUrl" });
 }
 
 // Async, non-blocking bash runner — required (not spawnSync) whenever the bash
@@ -206,6 +210,30 @@ describe("scripts/test-backup-restore.sh health_probe_url (issue #684)", () => {
     expect(result.stdout).toBe("http://127.0.0.1:9443/api/health");
   });
 
+  it("an exported ORBIT_PORT/ORBIT_BIND_ADDRESS wins over .env-orbit, as it does for Compose itself (#1241)", () => {
+    const dir = makeFixture();
+    const environmentFile = writeEnvironmentFile(dir, ["APP_URL=https://orbit.internal", "ORBIT_PORT=3000"]);
+    const result = runHealthProbeUrl(environmentFile, { ORBIT_PORT: "3001", ORBIT_BIND_ADDRESS: "127.0.0.1" });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("http://127.0.0.1:3001/api/health");
+  });
+
+  it("ignores the carriage return of a CRLF .env-orbit, so the probe URL has no stray \\r (#1316)", () => {
+    const dir = makeFixture();
+    const environmentFile = join(dir, ".env-orbit");
+    writeFileSync(environmentFile, "APP_URL=https://orbit.internal\r\nORBIT_BIND_ADDRESS=127.0.0.1\r\nORBIT_PORT=3210\r\n");
+    chmodSync(environmentFile, 0o600);
+    const result = runHealthProbeUrl(environmentFile);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("http://127.0.0.1:3210/api/health");
+  });
+
+  it("strips the carriage return from both ORBIT_BIND_ADDRESS and ORBIT_PORT, in the drill as in scripts/restore.sh (#1316)", () => {
+    const stripCalls = (source) => source.match(/sub\(\/\\r\$\/, ""\);/g) ?? [];
+    expect(stripCalls(restoreHealthProbeUrlSource)).toHaveLength(2);
+    expect(stripCalls(healthProbeUrlSource)).toHaveLength(2);
+  });
+
   it("derives the probe the same way scripts/restore.sh does, so the two cannot drift apart", () => {
     expect(healthProbeUrlSource).toBe(restoreHealthProbeUrlSource);
   });
@@ -285,5 +313,495 @@ describe("scripts/test-backup-restore.sh wait_for_health (issue #684)", () => {
     const result = await runBashAsync(harness);
     expect(result.stderr).not.toContain("did not become healthy");
     expect(result.status).toBe(0);
+  });
+});
+
+// #1241: this drill borrows a deployment, so its teardown must put back what it
+// changed and must never remove the deployment or its data. Two layers: the
+// real script is run against a fake docker to prove the trap fires on failure
+// and on SIGINT/SIGTERM, and the teardown functions are extracted verbatim and
+// run against each state a half-finished drill can leave behind.
+
+const cleanupSource = extractFunction(drillSource, "cleanup", "scripts/test-backup-restore.sh");
+const collectEvidenceSource = extractFunction(drillSource, "collect_evidence", "scripts/test-backup-restore.sh");
+const restoreDeploymentSource = extractFunction(drillSource, "restore_deployment", "scripts/test-backup-restore.sh");
+const removeOwnStackSource = extractFunction(drillSource, "remove_own_stack", "scripts/test-backup-restore.sh");
+
+function readLines(path) {
+  return existsSync(path)
+    ? readFileSync(path, "utf8")
+        .split("\n")
+        .filter((line) => line.length > 0)
+    : [];
+}
+
+/** Runs cleanup() as the EXIT trap, exactly as the drill registers it, in a
+ * scratch deployment where every collaborator is a recording stub. */
+function runTeardown({ status = 0, vars = {}, healthy = true, maintenanceActive = "f", journal = false, keyBackup = false, ownStack = false }) {
+  const dir = makeFixture();
+  const calls = join(dir, "calls.log");
+  const evidenceRoot = join(dir, "evidence");
+  const state = join(dir, "restore-state");
+  const binDir = join(dir, "bin");
+  mkdirSync(join(dir, "scripts"), { recursive: true });
+  mkdirSync(state, { recursive: true });
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(calls, "");
+  for (const name of ["restore.sh", "end-maintenance.sh"]) {
+    writeFileSync(join(dir, "scripts", name), `printf '${name} %s\\n' "$*" >> "${calls}"\n`);
+  }
+  writeFileSync(
+    join(binDir, "docker"),
+    `#!/usr/bin/env bash
+printf 'docker %s\\n' "$*" >> "${calls}"
+case " $* " in *" start "*) : > "${dir}/healthy" ;; *" logs "*) printf 'stub-compose-logs\\n' ;; *" ps -aq "*|*" ls -q "*) printf 'stub-id\\n' ;; esac
+exit 0
+`,
+  );
+  chmodSync(join(binDir, "docker"), 0o755);
+  // --own-stack (#1273): a work directory holding an installed target and
+  // install.sh's log, as install_own_stack leaves them.
+  const ownWorkdir = join(dir, "own");
+  const ownTarget = join(ownWorkdir, "orbit-backup-drill");
+  if (ownStack) {
+    mkdirSync(ownTarget, { recursive: true });
+    for (const name of [".env-orbit", "docker-compose.yml"]) writeFileSync(join(ownTarget, name), "");
+    writeFileSync(join(ownWorkdir, "install.log"), "stub-install-log\n");
+  }
+  if (healthy) writeFileSync(join(dir, "healthy"), "");
+  writeFileSync(join(dir, "maintenance"), maintenanceActive);
+  if (journal) writeFileSync(join(state, "restore.journal"), "state=checkpointed\n");
+  writeFileSync(join(dir, "kek"), "wrong-key\n");
+  writeFileSync(join(dir, "kek.backup"), "real-key\n");
+  for (const name of ["backup.tar", "recovery.tar", "maintenance.tar"]) writeFileSync(join(dir, name), "x");
+  mkdirSync(join(dir, "testdir"));
+
+  const lines = [
+    "#!/usr/bin/env bash",
+    "set -Eeuo pipefail",
+    `cd ${JSON.stringify(dir)}`,
+    `environment_file=${JSON.stringify(join(dir, ".env-orbit"))}`,
+    `live_kek=${JSON.stringify(join(dir, "kek"))}`,
+    `repo_dir=${JSON.stringify(dir)}`,
+    `deploy_dir=${JSON.stringify(ownStack ? ownTarget : dir)}`,
+    `own_workdir=${ownStack ? JSON.stringify(ownWorkdir) : '""'}`,
+    "own_stack=0 own_stack_started=0",
+    'own_project="orbit-backup-drill" own_registry_name="orbit-backup-drill-registry"',
+    `restore_state_directory=${JSON.stringify(state)}`,
+    `key_backup=${keyBackup ? JSON.stringify(join(dir, "kek.backup")) : '""'}`,
+    `backup_path=${JSON.stringify(join(dir, "backup.tar"))}`,
+    `recovery_bundle_path=${JSON.stringify(join(dir, "recovery.tar"))}`,
+    `maintenance_backup_path=${JSON.stringify(join(dir, "maintenance.tar"))}`,
+    `test_directory=${JSON.stringify(join(dir, "testdir"))}`,
+    'drill_run_container="orbit-backup-drill-test"',
+    "touched=0 fixtures_seeded=0 fixtures_removed=0 maintenance_touched=0",
+    'maintenance_initial="" journal_at_start=0 torn_down=0 failure_reason="" last_error="" evidence_dir=""',
+    "readonly teardown_health_seconds=2",
+    ...Object.entries(vars).map(([key, value]) => `${key}=${JSON.stringify(String(value))}`),
+    `export ORBIT_EVIDENCE_ROOT=${JSON.stringify(evidenceRoot)}`,
+    `health_check() { [[ -e ${JSON.stringify(join(dir, "healthy"))} ]]; }`,
+    `maintenance_active() { cat ${JSON.stringify(join(dir, "maintenance"))}; }`,
+    `remove_document_fixture() { echo remove_document_fixture >> ${JSON.stringify(calls)}; }`,
+    `remove_credential_fixture() { echo remove_credential_fixture >> ${JSON.stringify(calls)}; }`,
+    collectEvidenceSource,
+    restoreDeploymentSource,
+    removeOwnStackSource,
+    cleanupSource,
+    "trap cleanup EXIT",
+    `exit ${status}`,
+  ];
+  const result = failOnProcessDeadline(
+    spawnSync("bash", ["-c", lines.join("\n")], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
+      ...processGuard(),
+    }),
+    { label: "runTeardown" },
+  );
+  const evidence = readdirSync(dir).includes("evidence") ? readdirSync(evidenceRoot) : [];
+  return { result, dir, calls: readLines(calls), evidenceRoot, evidence, ownWorkdir, kek: readFileSync(join(dir, "kek"), "utf8") };
+}
+
+describe("scripts/test-backup-restore.sh teardown puts back what it changed (#1241)", () => {
+  it("does nothing to the deployment when the run never touched it", () => {
+    const { result, calls } = runTeardown({ status: 1, healthy: false });
+    expect(result.status).toBe(1);
+    expect(calls.filter((c) => c.startsWith("docker "))).toEqual([]);
+  });
+
+  it("removes its fixtures, its bundles and its temp directory, and nothing of the deployment's", () => {
+    const { result, dir, calls } = runTeardown({ vars: { touched: 1, fixtures_seeded: 1 } });
+    expect(result.status).toBe(0);
+    expect(calls).toContain("remove_document_fixture");
+    expect(calls).toContain("remove_credential_fixture");
+    expect(calls).toContain("docker rm -f -v orbit-backup-drill-test");
+    for (const name of ["backup.tar", "recovery.tar", "maintenance.tar", "testdir"]) {
+      expect(existsSync(join(dir, name)), name).toBe(false);
+    }
+    // The deployment is borrowed: no teardown call may take it, its volumes,
+    // networks or images away.
+    for (const call of calls) {
+      expect(call).not.toMatch(/ down( |$)| volume | network | rmi | prune/);
+      expect(call).not.toMatch(/^docker rm (?!-f -v orbit-backup-drill-test$)/);
+    }
+  });
+
+  it("does not remove fixtures twice when the drill already removed them", () => {
+    const { calls } = runTeardown({ vars: { touched: 1, fixtures_seeded: 1, fixtures_removed: 1 } });
+    expect(calls).not.toContain("remove_document_fixture");
+  });
+
+  it("restores the live document key a failed key-rejection step left swapped", () => {
+    const { kek } = runTeardown({ status: 1, keyBackup: true });
+    expect(kek).toBe("real-key\n");
+  });
+
+  it("recovers an unfinished restore this run left, but never one that was already there", () => {
+    const left = runTeardown({ status: 1, journal: true, vars: { touched: 1 } });
+    expect(left.calls).toContain("restore.sh --recover");
+    const preexisting = runTeardown({ status: 1, journal: true, vars: { touched: 1, journal_at_start: 1 } });
+    expect(preexisting.calls).not.toContain("restore.sh --recover");
+  });
+
+  it("starts orbit-app when the run left it down, and leaves a healthy one alone", () => {
+    const down = runTeardown({ status: 1, healthy: false, vars: { touched: 1 } });
+    expect(down.calls.some((c) => / start orbit-app$/.test(c))).toBe(true);
+    const up = runTeardown({ status: 1, healthy: true, vars: { touched: 1 } });
+    expect(up.calls.some((c) => / start /.test(c))).toBe(false);
+  });
+
+  it("reopens an instance the drill closed for maintenance, but not one that was closed before", () => {
+    const closedByDrill = runTeardown({
+      status: 1,
+      maintenanceActive: "t",
+      vars: { touched: 1, maintenance_touched: 1, maintenance_initial: "f" },
+    });
+    expect(closedByDrill.calls).toContain("end-maintenance.sh ");
+    const closedBefore = runTeardown({
+      status: 1,
+      maintenanceActive: "t",
+      vars: { touched: 1, maintenance_touched: 1, maintenance_initial: "t" },
+    });
+    expect(closedBefore.calls).not.toContain("end-maintenance.sh ");
+    const reopened = runTeardown({
+      maintenanceActive: "f",
+      vars: { touched: 1, maintenance_touched: 1, maintenance_initial: "f" },
+    });
+    expect(reopened.calls).not.toContain("end-maintenance.sh ");
+  });
+
+  it("fires exactly once however many times it is reached", () => {
+    const dir = makeFixture();
+    const harness = [
+      "#!/usr/bin/env bash",
+      "set -Eeuo pipefail",
+      `cd ${JSON.stringify(dir)}`,
+      'touched=0 torn_down=0 key_backup="" backup_path="" recovery_bundle_path="" maintenance_backup_path="" test_directory="" evidence_dir="" failure_reason="" last_error="" journal_at_start=0',
+      'restore_state_directory="$PWD/none" environment_file="$PWD/env" live_kek="$PWD/kek"',
+      collectEvidenceSource,
+      restoreDeploymentSource,
+      cleanupSource,
+      "trap cleanup EXIT",
+      "cleanup",
+      "exit 0",
+    ].join("\n");
+    const result = failOnProcessDeadline(spawnSync("bash", ["-c", harness], { encoding: "utf8", ...processGuard() }), { label: "once" });
+    expect(result.stderr.match(/teardown: starting/g)).toHaveLength(1);
+    expect(result.stderr.match(/teardown: complete/g)).toHaveLength(1);
+  });
+
+  it("keeps compose state, logs and the restore journal of a failed run, and prints where", () => {
+    const { result, evidenceRoot, evidence, calls } = runTeardown({
+      status: 3,
+      journal: true,
+      vars: { touched: 1, failure_reason: "simulated drill failure", last_error: "line 9: some command" },
+    });
+    expect(evidence).toHaveLength(1);
+    const dir = join(evidenceRoot, evidence[0]);
+    expect(evidence[0]).toMatch(/^test-backup-restore-\d{8}T\d{6}Z$/);
+    expect(result.stderr).toContain(`evidence kept in: ${dir}`);
+    const info = readFileSync(join(dir, "run-info.txt"), "utf8");
+    expect(info).toContain("exit_status=3");
+    expect(info).toContain("simulated drill failure");
+    expect(info).toContain("line 9: some command");
+    expect(readFileSync(join(dir, "compose.log"), "utf8")).toContain("stub-compose-logs");
+    expect(existsSync(join(dir, "compose-ps.txt"))).toBe(true);
+    expect(readFileSync(join(dir, "restore.journal"), "utf8")).toContain("state=checkpointed");
+    // Evidence is taken before anything is recovered or removed.
+    const firstLogs = calls.findIndex((c) => c.includes(" logs "));
+    expect(firstLogs).toBeGreaterThanOrEqual(0);
+    expect(calls.findIndex((c) => c === "restore.sh --recover")).toBeGreaterThan(firstLogs);
+  });
+
+  it("writes no evidence for a run that passed", () => {
+    const { result, evidence } = runTeardown({ status: 0, vars: { touched: 1 } });
+    expect(result.status).toBe(0);
+    expect(evidence).toEqual([]);
+  });
+});
+
+// #1273: with --own-stack the drill owns the deployment, so the same single
+// teardown removes it whole instead of putting it back.
+describe("scripts/test-backup-restore.sh teardown removes a stack it owns (#1273)", () => {
+  const label = "label=com.docker.compose.project=orbit-backup-drill";
+
+  it.each([0, 1])("takes the stack down with its volumes, sweeps its project and removes the work directory (exit %i)", (status) => {
+    const { result, calls, ownWorkdir } = runTeardown({
+      status,
+      ownStack: true,
+      vars: { own_stack: 1, own_stack_started: 1, touched: 1, fixtures_seeded: 1 },
+    });
+    expect(result.status).toBe(status);
+    expect(result.stderr.match(/teardown: starting/g)).toHaveLength(1);
+    expect(calls).toContain("docker compose --env-file .env-orbit down --volumes --remove-orphans");
+    expect(calls).toContain("docker rm -f -v orbit-backup-drill-registry");
+    expect(calls).toContain(`docker ps -aq --filter ${label}`);
+    expect(calls).toContain(`docker volume ls -q --filter ${label}`);
+    expect(calls).toContain(`docker network ls -q --filter ${label}`);
+    for (const removal of ["docker rm -f stub-id", "docker volume rm stub-id", "docker network rm stub-id"]) {
+      expect(calls).toContain(removal);
+    }
+    // Nothing is put back into a stack that is about to go.
+    expect(calls).not.toContain("remove_document_fixture");
+    expect(calls.some((c) => / start orbit-app$/.test(c))).toBe(false);
+    expect(existsSync(ownWorkdir)).toBe(false);
+  });
+
+  it("touches no Docker object when the run stopped before starting one, but still removes the work directory", () => {
+    const { calls, ownWorkdir } = runTeardown({ status: 1, ownStack: true, vars: { own_stack: 1 } });
+    expect(calls.filter((c) => c.startsWith("docker "))).toEqual([]);
+    expect(existsSync(ownWorkdir)).toBe(false);
+  });
+
+  it("keeps install.sh's log with a failed run's evidence", () => {
+    const { evidenceRoot, evidence } = runTeardown({ status: 1, ownStack: true, vars: { own_stack: 1, own_stack_started: 1 } });
+    expect(evidence).toHaveLength(1);
+    expect(readFileSync(join(evidenceRoot, evidence[0], "install.log"), "utf8")).toBe("stub-install-log\n");
+  });
+
+  it("never takes down a borrowed deployment", () => {
+    const { calls } = runTeardown({ status: 1, vars: { touched: 1, own_stack_started: 1 } });
+    expect(calls.some((c) => / down( |$)| volume | network /.test(c))).toBe(false);
+  });
+});
+
+// The real script, against a fake docker: the trap really is wired to failure
+// and to both signals. The seeding `compose exec` is where the fake fails or
+// blocks, which is the first point after the run changes the deployment.
+async function freePort() {
+  const server = createNetServer();
+  const port = await new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server.address().port)));
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+async function prepareDrill(mode) {
+  const dir = makeFixture();
+  const binDir = join(dir, "bin");
+  mkdirSync(binDir);
+  const secrets = join(dir, ".orbit-secrets");
+  mkdirSync(secrets);
+  writeFileSync(join(secrets, "document-kek"), "kek\n");
+  const envFile = join(dir, ".env-orbit");
+  writeFileSync(envFile, `ORBIT_BIND_ADDRESS=127.0.0.1\nORBIT_PORT=${await freePort()}\n`);
+  const calls = join(dir, "calls.log");
+  const pidFile = join(dir, "blocked.pid");
+  writeFileSync(calls, "");
+  writeFileSync(
+    join(binDir, "docker"),
+    `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${calls}"
+case " $* " in *" logs "*) printf 'stub-compose-logs\\n' ;; esac
+if [[ " $* " == *" --user orbit:orbit "* ]]; then
+  if [[ "${mode}" == block ]]; then
+    printf '%s' "$$" > "${pidFile}"
+    printf 'stub-docker-blocked\\n' >&2
+    exec sleep 300
+  fi
+  exit 1
+fi
+# --own-stack (#1273) modes: block in the image build, fail the registry push
+# (after the drill has started Docker objects of its own), or report another
+# project already holding the fixed container names.
+case "${mode}:$1" in
+  own-block:build)
+    printf '%s' "$$" > "${pidFile}"
+    printf 'stub-docker-blocked\\n' >&2
+    exec sleep 300 ;;
+  own-fail:push) exit 1 ;;
+  own-foreign:inspect) printf 'someone-else\\n' ;;
+esac
+exit 0
+`,
+  );
+  chmodSync(join(binDir, "docker"), 0o755);
+  return {
+    dir,
+    calls,
+    pidFile,
+    env: {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH}`,
+      ORBIT_ENV_FILE: envFile,
+      ORBIT_BACKUP_DIR: join(dir, "backups"),
+      ORBIT_EVIDENCE_ROOT: join(dir, "evidence"),
+      TMPDIR: dir,
+      ORBIT_BACKUP_TEST_TEARDOWN_HEALTH_SECONDS: "1",
+    },
+  };
+}
+
+function evidenceDirs(dir) {
+  const root = join(dir, "evidence");
+  return existsSync(root) ? readdirSync(root).map((name) => join(root, name)) : [];
+}
+
+function drillTempDirs(dir) {
+  return readdirSync(dir).filter((name) => name.startsWith("orbit-backup-test."));
+}
+
+/** Runs the drill in its own process group and signals the whole group once
+ * the fake docker reports it is blocked: what a terminal's Ctrl-C, a
+ * runner's cancel and `timeout` deliver. bash only runs a trap once its
+ * foreground command ends, so a signal sent to the script alone would wait
+ * for the blocked docker call; the group signal ends both at once. */
+function signalWhenBlocked(args, env, signal) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("bash", args, { env, detached: true });
+    let stderr = "";
+    let signalled = false;
+    const watchdog = processWatchdog({ label: `drill ${signal}`, kill: () => child.kill("SIGKILL") });
+    child.stdout.on("data", () => watchdog.touch());
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+      watchdog.touch();
+      if (!signalled && stderr.includes("stub-docker-blocked")) {
+        signalled = true;
+        process.kill(-child.pid, signal);
+      }
+    });
+    child.on("error", (error) => {
+      watchdog.stop();
+      reject(error);
+    });
+    child.on("close", (status) => {
+      watchdog.stop();
+      if (watchdog.reason) reject(watchdog.error({ stdout: "", stderr }));
+      else resolve({ status, stderr });
+    });
+  });
+}
+
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe("scripts/test-backup-restore.sh trap wiring (#1241)", () => {
+  it("tears down and keeps evidence when the drill fails after changing the deployment", async () => {
+    const { dir, calls, env } = await prepareDrill("fail");
+    const result = failOnProcessDeadline(spawnSync("bash", [drillPath], { encoding: "utf8", env, ...processGuard() }), { label: "drill fail" });
+    expect(result.status).not.toBe(0);
+    const log = readLines(calls);
+    expect(result.stderr.match(/teardown: starting/g)).toHaveLength(1);
+    // Fixtures were seeded before the failure, so they are removed again.
+    expect(log.some((c) => c.includes("delete from households"))).toBe(true);
+    expect(log.some((c) => c.includes("delete from users"))).toBe(true);
+    expect(log.some((c) => c.startsWith("rm -f -v orbit-backup-drill-"))).toBe(true);
+    expect(log.some((c) => / down( |$)| volume | network /.test(c))).toBe(false);
+    expect(drillTempDirs(dir)).toEqual([]);
+    const evidence = evidenceDirs(dir);
+    expect(evidence).toHaveLength(1);
+    expect(readFileSync(join(evidence[0], "run-info.txt"), "utf8")).toMatch(/last_failed_command=line \d+:/);
+    expect(readFileSync(join(evidence[0], "compose.log"), "utf8")).toContain("stub-compose-logs");
+  });
+
+  it.each([
+    ["SIGTERM", 143],
+    ["SIGINT", 130],
+  ])("tears down exactly once on %s, even while docker is blocked", async (signal, expectedStatus) => {
+    const { dir, calls, pidFile, env } = await prepareDrill("block");
+    const outcome = await signalWhenBlocked([drillPath], env, signal);
+    expect(outcome.status).toBe(expectedStatus);
+    expect(outcome.stderr.match(/teardown: starting/g)).toHaveLength(1);
+    const log = readLines(calls);
+    expect(log.some((c) => c.includes("delete from households"))).toBe(true);
+    expect(drillTempDirs(dir)).toEqual([]);
+    expect(evidenceDirs(dir)).toHaveLength(1);
+    // The blocked docker call was stopped, not left running past the script.
+    expect(isAlive(Number(readFileSync(pidFile, "utf8")))).toBe(false);
+  });
+});
+
+function ownStackDirs(dir) {
+  return readdirSync(dir).filter((name) => name.startsWith("orbit-backup-drill."));
+}
+
+// #1273: the real script with --own-stack, against the same fake docker. The
+// install itself needs a real Docker host and is the live check's job; these
+// prove the flag reaches the one teardown on failure and on both signals.
+describe("scripts/test-backup-restore.sh --own-stack wiring (#1273)", () => {
+  it("rejects an unknown option before touching anything", async () => {
+    const { calls, env } = await prepareDrill("fail");
+    const result = failOnProcessDeadline(spawnSync("bash", [drillPath, "--own-stak"], { encoding: "utf8", env, ...processGuard() }), {
+      label: "drill unknown option",
+    });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("unknown option --own-stak");
+    expect(result.stderr).not.toContain("teardown");
+    expect(readLines(calls)).toEqual([]);
+  });
+
+  it("refuses while another project holds the container names, and removes nothing of it", async () => {
+    const { dir, calls, env } = await prepareDrill("own-foreign");
+    const result = failOnProcessDeadline(spawnSync("bash", [drillPath, "--own-stack"], { encoding: "utf8", env, ...processGuard() }), {
+      label: "drill own-stack foreign",
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("owned by Compose project 'someone-else'");
+    expect(result.stderr.match(/teardown: starting/g)).toHaveLength(1);
+    expect(readLines(calls).every((c) => c.startsWith("inspect "))).toBe(true);
+    expect(ownStackDirs(dir)).toEqual([]);
+  });
+
+  it("removes what it started when the install fails part way, and ignores a borrowed deployment's settings", async () => {
+    const { dir, calls, env } = await prepareDrill("own-fail");
+    const result = failOnProcessDeadline(spawnSync("bash", [drillPath, "--own-stack"], { encoding: "utf8", env, ...processGuard() }), {
+      label: "drill own-stack fail",
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr.match(/teardown: starting/g)).toHaveLength(1);
+    const log = readLines(calls);
+    expect(log.some((c) => c.startsWith("build "))).toBe(true);
+    // Once at the start, once in teardown.
+    expect(log.filter((c) => c === "rm -f -v orbit-backup-drill-registry")).toHaveLength(2);
+    expect(log).toContain("ps -aq --filter label=com.docker.compose.project=orbit-backup-drill");
+    expect(log).toContain("volume ls -q --filter label=com.docker.compose.project=orbit-backup-drill");
+    expect(log).toContain("network ls -q --filter label=com.docker.compose.project=orbit-backup-drill");
+    expect(ownStackDirs(dir)).toEqual([]);
+    const evidence = evidenceDirs(dir);
+    expect(evidence).toHaveLength(1);
+    // The owned stack's own env file, not the ORBIT_ENV_FILE the caller set.
+    expect(readFileSync(join(evidence[0], "run-info.txt"), "utf8")).toMatch(
+      /^environment_file=.*\/orbit-backup-drill\.[^/]+\/orbit-backup-drill\/\.env-orbit$/m,
+    );
+  });
+
+  it.each([
+    ["SIGTERM", 143],
+    ["SIGINT", 130],
+  ])("tears down exactly once on %s during the image build, and leaves no work directory", async (signal, expectedStatus) => {
+    const { dir, calls, pidFile, env } = await prepareDrill("own-block");
+    const outcome = await signalWhenBlocked([drillPath, "--own-stack"], env, signal);
+    expect(outcome.status).toBe(expectedStatus);
+    expect(outcome.stderr.match(/teardown: starting/g)).toHaveLength(1);
+    // Nothing had been started in Docker yet, so nothing is swept.
+    expect(readLines(calls).some((c) => / --filter label=/.test(c))).toBe(false);
+    expect(ownStackDirs(dir)).toEqual([]);
+    expect(isAlive(Number(readFileSync(pidFile, "utf8")))).toBe(false);
   });
 });

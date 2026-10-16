@@ -1,0 +1,299 @@
+/**
+ * WHAT HOME'S ITEM DRAWER IS DOING BESIDES READING (#1319 stage 2;
+ * owner-decisions §34; design/v19/belt-purpose/round-8/m-colour-per-option.html).
+ * Held by the screen (the desk's +page.svelte, the phone's pocket.svelte),
+ * as the EditSession it wraps is, because the chooser card stands where the
+ * screen seats it: beside the drawer in the preview's column, or the
+ * phone's bottom sheet.
+ *
+ * Three things, one at a time:
+ *   editing     the rows' own values live (EditSession, edit-session.svelte.js)
+ *   completing  the rows ask for the completion: the date (today, through
+ *               the calendar), the cost entered before and the notes, all
+ *               editable (owner, 2026-10-08, on #1319)
+ *   snoozing    the calendar beside the drawer, "snooze until" (owner,
+ *               2026-10-08: "pick a date should not be removed")
+ * and at most one chooser card open for any of them.
+ *
+ * THE COMPLETION'S PREVIEW (#1337): while the rows complete an item, the
+ * engine is asked what the completed-on date alone would make the next date
+ * (a dry run of item.complete, askCommand): at once when completing opens,
+ * and about 300 ms after the date changes. `preview` is that date, or null:
+ * cleared the moment the date changes so an old answer never shows, and
+ * empty while waiting, when the engine refuses the date, when it cannot be
+ * reached, and for a one-off. Cost and notes cannot change it, so they are
+ * not sent.
+ *
+ * Rows holding changes are guarded (#1319 stage 3b; the coordinator's
+ * ruling, 2026-10-08): `cancel()` -- the cancel pill, Escape, and anything
+ * that would close the row or drawer -- arms "discard changes?" first and
+ * discards on a second press inside the hold (discard-guard.js).
+ */
+import { untrack } from "svelte";
+import { completeCommand } from "$lib/data/commands.js";
+import { dryRunner } from "$lib/data/dry-run.js";
+import { askCommand } from "$lib/data/workspace.js";
+import { EditSession } from "$lib/editing/edit-session.svelte.js";
+import { chooserAskOf, draftOf } from "$lib/editing/item-draft.js";
+import { createDiscardGuard, rowsChanged } from "./discard-guard.js";
+
+/**
+ * @typedef {import('$lib/data/commands.js').CommandItem} CommandItem
+ * @typedef {{ id: string, completedDate: string, cost: string, notes: string }} CompleteDraft
+ * @typedef {{ key: "snooze" | "done", label: string, from: HTMLElement }} FootChoosing
+ * @typedef {Omit<import('$lib/editing/item-draft.js').ChooserAsk, "key"> & {
+ *   key: import('$lib/editing/item-draft.js').ChooserAsk["key"] | "done",
+ * }} Ask  what the chooser card is asked; "done" is the completion's date
+ * @typedef {{ id: string, name: string, icon?: string, visible?: boolean }} SectionChoice
+ */
+
+export class DrawerModes {
+  /** @type {EditSession} */
+  edit;
+  /** @type {CompleteDraft | null} */
+  completing = $state(null);
+  /** @type {string | null} */
+  completeProblem = $state(null);
+  /** The snooze or completion calendar, when it is the one open. @type {FootChoosing | null} */
+  foot = $state.raw(null);
+  /** The next date the engine would give the completion as the rows hold it (ISO), or null. @type {string | null} */
+  preview = $state(null);
+  /** Whether the cancel pill reads "discard changes?" (discard-guard.js). */
+  discardArmed = $state(false);
+  /** Whether the screen is recording the completion (set around its applyCommand). */
+  recording = $state(false);
+  /** The item snoozing or completing. @type {CommandItem | null} */
+  #item = null;
+  /** The rows as they opened, to tell a change. @type {unknown} */
+  #opened = null;
+  #guard = createDiscardGuard({ onchange: (armed) => { this.discardArmed = armed; } });
+  /** @type {() => void} */
+  #onchoose;
+  /** The item the preview last opened on. @type {string | null} */
+  #previewFor = null;
+  #previewRun = dryRunner({
+    check: askCommand,
+    onanswer: (answer) => { this.preview = answer?.preview?.nextDate ?? null; },
+  });
+
+  /**
+   * @param {{
+   *   save: (item: CommandItem, edits: Partial<CommandItem>) => Promise<unknown>,
+   *   onchoose?: () => void,
+   * }} options  as EditSession's: `onchoose` hears any chooser opening, so
+   *   the screen puts the preview away (one card beside at a time)
+   */
+  constructor({ save, onchoose = () => {} }) {
+    this.#onchoose = onchoose;
+    this.edit = new EditSession({ save, onchoose });
+    /* The preview follows the completion: closed, it stops and clears; a new
+       item asks now; a new date clears at once and asks after the pause. */
+    $effect(() => {
+      const id = this.completing?.id;
+      const date = this.completing?.completedDate;
+      this.preview = null;
+      if (!id || !date) { this.#previewFor = null; this.#previewRun.stop(); return; }
+      const build = () => untrack(() => this.#previewCommand());
+      if (this.#previewFor === id) this.#previewRun.ask(build);
+      else { this.#previewFor = id; this.#previewRun.now(build); }
+    });
+  }
+
+  /** The question for the preview: the completion with its date alone. */
+  #previewCommand() {
+    const item = this.#item;
+    const date = this.completing?.completedDate;
+    return item && date ? completeCommand(item, { completedDate: date }) : null;
+  }
+
+  /** The item the drawer is editing, completing or snoozing, by id. */
+  get id() {
+    return this.edit.id ?? this.completing?.id ?? (this.foot ? this.#item?.id ?? null : null);
+  }
+  /** Whether a chooser card stands beside the drawer. */
+  get choosing() {
+    return Boolean(this.edit.choosing || this.foot);
+  }
+  /** The value pressed for the open chooser, for focus to go back to. @returns {HTMLElement | null} */
+  get choosingFrom() {
+    return this.edit.choosing?.from ?? this.foot?.from ?? null;
+  }
+  /** The open chooser's key, for the row that is lit. */
+  get choosingKey() {
+    return this.edit.choosing?.key ?? this.foot?.key ?? null;
+  }
+
+  /**
+   * What the chooser card is asked, or null when none is open.
+   * @param {SectionChoice[]} sections  the item's household's
+   * @param {string} today
+   * @returns {Ask | null}
+   */
+  askOf(sections, today) {
+    const { choosing, draft } = this.edit;
+    if (choosing && draft) return chooserAskOf(choosing, draft, sections, today);
+    const foot = this.foot;
+    if (!foot) return null;
+    if (foot.key === "done") {
+      return { key: "done", label: foot.label, heading: "completed on", today, choices: [],
+        value: this.completing?.completedDate ?? today };
+    }
+    /* The calendar opens on the item's current snooze; whether a day will
+       do is the engine's to say (#1325). */
+    return { key: "snooze", label: foot.label, heading: "snooze until", today, choices: [],
+      value: this.#item?.snoozedUntil ?? null };
+  }
+
+  /** The pencil: the rows go live. @param {CommandItem} item */
+  startEdit(item) {
+    /* A completion holding changes is not thrown away by one press, as
+       cancel() rules: the first press arms "discard changes?". */
+    if (this.completing && !this.#guard.ask(this.changed)) return;
+    this.cancelComplete();
+    this.foot = null;
+    this.edit.start(item);
+    this.#guard.disarm();
+    this.#opened = $state.snapshot(this.edit.draft);
+  }
+
+  /** Whether the rows hold changes since they opened. */
+  get changed() {
+    if (this.edit.id && this.edit.draft) return rowsChanged(this.#opened, $state.snapshot(this.edit.draft));
+    if (this.completing) return rowsChanged(this.#opened, $state.snapshot(this.completing));
+    return false;
+  }
+
+  /**
+   * Cancel the edit or the completion, guarded: true when it ended (nothing
+   * had changed, or this is the second press), false when it only armed
+   * "discard changes?" and the rows stay open. True when nothing was open.
+   */
+  cancel() {
+    if (!this.edit.id && !this.completing) return true;
+    /* Rows whose save or record is in flight cannot be discarded: the
+       engine's answer decides, and a refusal needs the rows to read under. */
+    if (this.edit.busy || this.recording) return false;
+    if (!this.#guard.ask(this.changed)) return false;
+    this.closeChooser(false);
+    this.edit.cancel();
+    this.cancelComplete();
+    return true;
+  }
+
+  /**
+   * Complete: the rows ask for the date (today), the cost entered before
+   * and the notes, all editable, until it is recorded or cancelled.
+   * @param {CommandItem} item @param {string} today
+   */
+  startComplete(item, today) {
+    this.edit.cancel();
+    this.foot = null;
+    this.#item = item;
+    const { cost, notes } = draftOf(item);
+    this.completing = { id: item.id, completedDate: today, cost, notes };
+    this.completeProblem = null;
+    this.#guard.disarm();
+    this.#opened = $state.snapshot(this.completing);
+  }
+
+  /**
+   * Snooze: the calendar beside the drawer; pressed again, it goes.
+   * @param {CommandItem} item @param {HTMLElement} from
+   */
+  snooze(item, from) {
+    if (this.foot?.key === "snooze" && this.#item?.id === item.id) { this.closeChooser(true); return; }
+    this.edit.cancel();
+    this.cancelComplete();
+    this.#item = item;
+    this.foot = { key: "snooze", label: "snooze until", from };
+    this.#onchoose();
+  }
+
+  /** The completion's date pressed: the calendar beside. @param {HTMLElement} from */
+  chooseDone(from) {
+    if (!this.completing) return;
+    if (this.foot?.key === "done") { this.closeChooser(true); return; }
+    this.foot = { key: "done", label: "completed on", from };
+    this.#onchoose();
+  }
+
+  /** @param {boolean} refocus  focus back to the pressed value */
+  closeChooser(refocus) {
+    if (this.edit.choosing) this.edit.closeChooser(refocus);
+    const foot = this.foot;
+    if (!foot) return;
+    this.foot = null;
+    if (refocus && foot.from.isConnected) foot.from.focus({ preventScroll: true });
+  }
+
+  /**
+   * The card's pick. The row takes it; a snooze's day is handed back for
+   * the screen to send.
+   * @param {string} value
+   * @returns {{ item: CommandItem, until: string } | null}
+   */
+  pick(value) {
+    const foot = this.foot;
+    if (foot?.key === "snooze") {
+      const item = this.#item;
+      this.closeChooser(true);
+      return item ? { item, until: value } : null;
+    }
+    if (foot?.key === "done") {
+      if (this.completing) this.completing.completedDate = value;
+      this.closeChooser(true);
+      return null;
+    }
+    this.edit.pick(value);
+    return null;
+  }
+
+  /**
+   * The completion as completeCommand takes it -- what happened, as the rows
+   * hold it: the day, the cost as typed, the notes. Never the next date,
+   * which the engine works out (#1324); whether the day and the cost will do
+   * is the engine's to say too (ADR-0034, #1325), in its refusal.
+   * @returns {{ refusal: string } | { item: CommandItem, fields: { completedDate: string, cost?: string, notes?: string } }}
+   */
+  completion() {
+    const draft = this.completing;
+    const item = this.#item;
+    if (!draft || !item) return { refusal: "not yet — nothing to record" };
+    return { item, fields: { completedDate: draft.completedDate, cost: draft.cost.trim() || undefined, notes: draft.notes.trim() || undefined } };
+  }
+
+  cancelComplete() {
+    if (this.foot?.key === "done") this.foot = null;
+    this.completing = null;
+    this.completeProblem = null;
+    this.preview = null;
+  }
+
+  /**
+   * Escape: the chooser first, then the edit or the completion (guarded,
+   * as cancel). True when it took the key.
+   */
+  escape() {
+    if (this.choosing) { this.closeChooser(true); return true; }
+    if (this.edit.id || this.completing) { this.cancel(); return true; }
+    return false;
+  }
+
+  /** The drawer closed, or another opened: everything ends, unguarded --
+      the screen asks `cancel()` first wherever a close can wait. */
+  end() {
+    this.#guard.disarm();
+    this.edit.cancel();
+    this.cancelComplete();
+    this.foot = null;
+    this.#item = null;
+  }
+}
+
+/**
+ * Whether a press is on the chooser card, or on a value that opens one
+ * (which toggles or switches it itself): any other press puts the card away.
+ * @param {EventTarget | null} target
+ */
+export const pressKeepsChooser = (target) =>
+  target instanceof Element && Boolean(target.closest("[data-chooser-card], [data-pick]"));

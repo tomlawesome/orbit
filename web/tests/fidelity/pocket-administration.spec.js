@@ -145,7 +145,7 @@ test("alerts stand first, and the jump strip is links, not tabs", async ({ page 
   await expect(first).toHaveAttribute("data-ad", "alerts");
   await expect(first).toContainText("No recovery bundle exported");
   await first.getByRole("button", { name: "what to do" }).click();
-  await expect(page.getByRole("dialog", { name: "No recovery bundle exported" })).toContainText("orbit export-recovery-bundle");
+  await expect(page.getByRole("dialog", { name: "No recovery bundle exported" })).toContainText("scripts/export-recovery-bundle.sh");
 
   const strip = page.getByRole("navigation", { name: "Jump to a card" });
   await expect(strip.getByRole("tab")).toHaveCount(0);

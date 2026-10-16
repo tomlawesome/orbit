@@ -3,6 +3,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, dueEvents, items, memberships, users } from "@/db/schema";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
+import { requireMetadataWriter } from "@/server/metadata/fields";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
@@ -73,22 +74,24 @@ const PLANTED_DUE_DATE = "2031-07-19";
 
 /** Gives the household one real, scheduled, priced event to leak. */
 async function plantRealEvent(fixture: IntegrationFixture): Promise<string> {
+  const cipher = await requireMetadataWriter(fixture.household.id);
   const [planted] = await getDb().update(items)
-    .set({ costMinor: PLANTED_COST_MINOR, renewalDate: PLANTED_DUE_DATE })
+    .set({ costMinorEnc: cipher.encryptNumber("items.cost_minor", fixture.item.id, PLANTED_COST_MINOR), renewalDate: PLANTED_DUE_DATE })
     .where(eq(items.id, fixture.item.id))
-    .returning({ title: items.title });
+    .returning({ titleEnc: items.titleEnc });
   await getDb().insert(dueEvents).values({
     householdId: fixture.household.id,
     itemId: fixture.item.id,
     kind: "renewal",
     dueDate: PLANTED_DUE_DATE,
   });
-  // The fixture's item is written straight to SQL and so is still plaintext,
-  // which is exactly the pre-backfill state the dual read is for (#963). A
-  // null here would mean that stopped being true, and this test would be
-  // asserting on nothing, so it fails loudly instead.
-  if (planted.title === null) throw new Error("planted item has no plaintext title");
-  return planted.title;
+  // The title the leak check searches for is the fixture item's own, read back
+  // through the production reader. A null here would mean the fixture item
+  // carries no title, and this test would be asserting on nothing, so it fails
+  // loudly instead.
+  const title = cipher.text("items.title", fixture.item.id, { encrypted: planted.titleEnc }).value;
+  if (title === null) throw new Error("planted item has no title");
+  return title;
 }
 
 /** The whole entry a workspace read carried for one household, or undefined. */

@@ -67,6 +67,16 @@ recoverable outage, terminal rejection and success. No raw path, filename,
 content, hash, signature, provider response, or key is persisted in logs or
 diagnostics.
 
+A scan result becomes a fixed code in one place, `classifyScan` in
+`src/server/documents/scan-outcome.ts` (#1349). Upload, the recovery job, the
+create form's inspection and preview, and mail-in holding all take it, each
+passing its code table explicitly. Only a result whose status is exactly
+`clean` is clean; a protocol error, a scanner-reported error and any outcome
+nobody recognises are errors, and only `unavailable`, `timeout` and `protocol`
+are retryable. Mail-in used to fold every failure into `scanner_unavailable`;
+it records the same codes as the rest and shows the member the same
+"scanner unavailable" reason.
+
 ## Consequences
 
 - A temporary scanner outage is recoverable without re-upload while normal

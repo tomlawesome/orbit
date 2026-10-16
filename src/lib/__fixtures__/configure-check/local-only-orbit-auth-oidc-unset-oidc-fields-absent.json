@@ -1,0 +1,24 @@
+{
+  "fixture": {
+    "record": {
+      "APP_URL": "https://orbit.parity.invalid",
+      "ORBIT_IMAGE": "registry.parity.invalid/acceptance/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "bash": {
+    "lines": [
+      "ready APP_URL",
+      "ready ORBIT_IMAGE",
+      "not in use OIDC_ISSUER",
+      "not in use OIDC_CLIENT_ID",
+      "not in use OIDC_CLIENT_SECRET",
+      "not in use OIDC_CALLBACK_URL",
+      "optional processing",
+      "optional ai",
+      "optional mail",
+      "app-managed imap",
+      "optional push"
+    ],
+    "status": 0
+  }
+}

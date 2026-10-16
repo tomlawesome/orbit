@@ -1,4 +1,4 @@
-import { THEME_PACKS } from "./theme.js";
+import { THEME_TABLE } from "./theme.js";
 
 /*
  * The five theme swatches the account menus offer, and choosing one (#1120).
@@ -17,20 +17,26 @@ import { THEME_PACKS } from "./theme.js";
  * the range it was admitted to carry, and dawn shows the temperature story's
  * own ground now that the terminator has moved it off #c3ccdb.
  */
-/** @type {Record<string, [string, string, string]>} */
-const SWATCH = {
-  starchart: ["star-chart", "#060b1c", ""],
-  afterdark: ["after dark", "#05070d", ""],
-  clouds: ["clouds", "#eef2f9", ""],
-  dawn: ["dawn", "#d2d3d4", ""],
-  retrograde: ["retrograde", "#080a14", "inset 0 0 0 1px #ff4fd8"],
-};
+/* Retrograde's dot wears a magenta ring; the other four are plain. */
+/** @type {Record<string, string>} */
+const RING = { retrograde: "inset 0 0 0 1px #ff4fd8" };
 
 /** @type {{ id: string, title: string, colour: string, shadow: string }[]} */
-export const SWATCHES = THEME_PACKS.map((id) => {
-  const [title, colour, shadow] = SWATCH[id];
-  return { id, title, colour, shadow };
-});
+export const SWATCHES = THEME_TABLE.map(({ id, title, ground }) => (
+  { id, title, colour: ground, shadow: RING[id] ?? "" }
+));
+
+/**
+ * The inline style of the swatch titled `title`: its ground, and its ring if
+ * it wears one. Home's desk keeps its five buttons written out (the tour
+ * selects them by title) and takes the paint from here.
+ * @param {string} title
+ */
+export function swatchStyle(title) {
+  const swatch = SWATCHES.find((entry) => entry.title === title);
+  if (!swatch) throw new Error(`no theme swatch titled "${title}"`);
+  return `background:${swatch.colour}${swatch.shadow ? `;box-shadow:${swatch.shadow}` : ""}`;
+}
 
 /**
  * Puts a pack on the page now and caches it for the next paint, the same

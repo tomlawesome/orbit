@@ -17,11 +17,25 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
-import { type HomeItem } from "@/lib/domain";
+import { isCalendarDate } from "@/lib/calendar-date";
+import {
+  COST_MINOR_MAX,
+  PROVIDER_MAX,
+  RECURRENCE_MAX,
+  REFERENCE_MAX,
+  SUBTYPE_MAX,
+  TITLE_MAX,
+  type HomeItem,
+  type ScheduleKind,
+} from "@/lib/domain";
+import { itemKinds, itemOfIntent, kindOfItem, type ItemIntent } from "@/lib/item-kind";
+import { isCurrencyCode } from "@/lib/platform-lists";
+import { costMinorOf, itemRefusal, Refusal } from "@/lib/refusals";
 import { workspaceItemSchema } from "@/lib/workspace";
 import type { AdjudicatedField } from "@/server/documents/adjudication";
 import { safeDocumentPlainText, scheduleKinds, type DocumentProposal } from "@/server/documents/suggestions";
-import { readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/imap-attachment-holding";
+import { envelopeOf } from "@/server/documents/crypto";
+import { flagStagingPurgeFailed, readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
 import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { applyWorkspaceCommand } from "@/server/workspace-repository";
@@ -42,10 +56,10 @@ type ProposalField = typeof proposalFields[number];
 const evidenceSource = z.enum(["filename", "document_text", "parser", "attachment"]);
 const evidenceConfidence = z.enum(["high", "medium", "low"]);
 const proposalTextMaximum: Record<string, number> = {
-  title: 100,
-  subtype: 80,
-  provider: 100,
-  reference: 80,
+  title: TITLE_MAX,
+  subtype: SUBTYPE_MAX,
+  provider: PROVIDER_MAX,
+  reference: REFERENCE_MAX,
   currency: 3,
   dueDate: 10,
   scheduleKind: 8,
@@ -98,16 +112,16 @@ function boundedProposalField(field: ProposalField, value: unknown): unknown {
     // and zero-width characters.
     const text = safeDocumentPlainText(value, proposalTextMaximum[field]);
     if (!text) return undefined;
-    if (field === "currency" && !/^[A-Z]{3}$/u.test(text)) return undefined;
-    if (field === "dueDate" && !/^\d{4}-\d{2}-\d{2}$/u.test(text)) return undefined;
+    if (field === "currency" && !isCurrencyCode(text)) return undefined;
+    if (field === "dueDate" && !isCalendarDate(text)) return undefined;
     // A3-Q1: the shared list (suggestions.ts, from src/lib/domain.ts)
     // includes "expiry"; a local copy missing it let an expiry document
     // reach review with its date but no schedule type.
     if (field === "scheduleKind" && !(scheduleKinds as readonly string[]).includes(text)) return undefined;
     return text;
   }
-  if (field === "costMinor" && typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 100_000_000) return value;
-  if (field === "recurrenceMonths" && typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= 120) return value;
+  if (field === "costMinor" && typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= COST_MINOR_MAX) return value;
+  if (field === "recurrenceMonths" && typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= RECURRENCE_MAX) return value;
   return undefined;
 }
 
@@ -196,28 +210,50 @@ export function reviewDraftMetadataFromProposal(
 }
 
 /**
- * The four columns cleared wherever a receipt's pending review ends —
+ * The columns cleared wherever a receipt's pending review ends —
  * approved, discarded or expired. The rejected reading is only ever kept
  * for the life of the pending review (ADR-0025 section 4), and it rides
  * inside this same blob, so nothing extra is needed to make it go with
  * everything else the review held.
  */
 export const clearedReviewDraftMetadata = {
-  proposal: {},
   proposalEnc: null,
-  fieldEvidence: {},
   fieldEvidenceEnc: null,
 } as const;
 
+/**
+ * The item an approval files (ADR-0034, #1325): what the reviewer typed and
+ * chose, judged by the same "not yet" rules as any new item, with the kind
+ * mapped by the engine. The relay's own reading of the subtype and schedule
+ * is the basis -- kept unless the reviewer chose another kind, as an edit
+ * keeps a stored item's.
+ */
 function canonicalItem(input: ReviewedIntakeApproval, itemId: string): HomeItem {
-  return workspaceItemSchema.parse({
-    ...input.item,
+  const { kind, subtype, scheduleKind, status: _status, cost, ...intent } = input.item;
+  const chosen = itemKinds.find((one) => one === kind);
+  // An approval that keeps the relay's own subtype and schedule has a type.
+  const effective = chosen ?? kindOfItem({
+    subtype: typeof subtype === "string" ? subtype : undefined,
+    scheduleKind: typeof scheduleKind === "string" ? scheduleKind : undefined,
+  });
+  const found = itemRefusal({ ...intent, cost, sectionId: input.sectionId }, effective);
+  // Attaching to an existing item creates none, so it needs no type.
+  const refused = found === "kindNeeded" && input.action === "attach_existing" ? null : found;
+  // The one-tap approval has no type chooser; review & amend does.
+  if (refused) throw new Refusal(refused === "kindNeeded" ? "kindNeededInReview" : refused);
+  const typedCost = typeof cost === "string" ? { costMinor: costMinorOf(cost) } : {};
+  return workspaceItemSchema.parse(itemOfIntent({
+    ...intent,
+    ...typedCost,
     id: itemId,
     sectionId: input.sectionId,
     version: 1,
-    status: "active",
     updatedAt: "1970-01-01T00:00:00.000Z",
-  });
+  } as ItemIntent, chosen, {
+    subtype: typeof subtype === "string" ? subtype : undefined,
+    scheduleKind: (scheduleKinds as readonly unknown[]).includes(scheduleKind) ? scheduleKind as ScheduleKind : undefined,
+    status: "active",
+  }));
 }
 
 function canonicalItemValues(input: ReviewedIntakeApproval): Record<string, unknown> {
@@ -310,11 +346,11 @@ async function reviewedItemMatches(input: ReviewedIntakeApproval, itemId: string
     // A damaged value reads as null here, so it can never compare equal to an
     // expected value and the approval is treated as a conflict, not a match.
     const metadata = await openMetadataReader(existing.householdId);
-    const persistedReference = metadata.text("items.reference", existing.id, { encrypted: existing.referenceEnc, plaintext: existing.reference });
-    const persistedNotes = metadata.text("items.notes", existing.id, { encrypted: existing.notesEnc, plaintext: existing.notes });
-    const persistedTitle = metadata.text("items.title", existing.id, { encrypted: existing.titleEnc, plaintext: existing.title });
-    const persistedProvider = metadata.text("items.provider", existing.id, { encrypted: existing.providerEnc, plaintext: existing.provider });
-    const persistedCost = metadata.number("items.cost_minor", existing.id, { encrypted: existing.costMinorEnc, plaintext: existing.costMinor });
+    const persistedReference = metadata.text("items.reference", existing.id, { encrypted: existing.referenceEnc });
+    const persistedNotes = metadata.text("items.notes", existing.id, { encrypted: existing.notesEnc });
+    const persistedTitle = metadata.text("items.title", existing.id, { encrypted: existing.titleEnc });
+    const persistedProvider = metadata.text("items.provider", existing.id, { encrypted: existing.providerEnc });
+    const persistedCost = metadata.number("items.cost_minor", existing.id, { encrypted: existing.costMinorEnc });
     const persisted = {
       id: existing.id,
       sectionId: existing.sectionId,
@@ -359,16 +395,16 @@ async function createReviewedItem(userId: string, input: ReviewedIntakeApproval,
     if (!existingMatch) throw new AppError("reviewed_intake_conflict", "That approval identity is already in use", 409);
     return itemId;
   }
-  const item = reviewedItem(input, itemId);
+  const { subtype, scheduleKind, status, ...item } = reviewedItem(input, itemId);
   try {
     await applyWorkspaceCommand(userId, "reviewed-intake", {
       type: "item.upsert",
       householdId: input.householdId,
       item,
+      basis: { subtype, scheduleKind, status },
       activity: {
         id: input.operationId,
         itemId,
-        kind: "created",
         occurredAt: new Date().toISOString(),
       },
     });
@@ -417,8 +453,7 @@ async function purgeReceiptStaging(receiptId: string): Promise<void> {
         .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, attachment.status)));
     } catch {
       failed = true;
-      await getDb().update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
-        .where(eq(imapIngestionAttachments.id, attachment.id));
+      await flagStagingPurgeFailed(getDb(), eq(imapIngestionAttachments.id, attachment.id));
     }
   }
   if (failed) throw new AppError("staging_purge_failed", "The private staged file could not be purged; retry later", 503);
@@ -462,14 +497,8 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
       } catch {
         pending.push(attachment.id);
         failureCode ??= "staging_purge_failed";
-        // Only re-flag a purge that is still outstanding (#722). A
-        // concurrent caller may have purged the private copy and cleared the
-        // flag while this attempt was in flight, in which case this failure
-        // is of a delete with nothing left to delete: stamping purgePending
-        // and a failure code here would advertise work already done, and
-        // count an attempt against it.
-        await getDb().update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
-          .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, attachment.assignedDocumentId), eq(imapIngestionAttachments.purgePending, true)));
+        // Only a purge still outstanding (#722): see flagStagingPurgeFailed.
+        await flagStagingPurgeFailed(getDb(), and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, attachment.assignedDocumentId), eq(imapIngestionAttachments.purgePending, true)));
       }
       continue;
     }
@@ -540,16 +569,7 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
         mediaType: attachment.mediaType,
         sizeBytes: attachment.sizeBytes,
         storageKey: attachment.storageKey,
-        envelope: {
-          envelopeVersion: attachment.envelopeVersion as 1,
-          algorithm: "aes-256-gcm",
-          contentIv: attachment.contentIv,
-          contentAuthTag: attachment.contentAuthTag,
-          wrappedDek: attachment.wrappedDek,
-          wrapIv: attachment.wrapIv,
-          wrapAuthTag: attachment.wrapAuthTag,
-          keyId: attachment.keyId,
-        },
+        envelope: envelopeOf(attachment),
       }, { recipientUserId: userId, receiptId });
       // A fresh const so the stream callback below closes over a binding
       // TypeScript can narrow to `Buffer` on its own — narrowing a `let`
@@ -605,14 +625,8 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
         attached.push(attachment.id);
         pending.push(attachment.id);
         failureCode ??= "staging_purge_failed";
-        // Only re-flag a purge that is still outstanding (#722). A
-        // concurrent caller may have purged the private copy and cleared the
-        // flag while this attempt was in flight, in which case this failure
-        // is of a delete with nothing left to delete: stamping purgePending
-        // and a failure code here would advertise work already done, and
-        // count an attempt against it.
-        await getDb().update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
-          .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, document.id), eq(imapIngestionAttachments.purgePending, true)));
+        // Only a purge still outstanding (#722): see flagStagingPurgeFailed.
+        await flagStagingPurgeFailed(getDb(), and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, document.id), eq(imapIngestionAttachments.purgePending, true)));
         continue;
       }
       attached.push(attachment.id);
@@ -697,9 +711,10 @@ async function finishMailboxApproval(
       return { receipt, claimed: false, expired: true, result: undefined };
     }
     const approvalResultId = randomUUID();
+    // draftVersion is left as-is: the claim is already fenced by approvalOperationId,
+    // and a retry reads this version back, so it must match the stored request hash.
     await transaction.update(imapIngestionMessages).set({
       status: "approving",
-      draftVersion: receipt.draftVersion + 1,
       approvalOperationId: input.operationId,
       approvalResultId,
       approvalRequestSha256: requestHash,
@@ -1018,10 +1033,4 @@ export async function approveReviewedIntake(userId: string, rawInput: unknown): 
   const requestHash = canonicalReviewedIntakeHash(input);
   if (input.source.kind === "mailbox_draft") return finishMailboxApproval(userId, input as MailboxApproval, requestHash);
   return finishDirectApproval(userId, input as DirectApproval, requestHash);
-}
-
-export async function listStagedAttachmentIds(receiptId: string): Promise<string[]> {
-  const rows = await getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments)
-    .where(and(eq(imapIngestionAttachments.messageId, receiptId), inArray(imapIngestionAttachments.status, ["stored", "assigned"])));
-  return rows.map((row) => row.id);
 }

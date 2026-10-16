@@ -29,6 +29,9 @@ const CONTAINER_ID_PATTERN = /^[0-9a-f]{12,64}$/;
 const IMMUTABLE_IMAGE_PATTERN = /^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$/;
 const CANDIDATE_VOLUME_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 const CANDIDATE_VOLUME_SUFFIX_PATTERN = /(^|_)orbit-db-data$/;
+// install.sh `bundled_compose_project_name`: the `name:` the bundled
+// docker-compose.yml declares (#999, #1239).
+const BUNDLED_COMPOSE_PROJECT_NAME = "orbit";
 
 /**
  * The `docker` calls `volume_belongs_to_deployment` makes, each returning
@@ -152,6 +155,20 @@ export interface DatabaseVolumeSafetyAdapter extends VolumeOwnershipAdapter {
   inspectVolumeProjectLabel(name: string): string | null;
 }
 
+/**
+ * The Compose project a volume's labels name, when they read cleanly as an
+ * Orbit database volume of a project other than `ownProject`; undefined
+ * otherwise (unreadable, malformed, or this project's own).
+ */
+function anotherProjectsLabel(volume: string, ownProject: string, adapter: VolumeOwnershipAdapter): string | undefined {
+  const labels = adapter.inspectVolumeLabels(volume);
+  if (labels === null || labels.length > 256 || labels.includes("\n")) return undefined;
+  const [project, key, extra] = splitPipeFields(labels, 3);
+  if (!PROJECT_NAME_PATTERN.test(project) || key !== DATABASE_VOLUME_KEY || extra !== "") return undefined;
+  if (volume !== `${project}_${DATABASE_VOLUME_KEY}` || project === ownProject) return undefined;
+  return project;
+}
+
 /** Thrown wherever install.sh's verify_database_volume_safety calls `fail`. */
 export class DatabaseVolumeSafetyRefusal extends Error {
   constructor(message: string) {
@@ -235,6 +252,14 @@ export function verifyDatabaseVolumeSafety(
     composeProjectNameProvisional: derived.provisional,
   };
 
+  // #1239: the projects this install may end up using. Before the bundled
+  // compose file is staged the name is only the directory-based guess; once
+  // staged it is replaced by that file's own `name:` (#999). Both are checked
+  // now so the later re-derivation cannot reach a volume this preflight never
+  // looked at.
+  const scopeProjects = [nextState.composeProjectName];
+  if (nextState.composeProjectNameProvisional) scopeProjects.push(BUNDLED_COMPOSE_PROJECT_NAME);
+
   const volumeList = adapter.listVolumesByKeySubstring(DATABASE_VOLUME_KEY);
   if (volumeList === null) {
     throw new DatabaseVolumeSafetyRefusal(
@@ -251,12 +276,41 @@ export function verifyDatabaseVolumeSafety(
   for (const volume of volumeList.split("\n")) {
     if (volume === "") continue;
     if (!volume.endsWith(DATABASE_VOLUME_KEY)) continue;
+    // #1239: a fresh install is only blocked by the volume it would itself
+    // attach to, <this install's Compose project>_orbit-db-data. Other
+    // stacks' volumes are skipped silently. An existing deployment keeps the
+    // broad search: its project may be a renamed one that only the volume's
+    // labels can prove.
+    if (nextState.targetWasEmpty && !scopeProjects.some((project) => volume === `${project}_${DATABASE_VOLUME_KEY}`)) {
+      continue;
+    }
     if (!(CANDIDATE_VOLUME_NAME_PATTERN.test(volume) && CANDIDATE_VOLUME_SUFFIX_PATTERN.test(volume))) {
       throw new DatabaseVolumeSafetyRefusal(
         "Could not verify the existing Orbit database volume; refusing to start Compose.",
       );
     }
     candidates.push(volume);
+  }
+
+  // #1261: an update whose project name is known (its own .env-orbit, or the
+  // operator's COMPOSE_PROJECT_NAME) skips a volume labelled with another
+  // Compose project that the ownership proof does not tie to this
+  // deployment: it is another stack's -- a second deployment, a leftover
+  // e2e run -- and could never be attached here anyway, since a different
+  // project would refuse below. Everything else still counts: a volume
+  // whose labels cannot be read, one the proof does tie to this deployment's
+  // image (a genuinely ambiguous pair refuses as before), and every volume
+  // while the project name is only a guess, when a renamed project is
+  // provable by its labels alone.
+  const expectedImage = readEnvironmentValue(targetDir, "ORBIT_IMAGE");
+  if (!nextState.targetWasEmpty && nextState.composeProjectNameExplicit && expectedImage !== undefined && IMMUTABLE_IMAGE_PATTERN.test(expectedImage)) {
+    const ownProject = nextState.composeProjectName;
+    for (let index = candidates.length - 1; index >= 0; index -= 1) {
+      const labelledProject = anotherProjectsLabel(candidates[index], ownProject, adapter);
+      if (labelledProject === undefined) continue;
+      if (evaluateVolumeOwnership(candidates[index], expectedImage, adapter).status === "proven") continue;
+      candidates.splice(index, 1);
+    }
   }
 
   if (candidates.length === 0) {

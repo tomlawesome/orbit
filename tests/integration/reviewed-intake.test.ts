@@ -4,7 +4,7 @@ import { getDb } from "@/db";
 import { imapIngestionMessages, items } from "@/db/schema";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { openMetadataReader } from "@/server/metadata/fields";
-import { assignImapReceiptHousehold, listImapInbox } from "@/server/imap-inbox";
+import { assignImapReceiptHousehold, listImapInbox } from "@/server/mail-in/imap-inbox";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 
 afterAll(async () => {
@@ -50,7 +50,7 @@ describe("private reviewed intake approval boundary", () => {
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
       action: "create_separate" as const,
-      item: { title: "Exact reviewed value", provider: "Reviewed provider", currency: "GBP", status: "active" as const },
+      item: { kind: "service", title: "Exact reviewed value", provider: "Reviewed provider", currency: "GBP", status: "active" as const },
       attachmentIds: [],
     };
 
@@ -79,20 +79,19 @@ describe("private reviewed intake approval boundary", () => {
     expect(await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, fixture.household.id))).toHaveLength(before.length + 1);
     // Title and provider are Tier 2 ciphertext since #963, so the row holds
     // envelopes; the assertion is the same one, made on the decrypted values.
-    const [created] = await getDb().select({ id: items.id, title: items.title, titleEnc: items.titleEnc, provider: items.provider, providerEnc: items.providerEnc })
+    const [created] = await getDb().select({ id: items.id, titleEnc: items.titleEnc, providerEnc: items.providerEnc })
       .from(items).where(eq(items.id, first.itemId));
-    expect({ title: created.title, provider: created.provider }).toEqual({ title: null, provider: null });
     const metadata = await openMetadataReader(fixture.household.id);
     expect({
-      title: metadata.text("items.title", created.id, { encrypted: created.titleEnc, plaintext: created.title }).value,
-      provider: metadata.text("items.provider", created.id, { encrypted: created.providerEnc, plaintext: created.provider }).value,
+      title: metadata.text("items.title", created.id, { encrypted: created.titleEnc }).value,
+      provider: metadata.text("items.provider", created.id, { encrypted: created.providerEnc }).value,
     }).toEqual({ title: "Exact reviewed value", provider: "Reviewed provider" });
   });
 
   it("does not apply submitted fields when attaching to an existing item", async () => {
     const fixture = await createIntegrationFixture("reviewed-attach-existing");
     const member = await fixture.session("member");
-    const before = await getDb().select({ title: items.title, provider: items.provider, reference: items.reference, sectionId: items.sectionId })
+    const before = await getDb().select({ titleEnc: items.titleEnc, providerEnc: items.providerEnc, referenceEnc: items.referenceEnc, sectionId: items.sectionId })
       .from(items).where(and(eq(items.id, fixture.item.id), eq(items.householdId, fixture.household.id)));
 
     await approveReviewedIntake(member.userId, {
@@ -106,7 +105,7 @@ describe("private reviewed intake approval boundary", () => {
       attachmentIds: [],
     });
 
-    expect(await getDb().select({ title: items.title, provider: items.provider, reference: items.reference, sectionId: items.sectionId })
+    expect(await getDb().select({ titleEnc: items.titleEnc, providerEnc: items.providerEnc, referenceEnc: items.referenceEnc, sectionId: items.sectionId })
       .from(items).where(eq(items.id, fixture.item.id))).toEqual(before);
   });
 });

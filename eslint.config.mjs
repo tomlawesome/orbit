@@ -35,14 +35,38 @@ export default defineConfig([
     },
   },
   ...svelteRecommended,
+  /* ADR-0034 decision 5 (#1325): the seam between the engine and the front
+     end is enforced, not promised. Browser code under web/src talks to the
+     engine only over the JSON API, so it may not import `orbit/*`; the
+     server side of the front end (the API routes, lib/server, *.server
+     modules and hooks.server) is where the engine is called. Types may
+     still cross, since they leave nothing behind at run time. */
+  {
+    files: ["web/src/**/*.{js,ts,svelte}"],
+    ignores: [
+      "web/src/routes/api/**",
+      "web/src/lib/server/**",
+      "web/src/**/*.server.{js,ts}",
+      "web/src/hooks.server.{js,ts}",
+    ],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": ["error", {
+        patterns: [{
+          group: ["orbit", "orbit/*"],
+          allowTypeImports: true,
+          message: "Browser code reaches the engine over the API, never by import (ADR-0034); move the call to a server route.",
+        }],
+      }],
+    },
+  },
   globalIgnores([
   // Sibling worktrees: a second checkout of this codebase, plus its build
   // output. Linting it reports another branch's errors as this one's (#769)
   ".claude/worktrees/**",
   // web/ build artefacts: gitignored output, not source (#419)
   "web/build/**", "web/.svelte-kit/**", "web/.preview/**", "web/test-results/**", "coverage/**", "drizzle/**", "dist/**",
-  // Scratch prototypes (#995). AGENTS.md and the extraction handoffs send
-  // agents here to prototype, and tmp/ is gitignored, so the files are both
+  // Scratch prototypes (#995). docs/extraction-method.md and the extraction
+  // handoffs send agents here to prototype, and tmp/ is gitignored, so the files are both
   // expected to exist and expected to rot — they import modules that have
   // since been refactored. Checking them meant that following the
   // instructions broke the fast suite for the next session, which then read
@@ -54,5 +78,11 @@ export default defineConfig([
   // are one-off scripts that made the PNGs and panes the owner reviewed.
   // They are records of how the pictures were made, not shipped or imported
   // code, and they use require() like any throwaway Node script.
-  "design/**/*.cjs"]),
+  "design/**/*.cjs",
+  // The shared door's folder (#1371): orbit-site's code, copied in unchanged
+  // and held to its recorded tree hash (scripts/ci/check-door-unchanged.sh),
+  // so a lint fix cannot be made here; the site's own lint holds it. Its
+  // interface is what Orbit's code sees, through web/types/door/, which is
+  // linted.
+  "web/src/lib/door/**"]),
 ]);

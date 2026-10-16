@@ -8,8 +8,7 @@
 # target.
 #
 # Extracted verbatim from the "Start disposable installer registry" step of
-# the &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801). It must run only after the
+# the retired GitHub container workflow, which the GitLab `acceptance` and `launcher_install_compat` jobs now run (#801). It must run only after the
 # acceptance stack is fully torn down (the Compose project name collides) and
 # only before any registry login, push or attestation.
 #

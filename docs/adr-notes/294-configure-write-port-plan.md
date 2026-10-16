@@ -1,5 +1,12 @@
 # #294 write-side port plan: configure/init/set-oidc-secret/set-deployment-profile
 
+> **2026-10-06:** the `ORBIT_CONFIGURE_ENGINE=container` opt-in and the bash
+> fallback described below were retired by #1210. `scripts/configure.sh` now
+> always runs the engine, and `scripts/configuration.sh` and
+> `scripts/engine-check.sh` no longer exist. The note below is the design as it
+> stood; the current behaviour is in `docs/engine-events.md`, "In-container
+> engine invocation (v0)".
+
 Status: proposed (implemented in one PR). This is a working note, not an
 ADR — it records the design for issue #294's write-side port so the
 decisions are traceable, following the same convention as

@@ -20,7 +20,14 @@ GitLab (`gitlab.tomlawson.io`, `ai/orbit`) is where Orbit is built, tested and
 merged. GitHub (`tomlawesome/orbit`) is a one-way push mirror: it carries the
 same history and tags, and GHCR (`ghcr.io/tomlawesome/orbit`) is the public
 image source. Nothing about stable promotion happens on GitHub; it only
-receives what GitLab already decided (#821).
+receives what GitLab already decided (#821). The path of an image: `record_image`
+pushes the tested image to `registry.tomlawson.io` and records its digest,
+`sign_evidence` attests it from the dedicated signing runner, `publish_channel`
+adds the channel tag (#661, ADR-0020), and `.github/workflows/publish-from-gitlab.yml`
+copies that digest to GHCR when the mirror delivers the `preview` push. Nothing
+built on GitHub reaches a registry. The mirror itself (GitLab Settings >
+Repository > Mirroring) is owner-managed, and a red GitHub run never blocks a
+GitLab merge.
 
 ## What you do, in short
 
@@ -31,11 +38,16 @@ To ship a stable release:
 2. Deploy that preview by its digest and do release acceptance: the
    charter's list ([v1 charter](v1-charter.md#release-acceptance), item 4),
    checked off on the release's acceptance issue.
-3. Merge `preview` into `main`.
-4. On GitLab, start a pipeline on `main` with `PREVIEW_DIGEST` set to the
+3. Update [the roadmap](roadmap.md) for the release: set each row's status
+   and evidence to what the accepted code does, mark kept promises
+   `delivered`, and add a row for any promise found anywhere new. A promise
+   that will not be kept is marked `dropped` and removed from where it was
+   made.
+4. Merge `preview` into `main`.
+5. On GitLab, start a pipeline on `main` with `PREVIEW_DIGEST` set to the
    accepted digest, and run the manual `promote_stable` job. It tags the image
    `vX.Y.Z` and `latest` and creates the `vX.Y.Z` tag.
-5. Straight away, run the **Countersign a stable release** workflow on GitHub
+6. Straight away, run the **Countersign a stable release** workflow on GitHub
    with that tag. This adds the owner's second signature.
 
 The rest of this document says what each step checks and why.
@@ -109,48 +121,62 @@ them):**
    half as `cosign.pub` at the repository root; the private key and password
    never enter chat or the repository. (Already done: the committed
    `cosign.pub` stays valid under this design.)
-2. On the `gitlab-runners` host, as root, put the key material where the
-   signing runner will mount it, owned by the runner's user (`gitlab-runner`,
-   uid 988):
+2. On the `gitlab-runners` host, as root, give signing its own Docker: a
+   separate user, `gitlab-signer`, running its own rootless Docker that no
+   other runner and no job can reach (#1373). Every other runner on the host
+   uses `gitlab-runner`'s Docker, and two of them hand that Docker to their
+   jobs, so key material that user can read is in reach of any job:
 
    ```sh
-   install -d -m 0700 -o gitlab-runner -g gitlab-runner /etc/orbit-signing
-   install -m 0600 -o gitlab-runner -g gitlab-runner /path/to/cosign.key /etc/orbit-signing/cosign.key
+   useradd -m -s /usr/sbin/nologin gitlab-signer   # Debian gives it a subuid range
+   grep gitlab-signer /etc/subuid /etc/subgid      # both must print a range
+   loginctl enable-linger gitlab-signer
+   ```
+
+   Put the key material where the signing runner will mount it, owned by
+   `gitlab-signer`:
+
+   ```sh
+   install -d -m 0700 -o gitlab-signer -g gitlab-signer /etc/orbit-signing
+   install -m 0600 -o gitlab-signer -g gitlab-signer /path/to/cosign.key /etc/orbit-signing/cosign.key
    ( umask 077 && IFS= read -r -s -p 'key password: ' p && \
      printf '%s' "$p" > /etc/orbit-signing/password ); echo
-   chown gitlab-runner:gitlab-runner /etc/orbit-signing/password
+   chown gitlab-signer:gitlab-signer /etc/orbit-signing/password
    ```
 
    The `read -s` keeps the password off the command line and out of shell
-   history. The runner's Docker is **rootless**, run by `gitlab-runner`: root
-   inside the job container is uid 988 on the host, so root-owned 0600 files
-   would be unreadable there (they read as `nobody`). Nothing else on the
+   history. The signing Docker is **rootless**, run by `gitlab-signer`: root
+   inside the job container is that user on the host, so root-owned 0600
+   files would be unreadable there (they read as `nobody`), and
+   `gitlab-runner`'s Docker cannot read these at all. Nothing else on the
    host needs to read them, and no other runner mounts the directory.
 
-   Rootless Docker also takes a snapshot of `/etc` when its daemon starts, so
-   a directory created under `/etc` afterwards is invisible to it: the job
-   sees an empty mount and fails with "no password file" although the file
-   is there. After creating the directory, restart that user's Docker once
-   (this kills any job then running on the host):
+   Then start that user's Docker. Rootless Docker takes a snapshot of `/etc`
+   when its daemon starts, so a directory created under `/etc` afterwards is
+   invisible to it (the job sees an empty mount and fails with "no password
+   file"): create the directory first, or restart the daemon after.
 
    ```sh
-   sudo -u gitlab-runner XDG_RUNTIME_DIR=/run/user/988 \
-     DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/988/bus \
-     systemctl --user restart docker
+   U=$(id -u gitlab-signer)
+   sudo -u gitlab-signer XDG_RUNTIME_DIR=/run/user/$U \
+     DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$U/bus \
+     dockerd-rootless-setuptool.sh install
    ```
 
    Later reboots need nothing: the directory exists before Docker starts.
-   (Both found on the first `preview` run, pipeline 791, 2026-09-09.)
+   (The snapshot was found on the first `preview` run, pipeline 791,
+   2026-09-09.)
 3. Register a second project runner on that host (the first is `orbit-build`),
    docker executor, tag `orbit-signing`, **protected** (Settings > CI/CD >
    Runners: "Protected" ticked, so it refuses jobs from unprotected refs),
    **locked to this project**, "run untagged jobs" off. In its
-   `config.toml` entry add the mount, and the rootless socket (without it
-   the executor looks for `/var/run/docker.sock`, which does not exist):
+   `config.toml` entry add the mount, and `gitlab-signer`'s rootless socket,
+   never `gitlab-runner`'s (without a `host` the executor looks for
+   `/var/run/docker.sock`, which does not exist):
 
    ```toml
    [runners.docker]
-     host = "unix:///run/user/988/docker.sock"
+     host = "unix:///run/user/<gitlab-signer's uid>/docker.sock"
      volumes = ["/etc/orbit-signing:/etc/orbit-signing:ro", "/cache"]
    ```
 
@@ -162,8 +188,62 @@ Until this setup exists, `sign_evidence` either finds no runner (no
 `orbit-signing` runner registered) or stops, naming the missing file in
 `/etc/orbit-signing`, and nothing publishes.
 
+`sign_evidence` installs and downloads nothing while the key is mounted
+(#1368). Its tools, cosign included, come baked into `$ORBIT_SIGNING_IMAGE`,
+which ai/orbit-base-image's `publish_signing` builds and scans; pin the
+digest from that job's `published-signing-digest.txt`. If the image's cosign
+is not exactly the version `scripts/ci/ensure-cosign.sh` pins, the job stops
+naming both versions rather than fetching one, so a cosign bump here means
+rebuilding that image and re-pinning. The pin is the digest from base-image's
+`publish_signing` run (first published 2026-10-10).
+
 **Key rotation:** generate a new pair, replace the two files on the runner
-host, commit the new `cosign.pub`. Attestations made under the old key stop
+host, commit the new `cosign.pub`, then re-sign the manifest that `latest`
+points at with the new key and replace its `.sig` asset. Until that third
+step is done the one-line installer refuses every install and update: the
+`get-orbit.sh` on `main` carries only the committed key, and nothing re-signs
+a published manifest by itself (signing only runs inside a release pipeline).
+Re-sign on the runner host in three steps, with `vX.Y.Z` the current `latest`
+release. Only `gitlab-signer` can read the key, but it has no login shell and
+no GitHub credential (giving it one would undo the isolation above), so you
+download and upload with your own `gh` login and `gitlab-signer` only signs.
+
+First, as yourself, download the manifest into a fresh directory:
+
+```sh
+cd "$(mktemp -d)"
+gh release download vX.Y.Z -R tomlawesome/orbit -p orbit-release-manifest.json
+```
+
+Then, from that directory, copy it into a directory only `gitlab-signer` can
+write, sign there as `gitlab-signer` exactly as
+`scripts/ci/sign-release-manifest.sh` does (same flags, password read from
+`/etc/orbit-signing/password`), and copy the signature back out.
+`gitlab-signer` cannot write your directory and you cannot read the key, hence
+the hand-over:
+
+```sh
+d=/var/tmp/orbit-resign
+sudo install -d -m 0700 -o gitlab-signer -g gitlab-signer "$d"
+sudo install -m 0600 -o gitlab-signer -g gitlab-signer orbit-release-manifest.json "$d/"
+sudo -u gitlab-signer bash -c 'cd /var/tmp/orbit-resign &&
+  export COSIGN_PASSWORD="$(< /etc/orbit-signing/password)" &&
+  cosign sign-blob --key /etc/orbit-signing/cosign.key \
+    --tlog-upload=false --use-signing-config=false --yes \
+    --new-bundle-format=false \
+    --output-signature orbit-release-manifest.json.sig orbit-release-manifest.json'
+sudo install -m 0644 -o "$USER" "$d/orbit-release-manifest.json.sig" .
+sudo rm -r "$d"
+```
+
+Last, as yourself again, upload it over the old signature:
+
+```sh
+gh release upload vX.Y.Z orbit-release-manifest.json.sig -R tomlawesome/orbit --clobber
+```
+
+The keyless `.sigstore.json` countersignature covers the manifest, not the
+`.sig`, so it is unaffected. Attestations made under the old key stop
 verifying, so any digest not yet published must go through validation again
 after a rotation.
 
@@ -195,10 +275,7 @@ To run it:
 4. Find the `promote_stable` job in the pipeline and click Run.
 
 
-The job (`scripts/ci/promote-stable.sh`) then does the following, in order.
-Steps 1-8 and 10 are what the retired `promote-container.yml` GitHub workflow
-did; step 9's `vX.Y.Z` tag is what that workflow stopped doing between v1.0.0
-and v1.1.0 (see "Version tags in GHCR start at v0.3.0" below):
+The job (`scripts/ci/promote-stable.sh`) then does the following, in order:
 
 1. Checks `PREVIEW_DIGEST` is `sha256:<64 hex>`.
 2. Confirms `main` and `preview` point at the exact same commit.
@@ -220,7 +297,12 @@ and v1.1.0 (see "Version tags in GHCR start at v0.3.0" below):
 7. Runs `scripts/stable-promotion-policy.mjs`, which refuses unless the
    image's revision is an ancestor of both `main` and its source branch and
    the tree at that revision exactly matches `main`'s tree.
-8. Refuses if `ghcr.io/tomlawesome/orbit:vX.Y.Z` already resolves in GHCR.
+8. Refuses if `ghcr.io/tomlawesome/orbit:vX.Y.Z` already resolves in GHCR,
+   unless it already resolves to the exact digest being promoted, in which
+   case the job carries on from there: it skips step 9 and still checks both
+   tags hold that digest before step 10. This lets a rerun finish a
+   promotion that failed after tagging GHCR but before creating the GitLab
+   tag (for example, an expired `GITLAB_RELEASE_TOKEN`).
 9. Tags that exact digest `vX.Y.Z` and `latest` in GHCR, by digest, without
    rebuilding anything (`latest`, not `stable`: `install.sh` defaults
    `ORBIT_CHANNEL` to `latest`).
@@ -238,7 +320,7 @@ Straight after `promote_stable` finishes, add the second signature:
 
 1. Open the **Countersign a stable release** workflow in the GitHub Actions
    tab: https://github.com/tomlawesome/orbit/actions/workflows/countersign.yml
-2. Click **Run workflow** and enter the release tag, for example `v1.4.0`.
+2. Click **Run workflow** and enter the release tag, for example `v0.3.0`.
 
 
 It resolves the release's digest in GHCR and the tag's commit. Then it checks
@@ -367,11 +449,16 @@ SHA2-256(stdin)= ed183527165c366de2a4005d8b20c3df687ea2e35d488de7961806867c9d1a1
 
 **Rotation.** Follows "Key rotation" above, plus one thing specific to the
 launcher path: the scripts on `main` only accept manifests signed after the
-rotation, since they carry only the current key. `latest` always carries a
-manifest signed under the current key. A user who pins an older
+rotation, since they carry only the current key. `latest` carries a
+manifest signed under the current key only once the re-sign step above is
+done. A user who pins an older
 `ORBIT_VERSION` must also fetch `get-orbit.sh` from that version's own tag
 (`…/orbit/vX.Y.Z/scripts/get-orbit.sh`), which still carries the key that
-release was actually signed with.
+release was actually signed with. That holds only for releases left signed
+under their original key: the release that was `latest` at rotation was
+re-signed in "Key rotation" above and now verifies only with the current key,
+so its own tag's `get-orbit.sh` (old key) refuses it; pin that release with
+`main`'s `get-orbit.sh` instead.
 
 **A limit worth stating plainly:** on the `latest` channel there is no
 freshness check. Whoever controls what `get-orbit.sh` downloads from could
@@ -385,34 +472,6 @@ script refuses a manifest whose own `version` field does not match the pin,
 so an older release can only be installed by asking for it by name, never
 served silently in place of a newer one. See `docs/installer-guarantees.md`
 for the full list of what is and is not checked.
-
-### Version tags in GHCR start at v0.3.0
-
-`ghcr.io/tomlawesome/orbit` has no `v1.1.0` or `v1.2.0` tag, and never had one
-(#1019). The GitHub promotion workflow originally tagged the promoted digest
-`vX.Y.Z` and `latest`, which is why `v1.0.0` still resolves. Commit 6952f35
-(2026-08-08, "feat(release): automate preview versions and lanes") rewrote the
-promote step to `--tag "${image}:latest"` alone and dropped the version tag; it
-was not noticed because the release notes still recorded the digest. v1.1.0
-(2026-08-08) and v1.2.0 (2026-08-10) were both promoted after that change, so
-each moved `latest` and nothing else. ADR-0016 had already found the same gap
-from the other side in August: `v1.0.0` was "the only version tag an operator
-could pin".
-
-Nothing was removed and nothing needs repairing in the pipeline: the GitLab
-`promote_stable` job tags both names (step 9 above), and
-`scripts/promote-stable.test.mjs` asserts both, so v0.3.0 onward is tagged
-correctly.
-
-The two missing releases are deliberately left missing. ADR-0016 makes v0.3.0
-the supported-install floor, so a `v1.1.0` or `v1.2.0` tag would be a pinnable
-name for an image `install.sh` refuses to install. Their digests stay on the
-record here and in their GitHub release notes:
-
-| Release | Digest | In GHCR today |
-| --- | --- | --- |
-| v1.1.0 (retracted alpha, #1213) | `sha256:92fb79336d997139002f94c52fd4767787767cc293147c12bbcfc25362a9237d` | untagged, still pullable by digest |
-| v1.2.0 (retracted alpha, #1213) | `sha256:35ad7cea14f835b8e5b350faa0fcf711cbf95c517a2bad26f5fe72795a8aeb12` | carried by `latest` |
 
 ## Required CI/CD variables
 
@@ -442,8 +501,8 @@ above.
 The operator tooling supports installing v0.3.0 and later; earlier published
 releases, and the retracted v1.0.0 to v1.2.0 tags, are not supported install
 targets
-([ADR-0016](adr/0016-release-identity-and-installer-era-boundary.md)), and
-GHCR carries no version tag for them either. Pinning a version tag requires
+([ADR-0016](adr/0016-release-identity-and-installer-era-boundary.md)), and the
+installer refuses them. Pinning a version tag requires
 the image's own embedded version to name that release, so a moved tag cannot
 pass an image off as a version it is not. Moving tags such as `preview` make
 no version claim and are unaffected; `latest` always points at the newest

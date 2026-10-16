@@ -17,10 +17,11 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { imapIngestionMessages } from "@/db/schema";
+import { RateLimitedError } from "@/lib/app-error";
 import { getImapIngestionConfig } from "./mailbox-config";
 import type { ImapIngestionConfig } from "./core/config";
-import { ensureRelayAliases, readRelayRow, relayAddressFor, rotateRelay, setRelayIngestPaused, type RelayRotationMode } from "./relays";
-import { hasVerifiedSenderAddress, seedSenderAddress } from "./sender-addresses";
+import { ensureRelayAliases, relayAddressFor, rotateRelay, setRelayIngestPaused, type RelayRotationMode } from "./relays";
+import { hasVerifiedSenderAddress, listSenderAddresses, seedSenderAddress } from "./sender-addresses";
 
 /** Mail-in is configured, switched on, and this account has a mailbox. */
 export const RELAY_LISTENING = "connected · listening";
@@ -68,6 +69,21 @@ export interface RelaySettings {
    * something is going wrong without being shown mail that was never theirs.
    */
   unattributed: number;
+  /**
+   * The member's one sending-address row (ADR-0017 decision 7c), so the screen
+   * can say "check your mail" or "checked". `null` when there is no row to
+   * report: an instance administrator, mail-in off, or an address Orbit
+   * cannot read. Only the member's own address, never host, port or mailbox.
+   */
+  sender: RelaySender | null;
+}
+
+export interface RelaySender {
+  address: string;
+  verified: boolean;
+  verificationPending: boolean;
+  /** When the outstanding link lapses (ISO); null once checked or with no live link. */
+  expiresAt: string | null;
 }
 
 /**
@@ -95,18 +111,34 @@ export async function readRelaySettings(
   const config = await resolvedConfig();
   const ingest: RelayIngest = config?.enabled ? "enabled" : "paused";
   if (user.isInstanceAdmin) {
-    return { address: null, listening: RELAY_NO_MAILBOX, lastReceived: null, ingest, unattributed: 0 };
+    return { address: null, listening: RELAY_NO_MAILBOX, lastReceived: null, ingest, unattributed: 0, sender: null };
   }
   // `enabled` already folds in `configured`, so this one test covers both an
   // instance that was never wired up and one whose operator switched mail-in off.
   if (!config?.enabled) {
-    return { address: null, listening: RELAY_NOT_LISTENING, lastReceived: null, ingest, unattributed: 0 };
+    return { address: null, listening: RELAY_NOT_LISTENING, lastReceived: null, ingest, unattributed: 0, sender: null };
   }
   /* Seeding here, on the member's own read, is what puts the account address
      in front of them without anybody typing it — still unverified, because
-     Orbit knowing an address is not the member proving they send from it. */
-  await seedSenderAddress(user.id);
+     Orbit knowing an address is not the member proving they send from it.
+     Seeding takes the member's sender lock; when a check holds it, this read
+     skips seeding rather than waiting (the next read seeds), and reads the
+     rows without the lock. */
+  try {
+    await seedSenderAddress(user.id);
+  } catch (error) {
+    if (!(error instanceof RateLimitedError && error.code === "sender_check_too_soon")) throw error;
+  }
   const usable = await hasVerifiedSenderAddress(user.id);
+  const senderRow = (await listSenderAddresses(user.id))[0];
+  const sender: RelaySender | null = senderRow?.address
+    ? {
+      address: senderRow.address,
+      verified: senderRow.verified,
+      verificationPending: senderRow.verificationPending,
+      expiresAt: senderRow.expiresAt,
+    }
+    : null;
   const relay = await ensureRelayAliases(user.id, config);
   const ownIngest: RelayIngest = relay.ingestPausedAt ? "paused" : ingest;
   const [latest] = await getDb()
@@ -134,6 +166,7 @@ export async function readRelaySettings(
     lastReceived: latest?.receivedAt ? latest.receivedAt.toISOString() : null,
     ingest: ownIngest,
     unattributed: unattributed?.count ?? 0,
+    sender,
   };
 }
 
@@ -182,9 +215,4 @@ export async function setRelayIngest(
   if (user.isInstanceAdmin || !config?.enabled) return readRelaySettings(user);
   await setRelayIngestPaused(user.id, paused);
   return readRelaySettings(user);
-}
-
-/** The member's own relay row, or `undefined` before they are enrolled. */
-export async function readOwnRelayRow(user: { id: string }) {
-  return readRelayRow(user.id);
 }

@@ -76,15 +76,6 @@ export function getBootPhase(): BootPhase {
 }
 
 /**
- * Test-only: set the phase directly, so a route or door-state test can
- * exercise the "running" branch without paying for the full mocked
- * `registerNode` sequence below.
- */
-export function setBootPhaseForTests(phase: BootPhase | undefined): void {
-  bootPhase = phase ?? "starting";
-}
-
-/**
  * Validates authentication configuration in the Node runtime without making
  * startup or public health depend on private runtime configuration.
  */
@@ -255,8 +246,39 @@ export async function reportKekRotationInProgress(): Promise<void> {
   });
 }
 
+/**
+ * Warns when the PDF sandbox lacks something it relies on (#1316, #1427,
+ * ADR-0038). Each PDF job runs in a child process started through `/bin/sh`
+ * with `ulimit -d`, and is watched through `/proc`; a trivial child started
+ * the same way says whether all three work here. Without `/bin/sh` no child
+ * starts and every PDF is refused; without `ulimit -d` the kernel backstop
+ * is gone; without `/proc` the memory watchdog is blind, leaving the child's
+ * heap cap and the clock.
+ */
+export async function reportPdfSandboxSelfCheck(): Promise<void> {
+  const [{ pdfSandboxSelfCheck }, { log, operationalDetail }] = await Promise.all([
+    import("@/server/documents/pdf-structure-sandbox"),
+    import("@/lib/logger"),
+  ]);
+  const problem = await pdfSandboxSelfCheck();
+  if (!problem) return;
+  const detail = {
+    child_not_started: operationalDetail`the PDF sandbox cannot start node through /bin/sh, so every PDF check and preview fails; run the image as shipped`,
+    data_limit_not_applied: operationalDetail`ulimit -d does not apply here, so the PDF sandbox has no kernel memory backstop; its memory watchdog still applies`,
+    proc_unreadable: operationalDetail`/proc is unreadable, so the PDF sandbox cannot watch a child's memory; only the heap cap and the clock bound a hostile PDF`,
+  }[problem];
+  log.warn({
+    event: "document.inspection",
+    state: "degraded",
+    reason: "configuration_invalid",
+    action: "check_configuration",
+    impact: problem === "child_not_started" ? "document_upload_blocked" : "none",
+    detail,
+  });
+}
+
 export async function registerNode(): Promise<void> {
-  const [{ validateStartupConfiguration, StartupConfigurationError }, { getDatabaseClient }, { verifyMigrationIntegrity, verifyMigrationJournalComplete, MigrationIntegrityError }, { log }, { getConfigurationProblems }] = await Promise.all([
+  const [{ validateStartupConfiguration, StartupConfigurationError }, { getDatabaseClient }, { verifyMigrationIntegrity, verifyMigrationJournalComplete, MigrationIntegrityError }, { log, operationalDetail, operationalErrorDetail }, { getConfigurationProblems }] = await Promise.all([
     import("@/lib/startup-config"),
     import("@/db"),
     import("@/db/migration-integrity"),
@@ -316,12 +338,14 @@ export async function registerNode(): Promise<void> {
        Reuses existing sentinel vocabulary (no new reason/impact tokens) -
        the migration's own outcome is already logged in full above/below;
        this only flags that its bookkeeping row may be missing. */
-    const logMigrationOutcomeUnavailable = () => log.warn({
+    const logMigrationOutcomeUnavailable = (error: unknown) => log.warn({
       event: "startup.migration",
       state: "degraded",
       reason: "unexpected_failure",
       action: "inspect_admin_diagnostics",
       impact: "none",
+      // #1288: the error's class and code only, never its message.
+      detail: operationalErrorDetail(error),
     });
     // Resolved once and reused below (#1151 A4-Q2): the integrity check, the
     // migrate() call and the post-migration journal check must all read the
@@ -351,9 +375,7 @@ export async function registerNode(): Promise<void> {
          verdict, so they travel as one pair. */
       const verdict = !(error instanceof MigrationIntegrityError)
         ? ({ reason: "migration_integrity", action: "check_migrations" } as const)
-        : code === "database_floor"
-          ? ({ reason: "database_below_floor", action: "upgrade_from_supported_version" } as const)
-          : ({ reason: "database_mismatch", action: "attach_matching_database" } as const);
+        : ({ reason: "database_mismatch", action: "attach_matching_database" } as const);
       log.error({
         event: "startup.migration",
         state: "exhausted",
@@ -371,8 +393,8 @@ export async function registerNode(): Promise<void> {
     }
     try {
       await ensureMigrationRunsTable(getDatabaseClient());
-    } catch {
-      logMigrationOutcomeUnavailable();
+    } catch (error) {
+      logMigrationOutcomeUnavailable(error);
     }
     const migrationStartedAt = new Date();
     try {
@@ -400,8 +422,8 @@ export async function registerNode(): Promise<void> {
           outcome: "failed",
           reason: "migration_failed",
         });
-      } catch {
-        logMigrationOutcomeUnavailable();
+      } catch (error) {
+        logMigrationOutcomeUnavailable(error);
       }
       throw new Error("migration_failed");
     }
@@ -412,8 +434,8 @@ export async function registerNode(): Promise<void> {
         outcome: "succeeded",
         reason: null,
       });
-    } catch {
-      logMigrationOutcomeUnavailable();
+    } catch (error) {
+      logMigrationOutcomeUnavailable(error);
     }
     try {
       await verifyMigrationJournalComplete(getDatabaseClient(), migrationsFolder);
@@ -445,12 +467,50 @@ export async function registerNode(): Promise<void> {
     });
   });
 
-  if (process.env.WORKER_ENABLED === "true") {
+  /* The encryption key self-test (#1405): awaited, after migrations and the
+     import rollback and before any worker, while the phase is still
+     "starting", so the door shows "waking up" until the verdict exists and no
+     request ever reaches a gate before it does. A database that cannot answer
+     inside the startup window fails boot like any other boot step. */
+  const { probeEncryptionKey, logKeyVerdict } = await import("@/server/key-state");
+  let keyState: Awaited<ReturnType<typeof probeEncryptionKey>>;
+  try {
+    keyState = await probeEncryptionKey();
+  } catch {
+    log.error({
+      event: "encryption.key",
+      state: "exhausted",
+      reason: "dependency_unavailable",
+      action: "check_database",
+      impact: "application_unavailable",
+    });
+    throw new Error("key_probe_failed");
+  }
+  logKeyVerdict(keyState);
+  const keyUsable = keyState.verdict === "usable";
+
+  if (process.env.WORKER_ENABLED === "true" && !keyUsable) {
+    /* No usable key (#1405): only the scheduled-maintenance worker, which
+       needs none (ADR-0013 §5). The others cannot do their work without the
+       key, and three of them would say so in the log every cycle; mail
+       deliveries would spend their attempts on a fault no retry fixes.
+       Leaving this state is a restart, which starts them normally. */
+    const { startMaintenanceWorker } = await import("@/server/maintenance-worker");
+    startMaintenanceWorker();
+    log.warn({
+      event: "application.startup",
+      state: "blocked",
+      reason: "key_unavailable",
+      action: "check_configuration",
+      impact: "application_unavailable",
+      detail: operationalDetail`workers not started while the encryption key is unusable; only scheduled maintenance ticks`,
+    });
+  } else if (process.env.WORKER_ENABLED === "true") {
     const [{ startNotificationWorker }, { startDocumentWorker }, { startImapIngestionWorker }, { startImapReceiptWorker }, { startMaintenanceWorker }] = await Promise.all([
       import("@/server/notification-worker"),
       import("@/server/document-worker"),
-      import("@/server/imap-ingestion"),
-      import("@/server/imap-receipt-worker"),
+      import("@/server/mail-in/imap-ingestion"),
+      import("@/server/mail-in/imap-receipt-worker"),
       import("@/server/maintenance-worker"),
     ]);
     const optionalSettings = new Set(
@@ -476,13 +536,6 @@ export async function registerNode(): Promise<void> {
     if (!optionalSettings.has("mail") && !optionalSettings.has("imap")) startImapReceiptWorker();
     // Unconditional: scheduled maintenance depends on no optional setting.
     startMaintenanceWorker();
-
-    /* The Tier 1 metadata backfill (ADR-0024 decision 3). It runs once, drains
-       the rows migration 0040 could not encrypt, and stops; an instance with
-       no key-encryption key logs and stops without converting anything, rather
-       than holding up start-up. */
-    const { startMetadataBackfill } = await import("@/server/metadata/backfill");
-    startMetadataBackfill();
   }
 
   // The strict sequence (#869) is done: configuration, readiness reports,
@@ -490,6 +543,21 @@ export async function registerNode(): Promise<void> {
   // post-boot reporting, not a boot step, so it flips before the scanner
   // probe kicks off rather than after.
   bootPhase = "running";
+
+  /* The operator alert for a locked instance, or the one "working again"
+     notice after an alert (#1405): only now the server is answering, so a
+     slow mail server never delays boot, and never able to fail it. */
+  const { sendKeyAlert, sendKeyRestoredNotice } = await import("@/server/key-alert");
+  const keyMail = keyUsable ? sendKeyRestoredNotice() : sendKeyAlert(keyState);
+  void keyMail.catch(() => {
+    log.warn({
+      event: "encryption.key",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "inspect_admin_diagnostics",
+      impact: "none",
+    });
+  });
 
   // Best-effort: the reminder that a KEK rotation is open must appear in
   // every boot's log, but a failed audit write may not stop the boot (#956)
@@ -518,6 +586,10 @@ export async function registerNode(): Promise<void> {
       impact: "document_upload_blocked",
     });
   });
+
+  // Best-effort, like the scanner probe: a weakened PDF sandbox must be
+  // visible in the log, but checking for it never delays or fails start-up.
+  void reportPdfSandboxSelfCheck().catch(() => undefined);
 
   /* The last act of start-up (ADR-0022 §1). On an unclaimed instance this
      prints the claim notice, so it is the last line of `docker logs

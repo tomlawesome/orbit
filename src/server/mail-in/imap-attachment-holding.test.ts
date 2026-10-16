@@ -4,9 +4,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
+import { validateSupportedDocumentStructure } from "@/server/documents/validation";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { syntheticPdf } from "../../../tests/support/synthetic-documents";
-import { readHeldImapAttachment, holdImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
+import { PgDialect } from "drizzle-orm/pg-core";
+import { eq } from "drizzle-orm";
+import { imapIngestionAttachments } from "@/db/schema";
+import { flagStagingPurgeFailed, readHeldImapAttachment, holdImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
 
 // #726: this is the only place that proves the mailbox path calls the real
 // ClamAV client (scanner.ts's live TCP scanner) at all, rather than a stub or
@@ -20,6 +24,22 @@ vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   scanFileWithClamAv: vi.fn(),
 }));
 
+// ADR-0033: the structure check is where pdf.js and the image decoders first
+// open the bytes, so it is spied on (still real) to prove the scan comes first.
+vi.mock("@/server/documents/validation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/documents/validation")>();
+  return { ...actual, validateSupportedDocumentStructure: vi.fn(actual.validateSupportedDocumentStructure) };
+});
+
+// The administrator's upload limit (#1285) is proven in
+// src/server/upload-limit.test.ts; here it answers the configured default,
+// read from the same environment this file configures.
+const limit = vi.hoisted(() => ({ effective: null as number | null }));
+vi.mock("@/server/upload-limit", async () => {
+  const { getDocumentConfig } = await import("@/server/documents/config");
+  return { readEffectiveUploadLimit: async (config = getDocumentConfig()) => limit.effective ?? config.maxBytes };
+});
+
 const originalEnvironment = { ...process.env };
 let root: string;
 
@@ -27,7 +47,9 @@ afterEach(async () => {
   for (const key of Object.keys(process.env)) if (!(key in originalEnvironment)) delete process.env[key];
   for (const [key, value] of Object.entries(originalEnvironment)) process.env[key] = value;
   resetDocumentConfigForTests();
+  limit.effective = null;
   vi.mocked(scanFileWithClamAv).mockReset();
+  vi.mocked(validateSupportedDocumentStructure).mockClear();
   if (root) await rm(root, { recursive: true, force: true });
 });
 
@@ -40,6 +62,23 @@ function configure(scanMode: "required" | "disabled" = "disabled") {
 }
 
 describe("private IMAP attachment holding", () => {
+  it("refuses a mailed attachment over the administrator's limit, and leaves no quarantine (#1285)", async () => {
+    root = await mkdtemp(join(tmpdir(), "orbit-imap-limit-"));
+    configure("required");
+    limit.effective = 1_048_576;
+    const bytes = Buffer.concat([syntheticPdf("over the limit"), Buffer.alloc(1_048_576, 0x20)]);
+    await expect(scanAndHoldImapAttachment({
+      bytes,
+      filename: "large.pdf",
+      declaredMediaType: "application/pdf",
+      recipientUserId: "10000000-0000-4000-8000-000000000001",
+      receiptId: "20000000-0000-4000-8000-000000000002",
+      mailboxIngestion: true,
+    })).rejects.toMatchObject({ code: "document_too_large" });
+    expect(scanFileWithClamAv).not.toHaveBeenCalled();
+    await expect(readdir(join(root, "quarantine")).catch(() => [])).resolves.toEqual([]);
+  });
+
   it("binds encryption to the verified recipient and receipt, and stores ciphertext only", async () => {
     root = await mkdtemp(join(tmpdir(), "orbit-imap-holding-"));
     configure();
@@ -103,6 +142,52 @@ describe("private IMAP attachment holding", () => {
     expect(written.some((file) => String(file).endsWith(".bin"))).toBe(false);
   });
 
+  it("required mode: scans a mailed attachment before anything opens it (ADR-0033)", async () => {
+    root = await mkdtemp(join(tmpdir(), "orbit-imap-scan-first-"));
+    configure("required");
+    const order: string[] = [];
+    vi.mocked(scanFileWithClamAv).mockImplementation(async () => {
+      order.push("scan");
+      return { status: "clean" };
+    });
+    vi.mocked(validateSupportedDocumentStructure).mockImplementationOnce(async () => {
+      order.push("open");
+      return true;
+    });
+    await scanAndHoldImapAttachment({
+      bytes: syntheticPdf("scan first"),
+      filename: "scan-first.pdf",
+      declaredMediaType: "application/pdf",
+      recipientUserId: "10000000-0000-4000-8000-000000000001",
+      receiptId: "20000000-0000-4000-8000-000000000002",
+      mailboxIngestion: true,
+    });
+    expect(order).toEqual(["scan", "open"]);
+  });
+
+  it.each([
+    ["infected", { status: "infected", signature: "Eicar-Test-Signature" }, "malware_detected"],
+    ["unreachable", { status: "error", reason: "unavailable" }, "scanner_unavailable"],
+    ["timed out", { status: "error", reason: "timeout" }, "scanner_timeout"],
+    ["a protocol error", { status: "error", reason: "protocol" }, "scanner_protocol"],
+    ["a scanner-reported error", { status: "error", reason: "scanner" }, "scanner_failed"],
+    ["an error with no reason", { status: "error" }, "scanner_failed"],
+    ["an unknown status", { status: "quarantined" }, "scanner_failed"],
+  ] as const)("required mode: never opens a mailed attachment whose scan was %s (ADR-0033)", async (_label, outcome, message) => {
+    root = await mkdtemp(join(tmpdir(), "orbit-imap-scan-stops-"));
+    configure("required");
+    vi.mocked(scanFileWithClamAv).mockResolvedValue(outcome as never);
+    await expect(scanAndHoldImapAttachment({
+      bytes: syntheticPdf("scan stops"),
+      filename: "scan-stops.pdf",
+      declaredMediaType: "application/pdf",
+      recipientUserId: "10000000-0000-4000-8000-000000000001",
+      receiptId: "20000000-0000-4000-8000-000000000002",
+      mailboxIngestion: true,
+    })).rejects.toThrow(message);
+    expect(validateSupportedDocumentStructure).not.toHaveBeenCalled();
+  });
+
   it("allocates the storage key before writing and removes it when registration fails", async () => {
     root = await mkdtemp(join(tmpdir(), "orbit-imap-allocation-"));
     configure();
@@ -124,5 +209,27 @@ describe("private IMAP attachment holding", () => {
       onCiphertextAllocated: async ({ storageKey }) => { allocatedKey = storageKey; throw new Error("registration failed"); },
     })).rejects.toThrow("registration failed");
     expect(await storage.ciphertextExists(allocatedKey)).toBe(false);
+  });
+});
+
+describe("flagStagingPurgeFailed (engine-18)", () => {
+  it("re-flags exactly the rows the caller's own predicate names, counting one attempt", async () => {
+    const writes: { values?: Record<string, unknown>; where?: unknown } = {};
+    const executor = {
+      update: () => ({
+        set: (values: Record<string, unknown>) => {
+          writes.values = values;
+          return { where: async (where: unknown) => { writes.where = where; } };
+        },
+      }),
+    };
+    const at = new Date("2030-01-02T03:04:05.000Z");
+    const where = eq(imapIngestionAttachments.id, "30000000-0000-4000-8000-000000000003");
+    await flagStagingPurgeFailed(executor as never, where, at);
+
+    expect(writes.where).toBe(where);
+    expect(writes.values).toMatchObject({ purgePending: true, purgeFailureCode: "staging_purge_failed", updatedAt: at });
+    const attempts = new PgDialect().sqlToQuery(writes.values!.purgeAttempts as never);
+    expect(attempts.sql).toBe('"imap_ingestion_attachments"."purge_attempts" + 1');
   });
 });

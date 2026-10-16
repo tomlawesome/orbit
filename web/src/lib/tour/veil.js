@@ -11,8 +11,8 @@
  * keep its own stacking context and its own hit-testing. So a hole cannot be
  * an element placed on top of the veil — it has to be an actual gap cut into
  * the dark sheet, which is what a CSS mask is for. The lit element itself is
- * never moved, re-parented, classed or given a z-index (`emphasis.js`
- * already collides `.lit` with `home.css:495` and zeroes it out entirely at
+ * never moved, re-parented, classed or given a z-index (`.lit` already
+ * collides with `home.css:495` and is zeroed out entirely at
  * `create.css:221` — this module never uses that class name, or any class on
  * the target at all).
  *
@@ -339,6 +339,21 @@ function teardownOverlay() {
   holes.clear();
   lastSig = null;
   removeListeners();
+}
+
+/**
+ * Tears the veil down at once: the pending fade timer is cancelled, the
+ * overlay removed, the listeners dropped. For a test's cleanup (#1234): a
+ * fade left running past the end of a unit-test file fires into a window
+ * that is already gone ("window is not defined" from removeListeners, three
+ * sightings). The product never needs this -- hideVeil's fade is the point.
+ */
+export function dropVeil() {
+  if (hideTimer !== null) {
+    clearTimeout(hideTimer);
+    hideTimer = null;
+  }
+  teardownOverlay();
 }
 
 /**

@@ -3,7 +3,7 @@
  *
  * The owner's ruling is that no freshness window ships. Setting a password,
  * changing one, linking, unlinking, issuing somebody else a setup link and
- * transferring primary authority all re-challenge the person in front of the
+ * creating a system for somebody else all re-challenge the person in front of the
  * screen, every time — a window is a bearer token for anyone at an unlocked
  * laptop, which is exactly what this replaces (#263's fifteen minutes, deleted
  * with this module).
@@ -11,7 +11,7 @@
  * There are two challenges and one rule for choosing between them:
  *
  *  - **Has a password?** Then the password is the challenge, verified through
- *    `verifyCredential` — the same backoff, the same gate, the same one-word
+ *    `verifyCredentialForUser` — the same backoff, the same gate, the same one-word
  *    refusal as a sign-in. Nothing here re-implements any of that.
  *  - **OIDC only?** Then a step-up: `POST /api/auth/step-up/start` sends the
  *    browser to the provider with `max_age=0`, the callback checks the
@@ -36,7 +36,8 @@ import type { VerifiedIdentity } from "@/lib/auth/oidc";
 import { getAuthConfig, type AuthConfig } from "@/lib/env";
 import type { CookieSink } from "@/lib/http";
 import { log } from "@/lib/logger";
-import { verifyCredential } from "@/server/local-credentials";
+import { validUuid } from "@/lib/uuid";
+import { verifyCredentialForUser } from "@/server/local-credentials";
 
 /** Keeps a step-up proof from opening as a claim cookie or a transaction. */
 export const STEP_UP_PROOF_AUDIENCE = "step-up-proof";
@@ -50,9 +51,9 @@ export const STEP_UP_PROOF_TTL_SECONDS = 120;
 
 /**
  * What a step-up is FOR. A closed list, because the proof is bound to one of
- * these: a step-up taken to change a password cannot be spent transferring the
- * instance. Later M7 slices append their own actions here; nothing reorders or
- * removes, and no route invents an intent of its own.
+ * these: a step-up taken to change a password cannot be spent creating a
+ * system. A new sensitive action appends its own intent here; no route invents
+ * an intent of its own.
  */
 export const stepUpIntents = [
   "password_set",
@@ -61,7 +62,6 @@ export const stepUpIntents = [
   "unlink_method",
   "local_user_create",
   "setup_link_issue",
-  "primary_transfer",
   /* Creating a system for somebody else (#1052): an administrator act that
      hands a household to a named owner, so it is challenged like the rest. */
   "system_create",
@@ -102,21 +102,11 @@ export interface RecentAuthenticationEvent {
 export interface RecentAuthenticationSubject {
   id: string;
   /**
-   * `email` is null when the instance holds no usable encryption key, so the
-   * account's own address cannot be read (#969). The password challenge below
-   * resolves an address to an account, so it has nothing to work with and says
-   * so, rather than answering "that is not your password".
+   * `email` is null when the stored address will not authenticate, so it
+   * cannot be read (#969). Neither challenge depends on it: the password is
+   * checked against `user.id`.
    */
   user: { id: string; email: string | null };
-}
-
-/** The answer when the instance holds no usable encryption key (#969). */
-function instanceLocked(): AuthError {
-  return new AuthError(
-    "instance_locked",
-    "This change cannot be confirmed until the encryption key is available",
-    503,
-  );
 }
 
 /** The one answer every unproven action gets. */
@@ -142,9 +132,6 @@ function stepUpRejected(): void {
 export function stepUpProofCookieName(config: AuthConfig): string {
   return config.secureCookies ? "__Secure-orbit-step-up" : "orbit-step-up";
 }
-
-/** A `jti` Orbit minted: anything else never reaches the uuid column. */
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 /**
  * Mints the proof the callback hands back to the browser. It carries no
@@ -275,21 +262,14 @@ async function verifyPasswordChallenge(
     : undefined;
   if (typeof supplied !== "string" || supplied.length === 0) throw unproven();
 
-  /* A locked instance cannot resolve any address to any account, so this
-     challenge cannot be answered at all (#969). Told plainly: `unproven()`
-     here would read as a wrong password and send the operator looking for a
-     fault in themselves rather than in the missing key. */
-  if (session.user.email === null) throw instanceLocked();
-
-  const verdict = await verifyCredential(session.user.email, supplied);
-  if (verdict.outcome === "locked") throw instanceLocked();
+  /* Checked against the account the session already names, not looked up by
+     its stored address: an address that no longer decrypts must not shut its
+     owner out of every guarded action. */
+  const verdict = await verifyCredentialForUser(session.user.id, supplied);
   if (verdict.outcome === "throttled") {
     throw new AuthError("too_many_attempts", "Too many attempts at once; try again shortly", 429);
   }
-  /* The verdict names the account the address resolved to, and it must be the
-     one holding this session: a second account that somehow shared the address
-     would otherwise let its password answer for this one. */
-  if (verdict.outcome !== "verified" || verdict.userId !== session.user.id) throw unproven();
+  if (verdict.outcome !== "verified") throw unproven();
   return { userId: session.user.id, intent, method: "password" };
 }
 
@@ -328,7 +308,7 @@ async function verifyStepUpProof(
      afterwards would leave the replay window open for as long as the action
      takes. */
   const jti = payload.jti;
-  if (typeof jti !== "string" || !UUID_PATTERN.test(jti)) throw unproven();
+  if (typeof jti !== "string" || !validUuid(jti)) throw unproven();
   const spent = await getDb()
     .update(stepUpProofs)
     .set({ consumedAt: sql`now()` })

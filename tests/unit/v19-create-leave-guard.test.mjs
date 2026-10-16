@@ -39,9 +39,15 @@ describe("#1151 W1-S1: the desktop create form warns before discarding", () => {
     // ...and a save that landed is not something to discard: leaving for
     // /home after it must not ask.
     expect(tail).toMatch(/isDirty:\s*\(\)\s*=>\s*!committed && disclose\.classList\.contains\("open"\)/u);
-    // Set before the attachment branch, so an entry the server already
-    // holds is committed whether or not a file was waiting to go with it.
-    expect(behaviour).toMatch(/committed = true;\s*\n\s*if \(attachment\) \{/u);
+    // #1316: the document is staged before the item is sent, so one command
+    // lands both. The form counts as committed only once that command has
+    // been answered, and never before the stage: a refused or lost stage
+    // leaves everything, file included, only here, so leaving must still ask.
+    const submit = behaviour.slice(behaviour.indexOf('on(card, "submit"'));
+    expect(submit.indexOf("stageDocument(")).toBeGreaterThan(-1);
+    expect(submit.indexOf("committed = true;")).toBeGreaterThan(submit.indexOf("applyCommand("));
+    expect(submit.indexOf("applyCommand(")).toBeGreaterThan(submit.indexOf("stageDocument("));
+    expect(behaviour).not.toMatch(/attachItemDocument/u);
     // ...and only until the next edit. Typing reaches the card as input or
     // change; a type chip, a section button and a dropped file do not, so
     // each of those paths resets the flag by hand (fix review round 4).

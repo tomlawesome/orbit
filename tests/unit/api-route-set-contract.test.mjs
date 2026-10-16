@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -41,6 +41,8 @@ const routesRoot = new URL("../../web/src/routes/api/", import.meta.url).pathnam
 const HANDLER_NAMES = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
 const EXPECTED_ROUTES = [
+  // What this Orbit runs on, for the About page (#1256): any signed-in member.
+  "/api/about",
   "/api/admin/contact",
   "/api/admin/documents/health",
   // Whether a document-KEK rotation is open and since when (#956).
@@ -50,17 +52,16 @@ const EXPECTED_ROUTES = [
   "/api/admin/mailbox",
   "/api/admin/maintenance",
   "/api/admin/operations",
-  "/api/admin/operations/deliveries/[deliveryId]",
   "/api/admin/operations/document-jobs/[jobId]",
   "/api/admin/operations/imap-test",
-  "/api/admin/operations/mailbox-notifications",
   "/api/admin/operations/smtp-test",
-  "/api/admin/primary",
   "/api/admin/recovery-bundle",
   // An administrator creates a system for a named owner (#1052): the flow
   // behind the Systems card's "new system" button, which was drawn from the
   // v19 mockup and left inert until the decision of 2026-09-19.
   "/api/admin/systems",
+  // The document upload size limit an administrator sets (#1285).
+  "/api/admin/upload-limit",
   "/api/admin/users",
   // Admin-issued setup and recovery links (M7 slice 8, #911, ADR-0023 §3):
   // re-issues a `recovery` token for a local user who has forgotten their
@@ -106,22 +107,23 @@ const EXPECTED_ROUTES = [
   "/api/auth/sign-in-notice",
   "/api/auth/logout",
   "/api/auth/session",
-  "/api/auth/session/refresh",
   // The OIDC step-up (M7, ADR-0023 §5): the challenge for a reader with no
   // password, called by every sensitive action's screen, never by the provider.
   "/api/auth/step-up/start",
   "/api/auth/sessions",
   "/api/auth/sessions/[sessionId]/revoke",
   "/api/auth/sessions/revoke",
-  "/api/document-drafts/[draftId]/approve",
   "/api/documents/[documentId]",
   "/api/documents/[documentId]/download",
-  "/api/documents/[documentId]/draft",
   "/api/documents/[documentId]/preview",
   "/api/documents/[documentId]/restore",
   "/api/health",
+  // #1316: the stage half of an all-or-nothing create -- a document stored
+  // before any item exists, bound later by item.upsert's documentIds.
+  "/api/households/[householdId]/documents",
   "/api/households/[householdId]/invitations",
   "/api/households/[householdId]/item-document-inspection",
+  "/api/households/[householdId]/item-document-preview",
   "/api/households/[householdId]/items/[itemId]/documents",
   "/api/households/[householdId]/join-requests",
   "/api/households/[householdId]/lifecycle",
@@ -140,7 +142,7 @@ const EXPECTED_ROUTES = [
   "/api/push/subscriptions",
   "/api/reviewed-intake/approve",
   "/api/settings/mail-relay",
-  "/api/settings/mail-relay/senders",
+  "/api/settings/mail-relay/verification",
   "/api/settings/mail-relay/verify",
   "/api/settings/reminders",
   "/api/settings/sent",
@@ -193,12 +195,36 @@ function exportedHandlers(source) {
 
 const routeFiles = collectServerFiles(routesRoot);
 
+// #1399 (#1316): the document-draft feature is removed. Its two routes,
+// `POST /api/documents/{id}/draft` and `POST /api/document-drafts/{draftId}/approve`,
+// are absent from EXPECTED_ROUTES above, so the exact-set test already fails if
+// either returns. The `document_drafts` table is gone too (migration 0053), so
+// only the module and its importers are checked here.
+const repoRoot = new URL("../../", import.meta.url).pathname;
+const SOURCE_EXTENSIONS = /\.(?:[cm]?[jt]s|svelte)$/;
+const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", ".svelte-kit", "build", "dist", "coverage"]);
+
+function collectSourceFiles(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      return SKIPPED_DIRECTORIES.has(entry.name) ? [] : collectSourceFiles(entryPath);
+    }
+    return SOURCE_EXTENSIONS.test(entry.name) ? [entryPath] : [];
+  });
+}
+
+// Any quoted module specifier ending in `document-drafts` (optionally .js/.ts):
+// static and dynamic imports, re-exports and vi.mock all name the module this
+// way. Route paths such as "document-drafts/[draftId]/approve" do not end there.
+const DRAFT_MODULE_SPECIFIER = /["'`][^"'`\n]*\/document-drafts(?:\.[jt]s)?["'`]/;
+
 describe("SvelteKit API route-set contract (#735)", () => {
   it("finds route files to check, so a misconfigured glob cannot silently empty this test", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 77 route families -- no fewer, no more", () => {
+  it("has exactly the expected 76 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });
@@ -225,5 +251,51 @@ describe("exportedHandlers (#1151 T-Q5)", () => {
 
   it("still finds a real handler sitting next to a dead one", () => {
     expect(exportedHandlers("// export function GET() {}\nexport function POST() {}")).toEqual(["POST"]);
+  });
+});
+
+describe("document drafts are gone (#1399)", () => {
+  it("has no src/server/document-drafts module", () => {
+    expect(existsSync(join(repoRoot, "src/server/document-drafts.ts"))).toBe(false);
+  });
+
+  it("has no route directory for document drafts", () => {
+    expect(existsSync(join(routesRoot, "document-drafts"))).toBe(false);
+    expect(existsSync(join(routesRoot, "documents/[documentId]/draft"))).toBe(false);
+  });
+
+  it("is imported, mocked or re-exported by no module in src, web/src, tests or scripts", () => {
+    const importers = ["src", "web/src", "tests", "scripts"]
+      .map((directory) => join(repoRoot, directory))
+      .filter((directory) => existsSync(directory))
+      .flatMap(collectSourceFiles)
+      .filter((file) => !file.endsWith("/api-route-set-contract.test.mjs"))
+      .filter((file) => DRAFT_MODULE_SPECIFIER.test(stripComments(readFileSync(file, "utf8"))))
+      .map((file) => file.slice(repoRoot.length));
+    expect(importers).toEqual([]);
+  });
+});
+
+describe("DRAFT_MODULE_SPECIFIER (#1399)", () => {
+  it("matches the ways a module can name the draft module", () => {
+    for (const text of [
+      'import { x } from "./document-drafts";',
+      'import { x } from "@/server/document-drafts";',
+      'import { x } from "orbit/server/document-drafts";',
+      'vi.mock("./document-drafts.js", () => ({}));',
+      'await import("../src/server/document-drafts.ts");',
+    ]) {
+      expect(DRAFT_MODULE_SPECIFIER.test(text), text).toBe(true);
+    }
+  });
+
+  it("does not match unrelated names", () => {
+    for (const text of [
+      'loadRoute("document-drafts/[draftId]/approve")',
+      'import { x } from "./document-draft-helpers";',
+      'import { x } from "./document-worker";',
+    ]) {
+      expect(DRAFT_MODULE_SPECIFIER.test(text), text).toBe(false);
+    }
   });
 });

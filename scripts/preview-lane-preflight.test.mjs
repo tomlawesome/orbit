@@ -20,21 +20,21 @@ const gitlabCi = readFileSync(
   new URL("../.gitlab-ci.yml", import.meta.url),
   "utf8",
 ).replaceAll("\r\n", "\n");
-const publishWorkflow = readFileSync(
-  new URL("../.github/workflows/publish-container.yml", import.meta.url),
-  "utf8",
-).replaceAll("\r\n", "\n");
 
 describe("preview-lane local preflight", () => {
   it("isolates generated configuration from the developer checkout", () => {
     expect(preflight).toContain("mktemp -d");
     expect(preflight).toContain("git ls-files --cached --others --exclude-standard");
-    expect(preflight).toContain("GIT_WORK_TREE");
-    expect(preflight).toContain("bash scripts/configure.sh");
+    expect(preflight).toContain(".env-orbit.example");
     expect(preflight).toContain("bash scripts/validate-compose-config.sh");
     expect(preflight).toContain("trap cleanup EXIT");
     expect(preflight).not.toContain("docker compose up");
     expect(preflight).not.toMatch(/claude|mistral|ollama pull/iu);
+  });
+
+  it("never builds or pulls an image, and does not run the configuration engine", () => {
+    expect(preflight).not.toMatch(/docker (?:build|buildx|pull)/iu);
+    expect(preflight).not.toContain("scripts/configure.sh");
   });
 
   it("calculates and validates the same release identity used by CI", () => {
@@ -50,7 +50,6 @@ describe("preview-lane local preflight", () => {
 
   it("validates every supported Compose combination and processing boundary", () => {
     const expectedOverlays = [
-      "compose/docker-compose.build.yml",
       "compose/docker-compose.acceptance.yml",
       "docker-compose.mail.yml",
     ];
@@ -70,15 +69,14 @@ describe("preview-lane local preflight", () => {
     expect(scripts).not.toContain("packages: write");
   });
 
-  it("routes the preview preflight and both CI call sites to the same Compose validation script (#804)", () => {
+  it("routes the preview preflight and the CI call site to the same Compose validation script (#804)", () => {
     // The preflight is a thin wrapper: it must not hold its own copy of the
     // Compose assertions, only delegate to the shared script.
     expect(composeWrapper).toContain("bash scripts/ci/validate-compose.sh");
     expect(composeWrapper).not.toContain("docker compose");
     expect(composeWrapper).not.toContain("jq --exit-status");
 
-    // Both CI call sites invoke that same shared script directly.
+    // The CI call site invokes that same shared script directly.
     expect(gitlabCi).toContain("bash scripts/ci/validate-compose.sh");
-    expect(publishWorkflow).toContain("run: bash scripts/ci/validate-compose.sh");
   });
 });

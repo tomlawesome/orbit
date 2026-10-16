@@ -6,9 +6,8 @@ into a release contract; its roadmap disposition makes that explicit. Entries
 describe intended outcomes and constraints, not implementation status or
 permission to expand an active issue.
 
-The [v1 charter](v1-charter.md) defines the release contract, the
-[engineering baseline](engineering-baseline.md) records dated evidence, and
-GitHub milestones/issues own live delivery status.
+The [v1 charter](v1-charter.md) defines the release contract, and GitHub
+milestones/issues own live delivery status.
 
 ## Register conventions
 
@@ -226,8 +225,8 @@ foundation, not a deferred enhancement.
 
 - Manual upload from desktop and mobile file pickers, including camera capture
   where the platform supports it.
-- A replaceable storage interface with local volume storage as a possible
-  default and S3-compatible object storage as an optional backend.
+- A replaceable storage interface with local volume storage as the backend.
+  S3-compatible object storage was dropped (owner, 2026-10-07).
 - Database metadata for content hash, original name, media type, size, owner,
   household, item, storage key, scan state, and retention state.
 - Authenticated streaming download without public storage URLs.

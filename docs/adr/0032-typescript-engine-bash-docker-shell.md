@@ -2,6 +2,11 @@
 
 **Status:** Accepted (owner, 2026-10-04, ratifying the 2026-08-13 direction
 on #295)
+**Note (2026-10-11):** #1210, #1211 and #1212 have all landed; the opt-in and
+the bash twins are gone. Context and Consequences describe the position on
+2026-10-04. The quoted constraint now sits in `docs/engine-events.md`, under
+"In-container engine invocation (v0)", subsection "Fail-closed guard: no
+Docker access from inside the engine container", not at line 613.
 **Date:** 2026-10-04
 **Relates to:** #295 (engine-delivery architecture, 2026-08-13); #1151
 (v1.3.0 release audit); #1210, #1211, #1212 (the flips this ADR orders);
@@ -31,7 +36,7 @@ doubles every fix and halves the testing.
 
 TypeScript is the engine. Bash becomes a thin shell holding only what must
 touch Docker on the host: the install bootstrap, pulling the image,
-`compose up`/`down`, VAPID key generation, and repair's container work.
+`compose up`/`down`, and repair's container work.
 
 Every flow that reads or writes configuration, secrets, backups or bundles
 runs once, in the TypeScript engine shipped inside the app image, invoked as
@@ -55,7 +60,7 @@ Until a flow flips, both twins stay, and every fix lands on both.
 - Reading and writing configuration, secrets, backups and recovery bundles
   moves into the TypeScript engine, one flow at a time, in the order above.
 - Bash keeps only the steps that must touch Docker on the host: the install
-  bootstrap, image pull, `compose up`/`down`, VAPID key generation, and
+  bootstrap, image pull, `compose up`/`down`, and
   repair's container work. These stay bash because the engine is
   structurally forbidden from touching Docker at all.
 - A fix to a flow that has not yet flipped must still land on both the bash
@@ -73,3 +78,11 @@ Until a flow flips, both twins stay, and every fix lands on both.
 - **Flip install first.** Rejected: #295 already deferred the bootstrap flip
   for its own reasons, and configure's write side is already partway there,
   so it goes first.
+
+## Amendment, 2026-10-06 (owner, answer 10a on #1210)
+
+VAPID key generation leaves the bash list above. It was listed because it
+needed Docker, but it needed Docker only because bash had to run Node to
+generate the keys; the engine does it itself (`src/lib/vapid-keys.ts`), so the
+bash list no longer includes it. The owner's reason: "if we don't need to do
+it in bash why bother?"

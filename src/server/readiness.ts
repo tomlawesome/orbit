@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { log } from "@/lib/logger";
+import { getKeyState } from "@/server/key-state";
 import { readEffectiveMaintenance } from "@/server/maintenance";
 
 export type PublicReadiness = { status: "ready" | "degraded" | "maintenance" };
@@ -62,6 +63,10 @@ export async function getPublicReadiness(): Promise<PublicReadiness> {
     });
     return { status: "degraded" };
   }
+  /* No usable encryption key (#1405): closed on purpose, and a restart
+     cannot help, so it reads as maintenance (200, the healthcheck stays
+     green), before the operator's own maintenance state is even read. */
+  if (getKeyState().verdict !== "usable") return { status: "maintenance" };
   try {
     if ((await readMaintenance()).effectivelyActive) return { status: "maintenance" };
   } catch {

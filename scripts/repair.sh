@@ -160,15 +160,12 @@ set -Eeuo pipefail
 #                                   deterministically recoverable interrupted
 #                                   `configuration.sh --migrate` run.
 #   deployment-version-unsupported — .env-orbit is readable but its
-#                                   ORBIT_CONFIG_APPLIED_VERSION is absent,
-#                                   malformed, or names a published release
-#                                   below ADR-0016's supported-install floor
-#                                   (v0.3.0), or on the retracted 1.x alpha
-#                                   line (any major version 1 or above).
-#                                   Absence fails closed: every supported
-#                                   install writes the key, so a readable
-#                                   file without it is the signature of a
-#                                   pre-floor or hand-assembled deployment.
+#                                   ORBIT_CONFIG_APPLIED_VERSION is absent
+#                                   or not a well-formed vX.Y.Z (ADR-0016).
+#                                   Absence fails closed: every install
+#                                   writes the key, so a readable file
+#                                   without it is the signature of a
+#                                   hand-assembled deployment.
 #                                   The check is skipped (never
 #                                   failed) while a configuration finding
 #                                   is present this run — a half-written
@@ -245,9 +242,6 @@ set -Eeuo pipefail
 #                                   build. Reported instead of, not as well
 #                                   as, application-unhealthy: restarting
 #                                   cannot change either side (#437).
-#   database-below-floor            — the application refused to start because
-#                                   the database predates the supported
-#                                   migration floor. Also not restartable.
 #   migration-failed                 — the migrator (drizzle) threw applying a
 #                                   migration and rolled it back, leaving no
 #                                   applied journal row: detected primarily by
@@ -1388,13 +1382,6 @@ readonly secrets_directory=".orbit-secrets"
 # migration was NOT already running inside install's own transaction.
 readonly configuration_rollback_suffix=".orbit-config.rollback"
 
-# ADR-0016's supported-install floor, as comparable components. repair.sh is
-# deliberately source-less, so the floor is mirrored here rather than shared
-# — the authoritative statement is docs/adr/0016 (amended 2026-10-04, #1213:
-# the floor is v0.3.0 and the 1.x tags are retracted).
-readonly supported_floor_major=0
-readonly supported_floor_minor=3
-readonly supported_floor_patch=0
 readonly database_volume_key="orbit-db-data"
 # ADR-0014 decision 5's second retention guard (document-kek): mirrors
 # database_volume_key exactly, matched the same way against
@@ -1438,22 +1425,24 @@ readonly -a dangerous_action_classes=(rotate-database-credential regenerate-secr
 readonly -a rotate_database_credential_steps=(checkpoint rotate-credential update-config restart-services)
 
 # Fixed allowlist of paths restore-transaction may ever touch, mirroring
-# install.sh's own `managed_paths` (its `deployment_assets` plus
-# `$environment_file` and `$secrets_directory`). Restoring never enumerates
+# the install engine's managed paths (src/lib/deployment-assets.ts's
+# DEPLOYMENT_ASSETS plus .env-orbit and .orbit-secrets; #1212). Restoring never enumerates
 # the staging directory's own contents — only these fixed, literal paths
 # are ever considered.
 readonly -a restore_transaction_paths=(
   docker-compose.yml
   docker-compose.mail.yml
+  docker-compose.kek-rotation.yml
   .env-orbit.example
   config/tika-config.json
   scripts/configure.sh
   scripts/installer-ui.sh
-  scripts/configuration.sh
   scripts/backup.sh
   scripts/restore.sh
   scripts/repair.sh
-  scripts/engine-check.sh
+  scripts/export-recovery-bundle.sh
+  scripts/import-recovery-bundle.sh
+  scripts/end-maintenance.sh
   .env-orbit
   .orbit-secrets
 )
@@ -1484,7 +1473,6 @@ readonly -a class_order=(
   image-identity-mismatch
   application-unhealthy
   database-schema-mismatch
-  database-below-floor
   migration-failed
 )
 
@@ -1520,10 +1508,9 @@ readonly -A action_for_class=(
   [stale-container]=restart-services
   [application-unhealthy]=restart-services
   # Both sides of a schema disagreement survive a restart, so restart-services
-  # would loop forever (#437). These need an operator decision: attach the
-  # matching database, or upgrade from a supported version.
+  # would loop forever (#437). This needs an operator decision: attach the
+  # matching database.
   [database-schema-mismatch]=manual
-  [database-below-floor]=manual
   # A failed, rolled-back migration leaves no applied row and no safe
   # automatic remedy: the migrator's own idempotent retry already happens on
   # any restart (issue #528 decision), so repair must not invent a competing
@@ -1534,11 +1521,11 @@ readonly -A action_for_class=(
   # same wrong image running); recreating a container from a different image
   # is outside repair's safe, reversible action set.
   [image-identity-mismatch]=manual
-  # ADR-0016: a deployment installed by a release below the supported floor
-  # is not a supported repair target. Nothing here is executable — and
+  # ADR-0016: a deployment with no well-formed applied version is not a
+  # supported repair target. Nothing here is executable — and
   # execute_repair additionally refuses the ENTIRE batch when this finding
-  # is present, because running even the safe executors against a pre-floor
-  # layout would mutate files this script was never proven against.
+  # is present, because running even the safe executors against an
+  # unidentified layout would mutate files this script was never proven against.
   [deployment-version-unsupported]=manual
   [not-orbit-directory]=manual
   [managed-file-missing]=manual
@@ -1639,12 +1626,11 @@ readonly -A manual_guidance=(
   # still recognises its migration history. repair never merges or migrates
   # a database on the operator's behalf.
   [database-schema-mismatch]="attach the database this build's migrations expect, or restore this deployment to the build that matches the current database, before starting either again"
-  [database-below-floor]="this database predates the oldest migration history this build supports; restore it from a backup made by a supported version, or run that version's upgrade path first, before pointing this build at it"
   # ADR-0004's recovery point is the actual rollback boundary here; repair
   # itself never applies, retries, or reverses a migration.
   [migration-failed]="restore this deployment from the pre-update recovery point captured before the migration ran, per the supported-upgrade recovery contract"
   [image-identity-mismatch]="recreate the flagged container from the locally pinned image so its running image identity matches; repair never recreates a container on the operator's behalf"
-  [deployment-version-unsupported]="this deployment was installed by a release below the supported floor (docs/adr/0016); reinstall or upgrade it with a supported release before running repair here. The 1.x versions were mislabelled early builds and are retracted, so a 1.x deployment is below the floor too"
+  [deployment-version-unsupported]="this deployment's .env-orbit has no well-formed ORBIT_CONFIG_APPLIED_VERSION (docs/adr/0016); reinstall or update it with an Orbit release before running repair here"
   [document-volume-retained-without-key]="a document volume is retained for this deployment while document-kek is missing; restore the original key from backup, or knowingly accept the retained documents are unreadable, before creating a new key"
   # Keyed by the reason class (secret-missing), not by target, like every
   # other entry here — but this one only ever fires for one specific target:
@@ -1731,7 +1717,9 @@ read_environment_value() {
   local requested_key="$1" line value="" found=0
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "${requested_key}="* ]]; then
+      # A CRLF .env-orbit is valid; drop the CR.
       value="${line#*=}"
+      value="${value%$'\r'}"
       found=1
     fi
   done < "$environment_file"
@@ -1753,7 +1741,7 @@ read_environment_value() {
 # top-level scalar key, so a line anchored at column 0 is enough, and this
 # must stay dependency-free (no docker, no node) since it runs inside the
 # same standalone, source-less scripts as read_environment_value above.
-# Identical text in end-maintenance.sh and engine-check.sh --
+# Identical text in end-maintenance.sh and install.sh --
 # scripts/compose-project-name-resolution.test.mjs proves that.
 read_compose_project_name() {
   local compose_manifest="$1" line value
@@ -1772,6 +1760,32 @@ read_compose_project_name() {
     fi
   done < "$compose_manifest"
   return 1
+}
+
+# engine_image_present <env-file>...
+#
+# Succeeds when configure.sh's engine can run without pulling: Docker
+# answered the availability probe and the ORBIT_IMAGE named in the first
+# <env-file> that names one (configure.sh's own lookup order) is already
+# present locally. Naming no image also succeeds, because configure.sh then
+# refuses on its own before it touches Docker; that refusal is a
+# configuration finding, not a Docker one. An exported ORBIT_IMAGE wins, as
+# it does in configure.sh. A malformed image also succeeds: configure.sh
+# refuses it before Docker, so it is reported as configuration-invalid
+# rather than as a missing image.
+engine_image_present() {
+  local image="${ORBIT_IMAGE:-}" file
+  [[ "$docker_available" == 1 ]] || return 1
+  for file in "$@"; do
+    [[ -z "$image" ]] || break
+    is_regular_non_symlink_file "$file" || continue
+    image="$(sed -n 's/^ORBIT_IMAGE=//p' "$file" 2>/dev/null | tail -n 1)"
+    image="${image%$'\r'}"
+  done
+  [[ -n "$image" ]] || return 0
+  # Same shape as configure.sh's is_valid_orbit_image.
+  [[ "$image" =~ ^orbit-local:[0-9a-f]{12}$ || "$image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || return 0
+  timeout "$docker_probe_timeout" docker image inspect "$image" >/dev/null 2>&1
 }
 
 # --- configuration-migration-interrupted (ADR-0014 decision 7) -------------
@@ -1799,6 +1813,8 @@ configuration_migration_rollback_recoverable() {
   is_regular_non_symlink_file "$rollback_path" || return 1
   has_mode "$rollback_path" 600 || return 1
   is_regular_non_symlink_file scripts/configure.sh || return 1
+  # --check-rollback runs the same engine; never let it pull either.
+  engine_image_present "$environment_file" "$rollback_path" || return 1
   local status=0
   bash scripts/configure.sh --check-rollback >/dev/null 2>/dev/null || status=$?
   [[ "$status" == 0 ]]
@@ -2210,6 +2226,19 @@ run_diagnosis() {
   shopt -u nullglob dotglob
   [[ ${#staging_entries[@]} -gt 0 ]] && add_finding staging-evidence-present staging warn
 
+  # --- Docker availability gate (used by Step 5 and Steps 8 onward) ----------
+  #
+  # One cheap, allowed, read-only probe (`docker ps -a`) decides whether every
+  # docker-backed check can run at all. Any failure — missing binary,
+  # missing `timeout`, unreachable daemon — is treated identically as
+  # docker-unavailable for every affected check; this script cannot and does
+  # not distinguish the cause.
+  docker_available=0
+  if command -v docker >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1 &&
+    timeout "$docker_probe_timeout" docker ps -a >/dev/null 2>&1; then
+    docker_available=1
+  fi
+
   # --- Step 5: configuration syntax/schema/secret readiness (delegated) ------
   #
   # configure.sh --check is the single source of truth for configuration
@@ -2227,8 +2256,16 @@ run_diagnosis() {
   #     configuration_migration_rollback_recoverable above), in which case
   #     configuration-migration-interrupted (ADR-0014 decision 7) replaces
   #     it: exactly one configuration finding is ever recorded per run.
+  #
+  # configure.sh --check runs its engine inside the pinned image, so it needs
+  # Docker, and pulls the image when it is missing. Without Docker, or with
+  # the image absent locally, the check cannot answer: that is
+  # docker-unavailable, not a broken configuration, and a read-only
+  # diagnosis must never pull.
   configuration_finding=0
-  if is_regular_non_symlink_file scripts/configure.sh; then
+  if is_regular_non_symlink_file scripts/configure.sh && ! engine_image_present "$environment_file"; then
+    add_finding docker-unavailable configuration info
+  elif is_regular_non_symlink_file scripts/configure.sh; then
     checked=$((checked + 1))
     configure_check_stderr="$(mktemp "${TMPDIR:-/tmp}/orbit-repair-configure-check.XXXXXX")"
     configure_check_status=0
@@ -2248,19 +2285,12 @@ run_diagnosis() {
     fi
   fi
 
-  # --- Step 5b: deployment version vs the supported-install floor (ADR-0016) -
+  # --- Step 5b: deployment version present and well-formed (ADR-0016) -------
   #
-  # ORBIT_CONFIG_APPLIED_VERSION is written by configuration.sh on every
-  # supported install, so its absence from a readable .env-orbit is not a
-  # gap to shrug at: it is the signature of a deployment installed before
-  # the floor existed (a v1.0.0-era install carries no configuration.sh at
-  # all), or of a hand-assembled file this script has no business mutating.
-  # Both refuse — fail closed. Releases are numbered 0.x (ADR-0016
-  # amendment of 2026-10-04, #1213), so the old major-0 development
-  # exemption is withdrawn: a version is supported only when its major is
-  # the floor's and (minor, patch) is at or above the floor's. Any major of
-  # 1 or above is the retracted alpha line (scripts/retracted-tags.json) and
-  # is refused like any other version below the floor.
+  # ORBIT_CONFIG_APPLIED_VERSION is written by every install, so its absence
+  # from a readable .env-orbit is not a gap to shrug at: it is the signature
+  # of a hand-assembled file this script has no business mutating. Absent or
+  # malformed refuses — fail closed. Any well-formed vX.Y.Z is accepted.
   # When .env-orbit itself is untrustworthy (missing, symlink, wrong mode)
   # this check is skipped rather than failed: those states are findings of
   # their own, fixing them is exactly what repair is for, and the version
@@ -2273,18 +2303,8 @@ run_diagnosis() {
   if [[ "$env_status" == ok && "$configuration_finding" == 0 ]]; then
     checked=$((checked + 1))
     applied_version="$(read_environment_value ORBIT_CONFIG_APPLIED_VERSION 2>/dev/null || true)"
-    version_supported=0
-    if [[ "$applied_version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-      version_major="${BASH_REMATCH[1]}"
-      version_minor="${BASH_REMATCH[2]}"
-      version_patch="${BASH_REMATCH[3]}"
-      if ((version_major == supported_floor_major && version_minor > supported_floor_minor)); then
-        version_supported=1
-      elif ((version_major == supported_floor_major && version_minor == supported_floor_minor && version_patch >= supported_floor_patch)); then
-        version_supported=1
-      fi
-    fi
-    [[ "$version_supported" == 1 ]] || add_finding deployment-version-unsupported deployment fail
+    [[ "$applied_version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
+      add_finding deployment-version-unsupported deployment fail
   fi
 
   # --- Step 6: Compose project name derivation (read-only) -------------------
@@ -2313,19 +2333,9 @@ run_diagnosis() {
     [[ -n "$candidate" && "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]] && project="$candidate"
   fi
 
-  # --- Step 7: docker availability gate ---------------------------------------
+  # --- Step 7: docker-backed check eligibility --------------------------------
   #
-  # One cheap, allowed, read-only probe (`docker ps -a`) decides whether every
-  # docker-backed check below can run at all. Any failure — missing binary,
-  # missing `timeout`, unreachable daemon — is treated identically as
-  # docker-unavailable for every affected check; this script cannot and does
-  # not distinguish the cause.
-  docker_available=0
-  if command -v docker >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1 &&
-    timeout "$docker_probe_timeout" docker ps -a >/dev/null 2>&1; then
-    docker_available=1
-  fi
-
+  # docker_available itself is probed ahead of Step 5, which needs it too.
   compose_check_eligible=0
   [[ "$env_status" == ok && "$compose_status" == ok && -n "$project" ]] && compose_check_eligible=1
   resource_check_eligible=0
@@ -2965,12 +2975,10 @@ check_application_container() {
     # by scripts/repair-log-contract.test.mjs (#447) — do not rename one without the other.
     if [[ "$app_log" == *"reason=database_mismatch"* ]]; then
       add_finding database-schema-mismatch application fail
-    elif [[ "$app_log" == *"reason=database_below_floor"* ]]; then
-      add_finding database-below-floor application fail
     elif [[ "$app_log" == *"reason=migration_failed"* ]]; then
       # issue #528: the migrator's own wrapper (src/instrumentation-node.ts)
       # writes this sentinel before the crash-looping/exited container's
-      # process exits, exactly like the two #437 sentinels above — same
+      # process exits, exactly like the #437 sentinel above — same
       # bounded `docker logs` read, same fixed-token match, no new docker
       # verb. Primary migration-failed detection path: the SQL backstop
       # (check_migration_failed_backstop, for the rotated-logs/no-container
@@ -4215,7 +4223,7 @@ execute_repair() {
 
   # ADR-0016 refusal (criterion 9, #681): an unsupported deployment version
   # refuses the whole execution, not just its own (manual) plan entry.
-  # Running even the safe executors against a pre-floor deployment would
+  # Running even the safe executors against an unidentified deployment would
   # mutate a layout this script was never proven against, so nothing is
   # allowed to run — mirroring the dangerous batch's own refusal grammar,
   # with the reason carried on the line.

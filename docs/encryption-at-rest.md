@@ -48,7 +48,8 @@ add any: the PostgreSQL data directory (the named `orbit-postgres` volume) is
 **cleartext on disk**. That includes household and item names, filenames and
 media types (which the threat model already treats as potentially sensitive
 on their own), audit events, session data, and every other row Orbit writes,
-apart from the columns layer 2a covers. Percona's `pg_tde` extension, a
+apart from the columns layer 2a covers (which includes the identity provider's
+ID token kept on a session row). Percona's `pg_tde` extension, a
 Postgres add-on for whole-database encryption, is a possible future option.
 Its encryption of the database's write-ahead journal is still marked
 experimental upstream, so Orbit does not depend on it today. It is being
@@ -74,7 +75,12 @@ and its cost, the address on an open household invitation, and — since #969 �
 every account address: `users.email` and the mail-forwarding addresses members
 send from. Those two sit under an instance-wide key rather than a household
 one, because a person belongs to several households and a forwarded message is
-matched to its sender before any household is known. Tier 2 costs
+matched to its sender before any household is known. Since #1316 the instance
+key also protects the identity provider's ID token (`sessions.id_token`), which
+Orbit keeps on a session that began at the provider so that signing out can tell
+the provider which session to end. It is deleted with the session; if the key
+cannot open it, the only cost is that signing out ends Orbit's session without
+the provider hand-off. Tier 2 costs
 queries the database used to be able to do: searching item names, matching a
 provider and adding up costs all happen in Orbit now, over one household's
 decrypted rows. Measured on a seeded database, that costs about 4.5 ms for a
@@ -86,16 +92,26 @@ and household and member relationships. Those are what the reminder workers and
 due-window queries run on in SQL, and disk encryption (layer 4) is the answer
 for them.
 
-**What happens to signing in when the key is missing** was the open question
-here, and #966 settled it. Orbit finds an account by its address, so with no
-key it can match none. Password sign-in is refused in those words, "this
-instance cannot sign anybody in until its encryption key is available", and
-never as a wrong password, which would send an operator looking for a fault in
-themselves. People who sign in through an identity provider are unaffected,
-because that match is on the provider's own issuer and subject and never
-touches the address. If the key **and** the recovery bundle are both gone, the
-addresses cannot be recovered at all, and a host-shell command clears them so
-that people can be let back in and their addresses re-entered by hand — see
+**What happens when the key is missing or wrong** (#1405): Orbit closes to
+everyone and says so. It checks the key once at startup, by opening the
+instance's own key with it; a key that is missing, unreadable, malformed, set
+twice, or not the one this database was written under puts the whole instance
+in a locked state. Every screen shows one page saying the encryption key is
+not available and nothing is lost; every API answers
+`503 {"error":"encryption_key_unavailable"}`; nobody signs in, administrators
+and identity-provider users included, because with host access the only
+remedy, a person signed in could read or save almost nothing. What stays open
+is the healthcheck (`/api/health`), `/api/auth/availability` (which the sign-in
+page reads to learn the instance is locked), signing out (`/api/auth/logout`
+and the goodbye page `/logout`) and `/maintenance`, which is the locked page
+itself. `/login` and `/auth/error` are static pages that load even while
+locked; the script on `/login` then sends the reader to `/maintenance`, and
+`/auth/error` stays where it is. The container log states the fault, and an
+alert goes to `OPERATOR_ALERT_ADDRESS` when it is set. Fixing the key on the
+host and restarting is the way out. If the key **and** the recovery bundle are
+both gone, the addresses cannot be recovered at all and nobody can sign in;
+there is deliberately no command that clears what cannot be read, so the way
+back is to restore the backup bundle or reinstall — see
 [administrator-operations.md](administrator-operations.md#when-the-encryption-key-and-the-recovery-bundle-are-both-lost).
 
 `items.reference`, the invitation address and both account addresses carry a
@@ -116,7 +132,8 @@ live host, because a running Orbit holds the key. It is also being rolled out
 over two releases: the expand release adds the encrypted columns beside the
 plaintext ones and converts existing rows in the background, and only the
 contract release afterwards drops the plaintext columns. Until that lands, a
-database dump can still contain those four columns in the clear.
+database dump can still contain every Tier 1 and Tier 2 column listed above,
+account addresses included, in the clear.
 
 ### 3. Backups and recovery bundles
 
@@ -124,30 +141,33 @@ Two different artifacts exist, and they are protected differently — worth
 being precise about rather than lumping them together as "backups are
 encrypted":
 
-- **`orbit backup` / `scripts/backup.sh`** produces one tar
+- **`scripts/backup.sh`** (which runs `orbit backup` inside the deployment) produces one tar
   (`orbit-<timestamp>.tar`) containing a manifest, checksums, a `pg_dump`
   database dump, and the document tree. Inside that tar, the **document
   archive is encrypted** with AES-256-CBC (PBKDF2-SHA256, 600,000 iterations)
   using the same `DOCUMENT_KEK` that protects live documents — so a backup is
   exactly as recoverable, and exactly as exposed, as the live document store
   is. The **database dump inside the same tar is plaintext** `pg_dump`
-  output. Nothing in `backup.sh` encrypts it; a backup tar sitting on an
+  output. Nothing in the backup encrypts it; a backup tar sitting on an
   unencrypted disk (or an unencrypted off-host copy) discloses the database
   in full to whoever can read the file. This is the second half of the
   database gap above, not a separate issue.
-- **`orbit export-recovery-bundle` / `scripts/export-recovery-bundle.sh`**
-  produces a much smaller, separate bundle whose only job is to let an
-  operator recover the `DOCUMENT_KEK` itself using a memorised passphrase
-  (12 characters minimum, confirmed twice) instead of the raw key file. The
-  key is wrapped in the **ORBKEK01 envelope**: a key derived from your
-  passphrase encrypts the master key under AES-256-GCM, with a fresh salt
-  and IV per export, and the result is locked to the format's own
-  marker.[^scrypt] This bundle does not contain documents or
-  database rows — it exists purely so a lost `document-kek` secret file does
-  not mean a permanently unreadable document archive. See
+- **`scripts/export-recovery-bundle.sh`** (`orbit export-recovery-bundle`)
+  produces a bundle that lets an operator recover the `DOCUMENT_KEK` itself
+  using a memorised passphrase (12 characters minimum, confirmed twice)
+  instead of the raw key file, so a lost `document-kek` secret file does not
+  mean a permanently unreadable document archive. The bundle is the backup
+  you give it, whole (`orbit-backup.tar`: the encrypted document archive
+  plus the plaintext database dump), plus the `DOCUMENT_KEK` wrapped in the
+  **ORBKEK01 envelope**: a key derived from your passphrase encrypts the
+  master key under AES-256-GCM, with a fresh salt and IV per export, and the
+  result is locked to the format's own marker.[^scrypt] The passphrase
+  protects the key only. The file discloses everything the backup does, so
+  store it with the same care as a backup, and keep its passphrase apart
+  from it. See
   `docs/adr-notes/296-backup-port-plan.md` for the implementation slice this
   landed in.
-- **Repair/restore checkpoints** (`scripts/restore.sh`'s `create_checkpoint`,
+- **Repair/restore checkpoints** (the restore engine's checkpoint, `src/lib/restore-engine.ts`,
   and the equivalent path in `scripts/repair.sh`) are plain, unencrypted
   files under a `0700` directory with `0600` file modes — the same posture as
   the database dump above, not the ORBKEK01 envelope. They are private,

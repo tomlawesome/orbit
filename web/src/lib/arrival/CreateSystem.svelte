@@ -1,56 +1,33 @@
 <script>
-  import { onDestroy } from "svelte";
-  import { ringFocusIn, ringFocusOut, ringOpens } from "$lib/flight/ring-closes.js";
   import {
     CURRENCIES, TIME_ZONES, NAME_LIMIT,
-    sectionNote, sectionNoteTitle,
+    browserCurrency, preferredCurrency, sectionNote, sectionNoteTitle,
   } from "./stage.js";
 
-  /* #1175: on a phone the ring closes while a field has focus, the way it
-     does for every card on the door (ring-closes.js); the class it raises
-     goes with this card. */
-  onDestroy(ringOpens);
-
   /**
-   * THE CREATE-SYSTEM CARD (#410, §15 — design/v19/first-run.html, block 2;
-   * #862 round 3 — design/v19/first-run-card/round-3/ring.html, "the ring
-   * holds the questions").
+   * THE CREATE FORM (#410, §15; #1263). Three questions and nothing else
+   * (§15, "first-run asks three things only"): a name, a time zone, a
+   * currency. The four default sections are applied by the server and
+   * admitted to in one quiet mono line, the refusal is one warm line under
+   * the name, and the act reads `Create` — one word (#862).
    *
-   * Three fields and a button, standing inside the login ring itself — no
-   * card of its own any more. No wordmark, no glyph, no identity-provider
-   * button, no footer: the login's own hero ring is enlarged to 500px behind
-   * this form (the host's `.bigring`) and IS the card, which is what the
-   * flight closes back to 302.4px on submit.
+   * Since #1263 it stands in the belong card's "name your own system" drawer
+   * (Newcomer.svelte), in that card's own type, and no longer in the login
+   * ring: the arrival flies once, and the ring-held card and its reclaim are
+   * superseded for the arrival (they stand on the door's own cards).
    *
-   * The card asks three things and nothing else (§15, "first-run asks three
-   * things only"): a name, a time zone, a currency, one column, values and
-   * labels centred on the ring's own axis. The four default sections are
-   * applied by the server and admitted to in one quiet mono line. The
-   * refusal is one warm line under the field it is about. The act reads
-   * `Create` — one word, the ratified gate rule verbatim (#862).
-   *
-   * This component is the form and only the form: the host owns the stage, the
-   * ring, the submit, the reclaim and the launch.
-   *
-   * THE DRAWING IS SHARED NOW, not copied (#914): the ring, this card, its
-   * fields, its note, its refusal line and its act live in
-   * `$lib/ringcard.css`, because the owner's 2026-09-09 composition ruling
-   * makes this same card the sign-in door's claim, sign-in, first-administrator
-   * and setup cards. Nothing about this one moved a pixel — arrival.css keeps
-   * `#hhname` and the create path's own `body.rejected` and `body.reclaimed`
-   * beats, and every one of those outranks its shared base on specificity, so
-   * the cascade cannot turn on which file a bundler emits first. The markup
-   * below is untouched by that lift.
+   * This component is the form and only the form: the host owns the answers,
+   * the refusal and the submit.
    */
   /**
    * @type {{
    *   name?: string,
    *   timezone?: string,
    *   currency?: string,
-   *   rejected?: { name: string, reason: string, householdId?: string | null } | null,
+   *   rejected?: { name: string, reason: string, householdId?: string | null, link?: string, road?: "join" | "carry-on" } | null,
    *   busy?: boolean,
    *   onsubmit?: () => void,
-   *   onask?: (rejected: { name: string, reason: string, householdId?: string | null }) => void,
+   *   onask?: (rejected: { name: string, reason: string, householdId?: string | null, link?: string, road?: "join" | "carry-on" }) => void,
    *   onnaming?: import('svelte/elements').FormEventHandler<HTMLInputElement>,
    * }}
    */
@@ -60,7 +37,8 @@
     timezone = $bindable(TIME_ZONES[0].value),
     currency = $bindable(CURRENCIES[0]),
     /* the name the server (or the list of systems out there) refused, and the
-       household it collided with, if that household can be asked to join */
+       road on from it where there is one: the words of its link, and the
+       household that link is about */
     rejected = null,
     busy = false,
     onsubmit = () => {},
@@ -69,22 +47,41 @@
   } = $props();
 
   const trimmed = $derived(name.trim());
+
+  /* The host only hands down the answer, not whether the browser supplied it.
+     A browser zone outside the short list fell back to the first option, so
+     the helper must not claim it was read off the browser; asked here, once,
+     the same way the host asks. */
+  const zoneOnList = (() => {
+    try {
+      const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      return TIME_ZONES.some((zone) => zone.value === browserZone);
+    } catch {
+      return false;
+    }
+  })();
+  const zoneHelper = zoneOnList
+    ? "Read off your browser. It moves to settings afterwards, and dates read by it."
+    : "your browser's zone isn't on this short list — change it in settings";
+  /* The same honesty for the currency: read off the browser only when its
+     language names a region Orbit maps to an offered currency (#1316). */
+  const browserCurrencyFound = (() => {
+    const found = browserCurrency();
+    return found !== null && preferredCurrency(found) === found;
+  })();
+  const currencyHelper = browserCurrencyFound
+    ? "Read off your browser. It moves to settings afterwards, and costs read by it."
+    : "your browser didn't say a currency we know — change it in settings";
 </script>
 
-<div id="formlayer">
-  <!-- THIRD PASS: three fields, a button, air. Everything that was prose is
-       either gone or moved to a title attribute — the household screen and
-       settings say all of it again, later, where it is actually needed. -->
-  <form class="card" aria-labelledby="createask"
-        onfocusin={ringFocusIn} onfocusout={ringFocusOut}
-        onsubmit={(event) => { event.preventDefault(); onsubmit(); }}>
-    <!-- THE RING HOLDS THE QUESTION (#1175, as door-phone.css puts it for
-         every card on the door): on a phone this heading stands at the
-         ring's centre, 22px in the display face; on the desk it is read and
-         not seen (`.asklabel`), exactly as Identity.svelte's is, since the
-         ratified card carries no visible heading. The same words the form's
-         label already said. -->
-    <h2 class="ask asklabel" id="createask">Name your first system</h2>
+<!-- THIRD PASS: three fields, a button, air. Everything that was prose is
+     either gone or moved to a title attribute — the household screen and
+     settings say all of it again, later, where it is actually needed. -->
+<form class="create" aria-labelledby="createask"
+      onsubmit={(event) => { event.preventDefault(); onsubmit(); }}>
+    <!-- Read and not seen (#1263: "heading hidden"): the drawer's handle
+         already says it. -->
+    <h2 class="asklabel" id="createask">Name your own system</h2>
     <div class="field">
       <label for="hhname">name</label>
       <input id="hhname" placeholder="Your world" maxlength={NAME_LIMIT} autocomplete="off"
@@ -95,8 +92,8 @@
            and "your answers are still here" are not said, because the answers,
            still sitting in the fields, say it. -->
       {#if rejected}
-        <p class="err" role="alert"><b>{`“${rejected.name}”`}</b> {rejected.reason}{#if rejected.householdId}
-          — <a href="#ask" onclick={(event) => { event.preventDefault(); onask(rejected); }}>ask to join it →</a>{/if}</p>
+        <p class="err" role="alert"><b>{`“${rejected.name}”`}</b> {rejected.reason}{#if rejected.link}
+          — <a href="#ask" onclick={(event) => { event.preventDefault(); onask(rejected); }}>{rejected.link}</a>{/if}</p>
       {/if}
     </div>
 
@@ -105,14 +102,14 @@
         <div class="field selwrap">
           <label for="tz">time zone</label>
           <select id="tz" aria-label="Time zone" bind:value={timezone}
-                  title="Read off your browser. It moves to settings afterwards, and dates read by it.">
+                  title={zoneHelper}>
             {#each TIME_ZONES as zone (zone.value)}<option value={zone.value}>{zone.label}</option>{/each}
           </select>
         </div>
         <div class="field selwrap">
           <label for="cur">currency</label>
           <select id="cur" aria-label="Currency" bind:value={currency}
-                  title="Read off your browser. It moves to settings afterwards, and costs read by it.">
+                  title={currencyHelper}>
             {#each CURRENCIES as code (code)}<option value={code}>{code}</option>{/each}
           </select>
         </div>
@@ -131,5 +128,4 @@
          whitespace inside the button: the label is centred, and a collapsed
          newline either side of it moves the word off the mockup's own pixels. -->
     <button class="btn act" id="gobtn" type="submit" disabled={!trimmed || busy}>Create</button>
-  </form>
-</div>
+</form>

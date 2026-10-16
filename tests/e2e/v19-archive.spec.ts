@@ -6,12 +6,18 @@ import { expect, test, type Page } from "@playwright/test";
 import { settleArrival } from "./support/arrival";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { ensureLocalPassword } from "./support/local-credentials";
-import { ensureWorkerAdministrator, workerAccount, workerFixturePassword } from "./support/worker-identity";
+import { ensureWorkerAdministrator, workerAccount, workerEmail, workerFixturePassword } from "./support/worker-identity";
+import { waitForInvitationLink } from "./support/mail";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { exclusiveSpecFile } from "./support/exclusive-spec";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
+
+/* #1316: one worker at a time in the archive-slot specs, in whichever project. */
+exclusiveSpecFile("archive-slot");
 
 /**
  * #1002 — the desk archive card: export, preview and import, built from
@@ -26,8 +32,12 @@ resetDatabaseBetweenSpecFiles();
  * once the stack is available — `pnpm test:e2e -- v19-archive`.
  */
 
-test.beforeEach(({ isMobile }) => {
-  test.skip(isMobile, "desktop archive card only; the pocket dialect is #1122's own file");
+/* The one test that runs on both layouts (#1316): a member who is not an owner
+   sees neither card, desk or pocket, and the API refuses them too. */
+const BOTH_LAYOUTS = "a member who is not an owner sees no archive card and cannot bring one in";
+
+test.beforeEach(({ isMobile }, testInfo) => {
+  test.skip(isMobile && testInfo.title !== BOTH_LAYOUTS, "desktop archive card only; the pocket dialect is #1122's own file");
 });
 
 /* #1080: this worker's own administrator, resolved lazily (worker env only). */
@@ -165,7 +175,7 @@ async function seedHousehold(page: Page, itemTitles: string[]) {
   });
   if (!created.ok()) throw new Error(`#1002: could not seed household "${name}" (${created.status()})`);
 
-  const dueDate = new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10);
+  const dueDate = householdDateFromToday(10);
   for (const title of itemTitles) {
     const itemId = randomUUID();
     const itemCreated = await page.request.post("/api/workspace/commands", {
@@ -173,11 +183,12 @@ async function seedHousehold(page: Page, itemTitles: string[]) {
       data: {
         type: "item.upsert",
         householdId,
+        kind: "service",
         item: {
           id: itemId, sectionId, title, currency: "GBP",
-          scheduleKind: "service", dueDate, recurrenceMonths: 12, status: "active",
+          dueDate, recurrenceMonths: 12,
         },
-        activity: { id: randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+        activity: { id: randomUUID(), itemId, occurredAt: new Date().toISOString() },
       },
     });
     if (!itemCreated.ok()) throw new Error(`#1002: could not seed item "${title}" (${itemCreated.status()})`);
@@ -259,6 +270,33 @@ test("write an archive, then bring it into a second household — a clash stays 
   }
 });
 
+test("an armed desk button relaxes back after 4 s without a second tap (#1342)", async ({ page }) => {
+  test.setTimeout(60_000);
+  await signIn(page, "/home");
+  const source = await seedHousehold(page, ["Boiler service"]);
+  await ensureReaderCanAnswerTheChallenge(page);
+  const desk = await pageAfterStepUp(page);
+  try {
+    await desk.goto(`/household/${source.id}`);
+    await expect(desk.locator(".c-archive")).toBeVisible({ timeout: 30_000 });
+    await desk.getByRole("button", { name: "write an archive →" }).click();
+    await desk.getByLabel("a passphrase for the file").fill(PASSPHRASE);
+    await desk.getByLabel("the passphrase again").fill(PASSPHRASE);
+
+    const armed = desk.getByRole("button", { name: "tap again to write the archive" });
+    await desk.getByRole("button", { name: "write the archive" }).click(); // arm
+    await expect(armed).toBeVisible();
+    // Still armed shortly before 4 s ...
+    await desk.waitForTimeout(3_000);
+    await expect(armed).toBeVisible();
+    // ... and relaxed by 4 s (plus slack), 5 s being the old hold on this screen.
+    await expect(armed).toHaveCount(0, { timeout: 1_500 });
+    await expect(desk.getByRole("button", { name: "write the archive" })).toBeVisible();
+  } finally {
+    await cleanup(desk, source);
+  }
+});
+
 test("a wrong passphrase is refused, and nothing is read", async ({ page }) => {
   test.setTimeout(60_000);
   await signIn(page, "/home");
@@ -296,5 +334,48 @@ test("a wrong passphrase is refused, and nothing is read", async ({ page }) => {
   } finally {
     rmSync(scratch, { recursive: true, force: true });
     await cleanup(desk, source);
+  }
+});
+
+test(BOTH_LAYOUTS, async ({ page, browser }) => {
+  test.setTimeout(180_000);
+  await signIn(page, "/home");
+  const household = await seedHousehold(page, ["Boiler service"]);
+  /* A plain member, made the way a real one is: the administrator (who owns
+     the household they seeded) mails an invitation, and the invitee redeems
+     the mailed link (the flow v19-invitations.spec.ts drives). */
+  const invited = await page.request.post(`/api/households/${household.id}/invitations`, {
+    headers: await sessionHeaders(page),
+    data: { email: workerEmail("member") },
+  });
+  expect(invited.ok(), `invitation send failed: ${invited.status()}`).toBe(true);
+  const link = await waitForInvitationLink(workerEmail("member"), household.name);
+  expect(link).toMatch(/\/invite\//u);
+
+  const memberContext = await browser.newContext({ ignoreHTTPSErrors: true, reducedMotion: "reduce" });
+  const member = await memberContext.newPage();
+  try {
+    await answerPushWithoutAService(member);
+    await member.goto(link);
+    await member.getByRole("link", { name: workerAccount("member") }).click();
+    await expect(member).toHaveURL(/\/home$/, { timeout: 30_000 });
+
+    /* The household page has loaded (its title is showing on whichever layout
+       this is) before the absence below is believed. */
+    await member.goto(`/household/${household.id}`);
+    await expect(member.getByRole("heading", { level: 1, name: household.name })).toBeVisible({ timeout: 30_000 });
+    await expect(member.getByRole("heading", { name: "The archive" })).toHaveCount(0);
+
+    /* The card being absent is not the lock: the API itself says no, and says
+       why -- ahead of asking the member to prove anything. */
+    const refused = await member.request.post("/api/portable-archives/import", {
+      headers: await sessionHeaders(member),
+      data: { householdId: household.id, archive: {}, passphrase: "a passphrase long enough", conflictItemIds: [] },
+    });
+    expect(refused.status()).toBe(403);
+    expect(((await refused.json()) as { error?: { code?: string } }).error?.code).toBe("owner_required");
+  } finally {
+    await memberContext.close();
+    await cleanup(page, household);
   }
 });

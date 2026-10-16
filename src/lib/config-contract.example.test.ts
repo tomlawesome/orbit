@@ -34,4 +34,8 @@ describe(".env-orbit.example agrees with the configuration contract", () => {
     const undocumented = ALLOWED_KEYS.filter((key) => !documented.has(key));
     expect(undocumented).toEqual([]);
   });
+
+  it("names a v0.3.0 applied version in its provenance example (#1403 D3)", () => {
+    expect(readFileSync(examplePath, "utf8")).toContain("ORBIT_CONFIG_APPLIED_VERSION=v0.3.0");
+  });
 });

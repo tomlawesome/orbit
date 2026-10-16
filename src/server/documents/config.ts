@@ -1,18 +1,31 @@
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { readRuntimeSecret } from "@/lib/runtime-secret";
+import { inspectRuntimeSecret, readRuntimeSecret } from "@/lib/runtime-secret";
 
 const MIB = 1_048_576;
 const GIB = 1_073_741_824;
 
+/**
+ * The hard bounds on the document size limit (#1285). `DOCUMENT_MAX_BYTES`
+ * is only the starting default: an administrator can raise or lower the
+ * limit in Administration (src/server/upload-limit.ts), but never past these,
+ * whichever way it is set.
+ */
+export const DOCUMENT_MAX_BYTES_FLOOR = MIB;
+export const DOCUMENT_MAX_BYTES_CEILING = 100 * MIB;
+export const DOCUMENT_MAX_BYTES_DEFAULT = 50 * MIB;
+
 const documentEnvironmentSchema = z.object({
   DOCUMENTS_ROOT: z.string().min(1).default("/var/lib/orbit/documents"),
   DOCUMENTS_QUARANTINE_ROOT: z.string().min(1).default("/tmp/orbit-document-quarantine"),
-  DOCUMENT_MAX_BYTES: z.coerce.number().int().min(MIB).max(100 * MIB).default(25 * MIB),
+  DOCUMENT_MAX_BYTES: z.coerce.number().int().min(DOCUMENT_MAX_BYTES_FLOOR).max(DOCUMENT_MAX_BYTES_CEILING).default(DOCUMENT_MAX_BYTES_DEFAULT),
   DOCUMENT_HOUSEHOLD_QUOTA_BYTES: z.coerce.number().int().min(25 * MIB).max(10_000 * GIB).default(5 * GIB),
   DOCUMENT_INSTANCE_QUOTA_BYTES: z.coerce.number().int().min(25 * MIB).max(100_000 * GIB).default(20 * GIB),
   DOCUMENT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3_650).default(30),
+  // Also sets the floor of the staged-upload hold (document-repository.ts
+  // stagedUploadHoldMs): raising it lengthens how long an abandoned staged
+  // upload counts against quota.
   DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS: z.coerce.number().int().min(1).max(168).default(24),
   // The install-time contract (src/lib/config-contract.ts) accepts "" as
   // "unset" for this variable, the same as every other optional one; that
@@ -38,6 +51,12 @@ const documentEnvironmentSchema = z.object({
 export interface DocumentConfig {
   storageRoot: string;
   quarantineRoot: string;
+  /**
+   * The CONFIGURED default limit (`DOCUMENT_MAX_BYTES`). An upload path never
+   * reads this directly: it asks `readEffectiveUploadLimit()`
+   * (src/server/upload-limit.ts), which applies the administrator's override
+   * when one is set (#1285).
+   */
   maxBytes: number;
   householdQuotaBytes: number;
   instanceQuotaBytes: number;
@@ -75,6 +94,53 @@ export function deriveDocumentKeyId(keyEncryptionKey: Buffer): string {
 }
 
 let cachedDocumentConfig: DocumentConfig | undefined;
+
+/**
+ * Why the key settings hold no usable key, read from the settings alone
+ * (#1405): the first four of the five "no usable key" faults. The fifth, a key
+ * that is not the one the database was written under, needs the database and
+ * is `src/server/key-state.ts`'s to find.
+ */
+export type DocumentKeyProblem = "missing" | "unreadable" | "malformed" | "both_forms";
+
+const KEY_HEX = /^[a-fA-F0-9]{64}$/;
+
+/**
+ * The reason the key settings are unusable, or null when they hold a key
+ * (#1405). Reads only `DOCUMENT_KEK` and `DOCUMENT_KEK_NEXT` (each directly or
+ * through `_FILE`), so an unrelated bad document setting never counts as a key
+ * fault. Never throws, and never returns key material or a path.
+ */
+export function documentKeyProblem(environment: NodeJS.ProcessEnv = process.env): DocumentKeyProblem | null {
+  const current = inspectRuntimeSecret(environment, "DOCUMENT_KEK");
+  if (current.state === "both_forms") return "both_forms";
+  if (current.state === "unreadable") return "unreadable";
+  if (current.state !== "present") return "missing";
+  if (!KEY_HEX.test(current.value)) return "malformed";
+
+  /* The rotation key is optional, but one that is set must be usable: the
+     full configuration refuses to load otherwise, so it is a key fault too. */
+  const next = inspectRuntimeSecret(environment, "DOCUMENT_KEK_NEXT");
+  if (next.state === "both_forms") return "both_forms";
+  if (next.state === "unreadable") return "unreadable";
+  if (next.state === "empty_file") return "malformed";
+  if (next.state === "present") {
+    if (!KEY_HEX.test(next.value)) return "malformed";
+    if (next.value.toLowerCase() === current.value.toLowerCase()) return "malformed";
+  }
+  return null;
+}
+
+/**
+ * The document retention window alone, read without the document key (#1336).
+ * The session route reports it to every signed-in screen, and a missing or
+ * mistyped DOCUMENT_KEK is a degraded state the administration screen
+ * explains, so this never throws: a value the full config would refuse is null.
+ */
+export function documentRetentionDays(environment: NodeJS.ProcessEnv = process.env): number | null {
+  const parsed = documentEnvironmentSchema.shape.DOCUMENT_RETENTION_DAYS.safeParse(environment.DOCUMENT_RETENTION_DAYS);
+  return parsed.success ? parsed.data : null;
+}
 
 /**
  * Loads document configuration lazily so builds and non-document routes do not

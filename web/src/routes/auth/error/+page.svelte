@@ -53,13 +53,15 @@
    * reader on /login keeps `returnTo`'s "/" default. `code` itself is never
    * rendered or stored past the one read that picks a row.
    */
-  let state = $state(/** @type {"incomplete" | "refused"} */ (INCOMPLETE));
+  let face = $state(/** @type {"incomplete" | "refused"} */ (INCOMPLETE));
   let leaving = false;
 
   const reduced = () =>
     typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  const message = $derived(authErrorMessageFor(state));
+  /* Set with the face in onMount, from the same one read of `code`, which
+     picks the words (#1242: `link_required` says why) and is never rendered. */
+  let message = $state(authErrorMessageFor(INCOMPLETE));
 
   onMount(() => {
     const code = new URLSearchParams(location.search).get("code");
@@ -71,8 +73,9 @@
        first-light hold a static page with the right words from the start
        would. */
     if (resolved === REFUSED) document.body.classList.add("switched");
-    state = resolved;
-    document.body.dataset.state = state;
+    face = resolved;
+    message = authErrorMessageFor(resolved, code);
+    document.body.dataset.state = face;
 
     /* first light, as the door does it (SignIn.svelte's own choreography) */
     const frame = requestAnimationFrame(() => setTimeout(() => document.body.classList.add("lit"), 180));
@@ -105,7 +108,7 @@
      a rule on <body>: see SignIn.svelte's identical note. -->
 <div class="signin-stage" aria-hidden="true"></div>
 <Dawn shown={true} statePrimary={message.primary} stateSub={message.sub}>
-  {#if state === INCOMPLETE}
+  {#if face === INCOMPLETE}
     <button class="gate" id="gate" onclick={press}>Try again</button>
   {/if}
 </Dawn>

@@ -2,19 +2,19 @@
  * Recent authentication, end to end (ADR-0023 §5).
  *
  * The guard has two halves and one rule for choosing between them, and this
- * suite drives both through a real sensitive action — the primary-administrator
- * transfer, which is the first caller and the one whose fifteen-minute window
- * (#263) this replaces. `primary-administrator.test.ts` keeps the authority
- * rules; what is proved here is the challenge itself.
+ * suite drives both through a real sensitive action — an administrator
+ * creating a system for somebody else (#1052). What is proved here is the
+ * challenge itself, not the system it guards.
  */
 
-import { eq, inArray } from "drizzle-orm";
+import { randomBytes, randomUUID } from "node:crypto";
+import { eq, inArray, like } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import {
   auditLog,
   externalIdentities,
-  instanceAuthority,
+  households,
   sessions,
   stepUpProofs,
   userPreferences,
@@ -34,23 +34,24 @@ import type { VerifiedIdentity } from "@/lib/auth/oidc";
 import { createSession, csrfTokenForSession, readSession } from "@/lib/auth/session";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { createLocalUser } from "@/server/local-credentials";
-import { cleanupIntegrationEnvironment } from "./support/fixtures";
+import { accountAddressColumns, cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute } from "./support/request-event";
 import { readSetCookie } from "./support/set-cookie";
 
-/* The transfer targets below are provider-backed accounts, and an identity
+/* Several accounts below sign in only through a provider, and an identity
    only counts as a way in while the provider is switched on (#1151 SS1-S1),
    so the key is on for this file and restored at the end. */
 const previousOidcKey = process.env.ORBIT_AUTH_OIDC;
 process.env.ORBIT_AUTH_OIDC = "true";
 resetAuthConfigForTests();
 
-const { POST: transferPrimary } = await loadRoute("admin/primary");
+const { POST: createSystem } = await loadRoute("admin/systems");
 
 const ORIGIN = "http://127.0.0.1:3000";
 const PASSWORD = "a-correct-local-password";
 const WRONG_PASSWORD = "a-wrong-local-password";
 const ISSUER = "https://oidc.invalid.example";
+const SYSTEM_NAME = "Recent authentication system";
 
 const created: string[] = [];
 
@@ -64,7 +65,7 @@ interface Actor {
 
 afterEach(async () => {
   const db = getDb();
-  await db.delete(instanceAuthority);
+  await db.delete(households).where(like(households.name, `${SYSTEM_NAME}%`));
   await db.delete(auditLog);
   if (created.length > 0) await db.delete(users).where(inArray(users.id, created));
   created.length = 0;
@@ -93,8 +94,10 @@ async function localUser(label: string, options: { administrator?: boolean } = {
 
 /** A user with a provider identity and no password. */
 async function oidcUser(label: string, options: { administrator?: boolean } = {}): Promise<string> {
+  const id = randomUUID();
   const [user] = await getDb().insert(users).values({
-    email: `${label}@recent.invalid`,
+    id,
+    ...(await accountAddressColumns(id, `${label}@recent.invalid`)),
     emailVerified: true,
     displayName: `Recent ${label}`,
     isInstanceAdmin: options.administrator === true,
@@ -137,27 +140,23 @@ async function actorFor(userId: string): Promise<Actor> {
   };
 }
 
-async function seatPrimary(userId: string): Promise<void> {
-  await getDb().insert(instanceAuthority).values({ primaryUserId: userId });
+/** How many systems the guarded action has made so far. */
+async function systemsMade(): Promise<number> {
+  return (await getDb().select({ id: households.id }).from(households).where(eq(households.name, SYSTEM_NAME))).length;
 }
 
-async function primaryRow(): Promise<string | null> {
-  const [row] = await getDb().select({ primaryUserId: instanceAuthority.primaryUserId }).from(instanceAuthority);
-  return row?.primaryUserId ?? null;
-}
-
-/** The transfer, called exactly as a browser would. */
-async function transfer(
+/** The sensitive action, called exactly as a browser would. */
+async function createSystemAs(
   actor: Actor,
-  targetUserId: string,
+  ownerId: string,
   options: { currentPassword?: string; proof?: string } = {},
 ): Promise<Response> {
   const config = getAuthConfig();
   const cookie = options.proof === undefined
     ? actor.cookie
     : `${actor.cookie}; ${stepUpProofCookieName(config)}=${options.proof}`;
-  return callRoute(transferPrimary, {
-    url: `${ORIGIN}/api/admin/primary`,
+  return callRoute(createSystem, {
+    url: `${ORIGIN}/api/admin/systems`,
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -167,7 +166,8 @@ async function transfer(
       cookie,
     },
     body: JSON.stringify({
-      targetUserId,
+      name: SYSTEM_NAME,
+      ownerId,
       ...(options.currentPassword === undefined ? {} : { currentPassword: options.currentPassword }),
     }),
   });
@@ -179,7 +179,7 @@ function guardWith(actor: Actor, proof: string): Promise<RecentAuthentication> {
     { cookies: { get: () => proof, set: () => {} } },
     { id: actor.sessionId, user: { id: actor.id, email: actor.email } },
     {},
-    "primary_transfer",
+    "system_create",
   );
 }
 
@@ -190,19 +190,18 @@ async function errorCode(response: Response): Promise<string> {
 
 describe("recent authentication: the password challenge (ADR-0023 §5)", () => {
   it("refuses a missing or wrong password, accepts the right one, and does not care how old the session is", async () => {
-    const actorId = await localUser("primary-local", { administrator: true });
-    const targetId = await localUser("target-local", { administrator: true });
-    await seatPrimary(actorId);
+    const actorId = await localUser("admin-local", { administrator: true });
+    const ownerId = await localUser("owner-local", { administrator: true });
     const actor = await actorFor(actorId);
 
-    const unchallenged = await transfer(actor, targetId);
+    const unchallenged = await createSystemAs(actor, ownerId);
     expect(unchallenged.status).toBe(403);
     expect(await errorCode(unchallenged)).toBe("recent_authentication_required");
 
-    const wrong = await transfer(actor, targetId, { currentPassword: WRONG_PASSWORD });
+    const wrong = await createSystemAs(actor, ownerId, { currentPassword: WRONG_PASSWORD });
     expect(wrong.status).toBe(403);
     expect(await errorCode(wrong)).toBe("recent_authentication_required");
-    expect(await primaryRow()).toBe(actorId);
+    expect(await systemsMade()).toBe(0);
 
     /* Sixteen minutes old: #263 refused this outright and asked for a fresh
        sign-in. The window is gone, so what decides is the password. */
@@ -210,67 +209,106 @@ describe("recent authentication: the password challenge (ADR-0023 §5)", () => {
       .set({ createdAt: new Date(Date.now() - 16 * 60 * 1000) })
       .where(eq(sessions.id, actor.sessionId));
 
-    const accepted = await transfer(actor, targetId, { currentPassword: PASSWORD });
-    expect(accepted.status).toBe(200);
-    expect(await primaryRow()).toBe(targetId);
+    const accepted = await createSystemAs(actor, ownerId, { currentPassword: PASSWORD });
+    expect(accepted.status).toBe(201);
+    expect(await systemsMade()).toBe(1);
   });
 
   it("challenges someone who has both methods with the password, not with a step-up proof", async () => {
-    const actorId = await localUser("primary-both", { administrator: true });
+    const actorId = await localUser("admin-both", { administrator: true });
     await getDb().insert(externalIdentities).values({
       userId: actorId,
       issuer: ISSUER,
-      subject: "recent-primary-both",
+      subject: "recent-admin-both",
     });
-    const targetId = await oidcUser("target-both", { administrator: true });
-    await seatPrimary(actorId);
+    const ownerId = await oidcUser("owner-both", { administrator: true });
     const actor = await actorFor(actorId);
 
     const config = getAuthConfig();
-    const proof = await sealStepUpProof(actor.sessionId, "primary_transfer", config);
-    const withProof = await transfer(actor, targetId, { proof });
+    const proof = await sealStepUpProof(actor.sessionId, "system_create", config);
+    const withProof = await createSystemAs(actor, ownerId, { proof });
     expect(withProof.status).toBe(403);
     expect(await errorCode(withProof)).toBe("recent_authentication_required");
-    expect(await primaryRow()).toBe(actorId);
+    expect(await systemsMade()).toBe(0);
 
-    const withPassword = await transfer(actor, targetId, { currentPassword: PASSWORD });
-    expect(withPassword.status).toBe(200);
-    expect(await primaryRow()).toBe(targetId);
+    const withPassword = await createSystemAs(actor, ownerId, { currentPassword: PASSWORD });
+    expect(withPassword.status).toBe(201);
+    expect(await systemsMade()).toBe(1);
+  });
+
+  /* A stored address that fails its integrity check reads back as null on the
+     session, while sign-in still works because it looks the account up by the
+     blind index of the typed address. The step-up must not need the address:
+     the session already says who the member is. */
+  async function damageAddress(userId: string): Promise<void> {
+    await getDb().update(users)
+      .set({ emailEnc: randomBytes(48).toString("base64") })
+      .where(eq(users.id, userId));
+  }
+
+  it("accepts the right password from a member whose stored address is damaged", async () => {
+    const actorId = await localUser("admin-damaged", { administrator: true });
+    const ownerId = await localUser("owner-damaged", { administrator: true });
+    const actor = await actorFor(actorId);
+    await damageAddress(actorId);
+
+    /* The damage is real: the session no longer yields an address. */
+    const config = getAuthConfig();
+    const session = await readSession(
+      { get: (name) => (name === sessionCookieName(config) ? actor.cookie.split("=")[1] : undefined) },
+      config,
+    );
+    expect(session?.user.email).toBeNull();
+
+    const accepted = await createSystemAs(actor, ownerId, { currentPassword: PASSWORD });
+    expect(accepted.status).toBe(201);
+    expect(await systemsMade()).toBe(1);
+  });
+
+  it("still refuses a wrong password from a member whose stored address is damaged", async () => {
+    const actorId = await localUser("admin-damaged-wrong", { administrator: true });
+    const ownerId = await localUser("owner-damaged-wrong", { administrator: true });
+    const actor = await actorFor(actorId);
+    await damageAddress(actorId);
+
+    const wrong = await createSystemAs(actor, ownerId, { currentPassword: WRONG_PASSWORD });
+    expect(wrong.status).toBe(403);
+    expect(await errorCode(wrong)).toBe("recent_authentication_required");
+    expect(await systemsMade()).toBe(0);
   });
 });
 
 describe("recent authentication: the OIDC step-up (ADR-0023 §5)", () => {
   it("needs a proof bound to this session and this action, and spends it once", async () => {
-    const actorId = await oidcUser("primary-oidc", { administrator: true });
-    const targetId = await oidcUser("target-oidc", { administrator: true });
-    await seatPrimary(actorId);
+    const actorId = await oidcUser("admin-oidc", { administrator: true });
+    const ownerId = await oidcUser("owner-oidc", { administrator: true });
     const actor = await actorFor(actorId);
-    const other = await actorFor(targetId);
+    const other = await actorFor(ownerId);
     const config = getAuthConfig();
 
-    const unchallenged = await transfer(actor, targetId);
+    const unchallenged = await createSystemAs(actor, ownerId);
     expect(unchallenged.status).toBe(403);
     expect(await errorCode(unchallenged)).toBe("recent_authentication_required");
 
     // A password is not the challenge for someone who has none.
-    const password = await transfer(actor, targetId, { currentPassword: PASSWORD });
+    const password = await createSystemAs(actor, ownerId, { currentPassword: PASSWORD });
     expect(await errorCode(password)).toBe("recent_authentication_required");
 
     // Another session's proof, and a proof earned for another action.
     for (const proof of [
-      await sealStepUpProof(other.sessionId, "primary_transfer", config),
+      await sealStepUpProof(other.sessionId, "system_create", config),
       await sealStepUpProof(actor.sessionId, "password_change", config),
     ]) {
-      const response = await transfer(actor, targetId, { proof });
+      const response = await createSystemAs(actor, ownerId, { proof });
       expect(response.status).toBe(403);
       expect(await errorCode(response)).toBe("recent_authentication_required");
     }
-    expect(await primaryRow()).toBe(actorId);
+    expect(await systemsMade()).toBe(0);
 
-    const proof = await sealStepUpProof(actor.sessionId, "primary_transfer", config);
-    const accepted = await transfer(actor, targetId, { proof });
-    expect(accepted.status).toBe(200);
-    expect(await primaryRow()).toBe(targetId);
+    const proof = await sealStepUpProof(actor.sessionId, "system_create", config);
+    const accepted = await createSystemAs(actor, ownerId, { proof });
+    expect(accepted.status).toBe(201);
+    expect(await systemsMade()).toBe(1);
     // Spent: the answer clears the cookie, so the browser cannot present it
     // again for the next sensitive action.
     expect(readSetCookie(accepted, stepUpProofCookieName(config))).toMatchObject({ value: "", maxAge: 0 });
@@ -279,8 +317,8 @@ describe("recent authentication: the OIDC step-up (ADR-0023 §5)", () => {
        proof is sealed for a real but different session, because a proof is now
        a row keyed on a live session (0039_step_up_proofs) and one bound to a
        session that never existed cannot be minted at all. */
-    const spent = await transfer(await actorFor(actorId), targetId, {
-      proof: await sealStepUpProof(other.sessionId, "primary_transfer", config),
+    const spent = await createSystemAs(await actorFor(actorId), ownerId, {
+      proof: await sealStepUpProof(other.sessionId, "system_create", config),
     });
     expect(readSetCookie(spent, stepUpProofCookieName(config))).toMatchObject({ value: "", maxAge: 0 });
   });
@@ -294,7 +332,7 @@ describe("recent authentication: the OIDC step-up (ADR-0023 §5)", () => {
     const proof = await completeStepUp({
       identity: identityOf("stepup-holder"),
       sessionId: actor.sessionId,
-      intent: "primary_transfer",
+      intent: "system_create",
       config,
     });
     /* The guard accepts what the callback minted — the two halves agree, which
@@ -303,15 +341,15 @@ describe("recent authentication: the OIDC step-up (ADR-0023 §5)", () => {
       { cookies: { get: () => proof, set: () => {} } },
       { id: actor.sessionId, user: { id: actorId, email: actor.email } },
       {},
-      "primary_transfer",
-    )).resolves.toMatchObject({ userId: actorId, intent: "primary_transfer", method: "step_up" });
+      "system_create",
+    )).resolves.toMatchObject({ userId: actorId, intent: "system_create", method: "step_up" });
 
     // Someone else re-authenticating at the provider proves nothing about the
     // person holding this session.
     await expect(completeStepUp({
       identity: identityOf("stepup-stranger"),
       sessionId: actor.sessionId,
-      intent: "primary_transfer",
+      intent: "system_create",
       config,
     })).rejects.toMatchObject({ code: "step_up_failed", status: 403 });
 
@@ -319,7 +357,7 @@ describe("recent authentication: the OIDC step-up (ADR-0023 §5)", () => {
     await expect(completeStepUp({
       identity: identityOf("nobody-at-all"),
       sessionId: actor.sessionId,
-      intent: "primary_transfer",
+      intent: "system_create",
       config,
     })).rejects.toMatchObject({ code: "step_up_failed" });
 
@@ -328,7 +366,7 @@ describe("recent authentication: the OIDC step-up (ADR-0023 §5)", () => {
     await expect(completeStepUp({
       identity: identityOf("stepup-holder"),
       sessionId: actor.sessionId,
-      intent: "primary_transfer",
+      intent: "system_create",
       config,
     })).rejects.toMatchObject({ code: "step_up_failed" });
   });
@@ -344,7 +382,7 @@ describe("recent authentication: the OIDC step-up (ADR-0023 §5)", () => {
     const proof = await completeStepUp({
       identity: identityOf("stepup-replay"),
       sessionId: actor.sessionId,
-      intent: "primary_transfer",
+      intent: "system_create",
       config,
     });
 
@@ -371,7 +409,7 @@ describe("recent authentication: the OIDC step-up (ADR-0023 §5)", () => {
     const proof = await completeStepUp({
       identity: identityOf("stepup-revoked"),
       sessionId: actor.sessionId,
-      intent: "primary_transfer",
+      intent: "system_create",
       config,
     });
 
@@ -396,7 +434,7 @@ describe("recent authentication: the OIDC step-up (ADR-0023 §5)", () => {
     const proof = await completeStepUp({
       identity: identityOf("stepup-ttl"),
       sessionId: actor.sessionId,
-      intent: "primary_transfer",
+      intent: "system_create",
       config,
     });
     expect(proof.split(".").length).toBe(5);

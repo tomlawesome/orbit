@@ -1,7 +1,7 @@
 import { json } from "@sveltejs/kit";
 import { z } from "zod";
 
-import { assignImapReceiptHousehold, discardImapReviewItem, getImapReview } from "orbit/server/imap-inbox";
+import { assignImapReceiptHousehold, discardImapReviewItem, getImapReview } from "orbit/server/mail-in/imap-inbox";
 
 import { read, write } from "$lib/server/api.js";
 

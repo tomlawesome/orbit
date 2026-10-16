@@ -67,7 +67,9 @@ read_environment_value() {
   local requested_key="$1" line value="" found=0
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "${requested_key}="* ]]; then
+      # A CRLF .env-orbit is valid; drop the CR.
       value="${line#*=}"
+      value="${value%$'\r'}"
       found=1
     fi
   done < "$environment_file"
@@ -89,7 +91,7 @@ read_environment_value() {
 # top-level scalar key, so a line anchored at column 0 is enough, and this
 # must stay dependency-free (no docker, no node) since it runs inside the
 # same standalone, source-less scripts as read_environment_value above.
-# Identical text in engine-check.sh and repair.sh --
+# Identical text in repair.sh and install.sh --
 # scripts/compose-project-name-resolution.test.mjs proves that.
 read_compose_project_name() {
   local compose_manifest="$1" line value
@@ -110,7 +112,7 @@ read_compose_project_name() {
   return 1
 }
 
-# Compose project-name derivation, mirroring engine-check.sh and repair.sh
+# Compose project-name derivation, mirroring repair.sh and install.sh
 # precedence exactly: .env-orbit's own COMPOSE_PROJECT_NAME, then the
 # caller's environment, then docker-compose.yml's own `name:` (#921), then a
 # sanitized fallback from the current directory's basename.

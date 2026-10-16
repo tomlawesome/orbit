@@ -31,8 +31,9 @@ journey, persistence.
 | `core/imap-recipient.ts` | Recipient-alias derivation, normalization, and matching; trusted-header parsing. The alias base (`<account-local>+<code>@<domain>`) is derived from the mailbox account by `imapAliasBaseFromAccount` rather than being the fixed `orbit+` literal it was before ADR-0017. |
 | `core/relay-generations.ts` | Per-user relay-generation state (`assertRelayGenerationState`, `nextRelayGeneration`, `relayPreviousIsActive`, `activeRelayGenerations`; ADR-0017 slice 3). Replaced the instance-wide alias-rotation state machine that lived in `imap-rotation.ts`. |
 | `core/secret-crypto.ts` | Envelope encryption for a `mail_in_secrets` row: the same AES-256-GCM construction documents use, under its own AAD purpose (ADR-0017 slice 1). |
-| `core/config.ts` | `parseImapIngestionConfigFromEnvironment` (the old `getImapIngestionConfig` environment parser, kept only for the characterization tests; the live `getImapIngestionConfig` is in `mailbox-config.ts`), `imapProviderConnectionOptions`, `imapProviderConfigCommitment`, `imapAttachmentRetryDelayMs` — extracted from `imap-ingestion.ts`, which re-exports them for a churn-free import path. |
-| `core/review-state.ts` | `reviewInboxState`, `findReviewedIntakeCandidateReason` — extracted from `imap-inbox.ts`, which re-exports them for a churn-free import path — plus the read-side display shaping added by #467 (`reviewAttachmentDisplayName`, `reviewAttachmentMediaType`, `reviewAttachmentScanState`). |
+| `core/config.ts` | The `ImapIngestionConfig` shape, `imapProviderConfigCommitment` and `imapAttachmentRetryDelayMs` — extracted from `imap-ingestion.ts`, which re-exports them. The live `getImapIngestionConfig` is in `mailbox-config.ts`. |
+| `core/provider-options.ts` | `imapProviderConnectionOptions`: the TLS-only ImapFlow options built from a config. |
+| `core/review-state.ts` | `reviewInboxState`, `findReviewedIntakeCandidateReason` — extracted from `imap-inbox.ts`, which re-exports them — plus the read-side display shaping added by #467 (`reviewAttachmentDisplayName`, `reviewAttachmentMediaType`, `reviewAttachmentScanState`). |
 | `mailbox-config.ts` | Resolves the running mail-in configuration from `mail_in_mailbox`/`mail_in_secrets` and decrypts the credential (ADR-0017 slice 1). No environment fallback. |
 | `mailbox-settings.ts` | The administrator's set/verify/probe/rotate/remove/enable actions on that mailbox (ADR-0017 slice 2). Verifies against the provider before committing; the password and alias key are write-only and have no read path. |
 | `imap-ingestion.ts` | The ImapFlow network shell: polling cycle, recipient-alias reconciliation, attachment staging/commit, provider preflight. The `globalThis` provider-preflight and worker-cycle singletons stay here, colocated with the worker that owns them. |
@@ -40,18 +41,13 @@ journey, persistence.
 | `imap-attachment-holding.ts` | Scan + encrypt inbound attachments to local staging ahead of commit. |
 | `imap-receipt-worker.ts` | SMTP notification delivery for receipts/review-ready mail. Its `globalThis.__orbit*` singleton stays colocated here. |
 
-Old `src/server/imap-*.ts` paths (`imap-ingestion.ts`, `imap-inbox.ts`,
-`imap-attachment-holding.ts`, `imap-receipt-worker.ts`) are now deprecated
-one-line re-export stubs pointing at their new home here, so no caller's
-import path had to change. `imap-attachment-validation.ts`, `imap-recipient.ts`,
-and `imap-rotation.ts` had no consumers outside this module, so they moved
-outright with no stub (`imap-rotation.ts` has since been replaced by
-`core/relay-generations.ts`).
+Every importer uses the `src/server/mail-in/` path; the old
+`src/server/imap-*.ts` re-export stubs are gone (#1403).
 
 ## Failure reasons (#1143)
 
 `failureReasonOf` (`core/review-state.ts`) folds the stored `failure_code`
-into one of nine short reasons a member can be shown; `reviewInboxState`
+into one of eight short reasons a member can be shown; `reviewInboxState`
 returns it as `reason` beside `message`, and both `GET /api/imap-inbox` and
 `GET /api/imap-inbox/[receiptId]` carry it on every receipt. Labels
 (`REASON_WORDS`/`reasonWords`) live in `web/src/lib/pocket/words.js`, not
@@ -62,11 +58,10 @@ here — this module stays free of display prose.
 | `no_document` | `no_supported_pdf`; `document_type_unsupported`, `mime_type_mismatch`, `mime_structure_invalid`, `mime_part_count_exceeded`, `mime_nesting_too_deep` |
 | `too_large` | `message_too_large`; `document_too_large`, `attachment_total_too_large`, `attachment_count_exceeded` |
 | `malware` | `malware_detected` |
-| `scanner_off` | `scanner_disabled`, `scanner_unavailable` |
+| `scanner_off` | `scanner_disabled`, `scanner_unavailable`, `scanner_timeout`, `scanner_protocol`, `scanner_failed` |
 | `not_kept` | `attachment_download_failed`, `staging_lease_lost`, `attachment_processing_failed`, `attachment_processing_exhausted`, `staging_purge_failed`, `discard_purge_failed`, `staging_purge_pending`, `staging_expiry_pending` |
 | `wrong_recipient` | `recipient_mismatch` |
 | `account_disabled` | `account_disabled` |
-| `older_review` | `legacy_review_item` |
 | `unknown` | null, or any code not listed above |
 
 ## Pending ownership question

@@ -2,8 +2,8 @@
   import { flip } from "svelte/animate";
   import { SvelteMap } from "svelte/reactivity";
   import { resolve } from "$app/paths";
-  import { approveReceipt, dismissReceipt, readInboxScreen } from "$lib/data/workspace.js";
-  import { ago, agoLong } from "$lib/format.js";
+  import { approveWithOperation, dismissReceipt, readInboxScreen, wordsOf } from "$lib/data/workspace.js";
+  import { ago, agoLong, dayMonth } from "$lib/format.js";
   import { receiptWords } from "$lib/data/metadata-status.js";
   import FailedRow from "$lib/pocket/FailedRow.svelte";
   import ReviewCard from "$lib/pocket/ReviewCard.svelte";
@@ -16,7 +16,7 @@
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
-  import { T_CLASS } from "../home/bands.js";
+  import { T_CLASS } from "$lib/data/bands.js";
 
   /**
    * THE INBOX ON A PHONE (#1120, proposal §2.6). Server-rendered beside the
@@ -54,7 +54,7 @@
   let busyAct = $state(null);
   /** Per receipt: the red line under its pills (§1.13), until the next try. */
   const problems = new SvelteMap();
-  /** One operation id per receipt across retries (approveReceipt's contract). */
+  /** One operation id per receipt across retries (approveWithOperation's contract). */
   const operationIds = new SvelteMap();
   /** How each departing card leaves: "filed" into the orbit, or "burn". */
   const exits = new SvelteMap();
@@ -64,9 +64,6 @@
   }
 
   /* ---- words ----------------------------------------------------------- */
-  /** @param {string} iso */
-  const short = (iso) =>
-    new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
   /** @param {Receipt} receipt */
   const titleOf = (receipt) => reviewTitleOf(receipt);
   /** @param {Receipt} receipt */
@@ -96,19 +93,17 @@
          so one armed to approve is always found. */
       const suggestion = /** @type {import('$lib/data/workspace.js').ReceiptSuggestion} */ (
         need().suggestions.find((one) => one.receiptId === receipt.id));
-      if (!operationIds.has(receipt.id)) operationIds.set(receipt.id, crypto.randomUUID());
-      const result = await approveReceipt(suggestion, need().primary, operationIds.get(receipt.id), amended, sectionId);
-      if (result.outcome === "partial_success") {
-        problems.set(receipt.id, "The item is recorded, but its documents need another try: add it again to finish.");
+      const result = await approveWithOperation(suggestion, operationIds, need().primary, amended, sectionId);
+      if ("partial" in result) {
+        problems.set(receipt.id, result.message);
         return false;
       }
-      operationIds.delete(receipt.id);
       exits.set(receipt.id, "filed");
       wake(`added to your orbit · ${amended?.title ?? titleOf(receipt)}`);
       await reload();
       return true;
     } catch (error) {
-      problems.set(receipt.id, /** @type {{ message?: string }} */ (error)?.message ?? String(error));
+      problems.set(receipt.id, wordsOf(error));
       return false;
     } finally {
       busy = null;
@@ -127,7 +122,7 @@
       wake(`dismissed · ${titleOf(receipt)}`);
       await reload();
     } catch (error) {
-      problems.set(receipt.id, /** @type {{ message?: string }} */ (error)?.message ?? String(error));
+      problems.set(receipt.id, wordsOf(error));
     } finally {
       busy = null;
       busyAct = null;
@@ -141,7 +136,7 @@
       exits.set(failure.id, "burn");
       await reload();
     } catch (error) {
-      wake(`not removed — ${/** @type {{ message?: string }} */ (error)?.message ?? String(error)}`, { failure: true });
+      wake(`not removed — ${wordsOf(error)}`, { failure: true });
     }
   }
 
@@ -248,7 +243,7 @@
           </h2>
           {#each view.review as receipt, index (receipt.id)}
             <div class="pki-card" animate:flip={{ duration: 300 }} out:leave={{ id: receipt.id }}>
-              <ReviewCard title={titleOf(receipt)} caught={short(/** @type {string} */ (receipt.receivedAt))}
+              <ReviewCard title={titleOf(receipt)} caught={dayMonth(/** @type {string} */ (receipt.receivedAt))}
                           burnsIn={burnsIn(receipt)} readings={readingsOf(receipt)} papers={papersOf(receipt)}
                           unreadable={receiptWords(receipt.metadataStatus)} locked={reviewLockedOf(receipt)} {index}
                           busy={busy === receipt.id ? busyAct : null} problem={problems.get(receipt.id) ?? null}
@@ -304,8 +299,8 @@
               <div class="pki-slot" style:--i={index} animate:flip={{ duration: 300 }}>
                 <!-- The date first and the file name last, so the guard
                      trims the name (round 3 §1, R5). -->
-                <Row title={entry.title ?? "a filed item"} href={resolve("/item/[[id]]", { id: entry.itemId })}
-                     meta="added {short(/** @type {string} */ (entry.filedAt))}{entry.sourceDocument ? ` · ${entry.sourceDocument}` : ""}">
+                <Row title={entry.title ?? "a filed item"} href={resolve(`/home?item=${encodeURIComponent(entry.itemId)}`)}
+                     meta="added {dayMonth(/** @type {string} */ (entry.filedAt))}{entry.sourceDocument ? ` · ${entry.sourceDocument}` : ""}">
                   {#snippet mark()}<span class="p-body {T_CLASS[entry.band] ?? 'ended'}"></span>{/snippet}
                 </Row>
               </div>
@@ -319,7 +314,7 @@
       </section>
 
       {#if !emptyQueue}
-        <p class="p-foot pki-foot">unreviewed arrivals burn up after 45d</p>
+        <p class="p-foot pki-foot">unreviewed arrivals burn up after {view?.retention ? `${view.retention.receiptDays}d` : "a limited time"}</p>
       {/if}
     {/if}
   </main>

@@ -260,7 +260,7 @@ function titleBlock(candidates: readonly TaggedCandidate[]): TaggedCandidate | u
  * the figures the text under it carries, and it is printed in capitals or
  * with its words capitalised -- which, once Tika has thrown the type away,
  * is all that is left of being set apart. Subtype keeps its own copy of this
- * judgement (AGENTS.md: every field owns its own stages), and stage 1's
+ * judgement (docs/extraction-method.md: every field owns its own stages), and stage 1's
  * looser reading of a heading -- any short block -- stays exactly as it is.
  */
 function isSetApartHeading(line: string): boolean {

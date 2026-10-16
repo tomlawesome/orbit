@@ -1,18 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
-import { z } from "zod";
 import { getDb } from "@/db";
-import { auditLog, externalIdentities, households, instanceAuthority, localCredentials, memberships, sections, sessions, users } from "@/db/schema";
+import { auditLog, households, instanceAuthority, memberships, sections, sessions, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY, ADMINISTRATOR_LOCK_KEY } from "@/lib/auth/authority-locks";
-import type { RecentAuthentication } from "@/lib/auth/recent-auth";
+import { requireUuid } from "@/lib/uuid";
 import { cloneSections } from "@/lib/workspace";
-import { identitiesAreUsable } from "@/server/local-credentials";
 import { openInstanceMetadataReader, type MetadataCipher, type MetadataFieldState } from "@/server/metadata/fields";
-import { requireInstanceAdministrator } from "@/server/authorization";
+import { requireActiveAdministrator, requireInstanceAdministrator } from "@/server/authorization";
 import { sectionSlug } from "@/server/workspace-access";
-
-const uuidSchema = z.uuid();
 
 export interface InstanceUser {
   id: string;
@@ -59,9 +55,7 @@ async function primaryAdministratorId(transaction: Transaction): Promise<string 
 const instanceUserColumns = {
   id: users.id,
   displayName: users.displayName,
-  /* Dual read for the length of the expand release (#969): `email_enc` when
-     the backfill has reached the row, the plaintext column when it has not. */
-  email: users.email,
+  /* The address is read from `email_enc` only (#1403 Q3). */
   emailEnc: users.emailEnc,
   isInstanceAdmin: users.isInstanceAdmin,
   disabledAt: users.disabledAt,
@@ -70,14 +64,13 @@ const instanceUserColumns = {
 type InstanceUserRow = {
   id: string;
   displayName: string;
-  email: string | null;
   emailEnc: string | null;
   isInstanceAdmin: boolean;
   disabledAt: Date | null;
 };
 
 function toInstanceUser(row: InstanceUserRow, cipher: MetadataCipher, primaryUserId: string | null): InstanceUser {
-  const email = cipher.text("users.email", row.id, { encrypted: row.emailEnc, plaintext: row.email });
+  const email = cipher.text("users.email", row.id, { encrypted: row.emailEnc });
   return {
     id: row.id,
     displayName: row.displayName,
@@ -89,7 +82,7 @@ function toInstanceUser(row: InstanceUserRow, cipher: MetadataCipher, primaryUse
   };
 }
 
-/** Addresses last when they cannot be read, which is where `asc(users.email)` put a null too. */
+/** Addresses last when they cannot be read, which is where a null sorts. */
 function compareEmail(left: string | null, right: string | null): number {
   if (left === right) return 0;
   if (left === null) return 1;
@@ -176,17 +169,11 @@ export async function setInstanceAdministrator(
   targetUserId: string,
   administrator: boolean,
 ): Promise<InstanceUserList> {
-  if (!uuidSchema.safeParse(targetUserId).success) {
-    throw new AppError("invalid_identifier", "User is not a valid identifier", 422);
-  }
+  requireUuid(targetUserId, "User");
 
   await getDb().transaction(async (transaction) => {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ADMINISTRATOR_LOCK_KEY}, 0))`);
-    const [actor] = await transaction.select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt }).from(users)
-      .where(eq(users.id, actorUserId)).limit(1);
-    if (!actor?.administrator || actor.disabledAt) {
-      throw new AppError("administrator_required", "Orbit administrator access is required", 403);
-    }
+    await requireActiveAdministrator(actorUserId, transaction);
 
     const [target] = await transaction.select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt }).from(users)
       .where(eq(users.id, targetUserId)).limit(1);
@@ -204,12 +191,12 @@ export async function setInstanceAdministrator(
       );
     }
 
-    /* The primary administrator cannot be demoted by anyone — authority moves
-       first, by explicit transfer (#263). */
+    /* The primary administrator cannot be demoted by anyone. The primary
+       is fixed at install; there is no transfer (#1403, owner 2026-10-13). */
     if (!administrator && targetUserId === await primaryAdministratorId(transaction)) {
       throw new AppError(
         "primary_administrator_protected",
-        "Transfer primary administrator authority before changing this account",
+        "The primary administrator's account cannot be demoted or disabled.",
         409,
       );
     }
@@ -250,18 +237,12 @@ export async function setInstanceUserDisabled(
   targetUserId: string,
   disabled: boolean,
 ): Promise<InstanceUserList> {
-  if (!uuidSchema.safeParse(targetUserId).success) {
-    throw new AppError("invalid_identifier", "User is not a valid identifier", 422);
-  }
+  requireUuid(targetUserId, "User");
 
   await getDb().transaction(async (transaction) => {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ADMINISTRATOR_LOCK_KEY}, 0))`);
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`);
-    const [actor] = await transaction.select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt }).from(users)
-      .where(eq(users.id, actorUserId)).limit(1);
-    if (!actor?.administrator || actor.disabledAt) {
-      throw new AppError("administrator_required", "Orbit administrator access is required", 403);
-    }
+    await requireActiveAdministrator(actorUserId, transaction);
 
     const [target] = await transaction.select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt }).from(users)
       .where(eq(users.id, targetUserId)).limit(1);
@@ -269,12 +250,12 @@ export async function setInstanceUserDisabled(
     if (targetUserId === actorUserId && disabled) {
       throw new AppError("self_disable_not_allowed", "Ask another administrator to disable your account", 409);
     }
-    /* The primary administrator cannot be disabled by anyone — authority moves
-       first, by explicit transfer (#263). */
+    /* The primary administrator cannot be disabled by anyone. The primary
+       is fixed at install; there is no transfer (#1403, owner 2026-10-13). */
     if (disabled && targetUserId === await primaryAdministratorId(transaction)) {
       throw new AppError(
         "primary_administrator_protected",
-        "Transfer primary administrator authority before changing this account",
+        "The primary administrator's account cannot be demoted or disabled.",
         409,
       );
     }
@@ -326,119 +307,6 @@ export async function setInstanceUserDisabled(
       entityId: targetUserId,
       action: disabled ? "account_disabled" : "account_enabled",
       changes: { disabled },
-    });
-  });
-
-  return instanceUserList();
-}
-
-/**
- * Moves primary administrator authority to another active administrator
- * (#263). One atomic transaction under the administrator lock, so a
- * concurrent disable, demotion or second transfer serializes behind it and
- * re-reads the authority row it may have moved. Only the current primary may
- * transfer; the target must be a different, active administrator with a
- * usable sign-in method — a password or a linked provider identity
- * (ADR-0023 §6). The former primary remains an ordinary active administrator.
- *
- * Administrator and primary status are read from the database on every
- * mutation rather than cached in sessions, so existing sessions see the new
- * authority immediately; nothing needs revoking.
- *
- * The caller must have just been re-challenged: `recentAuthentication` is the
- * receipt `requireRecentAuthentication` returns (ADR-0023 §5), and it replaces
- * #263's fifteen-minute session window, which is deleted. The receipt is
- * checked here rather than trusted, so this function cannot be reached with
- * somebody else's challenge or one earned for a different action.
- */
-export async function transferPrimaryAdministrator(
-  actorUserId: string,
-  recentAuthentication: RecentAuthentication,
-  targetUserId: string,
-): Promise<InstanceUserList> {
-  if (!uuidSchema.safeParse(targetUserId).success) {
-    throw new AppError("invalid_identifier", "User is not a valid identifier", 422);
-  }
-  if (recentAuthentication.userId !== actorUserId || recentAuthentication.intent !== "primary_transfer") {
-    throw new AppError(
-      "recent_authentication_required",
-      "Confirm it is you before transferring primary administrator authority",
-      403,
-    );
-  }
-
-  await getDb().transaction(async (transaction) => {
-    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ADMINISTRATOR_LOCK_KEY}, 0))`);
-
-    const [actor] = await transaction
-      .select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt })
-      .from(users).where(eq(users.id, actorUserId)).limit(1);
-    if (!actor?.administrator || actor.disabledAt) {
-      throw new AppError("administrator_required", "Orbit administrator access is required", 403);
-    }
-
-    const primary = await primaryAdministratorId(transaction);
-    if (primary !== actorUserId) {
-      throw new AppError(
-        "primary_administrator_required",
-        "Only the primary administrator can transfer this authority",
-        403,
-      );
-    }
-
-    if (targetUserId === actorUserId) {
-      throw new AppError(
-        "transfer_target_ineligible",
-        "Choose a different active administrator to receive primary authority",
-        409,
-      );
-    }
-    const [target] = await transaction
-      .select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt })
-      .from(users).where(eq(users.id, targetUserId)).limit(1);
-    if (!target || !target.administrator || target.disabledAt) {
-      throw new AppError(
-        "transfer_target_ineligible",
-        "Choose a different active administrator to receive primary authority",
-        409,
-      );
-    }
-    /* The target must be able to sign in. Since M7 that is a password OR a
-       linked provider identity (ADR-0023 §6): on a local-only instance nobody
-       has an identity, and requiring one would leave the authority
-       untransferable.
-       A password always counts; an identity only counts while its provider
-       is still switched on (#1151 SS1-S1) -- the same rule the unlink checks
-       in local-credentials.ts already apply to their own caller. Without it,
-       an identity row left over from a since-disabled provider satisfied
-       this check while giving the target no way to actually sign in. */
-    const [identity] = await transaction
-      .select({ id: externalIdentities.id })
-      .from(externalIdentities)
-      .where(eq(externalIdentities.userId, targetUserId))
-      .limit(1);
-    const [credential] = await transaction
-      .select({ userId: localCredentials.userId })
-      .from(localCredentials)
-      .where(eq(localCredentials.userId, targetUserId))
-      .limit(1);
-    if (!credential && !(identity && identitiesAreUsable())) {
-      throw new AppError(
-        "transfer_target_ineligible",
-        "Choose a different active administrator to receive primary authority",
-        409,
-      );
-    }
-
-    await transaction.update(instanceAuthority)
-      .set({ primaryUserId: targetUserId, updatedAt: new Date() });
-    await transaction.insert(auditLog).values({
-      householdId: null,
-      actorUserId,
-      entityType: "user",
-      entityId: targetUserId,
-      action: "primary_administrator_transferred",
-      changes: { from: actorUserId, to: targetUserId },
     });
   });
 
@@ -499,9 +367,7 @@ export async function createHouseholdForOwner(
       422,
     );
   }
-  if (!uuidSchema.safeParse(input.ownerId).success) {
-    throw new AppError("invalid_identifier", "User is not a valid identifier", 422);
-  }
+  requireUuid(input.ownerId, "User");
 
   const householdId = randomUUID();
   await getDb().transaction(async (transaction) => {

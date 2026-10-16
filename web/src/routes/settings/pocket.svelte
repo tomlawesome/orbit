@@ -7,15 +7,13 @@
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
   import { applyTheme } from "$lib/theme-swatches.js";
-  import { agoLong } from "$lib/format.js";
+  import { agoLong, clockOf, dayMonth, localZone, plural } from "$lib/format.js";
   import { watchTour } from "$lib/tour/watch.js";
   import { alertsSupported, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
   import {
     readSentLately,
     readSignInMethods,
     removeLocalPassword,
-    revokeSession,
-    signOutEverywhere,
     startProviderLink,
     startStepUp,
     unlinkProviderIdentity,
@@ -24,6 +22,7 @@
   } from "$lib/data/workspace.js";
   import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
   import { PACKS, intentOf, issuerHost, methodWords, on } from "./helm.js";
+  import { signOutOfDevice, signOutOfEveryDevice } from "./sign-out.js";
 
   /*
    * SETTINGS ON A PHONE (#1125, proposal §2.7-§2.8). Rendered beside the
@@ -69,6 +68,7 @@
    *   onretry?: () => void,
    *   resumed: string | null,
    *   fixtures: boolean,
+   *   onsignedout?: (redirectTo: string | null) => unknown,
    * }}
    */
   let {
@@ -85,6 +85,9 @@
     onretry = undefined,
     resumed,
     fixtures,
+    /* Chrome's descent, handed down by the desk page (#1439): this layout's
+       own sign-outs play the same goodbye, as the hatch's does. */
+    onsignedout = undefined,
   } = $props();
 
   /* ── reminders ────────────────────────────────────────────────────────── */
@@ -164,7 +167,7 @@
      too, not just desk's copy of it. */
 
   /** @param {number} days */
-  const daysWord = (days) => (days === 0 ? "on the day" : `${days} day${days === 1 ? "" : "s"}`);
+  const daysWord = (days) => (days === 0 ? "on the day" : plural(days, "day"));
 
   /* SENT TO YOU LATELY (#1003, §20, proposal §2.8). `GET /api/settings/sent`
      read in onMount below; `null` is the "couldn't load" state the panel
@@ -176,11 +179,8 @@
 
   /** @param {string} iso */
   function when(iso) {
-    const date = new Date(iso);
-    const zone = fixtures ? "UTC" : undefined;
-    const day = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: zone });
-    const time = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: zone });
-    return `${day} ${time}`;
+    const zone = fixtures ? "UTC" : localZone();
+    return `${dayMonth(iso, zone)} ${clockOf(iso, zone)}`;
   }
   /** @param {SentRow} row */
   const sentMeta = (row) =>
@@ -316,27 +316,37 @@
   let everywhereProblem = $state(/** @type {string | null} */ (null));
   const now = new Date().toISOString();
 
+  /* Set while a sign-out request is out, and kept once this device has left:
+     a second press then sends nothing, and after this session has ended any
+     request would answer 401 and sign the reader straight back in through
+     the provider (#1439). */
+  let signingOut = false;
+
   /** @param {Sessions[number]} row */
   async function signOutOf(row) {
+    if (signingOut) return;
+    signingOut = true;
     sessionProblem = null;
     try {
-      await revokeSession(row.id);
-      /* Ending this device's own session leaves nothing to come back to. */
-      if (row.current) { location.assign("/login"); return; }
+      /* This device's own session plays the goodbye (./sign-out.js). */
+      if (await signOutOfDevice(row, onsignedout)) return;
       sessions = sessions.filter((one) => one.id !== row.id);
       wake(`signed out of ${row.device}`);
     } catch {
       sessionProblem = `still signed in on ${row.device} — try again`;
     }
+    signingOut = false;
   }
 
   async function signOutEverywhereNow() {
+    if (signingOut) return;
+    signingOut = true;
     everywhereProblem = null;
     try {
-      await signOutEverywhere();
-      location.assign("/login");
+      await signOutOfEveryDevice(onsignedout);
     } catch {
       everywhereProblem = "still signed in — try again";
+      signingOut = false;
     }
   }
 
@@ -529,7 +539,7 @@
           <div class="st-rows st-sent">
             {#each sent as row (row.id)}
               <Row title={row.itemName} meta={sentMeta(row)} trail={when(row.at).slice(0, 6)} trailSub={when(row.at).slice(7)}
-                   href={resolve("/item/[[id]]", { id: row.itemId })}>
+                   href={resolve(`/home?item=${encodeURIComponent(row.itemId)}`)}>
                 {#snippet mark()}
                   <span class="st-sentmark" class:failed={row.status === "failed"} class:retry={row.status === "retry"}>
                     {#if row.channel === "email"}
@@ -584,7 +594,7 @@
         <div class="st-rows st-flush">
           {#each view.memberships as membership (membership.id)}
             <Row title={membership.name}
-                 meta={`${membership.memberCount ?? "?"} member${membership.memberCount === 1 ? "" : "s"} · ${membership.itemCount} item${membership.itemCount === 1 ? "" : "s"}`}
+                 meta={`${membership.memberCount === undefined || membership.memberCount === null ? "? members" : plural(membership.memberCount, "member")} · ${plural(membership.itemCount, "item")}`}
                  trail={membership.role} trailTone={membership.role === "owner" ? "var(--accent-text)" : ""}
                  href={resolve("/household/[id]", { id: membership.id })}>
               {#snippet mark()}
@@ -629,6 +639,7 @@
         <ArmButton label="sign out of every device →" armedLabel="tap again to sign out everywhere" wide
                    onfire={signOutEverywhereNow} />
         {#if everywhereProblem}<p class="p-error" role="alert">{everywhereProblem}</p>{/if}
+        <p class="st-everywhere p-prose">This signs Orbit out everywhere{#if providerOffered}, and signs you out of your sign-in provider in this browser only: your other devices stay signed in at the provider{/if}.</p>
       </div>
     </section>
   </main>
@@ -654,7 +665,7 @@
         {/if}
         {#if wantsNew}
           <label class="st-label" for="st-new">new password</label>
-          <input id="st-new" class="st-input" type="password" autocomplete="new-password" minlength="12"
+          <input id="st-new" class="st-input" type="password" autocomplete="new-password"
                  enterkeyhint="done" bind:value={newPassword}>
         {/if}
       </form>
@@ -816,6 +827,7 @@
   .st-device.here{color:var(--ok)}
   .st-hint{margin:10px 0 0;color:var(--ink-quiet)}
   .st-foot{margin:12px 0 0}
+  .st-everywhere{margin:10px 0 0;color:var(--ink-quiet)}
 
   /* The callouts. */
   .st-form{display:flex;flex-direction:column}

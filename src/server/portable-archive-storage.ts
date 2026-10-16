@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
-
-const STORAGE_KEY_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+import { validUuid } from "@/lib/uuid";
 
 export interface StoredPortableArchive { storageKey: string; modifiedAt: Date }
+export interface OpenedPortableArchive { handle: FileHandle; sizeBytes: number }
 
 /** Private local storage for encrypted portability exports. */
 export class PortableArchiveStorage {
@@ -15,7 +15,7 @@ export class PortableArchiveStorage {
   }
 
   private pathFor(storageKey: string): string {
-    if (!STORAGE_KEY_PATTERN.test(storageKey)) throw new Error("Invalid portable archive storage key");
+    if (!validUuid(storageKey)) throw new Error("Invalid portable archive storage key");
     return join(this.root, `${storageKey}.archive`);
   }
 
@@ -40,8 +40,46 @@ export class PortableArchiveStorage {
     return contents;
   }
 
+  /**
+   * The stored file as an open handle and its size, for reading in chunks
+   * rather than whole (#1428). The caller owns the handle and closes it. An
+   * open handle keeps reading the same file even if a purge unlinks it.
+   */
+  async open(storageKey: string, maximumBytes: number): Promise<OpenedPortableArchive> {
+    const handle = await open(this.pathFor(storageKey), "r");
+    try {
+      const { size } = await handle.stat();
+      if (size > maximumBytes) throw new Error("Portable archive exceeds its expected size");
+      return { handle, sizeBytes: size };
+    } catch (error) {
+      await handle.close().catch(() => undefined);
+      throw error;
+    }
+  }
+
   async delete(storageKey: string): Promise<void> {
     await rm(this.pathFor(storageKey), { force: true });
+  }
+
+  /**
+   * Removes `*.tmp` files left by a process killed between a temporary write
+   * and its rename: nothing else ever names them. A younger one may be a
+   * write still in flight.
+   */
+  async sweepTemporaryFiles(olderThanMs: number): Promise<void> {
+    const boundary = Date.now() - olderThanMs;
+    let entries;
+    try { entries = await readdir(this.root, { withFileTypes: true }); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".tmp")) continue;
+      const path = join(this.root, entry.name);
+      const details = await stat(path).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (details && details.mtimeMs < boundary) await rm(path, { force: true });
+    }
   }
 
   async list(): Promise<StoredPortableArchive[]> {
@@ -50,8 +88,8 @@ export class PortableArchiveStorage {
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
     const result: StoredPortableArchive[] = [];
     for (const entry of entries) {
-      const match = entry.isFile() && entry.name.match(/^([0-9a-f-]{36})\.archive$/i);
-      if (!match || !STORAGE_KEY_PATTERN.test(match[1])) continue;
+      const match = entry.isFile() && entry.name.match(/^(.{36})\.archive$/s);
+      if (!match || !validUuid(match[1])) continue;
       result.push({ storageKey: match[1], modifiedAt: (await stat(join(this.root, entry.name))).mtime });
     }
     return result;

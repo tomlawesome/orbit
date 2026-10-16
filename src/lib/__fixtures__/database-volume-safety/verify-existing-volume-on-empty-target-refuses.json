@@ -1,0 +1,36 @@
+{
+  "name": "verify existing volume on empty target refuses",
+  "kind": "verify",
+  "target": {
+    "envOrbit": "ORBIT_IMAGE=ghcr.io/tomlawesome/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+    "composeFile": null,
+    "postgresPassword": "hunter2"
+  },
+  "targetWasEmpty": true,
+  "requested": null,
+  "scenario": {
+    "volumeLabels": {
+      "orbit_orbit-db-data": "orbit|orbit-db-data"
+    },
+    "volumeProjectLabel": {
+      "orbit_orbit-db-data": "orbit"
+    },
+    "containersByVolume": {
+      "orbit_orbit-db-data": "aaaaaaaaaaaa|orbit|orbit-db"
+    },
+    "containersByProject": {
+      "orbit": "bbbbbbbbbbbb|orbit|orbit-app"
+    },
+    "containerImage": {
+      "bbbbbbbbbbbb": "ghcr.io/tomlawesome/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "volumeLsSubstring": {
+      "orbit-db-data": "orbit_orbit-db-data"
+    }
+  },
+  "bash": {
+    "status": 1,
+    "stdout": "",
+    "stderr": "An existing Orbit database volume (orbit_orbit-db-data) requires a recognized deployment with its preserved database credentials; refusing to start Compose. If this is leftover from a previous failed install rather than a deployment you want to keep, remove it first: docker volume rm -- orbit_orbit-db-data"
+  }
+}

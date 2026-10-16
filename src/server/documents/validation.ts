@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import { AppError } from "@/lib/app-error";
-import { getDocument, VerbosityLevel } from "pdfjs-dist/legacy/build/pdf.mjs";
+import type { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { inspectPdfStructureInSandbox } from "@/server/documents/pdf-structure-sandbox";
 
 export type SupportedDocumentMediaType =
   | "application/pdf"
@@ -15,45 +16,45 @@ const mediaExtensions: Record<SupportedDocumentMediaType, string> = {
 
 const MAX_IMAGE_DIMENSION = 20_000;
 const MAX_IMAGE_PIXELS = 40_000_000;
-const MAX_PNG_CHUNKS = 4_096;
-const MAX_PDF_XREF_ENTRIES = 1_250_000;
 export const PDF_STRUCTURE_MAX_PAGES = 1_000;
-export const PDF_STRUCTURE_INSPECTION_BUDGET_MS = 5_000;
-type PdfStructureParserOptions = NonNullable<Parameters<typeof getDocument>[0]> & { isEvalSupported: false };
+const MAX_PDF_XREF_ENTRIES = 1_250_000;
+/**
+ * The parameters the installed pdf.js's own `getDocument` declares. Options
+ * are checked against this with `satisfies`, so an option the pinned version
+ * does not know fails the type check instead of silently doing nothing, as
+ * `isEvalSupported` and `enableScripting` did (#1294).
+ */
+export type PdfDocumentParameters = NonNullable<Parameters<typeof getDocument>[0]>;
+
+/**
+ * How Orbit's one PDF parser opens untrusted bytes, for the structure check
+ * and the page renderer alike, both in a sandbox child process (ADR-0033 pattern
+ * C, ADR-0038): no XFA, no pdf.js worker, no network or range fetching, no
+ * system or browser fonts, no WebAssembly or platform image decoders, and
+ * errors stop the parse. Nothing a PDF carries can run: pdf.js runs document
+ * scripts only through the viewer's annotation layer and scripting manager,
+ * which Orbit never builds.
+ */
 export const PDF_STRUCTURE_PARSER_OPTIONS = Object.freeze({
   disableAutoFetch: true,
   disableFontFace: true,
   disableRange: true,
   disableStream: true,
-  enableScripting: false,
-  enableXfa: true,
-  isEvalSupported: false,
+  enableXfa: false,
   isImageDecoderSupported: false,
   isOffscreenCanvasSupported: false,
+  // The same pixel cap image uploads already hold, applied to images a PDF
+  // carries; with stopAtErrors an over-cap image fails the page instead of
+  // being decoded.
+  maxImageSize: MAX_IMAGE_PIXELS,
   stopAtErrors: true,
   useSystemFonts: false,
   useWasm: false,
   useWorkerFetch: false,
-  verbosity: VerbosityLevel.ERRORS,
-}) as Readonly<PdfStructureParserOptions>;
-const unsafePdfFeatures = new Set([
-  "EmbeddedFile",
-  "EmbeddedFiles",
-  "Filespec",
-  "JavaScript",
-  "JS",
-  "Launch",
-  "RichMedia",
-  "XFA",
-]);
-const unsafePdfActionValues = new Set(["JavaScript", "Launch", "RichMedia"]);
-const crcTable = Array.from({ length: 256 }, (_, value) => {
-  let crc = value;
-  for (let bit = 0; bit < 8; bit += 1) {
-    crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
-  }
-  return crc >>> 0;
-});
+  // pdf.js's VerbosityLevel.ERRORS, written as its value: this module only
+  // names pdf.js's types, so the server never loads the reader (#1427).
+  verbosity: 0,
+} satisfies PdfDocumentParameters);
 
 function startsWith(bytes: Buffer, signature: number[]): boolean {
   return signature.every((value, index) => bytes[index] === value);
@@ -67,344 +68,396 @@ function safeImageDimensions(width: number, height: number): boolean {
     && width * height <= MAX_IMAGE_PIXELS;
 }
 
-function validateJpegStructure(bytes: Buffer): boolean {
-  if (bytes.length < 10 || !startsWith(bytes, [0xff, 0xd8])) return false;
+/**
+ * The dimensions an image's header declares, read before anything decodes
+ * it, so the pixel cap bounds the decoder rather than following it (ADR-0033
+ * pattern D). Only the header is read: the PNG IHDR at its fixed place, or
+ * the JPEG frame header found by stepping over the segments ahead of it.
+ */
+function declaredImageDimensions(bytes: Buffer, mediaType: "image/jpeg" | "image/png"): { width: number; height: number } | undefined {
+  if (mediaType === "image/png") {
+    if (bytes.length < 24 || bytes.subarray(12, 16).toString("latin1") !== "IHDR") return undefined;
+    return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+  }
   let offset = 2;
-  let sawFrame = false;
-  let sawScan = false;
-  let inScan = false;
-  let frameMarker: number | undefined;
-  const frameComponentIds = new Set<number>();
-
-  while (offset < bytes.length) {
-    if (inScan) {
-      while (offset < bytes.length && bytes[offset] !== 0xff) offset += 1;
-      if (offset >= bytes.length) return false;
-      while (offset < bytes.length && bytes[offset] === 0xff) offset += 1;
-      if (offset >= bytes.length) return false;
-      const marker = bytes[offset];
-      if (marker === 0x00 || (marker >= 0xd0 && marker <= 0xd7)) {
-        offset += 1;
-        continue;
-      }
-      offset -= 1;
-      inScan = false;
-    }
-
-    if (bytes[offset] !== 0xff) return false;
+  while (offset + 4 <= bytes.length) {
+    if (bytes[offset] !== 0xff) return undefined;
     while (offset < bytes.length && bytes[offset] === 0xff) offset += 1;
-    if (offset >= bytes.length) return false;
-    const marker = bytes[offset++];
-    if (marker === 0xd9) return sawFrame && sawScan && offset === bytes.length;
-    if (marker === 0x01) continue;
-    if (marker === 0xd8 || marker === 0x00 || (marker >= 0xd0 && marker <= 0xd7)) return false;
-    if (offset + 2 > bytes.length) return false;
-    const segmentLength = bytes.readUInt16BE(offset);
-    if (segmentLength < 2 || offset + segmentLength > bytes.length) return false;
-    const segmentStart = offset + 2;
-    const segmentEnd = offset + segmentLength;
-    const startOfFrameMarkers = [
-      0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7,
-      0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf,
-    ];
-    const isStartOfFrame = marker === 0xc0 || marker === 0xc2;
-    if (startOfFrameMarkers.includes(marker) && !isStartOfFrame) return false;
-    if (isStartOfFrame) {
-      if (sawFrame || segmentLength < 11) return false;
-      const precision = bytes[segmentStart];
-      const height = bytes.readUInt16BE(segmentStart + 1);
-      const width = bytes.readUInt16BE(segmentStart + 3);
-      const components = bytes[segmentStart + 5];
-      if (precision !== 8
-        || !safeImageDimensions(width, height)
-        || components < 1
-        || components > 4
-        || segmentLength !== 8 + (3 * components)) return false;
-      let samplingBlocks = 0;
-      for (let componentIndex = 0; componentIndex < components; componentIndex += 1) {
-        const componentOffset = segmentStart + 6 + (componentIndex * 3);
-        const componentId = bytes[componentOffset];
-        const sampling = bytes[componentOffset + 1];
-        const horizontalSampling = sampling >>> 4;
-        const verticalSampling = sampling & 0x0f;
-        if (componentId === 0
-          || frameComponentIds.has(componentId)
-          || horizontalSampling < 1
-          || horizontalSampling > 4
-          || verticalSampling < 1
-          || verticalSampling > 4
-          || bytes[componentOffset + 2] > 3) return false;
-        frameComponentIds.add(componentId);
-        samplingBlocks += horizontalSampling * verticalSampling;
-      }
-      if (samplingBlocks > 10) return false;
-      frameMarker = marker;
-      sawFrame = true;
-    }
-    if (marker === 0xda) {
-      if (!sawFrame || segmentLength < 6) return false;
-      const components = bytes[segmentStart];
-      if (components < 1 || components > 4 || segmentLength !== 6 + (2 * components)) return false;
-      const scanComponentIds = new Set<number>();
-      for (let componentIndex = 0; componentIndex < components; componentIndex += 1) {
-        const componentOffset = segmentStart + 1 + (componentIndex * 2);
-        const componentId = bytes[componentOffset];
-        const tables = bytes[componentOffset + 1];
-        if (!frameComponentIds.has(componentId)
-          || scanComponentIds.has(componentId)
-          || (tables >>> 4) > 3
-          || (tables & 0x0f) > 3) return false;
-        scanComponentIds.add(componentId);
-      }
-      const spectralStart = bytes[segmentEnd - 3];
-      const spectralEnd = bytes[segmentEnd - 2];
-      const approximation = bytes[segmentEnd - 1];
-      const approximationHigh = approximation >>> 4;
-      const approximationLow = approximation & 0x0f;
-      if (frameMarker === 0xc0) {
-        if (spectralStart !== 0 || spectralEnd !== 63 || approximation !== 0) return false;
-      } else if (spectralStart > spectralEnd
-        || spectralEnd > 63
-        || approximationHigh > 13
-        || approximationLow > 13
-        || (spectralStart > 0 && components !== 1)
-        || (approximationHigh !== 0 && approximationHigh !== approximationLow + 1)) return false;
-      sawScan = true;
-      inScan = true;
-    }
-    offset = segmentEnd;
-  }
-  return false;
-}
-
-function crc32(bytes: Buffer, start: number, end: number): number {
-  let crc = 0xffffffff;
-  for (let index = start; index < end; index += 1) {
-    crc = crcTable[(crc ^ bytes[index]) & 0xff] ^ (crc >>> 8);
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function validatePngStructure(bytes: Buffer): boolean {
-  if (bytes.length < 45 || !startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return false;
-  let offset = 8;
-  let chunkCount = 0;
-  let sawHeader = false;
-  let sawImageData = false;
-  let imageDataBytes = 0;
-  let imageDataEnded = false;
-  let paletteRequired = false;
-  let sawPalette = false;
-  let colourType = -1;
-  let bitDepth = -1;
-  while (offset + 12 <= bytes.length && chunkCount < MAX_PNG_CHUNKS) {
-    const length = bytes.readUInt32BE(offset);
-    const typeStart = offset + 4;
-    const dataStart = offset + 8;
-    const dataEnd = dataStart + length;
-    const chunkEnd = dataEnd + 4;
-    if (dataEnd < dataStart || chunkEnd > bytes.length) return false;
-    const type = bytes.subarray(typeStart, dataStart).toString("ascii");
-    if (!/^[A-Za-z]{4}$/u.test(type)) return false;
-    if (bytes.readUInt32BE(dataEnd) !== crc32(bytes, typeStart, dataEnd)) return false;
-    if (!sawHeader) {
-      if (type !== "IHDR" || length !== 13) return false;
-      const width = bytes.readUInt32BE(dataStart);
-      const height = bytes.readUInt32BE(dataStart + 4);
-      bitDepth = bytes[dataStart + 8];
-      colourType = bytes[dataStart + 9];
-      const validBitDepths: Record<number, number[]> = {
-        0: [1, 2, 4, 8, 16],
-        2: [8, 16],
-        3: [1, 2, 4, 8],
-        4: [8, 16],
-        6: [8, 16],
-      };
-      if (!safeImageDimensions(width, height)
-        || !validBitDepths[colourType]?.includes(bitDepth)
-        || bytes[dataStart + 10] !== 0
-        || bytes[dataStart + 11] !== 0
-        || ![0, 1].includes(bytes[dataStart + 12])) return false;
-      paletteRequired = colourType === 3;
-      sawHeader = true;
-    } else if (type === "IHDR") {
-      return false;
-    }
-    if (type === "PLTE") {
-      if (sawPalette
-        || sawImageData
-        || [0, 4].includes(colourType)
-        || length === 0
-        || length % 3 !== 0
-        || length > 768
-        || (colourType === 3 && length / 3 > 2 ** bitDepth)) return false;
-      sawPalette = true;
-    }
-    if (type === "IDAT") {
-      if ((paletteRequired && !sawPalette) || imageDataEnded) return false;
-      sawImageData = true;
-      imageDataBytes += length;
-    } else if (sawImageData && type !== "IEND") {
-      imageDataEnded = true;
-    }
-    if (type === "IEND") return length === 0 && imageDataBytes > 0 && chunkEnd === bytes.length;
-    if (type[0] === type[0]?.toUpperCase() && !["IHDR", "PLTE", "IDAT"].includes(type)) return false;
-    offset = chunkEnd;
-    chunkCount += 1;
-  }
-  return false;
-}
-
-function pdfNameValue(value: string): string {
-  return value.replace(/#([0-9a-f]{2})/giu, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
-}
-
-function isPdfDelimiter(value: number | undefined): boolean {
-  return value === undefined || value === 0x00 || value === 0x09 || value === 0x0a
-    || value === 0x0c || value === 0x0d || value === 0x20 || value === 0x28
-    || value === 0x29 || value === 0x3c || value === 0x3e || value === 0x5b
-    || value === 0x5d || value === 0x7b || value === 0x7d || value === 0x2f
-    || value === 0x25;
-}
-
-function isPdfTokenAt(bytes: Buffer, offset: number, token: string): boolean {
-  if (offset < 0 || offset + token.length > bytes.length) return false;
-  if (bytes.subarray(offset, offset + token.length).toString("latin1") !== token) return false;
-  return isPdfDelimiter(bytes[offset - 1]) && isPdfDelimiter(bytes[offset + token.length]);
-}
-
-function nextPdfToken(bytes: Buffer, offset: number, token: string): number {
-  let candidate = bytes.indexOf(Buffer.from(token, "latin1"), offset);
-  while (candidate >= 0 && !isPdfTokenAt(bytes, candidate, token)) {
-    candidate = bytes.indexOf(Buffer.from(token, "latin1"), candidate + token.length);
-  }
-  return candidate;
-}
-
-/** Removes comments, literal/hex strings and stream payloads before inspecting PDF names. */
-function structuralPdfText(bytes: Buffer): string {
-  let output = "";
-  let offset = 0;
-  while (offset < bytes.length) {
-    const value = bytes[offset];
-    if (value === 0x25) {
-      while (offset < bytes.length && bytes[offset] !== 0x0a && bytes[offset] !== 0x0d) offset += 1;
-      continue;
-    }
-    if (value === 0x28) {
-      offset += 1;
-      let depth = 1;
-      while (offset < bytes.length && depth > 0) {
-        if (bytes[offset] === 0x5c) offset += 2;
-        else if (bytes[offset] === 0x28) { depth += 1; offset += 1; }
-        else if (bytes[offset] === 0x29) { depth -= 1; offset += 1; }
-        else offset += 1;
-      }
-      continue;
-    }
-    if (value === 0x3c && bytes[offset + 1] === 0x3c) {
-      output += "<<";
-      offset += 2;
-      continue;
-    }
-    if (value === 0x3c) {
-      offset += 1;
-      while (offset < bytes.length && bytes[offset] !== 0x3e) offset += 1;
-      if (offset < bytes.length) offset += 1;
-      continue;
-    }
-    if (isPdfTokenAt(bytes, offset, "stream")) {
-      offset += 6;
-      if (bytes[offset] === 0x0d && bytes[offset + 1] === 0x0a) offset += 2;
-      else if (bytes[offset] === 0x0a || bytes[offset] === 0x0d) offset += 1;
-      const endstream = nextPdfToken(bytes, offset, "endstream");
-      if (endstream < 0) break;
-      offset = endstream + 9;
-      continue;
-    }
-    output += String.fromCharCode(value);
+    const marker = bytes[offset];
     offset += 1;
-  }
-  return output;
-}
-
-function hasUnsafePdfName(content: string): boolean {
-  const names = content.match(/\/([!#$%&'*+\-./0-9:;<=>?@A-Z\\^_`a-z{|}~#]+)/gu) ?? [];
-  return names.some((name) => unsafePdfFeatures.has(pdfNameValue(name.slice(1))));
-}
-
-function hasTooManyPdfObjects(content: string): boolean {
-  const objectHeaders = content.match(/(?:^|[\r\n])\s*\d+\s+\d+\s+obj\b/gu)?.length ?? 0;
-  return objectHeaders > MAX_PDF_XREF_ENTRIES;
-}
-
-function hasValidPdfStartxref(bytes: Buffer): boolean {
-  const tail = bytes.subarray(Math.max(0, bytes.length - 1_024)).toString("latin1");
-  const match = tail.match(/startxref\s+(\d+)\s+%%EOF[\x00\t\n\f\r ]*$/u);
-  if (!match) return false;
-  const offset = Number(match[1]);
-  if (!Number.isSafeInteger(offset) || offset < 0 || offset >= bytes.length) return false;
-  const target = bytes.subarray(offset, Math.min(bytes.length, offset + 512)).toString("latin1");
-  return /^xref(?:\s|$)/u.test(target)
-    || /^\d+\s+\d+\s+obj\s*<<[\s\S]*?\/Type\s*\/XRef\b/u.test(target);
-}
-
-function hasPdfIndexBudget(bytes: Buffer): boolean {
-  const tail = bytes.subarray(Math.max(0, bytes.length - 1_024)).toString("latin1");
-  const match = tail.match(/startxref\s+(\d+)\s+%%EOF[\x00\t\n\f\r ]*$/u);
-  const offset = Number(match?.[1]);
-  if (!Number.isSafeInteger(offset) || offset < 0 || offset >= bytes.length) return false;
-  const target = bytes.subarray(offset).toString("latin1");
-  if (/^xref(?:\s|$)/u.test(target)) {
-    const trailerOffset = target.indexOf("trailer");
-    if (trailerOffset < 0) return true;
-    const subsectionCounts = target.slice(4, trailerOffset).match(/^\s*\d+\s+(\d+)\s*$/gmu) ?? [];
-    const total = subsectionCounts.reduce((sum, line) => sum + Number(line.match(/\d+\s*$/u)?.[0] ?? 0), 0);
-    return total <= MAX_PDF_XREF_ENTRIES;
-  }
-  const dictionary = target.match(/^\d+\s+\d+\s+obj\s*<<([\s\S]*?)>>/u)?.[1] ?? "";
-  const size = Number(dictionary.match(/\/Size\s+(\d+)\b/u)?.[1]);
-  const index = dictionary.match(/\/Index\s*\[([^\]]+)\]/u)?.[1]
-    ?.trim()
-    .split(/\s+/u)
-    .map(Number);
-  const total = index && index.length > 0 && index.length % 2 === 0
-    ? index.reduce((sum, value, position) => sum + (position % 2 === 1 ? value : 0), 0)
-    : size;
-  return Number.isSafeInteger(total) && total >= 1 && total <= MAX_PDF_XREF_ENTRIES;
-}
-
-function hasEntries(value: unknown): boolean {
-  if (value instanceof Map) return value.size > 0;
-  return value !== null && typeof value === "object" && Object.keys(value).length > 0;
-}
-
-function hasUnsafePdfValue(value: unknown): boolean {
-  if (typeof value === "string") return unsafePdfActionValues.has(value);
-  if (Array.isArray(value)) return value.some((entry) => hasUnsafePdfValue(entry));
-  if (value instanceof Map) {
-    return Array.from(value.entries()).some(([key, entry]) => hasUnsafePdfValue(key) || hasUnsafePdfValue(entry));
-  }
-  if (value === null || typeof value !== "object") return false;
-  return Object.entries(value).some(([key, entry]) => {
-    const lowerKey = key.toLowerCase();
-    return ((lowerKey === "actiontype" || lowerKey === "subtype" || lowerKey === "s" || lowerKey === "type")
-      && typeof entry === "string" && unsafePdfActionValues.has(entry)) || hasUnsafePdfValue(entry);
-  });
-}
-
-async function inspectParsedPdfFeatures(pdf: { numPages: number; getJSActions: () => Promise<unknown>; getAttachments: () => Promise<unknown>; getOpenAction: () => Promise<unknown>; getPage: (pageNumber: number) => Promise<{ getJSActions: () => Promise<unknown>; getAnnotations: (options: { intent: string }) => Promise<unknown>; getXfa: () => Promise<unknown> }> }): Promise<"unsupported_structure" | "prohibited_content" | undefined> {
-  if (pdf.numPages < 1 || pdf.numPages > PDF_STRUCTURE_MAX_PAGES) return "unsupported_structure";
-  if (hasEntries(await pdf.getJSActions()) || hasEntries(await pdf.getAttachments())) return "prohibited_content";
-  if (hasUnsafePdfValue(await pdf.getOpenAction())) return "prohibited_content";
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const xfa = await page.getXfa();
-    if (hasEntries(await page.getJSActions())
-      || hasUnsafePdfValue(await page.getAnnotations({ intent: "any" }))
-      || (xfa !== null && xfa !== undefined)) return "prohibited_content";
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (marker === undefined || marker === 0xd9 || marker === 0xda || offset + 2 > bytes.length) return undefined;
+    const length = bytes.readUInt16BE(offset);
+    const isFrame = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    if (isFrame) {
+      if (length < 7 || offset + 7 > bytes.length) return undefined;
+      return { height: bytes.readUInt16BE(offset + 3), width: bytes.readUInt16BE(offset + 5) };
+    }
+    offset += length;
   }
   return undefined;
+}
+
+/** Pattern E for images: the header is within the cap and the preview renderer's own decoder reads the image. */
+async function classifyImageStructure(bytes: Buffer, mediaType: "image/jpeg" | "image/png"): Promise<DocumentStructureReason> {
+  const declared = declaredImageDimensions(bytes, mediaType);
+  if (!declared || !safeImageDimensions(declared.width, declared.height)) return "unsupported_structure";
+  try {
+    // Loaded here rather than at the top: the native canvas backend stays off
+    // every module that imports this one until an image actually arrives.
+    const { loadImage } = await import("@napi-rs/canvas");
+    const image = await loadImage(bytes);
+    return image.width === declared.width && image.height === declared.height ? "supported_structure" : "unsupported_structure";
+  } catch {
+    return "unsupported_structure";
+  }
+}
+
+const PDF_DELIMITERS = new Set([..."()<>[]{}/%"]);
+const PDF_WHITESPACE = new Set([..."\0\t\n\f\r "]);
+const PDF_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)$/u;
+const MAX_PDF_XREF_SECTIONS = 32;
+const MAX_PDF_NESTING = 64;
+
+type PdfValue = number | string | PdfValue[] | Map<string, PdfValue> | { ref: number } | null;
+
+/** Thrown for any syntax the budget check cannot read; the caller refuses the file. */
+class PdfSyntaxError extends Error {}
+
+/**
+ * Just enough of pdf.js's lexer to read a cross-reference dictionary: names
+ * (with #xx escapes), numbers, delimiters and words, with strings and
+ * comments skipped so a `<<` inside them does not count.
+ */
+class PdfLexer {
+  constructor(private readonly text: string, public position: number) {}
+
+  next(): string | undefined {
+    const { text } = this;
+    while (this.position < text.length) {
+      const char = text[this.position]!;
+      if (PDF_WHITESPACE.has(char)) this.position += 1;
+      else if (char === "%") while (this.position < text.length && text[this.position] !== "\n" && text[this.position] !== "\r") this.position += 1;
+      else break;
+    }
+    if (this.position >= text.length) return undefined;
+    const start = this.position;
+    const char = text[start]!;
+    if ((char === "<" || char === ">") && text[start + 1] === char) {
+      this.position += 2;
+      return char + char;
+    }
+    if (char === "<") {
+      const end = text.indexOf(">", start);
+      if (end < 0) throw new PdfSyntaxError("unterminated hex string");
+      this.position = end + 1;
+      return "<>";
+    }
+    if (char === "(") {
+      let depth = 0;
+      for (; this.position < text.length; this.position += 1) {
+        const current = text[this.position];
+        if (current === "\\") this.position += 1;
+        else if (current === "(") depth += 1;
+        else if (current === ")" && --depth === 0) {
+          this.position += 1;
+          return "()";
+        }
+      }
+      throw new PdfSyntaxError("unterminated string");
+    }
+    this.position += 1;
+    if (char !== "/" && PDF_DELIMITERS.has(char)) return char;
+    while (this.position < text.length && !PDF_WHITESPACE.has(text[this.position]!) && !PDF_DELIMITERS.has(text[this.position]!)) this.position += 1;
+    const word = text.slice(start, this.position);
+    return char === "/" ? word.replace(/#([0-9A-Fa-f]{2})/gu, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16))) : word;
+  }
+}
+
+function readPdfValue(lexer: PdfLexer, token: string | undefined, depth: number): PdfValue {
+  if (token === undefined || depth > MAX_PDF_NESTING) throw new PdfSyntaxError("unreadable value");
+  if (token === "<<") return readPdfDictionary(lexer, depth + 1);
+  if (token === "[") {
+    const items: PdfValue[] = [];
+    for (let item = lexer.next(); item !== "]"; item = lexer.next()) items.push(readPdfValue(lexer, item, depth + 1));
+    return items;
+  }
+  if (token === ">>" || token === "]") throw new PdfSyntaxError("unbalanced delimiter");
+  if (token.startsWith("/")) return token;
+  return PDF_NUMBER.test(token) ? Number(token) : null;
+}
+
+/** A dictionary's own entries; nested dictionaries are values, so their keys never reach the top level. */
+function readPdfDictionary(lexer: PdfLexer, depth: number): Map<string, PdfValue> {
+  const entries = new Map<string, PdfValue>();
+  for (let key = lexer.next(); key !== ">>"; key = lexer.next()) {
+    if (key === undefined || !key.startsWith("/")) throw new PdfSyntaxError("dictionary key is not a name");
+    let value = readPdfValue(lexer, lexer.next(), depth);
+    if (typeof value === "number") {
+      const position = lexer.position;
+      const generation = lexer.next();
+      if (generation !== undefined && PDF_NUMBER.test(generation) && lexer.next() === "R") value = { ref: value };
+      else lexer.position = position;
+    }
+    entries.set(key, value);
+  }
+  return entries;
+}
+
+function isPdfCount(value: PdfValue | undefined): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isPdfInteger(token: string | undefined): boolean {
+  return token !== undefined && PDF_NUMBER.test(token) && Number.isInteger(Number(token));
+}
+
+/**
+ * Where pdf.js starts reading a file it takes as linearized, which it does
+ * when the first object is a dictionary with a positive /Linearized and an /L
+ * equal to the file length (its Linearization.create). It then ignores
+ * startxref and starts after the first endobj in the first 1,024 bytes,
+ * skipping whitespace, or at 0 if there is none. The hint and page entries
+ * pdf.js also requires are not checked: they only narrow its rule. Anything
+ * this cannot read means no extra root, so the check never refuses by itself.
+ */
+function linearizedXrefOffset(bytes: Buffer, text: string): number | undefined {
+  try {
+    const lexer = new PdfLexer(text, 0);
+    if (!PDF_NUMBER.test(lexer.next() ?? "") || !PDF_NUMBER.test(lexer.next() ?? "") || lexer.next() !== "obj" || lexer.next() !== "<<") return undefined;
+    const dictionary = readPdfDictionary(lexer, 1);
+    const linearized = dictionary.get("/Linearized");
+    if (typeof linearized !== "number" || linearized <= 0 || dictionary.get("/L") !== bytes.length) return undefined;
+  } catch (error) {
+    if (error instanceof PdfSyntaxError) return undefined;
+    throw error;
+  }
+  const endobj = bytes.subarray(0, 1024).indexOf("endobj");
+  if (endobj < 0) return 0;
+  let offset = endobj + "endobj".length;
+  while (offset < text.length && " \t\n\r".includes(text[offset]!)) offset += 1;
+  return offset;
+}
+
+/**
+ * Where pdf.js's recovery scan (its XRef.indexObjects) reads a
+ * cross-reference stream: the start of every object whose text, up to the
+ * next endobj, object header, xref or trailer, holds `/XRef` followed by a
+ * byte below 64. pdf.js scans the whole file this way whenever it cannot use
+ * the sections it was pointed at, and reads each one found, with its /Prev
+ * chain, as a fresh walk. This steps through the file token by token exactly
+ * as that scan does, once and in order, so it stays linear in the file's
+ * length. More starts than the section cap is null: the caller refuses.
+ */
+function recoveryXrefOffsets(bytes: Buffer, text: string): number[] | null {
+  const offsets: number[] = [];
+  // pdf.js's own patterns for where an object's text, or a trailer's, ends.
+  const objectEnd = /\b(?:endobj|\d+\s+\d+\s+obj|xref|trailer\s*<<)\b/gu;
+  const trailerEnd = /\b(?:startxref|\d+\s+\d+\s+obj)\b/gu;
+  const isLineEnd = (byte: number | undefined): boolean => byte === 0x0a || byte === 0x0d;
+  let position = 0;
+  let tag = -1;
+  while (position < bytes.length) {
+    const byte = bytes[position]!;
+    if (byte === 0x09 || byte === 0x20 || isLineEnd(byte)) {
+      position += 1;
+      continue;
+    }
+    if (byte === 0x25) {
+      while (position < bytes.length && !isLineEnd(bytes[position])) position += 1;
+      continue;
+    }
+    // A token runs to a line end or "<"; pdf.js's readToken never takes the file's last byte.
+    let end = position;
+    while (end < bytes.length - 1 && !isLineEnd(bytes[end]) && bytes[end] !== 0x3c) end += 1;
+    // Only a token starting x, t or a digit can be one the scan acts on.
+    const token = byte === 0x78 || byte === 0x74 || (byte >= 0x30 && byte <= 0x39) ? text.slice(position, end) : "";
+    if (!token) {
+      position = end + 1;
+    } else if (/^xref(?:\s|$)/u.test(token)) {
+      const trailer = bytes.indexOf("trailer", position);
+      position = trailer < 0 ? bytes.length : trailer;
+      const startxref = bytes.indexOf("startxref", position);
+      position = startxref < 0 ? bytes.length : startxref;
+    } else if (/^\d+\s+\d+\s+obj\b/u.test(token)) {
+      objectEnd.lastIndex = end;
+      const match = objectEnd.exec(text);
+      const contentEnd = Math.min(bytes.length, !match ? bytes.length : match[0] === "endobj" ? objectEnd.lastIndex + 1 : match.index);
+      // Positions only grow, so the next "/XRef" is searched for again only once passed.
+      if (tag < position) {
+        tag = bytes.indexOf("/XRef", position);
+        if (tag < 0) tag = bytes.length;
+      }
+      if (tag + 5 < contentEnd && bytes[tag + 5]! < 64) {
+        offsets.push(position);
+        if (offsets.length > MAX_PDF_XREF_SECTIONS) return null;
+      }
+      position = Math.max(contentEnd, end + 1);
+    } else if (/^trailer(?:\s|$)/u.test(token)) {
+      trailerEnd.lastIndex = end;
+      const match = trailerEnd.exec(text);
+      position = !match ? bytes.length : match[0] === "startxref" ? trailerEnd.lastIndex + 1 : match.index;
+    } else {
+      position = end + 1;
+    }
+  }
+  return offsets;
+}
+
+interface PdfXrefSection {
+  /** Entries pdf.js loops over reading it; a /Size over the cap counts as over the cap. */
+  entries: number;
+  previous?: number;
+  stream?: number;
+}
+
+/**
+ * One cross-reference section as pdf.js's readXRef reads it: a classic table,
+ * whose subsection headers are read with the lexer (so a comment cannot hide
+ * one) and whose entries must each be two integers and f or n, then its
+ * trailer; or an `N G obj` cross-reference stream, counted from /Index or,
+ * without one, /Size. pdf.js reads a section only where the first token is
+ * xref or a number; anywhere else it reads nothing and this returns
+ * undefined. Past that first token, anything this cannot read throws, and the
+ * caller refuses the file.
+ */
+function readPdfXrefSection(text: string, offset: number): PdfXrefSection | undefined {
+  const lexer = new PdfLexer(text, offset);
+  let first: string | undefined;
+  try {
+    first = lexer.next();
+  } catch {
+    return undefined;
+  }
+  if (first !== "xref" && !/^[\d+.-]/u.test(first ?? "")) return undefined;
+  let entries = 0;
+  let dictionary: Map<string, PdfValue>;
+  if (first === "xref") {
+    for (let start = lexer.next(); start !== "trailer"; start = lexer.next()) {
+      const countToken = lexer.next();
+      const count = Number(countToken);
+      if (!isPdfInteger(start) || !isPdfInteger(countToken) || !isPdfCount(count)) throw new PdfSyntaxError("unreadable subsection header");
+      entries += count;
+      if (entries > MAX_PDF_XREF_ENTRIES) return { entries };
+      for (let entry = 0; entry < count; entry += 1) {
+        const fields = [lexer.next(), lexer.next(), lexer.next()];
+        if (!isPdfInteger(fields[0]) || !isPdfInteger(fields[1]) || (fields[2] !== "f" && fields[2] !== "n")) throw new PdfSyntaxError("unreadable entry");
+      }
+    }
+    if (lexer.next() !== "<<") throw new PdfSyntaxError("no trailer dictionary");
+    dictionary = readPdfDictionary(lexer, 1);
+  } else {
+    if (!PDF_NUMBER.test(first!) || !PDF_NUMBER.test(lexer.next() ?? "") || lexer.next() !== "obj" || lexer.next() !== "<<") throw new PdfSyntaxError("not a cross-reference section");
+    dictionary = readPdfDictionary(lexer, 1);
+    const index = dictionary.get("/Index");
+    if (index === undefined) {
+      const size = dictionary.get("/Size");
+      if (!isPdfCount(size)) throw new PdfSyntaxError("unreadable /Size");
+      entries = size;
+    } else {
+      if (!Array.isArray(index) || index.length % 2 !== 0 || !index.every(isPdfCount)) throw new PdfSyntaxError("unreadable /Index");
+      entries = index.reduce<number>((sum, value, position) => sum + (position % 2 === 1 ? value as number : 0), 0);
+    }
+  }
+  const section: PdfXrefSection = { entries };
+  // /Size is checked on its own even where /Index governs the loop.
+  const size = dictionary.get("/Size");
+  if (size !== undefined && !(isPdfCount(size) && size <= MAX_PDF_XREF_ENTRIES)) section.entries = Number.POSITIVE_INFINITY;
+  const previous = dictionary.get("/Prev");
+  if (typeof previous === "number") section.previous = previous;
+  // pdf.js follows a /Prev reference to the offset of its object number.
+  else if (previous && typeof previous === "object" && "ref" in previous) section.previous = previous.ref;
+  const stream = dictionary.get("/XRefStm");
+  if (first === "xref" && typeof stream === "number") section.stream = stream;
+  return section;
+}
+
+/**
+ * Whether every cross-reference section pdf.js could read declares, in all,
+ * no more entries than the cap. pdf.js loops over every declared entry on
+ * this thread, where the time budget cannot interrupt it, and an xref
+ * stream's entries can take no bytes at all, so a tiny file can declare
+ * billions. pdf.js reaches sections from three places, and the check walks
+ * all three as its readXRef walks them: the last startxref; for a file it
+ * takes as linearized, the section after the first endobj; and, when it
+ * cannot use those (a startxref that is missing, past the end or pointing at
+ * something unreadable, or a table that does not lead to the pages), its
+ * recovery scan, which reads every cross-reference stream in the file, each
+ * as a fresh walk, the first together with the root again. From each it follows /Prev and a classic trailer's
+ * /XRefStm, from the top-level dictionary only, and a section a walk has
+ * already read is skipped, as pdf.js skips it. Entries count every time a
+ * section is read, because pdf.js loops over them every time. The file is
+ * refused when the total passes the cap, a count is not a non-negative
+ * integer, there are more distinct places to read than the section cap, or a
+ * section any of these points at cannot be read: what this check cannot read
+ * it cannot bound. Only an offset outside the file, or one whose first token
+ * is neither xref nor a number, is skipped: pdf.js reads nothing there and
+ * falls back to the scan, which is modelled.
+ */
+export function hasPdfIndexBudget(bytes: Buffer): boolean {
+  const text = bytes.toString("latin1");
+  const recovery = recoveryXrefOffsets(bytes, text);
+  if (recovery === null) return false;
+  const roots: number[] = [];
+  const linearized = linearizedXrefOffset(bytes, text);
+  if (linearized !== undefined) roots.push(linearized);
+  // Otherwise pdf.js takes the last startxref anywhere in the file, %%EOF or
+  // not; it is walked for a linearized file too, which costs one more section.
+  const keyword = bytes.lastIndexOf("startxref");
+  if (keyword >= 0) roots.push(Number(text.slice(keyword + 9, keyword + 64).match(/^\s*(\d+)/u)?.[1]));
+  // Each place is read once, however many walks reach it; null is nothing to read.
+  const sections = new Map<number, PdfXrefSection | null>();
+  // pdf.js follows a given /XRefStm once per document, never one its scan found.
+  const followedStreams = new Set<number>();
+  let total = 0;
+  const walk = (queue: number[]): boolean => {
+    const visited = new Set<number>();
+    for (let offset = queue.shift(); offset !== undefined; offset = queue.shift()) {
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset >= bytes.length || visited.has(offset)) continue;
+      visited.add(offset);
+      let section = sections.get(offset);
+      if (section === undefined) {
+        if (sections.size >= MAX_PDF_XREF_SECTIONS) return false;
+        section = readPdfXrefSection(text, offset) ?? null;
+        sections.set(offset, section);
+      }
+      if (!section) continue;
+      total += section.entries;
+      if (total > MAX_PDF_XREF_ENTRIES) return false;
+      if (section.stream !== undefined && !followedStreams.has(section.stream)) {
+        followedStreams.add(section.stream);
+        queue.push(section.stream);
+      }
+      if (section.previous !== undefined) queue.push(section.previous);
+    }
+    return true;
+  };
+  try {
+    if (!walk([...roots])) return false;
+    for (const offset of recovery) followedStreams.add(offset);
+    // Before scanning, pdf.js queues its root again, so the first walk reads it twice.
+    return recovery.every((offset, position) => walk(position === 0 ? [...roots, offset] : [offset]));
+  } catch (error) {
+    if (error instanceof PdfSyntaxError) return false;
+    throw error;
+  }
+}
+
+/**
+ * Pattern E for PDFs (ADR-0033): pdf.js, the library that draws the file,
+ * opens it with no password, within the page cap and the time budget, and
+ * finds page one. Owner-password-only files open (pdf.js decrypts them
+ * itself); a file that needs a password to open is refused, because nothing
+ * in Orbit could show, read or scan it. Nothing is refused for what the file
+ * contains: the renderer runs none of it. The open runs in a memory-capped,
+ * killable child process (ADR-0038, pdf-structure-sandbox.ts), never in the
+ * server's process.
+ */
+async function classifyPdfStructure(bytes: Buffer): Promise<DocumentStructureReason> {
+  // A cheap first fence: a declared entry count pdf.js would loop over,
+  // refused before any child starts (ADR-0033 item 3, as amended by ADR-0038).
+  if (!hasPdfIndexBudget(bytes)) return "unsupported_structure";
+  return inspectPdfStructureInSandbox(bytes);
 }
 
 /** Identifies the deliberately narrow initial document set from magic bytes. */
@@ -415,54 +468,15 @@ export function detectDocumentMediaType(bytes: Buffer): SupportedDocumentMediaTy
   throw new AppError("document_type_unsupported", "Choose a PDF, JPEG, or PNG document", 415);
 }
 
-export type DocumentStructureReason = "supported_structure" | "unsupported_structure" | "prohibited_content";
+export type DocumentStructureReason = "supported_structure" | "unsupported_structure" | "password_required";
 
-/** Classifies document structure with a maintained bounded in-process parser. */
-async function classifyPdfStructure(bytes: Buffer): Promise<DocumentStructureReason> {
-  if (bytes.length < 24
-    || !/^%PDF-[12]\.\d/u.test(bytes.subarray(0, 8).toString("ascii"))
-    || !hasValidPdfStartxref(bytes)
-    || !hasPdfIndexBudget(bytes)
-    || hasTooManyPdfObjects(bytes.toString("latin1"))) return "unsupported_structure";
-
-  const structuralContent = structuralPdfText(bytes);
-  if (hasUnsafePdfName(structuralContent)) return "prohibited_content";
-
-  let loadingTask: ReturnType<typeof getDocument> | undefined;
-  let budgetTimer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    loadingTask = getDocument({
-      ...PDF_STRUCTURE_PARSER_OPTIONS,
-      data: new Uint8Array(bytes),
-    });
-    const inspection = (async (): Promise<DocumentStructureReason> => {
-      const pdf = await loadingTask!.promise;
-      return (await inspectParsedPdfFeatures(pdf)) ?? "supported_structure";
-    })();
-    const budget = new Promise<never>((_, reject) => {
-      budgetTimer = setTimeout(() => reject(new Error("pdf_inspection_budget_exceeded")), PDF_STRUCTURE_INSPECTION_BUDGET_MS);
-    });
-    return await Promise.race([inspection, budget]);
-  } catch {
-    return "unsupported_structure";
-  } finally {
-    if (budgetTimer) clearTimeout(budgetTimer);
-    if (loadingTask) await loadingTask.destroy().catch(() => undefined);
-  }
-}
-
-/** Classifies document structure with explicit reason and a bounded in-process parser. */
+/** Whether the file is one Orbit can open and show: the renderer opens it and finds a page (ADR-0033). Call only after the malware scan has passed. */
 export async function classifyDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType): Promise<DocumentStructureReason> {
-  if (mediaType === "application/pdf") {
-    return classifyPdfStructure(bytes);
-  }
-  if (mediaType === "image/jpeg") {
-    return validateJpegStructure(bytes) ? "supported_structure" : "unsupported_structure";
-  }
-  return validatePngStructure(bytes) ? "supported_structure" : "unsupported_structure";
+  if (mediaType === "application/pdf") return classifyPdfStructure(bytes);
+  return classifyImageStructure(bytes, mediaType);
 }
 
-/** Performs bounded container checks without rendering or executing document content. */
+/** True when `classifyDocumentStructure` finds a file Orbit can open and show. */
 export async function validateSupportedDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType): Promise<boolean> {
   return (await classifyDocumentStructure(bytes, mediaType)) === "supported_structure";
 }

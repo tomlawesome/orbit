@@ -1,8 +1,17 @@
 # #295 slice plan: port the guided/unattended install flow to the orbit CLI
 
-Status: proposed (slices 1-5 implemented; the bootstrap flip itself — issue
-#295's own release decision to switch `install.sh`'s dispatch or
-`orbit-launcher`'s fetch target to the CLI path — has not happened). This is
+> **2026-10-06:** the `ORBIT_CONFIGURE_ENGINE` opt-in and the
+> `scripts/configuration.sh` hand-off described below were retired by #1210:
+> `configure.sh` always runs the engine, and the configuration preflight and
+> migration are ported to `src/lib/configuration-migration.ts`
+> (`configure.sh --preflight`/`--migrate`). The note below is the plan as it
+> stood.
+
+Status: bootstrap flip landed (#1212): `install.sh` is the bootstrap shell
+and runs the install engine as a one-off of the image it verified; the
+engine's Docker adapters, image resolution and health waits were deleted
+rather than kept as twins. The build notes and their amendment are on
+#1212; slices 1-5 below are history. This is
 a working note, not an ADR —
 it records the decomposition of issue #295 so each slice lands as an
 independently reviewable pull request. Update it as slices land or the plan

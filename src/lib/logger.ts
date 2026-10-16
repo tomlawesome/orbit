@@ -63,8 +63,8 @@ export const operationalReasons = [
   "scanner_failed",
   "malware_detected",
   "supported_structure",
-  "prohibited_content",
   "unsupported_structure",
+  "password_required",
   "infected",
   "parser_disabled",
   "parser_output_invalid",
@@ -96,12 +96,10 @@ export const operationalReasons = [
   "not_configured",
   "disabled",
   "invalid_event",
-  /* Startup refusals that a restart cannot fix (#437). Named separately from
+  /* A startup refusal that a restart cannot fix (#437). Named separately from
      the generic migration_integrity so an operator - and repair.sh - can tell
-     "this database belongs to a different build" from "this database is older
-     than we support", which have different remedies. */
+     "this database belongs to a different build" from a general failure. */
   "database_mismatch",
-  "database_below_floor",
   /* The claim (ADR-0022, ADR-0023 §8). `bootstrap_unclaimed` is the state an
      instance boots into before anyone has claimed it; `bootstrap_rejected` is
      a claim attempt that did not match. Neither record ever carries the code
@@ -121,13 +119,37 @@ export const operationalReasons = [
      because a provider that ignores `max_age` blocks every sensitive action;
      the record names no person and no provider text. */
   "step_up_rejected",
+  /* A new provider identity refused because its email already belongs to an
+     Orbit account (ADR-0023 §3, #1242): Orbit's rule, not a provider fault,
+     and the person's remedy is to sign in to that account and link. */
+  "link_required",
+  /* The claim's two provider refusals (ADR-0022, ADR-0023 §8, #1242): a
+     provider sign-in before the instance is claimed, and one after a local
+     administrator holds it. Orbit's rule, not a provider fault. */
+  "bootstrap_required",
+  "bootstrap_claimed",
   /* Tier 1 metadata (ADR-0024 decision 5): one stored value would not
      authenticate. The record names the table, column and row so an
      administrator can find it; it never carries the value, the ciphertext or
      any key material, and the rest of the row keeps working. */
   "metadata_integrity_failed",
+  /* A mail send that failed in a way the transport could not classify
+     (`sendBoundedMail`'s own word, #1405 alert). */
+  "unknown",
 ] as const;
 export type OperationalReason = typeof operationalReasons[number];
+
+/**
+ * A free-form failure code as a loggable reason: a listed reason passes
+ * through, anything else is `unexpected_failure` rather than a dropped field.
+ * The one place a stored code is narrowed to the schema, so a caller does not
+ * hand-write the membership test.
+ */
+export function asOperationalReason(value: string): OperationalReason {
+  return (operationalReasons as readonly string[]).includes(value)
+    ? value as OperationalReason
+    : "unexpected_failure";
+}
 
 export const operationalActions = [
   "none",
@@ -149,10 +171,9 @@ export const operationalActions = [
   "restore_backup",
   "run_recovery",
   "contact_operator",
-  /* Neither of these is "restart": both sides of the disagreement survive a
-     restart, so restarting loops forever (#437). */
+  /* Not "restart": both sides of the disagreement survive a restart, so
+     restarting loops forever (#437). */
   "attach_matching_database",
-  "upgrade_from_supported_version",
 ] as const;
 export type OperationalAction = typeof operationalActions[number];
 
@@ -176,6 +197,9 @@ export const operationalImpacts = [
   "worker_degraded",
   /* One field is unreadable, not the row and not the application. */
   "metadata_field_unreadable",
+  /* A member's sending address must be checked again before their forwarded
+     mail is attributed to them. */
+  "sender_check_required",
 ] as const;
 export type OperationalImpact = typeof operationalImpacts[number];
 
@@ -192,10 +216,15 @@ export const configurationSettings = [
   "push",
   "processing",
   "ai",
+  /* OPERATOR_ALERT_ADDRESS (#1405): where Orbit writes when it cannot run safely. */
+  "alerts",
 ] as const;
 export type ConfigurationSetting = typeof configurationSettings[number];
 
-export const configurationProblemCodes = ["configuration_version", "configuration_core", "configuration_optional"] as const;
+/* `configuration_key` (#1405): the document key settings hold no usable key.
+   Reported, but it does not stop the start: the instance comes up locked so
+   it can say so to members and to the operator. */
+export const configurationProblemCodes = ["configuration_version", "configuration_core", "configuration_optional", "configuration_key"] as const;
 export type ConfigurationProblemCode = typeof configurationProblemCodes[number];
 
 export const configurationFallbacks = ["startup_blocked", "feature_disabled"] as const;
@@ -232,6 +261,8 @@ export const operationalEvents = {
   "document.model_extraction": "document",
   "imap.ingestion": "ingestion",
   "imap.receipt": "mail",
+  /* A member's stored sending address (the mail relay's sender check). */
+  "mail-relay.sender": "mail",
   "delivery.smtp": "delivery",
   "delivery.push": "delivery",
   "backup.operation": "backup",
@@ -239,9 +270,8 @@ export const operationalEvents = {
   "maintenance.worker": "maintenance",
   "configuration.problem": "configuration",
   /* Tier 1 metadata encryption (ADR-0024): a value that failed its integrity
-     check, and the resumable backfill that converts pre-encryption rows. */
+     check. */
   "metadata.integrity": "metadata",
-  "metadata.backfill": "metadata",
   /* The document KEK rewrap worker (#932, ADR-0017): reports beside
      "document.job" rather than reusing it, because this is a whole rotation's
      outcome across all three key populations, not one job's. */
@@ -251,6 +281,9 @@ export const operationalEvents = {
      beside the document events because what it names is document ciphertext
      left behind, not a portable-archive export file. */
   "portable_archive.import": "document",
+  /* Whether Orbit holds a usable encryption key (#1405): the startup verdict,
+     sign-ins refused while it does not, and the operator alert. */
+  "encryption.key": "encryption",
 } as const;
 export type OperationalEventName = keyof typeof operationalEvents;
 export type OperationalComponent = typeof operationalEvents[OperationalEventName];
@@ -320,6 +353,34 @@ export function operationalDetail(literals: TemplateStringsArray, ...values: unk
  */
 export function operationalDetailFromValidatorMessage(message: string): OperationalDetail {
   return boundedDetailText(message) as OperationalDetail;
+}
+
+/**
+ * The detail for a caught error (#1288): its class, an HTTP status where it
+ * has one, and a short code where it has one - `error_class=PostgresError
+ * code=ECONNREFUSED`. The message is deliberately never included: driver and
+ * provider messages carry connection strings, SQL and personal data, and
+ * there is no redaction helper that can promise otherwise. Class and code are
+ * held to the same bounded-token rule as `operationalDetail` interpolations;
+ * one that fails it (or a status outside 100-599) is left out rather than
+ * logged, so a hostile `name`, `code` or `status` cannot smuggle text in.
+ */
+export function operationalErrorDetail(error: unknown): OperationalDetail {
+  const fields = error !== null && typeof error === "object" ? (error as Record<string, unknown>) : {};
+  const rawClass = error === null
+    ? "null"
+    : typeof error === "object"
+      ? (error as object).constructor?.name
+      : typeof error;
+  const errorClass = typeof rawClass === "string" && detailTokenPattern.test(rawClass) ? rawClass : "unknown";
+  const status = fields.status ?? fields.statusCode;
+  const code = fields.code;
+  const parts = [`error_class=${errorClass}`];
+  if (typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599) {
+    parts.push(`status=${status}`);
+  }
+  if (typeof code === "string" && detailTokenPattern.test(code)) parts.push(`code=${code}`);
+  return boundedDetailText(parts.join(" ")) as OperationalDetail;
 }
 
 export type OperationalEvent = {

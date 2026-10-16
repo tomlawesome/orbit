@@ -111,12 +111,13 @@ fi
 # every key read here ("version", a files.* filename) is unique in that
 # schema.
 manifest_value() { grep -F "\"$2\":" "$1" | sed -n 's/.*: *"\([^"]*\)".*/\1/p' | head -n1; }
+# The release manifest records the image label verbatim: vX.Y.Z.
 version="$(manifest_value "$manifest_json" version)"
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || fail "the manifest has no valid version."
+[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || fail "the manifest has no valid version."
 # A validly signed manifest for a different release must not stand in for
 # the one asked for: an older signed release is still signed.
-if [[ -n "$version_pin" && "v${version}" != "$version_pin" ]]; then
-  fail "asked for ${version_pin} but the signed manifest is for v${version}; refusing."
+if [[ -n "$version_pin" && "$version" != "$version_pin" ]]; then
+  fail "asked for ${version_pin} but the signed manifest is for ${version}; refusing."
 fi
 archive_name="orbit-launcher_linux_${arch}.tar.gz"
 archive_sha="$(manifest_value "$manifest_json" "$archive_name")"
@@ -132,7 +133,8 @@ printf '%s  %s\n' "${archive_sha#sha256:}" "$archive_file" | sha256sum -c - > /d
 printf '%s  %s\n' "${install_sha#sha256:}" "$install_file" | sha256sum -c - > /dev/null 2>&1 ||
   fail "install.sh does not match the manifest's checksum."
 
-install_dir="${XDG_CACHE_HOME:-$HOME/.cache}/orbit/${version}"
+# The launcher cache is named by the bare X.Y.Z.
+install_dir="${XDG_CACHE_HOME:-$HOME/.cache}/orbit/${version#v}"
 mkdir -p "$install_dir" || fail "could not create ${install_dir}."
 tar -xzf "$archive_file" -C "$install_dir" || fail "could not extract the launcher archive."
 launcher="$install_dir/orbit-launcher"

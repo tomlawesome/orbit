@@ -2,16 +2,23 @@ import { building } from "$app/environment";
 import { env } from "$env/dynamic/private";
 import { redirect } from "@sveltejs/kit";
 
+import { ARCHIVE_SLOT_ROUTES, holdArchiveSlot } from "$lib/server/archive-slot.js";
+import { bodyLimitFor, discardBody, limitRequestBody } from "$lib/server/body-limit.js";
+
 /**
  * The screens a reader may open without a session (#789).
  *
  * Route ids, not pathnames: the router's own truth, so a trailing slash or a
  * percent-encoded path cannot dress a gated screen up as an open one.
  *
- * `/` is the arrival and decides signed-in from signed-out in the browser;
- * `/login` and `/logout` are the ratified dawn and dusk (§15); `/maintenance`
- * has to be reachable precisely when the instance cannot serve anything else.
- * None of them reads a session.
+ * `/` is the arrival. It is open because a signed-out reader is served the
+ * door there, never bounced to /login, but since #1252 it reads the session
+ * once, in `frontDoor` below: a reader who already belongs to a household is
+ * answered 303 to /home before the door's HTML is sent. Everyone else gets the
+ * door, and Arrival.svelte decides the rest in the browser. `/login` and
+ * `/logout` are the ratified dawn and dusk (§15), still prerendered;
+ * `/maintenance` has to be reachable precisely when the instance cannot serve
+ * anything else. None of those three reads a session.
  *
  * `/invite/[token]` is open because a signed-out stranger is exactly who the
  * address is written for (#481). It is the one open route that DOES read a
@@ -23,16 +30,16 @@ import { redirect } from "@sveltejs/kit";
  * the whole point of a setup or recovery link is that the person holding it
  * has no way in yet. It reads no session at all — the token in the body of
  * the POST it makes is the entire authorisation — so there is nothing for a
- * gate to protect. It is deliberately NOT in `DOORS` below: maintenance
- * closes it like any other screen, because setting a password is not the
- * administrator action a window exists to allow.
+ * gate to protect. It is also in `DOORS` below: a recovery link is the
+ * documented way past a broken mailbox, and someone who sets a password
+ * during a window still lands on a closed home, so nothing new opens.
  *
  * `/approve/[token]` is open because the person it is written for must NOT be
  * signed in (#1033, ADR-0027 §4): the link finishes somebody else's sign-in,
  * on a phone that may never have seen this instance before, and approving on
  * it deliberately signs nobody in. It reads no session either -- the token in
- * the address is the whole authorisation -- and it is not in `DOORS`, for the
- * same reason `/setup/[token]` is not.
+ * the address is the whole authorisation -- and it is in `DOORS`, because it
+ * is the second half of the password sign-in a window must leave open.
  *
  * `/auth/error` is open for the same reason `/login` is (#1056): it is where
  * a failed OIDC callback lands a signed-out stranger, and a session-required
@@ -40,8 +47,7 @@ import { redirect } from "@sveltejs/kit";
  * no session either -- `code` off the query string is the whole of what it
  * reads, client-side, in +page.svelte -- so there is nothing here for a gate
  * to protect. Not in `DOORS`: unlike /login it is not an administrator's way
- * to end a maintenance window, so maintenance closes it like /invite and
- * /setup do.
+ * to end a maintenance window, so maintenance closes it like /invite.
  */
 const OPEN_ROUTES = new Set([
   "/", "/login", "/logout", "/maintenance",
@@ -52,13 +58,15 @@ const OPEN_ROUTES = new Set([
  * The screens maintenance never closes (#526; ADR-0013 decision 3): the door
  * and the way out, because an administrator has to be able to sign in to end
  * a window and anyone may leave cleanly. Neither reads any state at all.
+ * The approval and setup links are doors too, because a window closes
+ * nothing a password sign-in needs to finish; each reads only its own token.
  *
  * `/` is deliberately not here: a signed-out visitor is not an administrator,
  * and the arrival would only send them to a home that is closed. The API is
  * a separate boundary with its own guard (`web/src/lib/server/api.js`); this
  * set is for screens.
  */
-const DOORS = new Set(["/login", "/logout"]);
+const DOORS = new Set(["/login", "/logout", "/approve/[token]", "/setup/[token]"]);
 
 /**
  * Orbit's boot sequence, moved off Next's instrumentation hook (#735).
@@ -101,6 +109,18 @@ export async function init() {
        diagnosis (scripts/repair.sh) have something to see. */
     process.exit(1);
   }
+}
+
+/**
+ * The administrator's upload size limit (#1285), read only for an upload
+ * route's request; imported on demand like the workspace read below, so a
+ * request with no body never loads the database client here.
+ *
+ * @returns {Promise<number>}
+ */
+async function readUploadLimit() {
+  const { readEffectiveUploadLimit } = await import("orbit/server/upload-limit");
+  return readEffectiveUploadLimit();
 }
 
 /**
@@ -175,6 +195,119 @@ function closedForMaintenance(page, maintenance) {
 }
 
 /**
+ * The locked screen as the answer to every screen while Orbit holds no usable
+ * encryption key (#1405): 503, never stored, no validator, and no
+ * `Retry-After`, because nothing says when the key will be back.
+ *
+ * @param {Response} page
+ */
+function closedForKey(page) {
+  const headers = new Headers(page.headers);
+  headers.set("cache-control", "no-store");
+  headers.delete("etag");
+  headers.delete("retry-after");
+  return new Response(page.body, { status: 503, headers });
+}
+
+/**
+ * A gated screen's answer, marked never to be stored (#1264).
+ *
+ * Without it a browser may keep a signed-in page in its back/forward cache or
+ * HTTP cache, so Back after sign-out shows household content without asking
+ * the server. Set here, beside the gate, so a screen added tomorrow is
+ * uncached the day its folder exists. The ETag goes too: a copy cached before
+ * this header existed could otherwise be revalidated into a 304 and shown
+ * again. Same shape as `closedForMaintenance`; the response is rebuilt rather
+ * than mutated because a redirect or fetched response has immutable headers.
+ *
+ * @param {Response} page
+ */
+function neverStored(page) {
+  const headers = new Headers(page.headers);
+  headers.set("cache-control", "no-store");
+  headers.delete("etag");
+  return new Response(page.body, { status: page.status, statusText: page.statusText, headers });
+}
+
+/**
+ * Whether the reader at `/` is the invited reader's first landing (#481): the
+ * one signed-in member the door must still be served to, so the arrival
+ * plays once. Presence only -- GET /api/auth/session reads and clears it, and
+ * clearing it here would take that landing away. Any failure, auth
+ * unconfigured included, answers "not that", which serves nothing new: the
+ * session read that follows fails the same way and the door is served anyway.
+ *
+ * @param {import("@sveltejs/kit").Cookies} cookies
+ */
+async function invitedLandingPresent(cookies) {
+  try {
+    const { invitedLandingCookieName } = await import("orbit/server/invitations/cookie");
+    const { getAuthConfig } = await import("orbit/lib/env");
+    return Boolean(cookies.get(invitedLandingCookieName(getAuthConfig())));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether this session already belongs to a household, by the same two tests
+ * the gate below uses for every other screen (#840): `activeHouseholdId`, or
+ * failing that `hasOnwardHousehold`. A failed membership read answers "no",
+ * which serves the door -- the arrival's own decide() then asks again.
+ *
+ * @param {import("orbit/lib/auth/session").AuthenticatedSession | null} session
+ */
+async function belongsSomewhere(session) {
+  if (!session) return false;
+  if (session.activeHouseholdId) return true;
+  try {
+    const { hasOnwardHousehold } = await import("orbit/server/workspace-repository");
+    return await hasOnwardHousehold(session.user.id, session.user.isInstanceAdmin);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * THE FRONT DOOR DECIDES ON THE SERVER (#1252; ADR-0012, amended 2026-10-06).
+ *
+ * A member who refreshed `/` used to be served the sign-in door and handed on
+ * to /home only once the browser had asked GET /api/auth/session -- long
+ * enough to see the door. Now a session that already belongs somewhere is
+ * answered 303 to /home before any HTML is sent. Every other reader -- no
+ * cookie, a stale one, no household yet, the invited landing, a backend that
+ * cannot answer -- is served the door exactly as before, and Arrival.svelte's
+ * decide() stays as the fallback.
+ *
+ * Nothing about the reader goes on `locals` here, so the door's HTML is the
+ * same with or without a cookie. Both answers are `no-store`: the same
+ * address now means two things depending on who asks.
+ *
+ * A Response rather than `redirect()`, because a thrown redirect carries no
+ * headers of ours. SvelteKit turns it into its JSON redirect for a
+ * `__data.json` request, the same as a thrown one.
+ *
+ * @param {import("@sveltejs/kit").RequestEvent} event
+ * @param {Parameters<import("@sveltejs/kit").Handle>[0]["resolve"]} resolve
+ * @param {import("orbit/lib/auth/session").AuthenticatedSession | null | undefined} session
+ *   already read by the maintenance gate, when it needed one
+ */
+async function frontDoor(event, resolve, session) {
+  if (!(await invitedLandingPresent(event.cookies))) {
+    session ??= await readSessionQuietly(event.cookies);
+    if (await belongsSomewhere(session)) {
+      return new Response(null, { status: 303, headers: { location: "/home", "cache-control": "no-store" } });
+    }
+  }
+  const door = await resolve(event);
+  door.headers.set("cache-control", "no-store");
+  /* and no validator either, so a copy cached before this cannot be
+     revalidated into a 304 and shown again */
+  door.headers.delete("etag");
+  return door;
+}
+
+/**
  * The gates for every screen: maintenance (#526), then authentication (#789).
  *
  * The cut deleted Next's AuthenticationGate along with the rest of `src/app/`
@@ -208,6 +341,78 @@ export async function handle({ event, resolve }) {
      database, and no dynamic environment to read. */
   if (building) return resolve(event);
 
+  /* ONE ARCHIVE AT A TIME (#1316), in this order: the session, then the slot,
+     then the body limit below. Signed in first, so a stranger can never hold
+     the slot: without a session nothing is claimed and the route's own
+     write() answers 401 unread. The slot before the body limit, so a second
+     archive is refused with a 429 before its body is buffered. The finally
+     frees the slot however the rest ends: an answer, a 413, a refusal, a
+     throw, a dropped client, the body watchdog.
+     web/src/lib/server/archive-slot.js has the routes and the reasons. */
+  if (event.route.id !== null && ARCHIVE_SLOT_ROUTES.has(event.route.id)
+    && event.request.method === "POST" && event.request.body !== null
+    && await readSessionQuietly(event.cookies)) {
+    const held = holdArchiveSlot(event.route.id, event.request);
+    if (held instanceof Response) return held;
+    if (held) {
+      event.request = held.request;
+      try {
+        return await gated(event, resolve);
+      } finally {
+        drainUnread(event);
+        held.release();
+      }
+    }
+  }
+  try {
+    return await gated(event, resolve);
+  } finally {
+    drainUnread(event);
+  }
+}
+
+/**
+ * Reads away an upload the route answered without reading (#1316).
+ *
+ * A route may refuse before it reads: a stale CSRF token, maintenance, the
+ * key gate, a signed-out redirect. Node would read such a body away itself
+ * once the answer is sent, but adapter-node's early data listener stops it,
+ * so the upload sits paused and a browser still sending it never sees the
+ * answer -- Firefox reports a network error instead. So the answer goes first
+ * and the rest is read and thrown away after it, the same as the 413 and 429.
+ *
+ * In a `finally`, because a redirect or an error is thrown, not returned. A
+ * locked body is left alone: a route is still reading it, in the background
+ * or through a clone. A used one has been read to its end. The response is
+ * not touched; a route must not hand the unread body on without reading or
+ * locking it first (an answer built from `request.body`, or a reader started
+ * on a later tick, would find it drained).
+ *
+ * @param {import("@sveltejs/kit").RequestEvent} event
+ */
+function drainUnread(event) {
+  const { body, bodyUsed } = event.request;
+  if (body !== null && !body.locked && !bodyUsed) discardBody(event.request);
+}
+
+/**
+ * Everything `handle` does after the building guard and the archive slot.
+ *
+ * @param {import("@sveltejs/kit").RequestEvent} event
+ * @param {Parameters<import("@sveltejs/kit").Handle>[0]["resolve"]} resolve
+ */
+async function gated(event, resolve) {
+  /* Per-route request body limits (#1285), ahead of every other step and for
+     every route, the API included: the image lets any body up to the largest
+     a route may take through (BODY_SIZE_LIMIT), and this holds each route to
+     its own. web/src/lib/server/body-limit.js has the routes and limits. */
+  if (event.request.body !== null) {
+    const rule = await bodyLimitFor(event.route.id, readUploadLimit);
+    const held = limitRequestBody(event.request, rule);
+    if (held instanceof Response) return held;
+    event.request = held;
+  }
+
   /* A null id is a path the router did not match, which belongs to the 404
      screen. Letting it through gates nothing new: route names already ship in
      the client bundle. The API has its own guards for both gates and answers
@@ -221,10 +426,26 @@ export async function handle({ event, resolve }) {
      seam already relies on: nothing production runs sets the variable. */
   if (env.ORBIT_FIXTURES === "1") return resolve(event);
 
+  /* THE ENCRYPTION KEY GATE (#1405), before everything else about the reader.
+     With no usable key (or no verdict yet: fail closed) every screen is the
+     locked screen, at the URL that was asked for, so a reload after the fix
+     lands where it was. The session is never read: there is no
+     administrator way round, because nobody can do anything here without the
+     key. Only the goodbye is left alone, since it reads nothing and anyone may
+     leave. Operator maintenance is not consulted: the key is the more basic
+     fault. A memory read; no I/O. */
+  const { getKeyState } = await import("orbit/server/key-state");
+  if (getKeyState().verdict !== "usable") {
+    if (id === "/logout") return resolve(event);
+    const screen = id === "/maintenance" ? await resolve(event) : await event.fetch("/maintenance");
+    return closedForKey(screen);
+  }
+
   if (DOORS.has(id)) return resolve(event);
 
   /* The session is read at most once, and only when a gate needs it: the open
-     routes never read one unless the instance is closed. */
+     routes never read one unless the instance is closed, `/` excepted
+     (#1252), which reuses this one when maintenance already read it. */
   let session;
 
   const maintenance = await readMaintenance();
@@ -239,6 +460,8 @@ export async function handle({ event, resolve }) {
       return closedForMaintenance(screen, maintenance);
     }
   }
+
+  if (id === "/") return frontDoor(event, resolve, session);
 
   if (OPEN_ROUTES.has(id)) return resolve(event);
 
@@ -289,5 +512,5 @@ export async function handle({ event, resolve }) {
 
   /* Carried on locals so a server load never has to ask a second time. */
   event.locals.session = session;
-  return resolve(event);
+  return neverStored(await resolve(event));
 }

@@ -47,8 +47,11 @@ export interface MetadataKeyMaterial {
 
 const unwrappedKeys = new Map<string, Buffer>();
 
-function cacheKey(keyId: string, scope: MetadataKeyScope, householdId: string | null): string {
-  return `${keyId} ${scope} ${householdId ?? ""}`;
+// The wrap's auth tag is unique per stored row, so an entry cached for a key
+// minted in a transaction that later rolled back is never served for the
+// row that replaces it.
+function cacheKey(row: WrappedKey & { keyId: string }, scope: MetadataKeyScope, householdId: string | null): string {
+  return `${row.keyId} ${scope} ${householdId ?? ""} ${row.wrapAuthTag}`;
 }
 
 /** Test-only: the cache outlives a `resetDocumentConfigForTests` otherwise. */
@@ -82,7 +85,7 @@ function unwrapRow(
   householdId: string | null,
   config: DocumentConfig,
 ): MetadataKeyMaterial {
-  const cached = unwrappedKeys.get(cacheKey(row.keyId, scope, householdId));
+  const cached = unwrappedKeys.get(cacheKey(row, scope, householdId));
   if (cached) return { scope, householdId, keyId: row.keyId, dataKey: cached };
   // The row's own `key_id` picks which held key unwraps it (#954, ADR-0024
   // decision 4): a row the rewrap worker has not reached yet is still
@@ -100,7 +103,7 @@ function unwrapRow(
     // overwrites anything.
     throw new MetadataKeyLockedError();
   }
-  unwrappedKeys.set(cacheKey(row.keyId, scope, householdId), dataKey);
+  unwrappedKeys.set(cacheKey(row, scope, householdId), dataKey);
   return { scope, householdId, keyId: row.keyId, dataKey };
 }
 

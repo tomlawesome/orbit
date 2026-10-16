@@ -7,12 +7,11 @@
  * deliberately preserved rather than rewritten: their durable evidence is what
  * the purge job's retry depends on.
  */
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documentStagingObjects, documents } from "@/db/schema";
+import { auditLog, documentCrypto, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionStagingObjects } from "@/db/schema";
 import { log } from "@/lib/logger";
-import { getDocumentConfig } from "@/server/documents/config";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { openDocumentStorage } from "@/server/documents/storage";
 import { reconcileMissingDocument } from "@/server/documents/reconciliation";
 import { workerState } from "@/server/document-maintenance/worker-state";
 
@@ -39,9 +38,32 @@ export async function rejectInterruptedDocuments(): Promise<void> {
   }
 }
 
+/**
+ * A staged upload (#1316) that no item bound before its `delete_after` goes the
+ * way a member's deletion does: `pending_deletion` with a purge job, which the
+ * retention purge then finishes. Nothing else ever queues a purge for it.
+ */
+async function retireUnboundUploads(): Promise<void> {
+  const retired = await getDb().execute(sql`
+    with expired as (
+      update documents
+      set lifecycle = 'pending_deletion', version = version + 1, updated_at = now()
+      where lifecycle = 'available' and item_id is null and delete_after <= now()
+      returning id, version
+    )
+    insert into document_jobs (document_id, kind, generation)
+    select id, 'purge', version from expired
+    on conflict do nothing
+    returning document_id
+  `);
+  if (retired.length > 0) {
+    log.info({ event: "document.lifecycle", state: "stopping", action: "none" });
+  }
+}
+
 export async function reconcileDocumentStorage(): Promise<void> {
-  const config = getDocumentConfig();
-  const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  const storage = openDocumentStorage();
+  await retireUnboundUploads();
   const staleBoundary = new Date(Date.now() - 60 * 60 * 1_000);
   await getDb().update(documents).set({ lifecycle: "rejected", failureCode: "processing_interrupted", updatedAt: new Date() }).where(and(
     eq(documents.lifecycle, "scanning"),
@@ -153,6 +175,16 @@ export async function reconcileDocumentStorage(): Promise<void> {
     }
   }
 
+  // Held mail-in attachments live in the same objects tree for as long as
+  // their receipt is retained, which can be far longer than a day; until
+  // their own purge path removes them they are referenced, not orphans.
+  const heldAttachments = await getDb().select({ storageKey: imapIngestionAttachments.storageKey }).from(imapIngestionAttachments).where(or(
+    eq(imapIngestionAttachments.status, "stored"),
+    and(eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.purgePending, true)),
+  ));
+  const heldStagingObjects = await getDb().select({ storageKey: imapIngestionStagingObjects.storageKey }).from(imapIngestionStagingObjects);
+  for (const row of [...heldAttachments, ...heldStagingObjects]) referencedKeys.add(row.storageKey);
+
   const orphanBoundary = Date.now() - 24 * 60 * 60 * 1_000;
   for (const object of await storage.listCiphertextObjects()) {
     if (!referencedKeys.has(object.storageKey) && object.modifiedAt.getTime() < orphanBoundary) {
@@ -168,5 +200,6 @@ export async function reconcileDocumentStorage(): Promise<void> {
   for (const quarantine of await storage.listQuarantineFiles()) {
     if (quarantine.modifiedAt.getTime() < orphanBoundary) await storage.discardQuarantine(quarantine.path);
   }
+  await storage.sweepTemporaryFiles(60 * 60 * 1_000);
   workerState.__orbitDocumentWorkerLastReconciliationAt = new Date().toISOString();
 }

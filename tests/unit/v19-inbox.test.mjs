@@ -9,7 +9,7 @@ const READY = {
   id: "r-1", status: "pending_review", householdId: "hh-1", draftVersion: 2,
   expiresAt: "2026-09-27T00:00:00.000Z", receivedAt: "2026-08-13T09:00:00.000Z",
   attachmentCount: 1, classification: "ready", canApprove: true, canDiscard: true,
-  cleanupOnly: false, message: "Ready for your review.",
+  message: "Ready for your review.",
   proposal: { title: "Home insurance renewal", dueDate: "2026-10-03", costMinor: 40000, currency: "GBP", scheduleKind: "renewal", recurrenceMonths: 12 },
   fieldEvidence: { title: { source: "document", confidence: "high" } },
 };
@@ -89,10 +89,9 @@ describe("approvalItemOf", () => {
     });
     expect(approvalItemOf({}, "EUR")).toEqual({ title: "Forwarded email", currency: "EUR" });
   });
-  it("never sends a schedule without a date, nor recurrence without a schedule", () => {
+  it("sends the relay's reading unjudged: a dateless schedule is the engine's to drop (#1325)", () => {
     const item = approvalItemOf({ title: "x", scheduleKind: "renewal", recurrenceMonths: 12 }, "GBP");
-    expect(item.scheduleKind).toBeUndefined();
-    expect(item.recurrenceMonths).toBeUndefined();
+    expect(item).toMatchObject({ scheduleKind: "renewal", recurrenceMonths: 12 });
   });
 });
 

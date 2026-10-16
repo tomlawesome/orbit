@@ -7,8 +7,7 @@
 # real git call would both leave evidence and abort the run.
 #
 # Extracted verbatim from the "Prepare empty installer target and Git guard"
-# step of the &container_validation_steps anchor in
-# .github/workflows/publish-container.yml (#801).
+# step of the retired GitHub container workflow, which the GitLab `acceptance` job now runs (#801).
 #
 # Inputs (environment): RUNNER_TEMP, optional; defaults to $TMPDIR or /tmp.
 #

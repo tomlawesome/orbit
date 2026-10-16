@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -76,7 +76,7 @@ describe("installer guarantee catalogue aggregates", () => {
     // silently merged into its neighbour) would otherwise show up only as a
     // suspiciously small total further down.
     expect(part1Sections.length).toBeGreaterThanOrEqual(7);
-    expect(part2Sections.length).toBeGreaterThanOrEqual(9);
+    expect(part2Sections.length).toBeGreaterThanOrEqual(8);
   });
 
   it("Part 1's per-script table matches the numbered entries in each section", () => {
@@ -133,6 +133,15 @@ describe("installer guarantee catalogue aggregates", () => {
     expect(Number(installFamilyTotal), "Install/configuration family total").toBe(part1ActualTotal);
     expect(Number(backupFamilyTotal), "Backup/recovery/deploy family total").toBe(part2ActualTotal);
     expect(Number(documentTotal), "document-wide total").toBe(part1ActualTotal + part2ActualTotal);
+  });
+
+  it("catalogues only scripts that still exist (#1403 D5)", () => {
+    // A section for a deleted script (configuration.sh, generate-vapid.mjs)
+    // keeps guarantees nothing can break any more and inflates every tally.
+    const missing = sections
+      .map((section) => section.name)
+      .filter((name) => !existsSync(new URL(`./${name}`, import.meta.url)));
+    expect(missing).toEqual([]);
   });
 
   it("no script section heading still says the executor doesn't exist yet", () => {

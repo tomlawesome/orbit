@@ -31,10 +31,12 @@ export type MetadataKeyScope = "household" | "instance";
  * envelope and one rewrap path. Bound into the content AAD, so a value cannot
  * be replayed into another row or another column.
  *
- * The last two are account addresses and sit under the INSTANCE key, not a
- * household one (#969): a user belongs to several households, so no household
- * owns their address, and a sender address is matched before any household is
- * known. Everything above them is household-scoped except an unattributed
+ * `users.email` and `mail_in_sender_addresses.address` are account addresses
+ * and sit under the INSTANCE key, not a household one (#969): a user belongs
+ * to several households, so no household owns their address, and a sender
+ * address is matched before any household is known. `sessions.id_token` (the
+ * provider's ID token kept for sign-out, #1316) is under the instance key for
+ * the same reason. Everything else is household-scoped except an unattributed
  * mail-in receipt, which already reads under the instance key.
  */
 export type MetadataColumn =
@@ -47,7 +49,8 @@ export type MetadataColumn =
   | "imap_ingestion_messages.field_evidence"
   | "household_invitations.email"
   | "users.email"
-  | "mail_in_sender_addresses.address";
+  | "mail_in_sender_addresses.address"
+  | "sessions.id_token";
 
 /** Identifies exactly one value: which column, and which row of it. */
 export interface MetadataValueContext {
@@ -196,8 +199,8 @@ export function decryptMetadataValue(stored: string, dataKey: Buffer, context: M
  *
  * Control characters are scanned explicitly rather than matched by a
  * hand-written regular-expression range: losing an escape in such a range
- * silently widens it to ordinary characters (AGENTS.md, "Traps when running
- * things locally").
+ * silently widens it to ordinary characters (docs/testing.md, "Local
+ * traps").
  */
 export function normalizeComparableMetadata(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;

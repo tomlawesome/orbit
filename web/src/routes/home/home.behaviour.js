@@ -14,6 +14,9 @@
  *   2. The mockup's inline on* attributes are wired here as listeners instead.
  *      Inline handlers need their functions to be globals; a module has none.
  */
+import { goto } from "$app/navigation";
+import { resolve } from "$app/paths";
+import { holdDocument } from "$lib/data/held-document.js";
 import { fillStarTiles } from "$lib/sky.js";
 import { screenScope } from "$lib/teardown.js";
 import { placeGalaxy } from "./placement.js";
@@ -38,9 +41,9 @@ export const sunHref = (id) => `/household/${encodeURIComponent(id)}`;
  * THE CONSTELLATION MARKER'S OWN GEOMETRY (#1151 W1-Q12): the ring centre
  * and the leader-line's "extends away from the dial" veer path (owner,
  * 2026-08-16), shared between the live sky's renderGalaxy() below and the
- * newcomer's labelled sky's mountEmptySky() further down — one builds its
- * marker as an innerHTML SVG string, the other with createElementNS, but
- * both drew the identical ring/veer numbers from scratch before this. mx()
+ * newcomer's labelled sky's mountEmptySky() further down — both build their
+ * marker node by node with svgChild(), and both drew the identical ring/veer
+ * numbers from scratch before this. mx()
  * mirrors any drawn x through the 210-wide viewBox: a constellation left of
  * centre reads leftward (the original layout, ring at svg x 118), one right
  * of centre is the horizontal mirror (ring at x 92, text end-anchored).
@@ -61,14 +64,34 @@ function markerVeer(width, away) {
     : `M 4 21 H ${width + 10} L ${width + 26} 40`;
 }
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+/**
+ * Appends one SVG element to `svg`. A household's name is another household's
+ * input, so it only ever goes in as `text` (textContent), never through a
+ * markup string (#1316).
+ * @param {Element} svg
+ * @param {string} tag
+ * @param {Record<string, any>} attrs
+ * @param {string} [text]
+ */
+function svgChild(svg, tag, attrs, text) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
+  if (text !== undefined) el.textContent = text;
+  svg.appendChild(el);
+  return el;
+}
+
 /**
  * @param {object} options
  * @param {Record<string, any>} options.galaxy
  * @param {string | null} [options.primary]
  * @param {boolean} [options.fixtures]
  * @param {string} [options.workspace]
+ * @param {(id: string) => void} [options.onopendocs]  the dial callout's
+ *   documents chip: opens that item's drawer with its documents (#1305)
  */
-export function mountHome({ galaxy, primary, fixtures = false, workspace = "" }) {
+export function mountHome({ galaxy, primary, fixtures = false, workspace = "", onopendocs = () => {} }) {
   /*
    * The binder, the timer set and the teardown are $lib/teardown.js's (#445):
    * create and the pocket had each written their own near-copy of this, and
@@ -190,18 +213,24 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       div.style.setProperty("--dim", dim);
       const label = hh.name.toUpperCase();
       const tw = Math.min(150, label.length * 6.6);
-      div.innerHTML = `<svg width="210" height="160" viewBox="0 0 210 160">
-        <text x="${markerX(6, away)}" y="14" font-size="9.5" letter-spacing=".14em"${away ? ' text-anchor="end"' : ""} style="fill:var(--accent-text)" opacity=".85">${label}</text>
-        <path d="${markerVeer(tw, away)}" fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55"/>
-        <circle class="msring" cx="${ringX}" cy="95" r="40" fill="none" style="stroke:var(--chart-line)" stroke-opacity=".5" stroke-width="1"/>
-        <!-- #638: the real hit target — fill="none" above doesn't hit-test,
-             fill="transparent" does. home.css turns off pointer events on the
-             rest of the (blank) 210x160 box. -->
-        <circle class="mshit" cx="${ringX}" cy="95" r="40" fill="transparent"/>
-        <circle cx="${ringX}" cy="95" r="3" style="fill:var(--ink)" opacity=".8"/>
-        ${hh.planets.map((/** @type {[number, number, number, string]} */ [px, py, pr, tok]) =>
-          `<circle cx="${ringX + px}" cy="${95 + py}" r="${pr}" style="fill:var(${tok})" opacity=".55"/>`).join("")}
-      </svg>`;
+      // built node by node: the name is another household's input, so it
+      // goes in as text and can never become markup (#1316)
+      const svg = document.createElementNS(SVG_NS, "svg");
+      svg.setAttribute("width", "210"); svg.setAttribute("height", "160");
+      svg.setAttribute("viewBox", "0 0 210 160");
+      const name = svgChild(svg, "text", { x: markerX(6, away), y: 14, "font-size": "9.5", "letter-spacing": ".14em", style: "fill:var(--accent-text)", opacity: ".85" }, label);
+      if (away) name.setAttribute("text-anchor", "end");
+      svgChild(svg, "path", { d: markerVeer(tw, away), fill: "none", style: "stroke:var(--accent)", "stroke-width": "1", opacity: ".55" });
+      svgChild(svg, "circle", { class: "msring", cx: ringX, cy: 95, r: 40, fill: "none", style: "stroke:var(--chart-line)", "stroke-opacity": ".5", "stroke-width": "1" });
+      // #638: the real hit target — fill="none" above doesn't hit-test,
+      // fill="transparent" does. home.css turns off pointer events on the
+      // rest of the (blank) 210x160 box.
+      svgChild(svg, "circle", { class: "mshit", cx: ringX, cy: 95, r: 40, fill: "transparent" });
+      svgChild(svg, "circle", { cx: ringX, cy: 95, r: 3, style: "fill:var(--ink)", opacity: ".8" });
+      for (const [px, py, pr, tok] of /** @type {[number, number, number, string][]} */ (hh.planets)) {
+        svgChild(svg, "circle", { cx: ringX + px, cy: 95 + py, r: pr, style: `fill:var(${tok})`, opacity: ".55" });
+      }
+      div.appendChild(svg);
       div.addEventListener("click", () => flyTo(key, div));
       hero.appendChild(div);
       corrections.push({ div, away });
@@ -302,7 +331,14 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       if (docs) {
         const chip = /** @type {HTMLElement} */ (callout.querySelector(".chip"));
         chip.textContent = "◆ " + docs + (docs === "1" ? " document" : " documents");
-        chip.onclick = () => openDocsByTitle(/** @type {string} */ (link.dataset.title));
+        /* #1305: the item's own drawer, its real documents -- never a
+           dialog of made-up ones. The click stops here, or home's own
+           click-off rule would put away the drawer it has just opened. */
+        chip.onclick = (event) => {
+          event.stopPropagation();
+          callout.classList.remove("show");
+          onopendocs(/** @type {string} */ (link.dataset.body));
+        };
       }
       callout.classList.add("show");
       document.querySelector("#" + link.dataset.body)?.classList.add("lit");
@@ -338,12 +374,6 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       event.preventDefault(); /** @type {HTMLElement} */ (document.getElementById("explore")).focus();
     }
   });
-  /** @param {string} title */
-  function openDocsByTitle(title){
-    callout.classList.remove("show");
-    /** @type {HTMLElement} */ (document.getElementById("docview-title")).textContent = title;
-    /** @type {HTMLElement} */ (document.getElementById("docview")).classList.add("open");
-  }
   callout.addEventListener("mouseleave", () => callout.classList.remove("show"));
   /* The status-drawer handle's `health-degraded` body class is now owned by
      +page.svelte's own `$effect`, reactive to the real `systemStatus` read
@@ -389,7 +419,6 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     ["#createdrawer", "create"],
     ["#statusdrawer", "statusdrawer"],
     ["#keydrawer", "keydrawer"],
-    ["#docview", "docview"],
     ["#account", "account"],
     ["button.orb", "account"],
   ];
@@ -406,7 +435,6 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
         drawer.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", "false");
       }
     }
-    if (keep !== "docview") document.getElementById("docview")?.classList.remove("open");
     if (keep !== "account") {
       const account = document.getElementById("account");
       if (account?.classList.contains("open")) {
@@ -594,8 +622,39 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     });
   }
 
-  on(document.querySelector("#docview .close"), "click", () =>
-    /** @type {HTMLElement} */ (document.getElementById("docview")).classList.remove("open"));
+  /* #1243: the quick add's drop box. It takes a dropped file, or opens the
+     system file picker on a click or Enter, and hands the file to the full
+     form, which reads, previews and attaches it. */
+  const quickDrop = document.getElementById("cdrop");
+  if (quickDrop) {
+    const picker = document.createElement("input");
+    picker.type = "file";
+    picker.hidden = true;
+    picker.accept = ".pdf,.eml,image/*";
+    quickDrop.after(picker);
+    const handOver = (/** @type {File | null | undefined} */ file) => {
+      if (!file) return;
+      holdDocument(file);
+      void goto(resolve("/create"));
+    };
+    on(quickDrop, "click", () => picker.click());
+    on(quickDrop, "keydown", (/** @type {KeyboardEvent} */ event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      picker.click();
+    });
+    on(picker, "change", () => handOver(picker.files?.[0]));
+    on(quickDrop, "dragover", (/** @type {DragEvent} */ event) => {
+      event.preventDefault();
+      quickDrop.classList.add("over");
+    });
+    on(quickDrop, "dragleave", () => quickDrop.classList.remove("over"));
+    on(quickDrop, "drop", (/** @type {DragEvent} */ event) => {
+      event.preventDefault();
+      quickDrop.classList.remove("over");
+      handOver(event.dataTransfer?.files?.[0]);
+    });
+  }
 
   /*
    * Hand the document back exactly as home found it. Everything below lives
@@ -743,22 +802,11 @@ export function mountEmptySky({ galaxy, onAsk }) {
       const label = hh.name.toUpperCase();
       const tw = Math.min(150, label.length * 6.6);
       const veer = markerVeer(tw, away);
-      const svgNS = "http://www.w3.org/2000/svg";
-      const svg = document.createElementNS(svgNS, "svg");
+      const svg = document.createElementNS(SVG_NS, "svg");
       svg.setAttribute("width", "210"); svg.setAttribute("height", "160");
       svg.setAttribute("viewBox", "0 0 210 160");
-      /**
-       * @param {string} tag
-       * @param {Record<string, any>} attrs
-       * @param {string} [text]
-       */
-      const put = (tag, attrs, text) => {
-        const el = document.createElementNS(svgNS, tag);
-        for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
-        if (text !== undefined) el.textContent = text;
-        svg.appendChild(el);
-        return el;
-      };
+      /** @type {(tag: string, attrs: Record<string, any>, text?: string) => Element} */
+      const put = (tag, attrs, text) => svgChild(svg, tag, attrs, text);
       const name = put("text", { x: markerX(6, away), y: 14, "font-size": "9.5", "letter-spacing": ".14em", style: "fill:var(--accent-text)", opacity: ".85" }, label);
       if (away) name.setAttribute("text-anchor", "end");
       put("path", { d: veer, fill: "none", style: "stroke:var(--accent)", "stroke-width": "1", opacity: ".55" });

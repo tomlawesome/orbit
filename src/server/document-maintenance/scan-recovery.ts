@@ -7,27 +7,32 @@
  * write re-checks that token and the document generation. The staged
  * ciphertext is decrypted under the `scanner_recovery` purpose, written to
  * quarantine, scanned, and the quarantine copy discarded before anything
- * else. Only a `clean` result reaches encryption, a ciphertext write and the
- * publish transaction; a retryable outage reschedules the job, and every
- * other outcome ends the recovery terminally with the stage purged.
+ * else. Only a `clean` result reaches the structure check (ADR-0033: nothing
+ * opened the staged bytes before this scan), and only a file that passes it
+ * reaches encryption, a ciphertext write and the publish transaction; a
+ * retryable outage reschedules the job, and every other outcome ends the
+ * recovery terminally with the stage purged.
  */
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
 import { log } from "@/lib/logger";
-import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
-import { LocalDocumentStorage } from "@/server/documents/storage";
-import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
+import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
+import { openDocumentStorage } from "@/server/documents/storage";
+import { decryptDocument, encryptDocument, envelopeOf } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
+import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
+import { validateSupportedDocumentStructure, type SupportedDocumentMediaType } from "@/server/documents/validation";
 import {
   isScannerRecoveryExpired,
-  retryableScannerFailureCode,
   scannerRecoveryDelayMs,
   SCANNER_RECOVERY_MAX_ATTEMPTS,
 } from "@/server/documents/staging";
 import {
   JOB_CLAIM_UPDATE,
-  operationalDocumentReason,
+  completeJob,
+  failJob,
+  holdsJobLease,
   type ClaimedScanJob,
   type ScanRecoveryRecord,
 } from "@/server/document-maintenance/claims";
@@ -36,6 +41,23 @@ import {
   markStagingPurgeFailure,
   purgeScannerStage,
 } from "@/server/document-maintenance/staging-purge";
+
+/**
+ * A staged object wrapped under a key id this instance does not hold (#1260),
+ * for instance after a restore onto an instance with different keys, a wrong
+ * key mount, or a key rotation finished before the stage was scanned. Each of
+ * those can be put right by giving the instance the key back, so the job is
+ * retried as `key_unavailable` (and, once its attempts run out, waits as a
+ * failed job an administrator can retry) until the key returns or the stage's
+ * recovery expiry passes; the expiry purge is the terminal end, never this
+ * error.
+ */
+export class StagingKeyNotHeldError extends Error {
+  constructor() {
+    super("staging object's key is not held by this instance");
+    this.name = "StagingKeyNotHeldError";
+  }
+}
 
 export async function claimScannerRecoveryJobs(limit = 25): Promise<ClaimedScanJob[]> {
   const rows = await getDb().execute(sql<ClaimedScanJob>`
@@ -72,7 +94,9 @@ export async function claimScannerRecoveryJobs(limit = 25): Promise<ClaimedScanJ
 async function readOwnedScanRecord(job: ClaimedScanJob): Promise<ScanRecoveryRecord | undefined> {
   const rows = await getDb().execute(sql<ScanRecoveryRecord>`
     select document.household_id as "householdId",
-           document.item_id as "itemId",
+           -- The id the staged ciphertext was sealed under; a staged upload
+           -- may not be bound to its item yet.
+           coalesce(document.sealed_item_id, document.item_id) as "itemId",
            document.media_type as "mediaType",
            document.size_bytes as "sizeBytes",
            document.display_name as "displayName",
@@ -106,59 +130,33 @@ async function readOwnedScanRecord(job: ClaimedScanJob): Promise<ScanRecoveryRec
   return { ...record, recoveryExpiresAt };
 }
 
-async function clearScanJob(job: ClaimedScanJob, status: "completed" | "cancelled", lastError: string | null = null): Promise<boolean> {
-  const changed = await getDb().update(documentJobs).set({
-    status,
-    completedAt: new Date(),
-    lockedAt: null,
-    leaseExpiresAt: null,
-    leaseToken: null,
-    lastError,
-    updatedAt: new Date(),
-  }).where(and(
-    eq(documentJobs.id, job.id),
+/** The job, its document, kind and generation, still processing under this lease. */
+function holdsScanJob(job: ClaimedScanJob): SQL {
+  return and(
+    holdsJobLease(job),
     eq(documentJobs.documentId, job.documentId),
     eq(documentJobs.kind, "scan"),
     eq(documentJobs.generation, job.generation),
-    eq(documentJobs.status, "processing"),
-    eq(documentJobs.leaseToken, job.leaseToken),
-  )).returning({ id: documentJobs.id });
-  return changed.length === 1;
+  ) as SQL;
+}
+
+async function clearScanJob(job: ClaimedScanJob, status: "completed" | "cancelled", lastError: string | null = null): Promise<boolean> {
+  return completeJob(getDb(), holdsScanJob(job), { status, lastError });
 }
 
 export async function failScannerRecoveryJob(job: ClaimedScanJob, failureCode: string): Promise<void> {
-  const [current] = await getDb().select({ attempts: documentJobs.attempts })
-    .from(documentJobs)
-    .where(and(eq(documentJobs.id, job.id), eq(documentJobs.status, "processing"), eq(documentJobs.leaseToken, job.leaseToken)))
-    .limit(1);
-  if (!current) return;
-  const exhausted = current.attempts >= SCANNER_RECOVERY_MAX_ATTEMPTS;
-  const nextAttemptAt = new Date(Date.now() + scannerRecoveryDelayMs(current.attempts + 1));
-  await getDb().update(documentJobs).set({
-    status: exhausted ? "failed" : "retry",
-    nextAttemptAt,
-    lockedAt: null,
-    leaseExpiresAt: null,
-    leaseToken: null,
-    lastError: failureCode,
-    updatedAt: new Date(),
-  }).where(and(
-    eq(documentJobs.id, job.id),
-    eq(documentJobs.status, "processing"),
-    eq(documentJobs.leaseToken, job.leaseToken),
-  ));
-  log.warn({
-    event: "document.job",
-    state: exhausted ? "exhausted" : "retrying",
-    reason: operationalDocumentReason(failureCode),
-    action: exhausted ? "inspect_admin_diagnostics" : "retry_job",
-    impact: "document_processing_blocked",
+  await failJob({
+    db: getDb(),
+    owns: holdsJobLease(job),
+    code: failureCode,
+    maxAttempts: SCANNER_RECOVERY_MAX_ATTEMPTS,
+    retryDelayMs: scannerRecoveryDelayMs,
   });
 }
 
 export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<void> {
   const config = getDocumentConfig();
-  const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  const storage = openDocumentStorage(config);
   const record = await readOwnedScanRecord(job);
   if (!record) {
     await clearScanJob(job, "cancelled", "staging_object_missing");
@@ -179,12 +177,14 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
   let finalStorageKey: string | undefined;
   let availabilityFinalized = false;
   try {
-    ciphertext = await storage.readStagingCiphertext(record.stagingStorageKey, config.maxBytes);
+    // Staged under whatever limit applied when it was uploaded, so it is read
+    // against the hard ceiling: lowering the limit (#1285) must not strand it.
+    ciphertext = await storage.readStagingCiphertext(record.stagingStorageKey, DOCUMENT_MAX_BYTES_CEILING);
     // Picks by the staged object's own key_id (#954): held staging objects
     // outlive a poll cycle (up to `scanRecoveryRetentionHours`), long enough
     // to span a rotation window.
     const stagingKek = keyEncryptionKeyFor(config, record.keyId);
-    if (!stagingKek) throw new Error("staging object's key is not held by this instance");
+    if (!stagingKek) throw new StagingKeyNotHeldError();
     plaintext = decryptDocument(ciphertext!, {
       documentId: job.documentId,
       householdId: record.householdId,
@@ -192,27 +192,24 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
       mediaType: record.mediaType,
       plaintextSize: record.sizeBytes,
       purpose: "scanner_recovery",
-    }, {
-      envelopeVersion: record.envelopeVersion,
-      algorithm: "aes-256-gcm",
-      keyId: record.keyId,
-      contentIv: record.contentIv,
-      contentAuthTag: record.contentAuthTag,
-      wrappedDek: record.wrappedDek,
-      wrapIv: record.wrapIv,
-      wrapAuthTag: record.wrapAuthTag,
-    } as DocumentCryptoEnvelope, stagingKek);
+    }, envelopeOf(record), stagingKek);
     quarantinePath = await storage.writeQuarantineBytes(job.documentId, plaintext);
-    const scan = await scanFileWithClamAv(quarantinePath, config.clamAv);
+    const outcome = classifyScan(await scanFileWithClamAv(quarantinePath, config.clamAv), documentScanCodes);
     await storage.discardQuarantine(quarantinePath);
     quarantinePath = undefined;
-    if (scan.status !== "clean") {
-      const retryable = retryableScannerFailureCode(scan);
-      if (retryable) {
-        await failScannerRecoveryJob(job, retryable);
+    if (outcome.status !== "clean") {
+      if (outcome.retryable) {
+        await failScannerRecoveryJob(job, outcome.code);
         return;
       }
-      await purgeScannerStage(job, record, scan.status === "infected" ? "malware_detected" : "scanner_failed");
+      await purgeScannerStage(job, record, outcome.code);
+      return;
+    }
+    // ADR-0033: a staged upload was held before anything opened it, so the
+    // renderer's structure check runs here, after the recovery scan passed,
+    // exactly where the upload path would have run it.
+    if (!await validateSupportedDocumentStructure(plaintext, record.mediaType as SupportedDocumentMediaType)) {
+      await purgeScannerStage(job, record, "unsupported_structure");
       return;
     }
     finalStorageKey = storage.createStorageKey();
@@ -258,8 +255,7 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
       await transaction.insert(documentCrypto).values({ documentId: job.documentId, storageKey: finalStorageKey!, ciphertextSize: encrypted.ciphertext.length, ...encrypted.envelope });
       await transaction.update(documentStagingObjects).set({ status: "purge_pending", purgeFailureCode: null, updatedAt: now })
         .where(and(eq(documentStagingObjects.documentId, job.documentId), eq(documentStagingObjects.storageKey, record.stagingStorageKey), eq(documentStagingObjects.status, "pending")));
-      await transaction.update(documentJobs).set({ status: "completed", completedAt: now, lockedAt: null, leaseExpiresAt: null, leaseToken: null, lastError: null, updatedAt: now })
-        .where(and(eq(documentJobs.id, job.id), eq(documentJobs.status, "processing"), eq(documentJobs.leaseToken, job.leaseToken)));
+      await completeJob(transaction, holdsJobLease(job), { now });
       const pendingOperations = await transaction.select({ id: reviewedIntakeOperations.id, actorUserId: reviewedIntakeOperations.actorUserId, resultId: reviewedIntakeOperations.resultId })
         .from(reviewedIntakeOperations).where(and(eq(reviewedIntakeOperations.documentId, job.documentId), inArray(reviewedIntakeOperations.status, ["pending_attachment", "recoverable"])));
       for (const operation of pendingOperations) {
@@ -293,6 +289,11 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
       return;
     }
     if (finalStorageKey) await storage.deleteCiphertext(finalStorageKey).catch(() => undefined);
+    // Never purged here: the staged copy is the only one, and the key can come back.
+    if (error instanceof StagingKeyNotHeldError) {
+      await failScannerRecoveryJob(job, "key_unavailable");
+      return;
+    }
     if (error instanceof Error && /authentication|invalid|unsupported|size|enoent|no such file/i.test(error.message)) {
       await purgeScannerStage(job, record, "staging_object_invalid");
       return;

@@ -70,7 +70,3 @@ export async function rasteriseSvg(key, svg, w, h) {
   cache.set(key, url);
   return url;
 }
-
-export function clearRasterCache() {
-  cache.clear();
-}

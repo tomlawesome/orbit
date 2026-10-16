@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { MetadataKeyLockedError } from "@/server/metadata/keys";
-import { MetadataCipher } from "@/server/metadata/fields";
+import { MetadataCipher, metadataLockedError } from "@/server/metadata/fields";
 
 const rowId = "55555555-5555-4555-8555-555555555555";
 const householdId = "66666666-6666-4666-8666-666666666666";
@@ -10,20 +10,13 @@ function cipher(): MetadataCipher {
   return new MetadataCipher({ scope: "household", householdId, keyId: "key-one", dataKey: randomBytes(32) });
 }
 
-describe("the Tier 1 dual read (ADR-0024 decision 3)", () => {
-  it("reads the plaintext column while a row is still waiting for the backfill", () => {
-    expect(cipher().text("items.notes", rowId, { encrypted: null, plaintext: "still plain" }))
-      .toEqual({ value: "still plain" });
-  });
-
-  it("reads the ciphertext once a row has been converted", () => {
+describe("the Tier 1 encrypted read (ADR-0024 decision 3)", () => {
+  it("reads the ciphertext", () => {
     const metadata = cipher();
     const encrypted = metadata.encryptText("items.notes", rowId, "the note");
     expect(encrypted).not.toBeNull();
     expect(encrypted).not.toContain("the note");
-    // The write clears the plaintext in the same statement, which is why the
-    // fallback below is null rather than a stale copy of the old value.
-    expect(metadata.text("items.notes", rowId, { encrypted, plaintext: null })).toEqual({ value: "the note" });
+    expect(metadata.text("items.notes", rowId, { encrypted })).toEqual({ value: "the note" });
   });
 
   it("stores nothing for an absent or empty value", () => {
@@ -38,7 +31,7 @@ describe("the Tier 1 dual read (ADR-0024 decision 3)", () => {
     const proposal = { title: "Broadband", reference: "AB-123" };
     const encrypted = metadata.encryptJson("imap_ingestion_messages.proposal", rowId, proposal);
     expect(encrypted).not.toContain("Broadband");
-    expect(metadata.json("imap_ingestion_messages.proposal", rowId, { encrypted, plaintext: {} }))
+    expect(metadata.json("imap_ingestion_messages.proposal", rowId, { encrypted }))
       .toEqual({ value: proposal });
   });
 });
@@ -47,7 +40,7 @@ describe("a damaged Tier 1 value (ADR-0024 decision 5)", () => {
   it("is refused as metadata_integrity_failed rather than shown empty or fabricated", () => {
     const metadata = cipher();
     const damaged = metadata.encryptText("items.notes", rowId, "the note")!.slice(0, -4) + "AAAA";
-    const result = metadata.text("items.notes", rowId, { encrypted: damaged, plaintext: null });
+    const result = metadata.text("items.notes", rowId, { encrypted: damaged });
     expect(result.state).toBe("metadata_integrity_failed");
     expect(result.value).toBeNull();
   });
@@ -58,9 +51,9 @@ describe("a damaged Tier 1 value (ADR-0024 decision 5)", () => {
     const reference = metadata.encryptText("items.reference", rowId, "AB-123")!;
     const damagedReference = reference.slice(0, -4) + "AAAA";
 
-    expect(metadata.text("items.reference", rowId, { encrypted: damagedReference, plaintext: null }))
+    expect(metadata.text("items.reference", rowId, { encrypted: damagedReference }))
       .toEqual({ value: null, state: "metadata_integrity_failed" });
-    expect(metadata.text("items.notes", rowId, { encrypted: notes, plaintext: null }))
+    expect(metadata.text("items.notes", rowId, { encrypted: notes }))
       .toEqual({ value: "the note" });
   });
 
@@ -68,7 +61,7 @@ describe("a damaged Tier 1 value (ADR-0024 decision 5)", () => {
     const metadata = cipher();
     const notes = metadata.encryptText("items.notes", rowId, "the note")!;
     const otherRow = "77777777-7777-4777-8777-777777777777";
-    expect(metadata.text("items.notes", otherRow, { encrypted: notes, plaintext: null }).state)
+    expect(metadata.text("items.notes", otherRow, { encrypted: notes }).state)
       .toBe("metadata_integrity_failed");
   });
 
@@ -76,14 +69,14 @@ describe("a damaged Tier 1 value (ADR-0024 decision 5)", () => {
     const metadata = cipher();
     const encrypted = metadata.encryptJson("imap_ingestion_messages.proposal", rowId, { title: "Broadband" });
     const damaged = encrypted.slice(0, -4) + "AAAA";
-    expect(metadata.json("imap_ingestion_messages.proposal", rowId, { encrypted: damaged, plaintext: {} }))
+    expect(metadata.json("imap_ingestion_messages.proposal", rowId, { encrypted: damaged }))
       .toEqual({ value: {}, state: "metadata_integrity_failed" });
   });
 
   it("can be repaired by writing over it", () => {
     const metadata = cipher();
     const repaired = metadata.encryptText("items.notes", rowId, "a fresh note")!;
-    expect(metadata.text("items.notes", rowId, { encrypted: repaired, plaintext: null }))
+    expect(metadata.text("items.notes", rowId, { encrypted: repaired }))
       .toEqual({ value: "a fresh note" });
   });
 });
@@ -92,15 +85,10 @@ describe("a locked instance (ADR-0024 decision 5)", () => {
   const locked = new MetadataCipher(undefined);
 
   it("reads encrypted fields as locked, not as damaged", () => {
-    expect(locked.text("items.notes", rowId, { encrypted: "mdv1.a.b.c", plaintext: null }))
+    expect(locked.text("items.notes", rowId, { encrypted: "mdv1.a.b.c" }))
       .toEqual({ value: null, state: "metadata_locked" });
-    expect(locked.json("imap_ingestion_messages.proposal", rowId, { encrypted: "mdv1.a.b.c", plaintext: {} }))
+    expect(locked.json("imap_ingestion_messages.proposal", rowId, { encrypted: "mdv1.a.b.c" }))
       .toEqual({ value: {}, state: "metadata_locked" });
-  });
-
-  it("still reads rows the backfill has not reached, so the application stays usable", () => {
-    expect(locked.text("items.notes", rowId, { encrypted: null, plaintext: "still plain" }))
-      .toEqual({ value: "still plain" });
   });
 
   it("refuses every write rather than storing something it cannot protect", () => {
@@ -118,7 +106,7 @@ describe("the Tier 2 numeric column (#963)", () => {
     // The figure itself must not survive in the stored bytes: a database file
     // carrying "58200" in the clear would defeat the point of the tier.
     expect(encrypted).not.toContain("58200");
-    expect(metadata.number("items.cost_minor", rowId, { encrypted, plaintext: null }))
+    expect(metadata.number("items.cost_minor", rowId, { encrypted }))
       .toEqual({ value: 58_200 });
   });
 
@@ -126,21 +114,16 @@ describe("the Tier 2 numeric column (#963)", () => {
     const metadata = cipher();
     const zero = metadata.encryptNumber("items.cost_minor", rowId, 0);
     expect(zero).not.toBeNull();
-    expect(metadata.number("items.cost_minor", rowId, { encrypted: zero, plaintext: null }))
+    expect(metadata.number("items.cost_minor", rowId, { encrypted: zero }))
       .toEqual({ value: 0 });
     expect(metadata.encryptNumber("items.cost_minor", rowId, null)).toBeNull();
     expect(metadata.encryptNumber("items.cost_minor", rowId, undefined)).toBeNull();
   });
 
-  it("reads the plaintext column while a row is still waiting for the backfill", () => {
-    expect(cipher().number("items.cost_minor", rowId, { encrypted: null, plaintext: 4_200 }))
-      .toEqual({ value: 4_200 });
-  });
-
   it("reports a damaged cost rather than coercing it to zero or NaN", () => {
     const metadata = cipher();
     const damaged = metadata.encryptNumber("items.cost_minor", rowId, 999)!.slice(0, -4) + "AAAA";
-    expect(metadata.number("items.cost_minor", rowId, { encrypted: damaged, plaintext: null }))
+    expect(metadata.number("items.cost_minor", rowId, { encrypted: damaged }))
       .toEqual({ value: null, state: "metadata_integrity_failed" });
   });
 
@@ -149,7 +132,7 @@ describe("the Tier 2 numeric column (#963)", () => {
     // Authenticated, so it decrypts cleanly; it is simply not a cost. Only a
     // bug in a writer can produce this, and a money field must not guess.
     const notANumber = metadata.encryptText("items.cost_minor", rowId, "-12.5")!;
-    expect(metadata.number("items.cost_minor", rowId, { encrypted: notANumber, plaintext: null }))
+    expect(metadata.number("items.cost_minor", rowId, { encrypted: notANumber }))
       .toEqual({ value: null, state: "metadata_integrity_failed" });
   });
 
@@ -161,7 +144,7 @@ describe("the Tier 2 numeric column (#963)", () => {
 
   it("locks the numeric column exactly as it locks the text ones", () => {
     const locked = new MetadataCipher(undefined);
-    expect(locked.number("items.cost_minor", rowId, { encrypted: "mdv1.a.b.c", plaintext: null }))
+    expect(locked.number("items.cost_minor", rowId, { encrypted: "mdv1.a.b.c" }))
       .toEqual({ value: null, state: "metadata_locked" });
     expect(() => locked.encryptNumber("items.cost_minor", rowId, 1)).toThrow(MetadataKeyLockedError);
   });
@@ -189,10 +172,20 @@ describe("Tier 2 blind indexes (ADR-0024 decision 2, #963)", () => {
     const metadata = cipher();
     const otherRow = "77777777-7777-4777-8777-777777777777";
     const encrypted = metadata.encryptText("items.title", rowId, "Car insurance");
-    expect(metadata.text("items.title", otherRow, { encrypted, plaintext: null }))
+    expect(metadata.text("items.title", otherRow, { encrypted }))
       .toEqual({ value: null, state: "metadata_integrity_failed" });
     // Nor into another column of the same row.
-    expect(metadata.text("items.provider", rowId, { encrypted, plaintext: null }))
+    expect(metadata.text("items.provider", rowId, { encrypted }))
       .toEqual({ value: null, state: "metadata_integrity_failed" });
+  });
+});
+
+describe("the refusal when the key is locked (ADR-0034 decision 4, #1335)", () => {
+  it("carries the engine's own words, so the browser need not word it", () => {
+    const error = metadataLockedError();
+    expect(error.code).toBe("metadata_locked");
+    expect(error.status).toBe(503);
+    expect(error.message)
+      .toBe("not saved \u2014 encrypted details are locked until the key is restored. The stored values are intact.");
   });
 });

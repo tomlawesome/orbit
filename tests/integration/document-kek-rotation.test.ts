@@ -2,12 +2,12 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documents, households, mailInSecrets, metadataKeys } from "@/db/schema";
+import { auditLog, documentCrypto, documents, documentStagingObjects, households, imapIngestionAttachments, imapIngestionMessages, mailInSecrets, metadataKeys } from "@/db/schema";
 import { deriveDocumentKeyId, getDocumentConfig, keyEncryptionKeyFor, resetDocumentConfigForTests, wrappingKey, type DocumentConfig } from "@/server/documents/config";
-import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope, type DocumentEncryptionContext } from "@/server/documents/crypto";
+import { decryptDocument, encryptDocument, type CryptoEnvelope, type DocumentEncryptionContext } from "@/server/documents/crypto";
 import { createWrappedMetadataKey, unwrapMetadataKey, type MetadataKeyContext } from "@/server/metadata/crypto";
 import { loadMetadataKey, resolveMetadataKey, resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
-import { decryptMailInSecret, encryptMailInSecret, type MailInSecretContext, type MailInSecretEnvelope } from "@/server/mail-in/core/secret-crypto";
+import { decryptMailInSecret, encryptMailInSecret, type MailInSecretContext } from "@/server/mail-in/core/secret-crypto";
 import {
   findOpenRotationStart,
   recordRotationCompleted,
@@ -19,6 +19,8 @@ import {
   type RotationKeys,
 } from "@/server/documents/rewrap-worker";
 import { getKekRotationStatus } from "@/server/documents/rotation-status";
+import { purgeHeldImapAttachment, readHeldImapAttachment, scanAndHoldImapAttachment, type HeldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
+import { syntheticPdf } from "../support/synthetic-documents";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
 
 afterAll(async () => {
@@ -87,7 +89,7 @@ async function plantDocument(householdId: string, keyEncryptionKey: Buffer, keyI
   return { documentId, context, ciphertext: encrypted.ciphertext, plaintext };
 }
 
-async function readDocumentEnvelope(documentId: string): Promise<DocumentCryptoEnvelope> {
+async function readDocumentEnvelope(documentId: string): Promise<CryptoEnvelope> {
   const [row] = await getDb().select().from(documentCrypto).where(eq(documentCrypto.documentId, documentId));
   return {
     envelopeVersion: row.envelopeVersion as 1,
@@ -157,7 +159,7 @@ async function readSecretRow(secretId: string) {
   return row;
 }
 
-function secretEnvelopeFromRow(row: { envelopeVersion: number; keyId: string; contentIv: string; contentAuthTag: string; wrappedDek: string; wrapIv: string; wrapAuthTag: string }): MailInSecretEnvelope {
+function secretEnvelopeFromRow(row: { envelopeVersion: number; keyId: string; contentIv: string; contentAuthTag: string; wrappedDek: string; wrapIv: string; wrapAuthTag: string }): CryptoEnvelope {
   return {
     envelopeVersion: row.envelopeVersion as 1,
     algorithm: "aes-256-gcm",
@@ -169,6 +171,210 @@ function secretEnvelopeFromRow(row: { envelopeVersion: number; keyId: string; co
     wrapAuthTag: row.wrapAuthTag,
   };
 }
+
+interface PlantedHeldAttachment {
+  held: HeldImapAttachment;
+  messageId: string;
+  plaintext: Buffer;
+}
+
+/** A mailed attachment held through the real holding path (encrypted file on
+ * disk, ciphertext written under the current key), with the database row the
+ * ingestion worker writes for it. */
+async function plantHeldImapAttachment(): Promise<PlantedHeldAttachment> {
+  const plaintext = syntheticPdf(`held-attachment-${randomUUID()}`);
+  const held = await scanAndHoldImapAttachment({
+    bytes: plaintext,
+    filename: "held.pdf",
+    declaredMediaType: "application/pdf",
+    recipientUserId: randomUUID(),
+    receiptId: randomUUID(),
+  });
+  const [message] = await getDb().insert(imapIngestionMessages).values({
+    mailbox: "rotation-test",
+    mailboxUidValidity: "rotation",
+    mailboxUid: Math.floor(Math.random() * 1_000_000_000),
+    contentSha256: randomUUID().replaceAll("-", ""),
+    recipientAliasSha256: "rotation-alias",
+    status: "pending_review",
+    expiresAt: new Date(Date.now() + 86_400_000),
+    receiptStatus: "pending",
+  }).returning({ id: imapIngestionMessages.id });
+  await getDb().insert(imapIngestionAttachments).values({
+    id: held.id,
+    messageId: message.id,
+    displayName: held.displayName,
+    mediaType: held.mediaType,
+    sizeBytes: held.sizeBytes,
+    contentSha256: held.contentSha256,
+    storageKey: held.storageKey,
+    ciphertextSize: held.ciphertextSize,
+    envelopeVersion: held.envelope.envelopeVersion,
+    contentIv: held.envelope.contentIv,
+    contentAuthTag: held.envelope.contentAuthTag,
+    wrappedDek: held.envelope.wrappedDek,
+    wrapIv: held.envelope.wrapIv,
+    wrapAuthTag: held.envelope.wrapAuthTag,
+    keyId: held.envelope.keyId,
+    status: "stored",
+  });
+  return { held, messageId: message.id, plaintext };
+}
+
+async function readHeldAttachmentRow(id: string) {
+  const [row] = await getDb().select().from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, id));
+  return row;
+}
+
+interface PlantedStagedObject {
+  documentId: string;
+  context: DocumentEncryptionContext;
+  ciphertext: Buffer;
+  plaintext: Buffer;
+}
+
+/** A scanner-recovery staging object, wrapped the way the upload path wraps
+ * one when the scanner is down: the `scanner_recovery` purpose, under the
+ * current key. */
+async function plantScannerRecoveryObject(householdId: string, keyEncryptionKey: Buffer, keyId: string): Promise<PlantedStagedObject> {
+  const documentId = randomUUID();
+  const plaintext = randomBytes(64);
+  const context: DocumentEncryptionContext = {
+    documentId,
+    householdId,
+    itemId: randomUUID(),
+    mediaType: "application/octet-stream",
+    plaintextSize: plaintext.length,
+    purpose: "scanner_recovery",
+  };
+  const staged = encryptDocument(plaintext, context, keyEncryptionKey, keyId);
+  await getDb().insert(documents).values({
+    id: documentId,
+    householdId,
+    itemId: null,
+    displayName: `rotation-staged-${documentId}`,
+    mediaType: context.mediaType,
+    sizeBytes: plaintext.length,
+    contentSha256: createHash("sha256").update(plaintext).digest("hex"),
+    lifecycle: "scanning",
+    scanStatus: "error",
+  });
+  await getDb().insert(documentStagingObjects).values({
+    documentId,
+    storageKey: createHash("sha256").update(`staged-${documentId}`).digest("hex"),
+    purpose: "scanner_recovery",
+    ciphertextSize: staged.ciphertext.length,
+    ...staged.envelope,
+    status: "pending",
+    recoveryExpiresAt: new Date(Date.now() + 86_400_000),
+  });
+  return { documentId, context, ciphertext: staged.ciphertext, plaintext };
+}
+
+async function readStagedObjectRow(documentId: string) {
+  const [row] = await getDb().select().from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId));
+  return row;
+}
+
+/** What `rotationRemaining` counts, summed without naming its fields: the
+ * fix adds fields for the two new populations. */
+function totalRemaining(progress: object): number {
+  return Object.values(progress).reduce<number>((sum, value) => sum + (typeof value === "number" ? value : 0), 0);
+}
+
+describe("held IMAP attachments and scanner-recovery objects rotate too (#1316)", () => {
+  it("moves a held attachment and a staged object to the next key, and reports completion only then", async () => {
+    const household = await plantHousehold("Held and staged rotation household");
+    const current = getDocumentConfig();
+    const originalDocumentKek = process.env.DOCUMENT_KEK;
+    const nextKek = randomBytes(32);
+    const keys = keysFor(nextKek);
+
+    // One row of each of the three existing populations, plus the two new ones.
+    const planted = await plantDocument(household, current.keyEncryptionKey, current.keyId);
+    const plantedKey = await plantMetadataKey(household, current.keyEncryptionKey, current.keyId);
+    const plantedSecret = await plantMailInSecret(current.keyEncryptionKey, current.keyId);
+    const heldPlanted = await plantHeldImapAttachment();
+    const stagedPlanted = await plantScannerRecoveryObject(household, current.keyEncryptionKey, current.keyId);
+    expect(heldPlanted.held.envelope.keyId).toBe(current.keyId);
+    expect((await readStagedObjectRow(stagedPlanted.documentId)).keyId).toBe(current.keyId);
+
+    try {
+      const after = await runKekRotationToCompletion(keys);
+
+      // Both new rows now carry the next key id...
+      expect((await readHeldAttachmentRow(heldPlanted.held.id)).keyId).toBe(keys.nextKeyId);
+      expect((await readStagedObjectRow(stagedPlanted.documentId)).keyId).toBe(keys.nextKeyId);
+      // ...and only then does the worker report nothing left to do.
+      expect(rotationComplete(after)).toBe(true);
+      expect(totalRemaining(after)).toBe(0);
+      expect(totalRemaining(await rotationRemaining(keys))).toBe(0);
+
+      // The held attachment reads back through the real reader, with an
+      // application that holds only the next key (the operator's step 4).
+      process.env.DOCUMENT_KEK = keys.nextKek.toString("hex");
+      delete process.env.DOCUMENT_KEK_NEXT;
+      resetDocumentConfigForTests();
+      const nextOnly = getDocumentConfig();
+      expect(nextOnly.keyId).toBe(keys.nextKeyId);
+      expect(nextOnly.nextKeyId).toBeNull();
+
+      const heldRow = await readHeldAttachmentRow(heldPlanted.held.id);
+      const read = await readHeldImapAttachment(
+        { id: heldRow.id, mediaType: heldRow.mediaType, sizeBytes: heldRow.sizeBytes, storageKey: heldRow.storageKey, envelope: secretEnvelopeFromRow(heldRow) },
+        { recipientUserId: heldPlanted.held.recipientUserId, receiptId: heldPlanted.held.receiptId },
+      );
+      expect(read.equals(heldPlanted.plaintext)).toBe(true);
+
+      // The staged object decrypts under the next key alone, the way the
+      // scanner-recovery job does it: the key chosen by the row's own key id,
+      // the `scanner_recovery` purpose.
+      const stagedRow = await readStagedObjectRow(stagedPlanted.documentId);
+      const stagingKek = keyEncryptionKeyFor(nextOnly, stagedRow.keyId);
+      expect(stagingKek).toBeDefined();
+      const stagedEnvelope = secretEnvelopeFromRow(stagedRow);
+      expect(decryptDocument(stagedPlanted.ciphertext, stagedPlanted.context, stagedEnvelope, stagingKek!).equals(stagedPlanted.plaintext)).toBe(true);
+      expect(() => decryptDocument(stagedPlanted.ciphertext, stagedPlanted.context, stagedEnvelope, keys.currentKek)).toThrow();
+    } finally {
+      if (originalDocumentKek === undefined) delete process.env.DOCUMENT_KEK;
+      else process.env.DOCUMENT_KEK = originalDocumentKek;
+      delete process.env.DOCUMENT_KEK_NEXT;
+      resetDocumentConfigForTests();
+    }
+
+    await purgeHeldImapAttachment(heldPlanted.held.storageKey);
+    await getDb().delete(imapIngestionMessages).where(eq(imapIngestionMessages.id, heldPlanted.messageId));
+    await getDb().delete(documentStagingObjects).where(eq(documentStagingObjects.documentId, stagedPlanted.documentId));
+    await getDb().delete(documents).where(eq(documents.id, stagedPlanted.documentId));
+    await getDb().delete(documentCrypto).where(eq(documentCrypto.documentId, planted.documentId));
+    await getDb().delete(documents).where(eq(documents.id, planted.documentId));
+    await getDb().delete(metadataKeys).where(eq(metadataKeys.householdId, household));
+    await getDb().delete(mailInSecrets).where(eq(mailInSecrets.id, plantedSecret.secretId));
+    await getDb().delete(households).where(eq(households.id, household));
+    expect(plantedKey.householdId).toBe(household);
+  });
+
+  it("does not call a rotation complete while a held attachment or staged object is still on the outgoing key", async () => {
+    const household = await plantHousehold("Held and staged pending household");
+    const current = getDocumentConfig();
+    const keys = keysFor(randomBytes(32));
+
+    const heldPlanted = await plantHeldImapAttachment();
+    const stagedPlanted = await plantScannerRecoveryObject(household, current.keyEncryptionKey, current.keyId);
+
+    // Nothing has run yet, so both rows are on the outgoing key and must show
+    // up as remaining work.
+    const before = await rotationRemaining(keys);
+    expect(rotationComplete(before)).toBe(false);
+    expect(totalRemaining(before)).toBeGreaterThanOrEqual(2);
+
+    await purgeHeldImapAttachment(heldPlanted.held.storageKey);
+    await getDb().delete(imapIngestionMessages).where(eq(imapIngestionMessages.id, heldPlanted.messageId));
+    await getDb().delete(documentStagingObjects).where(eq(documentStagingObjects.documentId, stagedPlanted.documentId));
+    await getDb().delete(documents).where(eq(documents.id, stagedPlanted.documentId));
+    await getDb().delete(households).where(eq(households.id, household));
+  });
+});
 
 describe("the KEK rewrap worker (#932, ADR-0017's contract, ADR-0024 decision 4)", () => {
   it("rewraps document_crypto, metadata_keys and mail_in_secrets rows so they read only under the next key", async () => {

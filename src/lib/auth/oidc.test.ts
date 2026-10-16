@@ -6,6 +6,7 @@ import type { TokenExchangeReason } from "./errors";
 import {
   createAuthorizationUrl,
   completeAuthorization,
+  createProviderLogoutUrl,
   discoverProvider,
   profileFromClaims,
   StaleAuthenticationError,
@@ -115,7 +116,7 @@ describe("OIDC validation", () => {
     const stepUp = createAuthorizationUrl(config, metadata, {
       ...transaction,
       stepUpSessionId: "11111111-1111-4111-8111-111111111111",
-      intent: "primary_transfer",
+      intent: "system_create",
       maxAge: 0,
     });
     expect(stepUp.searchParams.get("max_age")).toBe("0");
@@ -483,5 +484,77 @@ describe("token exchange internal reason classification", () => {
       () => new Response(JSON.stringify({ access_token: "opaque-token-sentinel" }), { status: 200 }),
       "invalid_response",
     );
+  });
+});
+
+/*
+ * #1316 decision 26a: the provider sign-out carries `id_token_hint`
+ * (OpenID Connect RP-Initiated Logout 1.0 section 2), and the token is
+ * handed on from the code exchange untouched.
+ */
+describe("provider sign-out carries the ID token (#1316)", () => {
+  const withEndSession: OidcMetadata = { ...metadata, end_session_endpoint: "https://auth.example/application/o/orbit/end-session/" };
+  const returnTo = new URL("https://orbit.example/logout");
+  const hint = "header.payload.signature-sentinel";
+
+  it("sends the exact ID token, the client id and the way back to the end-session endpoint", () => {
+    const url = createProviderLogoutUrl(config, withEndSession, returnTo, hint);
+    expect(url).not.toBeNull();
+    expect(url!.origin + url!.pathname).toBe("https://auth.example/application/o/orbit/end-session/");
+    expect(url!.searchParams.get("id_token_hint")).toBe(hint);
+    expect(url!.searchParams.get("post_logout_redirect_uri")).toBe(returnTo.href);
+    expect(url!.searchParams.get("client_id")).toBe(config.clientId);
+  });
+
+  it("has nowhere to send the browser without an end-session endpoint", () => {
+    expect(createProviderLogoutUrl(config, metadata, returnTo, hint)).toBeNull();
+  });
+
+  it.each([
+    ["undefined", undefined],
+    ["null", null],
+    ["an empty string", ""],
+  ])("has nothing to hand over without an ID token (%s): no hint, no hand-off", (_label, missing) => {
+    expect(createProviderLogoutUrl(config, withEndSession, returnTo, missing as never)).toBeNull();
+  });
+
+  it("resolves the identity and the byte-identical ID token the provider answered", async () => {
+    const issuer = uniqueIssuer();
+    const providerMetadata: OidcMetadata = {
+      ...metadata,
+      issuer,
+      jwks_uri: `${issuer}jwks`,
+      token_endpoint: `${issuer}token`,
+    };
+    const { privateKey, publicKey } = await generateKeyPair("RS256");
+    const publicJwk = { ...await exportJWK(publicKey), alg: "RS256", kid: "primary", use: "sig" };
+    const idToken = await new SignJWT({ nonce: "nonce", email: "user@example.invalid", email_verified: true })
+      .setProtectedHeader({ alg: "RS256", kid: "primary" })
+      .setIssuer(issuer)
+      .setAudience(config.clientId)
+      .setSubject("immutable-subject")
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(privateKey);
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string | URL) => {
+      const url = String(input);
+      if (url === providerMetadata.token_endpoint) {
+        return Promise.resolve(new Response(JSON.stringify({ id_token: idToken }), { headers: { "content-type": "application/json" } }));
+      }
+      if (url === providerMetadata.jwks_uri) {
+        return Promise.resolve(new Response(JSON.stringify({ keys: [publicJwk] }), { headers: { "content-type": "application/json" } }));
+      }
+      return Promise.reject(new Error("unexpected endpoint"));
+    }));
+
+    const completed = await completeAuthorization({ ...config, issuer }, providerMetadata, "authorization-code-sentinel", {
+      state: "state",
+      nonce: "nonce",
+      codeVerifier: "verifier",
+      returnTo: "/",
+    }) as unknown as { identity: { issuer: string; subject: string; email: string }; idToken: string };
+
+    expect(completed.idToken).toBe(idToken);
+    expect(completed.identity).toMatchObject({ issuer, subject: "immutable-subject", email: "user@example.invalid" });
   });
 });

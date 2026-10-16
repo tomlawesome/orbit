@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -9,6 +9,7 @@ import {
   items,
   memberships,
   notificationStates,
+  portableArchiveImports,
   reminderRules,
   sections,
   sessions,
@@ -19,8 +20,16 @@ import type { ScheduleKind } from "@/lib/domain";
 import { listVisibleHouseholds } from "@/server/join-requests";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { log } from "@/lib/logger";
+import { householdToday } from "@/lib/household-date";
+import { itemOfIntent } from "@/lib/item-kind";
+import { Refusal, snoozeRefusal } from "@/lib/refusals";
+import { nextDueDate } from "@/lib/next-due-date";
 import {
-  itemActivitySchema,
+  completionActivity,
+  namedActivity,
+  statusActivity,
+  storedActivitySchema,
+  workspaceItemSchema,
   workspaceSchema,
   type ItemActivity,
   type WorkspaceCommand,
@@ -30,14 +39,14 @@ import { listableDocumentLifecycles } from "@/server/document-repository";
 import { planOwnershipTransfer } from "@/server/household-ownership";
 import { clearMetadataDamageForRow } from "@/server/metadata/damage-sightings";
 import { openMetadataReaders, requireMetadataWriter } from "@/server/metadata/fields";
+import { requireUuid, validUuid } from "@/lib/uuid";
 import {
   acquireActiveHouseholdLock,
   requireHouseholdAccess,
-  requireUuid,
   sectionSlug,
-  validUuid,
 } from "@/server/workspace-access";
 import { isInstanceAdministrator } from "@/server/authorization";
+import { PORTABLE_IMPORT_LEASE_MS } from "@/server/portable-archive-limits";
 
 /**
  * Reconstructs the normalized database rows into the UI's versioned workspace
@@ -109,10 +118,23 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     });
   }
 
-  const householdIds = householdRows.map((household) => household.id);
-  const activeHouseholdId = preferredHouseholdId && householdIds.includes(preferredHouseholdId)
+  const listedHouseholdIds = householdRows.map((household) => household.id);
+  const activeHouseholdId = preferredHouseholdId && listedHouseholdIds.includes(preferredHouseholdId)
     ? preferredHouseholdId
-    : householdIds[0];
+    : listedHouseholdIds[0];
+  // A household someone else is importing into is closed to this reader
+  // (#1316, owner 2026-10-14; the gate in workspace-access.ts): it is still
+  // listed, by name, but nothing in it is read, so nothing of it travels.
+  const closedHouseholdIds = new Set((await getDb().select({ householdId: portableArchiveImports.householdId, actorUserId: portableArchiveImports.actorUserId })
+    .from(portableArchiveImports)
+    .where(and(
+      inArray(portableArchiveImports.householdId, listedHouseholdIds),
+      isNull(portableArchiveImports.finishedAt),
+      gt(portableArchiveImports.startedAt, new Date(Date.now() - PORTABLE_IMPORT_LEASE_MS)),
+    )))
+    .filter((row) => row.actorUserId !== userId)
+    .map((row) => row.householdId));
+  const householdIds = listedHouseholdIds.filter((id) => !closedHouseholdIds.has(id));
 
   const [sectionRows, itemRows, eventRows, reminderRows, activityRows, memberRows, stateRows, documentCountRows] = await Promise.all([
     getDb().select().from(sections)
@@ -136,7 +158,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     // Only recordActivity's inserts (entityType "item", changes: { activity })
     // feed the item history timeline; every other audit_log write (document
     // lifecycle, membership, household lifecycle, ...) is filtered out by the
-    // itemActivitySchema.safeParse below. Filtering entityType in SQL keeps
+    // storedActivitySchema.safeParse below. Filtering entityType in SQL keeps
     // the 5000-row window from being consumed by rows this read discards
     // anyway (#383).
     getDb().select({ householdId: auditLog.householdId, changes: auditLog.changes, createdAt: auditLog.createdAt })
@@ -146,7 +168,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
       .limit(5_000),
     getDb().select({ householdId: memberships.householdId, userId: memberships.userId, role: memberships.role })
       .from(memberships)
-      .where(inArray(memberships.householdId, householdIds)),
+      .where(inArray(memberships.householdId, listedHouseholdIds)),
     getDb().select().from(notificationStates)
       .where(and(eq(notificationStates.userId, userId), inArray(notificationStates.householdId, householdIds)))
       .orderBy(desc(notificationStates.updatedAt)),
@@ -185,7 +207,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
   for (const entry of activityRows) {
     // Instance-wide audit records have no household and never appear here.
     if (!entry.householdId) continue;
-    const candidate = itemActivitySchema.safeParse((entry.changes as { activity?: unknown })?.activity);
+    const candidate = storedActivitySchema.safeParse((entry.changes as { activity?: unknown })?.activity);
     if (!candidate.success) continue;
     const current = activitiesByHousehold.get(entry.householdId) ?? [];
     current.push(candidate.data);
@@ -198,17 +220,41 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     activeHouseholdId,
     recoverableHouseholds: recoverableHouseholds.map((household) => ({ id: household.id, name: household.name, deleteAfter: household.deleteAfter!.toISOString() })),
     households: householdRows.map((household) => {
+      const memberCount = memberRows.filter((member) => member.householdId === household.id).length;
+      const canManage = administrator || memberRows.some((member) => (
+        member.householdId === household.id
+        && member.userId === userId
+        && member.role === "owner"
+      ));
+      if (closedHouseholdIds.has(household.id)) {
+        return {
+          id: household.id,
+          name: household.name,
+          timezone: household.timezone,
+          today: householdToday(household.timezone),
+          currency: household.currency,
+          memberCount,
+          canManage,
+          onboardingComplete: household.onboardingComplete,
+          importInProgress: true,
+          sections: [],
+          items: [],
+          activities: [],
+          readNotificationIds: [],
+          dismissedNotificationIds: [],
+        };
+      }
       const metadata = metadataReaders.get(household.id)!;
       const householdItems = itemRows.filter((item) => item.householdId === household.id).map((item) => {
         const event = eventByItem.get(item.id);
-        const reference = metadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference });
-        const notes = metadata.text("items.notes", item.id, { encrypted: item.notesEnc, plaintext: item.notes });
+        const reference = metadata.text("items.reference", item.id, { encrypted: item.referenceEnc });
+        const notes = metadata.text("items.notes", item.id, { encrypted: item.notesEnc });
         // Tier 2 (#963): decrypted here rather than in SQL. Cost totals and
         // search both run on these values in the client, over one household's
         // rows, which is what the tiering decision traded the query for.
-        const title = metadata.text("items.title", item.id, { encrypted: item.titleEnc, plaintext: item.title });
-        const provider = metadata.text("items.provider", item.id, { encrypted: item.providerEnc, plaintext: item.provider });
-        const costMinor = metadata.number("items.cost_minor", item.id, { encrypted: item.costMinorEnc, plaintext: item.costMinor });
+        const title = metadata.text("items.title", item.id, { encrypted: item.titleEnc });
+        const provider = metadata.text("items.provider", item.id, { encrypted: item.providerEnc });
+        const costMinor = metadata.number("items.cost_minor", item.id, { encrypted: item.costMinorEnc });
         const metadataStatus = {
           reference: reference.state,
           notes: notes.state,
@@ -248,13 +294,10 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
         id: household.id,
         name: household.name,
         timezone: household.timezone,
+        today: householdToday(household.timezone),
         currency: household.currency,
-        memberCount: memberRows.filter((member) => member.householdId === household.id).length,
-        canManage: administrator || memberRows.some((member) => (
-          member.householdId === household.id
-          && member.userId === userId
-          && member.role === "owner"
-        )),
+        memberCount,
+        canManage,
         onboardingComplete: household.onboardingComplete,
         deletionRequestedAt: household.deletionRequestedAt?.toISOString(),
         deleteAfter: household.deleteAfter?.toISOString(),
@@ -322,15 +365,102 @@ function itemDates(scheduleKind: ScheduleKind | undefined, dueDate: string | und
   };
 }
 
+/**
+ * What a dry run can tell besides "yes" (ADR-0034 decision 3, amended for
+ * #1337): the result the real call would store, normalised. A completion
+ * answers the next date it would set; nothing is previewed for a command
+ * that ends the schedule, or for any other command.
+ */
+export interface CommandPreview {
+  nextDate: string;
+}
+
+/**
+ * The dry run (ADR-0034 decision 3, #1325): the same command through the same
+ * access check and the same pre-write checks as the real call, stopping at
+ * the first write. Resolves when the command would be accepted, with the
+ * preview of its result where it has one (#1337); throws the refusal the real
+ * call would throw. Writes nothing.
+ *
+ * What only the write itself can find is left to the real call: a version
+ * that moves between this check and the save, and a database constraint.
+ */
+export async function checkWorkspaceCommand(
+  userId: string,
+  sessionId: string,
+  command: WorkspaceCommand,
+): Promise<CommandPreview | undefined> {
+  return runWorkspaceCommand(userId, sessionId, command, true);
+}
+
 /** Applies one validated, authorized command atomically, then returns canonical state. */
 export async function applyWorkspaceCommand(
   userId: string,
   sessionId: string,
   command: WorkspaceCommand,
 ): Promise<WorkspaceState> {
+  await runWorkspaceCommand(userId, sessionId, command, false);
+  if (command.type === "household.create") return readWorkspace(userId, sessionId, requireUuid(command.household.id, "Household"));
+  const nextActiveId = command.type === "household.activate" ? command.householdId : undefined;
+  return readWorkspace(userId, sessionId, nextActiveId);
+}
+
+type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
+
+/**
+ * A `household.create` whose id is already a household: false when it is
+ * not, otherwise the replay. The id is an idempotency key, and the same key
+ * with a different payload is refused, never applied and never silently
+ * replayed (U3 decision 2): applying it would make the create a second rename
+ * road outside `household.setup`'s checks, and replaying it would drop the
+ * edit unseen. Its owner sending identical details gets the first result
+ * back, the session pointed at it; anyone else is refused rather than handed
+ * a household they do not own. Every check comes before the one write, so
+ * the dry run throws the same refusal and a refusal changes nothing.
+ */
+async function replayHouseholdCreate(
+  transaction: Transaction,
+  userId: string,
+  sessionId: string,
+  household: Extract<WorkspaceCommand, { type: "household.create" }>["household"],
+  dryRun: boolean,
+): Promise<boolean> {
+  const householdId = requireUuid(household.id, "Household");
+  const [stored] = await transaction.select({
+    name: households.name,
+    timezone: households.timezone,
+    currency: households.defaultCurrency,
+  }).from(households).where(eq(households.id, householdId)).limit(1);
+  if (!stored) return false;
+  const [owned] = await transaction.select({ userId: memberships.userId }).from(memberships)
+    .where(and(eq(memberships.householdId, householdId), eq(memberships.userId, userId), eq(memberships.role, "owner"))).limit(1);
+  if (!owned) throw new AppError("household_exists", "This household already exists", 409);
+  /* exact: a true retry sends the very values it sent the first time */
+  if (stored.name !== household.name || stored.timezone !== household.timezone || stored.currency !== household.currency) {
+    throw new AppError("household_create_mismatch", "This household was already created with different details", 422);
+  }
+  if (!dryRun) await transaction.update(sessions).set({ activeHouseholdId: householdId }).where(eq(sessions.id, sessionId));
+  return true;
+}
+
+/**
+ * One command's checks and, unless `dryRun`, its writes, in one transaction.
+ * Every branch makes its checks before its first write and returns there on a
+ * dry run, so the dry run and the real call cannot disagree about a check.
+ */
+async function runWorkspaceCommand(
+  userId: string,
+  sessionId: string,
+  command: WorkspaceCommand,
+  dryRun: boolean,
+): Promise<CommandPreview | undefined> {
   if (command.type === "household.create") {
     const householdId = requireUuid(command.household.id, "Household");
     await getDb().transaction(async (transaction) => {
+      /* The client's id is the idempotency key: a retry after a lost reply
+         sends the same id again. The lookup is the fast path; the insert's
+         ON CONFLICT below is what decides when two creates overlap. */
+      if (await replayHouseholdCreate(transaction, userId, sessionId, command.household, dryRun)) return;
       const [recoverableName] = await transaction.select({ id: households.id }).from(households)
         .where(and(
           isNotNull(households.deletionRequestedAt),
@@ -338,13 +468,23 @@ export async function applyWorkspaceCommand(
           sql`lower(${households.name}) = lower(${command.household.name.trim()})`,
         )).limit(1);
       if (recoverableName) throw new AppError("household_name_recoverable", "A removed household already uses this name. Restore it, or ask an instance administrator to permanently delete it first.", 409);
-      await transaction.insert(households).values({
+      if (dryRun) return;
+      /* Let the constraint decide: an overlapping create with the same id
+         waits here for the other to commit, inserts nothing, and is then a
+         replay like any other, so it never surfaces as a key violation. */
+      const [inserted] = await transaction.insert(households).values({
         id: householdId,
         name: command.household.name,
         timezone: command.household.timezone,
         defaultCurrency: command.household.currency,
         setupCompleted: command.household.onboardingComplete,
-      });
+      }).onConflictDoNothing({ target: households.id }).returning({ id: households.id });
+      if (!inserted) {
+        if (await replayHouseholdCreate(transaction, userId, sessionId, command.household, false)) return;
+        /* the row that beat this insert was gone again before it could be
+           read: nothing to replay, so refuse rather than guess */
+        throw new AppError("household_exists", "This household already exists", 409);
+      }
       await transaction.insert(memberships).values({ householdId, userId, role: "owner" });
       await transaction.insert(sections).values(command.household.sections.map((section, position) => {
         const sectionId = validUuid(section.id) ? section.id : randomUUID();
@@ -383,7 +523,7 @@ export async function applyWorkspaceCommand(
         },
       });
     });
-    return readWorkspace(userId, sessionId, householdId);
+    return;
   }
 
   await requireHouseholdAccess(
@@ -392,8 +532,15 @@ export async function applyWorkspaceCommand(
     command.type === "sections.replace"
       || command.type === "household.setup"
       || command.type === "household.update",
-  );
+  ).catch((error: unknown) => {
+    // A member may still make a household closed by an import their home
+    // household (#1316): choosing it reads nothing of it, and home draws the
+    // notice there.
+    if (command.type === "household.activate" && error instanceof AppError && error.code === "household_import_in_progress") return;
+    throw error;
+  });
   const householdId = command.householdId;
+  let preview: CommandPreview | undefined;
 
   await getDb().transaction(async (transaction) => {
     await acquireActiveHouseholdLock(transaction, householdId);
@@ -422,11 +569,13 @@ export async function applyWorkspaceCommand(
     };
 
     if (command.type === "household.activate") {
+      if (dryRun) return;
       await transaction.update(sessions).set({ activeHouseholdId: householdId }).where(eq(sessions.id, sessionId));
       return;
     }
 
     if (command.type === "household.setup") {
+      if (dryRun) return;
       await transaction.update(households).set({
         name: command.name,
         timezone: command.timezone,
@@ -464,6 +613,7 @@ export async function applyWorkspaceCommand(
     }
 
     if (command.type === "household.update") {
+      if (dryRun) return;
       await transaction.update(households).set({
         name: command.name,
         timezone: command.timezone,
@@ -476,10 +626,38 @@ export async function applyWorkspaceCommand(
     if (command.type === "sections.replace") {
       const existing = await transaction.select({ id: sections.id }).from(sections).where(eq(sections.householdId, householdId));
       const existingIds = new Set(existing.map((section) => section.id));
-      const retainedSectionIds: string[] = [];
+      /* The id each listed section ends up with: the stored one, or for a new
+         section the id it brought (when that is a UUID) or a fresh one. */
+      const resolvedIds = new Map<string, string>();
+      for (const section of command.sections) {
+        resolvedIds.set(section.id, existingIds.has(section.id) || validUuid(section.id) ? section.id : randomUUID());
+      }
+      const retainedSectionIds = [...resolvedIds.values()];
+      const droppedSectionIds = existing.map((section) => section.id).filter((id) => !retainedSectionIds.includes(id));
+
+      /* #1332 (ADR-0034): before anything is written -- so a dry run says the
+         same -- a section that still holds items goes only with somewhere
+         named for them, and that somewhere is a section the list keeps. */
+      let destinationId: string | undefined;
+      if (command.moveItemsTo !== undefined) {
+        destinationId = resolvedIds.get(command.moveItemsTo);
+        if (!destinationId) {
+          throw new AppError("section_not_found", "Choose a section this household keeps to move the entries to", 422);
+        }
+      }
+      if (droppedSectionIds.length) {
+        const [held] = await transaction.select({ id: items.id }).from(items)
+          .where(and(eq(items.householdId, householdId), inArray(items.sectionId, droppedSectionIds)))
+          .limit(1);
+        if (held && !destinationId) {
+          throw new AppError("section_has_items", "A section with entries in it cannot be removed until you choose where they go", 422);
+        }
+      }
+      if (dryRun) return;
+
       for (const [position, section] of command.sections.entries()) {
-        if (existingIds.has(section.id)) {
-          retainedSectionIds.push(section.id);
+        const sectionId = resolvedIds.get(section.id)!;
+        if (existingIds.has(sectionId)) {
           await transaction.update(sections).set({
             name: section.name,
             icon: section.icon,
@@ -487,10 +665,8 @@ export async function applyWorkspaceCommand(
             position,
             visible: section.visible,
             updatedAt: new Date(),
-          }).where(and(eq(sections.id, section.id), eq(sections.householdId, householdId)));
+          }).where(and(eq(sections.id, sectionId), eq(sections.householdId, householdId)));
         } else {
-          const sectionId = validUuid(section.id) ? section.id : randomUUID();
-          retainedSectionIds.push(sectionId);
           await transaction.insert(sections).values({
             id: sectionId,
             householdId,
@@ -503,17 +679,20 @@ export async function applyWorkspaceCommand(
           });
         }
       }
-      const fallbackSectionId = retainedSectionIds[0];
-      await transaction.update(items)
-        .set({ sectionId: fallbackSectionId })
-        .where(and(
-          eq(items.householdId, householdId),
-          notInArray(items.sectionId, retainedSectionIds),
+      if (droppedSectionIds.length && destinationId) {
+        await transaction.update(items)
+          .set({ sectionId: destinationId })
+          .where(and(
+            eq(items.householdId, householdId),
+            inArray(items.sectionId, droppedSectionIds),
+          ));
+      }
+      if (droppedSectionIds.length) {
+        await transaction.delete(sections).where(and(
+          eq(sections.householdId, householdId),
+          inArray(sections.id, droppedSectionIds),
         ));
-      await transaction.delete(sections).where(and(
-        eq(sections.householdId, householdId),
-        notInArray(sections.id, retainedSectionIds),
-      ));
+      }
       return;
     }
 
@@ -523,13 +702,32 @@ export async function applyWorkspaceCommand(
       const [ownedSection] = await transaction.select({ id: sections.id }).from(sections)
         .where(and(eq(sections.id, sectionId), eq(sections.householdId, householdId))).limit(1);
       if (!ownedSection) throw new AppError("section_not_found", "Choose a section from this household", 422);
-      const [existing] = await transaction.select({ version: items.version }).from(items)
-        .where(and(eq(items.id, itemId), eq(items.householdId, householdId))).limit(1);
+      const [existing] = await transaction.select({
+        householdId: items.householdId,
+        version: items.version,
+        subtype: items.subtype,
+        status: items.status,
+        renewalDate: items.renewalDate,
+        serviceDate: items.serviceDate,
+        expiryDate: items.expiryDate,
+      }).from(items)
+        .where(eq(items.id, itemId)).limit(1);
+      // A client-minted id names one request; one that already names an item
+      // in another household is refused, not inserted into a primary-key collision.
+      if (existing && existing.householdId !== householdId) throw new AppError("item_conflict", "That item identity is already in use", 409);
       // The schema tolerates an empty title only so a damaged one can be read
       // back (ADR-0024 decision 5); a write still has to carry a real one, and
       // a client that sends `metadataStatus` to slip past that check is
       // refused here rather than storing a nameless item.
       if (!command.item.title.trim()) throw new AppError("invalid_item", "Give this a name", 422);
+      /* ADR-0034, #1325: the schedule kind, subtype and status are the
+         engine's, from the kind the member chose and the item as stored --
+         the same rule the reducer applies. */
+      const item = workspaceItemSchema.parse(itemOfIntent(command.item, command.kind, existing ? {
+        subtype: existing.subtype,
+        status: existing.status,
+        scheduleKind: existing.serviceDate ? "service" : existing.renewalDate ? "renewal" : existing.expiryDate ? "expiry" : undefined,
+      } : command.basis));
       // #1151 A4-S4: `command.item.version` is optional in the wire schema,
       // but an update with none omitted used to fall back to "whatever the
       // row's current version already is" -- a check against the value it
@@ -539,9 +737,50 @@ export async function applyWorkspaceCommand(
       // ever reported. An existing row now always requires the version it is
       // meant to replace; only a brand new item, which has no version to
       // race against, may omit it.
-      if (existing && command.item.version === undefined) {
+      if (existing && item.version === undefined) {
+        /* A create sent again after its answer was lost must be the same
+           request. One carrying a file this item does not already hold is a
+           different request: refuse it, rather than let version_required
+           read as "the earlier send landed with this file" and lose it. */
+        const requested = [...new Set((command.documentIds ?? []).map((id) => id.toLowerCase()))];
+        if (requested.length > 0) {
+          const bound = await transaction.select({ id: documents.id }).from(documents)
+            .where(and(inArray(documents.id, requested), eq(documents.householdId, householdId), eq(documents.itemId, itemId)));
+          if (bound.length !== requested.length) {
+            throw new AppError("item_already_saved", "This item was already added, but without this file. Open the item and attach the file there.", 409);
+          }
+        }
         throw new AppError("version_required", "This item changed on another device; refresh and try again", 409);
       }
+      // `item.version` is the version the client wants this write to become;
+      // the row it replaces must be one less than that. The update's own
+      // WHERE below is what holds it against a race; this says so before
+      // anything is written, which is the check a dry run can make.
+      const expectedVersion = existing ? Math.max(1, item.version! - 1) : undefined;
+      if (existing && existing.version !== expectedVersion) {
+        throw new AppError("version_conflict", "This item changed on another device; refresh and try again", 409);
+      }
+      // #1316: each document must be this household's, sealed under this
+      // item, bound to no other item, and not refused or on its way out. One
+      // that is not refuses the whole save, in the same words whatever the
+      // reason, so no item is kept without the paper the member attached and
+      // nothing is learned about another household's documents or drafts.
+      const documentIds = [...new Set((command.documentIds ?? []).map((id) => id.toLowerCase()))];
+      if (documentIds.length > 0) {
+        const bindable = await transaction.select({ id: documents.id }).from(documents)
+          .where(and(
+            inArray(documents.id, documentIds),
+            eq(documents.householdId, householdId),
+            sql`coalesce(${documents.sealedItemId}, ${documents.itemId}) = ${itemId}::uuid`,
+            or(isNull(documents.itemId), eq(documents.itemId, itemId)),
+            notInArray(documents.lifecycle, ["rejected", "deleted", "pending_deletion"]),
+          ))
+          .for("update");
+        if (bindable.length !== documentIds.length) {
+          throw new AppError("document_not_available", "That document is no longer available — pick it again", 422);
+        }
+      }
+      if (dryRun) return;
       // Tier 1 and Tier 2 (ADR-0024 decision 3): encrypt and clear the
       // plaintext in the same statement, so the row is never in both states at
       // once. Writing a damaged field is also the repair for it: the new value
@@ -549,44 +788,39 @@ export async function applyWorkspaceCommand(
       const metadata = await requireMetadataWriter(householdId, transaction);
       const values = {
         sectionId,
-        title: null,
-        titleEnc: metadata.encryptText("items.title", itemId, command.item.title),
-        subtype: command.item.subtype ?? null,
-        provider: null,
-        providerEnc: metadata.encryptText("items.provider", itemId, command.item.provider),
-        reference: null,
-        referenceEnc: metadata.encryptText("items.reference", itemId, command.item.reference),
-        referenceIndex: metadata.referenceIndex(command.item.reference),
-        costMinor: null,
-        costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, command.item.costMinor),
-        currency: command.item.currency,
+        titleEnc: metadata.encryptText("items.title", itemId, item.title),
+        subtype: item.subtype ?? null,
+        providerEnc: metadata.encryptText("items.provider", itemId, item.provider),
+        referenceEnc: metadata.encryptText("items.reference", itemId, item.reference),
+        referenceIndex: metadata.referenceIndex(item.reference),
+        costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, item.costMinor),
+        currency: item.currency,
         /* #1005: belt and braces with `workspaceItemSchema`, which refuses the
            pair outright -- nothing that reaches the row can claim a one-off
            comes round again. */
-        recurrenceMonths: command.item.scheduleKind === "expiry" ? null : command.item.recurrenceMonths ?? null,
-        snoozedUntil: command.item.snoozedUntil ?? null,
-        notes: null,
-        notesEnc: metadata.encryptText("items.notes", itemId, command.item.notes),
-        status: command.item.status,
+        recurrenceMonths: item.scheduleKind === "expiry" ? null : item.recurrenceMonths ?? null,
+        snoozedUntil: item.snoozedUntil ?? null,
+        notesEnc: metadata.encryptText("items.notes", itemId, item.notes),
+        status: item.status,
         updatedAt: new Date(),
-        ...itemDates(command.item.scheduleKind, command.item.dueDate),
+        ...itemDates(item.scheduleKind, item.dueDate),
       };
       if (existing) {
-        // `command.item.version` is the version the client wants this write
-        // to become, guaranteed present by the guard above; the row it
-        // replaces must be one less than that.
-        const expectedVersion = Math.max(1, command.item.version! - 1);
         const [updated] = await transaction.update(items)
           .set({ ...values, version: sql`${items.version} + 1` })
           .where(and(
             eq(items.id, itemId),
             eq(items.householdId, householdId),
-            eq(items.version, expectedVersion),
+            eq(items.version, expectedVersion!),
           ))
           .returning({ id: items.id });
         if (!updated) throw new AppError("version_conflict", "This item changed on another device; refresh and try again", 409);
       } else {
         await transaction.insert(items).values({ id: itemId, householdId, version: 1, ...values });
+      }
+      if (documentIds.length > 0) {
+        await transaction.update(documents).set({ itemId, deleteAfter: null, updatedAt: new Date() })
+          .where(inArray(documents.id, documentIds));
       }
       // Every encrypted column on the row was just rewritten - Tier 1 and, since
       // #963, Tier 2 - so anything this row had been seen damaged in is gone
@@ -595,22 +829,22 @@ export async function applyWorkspaceCommand(
       // leave the administrator count claiming a repair that did not happen.
       await clearMetadataDamageForRow("items", itemId, transaction);
       await transaction.delete(dueEvents).where(and(eq(dueEvents.itemId, itemId), isNull(dueEvents.completedAt)));
-      if (command.item.dueDate && command.item.scheduleKind) {
+      if (item.dueDate && item.scheduleKind) {
         await transaction.insert(dueEvents).values({
           householdId,
           itemId,
-          kind: command.item.scheduleKind,
-          dueDate: command.item.dueDate,
+          kind: item.scheduleKind,
+          dueDate: item.dueDate,
         });
       }
       await transaction.delete(reminderRules).where(eq(reminderRules.itemId, itemId));
-      if (command.item.reminderDays?.length) {
-        await transaction.insert(reminderRules).values(command.item.reminderDays.map((daysBefore) => ({
+      if (item.reminderDays?.length) {
+        await transaction.insert(reminderRules).values(item.reminderDays.map((daysBefore) => ({
           itemId,
           daysBefore,
         })));
       }
-      if (command.activity) await recordActivity(itemId, command.activity);
+      if (command.activity) await recordActivity(itemId, namedActivity(command.activity, existing ? "updated" : "created"));
       return;
     }
 
@@ -619,6 +853,7 @@ export async function applyWorkspaceCommand(
       || command.type === "notification.dismiss"
       || command.type === "notification.read-all"
     ) {
+      if (dryRun) return;
       // Deduplicated so the multi-row upsert below never targets the same
       // conflict key twice in one statement (Postgres rejects that with "ON
       // CONFLICT DO UPDATE command cannot affect row a second time").
@@ -663,7 +898,7 @@ export async function applyWorkspaceCommand(
         if (existingCompletion.householdId !== householdId || existingCompletion.itemId !== itemId) {
           throw new AppError("version_conflict", "This completion was already used for another item", 409);
         }
-        return;
+        return; // a replay: already recorded, nothing to write
       }
       if (validUuid(command.activity.id)) {
         const [existingAudit] = await transaction.select({ id: auditLog.id })
@@ -682,9 +917,10 @@ export async function applyWorkspaceCommand(
     }
 
     if (command.type === "item.archive") {
+      if (dryRun) return;
       await transaction.update(items).set({ status: "archived", version: sql`${items.version} + 1`, updatedAt: new Date() })
         .where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
-      await recordActivity(itemId, command.activity);
+      await recordActivity(itemId, namedActivity(command.activity, "archived"));
       return;
     }
 
@@ -701,20 +937,29 @@ export async function applyWorkspaceCommand(
       if (!currentEvent) {
         throw new AppError("version_conflict", "This item has no active scheduled event", 409);
       }
-      /* #1005: an expiry is the one-off kind -- completing one records that it
-         ended, and there is no next date to take. */
-      if (currentEvent.kind === "expiry" && command.nextDate) {
-        throw new AppError("invalid_command", "An expiry happens once; it has no next date", 400);
+      /* ADR-0034, #1324: the next date is the engine's, from the stored
+         period and the day it was done -- the same rule the reducer applies.
+         An expiry is the one-off kind (#1005), and an item with no period
+         does not come round: completing either ends its schedule. */
+      const nextDate = nextDueDate(
+        { scheduleKind: currentEvent.kind, recurrenceMonths: current.recurrenceMonths },
+        command.completedDate,
+      );
+      if (dryRun) {
+        /* #1337: the dry run answers the date the real call would store, from
+           the same call above, so a preview cannot differ from the save. */
+        if (nextDate) preview = { nextDate };
+        return;
       }
       let nextEventId: string | undefined;
-      if (command.nextDate) {
+      if (nextDate) {
         nextEventId = randomUUID();
         await transaction.insert(dueEvents).values({
           id: nextEventId,
           householdId,
           itemId,
           kind: currentEvent.kind,
-          dueDate: command.nextDate,
+          dueDate: nextDate,
         });
       }
       if (currentEvent) {
@@ -732,7 +977,6 @@ export async function applyWorkspaceCommand(
       const completionCost = command.costMinor === undefined
         ? {}
         : {
-          costMinor: null,
           costMinorEnc: (await requireMetadataWriter(householdId, transaction))
             .encryptNumber("items.cost_minor", itemId, command.costMinor),
         };
@@ -740,17 +984,18 @@ export async function applyWorkspaceCommand(
         ...completionCost,
         status: "active",
         snoozedUntil: null,
-        recurrenceMonths: command.nextDate ? current.recurrenceMonths : null,
-        ...itemDates(command.nextDate ? currentEvent.kind : undefined, command.nextDate),
+        recurrenceMonths: nextDate ? current.recurrenceMonths : null,
+        ...itemDates(nextDate ? currentEvent.kind : undefined, nextDate),
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
       }).where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
-      if (!command.nextDate) await transaction.delete(reminderRules).where(eq(reminderRules.itemId, itemId));
-      await recordActivity(itemId, command.activity, true);
+      if (!nextDate) await transaction.delete(reminderRules).where(eq(reminderRules.itemId, itemId));
+      await recordActivity(itemId, completionActivity(command.activity, currentEvent.kind, nextDate), true);
       return;
     }
 
     if (command.type === "item.reschedule") {
+      if (dryRun) return;
       const kind = current.serviceDate ? "service" : current.expiryDate ? "expiry" : "renewal";
       await transaction.update(items).set({
         status: "active",
@@ -766,34 +1011,39 @@ export async function applyWorkspaceCommand(
       } else {
         await transaction.insert(dueEvents).values({ householdId, itemId, dueDate: command.dueDate, kind });
       }
-      await recordActivity(itemId, command.activity);
+      await recordActivity(itemId, namedActivity(command.activity, "rescheduled"));
       return;
     }
 
     if (command.type === "item.snooze") {
+      /* ADR-0034, #1325: a snooze lands after the household's today. */
+      const [household] = await transaction.select({ timezone: households.timezone }).from(households)
+        .where(eq(households.id, householdId)).limit(1);
+      const refused = snoozeRefusal(command.snoozedUntil, householdToday(household?.timezone ?? "UTC"));
+      if (refused) throw new Refusal(refused);
+      if (dryRun) return;
       await transaction.update(items).set({
         snoozedUntil: command.snoozedUntil,
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
       }).where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
-      await recordActivity(itemId, command.activity);
+      await recordActivity(itemId, namedActivity(command.activity, "snoozed"));
       return;
     }
 
     if (command.type === "item.status") {
+      if (dryRun) return;
       await transaction.update(items).set({
         status: command.status,
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
       }).where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
-      await recordActivity(itemId, command.activity);
+      await recordActivity(itemId, statusActivity(command.activity, command.status));
       return;
     }
 
   });
-
-  const nextActiveId = command.type === "household.activate" ? command.householdId : undefined;
-  return readWorkspace(userId, sessionId, nextActiveId);
+  return preview;
 }
 
 export interface HouseholdMember {

@@ -39,6 +39,19 @@ async function answerApproval(page, itemId = "i-new") {
     seen.approvals.push(route.request().postDataJSON());
     await route.fulfill({ json: { outcome: "approved", itemId } });
   });
+  /* The review sheet holds its button to the engine's dry run (ADR-0034,
+     #1325), which the fixture app accepts whatever it is asked; answered
+     here with the engine's own refusal for the one rule this spec reads. */
+  await page.route("**/api/workspace/commands", async (route) => {
+    const body = route.request().postDataJSON();
+    if (!body?.dryRun) return route.fallback();
+    if (!body.item?.sectionId) {
+      /* A dry run's refusal is a 200 verdict (ADR-0034, decision 3 amendment). */
+      return route.fulfill({
+        json: { refusal: { code: "item_section_missing", message: "not yet — choose a section" } } });
+    }
+    return route.fulfill({ json: {} });
+  });
   return seen;
 }
 
@@ -59,6 +72,14 @@ test("Add to orbit arms on the first tap and approves as proposed on the second"
 
 test("review & amend opens create's form pre-filled, and approves the amended values into the chosen section", async ({ page }) => {
   const seen = await answerApproval(page);
+  /* The new item's reminders start at the member's own Settings pair (#1389,
+     owner decision 7a on #1316). The fixture app answers 14 and 3; this
+     member has chosen 30 and 7. */
+  await page.route("**/api/settings/reminders", (route) => route.request().method() === "GET"
+    ? route.fulfill({ json: { reminders: {
+      emailEnabled: true, firstWarningDays: 30, finalWarningDays: 7,
+      firstWarning: "30 days before closest approach", finalWarning: "7 days before", outboundMail: "configured" } } })
+    : route.fallback());
   await page.goto(`${APP}/inbox`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "review & amend →" }).click();
   const sheet = page.getByRole("dialog", { name: "Review & amend" });
@@ -68,16 +89,18 @@ test("review & amend opens create's form pre-filled, and approves the amended va
   await expect(sheet.getByRole("button", { name: "renewal", exact: true })).toHaveAttribute("aria-pressed", "true");
   /* The section has no default (#1058): nothing is sent until one is chosen. */
   const go = sheet.getByRole("button", { name: "add to orbit" });
-  await expect(go).toBeDisabled();
+  await expect(go).toHaveAttribute("aria-disabled", "true");
   await expect(sheet.getByText("not yet — choose a section")).toBeVisible();
   await sheet.getByRole("button", { name: "Dates & renewals" }).click();
   await sheet.getByRole("textbox", { name: "provider", exact: true }).fill("Harbour Mutual plc");
   await go.click();
   await expect.poll(() => seen.approvals.length).toBe(1);
   expect(seen.approvals[0].sectionId).toBe("s-dates");
+  /* The sheet sends the cost as typed and the item's kind, for the engine
+     to read and map (ADR-0034, #1325). */
   expect(seen.approvals[0].item).toMatchObject({
-    title: "Home insurance renewal", provider: "Harbour Mutual plc", costMinor: 40000, currency: "GBP",
-    dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, subtype: "renewal", reminderDays: [21, 7],
+    title: "Home insurance renewal", provider: "Harbour Mutual plc", cost: "400.00", currency: "GBP",
+    dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, kind: "renewal", reminderDays: [30, 7],
   });
   await expect(sheet).toBeHidden();
 });
@@ -87,7 +110,7 @@ test("a failed arrival the server lets go opens on a tap to remove; one it keeps
   await page.route("**/api/imap-inbox", (route) => route.fulfill({
     json: {
       receipts: [
-        { id: "r-gone", receivedAt: "2026-08-09T16:02:00.000Z", classification: "cleanup", canApprove: false,
+        { id: "r-gone", receivedAt: "2026-08-09T16:02:00.000Z", classification: "retry", canApprove: false,
           canDiscard: true, message: "It carried no document Orbit can read." },
         { id: "r-kept", receivedAt: "2026-08-06T08:41:00.000Z", classification: "unavailable", canApprove: false,
           canDiscard: false, message: "Its document could not be prepared." },
@@ -110,46 +133,9 @@ test("a failed arrival the server lets go opens on a tap to remove; one it keeps
   await expect.poll(() => seen.discards).toEqual(["r-gone"]);
 });
 
-/* THE SUGGESTION IN THE BELT ON A PHONE (#1145; round 3 §4's receipt page
-   merged into the belt): `/item/<receiptId>` is the belt under the top
-   chrome, the suggestion seated at the apex as its card, with the two
-   decisions and `review & amend →`. The desk half is belt-suggestion.spec.js. */
-test("the receipt address is the belt, wearing the top chrome, with the suggestion's card at the apex", async ({ page }) => {
-  await page.goto(`${APP}/item/r-insurance`, { waitUntil: "networkidle" });
-  const chrome = page.locator(".p-chrome:visible");
-  await expect(chrome.locator(".back")).toHaveAttribute("href", "/home");
-  await expect(chrome.locator(".porb")).toBeVisible();
-  const card = page.locator(".item-card.sug-card");
-  await expect(card.getByRole("heading", { level: 2 })).toHaveText("Home insurance renewal");
-  await expect(card.locator(".sub")).toContainText("1 forwarded document · burns up in 43d");
-  await expect(card.getByRole("button", { name: "Add Home insurance renewal to your orbit" })).toBeVisible();
-  await expect(card.getByRole("button", { name: "Dismiss Home insurance renewal" })).toBeVisible();
-  await expect(card.locator(".ip-docs")).toContainText("1 forwarded document");
-  /* The old page's own lines are gone with it (round 3 §4, owner's 10b). */
-  await expect(page.getByText("back to your orbit")).toHaveCount(0);
-  await expect(page.getByText("nothing is created without your acceptance")).toHaveCount(0);
-  /* The belt is real: the seat list holds the household and the visitor. */
-  await expect(page.locator(".ip-count")).toHaveText("6 items · 1 suggested · sooner to later");
-});
-
-test("the suggestion adds to orbit from the belt and becomes the new item's seat", async ({ page }) => {
-  const seen = await answerApproval(page, "i-chimney");
-  await page.goto(`${APP}/item/r-insurance`, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "Add Home insurance renewal to your orbit" }).click();
-  await page.getByRole("button", { name: "tap again to add Home insurance renewal to your orbit" }).click();
-  await expect.poll(() => seen.approvals.length).toBe(1);
-  expect(seen.approvals[0]).toMatchObject({ source: { kind: "mailbox_draft", receiptId: "r-insurance" } });
-  /* Accepted, it is an item with a seat of its own: the belt re-reads with
-     that item at the apex (the fixture stands in with a real item's id). */
-  await expect(page).toHaveURL(/\/item\/i-chimney$/);
-  await expect(page.locator(".item-card h2")).toHaveText("Chimney sweep");
-  await expect(page.locator(".item-card.sug-card")).toHaveCount(0);
-});
-
-test("the receipt page raises the same review sheet", async ({ page }) => {
-  await page.goto(`${APP}/item/r-insurance`, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "review & amend →" }).click();
-  const sheet = page.getByRole("dialog", { name: "Review & amend" });
-  await expect(sheet).toBeVisible();
-  await expect(sheet.getByRole("textbox", { name: "provider", exact: true })).toHaveValue("Harbour Mutual");
-});
+/* The suggestion's own address (`/item/<receiptId>`) was the belt on a
+   phone (#1145) until #1319 stage 3b retired it: `/item/<id>` no longer
+   exists, and `/home?item=<receiptId>` opens the suggestion's row in home's
+   signals, where it is decided and amended in its own lines. Those checks
+   are in pocket-home-drawers.spec.js; the inbox keeps its review sheet,
+   proved above. */

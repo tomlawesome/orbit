@@ -50,26 +50,22 @@ administrator operations. For each denied request it asserts the bounded
 error contract, a `no-store` response, an unchanged target and, where the
 request would have changed something, an unchanged audit trail.
 
-## Hand-writing a migration
+## Writing a migration: generate, then read the SQL
 
-`pnpm db:generate` is refused (`scripts/db-generate-refused.mjs`, #535).
-drizzle-kit works out a new migration by comparing the schema with its last
-saved snapshot of it, and `drizzle/meta/` only has snapshots through 0004. So
-`drizzle-kit generate` would compare against that old snapshot and quietly
-write a migration that recreates almost the whole schema. Write migrations by
-hand instead:
+The migration history is one baseline, `drizzle/0000_baseline.sql`, with its
+snapshot `drizzle/meta/0000_snapshot.json` (#1403). `pnpm db:generate` works
+again: drizzle-kit compares `src/db/schema.ts` with the newest snapshot and
+writes the difference.
 
-1. Create `drizzle/NNNN_name.sql`, where `NNNN` is the next number after the
-   last journal entry, in the style of `drizzle/0027_instance_authority.sql`:
-   plain DDL, with `--> statement-breakpoint` between statements. Write a
-   `DO $$ ... END $$` block only when existing rows must be changed, and make
-   that change deliberate and auditable. (0027 seats a primary administrator;
-   when the data is ambiguous it stops rather than guesses.)
-2. Add the matching entry to `drizzle/meta/_journal.json` by hand: `idx` one
-   past the last entry, `version` copied from the file's own top-level
-   `version`, `tag` equal to the migration's filename without `.sql`, `when` a
-   later millisecond timestamp than the previous entry's, and
-   `breakpoints: true`.
+1. Change `src/db/schema.ts`, then run `pnpm db:generate`. It writes
+   `drizzle/NNNN_name.sql`, a new snapshot and a journal entry. Run it once
+   more: on an unchanged schema it must write nothing.
+2. **Read the generated SQL before anything else.** drizzle-kit guesses at
+   renames (it may offer a drop and an add where you meant a rename) and
+   writes only what the schema file says. A `DEFAULT`, `CHECK` or index that
+   the schema does not declare is invisible to it. Edit the file by hand where
+   it is wrong, and add a `DO $$ ... END $$` block only when existing rows must
+   be changed, deliberately and auditably.
 3. Update `tests/integration/support/migration-fixture.ts` for whatever the
    migration changes:
    - New or changed columns go in `EXPECTED_TABLE_COLUMNS` (kept sorted; the
@@ -80,17 +76,25 @@ hand instead:
    - Everything here is compared word for word with `readSchemaContract` in
      `tests/integration/migrations.test.ts`, so a mismatch in either
      direction fails that test rather than passing quietly.
-4. Update `tests/integration/migrations.test.ts` if the migration does more
-   than change the schema. A migration that always seeds or transforms data
-   (as 0028 and 0033 do for their single-row tables) needs an assertion on
-   that seeded state in the "migrates every current migration into a fresh
-   PostgreSQL 18 database" test. A migration that can fail on existing data
-   (as 0022 does) needs its own scenario, following the
-   `document_openable_scan_status_valid` test below it.
+4. A migration that can fail on existing data needs a test that applies the
+   migrations before it, adds the offending row, then applies it and checks the
+   failure message and that nothing was recorded (`runMigrationsWithActionableError`
+   and `createInvalidMigrationDirectory` in `migration-fixture.ts` are the
+   helpers to start from).
 
-`tests/integration/fixtures/migration-baseline.json` freezes the supported
-upgrade starting point (`migrationPrefix`, currently through 0017). An
-ordinary new migration does not touch it.
+The journal-integrity and drift checks hash the `.sql` files themselves, so
+there is nothing to regenerate by hand: never edit a migration that has been
+applied; add a new one.
+
+### After the 0.3 squash: recreate your database
+
+The history `0000`-`0057` was replaced by `0000_baseline` (#1403). A database
+built from the old history records the old migrations, so the integrity check
+refuses it ("applied migration 1 of <N> does not match 0000_baseline; this database was
+migrated by a different build"). Every dev and CI
+database built before the squash must be recreated (drop it and run
+`pnpm db:migrate`, or remove the compose volume). Nobody runs Orbit yet, so
+there is no upgrade path and none is needed.
 
 ## CI relationship
 
@@ -143,7 +147,9 @@ has no maintenance pass of its own yet. Locally, `scripts/test-e2e-local.sh`
 runs all five unless told otherwise; `ORBIT_E2E_ENGINES=chromium`, `=firefox`
 or `=webkit` picks one engine the way the jobs do, and
 `ORBIT_E2E_WEBKIT_DEVICES=desktop` or `=mobile` narrows WebKit further the
-way `smoke_webkit` and `smoke_webkit_mobile` do. The automated checks are
+way `smoke_webkit` and `smoke_webkit_mobile` do. On the development host the
+WebKit projects run inside the CI Playwright image rather than on the host,
+which lacks WebKit's system packages (#1235). The automated checks are
 deliberately representative, not device certification:
 
 | Contract | Automated evidence |
@@ -183,10 +189,16 @@ evidence.
 
 ```sh
 pnpm install
-bash scripts/configure.sh
+bash scripts/build-container.sh
+ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)" bash scripts/configure.sh
 pnpm db:migrate
 pnpm --filter orbit-web dev
 ```
+
+`configure.sh` runs inside the Orbit image, so the image has to exist first:
+`build-container.sh` builds it as `orbit-local:<12-character commit>`, and
+`configure.sh` records that tag in `.env-orbit`. To use a published image
+instead, skip the build and set `ORBIT_IMAGE` to its digest.
 
 The last command starts the development server for the app under `web/`;
 the repository root has no `dev` script of its own.
@@ -194,8 +206,11 @@ the repository root has no `dev` script of its own.
 To run only PostgreSQL in Docker:
 
 ```sh
-docker compose --env-file .env-orbit up -d orbit-db
+docker compose -p <your-dev-name> --env-file .env-orbit up -d orbit-db
 ```
+
+Give it a project name of your own with `-p`; without one the command attaches
+to your real deployment's containers and data (see [Local traps](#local-traps)).
 
 The default host and database settings in `.env-orbit.example` use the same
 generated PostgreSQL password file as the container.
@@ -249,8 +264,8 @@ your real deployment's containers and data. `docker-compose.yml`'s
 `name: orbit` and `.env-orbit`'s `COMPOSE_PROJECT_NAME` both default to the
 same project name a real deployment uses, from any checkout, so a bare
 `--env-file .env-orbit` command with no `-p` reuses that deployment's
-containers and named volumes instead of creating its own. AGENTS.md documents
-this trap and issue #536 hit it for real. The `--keep` output prints the
+containers and named volumes instead of creating its own. [Local traps](#local-traps)
+documents this one, and issue #536 hit it for real. The `--keep` output prints the
 exact teardown line to use:
 
 ```sh
@@ -273,12 +288,10 @@ bash scripts/install-test-browser.sh
 bash scripts/test-frontend.sh
 ```
 
-The current measured suite and its known gaps are recorded in the
-[engineering baseline](engineering-baseline.md). Playwright verifies
-signed-out privacy in desktop and mobile Chromium and uses the disposable OIDC
-profile for authenticated household-lifecycle acceptance. Coverage is
-diagnostic while the database/API integration baseline is established; it is
-not an arbitrary release percentage.
+Playwright verifies signed-out privacy in desktop and mobile Chromium and
+uses the disposable OIDC profile for authenticated household-lifecycle
+acceptance. Coverage is diagnostic while the database/API integration baseline
+is established; it is not an arbitrary release percentage.
 
 Every corpus committed to the repository is invented — real paperwork must
 never be committed. If you want to know how extraction does against your own
@@ -293,3 +306,175 @@ and the [quality strategy](quality-strategy.md) defines test and CI
 evidence. GitHub milestones and issues own delivery status. Product directions
 outside the stable contract remain in the
 [feature register](feature-register.md).
+
+## Local harnesses
+
+Check this list before building a test rig or handing a check to the owner.
+Each script's own header holds its full usage.
+
+| Script | What it does |
+| --- | --- |
+| `scripts/test-all.sh` | `test-backend.sh`, then `test-frontend.sh` (Playwright against a running instance; `ORBIT_SKIP_E2E=true` skips it). |
+| `scripts/test-backend.sh` | Static analysis and the fast Vitest suite. |
+| `scripts/test-frontend.sh` | Playwright against a running instance. |
+| `pnpm --filter orbit-web fidelity` | The v19 visual gate: stands up the adapter-node build and the mockup host, compares every screen in `SCREENS` against the committed baselines. In CI it runs pinned to the Playwright image the baselines were proven against; run it locally the same way if a diff disagrees. |
+| `scripts/test-integration.mjs` | Integration suite against a real database. |
+| `scripts/test-e2e-local.sh` | Local stack with disposable OIDC and GreenMail sidecars, then Playwright. `--profile local-only` swaps them for an Orbit with no identity provider and runs the short list in `tests/e2e/local-only-specs.txt`, which is what CI's `smoke_local_only` runs too (#916). `--reuse PROJECT` skips the build and `compose up` and runs Playwright against a stack a prior `--keep` run left up, identified by Compose's project/service labels and health-checked first; it never tears that stack down (#947). `--ci-cap` adds the cpu/memory overlay CI's acceptance stack runs under, so a local timing measurement transfers; off by default because an uncapped stack is the faster loop (#1080). **WebKit runs on this host only inside the CI Playwright image** (`mcr.microsoft.com/playwright:v1.63.0-noble`, already pulled): the host lacks WebKit's system packages, and that is not a reason to leave the check to a pipeline. The script does this itself for any run that includes a WebKit project (#1235); `--project desktop-webkit --spec <file>` with `--reuse` runs one file in WebKit alone. A change to a WebKit-affected e2e test is run locally on both WebKit projects before it is pushed; the pipeline is the second check, not the first (owner, 2026-10-06). |
+| `scripts/test-install-acceptance.sh` | Real fresh install to a healthy `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a fixture, so no provider credentials are needed. |
+| `scripts/test-install-bootstrap.sh` | The direct bootstrap path (not a supported install entry since ADR-0031's 2026-10-04 amendment; `get-orbit.sh` is): fetches `install.sh` over the network from a branch, pipes it to bash, and proves the channel tag resolved to the digest the registry serves right now. Real network and registry; only OIDC discovery is redirected, to the `tests/oidc` sidecar. Non-interactive path only; `--red` proves the digest assertion fires. Runs two ways (#724): weekly, via the `install_bootstrap` job in `.gitlab-ci.yml` (maintenance stage, `INSTALL_BOOTSTRAP=true`), `--red` then the green run in that one job; and green-only, via `verify_bootstrap` in `.github/workflows/publish-from-gitlab.yml`, right after that workflow's `publish` job moves GHCR's `preview` tag, the publication path that can actually invalidate what the harness asserts. |
+| `scripts/test-backup-restore.sh` | Backup and restore acceptance drill. Locally run it with `--own-stack`: it builds the working tree, installs a throwaway deployment (Compose project `orbit-backup-drill`) and removes it on every exit (#1273). Needs a host with no Orbit stack and no `*orbit-db-data` volume. Without the flag it borrows the deployment `.env-orbit` names and never removes it, which is CI's path (#1241). |
+| `scripts/test-repair-journeys.sh` | Live repair journeys: installs a real stack, breaks it, and proves `repair.sh` recovers it (`--list` shows which journeys are live and which are still absent). |
+| `scripts/test-malware-scanner.sh` | ClamAV detection. |
+| `scripts/test-secret-scan.sh` | Proves the `gitleaks` CI job's full-history scan fires: plants a synthetic secret in a throwaway `mktemp -d` git repo (never committed to Orbit) and asserts detection and redaction. |
+| `scripts/test-tika-processor.mjs` | Tika document extraction. |
+| `scripts/installer-simulation.sh` | Installer command centre UI, no Docker. |
+| `scripts/install-test-browser.sh` | One-time headless browser download. |
+| `scripts/preview-lane-preflight.sh` | Preview-lane preflight checks. |
+| `scripts/validate-compose-config.sh` | Compose configuration validation. |
+| `scripts/ci/*.sh` | The container validation sequence, one script per workflow step, so GitHub Actions and the GitLab pipeline run the same checks rather than two paraphrases of them (#801). Inputs are environment variables; `$GITHUB_OUTPUT` and `$GITHUB_ENV` are written only when set. |
+| `scripts/acceptance-mailbox.mjs` | Mailbox acceptance record for a digest. |
+| `scripts/sidecar-pins.mjs` | Sidecar pin freshness: `check` reports drift between compose and policy, a moved tag, and stale packages inside a current pin (`--offline` is the drift axis alone, `--red` proves it fires); `sync` re-pins both places after a Renovate bump. |
+| `scripts/check-rolldown-jsdoc-trap.mjs` | Flags a JSDoc comment inside a `{#snippet}` parameter list, or inside a multi-line comma-separated parameter/argument list, before it reaches rolldown's own opaque parse crash on the production build (#782). `pnpm --filter orbit-web repro:782` drives the real crash against throwaway fixtures in `web/tests/rolldown-repro/` (slow, not wired into the fast suite). |
+| `scripts/ci/prove-content-id.sh` | ADR-0028 section 6's proof (#1060 slice 2): three image builds showing that the same tree on two commits gives one image content ID and that a changed `src/` file gives another. By hand or as a manual job, never in an ordinary pipeline, because it builds the image three times. |
+| `scripts/ci/repin-base-image.sh` | Base image freshness (#708): compares the Dockerfile pin to ai/orbit-base-image's published-digest.txt artifact and, on a mismatch, re-pins every location and opens a merge request; `--red` proves the comparison fires, `--dry-run` stops before any commit, push or merge-request call. Its header holds the job-token and Renovate arrangement. |
+| `scripts/cleanup-stacks.sh` | Lists every `orbit*` Compose project on the host, marked running or stale (containers, volumes, networks, stopped and profile ones included, and networks left with no container). `--remove` tears down only stale projects and skips any with a running container, since other sessions share the host; `--project NAME --remove` removes that one even if running, `--remove --all` removes running ones too. Also removes unused `orbit-local`, `orbit-vapid-bootstrap` and `orbit-acceptance-local` images over a day old (not with `--project`). Keeps `orbit-ollama` and its model volume unless `--include-ollama`. Containers Compose did not create are listed, never removed (#1241). |
+| `scripts/dev/test-bed.sh` | The demo and owner-review bed (#1241); see its header. |
+| `scripts/corpus/stages-rerun.sh '<command>'` | Runs one command inside a Node container on the document-processing network, for eval runs that ask the model. See [Extraction method](extraction-method.md). |
+
+## Local traps
+
+Known ways to lose an afternoon, or worse. `AGENTS.md` carries each as one line;
+the reasoning is here.
+
+### A stack a script started is torn down by the same script
+
+Stale containers are a defect, not housekeeping. Run
+`bash scripts/cleanup-stacks.sh` at session end and before an acceptance run.
+Plain `--remove` clears stale stacks and skips running ones (another session
+may own them); a running stack you started yourself goes with
+`--project NAME --remove` (#1241).
+
+### Compose commands attach to whatever project `.env-orbit` names
+
+`docker compose --env-file .env-orbit ...` with no `-p` silently adopts that
+project (and its named volumes) from any checkout or worktree, and the fixed
+`container_name` pins in `docker-compose.yml` then stop a second stack
+coexisting instead of failing loudly. Source
+`scripts/compose-isolation-preflight.sh` before an `up` you assemble by hand,
+and see the isolated-stack recipe under "Quality checks" above. Fixed in the
+acceptance-stack entry point by #536; still your job for a one-off manual
+command.
+
+### Never drive a pty test by closing its own stdin
+
+`spawnSync({ input })` closes stdin as soon as the string is written, which
+under `script` closes the pty master and makes the next read return EOF
+instead of blocking. A widget that tells a timeout from a read error then takes
+the wrong branch, and the test either races or silently never exercises what it
+claims. Keep stdin open for the life of the child, as `runPty` in
+`scripts/installer-simulation.test.mjs` and `runPtyInterrupted` in
+`scripts/installer-ui.test.mjs` both do. Diagnosed twice: #510/#512, then #552.
+
+### A pty driver's deadline belongs to `scripts/pty-deadline.mjs`
+
+A child killed for running out of time has no exit status, so a driver that
+hands the result to an exit-code assertion fails with `expected null to be 130`
+and names the wrong fault: the child never exited at all. Take the deadline and
+the failure from that module rather than writing another timer. A `spawn`-based
+driver must reject rather than resolve, and its tests declare
+`PTY_TEST_TIMEOUT_MS` so Vitest's 5s default does not speak first. See #595.
+
+### A Compose `file:` secret is a bind mount of an inode, not of a path
+
+Edit the file in place and every running container sees it at once; *replace*
+it (`mktemp` + `mv`, `tar -x`, `rsync`) and each container keeps reading the
+old file for as long as it keeps running. A plain `docker restart` re-resolves
+the mount. Repair's rotation lands the new password by rename precisely so a
+half-written secret is impossible, which left the database container reading a
+spent copy and made repair diagnose its own successful rotation as failed.
+Postgres itself never notices, because it reads that file once at initdb and
+authenticates from its own catalogue afterwards. See #629.
+
+### `scripts/test-backup-restore.sh` seeds its own state with SQL
+
+Nothing else drives it. A dropped column passes every unit and integration
+check and fails only the compose smoke test, so grep it before changing a
+schema.
+
+### Do not run `pnpm install` from a worktree
+
+An install run from inside a worktree used to rewire the main checkout; this is
+closed (#784, #858). `scripts/guard-worktree-install.mjs`, wired as pnpm's
+`preinstall`, refuses `pnpm install` from a worktree whose `node_modules`
+resolves outside itself; a worktree with its own `node_modules` installs safely
+through pnpm's shared content-addressable store. `test-e2e-local.sh`'s two pnpm
+calls no longer reach through the trap either. If it ever recurs,
+`find node_modules web/node_modules -type l -lname '*worktrees*'` must be empty
+in the main checkout; repair with `CI=true pnpm install` from the main checkout
+root (it breaks other sessions' builds while it runs, so agree a window first).
+
+### The web type check says SKIPPED in most worktrees, and that is correct
+
+(#1029.) `web/node_modules/orbit` usually links to the main checkout, so
+`orbit/server/*` would be read from whatever branch *that* has out: a wrong
+answer either way, and a passing one is the dangerous half. Run it in the main
+checkout or let CI answer; it is not a fault to fix.
+
+### A red compose smoke job can be hiding the next failure
+
+Its steps run in one job and it stops at the first, so fixing that step reveals
+what was behind it rather than turning the job green. The favicon 404 hid nine
+e2e failures all of 2026-09-03. Read the whole job before reporting what a
+branch needs.
+
+### Never hand-write a control-character range in a regular expression
+
+The escapes are what break. Lose them and the intended "control characters or
+backslash" collapses into a range running from space to backslash, matching most
+ordinary characters: a path sanitiser then rejects every real path, or the
+reverse, and no test notices unless it covers the boundary. Scan the string
+explicitly instead, as `isApplicationRelative` in `web/src/lib/return-path.js`
+does, and give it cases for the empty string, a protocol-relative `//` and a
+backslash.
+
+### A leftover volume of the same Compose project blocks an install
+
+Another stack's database volume no longer does (#1239, #1261): a fresh install
+is blocked only by the volume it would itself attach to, and an update whose
+project name is known skips a volume labelled with another project that is not
+provably its own. Two volumes that could both be this deployment's still refuse,
+so a leftover volume of the *same* Compose project does too.
+`scripts/cleanup-stacks.sh` lists them.
+
+### A lockfile diff adding an `@pnpm/exe` block means the host pnpm is older than the pin
+
+(#884, #901, #1185.) An older pnpm reads `packageManager` and hands over to the
+pinned version, but first writes `@pnpm/exe` into `pnpm-lock.yaml`, even with
+`--frozen-lockfile`. A correct 12.x lockfile has no such block. The owner
+upgraded `/usr/local/bin/pnpm` to the pin (12.4.1) on 2026-10-07, after which
+`CI=true pnpm install --frozen-lockfile` leaves `git status` clean. If the block
+reappears, the pin has moved ahead of the host: discard the lockfile diff, run
+`node --test scripts/lockfile-no-pnpm-exe.test.mjs` before committing a lockfile
+change, and ask the owner to upgrade the host pnpm (`sudo npm install -g
+pnpm@<pin>`). CI activates the pin through corepack, so it never sees this.
+
+### Only ten usable text fonts exist on this host; anything else falls back silently
+
+See "Fonts" in [the corpus README](../scripts/corpus/README.md#fonts) for the
+list and the reason. Check with `fc-list : family` rather than assuming a
+common font is present.
+
+### Scratch work goes in `tmp/`
+
+`tmp/` is gitignored scratch for prototypes and the experiment-log render. The
+gates deliberately skip it (`tsconfig.json`, `eslint.config.mjs`,
+`vitest.config.ts`; guarded by `scripts/scratch-dir-ignored.test.mjs`), because
+a prototype there is expected to rot and must not break the suite for the next
+session (#995). Nothing in `tmp/` is built, shipped or imported.
+
+### The 44px tap floor
+
+Every tappable thing on the phone layout is at least 44x44px. The size is the
+token `--p-hit` in `web/src/lib/pocket/tokens.css`; the gate is
+`web/tests/fidelity/pocket-measure.spec.js` (`MIN_HIT`, #1120), which runs in
+the `fidelity` job (see [the quality strategy](quality-strategy.md)).

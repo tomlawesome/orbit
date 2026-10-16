@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -10,7 +10,11 @@ import {
   mailInSecrets,
   mailInSenderAddresses,
   mailInUnattributedReplies,
+  users,
 } from "@/db/schema";
+import { listSenderAddresses, seedSenderAddress } from "@/server/mail-in/sender-addresses";
+import { resetDocumentConfigForTests } from "@/server/documents/config";
+import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import { getImapIngestionConfig } from "@/server/mail-in/mailbox-config";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import {
@@ -123,8 +127,8 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     const a = fixture.users.owner.id;
     const b = fixture.users.member.id;
     await reconcileImapRecipientAliases(config);
-    const senderA = await verifiedSenderFor(a, "a@example.test");
-    await verifiedSenderFor(b, "b@example.test");
+    const senderA = await verifiedSenderFor(a);
+    await verifiedSenderFor(b);
 
     await collect(1001n, attributedHeaders(senderA));
 
@@ -142,11 +146,11 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     await reconcileImapRecipientAliases(config);
     /* The row exists and names the member; it is simply unverified, which is
        the state Orbit seeds every account in. A claim is not a credential. */
-    await getDb().insert(mailInSenderAddresses).values({
-      userId: fixture.users.member.id, address: "unchecked@example.test", source: "account",
-    });
+    await seedSenderAddress(fixture.users.member.id);
+    const [unchecked] = await listSenderAddresses(fixture.users.member.id);
+    expect(unchecked).toMatchObject({ verified: false });
 
-    await collect(1002n, attributedHeaders("unchecked@example.test"));
+    await collect(1002n, attributedHeaders(unchecked.address!));
 
     expect(await receiptFor("1002")).toEqual({
       userId: null, status: "unattributed", failureCode: "sender_unverified", attributedBy: null,
@@ -158,7 +162,7 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     const a = fixture.users.owner.id;
     const b = fixture.users.member.id;
     await reconcileImapRecipientAliases(config);
-    const senderA = await verifiedSenderFor(a, "a@example.test");
+    const senderA = await verifiedSenderFor(a);
     const relayB = await readRelayRow(b);
     const aliasB = imapRecipientAlias(b, config, relayB!.currentGeneration);
 
@@ -174,12 +178,12 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
   it("deletes a message with no authentication result silently, with no reply (acceptance 4)", async () => {
     const config = await getImapIngestionConfig();
     await reconcileImapRecipientAliases(config);
-    await verifiedSenderFor(fixture.users.member.id, "member@example.test");
+    const memberSender = await verifiedSenderFor(fixture.users.member.id);
 
     /* A verified address, written in `From` by anybody at all, with no
        provider verdict behind it. Answering it would be the backscatter path:
        Orbit emailing whoever a forger names. */
-    await collect(1004n, fixtureHeaders({ from: "member@example.test" }));
+    await collect(1004n, fixtureHeaders({ from: memberSender }));
 
     expect(await receiptFor("1004")).toMatchObject({ userId: null, status: "unattributed", failureCode: "sender_unauthenticated" });
     expect(sent).toEqual([]);
@@ -261,7 +265,7 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     const config = await getImapIngestionConfig();
     const member = fixture.users.member.id;
     await reconcileImapRecipientAliases(config);
-    const victim = await verifiedSenderFor(member, "victim@example.test");
+    const victim = await verifiedSenderFor(member);
     const relay = await readRelayRow(member);
     const alias = imapRecipientAlias(member, config, relay!.currentGeneration);
 
@@ -292,4 +296,197 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
        email whoever the forger named. */
     expect(sent).toEqual([]);
   }, 30_000);
+});
+
+/**
+ * A mailbox holding several messages at once, each under its own UID, with a
+ * provider that records what it deletes.
+ */
+function mailboxHoldingMessages(uidValidity: bigint, messages: Map<number, Buffer>) {
+  setImapClientFactoryForTests(() => ({
+    mailbox: { uidValidity, uidNext: 1_000_000 },
+    async connect() {},
+    async logout() {},
+    async getMailboxLock() { return { release() {} }; },
+    async search() { return [...messages.keys()]; },
+    async messageDelete(range: string) { deleted.push(range); return true; },
+    async fetchOne(uid: string) {
+      const headers = messages.get(Number(uid));
+      /* A fresh copy per fetch, as a real server sends: the cycle zeroes the
+         buffers it was handed, and a message may be fetched again. */
+      return headers ? { uid: Number(uid), headers: Buffer.from(headers), source: Buffer.from(`attribution-message-${uid}`) } : false;
+    },
+  } as unknown as import("imapflow").ImapFlow));
+}
+
+/** Takes the metadata key away, the way the key-outage suite does. */
+function lockMetadataKey() {
+  const original = process.env.DOCUMENT_KEK;
+  delete process.env.DOCUMENT_KEK;
+  resetDocumentConfigForTests();
+  return () => {
+    if (original !== undefined) process.env.DOCUMENT_KEK = original;
+    resetDocumentConfigForTests();
+  };
+}
+
+async function receiptsFor(uidValidity: string) {
+  return getDb().select({
+    uid: imapIngestionMessages.mailboxUid,
+    userId: imapIngestionMessages.userId,
+    status: imapIngestionMessages.status,
+  }).from(imapIngestionMessages).where(eq(imapIngestionMessages.mailboxUidValidity, uidValidity));
+}
+
+/*
+ * #1316 (M-S11): a message nobody could be found for is deleted from the
+ * provider's mailbox for good. That is right for a stranger, and wrong when
+ * the reason nobody was found is Orbit's own: a key outage, or one member's
+ * damaged stored address. Those say nothing about the sender, so the message
+ * must stay where the next cycle can try again.
+ */
+describe("a message Orbit cannot attribute through its own fault is kept (#1316)", () => {
+  it("keeps a verified sender's message, unanswered and unrecorded, while the metadata key is locked", async () => {
+    const config = await getImapIngestionConfig();
+    await reconcileImapRecipientAliases(config);
+    const sender = await verifiedSenderFor(fixture.users.member.id);
+
+    const restoreKey = lockMetadataKey();
+    try {
+      expect(metadataCryptoAvailable()).toBe(false);
+      mailboxHoldingMessages(3001n, new Map([[1, attributedHeaders(sender)]]));
+      /* No .catch: a cycle that throws fails the test. */
+      await runImapIngestionCycle(config, replyDependencies);
+    } finally {
+      restoreKey();
+    }
+
+    expect(deleted).toEqual([]);
+    expect(sent).toEqual([]);
+    expect(await receiptsFor("3001")).toEqual([]);
+  }, 30_000);
+
+  /** Flips the tail of a member's stored envelope so it no longer authenticates; returns the original to restore. */
+  async function damageStoredAddress(userId: string) {
+    const [stored] = await getDb().select({ emailEnc: users.emailEnc }).from(users).where(eq(users.id, userId));
+    const envelope = stored!.emailEnc!;
+    const tampered = `${envelope.slice(0, -4)}${envelope.endsWith("AAAA") ? "BBBB" : "AAAA"}`;
+    expect(tampered).not.toBe(envelope);
+    await getDb().update(users).set({ emailEnc: tampered }).where(eq(users.id, userId));
+    return envelope;
+  }
+
+  async function restoreStoredAddress(userId: string, envelope: string) {
+    await getDb().update(users).set({ emailEnc: envelope }).where(eq(users.id, userId));
+  }
+
+  it("keeps the message of a member whose stored address is damaged, while a stranger's in the same cycle is still handled as unattributed", async () => {
+    const config = await getImapIngestionConfig();
+    await reconcileImapRecipientAliases(config);
+    const damaged = fixture.users.member.id;
+    const sender = await verifiedSenderFor(damaged);
+
+    /* The key is fine; this one member's row is not. */
+    await damageStoredAddress(damaged);
+
+    mailboxHoldingMessages(3002n, new Map([
+      [1, attributedHeaders(sender)],
+      [2, attributedHeaders("stranger@example.test")],
+    ]));
+    await runImapIngestionCycle(config, replyDependencies);
+
+    /* Message 1 (the damaged member's): not deleted, not answered, but
+       recorded as held so a later cycle knows to come back to it. Message 2
+       (a genuine stranger): answered once and deleted, as ever. */
+    expect(deleted).toEqual(["2"]);
+    expect(sent.map((message) => message.to)).toEqual(["stranger@example.test"]);
+    const receipts = await receiptsFor("3002");
+    expect(receipts.filter((receipt) => receipt.uid === 1)).toEqual([
+      { uid: 1, userId: null, status: "held" },
+    ]);
+    expect(receipts.filter((receipt) => receipt.uid === 2)).toEqual([
+      { uid: 2, userId: null, status: "unattributed" },
+    ]);
+  }, 30_000);
+
+  it("ingests the damaged member's message on a later cycle once the address is repaired, though a later UID is already recorded", async () => {
+    const config = await getImapIngestionConfig();
+    await reconcileImapRecipientAliases(config);
+    const member = fixture.users.member.id;
+    const sender = await verifiedSenderFor(member);
+    const original = await damageStoredAddress(member);
+
+    const messages = new Map([
+      [1, attributedHeaders(sender)],
+      [2, attributedHeaders("stranger@example.test")],
+    ]);
+    mailboxHoldingMessages(3003n, messages);
+    await runImapIngestionCycle(config, replyDependencies);
+
+    expect(deleted).toEqual(["2"]);
+    expect(sent.map((message) => message.to)).toEqual(["stranger@example.test"]);
+    expect((await receiptsFor("3003")).filter((receipt) => receipt.uid === 1)).toEqual([
+      { uid: 1, userId: null, status: "held" },
+    ]);
+
+    /* Repair the address. The provider still holds both messages. */
+    await restoreStoredAddress(member, original);
+    mailboxHoldingMessages(3003n, messages);
+    await runImapIngestionCycle(config, replyDependencies);
+
+    const [first] = (await receiptsFor("3003")).filter((receipt) => receipt.uid === 1);
+    expect(first).toBeDefined();
+    expect(first!.userId).toBe(member);
+    expect(first!.status).not.toBe("held");
+    expect(first!.status).not.toBe("unattributed");
+    /* Each cycle re-sends the stranger's delete until it lands; only uid 2 is ever deleted. */
+    expect(new Set(deleted)).toEqual(new Set(["2"]));
+    expect(sent).toHaveLength(1);
+  }, 60_000);
+
+  it("keeps retrying a still-damaged message with a delay between tries, then ingests it once repaired", async () => {
+    const config = await getImapIngestionConfig();
+    await reconcileImapRecipientAliases(config);
+    const member = fixture.users.member.id;
+    const sender = await verifiedSenderFor(member);
+    const original = await damageStoredAddress(member);
+
+    const messages = new Map([
+      [1, attributedHeaders(sender)],
+      [2, attributedHeaders("stranger@example.test")],
+    ]);
+    mailboxHoldingMessages(3004n, messages);
+    await runImapIngestionCycle(config, replyDependencies);
+    mailboxHoldingMessages(3004n, messages);
+    await runImapIngestionCycle(config, replyDependencies);
+
+    /* Still damaged: still held, nothing deleted or answered beyond the stranger. */
+    expect((await receiptsFor("3004")).filter((receipt) => receipt.uid === 1)).toEqual([
+      { uid: 1, userId: null, status: "held" },
+    ]);
+    /* Each cycle re-sends the stranger's delete until it lands; only uid 2 is ever deleted. */
+    expect(new Set(deleted)).toEqual(new Set(["2"]));
+    expect(sent).toHaveLength(1);
+    const [pending] = await getDb().select({ next: imapIngestionMessages.attachmentProcessingNextAttemptAt })
+      .from(imapIngestionMessages)
+      .where(and(eq(imapIngestionMessages.mailboxUidValidity, "3004"), eq(imapIngestionMessages.mailboxUid, 1)));
+    expect(pending?.next).toBeInstanceOf(Date);
+    expect(pending!.next!.getTime()).toBeGreaterThan(Date.now());
+
+    /* Repair, and clear the delay so the next cycle may try at once. */
+    await restoreStoredAddress(member, original);
+    await getDb().update(imapIngestionMessages).set({ attachmentProcessingNextAttemptAt: null })
+      .where(and(eq(imapIngestionMessages.mailboxUidValidity, "3004"), eq(imapIngestionMessages.mailboxUid, 1)));
+    mailboxHoldingMessages(3004n, messages);
+    await runImapIngestionCycle(config, replyDependencies);
+
+    const [first] = (await receiptsFor("3004")).filter((receipt) => receipt.uid === 1);
+    expect(first).toBeDefined();
+    expect(first!.userId).toBe(member);
+    expect(first!.status).not.toBe("held");
+    expect(first!.status).not.toBe("unattributed");
+    /* Each cycle re-sends the stranger's delete until it lands; only uid 2 is ever deleted. */
+    expect(new Set(deleted)).toEqual(new Set(["2"]));
+    expect(sent).toHaveLength(1);
+  }, 60_000);
 });

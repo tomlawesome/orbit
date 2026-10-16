@@ -103,11 +103,15 @@
  * @property {boolean} [onboardingComplete]
  * @property {string} [deletionRequestedAt]
  * @property {string} [deleteAfter]
+ * @property {boolean} [importInProgress]  its owner is bringing an archive in
+ *   (#1316): closed to this reader, so it carries no sections or items
  * @property {WorkspaceSection[]} sections
  * @property {WorkspaceItem[]} items
  * @property {ItemActivity[]} [activities]
  * @property {string[]} [readNotificationIds]
  * @property {string[]} [dismissedNotificationIds]
+ * @property {string} [today]  the household's calendar date where it lives, as
+ *   the engine reckons it for its rules (ADR-0034, #1325); YYYY-MM-DD
  */
 
 /**
@@ -163,6 +167,8 @@
  * @property {string} csrfToken
  * @property {boolean} [authenticated]
  * @property {?SessionUser} [user]
+ * @property {import('./engine-limits.js').EngineLimits} [limits]       the engine's archive limits (#1336)
+ * @property {import('./engine-limits.js').EngineRetention} [retention] the engine's retention windows (#1336)
  */
 
 /**
@@ -173,7 +179,7 @@
  * @typedef {object} Receipt
  * @property {string} id
  * @property {boolean} canApprove
- * @property {string} classification   "ready" | "waiting" | "cleanup" | ...
+ * @property {string} classification   "ready" | "waiting" | "retry" | ...
  * @property {?string} [householdId]
  * @property {string} [status]
  * @property {number} [draftVersion]
@@ -181,7 +187,6 @@
  * @property {?string} [expiresAt]
  * @property {number} [attachmentCount]
  * @property {boolean} [canDiscard]
- * @property {boolean} [cleanupOnly]
  * @property {string} [message]
  * @property {ItemProposal} [proposal]
  * @property {Record<string, { source: string, confidence: string }>} [fieldEvidence]
@@ -244,6 +249,15 @@
  */
 
 /**
+ * One paper as home's item drawer lists it (#1319): the belt's own document
+ * row (belt.js documentRowOf) — every field the preview card and the reader
+ * need to open it, its honest state included — plus the drawer's one-line
+ * `meta`: `added 12 Jun · 240 KB`, and the state word when it has one.
+ *
+ * @typedef {import('./belt.js').BeltDocumentRow & { meta: string }} DrawerDocument
+ */
+
+/**
  * What the item screen renders, whichever origin it came from: a real item
  * with its household, section and papers, or (#434) a mail-in suggestion in
  * that same view — amendable, with accept-into-orbit where the item actions
@@ -251,8 +265,7 @@
  *
  * One shape rather than two because the screen draws one thing. Everything an
  * origin cannot fill is optional, and `suggestion` is the flag that says which
- * origin this was: readBelt reads exactly that to decide whether the arrival
- * has a seat in the band.
+ * origin this was.
  *
  * @typedef {Partial<WorkspaceItem> & Partial<ReceiptSuggestion> & {
  *   id: string,
@@ -260,7 +273,7 @@
  *   suggestion?: boolean,
  *   householdId?: ?string,
  *   section?: ?string,
- *   documents?: { name: string, meta: string }[],
+ *   documents?: DrawerDocument[],
  *   proposal?: ItemProposal,
  *   attachmentCount?: number,
  * }} ItemView
@@ -357,8 +370,10 @@
  * @property {boolean} shipped
  * @property {boolean} visible
  * @property {number} count        entries sitting in this section
- * @property {boolean} [removable] emptiness is the only thing that earns a ×
+ * @property {number} [incoming]   entries a not-yet-saved removal sends here
+ * @property {boolean} [removable] goes without asking: nothing in it, nothing coming
  * @property {boolean} [removed]   struck out in the editor, not yet saved
+ * @property {string} [moveTo]     where a struck-out section's entries go
  */
 
 /**
@@ -384,6 +399,13 @@
  * @property {string} status
  * @property {string} lastReceived
  * @property {string} ingest
+ * @property {RelaySender | null} [sender]  the address the member sends from, and whether it is checked (#1410); null for an administrator or when mail-in is off
+ *
+ * @typedef {object} RelaySender
+ * @property {string} address
+ * @property {boolean} verified
+ * @property {boolean} verificationPending  a check email has gone and its link has not been used
+ * @property {string | null} expiresAt      when that link lapses
  */
 
 /** Thrown with the server's own error code so screens can react to specifics. */
@@ -398,6 +420,100 @@ export class WorkspaceError extends Error {
     this.status = status;
     this.code = code;
   }
+}
+
+/**
+ * What a failure says, for a screen to print: the error's own message (a
+ * WorkspaceError carries the server's words), a thrown string as it is, or
+ * the screen's own sentence when there is nothing to say (#1340).
+ * @param {unknown} error
+ * @param {string} [fallback]
+ * @returns {string}
+ */
+export function wordsOf(error, fallback = "Something went wrong.") {
+  const message = /** @type {{ message?: unknown } | null | undefined} */ (error)?.message;
+  if (typeof message === "string" && message !== "") return message;
+  if (typeof error === "string" && error !== "") return error;
+  return fallback;
+}
+
+/** #1406: a create save that never reached Orbit, or whose answer was lost. */
+export const UNREACHED_WORDS = "not saved — couldn't reach Orbit; check the connection and try again";
+/** #1406: a create save Orbit failed (5xx) without words of its own. */
+export const SERVER_FAULT_WORDS = "not saved — Orbit had a problem; try again";
+
+/**
+ * A failure's words in the save vocabulary: the server's own, led by
+ * "not saved —" unless they already say what did not happen ("not yet — …").
+ * @param {unknown} error
+ * @returns {string}
+ */
+export function notSavedWords(error) {
+  const words = wordsOf(error);
+  return /^not [a-z]+ —/iu.test(words) ? words : `not saved — ${words}`;
+}
+
+/**
+ * #1406: what a create save says when it got no verdict -- the send never
+ * arrived, its answer was lost, or Orbit failed -- or null when the server
+ * answered with a verdict (a 4xx), which the caller words -- except a refused
+ * bind, whose words both forms show alike (see `bindRefused`). Nothing is half
+ * saved in any of these: the item and its document land together or not at
+ * all, so a retry under the same ids is always safe.
+ * @param {unknown} error
+ * @returns {string | null}
+ */
+export function unsavedWords(error) {
+  if (!(error instanceof WorkspaceError)) return UNREACHED_WORDS;
+  const status = error.status ?? 0;
+  if (status >= 500) return error.code ? notSavedWords(error) : SERVER_FAULT_WORDS;
+  if (status < 400) return UNREACHED_WORDS;
+  /* One wording for the desk and the pocket: the server's own, which tells
+     the member to pick the file again. */
+  if (bindRefused(error)) return wordsOf(error);
+  return null;
+}
+
+/**
+ * #1406: whether the server refused a staged file because it is gone -- the
+ * sweep retired it once its hold lapsed. The server answers both a re-stage
+ * and a bind under that document id with `document_not_available`, so the
+ * form stages the same file once more under a fresh id: within the same Add
+ * when the re-stage is refused, on the next Add when the bind is
+ * (create.behaviour.js).
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+export function bindRefused(error) {
+  return error instanceof WorkspaceError && error.code === "document_not_available";
+}
+
+/* The server's codes for a file it will never take, whoever sends it:
+   too large or empty, a type it does not accept, a structure it cannot open
+   (or a password), or malware found. */
+const FILE_REFUSAL_CODES = new Set([
+  "document_too_large",
+  "document_empty",
+  "document_type_unsupported",
+  "document_password_required",
+  "document_structure_invalid",
+  "document_malware_detected",
+]);
+
+/**
+ * #1406: whether a failed stage is the server refusing the file itself --
+ * its type, size or structure, or malware -- rather than a failed send.
+ * Decided by code, not status: the household's or the instance's storage
+ * limit (`document_household_quota`, `document_instance_quota`) is also a
+ * 413, but no replacement file helps there, so it reads as a plain
+ * "not saved" and the file stays attached.
+ * A refused file stays in the form, marked with these words, and holds Add
+ * until it is replaced or removed (owner's answer 6a).
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+export function refusesFile(error) {
+  return error instanceof WorkspaceError && FILE_REFUSAL_CODES.has(error.code ?? "");
 }
 
 /**
@@ -428,10 +544,26 @@ export async function json(response) {
         `/api/auth/login?returnTo=${encodeURIComponent(window.location.pathname)}`,
       );
     }
+    /* The household was closed by an import while this screen stood in it
+       (#1316): its data is no longer served, so the screen has nothing truer
+       to show than the notice a fresh read draws. Screens read nothing of a
+       household the workspace already marks closed, so the reload settles. */
+    if (body?.error?.code === "household_import_in_progress" && typeof window !== "undefined") {
+      window.location.reload();
+    }
     /* The server explains itself in its own words when it can. When it can't —
        an HTML error page, a proxy, a process that isn't there — say that
        plainly rather than surfacing a bare "Not Found" the reader cannot act
        on. */
+    if (response.status === 413 && !body?.error?.message) {
+      /* Reached, and refused for size by something in front of Orbit (nginx's
+         1 MB default answers with a bare page): not "could not be reached"
+         (#1284). Orbit's own limit answers 413 with this same code. */
+      throw new WorkspaceError("That file is larger than this Orbit accepts", {
+        status: 413,
+        code: "document_too_large",
+      });
+    }
     const message =
       body?.error?.message ?? `Orbit could not be reached (${response.status})`;
     throw new WorkspaceError(message, {
@@ -546,6 +678,89 @@ export async function applyCommand(command, { retryCsrf = true } = {}) {
 }
 
 /**
+ * A dry run of a command (ADR-0034 decision 3, #1325), read whole: the engine
+ * runs the same parse and checks the real call runs and writes nothing, and
+ * answers 200 either way -- `{}`, `{ refusal: { code, message } }`, or for a
+ * completion that would go through `{ preview: { nextDate } }` (#1337) -- so a
+ * browser never logs an expected "not yet" as a failed request. `refusal` is
+ * the engine's words, which the browser never rewords; `preview` is what the
+ * command would do, when the engine says. Null when the dry run cannot be
+ * heard (the network, the session, maintenance): nothing is known, and the
+ * real save says what went wrong.
+ *
+ * @param {object} command
+ * @param {{ retryCsrf?: boolean }} [options]
+ * @returns {Promise<{ refusal: string | null, refusalCode: string | null, preview: { nextDate: string } | null } | null>}
+ */
+export async function askCommand(command, { retryCsrf = true } = {}) {
+  try {
+    const { csrfToken } = await readSession();
+    const response = await fetch("/api/workspace/commands", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
+      body: JSON.stringify({ ...command, dryRun: true }),
+    });
+    if (response.status === 403 && retryCsrf) {
+      await readSession({ refresh: true });
+      return askCommand(command, { retryCsrf: false });
+    }
+    /** @type {{ refusal?: { code: string, message: string }, preview?: { nextDate?: string } }} */
+    const body = await json(response);
+    const nextDate = body.preview?.nextDate;
+    return {
+      refusal: body.refusal?.message ?? null,
+      refusalCode: body.refusal?.code ?? null,
+      preview: nextDate ? { nextDate } : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a command would be accepted: null when it would, otherwise the
+ * engine's refusal in the words the member reads (askCommand's `refusal`).
+ * A dry run that cannot be heard refuses nothing.
+ *
+ * @param {object} command
+ * @returns {Promise<string | null>}
+ */
+export async function checkCommand(command) {
+  return (await askCommand(command))?.refusal ?? null;
+}
+
+/**
+ * checkCommand for a create under a draft id. A draft id new to the server
+ * can only be answered version_required when an earlier send landed and its
+ * answer was lost, so that refuses nothing: the save swallows it the same way
+ * and carries on, and the entry can be retried.
+ *
+ * @param {object} command
+ * @returns {Promise<string | null>}
+ */
+export async function checkDraftCommand(command) {
+  const answer = await askCommand(command);
+  if (answer?.refusalCode === "version_required") return null;
+  return answer?.refusal ?? null;
+}
+
+/**
+ * When an item is next due in a workspace the engine returned: after a
+ * completion, the next date the engine worked out from its period (#1324);
+ * null when the completion ended its schedule, or the item is not there.
+ *
+ * @param {Workspace} workspace
+ * @param {string} householdId
+ * @param {string} itemId
+ * @returns {?string}
+ */
+export function dueDateIn(workspace, householdId, itemId) {
+  const household = workspace.households.find((one) => one.id === householdId);
+  return household?.items.find((one) => one.id === itemId)?.dueDate ?? null;
+}
+
+/**
  * The household the session is currently pointed at, with its sections.
  *
  * @returns {Promise<Household>}
@@ -575,10 +790,12 @@ export async function activeHousehold() {
  * fixture to fetch changes no caller's shape later.
  */
 import { adminFixture } from "./fixtures/admin.js";
-import { ago } from "$lib/format.js";
-import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
+import { ago, bandOf, dayMonth, sizeLabel } from "$lib/format.js";
+import { daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
-import { householdScreenOf, householdUpdateCommandOf, sectionsCommandOf } from "./household.js";
+import { engineNumbersOf } from "./engine-limits.js";
+import { householdScreenOf, householdUpdateCommandOf, sectionCommandsOf } from "./household.js";
+import { documentRowOf } from "./belt.js";
 
 /**
  * A mutating fetch with the session's CSRF token, like applyCommand's.
@@ -660,6 +877,57 @@ export async function approveReceipt(suggestion, fallbackHouseholdId, operationI
   return body; // { outcome: "approved" | "partial_success", itemId }
 }
 
+/** The one sentence for a receipt that is recorded but whose documents failed. */
+const PARTIAL_APPROVAL_MESSAGE = "The item is recorded, but its documents need another try — try once more to finish.";
+
+/**
+ * Approve a mail receipt's suggestion under its per-receipt operation id —
+ * the one call every screen makes. The id is made on the first try and kept
+ * in `operationIds` (keyed by receiptId; the map stays the screen's own) so a
+ * retry sends the same one; it is dropped once the item is fully approved.
+ * `partial_success` (the item is recorded, its documents failed) answers
+ * `{ partial: true, message }`, the id kept; callers branch on that shape,
+ * never on the words. A plain refusal throws, as approveReceipt does.
+ *
+ * @param {ReceiptSuggestion} suggestion
+ * @param {Map<string, string>} operationIds  the screen's ids, by receiptId
+ * @param {?string} fallbackHouseholdId
+ * @param {?ItemProposal} [amendedItem]
+ * @param {?string} [sectionId]
+ * @returns {Promise<{ ok: true } | { partial: true, message: string }>}
+ */
+export async function approveWithOperation(suggestion, operationIds, fallbackHouseholdId, amendedItem = null, sectionId = null) {
+  let operationId = operationIds.get(suggestion.receiptId);
+  if (!operationId) {
+    operationId = crypto.randomUUID();
+    operationIds.set(suggestion.receiptId, operationId);
+  }
+  // The engine binds an operation id to the body it first carried, so a plain
+  // retry (no amendment given) re-sends the amendment and section sent first.
+  // A refusal (4xx) bound nothing, so it unpins and the next tap sends afresh;
+  // a lost answer may have been accepted, so the pin stays for the retry.
+  const pinned = pinnedApprovals.get(operationId);
+  if (pinned && !amendedItem) ({ amendedItem, sectionId } = pinned);
+  else pinnedApprovals.set(operationId, { amendedItem, sectionId });
+  let result;
+  try {
+    result = await approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem, sectionId);
+  } catch (error) {
+    if (error instanceof WorkspaceError && typeof error.status === "number" && error.status >= 400 && error.status < 500) {
+      pinnedApprovals.delete(operationId);
+    }
+    throw error;
+  }
+  if (result.outcome === "partial_success") return { partial: true, message: PARTIAL_APPROVAL_MESSAGE };
+  operationIds.delete(suggestion.receiptId);
+  pinnedApprovals.delete(operationId);
+  return { ok: true };
+}
+
+/** What each kept operation id first sent, by operation id.
+ *  @type {Map<string, { amendedItem: ?ItemProposal, sectionId: ?string }>} */
+const pinnedApprovals = new Map();
+
 /**
  * Discard a mail-in receipt; its staged files are purged server-side.
  *
@@ -716,15 +984,30 @@ export async function createSystem(draft) {
 }
 
 /**
- * "Today" for chart arithmetic. The workspace fixture pins it to the date the
- * designs were drawn against so the fidelity gate is deterministic; the real
- * API carries no such field, so live data uses the real clock.
+ * "Today": the household's calendar date as the engine reckons it (the
+ * workspace read's `today`, in the household's own time zone, ADR-0034,
+ * #1325), so a calendar greys exactly the days the engine refuses. The
+ * workspace fixture pins it to the date the designs were drawn against so the
+ * fidelity gate is deterministic. The browser has no clock fallback (#1337):
+ * a household that came without one is the engine's fault, so it throws in
+ * development; elsewhere (and with no household at all) the answer is "", and
+ * every date count against it (daysUntil) is null, so the screen shows
+ * nothing rather than a UTC date that may be a day off.
  *
  * @param {?Workspace} [workspace]
+ * @param {?string} [householdId]  whose today; the active household's when omitted
  * @returns {string} a calendar date, YYYY-MM-DD
  */
-function todayOf(workspace) {
-  return workspace?.fixtureToday ?? new Date().toISOString().slice(0, 10);
+function todayOf(workspace, householdId) {
+  const households = workspace?.households ?? [];
+  const id = householdId ?? workspace?.activeHouseholdId;
+  const household = households.find((one) => one.id === id) ?? households[0];
+  const today = workspace?.fixtureToday ?? household?.today;
+  if (today) return today;
+  if (household && import.meta.env.DEV) {
+    throw new Error(`The workspace sent household ${household.id} without its "today" (the engine always sends it, #1337)`);
+  }
+  return "";
 }
 
 /**
@@ -769,6 +1052,7 @@ function todayOf(workspace) {
  * @property {MailFailure[]} mailFailures
  * @property {Receipt[]} mailReading           arrived, not yet readable
  * @property {SessionUser | null} user
+ * @property {import('./engine-limits.js').EngineRetention | null} retention  the engine's retention windows (#1336)
  * @property {string} today                    YYYY-MM-DD
  * @property {string} now                      ISO instant, pinned under fixtures
  */
@@ -793,7 +1077,7 @@ export async function readHome(fetchImpl) {
     readInbox(fetchImpl).catch(() => /** @type {Inbox} */ ({ receipts: [] })),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
-  const today = todayOf(workspace);
+  const today = todayOf(workspace, primary);
   /* §11 (#453): no membership means the labelled sky — every visible
      household as a bearing and a name, nothing else. The dial, manifest and
      mail surfaces simply do not exist yet for this viewer. */
@@ -808,6 +1092,7 @@ export async function readHome(fetchImpl) {
       mailFailures: [],
       mailReading: [],
       user: session?.user ?? null,
+      retention: engineNumbersOf(session).retention,
       today,
       now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
     };
@@ -826,11 +1111,42 @@ export async function readHome(fetchImpl) {
       (receipt) => !receipt.canApprove && receipt.classification === "waiting",
     ),
     user: session?.user ?? null,
+    retention: engineNumbersOf(session).retention,
     today,
     /* Pinned "now" for elapsed-time lines (the pocket's signals): fixture
        noon under the gate, the clock in production. */
     now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
   };
+}
+
+/**
+ * AN ITEM IN ANOTHER OF THE READER'S HOUSEHOLDS (#1319, decision
+ * 2026-10-09): `/home?item=<id>` for an item that lives in another household
+ * the reader belongs to switches home to that household and opens the drawer
+ * there. This names that household: null when home already stands in the
+ * item's own, or when no household of the reader's holds it (a suggestion,
+ * or an id Orbit does not hold, which opens nothing as before).
+ *
+ * @param {HomeView | null | undefined} view
+ * @param {string | null | undefined} itemId
+ * @returns {string | null}
+ */
+export function householdElsewhereFor(view, itemId) {
+  if (!itemId || !view?.household || (view.household.items ?? []).some((one) => one.id === itemId)) return null;
+  return view.households.find((one) => one.id !== view.primary && (one.items ?? []).some((item) => item.id === itemId))?.id ?? null;
+}
+
+/**
+ * Switches home to one of the reader's households and reads home again:
+ * the engine's own `household.activate` (the session's active household,
+ * which every screen reads), the command a household switch is.
+ *
+ * @param {string} householdId
+ * @returns {Promise<HomeView>}
+ */
+export async function readHomeIn(householdId) {
+  await applyCommand({ type: "household.activate", householdId });
+  return readHome();
 }
 
 /**
@@ -878,6 +1194,7 @@ export async function readInboxScreen() {
     today,
     now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
     relay,
+    retention: engineNumbersOf(session).retention,
     lastCaught: caught,
     review: receipts.filter((receipt) => receipt.canApprove),
     reading: receipts.filter((receipt) => !receipt.canApprove && receipt.classification === "waiting"),
@@ -992,12 +1309,23 @@ export async function commandMailbox(command) {
  */
 export async function readContactSettings() {
   try {
-    /** @type {{ contact?: ?ContactSettings }} */
-    const body = await json(await fetch("/api/admin/contact", { credentials: "same-origin" }));
-    return body.contact ?? null;
+    return await fetchContactSettings();
   } catch {
     return null;
   }
+}
+
+/**
+ * The same read, unguarded: it rejects where the route refuses, breaks or
+ * never answers, so the administration screen can tell a failed read from an
+ * address that is genuinely unset (#1442).
+ *
+ * @returns {Promise<?ContactSettings>}
+ */
+async function fetchContactSettings() {
+  /** @type {{ contact?: ?ContactSettings }} */
+  const body = await json(await fetch("/api/admin/contact", { credentials: "same-origin" }));
+  return body.contact ?? null;
 }
 
 /**
@@ -1011,6 +1339,44 @@ export async function commandContact(command) {
 }
 
 /**
+ * The document upload size limit, as an administrator sees it (#1285): a
+ * stored override, falling back to the configured default. `null` means the
+ * route could not answer — for a signed-in user who is not an instance
+ * administrator, or an older server.
+ *
+ * @typedef {object} UploadLimitSettings
+ * @property {number} maxBytes the limit every upload is held to right now
+ * @property {number} defaultBytes the configured default (`DOCUMENT_MAX_BYTES`)
+ * @property {?number} overrideBytes the administrator's own choice, or null
+ * @property {number} minBytes
+ * @property {number} ceilingBytes
+ * @property {number} version
+ * @property {?string} updatedAt
+ *
+ * @returns {Promise<?UploadLimitSettings>}
+ */
+export async function readUploadLimitSettings() {
+  try {
+    /** @type {{ uploadLimit?: ?UploadLimitSettings }} */
+    const body = await json(await fetch("/api/admin/upload-limit", { credentials: "same-origin" }));
+    return body.uploadLimit ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sets the limit in whole MB, or goes back to the configured default, and
+ * answers with the limit as it now stands.
+ *
+ * @param {{ action: "set", expectedVersion: number, megabytes: number } | { action: "default", expectedVersion: number }} command
+ * @returns {Promise<{ uploadLimit: UploadLimitSettings }>}
+ */
+export async function commandUploadLimit(command) {
+  return json(await csrfFetch("/api/admin/upload-limit", { body: command }));
+}
+
+/**
  * One row of `GET /api/admin/health`'s `services` array
  * (src/server/admin-health.ts, AdministratorServiceHealth) — states and
  * timestamps only, never a hostname, URL or error string.
@@ -1021,6 +1387,7 @@ export async function commandContact(command) {
  * @property {string} checkedAt
  * @property {?string} [lastSuccessAt]
  * @property {?string} [lastErrorAt]
+ * @property {?string} [signaturesAt] virus scanner only: when its loaded signatures were built (#1296)
  */
 
 /**
@@ -1040,24 +1407,39 @@ export async function commandContact(command) {
  * ownership, membership counts — from the admin fixture until #453 makes
  * them real. Live data omits what it cannot know. No join requests: §15-2g
  * moved them to household management, so this screen never asks for them.
+ *
+ * The admin fixture is fixture mode's alone (the fixture workspace carries
+ * `fixtureToday`; a live one never does). On a live instance a read that is
+ * refused, breaks or never arrives gives its panel `null` and a true flag in
+ * `failed`, never the mockup's values (#1442) — the people list and the
+ * public contact included, so a failed read never reads as "nobody" or "not
+ * set". Every panel's read is guarded so one that fails never sinks the rest
+ * of the screen. The workspace read is the exception: without it there is no
+ * screen to draw, so if it fails readAdminScreen() rejects, and both layouts
+ * catch that and say Orbit could not load administration, with a retry.
  */
 export async function readAdminScreen() {
-  const [workspace, session, users, mailbox, contact, rotation, metadata, recoveryBundle, health, operations] =
+  const [workspace, session, users, mailbox, contact, uploadLimit, rotation, metadata, recoveryBundle, health, operations] =
     await Promise.all([
     readWorkspace(),
     readSession().catch(() => null),
-    json(await fetch("/api/admin/users", { credentials: "same-origin" }))
+    fetch("/api/admin/users", { credentials: "same-origin" }).then((response) => json(response))
       .then(
         (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, disabledAt?: ?string }[] }} */ body) =>
           body.users ?? [],
       )
-      .catch(() => []),
+      /* null, not []: a failed read is not an instance of nobody (#1442). */
+      .catch(() => null),
     readMailboxSettings(),
-    readContactSettings(),
+    fetchContactSettings().then(
+      (answer) => ({ answer, failed: false }),
+      () => ({ answer: null, failed: true }),
+    ),
+    readUploadLimitSettings(),
     /* An open document-key rotation (#956). Additive: a route that cannot
        answer (fixture harness, older server) means no card, never a sunk
        screen — and "no rotation open" renders as nothing at all. */
-    json(await fetch("/api/admin/documents/rotation", { credentials: "same-origin" }))
+    fetch("/api/admin/documents/rotation", { credentials: "same-origin" }).then((response) => json(response))
       .then(
         (/** @type {{ rotation?: { inProgress: boolean, startedAt: string | null, secondKeyLoaded: boolean } }} */ body) =>
           body.rotation ?? null,
@@ -1068,7 +1450,7 @@ export async function readAdminScreen() {
        own. Additive on the same terms as the rotation above: a route that
        cannot answer means no cards, never a sunk screen, and an instance with
        nothing wrong renders nothing at all. */
-    json(await fetch("/api/admin/documents/health", { credentials: "same-origin" }))
+    fetch("/api/admin/documents/health", { credentials: "same-origin" }).then((response) => json(response))
       .then(
         (/** @type {{ health?: { metadata?: MetadataHealth } }} */ body) =>
           body.health?.metadata ?? null,
@@ -1078,17 +1460,17 @@ export async function readAdminScreen() {
        KEK (#968, slice 1 of #966). Additive on the same terms as the two
        cards above: a route that cannot answer means no card, never a sunk
        screen. */
-    json(await fetch("/api/admin/recovery-bundle", { credentials: "same-origin" }))
+    fetch("/api/admin/recovery-bundle", { credentials: "same-origin" }).then((response) => json(response))
       .then(
         (/** @type {{ recoveryBundle?: { exported: boolean, exportedAt: string | null } }} */ body) =>
           body.recoveryBundle ?? null,
       )
       .catch(() => null),
-    /* The real Operations panel and instance strip (#1000). Additive on the
-       same terms as the rotation and metadata above: a route that cannot
-       answer (fixture harness, older server) keeps the fixture's rows, so
-       the fixture-mode screen the fidelity gate photographs is unchanged. */
-    json(await fetch("/api/admin/health", { credentials: "same-origin" }))
+    /* The real Operations panel and instance strip (#1000). A route that
+       cannot answer keeps the fixture's rows under the fixture harness only,
+       so the screen the fidelity gate photographs is unchanged; live, the
+       panel says it failed (#1442). */
+    fetch("/api/admin/health", { credentials: "same-origin" }).then((response) => json(response))
       .then((/** @type {{ health?: AdminHealth }} */ body) => body.health ?? null)
       .catch(() => null),
     /* The document jobs (#1071). Additive on the same terms: a route that
@@ -1096,12 +1478,15 @@ export async function readAdminScreen() {
     readAdminOperations().catch(() => null),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
+  const fixtureMode = Boolean(workspace.fixtureToday);
   /* Real owner names where the members route answers (#453); the fixture's
-     stay as the gate's fallback where it doesn't. */
+     stay as the gate's fallback where it doesn't, in fixture mode only. */
   /** @type {Record<string, string>} */
-  const owners = { ...adminFixture.owners };
+  const owners = fixtureMode ? { ...adminFixture.owners } : {};
+  let ownersFailed = false;
   await Promise.all(
-    workspace.households.map(async (household) => {
+    /* A household closed by an import (#1316) is not asked: it would refuse. */
+    workspace.households.filter((household) => !household.importInProgress).map(async (household) => {
       try {
         /** @type {Partial<Roster>} */
         const body = await json(
@@ -1109,7 +1494,11 @@ export async function readAdminScreen() {
         );
         const owner = (body.members ?? []).find((member) => member.role === "owner");
         if (owner?.displayName) owners[household.id] = owner.displayName;
-      } catch { /* additive: a household that cannot answer keeps its label */ }
+      } catch {
+        /* additive: a household that cannot answer keeps its label, and
+           live, the Systems card says some owners could not be read */
+        ownersFailed = true;
+      }
     }),
   );
   /* Pinned under the fidelity gate exactly like the rest of this file's "ago"
@@ -1120,18 +1509,31 @@ export async function readAdminScreen() {
     household: workspace.households.find((one) => one.id === primary) ?? null,
     primary,
     today: todayOf(workspace),
-    users,
+    /* `null` on a live instance whose users read failed (`failed.users`);
+       the empty list under the fixture harness, as before. */
+    users: users ?? (fixtureMode ? [] : null),
     households: workspace.households,
-    ...adminFixture,
-    /* Live where the route answers, and the mockup's rows where it does not,
-       so the fixture-mode screen the fidelity gate photographs is unchanged
-       (#465, §15) while a real deployment shows its real mailbox. */
-    relay: mailbox ? relayRowsOf(mailbox) : adminFixture.relay,
-    /* Same contract, for the Operations panel and instance strip (#1000):
-       the five invented "healthy" rows and the hard-coded version string only
-       render where the route genuinely cannot answer. */
-    services: health ? serviceRowsOf(health, now) : adminFixture.services,
-    instance: health ? instanceLineOf(health.build) : adminFixture.instance,
+    /* The mockup's membership summaries: fixture mode only (#1442). */
+    peopleMeta: fixtureMode ? adminFixture.peopleMeta : /** @type {Record<string, string>} */ ({}),
+    /* Live where the route answers. Where it does not, the mockup's rows
+       under the fixture harness only, so the screen the fidelity gate
+       photographs is unchanged (#465, §15); on a live instance `null`, and
+       the panel says it could not be read (#1442). */
+    relay: mailbox ? relayRowsOf(mailbox) : fixtureMode ? adminFixture.relay : null,
+    /* Same contract, for the Operations panel and instance strip (#1000). */
+    services: health ? serviceRowsOf(health, now) : fixtureMode ? adminFixture.services : null,
+    instance: health ? instanceLineOf(health.build) : fixtureMode ? adminFixture.instance : null,
+    /* Which panels' reads did not answer on a live instance. Always all
+       false in fixture mode, whose fallbacks are the photographed screen. */
+    failed: {
+      relay: !fixtureMode && !mailbox,
+      services: !fixtureMode && !health,
+      instance: !fixtureMode && !health,
+      owners: !fixtureMode && ownersFailed,
+      users: !fixtureMode && users === null,
+      /* A contact the route answers as unset is not a failure. */
+      contact: !fixtureMode && contact.failed,
+    },
     /* The answer itself, for the pocket's per-service callout (#1123): when
        each service was last checked, last succeeded and last failed. Null
        where the route cannot answer, and the callout then says only the row. */
@@ -1142,7 +1544,8 @@ export async function readAdminScreen() {
        (#1001, §19): an instance administrator's workspace lists every one. */
     recoverable: workspace.recoverableHouseholds ?? [],
     mailbox,
-    contact,
+    contact: contact.answer,
+    uploadLimit,
     rotation,
     metadata,
     recoveryBundle,
@@ -1325,6 +1728,10 @@ function serviceDetailOf(service, now) {
   const isWorker = /** @type {readonly string[]} */ (WORKER_IDS).includes(service.id);
   if (service.state === "off") return "not enabled";
   if (service.state === "down") return isWorker ? "stopped" : "unreachable";
+  if (service.state === "warn" && service.id === "virus-scanner") {
+    // Old signatures, or a reply that gave no date at all (#1296).
+    return service.signaturesAt ? `out of date · signatures ${ago(service.signaturesAt, now)}` : "signature age unknown";
+  }
   if (service.state === "warn") {
     return service.lastErrorAt ? `retrying · last error ${ago(service.lastErrorAt, now)}` : "retrying";
   }
@@ -1367,19 +1774,64 @@ function instanceLineOf(build) {
 }
 
 /**
- * Named apart from format.js's and belt.js's own `shortDate` (#1151 W2-Q5):
- * those take a bare date and append T00:00:00Z themselves; this one takes a
- * document's full `availableAt` instant as it already arrives from the API.
- * @param {string} iso  a full ISO instant, not a bare date
+ * The same three parts without their labels or the self-hosted line, for
+ * the About page's Orbit row (#1256): "0.3.0 · preview · fd6a7e6". Empty
+ * when the build knows none of them.
+ *
+ * @param {{ version: ?string, channel: ?string, revision: ?string }} build
+ * @returns {string}
  */
-const shortAddedDate = (iso) =>
-  new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+export function buildLineOf(build) {
+  return [build.version, build.channel, build.revision?.slice(0, 7)].filter(Boolean).join(" · ");
+}
 
-/** @param {number} bytes */
-const sizeLabel = (bytes) =>
-  bytes >= 1024 * 1024
-    ? `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
-    : `${Math.round(bytes / 1024)} KB`;
+/**
+ * @typedef {{
+ *   build: { version: ?string, channel: ?string, revision: ?string, image: ?string },
+ *   node: ?string,
+ *   sidecars: { id: "postgres" | "tika" | "clamav" | "ollama", state: "running" | "off", version: ?string }[],
+ * }} AboutFacts
+ */
+
+/**
+ * What this Orbit runs on (#1256), from `GET /api/about`.
+ *
+ * @returns {Promise<AboutFacts>}
+ */
+export async function readAbout() {
+  /** @type {{ about: AboutFacts }} */
+  const body = await json(await fetch("/api/about", { credentials: "same-origin" }));
+  return body.about;
+}
+
+/**
+ * The word a paper's row adds when it cannot simply be read (#1319): the
+ * preview card's own honest states (belt.js documentPreviewStateOf), said
+ * in the drawer's meta so the row tells you before you press it.
+ * @param {DocumentSummary} doc
+ * @returns {?string}
+ */
+const stateWordOf = (doc) => {
+  if (doc.lifecycle === "pending_deletion") return "removed";
+  if (doc.lifecycle === "rejected") return "refused";
+  if (!doc.ready) return "scanning";
+  return null;
+};
+
+/**
+ * One paper as the desk's item drawer lists it (#1319, design/v19/
+ * belt-purpose/round-3): `added 12 Jun · 240 KB`, the honest state word
+ * after it, and underneath everything the preview and the reader need.
+ * @param {DocumentSummary} doc
+ * @returns {DrawerDocument}
+ */
+export function drawerDocumentOf(doc) {
+  return {
+    ...documentRowOf(doc),
+    meta: [`added ${dayMonth(doc.availableAt)}`, sizeLabel(doc.sizeBytes), stateWordOf(doc)]
+      .filter(Boolean).join(" · "),
+  };
+}
 
 /**
  * One item, or null. A membership test against data the session already sees
@@ -1389,9 +1841,8 @@ const sizeLabel = (bytes) =>
  * `version`/`updatedAt`/`snoozedUntil` ride along for #424's writes.
  *
  * @param {string} id  an item id, or (#434) a mail-in receipt id
- * @param {Workspace} [workspace]  a workspace the caller already holds
- *   (#1151 W2-Q4: readBelt reads one for itself before falling back to
- *   this for a mail-in suggestion, and must not read a second one)
+ * @param {Workspace} [workspace]  a workspace the caller already holds, so
+ *   it is not read a second time (#1151 W2-Q4)
  * @returns {Promise<?ItemView>}
  */
 export async function readItem(id, workspace) {
@@ -1409,12 +1860,9 @@ export async function readItem(id, workspace) {
     return {
       ...item,
       householdId: household.id,
-      today: todayOf(workspace),
+      today: todayOf(workspace, household.id),
       section: sections.get(item.sectionId) ?? null,
-      documents: (body.documents ?? []).map((doc) => ({
-        name: doc.displayName,
-        meta: `added ${shortAddedDate(doc.availableAt)} · ${sizeLabel(doc.sizeBytes)}`,
-      })),
+      documents: (body.documents ?? []).map(drawerDocumentOf),
     };
   }
   /* #434: the id may be a mail-in receipt — a suggestion opens in the same
@@ -1445,14 +1893,16 @@ export async function readItem(id, workspace) {
 
 /**
  * One item's papers, for the pocket home's item sheet and search (#1119,
- * #1057): the per-item documents route readItem and readBelt already read,
+ * #1057): the per-item documents route readItem already reads,
  * with each paper's id kept so a row can say which one it means. The
  * household id comes from the home view the caller already holds, which the
- * route's own membership check still guards.
+ * route's own membership check still guards. Each paper carries the belt's
+ * own row too (#1319, belt.js documentRowOf), so the phone's drawer opens it
+ * in the same preview card and reader the desk's does.
  *
  * @param {string} householdId
  * @param {string} itemId
- * @returns {Promise<{ id: string, itemId: string, name: string, meta: string }[]>}
+ * @returns {Promise<(import('./belt.js').BeltDocumentRow & { itemId: string, meta: string })[]>}
  */
 export async function readItemDocuments(householdId, itemId) {
   /** @type {{ documents?: DocumentSummary[] }} */
@@ -1462,15 +1912,252 @@ export async function readItemDocuments(householdId, itemId) {
     }),
   );
   return (body.documents ?? []).map((doc) => ({
+    /* #1319: the belt's own row first, so a paper in the phone's drawer
+       opens the same preview and reader; the search's own words after. */
+    ...documentRowOf(doc),
     id: doc.id,
     itemId,
     name: doc.displayName,
     meta: [
       sizeLabel(doc.sizeBytes),
-      `added ${shortAddedDate(doc.availableAt)}`,
-      doc.lifecycle === "pending_deletion" ? "removed" : null,
+      `added ${dayMonth(doc.availableAt)}`,
+      stateWordOf(doc),
     ].filter(Boolean).join(" · "),
   }));
+}
+
+/**
+ * Attaches a file to an item the server already holds (#1245): the same
+ * per-item documents route, as a raw-body upload — the filename travels
+ * encoded in a header because the body is the file's own bytes.
+ *
+ * `documentId` is the caller's, minted once per file: a retry after a lost
+ * answer sends the same id with the same bytes, and the route's idempotency
+ * (document-repository.ts `uploadItemDocument`) hands back the document it
+ * already holds instead of storing a second copy. A 202 (held for a scan
+ * retry) is still an attached document, so only a refusal throws. A stale
+ * CSRF token is retried once, as applyCommand does.
+ *
+ * @param {string} householdId
+ * @param {string} itemId
+ * @param {File} file
+ * @param {string} documentId
+ * @param {{ retryCsrf?: boolean }} [options]
+ * @returns {Promise<DocumentSummary>}
+ */
+export async function attachItemDocument(householdId, itemId, file, documentId, { retryCsrf = true } = {}) {
+  const response = await postDocumentBytes(
+    `/api/households/${encodeURIComponent(householdId)}/items/${encodeURIComponent(itemId)}/documents`,
+    file,
+    { "x-orbit-document-id": documentId },
+    { retryCsrf },
+  );
+  /** @type {{ document: DocumentSummary }} */
+  const body = await json(response);
+  return body.document;
+}
+
+/**
+ * Stages a file for an item that is about to be created (#1406): the
+ * household's documents route stores, scans and seals it with no item yet,
+ * and the create form's one `item.upsert` names it in `documentIds`, so the
+ * item and its document are saved together or not at all. The ciphertext is
+ * sealed under the draft item's id (`x-orbit-item-id`), so only that item
+ * can bind it.
+ *
+ * `documentId` is minted once per file picked and `itemId` once per draft, so
+ * a retry sends both again and the route hands back what it already holds. A
+ * 202 (held for a scan retry) is still staged; only a refusal or a failed
+ * send throws, with the server's status so the form can tell a refused file
+ * (413/415/422) from one that never got a verdict.
+ *
+ * @param {string} householdId
+ * @param {File} file
+ * @param {string} documentId
+ * @param {string} itemId  the draft item's id
+ * @param {{ retryCsrf?: boolean }} [options]
+ * @returns {Promise<DocumentSummary>}
+ */
+export async function stageDocument(householdId, file, documentId, itemId, { retryCsrf = true } = {}) {
+  const response = await postDocumentBytes(
+    `/api/households/${encodeURIComponent(householdId)}/documents`,
+    file,
+    { "x-orbit-document-id": documentId, "x-orbit-item-id": itemId },
+    { retryCsrf },
+  );
+  /** @type {{ document: DocumentSummary }} */
+  const body = await json(response);
+  return body.document;
+}
+
+/**
+ * One raw-body file POST, the shape all four document routes take: the
+ * bytes are the body, so the filename travels encoded in a header, with
+ * the CSRF token and whatever else the route asks for. A stale CSRF token
+ * is retried once, as applyCommand does. The caller reads the response —
+ * one answers JSON, one an image.
+ *
+ * @param {string} url
+ * @param {File} file
+ * @param {Record<string, string>} headers
+ * @param {{ retryCsrf?: boolean, signal?: AbortSignal }} [options]
+ * @returns {Promise<Response>}
+ */
+async function postDocumentBytes(url, file, headers, { retryCsrf = true, signal } = {}) {
+  const { csrfToken } = await readSession();
+  const response = await fetch(url, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "content-type": file.type || "application/octet-stream",
+      "x-csrf-token": csrfToken,
+      "x-orbit-filename": encodeURIComponent(file.name),
+      ...headers,
+    },
+    body: file,
+    signal,
+  });
+  if (response.status === 403 && retryCsrf) {
+    await readSession({ refresh: true });
+    return postDocumentBytes(url, file, headers, { retryCsrf: false, signal });
+  }
+  return response;
+}
+
+/**
+ * Page one of a file the create form has just been given, before any item
+ * exists for it (#1245): the household's pre-attachment preview route draws
+ * it from the bytes and keeps nothing. The picture comes back as an object
+ * URL for an `<img>`; the caller revokes it when the sheet is cleared.
+ * `scanned` is false only where the instance has scanning switched off —
+ * the lane says "scanned clean" only when something scanned it.
+ *
+ * The route answers NDJSON as each stage ends (ADR-0033 step 5): first the
+ * virus check, which `onStage("scanned", { scanned })` reports the moment
+ * its line arrives so the card can say Orbit has moved on to the preview,
+ * then the picture itself, or the server's own words if it could not be
+ * drawn. A refusal before the scan finished is an ordinary JSON error.
+ *
+ * @param {string} householdId
+ * @param {File} file
+ * @param {{ signal?: AbortSignal, onStage?: (stage: "scanned", detail: { scanned: boolean }) => void }} [options]
+ * @returns {Promise<{ url: string, scanned: boolean }>}
+ */
+export async function previewPickedDocument(householdId, file, { signal, onStage } = {}) {
+  const response = await postDocumentBytes(
+    `/api/households/${encodeURIComponent(householdId)}/item-document-preview`,
+    file,
+    { "x-orbit-declared-bytes": String(file.size) },
+    { signal },
+  );
+  if (!response.ok) await json(response); /* throws the server's own words */
+  const unreachable = () => new WorkspaceError(`Orbit could not be reached (${response.status})`, { status: response.status });
+  let scanned = false;
+  for await (const event of ndjsonLines(response, unreachable)) {
+    if (event.error) {
+      throw new WorkspaceError(
+        typeof event.error.message === "string" ? event.error.message : `Orbit could not be reached (${response.status})`,
+        { status: response.status, code: typeof event.error.code === "string" ? event.error.code : undefined },
+      );
+    }
+    if (event.stage === "scanned") {
+      scanned = event.scanned === true;
+      onStage?.("scanned", { scanned });
+    } else if (event.stage === "preview") {
+      if (!PREVIEW_MEDIA_TYPES.has(event.mediaType) || typeof event.bytes !== "string") {
+        throw new WorkspaceError("Orbit could not draw a picture of this document", { status: response.status, code: "document_preview_failed" });
+      }
+      let bytes;
+      try {
+        bytes = Uint8Array.from(atob(event.bytes), (char) => char.charCodeAt(0));
+      } catch {
+        throw unreachable();
+      }
+      return { url: URL.createObjectURL(new Blob([bytes], { type: event.mediaType })), scanned };
+    }
+  }
+  /* The stream ended without a picture or an error: something answered
+     that was never the whole route. */
+  throw unreachable();
+}
+
+/** The only pictures the preview route draws; anything else is refused. */
+const PREVIEW_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/svg+xml"]);
+
+/**
+ * The JSON objects of an NDJSON body, one per line, as they arrive. A line
+ * that is not a JSON object means whatever answered was not Orbit's route.
+ *
+ * @param {Response} response
+ * @param {() => Error} unreachable
+ * @returns {AsyncGenerator<Record<string, any>>}
+ */
+async function* ndjsonLines(response, unreachable) {
+  if (!response.body) throw unreachable();
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let pending = "";
+  /** @param {string} text */
+  const parse = (text) => {
+    let value;
+    try {
+      value = JSON.parse(text);
+    } catch {
+      throw unreachable();
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw unreachable();
+    return value;
+  };
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      pending += value;
+      let newline = pending.indexOf("\n");
+      while (newline !== -1) {
+        const text = pending.slice(0, newline).trim();
+        pending = pending.slice(newline + 1);
+        if (text) yield parse(text);
+        newline = pending.indexOf("\n");
+      }
+    }
+    if (pending.trim()) yield parse(pending.trim());
+  } finally {
+    /* Stopping early (a picture, an error) lets the rest of the body go. */
+    reader.cancel().catch(() => undefined);
+  }
+}
+
+/**
+ * What the picked file says, read before any item exists for it (#1245):
+ * the household's inspection route scans and extracts the bytes and keeps
+ * nothing. Started from the same pick as `previewPickedDocument`, so the
+ * page is on screen while this is still reading.
+ *
+ * @typedef {object} PickedDocumentSuggestion
+ * @property {string} field      "title" | "subtype" | "provider" | "reference" | "cost" | "dueDate" | "scheduleKind" | "recurrenceMonths"
+ * @property {string} value
+ * @property {string} source
+ * @property {string} confidence
+ *
+ * @typedef {object} PickedDocumentInspection
+ * @property {boolean} extracted
+ * @property {PickedDocumentSuggestion[]} suggestions
+ * @property {string} [message]       the honest reason nothing (or less) was read
+ * @property {"attachable" | "rejected"} attachmentDisposition
+ *
+ * @param {string} householdId
+ * @param {File} file
+ * @param {{ signal?: AbortSignal }} [options]
+ * @returns {Promise<PickedDocumentInspection>}
+ */
+export async function inspectPickedDocument(householdId, file, { signal } = {}) {
+  const response = await postDocumentBytes(
+    `/api/households/${encodeURIComponent(householdId)}/item-document-inspection`,
+    file,
+    { "x-orbit-declared-bytes": String(file.size) },
+    { signal },
+  );
+  return json(response);
 }
 
 /**
@@ -1490,7 +2177,7 @@ export async function readItemDocuments(householdId, itemId) {
  * @returns {Promise<Relay>}
  */
 export async function readRelay() {
-  /** @type {{ relay?: { address?: string, listening?: string, lastReceivedLabel?: string, lastReceived?: string, ingest?: string } }} */
+  /** @type {{ relay?: { address?: string, listening?: string, lastReceivedLabel?: string, lastReceived?: string, ingest?: string, sender?: RelaySender | null } }} */
   const body = await json(
     await fetch("/api/settings/mail-relay", { credentials: "same-origin" }),
   );
@@ -1504,6 +2191,7 @@ export async function readRelay() {
       relay.lastReceivedLabel
       ?? (relay.lastReceived ? ago(relay.lastReceived, new Date().toISOString()) : "nothing yet"),
     ingest: relay.ingest ?? UNAVAILABLE_RELAY.ingest,
+    sender: relay.sender ?? null,
   };
 }
 
@@ -1528,7 +2216,7 @@ export async function readRelay() {
  * @returns {Promise<Relay>}
  */
 export async function rotateRelay(action) {
-  /** @type {{ relay?: { address?: string, listening?: string, lastReceived?: string, ingest?: string } }} */
+  /** @type {{ relay?: { address?: string, listening?: string, lastReceived?: string, ingest?: string, sender?: RelaySender | null } }} */
   const body = await json(await csrfFetch("/api/settings/mail-relay", { method: "PUT", body: { action } }));
   const relay = body.relay ?? {};
   return {
@@ -1536,7 +2224,40 @@ export async function rotateRelay(action) {
     status: relay.listening ?? UNAVAILABLE_RELAY.status,
     lastReceived: relay.lastReceived ? ago(relay.lastReceived, new Date().toISOString()) : "nothing yet",
     ingest: relay.ingest ?? UNAVAILABLE_RELAY.ingest,
+    sender: relay.sender ?? null,
   };
+}
+
+/**
+ * Sends the check email to the signed-in member's registered address (#1410,
+ * ADR-0017 decision 7c).
+ *
+ * NO BODY, and none to send: the address a member forwards from is the one
+ * their account is registered with, so the session names the member and the
+ * server names the address. Answers 202 with where the mail went and when its
+ * link lapses; the refusals reach the caller as a WorkspaceError carrying the
+ * server's status, code and the engine's own words (ADR-0034 decision 4), which
+ * the screen shows as they arrive. A refusal the engine did not word (a proxy
+ * page, a bare string) carries an empty message.
+ *
+ * @returns {Promise<{ address: string, expiresAt: string }>}
+ */
+export async function sendSenderCheck() {
+  const response = await csrfFetch("/api/settings/mail-relay/verification");
+  /* Whether the engine actually worded the refusal: `json` fills in a "could
+     not be reached" sentence of its own when it did not, and that is not the
+     engine's to show as if it were. */
+  const spoken = response.ok
+    ? ""
+    : await response.clone().json().then((body) => body?.error?.message, () => "");
+  try {
+    return await json(response);
+  } catch (error) {
+    if (error instanceof WorkspaceError && !(typeof spoken === "string" && spoken.trim())) {
+      throw new WorkspaceError("", { status: error.status, code: error.code });
+    }
+    throw error;
+  }
 }
 
 const NO_ADDRESS = "no address yet";
@@ -1572,14 +2293,41 @@ const UNAVAILABLE_RELAY = {
  * ("configured"/"not configured"), never a host, a port or a credential —
  * the same rule the relay follows.
  *
+ * `within` bounds the wait (#1316): past that many milliseconds the fetch is
+ * aborted and the read refused, so a caller holding a screen open on the
+ * answer falls back instead of waiting on a server that never answers.
+ *
+ * @param {{ within?: number }} [options]
  * @returns {Promise<Reminders>}
  */
-export async function readReminders() {
-  /** @type {{ reminders?: Partial<Reminders> }} */
-  const body = await json(
-    await fetch("/api/settings/reminders", { credentials: "same-origin" }),
-  );
-  return remindersOf(body.reminders);
+export async function readReminders({ within } = {}) {
+  const abort = within ? new AbortController() : null;
+  const read = (async () => {
+    /** @type {{ reminders?: Partial<Reminders> }} */
+    const body = await json(
+      await fetch("/api/settings/reminders", abort
+        ? { credentials: "same-origin", signal: abort.signal }
+        : { credentials: "same-origin" }),
+    );
+    return remindersOf(body.reminders);
+  })();
+  if (!abort) return read;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  /** @type {Promise<never>} */
+  const late = new Promise((_, refuse) => {
+    timer = setTimeout(() => {
+      abort.abort();
+      refuse(new WorkspaceError("Orbit could not read your reminder timing in time", {
+        code: "reminders_timeout",
+      }));
+    }, within);
+  });
+  try {
+    return await Promise.race([read, late]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -1786,13 +2534,19 @@ export async function readSentLately() {
  * `signOutEverywhere`. If the ended session is this browser's own, the
  * server has already cleared the cookie by the time this resolves, so a
  * caller ending its own session should treat that the same way `signOut`
- * does: there is nothing left to be signed into on this page.
+ * does: there is nothing left to be signed into on this page, and nothing
+ * may call the API again (a 401 would send the reader through the provider's
+ * still-live sign-on, straight back in).
  *
  * @param {string} sessionId
- * @returns {Promise<void>}
+ * @returns {Promise<?string>}  the provider's own logout URL, when this
+ *   browser's own provider session ended with it (#1439); always null for
+ *   another device
  */
 export async function revokeSession(sessionId) {
-  await json(await csrfFetch(`/api/auth/sessions/${sessionId}/revoke`));
+  /** @type {?{ redirectTo?: ?string }} */
+  const body = await json(await csrfFetch(`/api/auth/sessions/${sessionId}/revoke`));
+  return body?.redirectTo ?? null;
 }
 
 /**
@@ -1802,17 +2556,19 @@ export async function revokeSession(sessionId) {
  * The caller's own session goes with them — that is the point, not a side
  * effect: a device the reader no longer trusts must lose access, and there is
  * no way to say which device that was. The route clears this browser's cookie
- * on the way out, so the only honest next page is the sign-in.
+ * on the way out, so this page then plays the goodbye, as `signOut` does.
  *
  * CSRF-carrying, like every other mutation here: an action this destructive
  * must not be reachable from another origin's form post.
  *
- * @returns {Promise<number>}  how many sessions were ended
+ * @returns {Promise<?string>}  the provider's own logout URL for this
+ *   browser, when it has one (#1439)
  */
 export async function signOutEverywhere() {
-  /** @type {?{ revoked?: number }} */
+  /** @type {?{ redirectTo?: ?string }} */
   const body = await json(await csrfFetch("/api/auth/sessions/revoke"));
-  return body?.revoked ?? 0;
+  sessionPromise = null;              /* the cached session is a dead letter now */
+  return body?.redirectTo ?? null;
 }
 
 /**
@@ -1831,11 +2587,32 @@ export async function signOutEverywhere() {
  * @returns {Promise<?string>}  the provider's own logout URL, when it has one
  */
 export async function signOut() {
-  const { csrfToken } = await readSession();
+  /* Read the session fresh, not from the cache: another tab may have replaced
+     it, and its old CSRF token would be refused on every press. A 401 is not
+     sent through `json()`, which would bounce into the login flow; with no
+     session there is nothing to prove, and the route takes the same-origin
+     check alone. */
+  /** @type {?string} */
+  let csrfToken = null;
+  try {
+    const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin" });
+    if (sessionResponse.status !== 401) {
+      ({ csrfToken } = /** @type {Session} */ (await json(sessionResponse)));
+    }
+  } catch {
+    /* The session read failing (Orbit answering 5xx, or not reached at all)
+       must not stop someone signing out. Send the token cached earlier on this
+       page if there is one, and otherwise none: the route then takes the
+       same-origin check, or refuses, and only that refusal is an error. */
+    csrfToken = (await sessionPromise?.catch(() => null))?.csrfToken ?? null;
+  }
+  /** @type {Record<string, string>} */
+  const headers = { accept: "application/json" };
+  if (csrfToken) headers["x-csrf-token"] = csrfToken;
   const response = await fetch("/api/auth/logout", {
     method: "POST",
     credentials: "same-origin",
-    headers: { accept: "application/json", "x-csrf-token": csrfToken },
+    headers,
   });
   if (!response.ok) {
     throw new WorkspaceError("The session could not be ended", { status: response.status });
@@ -2117,7 +2894,10 @@ export async function sendSetupLink(userId, options = {}) {
  */
 export async function readHouseholdScreen(householdId) {
   const [workspace, session] = await Promise.all([readWorkspace(), readSession().catch(() => null)]);
-  const [roster, joinRequests, invitations] = await Promise.all([
+  /* Closed by an import (#1316): the screen draws only the notice, and the
+     household's own routes would refuse every read below. */
+  const importInProgress = Boolean(workspace.households.find((one) => one.id === householdId)?.importInProgress);
+  const [roster, joinRequests, invitations] = importInProgress ? [/** @type {Partial<Roster>} */ ({}), [], []] : await Promise.all([
     /** @type {Promise<Partial<Roster>>} */ (
       json(await fetch(`/api/households/${householdId}/members`, { credentials: "same-origin" }))
     ).catch(() => ({ members: [], candidates: [] })),
@@ -2134,7 +2914,7 @@ export async function readHouseholdScreen(householdId) {
      defaults (e.g. `members = []` reads as `never[]`), so this call is cast
      rather than fought from the caller's side — the fix belongs with that
      function's own JSDoc, out of scope here. */
-  return householdScreenOf(/** @type {any} */ ({
+  const screen = householdScreenOf(/** @type {any} */ ({
     workspace,
     householdId,
     user: session?.user ?? null,
@@ -2142,11 +2922,21 @@ export async function readHouseholdScreen(householdId) {
     candidates: roster.candidates ?? [],
     joinRequests,
     invitations,
-    today: todayOf(workspace),
+    today: todayOf(workspace, householdId),
     /* Pinned "now" so "2d ago" on a waiting joiner holds still under the gate
        and stays live in production — readHome's rule. */
     now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
   }));
+  /* The engine's archive limits and retention windows (#1336), for the
+     archive card and the deletion words. */
+  return screen && {
+    ...screen,
+    ...engineNumbersOf(session),
+    importInProgress,
+    /* Whether the reader belongs to any household besides this one, for the
+       closed notice's "your other households are open" line. */
+    hasOthers: workspace.households.length > 1,
+  };
 }
 
 /**
@@ -2165,23 +2955,33 @@ export async function writeHouseholdIdentity(householdId, identity) {
 /**
  * The sections editor, saved whole — `sections.replace` replaces the list.
  *
- * The hidden-not-removed law is enforced HERE as well as in the interface,
- * because it is a data law and not a style: dropping a section that still
- * holds entries would have the engine re-file them under whichever section
- * happens to be first, which is a silent edit nobody asked for.
+ * Whether a dropped section may go is the engine's rule (ADR-0034, #1332): it
+ * refuses a removal while the section holds entries unless told where they
+ * go, in its own words, and this sends what the editor asked so those words
+ * reach the screen when a stale screen or another member's new entry got
+ * there first. One command per section dropped with entries (each carrying
+ * `moveItemsTo`), in removal order, as `sectionCommandsOf` decides.
  *
  * @param {string} householdId
- * @param {SectionRow[]} rows  the editor's rows, in sectionRowsOf's shape
+ * @param {SectionRow[]} rows  every editor row, struck-out ones included
  * @returns {Promise<Workspace>}
  */
 export async function writeSections(householdId, rows) {
-  const dropped = rows.filter((row) => row.count > 0 && row.removed);
-  if (dropped.length) {
-    throw new WorkspaceError("A section holding entries can be hidden, never removed", {
-      code: "section_in_use",
-    });
+  /** @type {Workspace | undefined} */
+  let workspace;
+  let saved = 0;
+  for (const command of sectionCommandsOf(householdId, rows)) {
+    try {
+      workspace = await applyCommand(command);
+      saved += 1;
+    } catch (error) {
+      /* Earlier commands of this save have already landed (#1332): the caller
+         reloads to the true list rather than keep the editor's. */
+      if (saved && error && typeof error === "object") /** @type {{ partial?: boolean }} */ (error).partial = true;
+      throw error;
+    }
   }
-  return applyCommand(sectionsCommandOf(householdId, rows.filter((row) => !row.removed)));
+  return /** @type {Workspace} */ (workspace);
 }
 
 /**
@@ -2308,95 +3108,8 @@ export async function withdrawInvitation(householdId, invitationId) {
 }
 
 /* ---------------------------------------------------------------------------
- * The item belt (#458) — the item screen, and the document surface with it.
+ * A document's own lifecycle: restore and remove.
  */
-
-/**
- * Everything the belt renders for one arrival: the WHOLE household the item
- * belongs to, because the belt is that household's manifest bent round a ring
- * and an item without its date-neighbours is not an arrival, it is a card on
- * its own.
- *
- * The membership test is readItem's, deliberately: the household is found by
- * looking for the id in data the session already sees, never by building a
- * request out of the URL, so an unknown id is a 404 and not a probe (#451).
- *
- * Documents come from the per-item route, fanned out over the items that
- * report carrying any — the pattern the retired archive used, and additive in the
- * same way: an item whose papers cannot be read loses its papers, not the
- * screen. They are read for the whole household rather than for the centred
- * item alone because every item's rock wears CON-1's belt ellipse when it has
- * papers, and because centring a neighbour must not go back to the server.
- *
- * #434, and since #1145 the owner's merge of the suggestion screen into the
- * belt: an id that is a mail-in receipt rather than an item is the SAME
- * belt -- the household the receipt files into (its own, else the primary),
- * with the suggestion handed alongside so beltManifestOf seats it, hollow, at
- * the date the relay read. It is a visitor: a suggestion is not in the
- * manifest until it is accepted into it, so no other arrival ever seats one.
- * `households` and `primary` ride along for the phone's review sheet, whose
- * form offers the sections of the household the item files into.
- *
- * @param {string} id  the centred item, or (#434) a mail-in receipt
- */
-export async function readBelt(id) {
-  const [workspace, session] = await Promise.all([readWorkspace(), readSession().catch(() => null)]);
-  const today = todayOf(workspace);
-  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
-  let household = workspace.households.find((one) =>
-    (one.items ?? []).some((item) => item.id === id),
-  );
-  /** @type {?ItemView} */
-  let suggestion = null;
-  if (!household) {
-    const found = await readItem(id, workspace);
-    if (!found?.suggestion) return null;
-    suggestion = found;
-    household = workspace.households.find((one) => one.id === (found.householdId ?? primary))
-      ?? workspace.households[0];
-  }
-
-  /** @type {Record<string, DocumentSummary[]>} */
-  const documentsByItem = {};
-  const items = household?.items ?? [];
-  const householdId = household?.id ?? "";
-  await Promise.all(
-    items
-      .filter((item) => (item.documentCount ?? 0) > 0)
-      .map(async (item) => {
-        try {
-          /** @type {{ documents?: DocumentSummary[] }} */
-          const body = await json(
-            await fetch(`/api/households/${householdId}/items/${item.id}/documents`, {
-              credentials: "same-origin",
-            }),
-          );
-          documentsByItem[item.id] = body.documents ?? [];
-        } catch {
-          documentsByItem[item.id] = [];
-        }
-      }),
-  );
-
-  return {
-    kind: "belt",
-    selectedId: id,
-    today,
-    user: session?.user ?? null,
-    household: household
-      ? {
-          ...household,
-          /* The command builders write against the raw item plus the household it
-             proved membership of (#455, commands.js base()). */
-          items: items.map((item) => ({ ...item, householdId })),
-        }
-      : null,
-    suggestion,
-    households: workspace.households,
-    primary,
-    documentsByItem,
-  };
-}
 
 /**
  * Undoes a document's soft delete (#1054/#1088): `POST

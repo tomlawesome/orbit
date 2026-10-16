@@ -1,0 +1,20 @@
+{
+  "name": "valid discovery response succeeds",
+  "envOrbit": "OIDC_ISSUER=https://idp.parity.invalid\n",
+  "issuer": "https://idp.parity.invalid",
+  "curl": {
+    "curlExitCode": 0,
+    "httpStatus": "200",
+    "body": "{\"issuer\":\"https://idp.parity.invalid\",\"authorization_endpoint\":\"https://idp.parity.invalid/authorize\",\"token_endpoint\":\"https://idp.parity.invalid/token\",\"jwks_uri\":\"https://idp.parity.invalid/jwks\"}"
+  },
+  "dockerExitCode": 0,
+  "bash": {
+    "status": 0,
+    "stdout": "status=ok",
+    "stderr": "",
+    "requestedUrls": [
+      "https://idp.parity.invalid/.well-known/openid-configuration"
+    ],
+    "failure": null
+  }
+}

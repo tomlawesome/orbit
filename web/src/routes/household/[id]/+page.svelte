@@ -1,28 +1,28 @@
 <script>
+  import { plural } from "$lib/format.js";
   import { onMount, tick, untrack } from "svelte";
   import { invalidateAll } from "$app/navigation";
   import Chrome from "$lib/Chrome.svelte";
   import Mark from "$lib/Mark.svelte";
+  import { createArm } from "$lib/arm.js";
   import { fillStarTiles } from "$lib/sky.js";
   import { PEN_ORDER, inkOf, nextMark } from "$lib/marks.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
-  import { MAX_SECTIONS, deletionNameMatches, entriesLabel } from "$lib/data/household.js";
+  import { BAND_VAR } from "$lib/data/bands.js";
+  import { MAX_SECTIONS, deletionNameMatches, entriesIn, entriesLabel, moveEntriesAway, whereHeadingOf } from "$lib/data/household.js";
   import { FIELD, berthsOf, liftOf, roomOf, skyMap, toField } from "./room.js";
   import { consumeDoor } from "./door.js";
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
+  import { daysWords } from "$lib/data/engine-limits.js";
   import DeskArchive from "./DeskArchive.svelte";
-  import {
-    addMember,
-    decideJoinRequest,
-    removeMember,
-    requestHouseholdDeletion,
-    sendInvitation,
-    transferOwnership,
-    withdrawInvitation,
-    writeHouseholdIdentity,
-    writeSections,
-  } from "$lib/data/workspace.js";
+  import HouseholdClosed from "$lib/HouseholdClosed.svelte";
+  import { addMember, decideJoinRequest, removeMember, requestHouseholdDeletion, sendInvitation, transferOwnership, withdrawInvitation, wordsOf, writeHouseholdIdentity, writeSections } from "$lib/data/workspace.js";
+  import { zoneLabel } from "$lib/pick-lists.js";
+  import PickSheet from "./PickSheet.svelte";
+  import { destinationChoices } from "$lib/editing/item-draft.js";
+  import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import { WIDE_QUERY } from "../../home/preview-pair.js";
   import "./household.css";
 
   /**
@@ -201,38 +201,142 @@
     });
   });
 
-  /* The mockup's own lists. A household whose stored value is not among them
-     keeps its own value at the head rather than being silently re-pointed at
-     one that is — the select must never change what is stored by rendering. */
-  const ZONES = ["Europe/London", "Europe/Dublin", "Europe/Paris", "America/New York", "Australia/Sydney", "UTC"];
-  const CURRENCIES = ["GBP", "EUR", "USD", "CAD", "AUD", "NZD"];
-  /** @param {string[]} list @param {string} current */
-  const withCurrent = (list, current) => (list.includes(current) ? list : [current, ...list]);
+  /* The time zone and the currency are picked from the shared pick-lists
+     (#1338): the full lists with the favourites first and a filter. On a
+     wide screen (1200px, as home's chooser) pressing the value stands the
+     chooser card under it; narrower, the phone's bottom sheet opens. A
+     household whose stored value is not among them keeps its own value at
+     the head of the list rather than being silently re-pointed — picking
+     never changes what is stored by rendering. */
+  /** @type {"timezone" | "currency"} */
+  let picking = $state("timezone");
+  /** the bottom sheet (narrow) */
+  let pickOpen = $state(false);
+  /** the chooser card standing under a field (wide), or none */
+  /** @type {"timezone" | "currency" | null} */
+  let cardFor = $state(null);
+  let wide = $state(false);
+  $effect(() => {
+    const media = matchMedia(WIDE_QUERY);
+    const set = () => { wide = media.matches; };
+    set();
+    media.addEventListener("change", set);
+    return () => media.removeEventListener("change", set);
+  });
+  /** @param {"timezone" | "currency"} field */
+  function pick(field) {
+    placing = null;
+    picking = field;
+    if (!wide) { pickOpen = true; return; }
+    if (cardFor === field) closeCard(true);
+    else cardFor = field;
+  }
+  /** Put the card away; focus goes back to the pressed value unless a press elsewhere took it.
+   *  @param {boolean} refocus */
+  function closeCard(refocus) {
+    const field = cardFor;
+    cardFor = null;
+    if (refocus && field) tick().then(() => document.getElementById(field === "timezone" ? "hhzone" : "hhcur")?.focus({ preventScroll: true }));
+  }
+  /** @param {string} value */
+  function choose(value) {
+    form[picking] = value;
+    touch(picking);
+    if (cardFor) closeCard(true);
+  }
+  /** What the card is asked: the field's stored value. @param {"timezone" | "currency"} field */
+  const askOf = (field) => ({
+    key: field,
+    label: field === "timezone" ? "time zone" : "currency",
+    heading: field === "timezone" ? "time zone" : "currency",
+    value: form[field],
+    choices: [],
+    today: "",
+  });
+  /* A press off the card (and off the value that opened it, whose own press
+     toggles it) puts it away, as home's chooser does. */
+  $effect(() => {
+    if (!cardFor) return;
+    /** @param {PointerEvent} event */
+    const onPress = (event) => {
+      const target = /** @type {Element | null} */ (event.target instanceof Element ? event.target : null);
+      if (target?.closest("[data-chooser-card], .pickbtn")) return;
+      closeCard(false);
+    };
+    window.addEventListener("pointerdown", onPress, true);
+    return () => window.removeEventListener("pointerdown", onPress, true);
+  });
 
   const shown = $derived(rows.filter((row) => !row.removed));
+
+  /* "Where do these entries go?" (#1332): removing a section that still holds
+     entries asks for a destination instead of removing. The chooser card
+     stands under the row on a wide screen; narrower, the bottom sheet opens
+     (PickSheet, kind "section"). Nothing is sent until the list is saved. */
+  /** the section whose entries are being placed, or none */
+  /** @type {string | null} */
+  let placing = $state(null);
+  /** the bottom sheet (narrow) */
+  let placeOpen = $state(false);
+  /** what the status line says about the last removal */
+  let sectionSaid = $state("");
+  const placingRow = $derived(rows.find((row) => row.id === placing) ?? null);
+  const placeHeading = $derived(placingRow ? whereHeadingOf(entriesIn(placingRow)) : "");
+  const placeChoices = $derived(placingRow ? destinationChoices(rows, placingRow.id) : []);
+  /** What the card is asked: nothing chosen yet, every other kept section. */
+  const placeAsk = $derived({
+    key: /** @type {const} */ ("section"),
+    label: "sections",
+    heading: placeHeading,
+    value: null,
+    choices: placeChoices,
+    today: "",
+  });
+  /** Put the card away; focus goes back to the × unless a press elsewhere took it.
+   *  @param {boolean} refocus */
+  function closePlace(refocus) {
+    const id = placing;
+    placing = null;
+    placeOpen = false;
+    if (refocus && id) tick().then(() => document.getElementById(`drop-${id}`)?.focus({ preventScroll: true }));
+  }
+  /** @param {string} destinationId */
+  function place(destinationId) {
+    const row = placingRow;
+    if (!row) return;
+    sectionSaid = moveEntriesAway(rows, row, destinationId);
+    placing = null;
+    placeOpen = false;
+    tick().then(() => document.getElementById(`secname-${destinationId}`)?.focus({ preventScroll: true }));
+  }
+  /* A press off the card (and off the × that opened it, whose own press
+     toggles it) puts it away, as the time-zone card does. */
+  $effect(() => {
+    if (!placing || placeOpen) return;
+    /** @param {PointerEvent} event */
+    const onPress = (event) => {
+      const target = /** @type {Element | null} */ (event.target instanceof Element ? event.target : null);
+      if (target?.closest("[data-chooser-card], .drop")) return;
+      closePlace(false);
+    };
+    window.addEventListener("pointerdown", onPress, true);
+    return () => window.removeEventListener("pointerdown", onPress, true);
+  });
   const nameOk = $derived(deletionNameMatches(typedName, v.name));
 
-  /* ── the two-tap protocol (§14) ─────────────────────────────────────────
+  /* ── the two-tap protocol (§14, lib/arm.js) ─────────────────────────────
      The first tap arms, the second fires, and an unfired arm relaxes on its
-     own after five seconds so nothing is left cocked on the desk. */
-  /** @type {string | null} */
-  let armed = $state(null);
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let armTimer = null;
+     own after four seconds, on scroll, on Escape and on a tap elsewhere. */
+  /** @type {string | boolean} */
+  let armed = $state(false);
+  const arm = createArm({ onchange: (next) => (armed = next) });
   /**
    * @param {string} key
    * @param {() => void} fire
+   * @param {HTMLElement | null} button
    */
-  function twoTap(key, fire) {
-    if (armed === key) {
-      clearTimeout(armTimer ?? undefined);
-      armed = null;
-      fire();
-      return;
-    }
-    clearTimeout(armTimer ?? undefined);
-    armed = key;
-    armTimer = setTimeout(() => (armed = null), 5000);
+  function twoTap(key, fire, button) {
+    if (arm.tap(key, button)) fire();
   }
 
   /* ── the system (2c) ──────────────────────────────────────────────────── */
@@ -282,7 +386,7 @@
       savedTimers[field] = setTimeout(() => (saved[field] = false), 2600);
       await invalidateAll();
     } catch (error) {
-      identityProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      identityProblem = wordsOf(error);
     }
   }
 
@@ -292,12 +396,20 @@
     row.visible = !row.visible;
   }
 
-  /* The hidden-not-removed law: only an empty section carries a × at all, so
-     this can never be reached for one holding entries. */
+  /* Every section can go, bar the last kept one (nowhere to send its
+     entries). One that goes without asking (empty, nothing coming) is struck
+     out at once; one holding entries asks where they go (#1332). */
   /** @param {EditorRow} row */
   function dropSection(row) {
-    if (!row.removable) return;
-    row.removed = true;
+    if (shown.length < 2) return;
+    if (row.removable) {
+      row.removed = true;
+      return;
+    }
+    if (placing === row.id && wide) { closePlace(true); return; }
+    cardFor = null;
+    placing = row.id;
+    if (!wide) placeOpen = true;
   }
 
   function addSection() {
@@ -384,6 +496,7 @@
   async function saveSections() {
     sectionsProblem = null;
     saidSections = false;
+    sectionSaid = "";
     try {
       /* Taken before the send: a section added while the save is in flight
          was not sent, so it must not be marked saved. */
@@ -397,7 +510,16 @@
       sectionsBaseline = sent;
       await invalidateAll();
     } catch (error) {
-      sectionsProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      sectionsProblem = wordsOf(error);
+      /* Someone filed an entry in a section since this page loaded: say so,
+         then show the true list rather than the one this editor expected. */
+      const refusal = /** @type {{ code?: string, partial?: boolean }} */ (error);
+      if (refusal?.code === "section_has_items" || refusal?.partial) {
+        await invalidateAll();
+        await tick();
+        rows = data.household.sections.map(editorRowOf);
+        sectionsBaseline = sectionsSnapshot(rows);
+      }
     }
   }
 
@@ -409,7 +531,7 @@
       await run();
       await invalidateAll();
     } catch (error) {
-      membersProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      membersProblem = wordsOf(error);
     }
   }
 
@@ -499,7 +621,7 @@
        compares the exact name and is the only authority. */
     requestHouseholdDeletion(v.id, typedName)
       .then(() => (saidDoom = true))
-      .catch((error) => (doomProblem = error?.message ?? String(error)));
+      .catch((error) => (doomProblem = wordsOf(error)));
   }
 
   /* The header ring, wearing this system's real due-state dots — the same
@@ -538,13 +660,16 @@
      scale a body is a region of sky you are standing near, not a disc. The
      alphas keep the key's own order — ruby loudest, jade quietest — because
      that order is the information. */
-  /** @type {Record<string, [string, string]>} */
-  const PAINT = {
-    overdue: ["--overdue", "hh-ruby"],
-    "due-soon": ["--warm", "hh-amber"],
-    upcoming: ["--upcoming", "hh-sky"],
-    ok: ["--ok", "hh-jade"],
-    unscheduled: ["--ok", "hh-jade"],
+  /** @type {Record<string, string>} */
+  const GLOW = {
+    overdue: "hh-ruby",
+    "due-soon": "hh-amber",
+    upcoming: "hh-sky",
+    ok: "hh-jade",
+    // No date, or finished: neither fine nor urgent, so neutral ink like the
+    // dot (lib/data/bands.js), quieter than jade (#1341).
+    unscheduled: "hh-quiet",
+    ended: "hh-quiet",
   };
 
   /** @type {HTMLDivElement | null} */
@@ -744,6 +869,11 @@
      holds the page's one main landmark (this route renders only in the
      browser, so the dialect is known here). -->
 <Pocket household={v} />
+{#if v.canManage}
+  <PickSheet bind:open={pickOpen} kind={picking} value={form[picking]} onchoose={choose} />
+  <PickSheet bind:open={placeOpen} kind="section" value={null} choices={placeChoices} heading={placeHeading}
+             onchoose={place} oncancel={() => (placing = null)} />
+{/if}
 
 <div class="household-page" class:member={!v.canManage} bind:this={stage} role={pocket ? undefined : "main"}>
 <!-- your own system, drawn from the inside (§15 H2). Behind the dust, not in
@@ -757,6 +887,7 @@
       <radialGradient id="hh-amber"><stop offset="0" style="stop-color:var(--warm)" stop-opacity=".20"/><stop offset=".55" style="stop-color:var(--warm)" stop-opacity=".07"/><stop offset="1" style="stop-color:var(--warm)" stop-opacity="0"/></radialGradient>
       <radialGradient id="hh-sky"><stop offset="0" style="stop-color:var(--upcoming)" stop-opacity=".18"/><stop offset=".55" style="stop-color:var(--upcoming)" stop-opacity=".06"/><stop offset="1" style="stop-color:var(--upcoming)" stop-opacity="0"/></radialGradient>
       <radialGradient id="hh-jade"><stop offset="0" style="stop-color:var(--ok)" stop-opacity=".15"/><stop offset=".55" style="stop-color:var(--ok)" stop-opacity=".05"/><stop offset="1" style="stop-color:var(--ok)" stop-opacity="0"/></radialGradient>
+      <radialGradient id="hh-quiet"><stop offset="0" style="stop-color:var(--ink-mid)" stop-opacity=".12"/><stop offset=".55" style="stop-color:var(--ink-mid)" stop-opacity=".04"/><stop offset="1" style="stop-color:var(--ink-mid)" stop-opacity="0"/></radialGradient>
       <radialGradient id="hh-sun"><stop offset="0" style="stop-color:var(--sun)" stop-opacity=".10"/><stop offset=".4" style="stop-color:var(--sun)" stop-opacity=".032"/><stop offset="1" style="stop-color:var(--sun)" stop-opacity="0"/></radialGradient>
     </defs>
     {#if room}
@@ -803,14 +934,14 @@
         </g>
         <g class="bodies">
           {#each room.stars as star (star.id)}
-            <circle cx={star.cx} cy={star.cy} r={star.r} fill="url(#{PAINT[/** @type {string} */ (star.band)][1]})"/>
+            <circle cx={star.cx} cy={star.cy} r={star.r} fill="url(#{GLOW[/** @type {string} */ (star.band)]})"/>
             {#if star.band === "overdue"}
               <!-- the chart key's overdue ping, on any body that has earned it -->
               <circle cx={star.cx} cy={star.cy} r={(star.r * 1.27).toFixed(1)} fill="none"
                       style="stroke:var(--overdue)" stroke-opacity=".20" stroke-width="1.3"/>
             {/if}
             <circle cx={star.cx} cy={star.cy} r={Math.max(2.1, star.r * 0.115).toFixed(2)}
-                    style="fill:var({PAINT[/** @type {string} */ (star.band)][0]})" opacity=".55"/>
+                    style="fill:var({BAND_VAR[/** @type {string} */ (star.band)]})" opacity=".55"/>
           {/each}
         </g>
         <!-- the whisper labels: what each star is and how far off it is, in the
@@ -843,8 +974,7 @@
      is to SETTINGS — unless you came in by the sun at the centre of the dial
      (ce86c7e), in which case it is your sky. door.js decides; absence of a
      marker is the helm, which is every deep link and every bookmark. -->
-<Chrome user={v.user} current="settings" back={door.href} backLabel={door.label}
-        role={`${v.name} · ${v.canManage ? "owner" : "member"}`} />
+<Chrome user={v.user} current="settings" back={door.href} backLabel={door.label} household={{ name: v.name, canManage: v.canManage }} />
 
 <div class="page">
   <header class="screen">
@@ -859,10 +989,14 @@
     </svg>
     <div>
       <h1>{v.name}</h1>
-      <div class="sub">{v.subtitle}</div>
+      <!-- Closed by an import (#1316), its counts would be read from nothing. -->
+      {#if !v.importInProgress}<div class="sub">{v.subtitle}</div>{/if}
     </div>
   </header>
 
+  {#if v.importInProgress}
+  <HouseholdClosed name={v.name} hasOthers={v.hasOthers} showHomeLink />
+  {:else}
   <div class="cards">
 
     <!-- ── the system ────────────────────────────────────────────────────
@@ -873,7 +1007,7 @@
          last-known values, never as whatever this editor is holding for
          them, so a save here can never carry an unconfirmed sibling field
          along with it (#1151 W2-S2; saveField builds that payload). -->
-    <div class="card c-system">
+    <div class="card c-system" class:lifted={cardFor}>
       <div class="cardhead"><h2>The system</h2></div>
       <div class="field" class:dirty={dirty.name}>
         <div class="lab">
@@ -895,10 +1029,13 @@
                 {saved.timezone ? "saved ✓" : "save"}</button>
             {/if}
           </div>
-          <select id="hhzone" disabled={!v.canManage}
-                  bind:value={form.timezone} onchange={() => touch("timezone")}>
-            {#each withCurrent(ZONES, v.timezone) as zone (zone)}<option>{zone}</option>{/each}
-          </select>
+          <button id="hhzone" type="button" class="pickbtn" disabled={!v.canManage}
+                  aria-haspopup="dialog" aria-expanded={cardFor === "timezone"} onclick={() => pick("timezone")}>{zoneLabel(form.timezone)}</button>
+          {#if cardFor === "timezone"}
+            <div class="pickseat" data-chooser-card>
+              <ChooserCard ask={askOf("timezone")} layout="beside" onpick={choose} onclose={() => closeCard(true)} />
+            </div>
+          {/if}
         </div>
         <div class="field selwrap" class:dirty={dirty.currency}>
           <div class="lab">
@@ -908,10 +1045,13 @@
                 {saved.currency ? "saved ✓" : "save"}</button>
             {/if}
           </div>
-          <select id="hhcur" disabled={!v.canManage}
-                  bind:value={form.currency} onchange={() => touch("currency")}>
-            {#each withCurrent(CURRENCIES, v.currency) as code (code)}<option>{code}</option>{/each}
-          </select>
+          <button id="hhcur" type="button" class="pickbtn" disabled={!v.canManage}
+                  aria-haspopup="dialog" aria-expanded={cardFor === "currency"} onclick={() => pick("currency")}>{form.currency}</button>
+          {#if cardFor === "currency"}
+            <div class="pickseat atright" data-chooser-card>
+              <ChooserCard ask={askOf("currency")} layout="beside" onpick={choose} onclose={() => closeCard(true)} />
+            </div>
+          {/if}
         </div>
       </div>
       <!-- round 2 (#481): the notes that stood here are gone. Three save
@@ -926,14 +1066,14 @@
          absent. They meet sections where sections mean something, printed
          beside entries in the manifest. -->
     {#if v.canManage}
-      <div class="card c-sections">
+      <div class="card c-sections" class:lifted={placing && wide}>
         <div class="cardhead">
           <h2>Sections</h2><span class="count">{shown.length} of {MAX_SECTIONS}</span>
         </div>
 
         <div>
           {#each shown as row (row.id)}
-            <div class="sec" class:off={!row.visible} class:empty={row.removable}>
+            <div class="sec" class:off={!row.visible}>
               {#if row.shipped}
                 <!-- a shipped section's glyph never changes meaning — not a button -->
                 <Mark icon={row.icon} accent={row.accent} aria-hidden="true" />
@@ -944,14 +1084,21 @@
                       aria-label="Mark for {row.name || 'this section'} — choose another"
                       onclick={() => toggleTray(row)} />
               {/if}
-              <input maxlength="30" aria-label="Section name" placeholder={row.fresh ? "name it" : null}
+              <input id="secname-{row.id}" maxlength="30" aria-label="Section name" placeholder={row.fresh ? "name it" : null}
                      bind:value={row.name}>
-              <span class="used">{entriesLabel(row.count)}</span>
+              <span class="used">{entriesLabel(entriesIn(row))}</span>
               <button class="toggle" aria-pressed={row.visible} aria-label="{row.name} on the chart"
                       onclick={() => flipSection(row)}><i></i></button>
               <span class="state">{row.visible ? "shown" : "hidden"}</span>
-              <button class="drop" title="remove" aria-label="Remove section"
+              <button class="drop" class:gone={shown.length < 2} id="drop-{row.id}" title="remove"
+                      aria-label="Remove {row.name.trim() || 'this section'}"
+                      aria-haspopup={row.removable ? undefined : "dialog"} aria-expanded={row.removable ? undefined : placing === row.id}
                       onclick={() => dropSection(row)}>×</button>
+              {#if placing === row.id && wide}
+                <div class="pickseat atright" data-chooser-card>
+                  <ChooserCard ask={placeAsk} layout="beside" onpick={place} onclose={() => closePlace(true)} />
+                </div>
+              {/if}
             </div>
             {#if !row.shipped && row.open}
               <!-- the worn figure plus every asterism this household has not
@@ -977,6 +1124,7 @@
         {#if saidSections}
           <p class="said show">saved</p>
         {/if}
+        <p class="moved" class:show={sectionSaid} role="status">{sectionSaid}</p>
         {#if sectionsProblem}<p class="problem">not saved — {sectionsProblem}</p>{/if}
         <!-- round 2 (#481): one button under one list says the list saves
              whole, and the × that only exists on empty rows says "hidden,
@@ -1006,11 +1154,11 @@
               <button class="ghost" onclick={ownerLeave}>leave this system</button>
             {:else if v.canManage && person.role !== "owner"}
               <button class="ghost" class:armed={armed === `drop:${person.id}`}
-                      onclick={() => twoTap(`drop:${person.id}`, () => dropMember(person))}>
+                      onclick={(event) => twoTap(`drop:${person.id}`, () => dropMember(person), event.currentTarget)}>
                 {armed === `drop:${person.id}` ? "tap again to remove" : "remove"}</button>
             {:else if person.you}
               <button class="ghost" class:armed={armed === "leave"}
-                      onclick={() => twoTap("leave", leave)}>
+                      onclick={(event) => twoTap("leave", leave, event.currentTarget)}>
                 {armed === "leave" ? "tap again to leave" : "leave this system"}</button>
             {/if}
           </div>
@@ -1096,7 +1244,7 @@
               </span>
               <button class="ghost" onclick={() => resend(invitation)}>resend</button>
               <button class="ghost" class:armed={armed === `inv:${invitation.id}`}
-                      onclick={() => twoTap(`inv:${invitation.id}`, () => withdraw(invitation))}>
+                      onclick={(event) => twoTap(`inv:${invitation.id}`, () => withdraw(invitation), event.currentTarget)}>
                 {armed === `inv:${invitation.id}` ? "tap again to withdraw" : "withdraw"}</button>
             </div>
           {/each}
@@ -1122,7 +1270,7 @@
             <span class="n">STEP TWO — CONFIRM</span>
             <div class="row">
               <button class="ghost" class:armed={armed === "handover"} disabled={!heir}
-                      onclick={() => twoTap("handover", handOver)}>
+                      onclick={(event) => twoTap("handover", handOver, event.currentTarget)}>
                 {armed === "handover"
                   ? "tap again to hand over"
                   : heir
@@ -1166,7 +1314,7 @@
          ordinary cards and the danger line, spanning both columns
          (household.css's .card.c-archive). -->
     {#if v.canManage}
-      <DeskArchive householdId={v.id} householdName={v.name} entries={v.entries} sections={shown.length} />
+      <DeskArchive householdId={v.id} householdName={v.name} entries={v.entries} sections={shown.length} limits={v.limits} />
     {/if}
 
     <!-- ── THE DANGER ZONE ─────────────────────────────────────────────────
@@ -1188,7 +1336,7 @@
             <button class="dangerbtn" onclick={openConfirm}>request deletion →</button>
           {:else}
             <button class="dangerbtn" class:armed={armed === "doom"} disabled={!nameOk || saidDoom}
-                    onclick={() => twoTap("doom", requestDeletion)}>
+                    onclick={(event) => twoTap("doom", requestDeletion, event.currentTarget)}>
               {armed === "doom" ? "tap again to schedule deletion" : "request deletion"}</button>
           {/if}
         </div>
@@ -1198,9 +1346,9 @@
         {#if confirming}
           <div class="confirm">
             <p class="stake">
-              Everything in {v.name} — {v.entries} {v.entries === 1 ? "entry" : "entries"},
+              Everything in {v.name} — {plural(v.entries, "entry", "entries")},
               their documents, their history and every reminder still queued — stops the
-              moment you ask. You have <b class="red">30 days</b> to change your mind;
+              moment you ask. You have <b class="red">{daysWords(v.retention?.recoveryDays)}</b> to change your mind;
               after that it is gone for good.
             </p>
             <div class="field">
@@ -1211,7 +1359,7 @@
         {/if}
         {#if saidDoom}
           <p class="said show">
-            requested · {v.name} stops now, and is gone for good in 30 days ·
+            requested · {v.name} stops now, and is gone for good in {daysWords(v.retention?.recoveryDays)} ·
             an instance admin can turn this back until then
           </p>
         {/if}
@@ -1224,5 +1372,6 @@
          row, and its one consequence appears while that button is armed. -->
 
   </div><!-- /cards -->
+  {/if}
 </div>
 </div>

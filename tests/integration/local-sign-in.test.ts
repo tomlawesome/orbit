@@ -14,9 +14,7 @@ import {
   LOCAL_LOCKOUT_FLOOR_MS,
   LOCAL_SIGN_IN_FREE_ATTEMPTS,
 } from "@/server/local-credentials";
-import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
-import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute } from "./support/request-event";
 import { readSetCookie } from "./support/set-cookie";
@@ -140,7 +138,6 @@ describe("claiming the instance with a password (ADR-0022 §2)", () => {
     const [seated] = await getDb()
       .select({
         id: users.id,
-        email: users.email,
         emailEnc: users.emailEnc,
         emailIndex: users.emailIndex,
         isInstanceAdmin: users.isInstanceAdmin,
@@ -152,10 +149,9 @@ describe("claiming the instance with a password (ADR-0022 §2)", () => {
        check it. The capitalisation the administrator typed still survives:
        only the index that finds the row is case-folded, never the stored
        value. */
-    expect(seated.email).toBeNull();
     expect(seated.emailIndex).not.toBeNull();
     const cipher = await openInstanceMetadataReader();
-    expect(cipher.text("users.email", seated.id, { encrypted: seated.emailEnc, plaintext: seated.email }).value)
+    expect(cipher.text("users.email", seated.id, { encrypted: seated.emailEnc }).value)
       .toBe("First.Administrator@local.invalid");
     expect(await getDb().select({ primaryUserId: instanceAuthority.primaryUserId }).from(instanceAuthority))
       .toEqual([{ primaryUserId: seated.id }]);
@@ -424,38 +420,5 @@ describe("local sign-in (ADR-0023 §4)", () => {
     expect(await errorCode(malformed)).toBe("credentials_invalid");
 
     expect((await credentialRow(account.id)).failedAttemptCount).toBe(0);
-  });
-});
-
-describe("an instance with no usable encryption key (#969)", () => {
-  it("answers a correct password with instance_locked, not credentials_invalid", async () => {
-    const account = await seedLocalUser("locked-instance", { password: PASSWORD });
-
-    /* The state an operator is actually in when the KEK file has gone: the
-       database is intact and the password is right, but no address can be
-       matched, because the lookup is a blind index now. */
-    const original = process.env.DOCUMENT_KEK;
-    delete process.env.DOCUMENT_KEK;
-    resetDocumentConfigForTests();
-    resetMetadataKeyCacheForTests();
-    try {
-      const response = await signInWith({ email: account.email, password: PASSWORD });
-      /* Deliberately NOT the 401 every other failure gets. An operator told
-         "your password is wrong" goes looking for a fault in themselves; this
-         sends them to the key, which is where the fault is. It names no
-         account, so it gives away nothing the generic answer protects. */
-      expect(response.status).toBe(503);
-      expect(await errorCode(response)).toBe("instance_locked");
-
-      // A wrong password gets the same answer: the verdict is about the
-      // instance, and reaches it before any password is compared.
-      const wrong = await signInWith({ email: account.email, password: WRONG_PASSWORD });
-      expect(await errorCode(wrong)).toBe("instance_locked");
-    } finally {
-      if (original === undefined) delete process.env.DOCUMENT_KEK;
-      else process.env.DOCUMENT_KEK = original;
-      resetDocumentConfigForTests();
-      resetMetadataKeyCacheForTests();
-    }
   });
 });

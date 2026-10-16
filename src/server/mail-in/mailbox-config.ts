@@ -3,10 +3,7 @@
  * configuration (ADR-0017 decision 1 and 6, slice 1, orbit#742).
  *
  * `getImapIngestionConfig` here is what every runtime caller in this module
- * uses; the environment-parsing function of the same old name lives on in
- * `core/config.ts` under `parseImapIngestionConfigFromEnvironment`, kept only
- * so its characterization tests stay exercised — nothing wires it up any
- * more. There is no environment fallback and no one-shot import: the owner's
+ * uses. There is no environment fallback and no one-shot import: the owner's
  * rescoping of orbit#742 removed both, because there are no existing
  * installs to carry forward (mail-in ships its admin-settings surface next,
  * in #743).
@@ -22,8 +19,8 @@ import { getDocumentConfig, keyEncryptionKeyFor, type DocumentConfig } from "@/s
 import {
   decryptMailInSecret,
   type MailInSecretContext,
-  type MailInSecretEnvelope,
 } from "./core/secret-crypto";
+import { envelopeOf } from "@/server/documents/crypto";
 import { imapAliasBaseFromAccount } from "./core/imap-recipient";
 import type { ImapIngestionConfig } from "./core/config";
 
@@ -106,16 +103,7 @@ function decryptSecretRow(row: MailInSecretRow, account: { host: string; user: s
     host: account.host,
     user: account.user,
   };
-  const envelope: MailInSecretEnvelope = {
-    envelopeVersion: row.envelopeVersion as 1,
-    algorithm: "aes-256-gcm",
-    keyId: row.keyId,
-    contentIv: row.contentIv,
-    contentAuthTag: row.contentAuthTag,
-    wrappedDek: row.wrappedDek,
-    wrapIv: row.wrapIv,
-    wrapAuthTag: row.wrapAuthTag,
-  };
+  const envelope = envelopeOf(row);
   return decryptMailInSecret(row.ciphertext, context, envelope, keyEncryptionKey);
 }
 

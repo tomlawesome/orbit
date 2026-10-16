@@ -5,6 +5,7 @@ import { settleArrival } from "./support/arrival";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -17,7 +18,7 @@ resetDatabaseBetweenSpecFiles();
  * What "degrade" means was read out of the app rather than assumed:
  *
  *   - every route with a live backdrop (home's sky,
- *     inbox/settings/household/item's own "*-drift" keyframes, the dial's
+ *     inbox/settings/household's own "*-drift" keyframes, the dial's
  *     POL-1/POL-2 flourishes, the login/logout flight) carries its own
  *     `@media (prefers-reduced-motion: reduce)` block that sets the
  *     offending `animation` to `none` or drops the element — see home.css,
@@ -87,29 +88,29 @@ async function seedHousehold(page: Page) {
   const overdueItem = `${NAME_PREFIX}overdue tv licence`;
   const soonItem = `${NAME_PREFIX}gutter service`;
   const laterItem = `${NAME_PREFIX}boiler certificate`;
-  const overdueDue = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10);
-  const soonDue = new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10);
-  const laterDue = new Date(Date.now() + 70 * 86_400_000).toISOString().slice(0, 10);
-  for (const [title, dueDate, scheduleKind] of [
-    [overdueItem, overdueDue, "renewal"],
-    [soonItem, soonDue, "service"],
-    [laterItem, laterDue, "renewal"],
+  const overdueDue = householdDateFromToday(-5);
+  const soonDue = householdDateFromToday(20);
+  const laterDue = householdDateFromToday(70);
+  const soonItemId = randomUUID();
+  for (const [title, dueDate, kind, id] of [
+    [overdueItem, overdueDue, "renewal", randomUUID()],
+    [soonItem, soonDue, "service", soonItemId],
+    [laterItem, laterDue, "renewal", randomUUID()],
   ] as const) {
     const upsert = await page.request.post("/api/workspace/commands", {
       headers,
       data: {
         type: "item.upsert",
         householdId,
+        kind,
         item: {
-          id: randomUUID(),
+          id,
           sectionId,
           title,
           currency: "GBP",
           costMinor: 4200,
-          scheduleKind,
           dueDate,
           recurrenceMonths: 12,
-          status: "active",
           version: 1,
           updatedAt: new Date().toISOString(),
         },
@@ -118,7 +119,7 @@ async function seedHousehold(page: Page) {
     if (!upsert.ok()) throw new Error(`Could not seed item "${title}" (${upsert.status()})`);
   }
 
-  return { id: householdId, name, overdueItem, soonItem, laterItem };
+  return { id: householdId, name, overdueItem, soonItem, laterItem, soonItemId };
 }
 
 /** Every CSS animation/transition currently RUNNING on the page (not
@@ -172,6 +173,33 @@ async function settleSignedOut(page: Page) {
       && surfaces.every((surface) => surface.dataset.rasterised === "ready");
   }, undefined, { timeout: 30_000 });
   await page.waitForTimeout(3000);
+}
+
+/**
+ * #1319 (owner-decisions §34): the item's own screen is home's drawer now
+ * (the belt and its own drift retired), so the drawer is held to the same
+ * rule: open on its address, then with its rows in edit and the chooser up
+ * (the card slides in beside the drawer, or rises as the phone's sheet,
+ * and drops that under reduced motion: ChooserCard.svelte).
+ */
+async function drawerMotion(page: Page, itemId: string, title: string, isMobile: boolean) {
+  const problems: string[] = [];
+  await page.goto(`/home?item=${itemId}`);
+  const drawer = isMobile
+    ? page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`)
+    : page.locator(`[id="${itemId}-view"]`);
+  await expect(drawer.getByRole("group", { name: `Actions for ${title}` })).toBeVisible({ timeout: 30_000 });
+  await settle(page);
+  const open = await runningMotion(page);
+  if (open.length > 0) problems.push(`/home?item=: the drawer open, still animating -> ${open.join(", ")}`);
+
+  await drawer.getByRole("button", { name: "Edit this item" }).click();
+  await drawer.getByRole("button", { name: /^due: / }).click();
+  await expect(page.getByRole("dialog", { name: /due date/i })).toBeVisible();
+  await page.waitForTimeout(1000);
+  const choosing = await runningMotion(page);
+  if (choosing.length > 0) problems.push(`/home?item=: the chooser up, still animating -> ${choosing.join(", ")}`);
+  return problems;
 }
 
 test.describe("reduced motion", () => {
@@ -255,6 +283,10 @@ test.describe("reduced motion", () => {
         }
       });
 
+      await test.step("/home?item=<id>: the item's drawer and its chooser", async () => {
+        problems.push(...await drawerMotion(page, household.soonItemId, household.soonItem, false));
+      });
+
       expect(problems, problems.join("\n")).toEqual([]);
     } finally {
       await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
@@ -263,6 +295,8 @@ test.describe("reduced motion", () => {
 
   test("home's pocket dialect holds still (mobile)", async ({ page, isMobile }) => {
     test.skip(!isMobile, "mobile-chromium only: the pocket dialect (CON-10) has its own reduced-motion rules");
+    /* home, then the drawer (#1319), each with settle()'s 3 s */
+    test.setTimeout(90_000);
 
     await signIn(page);
     const household = await seedHousehold(page);
@@ -279,6 +313,9 @@ test.describe("reduced motion", () => {
         const animationName = await dot.evaluate((el) => getComputedStyle(el).animationName);
         expect(animationName).toBe("none");
       }
+
+      const problems = await drawerMotion(page, household.soonItemId, household.soonItem, true);
+      expect(problems, problems.join("\n")).toEqual([]);
     } finally {
       await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
     }

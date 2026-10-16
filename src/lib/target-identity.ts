@@ -1,6 +1,8 @@
 import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
+import { DEPLOY_LOCK_FILE_NAME } from "./deploy-lock";
+
 // Target and identity validation (issue #295 slice 2), ported from
 // scripts/install.sh's `validate_target`, `is_preprovisioned_input`, and
 // `derive_compose_project_name` (install.sh:262-304,410-462). Guarantee
@@ -166,11 +168,40 @@ export function validateTarget(targetDir: string): ValidateTargetResult {
     isRegularNonSymlinkFile(composeFile) &&
     isRealNonSymlinkDirectory(secretsDirectory)
   ) {
+    // A staging directory left by a hard-killed update holds the real
+    // originals; a second transaction would snapshot the half-updated tree
+    // as its "original" and bury the first. The lone deploy lock is not
+    // checked here: it has its own stale-lock handling.
+    const staging = readdirSync(targetDir)
+      .filter((entry) => entry.startsWith(".orbit-install-staging."))
+      .sort();
+    if (staging.length > 0) {
+      throw new TargetValidationRefusal(
+        `A previous update was interrupted and left ${staging.join(" ")} behind in this deployment. If it holds a "committed" marker the update finished: remove it once you have confirmed the deployment is working. If it does not, run "bash scripts/repair.sh" to put the previous files back, then rerun.`,
+      );
+    }
     return { targetWasEmpty: false };
   }
 
   if (isPreprovisionedInput(targetDir)) {
     return { targetWasEmpty: true };
+  }
+
+  // A leftover `.orbit-install-staging.*` means an earlier attempt was
+  // killed hard enough (SIGKILL, OOM, power loss) that its own cleanup never
+  // ran. Named explicitly rather than folded into the generic refusal, and
+  // never removed here: only a person can confirm no other install is still
+  // running (#383).
+  // The engine's deploy lock goes with it (#1212): a hard kill inside the
+  // transaction leaves both, and the lock alone would otherwise turn a
+  // pre-provisioned target into an unrecognisable one with no word why.
+  const leftovers = readdirSync(targetDir)
+    .filter((entry) => entry.startsWith(".orbit-install-staging.") || entry === DEPLOY_LOCK_FILE_NAME)
+    .sort();
+  if (leftovers.length > 0) {
+    throw new TargetValidationRefusal(
+      `A previous install attempt was interrupted and left ${leftovers.join(" ")} behind in this directory. Review its contents, then remove ${leftovers.length === 1 ? "it" : "them"} (safe once you have confirmed no install is still in progress) and retry.`,
+    );
   }
 
   throw new TargetValidationRefusal(
@@ -199,7 +230,8 @@ export function readEnvironmentValue(targetDir: string, key: string): string | u
   let value = "";
   for (const line of content.split("\n")) {
     if (line.startsWith(prefix)) {
-      value = line.slice(prefix.length);
+      // The engine writes CRLF lines into a CRLF file; drop the CR.
+      value = line.slice(prefix.length).replace(/\r$/, "");
       found = true;
     }
   }

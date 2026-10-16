@@ -36,6 +36,10 @@ const sharedAliases = {
   "$env/dynamic/private": fileURLToPath(
     new URL("./tests/support/env-dynamic-private.ts", import.meta.url),
   ),
+  // Another virtual module, for the service worker (#1329); see the stub.
+  "$service-worker": fileURLToPath(
+    new URL("./tests/support/service-worker-module.ts", import.meta.url),
+  ),
 };
 
 // Written as a typed constant rather than inline: `project` below is declared
@@ -65,6 +69,14 @@ const test: TestUserConfig = {
           "$app/environment": fileURLToPath(
             new URL("./tests/support/app-environment.ts", import.meta.url),
           ),
+          // home.behaviour.js navigates to the create form (#1243); no unit
+          // test follows it, but every test that mounts home loads it.
+          "$app/navigation": fileURLToPath(
+            new URL("./tests/support/app-navigation.ts", import.meta.url),
+          ),
+          "$app/paths": fileURLToPath(
+            new URL("./tests/support/app-paths.ts", import.meta.url),
+          ),
         },
       },
       test: {
@@ -73,7 +85,9 @@ const test: TestUserConfig = {
         // One temporary root per test file, removed when the file ends (#654).
         // The suites leaked every mkdtemp they made: ~88k directories filled
         // this host's /tmp and started failing runs with ENOSPC.
-        setupFiles: ["./tests/support/temp-root.ts"],
+        // The second gives every file a usable encryption key verdict (#1405);
+        // a file about the key sets its own.
+        setupFiles: ["./tests/support/temp-root.ts", "./tests/support/key-usable.ts"],
         // Vitest's defaults (5s / 10s) already fail a hung test rather than the
         // whole job — pinned here, unchanged, so intent is explicit and can't
         // silently drift. A handful of tests that spawn real subprocesses
@@ -92,7 +106,7 @@ const test: TestUserConfig = {
           "tests/e2e/**",
           "tests/integration/**",
           // Scratch prototypes (#995), for the same reason tsconfig excludes
-          // and eslint ignores them: AGENTS.md sends agents to tmp/ to
+          // and eslint ignores them: docs/extraction-method.md sends agents to tmp/ to
           // prototype, the directory is gitignored, and a *.test.ts left
           // there is collected and run like any other — failing the suite
           // over work that was never meant to ship. Guarded by
@@ -124,18 +138,23 @@ const test: TestUserConfig = {
           // repository standing in for the launcher's GitHub mirror. Run
           // standalone with `node --test scripts/bump-launcher-pin.test.mjs`.
           "scripts/bump-launcher-pin.test.mjs",
+          // Same reason (#1374): uses node:test. Run by scripts/test-backend.sh.
+          "scripts/corpus/stages-rerun.test.mjs",
+          // Same reason (#1408): uses node:test. Run by the `names_guard` CI job.
+          "tests/unit/no-real-names.test.mjs",
           // ORBIT_TEST_SKIP_DOCKER (#950): the CI `fast` job runs on the
           // unprivileged `big` lane, which has no `docker` binary on PATH.
           // test-e2e-local-reuse.test.mjs joined the list on #947: it drives
           // the real script, whose preconditions demand docker.
+          // install-script-adapters.test.ts left the list with #1210: it
+          // drives configure.sh through scripts/engine-docker-shim.mjs.
           // `--exclude` on the CLI does not reach a project defined through
           // `test.projects` -- verified directly: passing it alongside this
           // same list left both files collected and red -- so the exclusion
           // has to live in the project's own array instead, gated on the
-          // variable `fast_docker` sets. `fast_docker` runs all three.
+          // variable `fast_docker` sets. `fast_docker` runs both.
           ...(process.env.ORBIT_TEST_SKIP_DOCKER === "true"
             ? [
-                "src/lib/install-script-adapters.test.ts",
                 "src/lib/recovery-bundle.parity.test.ts",
                 "scripts/test-e2e-local-reuse.test.mjs",
               ]

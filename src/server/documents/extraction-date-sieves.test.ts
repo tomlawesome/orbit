@@ -234,6 +234,13 @@ describe("the calendar the sieves count with", () => {
     expect(addMonths("2026-04-22", 24)).toBe("2028-04-22");
   });
 
+  it("reads no term from a date that is not a day (#1333)", () => {
+    expect(addMonths("2026-02-31", 1)).toBeUndefined();
+    expect(addMonths("2026-13-45", 1)).toBeUndefined();
+    expect(dayBefore("2026-02-31")).toBeUndefined();
+    expect(dayBefore("2027-02-29")).toBeUndefined();
+  });
+
   it("knows the day before, which is how half of UK paper ends a term", () => {
     expect(dayBefore("2028-04-22")).toBe("2028-04-21");
     expect(dayBefore("2026-01-01")).toBe("2025-12-31");

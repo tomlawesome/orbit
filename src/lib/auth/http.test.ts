@@ -132,4 +132,15 @@ describe("authentication HTTP diagnostics", () => {
     expect(mocks.log.error).not.toHaveBeenCalled();
     expect(mocks.log.info).not.toHaveBeenCalled();
   });
+
+  it("passes a missing encryption key through as the same bare 503 the other APIs give, not as a provider failure (#1405)", async () => {
+    /* imported here, not at the top, so the file's other cases do not depend on the module */
+    const { KeyUnavailableError } = await import("@/server/key-state");
+    const response = authErrorResponse(new KeyUnavailableError());
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("retry-after")).toBeNull();
+    await expect(response.json()).resolves.toEqual({ error: "encryption_key_unavailable" });
+    expect(mocks.log.error).not.toHaveBeenCalled();
+  });
 });

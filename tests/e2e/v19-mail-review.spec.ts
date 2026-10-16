@@ -12,7 +12,7 @@ resetDatabaseBetweenSpecFiles();
 
 /**
  * #434: mail-in review on the v19 surfaces — the manifest row's two-tap
- * approve (idempotent under retry), amend-then-accept in the item view, and
+ * approve (idempotent under retry), amend-then-accept in home's drawer, and
  * arrived-but-unreadable mail visible on the relay. Synthetic receipts ride
  * route interception exactly as the Next inbox spec does, so approval
  * payloads are asserted without pre-approval mutation.
@@ -86,8 +86,10 @@ async function seedHousehold(page: Page): Promise<{ householdId: string; itemId:
     await command({
       type: "item.upsert",
       householdId,
-      item: { id: itemId, sectionId: homeSection, title: "Reviewed intake landing", currency: "GBP", status: "active" },
-      activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+      // The engine refuses an item that names no kind (422 item_kind_missing).
+      kind: "service",
+      item: { id: itemId, sectionId: homeSection, title: "Reviewed intake landing", currency: "GBP" },
+      activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
     });
     return { householdId, itemId };
   }, name);
@@ -107,7 +109,6 @@ function readyReceipt(householdId: string) {
     classification: "ready",
     canApprove: true,
     canDiscard: true,
-    cleanupOnly: false,
     message: "Ready for your review.",
     proposal: { title: "Reviewed intake 1786823446152", provider: "Reviewed Cover", costMinor: 12550, currency: "GBP", dueDate: "2031-01-10", scheduleKind: "renewal", recurrenceMonths: 12 },
     fieldEvidence: { title: { source: "parser", confidence: "medium" }, costMinor: { source: "parser", confidence: "low" } },
@@ -118,6 +119,12 @@ function readyReceipt(householdId: string) {
       mediaType: "application/pdf", sizeBytes: 128, scanState: "clean",
     }],
   };
+}
+
+/** The cost an approval sent: as typed (`cost`, read by the engine, #1325) or in minor units. */
+function costSent(approval: Record<string, unknown>): unknown {
+  const item = approval.item as { cost?: string; costMinor?: number };
+  return item.cost ?? item.costMinor;
 }
 
 async function interceptMail(
@@ -205,7 +212,7 @@ test("the manifest row approves in two taps, idempotently under partial success"
     // The second tap fires; the first answer is partial, so the drawer says so.
     await drawer.getByRole("button", { name: "tap again to approve" }).click();
     await expect.poll(() => approvals.length).toBe(1);
-    await expect(drawer.locator(".mail-problem")).toContainText("another try");
+    await expect(drawer.locator(".mail-problem")).toContainText("The item is recorded, but its documents need another try — try once more to finish.");
 
     // The retry carries the SAME operation id and the SAME body: one item, ever.
     await drawer.getByRole("button", { name: "tap again to approve" }).click();
@@ -236,83 +243,83 @@ test("the manifest row approves in two taps, idempotently under partial success"
   }
 });
 
-test("amend then accept from the item view", async ({ page }) => {
-  /* #1196: on mobile WebKit, the page's own /api/imap-inbox fetch after
-     `page.goto` reaches the real server instead of interceptMail's route --
-     Playwright's WebKit driver skips the mock after a full navigation.
-     desktop-webkit runs this same flow and passes; detail on #1196. */
-  test.fail(test.info().project.name === "mobile-webkit", "#1196: mobile WebKit skips interceptMail's route after goto, so this hits the real (empty) inbox");
+/* #1319 (owner-decisions §34): a suggestion is reviewed in its home drawer,
+   not on the belt, which retired. On both, the drawer shows what the relay
+   read and how sure it was; `review & amend →` puts the suggestion's own
+   rows into editing (the title in the row's head), and `add to orbit`
+   approves what they hold. This took over "amend then accept from the item
+   view", the belt's card and the phone's review sheet. */
+test("amend then accept from home's drawer", async ({ page }) => {
+  /* Skipped, not marked to fail: the driver fault does not happen every run, so an
+     expected failure sometimes passes and fails the job. Un-skip when #1196 closes. */
+  test.skip(test.info().project.name === "mobile-webkit", "#1196: mobile WebKit skips interceptMail's route after goto, so this hits the real (empty) inbox");
   await signInToHome(page);
-  const { householdId, itemId } = await seedHousehold(page);
+  const { householdId } = await seedHousehold(page);
 
   try {
     const approvals: Record<string, unknown>[] = [];
-    await interceptMail(page, householdId, approvals, { approvedItemId: itemId });
-
-    await page.goto(`/item/${receiptId}`);
-    if (test.info().project.name.startsWith("mobile")) {
-      /* #1145, round 3 §4: on a phone the suggestion's card holds the relay's
-         readings and the two decisions; the fields are in the review sheet
-         `review & amend →` raises (ReviewSheet.svelte: EntryForm in review
-         mode), so the amendment happens there. */
-      /* #1196: a bounded wait for the button the mocked receipt should have
-         produced, true on every engine that reaches it -- mobile WebKit's
-         own interceptMail bypass (above) then fails this fast instead of
-         riding the click's own full test-timeout wait. */
-      await expect(page.getByRole("button", { name: "review & amend →" })).toBeVisible({ timeout: 30_000 });
-      await page.getByRole("button", { name: "review & amend →" }).click();
-      const form = page.getByRole("form", { name: "Review Reviewed intake 1786823446152" });
-      const name = form.locator('input[id$="-name"]');
-      await expect(name).toHaveValue("Reviewed intake 1786823446152");
-      /* No field wears a from-document mark on the phone: round 3 §4 draws
-         the readings as their own card, `what the relay read`, each with how
-         sure the relay was, and readingsOf (lib/pocket/review.js) lists
-         provider, reference, due date and cost only -- never the title. So
-         the mark asserted here is that card's: the provider was read plain,
-         the cost at low confidence. */
-      const reading = (label: string) =>
-        form.locator(".pc-read", { has: page.locator(".pc-read-label", { hasText: new RegExp(`^${label}$`) }) });
-      await expect(reading("provider").locator(".pc-read-sure")).toHaveText("sure");
-      await expect(reading("cost").locator(".pc-read-sure")).toHaveText("unsure");
-
-      await name.fill("Home insurance, corrected");
-      await form.locator('input[id$="-cost"]').fill("199.99");
-      /* The sheet's form is create's, and create refuses to save without a
-         section (entry.js refusalOf); the relay proposes none. */
-      await form.getByRole("button", { name: "Home", exact: true }).click();
-      await page.getByRole("button", { name: "add to orbit", exact: true }).click();
+    await interceptMail(page, householdId, approvals);
+    await page.goto("/home");
+    const pocket = test.info().project.name.startsWith("mobile");
+    /* The drawer: the phone's open row, or the desk's view under its row.
+       Opened by a press, not by its address: home's first view is read on
+       the server, which interceptMail's page.route never reaches. */
+    let drawer;
+    if (pocket) {
+      drawer = page.locator(`.pocket .pk-signals [data-row-key="${receiptId}"]`);
+      await expect(drawer).toBeVisible({ timeout: 30_000 });
+      await drawer.locator("[data-row-face]").click();
+      await expect(drawer).toHaveAttribute("data-open", "");
     } else {
-      const title = page.locator(".name-title");
-      await expect(title).toHaveValue("Reviewed intake 1786823446152");
-      // Extraction-read fields carry the from-document mark.
-      await expect(title).toHaveClass(/sugg/);
-
-      await title.fill("Home insurance, corrected");
-      await page.locator("#s-cost").fill("199.99");
-      await page.getByRole("button", { name: "accept into orbit" }).click();
+      const row = page.locator(".item.suggest", { hasText: "Reviewed intake 1786823446152" }).first();
+      await expect(row).toBeVisible();
+      await row.click();
+      drawer = page.locator(`[id="${receiptId}-view"]`);
+      await expect(drawer).toBeVisible();
     }
+    /* What the relay read, and how sure it was where the receipt says
+       (readingsOf, lib/pocket/review.js): the cost was read at low
+       confidence; the provider carries no evidence, so no mark at all. */
+    const reading = (label: string) =>
+      drawer.locator(pocket ? ".p-kv" : ".kv", { has: page.locator("span", { hasText: new RegExp(`^${label}$`) }) });
+    await expect(reading("provider")).toContainText("Reviewed Cover");
+    await expect(reading("provider").locator("i")).toHaveCount(0);
+    await expect(reading("cost").locator("i")).toHaveText("unsure");
+
+    await drawer.getByRole("button", { name: "review & amend →" }).click();
+    /* the title edits in the row's head, the rest in the drawer's rows */
+    const title = pocket
+      ? drawer.locator('[data-ed="title"]')
+      : page.locator(`[id="${receiptId}"] [data-ed="title"]`);
+    await expect(title).toHaveText("Reviewed intake 1786823446152");
+    await expect(title).toBeFocused();
+    await expect(drawer.locator('[data-ed="provider"]')).toHaveText("Reviewed Cover");
+    /* the relay's sure/unsure marks are put away while the rows are live */
+    await expect(drawer.getByText("unsure")).toHaveCount(0);
+    await title.fill("Home insurance, corrected");
+    await drawer.locator('[data-ed="cost"]').fill("199.99");
+    const amending = drawer.getByRole("group", { name: "Amending Reviewed intake 1786823446152" });
+    await expect(amending.getByRole("button")).toHaveText(["add to orbit", "cancel"]);
+    await amending.getByRole("button", { name: "add to orbit", exact: true }).click();
 
     await expect.poll(() => approvals.length).toBe(1);
     expect(approvals[0]).toMatchObject({
       source: { kind: "mailbox_draft", receiptId, draftVersion: 3 },
+      householdId,
+      sectionId,
       action: "create_separate",
-      item: { title: "Home insurance, corrected", costMinor: 19999, currency: "GBP", dueDate: "2031-01-10", scheduleKind: "renewal", recurrenceMonths: 12 },
+      item: { title: "Home insurance, corrected", provider: "Reviewed Cover", currency: "GBP",
+        dueDate: "2031-01-10", scheduleKind: "renewal", recurrenceMonths: 12 },
       attachmentIds: [attachmentId],
     });
-    // Acceptance lands on the created item.
-    await expect(page).toHaveURL(new RegExp(`/item/${itemId}$`));
-    await expect(page.getByRole("heading", { name: "Reviewed intake landing" })).toBeVisible();
+    // The drawer's rows send the cost as typed, for the engine to read (ADR-0034, #1325).
+    expect(costSent(approvals[0])).toBe("199.99");
+    /* Added: the suggestion leaves home, and home stays where it is. (The
+       belt used to land on the created item; the drawer stays on home.) */
+    await expect(page.locator(pocket ? ".pocket .pk-signals [data-row]" : ".item.suggest", { hasText: "Reviewed intake" }))
+      .toHaveCount(0);
+    await expect(page).toHaveURL(/\/home/);
   } finally {
-    /* #1192: WebKit only -- interceptMail's routes are never unrouted, and a
-       page.request call issued while they are still registered (sweep's own
-       sessionHeaders) hangs for the test's whole remaining budget instead of
-       resolving or erroring. v19-hit-routing.spec.ts hits the same class of
-       route/request conflict; unrouteAll is its fix too. Wrapped in
-       unrouteAndSweep (support/households.ts): on mobile WebKit a test whose
-       own action does not resolve in time has its page and context torn
-       down by Playwright's test timeout while this finally block is still
-       running, and an unrouteAll or sweep call that then finds the target
-       already closed must not replace the real timeout error with its own. */
     await unrouteAndSweep(page, households);
   }
 });
@@ -335,7 +342,7 @@ test("a dismissal takes two taps and mail that failed is visible on the relay", 
               id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2", status: "failed", householdId, draftVersion: 1,
               expiresAt: new Date(Date.now() + 86_400_000).toISOString(), receivedAt: "2026-08-14T08:00:00.000Z",
               attachmentCount: 0, classification: "unavailable", canApprove: false, canDiscard: false,
-              cleanupOnly: false, message: "This incoming document is no longer available for review.",
+              message: "This incoming document is no longer available for review.",
               proposal: {}, fieldEvidence: {},
             },
           ],
@@ -385,8 +392,11 @@ test("a dismissal takes two taps and mail that failed is visible on the relay", 
   }
 });
 
-test("the desk reads a staged paper's page one, on the receipt's own screen and from the inbox chip (#1155)", async ({ page }) => {
-  test.skip(test.info().project.name.startsWith("mobile"), "the desk reading card is desktop-only; see the phone test below");
+/* #1155, #1319: a staged paper opens the preview card beside the
+   suggestion's home drawer (it used to open the belt's reading card), and
+   the inbox's paper chip leads to that drawer. */
+test("the desk reads a staged paper's page one, from the suggestion's drawer and from the inbox chip (#1155)", async ({ page }) => {
+  test.skip(test.info().project.name.startsWith("mobile"), "the desk's preview card; the phone's sheet is the test below");
   await signInToHome(page);
   const { householdId } = await seedHousehold(page);
 
@@ -394,35 +404,29 @@ test("the desk reads a staged paper's page one, on the receipt's own screen and 
     const approvals: Record<string, unknown>[] = [];
     await interceptMail(page, householdId, approvals);
 
-    await page.goto(`/item/${receiptId}`);
-    /* §11: the suggestion card's note names the staged paper as a button;
-       pressing it is the same `showPaperById` an inbox chip or a home arrival
-       uses, so this covers all three doors into the same reading card. */
-    await page.locator(".note").getByRole("button", { name: /policy-schedule\.pdf/ }).click();
+    await page.goto(`/home?item=${receiptId}`);
+    const drawer = page.locator(`[id="${receiptId}-view"]`);
+    await expect(drawer).toBeVisible({ timeout: 30_000 });
+    await drawer.getByRole("button", { name: "Open policy-schedule.pdf" }).click();
 
-    const readcard = page.locator("#readcard");
-    await expect(readcard).toHaveClass(/snap/);
-    await expect(readcard.locator(".sheet img")).toHaveAttribute("alt", "Page one of policy-schedule.pdf");
-    await expect(readcard.locator(".rcfoot .rcnote")).toHaveText("not yet in orbit · attached on acceptance");
+    const card = page.getByRole("dialog", { name: "policy-schedule.pdf" });
+    await expect(card).toHaveClass(/snap/, { timeout: 20_000 });
+    await expect(card.getByRole("img")).toHaveAttribute("alt", "Page one of policy-schedule.pdf");
+    await expect(card.locator(".rcfoot .rcnote")).toHaveText("not yet in orbit · attached on acceptance");
     // No download for a staged paper: the foot carries the note, never a link.
-    await expect(readcard.locator(".rcfoot a")).toHaveCount(0);
+    await expect(card.locator(".rcfoot a")).toHaveCount(0);
 
-    // The chip is a second door into the same reading card (§8, §10).
+    // The chip is a second door, into the same drawer (§8, §10).
     await page.goto("/inbox");
     await page.getByRole("link", { name: /policy-schedule\.pdf/ }).click();
-    await expect(page).toHaveURL(new RegExp(`/item/${receiptId}$`));
-    await expect(page.locator("#readcard")).toHaveClass(/open/);
+    await expect(page).toHaveURL(new RegExp(`/home\\?item=${receiptId}$`));
+    await expect(drawer).toBeVisible({ timeout: 30_000 });
+    await expect(drawer.getByRole("button", { name: "Open policy-schedule.pdf" })).toBeVisible();
   } finally {
     /* #1192: WebKit only -- interceptMail's routes are never unrouted, and a
        page.request call issued while they are still registered (sweep's own
        sessionHeaders) hangs for the test's whole remaining budget instead of
-       resolving or erroring. v19-hit-routing.spec.ts hits the same class of
-       route/request conflict; unrouteAll is its fix too. Wrapped in
-       unrouteAndSweep (support/households.ts): on mobile WebKit a test whose
-       own action does not resolve in time has its page and context torn
-       down by Playwright's test timeout while this finally block is still
-       running, and an unrouteAll or sweep call that then finds the target
-       already closed must not replace the real timeout error with its own. */
+       resolving or erroring. Wrapped in unrouteAndSweep (support/households.ts). */
     await unrouteAndSweep(page, households);
   }
 });
@@ -433,7 +437,9 @@ test("the phone sheet reads a staged paper's page one, and tells a gone mail apa
      `page.goto` reaches the real server instead of interceptMail's route --
      Playwright's WebKit driver skips the mock after a full navigation.
      desktop-webkit runs this same flow and passes; detail on #1196. */
-  test.fail(test.info().project.name === "mobile-webkit", "#1196: mobile WebKit skips interceptMail's route after goto, so this hits the real (empty) inbox");
+  /* Skipped, not marked to fail: the driver fault does not happen every run, so an
+     expected failure sometimes passes and fails the job. Un-skip when #1196 closes. */
+  test.skip(test.info().project.name === "mobile-webkit", "#1196: mobile WebKit skips interceptMail's route after goto, so this hits the real (empty) inbox");
   await signInToHome(page);
   const { householdId } = await seedHousehold(page);
 
@@ -474,6 +480,29 @@ test("the phone sheet reads a staged paper's page one, and tells a gone mail apa
        down by Playwright's test timeout while this finally block is still
        running, and an unrouteAll or sweep call that then finds the target
        already closed must not replace the real timeout error with its own. */
+    await unrouteAndSweep(page, households);
+  }
+});
+
+/* #1316: the engine refuses an item.upsert that names no kind (422), so the
+   proving ground's landing item has to arrive with one. This pins the seed
+   itself: it must be accepted, and the item the server then holds must read
+   back as a kind (a subtype or a schedule), not as a kindless item. */
+test("the proving ground's landing item is seeded with a kind the engine accepts (#1316)", async ({ page }) => {
+  await signInToHome(page);
+  const { householdId, itemId } = await seedHousehold(page);
+
+  try {
+    const stored = await page.evaluate(async ({ householdId, itemId }) => {
+      const response = await fetch("/api/workspace", { credentials: "same-origin", cache: "no-store" });
+      const body = (await response.json()) as {
+        workspace: { households: { id: string; items?: { id: string; subtype?: string | null; scheduleKind?: string | null }[] }[] };
+      };
+      return body.workspace.households.find((one) => one.id === householdId)?.items?.find((one) => one.id === itemId) ?? null;
+    }, { householdId, itemId });
+    expect(stored, "the landing item was stored").not.toBeNull();
+    expect(Boolean(stored?.subtype) || Boolean(stored?.scheduleKind), "the stored item carries a kind").toBe(true);
+  } finally {
     await unrouteAndSweep(page, households);
   }
 });

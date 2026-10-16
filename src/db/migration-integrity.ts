@@ -6,7 +6,7 @@ import { operationalDetail, type OperationalDetail } from "@/lib/logger";
 
 export type SqlClient = { unsafe(query: string): Promise<Array<Record<string, unknown>>> };
 
-export type MigrationIntegrityCode = "database_floor" | "migration_integrity";
+export type MigrationIntegrityCode = "migration_integrity";
 
 export class MigrationIntegrityError extends Error {
   readonly code: MigrationIntegrityCode;
@@ -27,8 +27,6 @@ export class MigrationIntegrityError extends Error {
     this.detail = detail;
   }
 }
-
-const SUPPORTED_FLOOR_TAG = "0017_imap_recipient_alias_index";
 
 export function canonicalMigrationChecksum(content: string | Buffer): string {
   return createHash("sha256").update(content.toString().replace(/\r\n/gu, "\n"), "utf8").digest("hex");
@@ -74,9 +72,12 @@ export async function verifyMigrationIntegrity(client: SqlClient, folder: string
     if (error && typeof error === "object" && "code" in error && error.code === "42P01") {
       // A genuinely fresh database has neither the journal nor the product
       // schema. Existing product data without a journal cannot be safely
-      // classified and therefore fails closed at the supported floor.
+      // classified and therefore fails closed.
       if (await hasExistingProductTables(client)) {
-        throw new MigrationIntegrityError("database_floor");
+        throw new MigrationIntegrityError(
+          "migration_integrity",
+          operationalDetail`database has product tables but no migration journal`,
+        );
       }
       return;
     }
@@ -92,17 +93,10 @@ export async function verifyMigrationIntegrity(client: SqlClient, folder: string
     // "database-credential-mismatch" (#822).
     throw error;
   }
-  const floorIndex = expected.findIndex((migration) => migration.tag === SUPPORTED_FLOOR_TAG);
   if (applied.length === 0 && await hasExistingProductTables(client)) {
     throw new MigrationIntegrityError(
-      "database_floor",
-      operationalDetail`database has product tables but no migration journal; supported floor is ${SUPPORTED_FLOOR_TAG}`,
-    );
-  }
-  if (applied.length > 0 && (floorIndex < 0 || applied.length < floorIndex + 1)) {
-    throw new MigrationIntegrityError(
-      "database_floor",
-      operationalDetail`database is older than the supported floor ${SUPPORTED_FLOOR_TAG}; applied ${applied.length} migrations`,
+      "migration_integrity",
+      operationalDetail`database has product tables but no migration journal`,
     );
   }
   const divergence = applied.findIndex((hash, index) => expected[index]?.hash !== hash);

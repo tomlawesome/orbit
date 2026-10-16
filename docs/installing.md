@@ -18,6 +18,28 @@ what each script promises.
 - About 4 GiB of free memory for the malware scanner, on top of Orbit and
   its database.
 
+Your reverse proxy must accept uploads a little larger than Orbit's document
+limit. The limit is 50 MiB by default, and an administrator can change it
+(up to 100 MiB) with the upload size limit in Administration. Many proxies
+refuse much smaller requests unless told otherwise, and a document over the
+proxy's own limit fails with "413" before it reaches Orbit. Set the proxy a
+little above the limit your administrator chooses: 51 MiB for the default,
+or 101 MiB to cover every possible setting.
+
+Bringing a household in from an Orbit archive that includes documents sends
+a larger request, up to 343 MiB. If you will import archives, set the proxy
+to 343 MiB instead; it covers every document setting too.
+
+- nginx: `client_max_body_size 51m;` (or `101m;`, or `343m;`). Its default
+  is 1 MB, so this setting is needed.
+- Caddy: limits request bodies only if you set
+  `request_body { max_size 51MiB }` (or `101MiB`, or `343MiB`).
+- Traefik: limits request bodies only if the buffering middleware sets
+  `maxRequestBodyBytes` (53477376 is 51 MiB; 105906176 is 101 MiB;
+  359661568 is 343 MiB).
+
+If the document limit is raised later, raise the proxy setting to match.
+
 ## Install
 
 From an empty directory, run:
@@ -92,13 +114,20 @@ different build behind your back.
 The Compose files and operator scripts come out of that same build, so they
 always match the version they came with. The directory ends up holding
 `docker-compose.yml`, `docker-compose.mail.yml`, `.env-orbit.example`,
-`config/tika-config.json`, the scripts `configure.sh`, `configuration.sh`,
-`backup.sh`, `restore.sh`, `repair.sh`, `engine-check.sh` and
-`installer-ui.sh`, your settings in `.env-orbit`, and your secrets in
-`.orbit-secrets/`.
+`config/tika-config.json`, the scripts `configure.sh`,
+`backup.sh`, `restore.sh`, `repair.sh`, `export-recovery-bundle.sh`,
+`import-recovery-bundle.sh` and `installer-ui.sh`, your settings in
+`.env-orbit`, and your secrets in `.orbit-secrets/`.
+
+The installer itself only fetches, checks and starts things. Everything that
+reads or writes the directory — checking it is safe to install into, asking
+your questions, writing the settings and secrets, and checking your sign-in
+provider — runs inside that same build, in a short-lived container that is
+removed when it finishes. If anything goes wrong before Orbit starts, it puts
+the directory back exactly as it was.
 
 The installer then generates four separate secrets: one for sign-in
-sessions, the database password, the document encryption key, and a key
+sessions, the database password, the document encryption key, and the
 private key for browser alerts. They live in `.orbit-secrets/`, readable only by
 the user who ran the installer. Each container is given only the secret
 files it needs; secret values never go into container environment
@@ -118,6 +147,20 @@ bash scripts/configure.sh --init
 bash scripts/configure.sh --set-oidc-secret
 bash scripts/configure.sh --check
 ```
+
+These commands run inside the Orbit image, so Docker must be running and
+the image must be available, even for a one-line change. `configure.sh`
+takes the image from `ORBIT_IMAGE` in your environment, or else from the
+`ORBIT_IMAGE=` line the installer wrote to `.env-orbit`. If it finds neither
+it stops with:
+
+```text
+Orbit configuration: No Orbit image to run configuration with. Set ORBIT_IMAGE to an immutable registry digest (or the local tag scripts/build-container.sh builds), or install with get-orbit.sh, which records it in .env-orbit.
+```
+
+To go on, set `ORBIT_IMAGE` to the build's registry digest and run the
+command again. A digest that is not on this machine yet is pulled first.
+Files `configure.sh` creates belong to the user who ran it.
 
 ## Logged and unattended runs
 
@@ -165,9 +208,16 @@ not offer it. Clone the repository and build:
 
 ```bash
 git clone https://github.com/tomlawesome/orbit.git && cd orbit
-bash scripts/configure.sh
-bash scripts/build-container.sh
 ```
+
+Two scripts then matter, and each needs something the other can produce.
+`bash scripts/configure.sh` runs inside the Orbit image, so it needs one: an
+`ORBIT_IMAGE` in your environment (a registry digest, or the local tag
+`build-container.sh` builds) or in `.env-orbit`; a local tag that has not
+been built yet is refused. `bash scripts/build-container.sh` needs no
+`.env-orbit`, so on a fresh checkout `bash scripts/deploy-container.sh
+--build` does the whole job in the right order: build the image, run
+configuration, start Orbit.
 
 [Running Orbit](operating.md#running-a-source-checkout) covers starting and
 updating a checkout, and [Testing Orbit](testing.md#local-development) covers

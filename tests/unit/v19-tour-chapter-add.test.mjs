@@ -7,7 +7,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 import add, { SELECTORS } from "../../web/src/lib/tour/chapters/02-add.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { KINDS } from "../../web/src/routes/create/entry.js";
-import { TOUR_STOPS } from "../../web/src/lib/tour/stops.js";
 import { createFilmContext, T } from "../../web/src/lib/tour/vocabulary.js";
 
 /*
@@ -195,7 +194,11 @@ describe("the selectors chapter 2 names", () => {
   });
 
   it("names the same north star the ratified walk's create stop already points at", () => {
-    const create = TOUR_STOPS.find((stop) => stop.id === "create");
+    /* The ratified create stop, held here as literals (#1403 D2). */
+    const create = {
+      target: "#nstar, button.orb",
+      copy: ["Fill in the details here.", "Watch the tour again anytime from the settings or the menu."],
+    };
     expect(create.target).toContain("#nstar");
     expect(SELECTORS.DESK.star).toBe("#nstar");
     /* the ratified line this chapter's drawer callout says, verbatim */

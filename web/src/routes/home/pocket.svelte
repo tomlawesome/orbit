@@ -1,29 +1,39 @@
 <script>
   import "./pocket.css";
-  import { tick } from "svelte";
-  import { beforeNavigate, goto, onNavigate } from "$app/navigation";
+  import { tick, untrack } from "svelte";
+  import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { WorkspaceError, applyCommand, readItemDocuments } from "$lib/data/workspace.js";
-  import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
-  import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf } from "$lib/data/chart.js";
-  import { money } from "$lib/format.js";
+  import HouseholdClosed from "$lib/HouseholdClosed.svelte";
+  import { applyCommand, attachItemDocument, dueDateIn, householdElsewhereFor, readItemDocuments, readReminders, removeDocument, restoreDocument, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
+  import PreviewCard from "$lib/reading/PreviewCard.svelte";
+  import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import { sectionColourOf } from "$lib/option-colour.js";
+  import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
+  import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
+  import { droppedCompletionWords } from "$lib/data/held-completion.js";
+  import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf, manifestRowOf } from "$lib/data/chart.js";
+  import { dayMonth, initials as initialsOf, money, MONTHS, plural } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import Hatch from "$lib/pocket/Hatch.svelte";
   import NorthStar from "$lib/pocket/NorthStar.svelte";
-  import ReviewSheet from "$lib/pocket/ReviewSheet.svelte";
+  import Sun from "$lib/sun/Sun.svelte";
+  import { POCKET_SUN_R } from "$lib/sun/furnace.js";
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
+  import { inertPage } from "$lib/pocket/focus.js";
   import TopChrome from "$lib/pocket/TopChrome.svelte";
   import { POCKET_QUERY, isPocket } from "$lib/pocket/media.js";
-  import { formReadingsOf, papersOf as reviewPapersOf } from "$lib/pocket/review.js";
+  import { reviewLockedOf } from "$lib/pocket/review.js";
+  import { amendedOf, proposedItemOf } from "$lib/editing/item-draft.js";
   import { rowOf } from "$lib/pocket/row.js";
-  import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
+  import { wake } from "$lib/pocket/wake.js";
   import { markDoor } from "../household/[id]/door.js";
   import { HIT_R, spacedBodies } from "./pocket-dial.js";
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
-  import { BAND_VAR, tlabel } from "./bands.js";
+  import { BAND_VAR, tlabel } from "$lib/data/bands.js";
   import ItemDrawer from "./ItemDrawer.svelte";
+  import { attachIdFor, forget as forgetAttachId } from "./attach-id.js";
   import SuggestionDrawer from "./SuggestionDrawer.svelte";
 
   /**
@@ -38,31 +48,37 @@
    *
    * THE ROW IS THE ITEM (review round §2.1, the desk's own grammar, #424):
    * a manifest row opens in place into a drawer holding the item's detail,
-   * `open →` onward to its belt, `complete`, and `copy link`; the relay's
+   * its notes and papers, and its foot row (#1319: snooze, complete, attach
+   * a document, retire, the pencil and the chain link); the relay's
    * catch opens the same way with its readings and its two decisions. A
-   * search result closes the search and opens its row; one the manifest
-   * does not draw goes straight to the item (review round §6.e). A planet
+   * search result closes the search and opens its row. An item the manifest
+   * does not list (more than 30 days out, or undated) is drawn as one more
+   * row when it is asked for -- by its address, a search, a paper or its
+   * body -- since the belt it used to go to retired (#1319, §34). A planet
    * on the dial does what the desk's does (owner's answer 6a): it opens its
-   * row and wears the lit ring while the row is open, and a second tap on
-   * the lit body goes to the item.
+   * row and wears the lit ring while the row is open.
    *
-   * Home's sheets are the search sheet (#1057), the hatch, opened from the
-   * orb, and the review sheet (round 3 §4): a suggestion's `review & amend →`
-   * and a second tap on its hollow body raise it in place, rather than
-   * going to the receipt page; the item sheet is gone (§2.1).
+   * Home's sheets are the search sheet (#1057) and the hatch, opened from
+   * the orb; the item sheet is gone (§2.1). A suggestion's `review & amend
+   * →`, and a second tap on its hollow body, put its row's own lines into
+   * editing, as the desk's drawer does (#1319, owner 2026-10-08): the review
+   * sheet that used to rise here is gone.
    * @typedef {{
    *   view?: import('$lib/data/workspace.js').HomeView | null,
    *   arrive?: boolean,
    *   onapprove?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
    *   ondismiss?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
    *   onamend?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion,
-   *     item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<string | null>,
+   *     item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<string | { partial: true, message: string } | null>,
    *   onchanged?: () => Promise<unknown>,
+   *   onsignedout?: (redirectTo: string | null) => unknown,
+   *   onmenu?: () => unknown,
    * }} Props
    */
   /** @type {Props} */
   let {
     view = null, arrive = false, onapprove = undefined, ondismiss = undefined, onamend = undefined, onchanged = undefined,
+    onsignedout = undefined, onmenu = undefined,
   } = $props();
   let sheetOpen = $state(false);
   let hatchOpen = $state(false);
@@ -106,14 +122,7 @@
           })
       : [],
   );
-  const initials = $derived(
-    (view?.user?.displayName ?? "")
-      .split(/\s+/)
-      .map((word) => word[0] ?? "")
-      .join("")
-      .slice(0, 2)
-      .toUpperCase(),
-  );
+  const initials = $derived(initialsOf(view?.user?.displayName));
   // #852: the same "household · role" line the desk account panel derives.
   const roleLine = $derived(
     view?.household
@@ -125,21 +134,17 @@
   const waiting = $derived((view?.suggestions ?? []).filter((s) => s.receiptId).length);
   const isAdmin = $derived(Boolean(page.data?.isAdmin));
 
-  const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
   const QUARTER_POS = [[190, 30], [352, 196], [190, 370], [28, 196]];
   const quarters = $derived(
     QUARTER_POS.map(([x, y], k) => ({
       x, y,
-      label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k * 3) % 12],
+      label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k * 3) % 12].toUpperCase(),
     })),
   );
   // BAND_VAR/tlabel: #1151 W1-Q10, shared with CorridorRow.svelte and
   // +page.svelte's own dial via bands.js, rather than a second, diverging
   // copy (bands.js's own tlabel is now the null-safe version this file's
   // old copy had, per #1151 W1-F3's unscheduled band).
-  /** @type {(iso: string) => string} */
-  const short = (iso) =>
-    new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
   // #1005: a renewal comes round, a one-off ends.
   /** @type {(s: { scheduleKind?: ?string }) => string} */
   const dateWord = (s) => (s.scheduleKind === "expiry" ? "ends" : "renews");
@@ -165,7 +170,7 @@
     return { x1, y1, x2, y2 };
   });
   /** @type {(row: { costMinor: number | null, currency: string, costIsEstimate: boolean }) => string | null} */
-  const cost = (row) => (row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null);
+  const cost = (row) => (row.costMinor === null ? null : money(row.costMinor, row.currency, row.costIsEstimate));
   /** @type {(s: import('$lib/data/workspace.js').ReceiptSuggestion) => number | null} */
   const burnsIn = (s) => (s.expiresAt && view ? daysUntil(s.expiresAt.slice(0, 10), view.today) : null);
 
@@ -173,7 +178,7 @@
   const mailSummary = $derived.by(() => {
     const reading = view?.mailReading?.length ?? 0;
     const failed = view?.mailFailures?.length ?? 0;
-    const unread = `${failed} message${failed === 1 ? "" : "s"} couldn't be read`;
+    const unread = `${plural(failed, "message")} couldn't be read`;
     if (reading && failed) return `reading ${reading} · ${failed} couldn't be read`;
     if (reading) return reading === 1 ? "reading a message" : `reading ${reading} messages`;
     return failed ? unread : "";
@@ -222,33 +227,17 @@
     return () => media.removeEventListener("change", onchange);
   });
 
-  // The approach (§1.2, §1.9): `open →` goes to the item's own screen and the
-  // opened drawer lifts into it. The morph is a view transition; pocket.css
-  // names the open row's panel and says how it lifts. Reduced motion, or a browser without
-  // view transitions, simply navigates.
-  let morphing = false;
-  onNavigate((navigation) => {
-    if (!morphing) return;
-    morphing = false;
-    if (!document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    return new Promise((ready) => {
-      document.startViewTransition(async () => {
-        ready(undefined);
-        await navigation.complete;
-      });
-    });
-  });
-
-  // A document has no address of its own yet (item/[[id]]/+page.svelte), so a
-  // paper opens its item's belt and says which paper it meant in the
-  // navigation's state, where the belt can pick it up (step 3).
-  /** @param {{ id: string, itemId: string }} doc */
-  function openPaper(doc) {
-    morphing = true;
-    goto(resolve("/item/[[id]]", { id: encodeURIComponent(doc.itemId) }), {
-      replaceState: true,
-      state: { pocketPaper: doc.id },
-    });
+  /* A paper found by the search: its item's row opens, and the paper's
+     preview stands as the bottom sheet, as a paper pressed in the drawer
+     does (#1319: the belt it used to go to retired). */
+  /** @param {any} doc */
+  async function openPaper(doc) {
+    sheetOpen = false;
+    if (!(await openRow(doc.itemId))) return;
+    await tick();
+    const from = /** @type {HTMLElement | null} */ (manifestRow(doc.itemId)?.querySelector(
+      `[data-doc-row][aria-label="Open ${CSS.escape(doc.name)}"]`) ?? null);
+    openPaperHere(doc, from ?? /** @type {HTMLElement} */ (document.activeElement));
   }
 
   // ---- the relay's catch (#466) ---------------------------------------------
@@ -266,46 +255,97 @@
     delete rowProblem[target.id];
     try {
       const failed = await handler(target);
-      if (failed) { rowProblem[target.id] = failed; return; }
+      /* false: the row stays open with the refusal under it (Row.svelte run) */
+      if (failed) { rowProblem[target.id] = failed; return false; }
       wake(act === "approve" ? `${target.title} added to your orbit` : `${target.title} dismissed`);
     } finally {
       busy = false;
     }
   }
 
-  /* ---- review & amend, raised in place (round 3 §4): the sheet the inbox
-     and the receipt page raise too (ReviewSheet.svelte) ---- */
-  let reviewOpen = $state(false);
-  /** @type {import('$lib/data/workspace.js').ReceiptSuggestion | null} */
-  let reviewing = $state(null);
-  /** @type {string | null} */
-  let reviewProblem = $state(null);
-
+  /* ---- #1319: A SUGGESTION AMENDED IN ITS ROW'S OWN LINES ---------------
+     owner, 2026-10-08 ("Yeah, ideally"): the phone amends the way the desk
+     does since a3f8fa5a (home/+page.svelte's startAmend). `review & amend →`
+     puts the row's lines into editing (EditRows), the relay's proposal
+     standing in for the item it would become (proposedItemOf); the choosers
+     are the bottom sheet, as a filed item's are. `add to orbit` sends the
+     rows as the amended item on the two-tap decision's own operation id
+     (home's amendReceipt, as `onamend`), into the section the rows chose;
+     `cancel` puts the readings back. The review sheet that rose here is
+     gone. */
+  /* #1316: the latest review & amend press still waiting on the reminder
+     read (as the desk's amendAsk). */
+  /** @type {object | null} */
+  let amendAsk = null;
   /** @param {import('$lib/data/workspace.js').ReceiptSuggestion} s */
-  function openReview(s) {
-    reviewing = s;
-    reviewProblem = null;
-    reviewOpen = true;
-  }
-
-  /**
-   * @param {import('$lib/data/workspace.js').ItemProposal} item
-   * @param {string | null} sectionId
-   */
-  async function saveReview(item, sectionId) {
-    const target = reviewing;
-    if (!target || !onamend || busy) return false;
-    busy = true;
-    reviewProblem = null;
-    try {
-      const failed = await onamend(target, item, sectionId);
-      if (failed) { reviewProblem = failed; return false; }
-      wake(`${item.title ?? target.title} added to your orbit`);
-      return true;
-    } finally {
-      busy = false;
+  async function startAmend(s) {
+    if (!s.receiptId || reviewLockedOf(s) || !view) return;
+    /* Already amending this one: a second tap on the lit body keeps what was
+       typed rather than starting the rows again (#1316). */
+    if (modes.id === s.id) return;
+    const householdId = s.householdId ?? view.primary;
+    if (!householdId) {
+      rowProblem[s.id] = "This account has no household yet";
+      return;
     }
+    const own = (view.households ?? []).find((one) => one.id === householdId)?.sections
+      ?? view.household?.sections ?? [];
+    const sectionId = (own.find((one) => one.visible !== false) ?? own[0])?.id ?? null;
+    delete rowProblem[s.id];
+    previewPaper = null;
+    /* The member's own reminder pair from Settings, read before the lines
+       open (as the desk's startAmend does); the default pair if it fails or
+       takes past 1.5 s (#1316). */
+    const ask = {};
+    amendAsk = ask;
+    const reminders = await readReminders({ within: 1500 }).catch(() => null);
+    if (amendAsk !== ask) return;
+    amendAsk = null;
+    /* #1316: the row may have closed, another opened, another item's edit
+       begun, or the suggestion been locked or gone while the read was out. */
+    const still = view?.suggestions.find((one) => one.id === s.id);
+    if (lit !== s.id || (modes.id != null && modes.id !== s.id) || !still || reviewLockedOf(still)) return;
+    modes.startEdit(proposedItemOf(s, { householdId, sectionId }, { reminders }));
+    focusInRow(s.id, '[data-ed="title"]');
   }
+  /**
+   * The rows' save for a suggestion: approved as amended, or refused in the
+   * rows' own words (EditSession says it under the rows).
+   * @param {import('$lib/data/commands.js').CommandItem} item
+   * @param {Partial<import('$lib/data/commands.js').CommandItem>} edits
+   */
+  async function addSuggestion(item, edits) {
+    const suggestion = view?.suggestions.find((one) => one.id === item.id);
+    if (!suggestion || !onamend) throw new Error("not added — this suggestion has gone");
+    const { item: amended, sectionId } = amendedOf(item, edits);
+    const problem = await onamend(suggestion, amended, sectionId);
+    if (problem && typeof problem === "object") {
+      /* A partial approval has filed the item: the rows close, or a corrected
+         re-send under the same operation id is refused for good. */
+      wake(problem.message, { failure: true });
+      landedPartial = true;
+      return;
+    }
+    if (problem) throw new Error(`not added — ${problem}`);
+  }
+  /* Set by addSuggestion when the add landed partly: addAmended then leaves
+     the recorded-but-pending sentence standing instead of "added". */
+  let landedPartial = false;
+  async function addAmended() {
+    landedPartial = false;
+    const title = modes.edit.draft?.title.trim() ?? "";
+    if (await modes.edit.commit() && !landedPartial) wake(`added to your orbit · ${title}`);
+  }
+  /** What a suggestion's lines need while they are amended. @param {{ id: string }} s */
+  const amendActsOf = (s) => ({
+    modes,
+    sections,
+    onaccept: addAmended,
+    oncancel: () => {
+      if (!modes.cancel()) return;
+      focusInRow(s.id, "[data-amend]");
+    },
+  });
 
   // ---- the search sheet (#1057, §2.4) -------------------------------------
 
@@ -318,13 +358,14 @@
 
   /** #1151 W1-Q8: shared with the desk's own copy (home/+page.svelte) via
    *  pocket-search.js's readSearchDocuments, which also carries the
-   *  concurrency cap (#1151 W1-R9). */
+   *  concurrency cap (#1151 W1-R9). The open row's item is read whatever
+   *  its status, so a retired or expired item still shows its papers. */
   async function loadSearchDocuments() {
     const household = view?.household;
     const householdId = view?.primary;
     if (!household || !householdId || searchDocumentsFor === household) return;
     searchDocumentsFor = household;
-    const carrying = (household.items ?? []).filter((item) => item.status === "active" && (item.documentCount ?? 0) > 0);
+    const carrying = (household.items ?? []).filter((item) => (item.status === "active" || item.id === lit) && (item.documentCount ?? 0) > 0);
     // Additive: an item whose papers cannot be read loses its papers from the
     // results, not the search.
     const found = await readSearchDocuments(
@@ -348,15 +389,12 @@
     problem = null;
     const completedDate = view.today;
     try {
-      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), {
-        completedDate,
-        nextDate: nextDateAfter(completedDate, raw.recurrenceMonths) ?? undefined,
-      }));
+      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), { completedDate }));
       sheetOpen = false;
       wake(`${target.title} completed`);
       await onchanged?.();
     } catch (error) {
-      problem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again";
+      problem = wordsOf(error, "couldn't complete it — try again");
     } finally {
       busy = false;
     }
@@ -366,6 +404,31 @@
 
   /** What went wrong acting from a row, by the row's id. @type {Record<string, string>} */
   const rowProblem = $state({});
+
+  /* #1319: the belt retired, and the drawer opens any item (the
+     coordinator's ruling, 2026-10-08). An item the manifest does not list --
+     more than 30 days out, undated, or retired, cancelled or expired -- is
+     drawn as one more row once it is asked for (its address, a search
+     result, a paper, its body), and the list extends to hold it: in date
+     order among the rows, undated at the end, its state in its meta. One at
+     a time: the latest ask. */
+  /** @type {string | null} */
+  let asked = $state(null);
+  /* itemRow's parameter is typed by this default, not by JSDoc in the
+     snippet's parameter list, which crashes the production rolldown build
+     (scripts/check-rolldown-jsdoc-trap.mjs). */
+  /** @type {any} */
+  const NO_ROW = {};
+  const listed = $derived(groups ? (groups.attention.length ? groups.attention : groups.later.slice(0, 1)) : []);
+  const askedRow = $derived.by(() => {
+    if (!asked || !view?.household || listed.some((row) => row.id === asked)) return null;
+    const item = view.household.items.find((one) => one.id === asked);
+    return item ? manifestRowOf(view.household, item, view.today) : null;
+  });
+  /** Whether home holds an item by this id at all, whatever its status. @param {string} id */
+  const holds = (id) => Boolean(view?.household?.items.some((one) => one.id === id));
+  /** Rows in date order, undated last. @param {any[]} list */
+  const byDate = (list) => [...list].sort((a, b) => (a.days ?? Infinity) - (b.days ?? Infinity));
 
   /** The manifest's row for an item, if the manifest draws one. @param {string} id */
   const manifestRow = (id) => document.querySelector(`.pocket .pk-below [data-row-key="${CSS.escape(id)}"]`);
@@ -379,7 +442,12 @@
    */
   async function openRow(id, { focus = false } = {}) {
     await tick();
-    const el = manifestRow(id);
+    let el = manifestRow(id);
+    if (!el && holds(id)) {
+      asked = id;
+      await tick();
+      el = manifestRow(id);
+    }
     const control = rowOf(el);
     if (!el || !control) return false;
     control.open();
@@ -390,28 +458,33 @@
   }
 
   /**
-   * A search result closes the search and opens its row (§2.1). An item the
-   * manifest does not draw (it lists what needs attention) has no row to
-   * open, so it goes straight to the item, as it does from the belt
-   * (review round §6.e), taking the search's history entry as a paper does.
+   * A search result closes the search and opens its row (§2.1), drawn for
+   * it if the manifest does not list it (openRow).
    * @param {string} id
    */
   async function openResult(id) {
-    if (!manifestRow(id)) {
-      goto(resolve("/item/[[id]]", { id: encodeURIComponent(id) }), { replaceState: true });
-      return;
-    }
     sheetOpen = false;
     await tick();
     await openRow(id, { focus: true });
   }
 
-  /* Arriving on an item's address (`copy link`, the desk's own): its row
-     opens, once, as soon as the manifest has drawn it. */
+  /* Arriving on an item's address, `/home?item=<id>` (`copy link`, the
+     desk's own; the retired belt's `/item/<id>` no longer exists): its
+     row opens, once, as soon as the manifest has drawn it -- drawn for it if
+     the manifest does not list it (openRow). A suggestion's address opens
+     its row in the signals, where it is reviewed. An item in another of
+     the reader's households waits: home switches to that household
+     (+page.svelte, #1319) and its row opens there. An id home does not hold
+     at all opens nothing. */
   let addressed = false;
   $effect(() => {
     const id = page.url.searchParams.get("item");
-    if (addressed || !id || !rows.length || !isPocket()) return;
+    if (addressed || !id || !groups || !isPocket()) return;
+    if (!holds(id) && !view?.suggestions.some((one) => one.id === id)) {
+      if (householdElsewhereFor(view, id)) return;
+      addressed = true;
+      return;
+    }
     openRow(id).then((opened) => { addressed ||= opened; });
   });
 
@@ -422,36 +495,39 @@
   let lit = $state(null);
   /* The star hides while a sheet is up and while any row is open (round 3
      §5): it stood over the open suggestion's `Dismiss`. */
-  const starHidden = $derived(sheetOpen || hatchOpen || reviewOpen || lit !== null);
+  const starHidden = $derived(sheetOpen || hatchOpen || lit !== null);
   /** @param {string} id */
   const onRowToggle = (id) => /** @type {(open: boolean) => void} */ ((open) => {
-    if (open) { lit = id; loadSearchDocuments(); } else if (lit === id) lit = null;
+    /* #1319: an open row is the one asked for, so an edit that moves it out
+       of what the manifest lists (a new date past 30 days) keeps it drawn,
+       open, in its new place in date order, not folded away (the Q1 rule). */
+    /* Papers read before a non-active row opened left that item out, so
+       read them again with it included. */
+    if (open) {
+      lit = id; asked = id;
+      if (rawItems.get(id)?.status === "active") loadSearchDocuments(); else rereadPapers();
+    } else if (lit === id) lit = null;
   });
 
   /**
-   * A planet on the dial (owner's answer 6a, the desk's `.body-link`): the
-   * first tap scrolls the manifest to its row and opens it, the body
-   * lighting while the row is open; a tap on the lit body goes to the item,
-   * the open drawer lifting into it, and Escape on the dial puts the row
-   * away (onKeyActivate). A body the manifest draws no row for
-   * goes straight to the item, as a search result does (§6.e). The relay's
-   * catch does what its row's `review & amend →` does: raises the review
-   * sheet in place (round 3 §4).
+   * A planet on the dial (owner's answer 6a, the desk's `.body-link`): a tap
+   * scrolls the manifest to its row and opens it, drawn for it if the
+   * manifest does not list it (openRow), the body lighting while the row is
+   * open; Escape on the dial puts the row away (onKeyActivate). A tap on the
+   * lit body brings its row back on screen (#1319: the belt it used to lift
+   * into retired). The relay's catch, tapped again, does what its row's
+   * `review & amend →` does (round 3 §4).
    * @param {DialBody} b
    */
   async function tapBody(b) {
-    if (lit !== b.id && (await openRow(b.id))) return;
-    if (b.suggestion) {
-      const suggested = view?.suggestions.find((one) => one.id === b.id);
-      if (suggested?.receiptId) openReview(suggested);
-      return;
-    }
-    morphing = lit === b.id;
-    goto(resolve("/item/[[id]]", { id: encodeURIComponent(b.id) }));
+    const again = lit === b.id;
+    if (!(await openRow(b.id)) || !again || !b.suggestion) return;
+    const suggested = view?.suggestions.find((one) => one.id === b.id);
+    if (suggested) startAmend(suggested);
   }
   /* A press on the lit body must not close its row on the way down (row.js
-     closes an open row on any press outside it), or the drawer would be gone
-     before the tap could lift it into the item. Registered before any row
+     closes an open row on any press outside it), or the tap would close the
+     drawer it is about to bring back on screen. Registered before any row
      opens, so it hears the press first. */
   $effect(() => {
     /** @param {PointerEvent} event */
@@ -462,22 +538,69 @@
     addEventListener("pointerdown", onpress, true);
     return () => removeEventListener("pointerdown", onpress, true);
   });
+  /** Between the meta line's parts. */
+  const SEP = " · ";
+  /** A row's section, for its colour (option-colour.js). @param {string} id */
+  const sectionOf = (id) => sections.find((one) => one.id === rawItems.get(id)?.sectionId) ?? null;
   /** @type {(id: string) => typeof searchDocuments} */
   const papersOf = (id) => searchDocuments.filter((doc) => doc.itemId === id);
 
-  /* `complete` from a drawer, as the belt does it (item/[[id]]/+page.svelte,
-     tapComplete): an item with a cost to confirm goes to its belt with the
-     record sheet up; one with nothing to record completes on the tap, held
-     for the wake's four seconds so `undo` is a real undo, and sent at once
-     if the page is left first. */
-  /** @typedef {{ command: object, timer: ReturnType<typeof setTimeout> | undefined, done: boolean }} HeldCompletion */
-  /** @type {HeldCompletion | null} */
-  let held = null;
-  /** The key a held completion is stashed under (#1151 W1-S3), the same
-      reasoning and the same literal key as item/[[id]]/+page.svelte's own
-      (W1-R5): a flush cut off by the page actually unloading — not merely
-      refused — is picked up on the next load instead of silently failing.
-      One slot: this screen only ever holds one completion at a time. */
+  /* ---- #1319: a paper in a drawer opens the preview as the bottom sheet ----
+     design/v19/belt-purpose/round-3 (F), scene `narrow`: the desk's preview
+     card (PreviewCard.svelte), which under 1200px is the phone's bottom
+     sheet; its page opens the reader over home. Escape or a press off it
+     puts it away and leaves the row open. */
+  /** @type {any} */
+  let previewPaper = $state(null);
+  /** @type {HTMLElement | null} */
+  let previewFrom = null;
+  /** @param {any} paper @param {HTMLElement} from */
+  function openPaperHere(paper, from) {
+    /* one sheet at a time: a paper's preview puts a chooser away */
+    modes.closeChooser(false);
+    previewFrom = from;
+    if (previewPaper?.id !== paper.id) previewPaper = paper;
+  }
+  /** @param {{ refocus: boolean }} how */
+  function closePaper({ refocus }) {
+    previewPaper = null;
+    if (refocus && previewFrom?.isConnected) previewFrom.focus({ preventScroll: true });
+  }
+  /** The papers again, after one was removed or restored from the sheet. */
+  async function rereadPapers() {
+    searchDocumentsFor = null;
+    papersReady = false;
+    await loadSearchDocuments();
+  }
+  /** @param {{ id: string, name: string }} paper */
+  async function removePaper(paper) {
+    await removeDocument(paper.id);
+    previewPaper = null;
+    await rereadPapers();
+    wake(`${paper.name} removed`, {
+      // The removed wake is already gone by now, so a refused restore must
+      // say so or the paper silently stays removed.
+      undo: () => { restoreDocument(paper.id).then(rereadPapers).catch(() => wake(`couldn't restore ${paper.name} — try again`, { failure: true })); },
+    });
+  }
+  /** @param {{ id: string }} paper */
+  async function restorePaper(paper) {
+    await restoreDocument(paper.id);
+    previewPaper = null;
+    await rereadPapers();
+  }
+  /* A row closing takes its paper's sheet with it. */
+  $effect(() => {
+    if (previewPaper && lit !== previewPaper.itemId) previewPaper = null;
+  });
+
+  /* A completion a previous visit held and never saw confirmed (#1151
+     W1-S3): the belt and stage 1's drawer held a completion for the wake's
+     four seconds and stashed it first, under the same literal key as the
+     belt's own (W1-R5; the belt retired with #1319). #1319 stage 2: the drawer now
+     asks for the completion in its rows and records it at once, so nothing
+     is held here any more; what an earlier visit stashed is still picked up
+     on load and finished. */
   const HELD_COMPLETION_KEY = "orbit:pending-completion";
   /* A list, not one slot: completing a second item inside the first's undo
      window sends the first at once, and its send can still fail or answer
@@ -489,7 +612,7 @@
       const raw = localStorage.getItem(HELD_COMPLETION_KEY);
       if (!raw) return [];
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [parsed.command].filter(Boolean);
+      return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
     }
@@ -502,115 +625,271 @@
     } catch { /* best effort */ }
   }
   /** @param {object} command */
-  function stashHeldCompletion(command) {
-    writeHeldCompletionStash([...readHeldCompletionStash(), command]);
-  }
-  /** @param {object} command */
   function clearHeldCompletionStash(command) {
     const key = JSON.stringify(command);
     writeHeldCompletionStash(readHeldCompletionStash().filter((one) => JSON.stringify(one) !== key));
   }
-  /** @param {{ id: string, title: string }} one */
-  function completeRow(one) {
-    const raw = rawItems.get(one.id);
-    const householdId = view?.primary;
-    if (!raw || !householdId || !view) return;
-    if (raw.costMinor !== null && raw.costMinor !== undefined) {
-      morphing = true;
-      goto(resolve("/item/[[id]]", { id: encodeURIComponent(one.id) }), { state: { pocketAct: "complete" } });
-      return;
-    }
-    sendHeld();
-    const completedDate = view.today;
-    const nextDate = nextDateAfter(completedDate, raw.recurrenceMonths) ?? undefined;
-    /* Built once, not per send (#1151 W1-R2/W1-R3's own reasoning): a retry
-       reuses the exact command, version guard included. */
-    const command = completeCommand(/** @type {any} */ ({ ...raw, householdId }), { completedDate, nextDate });
-    stashHeldCompletion(command);
-    /** @type {HeldCompletion} */
-    const job = { command, done: false, timer: undefined };
-    job.timer = setTimeout(() => fireHeld(job), WAKE_HOLD_MS);
-    held = job;
-    wake(`Completed${nextDate ? ` · next due ${short(nextDate)}` : ""} · ${one.title}`, {
-      undo: () => {
-        clearTimeout(job.timer);
-        job.done = true;
-        if (held === job) held = null;
-        clearHeldCompletionStash(job.command);
-      },
-    });
-  }
-  /** @param {HeldCompletion} job */
-  async function fireHeld(job) {
-    if (job.done) return;
-    job.done = true;
-    if (held === job) held = null;
-    try {
-      await applyCommand(job.command);
-      clearHeldCompletionStash(job.command);
-      await onchanged?.();
-    } catch (error) {
-      wake(/** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again", { failure: true });
-    }
-  }
-  /* Leaving before the wake has gone: the completion is sent now, not lost
-     — and stashed before it is sent (above), so even a send this screen
-     never lives to see the answer to is picked up on the next load
-     (#1151 W1-S3). */
-  function sendHeld() {
-    const job = held;
-    if (!job || job.done) return;
-    clearTimeout(job.timer);
-    job.done = true;
-    held = null;
-    applyCommand(job.command).then(() => clearHeldCompletionStash(job.command)).catch(() => {});
-  }
-  beforeNavigate(() => { sendHeld(); });
-  $effect(() => {
-    addEventListener("pagehide", sendHeld);
-    return () => { removeEventListener("pagehide", sendHeld); };
-  });
   /** A completion stashed by a previous visit that never confirmed it sent
       (#1151 W1-S3): picked up here instead of staying lost with nothing
-      said. A version conflict means somebody already holds this change —
-      most likely the original send landing after all — so that alone is
-      treated as the stash's own success. Runs once, on mount: nothing it
-      reads is reactive state. */
+      said. The engine replays a completion it already recorded as success,
+      so a refusal — a version conflict included — means it was NOT
+      recorded, and will come back on every load: it is said once and the
+      entry dropped. A network or server failure keeps it for the next load.
+      Runs once, on mount: nothing it reads is reactive state. */
   $effect(() => {
-    for (const command of readHeldCompletionStash()) applyCommand(command).then(async () => {
-      clearHeldCompletionStash(command);
-      await onchanged?.();
-    }).catch((error) => {
-      if (error instanceof WorkspaceError && error.code === "version_conflict") {
+    for (const command of readHeldCompletionStash()) {
+      /** @type {any} */
+      const sent = command;
+      applyCommand(sent).then(async () => {
         clearHeldCompletionStash(command);
-        onchanged?.();
-        return;
-      }
-      wake(/** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again", { failure: true });
-    });
+        await onchanged?.();
+      }).catch((error) => {
+        const refused = error instanceof WorkspaceError && (error.status ?? 0) >= 400 && (error.status ?? 0) < 500;
+        if (refused) clearHeldCompletionStash(command);
+        /* Not recorded and now dropped: name the item rather than echo the
+           engine's "refresh and try again", which cannot bring it back. */
+        const title = refused ? rawItems.get(sent.itemId)?.title : null;
+        wake(title ? droppedCompletionWords(title) : wordsOf(error, "couldn't complete it — try again"), { failure: true });
+      });
+    }
   });
 
   /* `copy link`: the item's address, the desk's (+page.svelte addressOf),
-     the one place the pocket offers it. */
-  /** @type {string | null} */
-  let copied = $state(null);
-  /** @param {string} id */
+     the chain-link icon at the drawer's foot (#1319). */
+  /** @param {string} id @returns {Promise<boolean>} */
   async function copyLink(id) {
     try {
       await navigator.clipboard.writeText(new URL(`/home?item=${encodeURIComponent(id)}`, location.origin).href);
-      copied = id;
+      return true;
     } catch {
       /* A refused clipboard is no error worth a word: the address still works. */
-      copied = null;
+      return false;
     }
   }
 
-  /** The acts in a manifest item's drawer. @param {{ id: string, title: string }} one @returns {import('$lib/pocket/row.js').RowAct[]} */
-  const itemActs = (one) => [
-    { label: "open →", name: `Open ${one.title}`, tone: "accent", onact: () => { morphing = true; },
-      href: resolve("/item/[[id]]", { id: encodeURIComponent(one.id) }) },
-    { label: "complete", name: `Complete ${one.title}`, tone: "ok", onact: () => completeRow(one) },
-  ];
+  /* ---- #1319: THE DRAWER'S FOOT ROW (FootRow.svelte), as the desk's ----
+     The row's own acts (`open →`, `complete`) and its `copy link` line are
+     gone: the drawer is the item, and its foot holds every act the belt had
+     -- snooze, complete, attach a document, retire -- with the pencil and
+     the chain link at its right end. */
+  /** @type {{ id: string, kind: "snooze" | "attach" | "retire" | "restore" | "complete" } | null} */
+  let footBusy = $state(null);
+  /**
+   * @param {{ id: string, title: string }} one
+   * @param {"snooze" | "retire" | "restore"} kind
+   * @param {(item: any) => object} build
+   * @param {string} words
+   */
+  async function runRowAct(one, kind, build, words) {
+    const raw = rawItems.get(one.id);
+    const householdId = view?.primary;
+    if (!raw || !householdId || footBusy) return;
+    footBusy = { id: one.id, kind };
+    delete rowProblem[one.id];
+    try {
+      await applyCommand(build({ ...raw, householdId }));
+      wake(words);
+      await onchanged?.();
+    } catch (error) {
+      rowProblem[one.id] = wordsOf(error, `couldn't ${kind} it — try again`);
+    } finally {
+      footBusy = null;
+    }
+  }
+  /** @param {{ id: string, title: string }} one @param {File} file */
+  async function attachTo(one, file) {
+    const householdId = view?.primary;
+    if (!householdId || footBusy) return;
+    footBusy = { id: one.id, kind: "attach" };
+    delete rowProblem[one.id];
+    try {
+      await attachItemDocument(householdId, one.id, file, attachIdFor(one.id, file));
+      forgetAttachId(one.id, file);
+      wake(`${file.name} attached`);
+      // In this order: the papers are read from the refreshed view, which
+      // lists the item as now carrying one (a first paper was left out).
+      await onchanged?.();
+      await rereadPapers();
+    } catch (error) {
+      rowProblem[one.id] = wordsOf(error, "couldn't attach it — try again");
+    } finally {
+      footBusy = null;
+    }
+  }
+  /* ---- #1319 stage 2: EDITING IN THE ROWS, AND THE CHOOSER SHEET --------
+     design/v19/belt-purpose/round-8/m-colour-per-option.html, the `narrow-`
+     scenes: as the desk's drawer (home/+page.svelte), with the chooser card
+     as the bottom sheet, where the preview's sheet stands. */
+  const modes = new DrawerModes({
+    save: async (item, edits) => {
+      if (item.status === "suggested") { await addSuggestion(item, edits); return; }
+      await applyCommand(upsertCommand(item, edits));
+      await onchanged?.();
+    },
+    onchoose: () => { previewPaper = null; },
+  });
+  /* The sections of the household the open item is in, or a suggestion
+     being amended will file into. */
+  const sections = $derived.by(() => {
+    const amended = view?.suggestions.find((one) => one.id === modes.id);
+    const householdId = amended ? (amended.householdId ?? view?.primary) : null;
+    return (householdId ? view?.households?.find((one) => one.id === householdId)?.sections : null)
+      ?? view?.household?.sections ?? [];
+  });
+  /* .by: read at the top level, `view` would be narrowed to its default. */
+  const chooserAsk = $derived.by(() => (view ? modes.askOf(sections, view.today) : null));
+  /* A row closing, or another opening, ends whatever its drawer was doing. */
+  $effect(() => {
+    const id = modes.id;
+    if (!id || lit === id) return;
+    /* #1319: a row closing with changes in its rows opens again, the cancel
+       pill armed ("discard changes?"); closed again inside the hold, or
+       with nothing changed, it ends. */
+    if (untrack(() => modes.cancel())) modes.end();
+    else untrack(() => openRow(id));
+  });
+  /** The item as a command addresses it. @param {string} id @returns {any} */
+  const commandItemOf = (id) => {
+    const raw = rawItems.get(id);
+    return raw && view?.primary ? { ...raw, householdId: view.primary } : null;
+  };
+  /** Focus a control in a row's drawer, once it is drawn. @param {string} id @param {string} selector */
+  async function focusInRow(id, selector) {
+    await tick();
+    const el = /** @type {HTMLElement | null} */ (manifestRow(id)?.querySelector(selector) ?? null);
+    el?.focus({ preventScroll: true });
+    if (el?.isContentEditable) getSelection()?.collapse(el, el.childNodes.length);
+  }
+  /** The chooser's pick: the row takes it, or the snooze is sent. @param {string} value */
+  function pickChoice(value) {
+    const snooze = modes.pick(value);
+    if (!snooze || !view) return;
+    const { item, until } = snooze;
+    /* Whether the day will do is the engine's (#1325): its refusal lands
+       in rowProblem, in its words. */
+    /* #1319: the pills are disabled while it is sent, which drops the focus
+       the sheet handed back; put it back on the pill once they are live,
+       inside the row, so the row's own Escape still closes it. */
+    runRowAct(item, "snooze", (one) => snoozeCommand(one, until), `${item.title} snoozed until ${dayMonth(until)}`)
+      .then(() => { if (lit === item.id) focusInRow(item.id, '[aria-label^="Snooze "]'); });
+  }
+  /** @param {{ id: string, title: string }} one */
+  async function saveRow(one) {
+    const title = modes.edit.draft?.title.trim() ?? one.title;
+    if (await modes.edit.commit()) {
+      wake(`saved · ${title}`);
+      focusInRow(one.id, ".ivedit");
+    }
+  }
+  /* Complete records what the rows hold: the date, the cost and the notes.
+     The next due date is the engine's (#1324), read back from its reply. */
+  /** @param {{ id: string, title: string }} one */
+  async function recordRow(one) {
+    const out = modes.completion();
+    if ("refusal" in out) { modes.completeProblem = out.refusal; return; }
+    if (footBusy) return;
+    const { item, fields } = out;
+    footBusy = { id: one.id, kind: "complete" };
+    modes.completeProblem = null;
+    modes.recording = true;
+    try {
+      const nextDate = dueDateIn(await applyCommand(completeCommand(item, fields)), item.householdId, item.id);
+      modes.cancelComplete();
+      wake(`Completed${nextDate ? ` · next due ${dayMonth(nextDate)}` : ""} · ${one.title}`);
+      await onchanged?.();
+    } catch (error) {
+      modes.completeProblem = wordsOf(error, "couldn't complete it — try again");
+    } finally {
+      footBusy = null;
+      modes.recording = false;
+    }
+  }
+  /* Escape: the chooser first, then the edit or the completion, ahead of
+     the row's own Escape (row.js), which closes the row. */
+  $effect(() => {
+    const id = modes.id;
+    if (!id) return;
+    /** @param {KeyboardEvent} event */
+    const onKey = (event) => {
+      if (event.key !== "Escape" || event.defaultPrevented || previewPaper) return;
+      const chooser = modes.choosing;
+      const editing = Boolean(modes.edit.id);
+      if (!modes.escape()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!chooser && !modes.id) focusInRow(id, editing ? ".ivedit, [data-amend]" : '[aria-label^="Complete "]');
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  });
+  /* #1319: the chooser sheet is modal. While it stands, everything behind
+     it is inert (focus.js's inertPage, the kit's sheets' own pattern), so
+     nothing it covers takes a tap; when it goes, the page comes back first
+     and focus goes back to the value that was pressed (the close asked for
+     that while the page was still inert, where it could not land). */
+  /** @param {HTMLElement} seat @param {HTMLElement | null} from */
+  function holdChooserSeat(seat, from) {
+    let opener = from;
+    const restore = inertPage(seat);
+    return {
+      /** @param {HTMLElement | null} next */
+      update(next) { if (next) opener = next; },
+      destroy() {
+        const lost = !document.activeElement || document.activeElement === document.body || seat.contains(document.activeElement);
+        restore();
+        if (lost && opener?.isConnected) opener.focus({ preventScroll: true });
+      },
+    };
+  }
+  /* A press off the chooser sheet puts it away: on its scrim (inside the
+     seat, so this leaves it to the scrim's own click), or anywhere else
+     still live, the wake's undo say. */
+  $effect(() => {
+    if (!modes.choosing) return;
+    /** @param {PointerEvent} event */
+    const onPress = (event) => { if (!pressKeepsChooser(event.target)) modes.closeChooser(false); };
+    window.addEventListener("pointerdown", onPress, true);
+    return () => window.removeEventListener("pointerdown", onPress, true);
+  });
+
+  /** @param {{ id: string, title: string }} one @returns {import('./drawer-acts.js').DrawerActs} */
+  const drawerActsOf = (one) => ({
+    busy: footBusy?.id === one.id ? footBusy.kind : modes.edit.busy && modes.edit.id === one.id ? "save" : null,
+    problem: modes.id === one.id ? modes.edit.problem ?? modes.edit.refusal ?? modes.completeProblem : null,
+    modes,
+    sections,
+    onsnooze: (from) => {
+      const item = commandItemOf(one.id);
+      delete rowProblem[one.id];
+      if (item) modes.snooze(item, from);
+    },
+    oncomplete: () => {
+      const item = commandItemOf(one.id);
+      if (!item || !view) return;
+      delete rowProblem[one.id];
+      modes.startComplete(item, view.today);
+      focusInRow(one.id, "[data-pick]");
+    },
+    onedit: () => {
+      const item = commandItemOf(one.id);
+      if (!item) return;
+      delete rowProblem[one.id];
+      modes.startEdit(item);
+      focusInRow(one.id, '[data-ed="title"]');
+    },
+    onsave: () => saveRow(one),
+    onrecord: () => recordRow(one),
+    oncancel: () => {
+      const editing = Boolean(modes.edit.id);
+      /* rows holding changes: the first press arms "discard changes?" */
+      if (!modes.cancel()) return;
+      focusInRow(one.id, editing ? ".ivedit" : '[aria-label^="Complete "]');
+    },
+    onattach: (file) => attachTo(one, file),
+    onretire: () => runRowAct(one, "retire", (item) => archiveCommand(item), `${one.title} retired`),
+    onrestore: () => runRowAct(one, "restore", (item) => statusCommand(item, "active"), `${one.title} restored`),
+    oncopy: () => copyLink(one.id),
+  });
   /** The relay's catch, decided from its row. @param {import('$lib/data/workspace.js').ReceiptSuggestion} s @returns {import('$lib/pocket/row.js').RowAct[]} */
   const suggestionActs = (s) => [
     { label: "Add to orbit", name: `Add ${s.title} to your orbit`, tone: "filled", arms: true, onact: () => decide("approve", s) },
@@ -790,7 +1069,6 @@
       <!-- The desk's spheres and danger wash (+page.svelte's dial defs),
            named for the pocket: the desk's own defs share this document. -->
       <defs aria-hidden="true">
-        <filter id="pk-sun" x="-200%" y="-200%" width="500%" height="500%"><feGaussianBlur stdDeviation="5"/></filter>
         <radialGradient id="pk-ruby" cx="34%" cy="30%" r="72%">
           <stop offset="0%" stop-color="var(--p-ruby-1, #ffb3ab)"/><stop offset="42%" stop-color="var(--p-ruby-2, #e0453e)"/>
           <stop offset="100%" stop-color="var(--p-ruby-3, #7e1a1f)"/>
@@ -823,10 +1101,10 @@
       <g font-size="15" fill="var(--ink-quiet)" text-anchor="middle" font-family="JetBrains Mono,monospace">
         {#each quarters as q, k (k)}<text x={q.x} y={q.y}>{q.label}</text>{/each}</g>
       <path d="M190 38 l6 10 h-12 Z" style="fill:var(--accent)"/>
-      <!-- The sun (the desk's #sun, scaled): a soft glow that breathes under
-           the core, and the household's name beneath it. -->
-      <circle class="pk-glow" cx="190" cy="190" r="16" style="fill:#fff6e6" fill-opacity=".28" filter="url(#pk-sun)"/>
-      <circle class="pk-sun" cx="190" cy="190" r="8" style="fill:#fff6e6"/>
+      <!-- The sun (#1250): drawn by the layer over the dial (Sun.svelte, the
+           Furnace, in the pack's own colours, #1259); this is its disc, which
+           the tour marks, and the household's name beneath it. -->
+      <circle class="pk-sun" cx="190" cy="190" r={POCKET_SUN_R} fill="transparent"/>
       <text x="190" y="218" font-size="15" text-anchor="middle" style="fill:var(--ink-mid);font-family:var(--ui)">{view?.household?.name ?? ""}</text>
       {#if pinging}
         <circle class="pk-ping" cx={pinging.placement.x} cy={pinging.placement.y} r={bodyR(pinging) + 3} fill="none"
@@ -865,6 +1143,7 @@
         {/if}
       {/each}
     </svg>
+    <Sun r={POCKET_SUN_R} />
   </div>
   <NorthStar docked anchor={dialBox} hidden={starHidden} />
   </div>
@@ -885,40 +1164,64 @@
        so iOS never scrolls to an input that is about to move into the sheet. -->
   <button class="msearch" onclick={openSearch}>explore your world</button>
   <div class="pk-below" class:pk-busy={busy}>
-  {#if groups?.attention.length}
+  <!-- One item's row: the manifest's, or the one asked for (`asked`). -->
+  {#snippet itemRow(one = NO_ROW)}
+    <!-- #1319 stage 2 (round 8): while the item is edited, its title is
+         live in the row's head, as on the desk -->
+    {#snippet liveTitle()}{#if modes.edit.draft}<b class="ed" contenteditable="plaintext-only" spellcheck="false" role="textbox" tabindex="0"
+       aria-label="title" data-ed="title" bind:textContent={modes.edit.draft.title}></b>{/if}{/snippet}
+    <Row title={one.title} meta={[one.section, one.state, cost(one)].filter(Boolean).join(" · ")} key={one.id}
+         heading={modes.edit.id === one.id ? liveTitle : undefined}
+         trail={tlabel(one)} trailSub={one.dueDate ? dayMonth(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+         ontoggle={onRowToggle(one.id)}>
+      <!-- round 8 (#1319): the section word in its own colour -->
+      {#snippet metaline()}{#if one.section}<i class="opt" data-opt={sectionColourOf(sectionOf(one.id))}>{one.section}</i>{#if one.state || cost(one)}{SEP}{/if}{/if}{#if one.state}{one.state}{#if cost(one)}{SEP}{/if}{/if}{cost(one)}{/snippet}
+      {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
+      {#snippet detail()}
+        <ItemDrawer {one} raw={rawItems.get(one.id)} papers={papersOf(one.id)} problem={rowProblem[one.id] ?? null}
+                    showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere}
+                    acts={drawerActsOf(one)}
+                    reading={!papersReady && (rawItems.get(one.id)?.documentCount ?? 0) > 0} />
+      {/snippet}
+    </Row>
+  {/snippet}
+  <!-- #1316: closed while its owner brings an archive in; the other skies
+       above stay, and are the way to them. -->
+  {#if view?.household?.importInProgress}
+    <HouseholdClosed name={view.household.name} hasOthers={view.households.length > 1} />
+  {:else if groups?.attention.length}
     <h2 class="p-caps">Needs attention</h2>
     <div class="pk-list" data-row-group data-row-cards>
-      {#each groups.attention as one (one.id)}
-        <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")} key={one.id}
-             trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
-             acts={itemActs(one)} ontoggle={onRowToggle(one.id)}>
-          {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
-          {#snippet detail()}
-            <ItemDrawer {one} raw={rawItems.get(one.id)} papers={papersOf(one.id)} problem={rowProblem[one.id] ?? null}
-                        reading={!papersReady && (rawItems.get(one.id)?.documentCount ?? 0) > 0} />
-          {/snippet}
-          {#snippet after()}
-            <button class="p-quiet pk-copy" onclick={() => copyLink(one.id)}>{copied === one.id ? "link copied" : "copy link"}</button>
-          {/snippet}
-        </Row>
+      {#each askedRow ? byDate([...groups.attention, askedRow]) : groups.attention as one (one.id)}
+        {@render itemRow(one)}
       {/each}
     </div>
   {:else if groups?.later.length}
     {@const next = groups.later[0]}
+    {#snippet liveTitle()}{#if modes.edit.draft}<b class="ed" contenteditable="plaintext-only" spellcheck="false" role="textbox" tabindex="0"
+           aria-label="title" data-ed="title" bind:textContent={modes.edit.draft.title}></b>{/if}{/snippet}
     <h2 class="p-caps">Needs attention</h2>
     <!-- Nothing needs you: the one row is the next item up, and opens as it. -->
     <div class="pk-list" data-row-group data-row-cards>
       <Row title="nothing needs you" meta={`next up ${next.title}${next.days !== null ? `, ${tlabel(next)}` : ""}`} key={next.id}
-           acts={itemActs(next)} ontoggle={onRowToggle(next.id)}>
+           heading={modes.edit.id === next.id ? liveTitle : undefined}
+           ontoggle={onRowToggle(next.id)}>
         {#snippet mark()}<span class="pk-dot quiet"></span>{/snippet}
         {#snippet detail()}
           <ItemDrawer one={next} raw={rawItems.get(next.id)} papers={papersOf(next.id)} problem={rowProblem[next.id] ?? null}
+                      showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere}
+                      acts={drawerActsOf(next)}
                       reading={!papersReady && (rawItems.get(next.id)?.documentCount ?? 0) > 0} />
         {/snippet}
-        {#snippet after()}
-          <button class="p-quiet pk-copy" onclick={() => copyLink(next.id)}>{copied === next.id ? "link copied" : "copy link"}</button>
-        {/snippet}
       </Row>
+      {#if askedRow}{@render itemRow(askedRow)}{/if}
+    </div>
+  {:else if askedRow}
+    <!-- #1316 W1-F7: a household with nothing live (its one item archived)
+         has no manifest to seat the asked-for row in, so it stands alone;
+         its state word says why it is there. -->
+    <div class="pk-list" data-row-group data-row-cards>
+      {@render itemRow(askedRow)}
     </div>
   {/if}
   <!-- #466; round 3 §2 and owner-decisions §29 (#1142): 32px of clear sky
@@ -933,16 +1236,25 @@
       <h2 class="p-caps" id="pk-signals-h">Signals{#if view.suggestions.length}<span class="p-count">{view.suggestions.length}</span>{/if}</h2>
       <div class="pk-pen" data-row-group data-row-cards>
         {#each view.suggestions as s (s.id)}
+          {@const amending = modes.edit.id === s.id}
+          <!-- #1319: while amended, the title is live in the row's head and
+               `add to orbit` / `cancel` (SuggestionDrawer) replace the two
+               decisions -->
+          {#snippet liveTitle()}{#if modes.edit.draft}<b class="ed" contenteditable="plaintext-only" spellcheck="false" role="textbox" tabindex="0"
+             aria-label="title" data-ed="title" bind:textContent={modes.edit.draft.title}></b>{/if}{/snippet}
           <Row title={s.title} key={s.id}
+               heading={amending ? liveTitle : undefined}
                meta={burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : ""}
-               trail={s.costMinor ? money(s.costMinor, s.currency, true) : ""}
-               trailSub={s.renewsOn ? `${dateWord(s)} ${short(s.renewsOn)}` : ""} trailTone="var(--accent-text)"
-               acts={suggestionActs(s)} ontoggle={onRowToggle(s.id)}>
+               trail={s.costMinor !== null && s.costMinor !== undefined ? money(s.costMinor, s.currency, true) : ""}
+               trailSub={s.renewsOn ? `${dateWord(s)} ${dayMonth(s.renewsOn)}` : ""} trailTone="var(--accent-text)"
+               acts={amending ? [] : suggestionActs(s)} ontoggle={onRowToggle(s.id)}>
             {#snippet mark()}<span class="pk-dot hollow"></span>{/snippet}
-            {#snippet detail()}<SuggestionDrawer suggestion={s} problem={rowProblem[s.id] ?? null} />{/snippet}
+            {#snippet detail()}<SuggestionDrawer suggestion={s} problem={rowProblem[s.id] ?? null}
+                                                  showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere}
+                                                  acts={amendActsOf(s)} />{/snippet}
             {#snippet after()}
-              {#if s.receiptId}
-                <button class="p-quiet" aria-haspopup="dialog" onclick={() => openReview(s)}>review &amp; amend →</button>
+              {#if s.receiptId && !reviewLockedOf(s) && !amending}
+                <button class="p-quiet" data-amend onclick={() => startAmend(s)}>review &amp; amend →</button>
               {/if}
             {/snippet}
           </Row>
@@ -974,7 +1286,7 @@
     {#if !results.query}
       {#each results.items as one (one.id)}
         <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
-             trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+             trail={tlabel(one)} trailSub={one.dueDate ? dayMonth(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
              onactivate={() => openResult(one.id)}>
           {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
         </Row>
@@ -990,7 +1302,7 @@
     {:else}
       {#each results.items as one (one.id)}
         <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
-             trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+             trail={tlabel(one)} trailSub={one.dueDate ? dayMonth(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
              onactivate={() => openResult(one.id)}>
           {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
         </Row>
@@ -1021,10 +1333,22 @@
 </Sheet>
 
 <Hatch bind:open={hatchOpen} name={view?.user?.displayName ?? ""} {roleLine} {isAdmin}
-       inboxCount={waiting || null} />
+       inboxCount={waiting || null} {onsignedout} onopened={onmenu} />
 
-<ReviewSheet bind:open={reviewOpen} title={reviewing?.title ?? ""} proposal={reviewing?.proposal}
-             householdId={reviewing ? (reviewing.householdId ?? view?.primary ?? null) : null}
-             households={view?.households ?? []} readings={reviewing ? formReadingsOf(reviewing) : []}
-             papers={reviewing ? reviewPapersOf(reviewing) : []} receiptId={reviewing?.receiptId ?? null}
-             {busy} problem={reviewProblem} onsave={saveReview} />
+<PreviewCard doc={previewPaper} itemTitle={previewPaper?.itemTitle ?? ""} documentDays={view?.retention?.documentDays} onclose={closePaper}
+             onremove={removePaper} onrestore={restorePaper} />
+
+<!-- #1319 stage 2 (round 8, `narrow-editing-*`): the chooser card as the
+     bottom sheet, where the preview's sheet stands -->
+{#if chooserAsk}
+  <div class="pk-chseat" data-chooser-card use:holdChooserSeat={modes.choosingFrom}>
+    <!-- The scrim is a pointer's dismiss, clear so the page reads through
+         it: it takes the press, so the tap that puts the sheet away never
+         lands on the page behind as well. Escape and close · esc are the
+         keyboard's, so it needs no key handler of its own. -->
+    <div class="pk-chscrim" aria-hidden="true" onclick={() => modes.closeChooser(false)}></div>
+    <ChooserCard ask={chooserAsk} layout="sheet" onpick={pickChoice} onclose={() => modes.closeChooser(true)} />
+  </div>
+{/if}
+
+

@@ -6,7 +6,8 @@ import { and, eq } from "drizzle-orm";
 import { createSession, csrfTokenForSession, readSession } from "@/lib/auth/session";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { sessionCookieName } from "@/lib/auth/cookies";
-import { requireInstanceMetadataWriter } from "@/server/metadata/fields";
+import { requireInstanceMetadataWriter, requireMetadataWriter, requireReceiptMetadataWriter } from "@/server/metadata/fields";
+import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { closeDatabase, getDb } from "@/db";
 import {
   auditLog,
@@ -24,7 +25,33 @@ import {
   userPreferences,
   users,
 } from "@/db/schema";
-import { resetDocumentConfigForTests } from "@/server/documents/config";
+import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
+
+/**
+ * The encrypted address columns for an account row, written the way the
+ * application writes them. The row id is needed first: the envelope binds the
+ * address to it.
+ */
+export async function accountAddressColumns(userId: string, email: string): Promise<{ emailEnc: string | null; emailIndex: string | null }> {
+  const cipher = await requireInstanceMetadataWriter();
+  return {
+    emailEnc: cipher.encryptText("users.email", userId, email),
+    emailIndex: cipher.emailIndex(email),
+  };
+}
+
+/**
+ * The encrypted address columns for a `mail_in_sender_addresses` row, written
+ * the way the application writes them. The row id is needed first: the
+ * envelope binds the address to it.
+ */
+export async function senderAddressColumns(rowId: string, address: string): Promise<{ addressEnc: string | null; addressIndex: string | null }> {
+  const cipher = await requireInstanceMetadataWriter();
+  return {
+    addressEnc: cipher.encryptText("mail_in_sender_addresses.address", rowId, address),
+    addressIndex: cipher.senderAddressIndex(address),
+  };
+}
 
 export type FixtureRole = "owner" | "member" | "outsider" | "admin" | "disabled";
 
@@ -41,6 +68,16 @@ process.env.DOCUMENT_SCAN_MODE = "disabled";
    with encrypted addresses, so a stale "there is no key" made whole files
    fail, and which files depended on import order. */
 resetDocumentConfigForTests();
+
+/* #1405: the integration suite calls route handlers directly and never boots
+   the server, so the startup key check has not run and its verdict would read
+   "unknown", which every gate treats as closed. Every file here is about
+   something other than the key unless it says so, so the baseline is a usable
+   key; a file that is about the key sets its own verdict. Loaded tolerantly
+   because the module did not exist before #1405 was built. */
+await import("@/server/key-state")
+  .then((module) => module.setKeyStateForTests({ verdict: "usable", heldKeyId: getDocumentConfig().keyId }))
+  .catch(() => undefined);
 
 export interface IntegrationSession {
   userId: string;
@@ -65,7 +102,8 @@ export interface IntegrationFixture {
   secondDocument: { id: string; displayName: string };
   archive: { id: string };
   users: Record<FixtureRole | "secondOwner", FixtureUser>;
-  session(role: FixtureRole | "secondOwner"): Promise<IntegrationSession>;
+  /** `idToken` is the provider's ID token for a session that began at the provider (#1316 decision 26a). */
+  session(role: FixtureRole | "secondOwner", options?: { idToken?: string }): Promise<IntegrationSession>;
   expireSession(session: IntegrationSession): Promise<void>;
   removeMember(): Promise<void>;
   disableUser(role: FixtureRole): Promise<void>;
@@ -112,11 +150,47 @@ export async function cleanupIntegrationEnvironment(): Promise<void> {
      under it survives this function, so dropping it loses nothing and the next
      writer mints a fresh one. */
   await db.delete(metadataKeys);
+  /* The key cache would otherwise outlive the row it cached. */
+  resetMetadataKeyCacheForTests();
   await closeDatabase();
   await Promise.all([
     rm(storageRoot, { recursive: true, force: true }),
     rm(quarantineRoot, { recursive: true, force: true }),
   ]);
+}
+
+/**
+ * The encrypted columns an `items` row carries for the values given, written
+ * exactly as the application writes them (ADR-0024, contract release: the
+ * plaintext columns are no longer read). Spread into an insert.
+ */
+export async function encryptedItemColumns(
+  householdId: string,
+  itemId: string,
+  values: { title?: string | null; provider?: string | null; reference?: string | null; notes?: string | null; costMinor?: number | null },
+) {
+  const cipher = await requireMetadataWriter(householdId);
+  return {
+    titleEnc: cipher.encryptText("items.title", itemId, values.title),
+    providerEnc: cipher.encryptText("items.provider", itemId, values.provider),
+    referenceEnc: cipher.encryptText("items.reference", itemId, values.reference),
+    referenceIndex: cipher.referenceIndex(values.reference),
+    notesEnc: cipher.encryptText("items.notes", itemId, values.notes),
+    costMinorEnc: cipher.encryptNumber("items.cost_minor", itemId, values.costMinor),
+  };
+}
+
+/** The encrypted draft columns of a mail-in receipt, under its household's key (the instance key when `householdId` is null). */
+export async function encryptedReceiptDraft(
+  householdId: string | null,
+  receiptId: string,
+  values: { proposal?: Record<string, unknown>; fieldEvidence?: Record<string, unknown> },
+) {
+  const cipher = await requireReceiptMetadataWriter(householdId);
+  return {
+    proposalEnc: values.proposal === undefined ? null : cipher.encryptJson("imap_ingestion_messages.proposal", receiptId, values.proposal),
+    fieldEvidenceEnc: values.fieldEvidence === undefined ? null : cipher.encryptJson("imap_ingestion_messages.field_evidence", receiptId, values.fieldEvidence),
+  };
 }
 
 export async function createIntegrationFixture(label: string): Promise<IntegrationFixture> {
@@ -125,21 +199,16 @@ export async function createIntegrationFixture(label: string): Promise<Integrati
   const householdSuffix = randomUUID().slice(0, 8);
   const issuer = "https://oidc.invalid.example";
 
-  /* Written encrypted, exactly as the application writes it (#969). A fixture
-     that inserted plaintext would still pass every test — the dual read falls
-     back to it — while proving nothing about the path real accounts take, so
-     the whole integration suite would be green on the pre-release shape alone.
-     A test that wants the un-backfilled shape makes it deliberately, as
-     `metadata-addresses.test.ts` does. */
+  /* Written encrypted, exactly as the application writes it (#969). The
+     application reads an account address from the encrypted column only
+     (#1403 Q3), so a fixture that wrote the plaintext column would be an
+     account nobody can sign in to. */
   async function createUser(role: string, isInstanceAdmin = false): Promise<FixtureUser> {
     const email = `${namespace}-${role}@example.invalid`;
     const userId = randomUUID();
-    const cipher = await requireInstanceMetadataWriter();
     await db.insert(users).values({
       id: userId,
-      email: null,
-      emailEnc: cipher.encryptText("users.email", userId, email),
-      emailIndex: cipher.emailIndex(email),
+      ...(await accountAddressColumns(userId, email)),
       emailVerified: true,
       displayName: `Integration ${role}`,
       isInstanceAdmin,
@@ -195,16 +264,20 @@ export async function createIntegrationFixture(label: string): Promise<Integrati
     position: 0,
   }).returning({ id: sections.id });
 
+  const itemId = randomUUID();
   const [item] = await db.insert(items).values({
+    id: itemId,
     householdId: household.id,
     sectionId: section.id,
-    title: `Integration item ${namespace}`,
+    ...await encryptedItemColumns(household.id, itemId, { title: `Integration item ${namespace}` }),
     currency: "GBP",
   }).returning({ id: items.id });
+  const secondItemId = randomUUID();
   const [secondItem] = await db.insert(items).values({
+    id: secondItemId,
     householdId: secondHousehold.id,
     sectionId: secondSection.id,
-    title: `Second integration item ${namespace}`,
+    ...await encryptedItemColumns(secondHousehold.id, secondItemId, { title: `Second integration item ${namespace}` }),
     currency: "GBP",
   }).returning({ id: items.id });
 
@@ -243,10 +316,10 @@ export async function createIntegrationFixture(label: string): Promise<Integrati
     expiresAt: new Date(Date.now() + 86_400_000),
   }).returning({ id: portableArchives.id });
 
-  async function session(role: FixtureRole | "secondOwner"): Promise<IntegrationSession> {
+  async function session(role: FixtureRole | "secondOwner", options: { idToken?: string } = {}): Promise<IntegrationSession> {
     const userId = fixtureUsers[role].id;
     const config = getAuthConfig();
-    const created = await createSession(userId, config);
+    const created = await createSession(userId, config, undefined, options.idToken ? { idToken: options.idToken } : undefined);
     /* A plain literal, not a framework request (#735). `readSession` takes a
        `CookieReader`, which is one method — `src/lib/http.ts` says so in as
        many words, and the whole point of that seam is that a test does not

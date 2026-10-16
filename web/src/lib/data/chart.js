@@ -16,6 +16,9 @@
  * sessions, days, or devices. Product cap is five households.
  */
 
+import { BAND_VAR } from "$lib/data/bands.js";
+import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js";
+
 /**
  * The minimal shapes this transform reads off a workspace — loose and
  * additive on purpose, since the real objects (workspace.js's own
@@ -43,6 +46,7 @@
  * @property {boolean} [requested]
  * @property {ChartItem[]} [items]
  * @property {{ id: string, name: string, icon?: string, accent?: string }[]} [sections]
+ * @property {{ itemId: string, kind: string, occurredAt: string, effectiveDate?: ?string }[]} [activities]
  *
  * @typedef {object} ChartSuggestion
  * @property {string} id
@@ -101,20 +105,8 @@ export function hashId(text) {
  * @returns {?number}
  */
 export function daysUntil(dueDate, today) {
-  if (!dueDate) return null;
-  return Math.round((Date.parse(dueDate) - Date.parse(today)) / 86400000);
-}
-
-/**
- * The chart key's urgency bands: overdue / due soon / upcoming / wide orbit.
- * @param {?number} [days]
- */
-export function bandOf(days) {
-  if (days === null || days === undefined) return "unscheduled";
-  if (days < 0) return "overdue";
-  if (days <= 30) return "due-soon";
-  if (days <= 90) return "upcoming";
-  return "ok";
+  if (!dueDate || !today) return null;
+  return daysBetween(today, dueDate);
 }
 
 /**
@@ -161,12 +153,12 @@ export function constellationPosOf(householdId) {
   ];
 }
 
+/* The band's token comes from BAND_VAR (#1341); only `overdue` differs. A
+   distant planet's overdue is the planet's own warmth, not the band's alarm. */
+/** @type {Record<string, string>} */
 const PLANET_TONES = {
+  ...BAND_VAR,
   overdue: "--warm",
-  "due-soon": "--warm",
-  upcoming: "--upcoming",
-  ok: "--ok",
-  unscheduled: "--ok",
 };
 
 /**
@@ -207,7 +199,8 @@ const PAINTS = { overdue: "ruby", "due-soon": "amber", upcoming: "sky", ok: "jad
 /**
  * The body's kind in the chart key's vocabulary. An expiry (#1005) is read off
  * the schedule kind before the subtype, because a one-off ending is what the
- * body IS -- the crescent marks an inspection that comes round again.
+ * body IS. It is the item's field only: no body is drawn with a type face
+ * (#1322), so the kind never reaches the picture.
  *
  * @param {ChartItem} item
  * @returns {string}
@@ -234,9 +227,9 @@ export function bandOfKind(kind, days) {
 /**
  * The dial's bodies (#414/#451): the household's active items placed by the
  * law, plus any document suggestions as un-accepted accent bodies. Sorted by
- * lead time. Decorations follow the chart key: kind marks the body's face
- * (crescent = inspection, cored = renewal, dashed ring = expiry, plain =
- * service), a belt means
+ * lead time. Decorations follow the chart key: every filed item's body is
+ * drawn plain (#1322 -- the kind stays on the body as data, with no face of
+ * its own; only a suggestion keeps its hollow accent look), a belt means
  * documents, a trail rides with anything within 60 days of the sun, the ping
  * sits on overdue, and the comet flies from the closest approach.
  *
@@ -301,6 +294,34 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
 }
 
 /**
+ * What an item's row says about where it stands, when it is not simply
+ * waiting for its date (#1319; the coordinator's ruling, 2026-10-08: the
+ * drawer opens any item, and its row says its state in its meta). A retired,
+ * cancelled or expired item can be restored; a one-off that was completed
+ * stays active with no date and no repeat, and says when it was done.
+ * Null for everything else.
+ *
+ * @param {ChartItem} item
+ * @param {ChartHousehold["activities"]} [activities]
+ * @returns {{ word: string, restorable: boolean } | null}
+ */
+export function itemStateOf(item, activities = []) {
+  if (item.status === "archived") return { word: "retired", restorable: true };
+  if (item.status === "cancelled") return { word: "cancelled", restorable: true };
+  if (item.status === "expired") return { word: "expired", restorable: true };
+  if (item.status !== "active" || item.dueDate || item.recurrenceMonths) return null;
+  /* the newest thing that happened to it; the kinds that end in "completed"
+     are the engine's completions (service_completed, renewal_completed) */
+  const last = (activities ?? [])
+    .filter((one) => one.itemId === item.id)
+    .reduce((newest, one) => (!newest || one.occurredAt > newest.occurredAt ? one : newest),
+      /** @type {NonNullable<ChartHousehold["activities"]>[number] | null} */ (null));
+  if (!last || !/completed$/u.test(last.kind)) return null;
+  const day = (last.effectiveDate ?? last.occurredAt).slice(0, 10);
+  return { word: `done ${dayMonth(day)}`, restorable: false };
+}
+
+/**
  * The manifest's groups: needs attention (inside 31 days, overdue first),
  * document suggestions, then later this year — with the closest approach
  * called out on the attention heading.
@@ -309,28 +330,46 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
  * @param {{ suggestions?: ChartSuggestion[], today: string }} options
  */
 export function manifestGroupsOf(household, { suggestions = [], today }) {
-  const sections = new Map((household?.sections ?? []).map((s) => [s.id, s.name]));
   const rows = (household?.items ?? [])
     .filter((item) => item.status === "active")
-    .map((item) => ({
-      id: item.id,
-      title: item.title,
-      section: sections.get(/** @type {string} */ (item.sectionId)) ?? null,
-      days: daysUntil(item.dueDate, today),
-      dueDate: item.dueDate ?? null,
-      band: bandOfKind(kindOfItem(item), daysUntil(item.dueDate, today)),
-      provider: item.provider ?? null,
-      recurrenceMonths: item.recurrenceMonths ?? null,
-      costMinor: item.costMinor ?? null,
-      costIsEstimate: Boolean(item.costIsEstimate),
-      currency: item.currency ?? "GBP",
-      kind: kindOfItem(item),
-    }))
+    .map((item) => manifestRowOf(household, item, today))
     .sort((a, b) => (a.days ?? Infinity) - (b.days ?? Infinity));
   const attention = rows.filter((row) => row.days !== null && row.days <= 30);
   const later = rows.filter((row) => row.days === null || row.days > 30);
   const closest = rows.find((row) => row.days !== null && row.days >= 0) ?? null;
   return { attention, suggestions, later, closest };
+}
+
+/**
+ * One item as a manifest row, whatever its status: the manifest's own rows,
+ * and the one row the phone draws for an item it was asked for that the
+ * manifest does not list (#1319). An item that is not active wears the
+ * ended tone, never an urgency, and `state` says why.
+ *
+ * @param {?ChartHousehold} household
+ * @param {ChartItem} item
+ * @param {string} today
+ */
+export function manifestRowOf(household, item, today) {
+  const section = (household?.sections ?? []).find((one) => one.id === item.sectionId);
+  const days = daysUntil(item.dueDate, today);
+  const state = itemStateOf(item, household?.activities);
+  return {
+    id: item.id,
+    title: item.title,
+    section: section?.name ?? null,
+    days,
+    dueDate: item.dueDate ?? null,
+    band: item.status === "active" ? bandOfKind(kindOfItem(item), days) : "ended",
+    provider: item.provider ?? null,
+    recurrenceMonths: item.recurrenceMonths ?? null,
+    costMinor: item.costMinor ?? null,
+    costIsEstimate: Boolean(item.costIsEstimate),
+    currency: item.currency ?? "GBP",
+    kind: kindOfItem(item),
+    state: state?.word ?? null,
+    restorable: Boolean(state?.restorable),
+  };
 }
 
 /**
@@ -426,13 +465,15 @@ export function labelledSkyOf(visibleHouseholds) {
   return galaxy;
 }
 
-const MONTH_LABELS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
 /**
- * The approach corridor (#461): every active scheduled item across every
- * household, unrolled onto a line of time. Overdue sits in the red zone above
- * today; the rest of the current month follows headerless; each later month
- * with anything approaching gets its rule. An order, not a scale.
+ * The approach corridor (#461): every active item across every household,
+ * unrolled onto a line of time. Overdue sits in the red zone above today; the
+ * rest of the current month follows headerless; each later month with
+ * anything approaching gets its rule. An order, not a scale. An item kept
+ * without a date (#1281) rides at the foot, in `undated`, with the undated
+ * suggestions: counted in `total`, never in a month, and no part of the
+ * horizon.
  *
  * @typedef {object} CorridorRow  a scheduled item, or an un-accepted suggestion, on the line
  * @property {string} id
@@ -442,6 +483,7 @@ const MONTH_LABELS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "S
  * @property {?string} household
  * @property {boolean} away
  * @property {?string} [section]
+ * @property {?string} [sectionId]     issue 1319, the section word's colour (option-colour.js)
  * @property {?string} [sectionIcon]   issue 867, the mark printed beside the row
  * @property {?string} [sectionAccent]
  * @property {number} days
@@ -453,10 +495,16 @@ const MONTH_LABELS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "S
  * @property {string} currency
  * @property {string} [kind]
  * @property {?string} [sourceDocument]
+ * @property {?string} [state]          issue 1319: "retired", "done 12 Jun"… (itemStateOf)
+ * @property {boolean} [restorable]     issue 1319: retired, cancelled or expired
  *
  * @param {ChartWorkspace | null | undefined} workspace
  * @param {string} today
- * @param {{ suggestions?: ChartSuggestion[] }} [options]
+ * `include` names one item to put on the line whatever its status: the one
+ * the address asked for (#1319, the drawer opens any item). It sits at its
+ * own date, in the ended tone, its state on the row.
+ *
+ * @param {{ suggestions?: ChartSuggestion[], include?: ?string }} [options]
  */
 export function corridorOf(workspace, today, options = {}) {
   const primary = workspace?.activeHouseholdId ?? workspace?.households?.[0]?.id ?? null;
@@ -465,8 +513,9 @@ export function corridorOf(workspace, today, options = {}) {
   for (const household of workspace?.households ?? []) {
     const sections = new Map((household.sections ?? []).map((s) => [s.id, s]));
     for (const item of household.items ?? []) {
-      if (item.status !== "active" || !item.dueDate) continue;
+      if (item.status !== "active" && item.id !== options.include) continue;
       const days = daysUntil(item.dueDate, today);
+      const state = itemStateOf(item, household.activities);
       /* #867: the mark beside the entry — the section's own stored icon and
          accent, same as the Sections card and the dial's own legend read. */
       const section = sections.get(/** @type {string} */ (item.sectionId));
@@ -476,16 +525,21 @@ export function corridorOf(workspace, today, options = {}) {
         household: household.name,
         away: household.id !== primary,
         section: section?.name ?? null,
+        sectionId: section?.id ?? null,
         sectionIcon: section?.icon ?? null,
         sectionAccent: section?.accent ?? null,
-        days: /** @type {number} */ (days),
-        dueDate: item.dueDate,
-        band: bandOfKind(kindOfItem(item), days),
+        /* #1281: no date sorts after every dated row, as an undated catch
+           does below; no date is invented. */
+        days: days ?? Number.MAX_SAFE_INTEGER,
+        dueDate: item.dueDate ?? null,
+        band: item.status === "active" ? bandOfKind(kindOfItem(item), days) : "ended",
         provider: item.provider ?? null,
         costMinor: item.costMinor ?? null,
         costIsEstimate: Boolean(item.costIsEstimate),
         currency: item.currency ?? "GBP",
         kind: kindOfItem(item),
+        state: state?.word ?? null,
+        restorable: Boolean(state?.restorable),
       });
     }
   }
@@ -517,7 +571,7 @@ export function corridorOf(workspace, today, options = {}) {
   /* An expiry that has passed is not in the red zone and is not counted with
      it (#1005) -- nothing is owed on a thing that has ended. It keeps its seat
      on the line at the date it fell, which is where the reader looks for it. */
-  const isOverdue = (/** @type {CorridorRow} */ row) => row.days < 0 && row.kind !== "expiry";
+  const isOverdue = (/** @type {CorridorRow} */ row) => row.days < 0 && row.kind !== "expiry" && !row.restorable;
   const overdue = rows.filter(isOverdue);
   const ahead = rows.filter((row) => !isOverdue(row));
   const currentKey = today.slice(0, 7);
@@ -531,7 +585,7 @@ export function corridorOf(workspace, today, options = {}) {
     if (key === currentKey) continue;
     const last = months[months.length - 1];
     if (last?.key === key) last.rows.push(row);
-    else months.push({ key, label: MONTH_LABELS[Number(key.slice(5)) - 1], rows: [row] });
+    else months.push({ key, label: MONTHS[Number(key.slice(5)) - 1].toUpperCase(), rows: [row] });
   }
   /* Every row here passed the `row.dueDate` truthy check the filter reads,
      but TS's `.filter()` type doesn't narrow on a plain truthy predicate —
@@ -543,13 +597,13 @@ export function corridorOf(workspace, today, options = {}) {
     (Number(lastKey.slice(5)) - Number(today.slice(5, 7))) + 1;
   return {
     overdue, current, months, undated,
-    total: rows.length,
+    /* what is on the line now; an item put here only because it was asked for (`include`) is not */
+    total: rows.filter((row) => !row.restorable).length,
     systems: new Set(rows.map((row) => row.household).filter(Boolean)).size,
     monthsSpanned,
     /* the long name of the horizon month, for the closing line */
     horizon: dated.length
-      ? new Date(dated[dated.length - 1].dueDate + "T00:00:00Z")
-          .toLocaleDateString("en-GB", { month: "long", timeZone: "UTC" })
+      ? monthOnly(dated[dated.length - 1].dueDate)
       : null,
   };
 }

@@ -31,10 +31,6 @@ vi.mock("@/db", async () => {
   return { getDb: () => ({ select: () => selectBuilder() }) };
 });
 
-vi.mock("@/server/workspace-access", () => ({
-  validUuid: (value: string) => /^[0-9a-f-]{36}$/iu.test(value),
-}));
-
 vi.mock("@/server/mail-in/imap-inbox", () => ({
   privateMailboxUser: async (userId: string) => ({ id: userId, isInstanceAdmin: false }),
 }));
@@ -91,5 +87,15 @@ describe("readHeldImapAttachmentPreview (#1151 A2-R2)", () => {
 
     const preview = await readHeldImapAttachmentPreview(userId, receiptId, attachmentId);
     expect(preview).toEqual({ pageCount: 1, pageOneImage: Buffer.from("x") });
+  });
+
+  it("hands the renderer the page it was asked for, page one when none (#1300)", async () => {
+    mocks.readHeldImapAttachment.mockResolvedValue(Buffer.from("plaintext"));
+    const { renderDocumentPagePreview } = await import("@/server/documents/preview");
+
+    await readHeldImapAttachmentPreview(userId, receiptId, attachmentId);
+    expect(renderDocumentPagePreview).toHaveBeenLastCalledWith(expect.any(Buffer), "application/pdf", 1);
+    await readHeldImapAttachmentPreview(userId, receiptId, attachmentId, 2);
+    expect(renderDocumentPagePreview).toHaveBeenLastCalledWith(expect.any(Buffer), "application/pdf", 2);
   });
 });

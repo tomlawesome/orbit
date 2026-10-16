@@ -52,6 +52,11 @@ export function validateRecoveryPassphrase(input: string): string | undefined {
   return isValidPassphrase(input) ? input : undefined;
 }
 
+/** Import: any non-empty answer goes on to decryption. The length floor applies when a bundle is made, never when one is opened (password-length.ts). */
+export function validateImportRecoveryPassphrase(input: string): string | undefined {
+  return input.length > 0 ? input : undefined;
+}
+
 /** export-recovery-bundle.sh #7: the confirmation entry must match the already-accepted passphrase exactly. */
 export function validatePassphraseConfirmation(passphrase: string): (input: string) => string | undefined {
   return (input: string): string | undefined => (input === passphrase ? input : undefined);
@@ -173,7 +178,7 @@ export function collectMachineRecoveryPassphraseNoConfirm(driver: MachinePromptD
   return collectMachinePromptField({
     field: "RECOVERY_PASSPHRASE",
     driver,
-    validate: validateRecoveryPassphrase,
+    validate: validateImportRecoveryPassphrase,
     classifyRejection: classifyRecoveryPassphraseRejection,
   });
 }

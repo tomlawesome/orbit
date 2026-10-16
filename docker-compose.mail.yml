@@ -12,4 +12,4 @@ services:
 
 secrets:
   orbit-smtp-password:
-    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/smtp-password
+    file: ./.orbit-secrets/smtp-password

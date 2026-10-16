@@ -1,19 +1,18 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
-  ASKING, CREATE, DOOR, INVITED, NEWCOMER, ONWARD,
+  ASKING, DOOR, INVITED, NEWCOMER, ONWARD,
   CURRENCIES, DEFAULT_SECTIONS, NAME_LIMIT, TIME_ZONES,
   arrivalStageOf, belongRowsOf, collidingHouseholdOf,
   createSystemCommand, discoveredCountOf, isInvitedLanding, preferredCurrency, preferredTimeZone,
   sectionNote, sectionNoteTitle, WAITING_APPROVAL_NOTE,
 } from "$lib/arrival/stage.js";
-import {
-  T, newcomerAscentBeats, newcomerAscentBeatsReduced, runTimeline,
-} from "$lib/flight/timeline.js";
 import { NEWCOMER_FAR, NEWCOMER_NEAR } from "$lib/flight/starfields.js";
 import { labelledSkyOf } from "$lib/data/chart.js";
+import * as STAGES from "$lib/arrival/stage.js";
 import {
-  CREATE_ARRIVAL_FIXTURE, NEWCOMER_ARRIVAL_FIXTURE,
+  ARRIVAL_FIXTURES, NEWCOMER_ARRIVAL_FIXTURE,
 } from "$lib/data/fixtures/arrival.js";
 
 /*
@@ -36,9 +35,15 @@ describe("which surface an arrival lands on", () => {
     })).toBe(ONWARD);
   });
 
-  it("gives the first admin the create card: no households anywhere", () => {
-    expect(arrivalStageOf({ households: [], visibleHouseholds: [] })).toBe(CREATE);
-    expect(arrivalStageOf(CREATE_ARRIVAL_FIXTURE)).toBe(CREATE);
+  it("gives the first admin the newcomer's arrival too: no households anywhere (#1263)", () => {
+    /* one flight per arrival: the create questions are the belong card's
+       drawer, so an empty instance lands on the same stage */
+    expect(arrivalStageOf({ households: [], visibleHouseholds: [] })).toBe(NEWCOMER);
+  });
+
+  it("has retired the create stage altogether (#1263)", () => {
+    expect("CREATE" in STAGES).toBe(false);
+    expect(Object.keys(ARRIVAL_FIXTURES)).toEqual(["newcomer"]);
   });
 
   it("gives a newcomer the newcomer's arrival: none of theirs, some out there", () => {
@@ -57,7 +62,7 @@ describe("which surface an arrival lands on", () => {
   });
 
   it("treats a workspace with the fields missing as the empty instance it is", () => {
-    expect(arrivalStageOf({})).toBe(CREATE);
+    expect(arrivalStageOf({})).toBe(NEWCOMER);
   });
 });
 
@@ -87,25 +92,28 @@ describe("the invited landing, told apart from an ordinary return (#871)", () =>
 
   it("is its own stage, not one arrivalStageOf's workspace read could ever answer", () => {
     expect(INVITED).toBe("invited");
-    expect(new Set([DOOR, ASKING, CREATE, NEWCOMER, ONWARD, INVITED]).size).toBe(6);
+    expect(new Set([DOOR, ASKING, NEWCOMER, ONWARD, INVITED]).size).toBe(5);
   });
 });
 
-describe("the invited landing's climb is the newcomer's own, to the beat the chooser would stand on", () => {
-  it("flies the newcomer's beats to the same last one, full motion and reduced alike", () => {
-    /* Flight.svelte's landing="invited" reuses these two arrays UNCHANGED —
-       it only reads the terminal "belong" act differently (hands off to the
-       household instead of drawing the chooser) — so a later retiming that
-       moved "belong" off the end, or dropped it, would silently strand the
-       invited reader on a sky, no chooser and no move either. Pinned here
-       rather than left to that surface's own DOM tests. */
-    const full = newcomerAscentBeats();
-    expect(full.at(-1)).toEqual({ at: T.belongAt, act: "belong" });
+/*
+ * The climb itself (its beats and their timing) is the shared door's since
+ * #1371: the folder's timeline, held to its recorded tree hash. What is
+ * Orbit's own is what hangs off the folder's `settled` hook in Flight.svelte:
+ * the newcomer's count and the question that follows it. Pinned from the
+ * component's source, as the other surfaces' wiring is.
+ */
+const FLIGHT = readFileSync(new URL("../../web/src/lib/flight/Flight.svelte", import.meta.url), "utf8");
 
-    const reduced = newcomerAscentBeatsReduced();
-    expect(reduced.at(-1)).toEqual({ at: 700 + T.newDwell + 1900, act: "belong" });
-    /* the count still takes its turn before that last beat, ordering unchanged */
-    expect(reduced.map((beat) => beat.act)).toEqual(["land", "instrument", "countOn", "countOff", "belong"]);
+describe("the invited landing's climb is the newcomer's own, to the beat the chooser would stand on", () => {
+  it("flies one climb for both, and only reads the last beat differently", () => {
+    /* landing="invited" flies the newcomer's count unchanged and differs at
+       exactly one beat: the question's. A later edit that moved `belong` off
+       the end of the count, or dropped it, would silently strand the invited
+       reader on a sky, no chooser and no move either. */
+    expect(FLIGHT).toMatch(/const newcomer = landing !== "home";/);
+    expect(FLIGHT).toMatch(/settled: \(\) => \{ onsettled\(\); if \(newcomer\) count\(\); \}/);
+    expect(FLIGHT).toMatch(/if \(landing === "invited"\) onbelong\(\); else b\.classList\.add\("belong"\)/);
   });
 });
 
@@ -257,67 +265,33 @@ describe("the waiting note (owner-decisions §23): the marker is not the explana
   });
 });
 
-describe("the newcomer's clock is the sealed one", () => {
-  it("keeps its own 3s dwell while the login landing keeps the trimmed 2s", () => {
-    expect(T.dwell).toBe(2000);
-    expect(T.newDwell).toBe(3000);
-    expect(T.instrumentAt).toBe(8400);
-    expect(T.newInstrumentAt).toBe(9400);
-  });
+describe("the newcomer's count hangs off the folder's instrument beat (#1222)", () => {
+  /** the offsets, in ms from the instrument's arrival, as Flight.svelte writes them */
+  const offsets = (name) => {
+    const m = FLIGHT.match(new RegExp(`const ${name} = \\{ on: ([^,]+), off: ([^,]+), belong: ([^}]+) \\};`));
+    expect(m, `${name} not found in Flight.svelte`).not.toBeNull();
+    return m.slice(1, 4).map((expr) => expr.split("+").reduce((sum, term) => sum + Number(term), 0));
+  };
 
-  it("opens the count sooner and holds it longer (#870)", () => {
-    expect(T.countOn).toBe(9700);
-    expect(T.countOff).toBe(12900);
-    expect(T.belongAt).toBe(13800);
+  it("keeps the count's own offsets from the instrument beat (#870)", () => {
+    const [on, off, belong] = offsets("COUNT");
+    expect(on).toBe(300);
     /* ~4.55s of screen time in all: 0.45s in, 3.2s held, 0.9s out */
-    expect(T.countOff - T.countOn).toBe(3200);
-    expect(T.belongAt - T.countOff).toBe(900);
+    expect(off - on).toBe(3200);
+    expect(belong - off).toBe(900);
   });
 
-  it("flies the same climb to the millisecond and only lands differently", () => {
-    const climb = newcomerAscentBeats().filter((beat) => beat.at <= T.land);
-    expect(climb).toEqual([
-      { at: 0, act: "arming" },
-      { at: 200, act: "warp" },
-      { at: 260, act: "mark" },
-      { at: 430, act: "release" },
-      { at: 1340, act: "markOut" },
-      { at: 1560, act: "nameOn" },
-      { at: 2600, act: "nameOff" },
-      { at: 4800, act: "land" },
-    ]);
+  it("keeps the whole staging under reduced motion, and only drops the fade", () => {
+    const [on, off, belong] = offsets("COUNT_REDUCED");
+    expect(on).toBe(0);
+    /* the count still takes its turn, on the mockup's own 1900 hold, and yields to the question */
+    expect(off - on).toBe(1900);
+    expect(belong).toBe(off);
   });
 
-  it("lands, dwells, settles, counts and then asks — in that order", () => {
-    expect(newcomerAscentBeats().map((beat) => beat.act)).toEqual([
-      "arming", "warp", "mark", "release", "markOut", "nameOn", "nameOff",
-      "land", "instrument", "countOn", "countOff", "belong",
-    ]);
-  });
-
-  it("pins every beat up to a millisecond and schedules nothing", () => {
-    const applied = [];
-    const cancel = runTimeline(newcomerAscentBeats(), (act) => applied.push(act), { at: T.countOn });
-    expect(applied).toEqual([
-      "arming", "warp", "mark", "release", "markOut", "nameOn", "nameOff",
-      "land", "instrument", "countOn",
-    ]);
-    expect(cancel).toBeTypeOf("function");
-  });
-
-  it("keeps the whole staging under reduced motion, and only drops the motion", () => {
-    const beats = newcomerAscentBeatsReduced();
-    expect(beats).toEqual([
-      { at: 0, act: "land" },
-      { at: 3700, act: "instrument" },
-      { at: 3700, act: "countOn" },
-      { at: 5600, act: "countOff" },
-      { at: 5600, act: "belong" },
-    ]);
-    /* the bare labelled sky, the ratified 3s dwell, then the instrument */
-    expect(beats[1].at).toBe(700 + T.newDwell);
-    /* the count still takes its turn, on the mockup's own 1900 hold */
-    expect(beats[3].at - beats[1].at).toBe(1900);
+  it("is cancelled with the flight, and does not outlive it", () => {
+    expect(FLIGHT).toMatch(/function cancelCount\(\)/);
+    expect(FLIGHT).toMatch(/cancelCount\(\);\s*j\.destroy\(\)/);
   });
 });
 
@@ -338,8 +312,8 @@ describe("the newcomer's starfield", () => {
 });
 
 describe("the arrival's fixtures are the states the workspace fixture cannot be in", () => {
-  it("has no households of its own on either", () => {
-    for (const fixture of [CREATE_ARRIVAL_FIXTURE, NEWCOMER_ARRIVAL_FIXTURE]) {
+  it("has no households of its own on any", () => {
+    for (const fixture of Object.values(ARRIVAL_FIXTURES)) {
       expect(fixture.households).toEqual([]);
       expect(fixture.householdLanding).toBe("choose");
       expect(fixture.activeHouseholdId).toBeNull();

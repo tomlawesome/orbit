@@ -3,8 +3,8 @@
  *
  * Before this, the roster and its default were hand-written in at least four
  * places — app.html's pre-paint script, Chrome.svelte's swatches,
- * settings/+page.svelte's swatches, and tour/emphasis.js's forward/dim
- * classification — and two of the four disagreed about the default
+ * settings/+page.svelte's swatches, and the tour's forward/dim
+ * classification (since removed) — and two of the four disagreed about the default
  * (`starchart` vs `afterdark`). Atlas left the roster at #480 but stayed in
  * every one of those hand-written copies, still costing a place in every
  * change to the token system. This module is now the one export each of
@@ -24,8 +24,32 @@
  * file imports the other, a test parses both and asserts they agree.
  */
 
-/** The v1.3.0 roster (§15, owner), in the order every swatch list shows it. */
-export const THEME_PACKS = ["starchart", "afterdark", "clouds", "dawn", "retrograde"];
+/**
+ * The v1.3.0 roster (§15, owner), in the order every swatch list shows it, one
+ * row per pack (#1331). Everything the browser keeps per pack that is not
+ * paint lives here, so the readers (the swatch lists, settings' offer, the
+ * sun, the home desk) import this rather than naming
+ * packs themselves:
+ *
+ *   title     the name a swatch carries (tour selectors match on `title=`)
+ *   ground    the pack's background colour, as a swatch dot shows it
+ *   dark      true for a dark sky; must agree with the engine's
+ *             `themePackIsDark` (src/lib/preferences.ts, the owner of the
+ *             roster), pinned by tests/unit/theme-roster-parity.test.mjs
+ *   sun       which of the three furnace suns the pack wears
+ *
+ * @type {ReadonlyArray<{ id: string, title: string, ground: string, dark: boolean, sun: "starchart" | "dawn" | "retrograde" }>}
+ */
+export const THEME_TABLE = [
+  { id: "starchart", title: "star-chart", ground: "#060b1c", dark: true, sun: "starchart" },
+  { id: "afterdark", title: "after dark", ground: "#05070d", dark: true, sun: "starchart" },
+  { id: "clouds", title: "clouds", ground: "#eef2f9", dark: false, sun: "dawn" },
+  { id: "dawn", title: "dawn", ground: "#d2d3d4", dark: false, sun: "dawn" },
+  { id: "retrograde", title: "retrograde", ground: "#080a14", dark: true, sun: "retrograde" },
+];
+
+/** The pack ids, in table order. */
+export const THEME_PACKS = THEME_TABLE.map((row) => row.id);
 
 export const DEFAULT_THEME = "afterdark";
 

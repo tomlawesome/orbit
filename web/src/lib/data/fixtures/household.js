@@ -11,7 +11,7 @@
  * Ordering mirrors the route's: members by membership creation, so the owner
  * heads the list they founded.
  *
- * The values are design/v19/household-manage.html's own — Tom's four in
+ * The values are design/v19/household-manage.html's own — Ned's four in
  * Harlow Home, Emma's three in Seaside Cottage — so the fidelity gate
  * measures the port rather than a difference of data.
  *
@@ -38,7 +38,7 @@ const AVATARS = null;
  * @type {Record<string, { members: (FixtureCandidate & { role: string })[], candidates: FixtureCandidate[] }>}
  */
 export const MEMBERS_FIXTURE = {
-  /* Harlow Home — Tom owns it, and the mockup's owner state is drawn from
+  /* Harlow Home — Ned owns it, and the mockup's owner state is drawn from
      exactly these four. */
   "hh-harlow-1": {
     members: [
@@ -52,7 +52,7 @@ export const MEMBERS_FIXTURE = {
       { id: "u-ada", displayName: "Ada Reid", avatarUrl: AVATARS },
     ],
   },
-  /* Seaside Cottage — Emma owns it and Tom is only a member, which is the
+  /* Seaside Cottage — Emma owns it and Ned is only a member, which is the
      mockup's non-owner state. The route answers NO candidates to someone who
      may not add anyone, so this list is empty by contract, not by omission. */
   "hh-seaside-4551": {

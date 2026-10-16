@@ -11,14 +11,13 @@
  * rows — the #955 failure, checked rather than assumed.
  */
 import { randomBytes, randomUUID } from "node:crypto";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { householdInvitations, items, metadataKeys } from "@/db/schema";
 import { deriveDocumentKeyId, getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { rotationComplete, runKekRotationToCompletion, type RotationKeys } from "@/server/documents/rewrap-worker";
-import { runMetadataBackfillBatch } from "@/server/metadata/backfill";
 import { readWorkspace, applyWorkspaceCommand } from "@/server/workspace-repository";
 import { listHouseholdInvitations, sendHouseholdInvitation } from "@/server/invitations";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
@@ -53,7 +52,6 @@ async function writeItem(input: {
       provider: input.provider,
       costMinor: input.costMinor,
       currency: "GBP",
-      status: "active",
     },
   });
   return itemId;
@@ -80,9 +78,6 @@ describe("Tier 2 values are written and read encrypted (#963)", () => {
     const [stored] = await getDb().select().from(items).where(eq(items.id, itemId));
     // The whole point of the tier: a database file leaked from this instance
     // carries none of the three in readable form.
-    expect(stored.title).toBeNull();
-    expect(stored.provider).toBeNull();
-    expect(stored.costMinor).toBeNull();
     expect(stored.titleEnc?.startsWith("mdv1.")).toBe(true);
     expect(stored.providerEnc?.startsWith("mdv1.")).toBe(true);
     expect(stored.costMinorEnc?.startsWith("mdv1.")).toBe(true);
@@ -125,13 +120,9 @@ describe("Tier 2 values are written and read encrypted (#963)", () => {
       await writeItem({ userId: fixture.users.member.id, householdId: fixture.household.id, sectionId, ...item });
     }
 
-    // Nothing in this household still holds a plaintext cost, so a SQL sum
-    // could not produce this figure — the application's own sum over the
-    // decrypted values is what does (#365, owner 2026-08-13).
-    expect(await getDb().select({ id: items.id }).from(items)
-      .where(and(eq(items.householdId, fixture.household.id), isNotNull(items.costMinor))))
-      .toHaveLength(0);
-
+    // The cost is held only as ciphertext, so a SQL sum could not produce this
+    // figure — the application's own sum over the decrypted values is what
+    // does (#365, owner 2026-08-13).
     const visible = await workspaceItems(fixture);
     const total = visible.reduce((sum, item) => sum + (item.costMinor ?? 0), 0);
     expect(total).toBe(73_300);
@@ -163,55 +154,8 @@ describe("Tier 2 values are written and read encrypted (#963)", () => {
     });
     const { openMetadataReader } = await import("@/server/metadata/fields");
     const otherReader = await openMetadataReader(fixture.secondHousehold.id);
-    expect(otherReader.text("items.title", itemId, { encrypted: stored.titleEnc, plaintext: null }).state)
+    expect(otherReader.text("items.title", itemId, { encrypted: stored.titleEnc }).state)
       .toBe("metadata_integrity_failed");
-  });
-});
-
-describe("the backfill converts pre-existing Tier 2 plaintext (#963)", () => {
-  it("encrypts a row written before the release and clears every plaintext column in the same statement", async () => {
-    const fixture = await createIntegrationFixture("tier2-backfill");
-    // Straight to SQL, which is exactly the shape of a row that predates the
-    // expand release: plaintext present, ciphertext absent.
-    const legacyId = randomUUID();
-    await getDb().insert(items).values({
-      id: legacyId,
-      householdId: fixture.household.id,
-      sectionId: await sectionOf(fixture.item.id),
-      title: "Legacy item",
-      provider: "Legacy provider",
-      costMinor: 1_234,
-      reference: "LEG-1",
-      notes: "legacy notes",
-      currency: "GBP",
-    });
-
-    // Readable before the backfill runs: the dual read is what makes the
-    // expand release safe, and a row it has not reached is not broken.
-    const before = (await workspaceItems(fixture)).find((candidate) => candidate.id === legacyId)!;
-    expect(before.title).toBe("Legacy item");
-    expect(before.costMinor).toBe(1_234);
-
-    let guard = 0;
-    while (guard++ < 20) {
-      const batch = await runMetadataBackfillBatch(100);
-      if (batch.items === 0 && batch.receipts === 0 && batch.invitations === 0) break;
-    }
-
-    const [converted] = await getDb().select().from(items).where(eq(items.id, legacyId));
-    expect(converted.title).toBeNull();
-    expect(converted.provider).toBeNull();
-    expect(converted.costMinor).toBeNull();
-    expect(converted.reference).toBeNull();
-    expect(converted.notes).toBeNull();
-    expect(converted.titleEnc?.startsWith("mdv1.")).toBe(true);
-    expect(converted.providerEnc?.startsWith("mdv1.")).toBe(true);
-    expect(converted.costMinorEnc?.startsWith("mdv1.")).toBe(true);
-
-    const after = (await workspaceItems(fixture)).find((candidate) => candidate.id === legacyId)!;
-    expect(after.title).toBe("Legacy item");
-    expect(after.provider).toBe("Legacy provider");
-    expect(after.costMinor).toBe(1_234);
   });
 });
 
@@ -223,7 +167,6 @@ describe("the invited address is encrypted, and its database rule survives (#963
 
     const [stored] = await getDb().select().from(householdInvitations)
       .where(eq(householdInvitations.householdId, fixture.household.id));
-    expect(stored.email).toBeNull();
     expect(stored.emailEnc?.startsWith("mdv1.")).toBe(true);
     expect(stored.emailEnc).not.toContain("invited.person");
     expect(stored.emailIndex).toBeTruthy();

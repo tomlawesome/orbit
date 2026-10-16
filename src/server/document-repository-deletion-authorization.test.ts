@@ -108,6 +108,11 @@ vi.mock("@/server/documents/config", () => ({
   wrappingKey: () => ({ keyEncryptionKey: Buffer.alloc(32, 1), keyId: "key-1" }),
   keyEncryptionKeyFor: () => Buffer.alloc(32, 1),
 }));
+// The administrator's upload limit (#1285) is proven in
+// src/server/upload-limit.test.ts; here it answers the configured default.
+vi.mock("@/server/upload-limit", () => ({
+  readEffectiveUploadLimit: async (config: { maxBytes: number }) => config.maxBytes,
+}));
 
 const { requestDocumentDeletion, restoreDocument } = await import("./document-repository");
 
@@ -125,7 +130,7 @@ function seedDocumentRecord(opts: {
   scanStatus?: string;
   deleteAfter?: Date | null;
 }) {
-  queue(mocks.selectQueues, "users", [{
+  queue(mocks.selectQueues, "documents", [{
     id: documentId,
     householdId,
     itemId,
@@ -138,10 +143,9 @@ function seedDocumentRecord(opts: {
     deleteAfter: opts.deleteAfter ?? null,
     availableAt: new Date(),
     uploadedByUserId: uploaderUserId,
-    administrator: opts.callerIsAdministrator,
-    membershipUserId: opts.callerMembershipRole ? "self" : "self",
-    membershipRole: opts.callerMembershipRole,
   }]);
+  // The household gate (workspace-access.ts) answers from the users table.
+  queue(mocks.selectQueues, "users", [{ administrator: opts.callerIsAdministrator, role: opts.callerMembershipRole }]);
 }
 
 beforeEach(() => {
