@@ -183,15 +183,17 @@ combined with `--install`, `--update` or `--repair`.
 ### Installing with no questions
 
 For an unattended install, the directory must already hold a complete
-`.env-orbit` and an `.orbit-secrets/` directory, and nothing else. Before it
-downloads anything, the installer checks that:
+`.env-orbit` and, optionally, an `.orbit-secrets/` directory, and nothing
+else. Before it downloads anything, the installer checks that:
 
 - `.env-orbit` is a plain file (not a symlink) with permissions `0600`;
-- `.orbit-secrets/` is a real directory (not a symlink) with permissions
-  `0700`, and every file inside it is a plain, non-empty file with
-  permissions `0600`;
-- `.orbit-secrets/oidc-client-secret` exists, even when people sign in with
-  Orbit's own accounts only;
+- `.orbit-secrets/`, if it is there, is a real directory (not a symlink)
+  with permissions `0700`, and every file inside it is a plain, non-empty
+  file with permissions `0600`;
+- if `.env-orbit` sets `ORBIT_AUTH_OIDC=true` (people sign in through an
+  identity provider), `.orbit-secrets/oidc-client-secret` exists. With
+  Orbit's own accounts only, `.env-orbit` on its own is enough: the
+  installer creates `.orbit-secrets/` and generates the other secrets;
 - `.env-orbit` passes `bash scripts/configure.sh --check`.
 
 Anything else is refused before Docker or any download starts: extra files,
