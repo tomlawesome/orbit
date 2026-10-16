@@ -280,7 +280,7 @@ page's URL at failure, which this one has to infer.
 
 - 2026-09-30 · 0135f516 (!1006, the batch that built this film chapter) · pipeline 1855 / fidelity (job 27168) · `page.waitForFunction` hit the 60000ms test timeout. The same test passed on pipeline 1836 (same film code), and the job retried as 27270 on the same commit was green. First sighting; an issue on the third.
 
-## fidelity: door-station.spec.js:130 "the ring's hand-over to a card at 390x664, motion no-preference › the ring travels from the door's station to the card's" — #1306
+## fidelity: door-station.spec.js:130 "the ring's hand-over to a card at 390x664, motion no-preference › the ring travels from the door's station to the card's" — #1306 — quarantined 2026-10-16 (agent-infra#30): runs as `fidelity:quarantine`, outside the merge gate
 
 - 2026-10-01 · d3141346 (!1013, #1183's Firefox projects for tests/e2e; nothing under web/ or tests/fidelity) · pipeline 1926 / fidelity (job 28697) · "a jump between frames at 317ms": 38.9 against the < 20 bound. The full fidelity runs on !1010 and !1012 just before it passed, and the same pipeline's smoke ran about eleven minutes longer than usual alongside it on the shared runner. First sighting; an issue on the third.
 - 2026-10-04 · bc9ba29e (!1021, #1151's audit fixes; the only door-side change since the green run on bcaf64e0 is a waiting-card timeout constant, nothing in the ring's motion) · pipeline 2064 / fidelity (job 31041) · "a jump between frames at 280ms": 25.5 against the < 20 bound, same shape as the first sighting. The same test passed on pipeline 2054 ten commits earlier. Second sighting; an issue on the third.
@@ -291,6 +291,7 @@ page's URL at failure, which this one has to infer.
 - 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / fidelity (job 36171) · `a jump between frames at 263ms` (spec now at line 130); 174 other fidelity tests and all 488 pocket measurements passed. Seventh sighting.
 - 2026-10-14 · 00987a9d (door branch, !1066) · pipeline 2590 / fidelity retry (job 36215) · `a jump between frames at 402ms`; 174 others and all 488 pocket measurements passed. Eighth sighting. Owner merged !1066 with this red (12b).
 - 2026-10-15 · 0a2cec29 (dev, !1067 merged) · dev pipeline 2628 / fidelity (job 36373) · `a jump between frames at 303ms`: 23.19 against the < 20 bound, the job's only failure (174 passed, all 488 pocket measurements passed). Still #1306.
+- 2026-10-16 · 614118ff (!1069; nothing in the ring's motion) · pipeline 2649 / fidelity (jobs 36573 and 36574, two retries in a row) · `a jump between frames at 314ms`, then `at 235ms`, each the job's only failure. Quarantined the same day (owner decision on agent-infra#30).
 
 ## tour-pocket-webkit.spec.js "plays end to end at 430x932 under normal motion" — pill moving between places (#1174)
 
@@ -453,6 +454,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-10 · d80cf61b (!1054) · pipeline 2392 / fidelity (job 34627) · "/home · document-preview meets the pocket floors" at 390x664, the same wait at `pocket-states.js:61` for Car MOT's opened panel ran to the 60 s timeout; 487 others passed. Third sighting: filed as #1376.
 - 2026-10-10 · e0d5d796 (`dev`, merge of !1057; its head 327d32c1 passed fidelity in pipeline 2440, and the merge adds only `scripts/install.sh`, its test and `scripts/ci/repin-base-image.sh`) · pipeline 2461 / fidelity (job 35271) · "/home · row-complete meets the pocket floors" at 390x664, `locator.waitFor` ran to the 60 s test timeout; 487 of 488 passed.
 - 2026-10-14 · 00987a9d (door branch, !1066) · pipeline 2590 / fidelity (job 36196) · `pocket-measure.spec.js:544` "pocket measurement at 390x664 › /home · row-open meets the pocket floors" — `locator.waitFor: Test timeout of 60000ms exceeded`; 487 others passed. Diff since pipeline 2588 (where it passed) is an e2e keyboard spec and docs only; job retried as 36215.
+- 2026-10-16 · 614118ff (!1069; one e2e spec and this file changed since pipeline 2645, where fidelity passed) · pipeline 2649 / fidelity (job 36559) · "pocket measurement at 360x640 › /home · row-edit": `openRow` tapped the Car MOT row and the panel never opened (`locator.waitFor: Test timeout of 60000ms exceeded`); 487 others passed. Retried as 36573.
 
 ## tour-pocket-webkit.spec.js:539 "plays through chapter 3 at 360x780 under normal motion" — chapters skipped
 

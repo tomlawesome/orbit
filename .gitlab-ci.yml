@@ -1618,6 +1618,8 @@ fidelity:
       # back.
       node scripts/web-build-stamp.mjs check || echo "the fidelity gate will build its own copy"
       pnpm --filter orbit-web fidelity
+      # Quarantined tests (agent-infra#30): run and reported, never failing the job.
+      pnpm --filter orbit-web fidelity:quarantine || echo "fidelity: a quarantined test failed (non-blocking; see the issue named in the test)"
     - *reuse_evidence
   artifacts:
     name: orbit-fidelity-diffs
