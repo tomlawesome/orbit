@@ -13,8 +13,9 @@ vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 // The preview script must be told exactly which build to fetch: a pinned
 // ORBIT_PREVIEW_DIGEST of the form sha256:<64 hex characters>, and the place
 // to fetch from, ORBIT_PREVIEW_BASE_URL. It must refuse before fetching or
-// verifying anything when either is missing or malformed. Stub curl and cosign
-// record any call, so "nothing is fetched" is checked, not assumed.
+// verifying anything when either is missing or malformed. The base is an
+// http URL, so curl is the fetch path, and a stub curl records any call:
+// "nothing is fetched" is checked, not assumed.
 
 const script = join(dirname(fileURLToPath(import.meta.url)), "get-orbit-preview.sh");
 const SHORT_DEADLINE_MS = 10_000;
@@ -28,17 +29,13 @@ function run(extraEnv, { baseUrl = true } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "orbit-preview-"));
   scratchDirs.push(dir);
   const bin = join(dir, "bin");
-  const base = join(dir, "base");
   const calls = join(dir, "calls.log");
   mkdirSync(bin);
-  mkdirSync(base);
-  for (const name of ["curl", "cosign"]) {
-    writeFileSync(join(bin, name), `#!/usr/bin/env bash\necho "${name} $*" >> "${calls}"\nexit 1\n`);
-    chmodSync(join(bin, name), 0o755);
-  }
+  writeFileSync(join(bin, "curl"), `#!/usr/bin/env bash\necho "curl $*" >> "${calls}"\nexit 1\n`);
+  chmodSync(join(bin, "curl"), 0o755);
 
   const env = { PATH: `${bin}:/usr/bin:/bin`, HOME: dir, TMPDIR: dir };
-  if (baseUrl) env.ORBIT_PREVIEW_BASE_URL = base;
+  if (baseUrl) env.ORBIT_PREVIEW_BASE_URL = "http://127.0.0.1:1";
   Object.assign(env, extraEnv);
 
   return new Promise((resolve, reject) => {
@@ -89,6 +86,7 @@ describe("get-orbit-preview.sh pinned digest", () => {
     const r = await run({ ORBIT_PREVIEW_DIGEST: "sha256:abc" });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("sha256:<64 hex characters>");
+    expect(r.called).toBe(false);
   });
 
   it("refuses when ORBIT_PREVIEW_BASE_URL is unset", async () => {
