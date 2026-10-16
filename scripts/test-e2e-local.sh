@@ -184,6 +184,10 @@ set -Eeuo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
+# Every @quarantine tag leaves the gate this script runs, so each must be on
+# the reviewed list; checked before any stack is started.
+node scripts/check-quarantine.mjs >&2 || exit 1
+
 spec=""
 playwright_project=""
 profile="oidc"

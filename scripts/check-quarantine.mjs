@@ -8,8 +8,9 @@
 // tag text, not tests: a tag inside a loop or behind a condition covers
 // whatever that admits, and a tag assembled at run time is invisible to a text
 // scan, so review the code around each listed tag too. It counts every
-// "@quarantine" substring, comments included, because Playwright's filter
-// (/@quarantine/ over title and tags) is that wide. scripts/test-frontend.sh
+// "@quarantine" substring in any code file, comments included and ignoring
+// case, because Playwright's filters (/@quarantine/ over title and tags, and
+// the case-blind CLI --grep-invert) are that wide. scripts/test-frontend.sh
 // and web's fidelity scripts run this before the gate.
 //
 // Usage: node scripts/check-quarantine.mjs [root]   (default: the current directory)
@@ -19,9 +20,11 @@ import { join, relative } from "node:path";
 const root = process.argv[2] ?? process.cwd();
 const LIST = "tests/quarantine.txt";
 const SCAN = ["tests/e2e", "web/tests"];
-// Playwright's default testMatch: these files run if they sit under testDir.
-const SPEC = /\.(spec|test)\.(m|c)?[jt]sx?$/;
-const TAG = /@quarantine/g;
+// Every code file, not only specs: a helper can hold the tag a spec imports.
+const CODE = /\.(m|c)?[jt]sx?$/;
+// Case-insensitive: web's fidelity scripts filter with --grep-invert, which
+// Playwright matches ignoring case.
+const TAG = /@quarantine/gi;
 const ENTRY = /^(\S+)\s+(\S+)\s+(\S+)/;
 const ISSUES = /^#\d+(,#\d+)*$/;
 
@@ -30,7 +33,8 @@ function specFiles(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const path = join(dir, e.name);
     if (e.isDirectory()) return specFiles(path);
-    return e.isFile() && SPEC.test(e.name) ? [path] : [];
+    // The Playwright config defines the filter itself; it holds no tag.
+    return e.isFile() && CODE.test(e.name) && !e.name.startsWith("playwright.config.") ? [path] : [];
   });
 }
 

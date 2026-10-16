@@ -156,6 +156,8 @@ function makeReuseFixture() {
     mkdirSync(join(dir, sub), { recursive: true });
   }
   copyFileSync(script, join(dir, "scripts/test-e2e-local.sh"));
+  copyFileSync(new URL("./check-quarantine.mjs", import.meta.url), join(dir, "scripts/check-quarantine.mjs"));
+  writeFileSync(join(dir, "tests/quarantine.txt"), "# no quarantined tests\n");
   writeFileSync(join(dir, "scripts/configure.sh"), "touch .env-orbit\nmkdir -p .orbit-secrets\n");
   writeFileSync(
     join(dir, "scripts/dev-greenmail-cert.sh"),
