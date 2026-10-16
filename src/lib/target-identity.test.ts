@@ -115,18 +115,212 @@ describe("isPreprovisionedInput (guarantee #6)", () => {
     expect(isPreprovisionedInput(targetDir)).toBe(false);
   });
 
-  it("refuses when the oidc-client-secret file is missing", () => {
-    writeFileSync(join(targetDir, ".env-orbit"), "APP_URL=https://example.invalid\n", { mode: 0o600 });
+  it("refuses when the oidc-client-secret file is missing (SSO on)", () => {
+    writeFileSync(join(targetDir, ".env-orbit"), "APP_URL=https://example.invalid\nORBIT_AUTH_OIDC=true\n", { mode: 0o600 });
     const secretsDir = join(targetDir, ".orbit-secrets");
     mkdirSync(secretsDir, { mode: 0o700 });
     writeFileSync(join(secretsDir, "postgres-password"), "hunter2", { mode: 0o600 });
     expect(isPreprovisionedInput(targetDir)).toBe(false);
   });
 
-  it("refuses when the oidc-client-secret file is empty", () => {
+  it("refuses when the oidc-client-secret file is empty (SSO on)", () => {
     seedPreprovisioned();
+    writeFileSync(join(targetDir, ".env-orbit"), "APP_URL=https://example.invalid\nORBIT_AUTH_OIDC=true\n", { mode: 0o600 });
     writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "", { mode: 0o600 });
     expect(isPreprovisionedInput(targetDir)).toBe(false);
+  });
+});
+
+describe("prepared directory for local accounts needs no OIDC secret (#1451, guarantees #6 and #24)", () => {
+  const envPath = (): string => join(targetDir, ".env-orbit");
+  const secretsPath = (): string => join(targetDir, ".orbit-secrets");
+
+  function writeEnv(lines: string[], mode = 0o600): void {
+    writeFileSync(envPath(), `${lines.join("\n")}\n`, { mode });
+    chmodSync(envPath(), mode);
+  }
+
+  function makeSecretsDir(mode = 0o700): void {
+    mkdirSync(secretsPath(), { mode });
+    chmodSync(secretsPath(), mode);
+  }
+
+  function writeSecret(name: string, content: string, mode = 0o600): void {
+    writeFileSync(join(secretsPath(), name), content, { mode });
+    chmodSync(join(secretsPath(), name), mode);
+  }
+
+  const localModes: Array<[string, string[]]> = [
+    ["ORBIT_AUTH_OIDC=false", ["APP_URL=https://example.invalid", "ORBIT_AUTH_OIDC=false"]],
+    ["ORBIT_AUTH_OIDC absent", ["APP_URL=https://example.invalid"]],
+    ["ORBIT_AUTH_OIDC=true commented out", ["APP_URL=https://example.invalid", "# ORBIT_AUTH_OIDC=true"]],
+  ];
+
+  describe.each(localModes)("local accounts: %s", (_label, lines) => {
+    it("accepts .env-orbit (600) as the only entry in the directory", () => {
+      writeEnv(lines);
+      expect(isPreprovisionedInput(targetDir)).toBe(true);
+    });
+
+    it("accepts .env-orbit plus .orbit-secrets (700) holding valid files but no oidc-client-secret", () => {
+      writeEnv(lines);
+      makeSecretsDir();
+      writeSecret("postgres-password", "hunter2");
+      expect(isPreprovisionedInput(targetDir)).toBe(true);
+    });
+
+    it("still accepts a valid oidc-client-secret when one is present", () => {
+      writeEnv(lines);
+      makeSecretsDir();
+      writeSecret("oidc-client-secret", "s3cr3t");
+      expect(isPreprovisionedInput(targetDir)).toBe(true);
+    });
+
+    it("refuses a lone .env-orbit with mode 644", () => {
+      writeEnv(lines, 0o644);
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    });
+
+    it("refuses a lone .env-orbit that is a symlink", () => {
+      writeFileSync(join(targetDir, "real-env"), `${lines.join("\n")}\n`, { mode: 0o600 });
+      symlinkSync(join(targetDir, "real-env"), envPath());
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    });
+
+    it("refuses an extra file beside a lone .env-orbit", () => {
+      writeEnv(lines);
+      writeFileSync(join(targetDir, "docker-compose.yml"), "services: {}\n");
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    });
+
+    it("refuses an extra file beside .env-orbit and .orbit-secrets", () => {
+      writeEnv(lines);
+      makeSecretsDir();
+      writeSecret("postgres-password", "hunter2");
+      writeFileSync(join(targetDir, "docker-compose.yml"), "services: {}\n");
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    });
+
+    it("refuses .orbit-secrets with mode 755", () => {
+      writeEnv(lines);
+      makeSecretsDir(0o755);
+      writeSecret("postgres-password", "hunter2");
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    });
+
+    it("refuses an empty file inside .orbit-secrets", () => {
+      writeEnv(lines);
+      makeSecretsDir();
+      writeSecret("postgres-password", "");
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    });
+
+    it("refuses a mode-644 file inside .orbit-secrets", () => {
+      writeEnv(lines);
+      makeSecretsDir();
+      writeSecret("postgres-password", "hunter2", 0o644);
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    });
+
+    it("refuses a symlinked file inside .orbit-secrets", () => {
+      writeEnv(lines);
+      makeSecretsDir();
+      writeFileSync(join(targetDir, "real-secret"), "hunter2", { mode: 0o600 });
+      symlinkSync(join(targetDir, "real-secret"), join(secretsPath(), "postgres-password"));
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    });
+
+    it("refuses a subdirectory inside .orbit-secrets", () => {
+      writeEnv(lines);
+      makeSecretsDir();
+      mkdirSync(join(secretsPath(), "nested"), { mode: 0o700 });
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    });
+
+    it("refuses an empty or loosely permissioned oidc-client-secret that is present", () => {
+      writeEnv(lines);
+      makeSecretsDir();
+      writeSecret("oidc-client-secret", "");
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+      writeSecret("oidc-client-secret", "s3cr3t", 0o644);
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    });
+  });
+
+  describe("SSO on (ORBIT_AUTH_OIDC=true)", () => {
+    const sso = ["APP_URL=https://example.invalid", "ORBIT_AUTH_OIDC=true"];
+
+    it("accepts .env-orbit plus .orbit-secrets holding a valid oidc-client-secret", () => {
+      writeEnv(sso);
+      makeSecretsDir();
+      writeSecret("oidc-client-secret", "s3cr3t");
+      expect(isPreprovisionedInput(targetDir)).toBe(true);
+    });
+
+    it("refuses a lone .env-orbit with no .orbit-secrets", () => {
+      writeEnv(sso);
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    });
+
+    it("refuses when .orbit-secrets has no oidc-client-secret", () => {
+      writeEnv(sso);
+      makeSecretsDir();
+      writeSecret("postgres-password", "hunter2");
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    });
+
+    it("refuses an empty oidc-client-secret", () => {
+      writeEnv(sso);
+      makeSecretsDir();
+      writeSecret("oidc-client-secret", "");
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    });
+
+    it("refuses a mode-644 .env-orbit even with a valid oidc-client-secret", () => {
+      writeEnv(sso, 0o644);
+      makeSecretsDir();
+      writeSecret("oidc-client-secret", "s3cr3t");
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    });
+
+    it("finds the setting among other lines, wherever it sits", () => {
+      writeEnv(["# generated", "APP_URL=https://example.invalid", "ORBIT_AUTH_OIDC=true", "OTHER=1"]);
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    });
+  });
+
+  describe("only the exact value true means SSO on", () => {
+    it.each(["TRUE", "True", "1", "yes", "tru", "truee"])("treats ORBIT_AUTH_OIDC=%s as local accounts", (value) => {
+      writeEnv(["APP_URL=https://example.invalid", `ORBIT_AUTH_OIDC=${value}`]);
+      expect(isPreprovisionedInput(targetDir)).toBe(true);
+    });
+
+    it("does not mistake a longer key ending in ORBIT_AUTH_OIDC for the setting", () => {
+      writeEnv(["APP_URL=https://example.invalid", "NOT_ORBIT_AUTH_OIDC=true"]);
+      expect(isPreprovisionedInput(targetDir)).toBe(true);
+    });
+  });
+
+  describe("validateTarget", () => {
+    it("treats a local-accounts lone .env-orbit as a pre-provisioned bootstrap (target_was_empty=true)", () => {
+      writeEnv(["APP_URL=https://example.invalid", "ORBIT_AUTH_OIDC=false"]);
+      expect(validateTarget(targetDir)).toEqual({ targetWasEmpty: true });
+    });
+
+    it("treats a lone .env-orbit with the key absent as a pre-provisioned bootstrap", () => {
+      writeEnv(["APP_URL=https://example.invalid"]);
+      expect(validateTarget(targetDir)).toEqual({ targetWasEmpty: true });
+    });
+
+    it("still refuses an SSO lone .env-orbit as not a recognisable bootstrap", () => {
+      writeEnv(["APP_URL=https://example.invalid", "ORBIT_AUTH_OIDC=true"]);
+      expect(() => validateTarget(targetDir)).toThrow(TargetValidationRefusal);
+    });
+
+    it("still refuses a local-accounts lone .env-orbit with mode 644", () => {
+      writeEnv(["APP_URL=https://example.invalid", "ORBIT_AUTH_OIDC=false"], 0o644);
+      expect(() => validateTarget(targetDir)).toThrow(TargetValidationRefusal);
+    });
   });
 });
 
