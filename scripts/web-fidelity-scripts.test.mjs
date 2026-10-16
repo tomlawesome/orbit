@@ -24,8 +24,8 @@ const { scripts } = JSON.parse(
 
 describe("web fidelity scripts run the quarantine list check first", () => {
   for (const name of ["fidelity", "fidelity:webkit"]) {
-    it(`${name} starts with the check, joined with &&`, () => {
-      expect(scripts[name]).toMatch(/^node \.\.\/scripts\/check-quarantine\.mjs \.\. && /);
+    it(`${name} starts with the check and stops the whole script when it fails`, () => {
+      expect(scripts[name]).toMatch(/^node \.\.\/scripts\/check-quarantine\.mjs \.\. \|\| exit 1; /);
     });
   }
 });

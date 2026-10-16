@@ -4,9 +4,13 @@
 // Tagging a browser test @quarantine takes it out of every merge gate: the
 // quarantine run after the gate only reports (agent-infra#30). Without a list,
 // one word in a merge request could switch a real check off unnoticed (!1071
-// audit, security pass). The list makes each quarantine a reviewed line and
-// caps how many there are. scripts/test-frontend.sh and web's fidelity scripts
-// run this before the gate.
+// audit, security pass). The list makes each tag a reviewed line. It counts
+// tag text, not tests: a tag inside a loop or behind a condition covers
+// whatever that admits, and a tag assembled at run time is invisible to a text
+// scan, so review the code around each listed tag too. It counts every
+// "@quarantine" substring, comments included, because Playwright's filter
+// (/@quarantine/ over title and tags) is that wide. scripts/test-frontend.sh
+// and web's fidelity scripts run this before the gate.
 //
 // Usage: node scripts/check-quarantine.mjs [root]   (default: the current directory)
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -15,9 +19,9 @@ import { join, relative } from "node:path";
 const root = process.argv[2] ?? process.cwd();
 const LIST = "tests/quarantine.txt";
 const SCAN = ["tests/e2e", "web/tests"];
-const SPEC = /\.spec\.(ts|js|mjs)$/;
-const TAG = /@quarantine(?![A-Za-z0-9_-])/g;
-const COMMENT = /^\s*(\/\/|\/\*|\*)/;
+// Playwright's default testMatch: these files run if they sit under testDir.
+const SPEC = /\.(spec|test)\.(m|c)?[jt]sx?$/;
+const TAG = /@quarantine/g;
 const ENTRY = /^(\S+)\s+(\S+)\s+(\S+)/;
 const ISSUES = /^#\d+(,#\d+)*$/;
 
@@ -31,9 +35,7 @@ function specFiles(dir) {
 }
 
 function tagCount(path) {
-  return readFileSync(path, "utf8").split("\n")
-    .filter((line) => !COMMENT.test(line))
-    .reduce((n, line) => n + (line.match(TAG)?.length ?? 0), 0);
+  return readFileSync(path, "utf8").match(TAG)?.length ?? 0;
 }
 
 const problems = [];

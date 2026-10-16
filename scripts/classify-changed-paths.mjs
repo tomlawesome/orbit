@@ -49,7 +49,12 @@ const webPatterns = [/^web\//u, /^pnpm-lock\.yaml$/u, /^pnpm-workspace\.yaml$/u]
 // used to skip the suite, so the new spec first ran after merge. Kept apart
 // from `webPatterns` because a spec change cannot move what `fidelity`
 // photographs.
-const browserSuitePatterns = [...webPatterns, /^tests\/e2e\//u, /^scripts\/test-frontend\.sh$/u];
+// The quarantine list and its check (run by test-frontend.sh) answer for which
+// tests the suite leaves out, so a change to either alone runs the suite too.
+const browserSuitePatterns = [
+  ...webPatterns, /^tests\/e2e\//u, /^scripts\/test-frontend\.sh$/u,
+  /^tests\/quarantine\.txt$/u, /^scripts\/check-quarantine\.mjs$/u,
+];
 
 // What the `licence_policy` job (#815) reaches for: a change to any of these
 // can add or move a dependency, so the installed-tree licence walk needs to
