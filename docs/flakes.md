@@ -396,6 +396,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-09 · 40850119 · dev push pipeline 2297 / smoke_firefox (job 33780) · `.itemview.suggestview` not visible after the row click (line 352), on the first attempt and the retry, so the job failed. Passed on desktop-firefox in pipelines 2290 and 2313.
 - 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / smoke (job 36176), desktop-chromium · `apiRequestContext.get: socket hang up` in `waitForReceipts`, first attempt and retry; the job failed. Fourth sighting; #1415 filed.
 - 2026-10-15 · 0a2cec29 (dev, !1067 merged) · dev pipeline 2628 / smoke_firefox (job 36379), desktop-firefox · the test (now :238) failed its first attempt and the retry, the job's only failure (252 passed, 3 flaky). Still #1415.
+- 2026-10-16 · 9c4b8b88 (`preview` after !1070; same tree as 6f768016, green in pipelines 2655 and 2657) · pipeline 2658 / smoke_firefox (job 36673), desktop-firefox, now at :238 · failed on the first attempt AND on retry #1: the suggestion drawer `.itemview.suggestview` never opened (:301), then `.item.suggest` count wrong on the retry. Job retried as 36697.
 
 ## web/tests/fidelity screens.spec.js "household"
 
