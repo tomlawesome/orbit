@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,7 +28,7 @@ afterEach(() => {
   for (const dir of fixtures.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function runScript(args) {
+function runScript(args, scriptPath = script) {
   const dir = mkdtempSync(join(tmpdir(), "test-frontend-"));
   fixtures.push(dir);
   const bin = join(dir, "bin");
@@ -44,7 +44,7 @@ function runScript(args) {
   return new Promise((resolve, reject) => {
     // Stdin stays open (a pipe nobody closes until the child is gone): a
     // closed stdin is not what a terminal run looks like.
-    const child = spawn("bash", [script, ...args], {
+    const child = spawn("bash", [scriptPath, ...args], {
       env: {
         PATH: `${bin}:${process.env.PATH}`,
         HOME: process.env.HOME,
@@ -92,5 +92,49 @@ describe("scripts/test-frontend.sh quarantine selection", () => {
     expect(result.env, "the Playwright stub was never started").not.toBeNull();
     expect(result.env.ORBIT_E2E_QUARANTINE).toBe("exclude");
     expect(Object.keys(result.env)).not.toContain("ORBIT_E2E_REUSE");
+  });
+});
+
+/*
+ * scripts/check-quarantine.mjs (exit 1 when an @quarantine tag is not on
+ * tests/quarantine.txt) must run before the gate. These run the real script
+ * and the real check from a copy of the tree under a temporary root: only
+ * the two scripts are copied, plus a spec holding an @quarantine tag, so the
+ * wiring is tested rather than a stand-in. Playwright is the pnpm stub, which
+ * records its environment only if started.
+ */
+function quarantineRoot({ listed }) {
+  const root = mkdtempSync(join(tmpdir(), "test-frontend-root-"));
+  fixtures.push(root);
+  mkdirSync(join(root, "scripts"));
+  mkdirSync(join(root, "tests", "e2e"), { recursive: true });
+  for (const name of ["test-frontend.sh", "check-quarantine.mjs"]) {
+    copyFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), join(root, "scripts", name));
+  }
+  writeFileSync(join(root, "tests", "e2e", "x.spec.ts"), 'test("a thing", { tag: "@quarantine" }, async () => {});\n');
+  if (listed) writeFileSync(join(root, "tests", "quarantine.txt"), "tests/e2e/x.spec.ts 1 #1\n");
+  return join(root, "scripts", "test-frontend.sh");
+}
+
+describe("scripts/test-frontend.sh quarantine list check", () => {
+  it("without --quarantine, a failing check exits non-zero and Playwright is never launched", async () => {
+    const result = await runScript([], quarantineRoot({ listed: false }));
+    expect(result.status, result.stderr).not.toBe(0);
+    expect(result.stderr).toContain("quarantine list");
+    expect(result.env, "Playwright was launched after the check failed").toBeNull();
+  });
+
+  it("without --quarantine, a passing check lets Playwright run", async () => {
+    const result = await runScript([], quarantineRoot({ listed: true }));
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.env, "the Playwright stub was never started").not.toBeNull();
+    expect(result.env.ORBIT_E2E_QUARANTINE).toBe("exclude");
+  });
+
+  it("--quarantine does not require the check", async () => {
+    const result = await runScript(["--quarantine"], quarantineRoot({ listed: false }));
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.env, "the Playwright stub was never started").not.toBeNull();
+    expect(result.env.ORBIT_E2E_QUARANTINE).toBe("only");
   });
 });
