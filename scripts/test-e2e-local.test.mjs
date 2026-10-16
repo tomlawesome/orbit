@@ -556,3 +556,60 @@ describe("--reuse never tears down a stack it did not start (#1241)", () => {
     });
   }
 });
+
+/*
+ * ORBIT_E2E_REUSE must not vouch for a database (#1077). It used to be passed
+ * to the quarantine run, and it also switched off the guard in
+ * tests/e2e/support/database.ts, so a local quarantine run with
+ * COMPOSE_PROJECT_NAME=orbit (a real install) would reset that real database.
+ * The suite is told which project it owns with ORBIT_E2E_OWNED_PROJECT
+ * instead. Driven through the same stubbed fixture as above, with a fake
+ * Playwright CLI that records the environment each invocation was given.
+ */
+describe("the environment the script hands to Playwright (#1077)", () => {
+  function recordEnvironment(fx) {
+    const log = join(fx.dir, "playwright-env.jsonl");
+    writeFileSync(
+      join(fx.dir, "node_modules/@playwright/test/cli.js"),
+      `require("fs").appendFileSync(process.env.PW_ENV_LOG, JSON.stringify(process.env) + "\\n");\n`,
+    );
+    return log;
+  }
+
+  const runsOf = (log) =>
+    readFileSync(log, "utf8")
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line));
+
+  it("never passes ORBIT_E2E_REUSE to the quarantine run of a fresh stack", async () => {
+    const fx = makeFixture();
+    const log = recordEnvironment(fx);
+    const result = await runToEnd(fx, chromium, { PW_ENV_LOG: log });
+    expect(result.status, result.stderr).toBe(0);
+    const runs = runsOf(log);
+    const quarantine = runs.find((env) => env.ORBIT_E2E_QUARANTINE === "only");
+    const gate = runs.find((env) => env.ORBIT_E2E_QUARANTINE === "exclude");
+    expect(gate, "the gate run did not happen").toBeDefined();
+    expect(quarantine, "the quarantine run did not happen").toBeDefined();
+    expect(Object.keys(quarantine)).not.toContain("ORBIT_E2E_REUSE");
+    expect(Object.keys(gate)).not.toContain("ORBIT_E2E_REUSE");
+    // The project is still vouched for, the legitimate way.
+    expect(quarantine.ORBIT_E2E_OWNED_PROJECT).toBe(fx.project);
+    expect(quarantine.COMPOSE_PROJECT_NAME).toBe(fx.project);
+  });
+
+  it("gives every run of a --reuse stack ORBIT_E2E_OWNED_PROJECT=PROJECT", async () => {
+    const fx = makeFixture();
+    const log = recordEnvironment(fx);
+    writeFileSync(`${fx.dockerLog}.up`, ""); // the stub's stack is already up
+    const result = await runToEnd(fx, ["--reuse", fx.project, ...chromium], { PW_ENV_LOG: log });
+    expect(result.status, result.stderr).toBe(0);
+    const runs = runsOf(log);
+    expect(runs.map((env) => env.ORBIT_E2E_QUARANTINE).sort()).toEqual(["exclude", "only"]);
+    for (const env of runs) {
+      expect(env.ORBIT_E2E_OWNED_PROJECT).toBe(fx.project);
+      expect(env.COMPOSE_PROJECT_NAME).toBe(fx.project);
+    }
+  });
+});
