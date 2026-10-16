@@ -184,6 +184,10 @@ set -Eeuo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
+# Every @quarantine tag leaves the gate this script runs, so each must be on
+# the reviewed list; checked before any stack is started.
+node scripts/check-quarantine.mjs >&2 || exit 1
+
 spec=""
 playwright_project=""
 profile="oidc"
@@ -532,6 +536,13 @@ if [[ -n "$reuse_project" ]]; then
   app_container="$(container_for_service orbit-app)"
   [[ -n "$app_container" ]] ||
     fail "--reuse ${project_name}: no running orbit-app container for this project. Start one first with --keep -- its startup log line names the project to pass here -- or check the project name."
+  # The suite resets this project's database, so it must be a stack this
+  # script started: every one includes compose/docker-compose.local-e2e.yml,
+  # which Compose records on each container, and a real install never does.
+  # Without this, --reuse with a real install's name would wipe it.
+  app_config_files="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$app_container" 2>/dev/null || true)"
+  [[ ",${app_config_files}," == *"/compose/docker-compose.local-e2e.yml,"* ]] ||
+    fail "--reuse ${project_name}: not an e2e stack (it was not started with compose/docker-compose.local-e2e.yml, so it may be a real install). Refusing to reset its database."
   db_container="$(container_for_service orbit-db)"
   [[ -n "$db_container" ]] ||
     fail "--reuse ${project_name}: found orbit-app but no running orbit-db container; the stack is only partly up. Refusing to reuse it."
@@ -853,7 +864,10 @@ reuse_env=()
 # as the header invites, is one it brought up and health-checked here: say so,
 # or tests/e2e/support/database.ts refuses to reset a database it believes it
 # did not create.
-[[ -n "$reuse_project" ]] || reuse_env+=("ORBIT_E2E_OWNED_PROJECT=$project_name")
+# A --reuse project too, now that ORBIT_E2E_REUSE no longer lifts the guard
+# by itself: the reuse checks above refused it unless it is a healthy stack
+# started with this script's e2e overlay.
+reuse_env+=("ORBIT_E2E_OWNED_PROJECT=$project_name")
 # COMPOSE_PROJECT_NAME is handed to the suite because a spec may need to ask
 # the stack's own database a question -- tests/e2e/v19-tour.spec.ts proves the
 # tour's example body is never written down, which only the database can
@@ -881,8 +895,8 @@ playwright_cmd=(node node_modules/@playwright/test/cli.js test --config tests/e2
 # status; after a passing gate the quarantined ones run against the same
 # stack and only report. tests/e2e/playwright.config.ts selects them from
 # ORBIT_E2E_QUARANTINE. The quarantine run writes to test-results/quarantine,
-# so it never clears the gate's traces, and ORBIT_E2E_REUSE drops the
-# "unclaimed" project, which the gate's own claim has already made untrue.
+# so it never clears the gate's traces, and ORBIT_E2E_QUARANTINE=only drops
+# the "unclaimed" project, which the gate's own claim has already made untrue.
 quarantine_args=(--pass-with-no-tests --output test-results/quarantine)
 
 # #1235: WebKit cannot launch on this host -- its system packages need root
@@ -955,7 +969,7 @@ run_suite suite_status ORBIT_E2E_QUARANTINE=exclude --
 if [[ "$suite_status" == 0 ]]; then
   log "running the quarantined tests (@quarantine, agent-infra#30): reported, never failing this run"
   quarantine_status=0
-  run_suite quarantine_status ORBIT_E2E_QUARANTINE=only ORBIT_E2E_REUSE=true -- "${quarantine_args[@]}"
+  run_suite quarantine_status ORBIT_E2E_QUARANTINE=only -- "${quarantine_args[@]}"
   [[ "$quarantine_status" == 0 ]] ||
     log "a quarantined test failed (non-blocking; see the issue named in the test; traces in test-results/quarantine)"
 else

@@ -12,17 +12,23 @@ readonly base_url="${PLAYWRIGHT_BASE_URL:-http://127.0.0.1:3000}"
 # without failing the job. tests/e2e/playwright.config.ts does the selecting
 # (ORBIT_E2E_QUARANTINE; its comment says why not --grep), and
 # scripts/test-e2e-local.sh splits its run the same way. In the quarantine run:
-#   - the gate has claimed the stack by then, so ORBIT_E2E_REUSE drops the
-#     "unclaimed" project, which would fail;
+#   - the gate has claimed the stack by then, so the config drops the
+#     "unclaimed" project, which would fail (ORBIT_E2E_QUARANTINE=only does
+#     that; ORBIT_E2E_REUSE is not set, so the #1077 database guard stays);
 #   - its HTML report and its test-results go beside the gate's, not over
 #     them;
 #   - --pass-with-no-tests: a run with no quarantined test in its projects
 #     would otherwise exit non-zero with "No tests found".
 extra_args=()
 case "${1:-}" in
-  "") export ORBIT_E2E_QUARANTINE=exclude ;;
+  "")
+    export ORBIT_E2E_QUARANTINE=exclude
+    # Every @quarantine tag leaves this gate, so each must be on the reviewed
+    # list (tests/quarantine.txt, scripts/check-quarantine.mjs).
+    node scripts/check-quarantine.mjs || exit 1
+    ;;
   --quarantine)
-    export ORBIT_E2E_QUARANTINE=only ORBIT_E2E_REUSE=true
+    export ORBIT_E2E_QUARANTINE=only
     export PLAYWRIGHT_HTML_OUTPUT_DIR="${PLAYWRIGHT_HTML_OUTPUT_DIR:-playwright-report/quarantine}"
     extra_args=(--pass-with-no-tests --output test-results/quarantine)
     ;;

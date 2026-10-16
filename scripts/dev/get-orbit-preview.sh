@@ -21,9 +21,10 @@ set -Eeuo pipefail
 #                           orbit-launcher_linux_<arch>.tar.gz and install.sh.
 #                           Where the files come from does not matter: the
 #                           signature and checksums are what is trusted.
-#   ORBIT_PREVIEW_DIGEST    Optional but recommended: the image digest
-#                           recorded on #1152. A validly signed manifest for
-#                           a different build is refused.
+#   ORBIT_PREVIEW_DIGEST    Required: the image digest recorded on #1152. A
+#                           validly signed manifest for a different build is
+#                           refused, so a stale mirror cannot hand a tester an
+#                           older signed preview.
 #
 # docs/installing-preview.md has the manual steps this replaces.
 fail() { printf 'get-orbit-preview: %s\n' "$1" >&2; exit 1; }
@@ -52,7 +53,8 @@ base="${ORBIT_PREVIEW_BASE_URL:-}"
 [[ -n "$base" ]] || fail "set ORBIT_PREVIEW_BASE_URL to where the preview's files are (a URL or a directory)."
 base="${base%/}"
 expected_digest="${ORBIT_PREVIEW_DIGEST:-}"
-if [[ -n "$expected_digest" && ! "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+[[ -n "$expected_digest" ]] || fail "set ORBIT_PREVIEW_DIGEST to the preview's image digest recorded on #1152."
+if [[ ! "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
   fail "ORBIT_PREVIEW_DIGEST must look like sha256:<64 hex characters>."
 fi
 
@@ -93,7 +95,7 @@ channel="$(manifest_value "$manifest_json" channel)"
 [[ "$channel" == "preview" ]] || fail "the signed manifest is for channel '${channel}', not preview; use get-orbit.sh for a stable release."
 digest="$(manifest_value "$manifest_json" digest)"
 [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "the manifest names no valid image digest."
-if [[ -n "$expected_digest" && "$digest" != "$expected_digest" ]]; then
+if [[ "$digest" != "$expected_digest" ]]; then
   fail "asked for ${expected_digest} but the signed manifest names ${digest}; refusing."
 fi
 commit="$(manifest_value "$manifest_json" commit)"

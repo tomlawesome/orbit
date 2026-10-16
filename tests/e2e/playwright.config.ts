@@ -50,7 +50,10 @@ const PARALLEL_WORKERS = Number(process.env.ORBIT_E2E_WORKERS ?? 2);
 // comment), so only the "unclaimed" project and "setup"'s dependency on it
 // are dropped here; a fresh run (this unset) keeps exactly the graph it has
 // today.
-const reuseKeptStack = process.env.ORBIT_E2E_REUSE === "true";
+// A quarantine run (ORBIT_E2E_QUARANTINE=only) follows the gate on the stack
+// the gate just claimed, so it drops the project too, without setting
+// ORBIT_E2E_REUSE (which used to lift tests/e2e/support/database.ts's guard).
+const reuseKeptStack = process.env.ORBIT_E2E_REUSE === "true" || process.env.ORBIT_E2E_QUARANTINE === "only";
 
 // #1183: Firefox has no --host-resolver-rules (the Chromium switch `use`
 // passes below), so the same redirect of `orbit-oidc` is made with two
