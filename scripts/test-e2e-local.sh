@@ -853,8 +853,10 @@ reuse_env=()
 # as the header invites, is one it brought up and health-checked here: say so,
 # or tests/e2e/support/database.ts refuses to reset a database it believes it
 # did not create.
-# A --reuse project too: this script checked it before handing it over, and
-# ORBIT_E2E_REUSE no longer lifts the guard by itself.
+# A --reuse project too, now that ORBIT_E2E_REUSE no longer lifts the guard
+# by itself. The script checked only that it is a running, healthy Compose
+# project, not that it is an e2e stack: --reuse trusts the name it is given
+# (#947), so `--reuse` with a real install's name resets that install.
 reuse_env+=("ORBIT_E2E_OWNED_PROJECT=$project_name")
 # COMPOSE_PROJECT_NAME is handed to the suite because a spec may need to ask
 # the stack's own database a question -- tests/e2e/v19-tour.spec.ts proves the
