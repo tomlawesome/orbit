@@ -191,6 +191,7 @@ timeout on this one case rather than a global raise.
 ## v19-entry.spec.ts:99 "a signed-out visit lands in login and returns to the page it wanted"
 
 - 2026-09-23 · 079bd351 (#1080) · local `scripts/test-e2e-local.sh --ci-cap`, `ORBIT_E2E_WORKERS=4`, mobile-chromium · `expect(locator('.dialwrap, .mdial').visible()).toHaveCount(1)` at `tests/e2e/v19-entry.spec.ts:114` received `0` after 5000ms. The test seeds its own household a beat earlier, so there is nothing for another worker to have taken away; under four workers on a 0.6-cpu app the screen had simply not drawn inside the five seconds. Green at two workers in the run before. First sighting; an issue on the third, per the testing-and-ci skill.
+- 2026-10-16 · 6f768016 (!1070, `dev` -> `preview`) · pipeline 2657 / smoke_firefox (job 36649), desktop-firefox · now at :102; failed once, passed on retry.
 
 ## v19-item-actions.spec.ts:188 "completing an item from the v19 view moves its orbit"
 
@@ -374,6 +375,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-16 · d8fa9475 (!1069) · pipeline 2645 / smoke_webkit (job 36537), desktop-webkit · the /create announcement check (:385) and focus check (:402) failed their first attempts with `Error: a save on /create that cannot reach Orbit: the failure is shown` (`element(s) not found` after 5 s) and passed on the in-job retry. Still #1313.
 - 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke (job 36589), smoke_webkit (job 36591), smoke_webkit_mobile (job 36592), desktop-chromium, mobile-chromium, desktop-webkit and mobile-webkit · the /create announcement check (:385) failed once, passed on retry. Still #1313.
 - 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke (job 36589), smoke_firefox (job 36590), smoke_webkit_mobile (job 36592), desktop-chromium, mobile-chromium, desktop-firefox and mobile-webkit · the /create focus check (:402) failed once, passed on retry. Still #1313.
+- 2026-10-16 · 6f768016 (!1070, `dev` -> `preview`) · pipeline 2657 / smoke (job 36648) desktop-chromium and mobile-chromium; smoke_firefox (job 36649) desktop-firefox; smoke_webkit (job 36650) desktop-webkit; smoke_webkit_mobile (job 36651) mobile-webkit · the /create announcement check (:385) failed once on all five, the focus check (:402) on both Chromium projects and Firefox; all passed on retry.
 
 ## settings-notification-history.spec.ts:137 "a member sees their own last sent reminders, plainly, on both dialects" — desktop-firefox
 
@@ -422,6 +424,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-15 · a6168fe6 (!1069, v0.3 security batch) · pipeline 2640 / smoke_webkit (job 36460), **desktop-webkit**, line 193 · first attempt: `expect(locator).toBeVisible() failed`, the `Sign back in` link not found within 10 s after /logout (spec :227); passed on the in-job retry. Still #1367.
 - 2026-10-15 · a6168fe6 (!1069) · pipeline 2640 / smoke_webkit (job 36471, the re-run), **desktop-webkit**, line 193 · first attempt: `#1262: the menu is still open after sign-out started` (spec :216); passed on the in-job retry. Still #1367.
 - 2026-10-16 · 6f768016 (`dev` merge of !1069) · pipeline 2655 / smoke_webkit (job 36622), desktop-webkit · failed once, passed on retry.
+- 2026-10-16 · 6f768016 (!1070, `dev` -> `preview`) · pipeline 2657 / smoke_webkit_mobile (job 36651), mobile-webkit · failed once, passed on retry.
 
 ## sign-out-descent.spec.ts:271 "sign out from another page's menu plays the descent (phone-narrow)" on desktop-webkit
 
@@ -501,7 +504,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-10 · 65e369b5 (!1057) · local `scripts/test-e2e-local.sh --ci-cap --reuse`, 6 runs of the spec · failed once in 9.2 s with `apiRequestContext.get: socket hang up`; passed on the other five. First sighting.
 
-## v19-keyboard-pocket.spec.ts:437 "item drawer (pocket): opened from the dial by keyboard, is fully reachable" — mobile-webkit — #1381
+## v19-keyboard-pocket.spec.ts:437 "item drawer (pocket): opened from the dial by keyboard, is fully reachable" — mobile-webkit, mobile-chromium — #1381
 
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934) · `auditTabOrder`: `Tab reached a control the screen does not show as visible` for the drawer's Snooze, Complete, Attach, Retire, Edit and Copy link buttons, on the first attempt and the in-job retry.
 - 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35081, the first re-run) · the same audit message on the first attempt; passed on the in-job retry.
@@ -511,6 +514,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-13 · 3a297cc8 (!1065, #1316 audit fixes) · pipeline 2570 / smoke_webkit_mobile (job 36070) · `home (pocket) with the item drawer open` audit failed on the first attempt and the in-job retry, so the job failed. Still #1381.
 - 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke_webkit_mobile (job 36101), mobile-webkit · failed its first attempt, passed on the in-job retry. Still #1381.
 - 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit_mobile (job 36492), mobile-webkit · `Error: home (pocket) with the item drawer open`: `Tab reached a control the screen does not show as visible` for the drawer's Snooze, Complete, Attach, Retire, Edit and Copy link buttons (`support/keyboard.ts:322`); passed on the in-job retry. Still #1381.
+- 2026-10-16 · 6f768016 (!1070, `dev` -> `preview`) · pipeline 2657 / smoke (job 36648), mobile-chromium · failed once, passed on retry.
 
 ## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on mobile-webkit — #1367
 
@@ -571,6 +575,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-document-preview.spec.ts:366 "a one-page document's reader says "one page" and has no arrows" — desktop-webkit
 
 - 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit (job 36491), desktop-webkit · failed its first attempt (20.1 s), passed on the in-job retry. No error text printed: the job was cut off at its 30-minute timeout before the report. First sighting.
+- 2026-10-16 · 6f768016 (!1070, `dev` -> `preview`) · pipeline 2657 / smoke_webkit (job 36650), desktop-webkit · now at :370; failed once, passed on retry.
 
 ## v19-archive.spec.ts:273 "an armed desk button relaxes back after 4 s without a second tap (#1342)" — desktop-webkit
 
