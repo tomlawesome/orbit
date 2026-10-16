@@ -182,6 +182,7 @@ timeout on this one case rather than a global raise.
 - 2026-09-23 · 42271b4f · local `scripts/test-e2e-local.sh --ci-cap --spec tests/e2e/v19-arrival.spec.ts --project desktop-chromium`, `ORBIT_E2E_WORKERS=4` · did not reproduce: "Running 9 tests using 1 worker", green in 58.9s. Naming one spec file leaves Playwright only that file plus its own required setup/claim files to schedule, so `ORBIT_E2E_WORKERS` never gets a second file to hand to a second worker — the isolated run cannot exercise the cross-worker contention the four sightings above were taken under, whatever the env var says. Read this as ruling out nothing about the earlier sightings, only as ruling out single-spec isolation as a way to reproduce them.
   Code read alongside it found a candidate mechanism for the earlier sightings that single-spec isolation structurally cannot exercise: `createSession` (`src/lib/auth/session.ts:58`) takes `pg_advisory_xact_lock` on `ACCOUNT_LIFECYCLE_LOCK_KEY` (`src/lib/auth/authority-locks.ts:2`, `"orbit:account-lifecycle"`) — one key, not scoped to the signing-in user — and holds it for the whole transaction. `provisionIdentity`'s sign-in branch (`src/lib/auth/provision.ts:200`) takes the same key. Every sign-in on the instance, across every worker, therefore queues on one Postgres lock while `orbit-app` grinds through each transaction at 0.6 cpu; that is a real serialisation point, not a deadlock (the queue drains, FIFO-ish, on commit), but it turns concurrent sign-in load from several workers' specs into one queue with no bound tied to the 180s test timeout. Not confirmed against a hang — the single-file run above could not put load behind the lock — so this is the next thing to check with `pg_stat_activity`/`pg_locks` filtered to `hashtextextended('orbit:account-lifecycle', 0)` during a real multi-file four-worker run, not an established cause.
 - 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_webkit`, desktop-webkit (the test now sits at line 159) · failed once, passed on retry.
+- 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit (job 36591), desktop-webkit (the test now sits at line 159) · failed once, passed on retry.
 
 ## v19-create.spec.ts:50 "the create form saves a real item into the orbit"
 
@@ -337,10 +338,11 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-04 · ba984c1b (!1017, the WebKit suite's first full run) · pipeline 2099 / smoke_webkit (job on the desktop-webkit project) · `toHaveURL(/\/home/)` gave up after three polls with no "Timeout" line, so the attempt ended on an error rather than the 30 s wait; the body kept class `instrument`. The in-job retry at line 164 failed too, because the first attempt had already created the newcomer's household (the spec header warns of exactly this; its screenshot shows /home). Seven local runs on desktop-webkit in the pinned Playwright image (alone, under the CI cpu cap, and with two workers beside it) all passed. First sighting; an issue on the third.
 
-## v19-administration.spec.ts:76 "household recovery on the clock (#1001) › restores a household within its window, then hard-deletes another by the two-tap protocol" — desktop-webkit
+## v19-administration.spec.ts:76 "household recovery on the clock (#1001) › restores a household within its window, then hard-deletes another by the two-tap protocol" — desktop-webkit, mobile-webkit — #1448
 
 - 2026-10-05 · dac67650 (!1017) · pipeline 2131 / smoke_webkit (job 31782) · `page.evaluate: TypeError: Load failed` (WebKit's words for a fetch that did not complete) inside `createHousehold`'s in-page `fetch` at line 35, 7.2s in, straight after sign-in; the in-job retry passed (11.8s). Only the passing retry was traced, so the failing attempt's network is not recorded. Suspected, not established: the arrival at `/` navigating on to `/home` while the in-page fetch was out (support/arrival.ts describes that #840 race; this file's sign-in does not wait for it), made likelier on WebKit by the multi-second sky rasterising stall measured on #1219. First sighting; an issue on the third.
 - 2026-10-08 · 89ca8357 (`fix/door-site-whole`, the door batch; nothing in it touches administration) · local `scripts/test-e2e-local.sh --project desktop-webkit`, the whole suite inside the CI Playwright image, with other sessions using the host · `page.evaluate: TypeError: Load failed` in the spec's seeding fetch; green on the rerun of the file alone against a fresh stack on 64a4ad67 (same administration code). Second sighting (the first is above, same words, in CI).
+- 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit_mobile (job 36592), mobile-webkit · failed once, passed on retry.
 
 ## v19-feedback-recovery.spec.ts:402 "a save on /create that cannot reach Orbit leaves focus where the reader was" — mobile-webkit, desktop-webkit, desktop-chromium, mobile-chromium — #1313
 
@@ -368,6 +370,8 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-15 · 1c636dbd (!1069) · pipeline 2643 / smoke_webkit_mobile (job 36492), mobile-webkit · the /create announcement check (:385) and focus check (:402) failed their first attempts with `Error: a save on /create that cannot reach Orbit: the failure is shown` (`element(s) not found` after 5 s) and passed on the in-job retry. Still #1313.
 - 2026-10-16 · d8fa9475 (!1069) · pipeline 2645 / smoke (job 36535), desktop-chromium and mobile-chromium · the /create announcement check (:385) and focus check (:402) failed their first attempts with `Error: a save on /create that cannot reach Orbit: the failure is shown` (`element(s) not found` after 5 s) and passed on the in-job retry. Still #1313.
 - 2026-10-16 · d8fa9475 (!1069) · pipeline 2645 / smoke_webkit (job 36537), desktop-webkit · the /create announcement check (:385) and focus check (:402) failed their first attempts with `Error: a save on /create that cannot reach Orbit: the failure is shown` (`element(s) not found` after 5 s) and passed on the in-job retry. Still #1313.
+- 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke (job 36589), smoke_webkit (job 36591), smoke_webkit_mobile (job 36592), desktop-chromium, mobile-chromium, desktop-webkit and mobile-webkit · the /create announcement check (:385) failed once, passed on retry. Still #1313.
+- 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke (job 36589), smoke_firefox (job 36590), smoke_webkit_mobile (job 36592), desktop-chromium, mobile-chromium, desktop-firefox and mobile-webkit · the /create focus check (:402) failed once, passed on retry. Still #1313.
 
 ## settings-notification-history.spec.ts:137 "a member sees their own last sent reminders, plainly, on both dialects" — desktop-firefox
 
@@ -510,9 +514,10 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · `#1249: the menu is still open after sign-out started` at line 284. Second sighting.
 - 2026-10-16 · d8fa9475 (!1069) · pipeline 2645 / smoke_webkit_mobile (job 36538), mobile-webkit · now at :271: failed its first attempt with `Error: #1253: the menu is still open after sign-out started`; passed on the in-job retry.
 
-## v19-document-preview.spec.ts:397 "the preview's pager turns a multi-page document in place, and the reader opens on its page" — mobile-webkit
+## v19-document-preview.spec.ts:397 "the preview's pager turns a multi-page document in place, and the reader opens on its page" — mobile-webkit, desktop-webkit
 
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934) · failed its first attempt (9.0 s), passed on the in-job retry (13.5 s). First sighting.
+- 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit (job 36591), desktop-webkit · now at :401: failed once, passed on retry.
 
 ## tour-pocket-webkit.spec.js:1284 "chapter 8 plays through on a new household (#1174 round 6)" — at 390x844, chapters 7 to 9
 
@@ -574,3 +579,12 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-screen-reader.spec.ts:312 "/household/[id]" — desktop-webkit
 
 - 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit (job 36491), desktop-webkit · failed its first attempt (1.8 s); the live log shows the in-job retry passing (3.1 s). No error text printed: the job was cut off at its 30-minute timeout before the report. First sighting.
+
+## v19-document-preview.spec.ts:162 "pressing a paper opens the preview, and Esc closes it" — desktop-chromium
+
+- 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke (job 36589), desktop-chromium · failed once, passed on retry. First sighting; an issue on the third.
+
+## v19-create.spec.ts:1022 "the desk's lane offers 'not this one' while it is still reading, and pressing it closes the lane" — desktop-webkit
+
+- 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit (job 36591), desktop-webkit · failed once, passed on retry. First sighting; an issue on the third.
+
