@@ -11,10 +11,16 @@ import { PROCESS_DEADLINE_MS, PROCESS_TEST_TIMEOUT_MS } from "./process-budget.m
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 /*
- * scripts/check-quarantine.mjs [root]: every `@quarantine` tag in a spec file
+ * scripts/check-quarantine.mjs [root]: every `@quarantine` in a test file
  * under tests/e2e/ or web/tests/ must be on the reviewed list
  * tests/quarantine.txt, with the right count and an issue ref, because a
  * quarantined test is dropped from every merge gate.
+ *
+ * Playwright's own filter is the substring /@quarantine/ over titles and tags,
+ * and its default testMatch is /\.(spec|test)\.(m|c)?[jt]sx?$/. So the check
+ * counts every occurrence of the substring (comments, `@quarantined`,
+ * `@quarantine-x` included) in every file that testMatch would run: it must
+ * count at least what Playwright excludes.
  *
  * Each test builds its own fixture tree and runs the script as a black box.
  */
@@ -79,31 +85,31 @@ describe("check-quarantine", () => {
     expect(r.stderr).toBe("");
   });
 
-  it("does not count tags on // comment lines", () => {
+  it("counts tags on // comment lines", () => {
     const root = fixture(
       {
         [A]: `// test("x", { tag: "@quarantine" })\n    // @quarantine again\ntest("y", { tag: "@quarantine" }, () => {});\n`,
       },
-      `${A} 1 #1\n`,
+      `${A} 3 #1\n`,
     );
     const r = run(root);
     expect(r.status).toBe(0);
-    expect(r.stdout.trim()).toBe("quarantine list: 1 tags in 1 files, all listed");
+    expect(r.stdout.trim()).toBe("quarantine list: 3 tags in 1 files, all listed");
   });
 
-  it("does not count tags on block-comment lines", () => {
+  it("counts tags on block-comment lines", () => {
     const root = fixture(
       {
         [A]: `/* @quarantine opens a block\n * @quarantine inside it\n   * @quarantine indented\n */\ntest("y", { tag: "@quarantine" }, () => {});\n`,
       },
-      `${A} 1 #1\n`,
+      `${A} 4 #1\n`,
     );
     const r = run(root);
     expect(r.status).toBe(0);
-    expect(r.stdout.trim()).toBe("quarantine list: 1 tags in 1 files, all listed");
+    expect(r.stdout.trim()).toBe("quarantine list: 4 tags in 1 files, all listed");
   });
 
-  it("matches @quarantine only as a whole word", () => {
+  it("counts @quarantine as a substring, not a whole word", () => {
     const root = fixture(
       {
         [A]: [
@@ -115,21 +121,42 @@ describe("check-quarantine", () => {
           ``,
         ].join("\n"),
       },
-      `${A} 1 #1\n`,
+      `${A} 5 #1\n`,
     );
     const r = run(root);
     expect(r.status).toBe(0);
-    expect(r.stdout.trim()).toBe("quarantine list: 1 tags in 1 files, all listed");
+    expect(r.stdout.trim()).toBe("quarantine list: 5 tags in 1 files, all listed");
   });
 
-  it("treats a file with only near-miss tags as having none", () => {
+  it("counts each of @quarantined, @quarantine-x and @quarantine_y as one", () => {
+    for (const word of ["@quarantined", "@quarantine-x", "@quarantine_y", "@quarantine9"]) {
+      const root = fixture({ [A]: `test("a", { tag: "${word}" }, () => {});\n` }, `${A} 1 #1\n`);
+      const r = run(root);
+      expect(r.status, word).toBe(0);
+      expect(r.stdout.trim(), word).toBe("quarantine list: 1 tags in 1 files, all listed");
+    }
+  });
+
+  it("counts every occurrence on one line", () => {
+    const root = fixture({ [A]: `test("@quarantine a @quarantine", { tag: "@quarantine" }, () => {});\n` }, `${A} 3 #1\n`);
+    const r = run(root);
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe("quarantine list: 3 tags in 1 files, all listed");
+  });
+
+  it("fails a file whose only tags are near-misses when it is not listed", () => {
+    const root = fixture({ [A]: `test("a", { tag: "@quarantined" }, () => {});\n` }, `# nothing listed\n`);
+    expectFails(run(root), A);
+  });
+
+  it("treats a file with only near-miss tags as having some", () => {
     const root = fixture(
       { [A]: `test("a", { tag: "@quarantined" }, () => {});\ntest("b", { tag: "@quarantine-x" }, () => {});\n` },
-      `# nothing listed\n`,
+      `${A} 2 #1\n`,
     );
     const r = run(root);
     expect(r.status).toBe(0);
-    expect(r.stdout.trim()).toBe("quarantine list: 0 tags in 0 files, all listed");
+    expect(r.stdout.trim()).toBe("quarantine list: 2 tags in 1 files, all listed");
   });
 
   it("fails a tagged file that is not on the list", () => {
@@ -182,7 +209,7 @@ describe("check-quarantine", () => {
 
   it("fails a non-numeric count", () => {
     const root = fixture({ [A]: specA }, `${A} two #1085\n`);
-    expectFails(run(root), A);
+    expectFails(run(root), A, "must be a positive whole number");
   });
 
   it("fails a missing count", () => {
@@ -192,7 +219,7 @@ describe("check-quarantine", () => {
 
   it("fails a zero count", () => {
     const root = fixture({ [A]: specA }, `${A} 0 #1085\n`);
-    expectFails(run(root), A);
+    expectFails(run(root), A, "must be a positive whole number");
   });
 
   it("fails the same path listed twice", () => {
@@ -231,13 +258,14 @@ describe("check-quarantine", () => {
     expect(r.stdout.trim()).toBe("quarantine list: 2 tags in 1 files, all listed");
   });
 
-  it("ignores files that are not .spec.ts, .spec.js or .spec.mjs", () => {
+  it("ignores files that Playwright's default testMatch would not run", () => {
     const root = fixture(
       {
         [A]: specA,
         "tests/e2e/helper.ts": specA,
         "tests/e2e/notes.md": specA,
-        "tests/e2e/a.test.ts": specA,
+        "tests/e2e/a.spec.json": specA,
+        "tests/e2e/a.spec.ts.snap": specA,
         "web/tests/support.js": specA,
       },
       `${A} 2 #1085\n`,
@@ -245,6 +273,29 @@ describe("check-quarantine", () => {
     const r = run(root);
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe("quarantine list: 2 tags in 1 files, all listed");
+  });
+
+  it("scans every file Playwright's default testMatch runs", () => {
+    const names = [
+      "a.test.ts",
+      "a.spec.mts",
+      "a.spec.cjs",
+      "a.spec.tsx",
+      "a.test.jsx",
+      "a.test.cts",
+      "a.spec.mjs",
+      "a.test.js",
+    ];
+    const files = Object.fromEntries(names.map((n) => [`tests/e2e/${n}`, specB]));
+    const root = fixture(files, names.map((n, i) => `tests/e2e/${n} 1 #${i + 1}`).join("\n") + "\n");
+    const r = run(root);
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe(`quarantine list: ${names.length} tags in ${names.length} files, all listed`);
+  });
+
+  it("fails an unlisted a.test.ts carrying a tag", () => {
+    const f = "web/tests/a.test.ts";
+    expectFails(run(fixture({ [f]: specB }, `# empty\n`)), f);
   });
 
   it("scans .spec.js and .spec.mjs files", () => {
@@ -283,16 +334,17 @@ describe("check-quarantine", () => {
   });
 
   it("reports one stderr line per problem", () => {
+    // Four problems: A and B tagged but unlisted, one stale entry, one bad count.
     const root = fixture(
       { [A]: specA, [B]: specB },
-      `tests/e2e/gone.spec.ts 1 #2\n`,
+      `tests/e2e/gone.spec.ts 1 #2\ntests/e2e/c.spec.ts two #3\n`,
     );
     const r = run(root);
-    expectFails(r, A, B, "tests/e2e/gone.spec.ts");
+    expectFails(r, A, B, "tests/e2e/gone.spec.ts", "tests/e2e/c.spec.ts");
     const lines = r.stderr.split("\n").filter((l) => l.trim() !== "");
-    for (const p of [A, B, "tests/e2e/gone.spec.ts"]) {
-      expect(lines.filter((l) => l.includes(p)).length).toBeGreaterThanOrEqual(1);
+    expect(lines).toHaveLength(4);
+    for (const p of [A, B, "tests/e2e/gone.spec.ts", "tests/e2e/c.spec.ts"]) {
+      expect(lines.filter((l) => l.includes(p))).toHaveLength(1);
     }
-    expect(lines.length).toBeGreaterThanOrEqual(3);
   });
 });
