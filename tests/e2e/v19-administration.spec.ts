@@ -73,7 +73,8 @@ test.afterEach(async ({ page }) => {
 });
 
 test.describe("household recovery on the clock (#1001)", () => {
-  test("restores a household within its window, then hard-deletes another by the two-tap protocol", async ({ page }, testInfo) => {
+  /* #1448: quarantined 2026-10-16 (agent-infra#30) -- runs outside the merge gate. */
+  test("restores a household within its window, then hard-deletes another by the two-tap protocol", { tag: ["@quarantine"] }, async ({ page }, testInfo) => {
     const mobile = testInfo.project.name.startsWith("mobile");
     await signInAsWorkerAdministrator(page, "/administration");
 

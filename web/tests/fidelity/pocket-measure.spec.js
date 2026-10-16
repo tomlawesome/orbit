@@ -536,12 +536,19 @@ async function inspect(page, { rest = false } = {}) {
   return [...floors, ...reached, ...cover, ...words];
 }
 
+/* #1376: the /home states that open Car MOT's row by `openRow` (pocket-states.js),
+   at the two short phones every sighting came from, are quarantined 2026-10-16
+   (agent-infra#30) -- they run outside the merge gate (`fidelity:quarantine`). */
+const MOT_ROW_STATES = ["row-open", "row-snooze", "row-complete", "row-edit", "row-edit-section", "row-retire-armed", "document-preview"];
+const quarantined = (/** @type {string} */ phone, /** @type {{ route: string, state: string }} */ state) =>
+  (phone === "390x664" || phone === "360x640") && state.route === "/home" && MOT_ROW_STATES.includes(state.state);
+
 for (const phone of MEASURED) {
   test.describe(`pocket measurement at ${phone.name}`, () => {
     test.use({ viewport: phone.viewport, hasTouch: true, isMobile: true });
 
     for (const state of SIGNED_IN) {
-      test(`${state.route} · ${state.state} meets the pocket floors`, async ({ page }) => {
+      test(`${state.route} · ${state.state} meets the pocket floors`, { tag: quarantined(phone.name, state) ? ["@quarantine"] : [] }, async ({ page }) => {
         const defect = state.defect?.[phone.name] ?? state.defect?.["*"];
         test.fail(Boolean(defect), defect);
         await state.reach(page);

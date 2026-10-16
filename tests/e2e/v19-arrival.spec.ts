@@ -156,7 +156,8 @@ test.afterAll(async ({ browser }) => {
   }
 });
 
-test("the newcomer's arrival: the climb, the labelled sky, the real count, the question", async ({ page, browser }) => {
+/* #1085: quarantined 2026-10-16 (agent-infra#30) -- runs outside the merge gate. */
+test("the newcomer's arrival: the climb, the labelled sky, the real count, the question", { tag: ["@quarantine"] }, async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the journey is asserted on the desk dialect");
   test.setTimeout(180_000);
 
@@ -293,7 +294,9 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   await ownerContext.close();
 });
 
-test("naming your own system: one climb, the drawer, the refusal, then home without a second flight", async ({ page }) => {
+// Quarantined with the newcomer's arrival above (#1085): this file runs in serial order and
+// this test uses the state it leaves, so the two move together (agent-infra#30).
+test("naming your own system: one climb, the drawer, the refusal, then home without a second flight", { tag: ["@quarantine"] }, async ({ page }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the journey is asserted on the desk dialect");
   test.setTimeout(180_000);
 

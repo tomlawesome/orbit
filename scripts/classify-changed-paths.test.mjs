@@ -151,6 +151,19 @@ describe("changed-path CI risk classification", () => {
     expect(ciRequirements(["tests/e2e/v19-create.spec.ts"]).web).toBe(false);
   });
 
+  /*
+   * The quarantine list and its check decide which browser tests the gates
+   * exclude, so a merge request touching only them must still run the suite.
+   */
+  it("runs the browser suite when only the quarantine list or its check changed", () => {
+    for (const path of ["tests/quarantine.txt", "scripts/check-quarantine.mjs"]) {
+      expect(touchesBrowserSuite([path]), path).toBe(true);
+      expect(ciRequirements([path]).e2e, path).toBe(true);
+      // ...without charging the fidelity gate for it.
+      expect(ciRequirements([path]).web, path).toBe(false);
+    }
+  });
+
   it("runs the browser suite whenever the fidelity gate's front end moves", () => {
     for (const path of ["web/src/routes/home/+page.svelte", "pnpm-lock.yaml", "pnpm-workspace.yaml"]) {
       expect(touchesBrowserSuite([path])).toBe(true);

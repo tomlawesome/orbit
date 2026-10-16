@@ -190,7 +190,9 @@ async function openMenu(page: Page, desk: boolean) {
 
 for (const size of WIDTHS) {
   for (const world of [true, false]) {
-    test(`sign out from home's menu reaches the dusk (${size.label}, ${world ? "world forced" : "as the browser is"})`, async ({ page }, info) => {
+    /* #1367: the phone-narrow, world-forced case is quarantined 2026-10-16 (agent-infra#30) -- it runs outside the merge gate. */
+    const tag = size.label === "phone-narrow" && world ? ["@quarantine"] : [];
+    test(`sign out from home's menu reaches the dusk (${size.label}, ${world ? "world forced" : "as the browser is"})`, { tag }, async ({ page }, info) => {
       test.setTimeout(240_000);
       const desk = size.width >= 901;
       test.skip(info.project.name.startsWith("mobile") && desk, "a phone has no desk");
@@ -268,7 +270,8 @@ for (const size of WIDTHS) {
  * in", as from home.
  */
 for (const size of WIDTHS.filter((s) => s.label !== "narrow desk")) {
-  test(`sign out from another page's menu plays the descent (${size.label})`, async ({ page }, info) => {
+  /* #1367: the phone-narrow case is quarantined 2026-10-16 (agent-infra#30) -- it runs outside the merge gate. */
+  test(`sign out from another page's menu plays the descent (${size.label})`, { tag: size.label === "phone-narrow" ? ["@quarantine"] : [] }, async ({ page }, info) => {
     test.setTimeout(240_000);
     const desk = size.width >= 901;
     test.skip(info.project.name.startsWith("mobile") && desk, "a phone has no desk");

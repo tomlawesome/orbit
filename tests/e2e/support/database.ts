@@ -80,11 +80,12 @@ const E2E_PROJECT_PREFIX = "orbit-e2e-local-";
  *
  *   - `COMPOSE_PROJECT_NAME` set to the `orbit-e2e-local-` shape
  *     scripts/test-e2e-local.sh always derives;
- *   - `ORBIT_E2E_REUSE=true`, which that script sets only for `--reuse`
- *     (#947) -- a project name the user named explicitly, and the one place
- *     the derived shape does not have to hold, because the script already
- *     checked that project is a real, healthy, previously-claimed Orbit
- *     stack before handing it to Playwright at all;
+ *   - `ORBIT_E2E_OWNED_PROJECT` equal to it: scripts/test-e2e-local.sh
+ *     names the project it brought up, or the one `--reuse` (#947) handed
+ *     it after checking it is a healthy, previously-claimed stack.
+ *     `ORBIT_E2E_REUSE` alone no longer exempts a project: the quarantine
+ *     runs set it too, and a local quarantine run against a real install
+ *     would have reset that install's database;
  *   - `CI=true` with no `COMPOSE_PROJECT_NAME` at all, which is CI's own
  *     documented shape (scripts/ci/start-acceptance-stack.sh runs the exact
  *     bare `docker compose up` with no `-p` this guard exists to catch
@@ -102,12 +103,12 @@ export function resolvedComposeProject(): string | undefined {
     // brought up itself, whatever it is called -- its header invites
     // COMPOSE_PROJECT_NAME, so the derived-shape rule alone refused the
     // script's own documented override.
-    if (project.startsWith(E2E_PROJECT_PREFIX) || process.env.ORBIT_E2E_REUSE === "true" || project === process.env.ORBIT_E2E_OWNED_PROJECT) return project;
+    if (project.startsWith(E2E_PROJECT_PREFIX) || project === process.env.ORBIT_E2E_OWNED_PROJECT) return project;
     throw new Error(
       `#1077: COMPOSE_PROJECT_NAME is '${project}', which is not an e2e stack (scripts/test-e2e-local.sh `
       + `always names its own '${E2E_PROJECT_PREFIX}<worktree-hash>-<pid>'). Refusing to reset a database `
-      + "this suite did not create -- if this is a --reuse project, test-e2e-local.sh sets ORBIT_E2E_REUSE "
-      + "itself; running this file some other way needs that variable set explicitly.",
+      + "this suite did not create -- test-e2e-local.sh sets ORBIT_E2E_OWNED_PROJECT for its own and --reuse "
+      + "projects; running this file some other way needs that variable set to the project explicitly.",
     );
   }
   if (process.env.CI === "true") return undefined;

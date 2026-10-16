@@ -285,7 +285,9 @@ test.describe("the signed-in v19 screens at every size and in every theme pack",
 
   for (const pack of THEME_PACKS.filter((id) => id !== DEFAULT_THEME)) {
     for (const screen of SCREENS) {
-      test(`${screen.name} in the ${pack} pack has no WCAG A/AA violations`, async ({ page }) => {
+      /* #1307: /household/[id] in the clouds and dawn packs is quarantined 2026-10-16 (agent-infra#30) -- it runs outside the merge gate. */
+      const tag = screen.name === "/household/[id]" && (pack === "clouds" || pack === "dawn") ? ["@quarantine"] : [];
+      test(`${screen.name} in the ${pack} pack has no WCAG A/AA violations`, { tag }, async ({ page }) => {
         /* Owner, 2026-10-14: the default theme is checked at every size (above);
            every other pack at one size, the desktop project's. */
         test.skip(test.info().project.name.startsWith("mobile"), "other packs are checked at one size; the desktop project runs them");
