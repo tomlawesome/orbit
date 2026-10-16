@@ -86,18 +86,36 @@ function targetIsEmpty(targetDir: string): boolean {
  * mode-600, regular non-symlink files, the target directory must contain
  * *exactly* those two entries and nothing else, and an
  * `oidc-client-secret` file inside it must itself be non-empty.
+ *
+ * #1451, a deliberate change from the bash: `.orbit-secrets/` and its
+ * `oidc-client-secret` are required only when `.env-orbit` sets
+ * `ORBIT_AUTH_OIDC` to exactly `true` (guarantee #24's rule, read with
+ * readEnvironmentValue like the orchestrator's own OIDC decision). With
+ * local accounts a lone `.env-orbit` is accepted, as the launcher's guided
+ * configuration leaves it; configure then creates `.orbit-secrets/` and
+ * generates the secrets. A `.orbit-secrets/` that is present still has to
+ * meet every rule above.
  */
 export function isPreprovisionedInput(targetDir: string): boolean {
   const environmentFile = join(targetDir, ENVIRONMENT_FILE);
   const secretsDirectory = join(targetDir, SECRETS_DIRECTORY);
 
   if (!(isRegularNonSymlinkFile(environmentFile) && hasMode(environmentFile, 0o600))) return false;
-  if (!(isRealNonSymlinkDirectory(secretsDirectory) && hasMode(secretsDirectory, 0o700))) return false;
+  // Read only after the check above: a symlinked .env-orbit never gets here.
+  const ssoOn = readEnvironmentValue(targetDir, "ORBIT_AUTH_OIDC") === "true";
 
   let entries: string[];
-  let children: string[];
   try {
     entries = readdirSync(targetDir);
+  } catch {
+    return false;
+  }
+  if (!ssoOn && entries.length === 1) return entries[0] === ENVIRONMENT_FILE;
+
+  if (!(isRealNonSymlinkDirectory(secretsDirectory) && hasMode(secretsDirectory, 0o700))) return false;
+
+  let children: string[];
+  try {
     children = readdirSync(secretsDirectory);
   } catch {
     return false;
@@ -117,6 +135,8 @@ export function isPreprovisionedInput(targetDir: string): boolean {
     if (size === 0) return false;
     if (!hasMode(childPath, 0o600)) return false;
   }
+
+  if (!ssoOn) return true;
 
   const oidcSecretFile = join(secretsDirectory, "oidc-client-secret");
   if (!isRegularNonSymlinkFile(oidcSecretFile)) return false;
