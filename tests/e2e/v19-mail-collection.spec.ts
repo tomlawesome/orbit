@@ -335,7 +335,9 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
   expect(documents.documents.length).toBeGreaterThanOrEqual(1);
 });
 
-test("a message with no readable document lands in a bounded state on the relay", async ({ page }) => {
+// Quarantined with the spoofed-PDF test above (#1415): this file runs in serial order and
+// this test uses the state it leaves, so the two move together (agent-infra#30).
+test("a message with no readable document lands in a bounded state on the relay", { tag: ["@quarantine"] }, async ({ page }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "relay assertion covered on desktop");
   test.setTimeout(240_000);
 

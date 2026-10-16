@@ -294,7 +294,9 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   await ownerContext.close();
 });
 
-test("naming your own system: one climb, the drawer, the refusal, then home without a second flight", async ({ page }) => {
+// Quarantined with the newcomer's arrival above (#1085): this file runs in serial order and
+// this test uses the state it leaves, so the two move together (agent-infra#30).
+test("naming your own system: one climb, the drawer, the refusal, then home without a second flight", { tag: ["@quarantine"] }, async ({ page }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the journey is asserted on the desk dialect");
   test.setTimeout(180_000);
 
