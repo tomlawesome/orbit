@@ -365,6 +365,8 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke (job 36489), desktop-chromium and mobile-chromium · the /create announcement check (:385) and focus check (:402) failed their first attempts with `Error: a save on /create that cannot reach Orbit: the failure is shown` (`element(s) not found` after 5 s) and passed on the in-job retry. Still #1313.
 - 2026-10-15 · 1c636dbd (!1069) · pipeline 2643 / smoke_webkit (job 36491), desktop-webkit · the /create announcement check (:385) and focus check (:402) failed their first attempts and passed on the in-job retry. No error text printed: the job was cut off at its 30-minute timeout before the report (raised to 45m in a7c8ccad). Still #1313.
 - 2026-10-15 · 1c636dbd (!1069) · pipeline 2643 / smoke_webkit_mobile (job 36492), mobile-webkit · the /create announcement check (:385) and focus check (:402) failed their first attempts with `Error: a save on /create that cannot reach Orbit: the failure is shown` (`element(s) not found` after 5 s) and passed on the in-job retry. Still #1313.
+- 2026-10-16 · d8fa9475 (!1069) · pipeline 2645 / smoke (job 36535), desktop-chromium and mobile-chromium · the /create announcement check (:385) and focus check (:402) failed their first attempts with `Error: a save on /create that cannot reach Orbit: the failure is shown` (`element(s) not found` after 5 s) and passed on the in-job retry. Still #1313.
+- 2026-10-16 · d8fa9475 (!1069) · pipeline 2645 / smoke_webkit (job 36537), desktop-webkit · the /create announcement check (:385) and focus check (:402) failed their first attempts with `Error: a save on /create that cannot reach Orbit: the failure is shown` (`element(s) not found` after 5 s) and passed on the in-job retry. Still #1313.
 
 ## settings-notification-history.spec.ts:137 "a member sees their own last sent reminders, plainly, on both dialects" — desktop-firefox
 
@@ -504,6 +506,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (jobs 35081 and 35145, both re-runs) · failed its first attempt and passed on the in-job retry, in both. First sightings on mobile-webkit; the heading above is desktop-webkit.
 - 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · `#1249: the menu is still open after sign-out started` at line 284. Second sighting.
+- 2026-10-16 · d8fa9475 (!1069) · pipeline 2645 / smoke_webkit_mobile (job 36538), mobile-webkit · now at :271: failed its first attempt with `Error: #1253: the menu is still open after sign-out started`; passed on the in-job retry.
 
 ## v19-document-preview.spec.ts:397 "the preview's pager turns a multi-page document in place, and the reader opens on its page" — mobile-webkit
 
@@ -553,11 +556,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## GitLab outage during artifact transfer (502 / connection refused)
 
 - 2026-10-15 · a6168fe6 (!1069, v0.3 security batch) · pipeline 2640 / acceptance and repair_journeys (jobs 36463 and 36464), 20:46-20:54 UTC · both failed while moving artifacts, GitLab answering 502 or refusing connections; both passed on retry (jobs 36469 and 36470) with no change. First sighting.
-
-## v19-document-preview.spec.ts:299 "the reader turns a multi-page document to its last page and back, by arrows and by keys" — desktop-chromium, desktop-webkit
-
-- 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke (job 36489), desktop-chromium · `Error: apiRequestContext.get: Test timeout of 90000ms exceeded` on `page.request.get("/api/auth/session")` (`support/households.ts:24`, reached from the household sweep at spec line 362): the server did not answer a session read for 90 s. Passed on the in-job retry. First sighting.
-- 2026-10-15 · 1c636dbd (!1069) · pipeline 2643 / smoke_webkit (job 36491), desktop-webkit · failed on both attempts (1.2 min, then 24.2 s). No error text printed: the job was cut off at its 30-minute timeout before the report (raised to 45m in a7c8ccad). Passed on this browser in pipeline 2640. Second sighting.
 
 ## v19-document-preview.spec.ts:366 "a one-page document's reader says "one page" and has no arrows" — desktop-webkit
 
