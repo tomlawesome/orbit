@@ -853,7 +853,9 @@ reuse_env=()
 # as the header invites, is one it brought up and health-checked here: say so,
 # or tests/e2e/support/database.ts refuses to reset a database it believes it
 # did not create.
-[[ -n "$reuse_project" ]] || reuse_env+=("ORBIT_E2E_OWNED_PROJECT=$project_name")
+# A --reuse project too: this script checked it before handing it over, and
+# ORBIT_E2E_REUSE no longer lifts the guard by itself.
+reuse_env+=("ORBIT_E2E_OWNED_PROJECT=$project_name")
 # COMPOSE_PROJECT_NAME is handed to the suite because a spec may need to ask
 # the stack's own database a question -- tests/e2e/v19-tour.spec.ts proves the
 # tour's example body is never written down, which only the database can
@@ -881,8 +883,8 @@ playwright_cmd=(node node_modules/@playwright/test/cli.js test --config tests/e2
 # status; after a passing gate the quarantined ones run against the same
 # stack and only report. tests/e2e/playwright.config.ts selects them from
 # ORBIT_E2E_QUARANTINE. The quarantine run writes to test-results/quarantine,
-# so it never clears the gate's traces, and ORBIT_E2E_REUSE drops the
-# "unclaimed" project, which the gate's own claim has already made untrue.
+# so it never clears the gate's traces, and ORBIT_E2E_QUARANTINE=only drops
+# the "unclaimed" project, which the gate's own claim has already made untrue.
 quarantine_args=(--pass-with-no-tests --output test-results/quarantine)
 
 # #1235: WebKit cannot launch on this host -- its system packages need root
@@ -955,7 +957,7 @@ run_suite suite_status ORBIT_E2E_QUARANTINE=exclude --
 if [[ "$suite_status" == 0 ]]; then
   log "running the quarantined tests (@quarantine, agent-infra#30): reported, never failing this run"
   quarantine_status=0
-  run_suite quarantine_status ORBIT_E2E_QUARANTINE=only ORBIT_E2E_REUSE=true -- "${quarantine_args[@]}"
+  run_suite quarantine_status ORBIT_E2E_QUARANTINE=only -- "${quarantine_args[@]}"
   [[ "$quarantine_status" == 0 ]] ||
     log "a quarantined test failed (non-blocking; see the issue named in the test; traces in test-results/quarantine)"
 else

@@ -79,7 +79,7 @@ function targetIsEmpty(targetDir: string): boolean {
 }
 
 /**
- * is_preprovisioned_input (install.sh:282-304, guarantee #6): the strict
+ * Guarantee #6 (once install.sh's is_preprovisioned_input, now gone): the strict
  * unattended pre-provisioning contract — `.env-orbit` must be exactly mode
  * 600 and a regular non-symlink file, `.orbit-secrets/` must be exactly
  * mode 700 and a real non-symlink directory containing *only* non-empty,
