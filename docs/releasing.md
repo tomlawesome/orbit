@@ -433,7 +433,7 @@ does the same manifest fetch, check and stable-only restriction for whichever
 channel it is given, so a direct run is signature-checked too, although
 the launcher is the only supported install entry (ADR-0031, amendment
 2026-10-04). Passing `ORBIT_RELEASE_MANIFEST` directly still works
-for any channel, including `preview`; only the self-fetch is restricted.
+for any channel, including `preview`; only the self-fetch is restricted. It does not check the manifest's signature itself; [Installing a preview build](installing-preview.md) gives the checks to run by hand first.
 
 **Key fingerprint.** The key built into `get-orbit.sh` and `install.sh` is
 `cosign.pub`, byte for byte; a test fails if either drifts. To check the
