@@ -136,15 +136,17 @@ Check the build matches the digest on #1152.
 
 ## 6. Claim it
 
-The link that creates the first administrator is the last line of the Orbit
-container's log:
+The link that creates the first administrator is in the Orbit container's
+log, on the line after "Orbit is not yet claimed":
 
 ```sh
 cd ~/orbit
-docker compose --env-file .env-orbit logs orbit-app | tail -n 1
+docker compose --env-file .env-orbit logs --no-log-prefix orbit-app | grep -A1 'not yet claimed'
 ```
 
-Open it in your browser. [Claiming a fresh install](authentication.md#claiming-a-fresh-install)
+The installer's last screen and Orbit's own claim screen say it is the log's
+*last* line; it usually is not, because other services keep logging after it
+(#1450). Open the link in your browser. [Claiming a fresh install](authentication.md#claiming-a-fresh-install)
 has the detail. Then export a recovery bundle
 ([how](administrator-operations.md#exporting-a-recovery-bundle)).
 
@@ -157,6 +159,12 @@ settings) and [Mailbox provider operation](administrator-operations.md#mailbox-p
 put the password in `.orbit-secrets/smtp-password` (readable only by you)
 with an editor, not on a command line, set the `SMTP_*` lines, and start
 Orbit with the mail overlay so it can read the password file.
+
+## Tested
+
+Steps 1 to 6 were run as written on 2026-10-16 against the v0.3.0 preview
+(pipeline 2658, commit 9c4b8b88): Standard profile, local accounts. The
+installer finished with "Orbit is ready" on the recorded digest.
 
 ## Removing it afterwards
 
