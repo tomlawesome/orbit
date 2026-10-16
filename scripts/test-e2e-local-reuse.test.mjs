@@ -228,4 +228,25 @@ describe("test-e2e-local.sh --reuse only accepts an e2e stack", () => {
     expect(result.stderr).toContain(result.project);
     expect(existsSync(result.playwrightRan), "Playwright must not run against a non-e2e project").toBe(false);
   });
+
+  // Compose lists the files in -f order, and --ci-cap appends its overlay
+  // after the e2e one, so the e2e overlay is not always last.
+  it.each([
+    ["first", "/x/compose/docker-compose.local-e2e.yml,/x/docker-compose.yml"],
+    ["in the middle", "/x/docker-compose.yml,/x/compose/docker-compose.local-e2e.yml,/x/compose/docker-compose.ci-cap.yml"],
+  ])("reuses a stack whose e2e overlay is listed %s", (_where, label) => {
+    const result = reuseStubbed(label);
+    expect(result.status, result.stderr).toBe(0);
+    expect(existsSync(result.playwrightRan), "Playwright should have run").toBe(true);
+  });
+
+  it.each([
+    "/x/docker-compose.yml,/x/compose/docker-compose.local-e2e.yml.bak",
+    "/x/docker-compose.yml,/x/compose/x-docker-compose.local-e2e.yml",
+  ])("refuses a near-miss overlay name: %s", (label) => {
+    const result = reuseStubbed(label);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("not an e2e stack");
+    expect(existsSync(result.playwrightRan), "Playwright must not run against a non-e2e project").toBe(false);
+  });
 });
