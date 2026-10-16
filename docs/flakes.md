@@ -468,10 +468,11 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-14 · 00987a9d (door branch, !1066) · pipeline 2590 / fidelity (job 36196) · `pocket-measure.spec.js:544` "pocket measurement at 390x664 › /home · row-open meets the pocket floors" — `locator.waitFor: Test timeout of 60000ms exceeded`; 487 others passed. Diff since pipeline 2588 (where it passed) is an e2e keyboard spec and docs only; job retried as 36215.
 - 2026-10-16 · 614118ff (!1069; one e2e spec and this file changed since pipeline 2645, where fidelity passed) · pipeline 2649 / fidelity (job 36559) · "pocket measurement at 360x640 › /home · row-edit": `openRow` tapped the Car MOT row and the panel never opened (`locator.waitFor: Test timeout of 60000ms exceeded`); 487 others passed. Retried as 36573.
 
-## tour-pocket-webkit.spec.js:539 "plays through chapter 3 at 360x780 under normal motion" — chapters skipped
+## tour-pocket-webkit.spec.js:539 "plays through chapter 3 at 360x780 under normal motion" — chapters skipped — #1449
 
 - 2026-10-09 · abcb06f1 · pipeline 2301 / fidelity_webkit (job 33823) · the film reached only chapters 1 and 2 (`done` false, chapters `[0, 1]`) in 3.4 min. Neither of the next commits (63354fb6, 6afb412e) touches chapters 1–3; on 6afb412e, locally in the pinned image, it passed. First sighting.
 - 2026-10-10 · e0d5d796 (`dev`, merge of !1057; its head 327d32c1 passed fidelity_webkit in pipeline 2440, and the merge touches no web file) · pipeline 2461 / fidelity_webkit (job 35272) · at 390x844 this time: "the film plays as far as this phone watches it" false and "every chapter, in order, none skipped" short by two; 25 of 26 passed. Second sighting.
+- 2026-10-16 · 9c4b8b88 (`preview` after !1070; same tree as 6f768016, green in pipelines 2655 and 2657) · pipeline 2658 / fidelity_webkit (job 36668), at 390x844 · "no hole or ring snaps on or off between one frame and the next" (a frame-to-frame timing check). Job retried as 36698.
 
 ## install-orchestrator.test.ts "runInstall: success > installs a pre-provisioned target unattended: assets from the image, secrets, migration, digest (#6, #42, #45, #53)"
 
