@@ -361,17 +361,13 @@ make_preprovisioned_target() {
 # Slice 4 (#907): the local-only counterpart of make_preprovisioned_target.
 # ORBIT_AUTH_OIDC=false and no OIDC_* fields at all -- the guided flow's own
 # local-only path (scripts/configure.sh's guided_init) never writes them
-# either. The unattended pre-provisioning contract (installer-guarantees.md,
-# install.sh guarantee 6) still requires a non-empty oidc-client-secret file
-# regardless of sign-in mode, so a harmless unused placeholder goes in it
-# (ADR-0023 section 1: switching the provider off never requires deleting its
-# configuration -- here there simply is none to begin with).
+# either. With local accounts the unattended pre-provisioning contract
+# (installer-guarantees.md guarantee 6, #1451) accepts a lone .env-orbit, the
+# shape the launcher's guided configuration leaves: no .orbit-secrets/ at all,
+# so configure creates it and generates every secret.
 make_local_only_preprovisioned_target() {
   rm -rf -- "$target"
-  mkdir -p -- "$target/.orbit-secrets"
-  chmod 700 "$target/.orbit-secrets"
-  printf 'unused-placeholder\n' > "$target/.orbit-secrets/oidc-client-secret"
-  chmod 600 "$target/.orbit-secrets/oidc-client-secret"
+  mkdir -p -- "$target"
   {
     printf 'APP_URL=https://orbit.acceptance.invalid\n'
     printf 'ORBIT_PORT=%s\n' "$orbit_port"
