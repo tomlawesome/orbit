@@ -434,7 +434,8 @@ async function pickByKeyboard(page: Page, chooser: Locator, step: "ArrowRight" |
 /* #1319: was "item page (pocket): fully reachable by keyboard", which
    audited /item/<id> on a phone. The item is its row's drawer on pocket
    home now, so the same audit runs over home with that drawer open. */
-test("item drawer (pocket): opened from the dial by keyboard, is fully reachable", async ({ page }) => {
+/* #1381: quarantined 2026-10-16 (agent-infra#30) -- runs outside the merge gate. */
+test("item drawer (pocket): opened from the dial by keyboard, is fully reachable", { tag: ["@quarantine"] }, async ({ page }) => {
   test.setTimeout(60_000);
   const household = await arriveAtHomePocket(page, { withItem: true });
   try {

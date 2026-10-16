@@ -1676,6 +1676,8 @@ fidelity_webkit:
       # `fidelity` for the full reasoning.
       node scripts/web-build-stamp.mjs check || echo "the fidelity gate will build its own copy"
       pnpm --filter orbit-web fidelity:webkit
+      # Quarantined tests (agent-infra#30): run and reported, never failing the job.
+      pnpm --filter orbit-web fidelity:webkit:quarantine || echo "fidelity_webkit: a quarantined test failed (non-blocking; see the issue named in the test)"
     - *reuse_evidence
   artifacts:
     name: orbit-fidelity-webkit-diffs
@@ -2158,6 +2160,9 @@ smoke:
         exit 0
       fi
     - bash scripts/test-frontend.sh
+    # Quarantined tests (agent-infra#30): run and reported, never failing the job.
+    - |
+      bash scripts/test-frontend.sh --quarantine || echo "smoke: a quarantined test failed (non-blocking; see the issue named in the test)"
     - *reuse_evidence
   after_script:
     # No diagnostics here: this shell has no daemon to ask (#1100), so the
@@ -2248,6 +2253,9 @@ smoke_firefox:
         exit 0
       fi
     - bash scripts/test-frontend.sh
+    # Quarantined tests (agent-infra#30): run and reported, never failing the job.
+    - |
+      bash scripts/test-frontend.sh --quarantine || echo "smoke_firefox: a quarantined test failed (non-blocking; see the issue named in the test)"
     - *reuse_evidence
   after_script:
     # No diagnostics here: this shell has no daemon to ask (#1100), so the
@@ -2370,6 +2378,9 @@ smoke_webkit:
         exit 0
       fi
     - bash scripts/test-frontend.sh
+    # Quarantined tests (agent-infra#30): run and reported, never failing the job.
+    - |
+      bash scripts/test-frontend.sh --quarantine || echo "smoke_webkit: a quarantined test failed (non-blocking; see the issue named in the test)"
     - *reuse_evidence
   after_script:
     # No diagnostics here: this shell has no daemon to ask (#1100), so the
@@ -2461,6 +2472,9 @@ smoke_webkit_mobile:
         exit 0
       fi
     - bash scripts/test-frontend.sh
+    # Quarantined tests (agent-infra#30): run and reported, never failing the job.
+    - |
+      bash scripts/test-frontend.sh --quarantine || echo "smoke_webkit_mobile: a quarantined test failed (non-blocking; see the issue named in the test)"
     - *reuse_evidence
   after_script:
     # No diagnostics here: this shell has no daemon to ask (#1100), so the

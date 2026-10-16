@@ -536,7 +536,10 @@ test.describe("the pocket film in WebKit (#1174)", () => {
   test.use({ reducedMotion: "reduce" });
 
   for (const phone of PHONES) {
-    test(`plays ${phone.through === "yours" ? "end to end" : "through chapter 3"} at ${phone.width}x${phone.height} under normal motion: the clock keeps moving through a reader's tap, the pill stays in front and readable, nothing flashes, and every mark is where it belongs`, async ({ browser }) => {
+    /* #1449: "plays through chapter 3" (390x844, 360x780) is quarantined 2026-10-16
+       (agent-infra#30) -- it runs outside the merge gate (`fidelity:webkit:quarantine`). */
+    const tag = phone.through === "yours" ? [] : ["@quarantine"];
+    test(`plays ${phone.through === "yours" ? "end to end" : "through chapter 3"} at ${phone.width}x${phone.height} under normal motion: the clock keeps moving through a reader's tap, the pill stays in front and readable, nothing flashes, and every mark is where it belongs`, { tag }, async ({ browser }) => {
       test.setTimeout(phone.through === "yours" ? 540_000 : 240_000);
       const size = { width: phone.width, height: phone.height };
       const context = await browser.newContext({

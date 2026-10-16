@@ -876,6 +876,14 @@ suite_env=(PLAYWRIGHT_BASE_URL="$base_url" COMPOSE_PROJECT_NAME="$project_name" 
 # retain-on-failure, on-first-retry).
 playwright_cmd=(node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts \
   "--trace=${ORBIT_E2E_TRACE:-retain-on-failure}" "${playwright_args[@]}")
+# The same split as CI's smoke jobs (scripts/test-frontend.sh, agent-infra#30):
+# the gate leaves out tests tagged @quarantine and decides this script's exit
+# status; after a passing gate the quarantined ones run against the same
+# stack and only report. tests/e2e/playwright.config.ts selects them from
+# ORBIT_E2E_QUARANTINE. The quarantine run writes to test-results/quarantine,
+# so it never clears the gate's traces, and ORBIT_E2E_REUSE drops the
+# "unclaimed" project, which the gate's own claim has already made untrue.
+quarantine_args=(--pass-with-no-tests --output test-results/quarantine)
 
 # #1235: WebKit cannot launch on this host -- its system packages need root
 # -- so a run that includes a WebKit project happens inside the Playwright
@@ -898,6 +906,28 @@ playwright_cmd=(node node_modules/@playwright/test/cli.js test --config tests/e2
 #   - Only `node` runs on the mounted tree: never `pnpm install` in here, which
 #     rewrites the host's node_modules (environment skill, 2026-08-24).
 # in_image was decided above, before the browser download.
+run_suite() { # run_suite STATUS_VAR EXTRA_ENV... -- EXTRA_PLAYWRIGHT_ARGS...
+  local status_var="$1" extra_env=() extra_args=() kv
+  shift
+  while [[ $# -gt 0 && "$1" != "--" ]]; do extra_env+=("$1"); shift; done
+  [[ $# -eq 0 ]] || shift
+  extra_args=("$@")
+  if [[ "$in_image" == 1 ]]; then
+    local run_env=()
+    for kv in "${image_env[@]}"; do run_env+=("$kv"); done
+    for kv in "${extra_env[@]}"; do run_env+=(-e "$kv"); done
+    docker run --rm --label "orbit-e2e-run=${project_name}" --network host --ipc=host --add-host orbit-oidc:127.0.0.1 \
+      -v "${repo_dir}:${repo_dir}" -w "$repo_dir" \
+      -v "${docker_cli}:/usr/local/bin/docker:ro" \
+      -v "$(dirname -- "$compose_plugin"):/usr/local/lib/docker/cli-plugins:ro" \
+      -v "${docker_sock}:/var/run/docker.sock" -e DOCKER_HOST=unix:///var/run/docker.sock \
+      "${run_env[@]}" "$playwright_image" \
+      sh -c "${oidc_forward} exec \"\$@\"" sh "${playwright_cmd[@]}" "${extra_args[@]}" || printf -v "$status_var" '%s' "$?"
+  else
+    env "${suite_env[@]}" "${extra_env[@]}" "${playwright_cmd[@]}" "${extra_args[@]}" || printf -v "$status_var" '%s' "$?"
+  fi
+}
+
 if [[ "$in_image" == 1 ]]; then
   # grep -m1, not `| head` (scripts/acceptance-sigpipe-safety.test.mjs, #809).
   playwright_image="$(grep -m1 '^  PLAYWRIGHT_IMAGE: ' .gitlab-ci.yml | sed 's/^  PLAYWRIGHT_IMAGE: *//')"
@@ -919,15 +949,17 @@ if [[ "$in_image" == 1 ]]; then
     oidc_forward="node -e 'const n=require(\"net\");n.createServer(s=>{const c=n.connect(${TEST_OIDC_PORT},\"127.0.0.1\");s.pipe(c).pipe(s);s.on(\"error\",()=>c.destroy());c.on(\"error\",()=>s.destroy())}).listen(4443,\"127.0.0.1\")' & sleep 1;"
   fi
   log "running Playwright inside ${playwright_image} (WebKit needs it; #1235)"
-  docker run --rm --label "orbit-e2e-run=${project_name}" --network host --ipc=host --add-host orbit-oidc:127.0.0.1 \
-    -v "${repo_dir}:${repo_dir}" -w "$repo_dir" \
-    -v "${docker_cli}:/usr/local/bin/docker:ro" \
-    -v "$(dirname -- "$compose_plugin"):/usr/local/lib/docker/cli-plugins:ro" \
-    -v "${docker_sock}:/var/run/docker.sock" -e DOCKER_HOST=unix:///var/run/docker.sock \
-    "${image_env[@]}" "$playwright_image" \
-    sh -c "${oidc_forward} exec \"\$@\"" sh "${playwright_cmd[@]}" || suite_status=$?
+fi
+run_suite suite_status ORBIT_E2E_QUARANTINE=exclude --
+
+if [[ "$suite_status" == 0 ]]; then
+  log "running the quarantined tests (@quarantine, agent-infra#30): reported, never failing this run"
+  quarantine_status=0
+  run_suite quarantine_status ORBIT_E2E_QUARANTINE=only ORBIT_E2E_REUSE=true -- "${quarantine_args[@]}"
+  [[ "$quarantine_status" == 0 ]] ||
+    log "a quarantined test failed (non-blocking; see the issue named in the test; traces in test-results/quarantine)"
 else
-  env "${suite_env[@]}" "${playwright_cmd[@]}" || suite_status=$?
+  log "the gate failed, so the quarantined tests were not run (CI skips them the same way)"
 fi
 
 if [[ "$keep" == 1 ]]; then

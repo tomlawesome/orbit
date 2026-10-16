@@ -156,7 +156,8 @@ test.afterAll(async ({ browser }) => {
   }
 });
 
-test("the newcomer's arrival: the climb, the labelled sky, the real count, the question", async ({ page, browser }) => {
+/* #1085: quarantined 2026-10-16 (agent-infra#30) -- runs outside the merge gate. */
+test("the newcomer's arrival: the climb, the labelled sky, the real count, the question", { tag: ["@quarantine"] }, async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the journey is asserted on the desk dialect");
   test.setTimeout(180_000);
 

@@ -235,7 +235,8 @@ test.afterAll(async ({ browser }) => {
   }
 });
 
-test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item", async ({ page, browser }) => {
+/* #1415: quarantined 2026-10-16 (agent-infra#30) -- runs outside the merge gate. */
+test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item", { tag: ["@quarantine"] }, async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the pocket has no suggestion rows yet (#434 follow-up)");
   test.setTimeout(240_000);
 

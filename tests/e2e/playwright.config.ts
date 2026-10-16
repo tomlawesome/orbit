@@ -109,6 +109,26 @@ for (const device of selectedWebkitDevices) {
 const runsWebkit = (device: (typeof WEBKIT_DEVICES)[number]) => runs("webkit") && selectedWebkitDevices.includes(device);
 
 const BULK_IGNORE = [/bootstrap-protection\.spec\.ts/, /maintenance\.spec\.ts/];
+
+// agent-infra#30: a test at its third flaky sighting carries the tag
+// @quarantine and leaves the merge gate; it still runs, after the gate, in a
+// run that reports without failing (scripts/test-frontend.sh --quarantine).
+// ORBIT_E2E_QUARANTINE picks the side: unset or "exclude" is the gate,
+// "only" the quarantine run, "include" everything (to chase one by hand).
+// It is a project-level filter on the device and maintenance projects
+// rather than the CLI's --grep because Playwright applies CLI filters only to
+// the projects it was asked for, and every device project below is also a
+// dependency of the maintenance chain, which runs its dependencies in full:
+// a --grep-invert alone left every quarantined test in the Chromium and
+// Firefox gates. "setup" and "unclaimed" are never filtered.
+const QUARANTINE_MODES = ["exclude", "only", "include"] as const;
+const quarantineMode = process.env.ORBIT_E2E_QUARANTINE || "exclude";
+if (!(QUARANTINE_MODES as readonly string[]).includes(quarantineMode)) {
+  throw new Error(`ORBIT_E2E_QUARANTINE is "${quarantineMode}"; expected one of ${QUARANTINE_MODES.join(", ")}`);
+}
+const quarantineFilter: Pick<Project, "grep" | "grepInvert"> =
+  quarantineMode === "only" ? { grep: /@quarantine/ } : quarantineMode === "exclude" ? { grepInvert: /@quarantine/ } : {};
+
 const deviceProjects: Project[] = [
   ...(runs("chromium")
     ? [
@@ -170,7 +190,7 @@ const deviceProjects: Project[] = [
       dependencies: ["setup"],
     }]
     : []),
-];
+].map((project) => ({ ...project, ...quarantineFilter }));
 
 // #1080: maintenance.spec.ts opens an INSTANCE-WIDE maintenance window — the
 // one piece of state per-worker identities cannot unshare, because a window
@@ -197,6 +217,7 @@ const maintenanceProjects: Project[] = [
     : []),
 ].map((project, index, chain) => ({
   ...project,
+  ...quarantineFilter,
   testMatch: /maintenance\.spec\.ts/,
   dependencies: index === 0 ? deviceProjects.map((device) => device.name as string) : [chain[index - 1].name],
 }));

@@ -381,8 +381,12 @@ const householdDeletion: Journey = {
 
 const JOURNEYS = [createOffline, drawerApproval, inboxApproval, householdDeletion];
 
+/* #1313: the /create journey's two checks are quarantined 2026-10-16
+   (agent-infra#30) -- they run outside the merge gate; the other journeys stay in it. */
+const quarantineTag = (journey: Journey) => ({ tag: journey === createOffline ? ["@quarantine"] : [] });
+
 for (const journey of JOURNEYS) {
-  test(`${journey.name} is announced, and the act can be repeated by keyboard`, async ({ page }) => {
+  test(`${journey.name} is announced, and the act can be repeated by keyboard`, quarantineTag(journey), async ({ page }) => {
     const defect = journey.announceDefect?.();
     test.fail(Boolean(defect), defect);
     test.setTimeout(90_000);
@@ -399,7 +403,7 @@ for (const journey of JOURNEYS) {
     }
   });
 
-  test(`${journey.name} leaves focus where the reader was`, async ({ page }) => {
+  test(`${journey.name} leaves focus where the reader was`, quarantineTag(journey), async ({ page }) => {
     const defect = journey.focusDefect?.();
     test.fixme(Boolean(journey.focusFixme?.()), journey.focusFixme?.());
     test.fixme(Boolean(defect) && isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);

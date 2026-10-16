@@ -6,6 +6,32 @@ cd "$repo_dir"
 
 readonly base_url="${PLAYWRIGHT_BASE_URL:-http://127.0.0.1:3000}"
 
+# The merge gate runs every test but the quarantined ones (tagged @quarantine:
+# a test at its third flaky sighting, agent-infra#30). `--quarantine` runs only
+# those, after the gate, against the same stack; CI reports its failure
+# without failing the job. tests/e2e/playwright.config.ts does the selecting
+# (ORBIT_E2E_QUARANTINE; its comment says why not --grep), and
+# scripts/test-e2e-local.sh splits its run the same way. In the quarantine run:
+#   - the gate has claimed the stack by then, so ORBIT_E2E_REUSE drops the
+#     "unclaimed" project, which would fail;
+#   - its HTML report and its test-results go beside the gate's, not over
+#     them;
+#   - --pass-with-no-tests: a run with no quarantined test in its projects
+#     would otherwise exit non-zero with "No tests found".
+extra_args=()
+case "${1:-}" in
+  "") export ORBIT_E2E_QUARANTINE=exclude ;;
+  --quarantine)
+    export ORBIT_E2E_QUARANTINE=only ORBIT_E2E_REUSE=true
+    export PLAYWRIGHT_HTML_OUTPUT_DIR="${PLAYWRIGHT_HTML_OUTPUT_DIR:-playwright-report/quarantine}"
+    extra_args=(--pass-with-no-tests --output test-results/quarantine)
+    ;;
+  *)
+    printf 'Orbit frontend tests: unknown argument %s (expected nothing, or --quarantine)\n' "$1" >&2
+    exit 2
+    ;;
+esac
+
 if ! command -v pnpm >/dev/null 2>&1 && {
   ! command -v node >/dev/null 2>&1 || [[ ! -f node_modules/@playwright/test/cli.js ]];
 }; then
@@ -24,7 +50,7 @@ curl --fail --silent --show-error --max-time 10 "$base_url/api/health" >/dev/nul
 }
 
 if command -v pnpm >/dev/null 2>&1; then
-  pnpm test:e2e
+  pnpm test:e2e "${extra_args[@]}"
 else
-  node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts
+  node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts "${extra_args[@]}"
 fi
