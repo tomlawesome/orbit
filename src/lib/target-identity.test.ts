@@ -181,10 +181,17 @@ describe("prepared directory for local accounts needs no OIDC secret (#1451, gua
       expect(isPreprovisionedInput(targetDir)).toBe(false);
     });
 
-    it("refuses a lone .env-orbit that is a symlink", () => {
-      writeFileSync(join(targetDir, "real-env"), `${lines.join("\n")}\n`, { mode: 0o600 });
-      symlinkSync(join(targetDir, "real-env"), envPath());
-      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    it("refuses a lone .env-orbit that is a symlink, even to a valid file elsewhere", () => {
+      // The real file lives outside the target, so .env-orbit is the only
+      // entry: only the symlink check can refuse this.
+      const elsewhere = mkdtempSync(join(tmpdir(), "orbit-target-identity-elsewhere-"));
+      try {
+        writeFileSync(join(elsewhere, "real-env"), `${lines.join("\n")}\n`, { mode: 0o600 });
+        symlinkSync(join(elsewhere, "real-env"), envPath());
+        expect(isPreprovisionedInput(targetDir)).toBe(false);
+      } finally {
+        rmSync(elsewhere, { recursive: true, force: true });
+      }
     });
 
     it("refuses an extra file beside a lone .env-orbit", () => {
@@ -225,9 +232,14 @@ describe("prepared directory for local accounts needs no OIDC secret (#1451, gua
     it("refuses a symlinked file inside .orbit-secrets", () => {
       writeEnv(lines);
       makeSecretsDir();
-      writeFileSync(join(targetDir, "real-secret"), "hunter2", { mode: 0o600 });
-      symlinkSync(join(targetDir, "real-secret"), join(secretsPath(), "postgres-password"));
-      expect(isPreprovisionedInput(targetDir)).toBe(false);
+      const elsewhere = mkdtempSync(join(tmpdir(), "orbit-target-identity-elsewhere-"));
+      try {
+        writeFileSync(join(elsewhere, "real-secret"), "hunter2", { mode: 0o600 });
+        symlinkSync(join(elsewhere, "real-secret"), join(secretsPath(), "postgres-password"));
+        expect(isPreprovisionedInput(targetDir)).toBe(false);
+      } finally {
+        rmSync(elsewhere, { recursive: true, force: true });
+      }
     });
 
     it("refuses a subdirectory inside .orbit-secrets", () => {

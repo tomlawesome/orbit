@@ -193,7 +193,10 @@ else. Before it downloads anything, the installer checks that:
 - if `.env-orbit` sets `ORBIT_AUTH_OIDC=true` (people sign in through an
   identity provider), `.orbit-secrets/oidc-client-secret` exists. With
   Orbit's own accounts only, `.env-orbit` on its own is enough: the
-  installer creates `.orbit-secrets/` and generates the other secrets;
+  installer creates `.orbit-secrets/` and generates the other secrets.
+  The exception is an `.env-orbit` that still names
+  `OIDC_CLIENT_SECRET_FILE` (kept when SSO is switched off): then the
+  secret file must be there too, or the install stops and changes nothing;
 - `.env-orbit` passes `bash scripts/configure.sh --check`.
 
 Anything else is refused before Docker or any download starts: extra files,
