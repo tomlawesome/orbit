@@ -90,3 +90,17 @@ describe("#1459: the drop zone copy", () => {
     expect(promise).not.toMatch(/photo|image/iu);
   });
 });
+
+describe("#1459: the home page drop zone copy", () => {
+  const home = readFileSync(resolve(import.meta.dirname, "../../web/src/routes/home/+page.svelte"), "utf8");
+  const line = home.split("\n").find((one) => one.includes('id="cdrop"')) ?? "";
+
+  it("says the file is attached as it is when reading is off", () => {
+    expect(line).toContain("documentReading === false");
+    expect(line).toContain("it is attached as it is");
+  });
+
+  it("keeps the reading promise when reading is on", () => {
+    expect(line).toContain("we'll read what we can");
+  });
+});

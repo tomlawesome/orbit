@@ -1873,7 +1873,7 @@
     <div class="crow">
       <!-- #1243: a real drop target, and a button that opens the file
            picker; either way the file goes to the full form, which reads it. -->
-      <div class="cdrop" id="cdrop" role="button" tabindex="0" aria-label="drop a document, or press enter to choose one">drop a document here — we'll read what we can</div>
+      <div class="cdrop" id="cdrop" role="button" tabindex="0" aria-label="drop a document, or press enter to choose one">{data?.documentReading === false ? "drop a document here — it is attached as it is" : "drop a document here — we'll read what we can"}</div>
       <a class="cfull" href={resolve("/create")}>open the full form →</a>
     </div>
   </div>
