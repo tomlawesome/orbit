@@ -119,3 +119,13 @@ describe("every [data-theme=...] selector names a pack that exists (#1047)", () 
     expect(strays, "selectors naming a pack theme.js does not declare").toEqual([]);
   });
 });
+
+describe("app.html carries the text-size literal beside the theme one (#1180)", () => {
+  it("reads orbit-text-size against the four steps and starts on comfortable", () => {
+    const match = /localStorage\.getItem\("orbit-text-size"\)[\s\S]{0,200}?\[([^\]]+)\]/.exec(APP_HTML);
+    expect(match, "app.html's text-size list").toBeTruthy();
+    const list = match[1].split(",").map((entry) => entry.trim().replace(/^"|"$/g, ""));
+    expect(list).toEqual(["standard", "comfortable", "large", "extra-large"]);
+    expect(/<html\b[^>]*\sdata-text-size="comfortable"/.test(APP_HTML)).toBe(true);
+  });
+});

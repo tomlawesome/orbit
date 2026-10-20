@@ -136,3 +136,19 @@ describe("effectiveReminderOffsets (#1151 A4-F1)", () => {
     expect(offsets.map((offset) => offset.daysBefore)).toEqual([14, 3]);
   });
 });
+
+describe("text size round trip (#1180)", () => {
+  it("keeps each of the four ids exactly as stored", () => {
+    expect([...textSizes]).toEqual(["standard", "comfortable", "large", "extra-large"]);
+    for (const textSize of textSizes) {
+      const parsed = themePreferenceSchema.parse({ theme: "afterdark", textSize, emailNotifications: false, pushNotifications: true });
+      expect(parsed).toEqual({ theme: "afterdark", textSize, emailNotifications: false, pushNotifications: true });
+    }
+  });
+
+  it("defaults to comfortable and refuses the label spelling", () => {
+    expect(themePreferenceSchema.parse({ theme: "dawn" }).textSize).toBe("comfortable");
+    expect(themePreferenceSchema.safeParse({ theme: "dawn", textSize: "extra large" }).success).toBe(false);
+  });
+});
+
