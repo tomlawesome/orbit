@@ -117,13 +117,13 @@ body{background:#060a18}
         display:flex;flex-direction:column;align-items:center;gap:12px;
         padding:0 24px calc(16px + env(safe-area-inset-bottom));text-align:center}
 .maintenance-page .notice p{margin:0}
-.maintenance-page .msg{margin:0;font:500 16px var(--mono);letter-spacing:.28em;color:var(--ink);
+.maintenance-page .msg{margin:0;font:500 1rem var(--mono);letter-spacing:.28em;color:var(--ink);
      text-transform:uppercase}
 .maintenance-page .latest{display:flex;flex-direction:column;gap:6px;max-width:44ch}
-.maintenance-page .when{font:500 13px var(--mono);letter-spacing:.18em;color:var(--ink-mid);
+.maintenance-page .when{font:500 0.8125rem var(--mono);letter-spacing:.18em;color:var(--ink-mid);
       text-transform:uppercase}
-.maintenance-page .body{font:400 18px/1.5 var(--ui);color:var(--ink)}
-.maintenance-page .back{font:500 13px var(--mono);letter-spacing:.18em;color:var(--ink);
+.maintenance-page .body{font:400 1.125rem/1.5 var(--ui);color:var(--ink)}
+.maintenance-page .back{font:500 0.8125rem var(--mono);letter-spacing:.18em;color:var(--ink);
       text-transform:uppercase}
 .maintenance-page .back time{color:var(--accent)}
 
@@ -148,13 +148,13 @@ body{background:#060a18}
 .maintenance-page .log{list-style:none;margin:6px 0 0;padding:0 12px;width:100%}
 .maintenance-page .log li{display:flex;flex-direction:column;gap:4px;padding:10px 0;
         border-top:1px solid rgba(233,237,248,.08)}
-.maintenance-page .log .body{font-size:13px;color:var(--ink-mid)}
+.maintenance-page .log .body{font-size:0.8125rem;color:var(--ink-mid)}
 /* The locked screen (#1405): the same column, three short paragraphs instead
    of a timeline, so it scrolls rather than clips wherever it runs long. */
 .maintenance-page .notice.key{overflow-y:auto;overscroll-behavior:contain}
 .maintenance-page .locked{display:flex;flex-direction:column;gap:10px;max-width:52ch}
-.maintenance-page .locked .body{font-size:16px}
-.maintenance-page .locked .note{font:400 13px/1.5 var(--ui);color:var(--ink-mid)}
+.maintenance-page .locked .body{font-size:1rem}
+.maintenance-page .locked .note{font:400 0.8125rem/1.5 var(--ui);color:var(--ink-mid)}
 @media (prefers-reduced-motion: reduce){
   .maintenance-page .flare,.maintenance-page .wash,.maintenance-page .ringflare,.maintenance-page .flarewave{opacity:0!important}
   .maintenance-page .glints .glint{animation:none;opacity:.45}
@@ -172,5 +172,5 @@ body{background:#060a18}
   .maintenance-page .earlier[open]{mask-image:none}
   .maintenance-page .earlier summary{position:static;min-height:44px;min-width:44px;
         align-items:center;justify-content:center;padding:0 14px}
-  .maintenance-page .log .body{font-size:15px;line-height:1.5}
+  .maintenance-page .log .body{font-size:0.9375rem;line-height:1.5}
 }

@@ -97,14 +97,14 @@ body.doc #inprogress{opacity:0}      /* the plot waits; the document has the flo
 body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
 
 .create-page .card{width:100%;padding:30px 36px;min-width:0}
-.create-page .card h2{font:600 22px var(--display)}
-.create-page .sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;margin:6px 0 22px}
+.create-page .card h2{font:600 1.375rem var(--display)}
+.create-page .sub{font:0.6875rem var(--mono);color:var(--ink-mid);letter-spacing:.04em;margin:6px 0 22px}
 
 .create-page .field{margin-bottom:13px}
-.create-page .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-quiet);
+.create-page .field label{display:block;font:0.65625rem var(--mono);letter-spacing:.12em;color:var(--ink-quiet);
              text-transform:uppercase;margin:0 0 6px}
 .create-page .field input,.create-page .field select,.create-page .field textarea{width:100%;background:var(--panel);border:1px solid var(--line);
-       border-radius:9px;color:var(--ink);font-size:13.5px;padding:9px 12px;font-family:var(--ui)}
+       border-radius:9px;color:var(--ink);font-size:0.84375rem;padding:9px 12px;font-family:var(--ui)}
 .create-page .field input::placeholder{color:var(--ink-quiet)}
 .create-page .field input:focus,.create-page .field select:focus,.create-page .field textarea:focus{border-color:var(--accent)}
 .create-page .field textarea{resize:vertical;line-height:1.5}
@@ -117,12 +117,12 @@ body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
    the engine's dry run holds the save until a name is given (ADR-0034). */
 .create-page .name-title{display:block;width:100%;background:none;border:0;padding:0;
   border-bottom:1px solid var(--line);
-  font:600 22px var(--display);line-height:1.25;color:var(--ink)}
+  font:600 1.375rem var(--display);line-height:1.25;color:var(--ink)}
 .create-page .name-title::placeholder{color:var(--ink-quiet);opacity:1}
 .create-page .name-title:focus{border-bottom:1px solid var(--accent)}
 
 .create-page .types{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
-.create-page .types button{font:11px var(--mono);color:var(--ink-mid);background:var(--panel);border:1px solid var(--line);
+.create-page .types button{font:0.6875rem var(--mono);color:var(--ink-mid);background:var(--panel);border:1px solid var(--line);
               border-radius:99px;padding:7px 14px;cursor:pointer;letter-spacing:.02em}
 .create-page .types button:hover{color:var(--ink)}
 .create-page .types button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent);background:rgba(216,180,90,.08)}
@@ -132,7 +132,7 @@ body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
    household-manage.html's section mark does, without pulling in that
    screen's full icon set for a picker this small. */
 .create-page .sections{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
-.create-page .sections button{display:inline-flex;align-items:center;gap:7px;font:11px var(--mono);
+.create-page .sections button{display:inline-flex;align-items:center;gap:7px;font:0.6875rem var(--mono);
               color:var(--ink-mid);background:var(--panel);border:1px solid var(--line);
               border-radius:99px;padding:7px 14px 7px 11px;cursor:pointer;letter-spacing:.02em}
 .create-page .sections button:hover{color:var(--ink)}
@@ -145,12 +145,12 @@ body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
 /* #848: the dashed border's colour shift alone is too quiet for a keyboard
    user to find; the same ring as every other field. */
 .create-page .dropzone:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.create-page .dropzone .dz-main{font-size:13.5px;color:var(--ink-mid)}
-.create-page .dropzone .dz-hint{font:10px var(--mono);color:var(--ink-quiet);margin-top:7px;letter-spacing:.06em}
+.create-page .dropzone .dz-main{font-size:0.84375rem;color:var(--ink-mid)}
+.create-page .dropzone .dz-hint{font:0.625rem var(--mono);color:var(--ink-quiet);margin-top:7px;letter-spacing:.06em}
 /* once the document is in the right-hand lane, the zone states the fact */
 body.doc .dropzone{border-style:solid;border-color:var(--line-soft);cursor:default;background:none}
 body.doc .dropzone .dz-main,body.doc .dropzone .dz-hint{display:none}
-.create-page .dz-held{display:none;font:11px var(--mono);color:var(--ink-mid);letter-spacing:.03em}
+.create-page .dz-held{display:none;font:0.6875rem var(--mono);color:var(--ink-mid);letter-spacing:.03em}
 .create-page .dz-held b{color:var(--accent-text);font-weight:400}
 body.doc .dz-held{display:block}
 
@@ -222,7 +222,7 @@ body.doc .dropzone.landed{animation:dz-landed .6s cubic-bezier(.3,.7,.2,1) backw
 .create-page .disclose-inner{overflow:hidden}
 .create-page .disclose-content{padding-top:20px;margin-top:18px;border-top:1px solid var(--line-soft)}
 
-.create-page .docnote{display:none;font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.6;margin:0 0 18px}
+.create-page .docnote{display:none;font:0.65625rem var(--mono);color:var(--ink-quiet);line-height:1.6;margin:0 0 18px}
 .create-page .docnote.show{display:block}
 
 .create-page .row2{display:flex;gap:14px}
@@ -236,14 +236,14 @@ body.doc .dropzone.landed{animation:dz-landed .6s cubic-bezier(.3,.7,.2,1) backw
 
 .create-page .prefix-wrap{position:relative}
 .create-page .prefix-wrap .prefix{position:absolute;left:12px;top:50%;transform:translateY(-50%);
-                      color:var(--ink-mid);font-size:13.5px;pointer-events:none}
+                      color:var(--ink-mid);font-size:0.84375rem;pointer-events:none}
 .create-page .prefix-wrap input{padding-left:24px}
 
 .create-page .field.sugg input,.create-page .field.sugg select{border-left:3px solid var(--accent)}
-.create-page .field .tag{display:none;align-items:center;gap:8px;margin-top:7px;font:10px var(--mono);
+.create-page .field .tag{display:none;align-items:center;gap:8px;margin-top:7px;font:0.625rem var(--mono);
             color:var(--accent-text);letter-spacing:.04em}
 .create-page .field.sugg .tag{display:flex}
-.create-page .field .tag button{font:10px var(--mono);color:var(--bg);background:var(--accent);border:0;
+.create-page .field .tag button{font:0.625rem var(--mono);color:var(--bg);background:var(--accent);border:0;
                    border-radius:6px;padding:2px 9px;cursor:pointer}
 /* #1131: --bg on --accent is 3.03:1 on dawn/clouds, same pair the pocket kit
    measured on its own filled pill (74e7a491) — white clears 4.5:1 there too. */
@@ -253,14 +253,14 @@ body.doc .dropzone.landed{animation:dz-landed .6s cubic-bezier(.3,.7,.2,1) backw
 .create-page .save-row{display:flex;flex-direction:column;gap:10px;margin-top:20px}
 .create-page .save-buttons{display:flex;align-items:center;gap:18px}
 .create-page .btn-primary{flex:0 0 auto;padding:12px 26px;border-radius:11px;border:0;cursor:pointer;
-             font:600 14px var(--display);color:var(--bg);background:var(--accent)}
+             font:600 0.875rem var(--display);color:var(--bg);background:var(--accent)}
 /* #1131: --bg on --accent is 3.03:1 on dawn/clouds, same pair the pocket kit
    measured on its own filled pill (74e7a491) — white clears 4.5:1 there too. */
 :is([data-theme=dawn],[data-theme=clouds]) .create-page .btn-primary{color:#fff}
 .create-page .btn-primary:hover{filter:brightness(1.05)}
 /* #1327: held by aria-disabled, not `disabled`, so it stays in the tab order */
 .create-page .btn-primary[aria-disabled="true"]{opacity:.5;cursor:default;filter:none}
-.create-page .cancel-link{font:12px var(--mono);color:var(--ink-quiet);text-decoration:none}
+.create-page .cancel-link{font:0.75rem var(--mono);color:var(--ink-quiet);text-decoration:none}
 .create-page .cancel-link:hover{color:var(--ink-mid)}
 
 /* ---- the right lane: reading, then the top sheet ---- */
@@ -268,7 +268,7 @@ body.doc .dropzone.landed{animation:dz-landed .6s cubic-bezier(.3,.7,.2,1) backw
           opacity:0;transform:translateX(-16px);pointer-events:none;visibility:hidden;
           transition:opacity .55s ease .18s,transform .65s cubic-bezier(.4,.5,.15,1) .18s,visibility 0s linear .83s}
 body.doc .readcard{opacity:1;transform:none;pointer-events:auto;visibility:visible;transition-delay:.18s,.18s,0s}
-.create-page .readcard h2{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+.create-page .readcard h2{font:0.65625rem var(--mono);letter-spacing:.18em;text-transform:uppercase;
              color:var(--ink-quiet);margin-bottom:16px}
 
 .create-page .focus{display:flex;flex-direction:column;align-items:center;text-align:center;padding:16px 0 6px}
@@ -279,10 +279,10 @@ body.snap .focus{display:none}
 @keyframes sweep{to{transform:rotate(360deg)}}
 @keyframes pull{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(.88);opacity:.5}}
 /* the owner's words, breathing — slow, never a spinner */
-.create-page .focusline{font:600 15.5px var(--display);letter-spacing:.01em;color:var(--ink);
+.create-page .focusline{font:600 0.96875rem var(--display);letter-spacing:.01em;color:var(--ink);
            animation:breathe 4.2s ease-in-out infinite}
 @keyframes breathe{0%,100%{opacity:.96}50%{opacity:.42}}
-.create-page .focus .why{font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.9;margin-top:12px}
+.create-page .focus .why{font:0.65625rem var(--mono);color:var(--ink-quiet);line-height:1.9;margin-top:12px}
 /* the lane's honest, settled states (document-card/round-6's `still` and
    `refused`, as the item page's reading card already draws them): the
    words stop breathing once there is nothing left to wait for. */
@@ -304,16 +304,16 @@ body.snap .topsheet{display:block;animation:landed .6s cubic-bezier(.3,.7,.2,1) 
                transform:rotate(-1.1deg) translate(-4px,3px);z-index:-1}
 .create-page .sheet img{display:block;border-radius:2px;background:#fff;width:auto;
              max-width:100%;height:auto;max-height:min(60vh,520px)}
-.create-page .cap{font:10.5px var(--mono);color:var(--ink-mid);line-height:1.8;margin-top:14px;text-align:center}
+.create-page .cap{font:0.65625rem var(--mono);color:var(--ink-mid);line-height:1.8;margin-top:14px;text-align:center}
 .create-page .cap b{color:var(--ink);font-weight:400}
-.create-page .honest{font:9.5px var(--mono);color:var(--ink-quiet);line-height:1.8;margin-top:8px;text-align:center}
-.create-page .attach{display:flex;flex-wrap:wrap;align-items:center;gap:5px 10px;font:11px var(--mono);
+.create-page .honest{font:0.59375rem var(--mono);color:var(--ink-quiet);line-height:1.8;margin-top:8px;text-align:center}
+.create-page .attach{display:flex;flex-wrap:wrap;align-items:center;gap:5px 10px;font:0.6875rem var(--mono);
         color:var(--ink-mid);border:1px solid var(--line-soft);border-radius:9px;
         padding:9px 12px;margin-top:16px}
 .create-page .attach .file{flex:1 1 100%;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .create-page .attach .clean{color:var(--ok-text)}
 .create-page .attach .refusedword{color:var(--degraded-text)}
-.create-page .attach button{margin-left:auto;font:10.5px var(--mono);color:var(--ink-quiet);
+.create-page .attach button{margin-left:auto;font:0.65625rem var(--mono);color:var(--ink-quiet);
                background:none;border:0;cursor:pointer;padding:0}
 .create-page .attach button:hover{color:var(--overdue)}
 /* The mockup's three "lit" marks went with its sketched page: a real page
@@ -335,6 +335,6 @@ body.snap .topsheet{display:block;animation:landed .6s cubic-bezier(.3,.7,.2,1) 
    refusal reason beside a disabled button, the same weight as any other
    field hint. `.fail` is a save that was actually attempted and refused:
    loud, not small print, and never a toast. */
-.create-page .save-note{font:10.5px var(--mono);color:var(--ink-mid);letter-spacing:.04em;line-height:1.5}
+.create-page .save-note{font:0.65625rem var(--mono);color:var(--ink-mid);letter-spacing:.04em;line-height:1.5}
 .create-page .save-note:empty{display:none}
-.create-page .save-note.fail{font:600 12px var(--ui);color:var(--overdue-text);letter-spacing:0}
+.create-page .save-note.fail{font:600 0.75rem var(--ui);color:var(--overdue-text);letter-spacing:0}

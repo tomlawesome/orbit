@@ -214,7 +214,7 @@
   /* THE PILLS: the belt's item card, verbatim (document-card/round-6's
      .acts); armed, the reader's remove pill */
   .ivacts{display:flex;flex-wrap:wrap;gap:7px;justify-content:center}
-  .ivfootrow:not(.pocket) .ivacts button{font:11px var(--mono);color:var(--act-text,var(--act,var(--ink-mid)));
+  .ivfootrow:not(.pocket) .ivacts button{font:0.6875rem var(--mono);color:var(--act-text,var(--act,var(--ink-mid)));
     background:var(--panel);border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
     border-radius:999px;padding:6px 13px;cursor:pointer;line-height:1.55}
   .ivfootrow:not(.pocket) .ivacts button:hover{border-color:var(--act,var(--ink))}
@@ -224,7 +224,7 @@
   .ivfootrow:not(.pocket) .ivacts button.lit{border-color:var(--act)}
   .ivacts .brk{display:none}
   /* the completion's "then <date>": its own line, plain text (#1337) */
-  .ivacts .then{flex-basis:100%;text-align:center;min-height:1.6em;font:11.5px/1.6 var(--mono);color:var(--ink-mid)}
+  .ivacts .then{flex-basis:100%;text-align:center;min-height:1.6em;font:0.71875rem/1.6 var(--mono);color:var(--ink-mid)}
   .ivacts .then b{font-weight:500;color:var(--ink)}
 
   /* THE TWO ICONS: 32px round glass in the muted ink, accent on hover and
@@ -246,7 +246,7 @@
   .ivicon.on i{border-color:var(--accent)}
   .ivicon:disabled{opacity:.5;cursor:default}
   /* "link copied", said beside the icon for two seconds */
-  .copied{font:11px var(--mono);color:var(--accent-text);letter-spacing:.04em;white-space:nowrap;
+  .copied{font:0.6875rem var(--mono);color:var(--accent-text);letter-spacing:.04em;white-space:nowrap;
     opacity:0;transition:opacity .2s;pointer-events:none;margin-right:2px}
   .copied.show{opacity:1}
   .copied:not(.show){width:0;overflow:hidden;margin:0}

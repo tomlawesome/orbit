@@ -48,7 +48,7 @@ body:has(.invite-card){margin:0}
 }
 
 .invite-card .name {
-  font: 500 13px var(--display, Georgia, serif);
+  font: 500 0.8125rem var(--display, Georgia, serif);
   letter-spacing: .42em;
   text-transform: lowercase;
   color: #8791b3;
@@ -56,7 +56,7 @@ body:has(.invite-card){margin:0}
 
 .invite-card h1 {
   margin: 0;
-  font: 600 25px var(--display, Georgia, serif);
+  font: 600 1.5625rem var(--display, Georgia, serif);
   letter-spacing: .01em;
   line-height: 1.4;
   color: #e6e9f2;
@@ -65,7 +65,7 @@ body:has(.invite-card){margin:0}
 
 .invite-card .said {
   margin: 0;
-  font: 11.5px var(--mono, ui-monospace, monospace);
+  font: 0.71875rem var(--mono, ui-monospace, monospace);
   letter-spacing: .06em;
   line-height: 1.8;
   color: #8791b3;
@@ -73,7 +73,7 @@ body:has(.invite-card){margin:0}
 }
 
 .invite-card .gate {
-  font: 600 12px var(--display, Georgia, serif);
+  font: 600 0.75rem var(--display, Georgia, serif);
   letter-spacing: .1em;
   text-transform: uppercase;
   color: #04060e;
@@ -118,7 +118,7 @@ body:has(.invite-card){margin:0}
     border-radius:50%;border:4.2px solid #8791b3}
   .invite-card .invite-ring i{position:absolute;left:93.26%;top:24.94%;width:29.4px;height:29.4px;
     margin:-14.7px 0 0 -14.7px;border-radius:50%;background:#d8b45a}
-  .invite-card h1{max-width:232px;font-size:20px;line-height:1.3;position:relative}
+  .invite-card h1{max-width:232px;font-size:1.25rem;line-height:1.3;position:relative}
   .invite-card .said{margin-top:28px;max-width:376px;font:.9375rem/1.55 var(--ui);letter-spacing:0;color:#aab1c8}
   .invite-card .gate{display:flex;align-items:center;justify-content:center;width:100%;max-width:376px;box-sizing:border-box;
     min-height:var(--p-hit);margin-top:28px;padding:0 24px;border-radius:99px;

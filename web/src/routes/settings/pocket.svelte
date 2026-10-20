@@ -835,7 +835,7 @@
     text-transform:uppercase;color:var(--ink-quiet);margin:4px 0 6px}
   .st-input{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;margin:0 0 12px;border-radius:12px;
     border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);color:var(--ink);
-    font:var(--p-type-body)/1.2 var(--ui)}
+    font:var(--p-type-input)/1.2 var(--ui)}
   .st-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
   .st-proven{margin:0 0 12px;color:var(--ok-text)}
 

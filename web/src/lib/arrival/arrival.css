@@ -42,7 +42,7 @@ body.arming :where(.arrival) .card{border-color:var(--accent);
 /* THE FIELDS, THE NOTE, THE REFUSAL LINE AND THE ACT are $lib/ringcard.css's
    (#914). The three rules below are the create form's alone: the name's
    display face, and the warm outline its `body.rejected` beat puts on it. */
-#hhname{font:600 16.5px var(--display);padding:10px 13px}
+#hhname{font:600 1.03125rem var(--display);padding:10px 13px}
 body.rejected .err{display:block;animation:errin .35s ease}
 body.rejected #hhname{border-color:var(--warm);
      box-shadow:0 0 0 1px color-mix(in srgb,var(--warm) 40%,transparent)}
@@ -74,7 +74,7 @@ body.shownew .nf{opacity:1;pointer-events:auto}
            background:none;border:0;cursor:pointer}
 .nf .nstar .glint{animation:northpulse 5.5s ease-in-out infinite;transform-origin:0 0}
 @keyframes northpulse{0%,100%{opacity:.75;transform:scale(1)}50%{opacity:1;transform:scale(1.18)}}
-.nf .nstar span{font:10px var(--mono);letter-spacing:.22em;color:var(--ink-quiet);text-transform:uppercase}
+.nf .nstar span{font:0.625rem var(--mono);letter-spacing:.22em;color:var(--ink-quiet);text-transform:uppercase}
 .nf .nstar:hover span{color:var(--accent-text)}
 .nf .minisys{position:absolute;transform-origin:118px 95px}
 .nf .minisys svg{display:block}
@@ -103,7 +103,7 @@ body.shownew.instrument .nf .nstar{animation:chromein .95s ease .34s both}
 body.counting .nf .disc{opacity:1;transform:translate(-50%,-50%)}
 .nf .disc .big{font:600 clamp(72px,8.6vw,118px) var(--display);line-height:.84;
                letter-spacing:-.035em;color:var(--accent-text)}
-.nf .disc p{font:11.5px var(--mono);color:var(--ink-mid);letter-spacing:.2em;
+.nf .disc p{font:0.71875rem var(--mono);color:var(--ink-mid);letter-spacing:.2em;
             text-transform:uppercase;margin-top:20px}
 .nf .disc p b{color:var(--ink);font-weight:400}
 
@@ -120,8 +120,8 @@ body.counting .nf .disc{opacity:1;transform:translate(-50%,-50%)}
 body.belong .nf .belong{opacity:1}
 .nf .belong .top{padding:20px 24px 15px;border-bottom:1px solid var(--line-soft);
                  background:var(--panel-raised);text-align:center}
-.nf .belong h2{font:600 24px var(--display);letter-spacing:.01em;color:var(--ink)}
-.nf .belong .top p{font:10.5px var(--mono);color:var(--ink-mid);margin-top:8px;
+.nf .belong h2{font:600 1.5rem var(--display);letter-spacing:.01em;color:var(--ink)}
+.nf .belong .top p{font:0.65625rem var(--mono);color:var(--ink-mid);margin-top:8px;
                    line-height:1.9;letter-spacing:.06em}
 .nf .belong ul{list-style:none;padding:8px 12px 6px;margin:0;max-height:38vh;overflow:auto}
 .nf .belong li button{width:100%;display:flex;align-items:center;gap:11px;
@@ -129,9 +129,9 @@ body.belong .nf .belong{opacity:1}
 .nf .belong li button:hover{background:var(--panel-raised)}
 .nf .belong li .dot{flex:none;width:9px;height:9px;border-radius:50%;
      border:1px solid var(--accent);opacity:.8}
-.nf .belong li .nm{flex:1;min-width:0;font:12.5px var(--ui);color:var(--ink);
+.nf .belong li .nm{flex:1;min-width:0;font:0.78125rem var(--ui);color:var(--ink);
      white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.nf .belong li .act{flex:none;font:10px var(--mono);letter-spacing:.13em;
+.nf .belong li .act{flex:none;font:0.625rem var(--mono);letter-spacing:.13em;
      color:var(--ink-quiet);text-transform:uppercase}
 .nf .belong li button:hover .act{color:var(--accent-text)}
 /* #854's graded companion, not raw --warm: raw fails 4.5:1 on the daylight
@@ -145,14 +145,14 @@ body.belong .nf .belong{opacity:1}
    space rather than being hidden with `display`, which some screen readers
    do not treat as a live-region update when text and visibility change in
    the same tick. */
-.nf .belong li .note{margin:0 0 0 32px;font:10px var(--mono);color:var(--warm-text);
+.nf .belong li .note{margin:0 0 0 32px;font:0.625rem var(--mono);color:var(--warm-text);
      line-height:1.6;letter-spacing:.02em}
 .nf .belong li .note:not(:empty){margin-top:2px;padding-bottom:6px}
 .nf .belong .own{border-top:1px solid var(--line-soft);padding:13px 24px 16px;text-align:center}
-.nf .belong .own button{font:11.5px var(--mono);color:var(--accent-text);letter-spacing:.04em;
+.nf .belong .own button{font:0.71875rem var(--mono);color:var(--accent-text);letter-spacing:.04em;
      background:none;border:0;padding:0;cursor:pointer}
 .nf .belong .own button:hover{text-decoration:underline}
-.nf .belong .own span{display:block;font:10px var(--mono);color:var(--ink-quiet);margin-top:7px}
+.nf .belong .own span{display:block;font:0.625rem var(--mono);color:var(--ink-quiet);margin-top:7px}
 
 /* ── THE "NAME YOUR OWN SYSTEM" DRAWER (#1263) ────────────────────────────
    The footer's button is the handle (aria-expanded); opening it drops the
@@ -184,9 +184,9 @@ body.belong .nf .belong{opacity:1}
   .nf .belong .create .field{margin-bottom:14px}
   .nf .belong .create .field label{font-size:var(--p-type-caps,12px)}
   .nf .belong .create .field input,.nf .belong .create .field select,.nf .belong .create #hhname{height:48px;
-       font-size:var(--p-type-body,16px);padding:0 14px;border-radius:10px}
+       font-size:var(--p-type-input,16px);padding:0 14px;border-radius:10px}
   .nf .belong .create .note,.nf .belong .create .err{font-size:var(--p-type-caps,12px)}
-  .nf .belong .create #gobtn{width:100%;min-height:var(--p-hit,44px);font-size:14px}
+  .nf .belong .create #gobtn{width:100%;min-height:var(--p-hit,44px);font-size:0.875rem}
 }
 
 /* ══ PINNED ══════════════════════════════════════════════════════════════

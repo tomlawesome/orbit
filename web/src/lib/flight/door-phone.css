@@ -77,7 +77,7 @@
      site's horizontal proportion (2.3em) kept. Dawn's pill and the goodbye's
      "Sign back in" alike. */
   #dawn .gate,#dusk.asdawn .gate{display:inline-flex;align-items:center;justify-content:center;
-        min-height:44px;font-size:15px;padding-block:0;padding-inline:2.3em}
+        min-height:44px;font-size:0.9375rem;padding-block:0;padding-inline:2.3em}
   /* `incomplete` keeps the pill, so its words stand under the taller one */
   body[data-state="incomplete"] #dawn .state{margin-top:18px}
 
@@ -133,7 +133,7 @@
   /* the claim card has no heading, and an empty ring is a hole: the ring
      keeps the word (round 1) */
   .ringcard .bigring .ringword{display:block;position:relative;z-index:1;
-        font:600 72px var(--display);letter-spacing:.01em;line-height:1;background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 18.9px rgba(255,206,140,.2));
+        font:600 4.5rem var(--display);letter-spacing:.01em;line-height:1;background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 18.9px rgba(255,206,140,.2));
         transition:font-size .5s ease}
 
   .ringcard #formlayer{position:relative;inset:auto;z-index:4;flex:none;
@@ -147,7 +147,7 @@
   .ringcard #formlayer .card .ask{position:absolute;left:50%;
         top:calc(0px - var(--door-gap) - var(--door-ring) / 2);transform:translate(-50%,-50%);
         width:236px;height:auto;margin:0;padding:0;overflow:visible;clip:auto;white-space:normal;
-        font:600 22px/1.2 var(--display);letter-spacing:.005em;background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 11px rgba(255,206,140,.2));text-align:center;
+        font:600 1.375rem/1.2 var(--display);letter-spacing:.005em;background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 11px rgba(255,206,140,.2));text-align:center;
         transition:top .5s cubic-bezier(.55,0,.2,1),font-size .5s ease,width .5s ease}
 
   /* THE FIELDS: full width in the column, 48px, 16px so iOS never zooms,
@@ -155,7 +155,7 @@
   .ringcard #formlayer .card .field{margin-bottom:14px}
   .ringcard #formlayer .card .field label{font-size:var(--p-type-caps);letter-spacing:var(--p-type-caps-track);
         margin:0 0 6px;text-shadow:0 1px 5px rgba(4,6,14,.9)}
-  .ringcard #formlayer .card .field input{height:48px;font-size:var(--p-type-body);padding:0 14px;border-radius:10px}
+  .ringcard #formlayer .card .field input{height:48px;font-size:var(--p-type-input);padding:0 14px;border-radius:10px}
   /* §1.12: a 2px accent ring outside every focused control */
   .ringcard #formlayer .card .field input:focus-visible{outline:2px solid #d8b45a;outline-offset:2px}
   .ringcard #formlayer .card .pw{position:relative}
@@ -192,7 +192,7 @@
      size that reads at arm's length, then two acts of EQUAL weight -- the
      owner's "equally weighted" -- both 52px and full width, differing only
      in colour. */
-  .ringcard #formlayer .card.approve .approve-facts{font:15px/1.6 var(--ui);letter-spacing:0;
+  .ringcard #formlayer .card.approve .approve-facts{font:0.9375rem/1.6 var(--ui);letter-spacing:0;
         color:#c0cade;margin:0 0 24px;text-shadow:0 1px 5px rgba(4,6,14,.9)}
   .ringcard #formlayer .card.approve .approve-facts li+li{margin-top:2px}
   .ringcard #formlayer .card.approve .approve-facts b{color:#f0f4fb}
@@ -225,7 +225,7 @@
     :where(body.showform:not(.launching)) .ringcard .bigring .pocketstroke{--stroke:2.7px}
     :where(body.showform:not(.launching)) .ringcard .bigring .ringorbit i{
           width:23.4px;height:23.4px;margin:-11.7px 0 0 -11.7px}
-    :where(body.showform:not(.launching)) .ringcard #formlayer .card .ask{width:200px;font-size:20px}
+    :where(body.showform:not(.launching)) .ringcard #formlayer .card .ask{width:200px;font-size:1.25rem}
   }
   /* ringcard.css's rule that shows the ring while a card is up names its
      own transition (opacity and visibility) at a specificity the column's
@@ -255,7 +255,7 @@
     .ringcard .bigring .ringorbit i{width:calc(var(--door-from-ring, 302.4px) * .09722);
           height:calc(var(--door-from-ring, 302.4px) * .09722);
           margin:calc(var(--door-from-ring, 302.4px) * -.04861) 0 0 calc(var(--door-from-ring, 302.4px) * -.04861)}
-    .ringcard #formlayer .card .ask{top:calc(0px - var(--door-gap) - var(--door-from-ring, 302.4px) / 2);width:236px;font-size:22px}
+    .ringcard #formlayer .card .ask{top:calc(0px - var(--door-gap) - var(--door-from-ring, 302.4px) / 2);width:236px;font-size:1.375rem}
   }
 
   /* ══ THE RING CLOSES WHILE YOU TYPE ════════════════════════════════════
@@ -268,10 +268,10 @@
   body.typing .ringcard .bigring .ringstroke,
   body.typing .ringcard .bigring .pocketstroke{--stroke:1.5px}
   body.typing .ringcard .bigring .ringorbit i{width:9.4px;height:9.4px;margin:-4.7px 0 0 -4.7px}
-  body.typing .ringcard .bigring .ringword{font-size:22px;filter:drop-shadow(0 0 4px rgba(255,206,140,.2))}
+  body.typing .ringcard .bigring .ringword{font-size:1.375rem;filter:drop-shadow(0 0 4px rgba(255,206,140,.2))}
   body.typing .ringcard #formlayer{margin-top:46px}
   body.typing .ringcard #formlayer .card .ask{top:-34px;transform:translate(-50%,0);
-        font-size:15px;width:100%;filter:drop-shadow(0 0 4px rgba(255,206,140,.2))}
+        font-size:0.9375rem;width:100%;filter:drop-shadow(0 0 4px rgba(255,206,140,.2))}
   body.typing .ringcard #formlayer .card .field{margin-bottom:10px}
   body.typing .ringcard #formlayer .card .act{margin-top:14px}
 }
