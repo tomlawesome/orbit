@@ -91,9 +91,10 @@ const HARLOW_ITEMS = [
     recurrenceMonths: 12, reminderDays: [21], notes: null,
     snoozedUntil: null, version: 2, updatedAt: "2026-06-12T10:35:00.000Z",
   },
-  /* #1460: the dearest body the size curve draws (£50,000 a year, its
-     ceiling). Inside the year ring (the household room does not grow) and carrying a document, so it rides the pocket dial
-     well clear of the others. */
+  /* #1460: the dearest body the size curve draws (50,000 pounds a year, its
+     ceiling). It carries a document, so it rides the pocket dial, and falls
+     100 days out, well clear of the other pocket bodies. As one more star it
+     moves Harlow Home's room layout slightly, as do the smaller halos. */
   {
     id: "i-roof", title: "Roof replacement", sectionId: "s-home", status: "active",
     subtype: "service", scheduleKind: "service", provider: null, reference: null,

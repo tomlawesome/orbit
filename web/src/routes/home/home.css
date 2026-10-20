@@ -179,6 +179,9 @@
   /* healthy deployments render nothing on the left at all */
 
   .body-link{cursor:pointer}
+  .body-vis{pointer-events:none}
+  .body-vis :is(circle,path){transition:transform .25s;transform-origin:center;transform-box:fill-box}
+  .body-vis.hot circle{transform:scale(1.5)}
   .body-link :is(circle,path){pointer-events:all}
   .body-link :is(circle,path){transition:transform .25s;transform-origin:center;transform-box:fill-box}
   .body-link:is(:hover,:focus-visible) circle{transform:scale(1.5)}
@@ -541,6 +544,7 @@
   .now-month{fill:var(--accent-text);font-weight:600}
   /* POL-4: bidirectional highlight */
   .body-link.lit :is(circle,path){transform:scale(1.6)}
+  .body-vis.lit :is(circle,path){transform:scale(1.6)}
   .desk .item.lit{border-color:var(--accent)}
   /* POL-5: constellations light on section hover */
   /* POL-6: chart callout — legible, quadrant-aware */
@@ -569,7 +573,8 @@
      you, so there is nothing to read: just the sun, the far greens, and the
      sky celebrating. No text, no instrument. */
   body.quiet .breathe, body.quiet .ping, body.quiet [data-body="i-gutter"],
-  body.quiet [data-body="i-mot"], body.quiet [data-body="i-boiler"]{display:none}
+  body.quiet [data-body="i-mot"], body.quiet [data-body="i-boiler"],
+  body.quiet [data-vis="i-gutter"], body.quiet [data-vis="i-mot"], body.quiet [data-vis="i-boiler"]{display:none}
   .chrome{transition:opacity 2.2s ease}
   body.quiet .chrome{opacity:.06}
   /* the fill joins the transition for the sun's hover (§15, 08-17) */
@@ -608,10 +613,12 @@
      data-body> parents are already matched by the terms that remain, so POL-10
      still reaches them through the wrapper. */
   .dial g[fill="url(#p-jade)"],
-  .dial [data-body="i-smoke"],.dial [data-body="i-svc"]{
+  .dial [data-body="i-smoke"],.dial [data-body="i-svc"],
+  .dial [data-vis="i-smoke"],.dial [data-vis="i-svc"]{
     transition:transform 2s cubic-bezier(.3,.6,.2,1);transform-origin:190px 190px}
   body.storm .dial g[fill="url(#p-jade)"],
-  body.storm .dial [data-body="i-smoke"],body.storm .dial [data-body="i-svc"]{
+  body.storm .dial [data-body="i-smoke"],body.storm .dial [data-body="i-svc"],
+  body.storm .dial [data-vis="i-smoke"],body.storm .dial [data-vis="i-svc"]{
     transform:scale(1.17)}
   /* the search dissolve's own opacity transition joins this rule rather than
      `.dial :is(.chrome,.body-link,.ping,.belt)` below -- .belt already owns a
@@ -692,8 +699,8 @@
      transition lives on its own rule above, for the reason noted there;
      .chrome/.body-link/.ping carry no other transition, so this one is safe
      to declare outright. */
-  .dial :is(.chrome,.body-link,.ping){transition:opacity .55s ease}
-  body.searching .dial :is(.chrome,.body-link,.ping,.belt){opacity:.05}
+  .dial :is(.chrome,.body-link,.body-vis,.ping){transition:opacity .55s ease}
+  body.searching .dial :is(.chrome,.body-link,.body-vis,.ping,.belt){opacity:.05}
   /* .minisys already owns a transform+opacity transition for the household
      flight (CON-6); re-declaring it bare here would drop the transform half
      the same way .belt's would have, and unlike .belt there is no shared
@@ -704,7 +711,7 @@
      1.25s on the way out the rare moment the two overlap. */
   body.searching .minisys{opacity:.2;transition:opacity .55s ease}
   @media (prefers-reduced-motion: reduce){
-    .dial :is(.chrome,.body-link,.ping,.belt),.minisys{transition:none}
+    .dial :is(.chrome,.body-link,.body-vis,.ping,.belt),.minisys{transition:none}
   }
 
   /* CON-6 v17: households are fixed coordinates. The CAMERA flies: the
@@ -1171,8 +1178,8 @@
    packs.css): the same status colours seen through morning air. The haze is a
    pale halo, not a glow — it lightens the edge, it does not add light. Gloss
    stays off; light packs do not do specular and that law is unchanged. */
-[data-theme=dawn] .dial .body-link :is(circle,path),
-[data-theme=clouds] .dial .body-link :is(circle,path){
+[data-theme=dawn] .dial :is(.body-link,.body-vis) :is(circle,path),
+[data-theme=clouds] .dial :is(.body-link,.body-vis) :is(circle,path){
   filter:drop-shadow(0 0 3px rgba(255,240,220,.85))}
 /* The sun keeps its glow here — it is the reason the sky is warming, and it
    is the ONE thing in these packs allowed to glow: the Furnace's dawn sun

@@ -342,20 +342,24 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
       }
       callout.classList.add("show");
       document.querySelector("#" + link.dataset.body)?.classList.add("lit");
+      document.querySelector('.body-vis[data-vis="' + link.dataset.body + '"]')?.classList.add("lit");
     });
     link.addEventListener("mouseleave", () => {
       setTimeout(() => { if (!callout.matches(":hover")) {
         callout.classList.remove("show");
         document.querySelector("#" + link.dataset.body)?.classList.remove("lit");
+        document.querySelector('.body-vis[data-vis="' + link.dataset.body + '"]')?.classList.remove("lit");
       }}, 160);
     });
   }
   for (const item of document.querySelectorAll(".item[id]")) {
     item.addEventListener("mouseenter", () => {
       document.querySelector('.body-link[data-body="' + item.id + '"]')?.classList.add("lit");
+      document.querySelector('.body-vis[data-vis="' + item.id + '"]')?.classList.add("lit");
     });
     item.addEventListener("mouseleave", () => {
       document.querySelector('.body-link[data-body="' + item.id + '"]')?.classList.remove("lit");
+      document.querySelector('.body-vis[data-vis="' + item.id + '"]')?.classList.remove("lit");
     });
   }
   /* POL-5: constellations on section-header hover */
