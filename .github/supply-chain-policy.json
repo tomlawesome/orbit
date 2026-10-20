@@ -53,28 +53,6 @@
     {
       "kind": "vulnerability",
       "scope": "image",
-      "id": "CVE-2026-14257",
-      "package": "brace-expansion",
-      "installedVersion": "5.0.7",
-      "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-69152",
-      "package": "brace-expansion",
-      "installedVersion": "5.0.7",
-      "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
       "id": "CVE-2026-32285",
       "package": "github.com/buger/jsonparser",
       "installedVersion": "v1.1.1",
@@ -300,17 +278,6 @@
       "installedVersion": "v0.30.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-69192",
-      "package": "ip-address",
-      "installedVersion": "10.2.0",
-      "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved.",
       "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
@@ -878,127 +845,6 @@
     {
       "kind": "vulnerability",
       "scope": "image",
-      "id": "CVE-2026-73566",
-      "package": "tar",
-      "installedVersion": "7.5.19",
-      "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-102276",
-      "package": "brace-expansion",
-      "installedVersion": "5.0.7",
-      "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved (2026-10-01). Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-102278",
-      "package": "brace-expansion",
-      "installedVersion": "5.0.7",
-      "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved (2026-10-01). Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-19534",
-      "package": "undici",
-      "installedVersion": "6.27.0",
-      "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved (2026-10-01). Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-103111",
-      "package": "libpcre2-8-0",
-      "installedVersion": "10.46-1~deb13u2",
-      "owner": "Orbit maintainers",
-      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-75804",
-      "package": "libssl3t64",
-      "installedVersion": "3.5.7-1~deb13u2",
-      "owner": "Orbit maintainers",
-      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-75804",
-      "package": "openssl",
-      "installedVersion": "3.5.7-1~deb13u2",
-      "owner": "Orbit maintainers",
-      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-75804",
-      "package": "openssl-provider-legacy",
-      "installedVersion": "3.5.7-1~deb13u2",
-      "owner": "Orbit maintainers",
-      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-84782",
-      "package": "libssl3t64",
-      "installedVersion": "3.5.7-1~deb13u2",
-      "owner": "Orbit maintainers",
-      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-84782",
-      "package": "openssl",
-      "installedVersion": "3.5.7-1~deb13u2",
-      "owner": "Orbit maintainers",
-      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-84782",
-      "package": "openssl-provider-legacy",
-      "installedVersion": "3.5.7-1~deb13u2",
-      "owner": "Orbit maintainers",
-      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
       "id": "CVE-2026-78667",
       "package": "stdlib",
       "installedVersion": "v1.26.7",
@@ -1032,39 +878,6 @@
     {
       "kind": "vulnerability",
       "scope": "image",
-      "id": "CVE-2026-8286",
-      "package": "libcurl4t64",
-      "installedVersion": "8.14.1-2+deb13u5",
-      "owner": "Orbit maintainers",
-      "rationale": "curl library in clamav/clamav:1.5.4-debian; the distribution fixed it in 8.14.1-2+deb13u7 (DSA-6558-1) on 2026-10-14, but the 1.5.4-debian tag was last rebuilt on 2026-10-12, before the fix. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-8927",
-      "package": "libcurl4t64",
-      "installedVersion": "8.14.1-2+deb13u5",
-      "owner": "Orbit maintainers",
-      "rationale": "curl library in clamav/clamav:1.5.4-debian; the distribution fixed it in 8.14.1-2+deb13u7 (DSA-6558-1) on 2026-10-14, but the 1.5.4-debian tag was last rebuilt on 2026-10-12, before the fix. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-92392",
-      "package": "libcurl4t64",
-      "installedVersion": "8.14.1-2+deb13u5",
-      "owner": "Orbit maintainers",
-      "rationale": "curl library in clamav/clamav:1.5.4-debian; the distribution fixed it in 8.14.1-2+deb13u7 (DSA-6558-1) on 2026-10-14, but the 1.5.4-debian tag was last rebuilt on 2026-10-12, before the fix. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
       "id": "CVE-2026-92392",
       "package": "libcurl3t64-gnutls",
       "installedVersion": "8.18.0-1ubuntu2.7",
@@ -1081,6 +894,39 @@
       "installedVersion": "8.18.0-1ubuntu2.7",
       "owner": "Orbit maintainers",
       "rationale": "curl library in apache/tika:4.1.0-full; the distribution fixed it in 8.18.0-1ubuntu2.8 (USN-8927-1) on 2026-10-14, but 4.1.0-full is still the newest release tag and has not been rebuilt since 2026-09-29. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-102276",
+      "package": "brace-expansion",
+      "installedVersion": "5.0.9",
+      "owner": "Orbit maintainers",
+      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-102278",
+      "package": "brace-expansion",
+      "installedVersion": "5.0.9",
+      "owner": "Orbit maintainers",
+      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-19534",
+      "package": "undici",
+      "installedVersion": "6.28.0",
+      "owner": "Orbit maintainers",
+      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20.",
       "expiresOn": "2026-11-04",
       "trackingIssue": 794
     }
@@ -1106,8 +952,8 @@
     {
       "name": "Node.js build and runtime",
       "tag": "node:24-alpine",
-      "reference": "node:24-alpine@sha256:83f1c388c31fb2e51f7cbd4dea949b96260798c98f206e8e4696bc93bd964e3a",
-      "indexDigest": "sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1",
+      "reference": "node:24-alpine@sha256:429bdfbc204b4eabc6438e6d34e4e9d8dd2ca1df8289bcd78cdd3c5db387b7a5",
+      "indexDigest": "sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f",
       "platform": "linux/amd64",
       "locations": [
         "tests/oidc/Dockerfile"
@@ -1117,7 +963,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/docker-node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-09-24",
+      "resolvedOn": "2026-10-20",
       "reviewBy": "2026-10-30"
     },
     {
@@ -1143,8 +989,8 @@
     {
       "name": "ClamAV malware scanner",
       "tag": "clamav/clamav:1.5.4-debian",
-      "reference": "clamav/clamav:1.5.4-debian@sha256:38482a33c6791529d57ece99e5fda54ab94f85534d43306a0b37f5c5bd0aa498",
-      "indexDigest": "sha256:9bb8712a50f0e75166e936c452cd82dd5e5be0b85586598930b5bbb84a99a578",
+      "reference": "clamav/clamav:1.5.4-debian@sha256:bd1a3d9f7d90b1c1e2703b1e1e86354102e0be296899a3c941374a597f745e6c",
+      "indexDigest": "sha256:d7ede3cefeaf3b8a72ebcdee849d13f504bbca3f3b3cfade5bc7b6ee06a4f62c",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml",
@@ -1155,7 +1001,7 @@
       "license": "GPL-2.0-only",
       "licenseSource": "https://github.com/Cisco-Talos/clamav/blob/main/COPYING.txt",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-01",
+      "resolvedOn": "2026-10-20",
       "reviewBy": "2026-10-30"
     },
     {
