@@ -15,7 +15,7 @@ import {
   type DocumentProposal,
 } from "@/server/documents/suggestions";
 import { classifyDocumentStructure, detectDocumentMediaType, type DocumentStructureReason } from "@/server/documents/validation";
-import { extractTextWithTika, MAX_EXTRACTED_CHARACTERS } from "@/server/documents/tika";
+import { documentReadingEnabled, extractTextWithTika, MAX_EXTRACTED_CHARACTERS } from "@/server/documents/tika";
 import { requireHouseholdAccess } from "@/server/workspace-access";
 const parserRecoveryMessage = "Suggestions are unavailable right now. Review the fields manually; the document can still be attached.";
 const processorDisabledMessage = "Automatic suggestions require the optional document processor. You can still attach this file.";
@@ -196,6 +196,15 @@ export async function inspectItemDocument(input: {
         return {
           extracted: false,
           message: parserRecoveryMessage,
+          suggestions: buildDocumentSuggestions(input.filename, undefined),
+          attachmentDisposition: "attachable",
+          reason: structureReason,
+        };
+      }
+      if (!documentReadingEnabled()) {
+        // #1459: reading is off by configuration, not a fault: no parser call, no warning, no apology.
+        return {
+          extracted: false,
           suggestions: buildDocumentSuggestions(input.filename, undefined),
           attachmentDisposition: "attachable",
           reason: structureReason,

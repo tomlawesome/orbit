@@ -1,5 +1,5 @@
 import { AppError } from "@/lib/app-error";
-import { log } from "@/lib/logger";
+import { log, operationalDetail } from "@/lib/logger";
 import { getDocumentConfig } from "@/server/documents/config";
 import type { SupportedDocumentMediaType } from "@/server/documents/validation";
 
@@ -19,6 +19,23 @@ type ParserFailure =
   | "unexpected_content_type"
   | "oversized_response"
   | "undecodable_response";
+
+/** #1459: whether Orbit reads documents at all: only when TIKA_URL is set. */
+export function documentReadingEnabled(): boolean {
+  return getDocumentConfig().tika.url !== null;
+}
+
+/** One start-up line when reading is off, so the owner can see why; never the address, never a request. */
+export function reportDocumentReadingStatus(): void {
+  if (documentReadingEnabled()) return;
+  log.info({
+    event: "document.parse",
+    state: "disabled",
+    reason: "configuration_optional",
+    action: "none",
+    detail: operationalDetail`document reading is off: TIKA_URL is not set`,
+  });
+}
 
 function elapsedMilliseconds(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt);
