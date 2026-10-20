@@ -99,7 +99,7 @@
 #                             Defaults to 48. A numeric id survives a rename;
 #                             the project is gitlab.tomlawson.io/ai/orbit-base-image.
 #   BASE_IMAGE_REF            The ref whose latest `publish` job artifact is
-#                             read. Defaults to `primary` (that project's
+#                             read. Defaults to `main` (that project's
 #                             protected default branch).
 #   BASE_IMAGE_JOB            The job name that produced the artifact.
 #                             Defaults to `publish`.
@@ -150,7 +150,7 @@ policy_path="${POLICY_PATH:-$repo_dir/.github/supply-chain-policy.json}"
 check_script="${CHECK_SCRIPT:-$repo_dir/scripts/check-base-image-current.sh}"
 
 base_image_project="${BASE_IMAGE_PROJECT:-48}"
-base_image_ref="${BASE_IMAGE_REF:-primary}"
+base_image_ref="${BASE_IMAGE_REF:-main}"
 base_image_job="${BASE_IMAGE_JOB:-publish}"
 branch_name="${BASE_REPIN_BRANCH:-chore/base-image-repin}"
 target_branch="${BASE_REPIN_TARGET_BRANCH:-dev}"
