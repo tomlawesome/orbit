@@ -1004,6 +1004,9 @@ fast:
     # The door copy is only ever changed by the import (#1371): offline, two
     # paths and one hash, so it runs before the install and fails in a second.
     - bash scripts/ci/check-door-unchanged.sh
+    # scripts/ci/carry-previous-release.sh needs jq, and its tests run it
+    # for real; the Node image has none (pipeline 2777: 32 tests at exit 127).
+    - command -v jq > /dev/null 2>&1 || { export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq --no-install-recommends jq; }
     - pnpm install --frozen-lockfile
     # Everything from here runs unprivileged, because two of these tests assert
     # a permission refusal that root does not receive. See .drop_to_node.
