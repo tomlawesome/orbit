@@ -58,7 +58,7 @@ describe("#1459: readPickedDocument and the documentReading flag", () => {
     const { readPickedDocument } = await import("../../web/src/lib/data/document-read.js");
     const { page, read } = readPickedDocument("h1", file(), { documentReading: false });
     await Promise.all([page, read]);
-    expect(posted.some((href) => !href.includes("item-document-inspection"))).toBe(true);
+    expect(posted.some((href) => href.includes("item-document-preview"))).toBe(true);
   });
 
   it("sends the read request when document reading is on", async () => {
@@ -102,5 +102,28 @@ describe("#1459: the home page drop zone copy", () => {
 
   it("keeps the reading promise when reading is on", () => {
     expect(line).toContain("we'll read what we can");
+  });
+});
+
+describe("#1459: the lane does not claim a read when reading is off", () => {
+  const src = (p) => readFileSync(resolve(import.meta.dirname, "../../web/src/routes/create", p), "utf8");
+
+  it("the desk lane starts with a checking heading, why-text and the attached caption", () => {
+    const lane = src("create.behaviour.js");
+    expect(lane).toContain("resetLane(file, documentReading)");
+    expect(lane).toContain("reading ? READING_HEAD : CHECKING_HEAD");
+    expect(lane).toContain("reading ? CAP_READING : CAP_ATTACHED");
+  });
+
+  it("the pocket's first picked state and its heading follow the flag", () => {
+    const pocket = src("pocket.svelte");
+    expect(pocket).toContain("documentReading ? undefined : CHECKING_HEAD");
+    expect(pocket).toContain("documentReading ? CAP_READING : CAP_ATTACHED");
+    expect(src("EntryForm.svelte")).toContain("picked.head ?? READING_HEAD");
+  });
+
+  it("the checking words promise no reading", async () => {
+    const { CHECKING_HEAD, WHY_CHECKING, CAP_ATTACHED } = await import("../../web/src/lib/data/document-read.js");
+    expect(`${CHECKING_HEAD} ${WHY_CHECKING} ${CAP_ATTACHED}`).not.toMatch(/reading|read\b/iu);
   });
 });

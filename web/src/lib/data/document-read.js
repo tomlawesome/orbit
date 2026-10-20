@@ -35,6 +35,9 @@ export const TOO_LARGE = "this file is too large to send — it is larger than t
 export const WHY_TOO_LARGE = `${TOO_LARGE}<br>choose a smaller document`;
 export const FOCUS_REFUSED = "Orbit refused this file.";
 export const WHY_REFUSED = "it did not pass what orbit checks before keeping a file<br>choose another document";
+/* #1459: the lane's words when nothing is read, only checked and attached. */
+export const CHECKING_HEAD = "Checking your document";
+export const WHY_CHECKING = "orbit is checking the file for malware before attaching it";
 export const CAP_READING = "orbit is reading the pages it was given";
 export const CAP_CARRIED = "the fields marked ◆ from document are what orbit read across into the form";
 export const CAP_NOTHING = "orbit read the pages and found nothing to carry across";
@@ -61,7 +64,7 @@ export const SUGGESTION_FIELDS = /** @type {const} */ (["provider", "reference",
  * focus block breathing on `line` / `why` (a refusal, or a page that could not
  * be drawn); `read` is the read being done, and `caption` what it ended on.
  * @typedef {{
- *   key: number, name: string, size: number, page: string | null, scanned: boolean,
+ *   key: number, head?: string, name: string, size: number, page: string | null, scanned: boolean,
  *   refused: boolean, settled: boolean, line: string, why: string, read: boolean, caption: string,
  * }} PickedRead
  */

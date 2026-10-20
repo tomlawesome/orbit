@@ -4,7 +4,7 @@ import {
   wordsOf, notSavedWords,
 } from "$lib/data/workspace.js";
 import {
-  CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
+  CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
   WHY_UNDRAWABLE, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
 } from "$lib/data/document-read.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
@@ -391,7 +391,7 @@ export function mountCreate({ documentReading = true } = {}) {
   }
 
   /** Back to the mockup's `doc` state: the reticle breathing, nothing settled. */
-  function resetLane(/** @type {File} */ file) {
+  function resetLane(/** @type {File} */ file, reading = true) {
     clearSheet();
     pageState = "pending";
     readDone = false;
@@ -399,10 +399,11 @@ export function mountCreate({ documentReading = true } = {}) {
     readcard.classList.remove("still", "rc-refused");
     delete readcard.dataset.page;
     readcard.dataset.reading = "true";
-    readHead.textContent = READING_HEAD;
+    readHead.textContent = reading ? READING_HEAD : CHECKING_HEAD;
     focusline.textContent = FOCUS_SCANNING;
-    focusWhy.innerHTML = WHY_READING;
-    capline.textContent = CAP_READING;
+    focusWhy.textContent = reading ? "" : WHY_CHECKING;
+    if (reading) focusWhy.innerHTML = WHY_READING;
+    capline.textContent = reading ? CAP_READING : CAP_ATTACHED;
     honest.textContent = "";
     rcFile.textContent = `◆ ${file.name}`;
     rcSize.textContent = sizeLabel(file.size);
@@ -495,7 +496,7 @@ export function mountCreate({ documentReading = true } = {}) {
        pocket's readDocument does: carrying only fills empty fields, so stale
        ones would otherwise be saved against the new file. */
     clearSuggestions();
-    resetLane(file);
+    resetLane(file, documentReading);
     const householdId = (household ?? await activeHousehold()).id;
     if (!current()) return;
 

@@ -182,7 +182,7 @@
       <section class="p-card proposed pc-card pc-reading" class:pc-snap={Boolean(picked.page)} class:pc-still={picked.settled}
                class:pc-refused={picked.refused} class:pc-done={picked.read}
                style:--i="1" aria-labelledby="{uid}-reading" aria-live="polite">
-        <h2 class="p-caps" id="{uid}-reading">{picked.page ? PAGE_HEAD : READING_HEAD}</h2>
+        <h2 class="p-caps" id="{uid}-reading">{picked.page ? PAGE_HEAD : (picked.head ?? READING_HEAD)}</h2>
 
         <div class="pc-paper pc-paper-row">
           <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>

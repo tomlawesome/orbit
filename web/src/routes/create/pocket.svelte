@@ -8,7 +8,7 @@
     unsavedWords, wordsOf,
   } from "$lib/data/workspace.js";
   import {
-    CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
+    CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
     suggestionsToCarry,
   } from "$lib/data/document-read.js";
   import Sheet from "$lib/pocket/Sheet.svelte";
@@ -157,8 +157,8 @@
     const current = () => reading === controller && attachment === file;
     picks += 1;
     picked = {
-      key: picks, name: file.name, size: file.size, page: null, scanned: false, refused: false,
-      settled: false, line: FOCUS_SCANNING, why: WHY_READING, read: false, caption: CAP_READING,
+      key: picks, head: documentReading ? undefined : CHECKING_HEAD, name: file.name, size: file.size, page: null, scanned: false, refused: false,
+      settled: false, line: FOCUS_SCANNING, why: documentReading ? WHY_READING : WHY_CHECKING, read: false, caption: documentReading ? CAP_READING : CAP_ATTACHED,
     };
     const householdId = entry.householdId;
     if (!householdId) return;
