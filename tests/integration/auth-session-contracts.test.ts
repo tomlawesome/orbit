@@ -317,13 +317,26 @@ describe("PostgreSQL authentication session contracts", () => {
       createdAt: expect.any(String),
       lastSeenAt: expect.any(String),
       device: expect.any(String),
+      viaProvider: false,
     });
     // No fixture in this suite sets a User-Agent header, so the coarse
     // description resolves to the "no user agent recorded" case — and,
     // whatever it resolves to, the raw header is never a key in the payload.
     expect(current.device).toBe("unknown device");
-    expect(Object.keys(current).sort()).toEqual(["createdAt", "current", "device", "id", "lastSeenAt"]);
+    expect(Object.keys(current).sort()).toEqual(["createdAt", "current", "device", "id", "lastSeenAt", "viaProvider"]);
     expect(body.sessions[0].id).toBe(laptop.sessionId); // current sorts first
+  });
+
+  it("marks a session that began at the provider, and only that one (#1444)", async () => {
+    const fixture = await createIntegrationFixture("auth-sessions-via-provider");
+    const password = await fixture.session("member");
+    const provider = await fixture.session("member", { idToken: "header.payload.signature" });
+
+    const fromProvider = await (await callRouteForSession(listSessions, provider, { url: LIST_URL })).json();
+    const rows = Object.fromEntries(fromProvider.sessions.map((row: { id: string }) => [row.id, row]));
+    expect(rows[provider.sessionId].viaProvider).toBe(true);
+    expect(rows[password.sessionId].viaProvider).toBe(false);
+    expect(JSON.stringify(fromProvider)).not.toContain("header.payload.signature");
   });
 
   it("caps the list at SESSION_LIST_LIMIT, keeping the current session and the most recently seen (#1151 A1-R7)", async () => {

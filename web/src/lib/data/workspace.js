@@ -2503,6 +2503,7 @@ const UNAVAILABLE_REMINDERS = {
  * @property {string} createdAt   ISO-8601
  * @property {?string} lastSeenAt ISO-8601, or null if the session has never validated since #482 shipped
  * @property {string} device      a coarse two-word description ("Chrome · Linux"); never the raw user agent
+ * @property {boolean} viaProvider  began at the sign-in provider, so signing out can reach it too (#1444)
  */
 
 /**

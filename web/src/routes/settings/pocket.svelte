@@ -90,6 +90,9 @@
     onsignedout = undefined,
   } = $props();
 
+  /** #1444: this session came through the provider, so signing out reaches it; a password session has nothing there to end. */
+  const providerSession = $derived(providerOffered && sessions.some((row) => row.current && row.viaProvider));
+
   /* ── reminders ────────────────────────────────────────────────────────── */
   let tab = $state(/** @type {"reminders" | "sent"} */ ("reminders"));
   let emailSaving = $state(false);
@@ -639,7 +642,7 @@
         <ArmButton label="sign out of every device →" armedLabel="tap again to sign out everywhere" wide
                    onfire={signOutEverywhereNow} />
         {#if everywhereProblem}<p class="p-error" role="alert">{everywhereProblem}</p>{/if}
-        <p class="st-everywhere p-prose">This signs Orbit out everywhere{#if providerOffered}, and signs you out of your sign-in provider in this browser only: your other devices stay signed in at the provider{/if}.</p>
+        <p class="st-everywhere p-prose">This signs Orbit out everywhere{#if providerSession}, and signs you out of your sign-in provider in this browser only: your other devices stay signed in at the provider{/if}.</p>
       </div>
     </section>
   </main>
