@@ -21,7 +21,7 @@ made-up household. They hold no real accounts or settings.
 The home screen is "your sky": the year drawn as a dial, with your household
 at the centre and today at the top. Each thing you look after is a body on
 its own orbit. The closer it sits to the centre, the sooner it is due;
-overdue items sit inside the inner ring. The "key" tab on the right explains
+overdue items sit inside the event horizon, the dashed red ring around your sun. The "key" tab on the right explains
 the colours and sizes. The search box at the bottom, "explore your world",
 finds items and documents.
 

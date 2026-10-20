@@ -1086,7 +1086,8 @@
         {#each TICKS as t, k (k)}<line x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2}/>{/each}</g>
       <circle cx="190" cy="190" r="62" fill="url(#pk-danger4)"/>
       <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3"
-              stroke-width="1" stroke-dasharray="3 5"/>
+              stroke-width="1" stroke-dasharray="3 5"
+              role="img" aria-label="Event horizon: items inside it are overdue"/>
       <!-- Quarter labels at 15 units: 13px at the narrowest dial (§2.1). -->
       <g font-size="15" fill="var(--ink-quiet)" text-anchor="middle" font-family="JetBrains Mono,monospace">
         {#each quarters as q, k (k)}<text x={q.x} y={q.y}>{q.label}</text>{/each}</g>

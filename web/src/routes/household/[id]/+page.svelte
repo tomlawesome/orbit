@@ -899,7 +899,7 @@
           <circle cx={room.sun[0]} cy={room.sun[1]} r={room.rings.sun} fill="url(#hh-sun)"/>
           <circle cx={room.sun[0]} cy={room.sun[1]} r={(2.2 * room.scale).toFixed(1)}
                   style="fill:var(--sun-core)" opacity=".26"/>
-          <!-- r=62 — the chart key's own words, "overdue: inside the ring", in
+          <!-- r=62 — the chart key's own words, "overdue: inside the event horizon", in
                the same dashed red the dial draws it in. A household with an
                overdue entry has a body in there; one without has an empty
                ring, which is also the truth. -->

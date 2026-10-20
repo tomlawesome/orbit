@@ -1936,6 +1936,15 @@
         </radialGradient>
       </defs>
 
+      <!-- #1471: the overdue line is the event horizon, and it is the one
+           piece of the chart's drawing a screen reader is told about, so it
+           sits outside the decorative chrome (aria-hidden would hide it).
+           It wears the chrome's own motion through .horizon-line. -->
+      <g class="horizon-line">
+        <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)"
+                stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"
+                role="img" aria-label="Event horizon: items inside it are overdue"/>
+      </g>
       <g class="chrome" aria-hidden="true">
       <g class="celestial rotor">
         <g stroke="var(--chart-line-soft)" stroke-width=".5">
@@ -1948,8 +1957,6 @@
       </g>
 
       <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
-      <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)"
-              stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"/>
       <circle cx="190" cy="190" r="106" fill="none" stroke="var(--chart-line-soft)" stroke-width=".75"/>
       <circle cx="190" cy="190" r="150" fill="none" stroke="var(--chart-line)" stroke-width="1.5"/>
 
@@ -2224,7 +2231,7 @@
   <button class="handle" aria-expanded="false">
     <i></i><span>key</span></button>
   <h2>Urgency</h2>
-  <div class="keyrow"><span class="sw" style="background:var(--overdue)"></span>overdue &mdash; inside the ring</div>
+  <div class="keyrow"><span class="sw" style="background:var(--overdue)"></span>overdue &mdash; inside the event horizon</div>
   <div class="keyrow"><span class="sw" style="background:var(--warm)"></span>due soon</div>
   <div class="keyrow"><span class="sw" style="background:var(--upcoming)"></span>upcoming</div>
   <div class="keyrow"><span class="sw" style="background:var(--ok)"></span>on track &mdash; wide orbit</div>
