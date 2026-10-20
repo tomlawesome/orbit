@@ -413,7 +413,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `COMPOSE_PROFILES` | Compose | Optional services to run: `processing` for the document text reader, `ai` for the private model server, or both. Empty runs the standard stack. | `processing,ai` |
 | `ORBIT_BIND_ADDRESS` | Compose | Host interface that publishes Orbit. Use loopback when a reverse proxy is on the same host. | `0.0.0.0` |
 | `ORBIT_PORT` | Compose | Host TCP port mapped to container port 3000. | `3000` |
-| `ORBIT_MEMORY_LIMIT` | Compose | Memory limit for the Orbit application container. Keep it above about 1 GB, the peak of importing a maximum-size archive. | `2g` |
+| `ORBIT_MEMORY_LIMIT` | Compose | Memory limit for the Orbit application container. It must cover the peak of importing a maximum-size archive (about 1 GB), the 256 MiB quarantine space and Node's own overhead; 2 GB is the default. Node's heap is set to 70% of the limit automatically, unless `NODE_OPTIONS` sets `--max-old-space-size`. | `2g` |
 | `SESSION_SECRET` | Orbit | Direct session-signing secret. Leave empty when `SESSION_SECRET_FILE` is set. | `<64-character-random-hex>` |
 | `SESSION_SECRET_FILE` | Orbit | File containing the session-signing secret. The Compose stack sets this to `/run/orbit-secrets/orbit-session-secret`. | `.orbit-secrets/session-secret` |
 | `SESSION_TTL_SECONDS` | Orbit | How long a sign-in lasts, in seconds. | `604800` |

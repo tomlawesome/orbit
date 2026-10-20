@@ -130,6 +130,35 @@ done
 [ "$secret_count" -gt 0 ] ||
   fail "no Docker secrets were supplied"
 
+# Node sizes its heap from the container memory limit, but only to about half
+# of a 2 GB limit, which a maximum-size archive import can exhaust while the
+# container still has room. Size the heap explicitly to 70% of the limit
+# (whole MiB), unless the operator's NODE_OPTIONS already sets it. The limit
+# comes from cgroup v2, else v1; anything but a whole number of bytes (such as
+# "max") leaves NODE_OPTIONS unchanged.
+case "${NODE_OPTIONS:-}" in
+  *--max-old-space-size*) ;;
+  *)
+    cgroup_root="${ORBIT_CGROUP_ROOT:-/sys/fs/cgroup}"
+    limit_path="$cgroup_root/memory.max"
+    [ -e "$limit_path" ] || limit_path="$cgroup_root/memory/memory.limit_in_bytes"
+    memory_limit="$(cat -- "$limit_path" 2>/dev/null)" || memory_limit=""
+    case "$memory_limit" in
+      ""|0*|*[!0-9]*) ;;
+      *)
+        if [ "${#memory_limit}" -le 19 ]; then
+          limit_mib=$((memory_limit / 1048576))
+          heap_mib=$((limit_mib * 70 / 100))
+          if [ "$heap_mib" -gt 0 ]; then
+            NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=$heap_mib"
+            export NODE_OPTIONS
+          fi
+        fi
+        ;;
+    esac
+    ;;
+esac
+
 # Replace the bootstrap process so signals reach Node directly and the
 # application, including PID 1, has no root privileges.
 exec su-exec orbit:orbit "$@"
