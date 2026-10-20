@@ -28,6 +28,10 @@ services:
     # source is an explicit developer workflow through scripts/build-container.sh.
     image: "${ORBIT_IMAGE:?Set ORBIT_IMAGE to an immutable registry digest or a local build tag}"
     restart: unless-stopped
+    # Bounded like the other services (#1429): a runaway request cannot take
+    # the host with it. Keep it above about 1 GB, the peak of a maximum-size
+    # archive import.
+    mem_limit: ${ORBIT_MEMORY_LIMIT:-2g}
     env_file: .env-orbit
     environment:
       # The image reference itself, so the About page can say which image

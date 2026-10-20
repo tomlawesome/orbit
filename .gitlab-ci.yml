@@ -1086,7 +1086,9 @@ fast_docker:
     - apt-get install -y -qq --no-install-recommends jq
     - pnpm install --frozen-lockfile
     - *drop_to_node
-    - orbit_as_node 'pnpm exec vitest run src/lib/recovery-bundle.parity.test.ts scripts/test-e2e-local-reuse.test.mjs'
+    # app-memory-limit-contract.test.mjs (#1429) renders `docker compose config`,
+    # which needs the binary but no daemon.
+    - orbit_as_node 'pnpm exec vitest run src/lib/recovery-bundle.parity.test.ts scripts/test-e2e-local-reuse.test.mjs scripts/app-memory-limit-contract.test.mjs'
     - *reuse_evidence
   artifacts:
     name: orbit-fast-docker
