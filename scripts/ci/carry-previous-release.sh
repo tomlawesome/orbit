@@ -11,8 +11,9 @@
 # published, beside scripts/ci/write-release-manifest.sh. "The build before"
 # is the latest successful pipeline on the same branch, read with GitLab's
 # latest-artifacts-by-ref endpoint: the manifest from record_image and the
-# signature from sign_evidence. A successful pipeline has both jobs, so the
-# pair always comes from one build.
+# signature from sign_evidence. The two are separate lookups, and another
+# pipeline can finish between them, so the manifest is fetched again after
+# the signature and the pair is kept only if both copies are identical.
 #
 # On a rebuild of the same image (the fetched manifest names the digest being
 # recorded) the fetched build's own previous/ pair is carried forward
@@ -85,8 +86,10 @@ stage="$(mktemp -d .orbit-supply-chain/.previous-stage.XXXXXX)"
 # curl's own error (e.g. a 404 or 403) stays on stderr so a missing previous/
 # can be told apart from a refused token; it names the URL, never the token.
 fetch() {
-  curl --fail --silent --show-error --location \
-    --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 60 \
+  # No --location: these URLs answer directly, and curl would send the
+  # JOB-TOKEN header on to whatever host a redirect named.
+  curl --fail --silent --show-error \
+    --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 30 \
     -H "@${header_file}" \
     --output "$3" \
     "${base}/${1}?job=${2}"
@@ -117,8 +120,12 @@ else
   mv -- "$stage/fetched.json" "$stage/$manifest_name"
   fetch "$sig_name" sign_evidence "$stage/$sig_name" ||
     no_predecessor "could not fetch the signature from job sign_evidence"
+  fetch "$manifest_name" record_image "$stage/recheck.json" ||
+    no_predecessor "could not fetch the manifest again from job record_image"
+  cmp -s "$stage/$manifest_name" "$stage/recheck.json" ||
+    no_predecessor "the latest build changed while fetching; its manifest and signature may not match"
 fi
-rm -f -- "$stage/fetched.json"
+rm -f -- "$stage/fetched.json" "$stage/recheck.json"
 
 # Both files are good: move them into place in one rename.
 rm -rf -- "$dest"
