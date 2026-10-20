@@ -18,7 +18,7 @@
    * it waits for Enter, Space or a press.
    *
    * @typedef {{
-   *   choices: import('./item-draft.js').Choice[],
+   *   choices: (import('./item-draft.js').Choice & { size?: string })[],
    *   value: string | null,
    *   label: string,
    *   cols: number,
@@ -52,7 +52,7 @@
     <button type="button" class="tile" role="radio" aria-checked={choice.value === value}
             data-opt={choice.colour ?? undefined} tabindex={i === active ? 0 : -1}
             onclick={() => onpick(choice.value)} onkeydown={(e) => walk(e, i)} onfocus={() => (active = i)}>
-      <b>{choice.words}</b>
+      <b style:font-size={choice.size}>{choice.words}</b>
       {#if choice.note}<small>{choice.note}</small>{/if}
     </button>
   {/each}

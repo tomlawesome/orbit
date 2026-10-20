@@ -17,14 +17,16 @@ export const TEXT_SIZES = ["standard", "comfortable", "large", "extra-large"];
 export const DEFAULT_TEXT_SIZE = "comfortable";
 
 /**
- * What each step is called on a tile.
- * @type {ReadonlyArray<{ value: string, words: string }>}
+ * What each step is called on a tile (the Tiles `choices` shape), and the
+ * size its word is drawn at: px on purpose, so the reader sees each step
+ * whatever step is on now.
+ * @type {ReadonlyArray<{ value: string, words: string, colour: null, size: string }>}
  */
 export const TEXT_SIZE_CHOICES = [
-  { value: "standard", words: "standard" },
-  { value: "comfortable", words: "comfortable" },
-  { value: "large", words: "large" },
-  { value: "extra-large", words: "extra large" },
+  { value: "standard", words: "standard", colour: null, size: "15px" },
+  { value: "comfortable", words: "comfortable", colour: null, size: "16px" },
+  { value: "large", words: "large", colour: null, size: "18px" },
+  { value: "extra-large", words: "extra large", colour: null, size: "20px" },
 ];
 
 /**

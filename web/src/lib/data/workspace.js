@@ -794,6 +794,8 @@ import { ago, bandOf, dayMonth, sizeLabel } from "$lib/format.js";
 import { daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
 import { engineNumbersOf } from "./engine-limits.js";
+import { themeOrDefault } from "$lib/theme.js";
+import { textSizeOrDefault } from "$lib/text-size.js";
 import { householdScreenOf, householdUpdateCommandOf, sectionCommandsOf } from "./household.js";
 import { documentRowOf } from "./belt.js";
 
@@ -815,6 +817,32 @@ async function csrfFetch(path, { method = "POST", body } = {}) {
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
+}
+
+/**
+ * Saves a theme and/or a text size (#1180), PUT /api/preferences.
+ *
+ * The route replaces all four preference fields at once -- and cancels
+ * pending deliveries for any channel sent as false -- so the body is always
+ * whole: the picked field(s), and everything else taken fresh from the
+ * server's session (`refresh: true`), never from a cache that another tab or
+ * the notifications panel may have outdated.
+ *
+ * @param {{ theme?: string, textSize?: string }} change
+ */
+export async function savePreferences(change) {
+  const session = await readSession({ refresh: true });
+  const user = /** @type {any} */ (session.user ?? {});
+  const body = {
+    theme: themeOrDefault(change.theme ?? user.themeId),
+    textSize: textSizeOrDefault(change.textSize ?? user.textSize),
+    emailNotifications: user.emailNotifications,
+    pushNotifications: user.pushNotifications,
+  };
+  const result = await json(await csrfFetch("/api/preferences", { method: "PUT", body }));
+  /* The next read must show what was just saved. */
+  await readSession({ refresh: true }).catch(() => null);
+  return result;
 }
 
 /**

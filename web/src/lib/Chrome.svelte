@@ -5,7 +5,8 @@
   import { tick } from "svelte";
   import { signOut, wordsOf } from "$lib/data/workspace.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
-  import { SWATCHES, applyTheme } from "$lib/theme-swatches.js";
+  import { SWATCHES } from "$lib/theme-swatches.js";
+  import { chooseTheme } from "$lib/pick.js";
   import Hatch from "$lib/pocket/Hatch.svelte";
   import { watchTour } from "$lib/tour/watch.js";
   import TopChrome from "$lib/pocket/TopChrome.svelte";
@@ -75,7 +76,7 @@
   /** @param {string} name */
   function setSwatch(name) {
     active = name;
-    applyTheme(name);
+    chooseTheme(name);
   }
 
   /* THE POCKET (#1120): below the CON-10 switch the way back and the orb

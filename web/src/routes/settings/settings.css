@@ -140,6 +140,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 /* "Watch the tour" (#753, #1189; mockup stop 8 of design/v19/tour.html): the
  * mockup's own .relaunch rule, on a real button rather than a div, so it
  * carries the same type and colour as a plain click target must. */
+.helm-page .textsize-h{margin:18px 0 0;font:0.65625rem var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-quiet);font-weight:400}
 .helm-page .relaunch{display:block;margin-top:14px;font:0.71875rem var(--mono);
       color:var(--accent-text);background:none;border:0;padding:0;cursor:pointer;
       text-align:left}

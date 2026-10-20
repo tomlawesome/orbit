@@ -44,7 +44,30 @@
      can raise one through $lib/pocket/wake.js; empty until one does. */
   import Wake from "$lib/pocket/Wake.svelte";
 
+  import { onMount } from "svelte";
+  import { page } from "$app/state";
+  import { readSession } from "$lib/data/workspace.js";
+  import { applyTheme } from "$lib/theme-swatches.js";
+  import { applyTextSize } from "$lib/text-size.js";
+  import { themeOrDefault } from "$lib/theme.js";
+
   let { children } = $props();
+
+  /* The server is the source of truth for theme and text size (#1180);
+     localStorage is only the pre-paint cache of it (app.html). Once the
+     session is read, both are applied and the cache refreshed. Read only for
+     a signed-in reader: the session route answers 401 to anyone else, and
+     the signed-out door keeps using the cache. A failed read changes nothing. */
+  onMount(async () => {
+    if (!page.data?.signedIn) return;
+    try {
+      const session = await readSession();
+      const user = /** @type {{ themeId?: string, textSize?: string } | undefined} */ (session.user ?? undefined);
+      if (!user) return;
+      applyTheme(themeOrDefault(user.themeId));
+      applyTextSize(user.textSize ?? "");
+    } catch { /* keep the cached look */ }
+  });
 </script>
 
 {@render children()}
