@@ -3259,7 +3259,7 @@ record_image:
     GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
   script:
     - *apk_retry
-    - apk_add bash
+    - apk_add bash curl jq
     - *step_outputs
     - docker load --input image.tar
     # Only the immutable anchor `sha-<commit>` is pushed here -- the channel
@@ -3311,11 +3311,21 @@ record_image:
       ORBIT_LAUNCHER_ARM64_ARCHIVE="${CI_PROJECT_DIR}/.orbit-launcher-artifacts/orbit-launcher_linux_arm64.tar.gz" \
         bash scripts/ci/write-release-manifest.sh "$CI_REGISTRY_IMAGE" "$published_digest"
       cat .orbit-supply-chain/orbit-release-manifest.json
+    # #1480: save the build before this one (its manifest and signature) as
+    # .orbit-supply-chain/previous/, read by branch from the latest-artifacts
+    # API. Never fails the publish. The launcher's update test finds the
+    # previous build by branch alone, with no job IDs to expire.
+    # $published_digest is still set: GitLab runs every script item in one
+    # shell, as the write-release-manifest step above relies on too.
+    - bash scripts/ci/carry-previous-release.sh "$published_digest"
   artifacts:
     name: orbit-gitlab-tested-image
     paths:
       - .orbit-supply-chain/gitlab-tested-image.json
       - .orbit-supply-chain/orbit-release-manifest.json
+      # #1480: absent on a branch's first build; GitLab only warns about a
+      # missing path.
+      - .orbit-supply-chain/previous/
     expire_in: 90 days
     when: on_success
 
