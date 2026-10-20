@@ -261,13 +261,20 @@ fi
 # the life of the git command; git reads it from a mode-600 credential-store
 # file instead, from a scratch repository with no config of its own and a HOME
 # nothing else has written to, exactly as repin-base-image.sh does (#1081).
+#
+# Every call starts in that HOME, never in the job's checkout: GitLab Runner
+# includes a config there whose url.<...>.insteadOf rewrites this server's URL
+# to one carrying the job's own login. A listing run from the checkout went
+# out under that login, git saved it into the credential file, and the push
+# then sent it instead of DOOR_IMPORT_TOKEN and was refused (#1477).
 credential_file="$(new_secret_file)"
 printf 'https://oauth2:%s@%s\n' "$DOOR_IMPORT_TOKEN" "$server_host" > "$credential_file"
 push_url="${DOOR_IMPORT_PUSH_URL:-${CI_SERVER_URL%/}/${CI_PROJECT_PATH}.git}"
 push_home="$(new_scratch_dir)"
 push_git() {
   GIT_TERMINAL_PROMPT=0 HOME="$push_home" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-    git -c credential.helper= -c "credential.helper=store --file=${credential_file}" "$@"
+  GIT_CEILING_DIRECTORIES="$scratch_root" \
+    git -C "$push_home" -c credential.helper= -c "credential.helper=store --file=${credential_file}" "$@"
 }
 
 existing_branch="$(push_git ls-remote --heads "$push_url" "refs/heads/${branch_name}")" ||
