@@ -41,11 +41,14 @@ const CURL_STUB = [
   '  case "$1" in',
   '    -o|--output) output="$2"; shift 2 ;;',
   '    --output=*) output="${1#--output=}"; shift ;;',
-  '    -H|--header) case "$2" in "JOB-TOKEN: $CI_JOB_TOKEN") header_ok=1 ;; esac; shift 2 ;;',
-  '    --header=*) case "${1#--header=}" in "JOB-TOKEN: $CI_JOB_TOKEN") header_ok=1 ;; esac; shift ;;',
+  "    -H|--header) h=\"$2\"; shift 2 ;;",
+  '    --header=*) h="${1#--header=}"; shift ;;',
   '    http://*|https://*) url="$1"; shift ;;',
   "    *) shift ;;",
   "  esac",
+  '  # The token travels in a header file (curl -H @file), never in argv,',
+  '  # so it cannot show in a process listing.',
+  '  if [ -n "${h:-}" ]; then case "$h" in @?*) grep -qxF "JOB-TOKEN: $CI_JOB_TOKEN" "${h#@}" 2>/dev/null && header_ok=1 ;; esac; h=; fi',
   "done",
   '[ -n "$url" ] || exit 2',
   '# No token header means GitLab answers 401 and --fail turns it into 22.',
@@ -144,7 +147,7 @@ describe("carry-previous-release.sh", () => {
     expectNoToken(r.result);
   });
 
-  it("requests the manifest from job record_image and the signature from job sign_evidence, with the JOB-TOKEN header", () => {
+  it("requests the manifest from job record_image and the signature from job sign_evidence, with the JOB-TOKEN header from a file, not argv", () => {
     const r = run({
       routes: {
         [assetPath("main", MANIFEST, "record_image")]: manifest(OLDER),
@@ -157,7 +160,13 @@ describe("carry-previous-release.sh", () => {
     expect(keys).toContain(assetPath("main", SIG, "sign_evidence"));
     // A normal build has no reason to look at its own carried pair.
     expect(keys.filter((key) => key.includes("/previous/"))).toEqual([]);
-    for (const argv of r.calls()) expect(argv.join("\n")).toContain(`JOB-TOKEN: ${TOKEN}`);
+    // The token goes in a header file (curl -H @file): never in curl's argv.
+    for (const argv of r.calls()) {
+      expect(argv.join("\n")).not.toContain(TOKEN);
+      expect(argv.some((arg) => arg.startsWith("@"))).toBe(true);
+    }
+    // ...and the header file is gone once the script ends.
+    expect(readdirSync(r.work)).toEqual([".orbit-supply-chain"]);
   });
 
   it("URL-encodes the slash in a branch name", () => {
