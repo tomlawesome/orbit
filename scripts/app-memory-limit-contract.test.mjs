@@ -103,4 +103,30 @@ describe("ORBIT_MEMORY_LIMIT is documented where the other limits are (#1429)", 
     // The rows it is modelled on are still present.
     expect(operationsGuide).toContain("| `CLAMAV_MEMORY_LIMIT` | Compose |");
   });
+
+  it(".env-orbit.example says the limit must cover the import peak plus the 256 MiB quarantine space, and that the heap follows it (#1429 B1)", () => {
+    const lines = environmentExample.split("\n");
+    const index = lines.findIndex((line) => /^#?\s*ORBIT_MEMORY_LIMIT=2g\s*$/u.test(line));
+    expect(index).toBeGreaterThan(0);
+    const comment = lines.slice(Math.max(0, index - 8), index).join("\n");
+    expect(comment).toContain("1 GB");
+    expect(comment).toMatch(/quarantine/iu);
+    expect(comment).toContain("256 MiB");
+    expect(comment).toMatch(/overhead/iu);
+    expect(comment).toMatch(/2 GB.*default|default.*2 GB/isu);
+    expect(comment).toContain("70%");
+    expect(comment).toContain("NODE_OPTIONS");
+  });
+
+  it("the administrator operations guide row says the same: import peak, quarantine space, 70% heap unless NODE_OPTIONS sets it (#1429 B1)", () => {
+    const row = operationsGuide.split("\n").find((line) => line.startsWith("| `ORBIT_MEMORY_LIMIT`"));
+    expect(row, "no ORBIT_MEMORY_LIMIT row in docs/administrator-operations.md").toBeDefined();
+    expect(row).toContain("1 GB");
+    expect(row).toMatch(/quarantine/iu);
+    expect(row).toContain("256 MiB");
+    expect(row).toMatch(/overhead/iu);
+    expect(row).toContain("70%");
+    expect(row).toContain("NODE_OPTIONS");
+    expect(row).toContain("`2g`");
+  });
 });
