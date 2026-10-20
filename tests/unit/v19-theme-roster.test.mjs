@@ -76,7 +76,7 @@ describe("the theme roster, from one source (#865)", () => {
   });
 
   it("app.html's <html> starts on the same default the roster names", () => {
-    const match = /<html lang="en" data-theme="([\w-]+)">/.exec(APP_HTML);
+    const match = /<html lang="en" data-theme="([\w-]+)"[^>]*>/.exec(APP_HTML);
     expect(match, "app.html's <html data-theme>").toBeTruthy();
     expect(match[1]).toBe(DEFAULT_THEME);
   });
