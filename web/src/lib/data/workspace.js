@@ -1357,12 +1357,37 @@ export async function commandContact(command) {
  */
 export async function readUploadLimitSettings() {
   try {
-    /** @type {{ uploadLimit?: ?UploadLimitSettings }} */
-    const body = await json(await fetch("/api/admin/upload-limit", { credentials: "same-origin" }));
-    return body.uploadLimit ?? null;
+    return await fetchUploadLimitSettings();
   } catch {
     return null;
   }
+}
+
+/**
+ * The same read, but a refusal or a break rejects, so the administration
+ * screen can tell "failed" from "answered with nothing" (#1443).
+ *
+ * @returns {Promise<?UploadLimitSettings>}
+ */
+async function fetchUploadLimitSettings() {
+  /** @type {{ uploadLimit?: ?UploadLimitSettings }} */
+  const body = await json(await fetch("/api/admin/upload-limit", { credentials: "same-origin" }));
+  return body.uploadLimit ?? null;
+}
+
+/**
+ * Settles a read into its answer and whether it failed (#1443, the shape
+ * #1442 gave the contact read).
+ *
+ * @template T
+ * @param {Promise<T>} read
+ * @returns {Promise<{ answer: T | null, failed: boolean }>}
+ */
+function settle(read) {
+  return read.then(
+    (answer) => ({ answer, failed: false }),
+    () => ({ answer: null, failed: true }),
+  );
 }
 
 /**
@@ -1435,37 +1460,37 @@ export async function readAdminScreen() {
       (answer) => ({ answer, failed: false }),
       () => ({ answer: null, failed: true }),
     ),
-    readUploadLimitSettings(),
+    settle(fetchUploadLimitSettings()),
     /* An open document-key rotation (#956). Additive: a route that cannot
        answer (fixture harness, older server) means no card, never a sunk
        screen — and "no rotation open" renders as nothing at all. */
-    fetch("/api/admin/documents/rotation", { credentials: "same-origin" }).then((response) => json(response))
+    settle(fetch("/api/admin/documents/rotation", { credentials: "same-origin" }).then((response) => json(response))
       .then(
         (/** @type {{ rotation?: { inProgress: boolean, startedAt: string | null, secondKeyLoaded: boolean } }} */ body) =>
           body.rotation ?? null,
-      )
-      .catch(() => null),
+      ),
+    ),
     /* Locked and damaged Tier 1 metadata (#941), from the health route that
        already answers for the document subsystem rather than a surface of its
        own. Additive on the same terms as the rotation above: a route that
        cannot answer means no cards, never a sunk screen, and an instance with
        nothing wrong renders nothing at all. */
-    fetch("/api/admin/documents/health", { credentials: "same-origin" }).then((response) => json(response))
+    settle(fetch("/api/admin/documents/health", { credentials: "same-origin" }).then((response) => json(response))
       .then(
         (/** @type {{ health?: { metadata?: MetadataHealth } }} */ body) =>
           body.health?.metadata ?? null,
-      )
-      .catch(() => null),
+      ),
+    ),
     /* Whether a recovery bundle has been recorded for the current document
        KEK (#968, slice 1 of #966). Additive on the same terms as the two
        cards above: a route that cannot answer means no card, never a sunk
        screen. */
-    fetch("/api/admin/recovery-bundle", { credentials: "same-origin" }).then((response) => json(response))
+    settle(fetch("/api/admin/recovery-bundle", { credentials: "same-origin" }).then((response) => json(response))
       .then(
         (/** @type {{ recoveryBundle?: { exported: boolean, exportedAt: string | null } }} */ body) =>
           body.recoveryBundle ?? null,
-      )
-      .catch(() => null),
+      ),
+    ),
     /* The real Operations panel and instance strip (#1000). A route that
        cannot answer keeps the fixture's rows under the fixture harness only,
        so the screen the fidelity gate photographs is unchanged; live, the
@@ -1475,7 +1500,7 @@ export async function readAdminScreen() {
       .catch(() => null),
     /* The document jobs (#1071). Additive on the same terms: a route that
        cannot answer means no jobs card, never a sunk screen. */
-    readAdminOperations().catch(() => null),
+    settle(readAdminOperations()),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   const fixtureMode = Boolean(workspace.fixtureToday);
@@ -1533,22 +1558,29 @@ export async function readAdminScreen() {
       users: !fixtureMode && users === null,
       /* A contact the route answers as unset is not a failure. */
       contact: !fixtureMode && contact.failed,
+      /* The #1443 cards: a refused, broken or unanswered read, never an
+         answered one with nothing in it (no rotation open, metadata fine). */
+      uploadLimit: !fixtureMode && uploadLimit.failed,
+      operations: !fixtureMode && operations.failed,
+      rotation: !fixtureMode && rotation.failed,
+      metadata: !fixtureMode && metadata.failed,
+      recoveryBundle: !fixtureMode && recoveryBundle.failed,
     },
     /* The answer itself, for the pocket's per-service callout (#1123): when
        each service was last checked, last succeeded and last failed. Null
        where the route cannot answer, and the callout then says only the row. */
     health,
     now,
-    operations,
+    operations: operations.answer,
     /* Systems whose deletion is asked for and still inside its window
        (#1001, §19): an instance administrator's workspace lists every one. */
     recoverable: workspace.recoverableHouseholds ?? [],
     mailbox,
     contact: contact.answer,
-    uploadLimit,
-    rotation,
-    metadata,
-    recoveryBundle,
+    uploadLimit: uploadLimit.answer,
+    rotation: rotation.answer,
+    metadata: metadata.answer,
+    recoveryBundle: recoveryBundle.answer,
     owners,
   };
 }

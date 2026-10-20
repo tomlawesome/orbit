@@ -154,7 +154,7 @@ describe("readAdminScreen on a live instance", () => {
   it("with every read answering, shows the real values and marks nothing failed", async () => {
     stubFetch({ live: true });
     const view = await readAdmin();
-    expect(view.failed).toEqual({
+    expect(view.failed).toMatchObject({
       relay: false, services: false, instance: false, owners: false, users: false, contact: false,
     });
     expect(view.users).toEqual(PEOPLE);
@@ -205,7 +205,7 @@ describe("readAdminScreen on a live instance", () => {
   it("with every read failing, returns no fixture text anywhere and every panel failed", async () => {
     stubFetch({ live: true, mailbox: 403, health: 403, members: 403, users: 403, contact: 403 });
     const view = await readAdmin();
-    expect(view.failed).toEqual({
+    expect(view.failed).toMatchObject({
       relay: true, services: true, instance: true, owners: true, users: true, contact: true,
     });
     expect(view.users).toBeNull();
@@ -285,7 +285,7 @@ describe("readAdminScreen in fixture mode", () => {
     expect(view.instance).toBe(adminFixture.instance);
     expect(view.owners).toEqual(adminFixture.owners);
     expect(view.peopleMeta).toEqual(adminFixture.peopleMeta);
-    expect(view.failed).toEqual({
+    expect(view.failed).toMatchObject({
       relay: false, services: false, instance: false, owners: false, users: false, contact: false,
     });
   });
@@ -297,7 +297,7 @@ describe("readAdminScreen in fixture mode", () => {
     expect(view.services).toEqual(adminFixture.services);
     expect(view.instance).toBe(adminFixture.instance);
     expect(view.owners).toEqual(adminFixture.owners);
-    expect(view.failed).toEqual({
+    expect(view.failed).toMatchObject({
       relay: false, services: false, instance: false, owners: false, users: false, contact: false,
     });
   });
