@@ -33,8 +33,9 @@ describe.each([
   it.each(KEYS)("failed.%s shows the shared failed-read markup with a try again", (key) => {
     const hits = windowsAfter(read(file), new RegExp(`\\{#if view\\.failed\\.${key}\\}`), 700).map((w) => {
       /* only this block: stop where a neighbouring failed block or card starts */
-      const end = w.slice(10).search(/\{#if view\.failed\.|<section|<!--|<div class="card/);
-      return end === -1 ? w : w.slice(0, end + 10);
+      const from = w.indexOf("}") + 1;
+      const end = w.slice(from).search(/\{#if view\.failed\.|<section|<!--|<div class="card/);
+      return end === -1 ? w : w.slice(0, from + end);
     });
     expect(hits.length, `${file} never reads failed.${key}`).toBeGreaterThan(0);
     expect(
