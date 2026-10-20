@@ -266,9 +266,19 @@ printf 'https://oauth2:%s@%s\n' "$DOOR_IMPORT_TOKEN" "$server_host" > "$credenti
 push_url="${DOOR_IMPORT_PUSH_URL:-${CI_SERVER_URL%/}/${CI_PROJECT_PATH}.git}"
 push_home="$(new_scratch_dir)"
 push_git() {
+  # TEMPORARY trace for #1477, debug/1477-trace only; never merged. git
+  # redacts the Authorization header in GIT_TRACE_CURL; no value is printed.
+  GIT_TRACE=1 GIT_TRACE_CURL=1 GIT_TRACE_CURL_NO_DATA=1 GIT_TRACE_REDACT=1 \
   GIT_TERMINAL_PROMPT=0 HOME="$push_home" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
     git -c credential.helper= -c "credential.helper=store --file=${credential_file}" "$@"
 }
+# TEMPORARY (#1477): names only, never values, of what git can see here.
+log "trace: git $(git --version); cwd $(pwd)"
+log "trace: GIT_* variables set: $(env | cut -d= -f1 | grep '^GIT_' | tr '\n' ' ')"
+log "trace: config names in cwd, with origin:"
+GIT_TERMINAL_PROMPT=0 HOME="$push_home" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+  git config --list --show-origin --name-only >&2 || true
+log "trace: credential file host line: $(sed 's#//[^@]*@#//<redacted>@#' "$credential_file"); push_url ${push_url}"
 
 existing_branch="$(push_git ls-remote --heads "$push_url" "refs/heads/${branch_name}")" ||
   fail "could not list the branches of ${CI_PROJECT_PATH}. Check DOOR_IMPORT_TOKEN's scope (write_repository) and role (Developer)."
