@@ -64,7 +64,7 @@ import { sizeLabel } from "$lib/format.js";
  *      same class of bug satellites.js's own doc warns about ("a blurred
  *      scrim survived a trip to /create").
  */
-export function mountCreate() {
+export function mountCreate({ documentReading = true } = {}) {
   const { on, teardown } = screenScope();
 
   const card = /** @type {HTMLElement} */ (document.getElementById("card"));
@@ -505,7 +505,7 @@ export function mountCreate() {
       if (!current() || pageState !== "pending") return;
       focusline.textContent = focusAfterScan(scanned);
     };
-    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned });
+    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned, documentReading });
 
     const page = outcomes.page.then((outcome) => {
       if (!current()) {
@@ -539,6 +539,11 @@ export function mountCreate() {
         if (outcome.kind === "refused") {
           /* The upload would refuse it too, so the save is held now. */
           refuseDocument(file, outcome.why);
+          return;
+        }
+        if (outcome.kind === "attached") {
+          /* #1459: reading is off; the file goes with the entry as it is. */
+          capline.textContent = captionOf(outcome, 0);
           return;
         }
         if (outcome.kind === "unread") {

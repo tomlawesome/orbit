@@ -40,6 +40,8 @@
    * `?name=` prefills the name (search's `add "x" as an item`, §2.4).
    */
 
+  /* #1459: false when the instance has no TIKA_URL; nothing is asked to be read. */
+  let { documentReading = true } = $props();
   /** @type {import('./entry.js').FormHousehold[]} */
   let households = $state([]);
   let phase = $state(/** @type {"loading" | "ready" | "none" | "failed"} */ ("loading"));
@@ -167,7 +169,7 @@
       if (!current() || !picked || picked.page || picked.settled) return;
       picked.line = focusAfterScan(scanned);
     };
-    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned });
+    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned, documentReading });
     /** @type {string | null} */
     let undrawable = null;
 

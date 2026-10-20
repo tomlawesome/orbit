@@ -30,6 +30,8 @@
    * same shape as settings/mail/+page.svelte's relay.
    */
   let { data } = $props();
+  /* #1459: false when the instance has no TIKA_URL; the copy then stops promising a read. */
+  const documentReading = data?.documentReading !== false;
 
   /** @type {?HTMLDivElement} */
   let backdropRoot = null;
@@ -64,7 +66,7 @@
   }
 
   onMount(() => {
-    form = mountCreate();
+    form = mountCreate({ documentReading });
     /* #1251: the desk's heading is the form's first control and ships empty,
        so it takes the caret on arrival. Not on a phone: the keyboard must
        not pop over the page. */
@@ -112,7 +114,7 @@
 <Chrome user={chrome?.user} current="" household={chrome?.household} />
 
 <!-- #1120, proposal §2.5: the pocket's own create, chosen by CSS. -->
-<Pocket />
+<Pocket {documentReading} />
 
 <!-- §14 (#471): clicking off the form returns to the landing page — the same
      light-dismiss the item view has. -->
@@ -155,14 +157,18 @@
       <span class="dz-corner tl" aria-hidden="true"></span><span class="dz-corner tr" aria-hidden="true"></span>
       <span class="dz-corner br" aria-hidden="true"></span><span class="dz-corner bl" aria-hidden="true"></span>
       <div class="dz-main">
-        <span data-when="rest">drop a document — we'll read what we can</span>
+        <span data-when="rest">{documentReading ? "drop a document — we'll read what we can" : "drop a document"}</span>
         <span data-when="lock">release to add it</span>
         <span data-when="swap">release to swap the document</span>
       </div>
       <div class="dz-hint mono">
-        <span data-when="rest">PDF, email or photo &middot; dates, amounts &amp; reference numbers extracted automatically</span>
+        {#if documentReading}
+        <span data-when="rest">PDF or email &middot; dates, amounts &amp; reference numbers extracted automatically</span>
+        {:else}
+        <span data-when="rest">The file is attached to the item as it is.</span>
+        {/if}
         <span data-when="arm">bring it to this box &middot; PDF, email or photo</span>
-        <span data-when="lock">orbit will read what it can &middot; nothing is saved until you say</span>
+        <span data-when="lock">{documentReading ? "orbit will read what it can · " : ""}nothing is saved until you say</span>
       </div>
       <div class="dz-held" id="dz-held">&#9670; <b id="dz-held-name"></b> &middot; <span id="dz-held-size"></span> &middot; held in the lane on the right</div>
     </div>
