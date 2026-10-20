@@ -656,8 +656,6 @@
   .desk .strip .title{font-size:12.5px;fill:var(--ink-mid)}
   .desk .strip .match.sel .title{fill:var(--ink)}
   .desk .strip .meta{font-size:11px;fill:var(--ink-mid)}
-  .desk .strip .docs{font-size:11px;fill:var(--ink-faint)}
-  .desk .strip .docs.hitdoc{fill:var(--ink)}
   .desk .strip .halo{fill:none;stroke-width:1;stroke-opacity:.8}
   .desk .strip .match{cursor:pointer}
   .desk .strip .body{stroke:var(--bg);stroke-width:2}

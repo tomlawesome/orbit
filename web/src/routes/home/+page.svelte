@@ -25,11 +25,10 @@
   import Pocket from "./pocket.svelte";
   import HouseholdClosed from "$lib/HouseholdClosed.svelte";
   import { attachIdFor, forget as forgetAttachId } from "./attach-id.js";
-  import { readSearchDocuments, searchPocket } from "./pocket-search.js";
+  import { costLabel, listedItems, readSearchDocuments, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "$lib/data/bands.js";
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
-  import { addDays } from "$lib/editing/calendar.js";
   import CorridorRow from "./CorridorRow.svelte";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
@@ -1120,12 +1119,11 @@
 
   /**
    * @typedef {import('./pocket-search.js').SearchItem} SearchItem
-   * @typedef {import('./pocket-search.js').SearchDocument} SearchDoc
    * @typedef {{ kind: string, paint: string, documentCount: number, suggestion?: boolean }} BodyPaint
    * @typedef {BodyPaint & { days: number | null, size: number, costMinor: number | null,
    *   currency: string, costIsEstimate: boolean }} DialBody
    * @typedef {{ itemId: string, title: string, days: number | null, body: DialBody | null,
-   *   hitDocs: string[] }} StripMatch
+   *   cost: string }} StripMatch
    */
 
   /* `bodyMark`'s own neutral stand-in for an unscheduled match, which draws no
@@ -1238,11 +1236,12 @@
   const emptyStripRows = $derived((groups?.attention ?? []).filter(dueOrLater).slice(0, 2));
   /** @param {SearchItem} row */
   function dueOrLater(row) { return row.days !== null && row.days >= 0; }
-  const stripItems = $derived(searchQuery ? searchResults.items : emptyStripRows);
-  const stripDocuments = $derived(searchQuery ? searchResults.documents : []);
+  /* #1438: a result is the item's title and its cost. A document-name match
+     is listed as its item; the document's name is not drawn. */
+  const stripItems = $derived(searchQuery ? listedItems(searchResults, searchRows) : emptyStripRows);
 
   /* The one selectable list, in the order §1 names: items (manifest order,
-     soonest first), then documents, then the note line's own act(s) (#1162)
+     soonest first), then the note line's own act(s) (#1162)
      — trailing, since a query with real matches never shows one at all
      (BUILD.md §1). The no-match sentence itself carries no act and is never
      in this list. */
@@ -1251,15 +1250,10 @@
      (#1138). */
   /** @param {SearchItem} item */
   function itemEntry(item) {
-    return { kind: /** @type {const} */ ("item"), itemId: item.id, title: item.title, days: item.days };
-  }
-  /** @param {SearchDoc} doc */
-  function docEntry(doc) {
-    return { kind: /** @type {const} */ ("doc"), itemId: doc.itemId, title: doc.name, itemTitle: doc.itemTitle };
+    return { kind: /** @type {const} */ ("item"), itemId: item.id, title: item.title, cost: costLabel(item) };
   }
   const selectable = $derived([
     ...stripItems.map(itemEntry),
-    ...stripDocuments.map(docEntry),
     ...stripActs,
   ]);
   let selectedIndex = $state(0);
@@ -1310,27 +1304,13 @@
   const stripToday = $derived(view ? asView(view).today : "");
   const stripTodayX = $derived(xOfDays(0));
   const stripMonthTicks = $derived(stripOpen && stripToday ? monthTicks(stripToday) : []);
-  /** @param {number} days */
-  const stripDateOf = (days) =>
-    stripToday ? dayMonth(addDays(stripToday, days)) : "";
-
   const stripMarks = $derived.by(() => {
     if (!stripOpen) return [];
     /** @type {Map<string, StripMatch>} */
     const byItem = new SvelteMap();
     for (const row of stripItems) {
       const b = bodiesById.get(row.id) ?? null;
-      byItem.set(row.id, { itemId: row.id, title: row.title, days: b ? b.days : row.days, body: b, hitDocs: [] });
-    }
-    for (const doc of stripDocuments) {
-      let m = byItem.get(doc.itemId);
-      if (!m) {
-        const b = bodiesById.get(doc.itemId) ?? null;
-        const row = searchRows.find((r) => r.id === doc.itemId);
-        m = { itemId: doc.itemId, title: doc.itemTitle, days: b ? b.days : (row?.days ?? null), body: b, hitDocs: [] };
-        byItem.set(doc.itemId, m);
-      }
-      m.hitDocs.push(doc.name);
+      byItem.set(row.id, { itemId: row.id, title: row.title, days: b ? b.days : row.days, body: b, cost: costLabel(row) });
     }
     const raw = [...byItem.values()].map((m) => {
       /* `days` rather than `m.days` from here on: a ternary keyed on a
@@ -1339,13 +1319,9 @@
       const days = m.days;
       const unscheduled = days === null;
       const x = days === null ? UNSCHEDULED_X : xOfDays(days);
-      const meta = days === null
-        ? `no date · ${m.body ? money(m.body.costMinor, m.body.currency, m.body.costIsEstimate) : ""}`
-        : `${tlabel({ days })} · ${stripDateOf(days)} · ${money(m.body?.costMinor ?? null, m.body?.currency ?? "GBP", m.body?.costIsEstimate ?? false)}`;
       const lines = [
         { cls: "title", text: m.title, size: 12.5 },
-        { cls: "meta", text: meta, size: 11 },
-        ...m.hitDocs.map((name) => ({ cls: "docs hitdoc", text: `◆ ${name}`, size: 11 })),
+        ...(m.cost ? [{ cls: "meta", text: m.cost, size: 11 }] : []),
       ];
       const width = Math.max(...lines.map((l) => textWidth(l.text, l.size)));
       return { ...m, unscheduled, x, lines, width };
@@ -2119,11 +2095,7 @@
                       >→ {a.title}</span>
               {/each}
             {:else}
-              <span>{searchResults.items.length} in your orbit</span>
-              {#if searchResults.documents.length}
-                <span class="sep">·</span>
-                <span>{plural(searchResults.documents.length, "document")}</span>
-              {/if}
+              <span>{stripItems.length} in your orbit</span>
               <span class="sep">·</span>
               <span class="hint">←→ step · ↵ open</span>
             {/if}
@@ -2140,9 +2112,7 @@
           <ul class="sr-only" id="explore-results" role="listbox" aria-label="Results">
             {#each selectable as entry, i (i)}
               <li id="sr-opt-{i}" role="option" aria-selected={i === selectedPos}>
-                {entry.kind === "item" ? `${entry.title} · ${tlabel({ days: entry.days })}`
-                  : entry.kind === "doc" ? `document ${entry.title} · ${entry.itemTitle}`
-                  : entry.title}
+                {entry.kind === "item" ? (entry.cost ? `${entry.title} · ${entry.cost}` : entry.title) : entry.title}
               </li>
             {/each}
           </ul>

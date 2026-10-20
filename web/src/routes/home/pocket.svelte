@@ -30,7 +30,7 @@
   import { wake } from "$lib/pocket/wake.js";
   import { markDoor } from "../household/[id]/door.js";
   import { HIT_R, spacedBodies } from "./pocket-dial.js";
-  import { readSearchDocuments, searchPocket } from "./pocket-search.js";
+  import { costLabel, listedItems, readSearchDocuments, searchPocket } from "./pocket-search.js";
   import { BAND_VAR, tlabel } from "$lib/data/bands.js";
   import ItemDrawer from "./ItemDrawer.svelte";
   import { attachIdFor, forget as forgetAttachId } from "./attach-id.js";
@@ -227,19 +227,6 @@
     return () => media.removeEventListener("change", onchange);
   });
 
-  /* A paper found by the search: its item's row opens, and the paper's
-     preview stands as the bottom sheet, as a paper pressed in the drawer
-     does (#1319: the belt it used to go to retired). */
-  /** @param {any} doc */
-  async function openPaper(doc) {
-    sheetOpen = false;
-    if (!(await openRow(doc.itemId))) return;
-    await tick();
-    const from = /** @type {HTMLElement | null} */ (manifestRow(doc.itemId)?.querySelector(
-      `[data-doc-row][aria-label="Open ${CSS.escape(doc.name)}"]`) ?? null);
-    openPaperHere(doc, from ?? /** @type {HTMLElement} */ (document.activeElement));
-  }
-
   // ---- the relay's catch (#466) ---------------------------------------------
 
   /**
@@ -380,6 +367,9 @@
   const results = $derived(
     searchPocket(query, { items: rows, attention: groups?.attention ?? [], documents: searchDocuments }),
   );
+
+  /* #1438: items only; a document-name match lists its item. */
+  const foundItems = $derived(listedItems(results, rows));
 
   /** @param {{ id: string, title: string }} target */
   async function complete(target) {
@@ -1285,9 +1275,7 @@
   <div class="pk-results" class:pk-busy={busy} bind:this={resultList} onkeydown={listKey}>
     {#if !results.query}
       {#each results.items as one (one.id)}
-        <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
-             trail={tlabel(one)} trailSub={one.dueDate ? dayMonth(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
-             onactivate={() => openResult(one.id)}>
+        <Row title={one.title} meta={costLabel(one)} onactivate={() => openResult(one.id)}>
           {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
         </Row>
       {/each}
@@ -1300,17 +1288,9 @@
         {#snippet mark()}<span class="pk-plus" aria-hidden="true">+</span>{/snippet}
       </Row>
     {:else}
-      {#each results.items as one (one.id)}
-        <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
-             trail={tlabel(one)} trailSub={one.dueDate ? dayMonth(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
-             onactivate={() => openResult(one.id)}>
-          {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
-        </Row>
-      {/each}
-      {#each results.documents as doc (doc.id)}
-        <!-- Round 3 §8: the item alone; the paper's date is its own sheet's. -->
-        <Row title={doc.name} meta={doc.itemTitle} onactivate={() => openPaper(doc)}>
-          {#snippet mark()}<span class="pk-paper" aria-hidden="true">◆</span>{/snippet}
+      {#each foundItems as one (one.id)}
+        <Row title={one.title} meta={costLabel(one)} onactivate={() => openResult(one.id)}>
+          {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band] ?? "--ink-faint"})"></span>{/snippet}
         </Row>
       {/each}
     {/if}
