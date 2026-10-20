@@ -59,9 +59,9 @@
   const tryAgain = async () => {
     try {
       await reread();
+      tries = 0;
     } catch {
-      /* the screen it has stays; the count below says so */
-    } finally {
+      /* the screen it has stays; the count says so */
       tries += 1;
     }
   };

@@ -31,10 +31,14 @@ describe.each([
   ["phone (pocket.svelte)", POCKET, /onclick=\{tryAgain\}/, /p-pill filled/],
 ])("administration %s", (_label, file, retry, shared) => {
   it.each(KEYS)("failed.%s shows the shared failed-read markup with a try again", (key) => {
-    const hits = windowsAfter(read(file), new RegExp(`failed\\.${key}\\b`), 700);
+    const hits = windowsAfter(read(file), new RegExp(`\\{#if view\\.failed\\.${key}\\}`), 700).map((w) => {
+      /* only this block: stop where a neighbouring failed block or card starts */
+      const end = w.slice(10).search(/\{#if view\.failed\.|<section|<!--|<div class="card/);
+      return end === -1 ? w : w.slice(0, end + 10);
+    });
     expect(hits.length, `${file} never reads failed.${key}`).toBeGreaterThan(0);
     expect(
-      hits.some((w) => /try again/.test(w) && retry.test(w) && shared.test(w)),
+      hits.some((w) => /try again/.test(w) && /tried again/.test(w) && retry.test(w) && shared.test(w)),
       `${file}: no 'try again' wired to the retry after failed.${key}`,
     ).toBe(true);
   });

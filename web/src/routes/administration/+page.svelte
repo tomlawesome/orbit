@@ -70,14 +70,14 @@
   async function rereadScreen() {
     try {
       view = await readAdminScreen();
-      retries += 1;
+      retries = 0;
     } catch {
       /* the screen it has stays, and the cards say the retry came back
          empty too (#1443) */
       retries += 1;
     }
   }
-  /* How many times a failed card's "try again" has been pressed; the cards
+  /* How many times a failed "try again" has come back empty; the cards
      read it to say "still no answer" rather than looking untouched. */
   let retries = $state(0);
   /* Set when the screen's first read fails outright — readAdminScreen()
@@ -1299,7 +1299,7 @@
         {:else}
           {#if !view.failed.operations}<p class="jobfoot">no document jobs yet</p>{/if}
         {/each}
-        <div class="jobfoot">the 25 most recently touched jobs are kept; older ones are not</div>
+        {#if !view.failed.operations}<div class="jobfoot">the 25 most recently touched jobs are kept; older ones are not</div>{/if}
         {#if jobsProblem}<div class="adminproblem">{jobsProblem}</div>{/if}
       </div>
 
