@@ -82,12 +82,14 @@ mkdir -p .orbit-supply-chain
 stage="$(mktemp -d .orbit-supply-chain/.previous-stage.XXXXXX)"
 
 # fetch <path under .orbit-supply-chain> <job> <output file>
+# curl's own error (e.g. a 404 or 403) stays on stderr so a missing previous/
+# can be told apart from a refused token; it names the URL, never the token.
 fetch() {
   curl --fail --silent --show-error --location \
     --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 60 \
     -H "@${header_file}" \
     --output "$3" \
-    "${base}/${1}?job=${2}" 2> /dev/null
+    "${base}/${1}?job=${2}"
 }
 
 # digest_of <manifest file>: prints .image.digest; fails unless it is a string.
