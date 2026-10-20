@@ -19,10 +19,16 @@
 # recorded) the fetched build's own previous/ pair is carried forward
 # instead, so previous/ never points at itself.
 #
+# Either way the pair is verified against cosign.pub
+# (scripts/ci/verify-release-manifest.sh) before it is kept: a tag named
+# like the branch can answer the by-ref lookup, so the fetch alone proves
+# nothing.
+#
 # This step never fails the publish: anything it cannot fetch or trust (first
 # build on a branch, a network failure, a malformed manifest, a missing
-# signature) prints "no predecessor on this ref" with the reason, writes
-# nothing and exits 0. Only a usage error exits non-zero (2).
+# signature, a pair that does not verify) prints "no predecessor on this
+# ref" with the reason, writes nothing and exits 0. Only a usage error exits
+# non-zero (2).
 #
 # Usage:
 #   scripts/ci/carry-previous-release.sh <current-image-digest>
@@ -35,7 +41,8 @@
 #                      file (curl -H @file), so it is never in argv or the
 #                      log.
 #
-# Needs curl and jq.
+# Needs curl and jq, plus what the verifier needs: openssl, and curl to fetch
+# the pinned cosign (scripts/ci/ensure-cosign.sh) unless ORBIT_COSIGN is set.
 
 set -euo pipefail
 
@@ -44,6 +51,7 @@ if [ "$#" -ne 1 ] || [ -z "$1" ]; then
   exit 2
 fi
 current_digest="$1"
+verifier="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/verify-release-manifest.sh"
 
 dest=".orbit-supply-chain/previous"
 manifest_name="orbit-release-manifest.json"
@@ -95,9 +103,10 @@ fetch() {
     "${base}/${1}?job=${2}"
 }
 
-# digest_of <manifest file>: prints .image.digest; fails unless it is a string.
+# digest_of <manifest file>: prints .image.digest; fails unless the whole
+# string is sha256:<64 lowercase hex>.
 digest_of() {
-  jq -er 'if (.image.digest | type) == "string" and .image.digest != "" then .image.digest else empty end' "$1" 2> /dev/null
+  jq -er '.image.digest | select(type == "string" and test("\\Asha256:[0-9a-f]{64}\\z"))' "$1" 2> /dev/null
 }
 
 fetch "$manifest_name" record_image "$stage/fetched.json" ||
@@ -126,6 +135,12 @@ else
     no_predecessor "the latest build changed while fetching; its manifest and signature may not match"
 fi
 rm -f -- "$stage/fetched.json" "$stage/recheck.json"
+
+# The verifier cds to the repository root, so it gets absolute paths. It
+# never needs the job token, so it never gets it.
+stage_abs="$(pwd -P)/$stage"
+env -u CI_JOB_TOKEN bash "$verifier" "$stage_abs/$manifest_name" "$stage_abs/$sig_name" ||
+  no_predecessor "the previous build's manifest does not verify against cosign.pub"
 
 # Both files are good: move them into place in one rename.
 rm -rf -- "$dest"

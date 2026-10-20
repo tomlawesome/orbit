@@ -3259,7 +3259,9 @@ record_image:
     GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
   script:
     - *apk_retry
-    - apk_add bash curl jq
+    # openssl for carry-previous-release's manifest check (the verifier
+    # publish_channel uses); curl also fetches that verifier's pinned cosign.
+    - apk_add bash curl jq openssl
     - *step_outputs
     - docker load --input image.tar
     # Only the immutable anchor `sha-<commit>` is pushed here -- the channel
@@ -3313,8 +3315,11 @@ record_image:
       cat .orbit-supply-chain/orbit-release-manifest.json
     # #1480: save the build before this one (its manifest and signature) as
     # .orbit-supply-chain/previous/, read by branch from the latest-artifacts
-    # API. Never fails the publish. The launcher's update test finds the
-    # previous build by branch alone, with no job IDs to expire.
+    # API, kept only if it verifies against cosign.pub. Never fails the
+    # publish: the verifier fetches the pinned cosign itself, as in
+    # publish_channel, and any failure there is "no predecessor". The
+    # launcher's update test finds the previous build by branch alone, with
+    # no job IDs to expire.
     # $published_digest is still set: GitLab runs every script item in one
     # shell, as the write-release-manifest step above relies on too.
     - bash scripts/ci/carry-previous-release.sh "$published_digest"
