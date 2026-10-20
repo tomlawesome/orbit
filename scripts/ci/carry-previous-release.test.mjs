@@ -57,6 +57,11 @@ const CURL_STUB = [
   'name="$(printf %s "$key" | base64 -w0 | tr "/+" "__")"',
   'body="$STUB_MAP_DIR/$name"',
   '[ -f "$body" ] || exit 22',
+  '# Count requests per URL; from the second one on, serve "<name>.2" if it exists',
+  '# (another pipeline finished in between and "latest" now means a different build).',
+  'cnt="$STUB_MAP_DIR/$name.count"',
+  'n="$(cat "$cnt" 2>/dev/null || echo 0)"; n=$((n + 1)); printf %s "$n" > "$cnt"',
+  'if [ "$n" -ge 2 ] && [ -f "$body.2" ]; then body="$body.2"; fi',
   'if [ -n "$output" ]; then cat "$body" > "$output"; else cat "$body"; fi',
   "exit 0",
   "",
@@ -71,19 +76,24 @@ const manifest = (digest) =>
 
 /*
  * routes: { "<path?query>": body } -- anything else is a 404 (curl exit 22).
+ * laterRoutes: { "<path?query>": body } -- served from the second request to
+ * that URL on, instead of the routes body.
  * The default ref is "main"; the slash test passes its own.
+ * Each run gets its own empty TMPDIR, so leftovers are visible.
  */
-function run({ args = [CURRENT], routes = {}, ref = "main", env = {} } = {}) {
+function run({ args = [CURRENT], routes = {}, laterRoutes = {}, ref = "main", env = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "carry-previous-"));
   const bin = join(dir, "bin");
   const mapDir = join(dir, "map");
   const work = join(dir, "work");
-  for (const d of [bin, mapDir, work]) mkdirSync(d);
+  const tmp = join(dir, "tmp");
+  for (const d of [bin, mapDir, work, tmp]) mkdirSync(d);
   writeFileSync(join(bin, "curl"), CURL_STUB);
   chmodSync(join(bin, "curl"), 0o755);
   const logFile = join(dir, "calls.log");
   writeFileSync(logFile, "");
   for (const [key, body] of Object.entries(routes)) writeFileSync(join(mapDir, mapName(key)), body);
+  for (const [key, body] of Object.entries(laterRoutes)) writeFileSync(join(mapDir, `${mapName(key)}.2`), body);
 
   const result = failOnProcessDeadline(
     spawnSync("bash", [script, ...args], {
@@ -95,6 +105,7 @@ function run({ args = [CURRENT], routes = {}, ref = "main", env = {} } = {}) {
         CI_PROJECT_ID: PROJECT,
         CI_COMMIT_REF_NAME: ref,
         CI_JOB_TOKEN: TOKEN,
+        TMPDIR: tmp,
         STUB_LOG: logFile,
         STUB_MAP_DIR: mapDir,
         ...env,
@@ -115,7 +126,10 @@ function run({ args = [CURRENT], routes = {}, ref = "main", env = {} } = {}) {
   const previousDir = join(work, ".orbit-supply-chain", "previous");
   const previousFiles = () => (existsSync(previousDir) ? readdirSync(previousDir).sort() : []);
   const previous = (name) => readFileSync(join(previousDir, name));
-  return { result, calls, requestedKeys, previousFiles, previous, work };
+  const supplyChainDir = join(work, ".orbit-supply-chain");
+  const supplyChainEntries = () => (existsSync(supplyChainDir) ? readdirSync(supplyChainDir).sort() : []);
+  const tmpEntries = () => readdirSync(tmp);
+  return { result, calls, requestedKeys, previousFiles, previous, work, supplyChainEntries, tmpEntries };
 }
 
 const MANIFEST = "orbit-release-manifest.json";
@@ -145,6 +159,8 @@ describe("carry-previous-release.sh", () => {
     expect(r.previous(MANIFEST).equals(Buffer.from(manifestBody))).toBe(true);
     expect(r.previous(SIG).equals(Buffer.from(SIG_BYTES))).toBe(true);
     expectNoToken(r.result);
+    // No staging dir left beside previous/.
+    expect(r.supplyChainEntries()).toEqual(["previous"]);
   });
 
   it("requests the manifest from job record_image and the signature from job sign_evidence, with the JOB-TOKEN header from a file, not argv", () => {
@@ -165,8 +181,46 @@ describe("carry-previous-release.sh", () => {
       expect(argv.join("\n")).not.toContain(TOKEN);
       expect(argv.some((arg) => arg.startsWith("@"))).toBe(true);
     }
-    // ...and the header file is gone once the script ends.
-    expect(readdirSync(r.work)).toEqual([".orbit-supply-chain"]);
+    // ...and the header file is deleted when the script ends: the script's TMPDIR is empty.
+    expect(r.tmpEntries()).toEqual([]);
+  });
+
+  it("pairs one build: downloads the manifest, the signature, then the manifest again, and accepts the pair when both manifest copies are identical", () => {
+    const manifestBody = manifest(OLDER);
+    const r = run({
+      routes: {
+        [assetPath("main", MANIFEST, "record_image")]: manifestBody,
+        [assetPath("main", SIG, "sign_evidence")]: SIG_BYTES,
+      },
+    });
+    expect(r.result.status).toBe(0);
+    const keys = r.requestedKeys();
+    expect(keys).toEqual([
+      assetPath("main", MANIFEST, "record_image"),
+      assetPath("main", SIG, "sign_evidence"),
+      assetPath("main", MANIFEST, "record_image"),
+    ]);
+    expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
+    expect(r.previous(MANIFEST).equals(Buffer.from(manifestBody))).toBe(true);
+    expect(r.previous(SIG).equals(Buffer.from(SIG_BYTES))).toBe(true);
+    expect(r.tmpEntries()).toEqual([]);
+  });
+
+  it("manifest changes between the two downloads (another pipeline finished): no predecessor, nothing under previous/, no staging or temp leftovers, exit 0", () => {
+    const first = manifest(OLDER);
+    const second = manifest(`sha256:${"3".repeat(64)}`);
+    const r = run({
+      routes: {
+        [assetPath("main", MANIFEST, "record_image")]: first,
+        [assetPath("main", SIG, "sign_evidence")]: SIG_BYTES,
+      },
+      laterRoutes: { [assetPath("main", MANIFEST, "record_image")]: second },
+    });
+    expectNoPredecessor(r);
+    expect(r.requestedKeys().filter((key) => key === assetPath("main", MANIFEST, "record_image"))).toHaveLength(2);
+    expect(r.supplyChainEntries().filter((entry) => entry !== "previous")).toEqual([]);
+    expect(r.tmpEntries()).toEqual([]);
+    expectNoToken(r.result);
   });
 
   it("URL-encodes the slash in a branch name", () => {
@@ -248,6 +302,9 @@ describe("carry-previous-release.sh", () => {
     const r = run({ routes: { [assetPath("main", MANIFEST, "record_image")]: manifest(OLDER) } });
     expectNoPredecessor(r);
     expect(existsSync(join(r.work, ".orbit-supply-chain", "previous", MANIFEST))).toBe(false);
+    // No leftover staging dir either, and the header file is gone.
+    expect(r.supplyChainEntries().filter((entry) => entry !== "previous")).toEqual([]);
+    expect(r.tmpEntries()).toEqual([]);
   });
 
   it.each([
