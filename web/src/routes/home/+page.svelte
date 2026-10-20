@@ -29,6 +29,7 @@
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "$lib/data/bands.js";
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
+  import { addDays } from "$lib/editing/calendar.js";
   import CorridorRow from "./CorridorRow.svelte";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
@@ -1250,7 +1251,7 @@
      (#1138). */
   /** @param {SearchItem} item */
   function itemEntry(item) {
-    return { kind: /** @type {const} */ ("item"), itemId: item.id, title: item.title, cost: costLabel(item) };
+    return { kind: /** @type {const} */ ("item"), itemId: item.id, title: item.title, days: item.days, cost: costLabel(item) };
   }
   const selectable = $derived([
     ...stripItems.map(itemEntry),
@@ -1304,6 +1305,10 @@
   const stripToday = $derived(view ? asView(view).today : "");
   const stripTodayX = $derived(xOfDays(0));
   const stripMonthTicks = $derived(stripOpen && stripToday ? monthTicks(stripToday) : []);
+  /** @param {number} days */
+  const stripDateOf = (days) =>
+    stripToday ? dayMonth(addDays(stripToday, days)) : "";
+
   const stripMarks = $derived.by(() => {
     if (!stripOpen) return [];
     /** @type {Map<string, StripMatch>} */
@@ -1319,9 +1324,16 @@
       const days = m.days;
       const unscheduled = days === null;
       const x = days === null ? UNSCHEDULED_X : xOfDays(days);
+      /* #1438: a typed search's result is the title and the cost; the strip
+         at rest keeps its date and countdown. */
+      const meta = searchQuery
+        ? m.cost
+        : days === null
+          ? `no date · ${m.body ? money(m.body.costMinor, m.body.currency, m.body.costIsEstimate) : ""}`
+          : `${tlabel({ days })} · ${stripDateOf(days)} · ${money(m.body?.costMinor ?? null, m.body?.currency ?? "GBP", m.body?.costIsEstimate ?? false)}`;
       const lines = [
         { cls: "title", text: m.title, size: 12.5 },
-        ...(m.cost ? [{ cls: "meta", text: m.cost, size: 11 }] : []),
+        ...(meta ? [{ cls: "meta", text: meta, size: 11 }] : []),
       ];
       const width = Math.max(...lines.map((l) => textWidth(l.text, l.size)));
       return { ...m, unscheduled, x, lines, width };
@@ -2112,7 +2124,9 @@
           <ul class="sr-only" id="explore-results" role="listbox" aria-label="Results">
             {#each selectable as entry, i (i)}
               <li id="sr-opt-{i}" role="option" aria-selected={i === selectedPos}>
-                {entry.kind === "item" ? (entry.cost ? `${entry.title} · ${entry.cost}` : entry.title) : entry.title}
+                {entry.kind === "item"
+                  ? (searchQuery ? (entry.cost ? `${entry.title} · ${entry.cost}` : entry.title) : `${entry.title} · ${tlabel({ days: entry.days })}`)
+                  : entry.title}
               </li>
             {/each}
           </ul>

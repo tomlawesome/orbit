@@ -1275,7 +1275,9 @@
   <div class="pk-results" class:pk-busy={busy} bind:this={resultList} onkeydown={listKey}>
     {#if !results.query}
       {#each results.items as one (one.id)}
-        <Row title={one.title} meta={costLabel(one)} onactivate={() => openResult(one.id)}>
+        <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
+             trail={tlabel(one)} trailSub={one.dueDate ? dayMonth(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+             onactivate={() => openResult(one.id)}>
           {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
         </Row>
       {/each}
