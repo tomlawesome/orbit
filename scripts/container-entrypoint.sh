@@ -135,7 +135,8 @@ done
 # container still has room. Size the heap explicitly to 70% of the limit
 # (whole MiB), unless the operator's NODE_OPTIONS already sets it. The limit
 # comes from cgroup v2, else v1; anything but a whole number of bytes (such as
-# "max") leaves NODE_OPTIONS unchanged.
+# "max") or 1 TiB or more (cgroup v1 reports about 8 EiB for "no limit") leaves
+# NODE_OPTIONS unchanged.
 case "${NODE_OPTIONS:-}" in
   *--max-old-space-size*) ;;
   *)
@@ -146,7 +147,8 @@ case "${NODE_OPTIONS:-}" in
     case "$memory_limit" in
       ""|0*|*[!0-9]*) ;;
       *)
-        if [ "${#memory_limit}" -le 19 ]; then
+        # Thirteen digits at most, so the comparison cannot overflow.
+        if [ "${#memory_limit}" -le 13 ] && [ "$memory_limit" -lt 1099511627776 ]; then
           limit_mib=$((memory_limit / 1048576))
           heap_mib=$((limit_mib * 70 / 100))
           if [ "$heap_mib" -gt 0 ]; then
