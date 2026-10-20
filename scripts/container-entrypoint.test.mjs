@@ -194,4 +194,22 @@ describe("the entrypoint sizes Node's heap from the container memory limit (#142
     f.writeV2("max\n");
     expect(f.run()).toBe(UNSET);
   });
+
+  it("treats the cgroup v1 no-limit value 9223372036854771712 as no limit", () => {
+    const f = fixture();
+    f.writeV1(`${2 * GIB}\n`);
+    expect(f.run()).toBe("--max-old-space-size=1433");
+    f.writeV1("9223372036854771712\n");
+    expect(f.run()).toBe(UNSET);
+    expect(f.run({ nodeOptions: "--trace-warnings" })).toBe("--trace-warnings");
+  });
+
+  it("treats a limit of exactly 1 TiB (1099511627776 bytes) as no limit", () => {
+    const f = fixture();
+    f.writeV2(`${2 * GIB}\n`);
+    expect(f.run()).toBe("--max-old-space-size=1433");
+    f.writeV2("1099511627776\n");
+    expect(f.run()).toBe(UNSET);
+    expect(f.run({ nodeOptions: "--trace-warnings" })).toBe("--trace-warnings");
+  });
 });
