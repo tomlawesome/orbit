@@ -20,14 +20,20 @@ async function save(change) {
   }
 }
 
+let picks = 0;
+/** How many picks this page has seen; a session read that began before one must not overwrite it. */
+export const picksMade = () => picks;
+
 /** @param {string} id */
 export function chooseTheme(id) {
+  picks += 1;
   applyTheme(id);
   return save({ theme: id });
 }
 
 /** @param {string} id */
 export function chooseTextSize(id) {
+  picks += 1;
   applyTextSize(id);
   return save({ textSize: id });
 }

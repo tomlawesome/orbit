@@ -46,10 +46,11 @@
 
   import { onMount } from "svelte";
   import { page } from "$app/state";
-  import { readSession } from "$lib/data/workspace.js";
+  import { readSession, savePreferences } from "$lib/data/workspace.js";
   import { applyTheme } from "$lib/theme-swatches.js";
   import { applyTextSize } from "$lib/text-size.js";
-  import { themeOrDefault } from "$lib/theme.js";
+  import { decideSync, markSynced, readCache } from "$lib/preferences-sync.js";
+  import { picksMade } from "$lib/pick.js";
 
   let { children } = $props();
 
@@ -61,11 +62,20 @@
   onMount(async () => {
     if (!page.data?.signedIn) return;
     try {
+      const picksBefore = picksMade();
       const session = await readSession();
+      /* A pick made while the read was in flight is newer than the server. */
+      if (picksMade() !== picksBefore) return;
       const user = /** @type {{ themeId?: string, textSize?: string } | undefined} */ (session.user ?? undefined);
       if (!user) return;
-      applyTheme(themeOrDefault(user.themeId));
-      applyTextSize(user.textSize ?? "");
+      /* user.themeId and user.textSize cannot say "never chosen" (see
+         preferences-sync.js): a default on the server beside a different cached
+         choice, on a browser that has not synced, keeps the cache and sends it up. */
+      const decision = decideSync(user, readCache());
+      applyTheme(decision.theme);
+      applyTextSize(decision.textSize);
+      if (decision.push) await savePreferences(decision.push);
+      markSynced();
     } catch { /* keep the cached look */ }
   });
 </script>

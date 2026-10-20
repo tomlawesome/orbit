@@ -51,3 +51,19 @@ export function applyTextSize(id) {
   document.documentElement.setAttribute("data-text-size", size);
   try { localStorage.setItem("orbit-text-size", size); } catch { /* private mode: this page only */ }
 }
+
+/**
+ * Calls back with the applied step now and whenever it changes (the root layout
+ * applies the server's value after the session loads). Returns a stop function.
+ *
+ * @param {(size: string) => void} callback
+ * @returns {() => void}
+ */
+export function observeTextSize(callback) {
+  const root = document.documentElement;
+  const read = () => textSizeOrDefault(root.getAttribute("data-text-size"));
+  callback(read());
+  const observer = new MutationObserver(() => callback(read()));
+  observer.observe(root, { attributes: true, attributeFilter: ["data-text-size"] });
+  return () => observer.disconnect();
+}

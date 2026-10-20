@@ -648,7 +648,13 @@ const TITLE = "[data-row-face], .p-card h2";
  * @param {string} size
  */
 async function openAtTextSize(page, route, size) {
-  await page.addInitScript((value) => { localStorage.setItem("orbit-text-size", value); }, size);
+  /* Seed once per tab: a reload keeps sessionStorage, so the script does not
+     re-seed over a value the test has since changed. */
+  await page.addInitScript((value) => {
+    if (sessionStorage.getItem("text-size-seeded")) return;
+    sessionStorage.setItem("text-size-seeded", "1");
+    localStorage.setItem("orbit-text-size", value);
+  }, size);
   await page.goto(`${APP}${route}`, { waitUntil: "load" });
   if (route.startsWith("/home")) await page.locator("body[data-home-ready]").waitFor({ state: "attached" });
   await settle(page);
@@ -675,8 +681,20 @@ for (const phone of MEASURED) {
         await page.reload({ waitUntil: "load" });
         if (route.startsWith("/home")) await page.locator("body[data-home-ready]").waitFor({ state: "attached" });
         await settle(page);
+        expect(await page.evaluate(() => document.documentElement.dataset.textSize), "the reload is really comfortable").toBe("comfortable");
         const comfortable = await titleSize();
         expect(extra / comfortable).toBeCloseTo(1.25, 2);
+
+        if (route === "/settings") {
+          /* #1180: no tile word breaks mid-word, at any step (scrollWidth over clientWidth means it wrapped inside the word). */
+          for (const step of ["standard", "comfortable", "large", "extra-large"]) {
+            await page.evaluate((s) => { document.documentElement.dataset.textSize = s; }, step);
+            const broken = await page.locator('[role=radiogroup][aria-label="Text size"] [role=radio] b')
+              .evaluateAll((words) => words.filter((b) => b.scrollWidth > b.clientWidth
+                || b.getBoundingClientRect().height > 1.6 * parseFloat(getComputedStyle(b).lineHeight === "normal" ? getComputedStyle(b).fontSize : getComputedStyle(b).lineHeight)).map((b) => b.textContent));
+            expect(broken, `tile words cut mid-word at ${step}`).toEqual([]);
+          }
+        }
       });
     }
   });

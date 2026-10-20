@@ -232,5 +232,5 @@ body.farewell #dusk.asdawn .farewell{opacity:1;transform:translateX(-50%)}
     filter:drop-shadow(0 0 11px rgba(255,206,140,.2))}
   #dusk.asdawn .farewell .sub{position:absolute;left:0;right:0;top:calc(26px - var(--R) * .34);margin:0;
     font-size:0.8125rem;line-height:1.7;letter-spacing:.04em;color:#9aa0b8;text-shadow:0 1px 5px rgba(4,6,14,.9)}
-  #dusk.asdawn .gate{position:relative;top:calc(26px + 2 * 13px * 1.7 + 24px - var(--R) * .34)}
+  #dusk.asdawn .gate{position:relative;top:calc(26px + 2 * .8125rem * 1.7 + 24px - var(--R) * .34)}
 }

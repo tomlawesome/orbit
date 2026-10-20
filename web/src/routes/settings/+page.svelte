@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { resolve } from "$app/paths";
   import {
     readAuthMethodsOffered,
@@ -21,7 +21,7 @@
   import { watchTour } from "$lib/tour/watch.js";
   import { fillStarTiles } from "$lib/sky.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
-  import { DEFAULT_TEXT_SIZE, TEXT_SIZE_CHOICES, textSizeOrDefault } from "$lib/text-size.js";
+  import { DEFAULT_TEXT_SIZE, TEXT_SIZE_CHOICES, observeTextSize } from "$lib/text-size.js";
   import { chooseTheme, chooseTextSize } from "$lib/pick.js";
   import Tiles from "$lib/editing/Tiles.svelte";
   import Chrome from "$lib/Chrome.svelte";
@@ -133,7 +133,9 @@
   let alertsBusy = $state(false);
 
   onMount(async () => {
-    textSize = textSizeOrDefault(document.documentElement.getAttribute("data-text-size"));
+    /* The root layout may apply a different server value after this mounts. */
+    const stopObserving = observeTextSize((size) => { textSize = size; });
+    onDestroy(stopObserving);
     alertsAvailable = alertsSupported();
     /* The row is drawn either way, and the switch is simply held when the
        browser cannot do push. Drawing a different row instead would make this

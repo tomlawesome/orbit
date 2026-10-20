@@ -210,7 +210,7 @@
     chooseTheme(id);
   }
 
-  /* Text size (#1180): four tiles across, two by two under 390px. */
+  /* Text size (#1180): four tiles across, two by two under 430px (four 16px words do not fit across at 390). */
   let width = $state(1024);
   /** @param {string} id */
   function pickTextSize(id) {
@@ -485,7 +485,7 @@
         {/each}
       </div>
       <h3 class="p-caps st-textsize" id="st-textsize">Text size</h3>
-      <Tiles choices={[...TEXT_SIZE_CHOICES]} value={textSize} label="Text size" cols={width < 390 ? 2 : 4} onpick={pickTextSize} />
+      <Tiles choices={[...TEXT_SIZE_CHOICES]} value={textSize} label="Text size" cols={width < 430 ? 2 : 4} onpick={pickTextSize} />
       <!-- Under the packs, where the desk card has it (#1189). -->
       <button class="st-watch" onclick={watchTour}>↻ watch the tour</button>
     </section>
