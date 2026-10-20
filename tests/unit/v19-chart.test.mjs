@@ -273,7 +273,7 @@ describe("corridorOf", () => {
   const corridor = corridorOf(WORKSPACE_FIXTURE, TODAY);
 
   it("spans every system and counts honestly", () => {
-    expect(corridor.total).toBe(15);
+    expect(corridor.total).toBe(16);
     expect(corridor.systems).toBe(5);
     expect(corridor.monthsSpanned).toBe(11);
     expect(corridor.horizon).toBe("June");
@@ -286,7 +286,7 @@ describe("corridorOf", () => {
 
   it("rules exactly the months with something approaching, in date order", () => {
     expect(corridor.months.map((month) => [month.label, month.rows.length])).toEqual([
-      ["SEP", 2], ["OCT", 1], ["DEC", 2], ["JAN", 2], ["MAR", 1], ["APR", 1], ["MAY", 1], ["JUN", 1],
+      ["SEP", 2], ["OCT", 1], ["NOV", 1], ["DEC", 2], ["JAN", 2], ["MAR", 1], ["APR", 1], ["MAY", 1], ["JUN", 1],
     ]);
     expect(corridor.months[0].rows.map((row) => row.id)).toEqual(["i-boiler", "i-narrow-1"]);
   });

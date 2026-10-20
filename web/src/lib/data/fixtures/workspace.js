@@ -91,6 +91,16 @@ const HARLOW_ITEMS = [
     recurrenceMonths: 12, reminderDays: [21], notes: null,
     snoozedUntil: null, version: 2, updatedAt: "2026-06-12T10:35:00.000Z",
   },
+  /* #1460: the dearest body the size curve draws (£50,000 a year, its
+     ceiling). Inside the year ring (the household room does not grow) and carrying a document, so it rides the pocket dial
+     well clear of the others. */
+  {
+    id: "i-roof", title: "Roof replacement", sectionId: "s-home", status: "active",
+    subtype: "service", scheduleKind: "service", provider: null, reference: null,
+    costMinor: 5000000, currency: "GBP", dueDate: "2026-11-21", documentCount: 1,
+    recurrenceMonths: 12, reminderDays: [30], notes: null,
+    snoozedUntil: null, version: 1, updatedAt: "2026-06-14T09:00:00.000Z",
+  },
 ];
 
 /** Distant constellations, named: the id scheme and the due dates are

@@ -285,7 +285,7 @@ export function invitationRowsOf(invitations, now) {
  * with, never a copy of them.
  *
  *   angle° = daysUntilDue − 90,  radius = 62 + 0.242·days
- *   (overdue falls inward at 0.625/day),  halo = bodySize(costMinor),
+ *   (overdue falls inward at 0.625/day),  halo = bodySize(costMinor, recurrenceMonths),
  *   tone = the chart key's urgency band.
  *
  * What travels is the OFFSET from the dial's own centre, in dial units, rather
@@ -323,7 +323,7 @@ export function constellationOf(household, today) {
       band: bandOf(days),
       dx: Math.cos(angle) * radius,
       dy: Math.sin(angle) * radius,
-      halo: bodySize(item.costMinor),
+      halo: bodySize(item.costMinor, item.recurrenceMonths),
     });
   }
   /* Lead time, then id: the sky cannot depend on the order the API answered

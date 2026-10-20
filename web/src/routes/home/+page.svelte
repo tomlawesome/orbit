@@ -1920,7 +1920,7 @@
     <!-- backdrop constellations are generated from the galaxy map -->
     <div class="dialwrap">
       <svg width="640" height="640" class="dial" viewBox="0 0 380 380" role="group"
-         aria-label="Gravity well: items orbit by due date; distance from the household is time remaining, body size is typical cost; details in the manifest below">
+         aria-label="Gravity well: items orbit by due date; distance from the household is time remaining, body size is typical cost per year; details in the manifest below">
       <defs aria-hidden="true">
         <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
           <feGaussianBlur stdDeviation="4"/>
@@ -2028,9 +2028,9 @@
 
       {#if firstOverdue}
         <circle data-polish="POL-2" class="ping" cx={firstOverdue.placement.x} cy={firstOverdue.placement.y}
-                r="8" fill="none" style="stroke:var(--overdue)"/>
+                r={firstOverdue.size + 3} fill="none" style="stroke:var(--overdue)"/>
       {/if}
-      {#each bodies as b (b.id)}
+      {#each [...bodies].sort((a, b) => b.size - a.size) as b (b.id)}
         {#if b.suggestion}
           <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
              data-cost={money(b.costMinor, b.currency, true)} href="#{b.id}"
@@ -2052,7 +2052,7 @@
       {/each}
       {#each bodies.filter((b) => b.documentCount > 0 && b.paint === "jade") as b (b.id)}
         <g class="belt" aria-hidden="true">
-          <ellipse cx={b.placement.x} cy={b.placement.y} rx="13.5" ry="4.6"
+          <ellipse cx={b.placement.x} cy={b.placement.y} rx={b.size + 5} ry={(b.size + 5) * 0.34}
                    transform="rotate(-24 {b.placement.x} {b.placement.y})"
                    fill="none" style="stroke:var(--accent)" stroke-width="1.3" opacity=".8"/>
         </g>
@@ -2247,7 +2247,7 @@
   <div class="keyrow"><span class="sw" style="background:none;border:1.6px solid var(--accent)"></span>suggestion &mdash; not yet accepted</div>
   <h2>Physics</h2>
   <div class="keyrow">closer = sooner</div>
-  <div class="keyrow">bigger = costlier</div>
+  <div class="keyrow">bigger = costlier per year</div>
   <div class="keyrow">belt = documents attached</div>
   <div class="keyrow">the sky&rsquo;s weather = your workload</div>
 </aside>
