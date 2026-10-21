@@ -84,6 +84,22 @@ describe("#1459: the drop zone copy", () => {
     expect(page).toContain("The file is attached to the item as it is.");
   });
 
+  it("with reading on, the main line says exactly 'drop a document' and the about-to-drop line exactly 'nothing is saved until you say'", () => {
+    const main = page.slice(page.indexOf('class="dz-main"'), page.indexOf('class="dz-hint'));
+    expect(main).toMatch(/<span data-when="rest">drop a document<\/span>/u);
+    expect(main).not.toContain("we'll read");
+    expect(page).toMatch(/<span data-when="lock">nothing is saved until you say<\/span>/u);
+    expect(page).not.toContain("orbit will read what it can");
+  });
+
+  it("no line of the drop zone markup says 'read what'", () => {
+    const zone = page.slice(page.indexOf('id="dropzone"'), page.indexOf('class="dz-held"'));
+    expect(zone.length).toBeGreaterThan(200);
+    expect(zone).toContain("dz-main");
+    expect(zone).toContain('data-when="lock"');
+    expect(zone).not.toContain("read what");
+  });
+
   it("with reading on, the hint at rest and while dragging is exactly 'PDF or photo' and never says email, with no line about what is read", () => {
     expect(page).toMatch(/data-when="rest">PDF or photo<\/span>/u);
     expect(page).toMatch(/data-when="arm">PDF or photo<\/span>/u);
@@ -103,11 +119,13 @@ describe("#1459: the home page drop zone copy", () => {
 
   it("says the file is attached as it is when reading is off", () => {
     expect(line).toContain("documentReading === false");
-    expect(line).toContain("it is attached as it is");
+    expect(line).toContain('"drop a document here — it is attached as it is"');
   });
 
-  it("keeps the reading promise when reading is on", () => {
-    expect(line).toContain("we'll read what we can");
+  it("with reading on, says exactly 'drop a document here' and promises no reading", () => {
+    expect(line).toContain('"drop a document here"');
+    expect(line).not.toContain("read what");
+    expect(line).not.toContain("we'll read");
   });
 });
 

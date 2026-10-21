@@ -181,8 +181,13 @@ describe("#1244: the zone's markup and sheet carry the mockup's look", () => {
     /* The owner cut the arm hint to the bare accepted kinds (2026-10-21). */
     expect(page).toMatch(/<span data-when="arm">PDF or photo<\/span>/u);
     expect(page.match(/<span data-when="arm">([^<]*)<\/span>/u)?.[1]).not.toMatch(/email/iu);
-    /* #1459: the reading promise is shown only when document reading is on. */
-    expect(page).toMatch(/<span data-when="lock">\{documentReading \? "orbit will read what it can · " : ""\}nothing is saved until you say<\/span>/u);
+    /* Owner decision 2026-10-21: no drop-zone line promises reading. */
+    expect(page).toMatch(/<span data-when="rest">drop a document<\/span>/u);
+    expect(page).toMatch(/<span data-when="lock">nothing is saved until you say<\/span>/u);
+    const zoneMarkup = page.slice(page.indexOf('id="dropzone"'), page.indexOf('class="dz-held"'));
+    expect(zoneMarkup).toContain('data-when="lock"');
+    expect(zoneMarkup).not.toContain("read what");
+    expect(read("web/src/routes/home/+page.svelte").split("\n").find((one) => one.includes('id="cdrop"')) ?? "").not.toContain("read what");
     expect(page).toMatch(/<div class="sr-only" id="dz-live" aria-live="polite"><\/div>/u);
     expect(page).toContain('aria-label="drop a document, or press enter to choose one"');
   });
