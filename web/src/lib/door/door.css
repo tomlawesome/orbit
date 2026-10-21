@@ -119,7 +119,7 @@ body.lit #door .lockup .name{opacity:1;transform:none;filter:none}
 .loginchrome .lockup .name{grid-area:1/1;font:600 clamp(48px,14vw,72px) var(--display);letter-spacing:.015em;line-height:1;color:#e9edf8}
 /* the gate is over everything in the lockup: no planet (z 5), label (6) or world (5) ever passes over it */
 .gate-wrap{grid-area:1/1;align-self:center;justify-self:center;transform:translateY(min(74px,15vw));z-index:7}
-.gate{font:600 0.75rem var(--display);color:#04060e;background:#d8b45a;border:0;border-radius:99px;padding:11px 30px;cursor:pointer;
+.gate{font:600 12px var(--display);color:#04060e;background:#d8b45a;border:0;border-radius:99px;padding:11px 30px;cursor:pointer;
   letter-spacing:.04em;text-decoration:none;display:inline-block;line-height:normal;
   box-shadow:0 0 28px rgba(216,180,90,.22);opacity:0;transform:translateY(10px);
   transition:opacity 1.2s ease 1.25s,transform 1.2s cubic-bezier(.2,.7,.2,1) 1.25s,filter .35s ease,box-shadow .3s ease}
@@ -144,16 +144,16 @@ body.farewell #dusk .gate{opacity:1;transform:none}
 #dusk .farewell{position:absolute;left:0;right:0;bottom:calc(50% - 240px);text-align:center;z-index:3;
   opacity:0;transform:translateY(9px);transition:opacity .9s ease .3s,transform .9s ease .3s}
 body.farewell #dusk .farewell{opacity:1;transform:none}
-#dusk .farewell .said{font:600 0.9375rem var(--display);color:#cfd3e4;letter-spacing:.01em}
-#dusk .farewell .sub{font:0.6875rem var(--mono);color:#7e819a;margin-top:9px;letter-spacing:.06em}
+#dusk .farewell .said{font:600 15px var(--display);color:#cfd3e4;letter-spacing:.01em}
+#dusk .farewell .sub{font:11px var(--mono);color:#7e819a;margin-top:9px;letter-spacing:.06em}
 
 /* ══ THE FLIGHT (Orbit's flight.css, verbatim where the site has the part): the canvas between the surfaces, and the name on the void ══ */
 #warp,#warpgl{position:fixed;inset:0;z-index:38;opacity:0;pointer-events:none;transition:opacity 1.7s cubic-bezier(.45,.05,.55,.95)}
 body.showwarp #warp,body.showwarp #warpgl{opacity:1;transition:opacity .45s ease}
 #launchname{position:fixed;left:0;right:0;top:26%;z-index:39;text-align:center;pointer-events:none;opacity:0;transition:opacity .55s ease;
-  font:600 0.8125rem var(--display);letter-spacing:.62em;text-transform:uppercase;color:#dfe6f7;text-shadow:0 0 30px rgba(216,180,90,.4)}
+  font:600 13px var(--display);letter-spacing:.62em;text-transform:uppercase;color:#dfe6f7;text-shadow:0 0 30px rgba(216,180,90,.4)}
 #launchname.on{opacity:1}
-#launchname i{display:block;font:0.625rem var(--mono);font-style:normal;letter-spacing:.3em;color:#8791b3;margin-top:11px;text-transform:uppercase}
+#launchname i{display:block;font:10px var(--mono);font-style:normal;letter-spacing:.3em;color:#8791b3;margin-top:11px;text-transform:uppercase}
 @media (prefers-reduced-motion:reduce){#launchname,#warp,#warpgl{display:none!important}}
 
 /* ══ THE DOOR, LIT (html.rich): the ring lit from the sunrise below, the name lit from beneath, the way in a dark glass
@@ -231,6 +231,6 @@ body.farewell #dusk.asdawn .farewell{opacity:1;transform:translateX(-50%)}
   html.rich #dusk.asdawn .farewell .said{background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;
     filter:drop-shadow(0 0 11px rgba(255,206,140,.2))}
   #dusk.asdawn .farewell .sub{position:absolute;left:0;right:0;top:calc(26px - var(--R) * .34);margin:0;
-    font-size:0.8125rem;line-height:1.7;letter-spacing:.04em;color:#9aa0b8;text-shadow:0 1px 5px rgba(4,6,14,.9)}
-  #dusk.asdawn .gate{position:relative;top:calc(26px + 2 * .8125rem * 1.7 + 24px - var(--R) * .34)}
+    font-size:13px;line-height:1.7;letter-spacing:.04em;color:#9aa0b8;text-shadow:0 1px 5px rgba(4,6,14,.9)}
+  #dusk.asdawn .gate{position:relative;top:calc(26px + 2 * 13px * 1.7 + 24px - var(--R) * .34)}
 }
