@@ -1171,7 +1171,7 @@ list_deployment_volumes() {
   local -n found_volumes="$1"
   local listing key name
   found_volumes=()
-  listing="$(docker volume ls --filter "name=${compose_project_name}_orbit-" --format '{{.Name}}' 2>/dev/null)" || return 1
+  listing="$(bounded_docker 5 volume ls --filter "name=${compose_project_name}_orbit-" --format '{{.Name}}' 2>/dev/null)" || return 1
   for key in "${deployment_volume_keys[@]}"; do
     name="${compose_project_name}_${key}"
     if [[ $'\n'"$listing"$'\n' == *$'\n'"$name"$'\n'* ]]; then
@@ -1207,6 +1207,20 @@ shell_words() {
   printf '%s' "${line% }"
 }
 
+# bounded_docker <seconds> <docker-argument>...
+#
+# One Docker call that a hung daemon cannot hold past its bound (plus a
+# second for the KILL); the timeout's exit 124 is a failure like any other.
+# Bash runs a trapped signal only after its foreground child ends, and
+# `timeout` runs in its own process group, out of reach of a terminal's
+# Ctrl-C, so the bound is also the longest a trapped interrupt waits.
+# stdin is closed for the reason given at bounded_compose_probe.
+bounded_docker() {
+  local seconds="$1"
+  shift
+  timeout --signal=TERM --kill-after=1s "${seconds}s" docker "$@" </dev/null
+}
+
 # rollback_docker
 #
 # Containers down while docker-compose.yml is still in place, then each
@@ -1218,9 +1232,12 @@ rollback_docker() {
   local name
   local -a created=()
   [[ "$compose_started" == 1 ]] || return 0
-  # The containers are being removed, so a short stop loses nothing, and
-  # the rollback ends inside the launcher's 15 s wait.
-  if ! compose down --remove-orphans --timeout 5 >/dev/null 2>&1; then
+  # The containers are being removed, so a short stop loses nothing. Every
+  # Docker call here is bounded (down 10 s, listing and each removal 5 s), so
+  # a hung daemon ends the rollback with the obstacles named instead of
+  # holding it until the launcher kills it.
+  if ! bounded_docker 10 compose --project-name "$compose_project_name" --env-file "$environment_file" \
+    down --remove-orphans --timeout 5 >/dev/null 2>&1; then
     # The containers may still be running and using the volumes, so the
     # volumes are left: the one stop command removes this attempt's once
     # the containers are gone. `docker volume ls` works either way.
@@ -1234,7 +1251,7 @@ rollback_docker() {
     return 1
   fi
   for name in "${created[@]}"; do
-    docker volume rm -- "$name" >/dev/null 2>&1 || rollback_failed_volumes+=("$name")
+    bounded_docker 5 volume rm -- "$name" >/dev/null 2>&1 || rollback_failed_volumes+=("$name")
   done
   ((${#rollback_failed_volumes[@]} == 0))
 }
@@ -1520,8 +1537,8 @@ rollback_files() {
 # Sets rollback_action: `retry` when installing again can work (after the
 # one command, when there is one), `abort` when the folder could not be put
 # back. A second interrupt does not stop it half-way: INT, TERM and HUP are
-# caught (not ignored, so a hung Docker call still dies of them) until it
-# ends.
+# caught (not ignored, which every child would inherit) until it ends; a
+# signal waits for the current Docker call, which rollback_docker bounds.
 rollback_fresh_install() {
   local status=0 stop_dir
   rollback_obstacles=()
