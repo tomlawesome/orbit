@@ -571,6 +571,17 @@
     if (modes.id === expanded && !modes.cancel()) return;
     if (pushedEntry) {
       pushedEntry = false;
+      /* #1472: Back is the right way to close a row we pushed (Back and
+         Forward then agree with each other), but SvelteKit answers it by
+         putting the page at the scroll it had when the row was opened, with
+         the page's own smooth scrolling. Closing a row is not a reason to
+         move the page, so this pop is handed the place the reader is at now:
+         the listener below runs after SvelteKit's own, in the same dispatch,
+         and an instant scroll replaces the glide before it has moved. */
+      const { scrollX: x, scrollY: y } = window;
+      const stay = () => scrollTo({ left: x, top: y, behavior: "instant" });
+      addEventListener("popstate", stay, { once: true });
+      setTimeout(() => removeEventListener("popstate", stay), 1000);
       history.back();
     } else {
       replaceState(resolve("/home"), {});
@@ -1853,10 +1864,10 @@
   <div class="inner">
     <h2>Add to your orbit</h2>
     <div class="ctypes">
-      <button class="ctype"><span class="dot"></span>renewal</button>
-      <button class="ctype"><span class="dot"></span>service</button>
-      <button class="ctype"><span class="dot"></span>inspection</button>
-      <button class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
+      <button type="button" class="ctype" data-type="renewal"><span class="dot"></span>renewal</button>
+      <button type="button" class="ctype" data-type="service"><span class="dot"></span>service</button>
+      <button type="button" class="ctype" data-type="inspection"><span class="dot"></span>inspection</button>
+      <button type="button" class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
     </div>
     <div class="crow">
       <!-- #1243: a real drop target, and a button that opens the file

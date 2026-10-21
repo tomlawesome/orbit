@@ -322,6 +322,7 @@ export function ensureEnvironmentFile(deployDir: string): EnsureEnvironmentFileR
 
   const exampleContent = readFileSync(examplePath, "utf8");
   const content = buildMinimalEnvironmentContent(exampleContent);
+  // The `.env-orbit.installing.*` scratch name is also matched by install.sh rollback_files.
   atomicWriteFile(envPath, content, 0o600, "env-orbit.installing");
   return { created: true, message: `Created ${ENVIRONMENT_FILE_NAME} from ${ENVIRONMENT_EXAMPLE_NAME}.` };
 }
@@ -432,6 +433,7 @@ function updateManagedKeysLocked(deployDir: string, pairs: ReadonlyArray<readonl
     )
     .join("");
 
+  // The `.env-orbit.updating.*` scratch name is also matched by install.sh rollback_files.
   atomicWriteFile(envPath, content, 0o600, "env-orbit.updating");
 }
 

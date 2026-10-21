@@ -71,6 +71,11 @@ The rest of this document says what each step checks and why.
 - A `hotfix/*` branch starts from `main`, publishes and accepts a patch
   preview, merges to `main`, and is then merged back into `dev` and
   `preview`.
+- No back-merge of `preview` into `dev` after an ordinary promotion: the
+  `dev` -> `preview` merge commit carries no file changes, the next promotion
+  merges cleanly without it, and each back-merge costs a full pipeline. Merge
+  `preview` back into `dev` only when something landed on `preview` directly,
+  as a hotfix does (owner, 2026-10-17).
 
 Do not squash or rebase away the accepted preview revision. Stable promotion
 checks that `main` and `preview` are the exact same commit.

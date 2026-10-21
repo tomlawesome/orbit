@@ -578,3 +578,70 @@ describe("deriveComposeProjectName (guarantee #12)", () => {
     });
   });
 });
+
+// Redesign r5 (B27): `orbit-install-backups/` is install.sh's own folder
+// inside the Orbit folder. A real directory of that name is ignored when the
+// engine decides whether a folder is fresh; a symlink or a file of that name
+// is refused, and named.
+describe("validateTarget and isPreprovisionedInput: orbit-install-backups (redesign r5)", () => {
+  const backups = () => join(targetDir, "orbit-install-backups");
+  const linkTargets: string[] = [];
+  const linkTarget = () => {
+    const dir = mkdtempSync(join(tmpdir(), "orbit-target-identity-link-"));
+    linkTargets.push(dir);
+    return dir;
+  };
+  afterEach(() => {
+    for (const dir of linkTargets.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function refusalOf(run: () => unknown): Error {
+    let caught: unknown;
+    try {
+      run();
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(TargetValidationRefusal);
+    return caught as Error;
+  }
+
+  it("a folder holding only a real orbit-install-backups directory is empty", () => {
+    mkdirSync(join(backups(), "20261020T154502Z", "moved"), { recursive: true, mode: 0o700 });
+    writeFileSync(join(backups(), "20261020T154502Z", "moved", "notes.txt"), "kept\n");
+    expect(validateTarget(targetDir)).toEqual({ targetWasEmpty: true });
+  });
+
+  it(".env-orbit, .orbit-secrets and a real orbit-install-backups directory is pre-provisioned", () => {
+    seedPreprovisioned();
+    mkdirSync(backups(), { mode: 0o700 });
+    expect(isPreprovisionedInput(targetDir)).toBe(true);
+    expect(validateTarget(targetDir)).toEqual({ targetWasEmpty: true });
+  });
+
+  it.each([
+    ["a symlink", () => symlinkSync(linkTarget(), backups())],
+    ["a regular file", () => writeFileSync(backups(), "")],
+  ])("%s at orbit-install-backups makes the folder not empty and not a recognizable deployment, and is named", (_kind, plant) => {
+    plant();
+    expect(refusalOf(() => validateTarget(targetDir)).message).toContain("orbit-install-backups");
+  });
+
+  it.each([
+    ["a symlink", () => symlinkSync(linkTarget(), backups())],
+    ["a regular file", () => writeFileSync(backups(), "")],
+  ])("%s at orbit-install-backups beside the pre-provisioned files is refused, and named", (_kind, plant) => {
+    seedPreprovisioned();
+    plant();
+    expect(isPreprovisionedInput(targetDir)).toBe(false);
+    expect(refusalOf(() => validateTarget(targetDir)).message).toContain("orbit-install-backups");
+  });
+
+  it("a recognised deployment with a real orbit-install-backups directory is still a deployment", () => {
+    writeFileSync(join(targetDir, ".env-orbit"), "APP_URL=https://example.invalid\n", { mode: 0o600 });
+    writeFileSync(join(targetDir, "docker-compose.yml"), "services: {}\n");
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    mkdirSync(backups(), { mode: 0o700 });
+    expect(validateTarget(targetDir)).toEqual({ targetWasEmpty: false });
+  });
+});

@@ -21,11 +21,17 @@
 #   docs/engine-events.md       plain events use documented vocabulary only
 #
 # With --lifecycle (issue #291), additionally:
-#   Part 1 / install.sh #31     hard interruption leaves the target
-#                               byte-identical; staging evidence owner-only
-#                               (the engine SIGKILLs itself right after its
-#                               transaction begins, ORBIT_INSTALL_TEST_HARD_
-#                               INTERRUPT_STAGE=transaction-begun)
+#   Part 1 / install.sh #31     hard interruption: install.sh's rollback
+#                               (#58) puts .env-orbit and .orbit-secrets back
+#                               byte-identical (cmp, diff -r, both modes),
+#                               and the drill checks the staging directory,
+#                               the lock and orbit-install-backups are absent
+#                               after it. Twice: the engine SIGKILLs itself
+#                               right after its transaction begins, then
+#                               right after it commits (ORBIT_INSTALL_TEST_
+#                               HARD_INTERRUPT_STAGE=transaction-begun, then
+#                               transaction-committed), so the second run
+#                               proves a real restore of a committed folder
 #   Part 1 / configure.sh #33, #24; install.sh #19  recognized-deployment
 #                               rerun never rotates or rewrites a secret
 #   Part 1 / install.sh #13, #21  fresh install refused while another
@@ -46,7 +52,9 @@
 # What a run creates, and what its teardown removes (#1241). Every run tears
 # down all of it and nothing else, on success, on failure and on SIGINT or
 # SIGTERM, exactly once:
-#   - the work directory /tmp/orbit-acceptance.* (shim, manifest, targets)
+#   - the work directory /tmp/orbit-acceptance.* (shim, manifest, targets),
+#     including any orbit-install-backups/ install.sh makes inside a target
+#     (the lifecycle drill asserts none is left after a complete rollback)
 #   - Compose project <project> and <project>-local: containers, profile
 #     services and orphans, named volumes, networks (removed by `compose
 #     down`, then by the project label so a SIGKILLed run's debris goes too)
@@ -530,7 +538,7 @@ if [[ "\${1:-}" == "run" && " \$* " == *" /opt/orbit/cli/orbit.js install "* ]];
     -v "$workdir/oidc-ca.pem:/orbit-test-oidc-ca.pem:ro"
     -e NODE_EXTRA_CA_CERTS=/orbit-test-oidc-ca.pem)
   if [[ -e "$workdir/interrupt.armed" ]]; then
-    extra+=(-e ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE=transaction-begun)
+    extra+=(-e "ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE=\$(cat "$workdir/interrupt.armed")")
   fi
   exec "$real_docker" run "\${extra[@]}" "\${@:2}"
 fi
@@ -653,45 +661,70 @@ prepare_image() {
   write_shim
 }
 
+# One hard interruption of a fresh install at the engine's kill point
+# <stage>, then install.sh's rollback: the pre-provisioned files back
+# byte-identical with their modes, no staging, no lock, no
+# orbit-install-backups left in the target, and the rollback reported.
+hard_interruption() {
+  local stage="$1" success_note="$2"
+  cp -- "$target/.env-orbit" "$workdir/env-before-interrupt"
+  rm -rf -- "$workdir/secrets-before-interrupt"
+  cp -a -- "$target/.orbit-secrets" "$workdir/secrets-before-interrupt"
+  local modes_before
+  modes_before="$(stat -c %a -- "$target/.env-orbit" "$target/.orbit-secrets")"
+  printf '%s\n' "$stage" > "$workdir/interrupt.armed"
+  local install_status=0
+  run_installer || install_status=$?
+  rm -f "$workdir/interrupt.armed"
+  # A scenario that reports success without having interrupted anything is
+  # worse than one that flakes, so prove the engine died by the signal.
+  [[ "$install_status" == 1 ]] ||
+    fail "interruption ($stage): installer exited with status $install_status, not the failure of an interrupted engine"
+  grep -q 'The install engine stopped without reporting a result (docker run exit status 137)' "$workdir/install.log" ||
+    fail "interruption ($stage): the engine was not killed at its kill point (see install.log)"
+  cmp -s "$workdir/env-before-interrupt" "$target/.env-orbit" ||
+    fail "interruption ($stage): .env-orbit was not put back byte-identical"
+  diff -r -- "$workdir/secrets-before-interrupt" "$target/.orbit-secrets" >/dev/null ||
+    fail "interruption ($stage): .orbit-secrets was not put back byte-identical"
+  [[ "$(stat -c %a -- "$target/.env-orbit" "$target/.orbit-secrets")" == "$modes_before" ]] ||
+    fail "interruption ($stage): the rollback did not put back the modes of .env-orbit and .orbit-secrets"
+  # `-print -quit`, not a bare `| grep -q .` (issue #809).
+  local staging_dir
+  staging_dir="$(find "$target" -maxdepth 1 -name '.orbit-install-staging.*' -print -quit)"
+  [[ -z "$staging_dir" ]] ||
+    fail "interruption ($stage): the rollback left the staging directory $staging_dir"
+  [[ ! -e "$target/.orbit-engine.lock" && ! -L "$target/.orbit-engine.lock" ]] ||
+    fail "interruption ($stage): the rollback left the deploy lock"
+  [[ ! -e "$target/orbit-install-backups" && ! -L "$target/orbit-install-backups" ]] ||
+    fail "interruption ($stage): the rollback left orbit-install-backups in the target"
+  grep -q 'This install was rolled back' "$workdir/install.log" ||
+    fail "interruption ($stage): install.sh did not report a complete rollback (see install.log)"
+  note "$success_note"
+}
+
 positive_scenario() {
   make_preprovisioned_target
   stable_channel_refusal
 
   if [[ "$lifecycle_mode" == 1 ]]; then
     # catalogue Part 1 / install.sh #31: a hard interruption inside the
-    # transaction leaves the pre-provisioned target byte-identical; the
-    # staging evidence stays owner-only. The kill point is the engine's own
+    # transaction leaves the pre-provisioned target byte-identical, and on
+    # this fresh folder install.sh's rollback (#58) then removes the staging
+    # evidence and the deploy lock. The kill point is the engine's own
     # (#1212 note 30988): armed, it SIGKILLs itself right after the
     # transaction begins -- staging and rollback areas made, nothing written
     # yet -- as restore.sh's drill stage does. No poll, no race.
-    cp -- "$target/.env-orbit" "$workdir/env-before-interrupt"
-    : > "$workdir/interrupt.armed"
-    local install_status=0
-    run_installer || install_status=$?
-    rm -f "$workdir/interrupt.armed"
-    # A scenario that reports success without having interrupted anything is
-    # worse than one that flakes, so prove the engine died by the signal.
-    [[ "$install_status" == 1 ]] ||
-      fail "interruption: installer exited with status $install_status, not the failure of an interrupted engine"
-    grep -q 'The install engine stopped without reporting a result (docker run exit status 137)' "$workdir/install.log" ||
-      fail "interruption: the engine was not killed inside its transaction (see install.log)"
-    # `-print -quit`, not a bare `| grep -q .` (issue #809).
-    local staging_dir
-    staging_dir="$(find "$target" -maxdepth 1 -name '.orbit-install-staging.*' -type d -print -quit)"
-    [[ -n "$staging_dir" ]] ||
-      fail "interruption: no staging directory, so the transaction was never entered"
-    cmp -s "$workdir/env-before-interrupt" "$target/.env-orbit" ||
-      fail "interruption inside the transaction mutated .env-orbit"
-    local lax_staging_dir
-    lax_staging_dir="$(find "$target" -maxdepth 1 -name '.orbit-install-staging*' -type d ! -perm 700 -print -quit)"
-    [[ -z "$lax_staging_dir" ]] ||
-      fail "interruption left staging evidence that is not owner-only"
-    note "lifecycle: hard interruption left the target byte-identical (install.sh #31)"
-    # Recovery is the operator's documented step: staging evidence, and the
-    # deploy lock the killed engine held, are kept until inspected, then
-    # removed before rerunning -- the engine's target validation (install.sh
-    # #7) deliberately refuses a target containing them, and names both.
-    rm -rf -- "$target"/.orbit-install-staging.* "$target/.orbit-engine.lock" 2>/dev/null || true
+    hard_interruption transaction-begun \
+      "lifecycle: install.sh's rollback put .env-orbit and .orbit-secrets back byte-identical after a hard interruption inside the transaction, staging and lock gone (install.sh #58)"
+    # Redesign r5 (R5-drill-FR1): the same, killed right after the commit, so
+    # the folder holds what the engine wrote and the byte-identical check
+    # proves install.sh's restore of a committed folder, not an engine that
+    # had not written yet.
+    hard_interruption transaction-committed \
+      "lifecycle: install.sh's rollback put .env-orbit and .orbit-secrets back byte-identical after a hard interruption after the commit, staging and lock gone (install.sh #58)"
+    # The rollback removed the staging evidence and the lock, so the rerun
+    # below needs no manual step: the engine's target validation (install.sh
+    # #7) would otherwise refuse a target containing them.
   fi
 
   note "running unmocked install.sh against 127.0.0.1:$registry_port/$repository"

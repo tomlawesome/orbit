@@ -337,6 +337,7 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
     if (!written.has(key)) output += `${key}=${managed[key]}${newline}`;
   }
 
+  // The `.env-orbit.migrating.*` scratch name is also matched by install.sh rollback_files.
   const scratch = join(dirname(file), `${basename(file)}.migrating.${randomBytes(6).toString("hex")}`);
   installSignalCleanup();
   migrationScratch = { path: scratch, releaseLock };
