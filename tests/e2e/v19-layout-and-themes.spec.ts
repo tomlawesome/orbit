@@ -53,7 +53,10 @@ if (THEME_PACKS.length < 2 || !DEFAULT_THEME) throw new Error("#1178: could not 
  *    swept on every screen by v19-axe-sweep.spec.ts, so it is not run twice.
  *    The pack is chosen the way the swatches choose it (settings/+page.svelte
  *    `pickPack`): `orbit-theme` in localStorage, read by app.html's
- *    pre-paint script.
+ *    pre-paint script, and saved to the account (PUT /api/preferences). Since
+ *    #1180 the account's saved pack wins over this browser's copy, and every
+ *    test here signs in as the same person, so each test saves its pack as it
+ *    arrives and puts the default back when it ends (`savePack`).
  *
  *    The old spec also ran every Orbit text-size setting. v19 stores
  *    `textSize` (PUT /api/preferences) but no screen applies it, so there is
@@ -145,15 +148,36 @@ const SCREENS: Screen[] = [
  * needs one. Sign-in, a seed, the settle and an axe pass over a chart-heavy
  * screen outrun 30s on the capped stack, so every test gets the sweep's 60s.
  */
-async function arrive(page: Page, screen: Screen): Promise<Household | undefined> {
+/** Saves `pack` as the signed-in person's theme, the way a swatch does. */
+async function savePack(page: Page, pack: string): Promise<void> {
+  const ok = await page.evaluate(async (theme) => {
+    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
+    const response = await fetch("/api/preferences", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
+      body: JSON.stringify({ theme }),
+    });
+    return response.ok;
+  }, pack);
+  expect(ok, `saving the ${pack} pack`).toBe(true);
+}
+
+async function arrive(page: Page, screen: Screen, pack?: string): Promise<Household | undefined> {
   test.setTimeout(60_000);
   if (!screen.seed) {
     await signIn(page, screen.path());
+    if (pack) {
+      await savePack(page, pack);
+      await page.reload();
+    }
     await screen.ready(page);
     return undefined;
   }
   await signIn(page, "/home");
   const household = await seedHousehold(page, "layout-themes", { withItem: screen.seed === "item" });
+  /* Saved before the screen loads, so it is drawn once, in the pack. */
+  if (pack) await savePack(page, pack);
   await page.goto(screen.path(household));
   await screen.ready(page, household);
   return household;
@@ -296,7 +320,7 @@ test.describe("the signed-in v19 screens at every size and in every theme pack",
         await page.addInitScript((id: string) => {
           try { localStorage.setItem("orbit-theme", id); } catch { /* storage blocked: the check below says so */ }
         }, pack);
-        const household = await arrive(page, screen);
+        const household = await arrive(page, screen, pack);
         try {
           /* The pack really is the one drawn, and its tokens resolved -- or
              a contrast pass would be measuring the default pack again. */
@@ -308,6 +332,7 @@ test.describe("the signed-in v19 screens at every size and in every theme pack",
           expect(tokens.every((value) => value.length > 0), `${pack}: --bg and --ink resolve`).toBe(true);
           expect(await axeViolations(page), `${screen.name} in ${pack}`).toEqual([]);
         } finally {
+          await savePack(page, DEFAULT_THEME as string);
           if (household) await cleanup(page, household);
         }
       });
