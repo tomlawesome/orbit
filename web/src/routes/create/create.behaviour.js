@@ -4,7 +4,7 @@ import {
   wordsOf, notSavedWords,
 } from "$lib/data/workspace.js";
 import {
-  CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
+  CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
   WHY_UNDRAWABLE, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
 } from "$lib/data/document-read.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
@@ -64,7 +64,7 @@ import { sizeLabel } from "$lib/format.js";
  *      same class of bug satellites.js's own doc warns about ("a blurred
  *      scrim survived a trip to /create").
  */
-export function mountCreate() {
+export function mountCreate({ documentReading = true } = {}) {
   const { on, teardown } = screenScope();
 
   const card = /** @type {HTMLElement} */ (document.getElementById("card"));
@@ -391,7 +391,7 @@ export function mountCreate() {
   }
 
   /** Back to the mockup's `doc` state: the reticle breathing, nothing settled. */
-  function resetLane(/** @type {File} */ file) {
+  function resetLane(/** @type {File} */ file, reading = true) {
     clearSheet();
     pageState = "pending";
     readDone = false;
@@ -399,10 +399,11 @@ export function mountCreate() {
     readcard.classList.remove("still", "rc-refused");
     delete readcard.dataset.page;
     readcard.dataset.reading = "true";
-    readHead.textContent = READING_HEAD;
+    readHead.textContent = reading ? READING_HEAD : CHECKING_HEAD;
     focusline.textContent = FOCUS_SCANNING;
-    focusWhy.innerHTML = WHY_READING;
-    capline.textContent = CAP_READING;
+    focusWhy.textContent = reading ? "" : WHY_CHECKING;
+    if (reading) focusWhy.innerHTML = WHY_READING;
+    capline.textContent = reading ? CAP_READING : CAP_ATTACHED;
     honest.textContent = "";
     rcFile.textContent = `◆ ${file.name}`;
     rcSize.textContent = sizeLabel(file.size);
@@ -495,7 +496,7 @@ export function mountCreate() {
        pocket's readDocument does: carrying only fills empty fields, so stale
        ones would otherwise be saved against the new file. */
     clearSuggestions();
-    resetLane(file);
+    resetLane(file, documentReading);
     const householdId = (household ?? await activeHousehold()).id;
     if (!current()) return;
 
@@ -505,7 +506,7 @@ export function mountCreate() {
       if (!current() || pageState !== "pending") return;
       focusline.textContent = focusAfterScan(scanned);
     };
-    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned });
+    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned, documentReading });
 
     const page = outcomes.page.then((outcome) => {
       if (!current()) {
@@ -539,6 +540,11 @@ export function mountCreate() {
         if (outcome.kind === "refused") {
           /* The upload would refuse it too, so the save is held now. */
           refuseDocument(file, outcome.why);
+          return;
+        }
+        if (outcome.kind === "attached") {
+          /* #1459: reading is off; the file goes with the entry as it is. */
+          capline.textContent = captionOf(outcome, 0);
           return;
         }
         if (outcome.kind === "unread") {

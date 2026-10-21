@@ -35,9 +35,13 @@ export const TOO_LARGE = "this file is too large to send — it is larger than t
 export const WHY_TOO_LARGE = `${TOO_LARGE}<br>choose a smaller document`;
 export const FOCUS_REFUSED = "Orbit refused this file.";
 export const WHY_REFUSED = "it did not pass what orbit checks before keeping a file<br>choose another document";
+/* #1459: the lane's words when nothing is read, only checked and attached. */
+export const CHECKING_HEAD = "Checking your document";
+export const WHY_CHECKING = "orbit is checking the file for malware before attaching it";
 export const CAP_READING = "orbit is reading the pages it was given";
 export const CAP_CARRIED = "the fields marked ◆ from document are what orbit read across into the form";
 export const CAP_NOTHING = "orbit read the pages and found nothing to carry across";
+export const CAP_ATTACHED = "the file is attached as it is";
 export const CAP_UNREAD = "orbit could not read the pages this time";
 
 /** The suggestion fields both forms have a slot (and a "◆ from document"
@@ -52,14 +56,15 @@ export const SUGGESTION_FIELDS = /** @type {const} */ (["provider", "reference",
  *   | { kind: "undrawable", why: string }} PageOutcome
  * @typedef {{ kind: "refused", why: string }
  *   | { kind: "read", extracted: boolean, suggestions: { field: SuggestionField, value: string }[], message: string }
- *   | { kind: "unread", message: string }} ReadOutcome
+ *   | { kind: "unread", message: string }
+ *   | { kind: "attached" }} ReadOutcome
  *
  * The phone form's state for one pick (pocket.svelte holds it, EntryForm.svelte
  * draws it): `page` is page one's object URL once drawn; `settled` stops the
  * focus block breathing on `line` / `why` (a refusal, or a page that could not
  * be drawn); `read` is the read being done, and `caption` what it ended on.
  * @typedef {{
- *   key: number, name: string, size: number, page: string | null, scanned: boolean,
+ *   key: number, head?: string, name: string, size: number, page: string | null, scanned: boolean,
  *   refused: boolean, settled: boolean, line: string, why: string, read: boolean, caption: string,
  * }} PickedRead
  */
@@ -102,10 +107,10 @@ const tooLarge = (error) =>
  *
  * @param {string} householdId
  * @param {File} file
- * @param {{ signal?: AbortSignal, onScanned?: (scanned: boolean) => void }} [options]
+ * @param {{ signal?: AbortSignal, onScanned?: (scanned: boolean) => void, documentReading?: boolean }} [options]
  * @returns {{ page: Promise<PageOutcome>, read: Promise<ReadOutcome> }}
  */
-export function readPickedDocument(householdId, file, { signal, onScanned } = {}) {
+export function readPickedDocument(householdId, file, { signal, onScanned, documentReading = true } = {}) {
   const onStage = onScanned
     ? (/** @type {"scanned"} */ _stage, /** @type {{ scanned: boolean }} */ detail) => onScanned(detail.scanned)
     : undefined;
@@ -125,6 +130,11 @@ export function readPickedDocument(householdId, file, { signal, onScanned } = {}
       });
     },
   );
+
+  /* #1459: reading is off (no TIKA_URL). The virus scan rides on the page-one
+     request above, so nothing is lost by not asking; the file is attached as
+     it is, and nothing here says a read failed. */
+  if (!documentReading) return { page, read: Promise.resolve(/** @type {ReadOutcome} */ ({ kind: "attached" })) };
 
   const read = inspectPickedDocument(householdId, file, { signal }).then(
     (result) => {
@@ -165,10 +175,11 @@ export function suggestionsToCarry(suggestions, valueOf) {
 /**
  * The caption's second line once the read is done.
  *
- * @param {Extract<ReadOutcome, { kind: "read" | "unread" }>} read
+ * @param {Extract<ReadOutcome, { kind: "read" | "unread" | "attached" }>} read
  * @param {number} carried  how many fields it filled
  */
 export function captionOf(read, carried) {
+  if (read.kind === "attached") return CAP_ATTACHED;
   if (read.kind === "unread" || !read.extracted) return CAP_UNREAD;
   return carried ? CAP_CARRIED : CAP_NOTHING;
 }

@@ -1,4 +1,5 @@
 import { env } from "$env/dynamic/private";
+import { documentReadingEnabled } from "orbit/server/documents/tika";
 
 /**
  * #475: whether this instance is running on fixtures, for EVERY route.
@@ -19,10 +20,25 @@ import { env } from "$env/dynamic/private";
  * locals, so it costs no query. Showing the row is all this decides; the
  * administration page and its API keep their own server-side gates.
  */
+/*
+ * #1459: whether this instance reads documents (TIKA_URL set). The Add page
+ * promises extraction, and asks for it, only when it is true. Fixtures keep
+ * the reading lane drawn; an unreadable configuration means nothing is read.
+ */
+function documentReading() {
+  if (env.ORBIT_FIXTURES === "1") return true;
+  try {
+    return documentReadingEnabled();
+  } catch {
+    return false;
+  }
+}
+
 /** @type {import("./$types").LayoutServerLoad} */
 export function load({ locals }) {
   return {
     fixtures: env.ORBIT_FIXTURES === "1",
+    documentReading: documentReading(),
     isAdmin: Boolean(locals.session?.user?.isInstanceAdmin),
   };
 }

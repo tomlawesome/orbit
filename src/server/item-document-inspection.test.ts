@@ -68,6 +68,8 @@ const config = {
   maxBytes: 25 * 1_048_576,
   scanMode: "required" as const,
   clamAv: { host: "clamav", port: 3310, timeoutMs: 30_000 },
+  // Document reading is on in this file unless a test turns it off (#1459).
+  tika: { url: new URL("http://tika.internal:9998"), timeoutMs: 30_000 },
 };
 
 function validPdf(contents = "synthetic") {
@@ -402,6 +404,55 @@ describe("item document inspection", () => {
     expect(mocks.extract).not.toHaveBeenCalled();
     expect(bytes.every((byte) => byte === 0)).toBe(true);
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received(bytes).quarantinePath);
+  });
+
+  describe("document reading is off when TIKA_URL is unset (#1459)", () => {
+    const off = () => mocks.config.mockReturnValue({ ...config, tika: { url: null, timeoutMs: 30_000 } });
+    const upload = (filename = "manual-policy.pdf") => inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename,
+      body: new ReadableStream<Uint8Array>(),
+    });
+
+    it("never calls the parser, yet still scans the file and attaches it with a filename-only suggestion", async () => {
+      off();
+      const result = await upload();
+
+      expect(mocks.scan).toHaveBeenCalledTimes(1);
+      expect(mocks.extract).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        extracted: false,
+        suggestions: [{ field: "title", value: "manual-policy", source: "filename", confidence: "high" }],
+        attachmentDisposition: "attachable",
+      });
+      expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
+    });
+
+    it("does not raise or log parser_disabled per upload", async () => {
+      off();
+      const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+      const info = vi.spyOn(log, "info").mockImplementation(() => undefined);
+      const result = await upload();
+
+      const everything = JSON.stringify([...warn.mock.calls, ...info.mock.calls]);
+      expect(everything).not.toContain("parser_disabled");
+      expect(everything).not.toContain("parser_unavailable");
+      expect(result.message ?? "").not.toMatch(/could not read|unavailable right now/iu);
+    });
+
+    it("still refuses an infected file when reading is off", async () => {
+      off();
+      mocks.scan.mockResolvedValue({ status: "infected", logReason: "malware_detected" });
+      await expect(upload()).rejects.toMatchObject({ code: "document_malware_detected" });
+      expect(mocks.extract).not.toHaveBeenCalled();
+    });
+
+    it("with Tika on, the parser is called exactly once and its text is read", async () => {
+      const result = await upload("policy.pdf");
+      expect(mocks.extract).toHaveBeenCalledTimes(1);
+      expect(result.extracted).toBe(true);
+    });
   });
 
   it("does not parse when ClamAV scanning is disabled", async () => {

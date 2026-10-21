@@ -575,6 +575,9 @@ export async function registerNode(): Promise<void> {
     });
   });
 
+  // #1459: say once, plainly, when document reading is off. Best-effort.
+  void import("@/server/documents/tika").then((tika) => tika.reportDocumentReadingStatus()).catch(() => undefined);
+
   // Probed after workers start so a slow or absent scanner never delays them.
   // Failure is reported, never thrown: readiness is the health surface's job.
   void reportScannerReadiness().catch(() => {
