@@ -2833,12 +2833,13 @@ describe("install.sh: a model-pull container left behind by an earlier run", () 
     expect(`${result.stdout}\n${result.stderr}`).not.toMatch(/confirmed download did not complete/);
   });
 
-  it("a download that does not complete: the retry hint names the container", () => {
+  it("a download that does not complete: the retry hint does not name the container, which the next run removes itself", () => {
     const { targetDir, environment } = modelUpdateFixture();
     const result = runInstall(targetDir, { ...environment, ...confirmed, FAKE_MODEL_PULL_FAIL: "1" });
     expect(result.status).toBe(0);
     const note = `${result.stdout}\n${result.stderr}`.split("\n").find((line) => /confirmed download did not complete/.test(line)) ?? "";
-    expect(note).toContain(leftover);
+    expect(note).toMatch(/To try again: docker compose /u);
+    expect(note).not.toContain(leftover);
   });
 });
 
@@ -2893,13 +2894,13 @@ function unwritableHome() {
 }
 
 describe("install.sh: the rollback's shutdown is bounded (O-F6)", () => {
-  it("the rollback's `compose down` carries `--timeout 5`", () => {
+  it("the rollback's `compose down` carries `--timeout 2`", () => {
     const { targetDir, environment } = recoveryFixture();
     const result = runInstall(targetDir, { ...environment, FAKE_COMPOSE_UP_FAIL: "1" });
     expect(result.status).toBe(1);
     const downs = result.calls.split("\n").filter((line) => /^docker compose .* down( |$)/u.test(line));
     expect(downs.length).toBeGreaterThan(0);
-    for (const line of downs) expect(line).toMatch(/ --timeout 5( |$)/u);
+    for (const line of downs) expect(line).toMatch(/ --timeout 2( |$)/u);
   });
 });
 
