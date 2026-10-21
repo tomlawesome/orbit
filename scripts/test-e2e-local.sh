@@ -663,6 +663,21 @@ else
     fi
   done
 
+  # A fresh run owns its project outright: the suite resets its database and
+  # teardown removes its volumes. A name handed in through COMPOSE_PROJECT_NAME
+  # can be a real install's (which uses none of the renamed containers above),
+  # so any container or volume already carrying the project's Compose label
+  # means this run would adopt something it did not create. Refuse instead;
+  # nothing has been created yet, so the exit trap tears nothing down. A
+  # listing that fails is a refusal too, not an empty answer.
+  existing_containers="$(docker ps -aq --filter "label=com.docker.compose.project=${project_name}")" \
+    || fail "could not list containers for project ${project_name}; refusing to start without knowing whether it already exists."
+  existing_volumes="$(docker volume ls -q --filter "label=com.docker.compose.project=${project_name}")" \
+    || fail "could not list volumes for project ${project_name}; refusing to start without knowing whether it already exists."
+  if [[ -n "$existing_containers" || -n "$existing_volumes" ]]; then
+    fail "project ${project_name} already has containers or volumes (perhaps a real install, or a run left up with --keep). Refusing to adopt them: unset COMPOSE_PROJECT_NAME or pick an unused name, or pass --reuse ${project_name} for a stack an earlier --keep run left up."
+  fi
+
   # --- Build the app image: configuration runs inside it (#1210) ------------
 
   orbit_revision="$(git rev-parse HEAD)"
