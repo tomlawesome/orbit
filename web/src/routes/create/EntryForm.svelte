@@ -422,6 +422,11 @@
   /* Two rows, three over two (§2.5), each chip filling its share. */
   .pc-kinds .pc-chip{grid-column:span 2;padding:0 6px;gap:6px;font-size:.875rem}
   .pc-kinds .pc-chip:nth-child(n+4){grid-column:span 3}
+  /* #1180: at large text on a narrow phone three across will not hold the words: two columns. */
+  @media (max-width:389px){
+    :global(html[data-text-size=large]) .pc-kinds,:global(html[data-text-size=extra-large]) .pc-kinds{grid-template-columns:repeat(2,minmax(0,1fr))}
+    :global(html[data-text-size=large]) .pc-kinds .pc-chip,:global(html[data-text-size=extra-large]) .pc-kinds .pc-chip{grid-column:span 1;overflow-wrap:anywhere}
+  }
   .pc-glyph{color:var(--accent-text);font-size:var(--p-type-body);line-height:1}
 
   /* The document row: the desk's dashed drop target, as a 56px row. */
@@ -443,7 +448,7 @@
   .pc-need{letter-spacing:.04em;text-transform:none;font-size:var(--p-type-caps);color:var(--accent-text)}
   .pc-field input,.pc-field textarea{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;
     border-radius:12px;border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);
-    color:var(--ink);font:var(--p-type-body)/1.4 var(--ui);
+    color:var(--ink);font:var(--p-type-input)/1.4 var(--ui);
     scroll-margin-top:calc(var(--p-chrome) + 12px);scroll-margin-bottom:calc(var(--pc-bar, 0px) + var(--p-kb, 0px) + 12px)}
   .pc-field textarea{padding:12px 14px;resize:vertical;min-height:96px}
   .pc-field input.mono{font-family:var(--mono)}

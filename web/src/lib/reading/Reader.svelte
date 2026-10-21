@@ -394,7 +394,7 @@
   .rd-foot{display:flex;flex-direction:column;align-items:center;gap:8px;padding-top:8px}
   .rd-page{margin:0;min-height:1.4em;font:var(--p-type-meta) var(--mono);color:var(--ink);font-variant-numeric:tabular-nums}
   /* #1155: the reading card's own one-line note, for a staged paper's foot. */
-  .rcnote{font:10.5px var(--mono);color:var(--ink-quiet);letter-spacing:.02em;margin:0}
+  .rcnote{font:0.65625rem var(--mono);color:var(--ink-quiet);letter-spacing:.02em;margin:0}
   .rd-acts{justify-content:center}
   .rd-download{--act:var(--accent);--act-text:var(--accent-text);
     border-color:color-mix(in srgb, var(--accent) 40%, transparent);color:var(--accent-text)}

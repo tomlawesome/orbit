@@ -106,8 +106,8 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 /* §14: the desk. Same scale as the helm and administration. */
 .household-page .page{position:relative;z-index:2;max-width:1060px;margin:0 auto;padding:96px 24px 120px}
 .household-page header.screen{display:flex;align-items:center;gap:17px}
-.household-page header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
-.household-page header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:5px;letter-spacing:.04em}
+.household-page header.screen h1{font:600 1.625rem var(--display);letter-spacing:.01em}
+.household-page header.screen .sub{font:0.6875rem var(--mono);color:var(--ink-mid);margin-top:5px;letter-spacing:.04em}
 .household-page header.screen .glyph{flex:none}
 
 .household-page .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:24px;align-items:start}
@@ -149,15 +149,15 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
   .household-page .c-members .block{margin-top:16px}
 }
 .household-page .cardhead{display:flex;align-items:baseline;gap:10px;margin-bottom:15px}
-.household-page .card h2{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-quiet)}
-.household-page .cardhead .count{font:10.5px var(--mono);color:var(--ink-quiet);letter-spacing:.06em}
+.household-page .card h2{font:0.65625rem var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-quiet)}
+.household-page .cardhead .count{font:0.65625rem var(--mono);color:var(--ink-quiet);letter-spacing:.06em}
 
 /* the create screen's field vocabulary, unchanged */
 .household-page .field{margin-bottom:13px}
-.household-page .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-quiet);
+.household-page .field label{display:block;font:0.65625rem var(--mono);letter-spacing:.12em;color:var(--ink-quiet);
              text-transform:uppercase;margin:0 0 6px}
 .household-page .field input,.household-page .field select{width:100%;background:var(--panel);border:1px solid var(--line);
-       border-radius:9px;color:var(--ink);font-size:13.5px;padding:9px 12px;font-family:var(--ui)}
+       border-radius:9px;color:var(--ink);font-size:0.84375rem;padding:9px 12px;font-family:var(--ui)}
 .household-page .field input::placeholder{color:var(--ink-quiet)}
 .household-page .field input:focus,.household-page .field select:focus{border-color:var(--accent)}
 .household-page .field input:disabled,.household-page .field select:disabled{opacity:.62;cursor:default}
@@ -168,7 +168,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
    select's: at line-height normal the button stood 1px shorter, enough to
    fail the household fidelity gate (pipeline 2327). */
 .household-page .field .pickbtn{display:block;width:100%;box-sizing:border-box;text-align:left;background:var(--panel);
-       border:1px solid var(--line);border-radius:9px;color:var(--ink);font:13.5px/17px var(--ui);padding:9px 30px 9px 12px;
+       border:1px solid var(--line);border-radius:9px;color:var(--ink);font:0.84375rem/1.259 var(--ui);padding:9px 30px 9px 12px;
        cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .household-page .field .pickbtn:hover,.household-page .field .pickbtn:focus-visible{border-color:var(--accent)}
 .household-page .field .pickbtn:disabled{opacity:.62;cursor:default}
@@ -183,7 +183,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
    tick and goes quiet again. No save bar, no "remember to press this". */
 .household-page .lab{display:flex;align-items:baseline;gap:10px;margin:0 0 6px}
 .household-page .lab label{margin:0}
-.household-page .fsave{margin-left:auto;font:10px var(--mono);letter-spacing:.13em;text-transform:uppercase;
+.household-page .fsave{margin-left:auto;font:0.625rem var(--mono);letter-spacing:.13em;text-transform:uppercase;
        color:var(--ink-quiet);background:none;border:0;padding:0 0 1px;cursor:pointer;
        opacity:.5;transition:color .2s,opacity .2s}
 .household-page .fsave:hover{color:var(--accent-text);opacity:1}
@@ -204,36 +204,36 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page.member .c-system .selwrap::after{display:none}
 
 .household-page .savebar{display:flex;align-items:center;gap:14px;margin-top:17px}
-.household-page .btn{font:600 13px var(--display);color:var(--bg);background:var(--accent);border:0;
+.household-page .btn{font:600 0.8125rem var(--display);color:var(--bg);background:var(--accent);border:0;
      border-radius:10px;padding:9px 19px;cursor:pointer}
 /* #1131: --bg on --accent is 3.03:1 on dawn/clouds, same pair the pocket kit
    measured on its own filled pill (74e7a491) — white clears 4.5:1 there too. */
 :is([data-theme=dawn],[data-theme=clouds]) .household-page .btn{color:#fff}
 .household-page .btn:hover{filter:brightness(1.06)}
 .household-page .btn:disabled{opacity:.36;cursor:not-allowed;filter:none}
-.household-page .ghost{font:11px var(--mono);color:var(--ink-mid);background:none;border:1px solid var(--line);
+.household-page .ghost{font:0.6875rem var(--mono);color:var(--ink-mid);background:none;border:1px solid var(--line);
        border-radius:9px;padding:7px 13px;cursor:pointer}
 .household-page .ghost:hover{border-color:var(--accent);color:var(--accent-text)}
 .household-page .ghost.armed{color:var(--overdue-text);border-color:var(--overdue)}
-.household-page .note{font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.85}
+.household-page .note{font:0.65625rem var(--mono);color:var(--ink-quiet);line-height:1.85}
 .household-page .note.top{margin-top:13px}
 .household-page .note b{color:var(--ink-mid);font-weight:400}
-.household-page .said{display:none;margin-top:12px;font:11px var(--mono);color:var(--ok-text);line-height:1.8}
+.household-page .said{display:none;margin-top:12px;font:0.6875rem var(--mono);color:var(--ok-text);line-height:1.8}
 .household-page .said.show{display:block}
 /* #1332: the status line under the sections list, said once a section is removed */
-.household-page .moved{margin:0;font:11px var(--mono);color:var(--ok-text);line-height:1.8}
+.household-page .moved{margin:0;font:0.6875rem var(--mono);color:var(--ok-text);line-height:1.8}
 .household-page .moved.show{margin-top:12px}
 /* a line that exists only at the moment it applies (#481 round 2): the screen
    does not print a rule everybody has to read, it answers the person the rule
    stops, while it is stopping them. */
-.household-page .moment{margin-top:10px;font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.85}
+.household-page .moment{margin-top:10px;font:0.65625rem var(--mono);color:var(--ink-quiet);line-height:1.85}
 .household-page .moment.warn{color:var(--warm-text)}
 /* and it points at the way out rather than describing it */
 .household-page .ghost.beckon{border-color:var(--accent);color:var(--accent-text);
        box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
 /* What a control says when it could not do what it looked like it did — the
    helm's .note in the warm ink, never on the happy path. */
-.household-page .problem{margin-top:12px;font:11px var(--mono);color:var(--warm-text);line-height:1.8}
+.household-page .problem{margin-top:12px;font:0.6875rem var(--mono);color:var(--warm-text);line-height:1.8}
 
 /* sections: one editable list, saved whole. OWNER-ONLY (2b) — a plain
    member never sees this card at all, not even read-only. */
@@ -267,15 +267,15 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .tray button.mark:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .household-page .sec:last-of-type{border-bottom:0}
 .household-page .sec input{flex:1;min-width:0;background:none;border:0;border-bottom:1px solid transparent;
-           color:var(--ink);font-size:13.5px;font-family:var(--ui);padding:4px 0}
+           color:var(--ink);font-size:0.84375rem;font-family:var(--ui);padding:4px 0}
 .household-page .sec input:focus{border-bottom-color:var(--accent-text)}
 .household-page .sec input:disabled{color:var(--ink-mid)}
-.household-page .sec .used{font:10.5px var(--mono);color:var(--ink-quiet);flex:none}
-.household-page .sec .state{font:10px var(--mono);letter-spacing:.1em;color:var(--ink-mid);width:46px;
+.household-page .sec .used{font:0.65625rem var(--mono);color:var(--ink-quiet);flex:none}
+.household-page .sec .state{font:0.625rem var(--mono);letter-spacing:.1em;color:var(--ink-mid);width:46px;
             text-align:right;flex:none}
 .household-page .sec.off{opacity:.55}
 .household-page .sec.off .state{color:var(--ink-quiet)}
-.household-page .sec .drop{font:12px var(--mono);color:var(--ink-quiet);background:none;border:0;
+.household-page .sec .drop{font:0.75rem var(--mono);color:var(--ink-quiet);background:none;border:0;
            cursor:pointer;padding:0 2px;flex:none}
 /* the last kept section has nowhere to send its entries: no ×, its place held */
 .household-page .sec .drop.gone{visibility:hidden}
@@ -288,7 +288,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .toggle[aria-pressed=true]{border-color:var(--ok)}
 .household-page .toggle[aria-pressed=true] i{left:17px;background:var(--ok)}
 .household-page .toggle:disabled{opacity:.5;cursor:default}
-.household-page .addsec{margin-top:12px;font:11px var(--mono);color:var(--ink-mid);background:none;
+.household-page .addsec{margin-top:12px;font:0.6875rem var(--mono);color:var(--ink-mid);background:none;
         border:1px dashed var(--line);border-radius:9px;padding:7px 13px;cursor:pointer;width:100%}
 .household-page .addsec:hover{border-color:var(--accent);color:var(--accent-text)}
 .household-page .addsec:disabled{opacity:.4;cursor:not-allowed}
@@ -299,10 +299,10 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .memb:last-of-type{border-bottom:0}
 .household-page .avatar{width:32px;height:32px;border-radius:50%;flex:none;border:1px solid var(--line);
         background:var(--panel-raised);display:grid;place-items:center;
-        font:11px var(--mono);color:var(--ink-mid)}
-.household-page .memb b{flex:1;min-width:0;font-size:13.5px;font-weight:530}
+        font:0.6875rem var(--mono);color:var(--ink-mid)}
+.household-page .memb b{flex:1;min-width:0;font-size:0.84375rem;font-weight:530}
 .household-page .memb b em{font-style:normal;color:var(--ink-mid);font-weight:400}
-.household-page .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;flex:none;
+.household-page .role{font:0.625rem var(--mono);letter-spacing:.1em;text-transform:uppercase;flex:none;
       border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid)}
 .household-page .role.owner{color:var(--accent-text);border-color:var(--accent)}
 .household-page .memb .ghost{padding:5px 11px}
@@ -312,12 +312,12 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
    the same panel, each under its own small rule, instead of drawers you had
    to open. Two ways in now (#481): an existing account, or an address. */
 .household-page .block{margin-top:16px;padding-top:14px;border-top:1px solid var(--line-soft)}
-.household-page .block h3{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+.household-page .block h3{font:0.625rem var(--mono);letter-spacing:.16em;text-transform:uppercase;
           color:var(--ink-quiet);margin-bottom:9px}
 .household-page .cand{display:flex;align-items:center;gap:12px;padding:6px 2px;
       border-bottom:1px solid var(--line-soft)}
 .household-page .cand:last-of-type{border-bottom:0}
-.household-page .cand b{flex:1;font-size:13px;font-weight:520}
+.household-page .cand b{flex:1;font-size:0.8125rem;font-weight:520}
 
 /* INVITATIONS BY EMAIL (#481) — the other way in, for somebody with no
    account here yet. An outstanding invitation is NOT a third list of people:
@@ -331,7 +331,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
    what is outstanding (Q44) but the field and the controls are the owner's. */
 .household-page .invite{display:flex;align-items:center;gap:10px;margin-bottom:6px}
 .household-page .invite input{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);
-       border-radius:9px;color:var(--ink);font-size:13.5px;padding:9px 12px;font-family:var(--ui)}
+       border-radius:9px;color:var(--ink);font-size:0.84375rem;padding:9px 12px;font-family:var(--ui)}
 .household-page .invite input::placeholder{color:var(--ink-quiet)}
 .household-page .invite input:focus{border-color:var(--accent)}
 .household-page .inv{display:flex;align-items:center;gap:12px;padding:8px 2px;
@@ -341,9 +341,9 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .seat{width:32px;height:32px;border-radius:50%;flex:none;
       border:1px dashed var(--line)}
 .household-page .inv .who{flex:1;min-width:0}
-.household-page .inv b{display:block;font-size:13px;font-weight:520;font-family:var(--mono);
+.household-page .inv b{display:block;font-size:0.8125rem;font-weight:520;font-family:var(--mono);
       word-break:break-all}
-.household-page .inv .when{display:block;margin-top:2px;font:10.5px var(--mono);
+.household-page .inv .when{display:block;margin-top:2px;font:0.65625rem var(--mono);
       letter-spacing:.04em;color:var(--ink-quiet)}
 .household-page .inv .ghost{padding:5px 11px;flex:none}
 
@@ -351,22 +351,22 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .handover{display:none;margin-top:14px;border:1px solid var(--accent);border-radius:13px;
           background:var(--panel-raised);padding:16px 18px}
 .household-page .handover.open{display:block}
-.household-page .handover h3{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+.household-page .handover h3{font:0.625rem var(--mono);letter-spacing:.16em;text-transform:uppercase;
              color:var(--accent-text);margin-bottom:12px}
 .household-page .step{margin-bottom:13px}
-.household-page .step>.n{display:block;font:10px var(--mono);letter-spacing:.14em;color:var(--ink-quiet);
+.household-page .step>.n{display:block;font:0.625rem var(--mono);letter-spacing:.14em;color:var(--ink-quiet);
          margin-bottom:7px}
-.household-page .pick{display:flex;align-items:center;gap:10px;font-size:13.5px;padding:5px 2px;cursor:pointer}
+.household-page .pick{display:flex;align-items:center;gap:10px;font-size:0.84375rem;padding:5px 2px;cursor:pointer}
 .household-page .pick input{accent-color:var(--accent);width:14px;height:14px;cursor:pointer}
 .household-page .handover .row{display:flex;align-items:center;gap:12px}
 
 /* joiners (§11) — the same protocol administration used to draw */
 .household-page .joinreq{display:flex;align-items:center;gap:12px;border:1px dashed var(--warm);
          border-radius:12px;padding:11px 14px}
-.household-page .joinreq .avatar{width:28px;height:28px;font-size:10px}
-.household-page .joinreq p{flex:1;font-size:13px;color:var(--ink-mid)}
+.household-page .joinreq .avatar{width:28px;height:28px;font-size:0.625rem}
+.household-page .joinreq p{flex:1;font-size:0.8125rem;color:var(--ink-mid)}
 .household-page .joinreq p b{color:var(--ink);font-weight:530}
-.household-page .joinreq button{font-size:12px;font-family:var(--ui);border-radius:9px;padding:6px 13px;
+.household-page .joinreq button{font-size:0.75rem;font-family:var(--ui);border-radius:9px;padding:6px 13px;
                 cursor:pointer;border:1px solid var(--line);background:none;color:var(--ink-mid)}
 .household-page .joinreq button.yes{border-color:var(--ok);color:var(--ok-text)}
 
@@ -401,16 +401,16 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
                 stroke-linecap:round;stroke-linejoin:round}
 .household-page .dangerhead .spacer{margin-left:auto}
 
-.household-page .dangercard p{font-size:13px;color:var(--ink-mid);max-width:none;line-height:1.62}
+.household-page .dangercard p{font-size:0.8125rem;color:var(--ink-mid);max-width:none;line-height:1.62}
 .household-page .dangercard p b{color:var(--ink);font-weight:560}
 .household-page .dangercard p b.red{color:var(--overdue-text);font-weight:600}
 /* the card's prose is 13px; its mono lines are not — say so, or the prose
    rule out-specifies .said and .problem and swallows them */
-.household-page .dangercard .said{font-size:11px;color:var(--ok-text);max-width:none}
-.household-page .dangercard .problem{font-size:11px;color:var(--warm-text);max-width:none}
+.household-page .dangercard .said{font-size:0.6875rem;color:var(--ok-text);max-width:none}
+.household-page .dangercard .problem{font-size:0.6875rem;color:var(--warm-text);max-width:none}
 
 /* the button: red on the outside at rest, SOLID red once armed */
-.household-page .dangerbtn{font:600 11px var(--mono);letter-spacing:.15em;text-transform:uppercase;
+.household-page .dangerbtn{font:600 0.6875rem var(--mono);letter-spacing:.15em;text-transform:uppercase;
            color:var(--overdue-text);background:none;border:1.5px solid var(--overdue);
            border-radius:9px;padding:9px 16px;cursor:pointer;white-space:nowrap;
            transition:background .15s,color .15s,border-color .15s}
@@ -424,7 +424,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .confirm .stake{margin:0 0 13px;max-width:72ch}
 .household-page .confirm .field{margin-bottom:0;min-width:0;max-width:430px}
 .household-page .confirm .field label{color:var(--overdue-text);opacity:.9}
-.household-page .confirm .field input{font-family:var(--mono);font-size:12.5px;
+.household-page .confirm .field input{font-family:var(--mono);font-size:0.78125rem;
                       border-color:color-mix(in srgb,var(--overdue) 60%,transparent)}
 .household-page .confirm .field input:focus{border-color:var(--overdue)}
 @media (max-width:880px){
@@ -443,7 +443,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .c-archive .cardhead{gap:22px;align-items:center}
 .household-page .tabs{display:inline-flex;margin-left:auto;border:1px solid var(--line);
       border-radius:999px;overflow:hidden}
-.household-page .tabs [role=tab]{font:11px var(--mono);letter-spacing:.04em;color:var(--ink-mid);
+.household-page .tabs [role=tab]{font:0.6875rem var(--mono);letter-spacing:.04em;color:var(--ink-mid);
       background:none;border:0;padding:6px 14px;cursor:pointer;line-height:1.2}
 .household-page .tabs [role=tab]+[role=tab]{border-left:1px solid var(--line)}
 .household-page .tabs [role=tab]:hover{color:var(--ink)}
@@ -453,21 +453,21 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 :is([data-theme=dawn],[data-theme=clouds]) .household-page .tabs [role=tab][aria-selected=true]{color:#fff}
 .household-page .tabs [role=tab]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .household-page .arch{max-width:600px}
-.household-page .arch p{margin:0 0 12px;font-size:13px;color:var(--ink-mid);line-height:1.62;max-width:52ch}
+.household-page .arch p{margin:0 0 12px;font-size:0.8125rem;color:var(--ink-mid);line-height:1.62;max-width:52ch}
 .household-page .arch p b{color:var(--ink);font-weight:560}
 /* what a file holds is a manifest — a figure and a name per row (round 3:
    "I'd rather it read more as a list"), never a sentence */
 .household-page .arch .man{margin:0 0 12px;padding:0;list-style:none;max-width:430px}
 .household-page .arch .man li{display:flex;align-items:baseline;gap:12px;padding:5px 2px;
-      border-top:1px solid var(--line-soft);font-size:13px;color:var(--ink-mid);line-height:1.4}
+      border-top:1px solid var(--line-soft);font-size:0.8125rem;color:var(--ink-mid);line-height:1.4}
 .household-page .arch .man li:first-child{border-top:0}
 .household-page .arch .man li:last-child{border-bottom:1px solid var(--line-soft)}
-.household-page .arch .man b{flex:none;width:34px;text-align:right;font:600 13px var(--mono);color:var(--ink)}
+.household-page .arch .man b{flex:none;width:34px;text-align:right;font:600 0.8125rem var(--mono);color:var(--ink)}
 .household-page .arch .man .lab{color:var(--ink-mid)}
-.household-page .arch .man small{margin-left:auto;font:10.5px var(--mono);color:var(--ink-faint);
+.household-page .arch .man small{margin-left:auto;font:0.65625rem var(--mono);color:var(--ink-faint);
       letter-spacing:.04em;text-align:right}
 .household-page .arch .man small.zero,.household-page .arch .man small.warm{color:var(--warm-text)}
-.household-page .arch .man li.head{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.06em;
+.household-page .arch .man li.head{font:0.6875rem var(--mono);color:var(--ink-mid);letter-spacing:.06em;
       padding-bottom:7px}
 .household-page .arch .act{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:0}
 /* the open step borrows the danger line's own confirm: a dashed rule, then
@@ -475,20 +475,20 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .arch .step{display:none;margin-top:13px;padding-top:13px;border-top:1px dashed var(--line)}
 .household-page .arch .step.open{display:block}
 .household-page .arch .step .field{max-width:430px}
-.household-page .arch .field input.pw{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em}
-.household-page .arch .never{margin:0 0 13px;font:11px var(--mono);color:var(--warm-text);line-height:1.75;
+.household-page .arch .field input.pw{font-family:var(--mono);font-size:0.78125rem;letter-spacing:.14em}
+.household-page .arch .never{margin:0 0 13px;font:0.6875rem var(--mono);color:var(--warm-text);line-height:1.75;
       max-width:60ch}
 .household-page .arch .never b{color:var(--warm-text);font-weight:600}
-.household-page .arch .fname{margin:0 0 12px;font-size:13px;color:var(--ink)}
+.household-page .arch .fname{margin:0 0 12px;font-size:0.8125rem;color:var(--ink)}
 .household-page .arch .fname b{font-weight:530}
-.household-page .arch .fname small{margin-left:8px;font:10.5px var(--mono);color:var(--ink-quiet)}
+.household-page .arch .fname small{margin-left:8px;font:0.65625rem var(--mono);color:var(--ink-quiet)}
 .household-page .arch .inside{margin-top:13px;padding-top:13px;border-top:1px dashed var(--line)}
 .household-page .arch .dup{margin:0 0 12px;padding:0;list-style:none}
 .household-page .arch .dup li{display:flex;align-items:center;gap:10px;padding:4px 2px;
-      font-size:13px;color:var(--ink)}
-.household-page .arch .dup li span{margin-left:auto;font:10.5px var(--mono);color:var(--warm-text);
+      font-size:0.8125rem;color:var(--ink)}
+.household-page .arch .dup li span{margin-left:auto;font:0.65625rem var(--mono);color:var(--warm-text);
       letter-spacing:.06em;white-space:nowrap}
-.household-page .arch .refuse{margin:12px 0 0;font:11.5px var(--mono);color:var(--overdue-text);line-height:1.7}
+.household-page .arch .refuse{margin:12px 0 0;font:0.71875rem var(--mono);color:var(--overdue-text);line-height:1.7}
 /* the reactive step-up challenge (#1132): the same "type your password,
    confirm" shape administration.svelte and settings/+page.svelte already
    use, held inline under the act it belongs to rather than in a dialog —

@@ -626,3 +626,76 @@ for (const phone of MEASURED) {
     });
   });
 }
+
+/*
+ * TEXT SIZE (#1180). The largest step, extra large (root font 125%), must not
+ * break the pocket's floors on the three screens that carry the most words:
+ * /home, /create and /settings. `orbit-text-size` is seeded in localStorage
+ * before navigation, as a returning reader's cache would be, so app.html's
+ * first-paint script applies it. At each phone: every tappable element still
+ * at least 44px (the floors in `inspect`), nothing cut or ellipsised outside a
+ * title, no sideways scroll, and a row title drawn at 1.25x the comfortable
+ * run's computed size.
+ */
+const TEXT_SIZE_ROUTES = ["/home", "/create", "/settings"];
+
+/** The first row title (or card heading where a screen has no rows). */
+const TITLE = "[data-row-face], .p-card h2";
+
+/**
+ * @param {import("@playwright/test").Page} page
+ * @param {string} route
+ * @param {string} size
+ */
+async function openAtTextSize(page, route, size) {
+  /* Seed once per tab: a reload keeps sessionStorage, so the script does not
+     re-seed over a value the test has since changed. */
+  await page.addInitScript((value) => {
+    if (sessionStorage.getItem("text-size-seeded")) return;
+    sessionStorage.setItem("text-size-seeded", "1");
+    localStorage.setItem("orbit-text-size", value);
+  }, size);
+  await page.goto(`${APP}${route}`, { waitUntil: "load" });
+  if (route.startsWith("/home")) await page.locator("body[data-home-ready]").waitFor({ state: "attached" });
+  await settle(page);
+}
+
+for (const phone of MEASURED) {
+  test.describe(`pocket measurement at ${phone.name}: extra-large text`, () => {
+    test.use({ viewport: phone.viewport, hasTouch: true, isMobile: true });
+
+    for (const route of TEXT_SIZE_ROUTES) {
+      test(`${route} · extra-large meets the pocket floors, does not scroll sideways, scales 1.25x`, async ({ page }) => {
+        await openAtTextSize(page, route, "extra-large");
+        expect(await page.evaluate(() => document.documentElement.dataset.textSize)).toBe("extra-large");
+        const problems = await inspect(page);
+        expect(problems, problems.join("\n")).toEqual([]);
+
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        expect(overflow, "horizontal overflow in px").toBeLessThanOrEqual(0);
+
+        const titleSize = () => page.locator(TITLE).first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+        const extra = await titleSize();
+
+        await page.evaluate(() => { localStorage.setItem("orbit-text-size", "comfortable"); });
+        await page.reload({ waitUntil: "load" });
+        if (route.startsWith("/home")) await page.locator("body[data-home-ready]").waitFor({ state: "attached" });
+        await settle(page);
+        expect(await page.evaluate(() => document.documentElement.dataset.textSize), "the reload is really comfortable").toBe("comfortable");
+        const comfortable = await titleSize();
+        expect(extra / comfortable).toBeCloseTo(1.25, 2);
+
+        if (route === "/settings") {
+          /* #1180: no tile word breaks mid-word, at any step (scrollWidth over clientWidth means it wrapped inside the word). */
+          for (const step of ["standard", "comfortable", "large", "extra-large"]) {
+            await page.evaluate((s) => { document.documentElement.dataset.textSize = s; }, step);
+            const broken = await page.locator('[role=radiogroup][aria-label="Text size"] [role=radio] b')
+              .evaluateAll((words) => words.filter((b) => b.scrollWidth > b.clientWidth
+                || b.getBoundingClientRect().height > 1.6 * parseFloat(getComputedStyle(b).lineHeight === "normal" ? getComputedStyle(b).fontSize : getComputedStyle(b).lineHeight)).map((b) => b.textContent));
+            expect(broken, `tile words cut mid-word at ${step}`).toEqual([]);
+          }
+        }
+      });
+    }
+  });
+}

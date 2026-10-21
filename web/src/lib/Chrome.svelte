@@ -5,7 +5,8 @@
   import { tick } from "svelte";
   import { signOut, wordsOf } from "$lib/data/workspace.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
-  import { SWATCHES, applyTheme } from "$lib/theme-swatches.js";
+  import { SWATCHES } from "$lib/theme-swatches.js";
+  import { chooseTheme } from "$lib/pick.js";
   import Hatch from "$lib/pocket/Hatch.svelte";
   import { watchTour } from "$lib/tour/watch.js";
   import TopChrome from "$lib/pocket/TopChrome.svelte";
@@ -75,7 +76,7 @@
   /** @param {string} name */
   function setSwatch(name) {
     active = name;
-    applyTheme(name);
+    chooseTheme(name);
   }
 
   /* THE POCKET (#1120): below the CON-10 switch the way back and the orb
@@ -241,14 +242,14 @@
    * --bg and not a literal: the plate has to be whatever the pack's ground is,
    * or it becomes a visible smudge the moment someone picks clouds.
    */
-  .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
+  .back{position:fixed;top:30px;left:26px;z-index:6;font:0.6875rem var(--mono);
         letter-spacing:.14em;color:var(--ink-quiet);text-decoration:none;
         text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg)}
   .back:hover{color:var(--accent-text)}
   .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
        border-radius:50%;border:1px solid var(--line);background:var(--panel);
        backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
-       font:12px var(--mono);color:var(--ink-mid)}
+       font:0.75rem var(--mono);color:var(--ink-mid)}
   .orb:hover{border-color:var(--accent)}
   .account{position:fixed;top:70px;right:26px;z-index:6;width:240px;
            background:var(--panel-raised);backdrop-filter:blur(14px);
@@ -263,26 +264,26 @@
            transition:opacity .25s,transform .25s,visibility 0s .25s}
   .account.open{opacity:1;transform:none;pointer-events:auto;
                 visibility:visible;transition-delay:0s}
-  .account .who b{display:block;font-size:14px;font-weight:560}
-  .account .who span{font-size:12px;color:var(--ink-mid)}
+  .account .who b{display:block;font-size:0.875rem;font-weight:560}
+  .account .who span{font-size:0.75rem;color:var(--ink-mid)}
   .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
                padding:12px 0;border-top:1px solid var(--line-soft);
                border-bottom:1px solid var(--line-soft)}
-  .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
+  .account nav a{font-size:0.84375rem;color:var(--ink-mid);text-decoration:none;
                  padding:6px 8px;border-radius:8px}
   .account nav a:hover{color:var(--ink);background:var(--panel)}
   .account nav a[aria-current]{color:var(--accent-text)}
   .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
-  .swatches span{font:10.5px var(--mono);color:var(--ink-quiet);margin-right:2px}
+  .swatches span{font:0.65625rem var(--mono);color:var(--ink-quiet);margin-right:2px}
   .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
                    border:1px solid var(--line);padding:0}
   .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
-  .watch{display:block;margin-bottom:12px;font:12px var(--mono);color:var(--accent-text);
+  .watch{display:block;margin-bottom:12px;font:0.75rem var(--mono);color:var(--accent-text);
          background:none;border:0;cursor:pointer;padding:0}
   .watch:hover{text-decoration:underline}
-  .signout{font:12px var(--mono);color:var(--ink-quiet);background:none;border:0;cursor:pointer;padding:0}
+  .signout{font:0.75rem var(--mono);color:var(--ink-quiet);background:none;border:0;cursor:pointer;padding:0}
   .signout:hover{color:var(--overdue-text)}
-  .signout-problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:7px;line-height:1.7}
+  .signout-problem{font:0.65625rem var(--mono);color:var(--overdue-text);margin-top:7px;line-height:1.7}
 
   /*
    * LEAVING, in home's own beats (#1253; owner ruling 2026-10-07): when the

@@ -39,6 +39,9 @@ export function load({ locals }) {
   return {
     fixtures: env.ORBIT_FIXTURES === "1",
     documentReading: documentReading(),
+    /* #1180: the shell reads the session (theme and text size) only for a
+       signed-in reader; the session route answers 401 to anyone else. */
+    signedIn: Boolean(locals.session),
     isAdmin: Boolean(locals.session?.user?.isInstanceAdmin),
   };
 }
