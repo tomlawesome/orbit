@@ -192,19 +192,19 @@ export async function inspectItemDocument(input: {
         };
       }
       log.info({ event: "document.inspection", state: "ready", reason: "supported_structure", action: "none" });
-      if (config.scanMode !== "required") {
+      if (!documentReadingEnabled()) {
+        // #1459: reading is off by configuration, not a fault, whatever the scan mode: no parser call, no warning, no apology.
         return {
           extracted: false,
-          message: parserRecoveryMessage,
           suggestions: buildDocumentSuggestions(input.filename, undefined),
           attachmentDisposition: "attachable",
           reason: structureReason,
         };
       }
-      if (!documentReadingEnabled()) {
-        // #1459: reading is off by configuration, not a fault: no parser call, no warning, no apology.
+      if (config.scanMode !== "required") {
         return {
           extracted: false,
+          message: parserRecoveryMessage,
           suggestions: buildDocumentSuggestions(input.filename, undefined),
           attachmentDisposition: "attachable",
           reason: structureReason,
