@@ -366,6 +366,8 @@ function compose() {
   }
   if (sub === "down") {
     if (env.FAKE_HANG_DOWN === "1") hang("down");
+    // A slow but healthy down: answers after this many seconds.
+    if (env.FAKE_DOWN_DELAY) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(env.FAKE_DOWN_DELAY) * 1000);
     if (env.FAKE_STATE_DIR) fs.appendFileSync(env.FAKE_STATE_DIR + "/down-log", (fs.existsSync("docker-compose.yml") ? "compose-file-present" : "compose-file-missing") + "\\n");
     if (env.FAKE_COMPOSE_DOWN_FAIL === "1") exit(1);
     if (env.FAKE_STATE_DIR) fs.writeFileSync(env.FAKE_STATE_DIR + "/model-pull-running", "");
@@ -2583,6 +2585,15 @@ describe("install.sh: the confirmed model download (#1456 decision, #1474)", () 
     expect(result.calls).toMatch(/--profile ai-model-pull .*orbit-ollama-model-pull/);
     expect(result.calls).not.toMatch(/exec .*orbit-ollama .*ollama pull/);
   });
+
+  it("G7-FR1: the failed-download note carries the `docker compose ... run --rm orbit-ollama-model-pull` command to try again and not the leftover container's name", () => {
+    const { targetDir, environment } = modelFixture();
+    const result = runInstall(targetDir, { ...environment, ...withModelPull, FAKE_MODEL_PULL_FAIL: "1" });
+    expect(result.status).toBe(0);
+    const output = `${result.stdout}\n${result.stderr}`;
+    expect(output).toMatch(/To try again: docker compose .*--profile ai-model-pull run --rm orbit-ollama-model-pull/u);
+    expect(output).not.toContain("orbit-orbit-ollama-model-pull-install");
+  });
 });
 
 describe("install.sh: an update's failures are unchanged by the decision (#1456 decision)", () => {
@@ -4372,15 +4383,17 @@ describe("install.sh: a rollback that cannot finish names what is left (redesign
   });
 });
 
-describe("install.sh: every Docker call in the rollback shares one 8 s deadline (F1)", () => {
-  // A hung Docker daemon must not hold the rollback past the launcher's 15 s stop grace. The rollback's Docker
-  // calls share one 8 s budget set when the rollback starts; the fake hangs far longer (120 s). The rollback is
-  // measured from the `phase=rollback state=running` event to the terminal `failed` event (whole seconds), not by
-  // the wall time of the whole run. Ten seconds allows the 8 s budget, one kill-after second and rounding.
+describe("install.sh: the rollback lists first, stops briefly and names the real cause (R1)", () => {
+  // A hung Docker daemon must not hold the rollback past the launcher's 15 s stop grace. Order: list the volumes,
+  // then `down --timeout 2`, then remove each volume. The three Docker calls are capped at 5, 6 and 5 s inside an
+  // 8 s deadline. The rollback is measured from the `phase=rollback state=running` event to the terminal `failed`
+  // event (whole seconds). The fake hangs for 120 s.
   const rollbackBudgetSeconds = 10;
   const causeLine =
-    "Docker did not answer within 8 s, so the rollback stopped waiting for it; what it could not do is named below. Check that Docker is running and its disk is not full, then follow the next step.";
+    "Docker did not finish within 8 s, so the rollback stopped waiting for it; what it could not do is named below. Once Docker is answering again (check that it is running and its disk is not full), run the command below.";
   const containersLine = "the containers could not be stopped";
+  const listedLine = "could not be listed";
+  const stopCommand = /docker compose .* down --remove-orphans/u;
 
   function rollbackSeconds(stdout) {
     const start = /^phase=rollback .* state=running .* elapsed=(\d+)s$/mu.exec(stdout);
@@ -4396,53 +4409,88 @@ describe("install.sh: every Docker call in the rollback shares one 8 s deadline 
   }
 
   const occurrences = (text, needle) => text.split(needle).length - 1;
+  const callLines = (result) => result.calls.split("\n").filter(Boolean);
+  const isUp = (line) => /^docker compose .* up( |$)/u.test(line);
+  const isDown = (line) => /^docker compose .* down( |$)/u.test(line);
+  const isVolumeLs = (line) => /^docker volume ls( |$)/u.test(line);
+  const isVolumeRm = (line) => /^docker volume rm( |$)/u.test(line);
+  const afterUp = (result) => {
+    const calls = callLines(result);
+    return calls.slice(calls.findLastIndex(isUp) + 1);
+  };
 
-  it("a hung `compose down` ends the rollback within 10 s, naming the cause once and giving one recovery command", () => {
+  it("a slow but healthy `compose down` (4 s) is not a timeout: the rollback completes, no cause line, all three volumes removed (guards FR2)", () => {
+    const result = timedFailure({ FAKE_DOWN_DELAY: "4" });
+    expect(result.status).toBe(1);
+    expect(result.stderr).not.toContain("Docker did not finish within");
+    expect(result.stderr).not.toContain(containersLine);
+    expect(result.stderr).not.toContain(listedLine);
+    expect(recoveryCommands(result.stderr)).toEqual([]);
+    const removed = afterUp(result).filter(isVolumeRm).join(" ");
+    for (const volume of allThreeVolumes) expect(removed).toContain(volume);
+  });
+
+  it("a hung `compose down`: the cause line says \"did not finish within 8 s\", once, before the obstacle, within 10 s", () => {
     const result = timedFailure({ FAKE_HANG_DOWN: "1" });
     expect(result.status).toBe(1);
     expect(rollbackSeconds(result.stdout)).toBeLessThanOrEqual(rollbackBudgetSeconds);
     expect(result.stderr).toContain(containersLine);
     expect(occurrences(result.stderr, causeLine)).toBe(1);
-    expect(recoveryCommands(result.stderr)).toHaveLength(1);
-  });
-
-  it("the cause line comes before the obstacles it explains", () => {
-    const result = timedFailure({ FAKE_HANG_DOWN: "1" });
-    expect(result.stderr.indexOf(causeLine)).toBeGreaterThanOrEqual(0);
     expect(result.stderr.indexOf(causeLine)).toBeLessThan(result.stderr.indexOf(containersLine));
   });
 
-  it("a hung `compose down` and a hung `volume ls` end the rollback within 10 s, naming both obstacles and the cause once", () => {
-    const result = timedFailure({ FAKE_HANG_DOWN: "1", FAKE_HANG_VOLUME_LS_AFTER_UP: "1" });
+  it("a hung `compose down`: the one stop command ends in `docker volume rm` naming all three volumes", () => {
+    const result = timedFailure({ FAKE_HANG_DOWN: "1" });
+    const commands = recoveryCommands(result.stderr).map((entry) => entry.command);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatch(stopCommand);
+    expect(commands[0]).toContain(volumesPart);
+    expect(commands[0].slice(commands[0].indexOf(volumesPart) + volumesPart.length).split(" ").sort()).toEqual(allThreeVolumes);
+  });
+
+  it("a hung `compose down`: exactly one `volume ls` after the up and before the `down`, and nothing after the `down`", () => {
+    const result = timedFailure({ FAKE_HANG_DOWN: "1" });
+    const calls = afterUp(result);
+    const down = calls.findIndex(isDown);
+    expect(down).toBeGreaterThanOrEqual(0);
+    expect(calls.slice(0, down).filter(isVolumeLs)).toHaveLength(1);
+    expect(calls.slice(down + 1)).toEqual([]);
+  });
+
+  it("a hung `volume ls`: no `down` and no `volume rm` is run; the containers line, the listing line, the stop command, the next-install line and the cause line once", () => {
+    const result = timedFailure({ FAKE_HANG_VOLUME_LS_AFTER_UP: "1" });
     expect(result.status).toBe(1);
     expect(rollbackSeconds(result.stdout)).toBeLessThanOrEqual(rollbackBudgetSeconds);
+    const calls = afterUp(result);
+    expect(calls.filter(isDown)).toEqual([]);
+    expect(calls.filter(isVolumeRm)).toEqual([]);
     expect(result.stderr).toContain(containersLine);
+    expect(result.stderr).toContain(listedLine);
+    const commands = recoveryCommands(result.stderr).map((entry) => entry.command);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatch(stopCommand);
+    expect(commands[0]).not.toContain(volumesPart);
     expect(result.stderr).toContain(noVolumesLine);
     expect(occurrences(result.stderr, causeLine)).toBe(1);
   });
 
-  it("a hung `docker volume rm` ends the rollback within 10 s, naming every volume that could not be removed", () => {
+  it("a hung `volume rm`: every volume is named, the `docker volume rm` command is given, no stop command, cause once", () => {
     const result = timedFailure({ FAKE_HANG_VOLUME_RM: "1" });
     expect(result.status).toBe(1);
     expect(rollbackSeconds(result.stdout)).toBeLessThanOrEqual(rollbackBudgetSeconds);
     expect(result.stderr).toContain("could not be removed");
     for (const volume of allThreeVolumes) expect(result.stderr).toContain(volume);
+    const commands = recoveryCommands(result.stderr).map((entry) => entry.command);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatch(/^docker volume rm -- /u);
+    expect(result.stderr).not.toMatch(stopCommand);
     expect(occurrences(result.stderr, causeLine)).toBe(1);
   });
 
   it("a rollback in which Docker answers (even with a failure) carries no cause line", () => {
     const result = timedFailure({ FAKE_COMPOSE_DOWN_FAIL: "1" });
     expect(result.status).toBe(1);
-    expect(result.stderr).not.toContain("Docker did not answer within");
-  });
-
-  it("with no time left, Docker is not run: after a hung `compose down` used the whole budget, no `volume ls` or `volume rm` follows", () => {
-    const result = timedFailure({ FAKE_HANG_DOWN: "1" });
-    expect(result.status).toBe(1);
-    const calls = result.calls.split("\n").filter(Boolean);
-    const lastDown = calls.findLastIndex((line) => /^docker compose .* down( |$)/u.test(line));
-    expect(lastDown).toBeGreaterThanOrEqual(0);
-    expect(calls.slice(lastDown + 1)).toEqual([]);
+    expect(result.stderr).not.toContain("Docker did not finish within");
   });
 
   it("SIGTERM during a hung `down`: the process exits within 15 s of the signal with one terminal failed event", async () => {
@@ -4451,6 +4499,18 @@ describe("install.sh: every Docker call in the rollback shares one 8 s deadline 
       targetDir,
       { ...environment, FAKE_COMPOSE_UP_FAIL: "1", FAKE_HANG_DOWN: "1" },
       { signal: "SIGTERM", marker: "hung-down" },
+    );
+    expect(result.signalSent).toBe(true);
+    expect(result.signalToExitMs).toBeLessThan(15_000);
+    expect(eventLines(result.stdout).filter((line) => / state=failed /u.test(line))).toHaveLength(1);
+  }, PTY_TEST_TIMEOUT_MS);
+
+  it("SIGTERM during a hung readiness probe with `volume ls` also hung: the process exits within 15 s of the signal with one terminal failed event", async () => {
+    const { targetDir, environment } = recoveryFixture();
+    const result = await runInstallSignalled(
+      targetDir,
+      { ...environment, FAKE_HANG_PROBE: "orbit-db", FAKE_HANG_VOLUME_LS_AFTER_UP: "1", ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "60" },
+      { signal: "SIGTERM", marker: "hung-probe" },
     );
     expect(result.signalSent).toBe(true);
     expect(result.signalToExitMs).toBeLessThan(15_000);
