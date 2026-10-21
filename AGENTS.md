@@ -62,6 +62,7 @@ numbers are GitLab's. Operators pull from GHCR; GitLab publishes there
   handed over as a clickable link; sign-off is on running code, not a
   screenshot (`scripts/dev/test-bed.sh` header has the how).
 - Mockups and review screenshots use the app's default theme (after dark).
+- Mockups are shown to the owner only from the local design container (`orbit-design-host`, nginx, ports from 8307), with direct links in chat; never uploaded to issues or published on Pages (owner, 2026-10-21). The permission system blocks starting that container, so ask the owner explicitly for permission to host the mockups in the same message that says a round is ready, before trying to start it.
 - An internal test harness (labelling, evaluation page, debug view) is not
   product UX: build it the ordinary way, no top-model design call.
 
