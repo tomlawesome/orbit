@@ -95,3 +95,35 @@ test("an unrecognised or missing code fails open to the recoverable face, never 
   await expect(page.locator("body")).toHaveAttribute("data-state", "incomplete");
   await expect(page.locator("#gate")).toBeVisible();
 });
+
+/* #1457: ADR-0023 §3's `link_required` refusal carries its remedy. Runs in
+   every configured project, so desk (desktop-chromium) and pocket
+   (mobile-chromium) both prove it. Pinned by meaning, not exact copy. */
+test("link required: says to sign in to the existing Orbit account and link from Settings", async ({ page }) => {
+  await page.goto("/auth/error?code=link_required");
+
+  await expect(page.locator("body")).toHaveAttribute("data-state", "incomplete");
+  const state = page.locator(".state");
+  await expect(state).toBeVisible();
+  await expect(state).not.toContainText(/address already in use/i);
+  await expect(state).toContainText(/sign in/i);
+  await expect(state).toContainText(/orbit account|existing account/i);
+  await expect(state).toContainText(/settings/i);
+  await expect(state).toContainText(/link/i);
+  /* Never the code, never an address or a name (same words whether or not
+     the email exists). */
+  await expect(state).not.toContainText("link_required");
+  await expect(state).not.toContainText("@");
+
+  /* The way back to the door stays. */
+  await expect(page.locator("#gate")).toBeVisible();
+
+  /* Longer words must still fit the pocket's width. */
+  const box = await state.boundingBox();
+  const viewport = page.viewportSize();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
+
+  await sweep(page);
+});

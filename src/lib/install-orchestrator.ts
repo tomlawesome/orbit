@@ -118,6 +118,8 @@ export interface InstallDependencies {
   onConfigurationFailure?: () => void;
   /** Test hook: runs right after InstallTransaction.begin, before the first write (ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE). */
   afterTransactionBegun?: () => void;
+  /** Test hook: runs right after the transaction commits, before the outcome is returned (ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE=transaction-committed). */
+  afterTransactionCommitted?: () => void;
 }
 
 export type OnEvent = (event: EngineEvent) => void;
@@ -715,6 +717,7 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
         return fail("compose", "compose", error.message);
       }
       committed = true;
+      dependencies.afterTransactionCommitted?.();
     } finally {
       interruptCleanups.delete(disposeTransaction);
       const disposal = transaction.dispose();

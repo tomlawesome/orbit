@@ -16,6 +16,24 @@ installer fetches and checks it. A preview's manifest is kept only on GitLab,
 which is private, so you fetch it yourself and check its signature by hand.
 After that, the installer is the same one a stable install runs.
 
+## The short way: the preview script
+
+`scripts/dev/get-orbit-preview.sh` does steps 1 to 4 below for you, then
+starts the launcher just as the one-line installer does, so the rest is
+what a real user sees. Someone with GitLab access first puts the manifest,
+its signature, the launcher archive and `install.sh` in one place you can
+reach (a web address or a local folder). Then, with the digest recorded on
+#1152:
+
+```sh
+curl -fsSL <BASE>/get-orbit-preview.sh | ORBIT_PREVIEW_BASE_URL=<BASE> ORBIT_PREVIEW_DIGEST=sha256:<DIGEST> bash
+```
+
+It refuses to go on if the signature or any file's checksum is wrong, or if
+the manifest names a different digest. Where the files are served from does
+not matter: the signature and checksums are what is trusted. The steps below
+are the same checks done by hand.
+
 ## What you need
 
 Everything in [Installing Orbit, "What you need"](installing.md#what-you-need):

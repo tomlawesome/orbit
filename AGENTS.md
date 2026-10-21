@@ -149,6 +149,10 @@ Reasoning for each is in [docs/testing.md](docs/testing.md#local-traps).
 - Never hand-write a control-character range in a regex: lose an escape and it
   matches most ordinary characters. Scan explicitly, as `isApplicationRelative`
   in `web/src/lib/return-path.js` does, and test empty, `//` and backslash.
+- Rebuild the base image yourself, never hand it to the owner: run
+  `~/projects/orbit-base-image/scripts/rebuild-and-publish.sh --as claude --wait`
+  with `~` written out in full, as the whole command; the allow rule matches
+  only that bare absolute path (2026-10-21).
 - A leftover volume of the same Compose project blocks an install;
   `scripts/cleanup-stacks.sh` lists them.
 - A lockfile diff adding an `@pnpm/exe` block means the host pnpm is older than
@@ -162,6 +166,13 @@ Reasoning for each is in [docs/testing.md](docs/testing.md#local-traps).
   is built or shipped.
 - Every tappable thing on the phone layout is at least 44x44px (`--p-hit`,
   gated by `web/tests/fidelity/pocket-measure.spec.js`).
+- While a sub-agent edits and commits on the batch branch in the main
+  checkout, make no other edits there: its commit can pick them up. Run
+  parallel work in its own worktree, or wait.
+- Docs that cite `scripts/install.sh` by line number
+  (`docs/installer-guarantees.md`) are fixed after the batch's last
+  `install.sh` change: every fix moves the lines, so an earlier docs fix goes
+  stale.
 
 ## Sources of truth
 

@@ -7,6 +7,9 @@
 installer_ui_mode="plain"
 installer_ui_started_at=0
 installer_ui_simulation=0
+# Set by install.sh just before the terminal `failed` event that follows a
+# `recovery-command:` line; appended as a trailing field in plain mode only.
+installer_ui_recovery=""
 
 installer_ui_init() {
   local requested_mode="" requested_simulation=0
@@ -103,6 +106,9 @@ installer_ui_safe_field() {
     action:begin|action:validate|action:pull|action:inspect|action:fetch|action:configure|action:verify|action:check|action:start|action:wait|action:health|action:skip|action:status|action:complete|action:retry|action:rollback|action:repair|action:continue|action:display|action:abort)
       printf '%s' "$value"
       ;;
+    recovery:command)
+      printf '%s' "$value"
+      ;;
     *)
       printf 'unknown'
       ;;
@@ -122,7 +128,7 @@ installer_ui_elapsed() {
 installer_ui_emit() {
   [[ $# -eq 5 || $# -eq 6 ]] || return 2
 
-  local phase component state reason action elapsed
+  local phase component state reason action elapsed recovery=""
   phase="$(installer_ui_safe_field phase "$1")"
   component="$(installer_ui_safe_field component "$2")"
   state="$(installer_ui_safe_field state "$3")"
@@ -133,6 +139,8 @@ installer_ui_emit() {
   else
     elapsed="$(installer_ui_elapsed "$((SECONDS - installer_ui_started_at))")"
   fi
+  [[ -z "$installer_ui_recovery" ]] ||
+    recovery=" recovery=$(installer_ui_safe_field recovery "$installer_ui_recovery")"
 
   if [[ "$installer_ui_mode" == tty ]]; then
     local state_color='\033[33m' width simulation_prefix=""
@@ -152,11 +160,11 @@ installer_ui_emit() {
         "$simulation_prefix" "$elapsed" "$phase" "$component" "$state_color" "$state" "$reason" "$action"
     fi
   elif [[ "$installer_ui_simulation" == 1 ]]; then
-    printf 'phase=%s component=%s state=%s reason=%s action=%s elapsed=%s simulation=true\n' \
-      "$phase" "$component" "$state" "$reason" "$action" "$elapsed"
+    printf 'phase=%s component=%s state=%s reason=%s action=%s elapsed=%s simulation=true%s\n' \
+      "$phase" "$component" "$state" "$reason" "$action" "$elapsed" "$recovery"
   else
-    printf 'phase=%s component=%s state=%s reason=%s action=%s elapsed=%s\n' \
-      "$phase" "$component" "$state" "$reason" "$action" "$elapsed"
+    printf 'phase=%s component=%s state=%s reason=%s action=%s elapsed=%s%s\n' \
+      "$phase" "$component" "$state" "$reason" "$action" "$elapsed" "$recovery"
   fi
 }
 

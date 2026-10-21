@@ -122,6 +122,68 @@ function runPty(cwd, input, args = []) {
   });
 }
 
+// Plain mode prints `phase=<p> component=<c> state=<s> reason=<r> action=<a> ...`.
+// Interactive mode renders the same event as
+// `[SIMULATION] [<n>s] <phase> <component> <state> <reason> / <action>`.
+// PTY output carries carriage returns and escape sequences, so strip both
+// before parsing either shape into {phase, component, state, reason, action}.
+const RENDERED_EVENT = /\[SIMULATION\]\s+\[\d+s\]\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+\/\s+(\S+)/u;
+
+function eventLines(stdout) {
+  const events = [];
+  for (const raw of stdout.replace(/\x1b\[[0-9;?]*[A-Za-z]/gu, "").replace(/\r/gu, "").split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("phase=")) {
+      events.push(Object.fromEntries(
+        line.split(/\s+/u).filter((t) => t.includes("=")).map((t) => {
+          const i = t.indexOf("=");
+          return [t.slice(0, i), t.slice(i + 1)];
+        }),
+      ));
+      continue;
+    }
+    const m = RENDERED_EVENT.exec(line);
+    if (m) {
+      events.push({ phase: m[1], component: m[2], state: m[3], reason: m[4], action: m[5] });
+    }
+  }
+  return events;
+}
+
+function indexOfEvent(events, match, from = 0) {
+  return events.findIndex((e, i) => i >= from && Object.entries(match).every(([k, v]) => e[k] === v));
+}
+
+const START_RUNNING = { phase: "preparation", component: "compose", state: "starting", reason: "service-start", action: "start" };
+const START_DONE = { phase: "preparation", component: "compose", state: "completed", reason: "service-start", action: "start" };
+const ROLLBACK_RUNNING = { phase: "rollback", component: "installer", state: "running", reason: "rollback", action: "rollback" };
+const ROLLBACK_DONE = { phase: "rollback", component: "installer", state: "completed", reason: "rollback", action: "rollback" };
+
+function expectStartStepBeforeDatabase(events) {
+  const starting = indexOfEvent(events, START_RUNNING);
+  expect(starting).toBeGreaterThanOrEqual(0);
+  const completed = indexOfEvent(events, START_DONE);
+  expect(completed).toBeGreaterThan(starting);
+  const validation = events.findIndex((e) => e.phase === "compose" && e.component === "compose" && e.reason === "compose-validation");
+  if (validation >= 0) {
+    expect(starting).toBeGreaterThan(validation);
+  }
+  const firstDatabase = events.findIndex((e) => e.phase === "database");
+  expect(firstDatabase).toBeGreaterThanOrEqual(0);
+  expect(completed).toBeLessThan(firstDatabase);
+}
+
+const FAILURE_SCENARIOS = [
+  { name: "database-failure", presses: 1, phase: "database", component: "database", reason: "database-auth-migration" },
+  { name: "health-timeout", presses: 2, phase: "application", component: "application", reason: "health-timeout" },
+  { name: "optional-failure", presses: 3, phase: "optional", component: "clamav", reason: "optional-unavailable" },
+];
+
+function failureInput(mode, presses) {
+  const first = mode === "update" ? "\x1b[B\r" : "\r";
+  return `${first}\rnote\rsecret\r\r${"\x1b[B".repeat(presses)}\r`;
+}
+
 describe("scripts/installer-simulation.sh", () => {
   it("rejects unsupported arguments", () => {
     const cwd = scratchDir();
@@ -267,7 +329,7 @@ describe("scripts/installer-simulation.sh", () => {
     const scenarios = [
       ["\r\rnote\rsecret\r\r\x1b[B\r", "database-auth-migration"],
       ["\r\rnote\rsecret\r\r\x1b[B\x1b[B\r", "health-timeout"],
-      ["\r\rnote\rsecret\r\r\x1b[B\x1b[B\x1b[B\r", "optional-unavailable"],
+      ["\r\rnote\rsecret\r\r\x1b[B\x1b[B\x1b[B\r", "optional-status"],
     ];
 
     for (const [input, expectedReason] of scenarios) {
@@ -277,4 +339,126 @@ describe("scripts/installer-simulation.sh", () => {
       expect(result.stdout).toContain("No deployment occurred.");
     }
   }, PTY_TEST_TIMEOUT_MS);
+
+  it("plain success starts services as its own preparation step before the database", () => {
+    const result = runPlain(["--plain"], scratchDir());
+
+    expect(result.status).toBe(0);
+    expectStartStepBeforeDatabase(eventLines(result.stdout));
+  });
+
+  it("interactive Install success starts services before the database", async () => {
+    const result = await runPty(scratchDir(), "\r\rnote\rsecret\r\r\r");
+
+    expect(result.status).toBe(0);
+    expectStartStepBeforeDatabase(eventLines(result.stdout));
+  }, PTY_TEST_TIMEOUT_MS);
+
+  for (const scenario of FAILURE_SCENARIOS) {
+    // Only a stopped required service rolls a fresh Install back (#1456 decision).
+    if (scenario.name === "database-failure") it(`rolls back a failed Install (${scenario.name}) before the terminal retry failure`, async () => {
+      const result = await runPty(scratchDir(), failureInput("install", scenario.presses));
+      const events = eventLines(result.stdout);
+
+      expect(result.status).toBe(0);
+      const starting = indexOfEvent(events, START_RUNNING);
+      const completed = indexOfEvent(events, START_DONE);
+      expect(starting).toBeGreaterThanOrEqual(0);
+      expect(completed).toBeGreaterThan(starting);
+      const firstDatabase = events.findIndex((e) => e.phase === "database");
+      expect(firstDatabase).toBeGreaterThan(completed);
+
+      const running = indexOfEvent(events, ROLLBACK_RUNNING);
+      expect(running).toBeGreaterThan(completed);
+      const done = indexOfEvent(events, ROLLBACK_DONE);
+      expect(done).toBeGreaterThan(running);
+
+      const failedIndex = events.findIndex((e) => e.state === "failed");
+      expect(failedIndex).toBeGreaterThan(done);
+      expect(failedIndex).toBe(events.length - 1);
+      const failed = events[failedIndex];
+      expect(failed.phase).toBe(scenario.phase);
+      expect(failed.component).toBe(scenario.component);
+      expect(failed.reason).toBe(scenario.reason);
+      expect(failed.action).toBe("retry");
+      expect(result.stdout).toContain("No deployment occurred.");
+    }, PTY_TEST_TIMEOUT_MS);
+
+    it(`never rolls back a failed Update (${scenario.name}) and keeps the repair action`, async () => {
+      const result = await runPty(scratchDir(), failureInput("update", scenario.presses));
+      const events = eventLines(result.stdout);
+
+      expect(result.status).toBe(0);
+      expect(events.some((e) => e.phase === "rollback")).toBe(false);
+      const failed = events.filter((e) => e.state === "failed");
+      expect(failed).toHaveLength(1);
+      expect(failed[0].phase).toBe(scenario.phase);
+      expect(failed[0].component).toBe(scenario.component);
+      expect(failed[0].reason).toBe(scenario.reason);
+      expect(failed[0].action).toBe("repair");
+      expect(result.stdout).toContain("No deployment occurred.");
+    }, PTY_TEST_TIMEOUT_MS);
+  }
+  // The decided behaviour of a failed readiness wait (#1456, note 40388), as the
+  // rehearsal must play it for a fresh Install. The menu's three fixed failure
+  // choices (arrow presses 1-3, as above) are the selectors: 1 is a required
+  // service that stopped, 2 a required service still starting at the deadline,
+  // 3 the optional scanner still starting.
+  describe("the decided readiness behaviour (#1456)", () => {
+    it("(a) a required service that stopped: rollback events, then a failed event advising retry", async () => {
+      const result = await runPty(scratchDir(), failureInput("install", 1));
+      const events = eventLines(result.stdout);
+
+      expect(result.status).toBe(0);
+      const running = indexOfEvent(events, ROLLBACK_RUNNING);
+      const done = indexOfEvent(events, ROLLBACK_DONE);
+      expect(running).toBeGreaterThan(-1);
+      expect(done).toBeGreaterThan(running);
+      const failed = events.filter((e) => e.state === "failed");
+      expect(failed).toHaveLength(1);
+      expect(events.indexOf(failed[0])).toBeGreaterThan(done);
+      expect(failed[0]).toMatchObject({ phase: "database", component: "database", action: "retry" });
+    }, PTY_TEST_TIMEOUT_MS);
+
+    it("(b) a required service still starting at the deadline: no rollback events, failed with repair, and says it was left running", async () => {
+      const result = await runPty(scratchDir(), failureInput("install", 2));
+      const events = eventLines(result.stdout);
+
+      expect(result.status).toBe(0);
+      expect(events.some((e) => e.phase === "rollback")).toBe(false);
+      const failed = events.filter((e) => e.state === "failed");
+      expect(failed).toHaveLength(1);
+      expect(failed[0]).toMatchObject({ phase: "application", component: "application", action: "repair" });
+      expect(events.at(-1)).toEqual(failed[0]);
+      expect(result.stdout).toMatch(/left running/u);
+    }, PTY_TEST_TIMEOUT_MS);
+
+    it("(c) the optional scanner still starting: the install completes, the scanner's last event is waiting/optional-status/continue, and a completion line names it", async () => {
+      const result = await runPty(scratchDir(), failureInput("install", 3));
+      const events = eventLines(result.stdout);
+
+      expect(result.status).toBe(0);
+      expect(events.some((e) => e.phase === "rollback")).toBe(false);
+      expect(events.some((e) => e.state === "failed")).toBe(false);
+      const scanner = events.filter((e) => e.component === "clamav");
+      expect(scanner.at(-1)).toMatchObject({ state: "waiting", reason: "optional-status", action: "continue" });
+      expect(events.at(-1)).toMatchObject({ phase: "complete", state: "completed" });
+      expect(result.stdout).toMatch(/Scanner: still starting/u);
+      expect(result.stdout).toContain("No deployment occurred.");
+    }, PTY_TEST_TIMEOUT_MS);
+
+    it.each([
+      ["a required service that stopped", 1, { phase: "database", component: "database" }],
+      ["a required service still starting", 2, { phase: "application", component: "application" }],
+    ])("(d) an Update with %s keeps `repair` and never rolls back", async (_name, presses, where) => {
+      const result = await runPty(scratchDir(), failureInput("update", presses));
+      const events = eventLines(result.stdout);
+
+      expect(result.status).toBe(0);
+      expect(events.some((e) => e.phase === "rollback")).toBe(false);
+      const failed = events.filter((e) => e.state === "failed");
+      expect(failed).toHaveLength(1);
+      expect(failed[0]).toMatchObject({ ...where, action: "repair" });
+    }, PTY_TEST_TIMEOUT_MS);
+  });
 });

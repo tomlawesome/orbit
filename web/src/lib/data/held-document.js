@@ -23,3 +23,25 @@ export function takeHeldDocument() {
   held = null;
   return file;
 }
+
+/**
+ * A kind (service, renewal, inspection) the drawer's type button was pressed
+ * for, waiting for /create to choose it (#1467). Same hand-over as the file:
+ * memory only, taken once, so a later plain visit to /create starts with no
+ * kind chosen. "Something else" holds nothing.
+ *
+ * @type {string | null}
+ */
+let heldType = null;
+
+/** @param {string | null} type the chip's `data-type`; null clears what was held */
+export function holdType(type) {
+  heldType = type;
+}
+
+/** The held kind, once; null when nothing is waiting. */
+export function takeHeldType() {
+  const type = heldType;
+  heldType = null;
+  return type;
+}
