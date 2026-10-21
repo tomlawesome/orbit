@@ -448,6 +448,20 @@ describe("item document inspection", () => {
       expect(mocks.extract).not.toHaveBeenCalled();
     });
 
+    it("with scanning disabled too, answers attachable with no message, since reading is off", async () => {
+      mocks.config.mockReturnValue({ ...config, scanMode: "disabled", tika: { url: null, timeoutMs: 30_000 } });
+      const result = await upload();
+
+      expect(result.attachmentDisposition).toBe("attachable");
+      expect(result.message).toBeUndefined();
+      expect(result).toMatchObject({
+        extracted: false,
+        suggestions: [{ field: "title", value: "manual-policy", source: "filename", confidence: "high" }],
+      });
+      expect(mocks.scan).not.toHaveBeenCalled();
+      expect(mocks.extract).not.toHaveBeenCalled();
+    });
+
     it("with Tika on, the parser is called exactly once and its text is read", async () => {
       const result = await upload("policy.pdf");
       expect(mocks.extract).toHaveBeenCalledTimes(1);
