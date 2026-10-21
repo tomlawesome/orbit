@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { HIT_R, MIN_GAP, spacedBodies } from "../../web/src/routes/home/pocket-dial.js";
-import { searchPocket } from "../../web/src/routes/home/pocket-search.js";
+import { costLabel, listedItems, searchPocket } from "../../web/src/routes/home/pocket-search.js";
 
 /*
  * #1120 step 2: the pocket home's two pure rules, the dial's spacing law
@@ -87,5 +87,35 @@ describe("the pocket search", () => {
   it("says so when nothing matches", () => {
     const result = searchPocket("kayak ", world);
     expect(result).toMatchObject({ query: "kayak", items: [], documents: [], complete: null, nothing: true });
+  });
+});
+
+describe("what a search result draws (#1438)", () => {
+  const rows = [
+    { id: "gutter", title: "Gutter clearing", days: -16, costMinor: 4500, currency: "GBP", costIsEstimate: false },
+    { id: "mot", title: "Car MOT", days: 16, costMinor: 5400, currency: "GBP", costIsEstimate: true },
+    { id: "passport", title: "Passport", days: null, costMinor: null },
+  ];
+  const doc = (itemId, itemTitle) => ({ id: `d-${itemId}`, itemId, itemTitle, name: "Zebrafinch policy.pdf" });
+
+  it("lists a document-name match as its item, after the items the query matched", () => {
+    const hits = { items: [rows[1]], documents: [doc("gutter", "Gutter clearing")] };
+    expect(listedItems(hits, rows).map((i) => i.id)).toEqual(["mot", "gutter"]);
+  });
+
+  it("lists an item once when both its title and a document match", () => {
+    const hits = { items: [rows[1]], documents: [doc("mot", "Car MOT"), doc("mot", "Car MOT")] };
+    expect(listedItems(hits, rows).map((i) => i.id)).toEqual(["mot"]);
+  });
+
+  it("lists a document's item the manifest no longer carries by its title, with no date", () => {
+    const hits = { items: [], documents: [doc("gone", "Old policy")] };
+    expect(listedItems(hits, rows)).toEqual([{ id: "gone", title: "Old policy", days: null }]);
+  });
+
+  it("writes the cost, with an estimate marked, and nothing for an item without one", () => {
+    expect(costLabel(rows[0])).toBe("£45.00");
+    expect(costLabel(rows[1])).toBe("~£54.00");
+    expect(costLabel(rows[2])).toBe("");
   });
 });

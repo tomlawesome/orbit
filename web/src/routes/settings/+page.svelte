@@ -331,6 +331,8 @@
    */
   /** @type {Awaited<ReturnType<typeof readSessions>>} */
   let sessions = $state([]);
+  /** #1444: this session came through the provider, so signing out reaches it; a password session has nothing there to end. */
+  const providerSession = $derived(providerOffered && sessions.some((row) => row.current && row.viaProvider));
   /** @type {string | null} */
   let sessionsProblem = $state(null);
   /* One arm for the sessions list and "sign out of every device" (lib/arm.js):
@@ -747,7 +749,7 @@
       </ul>
       {#if sessionsProblem}<div class="note">{sessionsProblem}</div>{/if}
       <button onclick={(event) => tapSignOutEverywhere(event.currentTarget)}>{signOutArmed === "everywhere" ? "tap again to sign out everywhere" : "sign out of every device →"}</button>{#if signOutProblem}<div class="note">{signOutProblem}</div>{/if}
-      <p class="everywhere-says">This signs Orbit out everywhere{#if providerOffered}, and signs you out of your sign-in provider in this browser only: your other devices stay signed in at the provider{/if}.</p>
+      <p class="everywhere-says">This signs Orbit out everywhere{#if providerSession}, and signs you out of your sign-in provider in this browser only: your other devices stay signed in at the provider{/if}.</p>
     </div>
   {/if}
 </div>

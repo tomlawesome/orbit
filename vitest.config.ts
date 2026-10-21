@@ -157,6 +157,8 @@ const test: TestUserConfig = {
             ? [
                 "src/lib/recovery-bundle.parity.test.ts",
                 "scripts/test-e2e-local-reuse.test.mjs",
+                // #1429: renders `docker compose config`.
+                "scripts/app-memory-limit-contract.test.mjs",
               ]
             : []),
         ],

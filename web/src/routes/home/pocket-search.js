@@ -14,9 +14,11 @@
  * the order is the manifest's: soonest first.
  *
  * @typedef {{ id: string, title: string, section?: string | null, provider?: string | null,
- *   days: number | null }} SearchItem
+ *   days: number | null, costMinor?: number | null, costIsEstimate?: boolean, currency?: string }} SearchItem
  * @typedef {{ id: string, name: string, itemId: string, itemTitle: string, meta?: string }} SearchDocument
  */
+
+import { money } from "$lib/format.js";
 
 /** @param {string} text */
 const fold = (text) => text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -89,4 +91,36 @@ export function searchPocket(query, { items, attention, documents = [] }) {
     complete: matched[0] && matched[0].days !== null ? matched[0] : null,
     nothing: matched.length === 0 && papers.length === 0,
   };
+}
+
+/**
+ * #1438: what a result list draws. Documents stay searchable, but the list
+ * shows items only: each item the query matched, then each item that carries
+ * a matched document and was not already listed (manifest order, soonest
+ * first). An item the manifest no longer carries is listed from the document's
+ * own item title, with no date.
+ * @template {SearchItem} T
+ * @param {{ items: T[], documents: SearchDocument[] }} results
+ * @param {T[]} rows every item the manifest carries
+ * @returns {T[]}
+ */
+export function listedItems({ items, documents }, rows) {
+  const listed = new Set(items.map((item) => item.id));
+  const viaDocument = new Map(documents.filter((doc) => !listed.has(doc.itemId)).map((doc) => [doc.itemId, doc.itemTitle]));
+  if (!viaDocument.size) return items;
+  const extra = rows.filter((row) => viaDocument.has(row.id));
+  for (const row of extra) viaDocument.delete(row.id);
+  const orphans = [...viaDocument].map(([id, title]) => /** @type {T} */ (/** @type {unknown} */ ({ id, title, days: null })));
+  return [...items, ...extra, ...orphans];
+}
+
+/**
+ * An item's cost as a result draws it, or "" when it has none.
+ * @param {SearchItem} item
+ * @returns {string}
+ */
+export function costLabel(item) {
+  return item.costMinor === null || item.costMinor === undefined
+    ? ""
+    : money(item.costMinor, item.currency ?? "GBP", Boolean(item.costIsEstimate));
 }
