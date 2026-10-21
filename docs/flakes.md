@@ -616,3 +616,11 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## validation.test.ts "structural document classification > classifies unsupported %PDF-1.7 ... as unsupported_structure"
 
 - 2026-10-20 · 0469e455 · pipeline 2774 / fast (job 37576), same run as the sighting above · timed out at the 5 s default. Wall-clock-under-load shape. First sighting.
+
+## sign-out-descent.spec.ts:195 "sign out from home's menu reaches the dusk (narrow desk, as the browser is)" and "(wide desk, as the browser is)" on desktop-webkit
+
+- 2026-10-21 · 8a841e3c (!1074) · pipeline 2833 / `smoke_webkit` job 38057 · both cases failed first and passed on Playwright's retry in the same run ("2 flaky"), which fails the job; green on pipeline 2834 (b331397f, installer-only change, nothing under `web/`). First sighting.
+
+## local-sign-in.spec.ts:352 "no sign-in card sits over the chooser and the count" — desktop-chromium
+
+- 2026-10-21 · b331397f (!1074; installer-only change since the green 8a841e3c run) · pipeline 2834 / `smoke_local_only` job 38082 · "the chooser: the frame sampler never saw the newcomer's frame"; passed on the retried job 38096, same commit. First sighting.
