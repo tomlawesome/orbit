@@ -4103,6 +4103,81 @@ describe("install.sh: the journal lists files, and the person's files are moved,
   });
 });
 
+describe("install.sh: a refused backup folder names its cause and the way back", () => {
+  /** A bin directory ahead of the fake one: the same fakes, plus `tools` (name to shell body) that shadow real commands. */
+  function toolsPath(tools) {
+    const dir = mkdtempSync(join(tmpdir(), "orbit-install-shadow-"));
+    for (const [name, source] of [
+      ["docker", fakeDockerScript],
+      ["curl", fakeCurlScript],
+      ["cosign", fakeCosignScript],
+    ]) {
+      writeFileSync(join(dir, name), source);
+      chmodSync(join(dir, name), 0o755);
+    }
+    for (const [name, body] of Object.entries(tools)) {
+      writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`);
+      chmodSync(join(dir, name), 0o755);
+    }
+    return `${dir}:${process.env.PATH}`;
+  }
+
+  function refusal(targetDir, environment, tools) {
+    const result = runInstall(targetDir, { ...environment, PATH: toolsPath(tools) });
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=abort /u);
+    expect(result.engineRuns).toHaveLength(0);
+    return result.stderr;
+  }
+
+  const generic = "Could not make a backup folder under";
+
+  it("the run's timestamp cannot be read: says the clock could not be read and to try again", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const before = treeSnapshot(targetDir);
+    const text = refusal(targetDir, environment, { date: "exit 1" });
+    expect(text).toMatch(/(clock|date|time)/iu);
+    expect(text).toMatch(/(try again|run it again|install again|retry)/iu);
+    expect(text).not.toMatch(new RegExp(`${generic} \\S+; nothing was changed\\.`, "u"));
+    expect(treeSnapshot(targetDir)).toEqual(before);
+  });
+
+  it("the backups folder cannot be made private (not ours, or chmod fails): names the folder, says it is not usable by this user, and to change its owner, rename it or remove it", () => {
+    const { targetDir, environment } = recoveryFixture();
+    mkdirSync(backupsDir(targetDir), { mode: 0o755 });
+    const text = refusal(targetDir, environment, { chmod: 'case "$*" in *orbit-install-backups*) exit 1;; esac\nexec /bin/chmod "$@"' });
+    expect(text).toContain(backupsDir(targetDir));
+    expect(text).toMatch(/(owned by|another user|permission|private|0700|700)/iu);
+    expect(text).toMatch(/(chown|rename|remove)/iu);
+    expect(text).not.toMatch(new RegExp(`${generic} \\S+; nothing was changed\\.`, "u"));
+  });
+
+  it("a dated folder cannot be created: says it could not be created and names the folder to check", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const text = refusal(targetDir, environment, { mkdir: 'case "$*" in *orbit-install-backups*) exit 1;; esac\nexec /bin/mkdir "$@"' });
+    expect(text).toContain(backupsName);
+    expect(text).toMatch(/could not create/iu);
+    expect(text).toMatch(/(space|permission|writable|check)/iu);
+    expect(text).not.toMatch(new RegExp(`${generic} \\S+; nothing was changed\\.`, "u"));
+  });
+
+  it("all nine same-second names are taken: says so and to remove old dated folders", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const now = Date.now();
+    for (let second = -2; second <= 180; second += 1) {
+      for (const suffix of ["", "-2", "-3", "-4", "-5", "-6", "-7", "-8", "-9"]) {
+        mkdirSync(join(backupsDir(targetDir), `${stampAt(now + second * 1000)}${suffix}`), { recursive: true, mode: 0o700 });
+      }
+    }
+    chmodSync(backupsDir(targetDir), 0o700);
+    const text = refusal(targetDir, environment, {});
+    expect(text).toMatch(/(taken|already exist|in use)/iu);
+    expect(text).toMatch(/remove (the )?old/iu);
+    expect(text).toContain(backupsName);
+    expect(text).not.toMatch(new RegExp(`${generic} \\S+; nothing was changed\\.`, "u"));
+  });
+});
+
 describe("install.sh: the containers could not be stopped (redesign r5)", () => {
   it("B11: the folder is put back, the engine's files kept whole in <stamp>/engine, and one command, last and alone, run from there, `retry`", () => {
     const { targetDir, stateDir, environment, before } = privateStateFixture();
