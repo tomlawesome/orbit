@@ -1433,6 +1433,8 @@
     bodies.filter((b) => (b.suggestion ? b.trail : b.trail && (b.overdue || b.paint === "amber"))),
   );
   const closest = $derived(bodies.find((b) => b.closest) ?? null);
+  /** The body under the pointer or focus: its visible twin grows with it (#1460). */
+  let hotId = $state(/** @type {?string} */ (null));
   const firstOverdue = $derived(bodies.find((b) => b.overdue) ?? null);
   onMount(() => {
     const query = window.matchMedia(DESK);
@@ -1920,7 +1922,7 @@
     <!-- backdrop constellations are generated from the galaxy map -->
     <div class="dialwrap">
       <svg width="640" height="640" class="dial" viewBox="0 0 380 380" role="group"
-         aria-label="Gravity well: items orbit by due date; distance from the household is time remaining, body size is typical cost; details in the manifest below">
+         aria-label="Gravity well: items orbit by due date; distance from the household is time remaining, body size is typical cost per year; details in the manifest below">
       <defs aria-hidden="true">
         <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
           <feGaussianBlur stdDeviation="4"/>
@@ -2028,31 +2030,47 @@
 
       {#if firstOverdue}
         <circle data-polish="POL-2" class="ping" cx={firstOverdue.placement.x} cy={firstOverdue.placement.y}
-                r="8" fill="none" style="stroke:var(--overdue)"/>
+                r={firstOverdue.size + 3} fill="none" style="stroke:var(--overdue)"/>
       {/if}
+      <!-- #1460: paint order only. The visible bodies are drawn largest first so a
+           small one never hides under a big neighbour; they are aria-hidden and
+           take no pointer. The links below keep the chart's order (soonest due
+           first), which is the tab order and the screen-reader order. -->
+      {#each [...bodies].sort((a, b) => b.size - a.size) as b (b.id)}
+        <g class="body-vis" data-vis={b.id} aria-hidden="true" class:hot={hotId === b.id}
+           id={b.closest ? "b-closest" : undefined}
+           class:breathe={!b.suggestion && (b.overdue || b.paint === "amber")}>
+          {#if b.suggestion}
+            <circle cx={b.placement.x} cy={b.placement.y} r={b.size + 1.2}
+                    style="fill:none;stroke:var(--accent);stroke-width:1.8"
+            /><circle cx={b.placement.x} cy={b.placement.y} r={b.size - 1.3}
+                    style="fill:var(--accent)" opacity=".12"/>
+          {:else}
+            {@render bodyMark(b, b.placement.x, b.placement.y, b.size)}
+          {/if}
+        </g>
+      {/each}
       {#each bodies as b (b.id)}
         {#if b.suggestion}
           <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
              data-cost={money(b.costMinor, b.currency, true)} href="#{b.id}"
+             onpointerenter={() => (hotId = b.id)} onpointerleave={() => (hotId = null)}
+             onfocus={() => (hotId = b.id)} onblur={() => (hotId = null)}
              aria-label={`suggested: ${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, true)}`}><g
-            ><circle cx={b.placement.x} cy={b.placement.y} r={b.size + 1.2}
-                     style="fill:none;stroke:var(--accent);stroke-width:1.8"
-            /><circle cx={b.placement.x} cy={b.placement.y} r={b.size - 1.3}
-                     style="fill:var(--accent)" opacity=".12"/></g></a>
+            ><circle cx={b.placement.x} cy={b.placement.y} r={b.size + 1.2} fill="transparent"/></g></a>
         {:else}
           <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
              data-cost={money(b.costMinor, b.currency, b.costIsEstimate)}
              data-docs={b.documentCount > 0 ? b.documentCount : undefined} href="#{b.id}"
+             onpointerenter={() => (hotId = b.id)} onpointerleave={() => (hotId = null)}
+             onfocus={() => (hotId = b.id)} onblur={() => (hotId = null)}
              aria-label={`${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, b.costIsEstimate)}${b.documentCount > 0 ? `, ${plural(b.documentCount, "document")}` : ""}`}><g
-             id={b.closest ? "b-closest" : undefined}
-             class={b.overdue || b.paint === "amber" ? "breathe" : undefined}>
-            {@render bodyMark(b, b.placement.x, b.placement.y, b.size)}
-          </g></a>
+            ><circle cx={b.placement.x} cy={b.placement.y} r={b.size} fill="transparent"/></g></a>
         {/if}
       {/each}
       {#each bodies.filter((b) => b.documentCount > 0 && b.paint === "jade") as b (b.id)}
         <g class="belt" aria-hidden="true">
-          <ellipse cx={b.placement.x} cy={b.placement.y} rx="13.5" ry="4.6"
+          <ellipse cx={b.placement.x} cy={b.placement.y} rx={b.size + 5} ry={(b.size + 5) * 0.34}
                    transform="rotate(-24 {b.placement.x} {b.placement.y})"
                    fill="none" style="stroke:var(--accent)" stroke-width="1.3" opacity=".8"/>
         </g>
@@ -2247,7 +2265,7 @@
   <div class="keyrow"><span class="sw" style="background:none;border:1.6px solid var(--accent)"></span>suggestion &mdash; not yet accepted</div>
   <h2>Physics</h2>
   <div class="keyrow">closer = sooner</div>
-  <div class="keyrow">bigger = costlier</div>
+  <div class="keyrow">bigger = costlier per year</div>
   <div class="keyrow">belt = documents attached</div>
   <div class="keyrow">the sky&rsquo;s weather = your workload</div>
 </aside>
