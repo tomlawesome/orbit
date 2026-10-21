@@ -66,6 +66,40 @@ function stubDockerReturningDigest(newDigest) {
   return { ...process.env, PATH: `${binDir}:${process.env.PATH}` };
 }
 
+/**
+ * A `docker` whose registry lookups (`manifest inspect`, `buildx imagetools
+ * inspect`) answer with a single image manifest -- no index, no `manifests`
+ * list -- whose own digest is `manifestDigest` (#1483). Anything else refuses.
+ */
+function stubDockerReturningSingleManifest(manifestDigest) {
+  const binDir = join(workdir, "bin");
+  mkdirSync(binDir, { recursive: true });
+  const stub = join(binDir, "docker");
+  const manifestJson = JSON.stringify({
+    schemaVersion: 2,
+    mediaType: "application/vnd.oci.image.manifest.v1+json",
+    digest: manifestDigest,
+    config: { mediaType: "application/vnd.oci.image.config.v1+json", digest: digest(900), size: 100 },
+    layers: [{ mediaType: "application/vnd.oci.image.layer.v1.tar+gzip", digest: digest(901), size: 200 }],
+  });
+  writeFileSync(
+    stub,
+    [
+      "#!/bin/sh",
+      'if { [ "$1" = "manifest" ] && [ "$2" = "inspect" ]; } || { [ "$1" = "buildx" ] && [ "$2" = "imagetools" ]; }; then',
+      `  cat <<'MANIFEST_EOF'`,
+      manifestJson,
+      "MANIFEST_EOF",
+      "  exit 0",
+      "fi",
+      "exit 1",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(stub, 0o755);
+  return { ...process.env, PATH: `${binDir}:${process.env.PATH}` };
+}
+
 function digest(seed) {
   return `sha256:${String(seed).padStart(64, "0")}`;
 }
@@ -294,6 +328,48 @@ describe("scripts/check-base-image-current.sh -- moved tag vs. behind dev (#1027
     const dockerfile = writeDockerfile({ firstReference: `${pinnedTag}@${staleDigest}`, stages: 0 });
 
     const result = runCheck(dockerfile, stubDockerReturningDigest(currentDigest));
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("the tag has moved.");
+    expect(result.stderr).toContain("Update the first FROM");
+  });
+});
+
+// #1483: the base image is published as a single image manifest, so there is no
+// linux/amd64 index entry; the gate must compare the manifest's own digest
+// rather than skip the moved-tag check.
+describe("scripts/check-base-image-current.sh -- single-manifest tag (#1483)", { timeout: 20_000 }, () => {
+  const pinnedTag = "ghcr.io/tomlawesome/orbit-base-image:latest";
+
+  it("does not skip the moved-tag check for a single manifest", () => {
+    const pinnedDigest = digest(301);
+    const dockerfile = writeDockerfile({ firstReference: `${pinnedTag}@${pinnedDigest}`, stages: 0 });
+
+    const result = runCheck(dockerfile, stubDockerReturningSingleManifest(pinnedDigest));
+
+    expect(result.stdout + result.stderr).not.toContain("skipping the moved-tag check");
+    expect(result.stdout + result.stderr).not.toContain("has no linux/amd64 entry to compare");
+  });
+
+  it("finds the tag has not moved when the pinned digest equals the manifest digest", () => {
+    const pinnedDigest = digest(302);
+    const dockerfile = writeDockerfile({ firstReference: `${pinnedTag}@${pinnedDigest}`, stages: 0 });
+
+    const result = runCheck(dockerfile, stubDockerReturningSingleManifest(pinnedDigest));
+
+    // The comparison must actually run (not be skipped) and find no move. The
+    // run then proceeds to the packages probe, which the stub refuses.
+    expect(result.stdout + result.stderr).not.toContain("skipping the moved-tag check");
+    expect(result.stderr).not.toContain("the tag has moved.");
+    expect(result.stderr).not.toContain("Update the first FROM");
+  });
+
+  it("fails as a moved tag when the manifest digest differs from the pinned digest", () => {
+    const pinnedDigest = digest(303);
+    const currentDigest = digest(304);
+    const dockerfile = writeDockerfile({ firstReference: `${pinnedTag}@${pinnedDigest}`, stages: 0 });
+
+    const result = runCheck(dockerfile, stubDockerReturningSingleManifest(currentDigest));
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("the tag has moved.");

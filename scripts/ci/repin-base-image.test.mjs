@@ -145,16 +145,16 @@ const PACKAGES_SIMULATION_STALE = "(1/2) Upgrading musl (1.2.3-r0 -> 1.2.4-r0)\n
  * -- none of which this test needs to re-prove, all of which have their own
  * coverage elsewhere.
  */
-function runRepin({ repoDir, bareDir, packagesStale }) {
+function runRepin({ repoDir, bareDir, packagesStale, artifactDigest = NEW_INDEX_DIGEST, manifestSimulation = MANIFEST_SIMULATION }) {
   const digestFile = join(repoDir, "trusted-digest.txt");
-  writeFileSync(digestFile, `${IMAGE_NAME}@${NEW_INDEX_DIGEST}`);
+  writeFileSync(digestFile, `${IMAGE_NAME}@${artifactDigest}`);
 
   const env = {
     PATH: process.env.PATH,
     HOME: process.env.HOME ?? tmpdir(),
     CHECK_SCRIPT: deployStubCheckScript(),
     BASE_IMAGE_DIGEST_FILE: digestFile,
-    BASE_IMAGE_MANIFEST_SIMULATION: MANIFEST_SIMULATION,
+    BASE_IMAGE_MANIFEST_SIMULATION: manifestSimulation,
     BASE_IMAGE_PACKAGES_SIMULATION: packagesStale ? PACKAGES_SIMULATION_STALE : PACKAGES_SIMULATION_CURRENT,
     BASE_REPIN_TOKEN: "fake-test-token",
     BASE_REPIN_PUSH_URL: bareDir,
@@ -236,6 +236,77 @@ describe("repin-base-image.sh clears the runner's inherited auth header before p
 
     // Never the value: it is a working job token.
     assert.doesNotMatch(result.stdout + result.stderr, /Z2l0bGFiLWNpLXRva2Vu/u);
+  });
+});
+
+// #1483: the base image is published by a plain `docker push` of one image, so
+// its tag resolves to a single image manifest, not an index. The artifact's
+// digest is then the manifest's own digest, pinned directly.
+const SINGLE_MANIFEST_DIGEST = digest(5);
+
+function singleManifestSimulation(manifestDigest) {
+  return JSON.stringify({
+    schemaVersion: 2,
+    mediaType: "application/vnd.oci.image.manifest.v1+json",
+    digest: manifestDigest,
+    config: { mediaType: "application/vnd.oci.image.config.v1+json", digest: digest(6), size: 100 },
+    layers: [{ mediaType: "application/vnd.oci.image.layer.v1.tar+gzip", digest: digest(7), size: 200 }],
+  });
+}
+
+describe("repin-base-image.sh with a tag that resolves to a single image manifest (#1483)", () => {
+  it("accepts a single manifest matching the artifact and pins its digest in the Dockerfile", () => {
+    const repoDir = deployRepinRepo();
+    const bareDir = deployBareRemote();
+
+    const result = runRepin({
+      repoDir,
+      bareDir,
+      packagesStale: false,
+      artifactDigest: SINGLE_MANIFEST_DIGEST,
+      manifestSimulation: singleManifestSimulation(SINGLE_MANIFEST_DIGEST),
+    });
+
+    assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.doesNotMatch(result.stderr, /not a multi-platform index/u);
+    assert.equal(pushedDockerfile(bareDir), `FROM ${IMAGE_TAG}@${SINGLE_MANIFEST_DIGEST} AS base\n`);
+  });
+
+  it("records the pinned digest as indexDigest in the supply-chain policy", () => {
+    const repoDir = deployRepinRepo();
+    const bareDir = deployBareRemote();
+
+    const result = runRepin({
+      repoDir,
+      bareDir,
+      packagesStale: false,
+      artifactDigest: SINGLE_MANIFEST_DIGEST,
+      manifestSimulation: singleManifestSimulation(SINGLE_MANIFEST_DIGEST),
+    });
+
+    assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    const policy = JSON.parse(runGit(bareDir, ["show", "chore/base-image-repin:.github/supply-chain-policy.json"]));
+    const entry = policy.containerImages.find((image) => image.tag === IMAGE_TAG);
+    assert.equal(entry.indexDigest, SINGLE_MANIFEST_DIGEST);
+    assert.equal(entry.reference, `${IMAGE_TAG}@${SINGLE_MANIFEST_DIGEST}`);
+  });
+
+  it("refuses a single manifest whose digest differs from the artifact, pushing nothing", () => {
+    const repoDir = deployRepinRepo();
+    const bareDir = deployBareRemote();
+
+    const result = runRepin({
+      repoDir,
+      bareDir,
+      packagesStale: false,
+      artifactDigest: SINGLE_MANIFEST_DIGEST,
+      manifestSimulation: singleManifestSimulation(digest(8)),
+    });
+
+    assert.equal(result.status, 2, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    // Refused for the digest mismatch, not because a single manifest is unsupported.
+    assert.doesNotMatch(result.stderr, /not a multi-platform index/u);
+    assert.equal(runGit(bareDir, ["branch", "--list"]).trim(), "");
   });
 });
 
