@@ -188,5 +188,8 @@ export function suggestionsToCarry(suggestions, valueOf) {
 export function captionOf(read, carried) {
   if (read.kind === "attached") return CAP_ATTACHED;
   if (read.kind === "unread" || !read.extracted) return CAP_UNREAD;
+  /* A message beside extracted text is the server saying what it could not
+     do; its sentence sits beneath, so the caption keeps to what holds. */
+  if (read.message) return CAP_ATTACHED;
   return carried ? CAP_CARRIED : CAP_NOTHING;
 }
