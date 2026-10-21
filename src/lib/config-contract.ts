@@ -158,6 +158,11 @@ const MEMORY_LIMIT_PATTERN = /^([0-9]+)(b|k|kb|m|mb|g|gb)?$/i;
 const MEMORY_LIMIT_IMPORT_FLOOR_BYTES = 1024 ** 3;
 const MEMORY_LIMIT_UNIT_BYTES: Record<string, number> = { b: 1, k: 1024, m: 1024 ** 2, g: 1024 ** 3 };
 
+/** The readiness-contract shape check for ORBIT_MEMORY_LIMIT: Compose's byte-value grammar. */
+export function isValidMemoryLimit(value: string): boolean {
+  return MEMORY_LIMIT_PATTERN.test(value);
+}
+
 /** Bytes for a well-formed ORBIT_MEMORY_LIMIT, or null when it is malformed. */
 function memoryLimitBytes(value: string): number | null {
   const match = MEMORY_LIMIT_PATTERN.exec(value);
@@ -358,9 +363,10 @@ export const envOrbitSchema = z
     SMTP_SECURITY: z.enum(["", "starttls", "implicit_tls"]).optional(),
     MIGRATE_ON_START: z.enum(["", "true", "false"]).optional(),
     WORKER_ENABLED: z.enum(["", "true", "false"]).optional(),
+    // Empty means not set, as for every other key: Compose substitutes 2g.
     ORBIT_MEMORY_LIMIT: z
       .string()
-      .regex(MEMORY_LIMIT_PATTERN, {
+      .refine((value) => value === "" || isValidMemoryLimit(value), {
         message: "ORBIT_MEMORY_LIMIT must be a whole number with an optional unit b, k, kb, m, mb, g or gb, such as 2g or 2048m",
       })
       .optional(),
@@ -565,14 +571,18 @@ export function evaluateReadiness(
     ok = false;
   }
 
-  // Like the session-ttl check above, nothing is printed unless there is
-  // something to say, so the bash parity fixtures are untouched. A small
-  // limit warns without clearing ok: the stack starts and runs. The line
-  // names the key, never its value, like every other readiness line.
+  // Shaped like the session-ttl check above: nothing is printed when absent,
+  // empty or fine, so the bash parity fixtures are untouched. A malformed
+  // value would only fail at `docker compose up`, so it clears ok here with
+  // a value-free line. A small limit warns without clearing ok: the stack
+  // starts and runs; only a large import can hit it.
   const memoryLimit = isSet(record, "ORBIT_MEMORY_LIMIT")
     ? memoryLimitBytes(record.ORBIT_MEMORY_LIMIT as string)
-    : null;
-  if (memoryLimit !== null && memoryLimit < MEMORY_LIMIT_IMPORT_FLOOR_BYTES) {
+    : undefined;
+  if (memoryLimit === null) {
+    lines.push("missing memory-limit");
+    ok = false;
+  } else if (memoryLimit !== undefined && memoryLimit < MEMORY_LIMIT_IMPORT_FLOOR_BYTES) {
     lines.push(
       "warning ORBIT_MEMORY_LIMIT is below about 1 GB, the peak of importing a maximum-size archive; such an import may be stopped part-way (docs/administrator-operations.md)",
     );
