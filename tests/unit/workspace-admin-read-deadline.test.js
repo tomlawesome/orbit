@@ -21,7 +21,11 @@ const HOUSEHOLDS = [
 
 /** Panels reached through one route each: [route fragment, view field, failed flag]. */
 const STALLS = /** @type {const} */ ([
-  ["/api/admin/documents/health", "services", "services"],
+  ["/api/admin/health", "services", "services"],
+  ["/api/admin/documents/health", "metadata", "metadata"],
+  ["/api/admin/mailbox", "mailbox", "relay"],
+  ["/api/admin/contact", "contact", "contact"],
+  ["/api/admin/users", "users", "users"],
   ["/api/admin/operations", "operations", "operations"],
   ["/api/admin/upload-limit", "uploadLimit", "uploadLimit"],
   ["/api/admin/documents/rotation", "rotation", "rotation"],
@@ -33,14 +37,18 @@ let calls;
 /** @type {number[]} */
 let limits;
 
-/** @param {string | null} stalled A route fragment whose fetch never resolves on its own. */
-function stubFetch(stalled) {
+/**
+ * @param {string | null} stalled A route fragment whose fetch never resolves on its own.
+ * @param {{ stallOnce?: boolean }} [options] stallOnce: only the first fetch of that route stalls; later ones answer.
+ */
+function stubFetch(stalled, { stallOnce = false } = {}) {
   calls = [];
+  let stalls = 0;
   vi.stubGlobal("fetch", vi.fn((url, init) => {
     const href = String(url);
     const signal = init?.signal;
     calls.push({ href, signal });
-    if (stalled && href.includes(stalled)) {
+    if (stalled && href.includes(stalled) && (!stallOnce || stalls++ === 0)) {
       // Never answers; only an abort ends it, as a real fetch behaves.
       return new Promise((_resolve, reject) => {
         if (!signal) return;
@@ -58,6 +66,8 @@ function stubFetch(stalled) {
     if (href.includes("/api/admin/recovery-bundle")) return reply({ recoveryBundle: { exported: true, exportedAt: "2026-10-10T09:00:00.000Z" } });
     if (href.includes("/api/admin/operations")) return reply({ operations: { jobs: [], generatedAt: "2026-10-15T12:00:00.000Z" } });
     if (href.includes("/api/admin/users")) return reply({ users: [] });
+    if (href.includes("/api/admin/mailbox")) return reply({ mailbox: null });
+    if (href.includes("/api/admin/contact")) return reply({ contact: null });
     if (href.includes("/members")) return reply({ members: [] });
     return Promise.resolve(new Response("{}", { status: 404 }));
   }));
@@ -134,4 +144,50 @@ describe("the limit", () => {
     expect(limits.length).toBeGreaterThanOrEqual(admin.length);
     for (const ms of limits) expect(ms).toBe(STAGED_PAGE_TIMEOUT_MS);
   });
+});
+
+/*
+ * R4 (G4-FR1): the two reads the screen starts with, the workspace and the
+ * sign-in session, are shared with other screens but must not leave the admin
+ * screen loading forever either.
+ *   - a workspace read that never answers: readAdminScreen() REJECTS at the
+ *     limit (the desk's loadScreen turns that into "could not load
+ *     administration" and a "try again");
+ *   - a session read that never answers: the screen still resolves (user
+ *     null, as a failed session already gives), and the stalled promise is
+ *     not cached, so the next readAdminScreen() asks again and gets the user.
+ */
+describe("the reads the screen starts with", () => {
+  it("a workspace read that never answers rejects the screen at the limit", async () => {
+    shortenTimeouts();
+    stubFetch("/api/workspace");
+    await expect(readAdmin()).rejects.toBeTruthy();
+  }, 3000);
+
+  it("the workspace read carries an AbortSignal with the staged-page limit", async () => {
+    shortenTimeouts();
+    stubFetch(null);
+    await readAdmin();
+    const { STAGED_PAGE_TIMEOUT_MS } = await import("../../web/src/lib/data/staged-page.js");
+    const read = calls.find((c) => c.href.includes("/api/workspace"));
+    expect(read?.signal).toBeInstanceOf(AbortSignal);
+    expect(limits).toContain(STAGED_PAGE_TIMEOUT_MS);
+  });
+
+  it("a session read that never answers still resolves, with no user", async () => {
+    shortenTimeouts();
+    stubFetch("/api/auth/session");
+    const view = await readAdmin();
+    expect(view.user).toBeNull();
+  }, 3000);
+
+  it("a stalled session read is not cached: the retry asks again and gets the user", async () => {
+    shortenTimeouts();
+    stubFetch("/api/auth/session", { stallOnce: true });
+    const { readAdminScreen } = await import("../../web/src/lib/data/workspace.js");
+    const first = await readAdminScreen();
+    expect(first.user).toBeNull();
+    const second = await readAdminScreen();
+    expect(second.user).toEqual({ id: "u1" });
+  }, 3000);
 });
