@@ -159,8 +159,9 @@ describe("#1279: the phone's create form shows page one and the read, as the des
     expect(markup).toMatch(/◆ from document/u);
   });
 
-  it("keeps the row's promise: the document is read for you", () => {
-    expect(markup).toMatch(/photo or file · read for you/u);
+  it("the add-a-document row's hint is exactly 'PDF, email or photo', as on the desk", () => {
+    expect(markup).toMatch(/<span>PDF, email or photo<\/span>/u);
+    expect(markup).not.toMatch(/read for you/u);
     expect(form).not.toMatch(/reading is wired on the desk's\s+\*?\s*form only/u);
   });
 });
