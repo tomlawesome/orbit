@@ -285,11 +285,13 @@
 
   /**
    * The acts behind a person's row (§2.12, review round §2.6): a tap opens
-   * it. None on your own row. Each keeps its full accessible name.
+   * it. None on your own row, and none on any row while the session read
+   * failed, since which row is yours is then unknown. Each keeps its full
+   * accessible name.
    * @param {Person} person
    * @returns {import('$lib/pocket/row.js').RowAct[]}
    */
-  const personActs = (person) => person.id === meId ? [] : [
+  const personActs = (person) => person.id === meId || view?.failed.session ? [] : [
     { label: "place", name: `Place ${person.displayName} in a system`, tone: "accent",
       onact: () => { placing = person; placeOpen = true; } },
     { label: "link", name: `Send ${person.displayName} a new setup link`, tone: "accent",
@@ -793,6 +795,10 @@
             {#snippet mark()}<span class="p-avatar" class:owner={person.isInstanceAdmin} class:ad-off={person.disabledAt}>{initials(person.displayName)}</span>{/snippet}
           </Row>
         {/each}
+        {#if view.failed.session}
+          <p class="p-error ad-inset ad-lastline" role="alert">your own row not marked — Orbit could not confirm who is signed in{stillNoAnswer ? " (tried again, still no answer)" : ""}
+            <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
+        {/if}
         {#if view.failed.users}
           <p class="p-error ad-inset ad-lastline" role="alert">people not shown — Orbit could not reach the list of people{stillNoAnswer ? " (tried again, still no answer)" : ""}
             <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>

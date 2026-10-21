@@ -1522,9 +1522,16 @@ export async function readAdminScreen() {
   const [workspace, session, users, mailbox, contact, uploadLimit, rotation, metadata, recoveryBundle, health, operations] =
     await Promise.all([
     readWorkspace(adminFetch),
-    /* Its own fetch also keeps this read out of the page-wide session cache,
-       so a read that stalled and timed out is not handed to the next retry. */
-    readSession({}, adminFetch).catch(() => null),
+    /* Its own fetch keeps a read that stalled and timed out out of the
+       page-wide session cache, so the next retry asks again. A read that
+       answers fills that cache, so the first command on this screen does not
+       make its own unbounded session read. A failed read is null here and
+       `failed.session` below: not knowing who is signed in is not "signed
+       out". */
+    readSession({}, adminFetch).then((answer) => {
+      sessionPromise = Promise.resolve(answer);
+      return answer;
+    }, () => null),
     adminRead("/api/admin/users").then((response) => json(response))
       .then(
         (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, disabledAt?: ?string }[] }} */ body) =>
@@ -1628,6 +1635,9 @@ export async function readAdminScreen() {
     /* Which panels' reads did not answer on a live instance. Always all
        false in fixture mode, whose fallbacks are the photographed screen. */
     failed: {
+      /* The session read itself, so the screen can say it does not know who
+         is signed in and offer a retry rather than draw them signed out. */
+      session: !fixtureMode && session === null,
       relay: !fixtureMode && !mailbox,
       services: !fixtureMode && !health,
       instance: !fixtureMode && !health,

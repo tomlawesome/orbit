@@ -53,6 +53,14 @@
      asserts what the call sites already guarantee rather than duplicating
      the check. */
   const need = () => /** @type {NonNullable<typeof view>} */ (view);
+  /* The account this screen last confirmed. A re-read whose session read
+     failed keeps it in the header instead of blanking it as if signed out;
+     the People card says the session is unconfirmed and offers a retry. */
+  /** @type {import("$lib/data/workspace.js").SessionUser | null} */
+  let confirmedUser = $state.raw(null);
+  $effect(() => {
+    if (view?.user) confirmedUser = view.user;
+  });
   /** @type {?HTMLDivElement} */
   let backdropRoot = null;
   /* #1123: on a phone the pocket's column holds the page's one main landmark. */
@@ -867,7 +875,7 @@
 <div class="station-backdrop" bind:this={backdropRoot} aria-hidden="true"></div>
 <div class="vignette" aria-hidden="true"></div>
 
-<Chrome user={view?.user} current="administration" household={view?.household} />
+<Chrome user={view?.user ?? confirmedUser} current="administration" household={view?.household} />
 
 <!-- #1123, proposal §2.12: administration on a phone, chosen by CSS. It
      shares this page's state and acts (the step-up challenge, the re-read),
@@ -1070,6 +1078,12 @@
         {/if}
         {#if localProblem}<div class="adminproblem">{localProblem}</div>{/if}
 
+        {#if view.failed.session}
+          <!-- Not knowing who is signed in is not "signed out": say so, and
+               hold back the per-person actions until a retry tells which
+               row is yours. -->
+          <div class="adminproblem" role="alert">your own row not marked — Orbit could not confirm who is signed in{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
+        {/if}
         {#if view.failed.users}
           <div class="adminproblem" role="alert">people not shown — Orbit could not reach the list of people{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
         {/if}
@@ -1081,7 +1095,7 @@
               <span>{[person.email, view.peopleMeta[person.id]].filter(Boolean).join(" · ")}</span>
             </div>
             <span class="role" class:admin={person.isInstanceAdmin}>{person.isInstanceAdmin ? "admin" : "user"}</span>
-            {#if person.id !== view.user?.id}
+            {#if !view.failed.session && person.id !== view.user?.id}
               <button class="place" title="Admins can add any user to any system"
                       onclick={() => (placing = placing === person.id ? null : person.id)}>place in a system…</button>
               <!-- A fresh link for somebody who never used theirs, or who has
