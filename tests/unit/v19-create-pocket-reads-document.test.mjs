@@ -134,7 +134,7 @@ describe("#1279: the phone's create form shows page one and the read, as the des
   it("moves the phone card's focus line from the virus check to the preview (ADR-0033 step 5)", () => {
     expect(pocket).toMatch(/line: FOCUS_SCANNING,/u);
     expect(pocket).toMatch(/picked\.line = focusAfterScan\(scanned\);/u);
-    expect(pocket).toMatch(/readPickedDocument\(householdId, file, \{ signal: controller\.signal, onScanned \}\)/u);
+    expect(pocket).toMatch(/readPickedDocument\(householdId, file, \{ signal: controller\.signal, onScanned, documentReading \}\)/u);
   });
 
   it("lands the reading card straight under TYPE, in place of the row that picked the file", () => {
