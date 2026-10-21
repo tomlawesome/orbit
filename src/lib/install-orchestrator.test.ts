@@ -500,6 +500,31 @@ describe("runInstall: refusals inside the transaction roll back (#11, #56)", () 
     expect(snapshot(target)).toEqual(before);
   });
 
+  it("names memory-limit when ORBIT_MEMORY_LIMIT is malformed in an otherwise complete deployment (F2)", async () => {
+    const target = recognised(["ORBIT_MEMORY_LIMIT=2 g"]);
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "configuration", reason: "configuration-failure" });
+    const message = outcome.status === "failed" ? outcome.message : "";
+    expect(message).toContain("memory-limit");
+    expect(message).not.toContain("2 g");
+    expect(message).not.toContain("APP_URL");
+    expect(message).not.toContain("ORBIT_IMAGE");
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("says the memory warning once, in the installer window, when ORBIT_MEMORY_LIMIT is below 1g (F2)", async () => {
+    const target = recognised(["ORBIT_MEMORY_LIMIT=512m"]);
+    const { said } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(said.filter((line) => line.startsWith("warning ORBIT_MEMORY_LIMIT is below about 1 GB"))).toHaveLength(1);
+  });
+
+  it("says no memory warning at 2g (F2)", async () => {
+    const target = recognised(["ORBIT_MEMORY_LIMIT=2g"]);
+    const { said } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(said.filter((line) => line.includes("ORBIT_MEMORY_LIMIT"))).toEqual([]);
+  });
+
   it("rolls back an update whose configuration does not pass the preflight (#50)", async () => {
     const target = recognised();
     writeFileSync(join(target, ".env-orbit"), "not an assignment\n", { mode: 0o600 });
