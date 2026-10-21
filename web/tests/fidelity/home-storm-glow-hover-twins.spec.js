@@ -9,6 +9,7 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  * Storm's glow rules and the hover/highlight scale must reach the twin as
  * well as the link, and the two scale classes must agree.
  */
+/** @param {import("@playwright/test").Page} page */
 async function openDesk(page) {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`${APP}/home`, { waitUntil: "load" });
@@ -31,7 +32,7 @@ test("a hovered and a highlighted visible twin scale the same", async ({ page })
   await openDesk(page);
   await page.addStyleTag({ content: ".body-vis :is(circle,path){transition:none !important}" });
   const twin = page.locator('.body-vis[data-vis="i-gutter"]').first();
-  const read = async (cls) => {
+  const read = async (/** @type {string} */ cls) => {
     await twin.evaluate((el, c) => { el.classList.remove("hot", "lit"); el.classList.add(c); }, cls);
     return twin.locator("circle").first().evaluate((el) => getComputedStyle(el).transform);
   };
