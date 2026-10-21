@@ -5,7 +5,7 @@ import {
 } from "$lib/data/workspace.js";
 import {
   CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
-  WHY_UNDRAWABLE, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
+  WHY_UNDRAWABLE, DOCUMENT_ACCEPT, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
 } from "$lib/data/document-read.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
@@ -278,7 +278,7 @@ export function mountCreate({ documentReading = true } = {}) {
   const picker = document.createElement("input");
   picker.type = "file";
   picker.hidden = true;
-  picker.accept = ".pdf,.eml,image/*";
+  picker.accept = DOCUMENT_ACCEPT;
   card.appendChild(picker);
 
   /* §14/#474: a document splits the screen — the form slides left and the

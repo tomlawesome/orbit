@@ -503,13 +503,13 @@ test.describe(() => {
  * typed. The inspection answer is fixed here, so the marks do not depend on
  * whether the stack has a document processor.
  */
-async function signInWithHousehold(page: Page): Promise<void> {
+async function signInWithHousehold(page: Page): Promise<{ id: string; name: string }> {
   await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: workerAccount("administrator") }).click();
   await settleArrival(page);
   await ensureWorkerAdministrator(page);
-  households.track(await seedHousehold(page));
+  return households.track(await seedHousehold(page));
 }
 
 /** @param body the inspection route's answer for this page */
@@ -626,6 +626,70 @@ test.describe("the phone's create form reads a picked document", () => {
       await expect(card.getByRole("button", { name: /not this one|remove/i })).toHaveCount(1);
       await card.getByRole("button", { name: /not this one|remove/i }).click();
       await expect(form.getByRole("button", { name: /add a document/ })).toBeVisible();
+    } finally {
+      await households.sweep(page);
+    }
+  });
+});
+
+/**
+ * F3 (audit v0.3.1, G14): with reading on, a photo the read could not take
+ * words from says so on both layouts, in the same sentence: the phone's card
+ * as its own line under the caption, the desk's lane in #rc-honest. The file
+ * stays attachable and the save carries it.
+ */
+test.describe("a photo with nothing to read says so, and still saves", () => {
+  test.use({
+    serviceWorkers: async ({}, use, testInfo) => {
+      await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
+    },
+  });
+
+  const NOTHING = "Nothing was able to be extracted from this file.";
+  const PHOTO = "boiler-photo.png";
+  /* A 1x1 PNG: the smallest picture the upload route accepts. */
+  const PHOTO_BYTES = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+
+  test("the card and the lane show the nothing-extracted sentence, and the save attaches the photo", async ({ page }) => {
+    test.setTimeout(90_000);
+    const household = await signInWithHousehold(page);
+    const pocket = test.info().project.name.startsWith("mobile");
+
+    try {
+      await answerInspection(page, {
+        extracted: false, suggestions: [], attachmentDisposition: "attachable", message: NOTHING,
+      });
+      await gotoCreate(page);
+      const name = "Boiler photo proving";
+      const file = { name: PHOTO, mimeType: "image/png", buffer: PHOTO_BYTES };
+      if (pocket) {
+        const form = page.getByRole("form", { name: "New entry" });
+        await form.locator('input[type="file"]').setInputFiles(file);
+        await expect(form.locator(".pc-reading .pc-honest")).toHaveText(NOTHING, { timeout: 20_000 });
+        await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
+        await form.getByRole("button", { name: "document", exact: true }).click();
+        await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+        await page.getByRole("button", { name: "Add to orbit" }).click();
+      } else {
+        await page.locator('#card input[type="file"]').setInputFiles(file);
+        await expect(page.locator("#rc-honest")).toHaveText(NOTHING, { timeout: 20_000 });
+        await page.locator("#f-name").fill(name);
+        await page.locator('#types button[data-type="document"]').click();
+        await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+        await page.locator(".btn-primary").click();
+      }
+
+      await expect.poll(() => itemIdOf(page, household.id, name), { timeout: 30_000 }).not.toBeNull();
+      const itemId = (await itemIdOf(page, household.id, name)) as string;
+      await expect.poll(async () => {
+        const response = await page.request.get(`/api/households/${household.id}/items/${itemId}/documents`);
+        if (!response.ok()) return `http_${response.status()}`;
+        const { documents } = (await response.json()) as { documents: Array<{ displayName: string }> };
+        return documents.map((one) => one.displayName).join(",");
+      }, { timeout: 30_000 }).toContain(PHOTO);
     } finally {
       await households.sweep(page);
     }

@@ -673,6 +673,9 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
         if (missing.length === 0) missing = ["APP_URL", "ORBIT_IMAGE", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_CALLBACK_URL"];
         return configurationFailure(`Configuration fields require attention (${missing.join(" ")}); refusing to start Compose.`);
       }
+      // Readiness warnings (a memory limit below the import peak) do not stop
+      // the run, but the operator should see them in the installer window.
+      say(dependencies, readiness.text.split("\n").filter((line) => line.startsWith("warning ")));
       onEvent({ phase: "configuration", component: "configuration", state: "running", reason: "configuration-migration", action: "verify" });
 
       if (!verifyDatabasePasswordPreserved(transaction, context.targetDir, volumeState.databaseVolumeSeen)) {

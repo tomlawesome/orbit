@@ -84,10 +84,12 @@ describe("#1459: the drop zone copy", () => {
     expect(page).toContain("The file is attached to the item as it is.");
   });
 
-  it("keeps the extraction promise for reading-on installs, but never promises it for photos (OCR stays off)", () => {
-    const promise = page.split("\n").find((line) => line.includes("extracted automatically"));
-    expect(promise).toBeDefined();
-    expect(promise).not.toMatch(/photo|image/iu);
+  it("with reading on, the hint at rest and while dragging is exactly 'PDF, email or photo', with no line about what is read", () => {
+    expect(page).toMatch(/data-when="rest">PDF, email or photo<\/span>/u);
+    expect(page).toMatch(/data-when="arm">PDF, email or photo<\/span>/u);
+    expect(page).not.toContain("extracted automatically");
+    expect(page).not.toContain("bring it to this box");
+    expect(page).not.toContain("PDF or email");
   });
 });
 

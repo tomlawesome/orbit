@@ -5,7 +5,7 @@
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import { stagedPreviewHref } from "$lib/pocket/review.js";
   import { DAMAGED, DAMAGED_PLACEHOLDER } from "$lib/data/metadata-status.js";
-  import { PAGE_HEAD, READING_HEAD, whyLines } from "$lib/data/document-read.js";
+  import { DOCUMENT_ACCEPT, PAGE_HEAD, READING_HEAD, whyLines } from "$lib/data/document-read.js";
   import {
     KINDS, RECURRENCE_MAX, REMINDER_CHOICES, kindHasDate, kindRecurs, recurrenceWords, stepRecurrence, toggleReminder,
   } from "./entry.js";
@@ -166,11 +166,11 @@
           <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
           <span class="pc-doc-words">
             <b>add a document</b>
-            <span>photo or file · read for you</span>
+            <span>PDF, email or photo</span>
           </span>
         </button>
       {/if}
-      <input bind:this={picker} type="file" accept="application/pdf,image/*" hidden onchange={onPick}>
+      <input bind:this={picker} type="file" accept={DOCUMENT_ACCEPT} hidden onchange={onPick}>
     {/if}
   </section>
 
@@ -218,6 +218,12 @@
             <p class="pc-focusline">{picked.line}</p>
             <p class="pc-why">{#each whyLines(picked.why) as line, index (index)}{#if index}<br>{/if}{line}{/each}</p>
           </div>
+        {/if}
+
+        {#if picked.message}
+          <!-- The server's words about the read, where the desk shows them
+               under its caption; the card's aria-live announces them. -->
+          <p class="pc-honest">{picked.message}</p>
         {/if}
 
         {#if picked.refused}
@@ -576,6 +582,7 @@
   .pc-cap b{display:block;font-weight:500;color:var(--ink)}
   .pc-cap .p-body{display:inline-block;vertical-align:middle;margin:0 8px 2px 0}
   .pc-done .pc-cap .p-body{display:none}
+  .pc-honest{margin:8px 0 0;text-align:center;font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
   .pc-reading .pc-drop{margin-top:14px}
   .pc-refused-acts{display:flex;gap:var(--p-pill-gap);margin-top:14px}
   .pc-refused-acts .pc-drop{margin-top:0}

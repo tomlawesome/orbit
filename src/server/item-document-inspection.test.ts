@@ -293,6 +293,36 @@ describe("item document inspection", () => {
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
   });
 
+  describe("reading on, Tika returns no usable text", () => {
+    it.each([
+      ["empty", ""],
+      ["whitespace only", "  \n"],
+    ] as const)("answers the plain nothing-extracted message and stays attachable (%s)", async (_label, text) => {
+      mocks.extract.mockResolvedValue(text);
+      const result = await inspectItemDocument({
+        userId: "member-user",
+        householdId: "household-id",
+        filename: "photo.pdf",
+        body: new ReadableStream<Uint8Array>(),
+      });
+
+      expect(result.message).toBe("Nothing was able to be extracted from this file.");
+      expect(result.attachmentDisposition).toBe("attachable");
+    });
+
+    it("gives no message when Tika returns real text", async () => {
+      const result = await inspectItemDocument({
+        userId: "member-user",
+        householdId: "household-id",
+        filename: "policy.pdf",
+        body: new ReadableStream<Uint8Array>(),
+      });
+
+      expect(result.message).toBeUndefined();
+      expect(result.attachmentDisposition).toBe("attachable");
+    });
+  });
+
   it.each([
     ["non-string", 42],
     ["oversized", "x".repeat(250_001)],
@@ -445,6 +475,20 @@ describe("item document inspection", () => {
       off();
       mocks.scan.mockResolvedValue({ status: "infected", logReason: "malware_detected" });
       await expect(upload()).rejects.toMatchObject({ code: "document_malware_detected" });
+      expect(mocks.extract).not.toHaveBeenCalled();
+    });
+
+    it("with scanning disabled too, answers attachable with no message, since reading is off", async () => {
+      mocks.config.mockReturnValue({ ...config, scanMode: "disabled", tika: { url: null, timeoutMs: 30_000 } });
+      const result = await upload();
+
+      expect(result.attachmentDisposition).toBe("attachable");
+      expect(result.message).toBeUndefined();
+      expect(result).toMatchObject({
+        extracted: false,
+        suggestions: [{ field: "title", value: "manual-policy", source: "filename", confidence: "high" }],
+      });
+      expect(mocks.scan).not.toHaveBeenCalled();
       expect(mocks.extract).not.toHaveBeenCalled();
     });
 

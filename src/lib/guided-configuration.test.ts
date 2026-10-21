@@ -106,6 +106,10 @@ describe("missing_*_fields (install.sh:843-877)", () => {
     expect(missingConfigurationFields(readiness)).toEqual(["ORBIT_IMAGE", "OIDC_ISSUER", "OIDC_CLIENT_SECRET", "ai"]);
   });
 
+  it("memory-limit alone is the culprit: missingConfigurationFields returns it, not the six-field fallback (F2)", () => {
+    expect(missingConfigurationFields("ready APP_URL\nmissing memory-limit")).toEqual(["memory-limit"]);
+  });
+
   it("ignores a line that merely contains, but does not exactly equal, 'missing <field>'", () => {
     expect(missingRequiredFields("missing ORBIT_IMAGE_EXTRA\nmissing_APP_URL")).toEqual([]);
   });
