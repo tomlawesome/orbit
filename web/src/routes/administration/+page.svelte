@@ -369,12 +369,20 @@
     try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(payload)); } catch { /* storage refused: the form simply starts empty */ }
   }
 
-  function restoreDraft() {
+  /**
+   * Refill the forms from the stashed draft, but only for the errand the
+   * provider sent back: a draft left by another errand (one that never left,
+   * or was abandoned) holds a different person and must not resurface. The
+   * draft is removed either way.
+   * @param {string} returnedIntent the `stepup` value the return carried
+   */
+  function restoreDraft(returnedIntent) {
     try {
       const held = sessionStorage.getItem(DRAFT_KEY);
       sessionStorage.removeItem(DRAFT_KEY);
       if (!held) return;
       const draft = JSON.parse(held);
+      if (draft.intent !== returnedIntent) return;
       if (draft.local) localDraft = { ...localDraft, ...draft.local };
       if (draft.intent === "system_create") {
         systemName = draft.systemName ?? "";
@@ -420,6 +428,8 @@
       stashDraft(intent, about);
       await startStepUp({ intent, returnTo: `/administration?stepup=${encodeURIComponent(intent)}` });
     } catch (error) {
+      // The handover never left, so nothing will come back for the draft.
+      try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* storage refused: nothing was kept */ }
       report(setupWords(error));
     }
   }
@@ -837,7 +847,7 @@
          was left rather than making them type the person in again. */
       const resumed = parameters.get("stepup");
       if (resumed) {
-        restoreDraft();
+        restoreDraft(resumed);
         actorHasPassword = false;
         provenIntent = resumed;
       }
