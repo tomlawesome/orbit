@@ -46,8 +46,9 @@
        everyone who uses what they credit. */
     ["about", "About", "/about"],
   ];
-  /* The five swatches and the act of choosing one: $lib/theme-swatches.js,
-     shared with the pocket hatch (#1120). */
+  /* The five swatches: $lib/theme-swatches.js, shared with the pocket hatch
+     (#1120). Choosing one (apply, cache, save to the server) is chooseTheme
+     in $lib/pick.js, the same pick every screen makes. */
 
   let open = $state(false);
   let active = $state(DEFAULT_THEME);

@@ -9,26 +9,24 @@
  * home.behaviour.js imports it; the pocket hatch uses $lib/theme-swatches.js.
  */
 
+import { chooseTheme } from "$lib/pick.js";
+
 /* title -> pack name: "star-chart" is starchart, "after dark" is afterdark. */
 /** @type {(button: HTMLElement) => string} */
 export const packOf = (button) => button.title.replace(/[\s-]/g, "");
 
 /**
+ * A home swatch press. The theme itself goes through chooseTheme, the one
+ * pick every screen uses: it applies the pack, writes the pre-paint cache,
+ * saves it to the server and counts the pick, so a session read already in
+ * flight cannot put the old theme back. Only the pressed state is home's own.
  * @param {string} name
  * @param {HTMLElement} button
- * @param {() => void} [onChange] - a caller-specific follow-up run after the
- *   theme and the pressed state are set. The desk uses it to re-measure the
- *   constellation labels, which size differently per pack; the pocket sheet
- *   has nothing else that needs telling, so it simply omits this.
  */
-export function setSwatch(name, button, onChange) {
-  document.documentElement.dataset.theme = name;
+export function setSwatch(name, button) {
   for (const other of /** @type {HTMLElement} */ (button.parentElement).querySelectorAll("button"))
     other.setAttribute("aria-pressed", String(other === button));
-  /* Survive a refresh. See the note in app.html: the server holds the real
-     preference once the shell is wired; this is the pre-paint cache. */
-  try { localStorage.setItem("orbit-theme", name); } catch {}
-  onChange?.();
+  return chooseTheme(name);
 }
 
 /**
