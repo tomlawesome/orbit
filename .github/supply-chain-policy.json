@@ -284,6 +284,28 @@
     {
       "kind": "vulnerability",
       "scope": "image",
+      "id": "CVE-2026-56851",
+      "package": "golang.org/x/text",
+      "installedVersion": "v0.30.0",
+      "owner": "Orbit maintainers",
+      "rationale": "Compiled into /usr/bin/ollama (0.35.1); fixed upstream in x/text 0.41.0, which no Ollama release carries yet (0.40.6 declined, #794 note 40777). Owner granted, 2026-10-20. Clears when a re-pinned Ollama scans clean.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-63209",
+      "package": "github.com/klauspost/compress",
+      "installedVersion": "v1.18.3",
+      "owner": "Orbit maintainers",
+      "rationale": "Compiled into /usr/bin/ollama (0.35.1); fixed upstream in compress 1.18.7, which no Ollama release carries yet. The model server is off in the default (Standard) profile, so no shipped install runs this binary unless the operator chooses the full local stack. Owner granted, 2026-10-20. Clears when a re-pinned Ollama scans clean.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
       "id": "CVE-2025-61726",
       "package": "stdlib",
       "installedVersion": "v1.24.6",
