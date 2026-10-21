@@ -84,9 +84,13 @@ describe("#1459: the drop zone copy", () => {
     expect(page).toContain("The file is attached to the item as it is.");
   });
 
-  it("with reading on, the hint at rest and while dragging is exactly 'PDF, email or photo', with no line about what is read", () => {
-    expect(page).toMatch(/data-when="rest">PDF, email or photo<\/span>/u);
-    expect(page).toMatch(/data-when="arm">PDF, email or photo<\/span>/u);
+  it("with reading on, the hint at rest and while dragging is exactly 'PDF or photo' and never says email, with no line about what is read", () => {
+    expect(page).toMatch(/data-when="rest">PDF or photo<\/span>/u);
+    expect(page).toMatch(/data-when="arm">PDF or photo<\/span>/u);
+    // Only the hint line under the zone; the main line and the reading-off
+    // hint are other spans with the same data-when values.
+    const hintBlock = page.slice(page.indexOf('class="dz-hint'), page.indexOf('class="dz-held"'));
+    expect(hintBlock).not.toMatch(/email/iu);
     expect(page).not.toContain("extracted automatically");
     expect(page).not.toContain("bring it to this box");
     expect(page).not.toContain("PDF or email");

@@ -16,6 +16,7 @@
  */
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
+import { DOCUMENT_ACCEPT } from "$lib/data/document-read.js";
 import { holdDocument, holdType } from "$lib/data/held-document.js";
 import { fillStarTiles } from "$lib/sky.js";
 import { screenScope } from "$lib/teardown.js";
@@ -677,7 +678,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
     const picker = document.createElement("input");
     picker.type = "file";
     picker.hidden = true;
-    picker.accept = ".pdf,.eml,image/*";
+    picker.accept = DOCUMENT_ACCEPT;
     quickDrop.after(picker);
     const handOver = (/** @type {File | null | undefined} */ file) => {
       if (!file) return;

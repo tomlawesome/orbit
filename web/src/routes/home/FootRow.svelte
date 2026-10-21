@@ -1,5 +1,6 @@
 <script>
   import { createArm } from "$lib/arm.js";
+  import { DOCUMENT_ACCEPT } from "$lib/data/document-read.js";
   import { dayMonthYear } from "$lib/format.js";
   const uid = $props.id();
 
@@ -200,7 +201,7 @@
       <i><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2.4-2.4a2.6 2.6 0 0 0-3.7-3.7l-1 1"/><path d="M9.2 6.8a2.6 2.6 0 0 0-3.7 0L3.1 9.2a2.6 2.6 0 0 0 3.7 3.7l1-1"/></svg></i>
     </button>
   </span>
-  <input bind:this={picker} type="file" accept="application/pdf,image/*" hidden onchange={picked}>
+  <input bind:this={picker} type="file" accept={DOCUMENT_ACCEPT} hidden onchange={picked}>
 </div>
 
 <style>

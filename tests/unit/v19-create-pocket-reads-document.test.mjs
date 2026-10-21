@@ -174,8 +174,11 @@ describe("#1279: the phone's create form shows page one and the read, as the des
     expect(markup).toMatch(/◆ from document/u);
   });
 
-  it("the add-a-document row's hint is exactly 'PDF, email or photo', as on the desk", () => {
-    expect(markup).toMatch(/<span>PDF, email or photo<\/span>/u);
+  it("the add-a-document row's hint is exactly 'PDF or photo', as on the desk, and never says email", () => {
+    expect(markup).toMatch(/<span>PDF or photo<\/span>/u);
+    const hints = [...markup.matchAll(/<span>(PDF[^<]*)<\/span>/gu)].map((one) => one[1]);
+    expect(hints).toEqual(["PDF or photo"]);
+    for (const hint of hints) expect(hint).not.toMatch(/email/iu);
     expect(markup).not.toMatch(/read for you/u);
     expect(form).not.toMatch(/reading is wired on the desk's\s+\*?\s*form only/u);
   });
@@ -187,6 +190,18 @@ describe("#1279: the phone's create form shows page one and the read, as the des
     expect(desk).toMatch(/picker\.accept = DOCUMENT_ACCEPT;/u);
     expect(form).not.toMatch(/accept="[^"]*"/u);
     expect(desk).not.toMatch(/\.eml/u);
+  });
+
+  it("the home page's two pickers use the same constant and name no .eml (G14+F3-FR3)", () => {
+    const behaviour = read("web/src/routes/home/home.behaviour.js");
+    const foot = read("web/src/routes/home/FootRow.svelte");
+    expect(behaviour).toMatch(/import \{[^}]*\bDOCUMENT_ACCEPT\b[^}]*\} from "\$lib\/data\/document-read\.js"/u);
+    expect(foot).toMatch(/import \{[^}]*\bDOCUMENT_ACCEPT\b[^}]*\} from "\$lib\/data\/document-read\.js"/u);
+    expect(behaviour).toMatch(/picker\.accept = DOCUMENT_ACCEPT;/u);
+    expect(foot).toMatch(/<input [^>]*type="file"[^>]*accept=\{DOCUMENT_ACCEPT\}/u);
+    expect(behaviour).not.toMatch(/\.eml/u);
+    expect(foot).not.toMatch(/accept="[^"]*"/u);
+    expect(foot).not.toMatch(/\.eml/u);
   });
 
   it("the phone's reading card shows the inspection message as its own line, under the page block and above 'not this one' (F3)", () => {

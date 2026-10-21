@@ -552,9 +552,11 @@ memory-limit
 
 `session-ttl` is `SESSION_TTL_SECONDS` set to anything other than a whole
 number of seconds from 900 to 2592000 (15 minutes to 30 days).
-`memory-limit` is `ORBIT_MEMORY_LIMIT` set to anything other than a whole
-number with an optional unit `b`, `k`, `kb`, `m`, `mb`, `g` or `gb` (Compose's
-byte values, such as `2g`); empty counts as absent.
+`memory-limit` is `ORBIT_MEMORY_LIMIT` set to anything outside Compose's size
+grammar: a number (decimals allowed), one optional space, then an optional unit
+`b`, or `k`, `m`, `g`, `t` or `p` optionally followed by `b` or `ib`, any case,
+all 1024-based (such as `2g`, `3.5g`, `1.5GiB` or `2048m`); empty counts as
+absent.
 
 ### Consumer guidance
 

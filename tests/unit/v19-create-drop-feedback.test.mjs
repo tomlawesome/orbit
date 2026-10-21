@@ -179,7 +179,8 @@ describe("#1244: the zone's markup and sheet carry the mockup's look", () => {
     expect(page).toMatch(/<span data-when="lock">release to add it<\/span>/u);
     expect(page).toMatch(/<span data-when="swap">release to swap the document<\/span>/u);
     /* The owner cut the arm hint to the bare accepted kinds (2026-10-21). */
-    expect(page).toMatch(/<span data-when="arm">PDF, email or photo<\/span>/u);
+    expect(page).toMatch(/<span data-when="arm">PDF or photo<\/span>/u);
+    expect(page.match(/<span data-when="arm">([^<]*)<\/span>/u)?.[1]).not.toMatch(/email/iu);
     /* #1459: the reading promise is shown only when document reading is on. */
     expect(page).toMatch(/<span data-when="lock">\{documentReading \? "orbit will read what it can · " : ""\}nothing is saved until you say<\/span>/u);
     expect(page).toMatch(/<div class="sr-only" id="dz-live" aria-live="polite"><\/div>/u);
