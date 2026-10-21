@@ -279,6 +279,12 @@ function compose() {
     if (env.FAKE_STATE_DIR) {
       // The container the client started: it outlives its client (Docker does not stop it when the client dies).
       const name = flagValue("--name") ?? (flagValue("--project-name") + "-orbit-ollama-model-pull-run-" + process.pid);
+      // Docker refuses a second container under a name that is already in use, running or not.
+      const taken = fs.existsSync(env.FAKE_STATE_DIR + "/model-pull-running") ? fs.readFileSync(env.FAKE_STATE_DIR + "/model-pull-running", "utf8").split("\\n") : [];
+      if (taken.includes(name)) {
+        process.stderr.write('Error response from daemon: Conflict. The container name "/' + name + '" is already in use\\n');
+        exit(1);
+      }
       fs.appendFileSync(env.FAKE_STATE_DIR + "/model-pull-running", name + "\\n");
       fs.appendFileSync(env.FAKE_STATE_DIR + "/model-pull-started", name + "\\n");
     }
@@ -415,6 +421,7 @@ switch (argv[0]) {
     break;
   case "volume":
     if (argv[1] === "ls") {
+      if (env.FAKE_HANG_VOLUME_LS_AFTER_UP === "1" && fs.existsSync((env.FAKE_STATE_DIR ?? "/nonexistent") + "/up-called")) hang("volume-ls");
       if (env.FAKE_VOLUME_LS_FAIL === "1") exit(1);
       if (env.FAKE_VOLUME_LS_FAIL_AFTER_UP === "1" && fs.existsSync((env.FAKE_STATE_DIR ?? "/nonexistent") + "/up-called")) exit(1);
       const filter = (flagValue("--filter") ?? "").replace(/^name=/, "");
@@ -438,6 +445,7 @@ switch (argv[0]) {
       exit(0);
     }
     if (argv[1] === "rm") {
+      if (env.FAKE_HANG_VOLUME_RM === "1") hang("volume-rm");
       if (env.FAKE_VOLUME_RM_FAIL === "1") {
         process.stderr.write("fake docker: volume is in use\\n");
         exit(1);
@@ -2022,9 +2030,11 @@ function runInstallSignalled(targetDir, envOverrides, { signal, marker }) {
     let stdout = "";
     let stderr = "";
     let sent = false;
+    let sentAt = 0;
     const send = () => {
       if (sent || !existsSync(join(stateDir, marker))) return;
       sent = true;
+      sentAt = Date.now();
       killGroup(signal);
     };
     const watcher = watch(stateDir, send);
@@ -2060,6 +2070,7 @@ function runInstallSignalled(targetDir, envOverrides, { signal, marker }) {
         status,
         signal: closedBy,
         signalSent: sent,
+        signalToExitMs: sent ? Date.now() - sentAt : 0,
         hungAlive,
         stdout,
         stderr,
@@ -2791,6 +2802,32 @@ describe("install.sh: once the database and application are ready the rollback i
     expect(result.hungAlive).toBe(false);
     expect(events.filter((line) => /^phase=\S+ component=(ollama|model)/.test(line)).at(-1)).toMatch(/ state=waiting reason=optional-status action=continue /);
     expect(`${result.stdout}\n${result.stderr}`).toMatch(/(Local model|Model|Ollama)[^\n]*(not downloaded|still starting|still downloading)/i);
+  });
+});
+
+describe("install.sh: a model-pull container left behind by an earlier run", () => {
+  const leftover = "orbit-orbit-ollama-model-pull-install";
+  const confirmed = { FAKE_ENGINE_EXIT: "0", FAKE_ENGINE_OUTCOME: "status=ok\nfresh=0\nprofile=ai\nmodel-pull=1\ndatabase-volume=\n" };
+
+  it("the name is already held: the installer removes that container before the run, and the download succeeds", () => {
+    const { targetDir, stateDir, environment } = modelUpdateFixture();
+    writeFileSync(join(stateDir, "model-pull-running"), leftover + "\n");
+    const result = runInstall(targetDir, { ...environment, ...confirmed });
+    expect(result.status).toBe(0);
+    const calls = result.calls.split("\n");
+    const removal = calls.findIndex((line) => /^docker rm /.test(line) && / -f /.test(line) && line.split(" ").includes(leftover));
+    const run = calls.findIndex((line) => /compose .* run .*orbit-ollama-model-pull/.test(line));
+    expect(removal).toBeGreaterThanOrEqual(0);
+    expect(run).toBeGreaterThan(removal);
+    expect(`${result.stdout}\n${result.stderr}`).not.toMatch(/confirmed download did not complete/);
+  });
+
+  it("a download that does not complete: the retry hint names the container", () => {
+    const { targetDir, environment } = modelUpdateFixture();
+    const result = runInstall(targetDir, { ...environment, ...confirmed, FAKE_MODEL_PULL_FAIL: "1" });
+    expect(result.status).toBe(0);
+    const note = `${result.stdout}\n${result.stderr}`.split("\n").find((line) => /confirmed download did not complete/.test(line)) ?? "";
+    expect(note).toContain(leftover);
   });
 });
 
@@ -4069,6 +4106,81 @@ describe("install.sh: the journal lists files, and the person's files are moved,
   });
 });
 
+describe("install.sh: a refused backup folder names its cause and the way back", () => {
+  /** A bin directory ahead of the fake one: the same fakes, plus `tools` (name to shell body) that shadow real commands. */
+  function toolsPath(tools) {
+    const dir = mkdtempSync(join(tmpdir(), "orbit-install-shadow-"));
+    for (const [name, source] of [
+      ["docker", fakeDockerScript],
+      ["curl", fakeCurlScript],
+      ["cosign", fakeCosignScript],
+    ]) {
+      writeFileSync(join(dir, name), source);
+      chmodSync(join(dir, name), 0o755);
+    }
+    for (const [name, body] of Object.entries(tools)) {
+      writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`);
+      chmodSync(join(dir, name), 0o755);
+    }
+    return `${dir}:${process.env.PATH}`;
+  }
+
+  function refusal(targetDir, environment, tools) {
+    const result = runInstall(targetDir, { ...environment, PATH: toolsPath(tools) });
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=abort /u);
+    expect(result.engineRuns).toHaveLength(0);
+    return result.stderr;
+  }
+
+  const generic = "Could not make a backup folder under";
+
+  it("the run's timestamp cannot be read: says the clock could not be read and to try again", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const before = treeSnapshot(targetDir);
+    const text = refusal(targetDir, environment, { date: "exit 1" });
+    expect(text).toMatch(/(clock|date|time)/iu);
+    expect(text).toMatch(/(try again|run it again|install again|retry)/iu);
+    expect(text).not.toMatch(new RegExp(`${generic} \\S+; nothing was changed\\.`, "u"));
+    expect(treeSnapshot(targetDir)).toEqual(before);
+  });
+
+  it("the backups folder cannot be made private (not ours, or chmod fails): names the folder, says it is not usable by this user, and to change its owner, rename it or remove it", () => {
+    const { targetDir, environment } = recoveryFixture();
+    mkdirSync(backupsDir(targetDir), { mode: 0o755 });
+    const text = refusal(targetDir, environment, { chmod: 'case "$*" in *orbit-install-backups*) exit 1;; esac\nexec /bin/chmod "$@"' });
+    expect(text).toContain(backupsDir(targetDir));
+    expect(text).toMatch(/(owned by|another user|permission|private|0700|700)/iu);
+    expect(text).toMatch(/(chown|rename|remove)/iu);
+    expect(text).not.toMatch(new RegExp(`${generic} \\S+; nothing was changed\\.`, "u"));
+  });
+
+  it("a dated folder cannot be created: says it could not be created and names the folder to check", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const text = refusal(targetDir, environment, { mkdir: 'case "$*" in *orbit-install-backups*) exit 1;; esac\nexec /bin/mkdir "$@"' });
+    expect(text).toContain(backupsName);
+    expect(text).toMatch(/could not create/iu);
+    expect(text).toMatch(/(space|permission|writable|check)/iu);
+    expect(text).not.toMatch(new RegExp(`${generic} \\S+; nothing was changed\\.`, "u"));
+  });
+
+  it("all nine same-second names are taken: says so and to remove old dated folders", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const now = Date.now();
+    for (let second = -2; second <= 180; second += 1) {
+      for (const suffix of ["", "-2", "-3", "-4", "-5", "-6", "-7", "-8", "-9"]) {
+        mkdirSync(join(backupsDir(targetDir), `${stampAt(now + second * 1000)}${suffix}`), { recursive: true, mode: 0o700 });
+      }
+    }
+    chmodSync(backupsDir(targetDir), 0o700);
+    const text = refusal(targetDir, environment, {});
+    expect(text).toMatch(/(taken|already exist|in use)/iu);
+    expect(text).toMatch(/remove (the )?old/iu);
+    expect(text).toContain(backupsName);
+    expect(text).not.toMatch(new RegExp(`${generic} \\S+; nothing was changed\\.`, "u"));
+  });
+});
+
 describe("install.sh: the containers could not be stopped (redesign r5)", () => {
   it("B11: the folder is put back, the engine's files kept whole in <stamp>/engine, and one command, last and alone, run from there, `retry`", () => {
     const { targetDir, stateDir, environment, before } = privateStateFixture();
@@ -4258,4 +4370,90 @@ describe("install.sh: a rollback that cannot finish names what is left (redesign
     expect(readOptional(join(stamp, "originals", ".orbit-secrets", "oidc-client-secret"))).toBe("preprovisioned-oidc-secret");
     expect(existsSync(join(stamp, "originals", ".env-orbit"))).toBe(true);
   });
+});
+
+describe("install.sh: every Docker call in the rollback shares one 8 s deadline (F1)", () => {
+  // A hung Docker daemon must not hold the rollback past the launcher's 15 s stop grace. The rollback's Docker
+  // calls share one 8 s budget set when the rollback starts; the fake hangs far longer (120 s). The rollback is
+  // measured from the `phase=rollback state=running` event to the terminal `failed` event (whole seconds), not by
+  // the wall time of the whole run. Ten seconds allows the 8 s budget, one kill-after second and rounding.
+  const rollbackBudgetSeconds = 10;
+  const causeLine =
+    "Docker did not answer within 8 s, so the rollback stopped waiting for it; what it could not do is named below. Check that Docker is running and its disk is not full, then follow the next step.";
+  const containersLine = "the containers could not be stopped";
+
+  function rollbackSeconds(stdout) {
+    const start = /^phase=rollback .* state=running .* elapsed=(\d+)s$/mu.exec(stdout);
+    const end = /^phase=[a-z-]+ .* state=failed .* elapsed=(\d+)s(?: .*)?$/mu.exec(stdout);
+    expect(start, "a phase=rollback state=running event").not.toBeNull();
+    expect(end, "a terminal failed event").not.toBeNull();
+    return Number(end[1]) - Number(start[1]);
+  }
+
+  function timedFailure(knobs) {
+    const { targetDir, environment } = recoveryFixture();
+    return runInstall(targetDir, { ...environment, FAKE_COMPOSE_UP_FAIL: "1", ...knobs }, ["--plain"]);
+  }
+
+  const occurrences = (text, needle) => text.split(needle).length - 1;
+
+  it("a hung `compose down` ends the rollback within 10 s, naming the cause once and giving one recovery command", () => {
+    const result = timedFailure({ FAKE_HANG_DOWN: "1" });
+    expect(result.status).toBe(1);
+    expect(rollbackSeconds(result.stdout)).toBeLessThanOrEqual(rollbackBudgetSeconds);
+    expect(result.stderr).toContain(containersLine);
+    expect(occurrences(result.stderr, causeLine)).toBe(1);
+    expect(recoveryCommands(result.stderr)).toHaveLength(1);
+  });
+
+  it("the cause line comes before the obstacles it explains", () => {
+    const result = timedFailure({ FAKE_HANG_DOWN: "1" });
+    expect(result.stderr.indexOf(causeLine)).toBeGreaterThanOrEqual(0);
+    expect(result.stderr.indexOf(causeLine)).toBeLessThan(result.stderr.indexOf(containersLine));
+  });
+
+  it("a hung `compose down` and a hung `volume ls` end the rollback within 10 s, naming both obstacles and the cause once", () => {
+    const result = timedFailure({ FAKE_HANG_DOWN: "1", FAKE_HANG_VOLUME_LS_AFTER_UP: "1" });
+    expect(result.status).toBe(1);
+    expect(rollbackSeconds(result.stdout)).toBeLessThanOrEqual(rollbackBudgetSeconds);
+    expect(result.stderr).toContain(containersLine);
+    expect(result.stderr).toContain(noVolumesLine);
+    expect(occurrences(result.stderr, causeLine)).toBe(1);
+  });
+
+  it("a hung `docker volume rm` ends the rollback within 10 s, naming every volume that could not be removed", () => {
+    const result = timedFailure({ FAKE_HANG_VOLUME_RM: "1" });
+    expect(result.status).toBe(1);
+    expect(rollbackSeconds(result.stdout)).toBeLessThanOrEqual(rollbackBudgetSeconds);
+    expect(result.stderr).toContain("could not be removed");
+    for (const volume of allThreeVolumes) expect(result.stderr).toContain(volume);
+    expect(occurrences(result.stderr, causeLine)).toBe(1);
+  });
+
+  it("a rollback in which Docker answers (even with a failure) carries no cause line", () => {
+    const result = timedFailure({ FAKE_COMPOSE_DOWN_FAIL: "1" });
+    expect(result.status).toBe(1);
+    expect(result.stderr).not.toContain("Docker did not answer within");
+  });
+
+  it("with no time left, Docker is not run: after a hung `compose down` used the whole budget, no `volume ls` or `volume rm` follows", () => {
+    const result = timedFailure({ FAKE_HANG_DOWN: "1" });
+    expect(result.status).toBe(1);
+    const calls = result.calls.split("\n").filter(Boolean);
+    const lastDown = calls.findLastIndex((line) => /^docker compose .* down( |$)/u.test(line));
+    expect(lastDown).toBeGreaterThanOrEqual(0);
+    expect(calls.slice(lastDown + 1)).toEqual([]);
+  });
+
+  it("SIGTERM during a hung `down`: the process exits within 15 s of the signal with one terminal failed event", async () => {
+    const { targetDir, environment } = recoveryFixture();
+    const result = await runInstallSignalled(
+      targetDir,
+      { ...environment, FAKE_COMPOSE_UP_FAIL: "1", FAKE_HANG_DOWN: "1" },
+      { signal: "SIGTERM", marker: "hung-down" },
+    );
+    expect(result.signalSent).toBe(true);
+    expect(result.signalToExitMs).toBeLessThan(15_000);
+    expect(eventLines(result.stdout).filter((line) => / state=failed /u.test(line))).toHaveLength(1);
+  }, PTY_TEST_TIMEOUT_MS);
 });
