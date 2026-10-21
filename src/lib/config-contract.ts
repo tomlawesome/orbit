@@ -149,26 +149,37 @@ export function isValidSessionTtlSeconds(value: string): boolean {
 }
 
 // ORBIT_MEMORY_LIMIT feeds Compose's mem_limit, so it must use Compose's
-// byte-value grammar (units b, k, kb, m, mb, g, gb, case-insensitive, all
-// 1024-based); anything else would only surface as a failed
-// `docker compose up`. A well-formed value below 1g still starts, so it is
-// warned about rather than refused: it only fails when a large archive is
-// imported (docs/administrator-operations.md puts that peak at about 1 GB).
-const MEMORY_LIMIT_PATTERN = /^([0-9]+)(b|k|kb|m|mb|g|gb)?$/i;
+// size grammar (docker/go-units RAMInBytes): a decimal number, one optional
+// space, then an optional unit b, or k, m, g, t or p followed by nothing, b
+// or ib, case-insensitive, all 1024-based, the result truncated to whole
+// bytes. Go's ParseFloat would also take forms nobody writes here (1e3g, +2g,
+// hex floats); refusing those is deliberate. Anything outside the grammar
+// would only surface as a failed `docker compose up`. A well-formed value
+// below 1 GiB still starts, so it is warned about rather than refused: it
+// only fails when a large archive is imported
+// (docs/administrator-operations.md puts that peak at about 1 GB).
+const MEMORY_LIMIT_PATTERN = /^([0-9]+\.?[0-9]*|\.[0-9]+) ?(b|[kmgtp](?:ib|b)?)?$/i;
 const MEMORY_LIMIT_IMPORT_FLOOR_BYTES = 1024 ** 3;
-const MEMORY_LIMIT_UNIT_BYTES: Record<string, number> = { b: 1, k: 1024, m: 1024 ** 2, g: 1024 ** 3 };
+const MEMORY_LIMIT_UNIT_BYTES: Record<string, number> = {
+  b: 1,
+  k: 2 ** 10,
+  m: 2 ** 20,
+  g: 2 ** 30,
+  t: 2 ** 40,
+  p: 2 ** 50,
+};
 
-/** The readiness-contract shape check for ORBIT_MEMORY_LIMIT: Compose's byte-value grammar. */
+/** The readiness-contract shape check for ORBIT_MEMORY_LIMIT: Compose's size grammar. */
 export function isValidMemoryLimit(value: string): boolean {
   return MEMORY_LIMIT_PATTERN.test(value);
 }
 
-/** Bytes for a well-formed ORBIT_MEMORY_LIMIT, or null when it is malformed. */
-function memoryLimitBytes(value: string): number | null {
+/** Bytes for a well-formed ORBIT_MEMORY_LIMIT as Compose reads it, or null when it is malformed. */
+export function memoryLimitBytes(value: string): number | null {
   const match = MEMORY_LIMIT_PATTERN.exec(value);
   if (!match) return null;
   const unit = (match[2] ?? "b").toLowerCase().charAt(0);
-  return Number(match[1]) * (MEMORY_LIMIT_UNIT_BYTES[unit] as number);
+  return Math.trunc(Number(match[1]) * (MEMORY_LIMIT_UNIT_BYTES[unit] as number));
 }
 
 /** Operator-facing wording, kept identical across bash and TypeScript. */
@@ -367,7 +378,8 @@ export const envOrbitSchema = z
     ORBIT_MEMORY_LIMIT: z
       .string()
       .refine((value) => value === "" || isValidMemoryLimit(value), {
-        message: "ORBIT_MEMORY_LIMIT must be a whole number with an optional unit b, k, kb, m, mb, g or gb, such as 2g or 2048m",
+        message:
+          "ORBIT_MEMORY_LIMIT must be a number with an optional unit b, k, m, g, t or p (optionally followed by b or ib), such as 2g, 3.5g, 1.5GiB or 2048m",
       })
       .optional(),
   })
