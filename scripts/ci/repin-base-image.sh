@@ -244,6 +244,15 @@ is_index_media_type() {
   esac
 }
 
+# A single image manifest, OCI or Docker's older schema 2: what a plain
+# `docker push` of one platform publishes (#1483).
+is_single_image_media_type() {
+  case "$1" in
+    application/vnd.oci.image.manifest.v1+json | application/vnd.docker.distribution.manifest.v2+json) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Classifies a corroboration comparison between the artifact's trusted digest
 # (expected to be an index digest) and a live-resolved tag's index digest plus
 # its children (the per-platform manifests, including any attestation
@@ -504,25 +513,38 @@ live_index_digest="${live_fields[1]:-none}"
 live_platform_digest="${live_fields[2]:-none}"
 IFS=',' read -r -a live_children <<<"${live_fields[3]:-}"
 
-if ! is_index_media_type "$live_media_type"; then
-  fail "${pinned_tag} resolved to a ${live_media_type} manifest, not a multi-platform index. This image is pinned as an index (.github/supply-chain-policy.json's indexDigest field, platform linux/amd64 chosen from inside it) -- a single-platform manifest here means the tag was published without one. Check ai/orbit-base-image's publish job."
-fi
-if [[ "$live_platform_digest" == "none" ]]; then
-  fail "${pinned_tag}'s current index (${live_index_digest}) has no linux/amd64 manifest to pin; .github/supply-chain-policy.json records this image's platform as linux/amd64."
-fi
+# A single image rather than an index (#1483). ai/orbit-base-image publishes
+# with a plain `docker push` of one linux/amd64 image, so its tag is one image
+# manifest: the artifact's digest, the tag's digest and the pinned digest are
+# then all the same value, and there is no index to choose a platform from.
+# Corroborate the artifact against that manifest's own digest and pin it.
+if is_single_image_media_type "$live_media_type"; then
+  if [[ "$live_index_digest" != "$trusted_digest" ]]; then
+    fail "the artifact's digest (${trusted_digest}) does not match ${pinned_tag}'s current image digest (${live_index_digest}). Check whether the tag was republished after this run's artifact was read, and whether BASE_IMAGE_PROJECT/BASE_IMAGE_REF/BASE_IMAGE_JOB (currently ${base_image_project}/${base_image_ref}/${base_image_job}) point at the right publish job."
+  fi
+  live_platform_digest="$live_index_digest"
+  log "corroborated: ${pinned_tag} is a single image whose digest (${live_index_digest}) matches the artifact."
+else
+  if ! is_index_media_type "$live_media_type"; then
+    fail "${pinned_tag} resolved to a ${live_media_type} manifest, not a multi-platform index. This image is pinned as an index (.github/supply-chain-policy.json's indexDigest field, platform linux/amd64 chosen from inside it) -- a single-platform manifest here means the tag was published without one. Check ai/orbit-base-image's publish job."
+  fi
+  if [[ "$live_platform_digest" == "none" ]]; then
+    fail "${pinned_tag}'s current index (${live_index_digest}) has no linux/amd64 manifest to pin; .github/supply-chain-policy.json records this image's platform as linux/amd64."
+  fi
 
-corroboration="$(classify_corroboration "$trusted_digest" "$live_index_digest" "${live_children[@]}")"
-case "$corroboration" in
-  match)
-    log "corroborated: ${pinned_tag}'s current index digest (${live_index_digest}) matches the artifact."
-    ;;
-  child-platform)
-    fail "the artifact's digest (${trusted_digest}) is one of ${pinned_tag}'s own platform-manifest digests inside its current index (${live_index_digest}), not the index digest itself. Whatever wrote published-digest.txt -- ai/orbit-base-image's publish job -- needs to record the index digest, not a platform manifest; re-running this job will not change that."
-    ;;
-  mismatch)
-    fail "the artifact's digest (${trusted_digest}) matches neither ${pinned_tag}'s current index digest (${live_index_digest}) nor any of its platform manifests. Check whether the tag was republished after this run's artifact was read, and whether BASE_IMAGE_PROJECT/BASE_IMAGE_REF/BASE_IMAGE_JOB (currently ${base_image_project}/${base_image_ref}/${base_image_job}) point at the right publish job."
-    ;;
-esac
+  corroboration="$(classify_corroboration "$trusted_digest" "$live_index_digest" "${live_children[@]}")"
+  case "$corroboration" in
+    match)
+      log "corroborated: ${pinned_tag}'s current index digest (${live_index_digest}) matches the artifact."
+      ;;
+    child-platform)
+      fail "the artifact's digest (${trusted_digest}) is one of ${pinned_tag}'s own platform-manifest digests inside its current index (${live_index_digest}), not the index digest itself. Whatever wrote published-digest.txt -- ai/orbit-base-image's publish job -- needs to record the index digest, not a platform manifest; re-running this job will not change that."
+      ;;
+    mismatch)
+      fail "the artifact's digest (${trusted_digest}) matches neither ${pinned_tag}'s current index digest (${live_index_digest}) nor any of its platform manifests. Check whether the tag was republished after this run's artifact was read, and whether BASE_IMAGE_PROJECT/BASE_IMAGE_REF/BASE_IMAGE_JOB (currently ${base_image_project}/${base_image_ref}/${base_image_job}) point at the right publish job."
+      ;;
+  esac
+fi
 
 new_reference="${pinned_tag}@${live_platform_digest}"
 
