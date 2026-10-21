@@ -166,7 +166,7 @@
           <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
           <span class="pc-doc-words">
             <b>add a document</b>
-            <span>photo or file · read for you</span>
+            <span>PDF, email or photo</span>
           </span>
         </button>
       {/if}

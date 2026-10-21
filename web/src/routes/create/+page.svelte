@@ -163,11 +163,11 @@
       </div>
       <div class="dz-hint mono">
         {#if documentReading}
-        <span data-when="rest">PDF or email &middot; dates, amounts &amp; reference numbers extracted automatically</span>
+        <span data-when="rest">PDF, email or photo</span>
         {:else}
         <span data-when="rest">The file is attached to the item as it is.</span>
         {/if}
-        <span data-when="arm">bring it to this box &middot; PDF, email or photo</span>
+        <span data-when="arm">PDF, email or photo</span>
         <span data-when="lock">{documentReading ? "orbit will read what it can · " : ""}nothing is saved until you say</span>
       </div>
       <div class="dz-held" id="dz-held">&#9670; <b id="dz-held-name"></b> &middot; <span id="dz-held-size"></span> &middot; held in the lane on the right</div>

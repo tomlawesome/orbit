@@ -21,6 +21,8 @@ const parserRecoveryMessage = "Suggestions are unavailable right now. Review the
 const processorDisabledMessage = "Automatic suggestions require the optional document processor. You can still attach this file.";
 const unsupportedStructureMessage = "Orbit could not open this document. Choose another PDF, JPEG, or PNG.";
 const passwordRequiredMessage = "This document needs a password to open, so Orbit cannot show or read it. Choose a copy without a password.";
+// Tika answered but gave no usable text: today every photo, since OCR is off.
+const nothingExtractedMessage = "Nothing was able to be extracted from this file.";
 
 export const itemDocumentSuggestionFields = [
   "title",
@@ -220,6 +222,7 @@ export async function inspectItemDocument(input: {
         if (typeof parsedText !== "string" || parsedText.length > MAX_EXTRACTED_CHARACTERS) throw new Error("parser_output_invalid");
         text = parsedText;
         extracted = true;
+        if (!text.trim()) message = nothingExtractedMessage;
         proposal = proposalFromText(text, input.filename);
       } catch (error) {
         extracted = false;
