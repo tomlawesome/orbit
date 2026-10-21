@@ -2141,10 +2141,10 @@ print_completion_screen() {
   printf 'Status: docker compose --env-file %s ps\n' "$environment_file"
   printf 'Logs: docker compose --env-file %s logs --tail 200\n' "$environment_file"
   # ADR-0022 section 1: the claim is generated in the running process's
-  # memory only and printed once, as the last line of the container's own
-  # start-up log -- it has no file, no Compose secret and no installer-visible
+  # memory only and printed once, by the application after its start-up
+  # reports, in the container's own log -- it has no file, no Compose secret and no installer-visible
   # form, so this is a pointer to where to read it, never the code itself.
-  printf 'Claim this instance: run "docker compose --env-file %s logs orbit-app" and open the link on its last line to create the first administrator.\n' "$environment_file"
+  printf 'Claim this instance: run "docker compose --env-file %s logs orbit-app" and open the claim link it prints to create the first administrator.\n' "$environment_file"
   # #968 (slice 1 of #966): a hard block here was considered and rejected --
   # it would fail an offline install -- so this is an instruction, not a
   # gate. The administration screen carries its own persistent reminder

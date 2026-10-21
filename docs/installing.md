@@ -96,8 +96,8 @@ When everything is running, the last screen shows Orbit's address, the
 version, the exact build installed, the profile, and the commands for status
 and logs. It then tells you two things to do next:
 
-- Claim the new Orbit: the link that creates its first administrator is the
-  last line of the Orbit container's log. See
+- Claim the new Orbit: the link that creates its first administrator is printed
+  in the Orbit container's log. See
   [Claiming a fresh install](authentication.md#claiming-a-fresh-install).
 - Export a recovery bundle, the only way back in if the document encryption
   key is ever lost. See
