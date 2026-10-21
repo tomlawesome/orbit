@@ -796,7 +796,7 @@
           </Row>
         {/each}
         {#if view.failed.session}
-          <p class="p-error ad-inset ad-lastline" role="alert">your own row not marked — Orbit could not confirm who is signed in{stillNoAnswer ? " (tried again, still no answer)" : ""}
+          <p class="p-error ad-inset ad-lastline" role="alert">your own row not marked and people's actions hidden — Orbit could not confirm who is signed in{stillNoAnswer ? " (tried again, still no answer)" : ""}
             <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
         {/if}
         {#if view.failed.users}

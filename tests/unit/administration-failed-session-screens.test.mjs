@@ -23,6 +23,9 @@ function sessionBlocks(src) {
   return [...src.matchAll(/\{#if [^}]*failed\.session\b[^}]*\}([\s\S]*?)\{\/if\}/g)].map((m) => m[1]);
 }
 
+/** The People card note when the signed-in person could not be confirmed (top-model view ruling, 2026-10-21). */
+const NOTE = "your own row not marked and people's actions hidden \u2014 Orbit could not confirm who is signed in";
+
 describe.each([
   ["desk (+page.svelte)", "web/src/routes/administration/+page.svelte", /onclick=\{rereadScreen\}/],
   ["phone (pocket.svelte)", "web/src/routes/administration/pocket.svelte", /onclick=\{tryAgain\}/],
@@ -35,5 +38,11 @@ describe.each([
     const blocks = sessionBlocks(read(file));
     expect(blocks.length, `${file} has no {#if ...failed.session} block`).toBeGreaterThan(0);
     expect(blocks.some((w) => /try again/.test(w) && retry.test(w)), `${file}: no 'try again' wired to the retry inside the failed.session block`).toBe(true);
+  });
+
+  it("says the unconfirmed session leaves the own row unmarked and people's actions hidden (R6 view ruling)", () => {
+    const blocks = sessionBlocks(read(file)).map((b) => b.replace(/\s+/g, " "));
+    expect(blocks.length, `${file} has no {#if ...failed.session} block`).toBeGreaterThan(0);
+    expect(blocks.some((b) => b.includes(NOTE)), `${file}: no failed.session block contains "${NOTE}"`).toBe(true);
   });
 });

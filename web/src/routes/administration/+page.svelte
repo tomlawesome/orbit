@@ -1082,7 +1082,7 @@
           <!-- Not knowing who is signed in is not "signed out": say so, and
                hold back the per-person actions until a retry tells which
                row is yours. -->
-          <div class="adminproblem" role="alert">your own row not marked — Orbit could not confirm who is signed in{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
+          <div class="adminproblem" role="alert">your own row not marked and people's actions hidden — Orbit could not confirm who is signed in{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
         {/if}
         {#if view.failed.users}
           <div class="adminproblem" role="alert">people not shown — Orbit could not reach the list of people{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
