@@ -1425,17 +1425,29 @@ async function fetchUploadLimitSettings() {
 }
 
 /**
- * One administration-screen read, bounded by the same deadline the preview
- * loader uses: the far end may accept the connection and never answer, and
- * an unbounded read would leave the screen loading forever with no retry.
- * The deadline turns that into a rejected read, which each panel already
- * answers as failed.
+ * A fetch bounded by the same deadline the preview loader uses: the far end
+ * may accept the connection and never answer, and an unbounded read would
+ * leave the administration screen loading forever with no retry. The
+ * deadline turns that into a rejected read, which each panel already answers
+ * as failed. Handed to the shared workspace and session reads as well, so
+ * the screen's own call is bounded without changing them for other screens.
+ *
+ * @param {Parameters<Fetch>[0]} input
+ * @param {Parameters<Fetch>[1]} [init]
+ * @returns {Promise<Response>}
+ */
+function adminFetch(input, init) {
+  return fetch(input, { ...init, signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS) });
+}
+
+/**
+ * One administration-screen read, bounded as above.
  *
  * @param {string} href
  * @returns {Promise<Response>}
  */
 function adminRead(href) {
-  return fetch(href, { credentials: "same-origin", signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS) });
+  return adminFetch(href, { credentials: "same-origin" });
 }
 
 /**
@@ -1509,8 +1521,10 @@ export async function commandUploadLimit(command) {
 export async function readAdminScreen() {
   const [workspace, session, users, mailbox, contact, uploadLimit, rotation, metadata, recoveryBundle, health, operations] =
     await Promise.all([
-    readWorkspace(),
-    readSession().catch(() => null),
+    readWorkspace(adminFetch),
+    /* Its own fetch also keeps this read out of the page-wide session cache,
+       so a read that stalled and timed out is not handed to the next retry. */
+    readSession({}, adminFetch).catch(() => null),
     adminRead("/api/admin/users").then((response) => json(response))
       .then(
         (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, disabledAt?: ?string }[] }} */ body) =>
