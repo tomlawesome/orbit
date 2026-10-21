@@ -279,6 +279,12 @@ function compose() {
     if (env.FAKE_STATE_DIR) {
       // The container the client started: it outlives its client (Docker does not stop it when the client dies).
       const name = flagValue("--name") ?? (flagValue("--project-name") + "-orbit-ollama-model-pull-run-" + process.pid);
+      // Docker refuses a second container under a name that is already in use, running or not.
+      const taken = fs.existsSync(env.FAKE_STATE_DIR + "/model-pull-running") ? fs.readFileSync(env.FAKE_STATE_DIR + "/model-pull-running", "utf8").split("\\n") : [];
+      if (taken.includes(name)) {
+        process.stderr.write('Error response from daemon: Conflict. The container name "/' + name + '" is already in use\\n');
+        exit(1);
+      }
       fs.appendFileSync(env.FAKE_STATE_DIR + "/model-pull-running", name + "\\n");
       fs.appendFileSync(env.FAKE_STATE_DIR + "/model-pull-started", name + "\\n");
     }
@@ -2793,6 +2799,32 @@ describe("install.sh: once the database and application are ready the rollback i
     expect(result.hungAlive).toBe(false);
     expect(events.filter((line) => /^phase=\S+ component=(ollama|model)/.test(line)).at(-1)).toMatch(/ state=waiting reason=optional-status action=continue /);
     expect(`${result.stdout}\n${result.stderr}`).toMatch(/(Local model|Model|Ollama)[^\n]*(not downloaded|still starting|still downloading)/i);
+  });
+});
+
+describe("install.sh: a model-pull container left behind by an earlier run", () => {
+  const leftover = "orbit-orbit-ollama-model-pull-install";
+  const confirmed = { FAKE_ENGINE_EXIT: "0", FAKE_ENGINE_OUTCOME: "status=ok\nfresh=0\nprofile=ai\nmodel-pull=1\ndatabase-volume=\n" };
+
+  it("the name is already held: the installer removes that container before the run, and the download succeeds", () => {
+    const { targetDir, stateDir, environment } = modelUpdateFixture();
+    writeFileSync(join(stateDir, "model-pull-running"), leftover + "\n");
+    const result = runInstall(targetDir, { ...environment, ...confirmed });
+    expect(result.status).toBe(0);
+    const calls = result.calls.split("\n");
+    const removal = calls.findIndex((line) => /^docker rm /.test(line) && / -f /.test(line) && line.split(" ").includes(leftover));
+    const run = calls.findIndex((line) => /compose .* run .*orbit-ollama-model-pull/.test(line));
+    expect(removal).toBeGreaterThanOrEqual(0);
+    expect(run).toBeGreaterThan(removal);
+    expect(`${result.stdout}\n${result.stderr}`).not.toMatch(/confirmed download did not complete/);
+  });
+
+  it("a download that does not complete: the retry hint names the container", () => {
+    const { targetDir, environment } = modelUpdateFixture();
+    const result = runInstall(targetDir, { ...environment, ...confirmed, FAKE_MODEL_PULL_FAIL: "1" });
+    expect(result.status).toBe(0);
+    const note = `${result.stdout}\n${result.stderr}`.split("\n").find((line) => /confirmed download did not complete/.test(line)) ?? "";
+    expect(note).toContain(leftover);
   });
 });
 
