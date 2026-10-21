@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { DEPLOYMENT_ASSETS } from "../src/lib/deployment-assets.ts";
 import {
   CI_LANE,
   CI_RISK,
@@ -292,11 +294,9 @@ describe("changed-path CI risk classification", () => {
       "config/tika-config.json",
       "scripts/configure.sh",
       "scripts/installer-ui.sh",
-      "scripts/configuration.sh",
       "scripts/backup.sh",
       "scripts/restore.sh",
       "scripts/repair.sh",
-      "scripts/engine-check.sh",
     ]) {
       expect(touchesLauncherInstallCompat([path])).toBe(true);
       expect(ciRequirements([path]).launcherCompat).toBe(true);
@@ -305,6 +305,34 @@ describe("changed-path CI risk classification", () => {
     // compose overlays and the container's own entrypoint.
     expect(touchesLauncherInstallCompat(["compose/docker-compose.acceptance.yml"])).toBe(false);
     expect(touchesLauncherInstallCompat(["scripts/container-entrypoint.sh"])).toBe(false);
+  });
+
+  it("arms launcher_install_compat for every deployment asset the image bundles", () => {
+    for (const path of DEPLOYMENT_ASSETS) {
+      expect(touchesLauncherInstallCompat([path]), path).toBe(true);
+      expect(ciRequirements([path]).launcherCompat, path).toBe(true);
+    }
+  });
+
+  it("does not arm launcher_install_compat for scripts the image does not bundle", () => {
+    for (const path of ["scripts/configuration.sh", "scripts/engine-check.sh"]) {
+      expect(DEPLOYMENT_ASSETS).not.toContain(path);
+      expect(touchesLauncherInstallCompat([path]), path).toBe(false);
+      expect(ciRequirements([path]).launcherCompat, path).toBe(false);
+    }
+  });
+
+  it("keeps the .gitlab-ci.yml launcher_install_compat path list in step with the bundled assets", () => {
+    const lines = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8").split("\n");
+    const anchor = lines.findIndex((line) => line.trim() === "- config/tika-config.json");
+    expect(anchor).toBeGreaterThan(0);
+    const indent = lines[anchor].match(/^\s*/)[0];
+    const listed = [];
+    for (let i = anchor; i >= 0 && lines[i].startsWith(`${indent}- `); i -= 1) listed.push(lines[i].trim().slice(2));
+    for (let i = anchor + 1; i < lines.length && lines[i].startsWith(`${indent}- `); i += 1) listed.push(lines[i].trim().slice(2));
+    for (const path of DEPLOYMENT_ASSETS) expect(listed, path).toContain(path);
+    expect(listed).not.toContain("scripts/configuration.sh");
+    expect(listed).not.toContain("scripts/engine-check.sh");
   });
 
   // ADR-0031 #2/#3: build_launcher now builds and installs the pinned
