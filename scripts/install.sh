@@ -1267,32 +1267,37 @@ note_rollback_docker_timeout() {
 
 # rollback_docker
 #
-# Containers down while docker-compose.yml is still in place, then each
-# volume this attempt created removed by its exact name -- never a wildcard,
-# a prune or `down --volumes`, which would take a volume that predates this
-# attempt. Only after `compose up` was tried: nothing earlier creates a
-# container or a volume. Returns 1 when something could not be removed.
+# This attempt's volumes listed, then the containers down while
+# docker-compose.yml is still in place, then each listed volume removed by
+# its exact name -- never a wildcard, a prune or `down --volumes`, which
+# would take a volume that predates this attempt. Only after `compose up`
+# was tried: nothing earlier creates a container or a volume. Returns 1
+# when something could not be removed.
 rollback_docker() {
   local name
   local -a created=()
   [[ "$compose_started" == 1 ]] || return 0
-  # The containers are being removed, so a short stop loses nothing. Every
-  # Docker call here keeps its own cap (down 10 s, listing and each removal
-  # 5 s) but all share the deadline rollback_fresh_install sets, so a hung
-  # daemon ends the rollback inside the launcher's stop grace with the
-  # obstacles named, however many calls it holds up.
-  if ! bounded_docker 10 compose --project-name "$compose_project_name" --env-file "$environment_file" \
-    down --remove-orphans --timeout 5 >/dev/null 2>&1; then
-    # The containers may still be running and using the volumes, so the
-    # volumes are left: the one stop command removes this attempt's once
-    # the containers are gone. `docker volume ls` works either way.
+  # Listed before `down`, the step most likely to hang, so a failed `down`
+  # still knows which volumes the stop command must remove. The volumes
+  # exist once `compose up` ran, so this list is already complete. Each
+  # call's cap (listing 5 s, down 6 s, each removal 5 s) fits inside the
+  # 8 s deadline rollback_fresh_install sets, which they all share.
+  if ! created_deployment_volumes created; then
+    # A daemon that cannot list in 5 s will not stop the containers in the
+    # time left; the printed stop command does that later.
+    rollback_volumes_unlisted=1
     rollback_down_failed=1
-    created_deployment_volumes rollback_down_volumes || rollback_down_volumes=()
     return 1
   fi
-  # Not listed: print_rollback_obstacles says so.
-  if ! created_deployment_volumes created; then
-    rollback_volumes_unlisted=1
+  # The containers are being removed, so a short stop loses nothing: 2 s
+  # to stop, the rest of the 6 s to kill and remove them and the network.
+  if ! bounded_docker 6 compose --project-name "$compose_project_name" --env-file "$environment_file" \
+    down --remove-orphans --timeout 2 >/dev/null 2>&1; then
+    # The containers may still be running and using the volumes, so the
+    # volumes are left: the one stop command removes them once the
+    # containers are gone.
+    rollback_down_failed=1
+    rollback_down_volumes=("${created[@]}")
     return 1
   fi
   for name in "${created[@]}"; do
@@ -1608,7 +1613,7 @@ rollback_fresh_install() {
   rollback_docker_deadline=""
   # First in the report, so it precedes the obstacles it explains.
   [[ "$rollback_docker_timed_out" != 1 ]] ||
-    rollback_report+=("Docker did not answer within 8 s, so the rollback stopped waiting for it; what it could not do is named below. Check that Docker is running and its disk is not full, then follow the next step.")
+    rollback_report+=("Docker did not finish within 8 s, so the rollback stopped waiting for it; what it could not do is named below. Once Docker is answering again (check that it is running and its disk is not full), run the command below.")
   rollback_files || status=1
   if [[ "$rollback_down_failed" == 1 ]]; then
     stop_dir="$target_dir"
@@ -1718,7 +1723,11 @@ print_rollback_obstacles() {
     printf 'Orbit installer: This install could not be fully rolled back: the containers could not be stopped. The folder is as it was before%s%s; what this install wrote is kept in %s so the containers can still be stopped.\n' \
       "$(rollback_unit_clause)" "$(rollback_moved_phrase)" "$(printf '%q' "${backup_dir}/engine")" >&2 || true
     printf 'Orbit installer: Run this in a terminal, then install again:\n%s\n' "$rollback_recovery_command" >&2 || true
-    ((${#rollback_down_volumes[@]} > 0)) || printf 'Orbit installer: %s\n' "$no_volume_line" >&2 || true
+    if [[ "$rollback_volumes_unlisted" == 1 ]]; then
+      printf 'Orbit installer: The volumes this install created could not be listed. %s\n' "$no_volume_line" >&2 || true
+    elif ((${#rollback_down_volumes[@]} == 0)); then
+      printf 'Orbit installer: %s\n' "$no_volume_line" >&2 || true
+    fi
   elif ((${#rollback_failed_volumes[@]} > 0)); then
     for name in "${rollback_failed_volumes[@]}"; do
       printf 'Orbit installer: This install could not be fully rolled back: the volume %s could not be removed.\n' "$name" >&2 || true
@@ -2107,7 +2116,7 @@ pull_confirmed_model() {
     printf 'Orbit installer: Docker said: %s\n' "$installer_failure_detail" >&2 || true
   fi
   installer_failure_detail=""
-  optional_notes+=("Local model: the confirmed download did not complete; Orbit runs without it. To try again: ${again} (an earlier download left in the container ${container} is removed with: docker rm -f ${container})")
+  optional_notes+=("Local model: the confirmed download did not complete; Orbit runs without it. To try again: ${again}")
 }
 
 print_completion_screen() {
