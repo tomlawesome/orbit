@@ -275,6 +275,9 @@
   .meta{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .meta.ui{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal}
+  /* #1180: at large text the meta line wraps rather than truncate; the
+     ellipsis is kept for titles and file names only. */
+  :global(html:is([data-text-size=large],[data-text-size=extra-large])) .meta{white-space:normal;overflow:visible;overflow-wrap:anywhere}
   .meta.email{white-space:normal;overflow-wrap:anywhere;display:-webkit-box;
     -webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
   .trail{flex:none;text-align:right;font:500 var(--p-type-meta)/1.3 var(--mono);color:var(--ink-mid)}

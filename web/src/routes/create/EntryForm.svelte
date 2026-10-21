@@ -422,6 +422,9 @@
   /* Two rows, three over two (§2.5), each chip filling its share. */
   .pc-kinds .pc-chip{grid-column:span 2;padding:0 6px;gap:6px;font-size:.875rem}
   .pc-kinds .pc-chip:nth-child(n+4){grid-column:span 3}
+  /* #1180: at large text a chip may wrap its glyph and word and grow taller,
+     never spill (design note: wrap, never truncate). */
+  :global(html[data-text-size=large]) .pc-kinds .pc-chip,:global(html[data-text-size=extra-large]) .pc-kinds .pc-chip{flex-wrap:wrap;overflow-wrap:anywhere;padding-block:4px;row-gap:0}
   /* #1180: at large text on a narrow phone three across will not hold the words: two columns. */
   @media (max-width:389px){
     :global(html[data-text-size=large]) .pc-kinds,:global(html[data-text-size=extra-large]) .pc-kinds{grid-template-columns:repeat(2,minmax(0,1fr))}
