@@ -1054,10 +1054,12 @@ backup_root_is_sane() {
   [[ ! -L "$backup_root" ]] && { [[ ! -e "$backup_root" ]] || [[ -d "$backup_root" ]]; }
 }
 
-# backup_dir_refused <required|optional>
+# backup_dir_refused <required|optional> <reason>
 #
 # A dated folder that could not be made: a root this run made is removed
-# again; with `required` the install is refused before anything changed.
+# again; with `required` the install is refused before anything changed,
+# saying which cause applied and what to do, since each needs a different
+# fix before a retry can work.
 backup_dir_refused() {
   if [[ "$backup_root_created" == 1 ]] && rmdir -- "$backup_root" 2>/dev/null; then
     backup_root_created=0
@@ -1065,7 +1067,7 @@ backup_dir_refused() {
   [[ "$1" == required ]] || return 1
   installer_ui_phase=host
   installer_ui_component=host
-  fail_with failure abort "Could not make a backup folder under $(printf '%q' "$backup_root"); nothing was changed."
+  fail_with failure abort "Could not make a backup folder under $(printf '%q' "$backup_root"): $2 Nothing was changed."
 }
 
 # prepare_backup_dir <required|optional>
@@ -1080,19 +1082,23 @@ backup_dir_refused() {
 # rollback with a file to move) it returns 1.
 prepare_backup_dir() {
   local mode="$1" suffix
-  if ! backup_root_is_sane || [[ ! "$run_stamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]; then
-    backup_dir_refused "$mode"
+  if [[ ! "$run_stamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]; then
+    backup_dir_refused "$mode" "the clock could not be read to date it. Check that the date command works, then try again."
+    return 1
+  fi
+  if ! backup_root_is_sane; then
+    backup_dir_refused "$mode" "it is a link or a file, not a folder. Rename or remove it, then try again."
     return 1
   fi
   if [[ -d "$backup_root" ]]; then
     if [[ ! -O "$backup_root" ]] || ! chmod 700 -- "$backup_root"; then
-      backup_dir_refused "$mode"
+      backup_dir_refused "$mode" "it is owned by another user or cannot be made private (0700) by this user. Change its owner to this user (chown), or rename or remove it, then try again."
       return 1
     fi
   elif mkdir -m 700 -- "$backup_root"; then
     backup_root_created=1
   else
-    backup_dir_refused "$mode"
+    backup_dir_refused "$mode" "could not create it. Check that the install folder is writable by this user and has free space, then try again."
     return 1
   fi
   for suffix in "" -2 -3 -4 -5 -6 -7 -8 -9; do
@@ -1100,8 +1106,14 @@ prepare_backup_dir() {
       backup_dir="${backup_root}/${run_stamp}${suffix}"
       return 0
     fi
+    # Only a name that already exists moves on to the next suffix; any other
+    # failure would fail the same way for every suffix.
+    if [[ ! -e "${backup_root}/${run_stamp}${suffix}" && ! -L "${backup_root}/${run_stamp}${suffix}" ]]; then
+      backup_dir_refused "$mode" "could not create a dated folder in it. Check that it is writable by this user and has free space, then try again."
+      return 1
+    fi
   done
-  backup_dir_refused "$mode"
+  backup_dir_refused "$mode" "all nine dated names for this second ($run_stamp to $run_stamp-9) are already taken. Remove old dated folders you no longer need from it, then try again."
   return 1
 }
 
