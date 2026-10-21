@@ -9,7 +9,7 @@ import {
 } from "$lib/data/document-read.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
-import { takeHeldDocument } from "$lib/data/held-document.js";
+import { takeHeldDocument, takeHeldType } from "$lib/data/held-document.js";
 import { addedWords, wireDropFeedback } from "./drop-feedback.js";
 import { dryRunner } from "$lib/data/dry-run.js";
 import { REMINDER_DEFAULT, createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, reminderPairOf } from "./entry.js";
@@ -611,6 +611,19 @@ export function mountCreate({ documentReading = true } = {}) {
   /* #1243: a file the home drawer's quick add was given arrives here, and
      is taken exactly as if it had been dropped on this zone. */
   takeFile(takeHeldDocument());
+
+  /* #1467: a kind the home drawer's quick add was given arrives here and is
+     chosen exactly as if its chip had been pressed. Taken once, whether or
+     not a chip matches, so it can never linger for a later visit. The chip's
+     own handler reveals the fields, as a chosen type does, and marks the form
+     edited; but the reader has typed nothing, so Back must not ask to discard
+     it. `committed` is the "nothing of theirs to lose" baseline; their first
+     keystroke or choice makes it unsaved work again through `edited`. */
+  const heldType = takeHeldType();
+  if (heldType) {
+    typeButtons.find((button) => button.dataset.type === heldType)?.click();
+    committed = true;
+  }
 
   /* Accepting a suggestion clears the field's suggested marking. Nothing
      suggests anything yet — see the note above — but the grammar ships with

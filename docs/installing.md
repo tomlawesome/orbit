@@ -162,6 +162,28 @@ To go on, set `ORBIT_IMAGE` to the build's registry digest and run the
 command again. A digest that is not on this machine yet is pulled first.
 Files `configure.sh` creates belong to the user who ran it.
 
+### If an install fails
+
+When a new install fails after it has started writing files, the installer
+puts the directory back as it found it and removes the containers and
+volumes it created. It deletes only the files it wrote itself: anything else
+new in the directory, such as a note you saved there while it ran, is moved
+into `orbit-install-backups/<date and time>/moved/`, and the installer
+prints where. One exception: `.env-orbit` and `.orbit-secrets/` are
+put back whole from the copy taken at the start, so an edit or a file added
+inside them while the install ran is replaced, and the closing line says so
+when the rollback finishes.
+If it could not stop the containers, it keeps the files it wrote in that
+dated folder's `engine/` instead, and prints one command to stop them; run
+it, then install again.
+
+`orbit-install-backups/` is not a backup of your Orbit data (that is what
+`scripts/backup.sh` makes). It is readable only by you; the installer never
+reads, runs, moves or deletes anything in a folder from an earlier run, and
+later installs ignore it. A run removes only its own copy of your original
+files once they are put back, and its own dated folder when that leaves it
+empty. You can leave it there.
+
 ## Logged and unattended runs
 
 The options in this section belong to `install.sh`, the installer script

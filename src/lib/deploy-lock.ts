@@ -84,6 +84,7 @@ export function acquireDeployLock(
         `Another ${operationLabel} is already running against this deployment (lock held at ${lockPath}). Wait for it to finish, or remove the lock file yourself once you are certain no other run is active.`,
       );
     }
+    // The `.orbit-engine.lock.stale-*` name is also matched by install.sh rollback_files.
     const reclaimed = `${lockPath}.stale-${process.pid}`;
     try {
       renameSync(lockPath, reclaimed);

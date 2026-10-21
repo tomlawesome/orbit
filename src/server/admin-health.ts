@@ -32,6 +32,8 @@ export function withTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs = PRO
       settled = true;
       resolve(fallback);
     }, timeoutMs);
+    /* A pending probe's timer never keeps the process alive. */
+    timer.unref?.();
     promise.then(
       (value) => {
         if (settled) return;

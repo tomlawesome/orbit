@@ -575,8 +575,8 @@
   body.quiet .breathe, body.quiet .ping, body.quiet [data-body="i-gutter"],
   body.quiet [data-body="i-mot"], body.quiet [data-body="i-boiler"],
   body.quiet [data-vis="i-gutter"], body.quiet [data-vis="i-mot"], body.quiet [data-vis="i-boiler"]{display:none}
-  .chrome{transition:opacity 2.2s ease}
-  body.quiet .chrome{opacity:.06}
+  .chrome,.horizon-line{transition:opacity 2.2s ease}
+  body.quiet :is(.chrome,.horizon-line){opacity:.06}
   /* the fill joins the transition for the sun's hover (§15, 08-17) */
   #dial-name{transition:opacity 2.2s ease,fill .3s}
   body.quiet #dial-name{opacity:.3}
@@ -699,8 +699,8 @@
      transition lives on its own rule above, for the reason noted there;
      .chrome/.body-link/.ping carry no other transition, so this one is safe
      to declare outright. */
-  .dial :is(.chrome,.body-link,.body-vis,.ping){transition:opacity .55s ease}
-  body.searching .dial :is(.chrome,.body-link,.body-vis,.ping,.belt){opacity:.05}
+  .dial :is(.chrome,.horizon-line,.body-link,.body-vis,.ping){transition:opacity .55s ease}
+  body.searching .dial :is(.chrome,.horizon-line,.body-link,.body-vis,.ping,.belt){opacity:.05}
   /* .minisys already owns a transform+opacity transition for the household
      flight (CON-6); re-declaring it bare here would drop the transform half
      the same way .belt's would have, and unlike .belt there is no shared
@@ -711,7 +711,7 @@
      1.25s on the way out the rare moment the two overlap. */
   body.searching .minisys{opacity:.2;transition:opacity .55s ease}
   @media (prefers-reduced-motion: reduce){
-    .dial :is(.chrome,.body-link,.body-vis,.ping,.belt),.minisys{transition:none}
+    .dial :is(.chrome,.horizon-line,.body-link,.body-vis,.ping,.belt),.minisys{transition:none}
   }
 
   /* CON-6 v17: households are fixed coordinates. The CAMERA flies: the
@@ -1614,7 +1614,7 @@ body.storm .plane svg{opacity:.6}
    over the climb. Visibility inherits, and suppresses the filter with them. */
 body.launching .desk,body.launching .pocket{visibility:hidden;pointer-events:none}
 
-body.bare .desk .dial .chrome,
+body.bare .desk .dial :is(.chrome,.horizon-line),
 body.bare .desk .orb,
 body.bare .desk .nstar,
 body.bare .desk .drawer,
@@ -1634,7 +1634,7 @@ body.bare .desk .minisys{animation:condense 1.3s cubic-bezier(.2,.75,.25,1) both
   68%{filter:blur(2.5px)}
   to{transform:scale(1);filter:blur(0)}}
 
-.desk .dial .chrome{transform-box:view-box;transform-origin:50% 50%}
+.desk .dial :is(.chrome,.horizon-line){transform-box:view-box;transform-origin:50% 50%}
 /* v5 (design/v19/first-run.html at 9476480): 1.8s on cubic-bezier(.2,.26,.35,1),
    not the owner's 2026-08-16 amendment's 1.7s/(.2,.7,.2,1) — that amendment
    said plainly that if v5 chose different figures, v5 wins. The curve was
@@ -1647,7 +1647,7 @@ body.bare .desk .minisys{animation:condense 1.3s cubic-bezier(.2,.75,.25,1) both
    the opacity stop 60% → 55%, so the chart is solid while it is still being
    placed, and that must not leak into POL-1's arrival, which v5 never
    touched. */
-body.instrument .desk .dial .chrome{animation:instrumentarrive 1.8s cubic-bezier(.2,.26,.35,1) both}
+body.instrument .desk .dial :is(.chrome,.horizon-line){animation:instrumentarrive 1.8s cubic-bezier(.2,.26,.35,1) both}
 @keyframes instrumentarrive{from{transform:scale(.16);opacity:0}55%{opacity:1}to{transform:scale(1);opacity:1}}
 /* the chrome behind it: v5 stretched this to match the slower dial, .95s/.34s
    delay → 1.3s/.45s delay, so it settles just under the dial rather than
@@ -1660,7 +1660,7 @@ body.instrument .desk .hero-foot{animation:chromein 1.3s ease .45s both}
 
 /* Leaving reverses the arrival exactly: the instrument goes first (it came
    last), then the bodies disperse back into the light the sun is becoming. */
-body.withdrawing .desk .dial .chrome{animation:withdraw .6s cubic-bezier(.55,0,.9,.4) both}
+body.withdrawing .desk .dial :is(.chrome,.horizon-line){animation:withdraw .6s cubic-bezier(.55,0,.9,.4) both}
 body.withdrawing .desk .orb,
 body.withdrawing .desk .nstar,
 body.withdrawing .desk .drawer,
@@ -1686,9 +1686,9 @@ body.pinned .desk,body.pinned .pocket{transition:none!important}
    and only the movement goes. */
 @media (prefers-reduced-motion: reduce){
   body.bare .desk :is(.dial,.sunlayer),body.bare .desk .minisys,
-  body.instrument .desk .dial .chrome,
+  body.instrument .desk .dial :is(.chrome,.horizon-line),
   body.instrument .desk .orb,body.instrument .desk .nstar,body.instrument .desk .hero-foot,
-  body.withdrawing .desk .dial .chrome,
+  body.withdrawing .desk .dial :is(.chrome,.horizon-line),
   body.withdrawing .desk .orb,body.withdrawing .desk .nstar,body.withdrawing .desk .hero-foot,
   body.withdrawing .desk .drawer,body.instrument .desk .drawer,
   body.dispersing .desk :is(.dial,.sunlayer),body.dispersing .desk .minisys{animation:none!important}

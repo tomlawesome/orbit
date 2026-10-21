@@ -73,11 +73,32 @@ describe("a refusal that has its own reason (#1242)", () => {
     expect(authErrorStateFor("link_required")).toBe(INCOMPLETE);
   });
 
-  it("says why, in ADR-0023's own fixed words", () => {
-    expect(authErrorMessageFor(INCOMPLETE, "link_required")).toEqual({
-      primary: "Sign-in didn’t complete.",
-      sub: "Address already in use.",
-    });
+  it("tells the person the remedy, not just that something is in use (#1457)", () => {
+    /* ADR-0023 §3: "sign in to the existing Orbit account and link this
+       provider from settings". Pinned by meaning, not exact copy. The old
+       "Address already in use." assertion was replaced here. */
+    const { primary, sub } = authErrorMessageFor(INCOMPLETE, "link_required");
+    const text = `${primary} ${sub}`;
+    expect(text).not.toMatch(/address already in use/i);
+    expect(text).toMatch(/sign in/i);
+    expect(text).toMatch(/orbit account|existing account/i);
+    expect(text).toMatch(/settings/i);
+    expect(text).toMatch(/link/i);
+  });
+
+  it("keeps the same fixed words whatever the email, and names no one (#1457)", () => {
+    /* ADR-0023 §3: the same whether or not the email exists. The message is
+       a function of the state and code alone, so repeated calls agree. */
+    expect(authErrorMessageFor(INCOMPLETE, "link_required"))
+      .toEqual(authErrorMessageFor(INCOMPLETE, "link_required"));
+    const { primary, sub } = authErrorMessageFor(INCOMPLETE, "link_required");
+    expect(primary).toBe("Sign-in didn’t complete.");
+    expect(primary + sub).not.toMatch(/@/u);
+  });
+
+  it("differs from the ordinary incomplete words, so the remedy is not lost (#1457)", () => {
+    expect(authErrorMessageFor(INCOMPLETE, "link_required"))
+      .not.toEqual(authErrorMessageFor(INCOMPLETE));
   });
 
   it("never echoes the code or an address there either", () => {

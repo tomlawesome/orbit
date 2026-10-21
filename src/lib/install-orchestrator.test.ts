@@ -599,3 +599,38 @@ describe("runInstall: at the operator's terminal (F4)", () => {
     expect(terminal.output()).toContain("Current: schema=v1");
   });
 });
+
+// Redesign r5 (B27, section 13.5): the drill's `transaction-committed` kill
+// point is the `afterTransactionCommitted` dependency, beside
+// `afterTransactionBegun`, which the orchestrator calls right after
+// `transaction.commit()`, before it hands back the outcome the CLI writes.
+// The CLI maps ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE=transaction-committed
+// to it (src/cli/orbit.install.test.ts drives that half).
+describe("runInstall: the hook after the transaction commits (redesign r5)", () => {
+  it("calls afterTransactionCommitted once, after the commit put the files in place and before the outcome is returned", async () => {
+    const target = preprovisioned();
+    const before = readFileSync(join(target, ".env-orbit"), "utf8");
+    const order: string[] = [];
+    const seen: { composeFile?: boolean; envRewritten?: boolean } = {};
+    const hook = () => {
+      order.push("committed");
+      seen.composeFile = existsSync(join(target, "docker-compose.yml"));
+      seen.envRewritten = readFileSync(join(target, ".env-orbit"), "utf8") !== before;
+    };
+    const { outcome } = await run(target, {}, { afterTransactionCommitted: hook } as Partial<InstallDependencies>);
+    order.push("returned");
+    expect(outcome).toMatchObject({ status: "ok", fresh: true });
+    expect(order).toEqual(["committed", "returned"]);
+    expect(seen).toEqual({ composeFile: true, envRewritten: true });
+  });
+
+  it("guard: never calls it when nothing is committed (a refused target, or a refusal inside the transaction)", async () => {
+    const calls: string[] = [];
+    const hook = () => calls.push("committed");
+    const unrecognisable = sandbox("orbit-install-target-");
+    writeFileSync(join(unrecognisable, "notes.txt"), "mine\n");
+    expect((await run(unrecognisable, {}, { afterTransactionCommitted: hook } as Partial<InstallDependencies>)).outcome.status).toBe("failed");
+    expect((await run(preprovisioned("ORBIT_AUTH_OIDC=false\n"), {}, { afterTransactionCommitted: hook } as Partial<InstallDependencies>)).outcome.status).toBe("failed");
+    expect(calls).toEqual([]);
+  });
+});

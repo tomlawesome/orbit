@@ -71,11 +71,28 @@ function hasMode(absolutePath: string, expectedMode: number): boolean {
   }
 }
 
+/**
+ * install.sh's own folder inside the Orbit folder (redesign r5): the dated
+ * backups of a rolled-back install. A real, non-symlink directory of this
+ * name is ignored when deciding whether a folder is fresh; a symlink or a
+ * file of this name is not, so the folder is refused and the name given.
+ */
+export const INSTALL_BACKUPS_DIRECTORY = "orbit-install-backups";
+
+function ignorableBackupDirectory(targetDir: string, entry: string): boolean {
+  return entry === INSTALL_BACKUPS_DIRECTORY && isRealNonSymlinkDirectory(join(targetDir, entry));
+}
+
+/** Every entry of the target but an ignorable orbit-install-backups directory. */
+function targetEntries(targetDir: string): string[] {
+  return readdirSync(targetDir).filter((entry) => !ignorableBackupDirectory(targetDir, entry));
+}
+
 // target_is_empty (install.sh:270-276): `shopt -s nullglob dotglob; entries=(*)`
 // enumerates every directory entry including dotfiles, never "." or "..".
 // readdirSync has the same contract without needing the glob dance.
 function targetIsEmpty(targetDir: string): boolean {
-  return readdirSync(targetDir).length === 0;
+  return targetEntries(targetDir).length === 0;
 }
 
 /**
@@ -106,7 +123,7 @@ export function isPreprovisionedInput(targetDir: string): boolean {
 
   let entries: string[];
   try {
-    entries = readdirSync(targetDir);
+    entries = targetEntries(targetDir);
   } catch {
     return false;
   }
@@ -224,6 +241,12 @@ export function validateTarget(targetDir: string): ValidateTargetResult {
     );
   }
 
+  const backupsPath = join(targetDir, INSTALL_BACKUPS_DIRECTORY);
+  if (existsAsAnyType(backupsPath) && !isRealNonSymlinkDirectory(backupsPath)) {
+    throw new TargetValidationRefusal(
+      `The installation directory is not empty and is not a recognizable Orbit deployment or safe pre-provisioned bootstrap: ${INSTALL_BACKUPS_DIRECTORY} is not a folder, and the installer keeps its backups under that name. Rename it, then install again.`,
+    );
+  }
   throw new TargetValidationRefusal(
     "The installation directory is not empty and is not a recognizable Orbit deployment or safe pre-provisioned bootstrap. Refusing to install here.",
   );

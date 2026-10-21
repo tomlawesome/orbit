@@ -109,6 +109,12 @@ export async function init() {
        diagnosis (scripts/repair.sh) have something to see. */
     process.exit(1);
   }
+
+  /* Ask the database and the scanners their versions in the background, so
+     the first About visit after a restart already has them (#1465). Not
+     awaited: start-up does not wait on a sidecar, and a failure here costs
+     nothing but the first visit probing for itself. */
+  void import("orbit/server/about").then(({ warmAboutFacts }) => warmAboutFacts()).catch(() => {});
 }
 
 /**

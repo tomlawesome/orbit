@@ -1,12 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
-import { DEPLOYMENT_ASSETS } from "../lib/deployment-assets";
+import { DEPLOYMENT_ASSETS, buildManagedPaths } from "../lib/deployment-assets";
 
 // The CLI wiring of the install engine (#1212): `orbit install|update` as
 // install.sh runs it inside the image -- environment in, events on stdout,
@@ -78,10 +78,11 @@ function trappedDocker(): { bin: string; log: string } {
   return { bin, log };
 }
 
-function runCli(args: string[], env: NodeJS.ProcessEnv = {}): { stdout: string; stderr: string; status: number; dockerCalls: string } {
+function runCli(args: string[], env: NodeJS.ProcessEnv = {}, cwd?: string): { stdout: string; stderr: string; status: number; dockerCalls: string } {
   const docker = trappedDocker();
   const result = failOnProcessDeadline(
     spawnSync("node", [tsx, cliEntry, ...args], {
+      cwd,
       encoding: "utf8",
       env: {
         PATH: `${docker.bin}:${process.env.PATH}`,
@@ -271,5 +272,136 @@ describe("orbit install: the interruption drill's kill point (guarantee #31)", (
     expect(rerun.status).toBe(1);
     expect(rerun.stderr).toContain(`A previous install attempt was interrupted and left .orbit-engine.lock ${staging[0]} behind in this directory.`);
     expect(readdirSync(target).filter((entry) => entry.startsWith(".orbit-install-staging."))).toEqual(staging);
+  });
+});
+
+// Redesign r5 (B27, B29): a second kill point, right after the transaction
+// commits and before the outcome is written, so the drill's byte-identical
+// check exercises install.sh's restore of a committed folder.
+describe("orbit install: the interruption drill's kill point after the commit (redesign r5)", () => {
+  it("kills itself right after the transaction commits: the committed files are in the target, the journal is written, and no outcome is", () => {
+    const target = preprovisioned();
+    const before = readFileSync(join(target, ".env-orbit"));
+    const outcome = outcomeFile();
+    const docker = trappedDocker();
+    const result = failOnProcessDeadline(
+      spawnSync("node", [tsx, cliEntry, "install", "--dir", target, "--outcome", outcome], {
+        encoding: "utf8",
+        env: {
+          PATH: `${docker.bin}:${process.env.PATH}`,
+          HOME: process.env.HOME,
+          ORBIT_ENGINE_CONTEXT: "container",
+          ORBIT_IMAGE: REFERENCE,
+          ORBIT_INSTALL_HOST_FACTS: hostFacts(),
+          ORBIT_INSTALL_TEST_ASSETS_ROOT: assetsRoot(),
+          ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE: "transaction-committed",
+        },
+        ...processGuard(),
+      }),
+      { label: "hard interrupt after the commit" },
+    );
+    // tsx relays the child's death as its own exit status or signal.
+    expect(result.signal === "SIGKILL" || result.status === 137).toBe(true);
+    expect(existsSync(outcome)).toBe(false);
+    expect(existsSync(join(dirname(outcome), "written"))).toBe(true);
+    // Committed: the engine's files are in place and .env-orbit is the engine's.
+    expect(lstatSync(join(target, "docker-compose.yml")).isFile()).toBe(true);
+    expect(readFileSync(join(target, ".env-orbit"))).not.toEqual(before);
+    expect(readFileSync(docker.log, "utf8")).toBe("");
+  });
+});
+
+// Redesign r2: with --outcome, the engine journals the names it may write
+// (`<outcome dir>/written`) before it touches the target, so install.sh can
+// remove exactly those after an engine that died without a result, and move
+// anything else new aside. Redesign r5 (section 2, B27): one line per managed
+// path, a file as its relative path and a directory the engine owns whole
+// with a trailing slash, so a file the person put inside a directory the
+// engine created is not claimed.
+describe("orbit install: the journal of what it may write (redesign r2, r5)", () => {
+  const managedPaths = buildManagedPaths(DEPLOYMENT_ASSETS);
+  /** install.sh's grammar for a journal line (redesign r5 section 2). */
+  const journalLine = /^[A-Za-z0-9._-]{1,255}(\/[A-Za-z0-9._-]{1,255})*\/?$/u;
+
+  function expectJournal(outcome: string): void {
+    const written = join(dirname(outcome), "written");
+    expect(existsSync(written), `${written} exists`).toBe(true);
+    expect(statSync(written).mode & 0o777).toBe(0o600);
+    const text = readFileSync(written, "utf8");
+    expect(text.endsWith("\n")).toBe(true);
+    const lines = text.slice(0, -1).split("\n");
+    for (const line of lines) {
+      expect(line).toMatch(journalLine);
+      expect(line.replace(/\/$/u, "").split("/")).not.toContain("..");
+      expect(line.replace(/\/$/u, "").split("/")).not.toContain(".");
+    }
+    for (const asset of DEPLOYMENT_ASSETS) expect(lines.filter((line) => line === asset), asset).toHaveLength(1);
+    expect(lines.filter((line) => line === ".env-orbit")).toHaveLength(1);
+    expect(lines.filter((line) => line === ".orbit-secrets/")).toHaveLength(1);
+    for (const topLevel of [".orbit-secrets", "scripts", "config"]) expect(lines).not.toContain(topLevel);
+    expect(new Set(lines).size).toBe(lines.length);
+    expect(lines).toHaveLength(managedPaths.length);
+  }
+
+  function filesNamedWritten(root: string): string[] {
+    const found: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        const path = join(dir, entry);
+        if (entry === "written") found.push(path);
+        if (lstatSync(path).isDirectory()) walk(path);
+      }
+    };
+    walk(root);
+    return found;
+  }
+
+  it("E1: the journal is in place when the transaction has just begun, owner-only, one line per managed path", () => {
+    const target = preprovisioned();
+    const outcome = outcomeFile();
+    const docker = trappedDocker();
+    const result = failOnProcessDeadline(
+      spawnSync("node", [tsx, cliEntry, "install", "--dir", target, "--outcome", outcome], {
+        encoding: "utf8",
+        env: {
+          PATH: `${docker.bin}:${process.env.PATH}`,
+          HOME: process.env.HOME,
+          ORBIT_ENGINE_CONTEXT: "container",
+          ORBIT_IMAGE: REFERENCE,
+          ORBIT_INSTALL_HOST_FACTS: hostFacts(),
+          ORBIT_INSTALL_TEST_ASSETS_ROOT: assetsRoot(),
+          ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE: "transaction-begun",
+        },
+        ...processGuard(),
+      }),
+      { label: "hard interrupt" },
+    );
+    expect(result.signal === "SIGKILL" || result.status === 137).toBe(true);
+    expectJournal(outcome);
+
+    // The next run refuses the target (the killed run's leftovers) before any transaction; its journal is still written first.
+    const refusedOutcome = outcomeFile();
+    const rerun = runCli(["install", "--dir", target, "--outcome", refusedOutcome]);
+    expect(rerun.status).toBe(1);
+    // Given --outcome, the refusal goes to the outcome file for the shell to report, not to stderr.
+    expect(readFileSync(refusedOutcome, "utf8")).toContain("A previous install attempt was interrupted");
+    expectJournal(refusedOutcome);
+  });
+
+  it("E1: the journal is written even when the run refuses the target before any transaction", () => {
+    const outcome = outcomeFile();
+    const result = runCli(["update", "--dir", newSandbox("orbit-cli-install-empty-"), "--outcome", outcome]);
+    expect(result.status).toBe(1);
+    expectJournal(outcome);
+  });
+
+  it("E2: without --outcome, no journal is written anywhere", () => {
+    const target = preprovisioned();
+    const cwd = newSandbox("orbit-cli-install-cwd-");
+    const home = newSandbox("orbit-cli-install-home-");
+    const tmp = newSandbox("orbit-cli-install-tmp-");
+    const result = runCli(["install", "--action", "auto", "--dir", target], { HOME: home, TMPDIR: tmp }, cwd);
+    expect(result.status).toBe(0);
+    expect([target, cwd, home, tmp].flatMap(filesNamedWritten)).toEqual([]);
   });
 });

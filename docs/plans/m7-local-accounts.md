@@ -174,7 +174,7 @@ authentication is ADR-0023 §5; the step-up proof cookie is
 - `install.sh`: the guided fields drop the OIDC trio from the required path;
   a mode question ("Sign in with local accounts only, or also with an
   identity provider? OIDC can be added later with `configure.sh`") sets
-  `ORBIT_AUTH_OIDC`; `print_completion_screen` (`install.sh:1264-1278`) adds
+  `ORBIT_AUTH_OIDC`; `print_completion_screen` (`install.sh:2030-2061`) adds
   one line: run `docker compose logs orbit-app` and open the link on its
   last line to create the first administrator. The installer never prints
   the code itself.

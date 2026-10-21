@@ -170,11 +170,11 @@ variables:
   # 34555 (cosign v3.1.3, docker 29.9.0 CLI), 2026-10-10.
   ORBIT_SIGNING_IMAGE: registry.tomlawson.io/ai/orbit-base-image/signing@sha256:da750e179fd15e6955d28d54215838589b512ef1905c7fc866b39d87c3332550
   # build_launcher's job image (ADR-0031 #3): matches launcher/pin.json's
-  # go.mod exactly (go 1.27.1) at the pin this repository currently carries.
+  # go.mod exactly (go 1.27.2) at the pin this repository currently carries.
   # A pin bump to a launcher release built against a different Go version
   # needs this bumped alongside it -- build-launcher.sh's own toolchain check
   # fails closed and names the mismatch if it is not.
-  GOLANG_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/golang:1.27.1-bookworm@sha256:69a7b9788769bec032d238959b61854e9ae87f57be9029ec04e9885fabf99195
+  GOLANG_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
   # Same scanner build as the old workflow, so a finding here and a finding there
   # mean the same thing.
   TRIVY_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
@@ -1089,7 +1089,9 @@ fast_docker:
     - apt-get install -y -qq --no-install-recommends jq
     - pnpm install --frozen-lockfile
     - *drop_to_node
-    - orbit_as_node 'pnpm exec vitest run src/lib/recovery-bundle.parity.test.ts scripts/test-e2e-local-reuse.test.mjs'
+    # app-memory-limit-contract.test.mjs (#1429) renders `docker compose config`,
+    # which needs the binary but no daemon.
+    - orbit_as_node 'pnpm exec vitest run src/lib/recovery-bundle.parity.test.ts scripts/test-e2e-local-reuse.test.mjs scripts/app-memory-limit-contract.test.mjs'
     - *reuse_evidence
   artifacts:
     name: orbit-fast-docker

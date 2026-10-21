@@ -27,6 +27,7 @@ fixing the cause deletes the heading in the same commit.
 ## repair_journeys: hostile-value-privacy-negatives, "could not start the labelled container vector"
 
 - 2026-09-09 · 9e27d38 · pipeline 822 / repair_journeys (!908) · `docker run … busybox:stable sleep 600` failed after the four journeys before it passed; the job was green on 810–815 the same morning on unchanged harness code (M7 touches nothing in `scripts/test-repair-journeys.sh`). The `docker run` sends its own output to `/dev/null` (`test-repair-journeys.sh:955-960`), so the log cannot say whether it was a Docker Hub pull failure or something else; the next sighting should show that output first.
+- 2026-10-18 · 5b460996 (!1074; launcher pin and Go image only since the green c9df1a49 run, nothing the repair journeys read) · pipeline 2702 / `repair_journeys` job 37078 · same message, after the four journeys before it passed; the log does not name the docker error. Second sighting.
 
 ## The /home account panel does not register as open when armed — desktop and pocket — #1064
 
@@ -444,6 +445,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-keyboard.spec.ts:313 "arrive: the sign-in door opens by Tab and Enter alone" on desktop-chromium
 
 - 2026-10-09 · 79c68846 (#1319 stage 3b; this test unchanged on the branch) · local `scripts/test-e2e-local.sh --keep --project desktop-chromium`, whole suite, with the fidelity suite running alongside · `page.goto: net::ERR_ABORTED` on `/home` at line 328. Passed on a rerun of the file against the same stack. Traces: `~/projects/.backups/orbit/e2e-1319-stage3b-79c68846-desktop-chromium`. First sighting.
+- 2026-10-16 · 7264f015 (`dev` after !1073, which touches test tooling and scripts only; this test now at line 315) · pipeline 2674 / smoke (job 36868, !1072) · first attempt: signed out, `/home` landed on the test identity provider's `/authorize` page instead of Orbit's `/login?returnTo=%2Fhome` (`toHaveURL` at line 331); retry #1: `page.goto: net::ERR_ABORTED` on `/home` at line 330, as the first sighting. 392 others passed. Job retried as 36881. Second sighting.
 
 ## v19-home-drawer.spec.ts:212 "on the desk › the dial's documents chip opens the item's drawer at its real documents" (desktop-webkit)
 
@@ -597,3 +599,20 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## fidelity: document-preview.spec.js:47 "a paper's page loads on the fixture item's drawer at desk (1600x1000)"
 
 - 2026-10-16 · 6f768016 (`dev` merge of !1069; same tree as a08de7a1, whose pipeline 2650 passed this job) · pipeline 2655 / fidelity (job 36615) · `[data-preview-card].snap` not visible within the 5000ms wait: the preview card never reached its loaded page. The same 5 s family as the document-preview page-count wait raised to 20 s in 614118ff. First sighting; job retried as 36629.
+
+## v19-about-loading.spec.ts:69 "a slow click on About shows that it is loading before the content arrives" — desktop-webkit, mobile-webkit
+
+- 2026-10-18 · 5bfff8b6 (!1074, the branch that adds this test) · pipeline 2688 / `smoke_webkit` job 36975 · no loading sign (`aria-busy`, progress bar, a "loading" status or text) appeared within 10 s while the About data request was held; passed on its retry in the same job (11.1 s). The same run was loaded enough that one wheel scroll landed over a second late (#1472 note 40486). First sighting.
+- 2026-10-18 · c9df1a49 (!1074) · pipeline 2691 / `smoke_webkit_mobile` job 37001, mobile-webkit · failed once, passed on retry. Second sighting, two pipelines in a row; the test is new on this branch.
+
+## v19-document-preview.spec.ts:299 "the reader turns a multi-page document to its last page and back, by arrows and by keys" — desktop-webkit
+
+- 2026-10-18 · c9df1a49 (!1074, no document-preview change) · pipeline 2691 / `smoke_webkit` job 37000 · failed once, passed on retry. First sighting.
+
+## preview.test.ts:760 "renderDocumentPagePreview > the page is drawn in the sandbox, never on the server's own thread (#1427) > draws a 300 dpi A4 scan to a PNG of the page's shape"
+
+- 2026-10-20 · 0469e455 (the accepted v0.3.0 commit, unchanged since preview pipeline 2677 passed every job first time) · pipeline 2774 / fast (job 37576), the stable-promotion run on `main`, with the !1078 pipeline and five local agent stacks on the same host · `Orbit could not draw a picture of this document` from the sandboxed renderer, in a 449 s `fast` run. Retried as job 37634. First sighting.
+
+## validation.test.ts "structural document classification > classifies unsupported %PDF-1.7 ... as unsupported_structure"
+
+- 2026-10-20 · 0469e455 · pipeline 2774 / fast (job 37576), same run as the sighting above · timed out at the 5 s default. Wall-clock-under-load shape. First sighting.

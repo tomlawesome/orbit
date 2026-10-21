@@ -4,22 +4,25 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
   rmSync,
   statSync,
+  watch,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PTY_TEST_TIMEOUT_MS, ptyWatchdog } from "./pty-deadline.mjs";
-import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard, processWatchdog } from "./process-budget.mjs";
 
 // scripts/install.sh, the bootstrap shell around the install engine (#1212).
 //
@@ -108,6 +111,8 @@ const fakeDockerScript = `#!/usr/bin/env node
 const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
 const argv = process.argv.slice(2);
+// A pasted-command wrapper passes "--" first: Node would otherwise act on a docker-style --env-file argument itself.
+if (argv[0] === "--") argv.shift();
 const env = process.env;
 if (env.FAKE_CALL_LOG) fs.appendFileSync(env.FAKE_CALL_LOG, "docker " + argv.join(" ") + "\\n");
 const out = (text) => process.stdout.write(text);
@@ -118,6 +123,11 @@ const flagValue = (flag) => {
 };
 const volumes = (env.FAKE_VOLUMES ?? "").split("\\n").filter(Boolean);
 const exit = (code) => process.exit(code);
+// Blocks until a signal kills this process (120s at most), after telling the test where it is.
+function hang(name) {
+  if (env.FAKE_STATE_DIR) fs.writeFileSync(env.FAKE_STATE_DIR + "/hung-" + name, String(process.pid));
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 120000);
+}
 
 function runEngine() {
   const engineEnv = { PATH: env.PATH, HOME: env.HOME, TERM: env.TERM, ORBIT_ENGINE_CONTEXT: "container", ORBIT_INSTALL_TEST_ASSETS_ROOT: env.FAKE_ASSETS_ROOT };
@@ -157,36 +167,211 @@ function runEngine() {
     process.stderr.write("fake docker: unexpected run\\n");
     exit(125);
   }
+  const targetRoot = () => translate(rest[rest.indexOf("--dir") + 1]);
+  // A file the person saved in the folder while the engine was still running (redesign r2): written once, just before the engine hangs or exits.
+  let personWrote = false;
+  const personWrites = () => {
+    if (personWrote || !env.FAKE_ENGINE_PERSON_WRITES) return;
+    personWrote = true;
+    const { path, content, mode } = JSON.parse(env.FAKE_ENGINE_PERSON_WRITES);
+    const written = path.startsWith("/") ? path : targetRoot() + "/" + path;
+    fs.writeFileSync(written, content);
+    // The person's own mode, whatever umask the installer runs the engine under (redesign r5 B10).
+    if (mode !== undefined) fs.chmodSync(written, mode);
+  };
+  // An engine still running before it commits anything (O-R4).
+  if (env.FAKE_ENGINE_HANG_BEFORE === "1") {
+    personWrites();
+    hang("engine");
+  }
   if (env.FAKE_ENGINE_EXIT !== undefined) {
-    // A canned engine: write the outcome asked for, if any, and exit.
+    // A canned engine: leave the files asked for in the target, write the outcome asked for, if any, and exit.
+    // Redesign r2: first, the journal of the names it may write, beside the outcome; unset, no journal (an engine that died first, or an older image).
+    const journalAt = rest.indexOf("--outcome");
+    if (env.FAKE_ENGINE_WRITTEN !== undefined && journalAt >= 0) {
+      const outcomePath = translate(rest[journalAt + 1]);
+      const names = env.FAKE_ENGINE_WRITTEN.endsWith("\\n") ? env.FAKE_ENGINE_WRITTEN : env.FAKE_ENGINE_WRITTEN + "\\n";
+      fs.writeFileSync(outcomePath.slice(0, outcomePath.lastIndexOf("/")) + "/written", names, { mode: 0o600 });
+    }
+    if (env.FAKE_ENGINE_LEAVES) {
+      // {"relative/path": content | null | {content | base64 | symlink, mode}}; a trailing "/" is a directory (redesign r1).
+      const root = translate(rest[rest.indexOf("--dir") + 1]);
+      const directoryModes = [];
+      // "@<file>" reads the JSON from a file: a whole committed tree is too large for one environment string.
+      const leaves = env.FAKE_ENGINE_LEAVES.startsWith("@") ? fs.readFileSync(env.FAKE_ENGINE_LEAVES.slice(1), "utf8") : env.FAKE_ENGINE_LEAVES;
+      for (const [relative, value] of Object.entries(JSON.parse(leaves))) {
+        const path = root + "/" + relative.replace(/\\/+$/, "");
+        const spec = value !== null && typeof value === "object" ? value : { content: value };
+        if (relative.endsWith("/")) {
+          fs.mkdirSync(path, { recursive: true });
+          if (spec.mode !== undefined) directoryModes.unshift([path, spec.mode]);
+          continue;
+        }
+        fs.mkdirSync(path.slice(0, path.lastIndexOf("/")), { recursive: true });
+        if (spec.symlink !== undefined) {
+          fs.symlinkSync(spec.symlink, path);
+          continue;
+        }
+        fs.writeFileSync(path, spec.base64 !== undefined ? Buffer.from(spec.base64, "base64") : (spec.content ?? ""));
+        if (spec.mode !== undefined) fs.chmodSync(path, spec.mode);
+      }
+      // Directory modes last, deepest first, so a read-only directory still received its files.
+      for (const [path, mode] of directoryModes) fs.chmodSync(path, mode);
+    }
     const outcomeIndex = rest.indexOf("--outcome");
     if (env.FAKE_ENGINE_OUTCOME !== undefined && outcomeIndex >= 0) {
       fs.writeFileSync(translate(rest[outcomeIndex + 1]), env.FAKE_ENGINE_OUTCOME, { mode: 0o600 });
     }
+    personWrites();
+    // The canned engine committed (files and outcome written) and is still running (redesign r1).
+    if (env.FAKE_ENGINE_HANG_AFTER === "1") hang("engine");
     exit(Number(env.FAKE_ENGINE_EXIT));
   }
   const result = spawnSync("node", [${JSON.stringify(engineTsx)}, ${JSON.stringify(engineCli)}, ...rest.slice(1).map(translate)], { stdio: "inherit", env: engineEnv });
+  if (env.FAKE_OUTCOME_PATCH) {
+    // Make the real engine's outcome name another profile / ask for the model download.
+    const outcomeAt = rest.indexOf("--outcome");
+    const file = translate(rest[outcomeAt + 1]);
+    const patch = JSON.parse(env.FAKE_OUTCOME_PATCH);
+    const lines = fs.readFileSync(file, "utf8").split("\\n").filter(Boolean).map((line) => {
+      const key = line.slice(0, line.indexOf("="));
+      return key in patch ? key + "=" + patch[key] : line;
+    });
+    fs.writeFileSync(file, lines.join("\\n") + "\\n", { mode: 0o600 });
+  }
+  personWrites();
+  // The real engine committed (files and outcome written) and is still running (O-R4).
+  if (env.FAKE_ENGINE_HANG_AFTER === "1") hang("engine");
+  // The real engine committed; docker run still exits non-zero (#1456 follow-up).
+  if (env.FAKE_ENGINE_REAL_THEN_EXIT !== undefined) exit(Number(env.FAKE_ENGINE_REAL_THEN_EXIT));
   if (result.signal === "SIGKILL") exit(137);
   exit(result.status === null ? 1 : result.status);
 }
 
 function compose() {
   if (argv[1] === "version") exit(env.FAKE_COMPOSE_MISSING === "1" ? 1 : 0);
-  const sub = argv.find((arg, i) => i > 0 && !arg.startsWith("-") && !["--project-name", "--env-file"].includes(argv[i - 1]));
+  if (env.FAKE_COMPOSE_STRICT === "1") {
+    // Behave like Compose: a project loaded from a compose file needs ORBIT_IMAGE,
+    // from --env-file or the environment; asked only for a project name from a
+    // directory without a compose file, it carries on.
+    const directoryFlag = flagValue("--project-directory");
+    const fileFlag = flagValue("-f") ?? flagValue("--file");
+    const composeFile = fileFlag ?? (directoryFlag ? directoryFlag + "/docker-compose.yml" : "docker-compose.yml");
+    const found = fs.existsSync(composeFile);
+    if (env.FAKE_STATE_DIR) fs.appendFileSync(env.FAKE_STATE_DIR + "/strict-log", JSON.stringify({ cwd: process.cwd(), argv: argv.slice(1), found }) + "\\n");
+    if (found) {
+      let image = env.ORBIT_IMAGE ?? "";
+      const envFile = flagValue("--env-file");
+      if (!image && envFile && fs.existsSync(envFile)) {
+        const match = /^ORBIT_IMAGE=(.+)$/m.exec(fs.readFileSync(envFile, "utf8"));
+        if (match) image = match[1];
+      }
+      if (!image) {
+        process.stderr.write('error while interpolating services.orbit-app.image: required variable ORBIT_IMAGE is missing a value\\n');
+        exit(1);
+      }
+    }
+  }
+  const sub = argv.find((arg, i) => i > 0 && !arg.startsWith("-") && !["--project-name", "--env-file", "--profile"].includes(argv[i - 1]));
   const after = argv.slice(argv.indexOf(sub) + 1);
+  if (argv.includes("orbit-ollama-model-pull") && (sub === "run" || sub === "up")) {
+    // The model download as a one-off service (#1474); real Compose prints its words on stderr.
+    if (env.FAKE_STATE_DIR) {
+      // The container the client started: it outlives its client (Docker does not stop it when the client dies).
+      const name = flagValue("--name") ?? (flagValue("--project-name") + "-orbit-ollama-model-pull-run-" + process.pid);
+      fs.appendFileSync(env.FAKE_STATE_DIR + "/model-pull-running", name + "\\n");
+      fs.appendFileSync(env.FAKE_STATE_DIR + "/model-pull-started", name + "\\n");
+    }
+    if (env.FAKE_HANG_MODEL_PULL === "1") hang("modelpull");
+    // Finished normally: run --rm removes its container.
+    if (env.FAKE_STATE_DIR) fs.writeFileSync(env.FAKE_STATE_DIR + "/model-pull-running", "");
+    if (env.FAKE_MODEL_PULL_FAIL === "1") {
+      if (env.FAKE_MODEL_PULL_STDERR) process.stderr.write(env.FAKE_MODEL_PULL_STDERR);
+      exit(1);
+    }
+    exit(0);
+  }
+  if (["rm", "stop", "kill"].includes(sub) && env.FAKE_STATE_DIR) {
+    // Scoped to a service: only that service's container goes (the fake models just the model-pull one).
+    const services = after.filter((arg) => !arg.startsWith("-"));
+    if (services.includes("orbit-ollama-model-pull")) fs.writeFileSync(env.FAKE_STATE_DIR + "/model-pull-running", "");
+    exit(0);
+  }
+  if (sub === "logs") {
+    // Container logs carry secrets (the claim code, database passwords): the installer must never ask.
+    out("SECRET-LOG-LINE\\n");
+    exit(0);
+  }
+  if (sub === "ps") {
+    if (after.includes("-q") || after.includes("--quiet")) {
+      const service = after.filter((arg) => !arg.startsWith("-")).at(-1);
+      const container = json("FAKE_CONTAINERS", {})[service];
+      if (service && !(container && container.status === "missing")) out(flagValue("--project-name") + "-" + service + "-1\\n");
+    }
+    exit(0);
+  }
   if (sub === "config") exit(env.FAKE_COMPOSE_CONFIG_FAIL === "1" ? 1 : 0);
-  if (sub === "pull") exit((env.FAKE_COMPOSE_PULL_FAIL ?? "") === after[0] ? 1 : 0);
+  if (sub === "pull") {
+    if ((env.FAKE_HANG_PULL ?? "") === after[0]) hang("pull");
+    const failing = (env.FAKE_COMPOSE_PULL_FAIL ?? "") === after[0];
+    if (failing && env.FAKE_COMPOSE_PULL_STDERR) process.stderr.write(env.FAKE_COMPOSE_PULL_STDERR);
+    exit(failing ? 1 : 0);
+  }
   if (sub === "up") {
+    // R6-2: docker volume ls fails only once compose up has been tried (the pre-flight listing succeeds).
+    if (env.FAKE_STATE_DIR) fs.writeFileSync(env.FAKE_STATE_DIR + "/up-called", "");
     // A failed first start that still created its database volume.
     if (env.FAKE_UP_CREATES_VOLUME === "1" && env.FAKE_STATE_DIR) fs.writeFileSync(env.FAKE_STATE_DIR + "/created-volume", flagValue("--project-name") + "_orbit-db-data");
+    // #1455/#1456 hooks: every volume the stack would create, Docker's own
+    // words on stderr, and (for down) whether the Compose file was still there.
+    if (env.FAKE_UP_CREATES_ALL_VOLUMES === "1" && env.FAKE_STATE_DIR) {
+      const project = flagValue("--project-name");
+      fs.writeFileSync(env.FAKE_STATE_DIR + "/created-volumes", ["orbit-db-data", "orbit-clamav-data", "orbit-documents-data"].map((name) => project + "_" + name).join("\\n") + "\\n");
+    }
+    if (env.FAKE_STATE_DIR) fs.writeFileSync(env.FAKE_STATE_DIR + "/containers", ["orbit-db", "orbit-app"].map((name) => flagValue("--project-name") + "-" + name + "-1\\n").join(""));
+    // A file the person adds to the folder while the stack starts (O-S1).
+    if (env.FAKE_UP_ADDS_FILE) {
+      const added = JSON.parse(env.FAKE_UP_ADDS_FILE);
+      fs.writeFileSync(added.path, added.content);
+    }
+    if (env.FAKE_COMPOSE_UP_STDERR) process.stderr.write(env.FAKE_COMPOSE_UP_STDERR);
+    if (env.FAKE_SNAPSHOT_ROOTS && env.FAKE_STATE_DIR) {
+      // Where the rollback copy lives while the stack starts (#1456 follow-up).
+      const roots = JSON.parse(env.FAKE_SNAPSHOT_ROOTS);
+      const list = (dir) => {
+        const found = [];
+        const walk = (current) => {
+          let names = [];
+          try { names = fs.readdirSync(current); } catch { return; }
+          for (const name of names) {
+            const path = current + "/" + name;
+            const stats = fs.lstatSync(path);
+            found.push({ path, name, mode: (stats.mode & 0o777).toString(8), directory: stats.isDirectory() });
+            if (stats.isDirectory()) walk(path);
+          }
+        };
+        walk(dir);
+        return found;
+      };
+      // Every root named (tmp, xdg, and the target folder for redesign r5 B2), listed by its key.
+      fs.writeFileSync(env.FAKE_STATE_DIR + "/snapshot.json", JSON.stringify(Object.fromEntries(Object.entries(roots).map(([key, root]) => [key, list(root)]))));
+    }
     exit(env.FAKE_COMPOSE_UP_FAIL === "1" ? 1 : 0);
   }
-  if (sub === "down") exit(0);
+  if (sub === "down") {
+    if (env.FAKE_HANG_DOWN === "1") hang("down");
+    if (env.FAKE_STATE_DIR) fs.appendFileSync(env.FAKE_STATE_DIR + "/down-log", (fs.existsSync("docker-compose.yml") ? "compose-file-present" : "compose-file-missing") + "\\n");
+    if (env.FAKE_COMPOSE_DOWN_FAIL === "1") exit(1);
+    if (env.FAKE_STATE_DIR) fs.writeFileSync(env.FAKE_STATE_DIR + "/model-pull-running", "");
+    if (env.FAKE_STATE_DIR) fs.writeFileSync(env.FAKE_STATE_DIR + "/containers", "");
+    exit(0);
+  }
   if (sub === "exec") {
     // A probe is named by what it reaches: the service, or orbit-tika for
     // the probe the application runs against Tika.
     const text = after.join(" ");
     const probe = ["orbit-tika", "orbit-ollama", "orbit-clamav", "orbit-db", "orbit-app"].find((name) => text.includes(name));
+    if (env.FAKE_HANG_PROBE && env.FAKE_HANG_PROBE === probe) hang("probe");
     if (after.at(-1) === "true") exit(env.FAKE_APP_RUNNING === "1" ? 0 : 1);
     if ((env.FAKE_PROBE_FAIL ?? "").split(",").includes(probe)) exit(1);
     const transient = json("FAKE_PROBE_FAIL_TIMES", {})[probe];
@@ -207,6 +392,7 @@ switch (argv[0]) {
     compose();
     break;
   case "pull":
+    if (env.FAKE_PULL_FAIL === "1" && env.FAKE_PULL_STDERR) process.stderr.write(env.FAKE_PULL_STDERR);
     exit(env.FAKE_PULL_FAIL === "1" ? 1 : 0);
     break;
   case "image": {
@@ -230,9 +416,12 @@ switch (argv[0]) {
   case "volume":
     if (argv[1] === "ls") {
       if (env.FAKE_VOLUME_LS_FAIL === "1") exit(1);
+      if (env.FAKE_VOLUME_LS_FAIL_AFTER_UP === "1" && fs.existsSync((env.FAKE_STATE_DIR ?? "/nonexistent") + "/up-called")) exit(1);
       const filter = (flagValue("--filter") ?? "").replace(/^name=/, "");
       const createdPath = (env.FAKE_STATE_DIR ?? "/nonexistent") + "/created-volume";
       if (fs.existsSync(createdPath)) volumes.push(fs.readFileSync(createdPath, "utf8"));
+      const createdAllPath = (env.FAKE_STATE_DIR ?? "/nonexistent") + "/created-volumes";
+      if (fs.existsSync(createdAllPath)) volumes.push(...fs.readFileSync(createdAllPath, "utf8").split("\\n").filter(Boolean));
       if (filter.startsWith("^")) {
         const exact = filter.slice(1, -1);
         if (env.FAKE_VOLUME_GONE !== "1" && volumes.includes(exact)) out(exact + "\\n");
@@ -248,7 +437,35 @@ switch (argv[0]) {
       out((labels[volume] ?? project + "|orbit-db-data") + "\\n");
       exit(0);
     }
-    if (argv[1] === "rm") exit(0);
+    if (argv[1] === "rm") {
+      if (env.FAKE_VOLUME_RM_FAIL === "1") {
+        process.stderr.write("fake docker: volume is in use\\n");
+        exit(1);
+      }
+      // A removed volume is gone for the next run sharing FAKE_STATE_DIR.
+      const names = argv.slice(2).filter((arg) => !arg.startsWith("-"));
+      for (const file of ["created-volume", "created-volumes"]) {
+        const path = (env.FAKE_STATE_DIR ?? "/nonexistent") + "/" + file;
+        if (!fs.existsSync(path)) continue;
+        const left = fs.readFileSync(path, "utf8").split("\\n").filter((line) => line && !names.includes(line));
+        fs.writeFileSync(path, left.map((line) => line + "\\n").join(""));
+      }
+      exit(0);
+    }
+    break;
+  case "rm":
+  case "stop":
+  case "kill": {
+    // docker rm -f / stop / kill <container>: the named container is no longer running.
+    const names = argv.slice(1).filter((arg) => !arg.startsWith("-"));
+    const path = (env.FAKE_STATE_DIR ?? "/nonexistent") + "/model-pull-running";
+    if (fs.existsSync(path)) fs.writeFileSync(path, fs.readFileSync(path, "utf8").split("\\n").filter((line) => line && !names.includes(line)).map((line) => line + "\\n").join(""));
+    exit(0);
+    break;
+  }
+  case "logs":
+    out("SECRET-LOG-LINE\\n");
+    exit(0);
     break;
   case "ps": {
     const filter = flagValue("--filter") ?? "";
@@ -257,6 +474,43 @@ switch (argv[0]) {
     break;
   }
   case "inspect": {
+    // Container facts per scenario (FAKE_CONTAINERS), answered for any --format template.
+    const containers = json("FAKE_CONTAINERS", null);
+    const target = argv[argv.length - 1];
+    const service = ["orbit-clamav", "orbit-tika", "orbit-ollama", "orbit-db", "orbit-app"].find((name) => target.includes(name));
+    if (containers && service) {
+      const container = containers[service] ?? { status: "running" };
+      if (container.status === "missing") {
+        process.stderr.write("Error: No such object: " + target + "\\n");
+        exit(1);
+      }
+      const values = {
+        "State.Status": container.status,
+        "State.Running": String(container.status === "running"),
+        "State.ExitCode": String(container.exitCode ?? 0),
+        "State.OOMKilled": String(container.oom ?? false),
+        RestartCount: String(container.restarts ?? 0),
+        "State.Health.Status": container.health ?? "none",
+        "State.Error": container.error ?? "",
+      };
+      const format = flagValue("--format") ?? flagValue("-f") ?? "";
+      if (container.restartsRising && format.includes("RestartCount") && env.FAKE_STATE_DIR) {
+        // A crash loop: the count is higher at every read, by restartsStep (default 1).
+        const counter = env.FAKE_STATE_DIR + "/restarts-" + service;
+        const reads = fs.existsSync(counter) ? Number(fs.readFileSync(counter, "utf8")) : 0;
+        fs.writeFileSync(counter, String(reads + 1));
+        values.RestartCount = String((reads + 1) * (container.restartsStep ?? 1));
+      }
+      if (container.restartsJump !== undefined && format.includes("RestartCount") && env.FAKE_STATE_DIR) {
+        // Restarted restartsJump times after the first read, then stable (O-S2).
+        const counter = env.FAKE_STATE_DIR + "/restarts-" + service;
+        const reads = fs.existsSync(counter) ? Number(fs.readFileSync(counter, "utf8")) : 0;
+        fs.writeFileSync(counter, String(reads + 1));
+        values.RestartCount = String((container.restarts ?? 0) + (reads === 0 ? 0 : container.restartsJump));
+      }
+      out(format.replace(/\\{\\{\\s*\\.([A-Za-z.]+)\\s*\\}\\}/g, (_match, field) => values[field] ?? "<no value>") + "\\n");
+      exit(0);
+    }
     out((json("FAKE_CONTAINER_IMAGES", {})[argv[argv.length - 1]] ?? "") + "\\n");
     exit(0);
     break;
@@ -299,6 +553,15 @@ const fakeCosignScript = [
   "exit 1",
   "",
 ].join("\n");
+
+/** A fake bin whose docker is run through a wrapper, so `--env-file <path>` reaches the fake as an argument, as it reaches real docker. */
+function makePasteBin() {
+  const binDir = mkdtempSync(join(tmpdir(), "orbit-install-pastebin-"));
+  writeFileSync(join(binDir, "docker.cjs"), fakeDockerScript);
+  writeFileSync(join(binDir, "docker"), `#!/usr/bin/env bash\nexec node "${join(binDir, "docker.cjs")}" -- "$@"\n`);
+  chmodSync(join(binDir, "docker"), 0o755);
+  return binDir;
+}
 
 function makeFakeBin() {
   const binDir = mkdtempSync(join(tmpdir(), "orbit-install-fakebin-"));
@@ -361,6 +624,8 @@ function baseEnvironment(binDir, logDir) {
     FAKE_CALL_LOG: join(logDir, "calls.log"),
     FAKE_ENGINE_LOG: join(logDir, "engine.log"),
     FAKE_STATE_DIR: logDir,
+    // Keep the installer's private rollback copies out of the real home.
+    XDG_STATE_HOME: join(logDir, "state"),
   };
 }
 
@@ -950,8 +1215,9 @@ describe("install.sh: Compose, after the commit", () => {
     expect(result.stdout).toMatch(/^phase=compose component=compose state=failed reason=failure action=retry/m);
     expect(result.stderr).toContain("Docker Compose configuration is invalid");
     expect(result.calls).not.toContain(" up -d");
-    // Committed: the files stay.
-    expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(true);
+    // A fresh install rolls back (#1456): the folder holds only what it started with.
+    expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(false);
+    expect(targetEntries(targetDir)).toEqual([".env-orbit", ".orbit-secrets"]);
   });
 
   it("refuses when a service image cannot be prepared", () => {
@@ -965,9 +1231,9 @@ describe("install.sh: Compose, after the commit", () => {
     const { result } = installed({ FAKE_COMPOSE_UP_FAIL: "1", FAKE_VOLUMES: "" });
     expect(result.status).toBe(1);
     expect(result.calls).toContain("compose --project-name orbit --env-file .env-orbit down --remove-orphans");
-    expect(result.calls).toContain("docker volume ls --filter name=orbit_orbit-db-data --format {{.Name}}");
-    expect(result.stdout).toMatch(/^phase=database component=database state=failed reason=docker-host action=repair/m);
-    expect(result.stderr).toContain("next action is the bounded Repair path");
+    expect(result.calls).toContain("docker volume ls --filter name=orbit_orbit- --format {{.Name}}");
+    expect(result.stdout).toMatch(/^phase=preparation component=compose state=failed reason=docker-host action=retry/m);
+    expect(result.stderr).toContain("This install was rolled back");
   });
 
   it("bounds the database wait and points at repair", () => {
@@ -978,15 +1244,16 @@ describe("install.sh: Compose, after the commit", () => {
   });
 
   it("tells a running application that never reported ready from one that stopped", () => {
-    const { result } = installed({ FAKE_PROBE_FAIL: "orbit-app" });
+    const { result } = installed({ FAKE_PROBE_FAIL: "orbit-app", FAKE_CONTAINERS: JSON.stringify({ "orbit-app": { status: "exited", exitCode: 1 } }) });
     expect(result.status).toBe(1);
-    expect(result.stdout).toMatch(/reason=application-startup action=repair/);
+    expect(result.stdout).toMatch(/reason=application-startup action=retry/);
   });
 
   it("bounds the optional scanner's wait", () => {
     const { result } = installed({ FAKE_PROBE_FAIL: "orbit-clamav" });
-    expect(result.status).toBe(1);
-    expect(result.stdout).toMatch(/^phase=optional component=clamav state=failed reason=optional-unavailable action=repair/m);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/^phase=optional component=clamav state=waiting reason=optional-status action=continue/m);
+    expect(result.stdout).toContain("Scanner: still starting");
   });
 
   it("pulls the confirmed local model after Ollama is healthy (guarantee #20)", () => {
@@ -1002,7 +1269,8 @@ describe("install.sh: Compose, after the commit", () => {
     });
     expect(result.status).toBe(0);
     expect(result.calls).toContain("compose --project-name orbit --env-file .env-orbit pull orbit-ollama");
-    expect(result.calls).toContain("exec -T orbit-ollama ollama pull llama3.2:1b");
+    expect(result.calls).toContain("compose --project-name orbit --env-file .env-orbit --profile ai-model-pull run --rm -T --name orbit-orbit-ollama-model-pull-install orbit-ollama-model-pull");
+    expect(result.calls).not.toContain("ollama pull");
     expect(result.stdout).toContain("Optional profiles: ai");
   });
 });
@@ -1322,10 +1590,10 @@ describe("install.sh: identity, volumes and readiness across the seam", () => {
   it("withholds completion with a bounded health-timeout when the application runs but never reports ready", () => {
     const targetDir = makeTarget();
     makePreprovisionedDeployment(targetDir);
-    const result = runInstall(targetDir, { FAKE_PROBE_FAIL: "orbit-app", FAKE_APP_RUNNING: "1" });
+    const result = runInstall(targetDir, { FAKE_PROBE_FAIL: "orbit-app", FAKE_CONTAINERS: JSON.stringify({ "orbit-app": { status: "running", health: "starting" } }) });
     expect(result.status).toBe(1);
     expect(result.stdout).toMatch(/^phase=application component=application state=failed reason=health-timeout action=repair/m);
-    expect(result.stderr).toContain("Orbit did not report ready within the bounded startup window.");
+    expect(result.stderr).toMatch(/Orbit did not report ready within \d+ s; it is left running/);
     expect(result.stdout).not.toContain("Orbit is ready.");
   });
 
@@ -1500,3 +1768,2494 @@ describe("install.sh --simulate on a terminal", () => {
 function realPath(path) {
   return execFileSync("realpath", [path], { encoding: "utf8" }).trim();
 }
+
+// ---------------------------------------------------------------------------
+// #1455 (install.sh discards Docker's error when compose up fails) and
+// #1456 (a failed fresh install leaves a folder the next install refuses).
+//
+// Written from the specification alone, before the fix. Chosen pattern for
+// #1456: all-or-nothing install with rollback -- a fresh install that fails at
+// any step after files are written puts the folder back the way it found it
+// and removes the Docker objects it created (containers, then volumes by
+// exact name). The "fresh" target here is the safe pre-provisioned bootstrap
+// folder the rest of this file uses: its own files must survive byte for byte.
+// ---------------------------------------------------------------------------
+
+/** A bound on the Docker text the failure may carry (#1455): 2,000 characters. */
+const dockerErrorBound = 2000;
+const dockerReason = "no space left on device";
+const controlCharacters = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/u;
+
+function terminalFailure(stdout) {
+  return eventLines(stdout)
+    .filter((line) => / state=failed /.test(line))
+    .at(-1);
+}
+
+function longestRun(text, character) {
+  return Math.max(0, ...(text.match(new RegExp(`${character}+`, "gu")) ?? []).map((run) => run.length));
+}
+
+/** Every file and directory under `dir` with its mode, so "the way it found it" can be compared whole. */
+function treeSnapshot(dir) {
+  const snapshot = {};
+  const walk = (relative) => {
+    for (const name of readdirSync(join(dir, relative)).sort()) {
+      const path = join(relative, name);
+      const stats = statSync(join(dir, path));
+      if (stats.isDirectory()) {
+        snapshot[`${path}/`] = (stats.mode & 0o777).toString(8);
+        walk(path);
+      } else {
+        snapshot[path] = `${(stats.mode & 0o777).toString(8)}:${readFileSync(join(dir, path)).toString("base64")}`;
+      }
+    }
+  };
+  walk("");
+  return snapshot;
+}
+
+function volumeRemovals(calls) {
+  return calls
+    .split("\n")
+    .filter((line) => line.startsWith("docker volume rm"))
+    .flatMap((line) => line.split(" ").slice(3))
+    .filter((word) => word !== "--" && !word.startsWith("-"))
+    .sort();
+}
+
+function volumesLeftBehind(stateDir) {
+  return ["created-volume", "created-volumes"].flatMap((file) =>
+    readOptional(join(stateDir, file))
+      .split("\n")
+      .filter(Boolean),
+  );
+}
+
+/** A fresh pre-provisioned target, a state directory shared by every run on it, and another stack's volumes that must never be touched. */
+function recoveryFixture(folderName) {
+  const targetDir = folderName ? join(makeTarget(), folderName) : makeTarget();
+  if (folderName) mkdirSync(targetDir);
+  makePreprovisionedDeployment(targetDir);
+  const stateDir = mkdtempSync(join(tmpdir(), "orbit-install-state-"));
+  const other = recognisedVolume("someone-else", `${imageRepository}@sha256:${"f".repeat(64)}`);
+  const environment = {
+    FAKE_STATE_DIR: stateDir,
+    FAKE_UP_CREATES_ALL_VOLUMES: "1",
+    FAKE_VOLUMES: `${other.volume}\nunrelated-volume`,
+    FAKE_PS: JSON.stringify(other.ps),
+    FAKE_CONTAINER_IMAGES: JSON.stringify(other.images),
+  };
+  return { targetDir, stateDir, environment, preexistingVolumes: [other.volume, "unrelated-volume"], before: treeSnapshot(targetDir) };
+}
+
+describe("install.sh: a failed compose up reports Docker's reason (#1455)", () => {
+  const dockerStderr = [
+    `Container orbit-orbit-db-1  Error: first sighting, ${dockerReason}`,
+    `\u001b[31mError response from daemon: ${dockerReason}\u001b[0m\u0007 progress\rrewritten`,
+    "Z".repeat(5000),
+    `dependency failed to start: container orbit-orbit-db-1 exited (1): ${dockerReason}`,
+    "",
+  ].join("\n");
+  let cached;
+  /** One failed fresh start, shared by the tests below: they read different parts of the same failure. */
+  function failedStart() {
+    if (!cached) {
+      const fixture = recoveryFixture();
+      const result = runInstall(fixture.targetDir, { ...fixture.environment, FAKE_COMPOSE_UP_FAIL: "1", FAKE_COMPOSE_UP_STDERR: dockerStderr });
+      cached = { ...fixture, result, output: `${result.stdout}\n${result.stderr}` };
+    }
+    return cached;
+  }
+
+  it("shows Docker's own error output in the failure the launcher shows", () => {
+    const { result, output } = failedStart();
+    expect(result.status).toBe(1);
+    expect(output).toContain(dockerReason);
+  });
+
+  it("strips control characters from Docker's text and keeps every event line well-formed", () => {
+    const { result, output } = failedStart();
+    expect(output).toContain(dockerReason);
+    expect(output).not.toMatch(controlCharacters);
+    for (const line of eventLines(result.stdout)) {
+      expect(line).toMatch(/^phase=[a-z-]+ component=[a-z-]+ state=[a-z-]+ reason=[a-z-]+ action=[a-z-]+ elapsed=[0-9]+s$/);
+    }
+  });
+
+  it(`bounds Docker's text to ${dockerErrorBound} characters, however long its lines`, () => {
+    const { output } = failedStart();
+    expect(output).toContain(dockerReason);
+    expect(longestRun(output, "Z")).toBeLessThanOrEqual(dockerErrorBound);
+  });
+
+  it("keeps the failure code docker-host but does not call the start step `database`", () => {
+    const { result } = failedStart();
+    const failure = terminalFailure(result.stdout);
+    expect(failure).toBeDefined();
+    expect(failure).toMatch(/reason=docker-host /);
+    expect(failure).not.toMatch(/^phase=database /);
+    expect(eventLines(result.stdout).some((line) => /^phase=database .* state=failed /.test(line))).toBe(false);
+  });
+
+  it("removes every volume the failed start created, by exact name and never by wildcard or prune", () => {
+    const { result, stateDir, preexistingVolumes } = failedStart();
+    expect(volumeRemovals(result.calls)).toEqual(["orbit_orbit-clamav-data", "orbit_orbit-db-data", "orbit_orbit-documents-data"]);
+    expect(result.calls).not.toMatch(/volume prune|system prune|\*/u);
+    for (const volume of preexistingVolumes) expect(result.calls).not.toMatch(new RegExp(`volume rm.*${volume}`, "u"));
+    expect(volumesLeftBehind(stateDir)).toEqual([]);
+  });
+
+  it("brings the containers down while the Compose file still exists, and only then removes volumes", () => {
+    const { result, stateDir } = failedStart();
+    expect(readOptional(join(stateDir, "down-log")).split("\n").filter(Boolean)).toEqual(["compose-file-present"]);
+    const calls = result.calls.split("\n");
+    expect(calls.findIndex((line) => line.includes(" down "))).toBeGreaterThan(-1);
+    expect(calls.findIndex((line) => line.includes(" down "))).toBeLessThan(calls.findIndex((line) => line.startsWith("docker volume rm")));
+  });
+});
+
+describe("install.sh: a failed fresh install leaves its folder as it found it (#1456)", () => {
+  // Each row fails one step after the files were written. All of them create
+  // the stack's volumes when `up` runs, so a rollback that forgets them shows.
+  it.each([
+    ["Compose rejects the written configuration", { FAKE_COMPOSE_CONFIG_FAIL: "1" }],
+    ["the database image cannot be pulled", { FAKE_COMPOSE_PULL_FAIL: "orbit-db" }],
+    ["the scanner image cannot be pulled", { FAKE_COMPOSE_PULL_FAIL: "orbit-clamav" }],
+    ["compose up fails", { FAKE_COMPOSE_UP_FAIL: "1", FAKE_COMPOSE_UP_STDERR: `Error: ${dockerReason}\n` }],
+    ["the database stops before it is healthy", { FAKE_PROBE_FAIL: "orbit-db", FAKE_CONTAINERS: JSON.stringify({ "orbit-db": { status: "exited", exitCode: 1 } }) }],
+    ["the application stops before it reports ready", { FAKE_PROBE_FAIL: "orbit-app", FAKE_CONTAINERS: JSON.stringify({ "orbit-app": { status: "exited", exitCode: 1 } }) }],
+  ])("when %s: rolls the folder and Docker back, then a retry in the same folder installs", (_step, failure) => {
+    const { targetDir, stateDir, environment, preexistingVolumes, before } = recoveryFixture();
+
+    const failed = runInstall(targetDir, { ...environment, ...failure });
+    expect(failed.status).toBe(1);
+    // The folder is exactly what it was: its own files byte for byte, nothing the install wrote.
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(targetEntries(targetDir)).toEqual([".env-orbit", ".orbit-secrets"]);
+    // Everything this attempt created in Docker is gone; nothing else was touched.
+    expect(volumesLeftBehind(stateDir)).toEqual([]);
+    for (const volume of volumeRemovals(failed.calls)) expect(preexistingVolumes).not.toContain(volume);
+    expect(failed.calls).not.toMatch(/volume prune|system prune/u);
+
+    // A rollback that succeeded leaves a retry that can succeed.
+    const retried = runInstall(targetDir, environment);
+    expect(retried.stderr).toBe("");
+    expect(retried.status).toBe(0);
+    expect(retried.stdout).toContain("Orbit is ready.");
+  });
+
+  it("control: a failed image pull, before any file is written, leaves the folder as it was", () => {
+    const { targetDir, environment, before } = recoveryFixture();
+    const failed = runInstall(targetDir, { ...environment, FAKE_PULL_FAIL: "1" });
+    expect(failed.status).not.toBe(0);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(runInstall(targetDir, environment).status).toBe(0);
+  });
+
+  it("never rolls back an update: a failed start keeps the committed deployment and its files", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+    expect(runInstall(targetDir).status).toBe(0);
+    const before = treeSnapshot(targetDir);
+    const own = recognisedVolume("orbit");
+    const result = runInstall(
+      targetDir,
+      { FAKE_COMPOSE_UP_FAIL: "1", FAKE_VOLUMES: own.volume, FAKE_PS: JSON.stringify(own.ps), FAKE_CONTAINER_IMAGES: JSON.stringify(own.images) },
+      ["--update"],
+    );
+    expect(result.status).toBe(1);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(result.calls).not.toContain("volume rm");
+  });
+
+});
+
+// ---------------------------------------------------------------------------
+// Review follow-ups for #1456 / #1455 (docs/installer-guarantees.md #58-60,
+// docs/engine-events.md "install.sh after the commit"). Interrupts, a vanished
+// launcher, unsafe folder names, an engine that exits non-zero after
+// committing, Docker's words on a failed pull, and where the rollback copy of
+// the user's files lives. Readiness-timeout behaviour is deliberately not
+// tested here (a design decision is pending).
+// ---------------------------------------------------------------------------
+
+const wellFormedEvent = /^phase=[a-z-]+ component=[a-z-]+ state=[a-z-]+ reason=[a-z-]+ action=[a-z-]+ elapsed=[0-9]+s$/;
+const allThreeVolumes = ["orbit_orbit-clamav-data", "orbit_orbit-db-data", "orbit_orbit-documents-data"];
+
+function scratchDir(label) {
+  return mkdtempSync(join(tmpdir(), `orbit-install-${label}-`));
+}
+
+/**
+ * Runs install.sh in its own process group; once the fake docker has written
+ * `marker` into its state directory, sends `signal` to the whole group (what a
+ * terminal's Ctrl-C, a closing session or a service manager does).
+ */
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+function runInstallSignalled(targetDir, envOverrides, { signal, marker }) {
+  const binDir = makeFakeBin();
+  const logDir = scratchDir("log");
+  const stateDir = envOverrides.FAKE_STATE_DIR;
+  return new Promise((resolve, reject) => {
+    const child = spawn("bash", [installScript, "--plain"], {
+      cwd: targetDir,
+      env: { ...baseEnvironment(binDir, logDir), ...envOverrides },
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const killGroup = (name) => {
+      try {
+        process.kill(-child.pid, name);
+      } catch {
+        // already gone
+      }
+    };
+    let stdout = "";
+    let stderr = "";
+    let sent = false;
+    const send = () => {
+      if (sent || !existsSync(join(stateDir, marker))) return;
+      sent = true;
+      killGroup(signal);
+    };
+    const watcher = watch(stateDir, send);
+    const watchdog = processWatchdog({ label: "runInstallSignalled", kill: () => killGroup("SIGKILL") });
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      watchdog.touch();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+      watchdog.touch();
+    });
+    child.on("error", reject);
+    child.on("close", (status, closedBy) => {
+      watcher.close();
+      watchdog.stop();
+      // Is the hung fake docker still alive now that the installer has finished? (before the cleanup kill below)
+      let hungPid = 0;
+      try {
+        hungPid = Number(readFileSync(join(stateDir, marker), "utf8"));
+      } catch {
+        // no marker written
+      }
+      const hungAlive = Number.isInteger(hungPid) && hungPid > 0 && pidAlive(hungPid);
+      killGroup("SIGKILL");
+      if (watchdog.reason) {
+        reject(watchdog.error({ stdout, stderr }));
+        return;
+      }
+      resolve({
+        status,
+        signal: closedBy,
+        signalSent: sent,
+        hungAlive,
+        stdout,
+        stderr,
+        calls: readOptional(join(logDir, "calls.log")),
+        engineRuns: readOptional(join(logDir, "engine.log"))
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line)),
+      });
+    });
+    send();
+  });
+}
+
+/** Runs install.sh with its stdout and/or stderr read end closed early, as a launcher that went away does. */
+function runInstallWithClosedPipes(targetDir, envOverrides, closed) {
+  const binDir = makeFakeBin();
+  const logDir = scratchDir("log");
+  return new Promise((resolve, reject) => {
+    const child = spawn("bash", [installScript, "--plain"], {
+      cwd: targetDir,
+      env: { ...baseEnvironment(binDir, logDir), ...envOverrides },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const watchdog = processWatchdog({ label: "runInstallWithClosedPipes", kill: () => child.kill("SIGKILL") });
+    let gone = false;
+    const goAway = () => {
+      if (gone) return;
+      gone = true;
+      if (closed === "both") child.stdout.destroy();
+      child.stderr.destroy();
+    };
+    child.stdout.on("data", () => {
+      watchdog.touch();
+      goAway();
+    });
+    child.stderr.on("data", () => watchdog.touch());
+    if (closed === "stderr") goAway();
+    child.on("error", reject);
+    child.on("close", (status, signal) => {
+      watchdog.stop();
+      if (watchdog.reason) {
+        reject(watchdog.error());
+        return;
+      }
+      resolve({ status, signal, calls: readOptional(join(logDir, "calls.log")) });
+    });
+  });
+}
+
+/** A recovery fixture whose home, state and temp directories are scratch directories, so the rollback copy can be found. */
+function privateStateFixture(options = {}) {
+  // A string names the target folder, as recoveryFixture's argument does.
+  const { xdg = true, folderName } = typeof options === "string" ? { folderName: options } : options;
+  const fixture = recoveryFixture(folderName);
+  const home = scratchDir("home");
+  const tmp = scratchDir("tmp");
+  const xdgHome = xdg ? scratchDir("xdg") : undefined;
+  const stateRoot = join(xdgHome ?? join(home, ".local", "state"), "orbit");
+  return {
+    ...fixture,
+    home,
+    tmp,
+    stateRoot,
+    environment: {
+      ...fixture.environment,
+      HOME: home,
+      TMPDIR: tmp,
+      // undefined drops the base environment's XDG_STATE_HOME from the child.
+      XDG_STATE_HOME: xdgHome,
+      FAKE_SNAPSHOT_ROOTS: JSON.stringify({ tmp, xdg: stateRoot }),
+    },
+  };
+}
+
+function filesNamed(root, names) {
+  const found = [];
+  const walk = (dir) => {
+    let entries = [];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const path = join(dir, entry);
+      if (names.includes(entry)) found.push(path);
+      if (statSync(path).isDirectory()) walk(path);
+    }
+  };
+  walk(root);
+  return found;
+}
+
+describe("install.sh: an interrupt rolls a fresh install back (#1456)", () => {
+  it.each([
+    ["SIGTERM", "SIGTERM", { FAKE_HANG_PROBE: "orbit-db" }, "hung-probe", true],
+    ["SIGINT", "SIGINT", { FAKE_HANG_PROBE: "orbit-db" }, "hung-probe", true],
+    ["SIGHUP", "SIGHUP", { FAKE_HANG_PROBE: "orbit-db" }, "hung-probe", true],
+    ["SIGTERM during the image pull", "SIGTERM", { FAKE_HANG_PULL: "orbit-db" }, "hung-pull", false],
+  ])("on %s: exits non-zero, restores the folder, removes the attempt's volumes by exact name, and a retry installs", async (_name, signal, hang, marker, createsVolumes) => {
+    const { targetDir, stateDir, environment, preexistingVolumes, before } = recoveryFixture();
+
+    const result = await runInstallSignalled(
+      targetDir,
+      { ...environment, ...hang, ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "60" },
+      { signal, marker },
+    );
+
+    expect(result.signalSent).toBe(true);
+    expect(result.status).not.toBe(0);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(volumeRemovals(result.calls)).toEqual(createsVolumes ? allThreeVolumes : []);
+    expect(volumesLeftBehind(stateDir)).toEqual([]);
+    for (const volume of preexistingVolumes) expect(volumeRemovals(result.calls)).not.toContain(volume);
+
+    const retried = runInstall(targetDir, environment);
+    expect(retried.status).toBe(0);
+    expect(retried.stdout).toContain("Orbit is ready.");
+  });
+
+  it("emits one well-formed terminal `failed` event after the rollback events, even though the exit was not a planned failure", async () => {
+    const { targetDir, environment } = recoveryFixture();
+    const result = await runInstallSignalled(
+      targetDir,
+      { ...environment, FAKE_HANG_PROBE: "orbit-db", ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "60" },
+      { signal: "SIGTERM", marker: "hung-probe" },
+    );
+    const events = eventLines(result.stdout);
+    for (const line of events) expect(line).toMatch(wellFormedEvent);
+    const rollbackDone = events.findIndex((line) => /^phase=rollback component=installer state=completed /.test(line));
+    expect(rollbackDone).toBeGreaterThan(-1);
+    const terminal = events.at(-1);
+    expect(terminal).toMatch(/ state=failed /);
+    expect(events.indexOf(terminal)).toBeGreaterThan(rollbackDone);
+    expect(events.filter((line) => / state=failed /.test(line))).toHaveLength(1);
+  });
+
+  it("B23: keeps the copy of the user's original files in the folder, and names it, when a second SIGTERM lands during the rollback", async () => {
+    const fixture = privateStateFixture();
+    const { targetDir, environment, stateRoot, before } = fixture;
+    const result = await runInstallSignalled(
+      targetDir,
+      { ...environment, FAKE_COMPOSE_UP_FAIL: "1", FAKE_HANG_DOWN: "1" },
+      { signal: "SIGTERM", marker: "hung-down" },
+    );
+    expect(result.signalSent).toBe(true);
+    expect(result.status).not.toBe(0);
+    if (JSON.stringify(ownTree(targetDir)) !== JSON.stringify(before)) {
+      // Redesign r5: the folder was not put back, so the only copy of the originals is the start record inside the folder.
+      const copies = filesNamed(backupsDir(targetDir), [".env-orbit"]);
+      expect(copies).toHaveLength(1);
+      expect(readFileSync(copies[0], "utf8")).toContain("APP_URL=https://orbit.preprovisioned-install.internal");
+      expect(result.stderr).toContain(dirname(copies[0]));
+    }
+    expect(filesNamed(stateRoot, [".env-orbit"])).toEqual([]);
+  });
+});
+
+describe("install.sh: the launcher going away does not stop the rollback (#1456)", () => {
+  it.each([
+    ["stdout and stderr both closed", "both"],
+    ["stderr closed", "stderr"],
+  ])("with %s: a failure after the commit still restores the folder and removes the volumes", async (_name, closed) => {
+    const { targetDir, stateDir, environment, before } = recoveryFixture();
+    const result = await runInstallWithClosedPipes(targetDir, { ...environment, FAKE_COMPOSE_UP_FAIL: "1" }, closed);
+    expect(result.status === 0).toBe(false);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(volumesLeftBehind(stateDir)).toEqual([]);
+    expect(volumeRemovals(result.calls)).toEqual(allThreeVolumes);
+  });
+});
+
+describe("install.sh: printed recovery commands are safe to paste (#1456)", () => {
+  // Redesign r5 B24 (was r4 N12): a failed `down` prints one command; with a hostile folder name it parses, is safe, and reaches the engine/ folder.
+  it.each([
+    ["a space in the folder name", "orbit target folder"],
+    ["a command substitution in the folder name", "orbit $(touch PWNED) folder"],
+    ["a backquote and semicolon in the folder name", "orbit `touch PWNED`;touch PWNED"],
+  ])("B24: with %s, the single command a failed `down` prints parses, creates no stray file run from elsewhere, and finds the Compose file in engine/", (_name, folderName) => {
+    const { targetDir, stateDir, environment } = privateStateFixture(folderName);
+    const result = runInstall(targetDir, { ...environment, ...r5DownFailedKnobs() });
+    expect(result.status).toBe(1);
+    const commands = recoveryCommands(result.stderr);
+    expect(commands).toHaveLength(1);
+    expect(commands[0].command).toMatch(r5DownCommand);
+    // The recovery-command contract: one stdout line, the command whole on it, the same bytes as the stderr line.
+    const offered = result.stdout.split("\n").filter((line) => line.startsWith(recoveryPrefix));
+    expect(offered).toHaveLength(1);
+    const command = offered[0].slice(recoveryPrefix.length);
+    expect(command).toBe(commands[0].command);
+    expect(command).toContain(volumesPart);
+    expect(spawnSync("bash", ["-n"], { input: command, encoding: "utf8" }).status).toBe(0);
+
+    // Run as printed, from another directory, with the strict fake.
+    const engine = join(onlyStamp(targetDir), "engine");
+    const { ran, scratch, loaded } = runPasted(command, stateDir);
+    expect(`${command} -> ${ran.status} ${ran.stderr}`).toMatch(/-> 0 /u);
+    for (const directory of [scratch, dirname(targetDir), targetDir, engine]) expect(existsSync(join(directory, "PWNED"))).toBe(false);
+    expect(loaded?.found).toBe(true);
+    expect(loaded?.cwd).toBe(realPath(engine));
+  });
+});
+
+describe("install.sh: an engine that reports success but exits non-zero (#1456)", () => {
+  it("rolls the committed fresh install back instead of advising retry on a committed folder", () => {
+    const { targetDir, stateDir, environment, before } = recoveryFixture();
+    const result = runInstall(targetDir, { ...environment, FAKE_ENGINE_REAL_THEN_EXIT: "1" });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("reported success but exited with status 1");
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(volumesLeftBehind(stateDir)).toEqual([]);
+    expect(runInstall(targetDir, environment).status).toBe(0);
+  });
+});
+
+describe("install.sh: a failed image pull shows Docker's own words (#1455)", () => {
+  const pullStderr = [
+    `pull access denied: first sighting, ${dockerReason}`,
+    `\u001b[31mError response from daemon: ${dockerReason}\u001b[0m\u0007 progress\rrewritten`,
+    "Z".repeat(5000),
+    `failed to pull: ${dockerReason}`,
+    "",
+  ].join("\n");
+
+  it.each([
+    ["a service image (compose pull)", { FAKE_COMPOSE_PULL_FAIL: "orbit-db", FAKE_COMPOSE_PULL_STDERR: pullStderr }],
+    ["the release image (docker pull)", { FAKE_PULL_FAIL: "1", FAKE_PULL_STDERR: pullStderr }],
+  ])("for %s: bounded, control characters stripped", (_name, failure) => {
+    const { targetDir, environment } = recoveryFixture();
+    const result = runInstall(targetDir, { ...environment, ...failure });
+    expect(result.status).not.toBe(0);
+    const output = `${result.stdout}\n${result.stderr}`;
+    expect(output).toContain(dockerReason);
+    expect(output).not.toMatch(controlCharacters);
+    expect(longestRun(output, "Z")).toBeLessThanOrEqual(dockerErrorBound);
+    for (const line of eventLines(result.stdout)) expect(line).toMatch(wellFormedEvent);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #1485: the `Docker said:` excerpt carries Docker's error, not Compose's
+// progress stream, and is at most 500 characters (the launcher's failure
+// screen wraps the last six stderr lines, so a long excerpt pushes its menu
+// off the bottom). Written from the specification alone, before the fix.
+// ---------------------------------------------------------------------------
+
+const dockerSaidPrefix = "Orbit installer: Docker said: ";
+const dockerExcerptBound = 500;
+const addressInUse =
+  "Error response from daemon: failed to set up container networking: driver failed programming external connectivity on endpoint orbit (abc123): failed to bind host port 0.0.0.0:3000/tcp: address already in use";
+
+/** The text after `Docker said: ` on stderr, and how many such lines there were. */
+function dockerSaid(stderr) {
+  const lines = stderr.split("\n").filter((line) => line.startsWith(dockerSaidPrefix));
+  return { count: lines.length, excerpt: (lines[0] ?? "").slice(dockerSaidPrefix.length) };
+}
+
+function composeProgress() {
+  const lines = [];
+  for (const name of ["orbit_default", "orbit_net-a", "orbit_net-b"]) lines.push(` Network ${name}  Creating`, ` Network ${name}  Created`);
+  for (const name of ["orbit-db-data", "orbit-clamav-data", "orbit-documents-data", "orbit-ollama-data"]) lines.push(` Volume ${name}  Creating`, ` Volume ${name}  Created`);
+  for (const name of ["orbit-postgres", "orbit-clamav", "orbit-ollama", "orbit-mailpit", "orbit-worker"]) {
+    lines.push(` Container ${name}  Creating`, ` Container ${name}  Created`, ` Container ${name}  Starting`, ` Container ${name}  Started`);
+    lines.push(` Container ${name}  Waiting`, ` Container ${name}  Healthy`);
+  }
+  lines.push(" Image orbit/app:latest  Pulling", " Image orbit/app:latest  Pulled", " Container orbit  Starting");
+  return lines;
+}
+
+describe("install.sh: the Docker said line carries the error, not the progress, and stays short (#1485)", () => {
+  it("compose up: drops Compose progress lines, keeps the address-in-use error, at most 500 characters", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const stderr = [...composeProgress(), addressInUse, ""].join("\n");
+    const result = runInstall(targetDir, { ...environment, FAKE_COMPOSE_UP_FAIL: "1", FAKE_COMPOSE_UP_STDERR: stderr });
+    expect(result.status).toBe(1);
+    const { count, excerpt } = dockerSaid(result.stderr);
+    expect(count).toBe(1);
+    expect(excerpt).toContain("address already in use");
+    expect(excerpt).toContain("0.0.0.0:3000/tcp");
+    for (const progress of ["Creating", "Created", "Starting", "Started", "Waiting", "Healthy", "Pulling", "Pulled", "Network", "Volume", "Container orbit"]) {
+      expect(excerpt).not.toContain(progress);
+    }
+    expect(excerpt.length).toBeLessThanOrEqual(dockerExcerptBound);
+    expect(excerpt).not.toMatch(controlCharacters);
+  });
+
+  it("compose up: keeps every failure line (error, failed, denied) and joins them with ' | '", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const stderr = [
+      ...composeProgress().slice(0, 12),
+      "Error response from daemon: pull access denied for orbit/app",
+      " Container orbit-postgres  Healthy",
+      "failed to solve: no space left on device",
+      " Container orbit  Starting",
+      "",
+    ].join("\n");
+    const result = runInstall(targetDir, { ...environment, FAKE_COMPOSE_UP_FAIL: "1", FAKE_COMPOSE_UP_STDERR: stderr });
+    const { count, excerpt } = dockerSaid(result.stderr);
+    expect(count).toBe(1);
+    expect(excerpt).toBe("Error response from daemon: pull access denied for orbit/app | failed to solve: no space left on device");
+  });
+
+  it.each([
+    ["compose up", { FAKE_COMPOSE_UP_FAIL: "1" }, "FAKE_COMPOSE_UP_STDERR"],
+    ["compose pull", { FAKE_COMPOSE_PULL_FAIL: "orbit-db" }, "FAKE_COMPOSE_PULL_STDERR"],
+    ["the release image pull", { FAKE_PULL_FAIL: "1" }, "FAKE_PULL_STDERR"],
+  ])("%s: long error text is cut to 500 characters, keeping the end, marked with a leading '...'", (_name, failure, stderrVariable) => {
+    const { targetDir, environment } = recoveryFixture();
+    const longError = `Error response from daemon: ${"very long explanation of the failure ".repeat(40)}final cause: ${dockerReason} END-MARKER`;
+    expect(longError.length).toBeGreaterThan(dockerExcerptBound);
+    const result = runInstall(targetDir, { ...environment, ...failure, [stderrVariable]: `${longError}\n` });
+    expect(result.status).not.toBe(0);
+    const { count, excerpt } = dockerSaid(result.stderr);
+    expect(count).toBe(1);
+    expect(excerpt.length).toBeLessThanOrEqual(dockerExcerptBound);
+    expect(excerpt.startsWith("...")).toBe(true);
+    expect(excerpt.endsWith(`final cause: ${dockerReason} END-MARKER`)).toBe(true);
+  });
+
+  it("compose up: output that only looks like progress keeps its last line, so a cause is never lost", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const stderr = [...composeProgress(), "something unexpected happened", ""].join("\n");
+    const result = runInstall(targetDir, { ...environment, FAKE_COMPOSE_UP_FAIL: "1", FAKE_COMPOSE_UP_STDERR: stderr });
+    expect(result.status).toBe(1);
+    const { count, excerpt } = dockerSaid(result.stderr);
+    expect(count).toBe(1);
+    expect(excerpt).toBe("something unexpected happened");
+  });
+
+  it("compose up: progress-only output keeps its last line rather than printing an empty excerpt", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const stderr = [...composeProgress(), ""].join("\n");
+    const result = runInstall(targetDir, { ...environment, FAKE_COMPOSE_UP_FAIL: "1", FAKE_COMPOSE_UP_STDERR: stderr });
+    expect(result.status).toBe(1);
+    const { excerpt } = dockerSaid(result.stderr);
+    expect(excerpt.trim()).not.toBe("");
+    expect(excerpt).toContain("Container orbit  Starting");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #1456 decision (2026-10-17, note 40388): what a failed readiness wait does.
+// Only a FAILURE (container not running at the deadline) rolls a fresh install
+// back; a service still starting is left in place (`repair`); an optional
+// service never fails the install (`state=waiting reason=optional-status
+// action=continue`, a completion line each); a failed model download is a
+// `continue` too, and runs through the `orbit-ollama-model-pull` service
+// (#1474). Container facts come from single `docker inspect --format` fields;
+// logs are never requested (the app log carries the claim code).
+// ---------------------------------------------------------------------------
+
+const logSentinel = "SECRET-LOG-LINE";
+const freeSpaceLine = /free space|space free|available|free:/i;
+
+function componentEvents(stdout, component) {
+  return eventLines(stdout).filter((line) => line.startsWith(`phase=`) && line.includes(` component=${component} `));
+}
+
+function expectNoLogsRequested(result) {
+  const output = `${result.stdout}\n${result.stderr}`;
+  expect(output).not.toContain(logSentinel);
+  for (const line of result.calls.split("\n")) {
+    expect(line).not.toMatch(/^docker logs\b/u);
+    expect(line).not.toMatch(/ logs( |$)/u);
+    if (line.startsWith("docker inspect ")) {
+      expect(line).toMatch(/ (--format|-f)[ =]/u);
+      expect(line).not.toMatch(/\.Config\.Env|\.Args|\.Config(?!\.)/u);
+    }
+  }
+}
+
+describe("install.sh: a service that is not running at the deadline rolls a fresh install back (#1456 decision)", () => {
+  const exited = { status: "exited", exitCode: 1, restarts: 3, oom: false };
+  it.each([
+    ["the database exited", "orbit-db", exited, ["status=exited", "exit-code=1", "oom-killed=false", "restarts=3"]],
+    ["the database is restarting", "orbit-db", { status: "restarting", restarts: 5 }, ["status=restarting", "restarts=5"]],
+    ["the database container is missing", "orbit-db", { status: "missing" }, []],
+    ["the application exited", "orbit-app", exited, ["status=exited", "exit-code=1", "oom-killed=false", "restarts=3"]],
+    ["the application is restarting", "orbit-app", { status: "restarting", restarts: 5 }, ["status=restarting", "restarts=5"]],
+    ["the application container is missing", "orbit-app", { status: "missing" }, []],
+  ])("when %s: rolls back, advises retry, names the container facts and free space, shows no logs, and a retry installs", (_name, service, facts, expectedFacts) => {
+    const { targetDir, stateDir, environment, before } = recoveryFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      FAKE_PROBE_FAIL: service,
+      FAKE_CONTAINERS: JSON.stringify({ [service]: facts }),
+    });
+
+    expect(result.status).toBe(1);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(volumesLeftBehind(stateDir)).toEqual([]);
+    const failure = terminalFailure(result.stdout);
+    expect(failure).toMatch(/ action=retry /);
+    expect(result.stderr).toContain(service);
+    for (const fact of expectedFacts) expect(result.stderr).toContain(fact);
+    expect(result.stderr).toMatch(freeSpaceLine);
+    expectNoLogsRequested(result);
+
+    const retried = runInstall(targetDir, environment);
+    expect(retried.status).toBe(0);
+  });
+});
+
+describe("install.sh: a service still running at the deadline is left in place (#1456 decision)", () => {
+  it.each([
+    ["the database", "orbit-db"],
+    ["the application", "orbit-app"],
+  ])("%s running with its probe still failing: no rollback, `repair`, left running, and an Update is accepted", (_name, service) => {
+    const { targetDir, stateDir, environment } = recoveryFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      FAKE_PROBE_FAIL: service,
+      FAKE_CONTAINERS: JSON.stringify({ [service]: { status: "running", health: "starting" } }),
+    });
+
+    expect(result.status).toBe(1);
+    // The folder is a deployment, and nothing was torn down.
+    for (const file of ["docker-compose.yml", ".env-orbit", ".orbit-secrets"]) expect(existsSync(join(targetDir, file))).toBe(true);
+    expect(volumesLeftBehind(stateDir).sort()).toEqual(allThreeVolumes);
+    expect(result.calls).not.toContain("volume rm");
+    expect(result.calls).not.toContain(" down ");
+    expect(terminalFailure(result.stdout)).toMatch(/ action=repair /);
+    expect(result.stderr).toMatch(/did not report ready within \d+ ?s/);
+    expect(result.stderr).toMatch(/left running/);
+    expect(result.stderr).toMatch(/docker compose .* ps/);
+    expect(result.stderr).toMatch(/Repair/);
+    expectNoLogsRequested(result);
+
+    // The next step is Update, never a refused Install.
+    const own = recognisedVolume("orbit");
+    const updated = runInstall(
+      targetDir,
+      { FAKE_VOLUMES: own.volume, FAKE_PS: JSON.stringify(own.ps), FAKE_CONTAINER_IMAGES: JSON.stringify(own.images) },
+      ["--update"],
+    );
+    expect(updated.stderr).not.toMatch(/not empty|Refusing to install here|requires a recognized/);
+    expect(updated.status).toBe(0);
+  });
+});
+
+describe("install.sh: an optional service never fails the install (#1456 decision)", () => {
+  it.each([
+    ["the scanner is still starting", "clamav", undefined, { status: "running", health: "starting" }, /Scanner: still starting/],
+    ["the scanner exited", "clamav", undefined, { status: "exited", exitCode: 2 }, /Scanner: stopped \(exit 2\)/],
+    ["document processing is still starting", "tika", "processing", { status: "running", health: "starting" }, /(Document processing|Tika|Processing)[^\n]*still starting/i],
+    ["document processing exited", "tika", "processing", { status: "exited", exitCode: 2 }, /(Document processing|Tika|Processing)[^\n]*stopped \(exit 2\)/i],
+    ["the local model service is still starting", "ollama", "ai", { status: "running", health: "starting" }, /(Local model|Ollama|Model)[^\n]*still starting/i],
+    ["the local model service exited", "ollama", "ai", { status: "exited", exitCode: 2 }, /(Local model|Ollama|Model)[^\n]*stopped \(exit 2\)/i],
+  ])("when %s: the install exits 0, the component's last event is waiting/optional-status/continue, and a completion line names it", (_name, component, profile, facts, line) => {
+    const { targetDir, stateDir, environment } = recoveryFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      ...(profile ? { FAKE_OUTCOME_PATCH: JSON.stringify({ profile }) } : {}),
+      FAKE_PROBE_FAIL: `orbit-${component}`,
+      FAKE_CONTAINERS: JSON.stringify({ [`orbit-${component}`]: facts }),
+    });
+    expect(result.status).toBe(0);
+    expect(componentEvents(result.stdout, component).at(-1)).toMatch(/ state=waiting reason=optional-status action=continue /);
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(line);
+    expect(eventLines(result.stdout).some((event) => / state=failed /.test(event))).toBe(false);
+    // Nothing was rolled back: the stack stays.
+    expect(result.calls).not.toContain("volume rm");
+    expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(true);
+    expect(volumesLeftBehind(stateDir).sort()).toEqual(allThreeVolumes);
+    expectNoLogsRequested(result);
+  });
+});
+
+describe("install.sh: the confirmed model download (#1456 decision, #1474)", () => {
+  const pullWords = [`pull failed: first sighting, ${dockerReason}`, `\u001b[31mError: ${dockerReason}\u001b[0m\u0007 progress\rrewritten`, "Z".repeat(5000), `failed: ${dockerReason}`, ""].join("\n");
+  // The profile triple cannot be pre-provisioned on a fresh target, so, as the
+  // existing model test does, the deployment is installed first and the model
+  // download is requested on the next run (an update).
+  function modelFixture() {
+    const fixture = recoveryFixture();
+    expect(runInstall(fixture.targetDir, fixture.environment).status).toBe(0);
+    appendFileSync(join(fixture.targetDir, ".env-orbit"), "OLLAMA_MODEL=llama3.2:1b\n");
+    const own = recognisedVolume("orbit");
+    return {
+      ...fixture,
+      environment: {
+        FAKE_VOLUMES: own.volume,
+        FAKE_PS: JSON.stringify(own.ps),
+        FAKE_CONTAINER_IMAGES: JSON.stringify(own.images),
+      },
+    };
+  }
+  const withModelPull = { FAKE_ENGINE_EXIT: "0", FAKE_ENGINE_OUTCOME: "status=ok\nfresh=0\nprofile=ai\nmodel-pull=1\ndatabase-volume=\n" };
+
+  it("when the download fails: the install exits 0, the component continues, and the pull's words are shown bounded and stripped", () => {
+    const { targetDir, environment } = modelFixture();
+    const result = runInstall(targetDir, { ...environment, ...withModelPull, FAKE_MODEL_PULL_FAIL: "1", FAKE_MODEL_PULL_STDERR: pullWords });
+    expect(result.status).toBe(0);
+    const output = `${result.stdout}\n${result.stderr}`;
+    expect(eventLines(result.stdout).some((line) => /component=(ollama|model)[a-z-]* .* action=continue /.test(line))).toBe(true);
+    expect(output).toContain(dockerReason);
+    expect(output).not.toMatch(controlCharacters);
+    expect(longestRun(output, "Z")).toBeLessThanOrEqual(dockerErrorBound);
+    expect(eventLines(result.stdout).some((line) => / state=failed /.test(line))).toBe(false);
+  });
+
+  it.each([
+    ["succeeds", {}],
+    ["fails", { FAKE_MODEL_PULL_FAIL: "1", FAKE_MODEL_PULL_STDERR: pullWords }],
+  ])("when the download %s: it runs through the orbit-ollama-model-pull service, never `exec … ollama pull`", (_name, outcome) => {
+    const { targetDir, environment } = modelFixture();
+    const result = runInstall(targetDir, { ...environment, ...withModelPull, ...outcome });
+    expect(result.status).toBe(0);
+    expect(result.calls).toMatch(/--profile ai-model-pull .*orbit-ollama-model-pull/);
+    expect(result.calls).not.toMatch(/exec .*orbit-ollama .*ollama pull/);
+  });
+});
+
+describe("install.sh: an update's failures are unchanged by the decision (#1456 decision)", () => {
+  it.each([
+    ["the database exited", "orbit-db", { status: "exited", exitCode: 1, restarts: 3 }],
+    ["the application is still running but not ready", "orbit-app", { status: "running", health: "starting" }],
+  ])("when %s during an update: no rollback, files kept, `repair`", (_name, service, facts) => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+    expect(runInstall(targetDir).status).toBe(0);
+    const before = treeSnapshot(targetDir);
+    const own = recognisedVolume("orbit");
+    const result = runInstall(
+      targetDir,
+      {
+        FAKE_VOLUMES: own.volume,
+        FAKE_PS: JSON.stringify(own.ps),
+        FAKE_CONTAINER_IMAGES: JSON.stringify(own.images),
+        FAKE_PROBE_FAIL: service,
+        FAKE_CONTAINERS: JSON.stringify({ [service]: facts }),
+      },
+      ["--update"],
+    );
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=repair /);
+    expect(result.calls).not.toContain("volume rm");
+    expect(result.calls).not.toContain(" down ");
+    expect(Object.keys(treeSnapshot(targetDir))).toEqual(expect.arrayContaining(Object.keys(before)));
+    expect(eventLines(result.stdout).some((line) => /^phase=rollback /.test(line))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round-2 review findings on #1456 (rollback and readiness).
+// ---------------------------------------------------------------------------
+
+/** Recovery commands printed on stderr, each with the prose before it (which may say where to run it). */
+function recoveryCommands(stderr) {
+  const lines = stderr.split("\n");
+  const commands = [];
+  lines.forEach((line, index) => {
+    const match = /((?:cd\s.*?&&\s*)?docker (?:compose|volume rm)\b.*|cp -a\b.*|rm -rf\b.*)$/u.exec(line);
+    if (!match) return;
+    // A line holding only the command is taken whole: its quoted folder may itself contain a backquote.
+    // Inside a sentence, the command ends before a following sentence ("… ps. If it is not ready …") or a closing backquote.
+    const command =
+      match.index === 0
+        ? match[1].trimEnd()
+        : match[1].replace(/^`+/u, "").split(/`|\.\s+[A-Z]/u)[0].replace(/[.\s]+$/u, "");
+    commands.push({ command, context: `${lines[index - 1] ?? ""}\n${line.slice(0, match.index)}` });
+  });
+  return commands;
+}
+
+function containersLeft(stateDir) {
+  return readOptional(join(stateDir, "containers"))
+    .split("\n")
+    .filter(Boolean);
+}
+
+function modelUpdateFixture() {
+  // As the model-download tests above: install first, then ask for the download on an update.
+  const fixture = recoveryFixture();
+  expect(runInstall(fixture.targetDir, fixture.environment).status).toBe(0);
+  appendFileSync(join(fixture.targetDir, ".env-orbit"), "OLLAMA_MODEL=llama3.2:1b\n");
+  const own = recognisedVolume("orbit");
+  const stateDir = scratchDir("state");
+  return {
+    ...fixture,
+    stateDir,
+    environment: {
+      FAKE_STATE_DIR: stateDir,
+      FAKE_VOLUMES: own.volume,
+      FAKE_PS: JSON.stringify(own.ps),
+      FAKE_CONTAINER_IMAGES: JSON.stringify(own.images),
+      FAKE_ENGINE_EXIT: "0",
+      FAKE_ENGINE_OUTCOME: "status=ok\nfresh=0\nprofile=ai\nmodel-pull=1\ndatabase-volume=\n",
+    },
+  };
+}
+
+describe("install.sh: printed recovery commands work as printed (#1456 round 2)", () => {
+  it("the `ps` check printed after `left running` names the folder and works from another directory", () => {
+    const { targetDir, stateDir, environment } = recoveryFixture("orbit target folder");
+    const result = runInstall(targetDir, {
+      ...environment,
+      FAKE_COMPOSE_STRICT: "1",
+      FAKE_PROBE_FAIL: "orbit-db",
+      FAKE_CONTAINERS: JSON.stringify({ "orbit-db": { status: "running", health: "starting" } }),
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/left running/u);
+    const check = recoveryCommands(result.stderr).find((entry) => /\bps\b/u.test(entry.command));
+    expect(check).toBeDefined();
+
+    const scratch = scratchDir("elsewhere");
+    const ran = failOnProcessDeadline(
+      spawnSync("bash", ["-c", check.command], {
+        cwd: scratch,
+        env: { PATH: `${makePasteBin()}:${process.env.PATH}`, HOME: scratch, FAKE_STATE_DIR: stateDir, FAKE_COMPOSE_STRICT: "1", FAKE_CALL_LOG: join(scratch, "calls.log") },
+        encoding: "utf8",
+        ...processGuard(),
+      }),
+      { label: "printed ps check" },
+    );
+    expect(`${check.command} -> ${ran.status} ${ran.stderr}`).toMatch(/-> 0 /u);
+    // Compose really loaded this deployment, not an empty directory.
+    const loaded = JSON.parse(readOptional(join(stateDir, "strict-log")).split("\n").filter(Boolean).at(-1));
+    expect(loaded.found).toBe(true);
+    expect(loaded.cwd === realPath(targetDir) || loaded.argv.some((arg) => arg.includes(realPath(targetDir)))).toBe(true);
+  });
+});
+
+describe("install.sh: a crash-looping required container counts as stopped (#1456 round 2)", () => {
+  it.each([
+    ["the database", "orbit-db"],
+    ["the application", "orbit-app"],
+  ])("%s reporting `running` with a rising restart count: rolled back, retry, and the facts show restarts and the exit code", (_name, service) => {
+    const { targetDir, stateDir, environment, before } = recoveryFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "6",
+      FAKE_PROBE_FAIL: service,
+      // Three restarts between any two reads: a crash loop by the 3-or-more threshold (O-S2).
+      FAKE_CONTAINERS: JSON.stringify({ [service]: { status: "running", health: "starting", restartsRising: true, restartsStep: 3, exitCode: 137 } }),
+    });
+    expect(result.status).toBe(1);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(volumesLeftBehind(stateDir)).toEqual([]);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=retry /);
+    expect(result.stderr).toMatch(/restarts=\d+/u);
+    expect(result.stderr).toContain("exit-code=137");
+  });
+});
+
+describe("install.sh: the local model service never ready (#1456 round 2)", () => {
+  it("even when the confirmed model download succeeds, the service's last event is waiting/optional-status/continue and the completion line agrees", () => {
+    const { targetDir, environment } = modelUpdateFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      FAKE_PROBE_FAIL: "orbit-ollama",
+      FAKE_CONTAINERS: JSON.stringify({ "orbit-ollama": { status: "running", health: "starting" } }),
+    });
+    expect(result.status).toBe(0);
+    expect(componentEvents(result.stdout, "ollama").at(-1)).toMatch(/ state=waiting reason=optional-status action=continue /);
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(/(Local model|Ollama|Model)[^\n]*still starting/i);
+    expect(eventLines(result.stdout).some((line) => / state=failed /.test(line))).toBe(false);
+  });
+});
+
+describe("install.sh: the rollback copy failing part-way (#1456 round 2)", () => {
+  it("leaves no partial copy of the secrets under the state directory, and the folder unchanged", () => {
+    const fixture = privateStateFixture();
+    const { targetDir, stateRoot, tmp, environment } = fixture;
+    // A secret too big for the file-size limit below: the copy dies after the first file.
+    writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "x".repeat(20000), { mode: 0o600 });
+    const before = treeSnapshot(targetDir);
+
+    const binDir = makeFakeBin();
+    const logDir = scratchDir("log");
+    const result = failOnProcessDeadline(
+      spawnSync("bash", ["-c", 'ulimit -c 0; ulimit -f 8; exec bash "$0" --plain', installScript], {
+        cwd: targetDir,
+        encoding: "utf8",
+        env: { ...baseEnvironment(binDir, logDir), ...environment },
+        ...processGuard(),
+      }),
+      { label: "limited install" },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(filesNamed(stateRoot, [".env-orbit", ".orbit-secrets", "oidc-client-secret"])).toEqual([]);
+    expect(filesNamed(tmp, [".env-orbit", ".orbit-secrets", "oidc-client-secret"])).toEqual([]);
+  });
+});
+
+describe("install.sh: once the database and application are ready the rollback is disarmed (#1456 round 2)", () => {
+  function expectLeftInPlace(result, { targetDir, stateDir }) {
+    expect(result.signalSent).toBe(true);
+    expect(result.status).toBe(0);
+    const events = eventLines(result.stdout);
+    expect(events.some((line) => /^phase=rollback /.test(line))).toBe(false);
+    expect(events.some((line) => /^phase=complete .* state=completed /.test(line))).toBe(true);
+    expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(true);
+    expect(result.calls).not.toContain("volume rm");
+    expect(volumesLeftBehind(stateDir).sort()).toEqual(allThreeVolumes);
+    expect(result.hungAlive).toBe(false);
+  }
+
+  it("SIGTERM during the optional scanner wait: exits 0, scanner still starting, completes", async () => {
+    const { targetDir, stateDir, environment } = recoveryFixture();
+    const result = await runInstallSignalled(
+      targetDir,
+      { ...environment, FAKE_HANG_PROBE: "orbit-clamav", ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "60" },
+      { signal: "SIGTERM", marker: "hung-probe" },
+    );
+    expectLeftInPlace(result, { targetDir, stateDir });
+    expect(componentEvents(result.stdout, "clamav").at(-1)).toMatch(/ state=waiting reason=optional-status action=continue /);
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(/Scanner: still starting/u);
+  });
+
+  it("SIGTERM during the confirmed model download: exits 0, the model not downloaded, completes", async () => {
+    const { targetDir, environment } = modelUpdateFixture();
+    const result = await runInstallSignalled(
+      targetDir,
+      { ...environment, FAKE_HANG_MODEL_PULL: "1", ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "60" },
+      { signal: "SIGTERM", marker: "hung-modelpull" },
+    );
+    expect(result.signalSent).toBe(true);
+    expect(result.status).toBe(0);
+    const events = eventLines(result.stdout);
+    expect(events.some((line) => /^phase=rollback /.test(line))).toBe(false);
+    expect(events.some((line) => /^phase=complete .* state=completed /.test(line))).toBe(true);
+    expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(true);
+    expect(result.calls).not.toContain("volume rm");
+    expect(result.hungAlive).toBe(false);
+    expect(events.filter((line) => /^phase=\S+ component=(ollama|model)/.test(line)).at(-1)).toMatch(/ state=waiting reason=optional-status action=continue /);
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(/(Local model|Model|Ollama)[^\n]*(not downloaded|still starting|still downloading)/i);
+  });
+});
+
+describe("install.sh: an interrupted model download leaves no container running (#1456 round 3)", () => {
+  it("SIGTERM during the confirmed model download: the model-pull container the killed client started is removed, and only that one", async () => {
+    const { targetDir, stateDir, environment } = modelUpdateFixture();
+    const result = await runInstallSignalled(
+      targetDir,
+      { ...environment, FAKE_HANG_MODEL_PULL: "1", ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "60" },
+      { signal: "SIGTERM", marker: "hung-modelpull" },
+    );
+    expect(result.signalSent).toBe(true);
+    // The fake did start a model-pull container, and its client's death did not remove it.
+    expect(readOptional(join(stateDir, "model-pull-started")).split("\n").filter(Boolean)).toHaveLength(1);
+    const started = readOptional(join(stateDir, "model-pull-started")).trim();
+
+    // The installer removed it.
+    expect(readOptional(join(stateDir, "model-pull-running")).split("\n").filter(Boolean)).toEqual([]);
+
+    // Scoped: any removal names only the model-pull container or service, never orbit-ollama or the whole project.
+    for (const line of result.calls.split("\n")) {
+      if (/^docker (rm|stop|kill) /.test(line)) expect(line.split(" ").slice(2).filter((arg) => !arg.startsWith("-"))).toEqual([started]);
+      if (/^docker compose .* (rm|stop|kill) /.test(line)) {
+        const afterVerb = line.split(/ (?:rm|stop|kill) /)[1].split(" ").filter((arg) => !arg.startsWith("-"));
+        expect(afterVerb).toEqual(["orbit-ollama-model-pull"]);
+      }
+      expect(line).not.toMatch(/^docker compose .* down( |$)/);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v0.3 acceptance findings on the rollback (O-R1, O-F6, O-S2, O-S1, O-R4,
+// O-S4, O-F1, L-Q4). Written from the specification, before the fix.
+// ---------------------------------------------------------------------------
+
+/** Every directory called `name` anywhere under `root`. */
+function directoriesNamed(root, name) {
+  return filesNamed(root, [name]).filter((path) => statSync(path).isDirectory());
+}
+
+/** The `install-rollback.*` entries directly under a state root. */
+function rollbackEntries(stateRoot) {
+  return existsSync(stateRoot) ? readdirSync(stateRoot).filter((name) => name.startsWith("install-rollback.")) : [];
+}
+
+/** A HOME that does not exist and cannot be created, with XDG_STATE_HOME unset. */
+function unwritableHome() {
+  const parent = scratchDir("nohome");
+  chmodSync(parent, 0o500);
+  return { HOME: join(parent, "missing"), XDG_STATE_HOME: undefined };
+}
+
+describe("install.sh: the rollback's shutdown is bounded (O-F6)", () => {
+  it("the rollback's `compose down` carries `--timeout 5`", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const result = runInstall(targetDir, { ...environment, FAKE_COMPOSE_UP_FAIL: "1" });
+    expect(result.status).toBe(1);
+    const downs = result.calls.split("\n").filter((line) => /^docker compose .* down( |$)/u.test(line));
+    expect(downs.length).toBeGreaterThan(0);
+    for (const line of downs) expect(line).toMatch(/ --timeout 5( |$)/u);
+  });
+});
+
+describe("install.sh: one or two restarts are not a crash loop; three are (O-S2)", () => {
+  it("the database running, restart count +2 since the earlier sample: left in place, `repair`, no rollback", () => {
+    const { targetDir, stateDir, environment } = recoveryFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "6",
+      FAKE_PROBE_FAIL: "orbit-db",
+      FAKE_CONTAINERS: JSON.stringify({ "orbit-db": { status: "running", health: "starting", restarts: 1, restartsJump: 2 } }),
+    });
+    expect(result.status).toBe(1);
+    for (const file of ["docker-compose.yml", ".env-orbit", ".orbit-secrets"]) expect(existsSync(join(targetDir, file))).toBe(true);
+    expect(volumesLeftBehind(stateDir).sort()).toEqual(allThreeVolumes);
+    expect(result.calls).not.toContain("volume rm");
+    expect(result.calls).not.toContain(" down ");
+    expect(terminalFailure(result.stdout)).toMatch(/ action=repair /);
+    expect(result.stderr).toMatch(/left running/u);
+  });
+
+  it("the database running, restart count +3 since the earlier sample: a crash loop, rolled back, `retry`", () => {
+    const { targetDir, stateDir, environment, before } = recoveryFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "6",
+      FAKE_PROBE_FAIL: "orbit-db",
+      FAKE_CONTAINERS: JSON.stringify({ "orbit-db": { status: "running", health: "starting", restarts: 1, restartsJump: 3 } }),
+    });
+    expect(result.status).toBe(1);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(volumesLeftBehind(stateDir)).toEqual([]);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=retry /);
+  });
+});
+
+describe("install.sh: an interrupt while the engine runs (O-R4)", () => {
+  it("SIGTERM after the engine committed a fresh install: the folder is put back, the engine's files are removed rather than moved aside, the copy is released, and the next run is a fresh install", async () => {
+    // Redesign r1 test 3: privateStateFixture, so the state root is known.
+    const { targetDir, stateRoot, environment, before } = privateStateFixture();
+    const result = await runInstallSignalled(
+      targetDir,
+      { ...environment, FAKE_ENGINE_HANG_AFTER: "1" },
+      { signal: "SIGTERM", marker: "hung-engine" },
+    );
+    expect(result.signalSent).toBe(true);
+    expect(result.status).not.toBe(0);
+    expect(result.status).toBe(143);
+    expect(targetEntries(targetDir)).toEqual([".env-orbit", ".orbit-secrets"]);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(result.stderr).not.toContain("did not write");
+    expect(directoriesNamed(stateRoot, "added")).toEqual([]);
+    expect(filesNamed(stateRoot, [".env-orbit"])).toEqual([]);
+
+    const retried = runInstall(targetDir, environment);
+    expect(retried.stderr).not.toMatch(/not empty|Refusing to install here|requires a recognized/u);
+    expect(retried.status).toBe(0);
+    expect(retried.stdout).toContain("Orbit is ready.");
+  });
+
+  it("SIGTERM while the engine runs, before it commits: the folder and the original files are unchanged", async () => {
+    const { targetDir, environment, before } = recoveryFixture();
+    const result = await runInstallSignalled(
+      targetDir,
+      { ...environment, FAKE_ENGINE_HANG_BEFORE: "1" },
+      { signal: "SIGTERM", marker: "hung-engine" },
+    );
+    expect(result.signalSent).toBe(true);
+    expect(result.status).not.toBe(0);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(runInstall(targetDir, environment).status).toBe(0);
+  });
+});
+
+// Redesign r2 helpers. The engine journals the names it may write
+// (`<outcome dir>/written`); the rollback removes what the journal names and
+// moves anything else new aside, so a file the person saved while the engine
+// ran is never deleted.
+const personNotes = "notes the person saved while the engine ran\n";
+
+/** "Folder put back": as found (`before`, pre-provisioned) or empty (`before` undefined), apart from orbit-install-backups/ (redesign r5), and the terminal event advises retry. */
+function expectFolderPutBack(result, targetDir, before) {
+  if (before === undefined) expect(targetEntries(targetDir).filter((name) => name !== backupsName)).toEqual([]);
+  else expect(ownTree(targetDir)).toEqual(before);
+  expect(terminalFailure(result.stdout)).toMatch(/ action=retry /u);
+}
+
+// "Moved aside" (redesign r5): kept unchanged under <folder>/orbit-install-backups/<stamp>/moved/, and the output says so and where. Returns the kept path.
+function expectMovedAside(result, targetDir, name, content, { rollbackLine = true } = {}) {
+  const kept = filesNamed(backupsDir(targetDir), [name]);
+  expect(kept).toHaveLength(1);
+  expect(kept[0]).toMatch(new RegExp(`/orbit-install-backups/\\d{8}T\\d{6}Z(-[2-9])?/moved/${name.replace(/[.]/gu, "\\.")}$`, "u"));
+  expect(readFileSync(kept[0], "utf8")).toBe(content);
+  expect(result.stderr).toContain("moved, not deleted");
+  expect(result.stderr).toContain(dirname(kept[0]));
+  expect(result.stderr).not.toContain("Delete that directory");
+  if (rollbackLine) {
+    const lines = result.stderr.split("\n").filter((line) => line.includes("rolled back"));
+    expect(lines.join("\n")).toContain("apart from the files moved out");
+  }
+  return kept[0];
+}
+
+// O-S4 as redesigned (r1): the rollback runs when the engine dies without a
+// result, restores from the copy, then releases it (keeping the copy for ever
+// after a verified restore was O-S4-FR1).
+describe("install.sh: an engine killed hard on a fresh install is rolled back (O-S4, redesign r1)", () => {
+  // Redesign r2 T6 (replaces r1's half-commit test): the engine's journal names what it may have written, and a person's file is moved aside.
+  it("engine exits 137 with no outcome after a half commit: the folder is put back, staging and lock removed, the person's file moved aside and the copy released (redesign r5)", () => {
+    const { targetDir, stateRoot, environment, before } = privateStateFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      FAKE_ENGINE_EXIT: "137",
+      FAKE_ENGINE_WRITTEN: engineWritten,
+      FAKE_ENGINE_LEAVES: JSON.stringify({
+        ".orbit-install-staging.test/x": "half-written staging file\n",
+        ".orbit-engine.lock": "",
+        "docker-compose.yml": "services: {}\n",
+        "scripts/orbit-ops.sh": "#!/bin/sh\n",
+        ".env-orbit": "APP_URL=https://overwritten-by-a-half-commit.internal\n",
+      }),
+      FAKE_ENGINE_PERSON_WRITES: JSON.stringify({ path: "notes.txt", content: personNotes }),
+    });
+    expect(result.status).toBe(1);
+    expectFolderPutBack(result, targetDir, before);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+    expect(existsSync(join(targetDir, ".orbit-engine.lock"))).toBe(false);
+    const kept = expectMovedAside(result, targetDir, "notes.txt", personNotes);
+    expect(result.stderr).toContain("stopped without reporting a result (docker run exit status 137)");
+    expect(result.stderr).toContain("This install was rolled back");
+    expect(result.stderr).not.toContain("staging directory");
+    // Redesign r5: the copy is released after a verified restore; the engine's files are removed, not kept.
+    const stamp = dirname(dirname(kept));
+    expect(existsSync(join(stamp, "originals"))).toBe(false);
+    expect(filesNamed(backupsDir(targetDir), [".env-orbit", "oidc-client-secret", "docker-compose.yml", "orbit-ops.sh"])).toEqual([]);
+    expect(filesNamed(stateRoot, [".env-orbit", "notes.txt"])).toEqual([]);
+  });
+
+  it("engine exits 137 with no outcome, nothing written: the folder is unchanged and the copy released", () => {
+    const { targetDir, stateRoot, environment, before } = privateStateFixture();
+    const result = runInstall(targetDir, { ...environment, FAKE_ENGINE_EXIT: "137" });
+    expect(result.status).toBe(1);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    // Redesign r5: the copy lived in the folder and is gone with its folders.
+    expect(backups(targetDir)).toEqual([]);
+    expect(filesNamed(stateRoot, [".env-orbit", "oidc-client-secret"])).toEqual([]);
+    expect(result.stderr).not.toContain("staging directory");
+  });
+
+  it("guard: engine exits 137 with no outcome on an update: the folder is unchanged and nothing claims a rollback", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+    expect(runInstall(targetDir).status).toBe(0);
+    const before = treeSnapshot(targetDir);
+    const own = recognisedVolume("orbit");
+    const result = runInstall(
+      targetDir,
+      { FAKE_VOLUMES: own.volume, FAKE_PS: JSON.stringify(own.ps), FAKE_CONTAINER_IMAGES: JSON.stringify(own.images), FAKE_ENGINE_EXIT: "137" },
+      ["--update"],
+    );
+    expect(result.status).toBe(1);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(result.stderr).toContain("A hard interruption leaves its staging directory for review");
+    expect(result.stderr).not.toContain("rolled back");
+  });
+});
+
+// Redesign r1: an empty folder. The real engine cannot commit an unattended
+// install into an empty folder (it needs answers), so the commit is staged by
+// the canned engine: FAKE_ENGINE_LEAVES writes the tree a real engine committed
+// (from one real install of a pre-provisioned folder), then a fresh `ok`
+// outcome is written.
+let committedLeaves;
+let committedJournal;
+function emptyFolderCommit() {
+  if (!committedLeaves) {
+    const source = makeTarget();
+    makePreprovisionedDeployment(source);
+    expect(runInstall(source).status).toBe(0);
+    const leaves = {};
+    const walk = (relative) => {
+      for (const name of readdirSync(join(source, relative)).sort()) {
+        const path = relative ? `${relative}/${name}` : name;
+        const stats = lstatSync(join(source, path));
+        const mode = stats.mode & 0o777;
+        if (stats.isSymbolicLink()) {
+          leaves[path] = { symlink: readlinkSync(join(source, path)) };
+        } else if (stats.isDirectory()) {
+          leaves[`${path}/`] = { mode };
+          walk(path);
+        } else {
+          leaves[path] = { base64: readFileSync(join(source, path)).toString("base64"), mode };
+        }
+      }
+    };
+    walk("");
+    committedLeaves = `@${join(scratchDir("committed-tree"), "leaves.json")}`;
+    writeFileSync(committedLeaves.slice(1), JSON.stringify(leaves));
+    // The current engine journals every file it may write, by full relative
+    // path, before it touches the folder; .orbit-secrets/ is claimed whole.
+    committedJournal = [
+      ...Object.keys(leaves).filter((path) => !path.endsWith("/") && !path.startsWith(".orbit-secrets/")),
+      ".orbit-secrets/",
+    ].join("\n");
+  }
+  return {
+    FAKE_ENGINE_WRITTEN: committedJournal,
+    FAKE_ENGINE_EXIT: "0",
+    FAKE_ENGINE_OUTCOME: "status=ok\nfresh=1\nprofile=standard\nmodel-pull=0\ndatabase-volume=\n",
+    FAKE_ENGINE_LEAVES: committedLeaves,
+  };
+}
+
+describe("install.sh: an interrupt while the engine runs, empty folder (redesign r1)", () => {
+  it("SIGTERM after the engine committed: the folder is empty again, the output says it was rolled back, and a rerun installs", async () => {
+    const targetDir = makeTarget();
+    const stateDir = scratchDir("state");
+    const xdg = scratchDir("xdg");
+    const stateRoot = join(xdg, "orbit");
+    const result = await runInstallSignalled(
+      targetDir,
+      { ...emptyFolderCommit(), FAKE_STATE_DIR: stateDir, XDG_STATE_HOME: xdg, FAKE_ENGINE_HANG_AFTER: "1" },
+      { signal: "SIGTERM", marker: "hung-engine" },
+    );
+    expect(result.signalSent).toBe(true);
+    expect(result.status).not.toBe(0);
+    expect(targetEntries(targetDir)).toEqual([]);
+    expect(result.stderr).toContain("was rolled back");
+    expect(result.stderr).toContain("You can install again");
+    expect(result.stderr).not.toContain("did not write");
+    expect(result.stderr).not.toContain("Move these out");
+    expect(result.stderr).not.toContain("could not be fully rolled back");
+    expect(terminalFailure(result.stdout)).toMatch(/ action=retry /u);
+    expect(rollbackEntries(stateRoot)).toEqual([]);
+
+    const retried = runInstall(targetDir, { ...emptyFolderCommit(), XDG_STATE_HOME: xdg });
+    expect(retried.status).toBe(0);
+    expect(retried.stdout).toContain("Orbit is ready.");
+  });
+
+  it("guard: SIGTERM before the engine committed: the folder stays empty and a rerun installs", async () => {
+    const targetDir = makeTarget();
+    const stateDir = scratchDir("state");
+    const xdg = scratchDir("xdg");
+    const result = await runInstallSignalled(
+      targetDir,
+      { ...emptyFolderCommit(), FAKE_STATE_DIR: stateDir, XDG_STATE_HOME: xdg, FAKE_ENGINE_HANG_BEFORE: "1" },
+      { signal: "SIGTERM", marker: "hung-engine" },
+    );
+    expect(result.signalSent).toBe(true);
+    expect(targetEntries(targetDir)).toEqual([]);
+    expect(runInstall(targetDir, { ...emptyFolderCommit(), XDG_STATE_HOME: xdg }).status).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Redesign r2: the rollback removes only what the engine's journal names, and
+// moves anything else new aside, so a file the person saved while the engine
+// was still running is kept (T1-T5, T7-T10; T6 replaced r1's half-commit test
+// above). Written from the specification alone, before the fix.
+// ---------------------------------------------------------------------------
+
+describe("install.sh: a file saved while the engine runs survives an interrupt (redesign r2)", () => {
+  const personWrites = { FAKE_ENGINE_PERSON_WRITES: JSON.stringify({ path: "notes.txt", content: personNotes }) };
+
+  it("B22 (T1 re-homed): SIGTERM after the real engine committed: the folder is put back, the person's file moved into <stamp>/moved, the engine's files removed, the copy released, and a rerun installs", async () => {
+    const { targetDir, stateRoot, environment, before } = privateStateFixture();
+    const result = await runInstallSignalled(
+      targetDir,
+      { ...environment, ...personWrites, FAKE_ENGINE_HANG_AFTER: "1" },
+      { signal: "SIGTERM", marker: "hung-engine" },
+    );
+    expect(result.signalSent).toBe(true);
+    expect(result.status).toBe(143);
+    expectFolderPutBack(result, targetDir, before);
+    const kept = expectMovedAside(result, targetDir, "notes.txt", personNotes);
+    expect(existsSync(join(dirname(dirname(kept)), "originals"))).toBe(false);
+    // Section 13.2: the EXIT trap's closing line, on an interrupt.
+    const closing = result.stderr.split("\n").find((line) => line.includes("The install stopped before it finished (interrupted"));
+    expect(closing).toBeDefined();
+    expect(closing).toContain("and was rolled back: the folder is as it was before");
+    expect(closing.endsWith(interruptClosing)).toBe(true);
+    expect(result.stderr).not.toContain(failClosing);
+    expect(filesNamed(backupsDir(targetDir), ["docker-compose.yml", "orbit-ops.sh"])).toEqual([]);
+    expect(filesNamed(stateRoot, ["notes.txt", "docker-compose.yml", "scripts"])).toEqual([]);
+
+    const retried = runInstall(targetDir, environment);
+    expect(retried.status).toBe(0);
+    expect(retried.stdout).toContain("Orbit is ready.");
+  });
+
+  it("T2: SIGTERM before the real engine commits: the person's file is moved aside, the folder put back, and a rerun installs", async () => {
+    const { targetDir, stateRoot, environment, before } = privateStateFixture();
+    const result = await runInstallSignalled(
+      targetDir,
+      { ...environment, ...personWrites, FAKE_ENGINE_HANG_BEFORE: "1" },
+      { signal: "SIGTERM", marker: "hung-engine" },
+    );
+    expect(result.signalSent).toBe(true);
+    expectMovedAside(result, targetDir, "notes.txt", personNotes);
+    expectFolderPutBack(result, targetDir, before);
+    expect(filesNamed(stateRoot, ["notes.txt"])).toEqual([]);
+    expect(runInstall(targetDir, environment).status).toBe(0);
+  });
+
+});
+
+describe("install.sh: a file saved while the engine ran survives a failed start (redesign r2)", () => {
+  it("T5: the real engine completes, the person saves a file, compose up fails: the folder is put back, the file moved aside, the engine's files removed", () => {
+    const { targetDir, stateRoot, environment, before } = privateStateFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      FAKE_ENGINE_PERSON_WRITES: JSON.stringify({ path: "notes.txt", content: personNotes }),
+      FAKE_COMPOSE_UP_FAIL: "1",
+    });
+    expect(result.status).toBe(1);
+    expectFolderPutBack(result, targetDir, before);
+    expectMovedAside(result, targetDir, "notes.txt", personNotes);
+    expect(filesNamed(backupsDir(targetDir), ["docker-compose.yml", "orbit-ops.sh"])).toEqual([]);
+    expect(filesNamed(stateRoot, ["notes.txt", "docker-compose.yml", "scripts"])).toEqual([]);
+  });
+});
+
+describe("install.sh: an engine killed hard, by what its journal says (redesign r2)", () => {
+  it("T7: no journal, only staging and the lock left: both removed by their fixed names, the folder put back, nothing moved, the copy released", () => {
+    const { targetDir, stateRoot, environment, before } = privateStateFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      FAKE_ENGINE_EXIT: "137",
+      FAKE_ENGINE_LEAVES: JSON.stringify({
+        ".orbit-install-staging.test/x": "half-written staging file\n",
+        ".orbit-engine.lock": "",
+      }),
+    });
+    expect(result.status).toBe(1);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+    expect(existsSync(join(targetDir, ".orbit-engine.lock"))).toBe(false);
+    expectFolderPutBack(result, targetDir, before);
+    // Redesign r5: nothing moved and the copy released, so no orbit-install-backups is left.
+    expect(existsSync(backupsDir(targetDir))).toBe(false);
+    expect(filesNamed(stateRoot, [".env-orbit"])).toEqual([]);
+    expect(result.stderr).toContain("This install was rolled back");
+  });
+
+  it.each([
+    ["a name that climbs out of the folder", "../x\ndocker-compose.yml"],
+    // Redesign r5 (section 2): a slash is now allowed (full relative paths), so this row is a `.` component instead.
+    ["a `.` component", "./docker-compose.yml\ndocker-compose.yml"],
+  ])("T8: a journal with %s is rejected: docker-compose.yml is moved aside, not deleted, and the folder put back", (_label, written) => {
+    const { targetDir, stateRoot, environment, before } = privateStateFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      FAKE_ENGINE_EXIT: "137",
+      FAKE_ENGINE_WRITTEN: written,
+      FAKE_ENGINE_LEAVES: JSON.stringify({ "docker-compose.yml": "services: {}\n" }),
+    });
+    expect(result.status).toBe(1);
+    expectMovedAside(result, targetDir, "docker-compose.yml", "services: {}\n");
+    expectFolderPutBack(result, targetDir, before);
+    expect(filesNamed(stateRoot, ["docker-compose.yml"])).toEqual([]);
+    // Redesign r3 U6, in r4 N11's wording: the missing (here, rejected) journal is named.
+    expect(result.stderr).toContain("did not record which files it wrote");
+    expectNoRecoveryField(result.stdout);
+  });
+
+  it("T9: an older image writes no journal: staging is removed, docker-compose.yml moved aside, the folder put back, and the copy released (redesign r5)", () => {
+    const { targetDir, stateRoot, environment, before } = privateStateFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      FAKE_ENGINE_EXIT: "137",
+      FAKE_ENGINE_LEAVES: JSON.stringify({
+        "docker-compose.yml": "services: {}\n",
+        ".orbit-install-staging.test/x": "half-written staging file\n",
+      }),
+    });
+    expect(result.status).toBe(1);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+    const kept = expectMovedAside(result, targetDir, "docker-compose.yml", "services: {}\n");
+    expectFolderPutBack(result, targetDir, before);
+    expect(existsSync(join(dirname(dirname(kept)), "originals"))).toBe(false);
+    expect(filesNamed(stateRoot, [".env-orbit", "docker-compose.yml"])).toEqual([]);
+    // Redesign r3 U6, in r4 N11's wording: the missing journal is named.
+    expect(result.stderr).toContain("did not record which files it wrote");
+    expectNoRecoveryField(result.stdout);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Redesign r3 (U1-U7): the rollback states its rule for .env-orbit and
+// .orbit-secrets; with no journal and a failed `down` the folder is left as
+// committed; a person's file is never listed for deletion; the engine's own
+// scratch names are cleared; a missing journal is named. Written from the
+// specification alone, before the fix.
+// ---------------------------------------------------------------------------
+
+/**
+ * The canned committed engine's journal. Redesign r5 (section 2): full relative paths, a directory the engine owns whole
+ * with a trailing slash; it claims every file committedCanned leaves (section 9 lists the first four; scripts/installer-ui.sh
+ * is left too, as guarantee #5 needs it, so it is claimed too).
+ */
+const engineWritten = [".env-orbit", ".orbit-secrets/", "docker-compose.yml", "scripts/orbit-ops.sh", "scripts/installer-ui.sh"].join("\n");
+
+/**
+ * The committed canned engine: an `ok` fresh outcome, its journal unless `journal` is false, and docker-compose.yml and
+ * scripts/orbit-ops.sh left in the folder. A commit always carries the .env-orbit and installer UI helper the installer
+ * reads next (guarantee #5), so those, and docker-compose.yml, are taken from the real engine's committed tree.
+ */
+function committedCanned({ journal = true } = {}) {
+  const realTree = JSON.parse(readFileSync(emptyFolderCommit().FAKE_ENGINE_LEAVES.slice(1), "utf8"));
+  return {
+    FAKE_ENGINE_EXIT: "0",
+    FAKE_ENGINE_OUTCOME: "status=ok\nfresh=1\nprofile=standard\nmodel-pull=0\ndatabase-volume=\n",
+    ...(journal ? { FAKE_ENGINE_WRITTEN: engineWritten } : {}),
+    FAKE_ENGINE_LEAVES: JSON.stringify({
+      ".env-orbit": realTree[".env-orbit"],
+      "docker-compose.yml": realTree["docker-compose.yml"],
+      "scripts/installer-ui.sh": realTree["scripts/installer-ui.sh"],
+      "scripts/orbit-ops.sh": "#!/bin/sh\n",
+    }),
+  };
+}
+
+describe("install.sh: the rollback states its rule for .env-orbit and .orbit-secrets (redesign r3)", () => {
+  it("U1: a file added to .orbit-secrets while the engine ran is replaced with the folder, and the rule is stated", () => {
+    const { targetDir, stateRoot, environment, before } = privateStateFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      ...committedCanned(),
+      FAKE_ENGINE_PERSON_WRITES: JSON.stringify({ path: ".orbit-secrets/extra-secret", content: "added while the engine ran\n" }),
+      FAKE_COMPOSE_UP_FAIL: "1",
+    });
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=retry /u);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    // Redesign r4 (N10): the rule now lives in the closing "rolled back" line.
+    expect(result.stderr.split("\n").find((line) => line.includes("This install was rolled back"))).toContain("put back as a unit");
+    expectNoRecoveryField(result.stdout);
+    expect(result.stderr).toContain("This install was rolled back");
+    expect(filesNamed(stateRoot, ["extra-secret"])).toEqual([]);
+  });
+
+  it("U2: an empty folder had nothing to put back, so the rule is not stated", () => {
+    const result = runInstall(makeTarget(), { ...committedCanned(), FAKE_COMPOSE_UP_FAIL: "1" });
+    expect(result.status).toBe(1);
+    expect(result.stderr).not.toContain("put back exactly as they were");
+  });
+});
+
+describe("install.sh: the engine's own scratch names are cleared (redesign r3)", () => {
+  const scratchNames = [".env-orbit.migrating.ab12cd", ".env-orbit.installing.ab12cd", ".env-orbit.updating.ab12cd", ".orbit-engine.lock.stale-4242"];
+
+  it.each([["a pre-provisioned folder", true], ["an empty folder", false]])("U5: engine exits 137 leaving its scratch files in %s: the folder is put back and nothing is moved out", (_label, preprovisioned) => {
+    const fixture = privateStateFixture();
+    const { stateRoot, environment } = fixture;
+    const targetDir = preprovisioned ? fixture.targetDir : makeTarget();
+    const before = preprovisioned ? fixture.before : undefined;
+    const result = runInstall(targetDir, {
+      ...environment,
+      FAKE_ENGINE_EXIT: "137",
+      FAKE_ENGINE_WRITTEN: engineWritten,
+      FAKE_ENGINE_LEAVES: JSON.stringify(Object.fromEntries(scratchNames.map((name) => [name, "engine scratch\n"]))),
+    });
+    expect(result.status).toBe(1);
+    expectFolderPutBack(result, targetDir, before);
+    expect(filesNamed(stateRoot, scratchNames)).toEqual([]);
+    // Redesign r5: scratch names are removed, never moved, so no orbit-install-backups is made.
+    expect(existsSync(backupsDir(targetDir))).toBe(false);
+    expect(result.stderr).not.toContain("moved, not deleted");
+    expect(result.stderr).toContain("This install was rolled back");
+    expect(filesNamed(stateRoot, [".env-orbit"])).toEqual([]);
+  });
+});
+
+describe("install.sh: the rollback names a missing journal (redesign r3)", () => {
+  it("U6: no journal and a failed start: docker-compose.yml is moved out, and the output says the engine did not record which files it wrote", () => {
+    const { targetDir, stateRoot, environment, before } = privateStateFixture();
+    const result = runInstall(targetDir, { ...environment, ...committedCanned({ journal: false }), FAKE_COMPOSE_UP_FAIL: "1" });
+    expect(result.status).toBe(1);
+    expectFolderPutBack(result, targetDir, before);
+    // Redesign r5: moved into <folder>/orbit-install-backups/<stamp>/moved, never under the state root.
+    const kept = filesNamed(backupsDir(targetDir), ["docker-compose.yml"]);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toMatch(/\/orbit-install-backups\/\d{8}T\d{6}Z(-[2-9])?\/moved\/docker-compose\.yml$/u);
+    expect(filesNamed(stateRoot, ["docker-compose.yml"])).toEqual([]);
+    expect(result.stderr).toContain("did not record which files it wrote");
+    expectNoRecoveryField(result.stdout);
+    expect(result.stderr).toContain("so everything new was moved, not deleted");
+    expect(result.stderr).toContain(dirname(kept[0]));
+    expect(result.stderr).not.toContain("Delete that directory");
+    expect(result.stderr).not.toContain("Files this install did not write");
+  });
+
+  it("U7: with a journal the line names files this install did not write, moved, not deleted", () => {
+    const { targetDir, environment } = privateStateFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      ...committedCanned(),
+      FAKE_ENGINE_PERSON_WRITES: JSON.stringify({ path: "notes.txt", content: personNotes }),
+      FAKE_COMPOSE_UP_FAIL: "1",
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Files this install did not write were moved, not deleted");
+    expect(result.stderr).not.toContain("did not say which files");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Redesign r5 (.agents/reviews/v0.3.1-mr1074/redesign-r5.md, #1456): no state
+// between runs. The start record (originals/), the files moved aside (moved/)
+// and, when the containers could not be stopped, the files the engine wrote
+// (engine/) live in <folder>/orbit-install-backups/<stamp>/; nothing is
+// written under HOME, XDG_STATE_HOME or TMPDIR, and nothing is ever deleted
+// that the engine's journal does not claim. B1-B26 (section 9), written from
+// the design alone, before the fix.
+// ---------------------------------------------------------------------------
+
+const backupsName = "orbit-install-backups";
+/** "Stamp": the run's UTC start time to the second, `-2`..`-9` appended on a collision. */
+const stampPattern = /^\d{8}T\d{6}Z(-[2-9])?$/u;
+const recoveryPrefix = "recovery-command: ";
+/**
+ * The one command after a failed `down` (sections 5 and 13.1): run from the dated folder's engine/, then this attempt's
+ * volumes by exact name on the same line (absent when the attempt created none, or the listing failed).
+ */
+const r5DownCommand =
+  /^cd \S.*\/orbit-install-backups\/\d{8}T\d{6}Z(-[2-9])?\/engine && docker compose --project-name \S+ --env-file \.env-orbit down --remove-orphans( && docker volume rm -- \S+( \S+)*)?$/u;
+const volumesPart = " && docker volume rm -- ";
+/** The stderr line after a down-failed command that names no volume (section 13.1). */
+const noVolumesLine = "If the next install names a volume this install left, remove that volume by the name it prints.";
+/** Closing lines (section 13.2): a planned failure, and an interrupt or unplanned exit. */
+const failClosing = "Fix the cause, then install again.";
+const interruptClosing = "You can install again.";
+/** Never printed on any path ("moved, not deleted" is allowed and expected). */
+const forbiddenWords = [
+  "rm -rf",
+  "cp -a",
+  "rm -r",
+  "volume prune",
+  "Delete that",
+  "delete it",
+  "move out",
+  "Move these",
+  "or delete",
+  "Install again to finish",
+  "recovery record",
+  "Clear what is named above",
+];
+
+/** The recovery-command contract (addendum): one plain stdout line carrying the command, just before the terminal event, which ends ` recovery=command`. */
+function expectRecoveryCommand(result, command, action) {
+  const out = result.stdout.split("\n");
+  const found = out.filter((line) => line.startsWith(recoveryPrefix));
+  expect(found).toHaveLength(1);
+  expect(found[0].slice(recoveryPrefix.length)).toBe(command);
+  const terminal = terminalFailure(result.stdout);
+  expect(terminal).toBeDefined();
+  expect(out[out.lastIndexOf(terminal) - 1]).toBe(found[0]);
+  expect(terminal.endsWith(" recovery=command")).toBe(true);
+  expect(terminal).toMatch(new RegExp(` action=${action} `, "u"));
+}
+
+/** No recovery command offered: no `recovery-command:` line and no `recovery=` on any event. */
+function expectNoRecoveryField(stdout) {
+  expect(stdout.split("\n").filter((line) => line.startsWith(recoveryPrefix))).toEqual([]);
+  expect(eventLines(stdout).filter((line) => line.includes("recovery="))).toEqual([]);
+}
+
+/** "No command": none on stderr, no `recovery-command:` line, no `recovery=` on any event. */
+function expectNoCommand(result) {
+  expect(recoveryCommands(result.stderr)).toEqual([]);
+  expectNoRecoveryField(result.stdout);
+}
+
+function expectNoForbiddenWords(stderr) {
+  for (const word of forbiddenWords) expect(stderr, `stderr says "${word}"`).not.toContain(word);
+}
+
+function backupsDir(targetDir) {
+  return join(targetDir, backupsName);
+}
+
+/** Sorted names under <target>/orbit-install-backups; [] when the directory is absent. */
+function backups(targetDir) {
+  return existsSync(backupsDir(targetDir)) ? readdirSync(backupsDir(targetDir)).sort() : [];
+}
+
+function modeOf(path) {
+  return statSync(path).mode & 0o777;
+}
+
+/** The one dated folder this run made (every name not in `earlier`), as a path. */
+function onlyStamp(targetDir, earlier = []) {
+  const made = backups(targetDir).filter((name) => !earlier.includes(name));
+  expect(made).toHaveLength(1);
+  expect(made[0]).toMatch(stampPattern);
+  return join(backupsDir(targetDir), made[0]);
+}
+
+/** The folder's own tree, leaving out orbit-install-backups/. */
+function ownTree(targetDir) {
+  return Object.fromEntries(Object.entries(treeSnapshot(targetDir)).filter(([path]) => path !== `${backupsName}/` && !path.startsWith(`${backupsName}/`)));
+}
+
+/** The start record's two entries in a treeSnapshot: .env-orbit and everything under .orbit-secrets. */
+function originalsIn(snapshot) {
+  return Object.fromEntries(Object.entries(snapshot).filter(([path]) => path === ".env-orbit" || path.startsWith(".orbit-secrets/")));
+}
+
+function closingLine(stderr) {
+  return stderr.split("\n").find((line) => line.includes("This install was rolled back"));
+}
+
+/** A UTC stamp for `ms`, as `date -u +%Y%m%dT%H%M%SZ` prints it. */
+function stampAt(ms) {
+  return new Date(ms).toISOString().replace(/[-:]/gu, "").replace(/\.\d{3}Z$/u, "Z");
+}
+
+const personNotesWrite = { FAKE_ENGINE_PERSON_WRITES: JSON.stringify({ path: "notes.txt", content: personNotes }) };
+
+/** B11's knobs: the committed canned engine, the person's notes.txt, then `up` and `down` both fail. */
+function r5DownFailedKnobs({ journal = true } = {}) {
+  return { ...committedCanned({ journal }), ...personNotesWrite, FAKE_COMPOSE_UP_FAIL: "1", FAKE_COMPOSE_DOWN_FAIL: "1" };
+}
+
+/** Runs a printed command with bash from a scratch directory, through the paste fake and the strict Compose fake. */
+function runPasted(command, stateDir) {
+  const scratch = scratchDir("elsewhere");
+  const logs = scratchDir("pasted-log");
+  const ran = failOnProcessDeadline(
+    spawnSync("bash", ["-c", command], {
+      cwd: scratch,
+      env: { PATH: `${makePasteBin()}:${process.env.PATH}`, HOME: logs, FAKE_STATE_DIR: stateDir, FAKE_COMPOSE_STRICT: "1", FAKE_CALL_LOG: join(logs, "calls.log") },
+      encoding: "utf8",
+      ...processGuard(),
+    }),
+    { label: "pasted recovery command" },
+  );
+  const strict = readOptional(join(stateDir, "strict-log")).split("\n").filter(Boolean);
+  return { ran, scratch, loaded: strict.length > 0 ? JSON.parse(strict.at(-1)) : undefined };
+}
+
+/** No copy of the folder's files under the state root, the home's .local or TMPDIR. */
+function expectNothingPrivate({ stateRoot, home, tmp }) {
+  for (const root of [stateRoot, join(home, ".local"), tmp]) expect(filesNamed(root, [".env-orbit", ".orbit-secrets"]), root).toEqual([]);
+}
+
+describe("install.sh: a complete rollback, with backups inside the folder (redesign r5)", () => {
+  it("B1: nothing of the person's: the folder as found, no orbit-install-backups, nothing under the state root, home or TMPDIR, and the same after a success", () => {
+    const { targetDir, environment, before, stateRoot, home, tmp } = privateStateFixture();
+    const result = runInstall(targetDir, { ...environment, FAKE_COMPOSE_UP_FAIL: "1" });
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=retry /u);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(backups(targetDir)).toEqual([]);
+    expect(existsSync(backupsDir(targetDir))).toBe(false);
+    expectNothingPrivate({ stateRoot, home, tmp });
+    const closing = closingLine(result.stderr);
+    expect(closing).toBeDefined();
+    expect(closing).toContain("put back as a unit");
+    expect(closing.endsWith(failClosing)).toBe(true);
+    expectNoForbiddenWords(result.stderr);
+    expectNoCommand(result);
+
+    const fresh = privateStateFixture();
+    const succeeded = runInstall(fresh.targetDir, fresh.environment);
+    expect(succeeded.status).toBe(0);
+    expect(succeeded.stdout).toContain("Orbit is ready.");
+    expect(backups(fresh.targetDir)).toEqual([]);
+    expectNothingPrivate(fresh);
+  });
+
+  it("B2 (and B10's copy modes): while the run is in flight the copy is in orbit-install-backups/<stamp>/originals, every directory 0700, the secret 0600, and none in the state root or TMPDIR", () => {
+    const { targetDir, stateDir, stateRoot, tmp, environment } = privateStateFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      FAKE_SNAPSHOT_ROOTS: JSON.stringify({ tmp, xdg: stateRoot, target: targetDir }),
+      FAKE_COMPOSE_UP_FAIL: "1",
+    });
+    expect(result.status).toBe(1);
+    const during = JSON.parse(readFileSync(join(stateDir, "snapshot.json"), "utf8"));
+    const envCopies = during.target.filter((entry) => /\/orbit-install-backups\/\d{8}T\d{6}Z(-[2-9])?\/originals\/\.env-orbit$/u.test(entry.path));
+    expect(envCopies).toHaveLength(1);
+    const originals = dirname(envCopies[0].path);
+    expect(dirname(dirname(originals))).toBe(backupsDir(targetDir));
+    const secretCopy = during.target.find((entry) => entry.path === join(originals, ".orbit-secrets", "oidc-client-secret"));
+    expect(secretCopy).toBeDefined();
+    expect(secretCopy.mode).toBe("600");
+    for (const directory of [backupsDir(targetDir), dirname(originals), originals, join(originals, ".orbit-secrets")]) {
+      expect(during.target.find((entry) => entry.path === directory)?.mode, directory).toBe("700");
+    }
+    expect(during.xdg.filter((entry) => entry.name === ".env-orbit")).toEqual([]);
+    expect(during.tmp.filter((entry) => entry.name === ".env-orbit")).toEqual([]);
+  });
+
+  it("B18: verification is real: an .env-orbit overwritten during `compose up` is put back with the original bytes, and the copy released", () => {
+    const { targetDir, environment, before } = privateStateFixture();
+    const original = readFileSync(join(targetDir, ".env-orbit"));
+    const result = runInstall(targetDir, {
+      ...environment,
+      FAKE_UP_ADDS_FILE: JSON.stringify({ path: join(targetDir, ".env-orbit"), content: "APP_URL=https://overwritten-during-compose-up.internal\n" }),
+      FAKE_COMPOSE_UP_FAIL: "1",
+    });
+    expect(result.status).toBe(1);
+    expect(readFileSync(join(targetDir, ".env-orbit"))).toEqual(original);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(backups(targetDir)).toEqual([]);
+  });
+
+  it("B19: nothing is written under HOME, XDG_STATE_HOME or TMPDIR, whatever the run", () => {
+    const home = scratchDir("b19-home");
+    const tmp = scratchDir("b19-tmp");
+    const xdg = scratchDir("b19-xdg");
+    const stateRoot = join(xdg, "orbit");
+    const roots = { HOME: home, TMPDIR: tmp, XDG_STATE_HOME: xdg };
+    const expectNothingUnder = (label) => {
+      expect(existsSync(stateRoot), `${label}: ${stateRoot}`).toBe(false);
+      for (const root of [home, tmp]) expect(filesNamed(root, [".env-orbit", ".orbit-secrets", "notes.txt"]), `${label}: ${root}`).toEqual([]);
+    };
+    try {
+      const b3 = recoveryFixture();
+      expect(runInstall(b3.targetDir, { ...b3.environment, ...roots, ...committedCanned(), ...personNotesWrite, FAKE_COMPOSE_UP_FAIL: "1" }).status).toBe(1);
+      expectNothingUnder("B3's run");
+      const b11 = recoveryFixture();
+      expect(runInstall(b11.targetDir, { ...b11.environment, ...roots, ...r5DownFailedKnobs() }).status).toBe(1);
+      expectNothingUnder("B11's run");
+      expect(runInstall(makeTarget(), { ...roots, ...committedCanned(), ...personNotesWrite, FAKE_COMPOSE_UP_FAIL: "1" }).status).toBe(1);
+      expectNothingUnder("B6's run");
+      const success = recoveryFixture();
+      expect(runInstall(success.targetDir, { ...success.environment, ...roots }).status).toBe(0);
+      expectNothingUnder("a success");
+    } finally {
+      // Only the roots this test made.
+      for (const root of [home, tmp, xdg]) rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("B26: the rollback never reads, runs, moves or deletes anything in an earlier run's folder; its own folder is a sibling", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const old = join(backupsDir(targetDir), "20200101T000000Z");
+    mkdirSync(join(old, "moved"), { recursive: true, mode: 0o700 });
+    chmodSync(backupsDir(targetDir), 0o700);
+    writeFileSync(join(old, "moved", "secret.txt"), "PLANTED");
+    writeFileSync(join(old, "moved", "run-me.sh"), "echo EXECUTED\n", { mode: 0o755 });
+    chmodSync(join(old, "moved", "run-me.sh"), 0o755);
+    const oldBefore = treeSnapshot(old);
+    const result = runInstall(targetDir, { ...environment, ...committedCanned({ journal: false }), FAKE_COMPOSE_UP_FAIL: "1" });
+    expect(result.status).toBe(1);
+    expect(treeSnapshot(old)).toEqual(oldBefore);
+    expect(modeOf(join(old, "moved", "run-me.sh"))).toBe(0o755);
+    for (const text of [result.stdout, result.stderr, result.calls]) {
+      expect(text).not.toContain("PLANTED");
+      expect(text).not.toContain("EXECUTED");
+    }
+    const stamp = onlyStamp(targetDir, ["20200101T000000Z"]);
+    expect(dirname(stamp)).toBe(backupsDir(targetDir));
+    expect(existsSync(join(stamp, "moved", "docker-compose.yml"))).toBe(true);
+  });
+
+  it("N10 (re-homed): the closing line carries the unit clause when there was something to put back, and only then", () => {
+    const { targetDir, environment } = privateStateFixture();
+    const preprovisioned = runInstall(targetDir, { ...environment, ...committedCanned(), FAKE_COMPOSE_UP_FAIL: "1" });
+    expect(preprovisioned.status).toBe(1);
+    const closing = preprovisioned.stderr.split("\n").find((line) => line.includes("This install was rolled back"));
+    expect(closing).toBeDefined();
+    expect(closing).toContain("put back as a unit");
+    expectNoRecoveryField(preprovisioned.stdout);
+
+    const empty = runInstall(makeTarget(), { ...committedCanned(), HOME: scratchDir("home"), XDG_STATE_HOME: scratchDir("xdg"), FAKE_COMPOSE_UP_FAIL: "1" });
+    expect(empty.status).toBe(1);
+    const emptyClosing = empty.stderr.split("\n").find((line) => line.includes("This install was rolled back"));
+    expect(emptyClosing).toBeDefined();
+    expect(emptyClosing).not.toContain("as a unit");
+    expectNoRecoveryField(empty.stdout);
+  });
+});
+
+describe("install.sh: the closing lines say what to do about the obstacle, and the docs match (round 6, #1456)", () => {
+  // R6-1, R6-2, R6-4 and R6-5 make a directory read-only; give it back so the scratch directories can be removed.
+  const lockedDirectories = [];
+  afterEach(() => {
+    for (const directory of lockedDirectories.splice(0)) {
+      try {
+        chmodSync(directory, 0o700);
+      } catch {
+        // already gone
+      }
+    }
+  });
+
+  /** The engine leaves its committed tree with scripts/ read-only, so the rollback cannot remove it. */
+  function lockedScriptsKnobs(targetDir) {
+    const canned = committedCanned();
+    const leaves = { ...JSON.parse(canned.FAKE_ENGINE_LEAVES), "scripts/": { mode: 0o500 } };
+    lockedDirectories.push(join(targetDir, "scripts"));
+    return { ...canned, FAKE_ENGINE_LEAVES: JSON.stringify(leaves), FAKE_COMPOSE_UP_FAIL: "1" };
+  }
+
+  const stderrLines = (stderr) => stderr.split("\n");
+
+  it.skipIf(process.geteuid?.() === 0)("R6-1: the folder failed and volumes could not be removed: each volume is named, then `docker volume rm --` alone on a line, `abort`, no recovery field", () => {
+    const { targetDir, environment, preexistingVolumes } = recoveryFixture();
+    const result = runInstall(targetDir, { ...environment, ...lockedScriptsKnobs(targetDir), FAKE_VOLUME_RM_FAIL: "1" });
+    lockedDirectories.push(...directoriesNamed(targetDir, "scripts"));
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=abort /u);
+    expectNoRecoveryField(result.stdout);
+    const lines = stderrLines(result.stderr);
+    expect(result.stderr).toContain("Could not remove");
+    expect(result.stderr).toContain(join(targetDir, "scripts"));
+    for (const volume of allThreeVolumes) expect(lines, volume).toContain(`Orbit installer: The volume ${volume} could not be removed.`);
+    for (const volume of preexistingVolumes) expect(result.stderr).not.toContain(`The volume ${volume} could not be removed`);
+    const intro = lines.indexOf("Orbit installer: To remove the volumes, run this in a terminal:");
+    expect(intro).toBeGreaterThanOrEqual(0);
+    const command = lines[intro + 1];
+    expect(command).toMatch(/^docker volume rm -- /u);
+    expect(command.slice("docker volume rm -- ".length).split(" ").sort()).toEqual(allThreeVolumes);
+    for (const volume of preexistingVolumes) expect(command).not.toContain(volume);
+    expect(lines.filter((line) => line.startsWith("docker volume rm -- "))).toEqual([command]);
+    expectNoForbiddenWords(result.stderr);
+  });
+
+  it.skipIf(process.geteuid?.() === 0)("R6-2: the folder failed and the volumes could not be listed: the listing line is printed, and the folder obstacle", () => {
+    const targetDir = makeTarget();
+    const home = scratchDir("home");
+    const xdg = scratchDir("xdg");
+    const result = runInstall(targetDir, { ...lockedScriptsKnobs(targetDir), HOME: home, XDG_STATE_HOME: xdg, FAKE_VOLUME_LS_FAIL_AFTER_UP: "1" });
+    lockedDirectories.push(...directoriesNamed(targetDir, "scripts"));
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=abort /u);
+    expectNoRecoveryField(result.stdout);
+    expect(result.stderr).toContain("Could not remove");
+    expect(result.stderr).toContain(join(targetDir, "scripts"));
+    expect(stderrLines(result.stderr)).toContain(
+      "Orbit installer: The volumes this install created could not be listed. If the next install names a volume this install left, remove that volume by the name it prints.",
+    );
+    expect(result.stderr).toContain("could not be listed");
+    expect(stderrLines(result.stderr).filter((line) => line.startsWith("docker volume rm -- "))).toEqual([]);
+    expectNoForbiddenWords(result.stderr);
+  });
+
+  it.skipIf(process.geteuid?.() === 0)("R6-3: an original cannot be put back: one line says to replace the live path with the copy, and nothing says to clear anything", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const canned = committedCanned();
+    const leaves = {
+      ...JSON.parse(canned.FAKE_ENGINE_LEAVES),
+      ".orbit-secrets/locked/": { mode: 0o500 },
+      ".orbit-secrets/locked/x": "a file the rollback cannot remove\n",
+    };
+    lockedDirectories.push(join(targetDir, ".orbit-secrets", "locked"));
+    const result = runInstall(targetDir, { ...environment, ...canned, FAKE_ENGINE_LEAVES: JSON.stringify(leaves), FAKE_COMPOSE_UP_FAIL: "1" });
+    lockedDirectories.push(...directoriesNamed(targetDir, "locked"));
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=abort /u);
+    const stamp = onlyStamp(targetDir);
+    expect(stderrLines(result.stderr)).toContain(
+      `Orbit installer: Replace ${join(targetDir, ".orbit-secrets")} with the copy in ${join(stamp, "originals", ".orbit-secrets")}, then install again.`,
+    );
+    expect(result.stderr).not.toContain("Clear");
+    expect(result.stderr).not.toContain("Clear what is named above");
+    expectNoForbiddenWords(result.stderr);
+  });
+
+  it.skipIf(process.geteuid?.() === 0)("R6-4: nothing could be moved because the backups folder could not be made: the containers-and-volumes-removed line, `abort`, no `Clear`", () => {
+    // An empty folder; the engine leaves only the person's file and then the folder itself read-only, so orbit-install-backups/ cannot be made.
+    const targetDir = makeTarget();
+    lockedDirectories.push(targetDir);
+    const result = runInstall(targetDir, {
+      ...committedCanned(),
+      FAKE_ENGINE_LEAVES: JSON.stringify({ "notes.txt": personNotes, "/": { mode: 0o500 } }),
+      HOME: scratchDir("home"),
+      XDG_STATE_HOME: scratchDir("xdg"),
+      FAKE_COMPOSE_UP_FAIL: "1",
+    });
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=abort /u);
+    expectNoRecoveryField(result.stdout);
+    expect(result.stderr).toContain(backupsName);
+    expect(stderrLines(result.stderr)).toContain(
+      "Orbit installer: The containers and volumes were removed; the files this install wrote are still in the folder. Fix the cause named above, then install again.",
+    );
+    expect(result.stderr).not.toContain("Clear");
+    expectNoForbiddenWords(result.stderr);
+  });
+
+  it.skipIf(process.geteuid?.() === 0)("R6-5: an engine entry cannot be removed and the originals were put back: the clear line, with the copy sentence because the copy line is printed", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const result = runInstall(targetDir, { ...environment, ...lockedScriptsKnobs(targetDir) });
+    lockedDirectories.push(...directoriesNamed(targetDir, "scripts"));
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=abort /u);
+    const lines = stderrLines(result.stderr);
+    const stamp = onlyStamp(targetDir);
+    const copyLine = lines.find((line) => line.includes("A copy of this folder's original files is kept in"));
+    expect(copyLine).toBeDefined();
+    expect(copyLine).toContain(join(stamp, "originals"));
+    expect(lines).toContain(
+      "Orbit installer: Clear the entries this install could not remove, named above, then install again. The copy of your original files can stay where it is.",
+    );
+    expect(result.stderr).not.toContain("Clear what is named above");
+    expectNoForbiddenWords(result.stderr);
+  });
+
+  it("R6-6: the docs state the unit rule and which folders are untouched", () => {
+    const read = (name) => readFileSync(join(repositoryRoot, "docs", name), "utf8");
+    const installing = read("installing.md");
+    const events = read("engine-events.md");
+    const guarantees = read("installer-guarantees.md");
+    expect(installing).toContain("put back whole from the copy");
+    expect(events).toContain("put back whole from the copy");
+    expect(installing).not.toContain("It never deletes a file it did not write");
+    for (const [name, text] of [["installing.md", installing], ["installer-guarantees.md", guarantees]]) {
+      expect(text, name).not.toContain("never reads, runs, moves or deletes anything in it");
+      expect(text, name).not.toContain("Nothing under `orbit-install-backups/` is read");
+      expect(text, name).toContain("earlier run");
+      expect(text, name).not.toContain("Clear what is named above");
+    }
+  });
+
+  it("R6-7: a failed start after the commit leaves an earlier run's folder byte-identical, releases this run's own originals, and keeps its moved files", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const old = join(backupsDir(targetDir), "20200101T000000Z");
+    mkdirSync(join(old, "moved"), { recursive: true, mode: 0o700 });
+    chmodSync(backupsDir(targetDir), 0o700);
+    writeFileSync(join(old, "moved", "earlier.txt"), "AN EARLIER RUN");
+    const oldBefore = treeSnapshot(old);
+    const result = runInstall(targetDir, { ...environment, ...committedCanned(), ...personNotesWrite, FAKE_COMPOSE_UP_FAIL: "1" });
+    expect(result.status).toBe(1);
+    expect(treeSnapshot(old)).toEqual(oldBefore);
+    const stamp = onlyStamp(targetDir, ["20200101T000000Z"]);
+    expect(existsSync(join(stamp, "originals"))).toBe(false);
+    expect(readOptional(join(stamp, "moved", "notes.txt"))).toBe(personNotes);
+  });
+
+  it("R6-8: a file the engine planted inside .orbit-secrets is gone after the rollback, the folder is byte-identical, and the closing line says it was put back as a unit", () => {
+    const { targetDir, environment, before } = privateStateFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      ...committedCanned(),
+      FAKE_ENGINE_PERSON_WRITES: JSON.stringify({ path: ".orbit-secrets/notes.txt", content: "planted after the commit\n" }),
+      FAKE_COMPOSE_UP_FAIL: "1",
+    });
+    expect(result.status).toBe(1);
+    expect(existsSync(join(targetDir, ".orbit-secrets", "notes.txt"))).toBe(false);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    const closing = result.stderr.split("\n").find((line) => line.includes("This install was rolled back"));
+    expect(closing).toBeDefined();
+    expect(closing).toContain("put back as a unit");
+  });
+
+  it.skipIf(process.geteuid?.() === 0)("R6-9: compose down fails and the backups folder cannot be made: the stop command is offered, no removed claim, the files-still-in-folder line, `abort`", () => {
+    const targetDir = makeTarget();
+    lockedDirectories.push(targetDir);
+    const result = runInstall(targetDir, {
+      ...committedCanned(),
+      // The engine's usual files too, so `compose up` runs and `down` can fail (R6-4's bare fixture never starts Docker).
+      FAKE_ENGINE_LEAVES: JSON.stringify({ ...JSON.parse(committedCanned().FAKE_ENGINE_LEAVES), "notes.txt": personNotes, "/": { mode: 0o500 } }),
+      HOME: scratchDir("home"),
+      XDG_STATE_HOME: scratchDir("xdg"),
+      FAKE_COMPOSE_UP_FAIL: "1",
+      FAKE_COMPOSE_DOWN_FAIL: "1",
+    });
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=abort /u);
+    expect(result.stderr).toContain("To stop the containers, run this in a terminal:");
+    expect(result.stderr).not.toContain("The containers and volumes were removed");
+    expect(stderrLines(result.stderr)).toContain(
+      "Orbit installer: The files this install wrote are still in the folder. Fix the cause named above, then install again.",
+    );
+    expectNoForbiddenWords(result.stderr);
+  });
+
+  it.skipIf(process.geteuid?.() === 0)("R6-10: an original cannot be put back and an engine entry cannot be removed: both lines, with the copy sentence", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const knobs = lockedScriptsKnobs(targetDir);
+    const leaves = {
+      ...JSON.parse(knobs.FAKE_ENGINE_LEAVES),
+      ".orbit-secrets/locked/": { mode: 0o500 },
+      ".orbit-secrets/locked/x": "a file the rollback cannot remove\n",
+    };
+    lockedDirectories.push(join(targetDir, ".orbit-secrets", "locked"));
+    const result = runInstall(targetDir, { ...environment, ...knobs, FAKE_ENGINE_LEAVES: JSON.stringify(leaves) });
+    lockedDirectories.push(...directoriesNamed(targetDir, "scripts"), ...directoriesNamed(targetDir, "locked"));
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=abort /u);
+    const stamp = onlyStamp(targetDir);
+    const lines = stderrLines(result.stderr);
+    expect(lines).toContain(
+      `Orbit installer: Replace ${join(targetDir, ".orbit-secrets")} with the copy in ${join(stamp, "originals", ".orbit-secrets")}, then install again.`,
+    );
+    expect(lines).toContain(
+      "Orbit installer: Clear the entries this install could not remove, named above, then install again. The copy of your original files can stay where it is.",
+    );
+    expect(result.stderr).not.toContain("Clear what is named above");
+    expectNoForbiddenWords(result.stderr);
+  });
+});
+
+describe("install.sh: the journal lists files, and the person's files are moved, not deleted (redesign r5)", () => {
+  it("B3: the person's top-level file is moved into <stamp>/moved, the folder put back, the copy released, and the output says where", () => {
+    const { targetDir, environment, before } = recoveryFixture();
+    const result = runInstall(targetDir, { ...environment, ...committedCanned(), ...personNotesWrite, FAKE_COMPOSE_UP_FAIL: "1" });
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=retry /u);
+    const stamp = onlyStamp(targetDir);
+    expect(readOptional(join(stamp, "moved", "notes.txt"))).toBe(personNotes);
+    expect(existsSync(join(stamp, "originals"))).toBe(false);
+    expect(existsSync(join(stamp, "engine"))).toBe(false);
+    expect(targetEntries(targetDir)).toEqual([".env-orbit", ".orbit-secrets", backupsName]);
+    expect(ownTree(targetDir)).toEqual(before);
+    expect(result.stderr).toContain("moved, not deleted");
+    expect(result.stderr).toContain(join(stamp, "moved"));
+    expect(closingLine(result.stderr)).toContain("apart from the files moved out and named above");
+    expect(closingLine(result.stderr).endsWith(failClosing)).toBe(true);
+    expectNoForbiddenWords(result.stderr);
+  });
+
+  it("B4: a file the person put inside a directory the engine created is moved with its path kept; the engine's own files are removed (O-S1-FR3)", () => {
+    const { targetDir, environment, before } = recoveryFixture();
+    const helper = "#!/bin/sh\necho the person's own helper\n";
+    const result = runInstall(targetDir, {
+      ...environment,
+      ...committedCanned(),
+      FAKE_UP_ADDS_FILE: JSON.stringify({ path: join(targetDir, "scripts", "my-helper.sh"), content: helper }),
+      FAKE_COMPOSE_UP_FAIL: "1",
+    });
+    expect(result.status).toBe(1);
+    const stamp = onlyStamp(targetDir);
+    expect(readOptional(join(stamp, "moved", "scripts", "my-helper.sh"))).toBe(helper);
+    expect(readdirSync(join(stamp, "moved", "scripts"))).toEqual(["my-helper.sh"]);
+    expect(existsSync(join(targetDir, "scripts"))).toBe(false);
+    expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(false);
+    expect(modeOf(join(stamp, "moved"))).toBe(0o700);
+    expect(modeOf(join(stamp, "moved", "scripts"))).toBe(0o700);
+    expect(ownTree(targetDir)).toEqual(before);
+  });
+
+  it("B5: an older engine's top-level journal is not trusted: everything new is moved, not deleted, and the output says why", () => {
+    const { targetDir, environment, before } = recoveryFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      ...committedCanned(),
+      FAKE_ENGINE_WRITTEN: [".env-orbit", ".orbit-secrets", "docker-compose.yml", "scripts"].join("\n"),
+      FAKE_UP_ADDS_FILE: JSON.stringify({ path: join(targetDir, "scripts", "my-helper.sh"), content: "#!/bin/sh\n" }),
+      FAKE_COMPOSE_UP_FAIL: "1",
+    });
+    expect(result.status).toBe(1);
+    const stamp = onlyStamp(targetDir);
+    expect(existsSync(join(stamp, "moved", "scripts", "orbit-ops.sh"))).toBe(true);
+    expect(existsSync(join(stamp, "moved", "docker-compose.yml"))).toBe(true);
+    expect(result.stderr).toContain("did not record which files it wrote");
+    expect(originalsIn(treeSnapshot(targetDir))).toEqual(originalsIn(before));
+    expect(filesNamed(join(targetDir, "scripts"), ["orbit-ops.sh"])).toEqual([]);
+  });
+
+  it("B6: an empty folder: the person's file is moved, the folder holds only orbit-install-backups, and the next run installs without touching it", () => {
+    const targetDir = makeTarget();
+    const result = runInstall(targetDir, { ...committedCanned(), ...personNotesWrite, FAKE_COMPOSE_UP_FAIL: "1" });
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=retry /u);
+    expect(readdirSync(targetDir)).toEqual([backupsName]);
+    const stamp = onlyStamp(targetDir);
+    expect(readOptional(join(stamp, "moved", "notes.txt"))).toBe(personNotes);
+    expect(existsSync(join(stamp, "originals"))).toBe(false);
+
+    const kept = treeSnapshot(backupsDir(targetDir));
+    const rerun = runInstall(targetDir, committedCanned());
+    expect(rerun.status).toBe(0);
+    expect(rerun.stdout).toContain("Orbit is ready.");
+    expect(rerun.engineRuns).toHaveLength(1);
+    expect(treeSnapshot(backupsDir(targetDir))).toEqual(kept);
+  });
+
+  it("B7: an empty folder with nothing to move is empty again, and no orbit-install-backups was made", () => {
+    const targetDir = makeTarget();
+    const result = runInstall(targetDir, { ...committedCanned(), FAKE_COMPOSE_UP_FAIL: "1" });
+    expect(result.status).toBe(1);
+    expect(readdirSync(targetDir)).toEqual([]);
+    expect(existsSync(backupsDir(targetDir))).toBe(false);
+  });
+
+  it("B8: an earlier run's folder is ignored and untouched, by a success and by a failure", () => {
+    const plant = (targetDir) => {
+      const old = join(backupsDir(targetDir), "20200101T000000Z");
+      mkdirSync(join(old, "moved"), { recursive: true, mode: 0o700 });
+      chmodSync(backupsDir(targetDir), 0o700);
+      writeFileSync(join(old, "moved", "old.txt"), "from an earlier run\n");
+      return { old, oldBefore: treeSnapshot(old) };
+    };
+
+    const succeeding = recoveryFixture();
+    const kept = plant(succeeding.targetDir);
+    const success = runInstall(succeeding.targetDir, succeeding.environment);
+    expect(success.status).toBe(0);
+    expect(treeSnapshot(kept.old)).toEqual(kept.oldBefore);
+    expect(backups(succeeding.targetDir)).toEqual(["20200101T000000Z"]);
+
+    const failing = recoveryFixture();
+    const keptToo = plant(failing.targetDir);
+    const failure = runInstall(failing.targetDir, { ...failing.environment, ...committedCanned(), ...personNotesWrite, FAKE_COMPOSE_UP_FAIL: "1" });
+    expect(failure.status).toBe(1);
+    expect(backups(failing.targetDir)).toHaveLength(2);
+    expect(treeSnapshot(keptToo.old)).toEqual(keptToo.oldBefore);
+    const stamp = onlyStamp(failing.targetDir, ["20200101T000000Z"]);
+    expect(readOptional(join(stamp, "moved", "notes.txt"))).toBe(personNotes);
+  });
+
+  it.each([["a symlink"], ["a dangling symlink"], ["a regular file"]])("B9: %s at orbit-install-backups is refused before anything changes", (kind) => {
+    const { targetDir, environment } = recoveryFixture();
+    const linkTarget = scratchDir("backups-link-target");
+    if (kind === "a symlink") symlinkSync(linkTarget, backupsDir(targetDir));
+    else if (kind === "a dangling symlink") symlinkSync(join(linkTarget, "missing"), backupsDir(targetDir));
+    else writeFileSync(backupsDir(targetDir), "");
+    // lstat-based, so a dangling link can be recorded too.
+    const state = () => {
+      const entry = lstatSync(backupsDir(targetDir));
+      return {
+        entries: targetEntries(targetDir),
+        envOrbit: `${modeOf(join(targetDir, ".env-orbit")).toString(8)}:${readFileSync(join(targetDir, ".env-orbit")).toString("base64")}`,
+        secrets: treeSnapshot(join(targetDir, ".orbit-secrets")),
+        secretsMode: modeOf(join(targetDir, ".orbit-secrets")),
+        backups: entry.isSymbolicLink() ? `link:${readlinkSync(backupsDir(targetDir))}` : `file:${readFileSync(backupsDir(targetDir)).toString("base64")}`,
+      };
+    };
+    const before = state();
+    const result = runInstall(targetDir, environment);
+    expect(result.status).toBe(1);
+    // Section 13.3: `fail_with failure abort` from snapshot_fresh_target, phase and component `host`.
+    expect(terminalFailure(result.stdout)).toMatch(/^phase=host component=host state=failed reason=failure action=abort /u);
+    expect(result.engineRuns).toHaveLength(0);
+    expect(result.calls.split("\n").filter((line) => /^docker compose /u.test(line) && !/^docker compose version\b/u.test(line))).toEqual([]);
+    expect(result.stderr).toContain(
+      `Orbit installer: ${backupsDir(targetDir)} is not a folder: the installer keeps its backups under that name and cannot use a file or a link there. Rename it, then install again. Nothing was changed.`,
+    );
+    expect(readdirSync(linkTarget)).toEqual([]);
+    expect(state()).toEqual(before);
+  });
+
+  it("B10: modes: the backups root is made 0700, the dated folder and moved/ 0700, and the person's file keeps its own 0644", () => {
+    const { targetDir, environment } = recoveryFixture();
+    mkdirSync(backupsDir(targetDir), { mode: 0o755 });
+    chmodSync(backupsDir(targetDir), 0o755);
+    const result = runInstall(targetDir, {
+      ...environment,
+      ...committedCanned(),
+      FAKE_ENGINE_PERSON_WRITES: JSON.stringify({ path: "notes.txt", content: personNotes, mode: 0o644 }),
+      FAKE_COMPOSE_UP_FAIL: "1",
+    });
+    expect(result.status).toBe(1);
+    const stamp = onlyStamp(targetDir);
+    expect(modeOf(backupsDir(targetDir))).toBe(0o700);
+    expect(modeOf(stamp)).toBe(0o700);
+    expect(modeOf(join(stamp, "moved"))).toBe(0o700);
+    expect(modeOf(join(stamp, "moved", "notes.txt"))).toBe(0o644);
+  });
+
+  it("B20: an unwritable home changes nothing: an empty folder's person's file is still moved into the folder's backups", () => {
+    const targetDir = makeTarget();
+    const home = unwritableHome();
+    const result = runInstall(targetDir, { ...committedCanned(), ...home, ...personNotesWrite, FAKE_COMPOSE_UP_FAIL: "1" });
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=retry /u);
+    expect(readdirSync(targetDir)).toEqual([backupsName]);
+    expect(readOptional(join(onlyStamp(targetDir), "moved", "notes.txt"))).toBe(personNotes);
+    expect(readdirSync(dirname(home.HOME))).toEqual([]);
+  });
+
+  it("B21: dated folder names never collide: an existing name is skipped, never reused or emptied; past -9 the install is refused at the start", () => {
+    const premake = (targetDir, suffixes) => {
+      mkdirSync(backupsDir(targetDir), { mode: 0o700 });
+      chmodSync(backupsDir(targetDir), 0o700);
+      const now = Math.floor(Date.now() / 1000) * 1000;
+      const names = [];
+      for (let second = 0; second <= 180; second += 1) {
+        for (const suffix of suffixes) {
+          const name = `${stampAt(now + second * 1000)}${suffix}`;
+          mkdirSync(join(backupsDir(targetDir), name), { mode: 0o700 });
+          names.push(name);
+        }
+      }
+      return names;
+    };
+    const failingKnobs = { ...committedCanned(), ...personNotesWrite, FAKE_COMPOSE_UP_FAIL: "1" };
+
+    // (a) every plain stamp taken: the run uses <stamp>-2.
+    const first = recoveryFixture();
+    const plain = premake(first.targetDir, [""]);
+    expect(runInstall(first.targetDir, { ...first.environment, ...failingKnobs }).status).toBe(1);
+    const used = onlyStamp(first.targetDir, plain);
+    expect(basename(used)).toMatch(/^\d{8}T\d{6}Z-2$/u);
+    for (const name of plain) expect(readdirSync(join(backupsDir(first.targetDir), name)), name).toEqual([]);
+    expect(readOptional(join(used, "moved", "notes.txt"))).toBe(personNotes);
+
+    // (b) -2 through -9 taken too: refused before the engine, nothing changed.
+    const second = recoveryFixture();
+    premake(second.targetDir, ["", "-2", "-3", "-4", "-5", "-6", "-7", "-8", "-9"]);
+    const premade = treeSnapshot(second.targetDir);
+    const refused = runInstall(second.targetDir, { ...second.environment, ...failingKnobs });
+    expect(refused.status).toBe(1);
+    expect(terminalFailure(refused.stdout)).toMatch(/ action=abort /u);
+    expect(refused.engineRuns).toHaveLength(0);
+    expect(refused.stderr).toContain("Could not make a backup folder");
+    expect(treeSnapshot(second.targetDir)).toEqual(premade);
+
+    // (c) two failing runs, one after the other: two folders, each with its own file.
+    const third = recoveryFixture();
+    expect(runInstall(third.targetDir, { ...third.environment, ...failingKnobs }).status).toBe(1);
+    expect(runInstall(third.targetDir, { ...third.environment, ...failingKnobs }).status).toBe(1);
+    const names = backups(third.targetDir);
+    expect(names).toHaveLength(2);
+    expect(new Set(names).size).toBe(2);
+    for (const name of names) {
+      expect(name).toMatch(stampPattern);
+      expect(readOptional(join(backupsDir(third.targetDir), name, "moved", "notes.txt")), name).toBe(personNotes);
+    }
+  });
+});
+
+describe("install.sh: the containers could not be stopped (redesign r5)", () => {
+  it("B11: the folder is put back, the engine's files kept whole in <stamp>/engine, and one command, last and alone, run from there, `retry`", () => {
+    const { targetDir, stateDir, environment, before } = privateStateFixture();
+    const result = runInstall(targetDir, { ...environment, ...r5DownFailedKnobs() });
+    expect(result.status).toBe(1);
+    const offered = result.stdout.split("\n").filter((line) => line.startsWith(recoveryPrefix));
+    expect(offered).toHaveLength(1);
+    const command = offered[0].slice(recoveryPrefix.length);
+    expectRecoveryCommand(result, command, "retry");
+    expect(recoveryCommands(result.stderr).map((entry) => entry.command)).toEqual([command]);
+    expect(command).toMatch(r5DownCommand);
+    const lines = result.stderr.split("\n").filter((line) => line.trim() !== "");
+    expect(lines.at(-1)).toBe(command);
+    expect(lines.at(-2).endsWith("then install again:")).toBe(true);
+    expect(result.stderr).toContain("the containers could not be stopped");
+    expect(result.stderr).toContain("kept in");
+
+    expect(targetEntries(targetDir)).toEqual([".env-orbit", ".orbit-secrets", backupsName]);
+    expect(ownTree(targetDir)).toEqual(before);
+    const stamp = onlyStamp(targetDir);
+    expect(command).toContain(`/${basename(stamp)}/engine && `);
+    // Section 13.1: this attempt's volumes, by exact name, and no other.
+    expect(command).toContain(volumesPart);
+    expect(command.slice(command.indexOf(volumesPart) + volumesPart.length).split(" ").sort()).toEqual(allThreeVolumes);
+    expect(result.stderr).not.toContain(noVolumesLine);
+    const engine = join(stamp, "engine");
+    for (const path of ["docker-compose.yml", "scripts/orbit-ops.sh", ".env-orbit"]) expect(existsSync(join(engine, path)), path).toBe(true);
+    expect(readOptional(join(engine, ".env-orbit"))).toContain("COMPOSE_PROJECT_NAME=");
+    expect(lstatSync(join(engine, ".orbit-secrets")).isDirectory()).toBe(true);
+    expect(readOptional(join(stamp, "moved", "notes.txt"))).toBe(personNotes);
+    expect(existsSync(join(stamp, "originals"))).toBe(false);
+    expectNoForbiddenWords(result.stderr);
+    expect(volumesLeftBehind(stateDir)).not.toEqual([]);
+  });
+
+  /** B11 with the strict Compose fake, then the one command run as printed from elsewhere (B12). */
+  function downFailedThenPasted() {
+    const fixture = privateStateFixture();
+    const environment = { ...fixture.environment, ...r5DownFailedKnobs(), FAKE_COMPOSE_STRICT: "1" };
+    const failed = runInstall(fixture.targetDir, environment);
+    expect(failed.status).toBe(1);
+    const commands = recoveryCommands(failed.stderr).map((entry) => entry.command);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatch(r5DownCommand);
+    const stamp = onlyStamp(fixture.targetDir);
+    expect(containersLeft(fixture.stateDir)).not.toEqual([]);
+    expect(volumesLeftBehind(fixture.stateDir)).not.toEqual([]);
+    return { ...fixture, environment, failed, stamp, command: commands[0], pasted: runPasted(commands[0], fixture.stateDir) };
+  }
+
+  it("B12: the printed command works from another directory: it finds the compose file in engine/ and stops the containers", () => {
+    const { stateDir, stamp, command, pasted } = downFailedThenPasted();
+    expect(`${command} -> ${pasted.ran.status} ${pasted.ran.stderr}`).toMatch(/-> 0 /u);
+    expect(pasted.loaded?.found).toBe(true);
+    expect(pasted.loaded?.cwd.endsWith("/engine")).toBe(true);
+    expect(pasted.loaded?.cwd).toBe(realPath(join(stamp, "engine")));
+    expect(readdirSync(pasted.scratch)).toEqual([]);
+    expect(containersLeft(stateDir)).toEqual([]);
+    // Section 13.1: the same command removed this attempt's volumes once the containers were gone.
+    expect(volumesLeftBehind(stateDir)).toEqual([]);
+  });
+
+  it("B13: once the command has run, installing again is a fresh install that leaves the earlier dated folder as it was", () => {
+    const { targetDir, environment, stamp, pasted } = downFailedThenPasted();
+    expect(pasted.ran.status).toBe(0);
+    const kept = treeSnapshot(stamp);
+    const rerunEnvironment = Object.fromEntries(Object.entries(environment).filter(([key]) => !["FAKE_COMPOSE_UP_FAIL", "FAKE_COMPOSE_DOWN_FAIL"].includes(key)));
+    const rerun = runInstall(targetDir, rerunEnvironment);
+    expect(rerun.status).toBe(0);
+    expect(rerun.stdout).toContain("Orbit is ready.");
+    expect(rerun.engineRuns).toHaveLength(1);
+    expect(treeSnapshot(stamp)).toEqual(kept);
+    expect(backups(targetDir)).toEqual([basename(stamp)]);
+  });
+
+  it("B14: no journal and `down` failed: everything new is kept together in engine/, nothing deleted, and the command works from there", () => {
+    const { targetDir, stateDir, environment } = privateStateFixture();
+    const result = runInstall(targetDir, { ...environment, ...r5DownFailedKnobs({ journal: false }), FAKE_COMPOSE_STRICT: "1" });
+    expect(result.status).toBe(1);
+    const stamp = onlyStamp(targetDir);
+    expect(existsSync(join(stamp, "engine", "docker-compose.yml"))).toBe(true);
+    expect(readOptional(join(stamp, "engine", "notes.txt"))).toBe(personNotes);
+    expect(existsSync(join(stamp, "moved"))).toBe(false);
+    expect(result.stderr).toContain("did not record which files it wrote");
+    expect(result.stderr).toContain("kept together");
+    expectNoForbiddenWords(result.stderr);
+    const commands = recoveryCommands(result.stderr).map((entry) => entry.command);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatch(r5DownCommand);
+    expect(commands[0]).toContain(volumesPart);
+    expect(volumesLeftBehind(stateDir)).not.toEqual([]);
+    const pasted = runPasted(commands[0], stateDir);
+    expect(`${commands[0]} -> ${pasted.ran.status} ${pasted.ran.stderr}`).toMatch(/-> 0 /u);
+    expect(pasted.loaded?.found).toBe(true);
+    expect(pasted.loaded?.cwd).toBe(realPath(join(stamp, "engine")));
+    expect(volumesLeftBehind(stateDir)).toEqual([]);
+  });
+
+  it("B11 (section 13.1): when the attempt created no volume, the command ends after --remove-orphans and one line says what to do if the next install names a volume", () => {
+    const { targetDir, environment } = privateStateFixture();
+    const { FAKE_UP_CREATES_ALL_VOLUMES: _created, ...noVolumes } = { ...environment, ...r5DownFailedKnobs() };
+    const result = runInstall(targetDir, noVolumes);
+    expect(result.status).toBe(1);
+    const commands = recoveryCommands(result.stderr).map((entry) => entry.command);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatch(r5DownCommand);
+    expect(commands[0].endsWith(" down --remove-orphans")).toBe(true);
+    expectRecoveryCommand(result, commands[0], "retry");
+    const lines = result.stderr.split("\n");
+    expect(lines[lines.indexOf(commands[0]) + 1]).toContain(noVolumesLine);
+  });
+
+  it("B25: on a terminal no `recovery-command:` line is printed; the command is still shown once", async () => {
+    const { targetDir, environment } = privateStateFixture();
+    const result = await runInstallOnTerminal(targetDir, { ...environment, ...r5DownFailedKnobs() });
+    expect(result.status).toBe(1);
+    // On a terminal stdout and stderr share the pty: strip carriage returns and colour before reading lines.
+    const lines = result.stdout.split("\n").map((line) => line.replace(/\r/gu, "").replace(/\u001b\[[0-9;]*[A-Za-z]/gu, ""));
+    expect(lines.filter((line) => line.startsWith(recoveryPrefix))).toEqual([]);
+    expect(lines.filter((line) => r5DownCommand.test(line))).toHaveLength(1);
+  }, PTY_TEST_TIMEOUT_MS);
+});
+
+describe("install.sh: a rollback that cannot finish names what is left (redesign r5)", () => {
+  // B16 and B17 make a directory read-only; give it back so the scratch directories can be removed.
+  const lockedDirectories = [];
+  afterEach(() => {
+    for (const directory of lockedDirectories.splice(0)) {
+      try {
+        chmodSync(directory, 0o700);
+      } catch {
+        // already gone
+      }
+    }
+  });
+
+  it("B15: a volume that could not be removed: the folder is put back and the one command is `docker volume rm --` with this attempt's volumes, `retry`", () => {
+    const { targetDir, environment, before, preexistingVolumes } = recoveryFixture();
+    const result = runInstall(targetDir, { ...environment, FAKE_COMPOSE_UP_FAIL: "1", FAKE_VOLUME_RM_FAIL: "1" });
+    expect(result.status).toBe(1);
+    const commands = recoveryCommands(result.stderr).map((entry) => entry.command);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatch(/^docker volume rm -- /u);
+    expect(commands[0].slice("docker volume rm -- ".length).split(" ").sort()).toEqual(allThreeVolumes);
+    for (const volume of preexistingVolumes) expect(commands[0]).not.toContain(volume);
+    expectRecoveryCommand(result, commands[0], "retry");
+    expect(result.stderr).toContain("could not be removed");
+    for (const volume of allThreeVolumes) expect(result.stderr).toContain(volume);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(backups(targetDir)).toEqual([]);
+  });
+
+  it.skipIf(process.geteuid?.() === 0)("B16: an engine entry that cannot be removed is named, the originals are put back, and the run ends `abort` with no command", () => {
+    const { targetDir, environment, before } = recoveryFixture();
+    const canned = committedCanned();
+    const leaves = { ...JSON.parse(canned.FAKE_ENGINE_LEAVES), "scripts/": { mode: 0o500 } };
+    lockedDirectories.push(join(targetDir, "scripts"));
+    const result = runInstall(targetDir, { ...environment, ...canned, FAKE_ENGINE_LEAVES: JSON.stringify(leaves), FAKE_COMPOSE_UP_FAIL: "1" });
+    lockedDirectories.push(...directoriesNamed(targetDir, "scripts"));
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=abort /u);
+    expectNoCommand(result);
+    expect(result.stderr).toContain("Could not remove");
+    expect(result.stderr).toContain(join(targetDir, "scripts"));
+    expect(result.stderr).toContain("then install again");
+    expect(originalsIn(treeSnapshot(targetDir))).toEqual(originalsIn(before));
+    expectNoForbiddenWords(result.stderr);
+  });
+
+  it.skipIf(process.geteuid?.() === 0)("B17: an original that cannot be put back keeps its copy in <stamp>/originals, named, `abort`", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const canned = committedCanned();
+    const leaves = {
+      ...JSON.parse(canned.FAKE_ENGINE_LEAVES),
+      ".orbit-secrets/locked/": { mode: 0o500 },
+      ".orbit-secrets/locked/x": "a file the rollback cannot remove\n",
+    };
+    lockedDirectories.push(join(targetDir, ".orbit-secrets", "locked"));
+    const result = runInstall(targetDir, { ...environment, ...canned, FAKE_ENGINE_LEAVES: JSON.stringify(leaves), FAKE_COMPOSE_UP_FAIL: "1" });
+    lockedDirectories.push(...directoriesNamed(targetDir, "locked"));
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=abort /u);
+    expect(result.stderr).toContain("Could not put back");
+    expect(result.stderr).toContain(join(targetDir, ".orbit-secrets"));
+    expect(result.stderr).toContain("originals");
+    const stamp = onlyStamp(targetDir);
+    expect(readOptional(join(stamp, "originals", ".orbit-secrets", "oidc-client-secret"))).toBe("preprovisioned-oidc-secret");
+    expect(existsSync(join(stamp, "originals", ".env-orbit"))).toBe(true);
+  });
+});

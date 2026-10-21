@@ -43,6 +43,8 @@
   /* The wake (#1120): the pocket's one toast. Mounted once here so any screen
      can raise one through $lib/pocket/wake.js; empty until one does. */
   import Wake from "$lib/pocket/Wake.svelte";
+  /* A slow arrival at a screen that says so (#1465): About, for now. */
+  import NavigationBusy from "$lib/NavigationBusy.svelte";
 
   import { onMount } from "svelte";
   import { page } from "$app/state";
@@ -83,6 +85,7 @@
 {@render children()}
 <Tour />
 <Wake />
+<NavigationBusy />
 
 <style>
   /* A theme change crossfades rather than snapping, on every screen (review

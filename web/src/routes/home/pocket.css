@@ -161,7 +161,6 @@
 .pk-dot.breathing{background:var(--upcoming);animation:pocket-breathe 2.4s ease-in-out infinite}
 .pk-dot.failed{background:var(--degraded, #fb8b24)}
 @keyframes pocket-breathe{0%,100%{opacity:1}50%{opacity:.4}}
-.pk-paper{font:.875rem/1 var(--mono);color:var(--accent-text)}
 .pk-plus{font:var(--p-type-body)/1 var(--mono);color:var(--accent-text)}
 /* THE SIGNALS (round 3 §2; owner-decisions §29, #1142): 32px of clear sky
    under the manifest's last row, a caps head on the sky as NEEDS ATTENTION
