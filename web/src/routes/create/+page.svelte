@@ -157,7 +157,7 @@
       <span class="dz-corner tl" aria-hidden="true"></span><span class="dz-corner tr" aria-hidden="true"></span>
       <span class="dz-corner br" aria-hidden="true"></span><span class="dz-corner bl" aria-hidden="true"></span>
       <div class="dz-main">
-        <span data-when="rest">{documentReading ? "drop a document — we'll read what we can" : "drop a document"}</span>
+        <span data-when="rest">drop a document</span>
         <span data-when="lock">release to add it</span>
         <span data-when="swap">release to swap the document</span>
       </div>
@@ -168,7 +168,7 @@
         <span data-when="rest">The file is attached to the item as it is.</span>
         {/if}
         <span data-when="arm">PDF or photo</span>
-        <span data-when="lock">{documentReading ? "orbit will read what it can · " : ""}nothing is saved until you say</span>
+        <span data-when="lock">nothing is saved until you say</span>
       </div>
       <div class="dz-held" id="dz-held">&#9670; <b id="dz-held-name"></b> &middot; <span id="dz-held-size"></span> &middot; held in the lane on the right</div>
     </div>
