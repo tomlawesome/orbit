@@ -1,7 +1,7 @@
 import { hash } from "@node-rs/argon2";
 import type { Algorithm } from "@node-rs/argon2";
 import { eq, inArray } from "drizzle-orm";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, instanceAuthority, instanceContact, localCredentials, users } from "@/db/schema";
 import { claimCookieName, sealClaimProof } from "@/lib/auth/bootstrap";
@@ -18,6 +18,14 @@ import { openInstanceMetadataReader } from "@/server/metadata/fields";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute } from "./support/request-event";
 import { readSetCookie } from "./support/set-cookie";
+
+/* Calls through to the real library, but records every `verify`, so the
+   refusal test below can count derivations instead of timing them (#1476). */
+vi.mock("@node-rs/argon2", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@node-rs/argon2")>();
+  return { ...original, verify: vi.fn(original.verify) };
+});
+const { verify: argon2Verify } = await import("@node-rs/argon2");
 
 const { POST: bootstrapLocally } = await loadRoute("auth/bootstrap/local");
 const { POST: signIn } = await loadRoute("auth/local/login");
@@ -249,8 +257,7 @@ describe("local sign-in (ADR-0023 §4)", () => {
     const passwordless = await seedLocalUser("passwordless");
 
     /* One warm-up first: the process's decoy hash is made on its first use
-       (ADR-0021 §5), and that one-off cost would otherwise land on whichever
-       case happened to run first and dominate the comparison below. */
+       (ADR-0021 §5), so the decoy exists before the cases below are counted. */
     await signInWith({ email: "warmup@local.invalid", password: WRONG_PASSWORD });
 
     const cases = [
@@ -259,14 +266,14 @@ describe("local sign-in (ADR-0023 §4)", () => {
       { email: disabled.email, password: PASSWORD },
       { email: passwordless.email, password: PASSWORD },
     ];
-    const attempts: { elapsed: number; status: number; body: string }[] = [];
+    const attempts: { status: number; body: string; verified: string[] }[] = [];
     for (const attempt of cases) {
-      const started = performance.now();
+      vi.mocked(argon2Verify).mockClear();
       const response = await signInWith(attempt);
       attempts.push({
-        elapsed: performance.now() - started,
         status: response.status,
         body: await response.text(),
+        verified: vi.mocked(argon2Verify).mock.calls.map(([stored]) => String(stored)),
       });
     }
 
@@ -275,13 +282,20 @@ describe("local sign-in (ADR-0023 §4)", () => {
     expect(new Set(attempts.map((attempt) => attempt.body)).size).toBe(1);
     expect(JSON.parse(attempts[0].body).error.code).toBe("credentials_invalid");
 
-    /* And one cost, loosely: each case spends a real derivation, so their
-       times overlap rather than separating into "looked something up" and
-       "did not". A wide bound on purpose — this is a shared, loaded host, and
-       a strict one would measure the runner rather than the code. */
-    const times = attempts.map((attempt) => attempt.elapsed);
-    expect(Math.min(...times)).toBeGreaterThan(0);
-    expect(Math.max(...times)).toBeLessThan(Math.min(...times) * 6);
+    /* And one cost: each case spends exactly one real Argon2 derivation, so
+       none separates into "looked something up" and "did not". Counted, not
+       timed — wall-clock on a shared runner measured the host (#1476). The
+       known account is checked against its own stored hash; the other three
+       against one shared decoy that is neither the disabled account's hash
+       nor anyone's. */
+    for (const attempt of attempts) expect(attempt.verified).toHaveLength(1);
+    const knownHash = (await credentialRow(known.id)).passwordHash;
+    const disabledHash = (await credentialRow(disabled.id)).passwordHash;
+    expect(attempts[1].verified[0]).toBe(knownHash);
+    const decoys = [attempts[0], attempts[2], attempts[3]].map((attempt) => attempt.verified[0]);
+    expect(new Set(decoys).size).toBe(1);
+    expect(decoys[0]).not.toBe(knownHash);
+    expect(decoys[0]).not.toBe(disabledHash);
   });
 
   it("never carries the public contact address into a disabled account's refusal, even when one is set (#788, #860, #1070)", async () => {
