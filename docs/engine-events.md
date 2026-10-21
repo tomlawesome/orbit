@@ -500,6 +500,10 @@ not in use <FIELD>
   `Unfixable` and never turns the exit status non-zero.
 - `<FIELD>` is always a fixed name, never a configured value: `--check` never
   discloses secrets, URLs or other configured content, by field name alone.
+- `warning ORBIT_MEMORY_LIMIT ...` is a sentence for the operator, printed
+  only when the limit is below 1g (it still starts, but a maximum-size
+  import can be stopped part-way). It is more than two tokens, so the parser
+  above discards it; it never turns the exit status non-zero.
 - Exit status is non-zero whenever any line reports `missing`, zero
   otherwise.
 
