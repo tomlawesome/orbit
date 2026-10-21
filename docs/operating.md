@@ -26,7 +26,7 @@ directly to the internet.
 ## Claim it and create your household
 
 Nobody sees a household without signing in. A new Orbit stays unclaimed
-until someone opens the claim link printed as the last line of its log:
+until someone opens the claim link Orbit prints in its log:
 
 ```sh
 docker compose --env-file .env-orbit logs orbit-app
