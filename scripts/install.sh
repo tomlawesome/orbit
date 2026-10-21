@@ -249,6 +249,10 @@ declare -a rollback_restore_failed_paths=()
 rollback_entry_failed=0
 rollback_nothing_moved=0
 rollback_volumes_unlisted=0
+# The rollback's shared Docker deadline (a SECONDS value; empty outside the
+# rollback), and whether a Docker call ran out of it.
+rollback_docker_deadline=""
+rollback_docker_timed_out=0
 rollback_interrupted=0
 # Set by read_engine_journal only when the engine left a journal it accepted.
 rollback_journal_present=0
@@ -1181,9 +1185,14 @@ snapshot_fresh_target() {
 # Docker cannot say.
 list_deployment_volumes() {
   local -n found_volumes="$1"
-  local listing key name
+  local listing key name status=0
   found_volumes=()
-  listing="$(bounded_docker 5 volume ls --filter "name=${compose_project_name}_orbit-" --format '{{.Name}}' 2>/dev/null)" || return 1
+  listing="$(bounded_docker 5 volume ls --filter "name=${compose_project_name}_orbit-" --format '{{.Name}}' 2>/dev/null)" || status=$?
+  if ((status != 0)); then
+    # The substitution's subshell cannot set the flag here, so set it again.
+    note_rollback_docker_timeout "$status"
+    return 1
+  fi
   for key in "${deployment_volume_keys[@]}"; do
     name="${compose_project_name}_${key}"
     if [[ $'\n'"$listing"$'\n' == *$'\n'"$name"$'\n'* ]]; then
@@ -1227,10 +1236,33 @@ shell_words() {
 # `timeout` runs in its own process group, out of reach of a terminal's
 # Ctrl-C, so the bound is also the longest a trapped interrupt waits.
 # stdin is closed for the reason given at bounded_compose_probe.
+# Inside the rollback the bound is also trimmed to the time left on
+# rollback_docker_deadline (deadline propagation: min(own cap, time left)),
+# and with none left Docker is not run at all; either way of running out
+# sets rollback_docker_timed_out so the report can name the cause.
 bounded_docker() {
-  local seconds="$1"
+  local seconds="$1" left status=0
   shift
-  timeout --signal=TERM --kill-after=1s "${seconds}s" docker "$@" </dev/null
+  if [[ -n "$rollback_docker_deadline" ]]; then
+    left=$((rollback_docker_deadline - SECONDS))
+    if ((left <= 0)); then
+      rollback_docker_timed_out=1
+      return 124
+    fi
+    ((seconds <= left)) || seconds="$left"
+  fi
+  timeout --signal=TERM --kill-after=1s "${seconds}s" docker "$@" </dev/null || status=$?
+  note_rollback_docker_timeout "$status"
+  return "$status"
+}
+
+# note_rollback_docker_timeout <status>
+#
+# Inside the rollback, a bounded Docker call that ran out of time: 124 when
+# the TERM ended it, 137 when it ignored the TERM and the KILL did.
+note_rollback_docker_timeout() {
+  [[ -n "$rollback_docker_deadline" ]] || return 0
+  [[ "$1" != 124 && "$1" != 137 ]] || rollback_docker_timed_out=1
 }
 
 # rollback_docker
@@ -1245,9 +1277,10 @@ rollback_docker() {
   local -a created=()
   [[ "$compose_started" == 1 ]] || return 0
   # The containers are being removed, so a short stop loses nothing. Every
-  # Docker call here is bounded (down 10 s, listing and each removal 5 s), so
-  # a hung daemon ends the rollback with the obstacles named instead of
-  # holding it until the launcher kills it.
+  # Docker call here keeps its own cap (down 10 s, listing and each removal
+  # 5 s) but all share the deadline rollback_fresh_install sets, so a hung
+  # daemon ends the rollback inside the launcher's stop grace with the
+  # obstacles named, however many calls it holds up.
   if ! bounded_docker 10 compose --project-name "$compose_project_name" --env-file "$environment_file" \
     down --remove-orphans --timeout 5 >/dev/null 2>&1; then
     # The containers may still be running and using the volumes, so the
@@ -1550,7 +1583,9 @@ rollback_files() {
 # one command, when there is one), `abort` when the folder could not be put
 # back. A second interrupt does not stop it half-way: INT, TERM and HUP are
 # caught (not ignored, which every child would inherit) until it ends; a
-# signal waits for the current Docker call, which rollback_docker bounds.
+# signal waits for the current Docker call. All its Docker calls share one
+# 8 s deadline: the launcher kills 15 s after its TERM, a TERM landing in a
+# bounded probe may already have cost 6 s, and the last kill-after adds 1 s.
 rollback_fresh_install() {
   local status=0 stop_dir
   rollback_obstacles=()
@@ -1567,7 +1602,13 @@ rollback_fresh_install() {
   rollback_stop_command=""
   trap 'rollback_interrupted=130' INT; trap 'rollback_interrupted=143' TERM; trap 'rollback_interrupted=129' HUP
   installer_ui_event rollback installer running rollback rollback 2>/dev/null || true
+  rollback_docker_timed_out=0
+  rollback_docker_deadline=$((SECONDS + 8))
   rollback_docker || status=1
+  rollback_docker_deadline=""
+  # First in the report, so it precedes the obstacles it explains.
+  [[ "$rollback_docker_timed_out" != 1 ]] ||
+    rollback_report+=("Docker did not answer within 8 s, so the rollback stopped waiting for it; what it could not do is named below. Check that Docker is running and its disk is not full, then follow the next step.")
   rollback_files || status=1
   if [[ "$rollback_down_failed" == 1 ]]; then
     stop_dir="$target_dir"
