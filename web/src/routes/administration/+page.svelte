@@ -70,8 +70,16 @@
   async function rereadScreen() {
     try {
       view = await readAdminScreen();
-    } catch { /* the failed panels still say so */ }
+      retries = 0;
+    } catch {
+      /* the screen it has stays, and the cards say the retry came back
+         empty too (#1443) */
+      retries += 1;
+    }
   }
+  /* How many times a failed "try again" has come back empty; the cards
+     read it to say "still no answer" rather than looking untouched. */
+  let retries = $state(0);
   /* Set when the screen's first read fails outright — readAdminScreen()
      rejects when the workspace itself cannot be read (#1442) — so the page
      says so with a "try again" instead of staying blank. */
@@ -881,6 +889,9 @@
            finishing a rotation is a shell procedure, not a click. It is
            self-contained by design so #941's damaged/locked counts can stand
            beside it later without either being rewritten. -->
+      {#if view.failed.rotation}
+        <div class="adminproblem" role="alert">key rotation not shown — Orbit could not reach its status{#if retries} (tried again, still no answer){/if}<button class="retry" onclick={rereadScreen}>try again</button></div>
+      {/if}
       {#if view.rotation?.inProgress}
         <div class="card wide rotation">
           <div class="cardhead"><h2>Document key rotation in progress</h2>
@@ -912,6 +923,12 @@
            is gone. The member sees neither number: a member gets the field in
            front of them and what they can do about it, and this screen gets the
            aggregate, so a missing key reads as one condition with one remedy. -->
+      {#if view.failed.metadata}
+        <div class="adminproblem" role="alert">encrypted-details health not shown — Orbit could not reach it{#if retries} (tried again, still no answer){/if}<button class="retry" onclick={rereadScreen}>try again</button></div>
+      {/if}
+      {#if view.failed.recoveryBundle}
+        <div class="adminproblem" role="alert">recovery bundle status not shown — Orbit could not reach it{#if retries} (tried again, still no answer){/if}<button class="retry" onclick={rereadScreen}>try again</button></div>
+      {/if}
       {#if view.metadata}
       {#if view.metadata.locked}
         <div class="card wide rotation">
@@ -1268,6 +1285,9 @@
       <div class="card" id="jobs-card">
         <div class="cardhead"><h2>Document jobs</h2>
           {#if jobCounts}<span class="count">{jobCounts}</span>{/if}</div>
+        {#if view.failed.operations}
+          <div class="adminproblem" role="alert">not shown — Orbit could not reach the document jobs{#if retries} (tried again, still no answer){/if}<button class="retry" onclick={rereadScreen}>try again</button></div>
+        {/if}
         {#each jobs as job (job.id)}
           <div class="person">
             <div class="who"><b>{JOB_KINDS[job.kind] ?? job.kind}</b><span>{jobMeta(job)}</span></div>
@@ -1277,14 +1297,20 @@
             {/if}
           </div>
         {:else}
-          <p class="jobfoot">no document jobs yet</p>
+          {#if !view.failed.operations}<p class="jobfoot">no document jobs yet</p>{/if}
         {/each}
-        <div class="jobfoot">the 25 most recently touched jobs are kept; older ones are not</div>
+        {#if !view.failed.operations}<div class="jobfoot">the 25 most recently touched jobs are kept; older ones are not</div>{/if}
         {#if jobsProblem}<div class="adminproblem">{jobsProblem}</div>{/if}
       </div>
 
       <!-- #1285: the document upload size limit — the configured default
            until an administrator sets their own. -->
+      {#if view.failed.uploadLimit}
+        <div class="card" id="upload-limit-card">
+          <div class="cardhead"><h2>Upload size limit</h2></div>
+          <div class="adminproblem" role="alert">not shown — Orbit could not reach the upload limit{#if retries} (tried again, still no answer){/if}<button class="retry" onclick={rereadScreen}>try again</button></div>
+        </div>
+      {/if}
       {#if view.uploadLimit}
         {@const limit = view.uploadLimit}
         <div class="card" id="upload-limit-card">

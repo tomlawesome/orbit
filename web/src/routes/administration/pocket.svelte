@@ -53,7 +53,18 @@
   /* A panel whose read failed says so with a "try again" (#1442), as
      settings does on the phone (#1195): the whole screen is re-read, and a
      re-read that fails again keeps the screen it has. */
-  const tryAgain = () => reread().catch(() => {});
+  /* A second failure is said, not swallowed (#1443): `tries` counts presses
+     and the failed cards read it, so a retry that came back empty shows. */
+  let tries = $state(0);
+  const tryAgain = async () => {
+    try {
+      await reread();
+      tries = 0;
+    } catch {
+      /* the screen it has stays; the count says so */
+      tries += 1;
+    }
+  };
 
   const people = $derived(view?.users ?? []);
   const systems = $derived(view?.households ?? []);
@@ -708,6 +719,22 @@
         <div class="p-unlit"></div><div class="p-unlit"></div><div class="p-unlit"></div>
       </section>
     {:else}
+      {#if view.failed.rotation || view.failed.metadata || view.failed.recoveryBundle}
+        <section class="ad-alerts" aria-label="Alerts not shown" data-ad="alerts-failed">
+          {#if view.failed.rotation}
+            <p class="p-error ad-inset ad-lastline" role="alert">key rotation not shown — Orbit could not reach its status{#if tries} (tried again, still no answer){/if}
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+          {/if}
+          {#if view.failed.metadata}
+            <p class="p-error ad-inset ad-lastline" role="alert">encrypted-details health not shown — Orbit could not reach it{#if tries} (tried again, still no answer){/if}
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+          {/if}
+          {#if view.failed.recoveryBundle}
+            <p class="p-error ad-inset ad-lastline" role="alert">recovery bundle status not shown — Orbit could not reach it{#if tries} (tried again, still no answer){/if}
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+          {/if}
+        </section>
+      {/if}
       {#if alerts.length}
         <section class="ad-alerts" aria-label="Alerts" data-ad="alerts">
           {#each alerts as alert, i (alert.id)}
@@ -846,6 +873,14 @@
       </section>
 
       <!-- UPLOAD SIZE LIMIT (#1285): absent where the route cannot answer. -->
+      {#if view.failed.uploadLimit}
+        <section class="p-card ad-card ad-flush" style:--i="5" id="ad-uploads" tabindex="-1"
+                 aria-labelledby="ad-uploads-head" data-ad="uploads">
+          <div class="ad-cardhead"><h2 class="p-caps" id="ad-uploads-head">Upload size limit</h2></div>
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the upload limit{#if tries} (tried again, still no answer){/if}
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+        </section>
+      {/if}
       {#if view.uploadLimit}
         {@const limit = view.uploadLimit}
         <section class="p-card ad-card ad-flush" style:--i="5" id="ad-uploads" tabindex="-1"
@@ -961,6 +996,14 @@
 
       <!-- DOCUMENT JOBS (#1071, #1055 round 2): one row per job, kind only,
            the reason on the row for good, `retry` on show on a failed row. -->
+      {#if view.failed.operations}
+        <section class="p-card ad-card ad-flush" style:--i="8" id="ad-documents" tabindex="-1"
+                 aria-labelledby="ad-docs-head" data-ad="documents">
+          <div class="ad-cardhead"><h2 class="p-caps" id="ad-docs-head">Document jobs</h2></div>
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the document jobs{#if tries} (tried again, still no answer){/if}
+            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+        </section>
+      {/if}
       {#if view.operations}
         <section class="p-card ad-card ad-flush" class:proposed={jobs.length === 0} style:--i="8"
                  id="ad-documents" tabindex="-1" aria-labelledby="ad-docs-head" data-ad="documents">
