@@ -2029,6 +2029,9 @@ pull_confirmed_model() {
   again="$(shell_words docker compose --env-file "$environment_file" --profile ai-model-pull run --rm orbit-ollama-model-pull)"
   if [[ "$optional_interrupted" != 1 ]]; then
     installer_ui_event optional ollama running service-preparation pull
+    # A killed earlier run can leave this container behind; Docker refuses
+    # a second one under the same name, so every retry would fail.
+    timeout --signal=TERM --kill-after=1s 15s docker rm -f -- "$container" </dev/null >/dev/null 2>&1 || true
     # A background child, so an interrupt can stop the download (#1456
     # ruling); its words go to a private file, as a pipe would need a
     # foreground command substitution.
@@ -2051,7 +2054,7 @@ pull_confirmed_model() {
     printf 'Orbit installer: Docker said: %s\n' "$installer_failure_detail" >&2 || true
   fi
   installer_failure_detail=""
-  optional_notes+=("Local model: the confirmed download did not complete; Orbit runs without it. To try again: ${again}")
+  optional_notes+=("Local model: the confirmed download did not complete; Orbit runs without it. To try again: ${again} (an earlier download left in the container ${container} is removed with: docker rm -f ${container})")
 }
 
 print_completion_screen() {
