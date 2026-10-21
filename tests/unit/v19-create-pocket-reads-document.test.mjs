@@ -174,8 +174,11 @@ describe("#1279: the phone's create form shows page one and the read, as the des
     expect(markup).toMatch(/◆ from document/u);
   });
 
-  it("the add-a-document row's hint is exactly 'PDF, email or photo', as on the desk", () => {
-    expect(markup).toMatch(/<span>PDF, email or photo<\/span>/u);
+  it("the add-a-document row's hint is exactly 'PDF or photo', as on the desk, and never says email", () => {
+    expect(markup).toMatch(/<span>PDF or photo<\/span>/u);
+    const hints = [...markup.matchAll(/<span>(PDF[^<]*)<\/span>/gu)].map((one) => one[1]);
+    expect(hints).toEqual(["PDF or photo"]);
+    for (const hint of hints) expect(hint).not.toMatch(/email/iu);
     expect(markup).not.toMatch(/read for you/u);
     expect(form).not.toMatch(/reading is wired on the desk's\s+\*?\s*form only/u);
   });
