@@ -798,6 +798,7 @@ import { themeOrDefault } from "$lib/theme.js";
 import { textSizeOrDefault } from "$lib/text-size.js";
 import { householdScreenOf, householdUpdateCommandOf, sectionCommandsOf } from "./household.js";
 import { documentRowOf } from "./belt.js";
+import { STAGED_PAGE_TIMEOUT_MS } from "./staged-page.js";
 
 /**
  * A mutating fetch with the session's CSRF token, like applyCommand's.
@@ -1322,7 +1323,7 @@ export async function readSettingsScreen() {
 export async function readMailboxSettings() {
   try {
     /** @type {{ mailbox?: ?MailboxSettings }} */
-    const body = await json(await fetch("/api/admin/mailbox", { credentials: "same-origin" }));
+    const body = await json(await adminRead("/api/admin/mailbox"));
     return body.mailbox ?? null;
   } catch {
     return null;
@@ -1372,7 +1373,7 @@ export async function readContactSettings() {
  */
 async function fetchContactSettings() {
   /** @type {{ contact?: ?ContactSettings }} */
-  const body = await json(await fetch("/api/admin/contact", { credentials: "same-origin" }));
+  const body = await json(await adminRead("/api/admin/contact"));
   return body.contact ?? null;
 }
 
@@ -1419,8 +1420,22 @@ export async function readUploadLimitSettings() {
  */
 async function fetchUploadLimitSettings() {
   /** @type {{ uploadLimit?: ?UploadLimitSettings }} */
-  const body = await json(await fetch("/api/admin/upload-limit", { credentials: "same-origin" }));
+  const body = await json(await adminRead("/api/admin/upload-limit"));
   return body.uploadLimit ?? null;
+}
+
+/**
+ * One administration-screen read, bounded by the same deadline the preview
+ * loader uses: the far end may accept the connection and never answer, and
+ * an unbounded read would leave the screen loading forever with no retry.
+ * The deadline turns that into a rejected read, which each panel already
+ * answers as failed.
+ *
+ * @param {string} href
+ * @returns {Promise<Response>}
+ */
+function adminRead(href) {
+  return fetch(href, { credentials: "same-origin", signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS) });
 }
 
 /**
@@ -1496,7 +1511,7 @@ export async function readAdminScreen() {
     await Promise.all([
     readWorkspace(),
     readSession().catch(() => null),
-    fetch("/api/admin/users", { credentials: "same-origin" }).then((response) => json(response))
+    adminRead("/api/admin/users").then((response) => json(response))
       .then(
         (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, disabledAt?: ?string }[] }} */ body) =>
           body.users ?? [],
@@ -1512,7 +1527,7 @@ export async function readAdminScreen() {
     /* An open document-key rotation (#956). Additive: a route that cannot
        answer (fixture harness, older server) means no card, never a sunk
        screen — and "no rotation open" renders as nothing at all. */
-    settle(fetch("/api/admin/documents/rotation", { credentials: "same-origin" }).then((response) => json(response))
+    settle(adminRead("/api/admin/documents/rotation").then((response) => json(response))
       .then(
         (/** @type {{ rotation?: { inProgress: boolean, startedAt: string | null, secondKeyLoaded: boolean } }} */ body) =>
           body.rotation ?? null,
@@ -1523,7 +1538,7 @@ export async function readAdminScreen() {
        own. Additive on the same terms as the rotation above: a route that
        cannot answer means no cards, never a sunk screen, and an instance with
        nothing wrong renders nothing at all. */
-    settle(fetch("/api/admin/documents/health", { credentials: "same-origin" }).then((response) => json(response))
+    settle(adminRead("/api/admin/documents/health").then((response) => json(response))
       .then(
         (/** @type {{ health?: { metadata?: MetadataHealth } }} */ body) =>
           body.health?.metadata ?? null,
@@ -1533,7 +1548,7 @@ export async function readAdminScreen() {
        KEK (#968, slice 1 of #966). Additive on the same terms as the two
        cards above: a route that cannot answer means no card, never a sunk
        screen. */
-    settle(fetch("/api/admin/recovery-bundle", { credentials: "same-origin" }).then((response) => json(response))
+    settle(adminRead("/api/admin/recovery-bundle").then((response) => json(response))
       .then(
         (/** @type {{ recoveryBundle?: { exported: boolean, exportedAt: string | null } }} */ body) =>
           body.recoveryBundle ?? null,
@@ -1543,7 +1558,7 @@ export async function readAdminScreen() {
        cannot answer keeps the fixture's rows under the fixture harness only,
        so the screen the fidelity gate photographs is unchanged; live, the
        panel says it failed (#1442). */
-    fetch("/api/admin/health", { credentials: "same-origin" }).then((response) => json(response))
+    adminRead("/api/admin/health").then((response) => json(response))
       .then((/** @type {{ health?: AdminHealth }} */ body) => body.health ?? null)
       .catch(() => null),
     /* The document jobs (#1071). Additive on the same terms: a route that
@@ -1563,7 +1578,7 @@ export async function readAdminScreen() {
       try {
         /** @type {Partial<Roster>} */
         const body = await json(
-          await fetch(`/api/households/${household.id}/members`, { credentials: "same-origin" }),
+          await adminRead(`/api/households/${household.id}/members`),
         );
         const owner = (body.members ?? []).find((member) => member.role === "owner");
         if (owner?.displayName) owners[household.id] = owner.displayName;
@@ -1675,7 +1690,7 @@ export async function readAdminScreen() {
  */
 export async function readAdminOperations() {
   /** @type {{ operations?: AdminOperations }} */
-  const body = await json(await fetch("/api/admin/operations", { credentials: "same-origin" }));
+  const body = await json(await adminRead("/api/admin/operations"));
   if (!body.operations) throw new Error("no operations snapshot");
   return body.operations;
 }

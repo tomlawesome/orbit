@@ -53,16 +53,28 @@
   /* A panel whose read failed says so with a "try again" (#1442), as
      settings does on the phone (#1195): the whole screen is re-read, and a
      re-read that fails again keeps the screen it has. */
-  /* A second failure is said, not swallowed (#1443): `tries` counts presses
-     and the failed cards read it, so a retry that came back empty shows. */
-  let tries = $state(0);
+  /* A second failure is said, not swallowed (#1443). `emptyAnswer` is the
+     screen a press came back with while some card was still failed; the
+     cards still failed on it say so. reread() still resolves when a card's own
+     read fails again, so that counts as well as a rejected read. Any other
+     re-read replaces the screen, so a card that fails for the first time
+     afterwards does not say "tried again". A press while its re-read is out
+     is ignored, so an older answer cannot land over a newer one. */
+  /** @type {AdminView | null} */
+  let emptyAnswer = $state.raw(null);
+  const stillNoAnswer = $derived(emptyAnswer !== null && emptyAnswer === view);
+  let retrying = $state(false);
   const tryAgain = async () => {
+    if (retrying) return;
+    retrying = true;
     try {
       await reread();
-      tries = 0;
+      emptyAnswer = view && Object.values(view.failed).some(Boolean) ? view : null;
     } catch {
-      /* the screen it has stays; the count says so */
-      tries += 1;
+      /* the screen it has stays, and its failed cards say so */
+      emptyAnswer = view;
+    } finally {
+      retrying = false;
     }
   };
 
@@ -722,16 +734,16 @@
       {#if view.failed.rotation || view.failed.metadata || view.failed.recoveryBundle}
         <section class="ad-alerts" aria-label="Alerts not shown" data-ad="alerts-failed">
           {#if view.failed.rotation}
-            <p class="p-error ad-inset ad-lastline" role="alert">key rotation not shown — Orbit could not reach its status{#if tries} (tried again, still no answer){/if}
-            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+            <p class="p-error ad-inset ad-lastline" role="alert">key rotation not shown — Orbit could not reach its status{stillNoAnswer ? " (tried again, still no answer)" : ""}
+            <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
           {/if}
           {#if view.failed.metadata}
-            <p class="p-error ad-inset ad-lastline" role="alert">encrypted-details health not shown — Orbit could not reach it{#if tries} (tried again, still no answer){/if}
-            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+            <p class="p-error ad-inset ad-lastline" role="alert">encrypted-details health not shown — Orbit could not reach it{stillNoAnswer ? " (tried again, still no answer)" : ""}
+            <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
           {/if}
           {#if view.failed.recoveryBundle}
-            <p class="p-error ad-inset ad-lastline" role="alert">recovery bundle status not shown — Orbit could not reach it{#if tries} (tried again, still no answer){/if}
-            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+            <p class="p-error ad-inset ad-lastline" role="alert">recovery bundle status not shown — Orbit could not reach it{stillNoAnswer ? " (tried again, still no answer)" : ""}
+            <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
           {/if}
         </section>
       {/if}
@@ -782,8 +794,8 @@
           </Row>
         {/each}
         {#if view.failed.users}
-          <p class="p-error ad-inset ad-lastline" role="alert">people not shown — Orbit could not reach the list of people
-            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+          <p class="p-error ad-inset ad-lastline" role="alert">people not shown — Orbit could not reach the list of people{stillNoAnswer ? " (tried again, still no answer)" : ""}
+            <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
         {:else}
           {#if people.length <= 1}<p class="p-empty ad-inset">only you so far</p>{/if}
         {/if}
@@ -815,8 +827,8 @@
           {#if !recoverable.length}<p class="p-empty ad-inset">no systems yet</p>{/if}
         {/each}
         {#if view.failed.owners}
-          <p class="p-error ad-inset ad-lastline" role="alert">owners not shown — Orbit could not reach every system’s members
-            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+          <p class="p-error ad-inset ad-lastline" role="alert">owners not shown — Orbit could not reach every system’s members{stillNoAnswer ? " (tried again, still no answer)" : ""}
+            <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
         {/if}
         {#each gone as line (line.id)}
           <p class="ad-said ok" role="status">{line.text}</p>
@@ -865,8 +877,8 @@
             {#snippet mark()}<span class="ad-kmark">@</span>{/snippet}
           </Row>
         {:else if view.failed.contact}
-          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the public contact
-            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the public contact{stillNoAnswer ? " (tried again, still no answer)" : ""}
+            <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
         {:else}
           <p class="p-empty ad-inset">not set</p>
         {/if}
@@ -877,8 +889,8 @@
         <section class="p-card ad-card ad-flush" style:--i="5" id="ad-uploads" tabindex="-1"
                  aria-labelledby="ad-uploads-head" data-ad="uploads">
           <div class="ad-cardhead"><h2 class="p-caps" id="ad-uploads-head">Upload size limit</h2></div>
-          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the upload limit{#if tries} (tried again, still no answer){/if}
-            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the upload limit{stillNoAnswer ? " (tried again, still no answer)" : ""}
+            <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
         </section>
       {/if}
       {#if view.uploadLimit}
@@ -921,8 +933,8 @@
         {/each}
         {#if testProblem}<p class="p-error ad-inset ad-lastline" role="alert">{testProblem}</p>{/if}
         {#if view.failed.relay}
-          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the mail settings
-            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the mail settings{stillNoAnswer ? " (tried again, still no answer)" : ""}
+            <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
         {/if}
         {#each view.relay ?? [] as [label, value, extra] (label)}
           <Row title={label} meta={label === "ingest" ? ingestShort(value) : value} trail={extra === "on" ? "on" : ""} trailTone="var(--ok-text)">
@@ -982,8 +994,8 @@
                aria-labelledby="ad-ops-head" data-ad="operations">
         <div class="ad-cardhead"><h2 class="p-caps" id="ad-ops-head">Operations</h2></div>
         {#if view.failed.services}
-          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the service checks
-            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the service checks{stillNoAnswer ? " (tried again, still no answer)" : ""}
+            <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
         {/if}
         {#each view.services ?? [] as [tone, name, detail], at (name)}
           {@const words = split(detail)}
@@ -1000,8 +1012,8 @@
         <section class="p-card ad-card ad-flush" style:--i="8" id="ad-documents" tabindex="-1"
                  aria-labelledby="ad-docs-head" data-ad="documents">
           <div class="ad-cardhead"><h2 class="p-caps" id="ad-docs-head">Document jobs</h2></div>
-          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the document jobs{#if tries} (tried again, still no answer){/if}
-            <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the document jobs{stillNoAnswer ? " (tried again, still no answer)" : ""}
+            <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
         </section>
       {/if}
       {#if view.operations}
@@ -1038,8 +1050,8 @@
       {#if view.instance}
         <p class="ad-strip">{versionLine(view.instance)}</p>
       {:else if view.failed.instance}
-        <p class="p-error ad-inset" role="alert">version not shown — Orbit could not reach this instance’s build
-          <button class="p-pill filled" onclick={tryAgain}>try again</button></p>
+        <p class="p-error ad-inset" role="alert">version not shown — Orbit could not reach this instance’s build{stillNoAnswer ? " (tried again, still no answer)" : ""}
+          <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
       {/if}
     {/if}
   </main>
