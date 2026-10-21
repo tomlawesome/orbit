@@ -181,7 +181,6 @@
   .body-link{cursor:pointer}
   .body-vis{pointer-events:none}
   .body-vis :is(circle,path){transition:transform .25s;transform-origin:center;transform-box:fill-box}
-  .body-vis.hot circle{transform:scale(1.5)}
   .body-link :is(circle,path){pointer-events:all}
   .body-link :is(circle,path){transition:transform .25s;transform-origin:center;transform-box:fill-box}
   .body-link:is(:hover,:focus-visible) circle{transform:scale(1.5)}
@@ -544,7 +543,10 @@
   .now-month{fill:var(--accent-text);font-weight:600}
   /* POL-4: bidirectional highlight */
   .body-link.lit :is(circle,path){transform:scale(1.6)}
-  .body-vis.lit :is(circle,path){transform:scale(1.6)}
+  /* The visible twin grows from two sources: .hot (Svelte, pointer and
+     keyboard focus) and .lit (home.behaviour.js, mouse and manifest row).
+     One rule so both give the same growth. */
+  .body-vis:is(.hot,.lit) :is(circle,path){transform:scale(1.6)}
   .desk .item.lit{border-color:var(--accent)}
   /* POL-5: constellations light on section hover */
   /* POL-6: chart callout — legible, quadrant-aware */
@@ -632,8 +634,12 @@
     stroke-width:1.6;filter:drop-shadow(0 0 5px var(--overdue));
     animation:threshpulse 1.8s ease-in-out infinite}
   @keyframes threshpulse{0%,100%{stroke-opacity:.35}50%{stroke-opacity:.9}}
-  body.storm [data-body="i-gutter"] circle{filter:saturate(1.5) brightness(1.12) drop-shadow(0 0 7px var(--overdue))}
-  body.storm [data-body="i-mot"] circle,body.storm [data-body="i-boiler"] circle{
+  /* The drawn planets are the [data-vis] twins; [data-body] holds only the
+     transparent hit circle, so the glow must name both. */
+  body.storm [data-body="i-gutter"] circle,body.storm [data-vis="i-gutter"] circle{
+    filter:saturate(1.5) brightness(1.12) drop-shadow(0 0 7px var(--overdue))}
+  body.storm [data-body="i-mot"] circle,body.storm [data-body="i-boiler"] circle,
+  body.storm [data-vis="i-mot"] circle,body.storm [data-vis="i-boiler"] circle{
     filter:saturate(1.45) brightness(1.1) drop-shadow(0 0 6px var(--warm))}
   body.storm .meteor{animation:meteor 5.5s linear infinite;
     background:linear-gradient(90deg,transparent,#ff8a4d)}
