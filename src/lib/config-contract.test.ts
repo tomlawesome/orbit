@@ -106,7 +106,7 @@ describe("isValidMemoryLimit (F2)", () => {
 });
 
 describe("memoryLimitBytes (R2, Compose's go-units grammar, 1024-based, truncated)", () => {
-  it.each([["0.5g", 536870912], ["1.5GiB", 1610612736], ["2 g", 2147483648], ["2147483648", 2147483648], ["5b", 5]] as const)(
+  it.each([["0.5g", 536870912], ["1.5GiB", 1610612736], ["2 g", 2147483648], ["2147483648", 2147483648], ["5b", 5], ["0.3k", 307]] as const)(
     "%j is %d bytes",
     (value, bytes) => {
       expect(memoryLimitBytes(value)).toBe(bytes);

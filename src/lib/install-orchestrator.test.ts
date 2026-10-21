@@ -501,13 +501,13 @@ describe("runInstall: refusals inside the transaction roll back (#11, #56)", () 
   });
 
   it("names memory-limit when ORBIT_MEMORY_LIMIT is malformed in an otherwise complete deployment (F2)", async () => {
-    const target = recognised(["ORBIT_MEMORY_LIMIT=2 g"]);
+    const target = recognised(["ORBIT_MEMORY_LIMIT=lots"]);
     const before = snapshot(target);
     const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
     expect(outcome).toMatchObject({ status: "failed", phase: "configuration", reason: "configuration-failure" });
     const message = outcome.status === "failed" ? outcome.message : "";
     expect(message).toContain("memory-limit");
-    expect(message).not.toContain("2 g");
+    expect(message).not.toContain("lots");
     expect(message).not.toContain("APP_URL");
     expect(message).not.toContain("ORBIT_IMAGE");
     expect(snapshot(target)).toEqual(before);
