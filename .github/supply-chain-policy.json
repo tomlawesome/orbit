@@ -306,6 +306,39 @@
     {
       "kind": "vulnerability",
       "scope": "image",
+      "id": "CVE-2026-111943",
+      "package": "stdlib",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794,
+      "installedVersion": "v1.24.6",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; the newest 18-alpine build and gosu 1.19 are still on Go 1.24.6. Clears only when upstream rebuilds gosu on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-111943",
+      "package": "stdlib",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794,
+      "installedVersion": "v1.26.7",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; 4.1.0-1-full and 4.2.0-SNAPSHOT-full are still on Go 1.26.7. Clears when a Tika image ships pebble on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-111943",
+      "package": "stdlib",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794,
+      "installedVersion": "v1.26.0",
+      "rationale": "Go standard library compiled into /usr/bin/ollama (0.35.1); the newest release, 0.40.7, is still built on Go 1.26.0. The model server is off in the default (Standard) profile. Clears when a re-pinned Ollama scans clean. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
       "id": "CVE-2025-61726",
       "package": "stdlib",
       "installedVersion": "v1.24.6",
