@@ -47,7 +47,8 @@ import { image } from "./settings.js";
  * "con" kind's shape (`pts`) is a fixed, cached Path2D keyed by `shape`
  * instead (#873) — it never varied per run, only per constellation shape.
  * @typedef {object} Prop
- * @property {"grat" | "con" | "sys" | "craft" | "comet"} kind
+ * @property {"grat" | "con" | "sys" | "craft" | "comet" | "home" | "chart"} kind
+ * @property {string} [name]
  * @property {number} t0
  * @property {number} dur
  * @property {number} ang
@@ -100,7 +101,27 @@ import { image } from "./settings.js";
  * @property {(t: number) => number} speed
  * @property {(t: number) => number} atm
  * @property {(t: number) => number} [duskMix]
+ * @property {string} [tint]
+ * @property {number} [vpX]
+ * @property {number} [rate]
+ * @property {number} [skip]
+ * @property {number} [skipTu]
+ * @property {"bloom" | "ring" | "sweep" | "halo" | "chart"} [ending]
+ * @property {Chart} [chart]
  */
+
+/**
+ * The docs' chart a "chart" ending draws, in the page's own units (`rect` is where the page shows it).
+ * @typedef {object} Chart
+ * @property {{ x: number, y: number, w: number, h: number }} rect
+ * @property {{ W: number, H: number, field: { dots: Array<{ x: number, y: number, r: number, o: number }>, arcs: string[] }, cons: Array<{ c: string, name: string, pts: number[][] }> }} [geometry]
+ */
+
+/** @typedef {Chart & { geometry: NonNullable<Chart["geometry"]> }} DrawableChart a chart with its geometry made */
+
+/** @typedef {HydratedProp & { pts: number[][], name: string, c: string, bodies: Array<[number, number, string, number]> }} PenProp what the pens between them read (each reads its own kind's) */
+
+/** @typedef {NonNullable<ReturnType<typeof createVoyage>>} World the flight's WebGL world (voyage.js) */
 
 /**
  * The in-progress flight, held in `prime()` for the duration of one run.
@@ -111,6 +132,11 @@ import { image } from "./settings.js";
  * @property {number} last
  * @property {Prop[]} props
  * @property {number} dpr
+ * @property {boolean} tall  the screen's shape when the flight started: the docs' flight keeps its way in to the end
+ * @property {boolean} [pinned]
+ * @property {number} [n]
+ * @property {number} [worst]
+ * @property {boolean} [noted]
  */
 
 /* star-chart, verbatim from web/src/lib/packs.css */
@@ -232,8 +258,24 @@ export const mirror = (t) => UPDUR * (1 - Math.min(1, Math.max(0, t / DOWNDUR)))
 export const MARK_RING = 166.4 * 72 / 200, FAR_T0 = 1080, FAR_T1 = 1750;
 /* the way in: from out beyond the disc, down into it, to rest among the stars of an arm (voyage.js: REST) */
 export const PATH = [[0.7, 2.35, 1.85], [0.95, 0.95, 1.35], [0.82, 0.1, 0.42], [0.56, 0.006, 0]];
+/* on a portrait screen (taller than wide: width / height <= 10/11, the door's own threshold) the way in stops short of
+   the disc: above it, 1.1 from the core and looking down at it from 55 degrees off its axis, where the whole spiral
+   fills the height (orbit-site #51). Which way a flight takes is decided once, as it starts: turning the screen
+   mid-flight does not switch it; the next flight takes the new shape's. The first point is the rush's arrival, the same on every screen; the two between bring the camera
+   down onto its rest from above and further out, braking as the wide way in does */
+export const PATH_TALL = [PATH[0], [0.72, 1.75, 1.45], [0.42, 0.95, 1.0], [0.319, 0.631, 0.843]];
+/* the roll as the camera comes to rest: the band turned to lie as the docs page shows it; on a portrait screen a
+   quarter turn more, so the tilted disc stands up the screen, its long axis the screen's */
+const ROLL = 0.34, ROLL_TALL = ROLL + Math.PI / 2;
+/** @param {number} width @param {number} height */
+export const tallScreen = (width, height) => width / height <= 10 / 11;
+/** where the docs' flight comes to rest on a screen of this size (CSS px): its distance from the galaxy's core, in the
+    galaxy's own units (the disc's radius is about 1) */
+/** @param {{ width: number, height: number }} size @returns {{ distance: number }} */
+export function docsRest({ width, height }) { return { distance: Math.hypot(...(tallScreen(width, height) ? PATH_TALL : PATH)[3]) }; }
 const A_LEN = Math.hypot(...PATH[0]);
 /** the camera's distance from the galaxy's core, on the rush in (tu ≤ FAR_T1), for a screen H tall */
+/** @param {number} tu @param {number} H */
 export function deepDistance(tu, H) {
   const d0 = Math.max(A_LEN * 1.5, (0.92 * H * 0.95) / MARK_RING);
   const e = Math.pow(Math.min(1, Math.max(0, (tu - FAR_T0) / (FAR_T1 - FAR_T0))), 1.7);
@@ -247,11 +289,13 @@ export const DEEP_SKIP = 1000;
    across it as it rushes in, to the angle the way in starts from: the ring turns with it, so it is seen to tilt in
    depth as it opens, rather than to change its plane on the page first. deepTilt: how far it has turned (radians) */
 const A_TILT = Math.acos(PATH[0][1] / A_LEN);
+/** @param {number} tu */
 export function deepTilt(tu) {
   const q = Math.min(1, Math.max(0, (tu - FAR_T0) / (FAR_T1 - FAR_T0)));
   return A_TILT * q * q * (3 - 2 * q);
 }
 /** how much larger the galaxy looks than the mark's ring, at tu */
+/** @param {number} tu @param {number} H */
 export const deepGrowth = (tu, H) => deepDistance(FAR_T0, H) / deepDistance(tu, H);
 
 /** @type {Profile} */
@@ -328,6 +372,7 @@ const PINNED_STEP = 1000 / 60;
  *   cancelFrame?: (id: number) => void,
  *   now?: () => number,
  *   devicePixelRatio?: number,
+ *   plain?: boolean,
  * }} [options]
  */
 export function createFlight(canvas, options = {}) {
@@ -360,14 +405,16 @@ export function createFlight(canvas, options = {}) {
      Milky Way, the streaks as light. Without it, this canvas draws all of it, as it always has. */
   /* made when the flight is first readied (warm), not when the page starts: the door's first light is never kept
      waiting by a GPU context and its shaders */
+  /** @type {World | null} */
   let voyage = null;
   /* the world as made (voyage.js), drawn only once it is proved fit (its `ready`): `voyage`, above, is the one the
      flight under way draws with, chosen as a flight begins (prime), so a world that is too slow, or lost, or not yet
      proved is never drawn, and the flight draws on this canvas as it always could */
+  /** @type {World | null} */
   let world3d = null;
   /* a world that can no longer be drawn (its shaders would not link, its context lost or let go) is stopped as it is
      dropped, so what it made is given back (voyage.js: stop) and nothing more of it is put on the context */
-  const letGo = () => { world3d.stop(); world3d = null; };
+  const letGo = () => { /** @type {World} */ (world3d).stop(); world3d = null; };
   /* destroyed (journey.js: destroy): no world is made after it, and the one made is stopped */
   let destroyed = false;
   /** @type {{ cx: number, cy: number, R: number, alpha: number, c: number } | null} */
@@ -938,7 +985,7 @@ export function createFlight(canvas, options = {}) {
       if (x < -600 * sc || x > W + 600 * sc || y < -700 * sc || y > H + 700 * sc) continue;
       ctx.save();
       ctx.translate(x, y); if (g.kind !== "home") ctx.rotate(/** @type {number} */ (g.rot0) + g.p * g.spin); ctx.scale(sc, sc);
-      PEN[g.kind](/** @type {HydratedProp} */ (g), t);
+      PEN[g.kind](/** @type {PenProp} */ (g), t);
       ctx.restore();
     }
     ctx.globalAlpha = 1;
@@ -961,9 +1008,9 @@ export function createFlight(canvas, options = {}) {
 
     /* and the world beneath, in the same frame */
     if (voyage && show) {
-      const n = parseInt(TINT.slice(1), 16), lin = (x) => Math.pow(x / 255, 2.2) * 2.5;
+      const n = parseInt(TINT.slice(1), 16), lin = (/** @type {number} */ x) => Math.pow(x / 255, 2.2) * 2.5;
       const bloom = !P.ending || P.ending === "bloom" ? q : P.ending === "halo" ? q * 0.6 : 0;
-      const tu = active.rev ? mirror(tc) : tc, deep = P.ending === "chart" && P.chart ? milkyWay(tu, q, P.chart) : null;
+      const tu = active.rev ? mirror(tc) : tc, deep = P.ending === "chart" && P.chart ? milkyWay(tu, q, P.chart, active.tall) : null;
       voyage.draw({
         t, v, K: P.K, vp: [VPX, VPY], rmax: RMAX, tint: [lin((n >> 16) & 255), lin((n >> 8) & 255), lin(n & 255)],
         progress: active.rev ? 1 - tc / P.dur : tc / P.dur, world: worldGL, bloom,
@@ -980,39 +1027,48 @@ export function createFlight(canvas, options = {}) {
      with their true parallax, and as it brakes comes to rest inside, the core ahead: the band across the sky, turned
      to lie as the docs page shows it, dimmer down the middle where the words go. Then the docs' constellations
      light on it, one by one, each star flaring as it catches and settling, where the page will draw them. */
+  /** @param {number} a @param {number} b @param {number} x */
   const smoothq = (a, b, x) => { const q = Math.min(1, Math.max(0, (x - a) / (b - a))); return q * q * (3 - 2 * q); };
+  /** @param {string} hex */
   const hexLin = (hex) => { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((x) => Math.pow(x / 255, 2.2)); };
-  const v3 = { sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
-    norm: (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; } };
-  const bez = (s) => { const u = 1 - s; return [0, 1, 2].map((k) => u * u * u * PATH[0][k] + 3 * u * u * s * PATH[1][k] + 3 * u * s * s * PATH[2][k] + s * s * s * PATH[3][k]); };
+  const v3 = { sub: (/** @type {number[]} */ a, /** @type {number[]} */ b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], cross: (/** @type {number[]} */ a, /** @type {number[]} */ b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
+    norm: (/** @type {number[]} */ a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; } };
+  /** @param {number} s @param {boolean} tall */
+  const bez = (s, tall) => { const [p0, p1, p2, p3] = tall ? PATH_TALL : PATH, u = 1 - s; return [0, 1, 2].map((k) => u * u * u * p0[k] + 3 * u * u * s * p1[k] + 3 * u * s * s * p2[k] + s * s * s * p3[k]); };
   /* how far along: the climb's own speed, summed, so the camera goes as fast as the flight feels */
   const ALONG = (() => { const out = [], t0 = FAR_T1, t1 = 3500; let acc = 0; for (let t = t0; t <= t1; t += 10) { out.push(acc); acc += UP.speed(t) * 10; } return { t0, t1, out, total: acc }; })();
+  /** @param {number} tu */
   const along = (tu) => { if (tu <= ALONG.t0) return 0; if (tu >= ALONG.t1) return 1; const i = (tu - ALONG.t0) / 10, k = Math.floor(i); return (ALONG.out[k] + (ALONG.out[Math.min(k + 1, ALONG.out.length - 1)] - ALONG.out[k]) * (i - k)) / ALONG.total; };
   /* before that, the galaxy is first seen exactly where and as large as the mark's ring at the centre of the screen,
      face on as the ring is, so the ring becomes it; then the camera rushes in from there, faster and faster, swinging
      down as it goes (deepTilt) to the start of the way in */
   const A_H = v3.norm([PATH[0][0], 0, PATH[0][2]]);
   /* where the camera is, seen from the core, at a tilt (0: straight above the disc), and which way is up for it */
+  /** @param {number} th */
   const swung = (th) => ({ dir: [A_H[0] * Math.sin(th), Math.cos(th), A_H[2] * Math.sin(th)], up: [-A_H[0] * Math.cos(th), Math.sin(th), -A_H[2] * Math.cos(th)] });
-  function camPos(tu) {
-    if (tu >= FAR_T1) return bez(along(tu));
+  /** @param {number} tu @param {boolean} tall */
+  function camPos(tu, tall) {
+    if (tu >= FAR_T1) return bez(along(tu), tall);
     return swung(deepTilt(tu)).dir.map((x) => x * deepDistance(tu, H));
   }
-  function camAt(tu) {
-    const P = camPos(tu), f = v3.norm(v3.sub([0, 0, 0], P));
+  /** @param {number} tu @param {boolean} tall */
+  function camAt(tu, tall) {
+    const P = camPos(tu, tall), f = v3.norm(v3.sub([0, 0, 0], P));
     let r, u;
     if (tu < FAR_T1) { u = swung(deepTilt(tu)).up; r = v3.cross(u, f); }
     else { r = v3.norm(v3.cross([0, 1, 0], f)); u = v3.cross(f, r); }
-    const roll = 0.34 * smoothq(2600, 3700, tu), cr = Math.cos(roll), sr = Math.sin(roll);
+    const roll = (tall ? ROLL_TALL : ROLL) * smoothq(2600, 3700, tu), cr = Math.cos(roll), sr = Math.sin(roll);
     [r, u] = [[r[0] * cr + u[0] * sr, r[1] * cr + u[1] * sr, r[2] * cr + u[2] * sr], [u[0] * cr - r[0] * sr, u[1] * cr - r[1] * sr, u[2] * cr - r[2] * sr]];
     return { P, R: [...r, ...u, ...f] };
   }
-  function milkyWay(tu, b, chart) {
-    const now = camAt(tu), prev = camAt(tu - 21), back = smoothq(2600, 3900, tu);
+  /** @param {number} tu @param {number} b @param {Chart} chart @param {boolean} tall */
+  function milkyWay(tu, b, chart, tall) {
+    const now = camAt(tu, tall), prev = camAt(tu - 21, tall), back = smoothq(2600, 3900, tu);
     const galaxy3d = { w: smoothq(880, 1240, tu), P: now.P, R: now.R, prevP: prev.P, prevR: prev.R, gain: 5.5, starK: 0.09, page: back };
+    /** @type {number[][]} */
     const stars = [];
     if (b > 0 && chart.geometry) {
-      const { rect, geometry: g } = chart, s = rect.w / g.W, ease = (u) => 1 - Math.pow(1 - Math.max(0, Math.min(1, u)), 2.2);
+      const { rect, geometry: g } = chart, s = rect.w / g.W, ease = (/** @type {number} */ u) => 1 - Math.pow(1 - Math.max(0, Math.min(1, u)), 2.2);
       g.cons.forEach((con, gi) => {
         const u = (b - (0.12 + gi * 0.055)) / 0.55, c = hexLin(con.c);
         con.pts.forEach((p, i) => {
@@ -1029,10 +1085,11 @@ export function createFlight(canvas, options = {}) {
      "ring": the ring the mark wears, drawn once out of the vanishing light.
      "sweep": a band of light crossing the sky the way the flight was going.
      "halo": a warm light rising at the top, where the landing's sun will be. */
+  /** @param {string} kind @param {number} b @param {Profile} P */
   function drawEnding(kind, b, P) {
     if (b <= 0) return;
     const cx = W / 2, cy = H / 2;
-    if (kind === "chart" && P.chart) { if (P.chart.geometry) drawChart(b, P.chart); return; }
+    if (kind === "chart" && P.chart) { if (P.chart.geometry) drawChart(b, /** @type {DrawableChart} */ (P.chart)); return; }
     if (kind === "ring") {
       ctx.lineWidth = 1.2;
       for (const [off, mul, spd] of [[0, 0.7, 0.42], [0.18, 0.35, 0.34], [0.36, 0.18, 0.28]]) {
@@ -1068,10 +1125,10 @@ export function createFlight(canvas, options = {}) {
   /* site: the docs' chart, assembling where the page will show it — the
      field first, then each constellation line by line, then its name — so
      the page's own chart appears whole beneath it and nothing jumps */
-  /** @param {number} b @param {{ rect: {x:number,y:number,w:number,h:number}, geometry: { W:number, H:number, field: { dots: any[], arcs: string[] }, cons: any[] } }} chart */
+  /** @param {number} b @param {DrawableChart} chart */
   function drawChart(b, chart) {
     const { rect, geometry: g } = chart, s = rect.w / g.W;
-    const ease = (u) => 1 - Math.pow(1 - Math.max(0, Math.min(1, u)), 2.2);
+    const ease = (/** @type {number} */ u) => 1 - Math.pow(1 - Math.max(0, Math.min(1, u)), 2.2);
     ctx.save();
     ctx.translate(rect.x, rect.y); ctx.scale(s, s);
     /* the ruling and the field, first and faint */
@@ -1116,7 +1173,6 @@ export function createFlight(canvas, options = {}) {
     ctx.globalAlpha = 1;
   }
 
-  /** @param {number} now */
   function frame() {
     if (!flight) return;
     /* a world lost on the way (its context): the flight goes on without it, drawn on this canvas from here */
@@ -1130,7 +1186,7 @@ export function createFlight(canvas, options = {}) {
     const dt = Math.min(48, now - active.last) / 1000 * rate;
     /* the first second, counted: how the hand-over from the door went (the console says) */
     if (t < 1000 * rate) { active.n = (active.n || 0) + 1; active.worst = Math.max(active.worst || 0, now - active.last); }
-    else if (active.n && !active.noted) { active.noted = true; note(`flight: first second ${active.n} frames, worst ${Math.round(active.worst)} ms`); }
+    else if (active.n && !active.noted) { active.noted = true; note(`flight: first second ${active.n} frames, worst ${Math.round(/** @type {number} */ (active.worst))} ms`); }
     active.last = now;
     step(t, dt);
     if (t < active.P.dur + 400) flightRaf = raf(frame);
@@ -1159,11 +1215,11 @@ export function createFlight(canvas, options = {}) {
       n.p = n.p0;                      /* every run starts from the same dust */
     }
     /* a flight may start a little way into itself (P.skip, in its own time) */
-    flight = { P, rev: !!P.rev, start: clock() - (P.skip || 0) / (P.rate || 1), last: clock(), props: P.props, dpr };
+    flight = { P, rev: !!P.rev, start: clock() - (P.skip || 0) / (P.rate || 1), last: clock(), props: P.props, dpr, tall: tallScreen(W, H) };
     voyage?.reset();
   }
 
-  let warmed = null, proved = null, warmedDocs = null, provedDocs = null, compiled = null;
+  let /** @type {Promise<void> | null} */ warmed = null, /** @type {Promise<void> | null} */ proved = null, /** @type {Promise<unknown> | null} */ warmedDocs = null, /** @type {Promise<unknown> | null} */ provedDocs = null, /** @type {Promise<unknown> | null} */ compiled = null;
   return {
     /* when the flight's shaders are compiled (after warm has made its world); where compiles freeze the page, the docs'
        galaxy's too (voyage.js: a "compile" chore of its own, which main.js holds the door for with the rest) */
@@ -1198,6 +1254,8 @@ export function createFlight(canvas, options = {}) {
         /* if its shaders could not be made after all, the flight draws without it, as it always could */
         warmed = Promise.all([earthReady, made.then(() => (world3d ? world3d.warm({ prove: false }) : null))]).catch(() => {}).then(() => { if (world3d?.dead) letGo(); if (!options.plain) { note("flight: ready"); noteChores("flight ready"); } });
       }
+      /* (a later ask lets the world try once more for a map that failed: voyage.js warm; it settles by itself) */
+      else if (world3d && !world3d.dead) world3d.warm({ prove: false }).catch(() => {});
       if (!prove) return warmed;
       if (!proved) {
         proved = warmed.then(() => (world3d ? world3d.warm() : null)).catch(() => {}).then(() => { if (world3d?.dead) letGo(); });
@@ -1207,8 +1265,8 @@ export function createFlight(canvas, options = {}) {
     /* the docs' flight needs its galaxy too, readied after the flight itself (`prove` as warm's) */
     warmDocs({ prove = true } = {}) {
       this.warm({ prove });
-      if (!prove) return (warmedDocs ??= warmed.then(() => (world3d ? world3d.warmDocs({ prove: false }) : null)).catch(() => {}));
-      return (provedDocs ??= proved.then(() => (world3d ? world3d.warmDocs() : null)).catch(() => {}));
+      if (!prove) return (warmedDocs ??= /** @type {Promise<void>} */ (warmed).then(() => (world3d ? world3d.warmDocs({ prove: false }) : null)).catch(() => {}));
+      return (provedDocs ??= /** @type {Promise<void>} */ (proved).then(() => (world3d ? world3d.warmDocs() : null)).catch(() => {}));
     },
     /**
      * Fly. `at` pins the flight to one beat instead of running it: the

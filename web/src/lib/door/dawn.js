@@ -37,26 +37,45 @@ import { openSoft, openChores, softRan, note, holdReveal, compilesAside, drawnIn
 import { decodeAhead } from "./decode-ahead.js";
 import { flag } from "./settings.js";
 
+/**
+ * @typedef {object} LightOptions
+ * @property {boolean} [firstVisit]
+ * @property {boolean} [wait]
+ * @property {() => unknown} [after]
+ * @property {() => void} [onLit]
+ * @property {() => void} [onOpen]
+ * @property {boolean} [aside]
+ */
+
+/** @param {() => void} fn */
 const afterFirstFrame = (fn) => requestAnimationFrame(() => setTimeout(fn, 0));
 /* a wait that never holds anything for long: past the cap it goes with what it has */
+/** @param {unknown} p @param {number} ms */
 const within = (p, ms) => Promise.race([Promise.resolve(p).catch(() => {}), new Promise((r) => setTimeout(r, ms))]);
 
+/** @param {HTMLElement} host */
 export function mountDawn(host) {
-  const unsky = mountFlightSky(host.querySelector(".dsky"), DAWN_FAR, DAWN_NEAR, "lg");
-  const world = host.querySelector(".world");
+  const unsky = mountFlightSky(/** @type {HTMLElement} */ (host.querySelector(".dsky")), DAWN_FAR, DAWN_NEAR, "lg");
+  const world = /** @type {HTMLElement} */ (host.querySelector(".world"));
   /* the Earth's pictures asked for by start(), each settled when it has loaded or failed to (a failed one is let go,
      as critical() lets it go: the door is drawn without it, not held "pending" for ever); none asked for yet: settled */
+  /** @type {Promise<unknown>} */
   let earthSettled = Promise.resolve();
-  const rasters = mountRasters(world, { sun: SUN }, "dawn", { until: () => earthSettled, drawn: (url, name) => holdRaster(url, name) });
+  const rasters = mountRasters(world, { sun: SUN }, "dawn", { until: () => earthSettled, drawn: (/** @type {string} */ url, /** @type {string} */ name) => holdRaster(url, name) });
   /* the Earth under the dawn: two pictures, asked for once the dawn is being drawn, each shown when it has come */
+  /** @type {Promise<unknown> | null} */
+  let preSettled = null;
   const loadEarth = () => {
-    const settled = [];
-    for (const im of world.querySelectorAll(".earth image[data-href]")) {
-      settled.push(new Promise((done) => {
+    const /** @type {Promise<unknown>[]} */ settled = [], pre = world.querySelector(".earth image.pre");
+    for (const im of /** @type {NodeListOf<SVGImageElement>} */ (world.querySelectorAll(".earth image[data-href]"))) {
+      const one = new Promise(/** @type {(done: (value?: unknown) => void) => void} */ ((done) => {
         im.addEventListener("load", () => { im.classList.add("in"); if (im.classList.contains("pre")) world.classList.add("earthy"); done(); }, { once: true });
         im.addEventListener("error", done, { once: true });
       }));
-      im.setAttribute("href", im.dataset.href); im.removeAttribute("data-href");
+      settled.push(one);
+      /* (remembered from here: a light() that comes after the picture has loaded or failed would miss the event) */
+      if (im === pre) preSettled = one;
+      im.setAttribute("href", /** @type {string} */ (im.dataset.href)); im.removeAttribute("data-href");
     }
     earthSettled = Promise.all(settled);
   };
@@ -65,20 +84,24 @@ export function mountDawn(host) {
      `alive` and does nothing once the dawn is gone; the timers and the ring's listener are also let go at once */
   let gone = false;
   const stops = new Set();
+  /** @template {unknown[]} A @template R @param {(...a: A) => R} fn @returns {(...a: A) => R | undefined} */
   const alive = (fn) => (...a) => { if (!gone) return fn(...a); };
   /* its pictures decoded ahead of the light (decode-ahead.js, as the dusk's): the glows and the Earth sit invisible until
      body.lit fades them in, and a browser decodes a picture only when it is first drawn, so without this they were all
      decoded in the frames after the light, the page held until they were (a 25-80 ms stall there, #32) */
+  /** @type {ReturnType<typeof decodeAhead>[]} */
   let held = [];
   /* and the glows it rasterises itself (a blob: picture per size), each as it is set: one held per layer, the one it
      shows, so a resize lets the old size's go */
+  /** @type {Map<string, { url: string } & ReturnType<typeof decodeAhead>>} */
   const rastered = new Map();
+  /** @param {string} url @param {string} name */
   const holdRaster = (url, name) => { if (!gone && rastered.get(name)?.url !== url) rastered.set(name, { url, ...decodeAhead([url]) }); };
   const start = () => {
     if (started || gone) return; started = true; world.dataset.rasterised = "pending";
-    held.push(decodeAhead([...world.querySelectorAll("image[href]")].map((im) => im.getAttribute("href"))));
+    held.push(decodeAhead(/** @type {string[]} */ ([...world.querySelectorAll("image[href]")].map((im) => im.getAttribute("href")))));
     afterFirstFrame(alive(() => {
-      const hrefs = [...world.querySelectorAll(".earth image[data-href]")].map((im) => im.dataset.href);
+      const hrefs = /** @type {string[]} */ ([.../** @type {NodeListOf<SVGImageElement>} */ (world.querySelectorAll(".earth image[data-href]"))].map((im) => im.dataset.href));
       loadEarth(); rasters.start();
       held.push(decodeAhead(hrefs));
     }));
@@ -87,6 +110,7 @@ export function mountDawn(host) {
   const critical = () => {
     const pre = world.querySelector(".earth image.pre");
     const earthHere = world.classList.contains("earthy") || !pre ? Promise.resolve()
+      : preSettled ? preSettled
       : new Promise((r) => { pre.addEventListener("load", r, { once: true }); pre.addEventListener("error", r, { once: true }); });
     return Promise.all([document.fonts?.ready, earthHere]);
   };
@@ -96,6 +120,7 @@ export function mountDawn(host) {
    * stopped by a compile stops behind it; the host readies what it has to and returns what the ring waits for (or
    * nothing). onLit(): body.lit is set, the reveal begins. onOpen(): the chores are open (openChores), the host may
    * start what waits for them (the live door's planets). aside: whether compiles here are in the background.
+   * @param {LightOptions} [options]
    */
   function light({ firstVisit = true, wait = false, after = () => null, onLit = () => {}, onOpen = () => {}, aside } = {}) {
     if (gone) return;
@@ -103,9 +128,9 @@ export function mountDawn(host) {
     aside ??= compilesAside();
     const firstLight = !litOnce; litOnce = true;
     const crit = critical();
-    let backstop = null, lap = null, ring = null, loadingOn = false, lit = false;
+    let /** @type {number | null} */ backstop = null, /** @type {(() => void) | null} */ lap = null, /** @type {HTMLElement | null} */ ring = null, loadingOn = false, lit = false;
     stops.add(() => {
-      clearTimeout(backstop);
+      clearTimeout(/** @type {number} */ (backstop));
       if (lap) ring?.removeEventListener("animationiteration", lap);
       if (loadingOn) document.body.classList.remove("loading");   /* only the one this light put on, and not yet taken off */
     });
@@ -125,7 +150,7 @@ export function mountDawn(host) {
     const lightNow = alive(() => { if (lit) return; lit = true; requestAnimationFrame(alive(() => { document.body.classList.remove("loading"); loadingOn = false; document.body.classList.add("lit");
       if (!holdReveal()) openSoft();
       let gap = 0, last = 0, timing = firstLight;
-      const frame = (now) => { if (last) gap = Math.max(gap, now - last); last = now; if (timing && !gone) requestAnimationFrame(frame); };
+      const frame = (/** @type {number} */ now) => { if (last) gap = Math.max(gap, now - last); last = now; if (timing && !gone) requestAnimationFrame(frame); };
       if (timing) requestAnimationFrame(frame);
       onLit();
       if (OPEN_EARLY) go();
@@ -141,13 +166,13 @@ export function mountDawn(host) {
       lap = () => {
         laps++;
         const enough = here && laps >= minLaps;
-        if (enough || laps >= 7) { ring?.removeEventListener("animationiteration", lap); lightNow(); }
+        if (enough || laps >= 7) { ring?.removeEventListener("animationiteration", /** @type {() => void} */ (lap)); lightNow(); }
       };
       ring?.addEventListener("animationiteration", lap);
       /* ring=stop: lit the moment the work is done; ring=rush: the runner's lap finished at three times its pace */
       arrived = () => {
         if (lit || !ring) return;
-        if (RING === "stop") { ring.removeEventListener("animationiteration", lap); note("ring: stopped where it was"); lightNow(); }
+        if (RING === "stop") { ring.removeEventListener("animationiteration", /** @type {() => void} */ (lap)); note("ring: stopped where it was"); lightNow(); }
         else if (RING === "rush") { try { ring.getAnimations().forEach((a) => { a.playbackRate = 3; }); note("ring: rushed to the lap's end"); } catch { /* the lap as it is */ } }
       };
       if (here) arrived();
@@ -159,13 +184,15 @@ export function mountDawn(host) {
   /* the live door (door3d.js), fetched only where the host's flag asks for it: its compiles, its start, and when it
      has been measured and shown (the host's own planets start only after that, so the door's measure is its own) */
   const door3d = flag("door3d") ? import("./door3d.js") : null;
+  /** @type {Promise<ReturnType<(typeof import("./door3d.js"))["liveDoor"]>> | null} */
+  let liveStarted = null;
   const live = door3d ? {
     compile: () => door3d.then((m) => m.compileDoor()),
-    start: () => door3d.then((m) => m.liveDoor(world)),
+    start: () => (gone ? null : (liveStarted = door3d.then((m) => m.liveDoor(world)))),
     measured: door3d.then((m) => m.doorMeasured, () => null),
     firstCompiled: () => door3d.then((m) => m.doorFirstCompiled()),
   } : null;
-  const destroy = () => { gone = true; for (const stop of stops) stop(); stops.clear(); unsky(); rasters.stop(); held = []; rastered.clear(); };
+  const destroy = () => { gone = true; for (const stop of stops) stop(); stops.clear(); unsky(); rasters.stop(); held = []; rastered.clear(); liveStarted?.then((d) => d?.destroy?.(), () => {}); };
   return { host, world, start, light, live, destroy, get held() { return [...held, ...rastered.values()]; } };
 }
 
@@ -173,28 +200,30 @@ export function mountDawn(host) {
    as the sign-in (markup.js, asDawn) also carries the dawn's Earth, its two pictures lying under the ember rim: asked
    for and shown as the dawn's are (each fades in when it has come; the crisp rim gives way to the first), and "ready"
    waits for them too (a picture that fails to load counts as settled). A dusk without them is unchanged */
+/** @param {HTMLElement} host */
 export function mountDusk(host) {
-  const unsky = mountFlightSky(host.querySelector(".dsky"), DUSK_FAR, DUSK_NEAR, "dk");
-  const world = host.querySelector(".world");
+  const unsky = mountFlightSky(/** @type {HTMLElement} */ (host.querySelector(".dsky")), DUSK_FAR, DUSK_NEAR, "dk");
+  const world = /** @type {HTMLElement} */ (host.querySelector(".world"));
+  /** @type {Promise<unknown>} */
   let earthSettled = Promise.resolve();
   const rasters = mountRasters(world, {}, "dusk", { until: () => earthSettled });
-  let started = false, gone = false, held = null;
-  const earth = () => [...world.querySelectorAll(".earth image[data-href]")];
+  let started = false, gone = false, /** @type {ReturnType<typeof decodeAhead> | null} */ held = null;
+  const earth = () => [.../** @type {NodeListOf<SVGImageElement>} */ (world.querySelectorAll(".earth image[data-href]"))];
   const loadEarth = () => {
-    const settled = [];
+    const /** @type {Promise<unknown>[]} */ settled = [];
     for (const im of earth()) {
-      settled.push(new Promise((done) => {
+      settled.push(new Promise(/** @type {(done: (value?: unknown) => void) => void} */ ((done) => {
         im.addEventListener("load", () => { im.classList.add("in"); if (im.classList.contains("pre")) world.classList.add("earthy"); done(); }, { once: true });
         im.addEventListener("error", done, { once: true });
-      }));
-      im.setAttribute("href", im.dataset.href); im.removeAttribute("data-href");
+      })));
+      im.setAttribute("href", /** @type {string} */ (im.dataset.href)); im.removeAttribute("data-href");
     }
     earthSettled = Promise.all(settled);
   };
   const start = () => {
     if (started || gone) return; started = true;
     if (host.classList.contains("asdawn")) world.dataset.rasterised = "pending";
-    held = decodeAhead([...[...world.querySelectorAll("image[href]")].map((im) => im.getAttribute("href")), ...earth().map((im) => im.dataset.href)]);
+    held = decodeAhead([.../** @type {string[]} */ ([...world.querySelectorAll("image[href]")].map((im) => im.getAttribute("href"))), .../** @type {string[]} */ (earth().map((im) => im.dataset.href))]);
     afterFirstFrame(() => { if (gone) return; loadEarth(); rasters.start(); });
   };
   const destroy = () => { gone = true; unsky(); rasters.stop(); held = null; };

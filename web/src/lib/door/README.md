@@ -34,8 +34,8 @@ const door = createDoor({
 });
 // createDoor may run on a server too (it touches no document). Call it again freely: each setting given replaces
 // the earlier value (one left out, or undefined, keeps it) and the keyboard is watched once. Each dawn(), dusk()
-// and journey() adds its own resize listeners; its destroy() removes them (not the live door's, which the
-// door3d debug flag starts and nothing stops).
+// and journey() adds its own resize listeners; its destroy() removes them (the dawn's also takes down the live
+// door, which the door3d debug flag starts; see below).
 const dawn = door.dawn(document.querySelector("#door"));
 const dusk = door.dusk(document.querySelector("#dusk"));
 const journey = door.journey({ canvas, name, dawnGlyph, duskGlyph, on: { dusk, farewell } });
@@ -46,12 +46,12 @@ const journey = door.journey({ canvas, name, dawnGlyph, duskGlyph, on: { dusk, f
 | Setting | What | Site | Orbit |
 | --- | --- | --- | --- |
 | `image(path)` | Where a picture is: `"dawn/dawn.webp"` → a URL the page can load. Never built from `import.meta.url`: in a Vite build that leaks file paths into server-rendered pages and does not resolve in the browser | a relative base | its own map, `import.meta.glob(..., { query: "?url" })` |
-| `flags` | The debug switches: `door3d`, `rich`, `lean`, `level` (`"0"`–`"2"`), `holdreveal`, `mainthread`, `ring` (`"stop"`/`"rush"`), `open` (`"late"`), `gpu` (`"force"`: the GPU gate accepts a software renderer, see below). The folder never reads the address; the host does | from `location.search` | none |
+| `flags` | The debug switches: `door3d`, `rich`, `lean`, `level` (`"0"`–`"2"`), `holdreveal`, `mainthread`, `ring` (`"stop"`/`"rush"`), `open` (`"late"`), `gpu` (`"force"`: the GPU gate accepts a software renderer, see below), `fit` (`"skip"`: the flight world's speed test is not run and the world is taken as fit, the console line saying `on (fitness skipped)`; for a tool that draws pictures on software GL, together with `gpu: "force"`, which it does not imply). The folder never reads the address; the host does | from `location.search` | none |
 | `storagePrefix` | The first word of every localStorage key the folder writes (`orbit-probe …`) | `orbit` | `orbit` |
 | `settle` | `timeline.js`: ms after the landing at which the instrument arrives (the site's own amendment, 2026-10) | 1100 | 1100 |
 | `typingWait` | `chores.js`: an unhurried chore waits while someone is typing, this long after the last key; 0 never waits (Orbit's addition) | 600 | 600 |
 
-### The dawn: `door.dawn(host)` → `{ start, light, live, destroy, world, host }`
+### The dawn: `door.dawn(host)` → `{ start, light, live, destroy, held, world, host }`
 
 `host` is the `#door` element rendered from `dawnMarkup`. Mounting draws the
 star fields and sets the glows' origin.
@@ -80,7 +80,18 @@ star fields and sets the glows' origin.
 - `live`: the live door (`door3d.js`), only where `flags.door3d` is set,
   else `null`: `compile()`, `start()` → the live door, `measured` (a promise:
   it has been measured and shown), `firstCompiled()`. The live door is an
-  experiment behind its flag and has no teardown yet.
+  experiment behind its flag. The dawn's `destroy()` calls its own teardown: its
+  frame loop stops, its resize and visibility listeners and its observers are
+  removed, nothing it was waiting for acts any more (a door destroyed before it
+  was shown never becomes the flight's door), and it leaves the sharp strip's
+  queue (so it holds no other context back). A lost context takes it down the
+  same way, and it stays down until a remount. Its textures stay on the
+  context; a remount makes its own. `dawn.live.start()` on a destroyed dawn
+  returns `null`.
+- `held`: the pictures decoded ahead of the light (`decode-ahead.js`), a list of `{ ready, held }` as
+  `decodeAhead` returns them: the glows' and the Earth's, plus one for each glow the dawn draws itself (with its
+  `url`; a resize replaces the old size's). `[]` before `start()`, and again after `destroy()`, which lets
+  them go; until then they are kept so the browser does not throw the decoded copies away.
 - `destroy()`: the surface taken down (a host that remounts its door): its
   resize listeners removed, a glow build under way stopped, and a first light
   under way stopped: after it, no `body.lit`, no `onLit`, no `onOpen` (from
@@ -169,11 +180,13 @@ The journey sets body classes the stylesheet answers: `arming`, `showdawn`,
 `showwarp`, `launching`, `bare`, `instrument`, `withdrawing`, `dispersing`,
 `showdusk`, `farewell`, `holding`. The host's surfaces style themselves on
 them.
+`dawn()` and `dusk()` also set `loading` and `lit` (first light, below), and the
+host sets `ready-flight` (below).
 
 ### Markup (`markup.js`)
 
-`dawnMarkup({ image, lockup, gate, foot, heading, indent })` and
-`duskMarkup({ image, gate, foot, farewell, asDawn, indent })` are pure string
+`dawnMarkup({ image, lockup, gate, foot, heading, tag, indent })` and
+`duskMarkup({ image, gate, foot, farewell, asDawn, tag, indent })` are pure string
 functions: the door's markup with the host's parts in the slots (`lockup`,
 between the glyph and the name; `gate`, inside `.gate-wrap`; `foot`, at the
 surface's foot). `heading` (dawn only, default `true`): whether the wordmark is
@@ -184,7 +197,18 @@ does, for a page that has an h1 of its own (a docs page), styled the same
 renders them in its components. `image` is the same resolver as the setting; what it answers is escaped where it
 goes into an attribute, so it cannot add an attribute or an element.
 
-**Text and raw HTML.** `farewell.said` and `farewell.sub` are text: they are
+`tag` (both, default none; added 2026-10, #63): the release tag under the
+wordmark. It is TEXT, one string, escaped like `farewell`: nothing of it is
+markup or an attribute. Its first word is the channel and anything after the
+first whitespace is the build: `"alpha"`, `"beta"`, `"preview 3f2a9c1"`. It is
+written right after `.name` as `<div class="release" data-channel="C">W</div>`,
+`W` the word and `C` that word (in any case, shown in lowercase) if it is `alpha`, `beta`
+or `preview`, else `build`; whitespace runs fold to one space, a non-string is no tag, and a tag
+longer than the ring's inside is cut with an ellipsis; a build follows as `<span class="build">…</span>`. Empty or left out,
+the markup is byte for byte what it was. Orbit will pass its channel or short
+commit (a follow-up in `ai/orbit`); the site passes none.
+
+**Text and raw HTML.** `farewell.said`, `farewell.sub` and `tag` are text: they are
 escaped, so a person's name in them is never markup. `lockup`, `gate` and `foot`
 are raw HTML, put in as given (the host's own markup: never put a person's words
 in them). `indent` is whitespace.
@@ -206,6 +230,52 @@ Loaded before the host's own sheet. Its header lists what it asks of the
 host (`--star-far`, `--star-near`, `--display`, `--mono`, `html.rich`) and
 the keyframes it defines that a host may use (`driftf`, `driftn`,
 `spinback`). Every `url()` in it stays inside the folder.
+
+`.release` (the tag under the name, above): positioned from the name's measure
+(`--R` where the surface sets it), coloured and sized by the sheet, and shown
+with the name once `body.lit`. It asks nothing of the host; the host styles
+nothing of it. `#dusk.asdawn` hides it on a phone with the name.
+
+The host's own body class: `ready-flight`. The gate is hidden until
+`body.lit.ready-flight` (`door.css`), so the host adds `ready-flight` to the
+body once the flight is ready to begin (the site: `openNow` in
+`assets/js/main.js`). Without it the gate never shows.
+
+### What the folder touches in the host page
+
+- `#door`: `capability.js` and `door3d.js` look it up (`#door .world`), so the
+  dawn's host must have that id.
+- Body classes it sets: `loading` and `lit` (first light, `dawn.js`); the
+  journey's `arming`, `showdawn`, `showwarp`, `launching`, `bare`, `instrument`,
+  `withdrawing`, `dispersing`, `showdusk`, `farewell` and `holding`
+  (`journey.js`).
+- Body classes it reads: `launching`, `departing` and `showwarp` (`door3d.js`
+  watches the body's class to stand down while a flight leaves; `departing` is
+  the host's), and `ready-flight` (`door.css`).
+- `window.__chores`: set only under the `door3d` flag, by `createDoor`, to a
+  function returning the chore queue as it is now (for the live door's tests).
+
+### What a page's Content-Security-Policy must allow for the door
+
+Found by reading what the folder loads (`fetch`, `Image`, `createObjectURL`,
+`toDataURL`, `style.` and `import(` in `*.js`; `url()` in `door.css`):
+
+- `img-src 'self' data: blob:`: `glows.js` draws each glow as an image from a
+  `data:image/svg+xml` URL, then rasterises it into a `blob:` URL (a `data:`
+  PNG where a canvas cannot make a blob); the stylesheet's pictures and the
+  flight's own textures are same-origin files.
+- `connect-src 'self'`: `chores.js` `fetchOnce` fetches the pictures
+  (`image(path)` URLs) with `fetch`, so they must be on the page's own origin
+  (or named here if the host serves them from another).
+- `script-src 'self'`: the modules import each other, and `door3d.js` is
+  loaded with `import()`; nothing is evaluated (no `eval`, no `new Function`),
+  so `'unsafe-eval'` is not needed. The folder adds no inline script.
+- `style-src 'self'`: its sizes and origins are set from script through the
+  style object (`style.setProperty`, `style.width`), which a policy does not
+  block, and the markup has no `style=""` attribute. A host that keeps
+  `'unsafe-inline'` for its own styles loses nothing.
+- No `worker-src` beyond `'self'` (it starts no worker), no `font-src` (it
+  loads no font), no frames, no `object-src`.
 
 ### The GPU gate (`fitness.js`, ADR-0002)
 
@@ -232,19 +302,34 @@ verdict: `flight world: on (frame N ms)`, or `off: frame N ms`. No verdict is st
 ### Also exported from `index.js`
 
 For a host's own worlds and skies, so their work takes its turn with the
-door's: the chores (`chore`, `fetchOnce`, `openChores`, `hurryChores`,
-`note`, `quiet`, `compilesAside`, …), `uploadBanded`, the GPU gate (`gpu`,
+door's: the chores (`chore`, `fetchOnce`, `linked`, `counted`, `note`,
+`noteChores`, `quiet`, `openChores`, `openCompiles`, `openSoft`, `softRan`,
+`hurryChores`, `programs`, `compilesAside`, `holdReveal`, and the wait limit for
+a background compile, `compiledWithin` and `COMPILE_WAIT`), `uploadBanded`, the GPU gate (`gpu`,
 `isSoftware`, `FIT_MS`, below), the capability probe
 (`probe`, `level`, `liveDoor`, `lateDoor`), `seededRng`, `el`,
 `measureTile`, the engine (`createFlight`, `UP`, `PROPS_UP`, `UPDUR`,
-`homeProps(homes)`) and `decodeAhead`, and the glows' graphs (`DAWN`, `DUSK`).
+`homeProps(homes)`, `docsRest`) and `decodeAhead`, and the glows' graphs (`DAWN`, `DUSK`).
+`docsRest({ width, height })` → `{ distance }`: how far from the galaxy's core
+the docs' flight comes to rest on a screen of that size (CSS px), in the
+galaxy's own units (its disc's radius is about 1). The flight reads the
+screen's shape itself, once, as it starts (turning the screen mid-flight does
+not switch it): on a landscape screen the camera rests inside the disc, 0.56
+from the core, the band across the sky; on a portrait one (width / height at
+most 10/11, the door's own threshold) it stops short, 1.1 from the core and
+above the disc, rolled a quarter turn more, so the whole spiral stands up the
+screen (`engine.js`: `PATH`, `PATH_TALL`). A host that draws the sky the flight
+ends in draws one picture for each (the site's `tools/docsky.cjs`).
 `homeProps(homes)` is the other households passing on a flight: one `"home"`
 prop each from `[{ name, bodies: [[x, y, colour, r]] }]`, a home's prop
 depending only on its place in the list (the site's `demoFlight` uses it).
 `descentProfile({ onto, from, homes })` is the profile `descend` flies (pure,
 for tests: `DOWN` itself, `DOWN_DAWN` itself, or the climb `from` run
 backwards, with the `homes` on the end); `DOWN`, `DOWN_DAWN`, `DOWNDUR` and
-`mirrored(props)` come with it.
+`mirrored(props)` come with it. `mountDawn` and `mountDusk` are the very
+functions `door.dawn(host)` and `door.dusk(host)` return, exported by name too
+(`dawn.js`); `createJourney` is likewise `door.journey`. They read the settings
+`createDoor` has given, so call `createDoor` first.
 
 ## Files
 

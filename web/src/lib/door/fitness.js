@@ -28,7 +28,7 @@ export const WARM_FRAMES = 2;
 export const TIMED_FRAMES = 5;
 
 /**
- * @param {{ readPixels: Function, RGBA: number, UNSIGNED_BYTE: number }} gl
+ * @param {{ readPixels(x: number, y: number, w: number, h: number, format: number, type: number, pixels: ArrayBufferView): void, RGBA: number, UNSIGNED_BYTE: number }} gl any WebGL context
  * @param {() => void} draw  draws the heaviest frame the caller will ask for
  * @param {{ now?: () => number, warm?: number, timed?: number }} [how]
  * @returns {{ fit: boolean, ms: number }}  ms: the median timed frame
@@ -74,7 +74,7 @@ let verdict;
  * masked "WebKit WebGL". So RENDERER first, and the extension only when that is masked or empty.
  */
 const MASKED = /^(webkit webgl|mozilla)?$/i;
-/** @param {any} gl */
+/** @param {WebGL2RenderingContext} gl */
 function rendererOf(gl) {
   const plain = String(gl.getParameter(gl.RENDERER) ?? "").trim();
   if (!MASKED.test(plain)) return plain;
@@ -106,7 +106,16 @@ export function gpu() {
         sayVerdict(`off: software renderer (${renderer})`);
       }
       /* asked of this same context: whether shaders are made off the page's thread (KHR_parallel_shader_compile) */
-      else verdict = { canvas, gl, parallel: !!gl.getExtension("KHR_parallel_shader_compile"), renderer };
+      else {
+        const got = { canvas, gl, parallel: !!gl.getExtension("KHR_parallel_shader_compile"), renderer };
+        /* A lost context can come back (Khronos, HandlingContextLost): cancelling the event is what lets the browser
+           restore it. While it is lost the page stays 2D (voyage.js makes no world on a lost context); once restored
+           the same canvas and gl serve the next world, built from scratch by whoever asks, with no second test and no
+           second context. Extensions are asked for again, as the restored context starts without them. */
+        canvas.addEventListener("webglcontextlost", (e) => { e.preventDefault(); });
+        canvas.addEventListener("webglcontextrestored", () => { try { got.parallel = !!gl.getExtension("KHR_parallel_shader_compile"); } catch { /* fine */ } });
+        verdict = got;
+      }
     } else sayVerdict("off: no WebGL2 here, or the browser calls it a major performance caveat");
   } catch { sayVerdict("off: WebGL2 refused"); }
   return verdict;
