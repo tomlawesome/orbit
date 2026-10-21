@@ -189,6 +189,18 @@ describe("#1279: the phone's create form shows page one and the read, as the des
     expect(desk).not.toMatch(/\.eml/u);
   });
 
+  it("the home page's two pickers use the same constant and name no .eml (G14+F3-FR3)", () => {
+    const behaviour = read("web/src/routes/home/home.behaviour.js");
+    const foot = read("web/src/routes/home/FootRow.svelte");
+    expect(behaviour).toMatch(/import \{[^}]*\bDOCUMENT_ACCEPT\b[^}]*\} from "\$lib\/data\/document-read\.js"/u);
+    expect(foot).toMatch(/import \{[^}]*\bDOCUMENT_ACCEPT\b[^}]*\} from "\$lib\/data\/document-read\.js"/u);
+    expect(behaviour).toMatch(/picker\.accept = DOCUMENT_ACCEPT;/u);
+    expect(foot).toMatch(/<input [^>]*type="file"[^>]*accept=\{DOCUMENT_ACCEPT\}/u);
+    expect(behaviour).not.toMatch(/\.eml/u);
+    expect(foot).not.toMatch(/accept="[^"]*"/u);
+    expect(foot).not.toMatch(/\.eml/u);
+  });
+
   it("the phone's reading card shows the inspection message as its own line, under the page block and above 'not this one' (F3)", () => {
     expect(markup).toMatch(/<p class="pc-honest">\{picked\.message\}<\/p>/u);
     expect(markup).toMatch(/\{#if picked\.message\}/u);
