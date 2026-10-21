@@ -44,6 +44,11 @@ export const CAP_NOTHING = "orbit read the pages and found nothing to carry acro
 export const CAP_ATTACHED = "the file is attached as it is";
 export const CAP_UNREAD = "orbit could not read the pages this time";
 
+/* What both pickers offer: the types the server keeps (PDF, JPEG, PNG; it
+   refuses anything else). Extension and MIME both, because Android's picker
+   filters by MIME while desktop and iOS honour extensions. */
+export const DOCUMENT_ACCEPT = ".pdf,application/pdf,image/*";
+
 /** The suggestion fields both forms have a slot (and a "◆ from document"
     mark) for; the rest of the inspection's eight stay with the person's own
     choices (#1058c maps kind to schedule). */
@@ -62,10 +67,12 @@ export const SUGGESTION_FIELDS = /** @type {const} */ (["provider", "reference",
  * The phone form's state for one pick (pocket.svelte holds it, EntryForm.svelte
  * draws it): `page` is page one's object URL once drawn; `settled` stops the
  * focus block breathing on `line` / `why` (a refusal, or a page that could not
- * be drawn); `read` is the read being done, and `caption` what it ended on.
+ * be drawn); `read` is the read being done, `caption` what it ended on, and
+ * `message` the server's own words about the read (the desk's `#rc-honest`).
  * @typedef {{
  *   key: number, head?: string, name: string, size: number, page: string | null, scanned: boolean,
  *   refused: boolean, settled: boolean, line: string, why: string, read: boolean, caption: string,
+ *   message: string,
  * }} PickedRead
  */
 

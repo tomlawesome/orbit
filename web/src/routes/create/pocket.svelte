@@ -143,6 +143,8 @@
     picked.scanned = false;
     picked.refused = true;
     picked.read = true;
+    /* A refusal replaces whatever the read said, as the desk clears its line. */
+    picked.message = "";
     settle(FOCUS_REFUSED, why);
   }
 
@@ -159,6 +161,7 @@
     picked = {
       key: picks, head: documentReading ? undefined : CHECKING_HEAD, name: file.name, size: file.size, page: null, scanned: false, refused: false,
       settled: false, line: FOCUS_SCANNING, why: documentReading ? WHY_READING : WHY_CHECKING, read: false, caption: documentReading ? CAP_READING : CAP_ATTACHED,
+      message: "",
     };
     const householdId = entry.householdId;
     if (!householdId) return;
@@ -207,6 +210,9 @@
         carried = carry.length;
       }
       picked.caption = captionOf(outcome, carried);
+      /* The server's words about the read, as the desk shows them under its
+         caption (e.g. nothing could be extracted). */
+      picked.message = outcome.kind === "read" || outcome.kind === "unread" ? outcome.message : "";
       picked.read = true;
       if (undrawable) settle(FOCUS_UNDRAWABLE, undrawable);
     });
