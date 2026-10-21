@@ -415,6 +415,7 @@ switch (argv[0]) {
     break;
   case "volume":
     if (argv[1] === "ls") {
+      if (env.FAKE_HANG_VOLUME_LS_AFTER_UP === "1" && fs.existsSync((env.FAKE_STATE_DIR ?? "/nonexistent") + "/up-called")) hang("volume-ls");
       if (env.FAKE_VOLUME_LS_FAIL === "1") exit(1);
       if (env.FAKE_VOLUME_LS_FAIL_AFTER_UP === "1" && fs.existsSync((env.FAKE_STATE_DIR ?? "/nonexistent") + "/up-called")) exit(1);
       const filter = (flagValue("--filter") ?? "").replace(/^name=/, "");
@@ -438,6 +439,7 @@ switch (argv[0]) {
       exit(0);
     }
     if (argv[1] === "rm") {
+      if (env.FAKE_HANG_VOLUME_RM === "1") hang("volume-rm");
       if (env.FAKE_VOLUME_RM_FAIL === "1") {
         process.stderr.write("fake docker: volume is in use\\n");
         exit(1);
@@ -4257,5 +4259,42 @@ describe("install.sh: a rollback that cannot finish names what is left (redesign
     const stamp = onlyStamp(targetDir);
     expect(readOptional(join(stamp, "originals", ".orbit-secrets", "oidc-client-secret"))).toBe("preprovisioned-oidc-secret");
     expect(existsSync(join(stamp, "originals", ".env-orbit"))).toBe(true);
+  });
+});
+
+describe("install.sh: every Docker call in the rollback is time-bound", () => {
+  // A hung Docker daemon must not hold the rollback until the launcher kills it. The fake hangs far longer
+  // than the budget (down 10 s, listing and removing 5 s each); the whole failed install must still end well
+  // inside the 30 s process guard, so 25 s is the most it may take.
+  const budgetMs = 25_000;
+
+  function timedFailure(knobs) {
+    const { targetDir, environment } = recoveryFixture();
+    const started = Date.now();
+    const result = runInstall(targetDir, { ...environment, FAKE_COMPOSE_UP_FAIL: "1", ...knobs });
+    return { result, elapsed: Date.now() - started };
+  }
+
+  it("a hung `compose down` ends the rollback within the budget, reporting that the containers could not be stopped", () => {
+    const { result, elapsed } = timedFailure({ FAKE_HANG_DOWN: "1" });
+    expect(elapsed).toBeLessThan(budgetMs);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("the containers could not be stopped");
+    expect(recoveryCommands(result.stderr)).toHaveLength(1);
+  });
+
+  it("a hung `docker volume ls` ends the rollback within the budget, saying the volumes could not be listed", () => {
+    const { result, elapsed } = timedFailure({ FAKE_HANG_VOLUME_LS_AFTER_UP: "1" });
+    expect(elapsed).toBeLessThan(budgetMs);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("could not be listed");
+  });
+
+  it("a hung `docker volume rm` ends the rollback within the budget, naming each volume that could not be removed", () => {
+    const { result, elapsed } = timedFailure({ FAKE_HANG_VOLUME_RM: "1" });
+    expect(elapsed).toBeLessThan(budgetMs);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("could not be removed");
+    for (const volume of allThreeVolumes) expect(result.stderr).toContain(volume);
   });
 });
