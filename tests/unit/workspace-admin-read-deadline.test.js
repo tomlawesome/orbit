@@ -191,3 +191,54 @@ describe("the reads the screen starts with", () => {
     expect(second.user).toEqual({ id: "u1" });
   }, 3000);
 });
+
+/*
+ * R6 (R4-FR1): a session read that fails or never answers is NOT swallowed
+ * into "signed out". It is recorded as failed.session = true, so the screen
+ * can offer "try again" (rereadScreen) and does not look signed out with no
+ * cue. A good session read leaves failed.session false, and a failed other
+ * panel does not set it.
+ */
+describe("a failed session read is recorded, not swallowed", () => {
+  it("a session read that never answers sets failed.session", async () => {
+    shortenTimeouts();
+    stubFetch("/api/auth/session");
+    const view = await readAdmin();
+    expect(view.failed.session).toBe(true);
+  }, 3000);
+
+  it("a session read that is refused by the network sets failed.session", async () => {
+    stubFetch(null);
+    const answer = /** @type {any} */ (globalThis.fetch);
+    vi.stubGlobal("fetch", vi.fn((url, init) => (String(url).includes("/api/auth/session")
+      ? Promise.reject(new TypeError("network down"))
+      : answer(url, init))));
+    const view = await readAdmin();
+    expect(view.failed.session).toBe(true);
+  }, 3000);
+
+  it("a good session read leaves failed.session false", async () => {
+    stubFetch(null);
+    const view = await readAdmin();
+    expect(view.failed.session).toBe(false);
+    expect(view.user).toEqual({ id: "u1" });
+  });
+
+  it("a failed other panel does not set failed.session", async () => {
+    shortenTimeouts();
+    stubFetch("/api/admin/operations");
+    const view = await readAdmin();
+    expect(view.failed.operations).toBe(true);
+    expect(view.failed.session).toBe(false);
+  }, 3000);
+
+  it("the retry after a stalled session read clears failed.session", async () => {
+    shortenTimeouts();
+    stubFetch("/api/auth/session", { stallOnce: true });
+    const { readAdminScreen } = await import("../../web/src/lib/data/workspace.js");
+    const first = await readAdminScreen();
+    expect(first.failed.session).toBe(true);
+    const second = await readAdminScreen();
+    expect(second.failed.session).toBe(false);
+  }, 3000);
+});
