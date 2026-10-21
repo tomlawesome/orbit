@@ -12,13 +12,15 @@ import { describe, expect, it } from "vitest";
 /** @param {string} rel */
 const read = (rel) => readFileSync(new URL(`../../${rel}`, import.meta.url), "utf8");
 
-/** Every match of `needle` in `src`, as the text from the match to `reach` characters on. */
-/** @param {string} src @param {RegExp} needle @param {number} reach */
-function windowsAfter(src, needle, reach) {
-  /** @type {string[]} */
-  const out = [];
-  for (const m of src.matchAll(new RegExp(needle, "g"))) out.push(src.slice(m.index, m.index + reach));
-  return out;
+/**
+ * The body of every `{#if ...failed.session...}` block, up to its first `{/if}`.
+ * Bounded by the block rather than a character count, so a neighbouring
+ * panel's own "try again" (the People note sits right below) cannot pass for
+ * the session note's.
+ * @param {string} src
+ */
+function sessionBlocks(src) {
+  return [...src.matchAll(/\{#if [^}]*failed\.session\b[^}]*\}([\s\S]*?)\{\/if\}/g)].map((m) => m[1]);
 }
 
 describe.each([
@@ -30,8 +32,8 @@ describe.each([
   });
 
   it("offers 'try again' beside the failed session note, wired to the retry", () => {
-    const hits = windowsAfter(read(file), /failed\.session\b/, 700);
-    expect(hits.length, `${file} never reads failed.session`).toBeGreaterThan(0);
-    expect(hits.some((w) => /try again/.test(w) && retry.test(w)), `${file}: no 'try again' wired to the retry after failed.session`).toBe(true);
+    const blocks = sessionBlocks(read(file));
+    expect(blocks.length, `${file} has no {#if ...failed.session} block`).toBeGreaterThan(0);
+    expect(blocks.some((w) => /try again/.test(w) && retry.test(w)), `${file}: no 'try again' wired to the retry inside the failed.session block`).toBe(true);
   });
 });
