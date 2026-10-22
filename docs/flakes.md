@@ -27,6 +27,7 @@ fixing the cause deletes the heading in the same commit.
 ## repair_journeys: hostile-value-privacy-negatives, "could not start the labelled container vector"
 
 - 2026-09-09 · 9e27d38 · pipeline 822 / repair_journeys (!908) · `docker run … busybox:stable sleep 600` failed after the four journeys before it passed; the job was green on 810–815 the same morning on unchanged harness code (M7 touches nothing in `scripts/test-repair-journeys.sh`). The `docker run` sends its own output to `/dev/null` (`test-repair-journeys.sh:955-960`), so the log cannot say whether it was a Docker Hub pull failure or something else; the next sighting should show that output first.
+- 2026-10-18 · 5b460996 (!1074; launcher pin and Go image only since the green c9df1a49 run, nothing the repair journeys read) · pipeline 2702 / `repair_journeys` job 37078 · same message, after the four journeys before it passed; the log does not name the docker error. Second sighting.
 
 ## The /home account panel does not register as open when armed — desktop and pocket — #1064
 
@@ -135,11 +136,6 @@ skill).
 ## extraction-shortlist-recall.test.ts "adds to the tallies it is given rather than replacing them" (first seen alongside a password.test.ts timeout, since fixed under #1104)
 
 - 2026-09-18 · `fix/m9-surface-bugs` · local `pnpm run test` (whole unit suite, 270 files in parallel) · both timed out at 5000 ms in the full run, then passed together in isolation (32/32, ~4.5 s for both files) on unchanged code. The full run was under heavy load (import phase 239 s, tests 833 s), so this reads as scheduler starvation rather than anything in either test — neither file changed on this branch. First sighting of each; no issue yet (an issue on the third, per the testing-and-ci skill).
-
-## local-sign-in.test.ts "spends a real derivation whichever of the four cases it is"
-
-- 2026-09-19 · 9ccca49 (!950, none of it near sign-in) · pipeline 1278 / `integration` job 16683 · `expect(Math.max(...times)).toBeLessThan(Math.min(...times) * 6)` — the four attempts' elapsed times spread wider than 6×. Retried on the same commit as job 16708 and passed. The assertion measures wall-clock on a shared, loaded runner; its own comment (`tests/integration/local-sign-in.test.ts:283-285`) says a strict bound "would measure the runner rather than the code", and the host was writing at 80–160 MB/s under another tenant at the time.
-- 2026-10-10 · cd964294 (!1052; its only changes since 8b9bf878, whose `integration` job 34067 passed, are e2e specs and one unit test) · pipeline 2341 / `integration` job 34109 · the same assertion, now in the test named "answers an unknown address, a wrong password, a disabled account and a passwordless account alike" (`tests/integration/local-sign-in.test.ts:288`): 1310.7 ms against a 1244.3 ms bound (6× the fastest attempt). Retried as job 34121. Second sighting.
 
 ## v19-keyboard.spec.ts:568 "administration: the local-user controls are reachable and announced"
 
@@ -449,6 +445,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-keyboard.spec.ts:313 "arrive: the sign-in door opens by Tab and Enter alone" on desktop-chromium
 
 - 2026-10-09 · 79c68846 (#1319 stage 3b; this test unchanged on the branch) · local `scripts/test-e2e-local.sh --keep --project desktop-chromium`, whole suite, with the fidelity suite running alongside · `page.goto: net::ERR_ABORTED` on `/home` at line 328. Passed on a rerun of the file against the same stack. Traces: `~/projects/.backups/orbit/e2e-1319-stage3b-79c68846-desktop-chromium`. First sighting.
+- 2026-10-16 · 7264f015 (`dev` after !1073, which touches test tooling and scripts only; this test now at line 315) · pipeline 2674 / smoke (job 36868, !1072) · first attempt: signed out, `/home` landed on the test identity provider's `/authorize` page instead of Orbit's `/login?returnTo=%2Fhome` (`toHaveURL` at line 331); retry #1: `page.goto: net::ERR_ABORTED` on `/home` at line 330, as the first sighting. 392 others passed. Job retried as 36881. Second sighting.
 
 ## v19-home-drawer.spec.ts:212 "on the desk › the dial's documents chip opens the item's drawer at its real documents" (desktop-webkit)
 
@@ -602,3 +599,41 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## fidelity: document-preview.spec.js:47 "a paper's page loads on the fixture item's drawer at desk (1600x1000)"
 
 - 2026-10-16 · 6f768016 (`dev` merge of !1069; same tree as a08de7a1, whose pipeline 2650 passed this job) · pipeline 2655 / fidelity (job 36615) · `[data-preview-card].snap` not visible within the 5000ms wait: the preview card never reached its loaded page. The same 5 s family as the document-preview page-count wait raised to 20 s in 614118ff. First sighting; job retried as 36629.
+
+## v19-about-loading.spec.ts:69 "a slow click on About shows that it is loading before the content arrives" — desktop-webkit, mobile-webkit
+
+- 2026-10-18 · 5bfff8b6 (!1074, the branch that adds this test) · pipeline 2688 / `smoke_webkit` job 36975 · no loading sign (`aria-busy`, progress bar, a "loading" status or text) appeared within 10 s while the About data request was held; passed on its retry in the same job (11.1 s). The same run was loaded enough that one wheel scroll landed over a second late (#1472 note 40486). First sighting.
+- 2026-10-18 · c9df1a49 (!1074) · pipeline 2691 / `smoke_webkit_mobile` job 37001, mobile-webkit · failed once, passed on retry. Second sighting, two pipelines in a row; the test is new on this branch.
+
+## v19-document-preview.spec.ts:299 "the reader turns a multi-page document to its last page and back, by arrows and by keys" — desktop-webkit
+
+- 2026-10-18 · c9df1a49 (!1074, no document-preview change) · pipeline 2691 / `smoke_webkit` job 37000 · failed once, passed on retry. First sighting.
+
+## preview.test.ts:760 "renderDocumentPagePreview > the page is drawn in the sandbox, never on the server's own thread (#1427) > draws a 300 dpi A4 scan to a PNG of the page's shape"
+
+- 2026-10-20 · 0469e455 (the accepted v0.3.0 commit, unchanged since preview pipeline 2677 passed every job first time) · pipeline 2774 / fast (job 37576), the stable-promotion run on `main`, with the !1078 pipeline and five local agent stacks on the same host · `Orbit could not draw a picture of this document` from the sandboxed renderer, in a 449 s `fast` run. Retried as job 37634. First sighting.
+- 2026-10-22 · 2b120e89 (signing-image re-pin and cosign bump only since the green bea1293c run; nothing near documents) · local `scripts/test-backend.sh`, worktree `v031-parts`, while a base-image rebuild ran on the same host · same message, in a 919 s run; the file alone passed at once (40.9 s with the test below). Second sighting.
+
+## validation.test.ts "structural document classification > classifies unsupported %PDF-1.7 ... as unsupported_structure"
+
+- 2026-10-20 · 0469e455 · pipeline 2774 / fast (job 37576), same run as the sighting above · timed out at the 5 s default. Wall-clock-under-load shape. First sighting.
+
+## sign-out-descent.spec.ts:195 "sign out from home's menu reaches the dusk (narrow desk, as the browser is)" and "(wide desk, as the browser is)" on desktop-webkit
+
+- 2026-10-21 · 8a841e3c (!1074) · pipeline 2833 / `smoke_webkit` job 38057 · both cases failed first and passed on Playwright's retry in the same run ("2 flaky"), which fails the job; green on pipeline 2834 (b331397f, installer-only change, nothing under `web/`). First sighting.
+
+## local-sign-in.spec.ts:352 "no sign-in card sits over the chooser and the count" — desktop-chromium
+
+- 2026-10-21 · b331397f (!1074; installer-only change since the green 8a841e3c run) · pipeline 2834 / `smoke_local_only` job 38082 · "the chooser: the frame sampler never saw the newcomer's frame"; passed on the retried job 38096, same commit. First sighting.
+
+## settings-text-size-tab-stop.test.mjs:128 "settings, phone layout: the text size tab stop starts on the applied step > with standard applied, the one tab stop is the ticked tile"
+
+- 2026-10-22 · 2b120e89 (nothing near settings since the green bea1293c run) · local `scripts/test-backend.sh`, same 919 s run as preview.test.ts:760's second sighting · timed out at the 5 s default; the file alone passed at once. Wall-clock-under-load shape. First sighting.
+
+## sign-out-descent.spec.ts:274 "sign out from another page's menu plays the descent (wide desk)" on desktop-firefox
+
+- 2026-10-22 · 39134f33 (!1081) · pipeline 2875 / `smoke_firefox` job 38354 · "#1253: the page is still showing over the dusk", 10 s predicate timeout; passed on Playwright's retry in the same run. First sighting for this variant and browser.
+
+## v19-axe-sweep.spec.ts:388 "the signed-in v19 sweep › /settings/mail has no automated WCAG A/AA violations" on desktop-firefox
+
+- 2026-10-22 · 39134f33 (!1081) · pipeline 2875 / `smoke_firefox` job 38354 · failed its first attempt, passed on Playwright's retry in the same run. The same screen as the layout-and-themes axe flake above, from the sweep spec. First sighting.

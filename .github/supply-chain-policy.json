@@ -23,11 +23,11 @@
   "signingTools": [
     {
       "name": "cosign",
-      "version": "3.1.3",
-      "sha256": "4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71",
+      "version": "3.1.4",
+      "sha256": "424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa",
       "asset": "cosign-linux-amd64",
       "license": "Apache-2.0",
-      "source": "https://github.com/sigstore/cosign/releases/tag/v3.1.3",
+      "source": "https://github.com/sigstore/cosign/releases/tag/v3.1.4",
       "updateOwner": "Orbit maintainers",
       "reviewBy": "2026-10-30"
     }
@@ -280,6 +280,61 @@
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
       "expiresOn": "2026-11-04",
       "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-56851",
+      "package": "golang.org/x/text",
+      "installedVersion": "v0.30.0",
+      "owner": "Orbit maintainers",
+      "rationale": "Compiled into /usr/bin/ollama (0.35.1); fixed upstream in x/text 0.41.0, which no Ollama release carries yet (0.40.6 declined, #794 note 40777). Owner granted, 2026-10-20. Clears when a re-pinned Ollama scans clean.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-63209",
+      "package": "github.com/klauspost/compress",
+      "installedVersion": "v1.18.3",
+      "owner": "Orbit maintainers",
+      "rationale": "Compiled into /usr/bin/ollama (0.35.1); fixed upstream in compress 1.18.7, which no Ollama release carries yet. The model server is off in the default (Standard) profile, so no shipped install runs this binary unless the operator chooses the full local stack. Owner granted, 2026-10-20. Clears when a re-pinned Ollama scans clean.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-111943",
+      "package": "stdlib",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794,
+      "installedVersion": "v1.24.6",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; the newest 18-alpine build and gosu 1.19 are still on Go 1.24.6. Clears only when upstream rebuilds gosu on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-111943",
+      "package": "stdlib",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794,
+      "installedVersion": "v1.26.7",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; 4.1.0-1-full and 4.2.0-SNAPSHOT-full are still on Go 1.26.7. Clears when a Tika image ships pebble on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-111943",
+      "package": "stdlib",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794,
+      "installedVersion": "v1.26.0",
+      "rationale": "Go standard library compiled into /usr/bin/ollama (0.35.1); the newest release, 0.40.7, is still built on Go 1.26.0. The model server is off in the default (Standard) profile. Clears when a re-pinned Ollama scans clean. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
     },
     {
       "kind": "vulnerability",
@@ -935,8 +990,8 @@
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:b0ec1e181077b68385b2a63b60fee05708a7f765a695750d9d7236af2b553bd3",
-      "indexDigest": "sha256:c3448847796f019728077caf63ddb20d9861e22fbd8f92c33de7b13a9e0335af",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:669375d6f866a55f12520710047ed03311377d303ab0aeff9daefa0a597acc99",
+      "indexDigest": "sha256:669375d6f866a55f12520710047ed03311377d303ab0aeff9daefa0a597acc99",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -946,14 +1001,14 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-06",
+      "resolvedOn": "2026-10-22",
       "reviewBy": "2026-11-30"
     },
     {
       "name": "Node.js build and runtime",
       "tag": "node:24-alpine",
-      "reference": "node:24-alpine@sha256:429bdfbc204b4eabc6438e6d34e4e9d8dd2ca1df8289bcd78cdd3c5db387b7a5",
-      "indexDigest": "sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f",
+      "reference": "node:24-alpine@sha256:f777d4615e9f225aa23d72dc05bd8454a0fadcb033e00417c5b9257f5585677b",
+      "indexDigest": "sha256:6a1c190e17215d844926b0677f4bf87273ff7d5e54db06d3b5b5863ab0b09a3d",
       "platform": "linux/amd64",
       "locations": [
         "tests/oidc/Dockerfile"
@@ -963,7 +1018,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/docker-node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-20",
+      "resolvedOn": "2026-10-21",
       "reviewBy": "2026-10-30"
     },
     {
@@ -1024,9 +1079,9 @@
     },
     {
       "name": "Ollama optional local AI service",
-      "tag": "ollama/ollama:0.35.1",
-      "reference": "ollama/ollama:0.35.1@sha256:17e945f1aa6e505707eeb621e3f36847d0a4a063d4778f7007645acccfb8bd4f",
-      "indexDigest": "sha256:292ee7945dfc3d5840a181f3ab86fedb1e66703e02c8af98b50f4da56b7e278c",
+      "tag": "ollama/ollama:0.40.8",
+      "reference": "ollama/ollama:0.40.8@sha256:242721b8a8dbb71c38fdc0a07ed60ca78363f278d33fdf171a48728abf40743a",
+      "indexDigest": "sha256:2b8eecdb85aa6ea67c381c8ecffec04b2658496cf2821a8f88b0485bdff198e8",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -1036,7 +1091,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/ollama/ollama/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-02",
+      "resolvedOn": "2026-10-22",
       "reviewBy": "2026-10-30"
     }
   ],

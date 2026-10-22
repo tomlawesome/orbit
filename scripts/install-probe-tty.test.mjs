@@ -16,7 +16,7 @@ import { PTY_DEADLINE_MS, failOnPtyDeadline } from "./pty-deadline.mjs";
  * process, and only the KILL a second later lands. Every probe then fails at
  * the bound, and a healthy database is reported as a startup failure.
  *
- * The suite in install.test.mjs never saw it because its pty driver closes
+ * The install.*.test.mjs suites never saw it because their pty driver closes
  * stdin (`exec </dev/null`) before starting the installer. This test keeps
  * the terminal on stdin, as the launcher does, with a fake docker that reads
  * one byte from it, and asserts the probe returns at once.

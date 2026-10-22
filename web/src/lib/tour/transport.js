@@ -367,6 +367,34 @@ export function mountTransport({
     doc.body.insertBefore(catcher, bar);
   }
 
+  /* #1473: the page is paused as a whole while the film plays -- the standard
+     modal-walkthrough pattern. Every other child of <body> goes `inert`, so
+     the menu opener, desk and pocket can be neither pressed nor reached by
+     keyboard: never a menu that opens while the catcher above eats its links.
+     The tour's own layers (`#orbit-tour-*`: this bar, the catcher, the veil,
+     the callout layer) are not touched, nor is anything marked
+     `data-pocket-above`. Layers the film adds to <body> later are not inert,
+     and what was already inert stays so on release. */
+  /** @type {Element[]} */
+  let paused = [];
+  function pausePage() {
+    if (paused.length > 0) return;
+    for (const child of Array.from(doc.body.children)) {
+      if (child.id.startsWith("orbit-tour") || child.hasAttribute("inert") || child.hasAttribute("data-pocket-above")) continue;
+      if (["SCRIPT", "STYLE", "TEMPLATE"].includes(child.tagName)) continue;
+      child.setAttribute("inert", "");
+      paused.push(child);
+    }
+    /* Focus must not stay in a region that just went inert. */
+    const active = doc.activeElement;
+    if (active instanceof HTMLElement && active !== doc.body && paused.some((el) => el.contains(active))) active.blur();
+  }
+  function resumePage() {
+    for (const el of paused) el.removeAttribute("inert");
+    paused = [];
+  }
+  pausePage();
+
   /** Buttons on desk, painted `<i>` marks on the pocket (#1083 §4.2).
    *  @type {(HTMLButtonElement | HTMLElement)[]} */
   let ticks = [];
@@ -780,6 +808,8 @@ export function mountTransport({
 
   /** Fades the whole bar out and resolves once it is gone. */
   function leave() {
+    /* The film is over: the page comes back before focus is handed to it. */
+    resumePage();
     moveFocusOut();
     bar.classList.add("leaving");
     return new Promise((resolve) => {
@@ -799,6 +829,7 @@ export function mountTransport({
     if (!ended) {
       clearLeaveTimers();
       bar.classList.remove("leaving");
+      pausePage();
       return;
     }
     if (stoppedByUser) {
@@ -910,6 +941,7 @@ export function mountTransport({
         barResizeObserver?.disconnect();
         doc.documentElement.removeAttribute("data-tour-pocket");
       }
+      resumePage();
       catcher?.remove();
       bar.remove();
     },

@@ -30,7 +30,7 @@
   import { wake } from "$lib/pocket/wake.js";
   import { markDoor } from "../household/[id]/door.js";
   import { HIT_R, spacedBodies } from "./pocket-dial.js";
-  import { readSearchDocuments, searchPocket } from "./pocket-search.js";
+  import { costLabel, listedItems, readSearchDocuments, searchPocket } from "./pocket-search.js";
   import { BAND_VAR, tlabel } from "$lib/data/bands.js";
   import ItemDrawer from "./ItemDrawer.svelte";
   import { attachIdFor, forget as forgetAttachId } from "./attach-id.js";
@@ -86,7 +86,7 @@
   /* ---- what the page draws ----------------------------------------------
      `DialBody` is the shape dialBodiesOf (chart.js) returns; `closest` is set
      afterwards on at most one entry, so it stays optional. */
-  /** @typedef {{ id: string, title: string, days: number, dueDate?: string | null, placement: { angle: number, radius: number, x: number, y: number }, size: number, paint: string, kind: string, suggestion: boolean, costMinor: number | null, costIsEstimate: boolean, currency: string, documentCount: number, trail: boolean, overdue: boolean, closest?: boolean }} DialBody */
+  /** @typedef {{ id: string, title: string, days: number, dueDate?: string | null, placement: { angle: number, radius: number, x: number, y: number }, size: number, paint: string, kind: string, suggestion: boolean, costMinor: number | null, costIsEstimate: boolean, currency: string, documentCount: number, trail: boolean, overdue: boolean, closest?: boolean, pocketSize: number }} DialBody */
   /** @type {DialBody[]} */
   const bodies = $derived(
     view?.household
@@ -151,7 +151,7 @@
   /** @type {(b: DialBody) => string} */
   const bodyColour = (b) => `var(${BAND_VAR[b.overdue ? "overdue" : b.paint === "ended" ? "ended" : b.paint === "amber" ? "due-soon" : b.paint === "sky" ? "upcoming" : "ok"]})`;
   /** @type {(b: DialBody) => number} */
-  const bodyR = (b) => (b.overdue ? 8 : b.closest ? 7 : 7.5);
+  const bodyR = (b) => b.pocketSize;
   // The desk's spheres (review round §2.1): a body wears its paint's
   // gradient; the ended expiry keeps its quiet flat ink.
   const SPHERES = new Set(["ruby", "jade", "amber", "sky"]);
@@ -226,19 +226,6 @@
     media.addEventListener("change", onchange);
     return () => media.removeEventListener("change", onchange);
   });
-
-  /* A paper found by the search: its item's row opens, and the paper's
-     preview stands as the bottom sheet, as a paper pressed in the drawer
-     does (#1319: the belt it used to go to retired). */
-  /** @param {any} doc */
-  async function openPaper(doc) {
-    sheetOpen = false;
-    if (!(await openRow(doc.itemId))) return;
-    await tick();
-    const from = /** @type {HTMLElement | null} */ (manifestRow(doc.itemId)?.querySelector(
-      `[data-doc-row][aria-label="Open ${CSS.escape(doc.name)}"]`) ?? null);
-    openPaperHere(doc, from ?? /** @type {HTMLElement} */ (document.activeElement));
-  }
 
   // ---- the relay's catch (#466) ---------------------------------------------
 
@@ -380,6 +367,9 @@
   const results = $derived(
     searchPocket(query, { items: rows, attention: groups?.attention ?? [], documents: searchDocuments }),
   );
+
+  /* #1438: items only; a document-name match lists its item. */
+  const foundItems = $derived(listedItems(results, rows));
 
   /** @param {{ id: string, title: string }} target */
   async function complete(target) {
@@ -1096,7 +1086,8 @@
         {#each TICKS as t, k (k)}<line x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2}/>{/each}</g>
       <circle cx="190" cy="190" r="62" fill="url(#pk-danger4)"/>
       <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3"
-              stroke-width="1" stroke-dasharray="3 5"/>
+              stroke-width="1" stroke-dasharray="3 5"
+              role="img" aria-label="Event horizon: items inside it are overdue"/>
       <!-- Quarter labels at 15 units: 13px at the narrowest dial (§2.1). -->
       <g font-size="15" fill="var(--ink-quiet)" text-anchor="middle" font-family="JetBrains Mono,monospace">
         {#each quarters as q, k (k)}<text x={q.x} y={q.y}>{q.label}</text>{/each}</g>
@@ -1300,17 +1291,9 @@
         {#snippet mark()}<span class="pk-plus" aria-hidden="true">+</span>{/snippet}
       </Row>
     {:else}
-      {#each results.items as one (one.id)}
-        <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
-             trail={tlabel(one)} trailSub={one.dueDate ? dayMonth(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
-             onactivate={() => openResult(one.id)}>
-          {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
-        </Row>
-      {/each}
-      {#each results.documents as doc (doc.id)}
-        <!-- Round 3 §8: the item alone; the paper's date is its own sheet's. -->
-        <Row title={doc.name} meta={doc.itemTitle} onactivate={() => openPaper(doc)}>
-          {#snippet mark()}<span class="pk-paper" aria-hidden="true">◆</span>{/snippet}
+      {#each foundItems as one (one.id)}
+        <Row title={one.title} meta={costLabel(one)} onactivate={() => openResult(one.id)}>
+          {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band] ?? "--ink-faint"})"></span>{/snippet}
         </Row>
       {/each}
     {/if}

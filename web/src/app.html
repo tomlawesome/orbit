@@ -4,9 +4,9 @@
   --stars, which drives the starfield's opacity. Without it the packs never
   match, --stars is undefined, and the sky renders invisible. Set here rather
   than on mount so it is correct in the server-rendered HTML, exactly as
-  design/v19/home.html sets it on its own <html>.
+  design/v19/home.html sets it on its own root element.
 -->
-<html lang="en" data-theme="afterdark">
+<html lang="en" data-theme="afterdark" data-text-size="comfortable">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -54,6 +54,15 @@
         var t = localStorage.getItem("orbit-theme");
         if (t && ["starchart", "afterdark", "clouds", "dawn", "retrograde"].indexOf(t) !== -1)
           document.documentElement.dataset.theme = t;
+      } catch (e) {}
+      /* #1180: the text size, the same way. The array and the "comfortable"
+         default on <html> are a literal copy of TEXT_SIZES and
+         DEFAULT_TEXT_SIZE in web/src/lib/text-size.js, checked by
+         tests/unit/text-size.test.mjs. */
+      try {
+        var s = localStorage.getItem("orbit-text-size");
+        if (s && ["standard", "comfortable", "large", "extra-large"].indexOf(s) !== -1)
+          document.documentElement.dataset.textSize = s;
       } catch (e) {}
     </script>
     %sveltekit.head%

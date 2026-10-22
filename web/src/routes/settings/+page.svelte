@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { resolve } from "$app/paths";
   import {
     readAuthMethodsOffered,
@@ -21,6 +21,9 @@
   import { watchTour } from "$lib/tour/watch.js";
   import { fillStarTiles } from "$lib/sky.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
+  import { DEFAULT_TEXT_SIZE, TEXT_SIZE_CHOICES, observeTextSize } from "$lib/text-size.js";
+  import { chooseTheme, chooseTextSize } from "$lib/pick.js";
+  import Tiles from "$lib/editing/Tiles.svelte";
   import Chrome from "$lib/Chrome.svelte";
   import { createArm } from "$lib/arm.js";
   import SignInChallenge from "./SignInChallenge.svelte";
@@ -52,8 +55,16 @@
   /** @param {string} name */
   function pickPack(name) {
     active = name;
-    document.documentElement.dataset.theme = name;
-    try { localStorage.setItem("orbit-theme", name); } catch {}
+    chooseTheme(name);
+  }
+
+  /* Text size (#1180): the document carries the applied step (app.html's
+     first paint, then the root layout once the session is read). */
+  let textSize = $state(DEFAULT_TEXT_SIZE);
+  /** @param {string} id */
+  function pickTextSize(id) {
+    textSize = id;
+    chooseTextSize(id);
   }
 
   /* "Watch the tour" (#753 built it here as "take the walk again"; #1189
@@ -122,6 +133,9 @@
   let alertsBusy = $state(false);
 
   onMount(async () => {
+    /* The root layout may apply a different server value after this mounts. */
+    const stopObserving = observeTextSize((size) => { textSize = size; });
+    onDestroy(stopObserving);
     alertsAvailable = alertsSupported();
     /* The row is drawn either way, and the switch is simply held when the
        browser cannot do push. Drawing a different row instead would make this
@@ -331,6 +345,8 @@
    */
   /** @type {Awaited<ReturnType<typeof readSessions>>} */
   let sessions = $state([]);
+  /** #1444: this session came through the provider, so signing out reaches it; a password session has nothing there to end. */
+  const providerSession = $derived(providerOffered && sessions.some((row) => row.current && row.viaProvider));
   /** @type {string | null} */
   let sessionsProblem = $state(null);
   /* One arm for the sessions list and "sign out of every device" (lib/arm.js):
@@ -491,7 +507,7 @@
      household's is. It shares what this page loads rather than reading it
      twice, and hides this page's sky and cards below the switch; the chrome
      stays, because on a phone Chrome.svelte draws the kit's top chrome. -->
-<Pocket bind:view bind:methods bind:sessions bind:active {initials} {providerOffered} {emailApproval} {screenProblem} onretry={loadScreen}
+<Pocket bind:view bind:methods bind:sessions bind:active bind:textSize {initials} {providerOffered} {emailApproval} {screenProblem} onretry={loadScreen}
         {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} onsignedout={descendFrom} />
 
 <div class="helm-page">
@@ -644,6 +660,10 @@
           </button>
         {/each}
       </div>
+      <h3 class="textsize-h" id="st-textsize">Text size</h3>
+      <div class="textsize">
+        <Tiles choices={[...TEXT_SIZE_CHOICES]} value={textSize} label="Text size" cols={4} onpick={pickTextSize} />
+      </div>
       <button class="relaunch" onclick={watchTour}>↻ watch the tour</button>
     </div>
 
@@ -747,7 +767,7 @@
       </ul>
       {#if sessionsProblem}<div class="note">{sessionsProblem}</div>{/if}
       <button onclick={(event) => tapSignOutEverywhere(event.currentTarget)}>{signOutArmed === "everywhere" ? "tap again to sign out everywhere" : "sign out of every device →"}</button>{#if signOutProblem}<div class="note">{signOutProblem}</div>{/if}
-      <p class="everywhere-says">This signs Orbit out everywhere{#if providerOffered}, and signs you out of your sign-in provider in this browser only: your other devices stay signed in at the provider{/if}.</p>
+      <p class="everywhere-says">This signs Orbit out everywhere{#if providerSession}, and signs you out of your sign-in provider in this browser only: your other devices stay signed in at the provider{/if}.</p>
     </div>
   {/if}
 </div>

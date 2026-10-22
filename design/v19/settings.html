@@ -211,6 +211,20 @@
   /* the sky chooser: each card is PAINTED by its own pack variables */
   .relaunch{display:block;margin-top:14px;font:11.5px var(--mono);color:var(--accent-text);
             background:none;border:0;padding:0;cursor:pointer;text-align:left}
+  /* Text size (#1180): four glass tiles under the sky choice, each word drawn
+     at the size it names (px, so every step shows whichever step is on). The
+     built screen's Tiles component, copied: a radio group, the chosen tile
+     filled with the accent. */
+  .card .textsize-h{margin:18px 0 0;font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+              color:var(--ink-quiet);font-weight:400}
+  .tiles{display:grid;gap:8px;margin-top:10px;grid-template-columns:repeat(4,minmax(0,1fr))}
+  .tile{min-height:60px;border:1px solid var(--line-soft);background:var(--panel);border-radius:12px;cursor:pointer;
+        padding:8px;margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+        font:13px var(--mono);color:var(--ink);text-align:center;overflow-wrap:anywhere;
+        transition:background .15s,border-color .15s,color .15s}
+  .tile>b{font-weight:500}
+  .tile:hover{background:var(--panel-raised);border-color:var(--line)}
+  .tile[aria-checked=true],.tile[aria-checked=true]:hover{background:var(--accent-text);border-color:var(--accent-text);color:var(--bg)}
   .packs{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px}
   .pack{border:1px solid var(--line);border-radius:13px;overflow:hidden;cursor:pointer;
         background:none;padding:0;text-align:left;font-family:var(--ui)}
@@ -396,6 +410,15 @@
         </span>
         <span class="label"><b>retrograde</b><span>the eighties, classy</span></span>
       </button>
+    </div>
+    <h3 class="textsize-h" id="st-textsize">Text size</h3>
+    <div class="textsize">
+      <div class="tiles" role="radiogroup" aria-label="Text size">
+        <button type="button" class="tile" role="radio" aria-checked="false"><b style="font-size:15px">standard</b></button>
+        <button type="button" class="tile" role="radio" aria-checked="true"><b style="font-size:16px">comfortable</b></button>
+        <button type="button" class="tile" role="radio" aria-checked="false"><b style="font-size:18px">large</b></button>
+        <button type="button" class="tile" role="radio" aria-checked="false"><b style="font-size:20px">extra large</b></button>
+      </div>
     </div>
     <!-- "Take the walk again" (#477 stop 8, ratified 2026-09-03; built in #753):
          the first-run walk is re-launchable from here, under the sky choice,

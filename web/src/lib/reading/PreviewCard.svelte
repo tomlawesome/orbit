@@ -503,11 +503,11 @@
   .reticle .pull{transform-origin:48px 48px;animation:pv-pull 3.6s ease-in-out infinite}
   @keyframes pv-sweep{to{transform:rotate(360deg)}}
   @keyframes pv-pull{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(.88);opacity:.5}}
-  .focusline{font:600 15.5px var(--display);letter-spacing:.01em;color:var(--ink);
+  .focusline{font:600 0.96875rem var(--display);letter-spacing:.01em;color:var(--ink);
     animation:pv-breathe 4.2s ease-in-out infinite}
   @keyframes pv-breathe{0%,100%{opacity:.96}50%{opacity:.42}}
   /* 13px, the floor (#1319): it was 10.5px */
-  .why{font:13px var(--mono);color:var(--ink-quiet);line-height:1.7;margin-top:12px}
+  .why{font:0.8125rem var(--mono);color:var(--ink-quiet);line-height:1.7;margin-top:12px}
   /* the honest states hold still: the line said once, only the plate drawn */
   .readcard.still .focusline{animation:none}
   .readcard.still .why{color:var(--ink-mid)}
@@ -518,7 +518,7 @@
   .plate{flex:none;width:104px;height:134px;border-radius:8px;position:relative;box-sizing:border-box;
     border:1px solid var(--paper);background:var(--panel);margin:0 auto 18px;
     display:grid;place-items:end center;padding-bottom:8px;
-    font:9.5px var(--mono);letter-spacing:.1em;color:var(--paper)}
+    font:0.59375rem var(--mono);letter-spacing:.1em;color:var(--paper)}
   .plate::before{content:"";position:absolute;left:14px;right:14px;top:20px;height:1px;background:var(--line);
     box-shadow:0 10px 0 var(--line),0 20px 0 var(--line-soft),0 30px 0 var(--line-soft),
                0 40px 0 var(--line-soft),0 50px 0 var(--line-soft)}
@@ -554,15 +554,15 @@
     max-height:calc(100vh - 84px - 16px - 62px - 18px)}
 
   /* the foot: the pager (Pager.svelte), or an honest state's one word */
-  .rcnote{font:10.5px var(--mono);color:var(--ink-quiet);letter-spacing:.02em;margin:0}
+  .rcnote{font:0.65625rem var(--mono);color:var(--ink-quiet);letter-spacing:.02em;margin:0}
   .rcfoot{display:flex;justify-content:center;align-items:center;min-height:44px;
-    font:11px var(--mono);color:var(--ink-mid)}
-  .quiet{display:inline-flex;align-items:center;font:10.5px var(--mono);color:var(--ink-quiet);
+    font:0.6875rem var(--mono);color:var(--ink-mid)}
+  .quiet{display:inline-flex;align-items:center;font:0.65625rem var(--mono);color:var(--ink-quiet);
     background:none;border:0;cursor:pointer;padding:0 8px;height:44px;text-decoration:none;letter-spacing:.02em}
   .quiet:hover{color:var(--ink)}
   .quiet:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:999px}
   .quiet:disabled{opacity:.4;cursor:default}
-  .problem{font:13px var(--mono);color:var(--overdue-text);text-align:center;padding:0 8px 8px;line-height:1.6}
+  .problem{font:0.8125rem var(--mono);color:var(--overdue-text);text-align:center;padding:0 8px 8px;line-height:1.6}
 
   /* UNDER 1200px there is no room beside the drawer: the card is the phone's
      bottom sheet (round 6, CON-10), on the desk and in the pocket alike —

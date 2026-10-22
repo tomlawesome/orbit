@@ -71,6 +71,21 @@ describe("#1279: one read of a picked document, shared by the desk and the phone
     });
   });
 
+  it("carries the server's words for an empty read, as the message of a read outcome (F3)", async () => {
+    const sentence = "Nothing was able to be extracted from this file.";
+    stubFetch((href) => href.endsWith("/item-document-preview")
+      ? json({ error: { code: "document_preview_unsupported", message: "no" } }, 415)
+      : json({ extracted: false, suggestions: [], attachmentDisposition: "attachable", message: sentence }));
+    const { readPickedDocument } = await import("../../web/src/lib/data/document-read.js");
+    const { read: outcome } = readPickedDocument("h1", file());
+    await expect(outcome).resolves.toMatchObject({ kind: "read", extracted: false, message: sentence });
+  });
+
+  it("names one accept list for both pickers, PDF and images, never .eml (F3)", async () => {
+    const { DOCUMENT_ACCEPT } = await import("../../web/src/lib/data/document-read.js");
+    expect(DOCUMENT_ACCEPT).toBe(".pdf,application/pdf,image/*");
+  });
+
   it("refuses a file the scanner or the upload would not keep", async () => {
     stubFetch((href) => href.endsWith("/item-document-preview")
       ? json({ error: { code: "document_malware_detected", message: "malware" } }, 422)
@@ -134,7 +149,7 @@ describe("#1279: the phone's create form shows page one and the read, as the des
   it("moves the phone card's focus line from the virus check to the preview (ADR-0033 step 5)", () => {
     expect(pocket).toMatch(/line: FOCUS_SCANNING,/u);
     expect(pocket).toMatch(/picked\.line = focusAfterScan\(scanned\);/u);
-    expect(pocket).toMatch(/readPickedDocument\(householdId, file, \{ signal: controller\.signal, onScanned \}\)/u);
+    expect(pocket).toMatch(/readPickedDocument\(householdId, file, \{ signal: controller\.signal, onScanned, documentReading \}\)/u);
   });
 
   it("lands the reading card straight under TYPE, in place of the row that picked the file", () => {
@@ -159,8 +174,48 @@ describe("#1279: the phone's create form shows page one and the read, as the des
     expect(markup).toMatch(/◆ from document/u);
   });
 
-  it("keeps the row's promise: the document is read for you", () => {
-    expect(markup).toMatch(/photo or file · read for you/u);
+  it("the add-a-document row's hint is exactly 'PDF or photo', as on the desk, and never says email", () => {
+    expect(markup).toMatch(/<span>PDF or photo<\/span>/u);
+    const hints = [...markup.matchAll(/<span>(PDF[^<]*)<\/span>/gu)].map((one) => one[1]);
+    expect(hints).toEqual(["PDF or photo"]);
+    for (const hint of hints) expect(hint).not.toMatch(/email/iu);
+    expect(markup).not.toMatch(/read for you/u);
     expect(form).not.toMatch(/reading is wired on the desk's\s+\*?\s*form only/u);
+  });
+
+  it("both pickers take their accept list from the one shared constant, without .eml (F3)", () => {
+    expect(form).toMatch(/import \{[^}]*\bDOCUMENT_ACCEPT\b[^}]*\} from "\$lib\/data\/document-read\.js"/u);
+    expect(desk).toMatch(/import \{[^}]*\bDOCUMENT_ACCEPT\b[^}]*\} from "\$lib\/data\/document-read\.js"/u);
+    expect(form).toMatch(/<input [^>]*type="file"[^>]*accept=\{DOCUMENT_ACCEPT\}/u);
+    expect(desk).toMatch(/picker\.accept = DOCUMENT_ACCEPT;/u);
+    expect(form).not.toMatch(/accept="[^"]*"/u);
+    expect(desk).not.toMatch(/\.eml/u);
+  });
+
+  it("the home page's two pickers use the same constant and name no .eml (G14+F3-FR3)", () => {
+    const behaviour = read("web/src/routes/home/home.behaviour.js");
+    const foot = read("web/src/routes/home/FootRow.svelte");
+    expect(behaviour).toMatch(/import \{[^}]*\bDOCUMENT_ACCEPT\b[^}]*\} from "\$lib\/data\/document-read\.js"/u);
+    expect(foot).toMatch(/import \{[^}]*\bDOCUMENT_ACCEPT\b[^}]*\} from "\$lib\/data\/document-read\.js"/u);
+    expect(behaviour).toMatch(/picker\.accept = DOCUMENT_ACCEPT;/u);
+    expect(foot).toMatch(/<input [^>]*type="file"[^>]*accept=\{DOCUMENT_ACCEPT\}/u);
+    expect(behaviour).not.toMatch(/\.eml/u);
+    expect(foot).not.toMatch(/accept="[^"]*"/u);
+    expect(foot).not.toMatch(/\.eml/u);
+  });
+
+  it("the phone's reading card shows the inspection message as its own line, under the page block and above 'not this one' (F3)", () => {
+    expect(markup).toMatch(/<p class="pc-honest">\{picked\.message\}<\/p>/u);
+    expect(markup).toMatch(/\{#if picked\.message\}/u);
+    const honest = markup.indexOf('class="pc-honest"');
+    expect(honest).toBeGreaterThan(markup.indexOf("pc-reading"));
+    expect(honest).toBeGreaterThan(markup.indexOf("Page one of the file you added"));
+    expect(honest).toBeLessThan(markup.indexOf("not this one"));
+    expect(form).toMatch(/\.pc-honest\s*\{/u);
+  });
+
+  it("pocket.svelte sets picked.message from the outcome for read and unread, and clears it otherwise (F3)", () => {
+    expect(pocket).toMatch(/picked\.message = [^;]*outcome\.message[^;]*;/u);
+    expect(pocket).toMatch(/picked\.message = outcome\.kind === "(?:read|unread)" \|\| outcome\.kind === "(?:read|unread)"\s*\? outcome\.message\s*: "";|picked\.message = outcome\.message/u);
   });
 });

@@ -156,8 +156,8 @@ describe("the foot row shows \"then <date>\" under record and cancel", () => {
     expect(foot).toMatch(/dayMonthYear/u);
   });
 
-  it("is plain text on its own line, the desk's mono 11.5px and the phone's meta size", () => {
-    expect(foot).toMatch(/\.ivacts \.then\{flex-basis:100%;text-align:center;min-height:1\.6em;font:11\.5px\/1\.6 var\(--mono\);color:var\(--ink-mid\)\}/u);
+  it("is plain text on its own line, the desk's mono 11.5px (0.71875rem) and the phone's meta size", () => {
+    expect(foot).toMatch(/\.ivacts \.then\{flex-basis:100%;text-align:center;min-height:1\.6em;font:0\.71875rem\/1\.6 var\(--mono\);color:var\(--ink-mid\)\}/u);
     expect(foot).toMatch(/\.ivacts \.then b\{font-weight:500;color:var\(--ink\)\}/u);
     expect(foot).toMatch(/\.ivfootrow\.pocket \.ivacts \.then\{font:var\(--p-type-meta\)\/1\.4 var\(--mono\)\}/u);
   });

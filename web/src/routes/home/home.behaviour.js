@@ -16,7 +16,8 @@
  */
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
-import { holdDocument } from "$lib/data/held-document.js";
+import { DOCUMENT_ACCEPT } from "$lib/data/document-read.js";
+import { holdDocument, holdType } from "$lib/data/held-document.js";
 import { fillStarTiles } from "$lib/sky.js";
 import { screenScope } from "$lib/teardown.js";
 import { placeGalaxy } from "./placement.js";
@@ -342,20 +343,24 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
       }
       callout.classList.add("show");
       document.querySelector("#" + link.dataset.body)?.classList.add("lit");
+      document.querySelector('.body-vis[data-vis="' + link.dataset.body + '"]')?.classList.add("lit");
     });
     link.addEventListener("mouseleave", () => {
       setTimeout(() => { if (!callout.matches(":hover")) {
         callout.classList.remove("show");
         document.querySelector("#" + link.dataset.body)?.classList.remove("lit");
+        document.querySelector('.body-vis[data-vis="' + link.dataset.body + '"]')?.classList.remove("lit");
       }}, 160);
     });
   }
   for (const item of document.querySelectorAll(".item[id]")) {
     item.addEventListener("mouseenter", () => {
       document.querySelector('.body-link[data-body="' + item.id + '"]')?.classList.add("lit");
+      document.querySelector('.body-vis[data-vis="' + item.id + '"]')?.classList.add("lit");
     });
     item.addEventListener("mouseleave", () => {
       document.querySelector('.body-link[data-body="' + item.id + '"]')?.classList.remove("lit");
+      document.querySelector('.body-vis[data-vis="' + item.id + '"]')?.classList.remove("lit");
     });
   }
   /* POL-5: constellations on section-header hover */
@@ -400,6 +405,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
     const open = drawer.classList.toggle("open");
     button.setAttribute("aria-expanded", String(open));
     document.body.classList.toggle("create-open", open);
+    if (open) forgetReaderInput();
     /** @type {HTMLElement} */ (button.querySelector("span")).textContent = open ? "close" : "create";
   }
   /*
@@ -469,10 +475,38 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
     closeOverlays(null);
     if (within) /** @type {HTMLElement | null} */ (document.querySelector(within[1]))?.focus();
   });
-  /* v17, amended §14: any scroll movement sends every drawer home */
+  /* v17, amended §14: any scroll movement sends every drawer home.
+     #1472: "any scroll the reader makes". A scroll the page did not get from
+     the reader (history putting a scroll position back, a smooth scroll the
+     page began itself) is not the reader leaving the drawer: it closed the
+     quick add the instant the north star opened it. So the reader's own
+     input (the wheel, a touch, a scrolling key, a press on the scrollbar) is
+     remembered, and the next scroll that moves the page spends it and sends
+     the drawers home, however late that scroll lands: on a loaded machine
+     WebKit applied a wheel's scroll more than a second after the wheel, so a
+     time window cannot tell them apart. Opening a drawer forgets input from
+     before it (forgetReaderInput), so the press that opens one is never
+     undone by a scroll that follows it. */
+  const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+  let readerInput = false;
+  const reading = () => { readerInput = true; };
+  /** A drawer just opened: input from before it is not about leaving it. */
+  function forgetReaderInput() { readerInput = false; }
+  addEventListener("wheel", reading, { passive: true });
+  addEventListener("touchstart", reading, { passive: true });
+  addEventListener("touchmove", reading, { passive: true });
+  addEventListener("keydown", (/** @type {KeyboardEvent} */ event) => {
+    if (SCROLL_KEYS.has(event.key)) reading();
+  }, { passive: true });
+  /* the scrollbar belongs to the root element, so a press that lands on it
+     names <html> as its target; a press on any control names that control */
+  addEventListener("pointerdown", (/** @type {PointerEvent} */ event) => {
+    if (event.target === document.documentElement) reading();
+  }, { passive: true });
   let lastY = scrollY;
   addEventListener("scroll", () => {
-    if (Math.abs(scrollY - lastY) > 4) {
+    if (Math.abs(scrollY - lastY) > 4 && readerInput) {
+      readerInput = false;
       for (const id of ["statusdrawer", "keydrawer"]) {
         const drawer = /** @type {HTMLElement} */ (document.getElementById(id));
         if (drawer.classList.contains("open")) {
@@ -619,6 +653,20 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
       const drawer = /** @type {HTMLElement} */ (currentTarget.parentElement);
       const open = drawer.classList.toggle("open");
       currentTarget.setAttribute("aria-expanded", String(open));
+      if (open) forgetReaderInput();
+    });
+  }
+
+  /* #1467: the quick add's type buttons. Each hands its kind to the full form
+     (held once, as the dropped file is) and opens it; "something else" has no
+     kind, so it holds null, which also clears a kind held earlier and never
+     taken, and opens the form with none chosen. A plain visit to /create
+     holds nothing, because the form takes what is held. */
+  for (const button of document.querySelectorAll("#createdrawer .ctype")) {
+    on(button, "click", () => {
+      const type = /** @type {HTMLElement} */ (button).dataset.type;
+      holdType(type ?? null);
+      void goto(resolve("/create"));
     });
   }
 
@@ -630,7 +678,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
     const picker = document.createElement("input");
     picker.type = "file";
     picker.hidden = true;
-    picker.accept = ".pdf,.eml,image/*";
+    picker.accept = DOCUMENT_ACCEPT;
     quickDrop.after(picker);
     const handOver = (/** @type {File | null | undefined} */ file) => {
       if (!file) return;

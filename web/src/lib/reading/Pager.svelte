@@ -61,9 +61,9 @@
 
 <style>
   .pager{display:flex;justify-content:center;align-items:center;gap:6px;min-height:44px;
-         font:11px var(--mono);color:var(--ink-mid);letter-spacing:.02em}
+         font:0.6875rem var(--mono);color:var(--ink-mid);letter-spacing:.02em}
   .pg{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;
-      font:14px var(--mono);color:var(--ink-mid);background:none;border:0;border-radius:999px;cursor:pointer}
+      font:0.875rem var(--mono);color:var(--ink-mid);background:none;border:0;border-radius:999px;cursor:pointer}
   .pg:hover{color:var(--ink)}
   .pg:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
   .pgn{color:var(--ink);font-variant-numeric:tabular-nums;min-width:52px;text-align:center}

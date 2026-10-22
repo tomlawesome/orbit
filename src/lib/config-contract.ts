@@ -38,6 +38,7 @@ export const ALLOWED_KEYS = [
   "VAPID_PRIVATE_KEY_FILE",
   "ORBIT_BIND_ADDRESS",
   "ORBIT_PORT",
+  "ORBIT_MEMORY_LIMIT",
   "ORBIT_LOG_LEVEL",
   "ORBIT_LOG_FORMAT",
   "COMPOSE_PROFILES",
@@ -145,6 +146,40 @@ export function isValidSessionTtlSeconds(value: string): boolean {
   if (!/^[0-9]+$/.test(value)) return false;
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= SESSION_TTL_SECONDS_MIN && parsed <= SESSION_TTL_SECONDS_MAX;
+}
+
+// ORBIT_MEMORY_LIMIT feeds Compose's mem_limit, so it must use Compose's
+// size grammar (docker/go-units RAMInBytes): a decimal number, one optional
+// space, then an optional unit b, or k, m, g, t or p followed by nothing, b
+// or ib, case-insensitive, all 1024-based, the result truncated to whole
+// bytes. Go's ParseFloat would also take forms nobody writes here (1e3g, +2g,
+// hex floats); refusing those is deliberate. Anything outside the grammar
+// would only surface as a failed `docker compose up`. A well-formed value
+// below 1 GiB still starts, so it is warned about rather than refused: it
+// only fails when a large archive is imported
+// (docs/administrator-operations.md puts that peak at about 1 GB).
+const MEMORY_LIMIT_PATTERN = /^([0-9]+\.?[0-9]*|\.[0-9]+) ?(b|[kmgtp](?:ib|b)?)?$/i;
+const MEMORY_LIMIT_IMPORT_FLOOR_BYTES = 1024 ** 3;
+const MEMORY_LIMIT_UNIT_BYTES: Record<string, number> = {
+  b: 1,
+  k: 2 ** 10,
+  m: 2 ** 20,
+  g: 2 ** 30,
+  t: 2 ** 40,
+  p: 2 ** 50,
+};
+
+/** The readiness-contract shape check for ORBIT_MEMORY_LIMIT: Compose's size grammar. */
+export function isValidMemoryLimit(value: string): boolean {
+  return MEMORY_LIMIT_PATTERN.test(value);
+}
+
+/** Bytes for a well-formed ORBIT_MEMORY_LIMIT as Compose reads it, or null when it is malformed. */
+export function memoryLimitBytes(value: string): number | null {
+  const match = MEMORY_LIMIT_PATTERN.exec(value);
+  if (!match) return null;
+  const unit = (match[2] ?? "b").toLowerCase().charAt(0);
+  return Math.trunc(Number(match[1]) * (MEMORY_LIMIT_UNIT_BYTES[unit] as number));
 }
 
 /** Operator-facing wording, kept identical across bash and TypeScript. */
@@ -339,6 +374,14 @@ export const envOrbitSchema = z
     SMTP_SECURITY: z.enum(["", "starttls", "implicit_tls"]).optional(),
     MIGRATE_ON_START: z.enum(["", "true", "false"]).optional(),
     WORKER_ENABLED: z.enum(["", "true", "false"]).optional(),
+    // Empty means not set, as for every other key: Compose substitutes 2g.
+    ORBIT_MEMORY_LIMIT: z
+      .string()
+      .refine((value) => value === "" || isValidMemoryLimit(value), {
+        message:
+          "ORBIT_MEMORY_LIMIT must be a number with an optional unit b, k, m, g, t or p (optionally followed by b or ib), such as 2g, 3.5g, 1.5GiB or 2048m",
+      })
+      .optional(),
   })
   .catchall(z.string())
   .superRefine((record, context) => {
@@ -538,6 +581,23 @@ export function evaluateReadiness(
   if (isSet(record, "SESSION_TTL_SECONDS") && !isValidSessionTtlSeconds(record.SESSION_TTL_SECONDS as string)) {
     lines.push("missing session-ttl");
     ok = false;
+  }
+
+  // Shaped like the session-ttl check above: nothing is printed when absent,
+  // empty or fine, so the bash parity fixtures are untouched. A malformed
+  // value would only fail at `docker compose up`, so it clears ok here with
+  // a value-free line. A small limit warns without clearing ok: the stack
+  // starts and runs; only a large import can hit it.
+  const memoryLimit = isSet(record, "ORBIT_MEMORY_LIMIT")
+    ? memoryLimitBytes(record.ORBIT_MEMORY_LIMIT as string)
+    : undefined;
+  if (memoryLimit === null) {
+    lines.push("missing memory-limit");
+    ok = false;
+  } else if (memoryLimit !== undefined && memoryLimit < MEMORY_LIMIT_IMPORT_FLOOR_BYTES) {
+    lines.push(
+      "warning ORBIT_MEMORY_LIMIT is below about 1 GB, the peak of importing a maximum-size archive; such an import may be stopped part-way (docs/administrator-operations.md)",
+    );
   }
 
   return { lines, ok };

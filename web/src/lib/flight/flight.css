@@ -102,11 +102,11 @@ body[data-state]:not([data-state="door"]):not([data-state="incomplete"]) #dawn .
    sub 26px under it, out of flow so a longer sub never moves the ring. */
 #dawn .state{position:relative;pointer-events:none;text-align:center}
 #dawn .state-primary{width:max-content;max-width:250px;margin-inline:auto;
-      font:600 14px var(--display);letter-spacing:.01em;color:#cfd3e4;
+      font:600 0.875rem var(--display);letter-spacing:.01em;color:#cfd3e4;
       opacity:0;transition:opacity .8s ease .25s}
 #dawn .state-sub{position:absolute;left:50%;top:100%;margin-top:26px;transform:translateX(-50%);
       width:340px;max-width:78vw;text-align:center;
-      font:10.5px var(--mono);color:#8791b3;line-height:1.75;letter-spacing:.04em;
+      font:0.65625rem var(--mono);color:#8791b3;line-height:1.75;letter-spacing:.04em;
       opacity:0;transition:opacity .8s ease .5s}
 body.lit #dawn .state-primary,body.lit #dawn .state-sub{opacity:1}
 /* A state reached after the door already loaded fades its words in on its

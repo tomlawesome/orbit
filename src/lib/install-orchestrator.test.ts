@@ -500,6 +500,31 @@ describe("runInstall: refusals inside the transaction roll back (#11, #56)", () 
     expect(snapshot(target)).toEqual(before);
   });
 
+  it("names memory-limit when ORBIT_MEMORY_LIMIT is malformed in an otherwise complete deployment (F2)", async () => {
+    const target = recognised(["ORBIT_MEMORY_LIMIT=lots"]);
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "configuration", reason: "configuration-failure" });
+    const message = outcome.status === "failed" ? outcome.message : "";
+    expect(message).toContain("memory-limit");
+    expect(message).not.toContain("lots");
+    expect(message).not.toContain("APP_URL");
+    expect(message).not.toContain("ORBIT_IMAGE");
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("says the memory warning once, in the installer window, when ORBIT_MEMORY_LIMIT is below 1g (F2)", async () => {
+    const target = recognised(["ORBIT_MEMORY_LIMIT=512m"]);
+    const { said } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(said.filter((line) => line.startsWith("warning ORBIT_MEMORY_LIMIT is below about 1 GB"))).toHaveLength(1);
+  });
+
+  it("says no memory warning at 2g (F2)", async () => {
+    const target = recognised(["ORBIT_MEMORY_LIMIT=2g"]);
+    const { said } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(said.filter((line) => line.includes("ORBIT_MEMORY_LIMIT"))).toEqual([]);
+  });
+
   it("rolls back an update whose configuration does not pass the preflight (#50)", async () => {
     const target = recognised();
     writeFileSync(join(target, ".env-orbit"), "not an assignment\n", { mode: 0o600 });
@@ -597,5 +622,40 @@ describe("runInstall: at the operator's terminal (F4)", () => {
     expect(outcome).toMatchObject({ status: "ok", selectedProfile: "full", modelPullRequested: true });
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("OLLAMA_MODEL=llama3.2:3b\n");
     expect(terminal.output()).toContain("Current: schema=v1");
+  });
+});
+
+// Redesign r5 (B27, section 13.5): the drill's `transaction-committed` kill
+// point is the `afterTransactionCommitted` dependency, beside
+// `afterTransactionBegun`, which the orchestrator calls right after
+// `transaction.commit()`, before it hands back the outcome the CLI writes.
+// The CLI maps ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE=transaction-committed
+// to it (src/cli/orbit.install.test.ts drives that half).
+describe("runInstall: the hook after the transaction commits (redesign r5)", () => {
+  it("calls afterTransactionCommitted once, after the commit put the files in place and before the outcome is returned", async () => {
+    const target = preprovisioned();
+    const before = readFileSync(join(target, ".env-orbit"), "utf8");
+    const order: string[] = [];
+    const seen: { composeFile?: boolean; envRewritten?: boolean } = {};
+    const hook = () => {
+      order.push("committed");
+      seen.composeFile = existsSync(join(target, "docker-compose.yml"));
+      seen.envRewritten = readFileSync(join(target, ".env-orbit"), "utf8") !== before;
+    };
+    const { outcome } = await run(target, {}, { afterTransactionCommitted: hook } as Partial<InstallDependencies>);
+    order.push("returned");
+    expect(outcome).toMatchObject({ status: "ok", fresh: true });
+    expect(order).toEqual(["committed", "returned"]);
+    expect(seen).toEqual({ composeFile: true, envRewritten: true });
+  });
+
+  it("guard: never calls it when nothing is committed (a refused target, or a refusal inside the transaction)", async () => {
+    const calls: string[] = [];
+    const hook = () => calls.push("committed");
+    const unrecognisable = sandbox("orbit-install-target-");
+    writeFileSync(join(unrecognisable, "notes.txt"), "mine\n");
+    expect((await run(unrecognisable, {}, { afterTransactionCommitted: hook } as Partial<InstallDependencies>)).outcome.status).toBe("failed");
+    expect((await run(preprovisioned("ORBIT_AUTH_OIDC=false\n"), {}, { afterTransactionCommitted: hook } as Partial<InstallDependencies>)).outcome.status).toBe("failed");
+    expect(calls).toEqual([]);
   });
 });

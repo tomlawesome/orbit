@@ -93,7 +93,7 @@ closed.
 | RM-026 | Add, rename, reorder and recolour your own sections | site: "Around your household" | unscheduled | partial | add, rename, hide, reorder exist; colour follows the chosen mark, no recolour |
 | RM-027 | Display choices stay consistent across sessions: five colourways, light or dark, three text sizes | charter V1-ITEM-02; site: "Around your household" | v0.4 | partial | five packs shipped (#486); pack kept in the browser only; text size has no effect (#1180) |
 | RM-028 | Assign an item to a household member | decision #1058 | unscheduled | not started | no assignee in the model; the owner-decided follow-up issue was never filed |
-| RM-029 | Dial: nearer is sooner, bigger is costlier, a belt shows documents; nothing on it is decoration | owner-decisions §1, §12; site: "The orbit" | v0.3 | delivered | #414, #458 |
+| RM-029 | Dial: nearer is sooner, bigger is costlier, a belt shows documents; nothing on it is decoration | owner-decisions §1, §12; site: "The orbit" | v0.3 | delivered | #414, #458; size follows cost per year on a power curve, radius = clamp(rMin·(yearly£/50)^k, rMin, rMax), k = ln(rMax/rMin)/ln(1000), £50/yr smallest to £50,000/yr largest, desk 3.5-13, pocket 5-12 (#1460) |
 | RM-030 | "The sky's weather = your workload" | site: "The orbit" | unscheduled | not started | the weather layer is decoration on one pack; nothing maps workload to it |
 | RM-031 | One schedule surface: the manifest list is the accessible source of truth, and reduced-motion and no-JS readers get the plain list | owner-decisions §7, §14 | v0.3 | delivered | #469 |
 | RM-032 | Search that unrolls the year on the desk and opens as a sheet on a phone | owner-decisions §31; decision #1058 | M14 | delivered | #1057, #1161; open bugs #1302, #1303 |

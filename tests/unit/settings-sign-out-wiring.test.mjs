@@ -16,8 +16,11 @@ import { describe, expect, it, vi } from "vitest";
  * the `chrome` variable, so the test can lift it out and run it.
  *
  * D. The "signs you out of your sign-in provider in this browser only"
- * sentence is true only where a provider is offered: on both layouts it sits
- * inside an `{#if providerOffered ...}` block.
+ * sentence is true only where this session came through the provider (#1444,
+ * narrowing #1439's "where a provider is offered"): on both layouts it sits
+ * inside an `{#if providerSession}` block, and `providerSession` is derived
+ * from the provider being offered AND the current session row being
+ * `viaProvider`.
  */
 
 const DESK = "web/src/routes/settings/+page.svelte";
@@ -123,14 +126,24 @@ describe.each([
   ["desk", DESK],
   ["phone", POCKET],
 ])("settings %s's provider sentence (#1439)", (_label, file) => {
-  it("shows 'signs you out of your sign-in provider in this browser only' only where a provider is offered", () => {
+  it("shows 'signs you out of your sign-in provider in this browser only' only for a session that came through the provider", () => {
     const src = read(file);
     const phrase = "sign-in provider in this browser only";
     const at = src.indexOf(phrase);
     expect(at, `${file} lost the provider sentence`).toBeGreaterThan(-1);
     expect(src.indexOf(phrase, at + 1), "the sentence appears twice").toBe(-1);
-    const guarded = openIfsAt(src, at).some((one) => !one.inElse && /\bproviderOffered\b/.test(one.cond) && !/^\s*!/.test(one.cond));
-    expect(guarded, `${file}: the provider sentence is not inside {#if providerOffered}`).toBe(true);
+    const guarded = openIfsAt(src, at).some((one) => !one.inElse && /^\s*providerSession\s*$/.test(one.cond));
+    expect(guarded, `${file}: the provider sentence is not inside {#if providerSession}`).toBe(true);
+  });
+
+  it("derives providerSession from the provider being offered and the current session row being viaProvider (#1444)", () => {
+    const src = read(file);
+    const declared = src.match(/const\s+providerSession\s*=\s*\$derived\(([^;]*)\);/);
+    expect(declared, `${file} has no providerSession derivation`).not.toBeNull();
+    const body = declared?.[1] ?? "";
+    expect(body).toMatch(/\bproviderOffered\b/);
+    expect(body).toMatch(/\.current\b/);
+    expect(body).toMatch(/\.viaProvider\b/);
   });
 
   it("still says Orbit signs out everywhere", () => {

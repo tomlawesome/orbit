@@ -216,7 +216,7 @@
   .marks{display:flex;flex-wrap:wrap;align-items:center;gap:18px}
   .kvs{margin-bottom:16px}
   .field{display:flex;flex-direction:column;gap:6px;font:var(--p-type-meta) var(--mono);color:var(--ink-quiet);margin-bottom:16px}
-  .field input{font:var(--p-type-body) var(--ui);min-height:var(--p-hit);padding:0 12px;border-radius:10px;
+  .field input{font:var(--p-type-input) var(--ui);min-height:var(--p-hit);padding:0 12px;border-radius:10px;
     border:1px solid var(--line);background:var(--panel);color:var(--ink)}
   .tail{height:60vh}
 </style>

@@ -12,7 +12,7 @@
 # https://github.com/sigstore/cosign. Installed as a release binary pinned by
 # version and SHA-256 checksum, like the Trivy pin in
 # .github/supply-chain-policy.json; the checksum below is from that release's
-# cosign_checksums.txt (v3.1.3 verified current 2026-09-08).
+# cosign_checksums.txt (v3.1.4 verified current 2026-10-22).
 #
 # Usage:
 #   cosign="$(bash scripts/ci/ensure-cosign.sh)"
@@ -38,8 +38,8 @@ set -Eeuo pipefail
 # checksum -- so a version-only bump leaves this mismatched and the
 # checksum check below fails until a human copies the new checksum from
 # that release's cosign_checksums.txt by hand.
-readonly COSIGN_VERSION="3.1.3"
-readonly COSIGN_SHA256="4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71"
+readonly COSIGN_VERSION="3.1.4"
+readonly COSIGN_SHA256="424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa"
 readonly COSIGN_URL="https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-amd64"
 
 # Where the orbit-signing runner mounts the key (docs/releasing.md).

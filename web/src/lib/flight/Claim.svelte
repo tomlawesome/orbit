@@ -19,8 +19,8 @@
    *
    * WHERE THE CODE IS is said out loud because it is the whole of what an
    * operator has to know here, and it is the one place they will not think to
-   * look: the code is printed once, as the last line of the container's own
-   * start-up log, and lives nowhere else — no file, no environment variable,
+   * look: the code is printed once, in the container's own log (after the
+   * start-up reports, so it is near the end), and lives nowhere else — no file, no environment variable,
    * nothing the installer ever saw (ADR-0022's own reversal of the 2026-08-16
    * ruling). If they arrived by the link in that notice they never read this
    * sentence at all: the host fills the field from the URL fragment and
@@ -70,7 +70,7 @@
     <!-- The one line the card says by itself: the exact command, because
          "check the logs" is not an instruction anyone can follow at 2am on a
          machine they installed an hour ago. -->
-    <p class="note">Run <b>docker compose logs orbit-app</b> and read the last line.</p>
+    <p class="note">Run <b>docker compose logs orbit-app</b> and open the claim link it prints.</p>
 
     <button class="act" id="claimbtn" type="submit" disabled={!typed || busy}>Continue</button>
   </form>

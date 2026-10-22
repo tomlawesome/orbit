@@ -22,7 +22,10 @@ set -Eeuo pipefail
 # which it commits or rolls back. The engine never touches Docker (#295):
 # what Docker must do afterwards comes back in its outcome file, and this
 # script starts Compose, waits for readiness and prints the completion
-# screen. Nothing here writes a deployment file.
+# screen. Nothing here writes a deployment file, with one exception: a fresh
+# install that fails after the engine's commit is rolled back (#1456,
+# rollback_fresh_install), which puts this folder's own files back from the
+# copy taken before the engine ran.
 #
 # Environment (besides the settings read below):
 #   ORBIT_LAUNCHER_CONFIG_TREE  set by orbit-launcher to an empty directory it
@@ -42,6 +45,12 @@ readonly channel="${ORBIT_CHANNEL:-latest}"
 readonly environment_file=".env-orbit"
 readonly launcher_config_tree="${ORBIT_LAUNCHER_CONFIG_TREE:-}"
 readonly database_volume_key="orbit-db-data"
+# Every named volume docker-compose.yml declares that `compose up` can
+# create. A failed fresh start removes, by exact name, only those this
+# attempt created (#1151, #1207, #1455).
+readonly -a deployment_volume_keys=(orbit-db-data orbit-documents-data orbit-clamav-data orbit-ollama-data)
+# Docker's own words in a failure are bounded to this many characters (#1455).
+readonly docker_output_bound=500
 readonly image_repository="${registry}/${repository}"
 # ADR-0031 #7: byte-identical to cosign.pub (scripts/get-orbit.test.mjs also
 # checks this, and the copy embedded in scripts/get-orbit.sh, against the
@@ -58,6 +67,9 @@ readonly countersign_oidc_issuer='https://token.actions.githubusercontent.com'
 # ORBIT_RELEASE_MANIFEST is not set. Never for user environments.
 readonly release_manifest_base_url="${ORBIT_INSTALL_TEST_MANIFEST_BASE_URL:-https://github.com/tomlawesome/orbit}"
 readonly installer_process_started_at="$SECONDS"
+# The run's start time in UTC, which names its backup folder (snapshot_fresh_target).
+run_stamp="$(date -u +%Y%m%dT%H%M%SZ 2>/dev/null)" || run_stamp=""
+readonly run_stamp
 # Where the engine one-off sees what this script hands it (run_engine).
 readonly engine_cli="/opt/orbit/cli/orbit.js"
 readonly engine_mount="/orbit-deploy"
@@ -181,9 +193,89 @@ installer_failure_reason=""
 installer_failure_action=""
 selected_profile=""
 model_pull_requested=0
-model_pull_value=""
 target_was_empty=0
 declare -a pending_ui_events=()
+installer_failure_detail=""
+declare -a installer_failure_notes=()
+declare -a optional_notes=()
+container_state=unknown
+container_summary=""
+container_exit_code=""
+# The fresh-install rollback (#1456): an all-or-nothing install with a start
+# record and rollback. The record is a copy of this folder's own entries,
+# taken before the engine runs into orbit-install-backups/<stamp>/originals
+# inside the folder, and the list of this project's volumes that already
+# existed before `compose up`. Nothing is kept anywhere else, and nothing
+# between runs.
+backup_root=""
+# Set when this run made orbit-install-backups, so only this run removes it.
+backup_root_created=0
+# This run's dated folder, once made: orbit-install-backups/<stamp>.
+backup_dir=""
+rollback_snapshot_taken=0
+# Set when the folder could not be put back: the copy of the originals stays.
+rollback_keep_originals=0
+rollback_armed=0
+compose_started=0
+declare -a rollback_original_entries=()
+# The relative paths the engine journals, before its first write, as ones it
+# may create (read_engine_journal): with the staging directory, the lock and
+# the scratch names, only these are removed outright by a rollback. Anything
+# else new may be the person's, saved while the engine ran, and is moved
+# aside, never deleted.
+declare -a rollback_engine_entries=()
+# Set when anything of the folder's was moved out (moved/, or engine/ with no
+# journal), and which.
+rollback_moved=0
+rollback_moved_aside=0
+rollback_kept_unrecorded=0
+declare -a rollback_preexisting_volumes=()
+# What the rollback could not do, one sentence each, and the lines saying
+# where moved files are kept.
+declare -a rollback_obstacles=()
+declare -a rollback_report=()
+rollback_down_failed=0
+# This attempt's volumes when `down` failed (the stop command removes them),
+# and those a successful `down` could not remove.
+declare -a rollback_down_volumes=()
+declare -a rollback_failed_volumes=()
+rollback_folder_failed=0
+rollback_restore_named=0
+# The kinds of obstacle a failed folder rollback met, each with its own
+# closing line: an original that could not be put back (its live paths), an
+# engine entry that could not be removed or moved, and nothing moved because
+# the dated folder could not be made. The volumes could not be listed.
+declare -a rollback_restore_failed_paths=()
+rollback_entry_failed=0
+rollback_nothing_moved=0
+rollback_volumes_unlisted=0
+# The rollback's shared Docker deadline (a SECONDS value; empty outside the
+# rollback), and whether a Docker call ran out of it.
+rollback_docker_deadline=""
+rollback_docker_timed_out=0
+rollback_interrupted=0
+# Set by read_engine_journal only when the engine left a journal it accepted.
+rollback_journal_present=0
+# The walk's pass (plan or apply), what it found, and the claim on one entry.
+rollback_walk=apply
+rollback_needs_backup=0
+rollback_claim=none
+# The one command the person may need, offered as the recovery command: the
+# stop command when `down` failed, or the volume removal.
+rollback_recovery_command=""
+rollback_stop_command=""
+# complete or incomplete once rollback_fresh_install has run, and the
+# terminal event's action then.
+rollback_outcome=""
+rollback_action=""
+# The optional phase (#1456 ruling, note 40394): once the database and the
+# application are ready the rollback is disarmed, and an interrupt only ends
+# the optional waits.
+optional_window=0
+optional_interrupted=0
+interruptible_pid=""
+container_restarts=""
+declare -A restarts_before=()
 
 # installer-ui.sh renders this script's own phases (build note F6). It is
 # sourced only from the deployment the engine has just committed, which the
@@ -218,7 +310,9 @@ load_installer_ui() {
 
 installer_ui_event() {
   if [[ "$installer_ui_loaded" == 1 ]]; then
-    installer_ui_emit "$@"
+    # Reporting never stops the install: a launcher that went away (a closed
+    # pipe) must not leave a committed install half-started (#1456).
+    installer_ui_emit "$@" 2>/dev/null || true
   else
     pending_ui_events+=("$1|$2|$3|$4|$5|$((SECONDS - installer_process_started_at))")
   fi
@@ -260,19 +354,79 @@ fail() {
   action="${installer_failure_action:-$(default_failure_action)}"
   phase="${installer_ui_phase:-host}"
   component="${installer_ui_component:-host}"
-  elapsed="$((SECONDS - installer_process_started_at))"
-  if [[ "$installer_ui_loaded" == 1 ]]; then
-    installer_ui_emit "$phase" "$component" failed "$reason" "$action" "$elapsed" || true
-  else
-    flush_pending_ui_events
-    printf 'phase=%s component=%s state=failed reason=%s action=%s elapsed=%ss\n' \
-      "$phase" "$component" "$reason" "$action" "$elapsed"
+  # A fresh install that fails after the commit is undone before the
+  # terminal event, so the event can say whether a retry can work (#1456).
+  # A complete rollback leaves nothing to repair, so the next step is a
+  # retry once the cause named here is fixed; so does one that put the
+  # folder back but left something in Docker, once the one command has run.
+  # A folder that could not be put back needs the person first: `abort`.
+  if [[ "$rollback_armed" == 1 ]]; then
+    # A second signal must not cut the rollback short: caught from before
+    # the disarm, and remembered for the exit status.
+    trap 'rollback_interrupted=130' INT; trap 'rollback_interrupted=143' TERM; trap 'rollback_interrupted=129' HUP
+    rollback_armed=0
+    rollback_fresh_install || true
   fi
-  printf 'Orbit installer: %s\n' "$*" >&2
-  if [[ "$action" == repair ]]; then
-    printf 'Orbit installer: next action is the bounded Repair path; no deletion or credential reset is recommended.\n' >&2
+  case "$rollback_outcome" in
+    complete) action=retry ;;
+    incomplete) action="$rollback_action" ;;
+  esac
+  # Everything below only reports: a launcher that has gone away (a closed
+  # pipe) must not stop the exit, and the rollback above has already run.
+  emit_terminal_failure "$phase" "$component" "$reason" "$action"
+  # Docker's own words come before the message: the launcher shows the last
+  # few stderr lines, so the message and what to do next stay in view.
+  if [[ -n "$installer_failure_detail" ]]; then
+    printf 'Orbit installer: Docker said: %s\n' "$installer_failure_detail" >&2 || true
   fi
+  local note
+  for note in "${installer_failure_notes[@]}"; do
+    printf 'Orbit installer: %s\n' "$note" >&2 || true
+  done
+  printf 'Orbit installer: %s\n' "$*" >&2 || true
+  case "$rollback_outcome" in
+    complete)
+      print_rollback_report
+      printf 'Orbit installer: This install was rolled back: the folder is as it was before%s,%s and the containers and volumes it created are removed. Fix the cause, then install again.\n' \
+        "$(rollback_unit_clause)" "$(rollback_moved_clause)" >&2 || true
+      ;;
+    incomplete) print_rollback_obstacles ;;
+    *)
+      if [[ "$action" == repair ]]; then
+        printf 'Orbit installer: next action is the bounded Repair path; no deletion or credential reset is recommended.\n' >&2 || true
+      fi
+      ;;
+  esac
+  # An interrupt during the rollback ends the run with that signal's status.
+  ((rollback_interrupted == 0)) || exit "$rollback_interrupted"
   exit 1
+}
+
+# emit_terminal_failure <phase> <component> <reason> <action>
+#
+# The one terminal `failed` event, through installer-ui.sh once it is loaded
+# and as a plain line (after any queued events) before. When the person has a
+# command to run, a plain stream carries it on the line just before, as
+# `recovery-command: <command>`, and the event ends ` recovery=command`
+# (docs/engine-events.md, "Recovery command"): a launcher shows it in a copy
+# box instead of matching it in the stderr prose. Never fails.
+emit_terminal_failure() {
+  local elapsed="$((SECONDS - installer_process_started_at))" recovery=""
+  [[ -z "$rollback_recovery_command" ]] || recovery="command"
+  if [[ "$installer_ui_loaded" == 1 ]]; then
+    # shellcheck disable=SC2154 # set by installer-ui.sh
+    if [[ -n "$recovery" && "$installer_ui_mode" == plain ]]; then
+      printf 'recovery-command: %s\n' "$rollback_recovery_command" 2>/dev/null || true
+      # shellcheck disable=SC2034 # read by installer_ui_emit
+      installer_ui_recovery="command"
+    fi
+    installer_ui_emit "$1" "$2" failed "$3" "$4" "$elapsed" 2>/dev/null || true
+  else
+    flush_pending_ui_events 2>/dev/null || true
+    [[ -z "$recovery" ]] || printf 'recovery-command: %s\n' "$rollback_recovery_command" 2>/dev/null || true
+    printf 'phase=%s component=%s state=failed reason=%s action=%s elapsed=%ss%s\n' \
+      "$1" "$2" "$3" "$4" "$elapsed" "${recovery:+ recovery=$recovery}" 2>/dev/null || true
+  fi
 }
 
 fail_with() {
@@ -313,21 +467,67 @@ read_environment_value() {
 }
 
 cleanup() {
-  local exit_status=$?
+  local exit_status=$? exit_status_name=""
 
+  # A signal's trap runs inside whatever command it interrupted, with that
+  # command's redirections still applied -- a health probe's >/dev/null, say
+  # -- so report on the streams the script started with.
+  if [[ -n "$original_stdout_fd" && -n "$original_stderr_fd" ]]; then
+    exec 1>&"$original_stdout_fd" 2>&"$original_stderr_fd" || true
+  fi
+
+  # Any other way a fresh install ends early after the commit -- an
+  # interrupt (the INT/TERM/HUP traps below turn each into a non-zero exit),
+  # an unexpected command failure, a launcher that went away -- is rolled
+  # back too, first, and then reported with the one terminal `failed` event.
+  if [[ "$rollback_armed" == 1 && "$exit_status" != 0 ]]; then
+    trap 'rollback_interrupted=130' INT; trap 'rollback_interrupted=143' TERM; trap 'rollback_interrupted=129' HUP
+    rollback_armed=0
+    ((exit_status < 128)) || exit_status_name="interrupted"
+    if rollback_fresh_install; then
+      emit_terminal_failure "${installer_ui_phase:-host}" "${installer_ui_component:-host}" failure retry
+      print_rollback_report
+      printf 'Orbit installer: The install stopped before it finished (%s), and was rolled back: the folder is as it was before%s,%s and the containers and volumes it created are removed. You can install again.\n' \
+        "${exit_status_name:-exit status ${exit_status}}" "$(rollback_unit_clause)" "$(rollback_moved_clause)" >&2 || true
+    else
+      emit_terminal_failure "${installer_ui_phase:-host}" "${installer_ui_component:-host}" failure "$rollback_action"
+      printf 'Orbit installer: The install stopped before it finished (%s).\n' "${exit_status_name:-exit status ${exit_status}}" >&2 || true
+      print_rollback_obstacles
+    fi
+  fi
+  # A copy kept because the folder could not be put back is the user's only
+  # copy of their original files; print_rollback_obstacles named it.
+  # Otherwise the copy goes, with the emptied folders (any exit: a success,
+  # a refusal, an engine that rolled itself back).
+  if [[ "$rollback_keep_originals" != 1 ]]; then
+    release_rollback_copies || exit_status=1
+  fi
   if [[ -n "$engine_work_dir" ]] && ! rm -rf -- "$engine_work_dir"; then
-    printf 'Orbit installer: could not remove a temporary directory: %s.\n' "$engine_work_dir" >&2
+    printf 'Orbit installer: could not remove a temporary directory: %s.\n' "$engine_work_dir" >&2 || true
     exit_status=1
   fi
   if [[ -n "$release_manifest_work_dir" ]] && ! rm -rf -- "$release_manifest_work_dir"; then
-    printf 'Orbit installer: could not remove a temporary directory: %s.\n' "$release_manifest_work_dir" >&2
+    printf 'Orbit installer: could not remove a temporary directory: %s.\n' "$release_manifest_work_dir" >&2 || true
     exit_status=1
   fi
 
   exit "$exit_status"
 }
 
+original_stdout_fd=""
+original_stderr_fd=""
+exec {original_stdout_fd}>&1 {original_stderr_fd}>&2 || true
 trap cleanup EXIT
+# An untrapped INT/TERM/HUP ends bash with $? still 0 in the EXIT trap, so
+# cleanup could not tell an interrupt from success: each becomes a non-zero
+# exit instead (128 + the signal's number). installer-ui.sh saves and
+# restores these around its prompts. A launcher that went away closes our
+# pipes: writing to them must fail as a write, not kill the script before
+# the rollback.
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+trap '' PIPE
 
 # manifest_field <manifest-path> <literal-key>
 #
@@ -686,8 +886,48 @@ bounded_compose_probe() {
   # launcher gives it one), and `compose exec` keeps stdin attached even with
   # -T. Its first read of the terminal would stop it with SIGTTIN, TERM cannot
   # wake a stopped process, and every probe would fail at the bound.
+  if [[ "${optional_window:-0}" == 1 ]]; then
+    run_interruptibly timeout --signal=TERM --kill-after=1s 5s \
+      docker compose --project-name "$compose_project_name" --env-file "$environment_file" "$@" </dev/null
+    return
+  fi
   timeout --signal=TERM --kill-after=1s 5s \
     docker compose --project-name "$compose_project_name" --env-file "$environment_file" "$@" </dev/null
+}
+
+# run_interruptibly <program> <argument>...
+#
+# In the optional phase: runs the program as a background child and waits
+# for it, so a trapped INT/TERM/HUP returns at once (bash runs a trap only
+# after a foreground child ends), then kills the child itself -- it may not
+# have had the signal: `timeout` puts itself in its own process group, and
+# the signal may have been sent to this script alone. Returns 130 when
+# interrupted.
+run_interruptibly() {
+  local status=0 tries
+  "$@" &
+  interruptible_pid=$!
+  while :; do
+    # A signal that landed before `wait` began is seen here, not after the
+    # child ends by itself.
+    if [[ "$optional_interrupted" != 1 ]]; then
+      if wait "$interruptible_pid"; then status=0; else status=$?; fi
+    fi
+    if [[ "$optional_interrupted" == 1 ]]; then
+      kill -TERM "$interruptible_pid" 2>/dev/null || true
+      for ((tries = 0; tries < 30; tries++)); do
+        kill -0 "$interruptible_pid" 2>/dev/null || break
+        sleep 0.1
+      done
+      kill -KILL "$interruptible_pid" 2>/dev/null || true
+      wait "$interruptible_pid" 2>/dev/null || true
+      status=130
+      break
+    fi
+    kill -0 "$interruptible_pid" 2>/dev/null || break
+  done
+  interruptible_pid=""
+  return "$status"
 }
 
 probe_database_health() {
@@ -717,25 +957,811 @@ wait_for_component_health() {
   local phase="$1" component="$2" reason="$3" probe="$4"
   local deadline=$((SECONDS + 10#$readiness_timeout_seconds)) remaining pause
   while true; do
+    [[ "$optional_interrupted" != 1 ]] || return 1
     if "$probe"; then
       installer_ui_event "$phase" "$component" healthy "$reason" health
       return 0
     fi
+    [[ "$optional_interrupted" != 1 ]] || return 1
     installer_ui_event "$phase" "$component" waiting "$reason" wait
     remaining=$((deadline - SECONDS))
     ((remaining > 0)) || return 1
     pause=$((10#$readiness_poll_seconds))
     ((pause <= remaining)) || pause="$remaining"
-    sleep "$pause"
+    if [[ "$optional_window" == 1 ]]; then
+      run_interruptibly sleep "$pause" || [[ "$optional_interrupted" != 1 ]] || return 1
+    else
+      sleep "$pause"
+    fi
     ((SECONDS < deadline)) || return 1
   done
+}
+
+# --- Docker's own words in a failure (#1455) ---------------------------------
+
+# docker_reporting <command>...
+#
+# Runs a Docker command with its output captured in memory and bounded --
+# not in a file: a full disk is one of the reasons it fails -- and, when it
+# fails, keeps Docker's own words for fail() to show. pipefail keeps the
+# command's own status.
+docker_reporting() {
+  local output
+  if output="$("$@" 2>&1 | tail -c 16384)"; then
+    return 0
+  fi
+  installer_failure_detail="$(printf '%s' "$output" | docker_output_excerpt)"
+  return 1
+}
+
+# docker_output_excerpt < docker-output
+#
+# Docker's output as one line a terminal and the launcher can show safely:
+# escape sequences, bytes that are not valid UTF-8 (a raw 8-bit C1 such as
+# 0x9b, when iconv is there), C0 and UTF-8-encoded C1 controls, and the
+# bidirectional overrides U+202A-202E and U+2066-2069 removed (Docker's text
+# is untrusted, held to the same no-control-characters rule as the engine's
+# message in read_engine_outcome), only the lines that
+# report a failure kept (Compose's progress lines dropped; the last line
+# when none reads as an error), joined with " | ", and only the last
+# docker_output_bound characters kept: the launcher wraps the last six
+# stderr lines, and a long excerpt pushes its failure menu off the screen
+# (#1485). Pipes only, no temporary file: the disk may be
+# what is full.
+docker_output_excerpt() {
+  local esc=$'\033' joined
+  joined="$(tail -c 16384 |
+    LC_ALL=C sed -E "s|${esc}\\[[0-9;?]*[ -/]*[@-~]||g" |
+    LC_ALL=C tr '\r\t' '\n ' |
+    { if command -v iconv >/dev/null 2>&1; then iconv -c -f UTF-8 -t UTF-8 2>/dev/null || true; else cat; fi; } |
+    LC_ALL=C sed $'s/\xc2[\x80-\x9f]//g; s/\xe2\x80[\xaa-\xae]//g; s/\xe2\x81[\xa6-\xa9]//g' |
+    LC_ALL=C tr -d '\000-\010\013-\037\177' |
+    LC_ALL=C awk '
+      { gsub(/^ +| +$/, "") }
+      length($0) == 0 { next }
+      { last = $0 }
+      /^(Network|Volume|Container|Image|Service) .* (Creating|Created|Recreate|Recreated|Starting|Started|Stopping|Stopped|Removing|Removed|Waiting|Healthy|Running|Exited|Pulling|Pulled|Building|Built|Skipped)$/ { next }
+      tolower($0) ~ /error|fail|denied|refused|cannot|unable|no space|not found|invalid|timed out|timeout/ {
+        printf "%s%s", separator, $0; separator = " | "; kept = 1
+      }
+      END { if (!kept && length(last) > 0) printf "%s", last }')" || joined=""
+  if ((${#joined} > docker_output_bound)); then
+    joined="...${joined: -$((docker_output_bound - 3))}"
+  fi
+  printf '%s' "$joined"
+}
+
+# --- the fresh-install rollback (#1456) --------------------------------------
+#
+# All-or-nothing install with a start record and rollback: a write-ahead
+# journal with compensating undo, and quarantine instead of deletion. A fresh
+# install -- an empty folder, or one holding only the pre-provisioned
+# .env-orbit and .orbit-secrets (guarantee #6) -- that fails after the
+# engine's commit puts the folder back as it found it and removes what it
+# created in Docker: containers first, while docker-compose.yml still exists,
+# then volumes by exact name. Before its first write the engine journals
+# every path it may create; the rollback removes exactly those, and moves
+# anything else new aside into orbit-install-backups/<stamp>/ inside the
+# folder, never deleting it. Nothing is kept between runs: a rollback that
+# cannot finish says what is left, and the next run starts from what it finds
+# in the folder. The engine's own file transaction cannot do this part: it
+# ends at its commit, before Compose runs, and removes its backup then (#56).
+# An update is never rolled back.
+
+# backup_root_is_sane
+#
+# orbit-install-backups is the installer's own folder by contract: a real
+# directory of that name is ignored by everything that decides whether a
+# folder is fresh, and nothing in it is ever read, run, moved or deleted. A
+# symlink (dangling or not) or a file of that name is not usable.
+backup_root_is_sane() {
+  [[ ! -L "$backup_root" ]] && { [[ ! -e "$backup_root" ]] || [[ -d "$backup_root" ]]; }
+}
+
+# backup_dir_refused <required|optional> <reason>
+#
+# A dated folder that could not be made: a root this run made is removed
+# again; with `required` the install is refused before anything changed,
+# saying which cause applied and what to do, since each needs a different
+# fix before a retry can work.
+backup_dir_refused() {
+  if [[ "$backup_root_created" == 1 ]] && rmdir -- "$backup_root" 2>/dev/null; then
+    backup_root_created=0
+  fi
+  [[ "$1" == required ]] || return 1
+  installer_ui_phase=host
+  installer_ui_component=host
+  fail_with failure abort "Could not make a backup folder under $(printf '%q' "$backup_root"): $2 Nothing was changed."
+}
+
+# prepare_backup_dir <required|optional>
+#
+# Makes this run's dated folder, backup_dir: orbit-install-backups/<stamp>,
+# the stamp the run's UTC start time, `-2`..`-9` appended when that name
+# exists. Each is an atomic `mkdir` (never `mkdir -p`), so an existing name is
+# never reused or emptied. The root is made 0700 or, when it exists, accepted
+# only as a real directory owned by the current user, and made 0700: it may
+# hold secrets moved aside. With `required` a folder that cannot be made
+# refuses the install before anything is changed; with `optional` (a
+# rollback with a file to move) it returns 1.
+prepare_backup_dir() {
+  local mode="$1" suffix
+  if [[ ! "$run_stamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]; then
+    backup_dir_refused "$mode" "the clock could not be read to date it. Check that the date command works, then try again."
+    return 1
+  fi
+  if ! backup_root_is_sane; then
+    backup_dir_refused "$mode" "it is a link or a file, not a folder. Rename or remove it, then try again."
+    return 1
+  fi
+  if [[ -d "$backup_root" ]]; then
+    if [[ ! -O "$backup_root" ]] || ! chmod 700 -- "$backup_root"; then
+      backup_dir_refused "$mode" "it is owned by another user or cannot be made private (0700) by this user. Change its owner to this user (chown), or rename or remove it, then try again."
+      return 1
+    fi
+  elif mkdir -m 700 -- "$backup_root"; then
+    backup_root_created=1
+  else
+    backup_dir_refused "$mode" "could not create it. Check that the install folder is writable by this user and has free space, then try again."
+    return 1
+  fi
+  for suffix in "" -2 -3 -4 -5 -6 -7 -8 -9; do
+    if mkdir -m 700 -- "${backup_root}/${run_stamp}${suffix}" 2>/dev/null; then
+      backup_dir="${backup_root}/${run_stamp}${suffix}"
+      return 0
+    fi
+    # Only a name that already exists moves on to the next suffix; any other
+    # failure would fail the same way for every suffix.
+    if [[ ! -e "${backup_root}/${run_stamp}${suffix}" && ! -L "${backup_root}/${run_stamp}${suffix}" ]]; then
+      backup_dir_refused "$mode" "could not create a dated folder in it. Check that it is writable by this user and has free space, then try again."
+      return 1
+    fi
+  done
+  backup_dir_refused "$mode" "all nine dated names for this second ($run_stamp to $run_stamp-9) are already taken. Remove old dated folders you no longer need from it, then try again."
+  return 1
+}
+
+# snapshot_fresh_target
+#
+# The start record for the files: before the engine runs, a candidate fresh
+# folder's own entries are copied with `cp -a` (content, modes and structure,
+# as the engine's rollback/original backup does, #9 #47) into
+# orbit-install-backups/<stamp>/originals/ inside the folder, never under the
+# home, state or temporary directory. Any other folder is an update or a
+# refusal, and gets no start record.
+snapshot_fresh_target() {
+  local saved_options name
+  local -a entries=() originals=()
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob dotglob
+  entries=(*)
+  eval "$saved_options"
+  for name in "${entries[@]}"; do
+    case "$name" in
+      .env-orbit | .orbit-secrets) originals+=("$name") ;;
+      orbit-install-backups) ;;
+      *) return 0 ;;
+    esac
+  done
+  backup_root="${target_dir}/orbit-install-backups"
+  if ! backup_root_is_sane; then
+    installer_ui_phase=host
+    installer_ui_component=host
+    fail_with failure abort "$(printf '%q' "$backup_root") is not a folder: the installer keeps its backups under that name and cannot use a file or a link there. Rename it, then install again. Nothing was changed."
+  fi
+  # An empty folder has nothing to copy: its record is the empty list, and
+  # its backup folder is made only when a rollback has a file to move aside.
+  # Armed from here like any fresh folder.
+  if ((${#originals[@]} == 0)); then
+    rollback_snapshot_taken=1
+    rollback_armed=1
+    return 0
+  fi
+  prepare_backup_dir required
+  for name in "${originals[@]}"; do
+    # Recorded before the copy, so a copy that dies part-way is removed too.
+    rollback_original_entries+=("$name")
+    if ! { [[ -d "${backup_dir}/originals" ]] || mkdir -m 700 -- "${backup_dir}/originals"; } ||
+      ! cp -a -- "$name" "${backup_dir}/originals/${name}"; then
+      rm -rf -- "${backup_dir:?}/originals" || true
+      release_rollback_copies || true
+      backup_dir=""
+      rollback_original_entries=()
+      installer_ui_phase=host
+      installer_ui_component=host
+      fail_with failure abort "Could not copy this folder's files to put it back if the install fails; nothing was changed. Check that you can read everything in this folder and that there is space for a copy in it, then install again."
+    fi
+  done
+  rollback_snapshot_taken=1
+  # Armed from here, not from the engine's outcome: an interrupt while the
+  # engine runs may land after its commit. Putting the copy back over a
+  # folder the engine never changed leaves it as it was.
+  rollback_armed=1
+}
+
+# list_deployment_volumes <array-name>
+#
+# This project's own volumes that exist now, by exact name; returns 1 when
+# Docker cannot say.
+list_deployment_volumes() {
+  local -n found_volumes="$1"
+  local listing key name status=0
+  found_volumes=()
+  listing="$(bounded_docker 5 volume ls --filter "name=${compose_project_name}_orbit-" --format '{{.Name}}' 2>/dev/null)" || status=$?
+  if ((status != 0)); then
+    # The substitution's subshell cannot set the flag here, so set it again.
+    note_rollback_docker_timeout "$status"
+    return 1
+  fi
+  for key in "${deployment_volume_keys[@]}"; do
+    name="${compose_project_name}_${key}"
+    if [[ $'\n'"$listing"$'\n' == *$'\n'"$name"$'\n'* ]]; then
+      found_volumes+=("$name")
+    fi
+  done
+}
+
+# created_deployment_volumes <array-name>
+#
+# The volumes this attempt created: there now, not there before `compose up`.
+created_deployment_volumes() {
+  local -n created_volumes="$1"
+  local -a current=()
+  local name before
+  created_volumes=()
+  list_deployment_volumes current || return 1
+  for name in "${current[@]}"; do
+    for before in "${rollback_preexisting_volumes[@]}"; do
+      [[ "$name" != "$before" ]] || continue 2
+    done
+    created_volumes+=("$name")
+  done
+}
+
+# shell_words <word>...
+#
+# A command line for the user to paste: every word shell-quoted, so a
+# folder or project name can never become shell syntax.
+shell_words() {
+  local line
+  printf -v line '%q ' "$@"
+  printf '%s' "${line% }"
+}
+
+# bounded_docker <seconds> <docker-argument>...
+#
+# One Docker call that a hung daemon cannot hold past its bound (plus a
+# second for the KILL); the timeout's exit 124 is a failure like any other.
+# Bash runs a trapped signal only after its foreground child ends, and
+# `timeout` runs in its own process group, out of reach of a terminal's
+# Ctrl-C, so the bound is also the longest a trapped interrupt waits.
+# stdin is closed for the reason given at bounded_compose_probe.
+# Inside the rollback the bound is also trimmed to the time left on
+# rollback_docker_deadline (deadline propagation: min(own cap, time left)),
+# and with none left Docker is not run at all; either way of running out
+# sets rollback_docker_timed_out so the report can name the cause.
+bounded_docker() {
+  local seconds="$1" left status=0
+  shift
+  if [[ -n "$rollback_docker_deadline" ]]; then
+    left=$((rollback_docker_deadline - SECONDS))
+    if ((left <= 0)); then
+      rollback_docker_timed_out=1
+      return 124
+    fi
+    ((seconds <= left)) || seconds="$left"
+  fi
+  timeout --signal=TERM --kill-after=1s "${seconds}s" docker "$@" </dev/null || status=$?
+  note_rollback_docker_timeout "$status"
+  return "$status"
+}
+
+# note_rollback_docker_timeout <status>
+#
+# Inside the rollback, a bounded Docker call that ran out of time: 124 when
+# the TERM ended it, 137 when it ignored the TERM and the KILL did.
+note_rollback_docker_timeout() {
+  [[ -n "$rollback_docker_deadline" ]] || return 0
+  [[ "$1" != 124 && "$1" != 137 ]] || rollback_docker_timed_out=1
+}
+
+# rollback_docker
+#
+# This attempt's volumes listed, then the containers down while
+# docker-compose.yml is still in place, then each listed volume removed by
+# its exact name -- never a wildcard, a prune or `down --volumes`, which
+# would take a volume that predates this attempt. Only after `compose up`
+# was tried: nothing earlier creates a container or a volume. Returns 1
+# when something could not be removed.
+rollback_docker() {
+  local name
+  local -a created=()
+  [[ "$compose_started" == 1 ]] || return 0
+  # Listed before `down`, the step most likely to hang, so a failed `down`
+  # still knows which volumes the stop command must remove. The volumes
+  # exist once `compose up` ran, so this list is already complete. Each
+  # call's cap (listing 5 s, down 6 s, each removal 5 s) fits inside the
+  # 8 s deadline rollback_fresh_install sets, which they all share.
+  if ! created_deployment_volumes created; then
+    # A daemon that cannot list in 5 s will not stop the containers in the
+    # time left; the printed stop command does that later.
+    rollback_volumes_unlisted=1
+    rollback_down_failed=1
+    return 1
+  fi
+  # The containers are being removed, so a short stop loses nothing: 2 s
+  # to stop, the rest of the 6 s to kill and remove them and the network.
+  if ! bounded_docker 6 compose --project-name "$compose_project_name" --env-file "$environment_file" \
+    down --remove-orphans --timeout 2 >/dev/null 2>&1; then
+    # The containers may still be running and using the volumes, so the
+    # volumes are left: the one stop command removes them once the
+    # containers are gone.
+    rollback_down_failed=1
+    rollback_down_volumes=("${created[@]}")
+    return 1
+  fi
+  for name in "${created[@]}"; do
+    bounded_docker 5 volume rm -- "$name" >/dev/null 2>&1 || rollback_failed_volumes+=("$name")
+  done
+  ((${#rollback_failed_volumes[@]} == 0))
+}
+
+# read_engine_journal
+#
+# Fills rollback_engine_entries from the engine's journal, `written` beside
+# its outcome: one relative path per line, a directory the engine owns whole
+# with a trailing slash. It crosses from the image to the host, so it is used
+# only when it is a small regular file whose every line is a plain relative
+# path with no `.` or `..` component, and every claim matches what stands in
+# the folder: a file claimed where a directory is, or the reverse, is an
+# older engine's journal of top-level names. Otherwise (or an image that
+# writes none) it is not trusted, and every new entry but the scratch names
+# is moved aside. Never fails.
+read_engine_journal() {
+  local file line size component path
+  local path_pattern='^[A-Za-z0-9._-]{1,255}(/[A-Za-z0-9._-]{1,255})*/?$'
+  local -a names=() components=()
+  rollback_engine_entries=()
+  rollback_journal_present=0
+  [[ -n "$engine_work_dir" ]] || return 0
+  file="${engine_work_dir}/written"
+  is_regular_non_symlink_file "$file" || return 0
+  size="$(wc -c < "$file" 2>/dev/null)" || return 0
+  size="${size//[[:space:]]/}"
+  if [[ ! "$size" =~ ^[0-9]+$ ]] || ((size > 8192)); then
+    return 0
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ $path_pattern ]] || return 0
+    IFS=/ read -r -a components <<< "${line%/}"
+    for component in "${components[@]}"; do
+      [[ "$component" != . && "$component" != .. ]] || return 0
+    done
+    names+=("$line")
+  done < "$file" || return 0
+  for line in "${names[@]}"; do
+    path="${target_dir}/${line%/}"
+    if [[ "$line" == */ ]]; then
+      if [[ -L "$path" ]] || { [[ -e "$path" ]] && [[ ! -d "$path" ]]; }; then
+        return 0
+      fi
+    elif [[ -d "$path" && ! -L "$path" ]]; then
+      return 0
+    fi
+  done
+  rollback_engine_entries=("${names[@]}")
+  rollback_journal_present=1
+}
+
+rollback_moved_clause() {
+  [[ "$rollback_moved" != 1 ]] || printf ' apart from the files moved out and named above,'
+}
+
+# The same, inside a sentence that goes on after it.
+rollback_moved_phrase() {
+  [[ "$rollback_moved" != 1 ]] || printf ', apart from the files moved out and named above'
+}
+
+# The unit rule, in the closing line, which is the one a launcher showing the
+# last few lines still has.
+rollback_unit_clause() {
+  ((${#rollback_original_entries[@]} == 0)) ||
+    printf ' (.env-orbit and .orbit-secrets put back as a unit: anything changed in or added to them while the install ran was replaced)'
+}
+
+# rollback_obstacle <format> <path>
+#
+# One sentence naming what the rollback could not do, the path shell-quoted.
+rollback_obstacle() {
+  local sentence
+  # shellcheck disable=SC2059 # the formats are this script's own
+  printf -v sentence "$1" "$(printf '%q' "$2")"
+  rollback_obstacles+=("$sentence")
+  rollback_entry_failed=1
+  rollback_folder_failed=1
+}
+
+# rollback_move <relative-path> <moved|engine>
+#
+# Moves an entry into the dated folder's moved/ or engine/, its relative path
+# kept, parents made 0700. A destination that already exists is never
+# overwritten. In the planning walk it only notes that the dated folder is
+# needed. Returns 1 when the entry was not moved.
+rollback_move() {
+  local destination="${backup_dir}/$2/$1"
+  if [[ "$rollback_walk" == plan ]]; then
+    rollback_needs_backup=1
+    return 1
+  fi
+  [[ -n "$backup_dir" && ! -e "$destination" && ! -L "$destination" ]] || return 1
+  (umask 077 && mkdir -p -- "${destination%/*}") || return 1
+  mv -- "${target_dir}/$1" "$destination"
+}
+
+# rollback_claim_of <relative-path>
+#
+# Sets rollback_claim: `own` when the journal claims the path (a file, or a
+# directory whole), `parent` when it claims something inside it, else `none`.
+rollback_claim_of() {
+  local claim
+  rollback_claim=none
+  for claim in "${rollback_engine_entries[@]}"; do
+    if [[ "$claim" == "$1" || "$claim" == "$1/" ]]; then
+      rollback_claim=own
+      return 0
+    fi
+    [[ "$claim" != "$1/"?* ]] || rollback_claim=parent
+  done
+}
+
+# rollback_entry <relative-path>
+#
+# One entry of the walk (rollback_walk is `plan` or `apply`). A path the
+# journal claims is removed, or, when the containers could not be stopped,
+# moved into engine/; a real directory holding claimed paths is descended
+# into and then removed with rmdir, which cannot remove anything left in it;
+# anything else is moved into moved/ (or, with no journal and the containers
+# still up, into engine/ with everything else new).
+rollback_entry() {
+  local relative="$1" path="${target_dir}/$1" saved_options child
+  local -a children=()
+  if [[ "$rollback_journal_present" == 1 ]]; then
+    rollback_claim_of "$relative"
+    case "$rollback_claim" in
+      own)
+        if [[ "$rollback_down_failed" == 1 ]]; then
+          rollback_move "$relative" engine || [[ "$rollback_walk" == plan ]] ||
+            rollback_obstacle 'Could not move %s aside.' "$path"
+        elif [[ "$rollback_walk" == apply ]] && ! rm -rf -- "$path"; then
+          rollback_obstacle 'Could not remove %s.' "$path"
+        fi
+        return 0
+        ;;
+      parent)
+        if [[ -d "$path" && ! -L "$path" ]]; then
+          saved_options="$(shopt -p nullglob dotglob)" || true
+          shopt -s nullglob dotglob
+          children=("$path"/*)
+          eval "$saved_options"
+          for child in "${children[@]}"; do
+            rollback_entry "${relative}/${child##*/}"
+          done
+          if [[ "$rollback_walk" == apply ]] && ! rmdir -- "$path" 2>/dev/null; then
+            rollback_obstacle 'Could not remove %s.' "$path"
+          fi
+          return 0
+        fi
+        ;;
+    esac
+  fi
+  if [[ "$rollback_journal_present" != 1 && "$rollback_down_failed" == 1 ]]; then
+    if rollback_move "$relative" engine; then
+      rollback_kept_unrecorded=1
+      return 0
+    fi
+  elif rollback_move "$relative" moved; then
+    rollback_moved_aside=1
+    return 0
+  fi
+  [[ "$rollback_walk" == plan ]] || rollback_obstacle 'Could not move %s aside.' "$path"
+}
+
+# rollback_walk_folder <path>...
+#
+# The walk over the folder's top-level entries: the originals and
+# orbit-install-backups are skipped; the engine's fixed scratch names are
+# removed; everything else goes through rollback_entry.
+rollback_walk_folder() {
+  local path name original
+  for path in "$@"; do
+    name="${path##*/}"
+    [[ -e "$path" || -L "$path" ]] || continue
+    for original in "${rollback_original_entries[@]}"; do
+      [[ "$name" != "$original" ]] || continue 2
+    done
+    [[ "$name" != orbit-install-backups ]] || continue
+    # Fixed by contract: made before the engine's first staged write, or the
+    # engine's atomic-write and lock-reclaim scratch names.
+    case "$name" in
+      .orbit-install-staging.* | .orbit-engine.lock | \
+        .env-orbit.installing.* | .env-orbit.updating.* | .env-orbit.migrating.* | .orbit-engine.lock.stale-*)
+        if [[ "$rollback_walk" == apply ]] && ! rm -rf -- "$path"; then
+          rollback_obstacle 'Could not remove %s.' "$path"
+        fi
+        continue
+        ;;
+    esac
+    rollback_entry "$name"
+  done
+}
+
+# restore_originals
+#
+# Puts each original entry back from originals/ as a unit: the current entry
+# removed (or, when the containers could not be stopped, moved into engine/,
+# where the stop command needs it), then `cp -a` from the copy, then verified
+# with `diff -r`. A put-back that fails keeps the copy and names it.
+restore_originals() {
+  local name path copy="${backup_dir}/originals"
+  for name in "${rollback_original_entries[@]}"; do
+    path="${target_dir}/${name}"
+    if [[ -e "$path" || -L "$path" ]]; then
+      if [[ "$rollback_down_failed" == 1 ]]; then
+        rollback_move "$name" engine || {
+          rollback_restore_failed "$path"
+          continue
+        }
+      elif ! rm -rf -- "$path"; then
+        rollback_restore_failed "$path"
+        continue
+      fi
+    fi
+    if ! cp -a -- "${copy}/${name}" "$path" ||
+      ! diff -r --no-dereference -- "${copy}/${name}" "$path" >/dev/null 2>&1; then
+      rollback_restore_failed "$path"
+    fi
+  done
+}
+
+rollback_restore_failed() {
+  rollback_keep_originals=1
+  rollback_restore_named=1
+  rollback_restore_failed_paths+=("$1")
+  rollback_obstacles+=("Could not put back $(printf '%q' "$1"); a copy of the original is kept in $(printf '%q' "${backup_dir}/originals").")
+  rollback_folder_failed=1
+}
+
+# rollback_files
+#
+# Puts the folder back (section 2 of the design, redesign r5): a planning
+# walk first, so the dated folder is made only when something has to be moved
+# into it -- if it cannot be made, nothing is moved and the folder is left as
+# the rollback found it -- then the walk itself, then the originals.
+rollback_files() {
+  local saved_options
+  local -a present=()
+  # Read here, not after the engine: a signal's trap reaches the rollback
+  # before any line after run_engine.
+  read_engine_journal
+  [[ "$rollback_snapshot_taken" == 1 && -n "$target_dir" && "$target_dir" != / ]] || return 1
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob dotglob
+  present=("$target_dir"/*)
+  eval "$saved_options"
+  rollback_walk=plan
+  rollback_needs_backup=0
+  rollback_walk_folder "${present[@]}"
+  if [[ "$rollback_needs_backup" == 1 ]]; then
+    if [[ -n "$backup_dir" ]] && ! backup_root_is_sane; then
+      backup_dir=""
+    elif [[ -z "$backup_dir" ]]; then
+      prepare_backup_dir optional 2>/dev/null || true
+    fi
+    if [[ -z "$backup_dir" ]]; then
+      rollback_obstacles+=("Could not make $(printf '%q' "$backup_root") to keep files in; nothing was moved.")
+      rollback_nothing_moved=1
+      rollback_folder_failed=1
+      return 1
+    fi
+  fi
+  rollback_walk=apply
+  rollback_walk_folder "${present[@]}"
+  restore_originals
+  if [[ "$rollback_moved_aside" == 1 && "$rollback_journal_present" == 1 ]]; then
+    rollback_report+=("Files this install did not write were moved, not deleted: they are in $(printf '%q' "${backup_dir}/moved")")
+  elif [[ "$rollback_moved_aside" == 1 ]]; then
+    rollback_report+=("The engine did not record which files it wrote (an image older than this installer, or an engine that stopped before recording), so everything new was moved, not deleted: it is in $(printf '%q' "${backup_dir}/moved")")
+  elif [[ "$rollback_kept_unrecorded" == 1 ]]; then
+    rollback_report+=("The engine did not record which files it wrote (an image older than this installer, or an engine that stopped before recording), and the containers' stop command needs its files, so everything new was kept together, not deleted, in $(printf '%q' "${backup_dir}/engine")")
+  fi
+  [[ "$rollback_moved_aside" != 1 && "$rollback_kept_unrecorded" != 1 ]] || rollback_moved=1
+  [[ "$rollback_folder_failed" != 1 ]]
+}
+
+# rollback_fresh_install
+#
+# Docker first (Compose needs the files it is about to lose), then the
+# folder, which is put back even when the containers could not be stopped:
+# what the engine wrote is then kept whole in engine/, where the one stop
+# command runs. Returns 0 only when everything the attempt created is gone.
+# Sets rollback_action: `retry` when installing again can work (after the
+# one command, when there is one), `abort` when the folder could not be put
+# back. A second interrupt does not stop it half-way: INT, TERM and HUP are
+# caught (not ignored, which every child would inherit) until it ends; a
+# signal waits for the current Docker call. All its Docker calls share one
+# 8 s deadline: the launcher kills 15 s after its TERM, a TERM landing in a
+# bounded probe may already have cost 6 s, and the last kill-after adds 1 s.
+rollback_fresh_install() {
+  local status=0 stop_dir
+  rollback_obstacles=()
+  rollback_report=()
+  rollback_down_failed=0
+  rollback_down_volumes=()
+  rollback_failed_volumes=()
+  rollback_folder_failed=0
+  rollback_restore_failed_paths=()
+  rollback_entry_failed=0
+  rollback_nothing_moved=0
+  rollback_volumes_unlisted=0
+  rollback_recovery_command=""
+  rollback_stop_command=""
+  trap 'rollback_interrupted=130' INT; trap 'rollback_interrupted=143' TERM; trap 'rollback_interrupted=129' HUP
+  installer_ui_event rollback installer running rollback rollback 2>/dev/null || true
+  rollback_docker_timed_out=0
+  rollback_docker_deadline=$((SECONDS + 8))
+  rollback_docker || status=1
+  rollback_docker_deadline=""
+  # First in the report, so it precedes the obstacles it explains.
+  [[ "$rollback_docker_timed_out" != 1 ]] ||
+    rollback_report+=("Docker did not finish within 8 s, so the rollback stopped waiting for it; what it could not do is named below. Once Docker is answering again (check that it is running and its disk is not full), run the command below.")
+  rollback_files || status=1
+  if [[ "$rollback_down_failed" == 1 ]]; then
+    stop_dir="$target_dir"
+    if [[ -n "$backup_dir" ]] && is_regular_non_symlink_file "${backup_dir}/engine/docker-compose.yml"; then
+      stop_dir="${backup_dir}/engine"
+    fi
+    rollback_stop_command="cd $(printf '%q' "$stop_dir") && $(shell_words docker compose --project-name "$compose_project_name" --env-file "$environment_file" down --remove-orphans)"
+    ((${#rollback_down_volumes[@]} == 0)) ||
+      rollback_stop_command+=" && $(shell_words docker volume rm -- "${rollback_down_volumes[@]}")"
+  fi
+  if [[ "$status" == 0 ]]; then
+    rollback_outcome=complete
+    rollback_action=retry
+    installer_ui_event rollback installer completed rollback rollback 2>/dev/null || true
+  elif [[ "$rollback_folder_failed" == 1 ]]; then
+    # Installing again cannot work until the person acts: no command, and
+    # the copy of the originals is kept.
+    rollback_outcome=incomplete
+    rollback_action=abort
+    ((${#rollback_original_entries[@]} == 0)) || rollback_keep_originals=1
+  else
+    # The folder is fresh again; what is left is in Docker.
+    rollback_outcome=incomplete
+    rollback_action=retry
+    if [[ -n "$rollback_stop_command" ]]; then
+      rollback_recovery_command="$rollback_stop_command"
+    elif ((${#rollback_failed_volumes[@]} > 0)); then
+      rollback_recovery_command="$(shell_words docker volume rm -- "${rollback_failed_volumes[@]}")"
+    fi
+  fi
+  [[ "$rollback_keep_originals" == 1 ]] || release_rollback_copies || true
+  ((rollback_interrupted == 0)) ||
+    printf 'Orbit installer: An interrupt arrived during the rollback; the rollback was finished first.\n' >&2 || true
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+  return "$status"
+}
+
+# print_rollback_report
+#
+# What the rollback moved, and where it is kept, one line each.
+print_rollback_report() {
+  local line
+  for line in "${rollback_report[@]}"; do
+    printf 'Orbit installer: %s\n' "$line" >&2 || true
+  done
+}
+
+# print_rollback_obstacles
+#
+# The report of a rollback that could not finish: what is left, then the
+# next step. A command is alone on its own line so it can be copied whole.
+# Nothing here asks the person to delete anything, and the closing line
+# fits the obstacle: an original to copy back, files left in the folder, or
+# entries to clear (never the copy of the originals).
+print_rollback_obstacles() {
+  local obstacle name path copy_line
+  local no_volume_line='If the next install names a volume this install left, remove that volume by the name it prints.'
+  print_rollback_report
+  if [[ "$rollback_folder_failed" == 1 ]]; then
+    if [[ "$rollback_down_failed" == 1 ]]; then
+      printf 'Orbit installer: This install could not be fully rolled back: the containers could not be stopped.\n' >&2 || true
+    else
+      printf 'Orbit installer: This install could not be fully rolled back.\n' >&2 || true
+    fi
+    for obstacle in "${rollback_obstacles[@]}"; do
+      printf 'Orbit installer: %s\n' "$obstacle" >&2 || true
+    done
+    for name in "${rollback_failed_volumes[@]}"; do
+      printf 'Orbit installer: The volume %s could not be removed.\n' "$name" >&2 || true
+    done
+    [[ "$rollback_volumes_unlisted" != 1 ]] ||
+      printf 'Orbit installer: The volumes this install created could not be listed. %s\n' "$no_volume_line" >&2 || true
+    # copy_line: a line above named the originals copy, either this one or a
+    # "Could not put back" obstacle.
+    copy_line="$rollback_restore_named"
+    if [[ "$rollback_keep_originals" == 1 && "$rollback_restore_named" != 1 ]]; then
+      printf "Orbit installer: A copy of this folder's original files is kept in %s.\n" "$(printf '%q' "${backup_dir}/originals")" >&2 || true
+      copy_line=1
+    fi
+    [[ -z "$rollback_stop_command" ]] ||
+      printf 'Orbit installer: To stop the containers, run this in a terminal:\n%s\n' "$rollback_stop_command" >&2 || true
+    ((${#rollback_failed_volumes[@]} == 0)) ||
+      printf 'Orbit installer: To remove the volumes, run this in a terminal:\n%s\n' "$(shell_words docker volume rm -- "${rollback_failed_volumes[@]}")" >&2 || true
+    # The closing line depends on the obstacle: never a bare "clear what is
+    # named above" under a line naming the backups folder or the copy.
+    for path in "${rollback_restore_failed_paths[@]}"; do
+      printf 'Orbit installer: Replace %s with the copy in %s, then install again.\n' \
+        "$(printf '%q' "$path")" "$(printf '%q' "${backup_dir}/originals/$(basename -- "$path")")" >&2 || true
+    done
+    if [[ "$rollback_nothing_moved" == 1 ]]; then
+      if [[ "$rollback_down_failed" == 1 || "$rollback_volumes_unlisted" == 1 ]] || ((${#rollback_failed_volumes[@]} > 0)); then
+        printf 'Orbit installer: The files this install wrote are still in the folder. Fix the cause named above, then install again.\n' >&2 || true
+      else
+        printf 'Orbit installer: The containers and volumes were removed; the files this install wrote are still in the folder. Fix the cause named above, then install again.\n' >&2 || true
+      fi
+    fi
+    if [[ "$rollback_entry_failed" == 1 ]]; then
+      if [[ "$copy_line" == 1 ]]; then
+        printf 'Orbit installer: Clear the entries this install could not remove, named above, then install again. The copy of your original files can stay where it is.\n' >&2 || true
+      else
+        printf 'Orbit installer: Clear the entries this install could not remove, named above, then install again.\n' >&2 || true
+      fi
+    fi
+  elif [[ "$rollback_down_failed" == 1 ]]; then
+    printf 'Orbit installer: This install could not be fully rolled back: the containers could not be stopped. The folder is as it was before%s%s; what this install wrote is kept in %s so the containers can still be stopped.\n' \
+      "$(rollback_unit_clause)" "$(rollback_moved_phrase)" "$(printf '%q' "${backup_dir}/engine")" >&2 || true
+    printf 'Orbit installer: Run this in a terminal, then install again:\n%s\n' "$rollback_recovery_command" >&2 || true
+    if [[ "$rollback_volumes_unlisted" == 1 ]]; then
+      printf 'Orbit installer: The volumes this install created could not be listed. %s\n' "$no_volume_line" >&2 || true
+    elif ((${#rollback_down_volumes[@]} == 0)); then
+      printf 'Orbit installer: %s\n' "$no_volume_line" >&2 || true
+    fi
+  elif ((${#rollback_failed_volumes[@]} > 0)); then
+    for name in "${rollback_failed_volumes[@]}"; do
+      printf 'Orbit installer: This install could not be fully rolled back: the volume %s could not be removed.\n' "$name" >&2 || true
+    done
+    printf 'Orbit installer: Run this in a terminal, then install again:\n%s\n' "$rollback_recovery_command" >&2 || true
+  else
+    printf 'Orbit installer: This install could not be fully rolled back: the volumes it created could not be listed. The folder is as it was before%s%s.\n' \
+      "$(rollback_unit_clause)" "$(rollback_moved_phrase)" >&2 || true
+    printf 'Orbit installer: %s\n' "$no_volume_line" >&2 || true
+  fi
+}
+
+# release_rollback_copies
+#
+# Removes the copy of the original entries, then the emptied dated folder
+# and the root this run made, each with rmdir, which cannot remove a folder
+# that still holds moved/, engine/ or an earlier run's folder.
+release_rollback_copies() {
+  [[ -n "$backup_dir" ]] || return 0
+  if ! rm -rf -- "${backup_dir}/originals"; then
+    printf "Orbit installer: could not remove the copy of this folder's original files: %s.\n" "$(printf '%q' "${backup_dir}/originals")" >&2 || true
+    return 1
+  fi
+  if rmdir -- "$backup_dir" 2>/dev/null && [[ "$backup_root_created" == 1 ]]; then
+    rmdir -- "$backup_root" 2>/dev/null || true
+  fi
+  return 0
 }
 
 prepare_service_images() {
   installer_ui_phase=preparation
   installer_ui_component=database
   installer_ui_event preparation database starting service-preparation pull
-  compose pull orbit-db >/dev/null 2>&1 ||
+  docker_reporting compose pull orbit-db ||
     fail_with image-registry retry "Could not prepare the Orbit database image."
   installer_ui_event preparation database completed service-preparation pull
 
@@ -750,7 +1776,7 @@ prepare_service_images() {
 
   installer_ui_component=clamav
   installer_ui_event preparation clamav starting service-preparation pull
-  compose pull orbit-clamav >/dev/null 2>&1 ||
+  docker_reporting compose pull orbit-clamav ||
     fail_with image-registry retry "Could not prepare the private scanner image."
   installer_ui_event preparation clamav completed service-preparation pull
 
@@ -758,7 +1784,7 @@ prepare_service_images() {
     processing|full)
       installer_ui_component=tika
       installer_ui_event preparation tika starting service-preparation pull
-      compose pull orbit-tika >/dev/null 2>&1 ||
+      docker_reporting compose pull orbit-tika ||
         fail_with image-registry retry "Could not prepare the optional document-processing image."
       installer_ui_event preparation tika completed service-preparation pull
       ;;
@@ -768,7 +1794,7 @@ prepare_service_images() {
     ai|full)
       installer_ui_component=ollama
       installer_ui_event preparation ollama starting service-preparation pull
-      compose pull orbit-ollama >/dev/null 2>&1 ||
+      docker_reporting compose pull orbit-ollama ||
         fail_with image-registry retry "Could not prepare the optional local-model service image."
       installer_ui_event preparation ollama completed service-preparation pull
       ;;
@@ -776,64 +1802,256 @@ prepare_service_images() {
   esac
 }
 
+start_services() {
+  local output
+
+  # Starting the containers is the last step of preparing services, not the
+  # database wait (#1455): the database is waited on only once they exist.
+  installer_ui_phase=preparation
+  installer_ui_component=compose
+  # The start record for Docker (#1456): which of this project's volumes
+  # existed before `compose up`. The engine already refused a fresh install
+  # beside an existing database volume (#1151 O1-S3); the others may be
+  # left from an older attempt, and stay. If Docker cannot say, nothing is
+  # started, so nothing needs cleaning up.
+  if [[ "$target_was_empty" == 1 ]] && ! list_deployment_volumes rollback_preexisting_volumes; then
+    fail_with docker-host retry "Could not list Docker volumes before starting services, so a failed start could not be cleaned up; nothing was started."
+  fi
+  installer_ui_event preparation compose starting service-start start
+  compose_started=1
+  if ! docker_reporting compose up -d --no-build --remove-orphans; then
+    note_why_not_running orbit-db orbit-app
+    # A fresh install is rolled back by fail(), Docker included, and then
+    # says retry; an update keeps its deployment and points at Repair.
+    fail_with docker-host repair "Orbit services could not be created or started."
+  fi
+  installer_ui_event preparation compose completed service-start start
+}
+
+# --- why a service is not ready (#1456 decision, note 40388) ------------------
+#
+# A readiness wait that ends is classified the way Kubernetes classifies a
+# rollout: a container that is not running (exited, dead, restarting,
+# created, missing) has failed; one still running with its probe failing has
+# not yet progressed. The facts come from single `docker inspect --format`
+# fields of the service's container only -- never its logs (the
+# application's log carries the claim code; Postgres can log passwords) and
+# never the whole inspect document (it holds the environment).
+
+# inspect_field <container> <single-field template>
+inspect_field() {
+  local value
+  value="$(timeout --signal=TERM --kill-after=1s 5s docker inspect --format "$2" "$1" 2>/dev/null </dev/null)" || return 1
+  value="${value%%$'\n'*}"
+  [[ "$value" != *[[:cntrl:]]* && "$value" != "<no value>" ]] || return 1
+  printf '%s' "$value"
+}
+
+# container_facts <service>
+#
+# Sets container_state (running, stopped, missing or unknown),
+# container_exit_code, and container_summary: one line naming the service
+# and its facts.
+container_facts() {
+  local service="$1" id status exit_code oom restarts health error
+  container_state=unknown
+  container_exit_code=unknown
+  container_restarts=unknown
+  container_summary="${service}: its state could not be read"
+  if ! id="$(bounded_compose_probe ps --all -q "$service" 2>/dev/null)"; then
+    return 0
+  fi
+  id="${id%%$'\n'*}"
+  if [[ -z "$id" ]]; then
+    container_state=missing
+    container_summary="${service} is not running: its container is missing"
+    return 0
+  fi
+  [[ "$id" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] || return 0
+  status="$(inspect_field "$id" '{{.State.Status}}')" || return 0
+  exit_code="$(inspect_field "$id" '{{.State.ExitCode}}')" || exit_code=""
+  oom="$(inspect_field "$id" '{{.State.OOMKilled}}')" || oom=""
+  restarts="$(inspect_field "$id" '{{.RestartCount}}')" || restarts=""
+  health="$(inspect_field "$id" '{{.State.Health.Status}}')" || health=""
+  error="$(inspect_field "$id" '{{.State.Error}}' | docker_output_excerpt)" || error=""
+  [[ "$exit_code" =~ ^-?[0-9]{1,10}$ ]] || exit_code=unknown
+  [[ "$oom" =~ ^(true|false)$ ]] || oom=unknown
+  [[ "$restarts" =~ ^[0-9]{1,10}$ ]] || restarts=unknown
+  [[ "$health" =~ ^[a-z]{1,16}$ ]] || health=""
+  case "$status" in
+    running) container_state=running ;;
+    exited|dead|restarting|created|removing) container_state=stopped ;;
+    *) return 0 ;;
+  esac
+  container_exit_code="$exit_code"
+  container_restarts="$restarts"
+  if [[ "$container_state" == running ]]; then
+    container_summary="${service} is running:"
+  else
+    container_summary="${service} stopped:"
+  fi
+  container_summary+=" status=${status} exit-code=${exit_code} oom-killed=${oom} restarts=${restarts}"
+  [[ -z "$health" || "$health" == none ]] || container_summary+=" health=${health}"
+  [[ -z "$error" ]] || container_summary+=" error=${error:0:300}"
+}
+
+# free_space_summary
+#
+# One line: the space left (`df -Pk`) in this folder's file system and in
+# Docker's data directory, the two a start fills. Either is left out when it
+# cannot be read.
+free_space_summary() {
+  local root kb line=""
+  kb="$(df -Pk -- "$target_dir" 2>/dev/null | awk 'NR == 2 { print $4 }')" || kb=""
+  [[ ! "$kb" =~ ^[0-9]{1,15}$ ]] || line="$((kb / 1024)) MB available for this folder"
+  root="$(timeout --signal=TERM --kill-after=1s 5s docker info --format '{{.DockerRootDir}}' 2>/dev/null </dev/null)" || root=""
+  if [[ "$root" == /* && "$root" != *[[:cntrl:]]* && ${#root} -le 512 ]]; then
+    kb="$(df -Pk -- "$root" 2>/dev/null | awk 'NR == 2 { print $4 }')" || kb=""
+    [[ ! "$kb" =~ ^[0-9]{1,15}$ ]] || line+="${line:+; }$((kb / 1024)) MB available for Docker's data (${root})"
+  fi
+  [[ -z "$line" ]] || printf 'Free space: %s' "$line"
+}
+
+# note_why_not_running <service>...
+#
+# After a failed start: a facts line for each of these services whose
+# container exists and is not running, then the free-space line.
+note_why_not_running() {
+  local service line
+  for service in "$@"; do
+    container_facts "$service"
+    [[ "$container_state" != stopped ]] || installer_failure_notes+=("$container_summary")
+  done
+  line="$(free_space_summary)"
+  [[ -z "$line" ]] || installer_failure_notes+=("$line")
+}
+
+# sample_restart_count <service>
+#
+# The service's restart count before its wait, for the crash-loop check.
+sample_restart_count() {
+  local id count
+  id="$(bounded_compose_probe ps --all -q "$1" 2>/dev/null)" || return 0
+  id="${id%%$'\n'*}"
+  [[ "$id" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] || return 0
+  count="$(inspect_field "$id" '{{.RestartCount}}')" || return 0
+  [[ ! "$count" =~ ^[0-9]{1,10}$ ]] || restarts_before["$1"]="$count"
+}
+
+# required_service_not_ready <service> <label> <stopped-reason> <running-reason>
+#
+# A required service's wait ended on a fresh install. A container that is not
+# running has failed: its facts and the free space are shown and fail() rolls
+# back, so the next step is a retry. One still running, or whose state
+# cannot be read, has not failed: nothing is removed -- a rollback would
+# delete the progress a retry needs -- and the deployment is left to finish
+# starting, with Repair the next step.
+required_service_not_ready() {
+  local service="$1" label="$2" stopped_reason="$3" running_reason="$4" line check before
+  container_facts "$service"
+  # A crash loop (Kubernetes' CrashLoopBackOff) can read `running` at the
+  # deadline: three or more restarts since before the wait is a failure. One
+  # or two may be a slow start, and take the left-running path below.
+  before="${restarts_before[$service]:-}"
+  if [[ "$container_state" == running && "$before" =~ ^[0-9]+$ && "$container_restarts" =~ ^[0-9]+$ ]] &&
+    ((10#$container_restarts - 10#$before >= 3)); then
+    container_state=stopped
+    container_summary="${container_summary/ is running:/ keeps restarting:} (restarts before the wait: ${before})"
+  fi
+  installer_failure_notes+=("$container_summary")
+  if [[ "$container_state" == stopped || "$container_state" == missing ]]; then
+    line="$(free_space_summary)"
+    [[ -z "$line" ]] || installer_failure_notes+=("$line")
+    fail_with "$stopped_reason" repair "${label} stopped before it was ready."
+  fi
+  rollback_armed=0
+  check="cd $(printf '%q' "$target_dir") && $(shell_words docker compose --project-name "$compose_project_name" --env-file "$environment_file" ps)"
+  if [[ "$container_state" == running ]]; then
+    fail_with "$running_reason" repair "${label} did not report ready within ${readiness_timeout_seconds} s; it is left running and may still finish starting. Check: ${check}. If it is not ready in a few minutes, run Repair."
+  fi
+  fail_with "$running_reason" repair "${label} did not report ready within ${readiness_timeout_seconds} s, and its state could not be read, so nothing was removed; the deployment is left in place. Check: ${check}. Then run Repair."
+}
+
+# optional_service_not_ready <component> <service> <label> <starting-note> <update-message>
+#
+# An optional service never fails a fresh install (#1456 decision): its last
+# event is `waiting ... continue`, and the completion screen says why it is
+# not ready. An update keeps failing on it, as before.
+optional_service_not_ready() {
+  local component="$1" service="$2" label="$3" starting="$4" message="$5"
+  if [[ "$optional_interrupted" == 1 ]]; then
+    optional_notes+=("${label}: ${starting}")
+    installer_ui_event optional "$component" waiting optional-status continue
+    return 0
+  fi
+  # An update keeps failing on an optional service -- except the local model
+  # service on a run with a confirmed download: the download is its own step,
+  # which never fails an install (#1474), and is not skipped for it.
+  if [[ "$target_was_empty" != 1 ]] && ! [[ "$component" == ollama && "$model_pull_requested" == 1 ]]; then
+    fail_with optional-unavailable repair "$message"
+  fi
+  container_facts "$service"
+  case "$container_state" in
+    stopped) optional_notes+=("${label}: stopped (exit ${container_exit_code}); run Repair.") ;;
+    missing) optional_notes+=("${label}: not running (its container is missing); run Repair.") ;;
+    *) optional_notes+=("${label}: ${starting}") ;;
+  esac
+  installer_ui_event optional "$component" waiting optional-status continue
+}
+
 wait_for_deployment_readiness() {
   installer_ui_phase=database
   installer_ui_component=database
   installer_ui_event database database starting database-health start
-  if ! compose up -d --no-build --remove-orphans >/dev/null 2>&1; then
-    if [[ "$target_was_empty" == 1 ]]; then
-      compose down --remove-orphans >/dev/null 2>&1 || true
-      # #1151 O1-S3: `compose up` creates the named database volume on first
-      # run, and verify_database_volume_safety already refused earlier (see
-      # its own "An existing Orbit database volume requires a recognized
-      # deployment" check) if one existed before this attempt started -- so
-      # on a fresh install (target_was_empty), any matching volume here was
-      # created by the attempt that just failed, never a deployment worth
-      # protecting. Leaving it behind (compose down has no --volumes) meant
-      # every retry failed that exact same check again, forever, with no
-      # way out it ever named.
-      #
-      # #1207: remove only this project's own volume, by its exact name. The
-      # first volume that merely ended in orbit-db-data could belong to another
-      # Orbit deployment on the same host, whose live database was then
-      # removed. No project name means no exact name, so nothing is removed.
-      # Twin: removeLeftoverDatabaseVolume in src/lib/install-docker-adapter.ts.
-      if [[ -n "$compose_project_name" ]]; then
-        local own_volume="${compose_project_name}_${database_volume_key}"
-        if docker volume ls --filter "name=$own_volume" --format '{{.Name}}' 2>/dev/null | grep -Fxq -- "$own_volume"; then
-          docker volume rm -- "$own_volume" >/dev/null 2>&1 || true
-        fi
-      else
-        printf 'The leftover database volume was not removed because the Compose project name is unknown.\n' >&2
-      fi
-    fi
-    fail_with docker-host repair "Orbit services could not be created or started."
+  [[ "$target_was_empty" != 1 ]] || sample_restart_count orbit-db
+  if ! wait_for_component_health database database database-health probe_database_health; then
+    [[ "$target_was_empty" == 1 ]] ||
+      fail_with database-auth-migration repair "The database did not become healthy within the bounded startup window."
+    required_service_not_ready orbit-db "The database" database-auth-migration database-auth-migration
   fi
-  wait_for_component_health database database database-health probe_database_health ||
-    fail_with database-auth-migration repair "The database did not become healthy within the bounded startup window."
 
   installer_ui_phase=application
   installer_ui_component=application
   installer_ui_event application application starting application-health start
+  [[ "$target_was_empty" != 1 ]] || sample_restart_count orbit-app
   if ! wait_for_component_health application application application-health probe_application_health; then
-    if bounded_compose_probe exec -T orbit-app true >/dev/null 2>&1; then
-      fail_with health-timeout repair "Orbit did not report ready within the bounded startup window."
+    if [[ "$target_was_empty" != 1 ]]; then
+      container_facts orbit-app
+      [[ "$container_state" != running ]] ||
+        fail_with health-timeout repair "Orbit did not report ready within the bounded startup window."
+      fail_with application-startup repair "Orbit stopped before it could report ready; the bounded status does not claim an unproven cause."
     fi
-    fail_with application-startup repair "Orbit stopped before it could report ready; the bounded status does not claim an unproven cause."
+    required_service_not_ready orbit-app "Orbit" application-startup health-timeout
   fi
+
+  # The database and the application are ready: the deployment is real and
+  # usable, and the optional phase only reports how the rest converges
+  # (#1456 ruling, note 40394). The rollback is disarmed, and an interrupt
+  # from here kills the waiting child and ends the optional waits.
+  trap 'optional_interrupted=1' INT TERM HUP
+  rollback_armed=0
+  # Nothing is rolled back from here, so the copy of the originals goes.
+  release_rollback_copies || true
+  optional_window=1
 
   installer_ui_phase=optional
   installer_ui_component=clamav
-  installer_ui_event optional clamav starting optional-status health
-  wait_for_component_health optional clamav optional-status probe_clamav_health ||
-    fail_with optional-unavailable repair "The private scanner did not become healthy within the bounded startup window."
+  [[ "$optional_interrupted" == 1 ]] || installer_ui_event optional clamav starting optional-status health
+  if [[ "$optional_interrupted" == 1 ]] || ! wait_for_component_health optional clamav optional-status probe_clamav_health; then
+    optional_service_not_ready clamav orbit-clamav "Scanner" \
+      "still starting (first signature download); uploads are refused until it is ready." \
+      "The private scanner did not become healthy within the bounded startup window."
+  fi
 
   case "$selected_profile" in
     processing|full)
       installer_ui_component=tika
-      installer_ui_event optional tika starting optional-status health
-      wait_for_component_health optional tika optional-status probe_tika_health ||
-        fail_with optional-unavailable repair "The selected document-processing service did not become healthy within the bounded startup window."
+      [[ "$optional_interrupted" == 1 ]] || installer_ui_event optional tika starting optional-status health
+      if [[ "$optional_interrupted" == 1 ]] || ! wait_for_component_health optional tika optional-status probe_tika_health; then
+        optional_service_not_ready tika orbit-tika "Document processing" \
+          "still starting; documents are processed once it is ready." \
+          "The selected document-processing service did not become healthy within the bounded startup window."
+      fi
       ;;
     *) installer_ui_event optional tika skipped optional-status skip ;;
   esac
@@ -841,19 +2059,64 @@ wait_for_deployment_readiness() {
   case "$selected_profile" in
     ai|full)
       installer_ui_component=ollama
-      installer_ui_event optional ollama starting optional-status health
-      wait_for_component_health optional ollama optional-status probe_ollama_health ||
-        fail_with optional-unavailable repair "The selected local-model service did not become healthy within the bounded startup window."
-      if [[ "$model_pull_requested" == 1 ]]; then
-        installer_ui_event optional ollama running service-preparation pull
-        compose exec -T orbit-ollama ollama pull "$model_pull_value" >/dev/null 2>&1 ||
-          fail_with optional-unavailable repair "The confirmed local model download did not complete."
-        installer_ui_event optional ollama completed service-preparation pull
+      local ollama_ready=1
+      [[ "$optional_interrupted" == 1 ]] || installer_ui_event optional ollama starting optional-status health
+      if [[ "$optional_interrupted" == 1 ]] || ! wait_for_component_health optional ollama optional-status probe_ollama_health; then
+        ollama_ready=0
+        optional_service_not_ready ollama orbit-ollama "Local model service" \
+          "still starting; it is used once it is ready." \
+          "The selected local-model service did not become healthy within the bounded startup window."
       fi
+      [[ "$model_pull_requested" != 1 ]] || pull_confirmed_model
+      # The service's last event matches its completion line.
+      [[ "$ollama_ready" == 1 ]] || installer_ui_event optional ollama waiting optional-status continue
       ;;
     *) installer_ui_event optional ollama skipped optional-status skip ;;
   esac
-  unset model_pull_value
+}
+
+# pull_confirmed_model
+#
+# The confirmed model is downloaded by the one-off orbit-ollama-model-pull
+# service, the documented command (#1474): orbit-ollama itself sits only on
+# the internal processing network and has no route out. A failed download
+# never fails the install: Orbit runs without it, and the pull's own words
+# and the command to run it again are shown.
+pull_confirmed_model() {
+  local output="${engine_work_dir}/model-pull.out" again
+  # A known, project-scoped name: the container outlives a killed client
+  # (its first process is a shell with no TERM handler), so an interrupt
+  # removes it by this name -- that container only, never `compose down`.
+  local container="${compose_project_name}-orbit-ollama-model-pull-install"
+  again="$(shell_words docker compose --env-file "$environment_file" --profile ai-model-pull run --rm orbit-ollama-model-pull)"
+  if [[ "$optional_interrupted" != 1 ]]; then
+    installer_ui_event optional ollama running service-preparation pull
+    # A killed earlier run can leave this container behind; Docker refuses
+    # a second one under the same name, so every retry would fail.
+    timeout --signal=TERM --kill-after=1s 15s docker rm -f -- "$container" </dev/null >/dev/null 2>&1 || true
+    # A background child, so an interrupt can stop the download (#1456
+    # ruling); its words go to a private file, as a pipe would need a
+    # foreground command substitution.
+    if run_interruptibly docker compose --project-name "$compose_project_name" --env-file "$environment_file" \
+      --profile ai-model-pull run --rm -T --name "$container" orbit-ollama-model-pull </dev/null >"$output" 2>&1; then
+      installer_ui_event optional ollama completed service-preparation pull
+      return 0
+    fi
+    if [[ "$optional_interrupted" == 1 ]]; then
+      timeout --signal=TERM --kill-after=1s 15s docker rm -f -- "$container" </dev/null >/dev/null 2>&1 || true
+    fi
+  fi
+  installer_ui_event optional ollama waiting optional-status continue
+  if [[ "$optional_interrupted" == 1 ]]; then
+    optional_notes+=("Local model: not downloaded (the install was interrupted); Orbit runs without it. To download it: ${again}")
+    return 0
+  fi
+  installer_failure_detail="$(tail -c 16384 -- "$output" 2>/dev/null | docker_output_excerpt)" || installer_failure_detail=""
+  if [[ -n "$installer_failure_detail" ]]; then
+    printf 'Orbit installer: Docker said: %s\n' "$installer_failure_detail" >&2 || true
+  fi
+  installer_failure_detail=""
+  optional_notes+=("Local model: the confirmed download did not complete; Orbit runs without it. To try again: ${again}")
 }
 
 print_completion_screen() {
@@ -871,13 +2134,17 @@ print_completion_screen() {
   printf 'Revision: %s\n' "${revision:0:12}"
   printf 'Image digest: %s\n' "$applied_digest"
   printf 'Optional profiles: %s\n' "$selected_profile"
+  local note
+  for note in "${optional_notes[@]}"; do
+    printf '%s\n' "$note"
+  done
   printf 'Status: docker compose --env-file %s ps\n' "$environment_file"
   printf 'Logs: docker compose --env-file %s logs --tail 200\n' "$environment_file"
   # ADR-0022 section 1: the claim is generated in the running process's
-  # memory only and printed once, as the last line of the container's own
-  # start-up log -- it has no file, no Compose secret and no installer-visible
+  # memory only and printed once, by the application after its start-up
+  # reports, in the container's own log -- it has no file, no Compose secret and no installer-visible
   # form, so this is a pointer to where to read it, never the code itself.
-  printf 'Claim this instance: run "docker compose --env-file %s logs orbit-app" and open the link on its last line to create the first administrator.\n' "$environment_file"
+  printf 'Claim this instance: run "docker compose --env-file %s logs orbit-app" and open the claim link it prints to create the first administrator.\n' "$environment_file"
   # #968 (slice 1 of #966): a hard block here was considered and rejected --
   # it would fail an offline install -- so this is an instruction, not a
   # gate. The administration screen carries its own persistent reminder
@@ -938,7 +2205,7 @@ manifest_digest="$(manifest_field "$release_manifest_path" digest)"
 resolved_reference="${image_repository}@${manifest_digest}"
 [[ "$resolved_reference" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] ||
   fail "The release manifest's image reference is not an immutable digest reference."
-docker pull --quiet "$resolved_reference" >/dev/null 2>&1 ||
+docker_reporting docker pull --quiet "$resolved_reference" ||
   fail "Could not pull ${resolved_reference} named by the release manifest. If the image is private, authenticate with ${registry} first."
 
 if ! inspect_output="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$resolved_reference" 2>/dev/null)"; then
@@ -1020,14 +2287,18 @@ fi
 readonly bundled_assets_root
 
 installer_ui_event identity image running image-identity inspect
-if ! docker run --rm --entrypoint /opt/orbit/scripts/container-entrypoint.sh \
-  "$resolved_reference" --banner; then
+# Captured, then shown: a launcher that went away (a closed stdout) must not
+# turn into a banner the image "could not render".
+if ! banner="$(docker run --rm --entrypoint /opt/orbit/scripts/container-entrypoint.sh \
+  "$resolved_reference" --banner)"; then
   fail "The resolved Orbit image could not render its canonical banner."
 fi
+printf '%s\n' "$banner" || true
 installer_ui_event identity image completed image-identity verify
 
 gather_host_facts
 engine_host_identity
+snapshot_fresh_target
 
 # The engine: everything that reads or writes the deployment (F1). It prints
 # its own events and questions; what happened comes back in its outcome.
@@ -1035,10 +2306,22 @@ run_engine
 if ! read_engine_outcome; then
   installer_ui_phase=configuration
   installer_ui_component=configuration
-  fail_with failure retry "The install engine stopped without reporting a result (docker run exit status ${engine_status}); see the lines above. A hard interruption leaves its staging directory for review: remove it, then rerun."
+  # A fresh folder is rolled back like any other failure, staging directory
+  # included, and the rollback's own report says whether the copy is kept.
+  staging_note=""
+  [[ "$rollback_armed" == 1 ]] ||
+    staging_note=" A hard interruption leaves its staging directory for review: remove it, then rerun."
+  fail_with failure retry "The install engine stopped without reporting a result (docker run exit status ${engine_status}); see the lines above.${staging_note}"
 fi
+# Without an outcome the engine may have committed, so the rollback stayed
+# armed above. An outcome says: one that failed has rolled itself back, one
+# that stopped changed nothing, and only a committed fresh install stays armed.
+[[ "${engine_outcome[status]}" == ok && "${engine_outcome[fresh]:-}" == 1 ]] || rollback_armed=0
 case "${engine_outcome[status]}" in
   ok)
+    # The engine committed: from here a fresh install is rolled back on any
+    # failure, this one included (#1456).
+    [[ "${engine_outcome[fresh]:-}" != 1 ]] || rollback_armed=1
     [[ "$engine_status" == 0 ]] ||
       fail_with failure retry "The install engine reported success but exited with status ${engine_status}."
     ;;
@@ -1065,9 +2348,10 @@ esac
 
 # --- after the commit: Compose (F1's third phase) ---------------------------
 
-# The files are committed by now: a failure from here on never restores
-# files, and is never configuration-failure, which tells the launcher to
-# reconfigure (#1227).
+# The files are committed by now. A failure from here on is never
+# configuration-failure, which tells the launcher to reconfigure (#1227). On
+# a fresh install it rolls the folder and Docker back (#1456); an update's
+# committed files stay.
 target_was_empty="${engine_outcome[fresh]}"
 selected_profile="${engine_outcome[profile]}"
 load_installer_ui || fail_with failure retry "The deployment's installer UI helper is unavailable."
@@ -1089,7 +2373,8 @@ fi
 
 if [[ "${engine_outcome[model-pull]}" == 1 ]]; then
   model_pull_requested=1
-  model_pull_value="$(read_environment_value OLLAMA_MODEL 2>/dev/null)" ||
+  # The pull service reads OLLAMA_MODEL from .env-orbit itself (#1474).
+  read_environment_value OLLAMA_MODEL >/dev/null 2>&1 ||
     fail_with failure retry "The confirmed local model could not be read from the configuration."
 fi
 
@@ -1100,12 +2385,16 @@ if ! compose config --quiet >/dev/null 2>&1; then
   fail_with failure retry "Docker Compose configuration is invalid; review the named configuration fields and rerun."
 fi
 installer_ui_event compose compose completed compose-validation check
-printf 'Orbit installer: configuration, OIDC discovery, and Docker Compose preflight passed; starting services.\n'
+printf 'Orbit installer: configuration, OIDC discovery, and Docker Compose preflight passed; starting services.\n' || true
 
 prepare_service_images
+start_services
 wait_for_deployment_readiness
 
 installer_ui_phase=complete
 installer_ui_component=installer
 installer_ui_event complete installer completed deployment-ready complete
-print_completion_screen
+# Installed and ready: nothing after this is a reason to undo it.
+rollback_armed=0
+# Installed: a closed stdout only loses the screen, not the result.
+print_completion_screen || true

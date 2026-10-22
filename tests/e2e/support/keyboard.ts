@@ -324,6 +324,91 @@ export async function auditTabOrder(p: Page, screen: string, { root = null, excl
   return visited;
 }
 
+/**
+ * The ARIA exclude for one radio group's unchecked radios. A radio group is
+ * ONE Tab stop (WAI-ARIA Authoring Practices, Radio Group pattern): Tab lands
+ * on the checked radio and the rest are reached by arrow keys, so a Tab audit
+ * must leave the unchecked ones out, and `proveRadioGroupByArrows` proves them
+ * instead. Scoped to the one named group so no other control is excused.
+ */
+export function uncheckedRadiosOf(group: string): string {
+  return `[role="radiogroup"][aria-label="${group}"] [role="radio"][aria-checked="false"]`;
+}
+
+/**
+ * Proves a radio group by keyboard alone, against the Text size control's
+ * documented contract (Tiles.svelte): one Tab stop on the checked radio;
+ * Left/Right walk the radios in order and wrap at both ends; Home/End jump to
+ * the ends; arrows move focus ONLY -- a pick waits for Space (or Enter). This
+ * is deliberately not the WAI-ARIA Authoring Practices pattern's
+ * selection-follows-focus. Up/Down move a row, so where they land depends on
+ * the layout's column count (phone and desk differ) and they are not asserted.
+ * Ends by choosing the originally checked radio again, so a choice that is
+ * saved to the account is left as it was found.
+ */
+export async function proveRadioGroupByArrows(p: Page, group: string, screen: string) {
+  const radios = p.getByRole("radiogroup", { name: group }).getByRole("radio");
+  const count = await radios.count();
+  expect(count, `${screen}: the "${group}" group should offer at least three radios`).toBeGreaterThan(2);
+  const checkedIndex = async () =>
+    radios.evaluateAll((els) => els.map((e) => e.getAttribute("aria-checked")).indexOf("true"));
+  const start = await checkedIndex();
+  expect(start, `${screen}: exactly one "${group}" radio should start checked`).toBeGreaterThanOrEqual(0);
+  const names = await radios.evaluateAll((els) => els.map((e) => (e.textContent || "").trim()));
+  /* Focus is on radio `focused`; exactly radio `checked` is checked. */
+  const expectState = async (focused: number, checked: number, why: string) => {
+    await expect(radios.nth(focused), `${screen}: ${why}: focus should be on "${names[focused]}"`).toBeFocused();
+    for (let j = 0; j < count; j += 1) {
+      await expect(radios.nth(j), `${screen}: ${why}: "${names[j]}" aria-checked`)
+        .toHaveAttribute("aria-checked", j === checked ? "true" : "false");
+    }
+  };
+  try {
+    /* One Tab stop: Tab lands on the checked radio, the next Tab leaves the
+       group, and Shift+Tab comes back to the same checked radio. */
+    await tabTo(p, { selector: `[role="radiogroup"][aria-label="${group}"] [role="radio"][aria-checked="true"]` }, { screen });
+    await expectState(start, start, "Tab onto the group");
+    await p.keyboard.press("Tab");
+    const stillInGroup = await p.evaluate(
+      (g) => !!document.activeElement?.closest(`[role="radiogroup"][aria-label="${g}"]`), group);
+    expect(stillInGroup, `${screen}: Tab should leave the "${group}" group, which is a single Tab stop`).toBe(false);
+    await p.keyboard.press("Shift+Tab");
+    await expectState(start, start, "Shift+Tab back onto the group");
+
+    /* A full lap each way crosses last -> first (Right) and first -> last
+       (Left) once, and ends where it began. Focus moves; the choice does not. */
+    for (const [key, step] of [["ArrowRight", 1], ["ArrowLeft", -1]] as const) {
+      let at = start;
+      for (let n = 0; n < count; n += 1) {
+        await p.keyboard.press(key);
+        at = (at + step + count) % count;
+        await expectState(at, start, `${key} press ${n + 1} of ${count}`);
+      }
+      expect(at, `${screen}: a full lap of ${key} should return to the start`).toBe(start);
+    }
+    /* Space picks the focused radio; then walk back to the original and pick
+       it again, which leaves the saved choice as it was found. */
+    const other = (start + 1) % count;
+    await p.keyboard.press("ArrowRight");
+    await expectState(other, start, "walking to a different radio");
+    await p.keyboard.press("Space");
+    await expect(radios.nth(other), `${screen}: Space should check "${names[other]}"`).toHaveAttribute("aria-checked", "true");
+    await expectState(other, other, "after Space");
+    await p.keyboard.press("ArrowLeft");
+    await expectState(start, other, "walking back to the original");
+    await p.keyboard.press("Space");
+    await expectState(start, start, "Space on the original choice");
+
+    await p.keyboard.press("End");
+    await expectState(count - 1, start, "End");
+    await p.keyboard.press("Home");
+    await expectState(0, start, "Home");
+  } finally {
+    /* Whatever happened above, leave the saved choice as it was found. */
+    if ((await checkedIndex()) !== start) await radios.nth(start).click();
+  }
+}
+
 /** Dismisses the first-run tour if it turns up — see the desktop file's
  *  header note on why it is skipped rather than proven here. */
 /* This host runs other agents' work concurrently (builds, other browser

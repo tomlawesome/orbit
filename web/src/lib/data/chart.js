@@ -11,6 +11,12 @@
  * which was hand-placed where 177 days would sit — the #414 defect, corrected
  * here and in the mockup together.
  *
+ * Size is the other law (#1460, proportional-symbol scaling with power
+ * compensation): yearly £ = (costMinor/100) × (recurrenceMonths > 0 ?
+ * 12/recurrenceMonths : 1); radius = clamp(rMin·(yearly/50)^k, rMin, rMax),
+ * k = ln(rMax/rMin)/ln(1000), rounded to 0.1 -- £50/yr is the smallest body,
+ * £50,000/yr the largest. Desk range DESK_SIZE, pocket range POCKET_SIZE.
+ *
  * The sky is fixed (CON-13, #428): a household's absolute map position is a
  * pure function of its identity, so its bearing can never move between
  * sessions, days, or devices. Product cap is five households.
@@ -69,6 +75,7 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
  * @property {?string} [dueDate]
  * @property {{ angle: number, radius: number, x: number, y: number }} placement
  * @property {number} size
+ * @property {number} pocketSize  the same law on the pocket's own range (#1460)
  * @property {string} paint
  * @property {string} kind
  * @property {boolean} suggestion
@@ -126,14 +133,27 @@ export function dialPlacement(days) {
   };
 }
 
+/** Radius range in dial units, [rMin, rMax]: the desk's legibility at 640px. */
+export const DESK_SIZE = [3.5, 13];
+/** The pocket's range: its floor is set by the 44px tap rule. */
+export const POCKET_SIZE = [5, 12];
+
 /**
- * Bigger = costlier (chart key). Radius in dial units from minor units.
+ * Bigger = costlier per year (chart key, #1460). Radius in dial units from
+ * minor units and how often the cost recurs, on a power curve from £50/yr
+ * (rMin) to £50,000/yr (rMax), capped at both ends. A one-off, or a
+ * suggestion (no recurrence), counts its cost once; no cost is rMin.
  * @param {?number} [costMinor]
+ * @param {?number} [recurrenceMonths]
+ * @param {readonly number[]} [range]  [rMin, rMax]
  */
-export function bodySize(costMinor) {
-  if (!costMinor) return 4;
-  const pounds = Math.max(costMinor / 100, 1);
-  return Math.min(8.5, Math.max(3.5, Math.round((0.8 + 1.09 * Math.log(pounds)) * 10) / 10));
+export function bodySize(costMinor, recurrenceMonths, range = DESK_SIZE) {
+  const [rMin, rMax] = range;
+  if (!costMinor || costMinor < 0) return rMin;
+  const yearly = (costMinor / 100) * (recurrenceMonths && recurrenceMonths > 0 ? 12 / recurrenceMonths : 1);
+  const k = Math.log(rMax / rMin) / Math.log(1000);
+  const radius = Math.min(rMax, Math.max(rMin, rMin * Math.pow(yearly / 50, k)));
+  return Math.round(radius * 10) / 10;
 }
 
 /**
@@ -253,7 +273,8 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
       /* The dial law holds for an expiry too: it sits where its date falls,
          which after the date is inward, for as long as it lingers (#1005). */
       placement: dialPlacement(days),
-      size: bodySize(item.costMinor),
+      size: bodySize(item.costMinor, item.recurrenceMonths),
+      pocketSize: bodySize(item.costMinor, item.recurrenceMonths, POCKET_SIZE),
       paint: PAINTS[bandOfKind(kind, days)],
       kind,
       suggestion: false,
@@ -275,7 +296,8 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
       title: suggestion.title,
       days,
       placement: dialPlacement(days),
-      size: bodySize(suggestion.costMinor),
+      size: bodySize(suggestion.costMinor, null),
+      pocketSize: bodySize(suggestion.costMinor, null, POCKET_SIZE),
       paint: "accent",
       kind: "suggestion",
       suggestion: true,

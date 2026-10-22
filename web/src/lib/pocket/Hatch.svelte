@@ -3,7 +3,8 @@
   import { resolve } from "$app/paths";
   import { signOut, wordsOf } from "$lib/data/workspace.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
-  import { SWATCHES, applyTheme } from "$lib/theme-swatches.js";
+  import { SWATCHES } from "$lib/theme-swatches.js";
+  import { chooseTheme } from "$lib/pick.js";
   import { watchTour } from "$lib/tour/watch.js";
   import Row from "./Row.svelte";
   import Sheet from "./Sheet.svelte";
@@ -141,7 +142,7 @@
       {#each SWATCHES as swatch (swatch.id)}
         <button class="swatch" title={swatch.title} aria-label="{swatch.title} theme"
                 aria-pressed={active === swatch.id}
-                onclick={() => { active = swatch.id; applyTheme(swatch.id); }}>
+                onclick={() => { active = swatch.id; chooseTheme(swatch.id); }}>
           <span style:background={swatch.colour} style:box-shadow={swatch.shadow || undefined}></span>
         </button>
       {/each}

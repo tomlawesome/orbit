@@ -47,16 +47,19 @@ const MESSAGES = {
 /*
  * A refusal with a reason the person can act on keeps its face but says why
  * (#1242). `link_required` (ADR-0023 §3): a provider identity whose email
- * already belongs to an Orbit account is refused, and the ADR fixes the words
- * — the same `refusals.link_required` message `src/lib/auth/provision.ts`
- * throws. Its face stays INCOMPLETE because the way back to the door IS the
- * remedy: sign in there with the existing account. Before this the screen
- * said only "Nothing was changed.", which read as a broken sign-in.
+ * already belongs to an Orbit account is refused. The page says this in its
+ * own words (below), not `src/lib/auth/provision.ts`'s `refusals.link_required`
+ * message, which is the server-side text that refusal throws and logs, so
+ * the two differ; the code is what ties them together. Its face stays INCOMPLETE because the way back to the door IS the
+ * remedy: sign in there with the existing account. The sub line says that
+ * remedy in the Settings entry's own words ("link your identity provider"),
+ * so the person can find it (#1457). Before #1242 the screen said only
+ * "Nothing was changed.", which read as a broken sign-in.
  */
 const MESSAGES_BY_CODE = {
   link_required: {
     primary: "Sign-in didn’t complete.",
-    sub: "Address already in use.",
+    sub: "Sign in to your existing Orbit account, then link your identity provider in Settings.",
   },
 };
 

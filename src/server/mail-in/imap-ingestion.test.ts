@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const draftMocks = vi.hoisted(() => ({
   extract: vi.fn(),
+  readingEnabled: vi.fn(() => true),
   encryptJson: vi.fn((_column: string, _rowId: string, value: unknown) => JSON.stringify(value)),
   requireReceiptMetadataWriter: vi.fn(),
 }));
@@ -13,7 +14,7 @@ const draftMocks = vi.hoisted(() => ({
 // same PostgreSQL-free contract seam `imap-receipt-worker.ts` already uses
 // for its own tests). Adjudication and the heuristics stay real, so a
 // no-model run below exercises the genuine wiring, not a stand-in for it.
-vi.mock("@/server/documents/tika", () => ({ extractTextWithTika: draftMocks.extract }));
+vi.mock("@/server/documents/tika", () => ({ extractTextWithTika: draftMocks.extract, documentReadingEnabled: draftMocks.readingEnabled }));
 vi.mock("@/server/metadata/fields", () => ({ requireReceiptMetadataWriter: draftMocks.requireReceiptMetadataWriter }));
 
 import { IMAP_HEADER_FETCH_PART, draftProposalColumnsForTests, draftProposalTextForTests, imapAttachmentRetryDelayMs, imapProviderConfigCommitment, imapProviderConnectionOptions, imapRecipientAlias, matchesImapRecipientAlias, verifyImapIngestionProviders } from "./imap-ingestion";
@@ -131,6 +132,8 @@ describe("IMAP ingestion configuration", () => {
 describe("receipt draft proposal", () => {
   beforeEach(() => {
     draftMocks.extract.mockReset();
+    draftMocks.readingEnabled.mockReset();
+    draftMocks.readingEnabled.mockReturnValue(true);
     draftMocks.encryptJson.mockClear();
     draftMocks.encryptJson.mockImplementation((_column: string, _rowId: string, value: unknown) => JSON.stringify(value));
     draftMocks.requireReceiptMetadataWriter.mockReset();
@@ -155,6 +158,19 @@ describe("receipt draft proposal", () => {
 
     draftMocks.extract.mockResolvedValueOnce("");
     await expect(draftProposalTextForTests(Buffer.from("pdf-bytes"), "application/pdf", "receipt-1")).resolves.toBeUndefined();
+  });
+
+  it("#1459: with document reading off, no attachment is sent to the parser and the receipt has no draft text", async () => {
+    draftMocks.readingEnabled.mockReturnValue(false);
+    draftMocks.extract.mockResolvedValue("Provider: Acme Cover\nPolicy number: AB-12345");
+    expect(await draftProposalTextForTests(Buffer.from("pdf-bytes"), "application/pdf", "receipt-1")).toBeUndefined();
+    expect(draftMocks.extract).not.toHaveBeenCalled();
+  });
+
+  it("#1459: with document reading on, the attachment is sent to the parser as before", async () => {
+    draftMocks.extract.mockResolvedValue("Provider: Acme Cover");
+    await expect(draftProposalTextForTests(Buffer.from("pdf-bytes"), "application/pdf", "receipt-1")).resolves.toBe("Provider: Acme Cover");
+    expect(draftMocks.extract).toHaveBeenCalledTimes(1);
   });
 
   it("encrypts the heuristic-only proposal under the instance scope and issues zero model requests with no model configured", async () => {

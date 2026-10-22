@@ -24,8 +24,8 @@ const POCKET = readFileSync(
 
 describe("#1151 W1-Q8: one shared loadSearchDocuments helper", () => {
   it("both screens import readSearchDocuments from pocket-search.js", () => {
-    expect(HOME_PAGE).toMatch(/import \{ readSearchDocuments, searchPocket \} from "\.\/pocket-search\.js";/u);
-    expect(POCKET).toMatch(/import \{ readSearchDocuments, searchPocket \} from "\.\/pocket-search\.js";/u);
+    expect(HOME_PAGE).toMatch(/import \{ costLabel, listedItems, readSearchDocuments, searchPocket \} from "\.\/pocket-search\.js";/u);
+    expect(POCKET).toMatch(/import \{ costLabel, listedItems, readSearchDocuments, searchPocket \} from "\.\/pocket-search\.js";/u);
   });
 
   it("both call it instead of their own Promise.all/worker loop", () => {

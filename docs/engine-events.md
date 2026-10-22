@@ -19,6 +19,10 @@ phase=<phase> component=<component> state=<state> reason=<reason> action=<action
   malformed inputs are rendered as `0s`.
 - Simulation runs append ` simulation=true` as a trailing field. Consumers
   must tolerate unknown trailing `key=value` fields.
+- A terminal `failed` event that follows a `recovery-command:` line appends
+  ` recovery=command` (after `elapsed=`, and after `simulation=true` when
+  present); consumers tolerate it as any trailing field. See "Recovery
+  command (v0)" below.
 - Every field value is validated against the fixed vocabulary below before
   emission; an unrecognised value is rendered as the literal `unknown`,
   never echoed verbatim. Events carry enums only — never configuration
@@ -192,7 +196,79 @@ abort
 `abort` marks a failure that no retry can clear (#1038): the installer
 emits it in place of the phase's usual `retry`, and a consumer should stop
 the run rather than loop. It first appears on the ADR-0019 refusal of an
-image published without bundled deployment assets.
+image published without bundled deployment assets. `install.sh` also emits
+it (#1456) when a failed fresh install's folder could not be put back (an
+entry could not be removed, moved aside or put back, or the backup folder
+`orbit-install-backups/<stamp>` could not be made when a file needed
+moving), when a backup folder could not be made at the start (every name
+from `<stamp>` to `<stamp>-9` taken), and when `orbit-install-backups` is a
+symlink or a file rather than a folder. A rollback that put the folder
+back but left something in Docker ends `retry` instead, with the one
+command to run first ("Recovery command (v0)").
+
+### recovery
+
+```
+command
+```
+
+Present only on a terminal `failed` event, and only when the line just
+before it on stdout is a `recovery-command:` line ("Recovery command (v0)").
+
+### install.sh after the commit (#1455, #1456)
+
+- Starting the containers is the last step of `preparation`:
+  `phase=preparation component=compose`, `state=starting`/`completed`,
+  `reason=service-start action=start`. A failed start is
+  `phase=preparation component=compose state=failed reason=docker-host`,
+  with `action=retry` on a fresh install and `repair` on an update; the
+  `database` phase begins only once the containers exist. Docker's own
+  words come on stderr as one `Orbit installer: Docker said: ...` line
+  before the failure message (control characters removed, at most 2,000
+  characters).
+- A fresh install that fails after the commit is rolled back before the
+  terminal event: `phase=rollback component=installer state=running
+  reason=rollback action=rollback`, then `state=completed` when the folder
+  and Docker are back as they were. The terminal `failed` event follows and
+  keeps the failing step's phase, component and reason; its action is
+  `retry` after a complete rollback (there is nothing left to repair).
+  Nothing is kept between runs: there is no recovery record, and the next
+  install starts from what it finds in the folder. When the rollback could
+  not finish (no `completed` rollback event) but put the folder back -- the
+  containers could not be stopped, or a volume could not be removed -- the
+  action is also `retry`, the one command to run first is printed as the
+  `recovery-command:` line and the event carries `recovery=command`. When
+  the folder could not be put back the action is `abort`, and no
+  `recovery-command:` line is printed.
+  Files the install did not write are moved, never deleted, into
+  `orbit-install-backups/<stamp>/moved` inside the folder, and stderr says
+  where. `.env-orbit` and `.orbit-secrets/` are put back whole from the copy
+  taken at the start, so an edit or a file added inside them while the
+  install ran is replaced (the closing line says so when the rollback
+  finishes). An update is never rolled back, and its failures keep their usual action. An interrupt or other unplanned exit after the commit is
+  rolled back the same way, and then ends with one terminal
+  `state=failed reason=failure` event for the phase it stopped in.
+- A failed image pull (`compose pull`, or the release image's
+  `docker pull`) carries Docker's words on the same `Docker said:` line.
+- A required service's wait that ends on a fresh install (#1456 decision):
+  a container that is not running (exited, dead, restarting, missing) is a
+  failure -- rolled back as above, `action=retry`; one still running with
+  its probe failing is left in place -- no rollback events, the terminal
+  `failed` event has `action=repair`, and the folder is a deployment, so
+  the next run is an Update.
+- An optional component (`clamav`, `tika`, `ollama`) never fails a fresh
+  install: its last event is `phase=optional state=waiting
+  reason=optional-status action=continue`, the run still ends with
+  `phase=complete ... deployment-ready`, and the completion screen names
+  each such service. A failed confirmed model download ends the same way
+  for any install (`component=ollama ... action=continue`). An update keeps
+  failing on an optional service with `optional-unavailable` and `repair`.
+- The rollback is disarmed once the database and the application are
+  ready. An interrupt after that ends the optional waits: each component
+  not yet ready ends `waiting reason=optional-status action=continue`, and
+  the run ends with the normal `phase=complete ... state=completed` and
+  exit status 0. A required service that keeps restarting during its wait
+  counts as stopped (rolled back, `retry`).
 
 ## Consumer guidance
 
@@ -203,6 +279,50 @@ image published without bundled deployment assets.
 - The stream is pinned by the operational guarantee catalogue
   (`docs/installer-guarantees.md`) and exercised by the Phase 1 acceptance
   harness.
+
+## Recovery command (v0)
+
+When `install.sh` has a command for the person to run -- after a fresh
+install's rollback could not stop the containers, or could not remove a
+volume it created -- it says so in a fixed shape a launcher can show in a
+copy box, without matching prose:
+
+```
+recovery-command: <command>
+phase=<phase> component=<component> state=failed reason=<reason> action=<retry|abort> elapsed=<seconds>s recovery=command
+```
+
+1. **One stdout line, plain mode only, fixed prefix.** Immediately before
+   the terminal `failed` event it prints exactly one line, the first above.
+   `recovery-command: ` (the prefix and one space) is fixed; the rest of the
+   line is the command, verbatim, as the person is to run it. Every word of
+   the command is shell-quoted with `printf %q`, so a folder or project name
+   can never be shell syntax, and the line can never contain a newline or a
+   control character. It is the only plain-mode stdout line that carries a
+   path, and it never carries a secret (today: the folder, the Compose
+   project name, the fixed env-file name `.env-orbit`, volume names). Show
+   it verbatim and do not parse it. It is printed at most once per run, and
+   not in TTY mode, where the stderr lines serve. The commands today:
+   - the containers could not be stopped: the folder is put back and what
+     the engine wrote is kept in the dated backup folder's `engine/`, so
+     the command runs from there:
+     `cd <folder>/orbit-install-backups/<stamp>/engine && docker compose --project-name <p> --env-file .env-orbit down --remove-orphans && docker volume rm -- <volume>...`,
+     where the `&& docker volume rm -- ...` part names exactly the volumes
+     this attempt created (never `down --volumes`, which would also take a
+     volume that predates it) and is left out when it created none;
+   - a volume could not be removed after the containers were stopped:
+     `docker volume rm -- <volume>...`, this attempt's volumes by exact name.
+2. **A trailing field on the terminal event.** The terminal `failed` event
+   that follows carries ` recovery=command` (vocabulary under `### recovery`).
+   It is present only when a `recovery-command:` line was printed just
+   before it, so a consumer that sees the field looks one stdout line back;
+   one that sees neither has no command to show. It appears only with
+   `action=retry`: once the command has run the folder is fresh and no
+   volume of this attempt is left, so installing again can work.
+3. **stderr is for people.** The stderr lines carry the same command alone
+   on its own line, after a line ending "Run this in a terminal, then
+   install again:". They are unstable prose by contract; consumers must
+   not match on them.
 
 ## Machine prompts (v0)
 
@@ -380,6 +500,12 @@ not in use <FIELD>
   `Unfixable` and never turns the exit status non-zero.
 - `<FIELD>` is always a fixed name, never a configured value: `--check` never
   discloses secrets, URLs or other configured content, by field name alone.
+- `warning ORBIT_MEMORY_LIMIT ...` is a sentence for the operator, printed
+  only when the limit is below 1g (it still starts, but a maximum-size
+  import can be stopped part-way). It is more than two tokens, so the parser
+  above discards it; it never turns the exit status non-zero. The install
+  and update engine says every `warning ` line in the installer window once
+  the readiness gate passes.
 - Exit status is non-zero whenever any line reports `missing`, zero
   otherwise.
 
@@ -421,10 +547,16 @@ value is present but invalid; nothing is printed when it is absent or valid:
 
 ```
 session-ttl
+memory-limit
 ```
 
 `session-ttl` is `SESSION_TTL_SECONDS` set to anything other than a whole
 number of seconds from 900 to 2592000 (15 minutes to 30 days).
+`memory-limit` is `ORBIT_MEMORY_LIMIT` set to anything outside Compose's size
+grammar: a number (decimals allowed), one optional space, then an optional unit
+`b`, or `k`, `m`, `g`, `t` or `p` optionally followed by `b` or `ib`, any case,
+all 1024-based (such as `2g`, `3.5g`, `1.5GiB` or `2048m`); empty counts as
+absent.
 
 ### Consumer guidance
 

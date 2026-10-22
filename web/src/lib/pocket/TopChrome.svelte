@@ -78,7 +78,7 @@
     text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg)}
   .back:hover{color:var(--accent-text)}
   .back:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px}
-  .wordmark{display:flex;align-items:center;gap:10px;padding:0 8px;font:600 17px var(--display);
+  .wordmark{display:flex;align-items:center;gap:10px;padding:0 8px;font:600 1.0625rem var(--display);
     letter-spacing:.02em;color:var(--ink)}
   .end{display:flex;align-items:center}
   @media (prefers-reduced-motion:reduce){ .p-chrome{transition:none} }
