@@ -28,7 +28,7 @@
 # Usage: scripts/test-repair-journeys.sh [--keep] [--journey <name>] [--list]
 #   ORBIT_REPAIR_JOURNEYS_IMAGE=<ref>  use this image instead of building one
 #   ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE=<ref>  image for the throwaway local
-#                                        registry (default registry:2). CI
+#                                        registry (default registry:3.1.2 by digest). CI
 #                                        sets this to the group dependency
 #                                        proxy path (ai/orbit#1022); a local
 #                                        run has no proxy credential, so it
@@ -242,10 +242,10 @@ install_deployment() {
   docker rm -f "$registry_name" >/dev/null 2>&1 || true
   # Pinned by digest (ai/orbit#1111) so a local run without
   # ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE set still pulls a known-good image
-  # instead of a moving `:2` tag; CI points the variable at the dependency
+  # instead of a moving tag; CI points the variable at the dependency
   # proxy copy of the same digest.
   docker run -d --name "$registry_name" -p "127.0.0.1:$registry_port:5000" \
-      "${ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE:-registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373}" >/dev/null ||
+      "${ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE:-registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0}" >/dev/null ||
     fail 'local registry did not start'
   local local_tag="127.0.0.1:$registry_port/$repository:latest"
   docker tag "$image" "$local_tag"

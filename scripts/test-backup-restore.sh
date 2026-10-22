@@ -385,7 +385,7 @@ install_own_stack() {
   own_stack_started=1
   docker rm -f -v "$own_registry_name" >/dev/null 2>&1 || true
   docker run -d --name "$own_registry_name" -p "127.0.0.1:$own_registry_port:5000" \
-      "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373" >/dev/null ||
+      "registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0" >/dev/null ||
     fail 'local registry did not start'
   local_tag="127.0.0.1:$own_registry_port/$own_repository:latest"
   docker tag "$image" "$local_tag"

@@ -200,7 +200,7 @@ variables:
   # same digest as the direct-Docker-Hub default the script falls back to, so
   # these three jobs stop tripping Docker Hub's anonymous pull rate limit
   # (ai/orbit#1111, pipeline 1597 jobs 22132/22133/22198/22199).
-  ORBIT_INSTALLER_REGISTRY_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+  ORBIT_INSTALLER_REGISTRY_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0
   # Same reasoning, for tests/oidc/Dockerfile's FROM node:24-alpine: `smoke`
   # builds it through docker-compose.acceptance.yml's OIDC_BASE_IMAGE_PREFIX
   # build arg, and install_bootstrap/install_bootstrap_latest through

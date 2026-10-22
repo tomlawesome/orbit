@@ -59,7 +59,7 @@ describe("GitLab pipeline definition", () => {
     // pipeline must always override it with a proxied, digest-pinned image.
     const proxyPrefix = "${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/";
     const registryDigest =
-      "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373";
+      "registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0";
     const lines = gitlabCi.split(/\r?\n/u);
 
     const installerRegistryLine = lines.find((line) =>
@@ -78,7 +78,7 @@ describe("GitLab pipeline definition", () => {
     expect(repairRegistryLine).toMatch(
       /\$\{(?:CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX\}\/library\/registry|ORBIT_INSTALLER_REGISTRY_IMAGE\})/u,
     );
-    expect(repairRegistryLine).not.toMatch(/registry:2\s*$/u);
+    expect(repairRegistryLine).not.toMatch(/registry:[^@\s]*\s*$/u);
 
     // The disposable OIDC sidecar `smoke` builds pulls a Docker Hub base image
     // and needs the same proxy route.
@@ -128,7 +128,7 @@ describe("installer validation scripts", () => {
   it("pins the disposable registry and pushes the tested image rather than building one", () => {
     const registryStep = ciScript("start-installer-registry.sh");
     expect(registryStep).toContain(
-      "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373",
+      "registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0",
     );
     expect(registryStep).toContain("--publish 127.0.0.1:5000:5000");
     expect(registryStep).toContain('local_tag="127.0.0.1:5000/${IMAGE_NAME}:${channel}"');
