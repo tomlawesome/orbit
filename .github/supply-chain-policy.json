@@ -985,8 +985,8 @@
     {
       "name": "Node.js build and runtime",
       "tag": "node:24-alpine",
-      "reference": "node:24-alpine@sha256:f777d4615e9f225aa23d72dc05bd8454a0fadcb033e00417c5b9257f5585677b",
-      "indexDigest": "sha256:6a1c190e17215d844926b0677f4bf87273ff7d5e54db06d3b5b5863ab0b09a3d",
+      "reference": "node:24-alpine@sha256:1200d815de24f8dcca745fbf7651d166034a35adbcad8860a8538ffff44f1420",
+      "indexDigest": "sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53",
       "platform": "linux/amd64",
       "locations": [
         "tests/oidc/Dockerfile"
@@ -996,7 +996,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/docker-node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-21",
+      "resolvedOn": "2026-10-22",
       "reviewBy": "2026-10-30"
     },
     {
