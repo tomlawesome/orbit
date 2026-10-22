@@ -11,11 +11,11 @@ decision is [ADR-0011](docs/adr/0011-operator-experience-as-product.md).
 
 **One project, not siblings** ([ADR-0036](docs/adr/0036-the-orbit-family-is-one-project.md);
 recorded as an exception in `~/.config/agents/EXCEPTIONS.md`).
-Orbit, `ai/orbit-base-image`, `ai/orbit-launcher` (project 50) and
-`ai/orbit-site` (project 57) are one project in four repositories. When one
-needs something from another, or something there is not working, act on it
-without asking: file the issue, tell that session. Anything describing Orbit to
-the public (a feature claim, an install step, a screenshot) belongs on the site,
+
+- The Orbit family (`ai/orbit`, `ai/orbit-launcher`, `ai/orbit-site`, `ai/orbit-base-image`) is one project (Orbit ADR-0036): each repo's files, layout and scripts are the whole project's own, never designed around as an outside system. The launcher owns install, update, repair and removal; removal work belongs in the launcher, not a separate tool in Orbit.
+- When work here needs a change in another of the four, do not make it from here: file an issue there with the design fully worked out, labelled `cross-repo`, in that repo's nearest open milestone, and link it from this repo's issue, parked as blocked. That repo's session builds and closes it; on resuming, check blocked issues, and bump any pin once the other repo has released. A `cross-repo` issue is ordinary work in its milestone. ADR-0036 still covers reading sibling repos and one-line pin or doc fixes (owner, 2026-10-22: avoids two sessions editing one repo at once).
+
+Anything describing Orbit to the public (a feature claim, an install step, a screenshot) belongs on the site,
 so check it when Orbit's behaviour changes. The launcher and site point here for
 this rule.
 

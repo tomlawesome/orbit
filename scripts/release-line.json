@@ -1,0 +1,4 @@
+{
+  "line": "v0.3",
+  "reason": "Releases from dev are patches (v0.3.1, v0.3.2, ...). To start a new minor or major line, set this to it (for example v0.4) before promoting; it needs no reset afterwards (#1499)."
+}

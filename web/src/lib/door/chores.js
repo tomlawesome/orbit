@@ -17,14 +17,21 @@
  * A chore that promises to be frame-sized (soft: under ~5 ms, a band of a picture put on the GPU: upload.js) may run
  * sooner, from the moment the door is lit (openSoft), one a frame, during the reveal; the rest still wait for open.
  */
+/**
+ * @typedef {string | string[]} Tag what a chore readies ("flight", "docs", "install", "info", "compile", "galaxy", "door", "measure", "rich"), or a list of them
+ * @typedef {{ fn: () => unknown, resolve(value: unknown): void, reject(reason: unknown): void, rest: number, tag: Tag, soft: boolean }} Job
+ *   (resolve and reject are methods so a promise's own resolver, of any value type, fits the one queue)
+ */
+/** @type {Job[]} */
 const queue = [];
-let open = false, soft = false, compiling = false, running = false, want = null, until = 0, wake = 0, started = 0, openedAt = 0;
+let open = false, soft = false, compiling = false, running = false, /** @type {string[] | null} */ want = null, until = 0, wake = 0, started = 0, openedAt = 0;
 /* when someone last typed (watchTyping): an unhurried chore waits while they are, so a texture upload never lands
    between a keystroke and its echo (Orbit's addition; settings.typingWait, 0 to never wait) */
 let lastInput = -Infinity;
 /* where the chores' time goes (noteChores): waiting for an idle moment, running, and the first one's start */
 let waited = 0, ran = 0, firstAt = 0, empty = 0, emptyAt = 0, held = 0, heldAt = 0;
 /* and each chore: its tag, how long it waited to start, how long it ran (ms) */
+/** @type {{ tag: string, w: number, r: number }[]} */
 const record = [];
 /* the soft chores run during the reveal (before open): how many, and how long they ran */
 let softN = 0, softMs = 0;
@@ -33,6 +40,8 @@ let softN = 0, softMs = 0;
    one a frame and no more */
 let frameAt = 0;
 const SHARE = 8, REVEAL_SHARE = 4;
+/* the longest a chore may hold the queue (ms): the longest real one is a texture upload or a compile, seconds on a slow GPU */
+const CAP = 15000;
 /* ?holdreveal: nothing during the reveal, as before (openSoft is never called, and upload.js puts each picture on the
    GPU whole): for the owner's A/B */
 export const holdReveal = () => !!flag("holdreveal");
@@ -45,7 +54,9 @@ import { gpu } from "./fitness.js";
    (openCompiles; dawn.js waits for them), where only the ring's runner can show the hitch. Asked of the page's one
    context (fitness.js: gpu(), which makes it on first asking, never a throwaway); true where the page may not use the
    GPU at all (nothing will compile). &mainthread: as if it did not (to try the Firefox path in another browser) */
+/** @type {boolean | null} */
 let aside = null;
+/** @returns {boolean} */
 export function compilesAside() {
   if (aside !== null) return aside;
   try {
@@ -59,19 +70,22 @@ export function compilesAside() {
    and 1.3 s in Edge before the flight was ready. Now a chore starts a frame after the last, and no sooner) */
 /* the order the rest are done in, when no journey has been chosen: the compiles before anything (only where they
    freeze the page: compilesAside; elsewhere nothing is tagged so; and before open, nothing else), then the journeys
-   (a visitor can do nothing until one is ready), then the live door (door3d.js: its picture is already on screen),
-   the measures, the docs' galaxy where it compiles in the background (voyage.js: after the door is live; the docs'
-   journey still hurries it), and last of all the rich clouds, which nothing waits for */
-const ORDER = ["compile", "install", "flight", "docs", "info", "", "door", "measure", "galaxy", "rich"];
+   (a visitor can do nothing until one is ready), the docs' galaxy where it compiles in the background (voyage.js:
+   one chore that only starts its compiles, so it costs the door nothing, and the docs' way in opens with the others',
+   #49; the docs' journey still hurries it), then the live door (door3d.js: its picture is already on screen), the
+   measures, and last of all the rich clouds, which nothing waits for */
+const ORDER = ["compile", "install", "flight", "docs", "info", "", "galaxy", "door", "measure", "rich"];
 /* a chore's tag may be a list: ranked by its first ("compile"), hurried by any (the journey the compile is for) */
-const tags = (tag) => [].concat(tag);
+/** @param {Tag} tag @returns {string[]} */
+const tags = (tag) => /** @type {string[]} */ ([]).concat(tag);
+/** @param {Tag} tag */
 const rank = (tag) => { const i = ORDER.indexOf(tags(tag)[0]); return i < 0 ? ORDER.length : i; };
 
 function pump() {
   if (running || !queue.length) return;
   const now = performance.now();
   /* what the chosen journey needs, first */
-  let i = want ? queue.findIndex((j) => tags(j.tag).some((t) => want.includes(t))) : -1;
+  let i = want ? queue.findIndex((j) => tags(j.tag).some((t) => /** @type {string[]} */ (want).includes(t))) : -1;
   if (want && i < 0 && now >= until) want = null;
   const hurried = i >= 0;
   if (!hurried) {
@@ -83,6 +97,7 @@ function pump() {
     if (typing > 0) { clearTimeout(wake); wake = setTimeout(pump, typing + 20); return; }
     /* before open, only a compile (while they may run) or a soft chore (once the door is lit), or nothing ("compile"
        ranks first, so if there is one, it is this) */
+    /** @param {Job} j */
     const may = (j) => open || (compiling && tags(j.tag)[0] === "compile") || (soft && j.soft);
     i = -1;
     for (let k = 0; k < queue.length; k++) if (may(queue[k]) && (i < 0 || rank(queue[k].tag) < rank(queue[i].tag))) i = k;
@@ -99,25 +114,42 @@ function pump() {
     const rec = { tag: tags(job.tag).join("+") || "-", w: Math.round(t0 - asked), r: 0 }; record.push(rec);
     let out;
     try { out = job.fn(); } catch (e) { out = Promise.reject(e); }
-    Promise.resolve(out).then(job.resolve, job.reject).finally(() => {
+    /* a job that never settles must not hold the queue for ever: after CAP the queue goes on. The chore's own promise
+       is left as it was (settling by what the job does, if it ever does): a caller waiting on it has its own limit, and
+       one that ignored the promise would otherwise be given a rejection nobody handles */
+    let over = false, cap = 0;
+    const end = () => {
+      if (over) return;
+      over = true; clearTimeout(cap);
       running = false; rec.r = Math.round(performance.now() - t0); ran += performance.now() - t0; if (!queue.length) emptyAt = performance.now();
       if (early) { softN++; softMs += performance.now() - t0; }
       /* a rest between chores: a frame or so, so whatever is moving keeps moving (the measures keep their longer rest,
          so nothing heavy sits right beside them); hurried, still a frame; a soft one during the reveal, a frame and no
          more (it fits in a frame's slack, and the reveal is short) */
       /* (a soft one after the reveal, or hurried: the next at once while the frame's share lasts) */
+      /** @param {number} ms */
       const frame = (ms) => requestAnimationFrame(() => { frameAt = performance.now(); setTimeout(pump, ms); });
       /* (during the reveal a smaller share, 4 ms: a second band in the frame when the first was quick) */
       if (job.soft && performance.now() - frameAt < (open || hurried ? SHARE : REVEAL_SHARE)) setTimeout(pump, 0);
       else if (hurried || (job.soft && !open)) frame(0);
       else frame(job.tag === "measure" ? job.rest : Math.min(job.rest, 20));
-    });
+    };
+    cap = setTimeout(end, CAP);
+    Promise.resolve(out).then(job.resolve, job.reject).finally(end);
   };
   setTimeout(run, 0);
 }
 
-/** queue a piece of work for a journey (tag); resolves with what it returns (or what its promise resolves to).
-    soft: it promises to take under ~5 ms, so it may run during the reveal (openSoft), one a frame */
+/**
+ * queue a piece of work for a journey (tag); resolves with what it returns (or what its promise resolves to).
+ * soft: it promises to take under ~5 ms, so it may run during the reveal (openSoft), one a frame
+ * @template T
+ * @param {() => T | Promise<T>} fn
+ * @param {number} [rest]
+ * @param {Tag} [tag]
+ * @param {{ soft?: boolean }} [options]
+ * @returns {Promise<T>}
+ */
 export function chore(fn, rest = 60, tag = "", { soft: frameSized = false } = {}) {
   if (emptyAt) { empty += performance.now() - emptyAt; emptyAt = 0; }
   return new Promise((resolve, reject) => { queue.push({ fn, resolve, reject, rest, tag, soft: frameSized }); pump(); });
@@ -144,10 +176,12 @@ export function openCompiles() { compiling = true; pump(); }
     opening of the last still runs adds to what is wanted (a flight to the docs hurries ["flight", "docs"], and its
     proving warm() then "flight" again); one made after it starts afresh. What is wanted ends with its need: once the
     opening is over and nothing queued has a wanted tag, nothing is wanted, so a tag hurried once (the install's, on
-    arriving there) does not skip the opening of every later journey */
+    arriving there) does not skip the opening of every later journey
+    @param {Tag | null} [tags]
+    @param {number} [opening] */
 export function hurryChores(tags, opening = 6000) {
   const now = performance.now();
-  want = [...new Set([...(want && now < until ? want : []), ...[].concat(tags || [])])];
+  want = [...new Set([...(want && now < until ? want : []), .../** @type {string[]} */ ([]).concat(tags || [])])];
   until = Math.max(until, now + opening);
   if (!open) openedAt = performance.now();
   open = true; pump();
@@ -157,14 +191,16 @@ export function hurryChores(tags, opening = 6000) {
     a transform or an opacity is the compositor's, a colour or a size is the page's) has finished, so work that touches
     the GPU never runs under a reveal still being drawn (the door's first light; journey.js: later) */
 const COMPOSITED = new Set(["transform", "opacity", "offset", "easing", "composite", "computedOffset"]);
+/** @param {Animation & { transitionProperty?: string }} a */
 const painted = (a) => {
   try {
-    const t = a.effect.target;
+    const t = /** @type {KeyframeEffect} */ (a.effect).target;
     if (typeof SVGElement === "function" && t instanceof SVGElement && !(t instanceof SVGSVGElement)) return true;
-    const props = a.transitionProperty ? [a.transitionProperty] : a.effect.getKeyframes().flatMap(Object.keys);
+    const props = a.transitionProperty ? [a.transitionProperty] : /** @type {KeyframeEffect} */ (a.effect).getKeyframes().flatMap(Object.keys);
     return props.some((k) => !COMPOSITED.has(k));
   } catch { return true; }
 };
+/** @param {number} [cap] @returns {Promise<unknown>} */
 export function drawnIn(cap = 10000) {
   try {
     const ends = document.getAnimations().filter((a) => Number.isFinite(a.effect?.getComputedTiming().endTime) && painted(a));
@@ -175,7 +211,8 @@ export function drawnIn(cap = 10000) {
 
 /** the queue at rest: resolves once nothing is queued or running, and has stayed so for two animation frames, with
     calm(): whether it still is, and no chore has run since (a measure spread over frames asks at its end, and starts
-    again if not) */
+    again if not)
+    @returns {Promise<() => boolean>} */
 /* (the measures time the drawing alone: a chore beside them, an upload or a compile, is time that is not the
    drawing's, and a false measure lowers the drawing for the rest of the page view) */
 export function quiet() {
@@ -196,8 +233,11 @@ export const choresNow = () => ({ queued: queue.map((j) => tags(j.tag).join("+")
 /* the pictures, fetched once for whatever wants them, and asked for as early as is wanted: the network is never a chore */
 /* (keyed by the address resolved against the page, so a relative and an absolute spelling of one picture share
    the one fetch; off a page, by the string as given) */
+/** @type {Map<string, Promise<Blob>>} */
 const fetched = new Map();
+/** @param {string} url */
 const keyOf = (url) => { try { return new URL(url, document.baseURI).href; } catch { return url; } };
+/** @param {string} url @returns {Promise<Blob>} */
 export function fetchOnce(url) {
   const key = keyOf(url);
   if (!fetched.has(key)) {
@@ -206,12 +246,13 @@ export function fetchOnce(url) {
     /* a failed fetch is forgotten, so the next ask tries the network again */
     p.catch(() => { if (fetched.get(key) === p) fetched.delete(key); });
   }
-  return fetched.get(key);
+  return /** @type {Promise<Blob>} */ (fetched.get(key));
 }
 
 /** where the chores' time has gone so far, in the console: running (a compile's wait in the background counts as
     running), waiting to start (a frame, or the opening a journey is given), the queue empty (nothing to do: the
-    pictures still coming, or decoding), and the rests between */
+    pictures still coming, or decoding), and the rests between
+    @param {string} when */
 export function noteChores(when) {
   const wall = firstAt ? performance.now() - firstAt : 0;
   /* (the soft chores ran inside the held time: counted once, as running) */
@@ -219,15 +260,44 @@ export function noteChores(when) {
   /* each one: tag, waited/ran (?door3d only: a long line) */
   if (counting()) note(`chores, each (tag waited/ran ms): ${record.map((c) => `${c.tag} ${c.w}/${c.r}`).join(", ")}`);
 }
-/* how long the readying took, in the console (the first visit's GPU work differs greatly between machines and
-   browsers: this says where the time went) */
+/** how long the readying took, in the console (the first visit's GPU work differs greatly between machines and
+   browsers: this says where the time went)
+   @param {string} what @param {number} [since] */
 export function note(what, since = 0) {
   try { console.info(`orbit · ${what}: ${Math.round(performance.now() - since)} ms${since ? "" : " after opening"}`); } catch { /* fine */ }
 }
+/* the longest a compile in the background is waited for (KHR_parallel_shader_compile's COMPLETION_STATUS_KHR, polled):
+   past it, as on a lost context, the compile is taken as never coming and its part goes on without it (#49: a status
+   that never turned true left the docs, and with the probe the whole door, waiting for ever). Over twice the slowest
+   background compile measured (the laptop's flight, 1.8 s: CAPABILITIES.md) */
+export const COMPILE_WAIT = 5000;
+/** programs compiled in the background (par: the extension), waited for: true once every one says it is done, false
+    if the context is lost, the caller stops waiting (stop()) or COMPILE_WAIT passes first (the caller then goes on
+    without them); true at once where there is no extension (the browser compiles on the page's own thread)
+    @param {WebGLRenderingContext | WebGL2RenderingContext} gl
+    @param {KHR_parallel_shader_compile | null} par
+    @param {WebGLProgram[]} list
+    @param {number} [every]
+    @param {() => boolean} [stop]
+    @returns {Promise<boolean>} */
+export const compiledWithin = (gl, par, list, every = 40, stop = () => false) => new Promise((resolve) => {
+  if (!par) { resolve(true); return; }
+  const t0 = performance.now();
+  const poll = () => {
+    if (gl.isContextLost() || stop()) resolve(false);
+    else if (list.every((p) => gl.getProgramParameter(p, par.COMPLETION_STATUS_KHR))) resolve(true);
+    else if (performance.now() - t0 > COMPILE_WAIT) resolve(false);
+    else setTimeout(poll, every);
+  };
+  poll();
+});
 /* how many programs each part has linked (?door3d only: said in its notes, " (3 programs)", and summed by main.js) */
 const counting = () => !!flag("door3d");
+/** @type {Record<string, number>} */
 const links = {};
+/** @param {string} label */
 export function linked(label) { links[label] = (links[label] || 0) + 1; }
+/** @param {string} label */
 export const counted = (label) => (counting() ? ` (${links[label] || 0} program${links[label] === 1 ? "" : "s"})` : "");
 /* all of them so far, and by part ("flight 3, world 2, …") */
 export const programs = () => ({ n: Object.values(links).reduce((a, b) => a + b, 0), by: Object.entries(links).map(([k, v]) => `${k} ${v}`).join(", ") });

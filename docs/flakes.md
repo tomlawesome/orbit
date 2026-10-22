@@ -661,3 +661,11 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-explore-search.spec.ts:336 "Enter on the no-match add act carries the typed name to /create" — desktop-webkit
 
 - 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_webkit (job 38686) · failed once, passed on retry. First sighting.
+
+## sign-out-descent.spec.ts:274 "sign out from another page's menu plays the descent (wide desk)" on desktop-firefox
+
+- 2026-10-22 · 39134f33 (!1081) · pipeline 2875 / `smoke_firefox` job 38354 · "#1253: the page is still showing over the dusk", 10 s predicate timeout; passed on Playwright's retry in the same run. First sighting for this variant and browser.
+
+## v19-axe-sweep.spec.ts:388 "the signed-in v19 sweep › /settings/mail has no automated WCAG A/AA violations" on desktop-firefox
+
+- 2026-10-22 · 39134f33 (!1081) · pipeline 2875 / `smoke_firefox` job 38354 · failed its first attempt, passed on Playwright's retry in the same run. The same screen as the layout-and-themes axe flake above, from the sweep spec. First sighting.

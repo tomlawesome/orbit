@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const STABLE_VERSION = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u;
 const CHANNELS = new Set(["preview", "hotfix"]);
+const RELEASE_LINE = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u;
 
 function parseVersion(value) {
   const match = STABLE_VERSION.exec(value);
@@ -22,21 +23,40 @@ function compareVersions(left, right) {
   return 0;
 }
 
+function parseReleaseLine(value) {
+  const match = typeof value === "string" ? RELEASE_LINE.exec(value) : null;
+  if (!match) {
+    throw new Error("The release line must be written vMAJOR.MINOR, for example v0.4.");
+  }
+  const parts = match.slice(1).map(Number);
+  if (parts.some((part) => !Number.isSafeInteger(part))) {
+    throw new Error("The release line must be written vMAJOR.MINOR, for example v0.4.");
+  }
+  return parts;
+}
+
 /**
  * Calculates one candidate version for a release train. Stable tags are the
  * durable source of truth; package.json is used only to bootstrap repositories
  * that predate the first stable Git tag. Retracted tags (published versions
  * that must never be stood on) are dropped before the baseline is chosen.
+ *
+ * Every train bumps the patch. A preview train moves to a new minor or major
+ * only when the declared release line (scripts/release-line.json) is above the
+ * baseline's; once that line's first version is tagged the same declaration
+ * gives patches again, so it never needs resetting (#1499).
  */
 export function calculateReleaseTrainVersion({
   tags,
   fallbackVersion,
   channel,
   retractedTags = [],
+  releaseLine,
 }) {
   if (!CHANNELS.has(channel)) {
     throw new Error("Version channel must be preview or hotfix.");
   }
+  const line = channel === "preview" ? parseReleaseLine(releaseLine) : null;
 
   const retracted = new Set(retractedTags);
   const stableVersions = tags
@@ -55,9 +75,10 @@ export function calculateReleaseTrainVersion({
   }
   const [major, minor, patch] = baseline;
 
-  return channel === "hotfix"
-    ? `v${major}.${minor}.${patch + 1}`
-    : `v${major}.${minor + 1}.0`;
+  if (line && compareVersions(line, [major, minor]) > 0) {
+    return `v${line[0]}.${line[1]}.0`;
+  }
+  return `v${major}.${minor}.${patch + 1}`;
 }
 
 function repositoryTags(repositoryRoot) {
@@ -81,6 +102,20 @@ function retractedTagList(repositoryRoot) {
   return manifest.tags;
 }
 
+function declaredReleaseLine(repositoryRoot) {
+  let manifest;
+  try {
+    manifest = JSON.parse(
+      readFileSync(resolve(repositoryRoot, "scripts", "release-line.json"), "utf8"),
+    );
+  } catch {
+    throw new Error("scripts/release-line.json must exist and hold { \"line\": \"vMAJOR.MINOR\" }.");
+  }
+  const line = manifest?.line;
+  parseReleaseLine(line);
+  return line;
+}
+
 function requestedChannel(argv) {
   const channelIndex = argv.indexOf("--channel");
   if (channelIndex < 0 || !argv[channelIndex + 1] || argv.length !== 2) {
@@ -99,6 +134,7 @@ function runCli() {
     fallbackVersion: packageManifest.version,
     channel: requestedChannel(process.argv.slice(2)),
     retractedTags: retractedTagList(repositoryRoot),
+    releaseLine: declaredReleaseLine(repositoryRoot),
   });
   process.stdout.write(`${version}\n`);
 }
