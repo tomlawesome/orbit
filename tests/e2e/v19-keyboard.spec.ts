@@ -27,7 +27,9 @@ import {
   fillCreateForm,
   installKeyboardAudit,
   settled,
+  proveRadioGroupByArrows,
   tabTo,
+  uncheckedRadiosOf,
 } from "./support/keyboard";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
@@ -604,12 +606,17 @@ test("settings: reached via the account panel, and fully reachable", async ({ pa
     /* #1003: the Reminders card's tabs (owner-decisions §22) are one Tab
        stop with ← → between them, so the unchosen tab is proved by arrow
        key below, not by Tab — as the pocket file does. */
-    await auditTabOrder(page, "settings", { exclude: '[role="tab"][aria-selected="false"]' });
+    /* #1180: the Text size radio group is likewise one Tab stop (WAI-ARIA
+       radio pattern), so its unchecked radios are proved by arrow key. */
+    await auditTabOrder(page, "settings", {
+      exclude: `[role="tab"][aria-selected="false"], ${uncheckedRadiosOf("Text size")}`,
+    });
     const reminders = page.getByRole("tablist", { name: "Reminders" });
     await tabTo(page, { selector: '#rem-tab-reminders' }, { screen: "settings reminders" });
     await page.keyboard.press("ArrowRight");
     await expect(reminders.getByRole("tab", { name: "sent to you lately" })).toBeFocused();
     await expect(reminders.getByRole("tab", { name: "sent to you lately" })).toHaveAttribute("aria-selected", "true");
+    await proveRadioGroupByArrows(page, "Text size", "settings text size");
   } finally {
     await cleanup(page, household);
   }
@@ -769,7 +776,7 @@ test("settings: the sign-in-methods challenge arms by keyboard and is reachable"
     /* The Reminders tabs' unchosen tab is off the Tab order by design; the
        reachable-settings test above proves it by arrow key. */
     await auditTabOrder(page, "settings with the sign-in challenge open", {
-      exclude: '[role="tab"][aria-selected="false"]',
+      exclude: `[role="tab"][aria-selected="false"], ${uncheckedRadiosOf("Text size")}`,
     });
   } finally {
     await cleanup(page, household);
