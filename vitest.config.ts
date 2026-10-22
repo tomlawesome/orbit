@@ -208,7 +208,9 @@ const test: TestUserConfig = {
   coverage: {
     provider: "v8",
     include: ["src/**/*.{ts,tsx}", "scripts/*.mjs"],
-    exclude: ["src/**/*.test.ts", "scripts/*.test.mjs"],
+    // install-test-support.mjs is the install tests' shared fixtures (#1377):
+    // test code, so it must not count towards what the tests cover.
+    exclude: ["src/**/*.test.ts", "scripts/*.test.mjs", "scripts/install-test-support.mjs"],
     reporter: ["text-summary", "json-summary", "html"],
     reportsDirectory: "coverage",
     // Ratchet, not target (#302): floors sit just under the measured
