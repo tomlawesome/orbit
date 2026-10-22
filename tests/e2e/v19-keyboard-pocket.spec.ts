@@ -10,7 +10,9 @@ import {
   gotoCreate,
   homeIsLive,
   installKeyboardAudit,
+  proveRadioGroupByArrows,
   tabTo,
+  uncheckedRadiosOf,
 } from "./support/keyboard";
 import { entrancesSettled } from "./support/motion";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
@@ -613,7 +615,12 @@ test("settings (pocket): fully reachable by keyboard", async ({ page }) => {
     await expect(page.locator(".st-pocket .st-sessions")).toHaveCSS("opacity", "1");
     /* The Reminders card's tabs (owner-decisions §22): one tab in the Tab
        order, ← → between them, so the unchosen tab is never met by Tab. */
-    await auditTabOrder(page, "settings (pocket)", { exclude: "[role=tab][aria-selected=false]" });
+    /* #1180: the Text size radio group is one Tab stop too (WAI-ARIA radio
+       pattern); its unchecked radios are proved by arrow key instead. */
+    await auditTabOrder(page, "settings (pocket)", {
+      exclude: `[role=tab][aria-selected=false], ${uncheckedRadiosOf("Text size")}`,
+    });
+    await proveRadioGroupByArrows(page, "Text size", "settings (pocket) text size");
   } finally {
     await cleanup(page, household);
   }

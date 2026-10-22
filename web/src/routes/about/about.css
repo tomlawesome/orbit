@@ -21,17 +21,17 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .about-page .page{position:relative;z-index:2;max-width:1060px;margin:0 auto;padding:96px 24px 120px}
 .about-page .cards{display:grid;grid-template-columns:1fr;gap:18px;margin-top:22px;align-items:start}
 .about-page .cards .card{margin-top:0}
-.about-page header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
-.about-page header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
+.about-page header.screen h1{font:600 1.625rem var(--display);letter-spacing:.01em}
+.about-page header.screen .sub{font:0.6875rem var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
 
 .about-page .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
       border-radius:16px;padding:20px 22px;margin-top:22px;min-width:0}
-.about-page .card h2{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+.about-page .card h2{font:0.65625rem var(--mono);letter-spacing:.18em;text-transform:uppercase;
          color:var(--ink-quiet);margin-bottom:14px}
 
 /* Card 1 and card 3: the helm's .kv rows, name left, value right. */
 .about-page .kv{display:flex;justify-content:space-between;align-items:center;gap:14px;
-    font:11.5px var(--mono);color:var(--ink-mid);padding:9px 2px;
+    font:0.71875rem var(--mono);color:var(--ink-mid);padding:9px 2px;
     border-bottom:1px solid var(--line-soft)}
 .about-page .kv:last-child{border:0}
 .about-page .kv b{color:var(--ink);font-weight:500;text-align:right;min-width:0}
@@ -45,34 +45,34 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 
 /* The settings voice for what could not be shown, and its way to try again
    (the helm's own ghost button). */
-.about-page .note{margin-top:10px;font:11px var(--mono);color:var(--warm)}
-.about-page .again{margin-top:12px;font:11px var(--mono);color:var(--ink-mid);background:none;
+.about-page .note{margin-top:10px;font:0.6875rem var(--mono);color:var(--warm)}
+.about-page .again{margin-top:12px;font:0.6875rem var(--mono);color:var(--ink-mid);background:none;
       border:1px solid var(--line);border-radius:9px;padding:7px 13px;cursor:pointer}
 .about-page .again:hover{border-color:var(--accent);color:var(--accent-text)}
 .about-page .again:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* Card 2's index: administration's .tells, same-page pills with counts. */
 .about-page .tells{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
-.about-page .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+.about-page .role{font:0.625rem var(--mono);letter-spacing:.1em;text-transform:uppercase;
       border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid);
       text-decoration:none}
 .about-page .role:hover{border-color:var(--accent);color:var(--accent-text)}
 
 /* A group's heading: the helm's sub-heading voice (Sign-in methods). */
-.about-page .group{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+.about-page .group{font:0.65625rem var(--mono);letter-spacing:.18em;text-transform:uppercase;
       color:var(--ink-quiet);margin:22px 0 4px}
 
 /* The libraries' A–Z strip: letters with entries link, the rest are quiet. */
 .about-page .letters{display:flex;flex-wrap:wrap;gap:2px 10px;padding:6px 2px 8px;
-      font:11px var(--mono);letter-spacing:.06em}
+      font:0.6875rem var(--mono);letter-spacing:.06em}
 .about-page .letters a{color:var(--ink-mid);text-decoration:none}
 .about-page .letters a:hover{color:var(--accent-text)}
 .about-page .letters span{color:var(--ink-quiet)}
 
 /* One row per entry, in the rhythm of settings' "sent" rows. */
 .about-page .credit{padding:9px 2px;border-bottom:1px solid var(--line-soft)}
-.about-page .credit b{display:block;font-weight:520;color:var(--ink);font-size:13.5px;overflow-wrap:anywhere}
-.about-page .credit small{display:block;font:10.5px var(--mono);color:var(--ink-faint);overflow-wrap:anywhere}
+.about-page .credit b{display:block;font-weight:520;color:var(--ink);font-size:0.84375rem;overflow-wrap:anywhere}
+.about-page .credit small{display:block;font:0.65625rem var(--mono);color:var(--ink-faint);overflow-wrap:anywhere}
 .about-page .credit a{color:var(--ink-mid);text-decoration:none}
 .about-page .credit a:hover{color:var(--accent-text);text-decoration:underline}
 

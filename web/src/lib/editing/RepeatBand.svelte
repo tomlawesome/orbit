@@ -78,7 +78,7 @@
         font:var(--p-type-meta) var(--mono);color:var(--ink);text-align:center;cursor:pointer;
         transition:background .15s,color .15s}
   .cell:first-child{border-top:0}
-  .cell>b{font-size:14.5px;font-weight:500}
+  .cell>b{font-size:0.90625rem;font-weight:500}
   .cell>small{font:var(--p-type-meta) var(--mono);color:var(--ink-faint)}
   .cell:hover{background:var(--panel-raised)}
   .cell:focus-visible{outline:none;box-shadow:inset 0 0 0 1.5px var(--accent)}

@@ -35,14 +35,13 @@ export const POST = write(
     );
   },
   {
-    /* No engine behind ORBIT_FIXTURES=1 (#1141's rule): the honest answer
-       the engine itself gives with no processor, so the create form's
-       reading lane (#1245) settles in the fixture harness rather than
-       bouncing a 401 into the login flow. */
+    /* No engine behind ORBIT_FIXTURES=1 (#1141's rule): the shape of the
+       answer the engine gives when document reading is off (#1459: no
+       message), so the create form's reading lane (#1245) settles in the
+       fixture harness rather than bouncing a 401 into the login flow. */
     fixture: () => json({
       extracted: false,
       suggestions: [],
-      message: "Automatic suggestions require the optional document processor. You can still attach this file.",
       attachmentDisposition: "attachable",
       reason: "supported_structure",
     }, { headers: { "Cache-Control": "no-store" } }),

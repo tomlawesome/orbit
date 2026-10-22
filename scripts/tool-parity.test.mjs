@@ -76,7 +76,7 @@ describe.runIf(selected.includes("docker"))("docker", () => {
 
   // The #607 defect itself: `-T` is a `docker compose exec` flag and has never
   // been a plain `docker exec` one. Modelled by the shims in
-  // scripts/repair.test.mjs and scripts/install.test.mjs.
+  // scripts/repair.test.mjs and scripts/install-test-support.mjs.
   it("refuses `exec -T` with 125 and names the shorthand", () => {
     const result = run("docker", ["exec", "-T", absentName("orbit-parity"), "true"]);
     expect(result.status).toBe(125);
@@ -121,7 +121,7 @@ describe.runIf(selected.includes("docker"))("docker", () => {
     expect(result.stderr).toContain("unknown command");
   });
 
-  // scripts/install.test.mjs's `cp` branch models this exact status and
+  // scripts/install-test-support.mjs's `cp` branch models this exact status and
   // message for FAKE_DOCKER_CP_FAIL.
   it("`cp` from a container that does not exist exits 1 and names it", () => {
     const container = absentName("orbit-parity-container");
@@ -130,7 +130,7 @@ describe.runIf(selected.includes("docker"))("docker", () => {
     expect(result.stderr).toContain(`Error response from daemon: No such container: ${container}`);
   });
 
-  // scripts/install.test.mjs's `image` branch falls through to this status and
+  // scripts/install-test-support.mjs's `image` branch falls through to this status and
   // message when asked for an image it does not model.
   it("`image inspect` of an image that is not present exits 1 and names it", () => {
     const image = `${absentName("orbit-parity-image")}:missing`;
@@ -217,7 +217,7 @@ describe.runIf(selected.includes("curl"))("curl", () => {
   });
 
   // Every fake curl refuses an unrecognised option with this status and
-  // message: scripts/install.test.mjs, scripts/test-install-acceptance.sh
+  // message: scripts/install-test-support.mjs, scripts/test-install-acceptance.sh
   // and scripts/test-repair-journeys.sh.
   it("refuses an option it does not know with 2", () => {
     const result = run("curl", ["--orbit-parity-not-an-option", `${base}/ok`]);

@@ -256,12 +256,20 @@ case "$1" in
     for a in "$@"; do
       case "$a" in
         label=com.docker.compose.project=*)
-          if [[ -n "\${DOCKER_STUB_LEFTOVER:-}" && ! -e "$DOCKER_STUB_LOG.removed" ]]; then
+          if [[ -n "\${DOCKER_STUB_PREEXISTING_CONTAINER:-}" ]]; then
+            echo "$DOCKER_STUB_PREEXISTING_CONTAINER"
+          fi
+          if [[ -n "\${DOCKER_STUB_LEFTOVER:-}" && -e "$up_marker" && ! -e "$DOCKER_STUB_LOG.removed" ]]; then
             echo "$DOCKER_STUB_LEFTOVER"
           fi
           exit 0 ;;
       esac
     done
+    exit 0 ;;
+  volume)
+    if [[ "$2" == ls && "$*" == *label=com.docker.compose.project=* && -n "\${DOCKER_STUB_PREEXISTING_VOLUME:-}" ]]; then
+      echo "$DOCKER_STUB_PREEXISTING_VOLUME"
+    fi
     exit 0 ;;
   compose)
     case " $* " in
@@ -497,6 +505,55 @@ describe("teardown removes everything the run created (#1241)", () => {
       expect(readdirSync(fx.artifactRoot)).toHaveLength(1);
     });
   }
+});
+
+/*
+ * A run given an explicit COMPOSE_PROJECT_NAME must not adopt resources it did
+ * not create: if any container or volume already carries that project's
+ * Compose label (a real install, say), the run refuses before bringing
+ * anything up and, having created nothing, tears nothing down.
+ */
+describe("an explicit COMPOSE_PROJECT_NAME that names existing resources is refused", () => {
+  const upCalls = (fx) => dockerCalls(fx).filter((l) => /^compose .* up( |$)/.test(l));
+
+  for (const [label, env] of [
+    ["container", { DOCKER_STUB_PREEXISTING_CONTAINER: "realinstall1" }],
+    ["volume", { DOCKER_STUB_PREEXISTING_VOLUME: "realinstall_data" }],
+  ]) {
+    it(`fails before compose up when a ${label} already carries the project label`, async () => {
+      const fx = makeFixture();
+      const result = await runToEnd(fx, chromium, env);
+      expect(result.status, result.stderr).not.toBe(0);
+      expect(result.stderr).toContain(fx.project);
+      expect(upCalls(fx)).toHaveLength(0);
+      expect(downCalls(fx)).toHaveLength(0);
+      expect(dockerCalls(fx).filter((l) => l.startsWith("rm ") || l.startsWith("image rm"))).toHaveLength(0);
+    });
+  }
+
+  it("looks for both containers and volumes by the project label before compose up", async () => {
+    const fx = makeFixture();
+    const result = await runToEnd(fx, chromium);
+    expect(result.status, result.stderr).toBe(0);
+    const label = `label=com.docker.compose.project=${fx.project}`;
+    const calls = dockerCalls(fx);
+    const psAt = calls.findIndex((l) => l.startsWith("ps ") && l.includes("-aq") && l.includes(label));
+    const volAt = calls.findIndex((l) => l.startsWith("volume ls") && l.includes("-q") && l.includes(label));
+    const upAt = calls.findIndex((l) => /^compose .* up( |$)/.test(l));
+    expect(psAt).toBeGreaterThanOrEqual(0);
+    expect(volAt).toBeGreaterThanOrEqual(0);
+    expect(upAt).toBeGreaterThan(Math.max(psAt, volAt));
+  });
+
+  it("does not refuse a --reuse of the same project", async () => {
+    const fx = makeFixture();
+    writeFileSync(`${fx.dockerLog}.up`, ""); // the stub's stack is already up
+    const result = await runToEnd(fx, ["--reuse", fx.project, ...chromium], {
+      DOCKER_STUB_PREEXISTING_CONTAINER: "realinstall1",
+      DOCKER_STUB_PREEXISTING_VOLUME: "realinstall_data",
+    });
+    expect(result.status, result.stderr).toBe(0);
+  });
 });
 
 describe("a failed run keeps its logs and traces (#1241)", () => {

@@ -162,9 +162,7 @@ cd ~/orbit
 docker compose --env-file .env-orbit logs --no-log-prefix orbit-app | grep -A1 'not yet claimed'
 ```
 
-The installer's last screen and Orbit's own claim screen say it is the log's
-*last* line; it usually is not, because other services keep logging after it
-(#1450). Open the link in your browser. [Claiming a fresh install](authentication.md#claiming-a-fresh-install)
+Open the link in your browser. [Claiming a fresh install](authentication.md#claiming-a-fresh-install)
 has the detail. Then export a recovery bundle
 ([how](administrator-operations.md#exporting-a-recovery-bundle)).
 

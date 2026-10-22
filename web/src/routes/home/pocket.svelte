@@ -86,7 +86,7 @@
   /* ---- what the page draws ----------------------------------------------
      `DialBody` is the shape dialBodiesOf (chart.js) returns; `closest` is set
      afterwards on at most one entry, so it stays optional. */
-  /** @typedef {{ id: string, title: string, days: number, dueDate?: string | null, placement: { angle: number, radius: number, x: number, y: number }, size: number, paint: string, kind: string, suggestion: boolean, costMinor: number | null, costIsEstimate: boolean, currency: string, documentCount: number, trail: boolean, overdue: boolean, closest?: boolean }} DialBody */
+  /** @typedef {{ id: string, title: string, days: number, dueDate?: string | null, placement: { angle: number, radius: number, x: number, y: number }, size: number, paint: string, kind: string, suggestion: boolean, costMinor: number | null, costIsEstimate: boolean, currency: string, documentCount: number, trail: boolean, overdue: boolean, closest?: boolean, pocketSize: number }} DialBody */
   /** @type {DialBody[]} */
   const bodies = $derived(
     view?.household
@@ -151,7 +151,7 @@
   /** @type {(b: DialBody) => string} */
   const bodyColour = (b) => `var(${BAND_VAR[b.overdue ? "overdue" : b.paint === "ended" ? "ended" : b.paint === "amber" ? "due-soon" : b.paint === "sky" ? "upcoming" : "ok"]})`;
   /** @type {(b: DialBody) => number} */
-  const bodyR = (b) => (b.overdue ? 8 : b.closest ? 7 : 7.5);
+  const bodyR = (b) => b.pocketSize;
   // The desk's spheres (review round §2.1): a body wears its paint's
   // gradient; the ended expiry keeps its quiet flat ink.
   const SPHERES = new Set(["ruby", "jade", "amber", "sky"]);

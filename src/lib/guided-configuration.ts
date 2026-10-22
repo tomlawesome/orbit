@@ -192,10 +192,11 @@ function missingFieldsFrom(readiness: string, fields: readonly string[]): string
 // iterate, in the same order (install.sh:845,857,869).
 const REQUIRED_FIELDS = ["APP_URL", "ORBIT_IMAGE", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_CALLBACK_URL"];
 const GUIDED_FIELDS = ["APP_URL", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CALLBACK_URL"];
-// session-ttl postdates install.sh: the readiness report can name it, so the
-// installer must too, or an out-of-range SESSION_TTL_SECONDS falls through to
-// the six-field default list and the real culprit is never named.
-const CONFIGURATION_FIELDS = [...REQUIRED_FIELDS, "processing", "ai", "mail", "imap", "push", "session-ttl"];
+// session-ttl and memory-limit postdate install.sh: the readiness report can
+// name them, so the installer must too, or a bad SESSION_TTL_SECONDS or
+// ORBIT_MEMORY_LIMIT falls through to the six-field default list and the real
+// culprit is never named.
+const CONFIGURATION_FIELDS = [...REQUIRED_FIELDS, "processing", "ai", "mail", "imap", "push", "session-ttl", "memory-limit"];
 
 /** missing_required_fields (install.sh:843-853). */
 export function missingRequiredFields(readiness: string): string[] {

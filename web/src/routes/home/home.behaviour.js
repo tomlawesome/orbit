@@ -16,6 +16,7 @@
  */
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
+import { DOCUMENT_ACCEPT } from "$lib/data/document-read.js";
 import { holdDocument, holdType } from "$lib/data/held-document.js";
 import { fillStarTiles } from "$lib/sky.js";
 import { screenScope } from "$lib/teardown.js";
@@ -342,20 +343,24 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
       }
       callout.classList.add("show");
       document.querySelector("#" + link.dataset.body)?.classList.add("lit");
+      document.querySelector('.body-vis[data-vis="' + link.dataset.body + '"]')?.classList.add("lit");
     });
     link.addEventListener("mouseleave", () => {
       setTimeout(() => { if (!callout.matches(":hover")) {
         callout.classList.remove("show");
         document.querySelector("#" + link.dataset.body)?.classList.remove("lit");
+        document.querySelector('.body-vis[data-vis="' + link.dataset.body + '"]')?.classList.remove("lit");
       }}, 160);
     });
   }
   for (const item of document.querySelectorAll(".item[id]")) {
     item.addEventListener("mouseenter", () => {
       document.querySelector('.body-link[data-body="' + item.id + '"]')?.classList.add("lit");
+      document.querySelector('.body-vis[data-vis="' + item.id + '"]')?.classList.add("lit");
     });
     item.addEventListener("mouseleave", () => {
       document.querySelector('.body-link[data-body="' + item.id + '"]')?.classList.remove("lit");
+      document.querySelector('.body-vis[data-vis="' + item.id + '"]')?.classList.remove("lit");
     });
   }
   /* POL-5: constellations on section-header hover */
@@ -673,7 +678,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
     const picker = document.createElement("input");
     picker.type = "file";
     picker.hidden = true;
-    picker.accept = ".pdf,.eml,image/*";
+    picker.accept = DOCUMENT_ACCEPT;
     quickDrop.after(picker);
     const handOver = (/** @type {File | null | undefined} */ file) => {
       if (!file) return;

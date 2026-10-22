@@ -1,6 +1,4 @@
 <script>
-  import { untrack } from "svelte";
-
   /**
    * THE TILES (#1319; round 6's tiles, round 8's colour per option): a grid
    * of glass plates, one choice each — sections two by two, types three
@@ -18,7 +16,7 @@
    * it waits for Enter, Space or a press.
    *
    * @typedef {{
-   *   choices: import('./item-draft.js').Choice[],
+   *   choices: (import('./item-draft.js').Choice & { size?: string })[],
    *   value: string | null,
    *   label: string,
    *   cols: number,
@@ -28,8 +26,10 @@
   /** @type {Props} */
   let { choices, value, label, cols, onpick } = $props();
 
-  /** The tile in the tab order: the chosen one, else the first. */
-  let active = $state(untrack(() => Math.max(0, choices.findIndex((c) => c.value === value))));
+  /** The tile in the tab order: the chosen one, else the first. It follows
+      `value` when the parent changes it after mount (settings learns the
+      applied text size only then); focus and arrow keys move it in between. */
+  let active = $derived(Math.max(0, choices.findIndex((c) => c.value === value)));
   /** @type {HTMLDivElement | undefined} */
   let group = $state();
 
@@ -52,7 +52,7 @@
     <button type="button" class="tile" role="radio" aria-checked={choice.value === value}
             data-opt={choice.colour ?? undefined} tabindex={i === active ? 0 : -1}
             onclick={() => onpick(choice.value)} onkeydown={(e) => walk(e, i)} onfocus={() => (active = i)}>
-      <b>{choice.words}</b>
+      <b style:font-size={choice.size}>{choice.words}</b>
       {#if choice.note}<small>{choice.note}</small>{/if}
     </button>
   {/each}

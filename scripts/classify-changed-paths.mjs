@@ -78,13 +78,15 @@ const licencePolicyPaths = new Set([
 // default system lane below through the unmatched-path catch-all, so this
 // list exists to narrow *this one job's* reach, not to change classifyCiRisk.
 //
-// Since !895 (ADR-0019) the image also carries the eleven deployment assets an
+// Since !895 (ADR-0019) the image also carries the deployment assets an
 // install uses, so `install.sh` fetches its helpers out of the digest rather
 // than from a source revision. That makes every bundled asset part of what
 // this job proves, and a change to one visible to it: the Dockerfile lines
-// that copy them, what .dockerignore lets into that build context, the two
-// compose files, the example environment file, the Tika configuration and the
-// seven helper scripts under ./deploy/scripts/.
+// that copy them, what .dockerignore lets into that build context, and every
+// entry of src/lib/deployment-assets.ts's DEPLOYMENT_ASSETS. The asset entries
+// are spelled out rather than imported because this script runs under plain
+// node in CI; classify-changed-paths.test.mjs holds them, and the
+// launcher_install_compat changes list in .gitlab-ci.yml, equal to that list.
 // ADR-0031 #2/#3: the job also builds and installs the pinned launcher
 // itself now, rather than always checking out orbit-launcher's `dev`, so a
 // pin bump or a change to how it is built is part of what this job proves
@@ -96,9 +98,10 @@ const launcherCompatPatterns = [
   /^\.dockerignore$/u,
   /^docker-compose\.yml$/u,
   /^docker-compose\.mail\.yml$/u,
+  /^docker-compose\.kek-rotation\.yml$/u,
   /^\.env-orbit\.example$/u,
   /^config\/tika-config\.json$/u,
-  /^scripts\/(?:configure|installer-ui|configuration|backup|restore|repair|engine-check)\.sh$/u,
+  /^scripts\/(?:configure|installer-ui|backup|restore|repair|export-recovery-bundle|import-recovery-bundle|end-maintenance)\.sh$/u,
   /^launcher\/pin\.json$/u,
   /^scripts\/ci\/build-launcher\.sh$/u,
   /^scripts\/ci\/checkout-launcher-source\.sh$/u,

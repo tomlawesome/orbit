@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 // a module from there is fine — only test files are excluded.
 import {
   bodySize,
+  DESK_SIZE,
+  POCKET_SIZE,
   constellationPosOf,
   daysUntil,
   dialBodiesOf,
@@ -59,16 +61,76 @@ describe("dial placement law", () => {
   });
 });
 
-describe("body size (bigger = costlier)", () => {
-  it("matches the mockup's cost→size curve", () => {
-    expect(bodySize(5485)).toBeCloseTo(5.2, 0.5); // £54.85 → r 5.2
-    expect(bodySize(1200)).toBeCloseTo(3.5, 0.5); // £12 → r 3.5
-    expect(bodySize(12000)).toBeCloseTo(6, 0.5); // £120 → r 6
+describe("body size (bigger = costlier per year, #1460)", () => {
+  // £/yr -> [desk, pocket] radius, the design note's anchor table
+  const ANCHORS = [
+    [50, 3.5, 5.0],
+    [250, 4.8, 6.1],
+    [500, 5.4, 6.7],
+    [1000, 6.2, 7.3],
+    [2500, 7.4, 8.2],
+    [5000, 8.4, 9.0],
+    [10000, 9.6, 9.8],
+    [50000, 13.0, 12.0],
+  ];
+  it("exports the two ranges", () => {
+    expect(DESK_SIZE).toEqual([3.5, 13]);
+    expect(POCKET_SIZE).toEqual([5, 12]);
   });
-  it("is bounded and has a costless default", () => {
-    expect(bodySize(99999999)).toBeLessThanOrEqual(8.5);
-    expect(bodySize(1)).toBeGreaterThanOrEqual(3.5);
-    expect(bodySize(undefined)).toBe(4);
+  for (const [pounds, desk, pocket] of ANCHORS) {
+    it(`desk radius at £${pounds}/yr is ${desk}`, () => {
+      expect(Math.abs(bodySize(pounds * 100, 12, DESK_SIZE) - desk)).toBeLessThanOrEqual(0.05);
+    });
+    it(`pocket radius at £${pounds}/yr is ${pocket}`, () => {
+      expect(Math.abs(bodySize(pounds * 100, 12, POCKET_SIZE) - pocket)).toBeLessThanOrEqual(0.05);
+    });
+  }
+  it("annualises: £5 a month equals £60 a year", () => {
+    for (const range of [DESK_SIZE, POCKET_SIZE]) {
+      expect(bodySize(500, 1, range)).toBe(bodySize(6000, 12, range));
+    }
+  });
+  it("counts a one-off (0 or no recurrence) once", () => {
+    for (const range of [DESK_SIZE, POCKET_SIZE]) {
+      const yearly = bodySize(25000, 12, range);
+      expect(bodySize(25000, 0, range)).toBe(yearly);
+      expect(bodySize(25000, undefined, range)).toBe(yearly);
+    }
+  });
+  it("never shrinks as the yearly cost grows (£1 to £1,000,000)", () => {
+    for (const range of [DESK_SIZE, POCKET_SIZE]) {
+      let last = 0;
+      for (let pounds = 1; pounds <= 1_000_000; pounds = Math.ceil(pounds * 1.25)) {
+        const r = bodySize(pounds * 100, 12, range);
+        expect(r).toBeGreaterThanOrEqual(last);
+        last = r;
+      }
+    }
+  });
+  it("separates the dear from the cheap: £84,000 vs £250", () => {
+    expect(bodySize(8_400_000, 12, DESK_SIZE) / bodySize(25000, 12, DESK_SIZE)).toBeGreaterThanOrEqual(2.5);
+    expect(bodySize(8_400_000, 12, POCKET_SIZE) / bodySize(25000, 12, POCKET_SIZE)).toBeGreaterThanOrEqual(1.8);
+  });
+  it("gives no cost the smallest radius", () => {
+    expect(bodySize(undefined, 12, DESK_SIZE)).toBe(3.5);
+    expect(bodySize(undefined, 12, POCKET_SIZE)).toBe(5);
+    expect(bodySize(null, undefined, DESK_SIZE)).toBe(3.5);
+    expect(bodySize(0, 12, POCKET_SIZE)).toBe(5);
+  });
+  it("stays within the range at both extremes", () => {
+    for (const [lo, hi] of [DESK_SIZE, POCKET_SIZE]) {
+      for (const cost of [100, 1_000_000_000]) {
+        const r = bodySize(cost, 12, [lo, hi]);
+        expect(r).toBeGreaterThanOrEqual(lo);
+        expect(r).toBeLessThanOrEqual(hi);
+      }
+    }
+    expect(bodySize(1_000_000_000, 12, DESK_SIZE)).toBe(13);
+    expect(bodySize(100, 12, POCKET_SIZE)).toBe(5);
+  });
+  it("rounds to 0.1", () => {
+    const r = bodySize(123456, 7, DESK_SIZE);
+    expect(Math.abs(r * 10 - Math.round(r * 10))).toBeLessThan(1e-9);
   });
 });
 
@@ -154,6 +216,21 @@ describe("dialBodiesOf", () => {
     expect(far.trail).toBe(false);
     expect(bodies[0].overdue).toBe(true);
   });
+
+  it("carries pocketSize alongside size, both from yearly cost (#1460)", () => {
+    const bodies = dialBodiesOf(HOUSEHOLD, { suggestions: [SUGGESTION], today: TODAY });
+    const a = bodies.find((b) => b.id === "i-a"); // £150 every 12 months
+    expect(a.size).toBe(bodySize(15000, 12, DESK_SIZE));
+    expect(a.pocketSize).toBe(bodySize(15000, 12, POCKET_SIZE));
+    const c = bodies.find((b) => b.id === "i-c"); // £300 every 12 months
+    expect(c.size).toBe(bodySize(30000, 12, DESK_SIZE));
+    expect(c.pocketSize).toBe(bodySize(30000, 12, POCKET_SIZE));
+    // a suggestion has no recurrence: its cost counts once
+    const s = bodies.find((b) => b.id === "sug-1");
+    expect(s.size).toBe(bodySize(40000, undefined, DESK_SIZE));
+    expect(s.pocketSize).toBe(bodySize(40000, undefined, POCKET_SIZE));
+    for (const b of bodies) expect(typeof b.pocketSize).toBe("number");
+  });
 });
 
 describe("manifestGroupsOf", () => {
@@ -196,7 +273,7 @@ describe("corridorOf", () => {
   const corridor = corridorOf(WORKSPACE_FIXTURE, TODAY);
 
   it("spans every system and counts honestly", () => {
-    expect(corridor.total).toBe(15);
+    expect(corridor.total).toBe(16);
     expect(corridor.systems).toBe(5);
     expect(corridor.monthsSpanned).toBe(11);
     expect(corridor.horizon).toBe("June");
@@ -209,7 +286,7 @@ describe("corridorOf", () => {
 
   it("rules exactly the months with something approaching, in date order", () => {
     expect(corridor.months.map((month) => [month.label, month.rows.length])).toEqual([
-      ["SEP", 2], ["OCT", 1], ["DEC", 2], ["JAN", 2], ["MAR", 1], ["APR", 1], ["MAY", 1], ["JUN", 1],
+      ["SEP", 2], ["OCT", 1], ["NOV", 1], ["DEC", 2], ["JAN", 2], ["MAR", 1], ["APR", 1], ["MAY", 1], ["JUN", 1],
     ]);
     expect(corridor.months[0].rows.map((row) => row.id)).toEqual(["i-boiler", "i-narrow-1"]);
   });

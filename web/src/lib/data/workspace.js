@@ -794,8 +794,11 @@ import { ago, bandOf, dayMonth, sizeLabel } from "$lib/format.js";
 import { daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
 import { engineNumbersOf } from "./engine-limits.js";
+import { themeOrDefault } from "$lib/theme.js";
+import { textSizeOrDefault } from "$lib/text-size.js";
 import { householdScreenOf, householdUpdateCommandOf, sectionCommandsOf } from "./household.js";
 import { documentRowOf } from "./belt.js";
+import { STAGED_PAGE_TIMEOUT_MS } from "./staged-page.js";
 
 /**
  * A mutating fetch with the session's CSRF token, like applyCommand's.
@@ -815,6 +818,52 @@ async function csrfFetch(path, { method = "POST", body } = {}) {
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
+}
+
+/**
+ * Saves a theme and/or a text size (#1180), PUT /api/preferences.
+ *
+ * The route replaces all four preference fields at once -- and cancels
+ * pending deliveries for any channel sent as false -- so the body is always
+ * whole: the picked field(s), and everything else taken fresh from the
+ * server's session (`refresh: true`), never from a cache that another tab or
+ * the notifications panel may have outdated.
+ *
+ * Saves run one at a time (a promise chain), and each body is built from the
+ * latest local picks merged over the fresh session, so two quick picks cannot
+ * send the first one's old value.
+ *
+ * @param {{ theme?: string, textSize?: string }} change
+ */
+export function savePreferences(change) {
+  Object.assign(picked, change);
+  const run = saveChain.then(sendPicked);
+  saveChain = run.catch(() => {});
+  return run;
+}
+
+/** Picks not yet saved, merged over the fresh session when a save runs. */
+const picked = /** @type {{ theme?: string, textSize?: string }} */ ({});
+/** Saves run one at a time, so a later body never carries an older pick. */
+let saveChain = /** @type {Promise<unknown>} */ (Promise.resolve());
+
+async function sendPicked() {
+  const session = await readSession({ refresh: true });
+  const user = /** @type {any} */ (session.user ?? {});
+  const sent = { ...picked };
+  const body = {
+    theme: themeOrDefault(sent.theme ?? user.themeId),
+    textSize: textSizeOrDefault(sent.textSize ?? user.textSize),
+    emailNotifications: user.emailNotifications,
+    pushNotifications: user.pushNotifications,
+  };
+  const result = await json(await csrfFetch("/api/preferences", { method: "PUT", body }));
+  for (const key of /** @type {Array<"theme" | "textSize">} */ (Object.keys(sent))) {
+    if (picked[key] === sent[key]) delete picked[key];
+  }
+  /* The next read must show what was just saved. */
+  await readSession({ refresh: true }).catch(() => null);
+  return result;
 }
 
 /**
@@ -1274,7 +1323,7 @@ export async function readSettingsScreen() {
 export async function readMailboxSettings() {
   try {
     /** @type {{ mailbox?: ?MailboxSettings }} */
-    const body = await json(await fetch("/api/admin/mailbox", { credentials: "same-origin" }));
+    const body = await json(await adminRead("/api/admin/mailbox"));
     return body.mailbox ?? null;
   } catch {
     return null;
@@ -1324,7 +1373,7 @@ export async function readContactSettings() {
  */
 async function fetchContactSettings() {
   /** @type {{ contact?: ?ContactSettings }} */
-  const body = await json(await fetch("/api/admin/contact", { credentials: "same-origin" }));
+  const body = await json(await adminRead("/api/admin/contact"));
   return body.contact ?? null;
 }
 
@@ -1357,12 +1406,63 @@ export async function commandContact(command) {
  */
 export async function readUploadLimitSettings() {
   try {
-    /** @type {{ uploadLimit?: ?UploadLimitSettings }} */
-    const body = await json(await fetch("/api/admin/upload-limit", { credentials: "same-origin" }));
-    return body.uploadLimit ?? null;
+    return await fetchUploadLimitSettings();
   } catch {
     return null;
   }
+}
+
+/**
+ * The same read, but a refusal or a break rejects, so the administration
+ * screen can tell "failed" from "answered with nothing" (#1443).
+ *
+ * @returns {Promise<?UploadLimitSettings>}
+ */
+async function fetchUploadLimitSettings() {
+  /** @type {{ uploadLimit?: ?UploadLimitSettings }} */
+  const body = await json(await adminRead("/api/admin/upload-limit"));
+  return body.uploadLimit ?? null;
+}
+
+/**
+ * A fetch bounded by the same deadline the preview loader uses: the far end
+ * may accept the connection and never answer, and an unbounded read would
+ * leave the administration screen loading forever with no retry. The
+ * deadline turns that into a rejected read, which each panel already answers
+ * as failed. Handed to the shared workspace and session reads as well, so
+ * the screen's own call is bounded without changing them for other screens.
+ *
+ * @param {Parameters<Fetch>[0]} input
+ * @param {Parameters<Fetch>[1]} [init]
+ * @returns {Promise<Response>}
+ */
+function adminFetch(input, init) {
+  return fetch(input, { ...init, signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS) });
+}
+
+/**
+ * One administration-screen read, bounded as above.
+ *
+ * @param {string} href
+ * @returns {Promise<Response>}
+ */
+function adminRead(href) {
+  return adminFetch(href, { credentials: "same-origin" });
+}
+
+/**
+ * Settles a read into its answer and whether it failed (#1443, the shape
+ * #1442 gave the contact read).
+ *
+ * @template T
+ * @param {Promise<T>} read
+ * @returns {Promise<{ answer: T | null, failed: boolean }>}
+ */
+function settle(read) {
+  return read.then(
+    (answer) => ({ answer, failed: false }),
+    () => ({ answer: null, failed: true }),
+  );
 }
 
 /**
@@ -1421,9 +1521,18 @@ export async function commandUploadLimit(command) {
 export async function readAdminScreen() {
   const [workspace, session, users, mailbox, contact, uploadLimit, rotation, metadata, recoveryBundle, health, operations] =
     await Promise.all([
-    readWorkspace(),
-    readSession().catch(() => null),
-    fetch("/api/admin/users", { credentials: "same-origin" }).then((response) => json(response))
+    readWorkspace(adminFetch),
+    /* Its own fetch keeps a read that stalled and timed out out of the
+       page-wide session cache, so the next retry asks again. A read that
+       answers fills that cache, so the first command on this screen does not
+       make its own unbounded session read. A failed read is null here and
+       `failed.session` below: not knowing who is signed in is not "signed
+       out". */
+    readSession({}, adminFetch).then((answer) => {
+      sessionPromise = Promise.resolve(answer);
+      return answer;
+    }, () => null),
+    adminRead("/api/admin/users").then((response) => json(response))
       .then(
         (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, disabledAt?: ?string }[] }} */ body) =>
           body.users ?? [],
@@ -1435,47 +1544,47 @@ export async function readAdminScreen() {
       (answer) => ({ answer, failed: false }),
       () => ({ answer: null, failed: true }),
     ),
-    readUploadLimitSettings(),
+    settle(fetchUploadLimitSettings()),
     /* An open document-key rotation (#956). Additive: a route that cannot
        answer (fixture harness, older server) means no card, never a sunk
        screen — and "no rotation open" renders as nothing at all. */
-    fetch("/api/admin/documents/rotation", { credentials: "same-origin" }).then((response) => json(response))
+    settle(adminRead("/api/admin/documents/rotation").then((response) => json(response))
       .then(
         (/** @type {{ rotation?: { inProgress: boolean, startedAt: string | null, secondKeyLoaded: boolean } }} */ body) =>
           body.rotation ?? null,
-      )
-      .catch(() => null),
+      ),
+    ),
     /* Locked and damaged Tier 1 metadata (#941), from the health route that
        already answers for the document subsystem rather than a surface of its
        own. Additive on the same terms as the rotation above: a route that
        cannot answer means no cards, never a sunk screen, and an instance with
        nothing wrong renders nothing at all. */
-    fetch("/api/admin/documents/health", { credentials: "same-origin" }).then((response) => json(response))
+    settle(adminRead("/api/admin/documents/health").then((response) => json(response))
       .then(
         (/** @type {{ health?: { metadata?: MetadataHealth } }} */ body) =>
           body.health?.metadata ?? null,
-      )
-      .catch(() => null),
+      ),
+    ),
     /* Whether a recovery bundle has been recorded for the current document
        KEK (#968, slice 1 of #966). Additive on the same terms as the two
        cards above: a route that cannot answer means no card, never a sunk
        screen. */
-    fetch("/api/admin/recovery-bundle", { credentials: "same-origin" }).then((response) => json(response))
+    settle(adminRead("/api/admin/recovery-bundle").then((response) => json(response))
       .then(
         (/** @type {{ recoveryBundle?: { exported: boolean, exportedAt: string | null } }} */ body) =>
           body.recoveryBundle ?? null,
-      )
-      .catch(() => null),
+      ),
+    ),
     /* The real Operations panel and instance strip (#1000). A route that
        cannot answer keeps the fixture's rows under the fixture harness only,
        so the screen the fidelity gate photographs is unchanged; live, the
        panel says it failed (#1442). */
-    fetch("/api/admin/health", { credentials: "same-origin" }).then((response) => json(response))
+    adminRead("/api/admin/health").then((response) => json(response))
       .then((/** @type {{ health?: AdminHealth }} */ body) => body.health ?? null)
       .catch(() => null),
     /* The document jobs (#1071). Additive on the same terms: a route that
        cannot answer means no jobs card, never a sunk screen. */
-    readAdminOperations().catch(() => null),
+    settle(readAdminOperations()),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   const fixtureMode = Boolean(workspace.fixtureToday);
@@ -1490,7 +1599,7 @@ export async function readAdminScreen() {
       try {
         /** @type {Partial<Roster>} */
         const body = await json(
-          await fetch(`/api/households/${household.id}/members`, { credentials: "same-origin" }),
+          await adminRead(`/api/households/${household.id}/members`),
         );
         const owner = (body.members ?? []).find((member) => member.role === "owner");
         if (owner?.displayName) owners[household.id] = owner.displayName;
@@ -1526,6 +1635,9 @@ export async function readAdminScreen() {
     /* Which panels' reads did not answer on a live instance. Always all
        false in fixture mode, whose fallbacks are the photographed screen. */
     failed: {
+      /* The session read itself, so the screen can say it does not know who
+         is signed in and offer a retry rather than draw them signed out. */
+      session: !fixtureMode && session === null,
       relay: !fixtureMode && !mailbox,
       services: !fixtureMode && !health,
       instance: !fixtureMode && !health,
@@ -1533,22 +1645,29 @@ export async function readAdminScreen() {
       users: !fixtureMode && users === null,
       /* A contact the route answers as unset is not a failure. */
       contact: !fixtureMode && contact.failed,
+      /* The #1443 cards: a refused, broken or unanswered read, never an
+         answered one with nothing in it (no rotation open, metadata fine). */
+      uploadLimit: !fixtureMode && uploadLimit.failed,
+      operations: !fixtureMode && operations.failed,
+      rotation: !fixtureMode && rotation.failed,
+      metadata: !fixtureMode && metadata.failed,
+      recoveryBundle: !fixtureMode && recoveryBundle.failed,
     },
     /* The answer itself, for the pocket's per-service callout (#1123): when
        each service was last checked, last succeeded and last failed. Null
        where the route cannot answer, and the callout then says only the row. */
     health,
     now,
-    operations,
+    operations: operations.answer,
     /* Systems whose deletion is asked for and still inside its window
        (#1001, §19): an instance administrator's workspace lists every one. */
     recoverable: workspace.recoverableHouseholds ?? [],
     mailbox,
     contact: contact.answer,
-    uploadLimit,
-    rotation,
-    metadata,
-    recoveryBundle,
+    uploadLimit: uploadLimit.answer,
+    rotation: rotation.answer,
+    metadata: metadata.answer,
+    recoveryBundle: recoveryBundle.answer,
     owners,
   };
 }
@@ -1595,7 +1714,7 @@ export async function readAdminScreen() {
  */
 export async function readAdminOperations() {
   /** @type {{ operations?: AdminOperations }} */
-  const body = await json(await fetch("/api/admin/operations", { credentials: "same-origin" }));
+  const body = await json(await adminRead("/api/admin/operations"));
   if (!body.operations) throw new Error("no operations snapshot");
   return body.operations;
 }

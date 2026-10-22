@@ -27,7 +27,7 @@ const dist = join(root, "dist");
 const out = join(dist, "orbit-extract");
 const cache = join(dist, "extract-bundle-downloads");
 
-const NODE_VERSION = "v22.23.2";
+const NODE_VERSION = "v22.23.4";
 const NODE_ZIP = `node-${NODE_VERSION}-win-x64.zip`;
 const TIKA_ZIP = `tika-server-standard-${TIKA_VERSION}.zip`;
 

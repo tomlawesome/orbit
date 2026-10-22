@@ -120,7 +120,7 @@ test("names the household link and every rendered body, and hides the decorative
     // user is actually read rather than the attribute carrying it.
     await expect(dial).toHaveAttribute("role", "group");
     await expect(dial).toHaveAccessibleName(
-      "Gravity well: items orbit by due date; distance from the household is time remaining, body size is typical cost; details in the manifest below",
+      "Gravity well: items orbit by due date; distance from the household is time remaining, body size is typical cost per year; details in the manifest below",
     );
     // What the snapshot is for: proving the subtree survives. Under the old
     // role="img" the group's children were pruned from the accessibility

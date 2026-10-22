@@ -12,14 +12,14 @@ configuration, so it can be turned back on later with no re-entry.
 
 A fresh instance has no administrator and is **unclaimed**. At the end of
 start-up, while unclaimed, Orbit generates a one-time claim code, keeps it only
-in that process's memory, and prints it as the last line of the container's
-own log — both as a clickable link and as a plain code:
+in that process's memory, and prints it in the container's own log, after the
+usual start-up lines — both as a clickable link and as a plain code:
 
 ```sh
 docker compose --env-file .env-orbit logs orbit-app
 ```
 
-Open the link on the last line (or type the code by hand on the sign-in
+Open the claim link (or type the code by hand on the sign-in
 screen) to create the first administrator, with a password, an OIDC sign-in,
 or both. The installer never sees this code and never creates the first
 administrator itself; it only tells the operator where to look. The code is

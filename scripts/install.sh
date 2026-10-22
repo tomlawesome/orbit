@@ -249,6 +249,10 @@ declare -a rollback_restore_failed_paths=()
 rollback_entry_failed=0
 rollback_nothing_moved=0
 rollback_volumes_unlisted=0
+# The rollback's shared Docker deadline (a SECONDS value; empty outside the
+# rollback), and whether a Docker call ran out of it.
+rollback_docker_deadline=""
+rollback_docker_timed_out=0
 rollback_interrupted=0
 # Set by read_engine_journal only when the engine left a journal it accepted.
 rollback_journal_present=0
@@ -1054,10 +1058,12 @@ backup_root_is_sane() {
   [[ ! -L "$backup_root" ]] && { [[ ! -e "$backup_root" ]] || [[ -d "$backup_root" ]]; }
 }
 
-# backup_dir_refused <required|optional>
+# backup_dir_refused <required|optional> <reason>
 #
 # A dated folder that could not be made: a root this run made is removed
-# again; with `required` the install is refused before anything changed.
+# again; with `required` the install is refused before anything changed,
+# saying which cause applied and what to do, since each needs a different
+# fix before a retry can work.
 backup_dir_refused() {
   if [[ "$backup_root_created" == 1 ]] && rmdir -- "$backup_root" 2>/dev/null; then
     backup_root_created=0
@@ -1065,7 +1071,7 @@ backup_dir_refused() {
   [[ "$1" == required ]] || return 1
   installer_ui_phase=host
   installer_ui_component=host
-  fail_with failure abort "Could not make a backup folder under $(printf '%q' "$backup_root"); nothing was changed."
+  fail_with failure abort "Could not make a backup folder under $(printf '%q' "$backup_root"): $2 Nothing was changed."
 }
 
 # prepare_backup_dir <required|optional>
@@ -1080,19 +1086,23 @@ backup_dir_refused() {
 # rollback with a file to move) it returns 1.
 prepare_backup_dir() {
   local mode="$1" suffix
-  if ! backup_root_is_sane || [[ ! "$run_stamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]; then
-    backup_dir_refused "$mode"
+  if [[ ! "$run_stamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]; then
+    backup_dir_refused "$mode" "the clock could not be read to date it. Check that the date command works, then try again."
+    return 1
+  fi
+  if ! backup_root_is_sane; then
+    backup_dir_refused "$mode" "it is a link or a file, not a folder. Rename or remove it, then try again."
     return 1
   fi
   if [[ -d "$backup_root" ]]; then
     if [[ ! -O "$backup_root" ]] || ! chmod 700 -- "$backup_root"; then
-      backup_dir_refused "$mode"
+      backup_dir_refused "$mode" "it is owned by another user or cannot be made private (0700) by this user. Change its owner to this user (chown), or rename or remove it, then try again."
       return 1
     fi
   elif mkdir -m 700 -- "$backup_root"; then
     backup_root_created=1
   else
-    backup_dir_refused "$mode"
+    backup_dir_refused "$mode" "could not create it. Check that the install folder is writable by this user and has free space, then try again."
     return 1
   fi
   for suffix in "" -2 -3 -4 -5 -6 -7 -8 -9; do
@@ -1100,8 +1110,14 @@ prepare_backup_dir() {
       backup_dir="${backup_root}/${run_stamp}${suffix}"
       return 0
     fi
+    # Only a name that already exists moves on to the next suffix; any other
+    # failure would fail the same way for every suffix.
+    if [[ ! -e "${backup_root}/${run_stamp}${suffix}" && ! -L "${backup_root}/${run_stamp}${suffix}" ]]; then
+      backup_dir_refused "$mode" "could not create a dated folder in it. Check that it is writable by this user and has free space, then try again."
+      return 1
+    fi
   done
-  backup_dir_refused "$mode"
+  backup_dir_refused "$mode" "all nine dated names for this second ($run_stamp to $run_stamp-9) are already taken. Remove old dated folders you no longer need from it, then try again."
   return 1
 }
 
@@ -1169,9 +1185,14 @@ snapshot_fresh_target() {
 # Docker cannot say.
 list_deployment_volumes() {
   local -n found_volumes="$1"
-  local listing key name
+  local listing key name status=0
   found_volumes=()
-  listing="$(docker volume ls --filter "name=${compose_project_name}_orbit-" --format '{{.Name}}' 2>/dev/null)" || return 1
+  listing="$(bounded_docker 5 volume ls --filter "name=${compose_project_name}_orbit-" --format '{{.Name}}' 2>/dev/null)" || status=$?
+  if ((status != 0)); then
+    # The substitution's subshell cannot set the flag here, so set it again.
+    note_rollback_docker_timeout "$status"
+    return 1
+  fi
   for key in "${deployment_volume_keys[@]}"; do
     name="${compose_project_name}_${key}"
     if [[ $'\n'"$listing"$'\n' == *$'\n'"$name"$'\n'* ]]; then
@@ -1207,34 +1228,80 @@ shell_words() {
   printf '%s' "${line% }"
 }
 
+# bounded_docker <seconds> <docker-argument>...
+#
+# One Docker call that a hung daemon cannot hold past its bound (plus a
+# second for the KILL); the timeout's exit 124 is a failure like any other.
+# Bash runs a trapped signal only after its foreground child ends, and
+# `timeout` runs in its own process group, out of reach of a terminal's
+# Ctrl-C, so the bound is also the longest a trapped interrupt waits.
+# stdin is closed for the reason given at bounded_compose_probe.
+# Inside the rollback the bound is also trimmed to the time left on
+# rollback_docker_deadline (deadline propagation: min(own cap, time left)),
+# and with none left Docker is not run at all; either way of running out
+# sets rollback_docker_timed_out so the report can name the cause.
+bounded_docker() {
+  local seconds="$1" left status=0
+  shift
+  if [[ -n "$rollback_docker_deadline" ]]; then
+    left=$((rollback_docker_deadline - SECONDS))
+    if ((left <= 0)); then
+      rollback_docker_timed_out=1
+      return 124
+    fi
+    ((seconds <= left)) || seconds="$left"
+  fi
+  timeout --signal=TERM --kill-after=1s "${seconds}s" docker "$@" </dev/null || status=$?
+  note_rollback_docker_timeout "$status"
+  return "$status"
+}
+
+# note_rollback_docker_timeout <status>
+#
+# Inside the rollback, a bounded Docker call that ran out of time: 124 when
+# the TERM ended it, 137 when it ignored the TERM and the KILL did.
+note_rollback_docker_timeout() {
+  [[ -n "$rollback_docker_deadline" ]] || return 0
+  [[ "$1" != 124 && "$1" != 137 ]] || rollback_docker_timed_out=1
+}
+
 # rollback_docker
 #
-# Containers down while docker-compose.yml is still in place, then each
-# volume this attempt created removed by its exact name -- never a wildcard,
-# a prune or `down --volumes`, which would take a volume that predates this
-# attempt. Only after `compose up` was tried: nothing earlier creates a
-# container or a volume. Returns 1 when something could not be removed.
+# This attempt's volumes listed, then the containers down while
+# docker-compose.yml is still in place, then each listed volume removed by
+# its exact name -- never a wildcard, a prune or `down --volumes`, which
+# would take a volume that predates this attempt. Only after `compose up`
+# was tried: nothing earlier creates a container or a volume. Returns 1
+# when something could not be removed.
 rollback_docker() {
   local name
   local -a created=()
   [[ "$compose_started" == 1 ]] || return 0
-  # The containers are being removed, so a short stop loses nothing, and
-  # the rollback ends inside the launcher's 15 s wait.
-  if ! compose down --remove-orphans --timeout 5 >/dev/null 2>&1; then
-    # The containers may still be running and using the volumes, so the
-    # volumes are left: the one stop command removes this attempt's once
-    # the containers are gone. `docker volume ls` works either way.
+  # Listed before `down`, the step most likely to hang, so a failed `down`
+  # still knows which volumes the stop command must remove. The volumes
+  # exist once `compose up` ran, so this list is already complete. Each
+  # call's cap (listing 5 s, down 6 s, each removal 5 s) fits inside the
+  # 8 s deadline rollback_fresh_install sets, which they all share.
+  if ! created_deployment_volumes created; then
+    # A daemon that cannot list in 5 s will not stop the containers in the
+    # time left; the printed stop command does that later.
+    rollback_volumes_unlisted=1
     rollback_down_failed=1
-    created_deployment_volumes rollback_down_volumes || rollback_down_volumes=()
     return 1
   fi
-  # Not listed: print_rollback_obstacles says so.
-  if ! created_deployment_volumes created; then
-    rollback_volumes_unlisted=1
+  # The containers are being removed, so a short stop loses nothing: 2 s
+  # to stop, the rest of the 6 s to kill and remove them and the network.
+  if ! bounded_docker 6 compose --project-name "$compose_project_name" --env-file "$environment_file" \
+    down --remove-orphans --timeout 2 >/dev/null 2>&1; then
+    # The containers may still be running and using the volumes, so the
+    # volumes are left: the one stop command removes them once the
+    # containers are gone.
+    rollback_down_failed=1
+    rollback_down_volumes=("${created[@]}")
     return 1
   fi
   for name in "${created[@]}"; do
-    docker volume rm -- "$name" >/dev/null 2>&1 || rollback_failed_volumes+=("$name")
+    bounded_docker 5 volume rm -- "$name" >/dev/null 2>&1 || rollback_failed_volumes+=("$name")
   done
   ((${#rollback_failed_volumes[@]} == 0))
 }
@@ -1520,8 +1587,10 @@ rollback_files() {
 # Sets rollback_action: `retry` when installing again can work (after the
 # one command, when there is one), `abort` when the folder could not be put
 # back. A second interrupt does not stop it half-way: INT, TERM and HUP are
-# caught (not ignored, so a hung Docker call still dies of them) until it
-# ends.
+# caught (not ignored, which every child would inherit) until it ends; a
+# signal waits for the current Docker call. All its Docker calls share one
+# 8 s deadline: the launcher kills 15 s after its TERM, a TERM landing in a
+# bounded probe may already have cost 6 s, and the last kill-after adds 1 s.
 rollback_fresh_install() {
   local status=0 stop_dir
   rollback_obstacles=()
@@ -1538,7 +1607,13 @@ rollback_fresh_install() {
   rollback_stop_command=""
   trap 'rollback_interrupted=130' INT; trap 'rollback_interrupted=143' TERM; trap 'rollback_interrupted=129' HUP
   installer_ui_event rollback installer running rollback rollback 2>/dev/null || true
+  rollback_docker_timed_out=0
+  rollback_docker_deadline=$((SECONDS + 8))
   rollback_docker || status=1
+  rollback_docker_deadline=""
+  # First in the report, so it precedes the obstacles it explains.
+  [[ "$rollback_docker_timed_out" != 1 ]] ||
+    rollback_report+=("Docker did not finish within 8 s, so the rollback stopped waiting for it; what it could not do is named below. Once Docker is answering again (check that it is running and its disk is not full), run the command below.")
   rollback_files || status=1
   if [[ "$rollback_down_failed" == 1 ]]; then
     stop_dir="$target_dir"
@@ -1648,7 +1723,11 @@ print_rollback_obstacles() {
     printf 'Orbit installer: This install could not be fully rolled back: the containers could not be stopped. The folder is as it was before%s%s; what this install wrote is kept in %s so the containers can still be stopped.\n' \
       "$(rollback_unit_clause)" "$(rollback_moved_phrase)" "$(printf '%q' "${backup_dir}/engine")" >&2 || true
     printf 'Orbit installer: Run this in a terminal, then install again:\n%s\n' "$rollback_recovery_command" >&2 || true
-    ((${#rollback_down_volumes[@]} > 0)) || printf 'Orbit installer: %s\n' "$no_volume_line" >&2 || true
+    if [[ "$rollback_volumes_unlisted" == 1 ]]; then
+      printf 'Orbit installer: The volumes this install created could not be listed. %s\n' "$no_volume_line" >&2 || true
+    elif ((${#rollback_down_volumes[@]} == 0)); then
+      printf 'Orbit installer: %s\n' "$no_volume_line" >&2 || true
+    fi
   elif ((${#rollback_failed_volumes[@]} > 0)); then
     for name in "${rollback_failed_volumes[@]}"; do
       printf 'Orbit installer: This install could not be fully rolled back: the volume %s could not be removed.\n' "$name" >&2 || true
@@ -2012,6 +2091,9 @@ pull_confirmed_model() {
   again="$(shell_words docker compose --env-file "$environment_file" --profile ai-model-pull run --rm orbit-ollama-model-pull)"
   if [[ "$optional_interrupted" != 1 ]]; then
     installer_ui_event optional ollama running service-preparation pull
+    # A killed earlier run can leave this container behind; Docker refuses
+    # a second one under the same name, so every retry would fail.
+    timeout --signal=TERM --kill-after=1s 15s docker rm -f -- "$container" </dev/null >/dev/null 2>&1 || true
     # A background child, so an interrupt can stop the download (#1456
     # ruling); its words go to a private file, as a pipe would need a
     # foreground command substitution.
@@ -2059,10 +2141,10 @@ print_completion_screen() {
   printf 'Status: docker compose --env-file %s ps\n' "$environment_file"
   printf 'Logs: docker compose --env-file %s logs --tail 200\n' "$environment_file"
   # ADR-0022 section 1: the claim is generated in the running process's
-  # memory only and printed once, as the last line of the container's own
-  # start-up log -- it has no file, no Compose secret and no installer-visible
+  # memory only and printed once, by the application after its start-up
+  # reports, in the container's own log -- it has no file, no Compose secret and no installer-visible
   # form, so this is a pointer to where to read it, never the code itself.
-  printf 'Claim this instance: run "docker compose --env-file %s logs orbit-app" and open the link on its last line to create the first administrator.\n' "$environment_file"
+  printf 'Claim this instance: run "docker compose --env-file %s logs orbit-app" and open the claim link it prints to create the first administrator.\n' "$environment_file"
   # #968 (slice 1 of #966): a hard block here was considered and rejected --
   # it would fail an offline install -- so this is an instruction, not a
   # gate. The administration screen carries its own persistent reminder

@@ -46,7 +46,40 @@
   /* A slow arrival at a screen that says so (#1465): About, for now. */
   import NavigationBusy from "$lib/NavigationBusy.svelte";
 
+  import { onMount } from "svelte";
+  import { page } from "$app/state";
+  import { readSession, savePreferences } from "$lib/data/workspace.js";
+  import { applyTheme } from "$lib/theme-swatches.js";
+  import { applyTextSize } from "$lib/text-size.js";
+  import { decideSync, markSynced, readCache } from "$lib/preferences-sync.js";
+  import { picksMade } from "$lib/pick.js";
+
   let { children } = $props();
+
+  /* The server is the source of truth for theme and text size (#1180);
+     localStorage is only the pre-paint cache of it (app.html). Once the
+     session is read, both are applied and the cache refreshed. Read only for
+     a signed-in reader: the session route answers 401 to anyone else, and
+     the signed-out door keeps using the cache. A failed read changes nothing. */
+  onMount(async () => {
+    if (!page.data?.signedIn) return;
+    try {
+      const picksBefore = picksMade();
+      const session = await readSession();
+      /* A pick made while the read was in flight is newer than the server. */
+      if (picksMade() !== picksBefore) return;
+      const user = /** @type {{ themeId?: string, textSize?: string } | undefined} */ (session.user ?? undefined);
+      if (!user) return;
+      /* user.themeId and user.textSize cannot say "never chosen" (see
+         preferences-sync.js): a default on the server beside a different cached
+         choice, on a browser that has not synced, keeps the cache and sends it up. */
+      const decision = decideSync(user, readCache());
+      applyTheme(decision.theme);
+      applyTextSize(decision.textSize);
+      if (decision.push) await savePreferences(decision.push);
+      markSynced();
+    } catch { /* keep the cached look */ }
+  });
 </script>
 
 {@render children()}

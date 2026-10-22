@@ -500,6 +500,12 @@ not in use <FIELD>
   `Unfixable` and never turns the exit status non-zero.
 - `<FIELD>` is always a fixed name, never a configured value: `--check` never
   discloses secrets, URLs or other configured content, by field name alone.
+- `warning ORBIT_MEMORY_LIMIT ...` is a sentence for the operator, printed
+  only when the limit is below 1g (it still starts, but a maximum-size
+  import can be stopped part-way). It is more than two tokens, so the parser
+  above discards it; it never turns the exit status non-zero. The install
+  and update engine says every `warning ` line in the installer window once
+  the readiness gate passes.
 - Exit status is non-zero whenever any line reports `missing`, zero
   otherwise.
 
@@ -541,10 +547,16 @@ value is present but invalid; nothing is printed when it is absent or valid:
 
 ```
 session-ttl
+memory-limit
 ```
 
 `session-ttl` is `SESSION_TTL_SECONDS` set to anything other than a whole
 number of seconds from 900 to 2592000 (15 minutes to 30 days).
+`memory-limit` is `ORBIT_MEMORY_LIMIT` set to anything outside Compose's size
+grammar: a number (decimals allowed), one optional space, then an optional unit
+`b`, or `k`, `m`, `g`, `t` or `p` optionally followed by `b` or `ib`, any case,
+all 1024-based (such as `2g`, `3.5g`, `1.5GiB` or `2048m`); empty counts as
+absent.
 
 ### Consumer guidance
 

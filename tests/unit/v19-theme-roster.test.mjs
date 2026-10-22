@@ -76,7 +76,7 @@ describe("the theme roster, from one source (#865)", () => {
   });
 
   it("app.html's <html> starts on the same default the roster names", () => {
-    const match = /<html lang="en" data-theme="([\w-]+)">/.exec(APP_HTML);
+    const match = /<html lang="en" data-theme="([\w-]+)"[^>]*>/.exec(APP_HTML);
     expect(match, "app.html's <html data-theme>").toBeTruthy();
     expect(match[1]).toBe(DEFAULT_THEME);
   });
@@ -117,5 +117,15 @@ describe("every [data-theme=...] selector names a pack that exists (#1047)", () 
       }
     }
     expect(strays, "selectors naming a pack theme.js does not declare").toEqual([]);
+  });
+});
+
+describe("app.html carries the text-size literal beside the theme one (#1180)", () => {
+  it("reads orbit-text-size against the four steps and starts on comfortable", () => {
+    const match = /localStorage\.getItem\("orbit-text-size"\)[\s\S]{0,200}?\[([^\]]+)\]/.exec(APP_HTML);
+    expect(match, "app.html's text-size list").toBeTruthy();
+    const list = match[1].split(",").map((entry) => entry.trim().replace(/^"|"$/g, ""));
+    expect(list).toEqual(["standard", "comfortable", "large", "extra-large"]);
+    expect(/<html\b[^>]*\sdata-text-size="comfortable"/.test(APP_HTML)).toBe(true);
   });
 });

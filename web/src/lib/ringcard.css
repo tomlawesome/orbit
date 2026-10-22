@@ -221,10 +221,10 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
    blur, no border, no shadow of its own, because the ring is the card. */
 
 :where(.arrival, .ringcard) .field{margin-bottom:18px}
-:where(.arrival, .ringcard) .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-quiet);
+:where(.arrival, .ringcard) .field label{display:block;font:0.65625rem var(--mono);letter-spacing:.12em;color:var(--ink-quiet);
              text-transform:uppercase;margin:0 0 6px}
 :where(.arrival, .ringcard) .field input,:where(.arrival, .ringcard) .field select{width:100%;background:var(--panel);border:1px solid var(--line);
-       border-radius:9px;color:var(--ink);font-size:13.5px;padding:10px 12px;font-family:var(--ui)}
+       border-radius:9px;color:var(--ink);font-size:0.84375rem;padding:10px 12px;font-family:var(--ui)}
 :where(.arrival, .ringcard) .field input::placeholder{color:var(--ink-quiet)}
 :where(.arrival, .ringcard) .field input:focus,:where(.arrival, .ringcard) .field select:focus{border-color:var(--accent)}
 :where(.arrival, .ringcard) .field select{appearance:none;-webkit-appearance:none;padding-right:30px}
@@ -264,7 +264,7 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
    The door's cards have no journey to settle: a wrong claim code or a wrong
    password is answered where it happened, so they mark the line itself
    (#914). Same line, same warm tone, same entrance. */
-.err{display:none;font:11px var(--mono);color:var(--warm);letter-spacing:.02em;
+.err{display:none;font:0.6875rem var(--mono);color:var(--warm);letter-spacing:.02em;
      line-height:1.7;margin-top:8px}
 .err.shown{display:block;animation:errin .35s ease}
 @keyframes errin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
@@ -276,7 +276,7 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
 /* the one quiet line under the fields: on the create card it admits to the
    four sections nobody asked for; on the claim card it says where the code
    is; in create mode it carries the one identity-provider sentence (§2.7). */
-:where(.arrival, .ringcard) .note{font:10.5px var(--mono);color:var(--ink-quiet);letter-spacing:.05em;
+:where(.arrival, .ringcard) .note{font:0.65625rem var(--mono);color:var(--ink-quiet);letter-spacing:.05em;
       margin:-4px 0 20px}
 :where(.arrival, .ringcard) .card .note{color:#8f9bb5;text-align:center}
 /* A command or an address inside that line, lifted a shade out of it and no
@@ -284,7 +284,7 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
    this size reads as shouting rather than as emphasis. */
 :where(.arrival, .ringcard) .card .note b{font-weight:400;color:#c0cade}
 
-.btn{width:100%;font:600 14px var(--display);color:var(--bg);background:var(--accent);
+.btn{width:100%;font:600 0.875rem var(--display);color:var(--bg);background:var(--accent);
      border:0;border-radius:11px;padding:12px 24px;cursor:pointer;
      transition:filter .3s ease,opacity .3s ease}
 /* #1131: --bg on --accent is 3.03:1 on dawn/clouds, same pair the pocket kit
@@ -305,7 +305,7 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
    beats `.btn` in every state: (0,2,0) plain, (0,4,0) on hover, (0,3,0)
    disabled, against `.btn`'s (0,1,0)/(0,2,0)/(0,2,0). */
 :where(.arrival) #gobtn,:where(.arrival, .ringcard) .card .act{display:block;margin:20px auto 0;width:auto;
-       font:600 12px var(--display);color:#04060e;background:#d8b45a;
+       font:600 0.75rem var(--display);color:#04060e;background:#d8b45a;
        border:0;border-radius:99px;padding:11px 30px;cursor:pointer;
        letter-spacing:.04em;line-height:normal;
        box-shadow:0 0 28px rgba(216,180,90,.22);
@@ -323,7 +323,7 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
    smaller or fainter than text the card already carries — with the underline
    that says it can be pressed. Neither is a second gate: there is one pill on
    any screen, and this is not it. */
-.quietline{font:10.5px var(--mono);color:#8f9bb5;letter-spacing:.05em;
+.quietline{font:0.65625rem var(--mono);color:#8f9bb5;letter-spacing:.05em;
       background:none;border:0;padding:6px 4px;cursor:pointer;
       text-decoration:underline;text-underline-offset:3px;
       text-decoration-thickness:1px;text-decoration-color:rgba(216,180,90,.5);
@@ -354,7 +354,7 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
    face and a little air under the sentences. The one control it does carry is
    `.quietline`, which is already the card's voice for an offer. */
 :where(.ringcard) .card.waiting{text-align:center}
-:where(.ringcard) .card.waiting .waiting-head{font:600 15px var(--display);color:var(--ink);
+:where(.ringcard) .card.waiting .waiting-head{font:600 0.9375rem var(--display);color:var(--ink);
       letter-spacing:.01em;margin:0 0 14px}
 :where(.ringcard) .card.waiting .note{margin:0 0 14px;line-height:1.9}
 :where(.ringcard) .card.waiting .waiting-resend{margin-bottom:0}

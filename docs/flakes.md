@@ -137,13 +137,6 @@ skill).
 
 - 2026-09-18 · `fix/m9-surface-bugs` · local `pnpm run test` (whole unit suite, 270 files in parallel) · both timed out at 5000 ms in the full run, then passed together in isolation (32/32, ~4.5 s for both files) on unchanged code. The full run was under heavy load (import phase 239 s, tests 833 s), so this reads as scheduler starvation rather than anything in either test — neither file changed on this branch. First sighting of each; no issue yet (an issue on the third, per the testing-and-ci skill).
 
-## local-sign-in.test.ts "spends a real derivation whichever of the four cases it is" — #1476
-
-- 2026-09-19 · 9ccca49 (!950, none of it near sign-in) · pipeline 1278 / `integration` job 16683 · `expect(Math.max(...times)).toBeLessThan(Math.min(...times) * 6)` — the four attempts' elapsed times spread wider than 6×. Retried on the same commit as job 16708 and passed. The assertion measures wall-clock on a shared, loaded runner; its own comment (`tests/integration/local-sign-in.test.ts:283-285`) says a strict bound "would measure the runner rather than the code", and the host was writing at 80–160 MB/s under another tenant at the time.
-- 2026-10-10 · cd964294 (!1052; its only changes since 8b9bf878, whose `integration` job 34067 passed, are e2e specs and one unit test) · pipeline 2341 / `integration` job 34109 · the same assertion, now in the test named "answers an unknown address, a wrong password, a disabled account and a passwordless account alike" (`tests/integration/local-sign-in.test.ts:288`): 1310.7 ms against a 1244.3 ms bound (6× the fastest attempt). Retried as job 34121. Second sighting.
-- 2026-10-18 · 5bfff8b6 (!1074; its only server change is the About cache, which this test does not reach) · pipeline 2688 / `integration` job 36970 · the same assertion: 2610.2 ms against a 2300.5 ms bound. Third sighting; filed #1476.
-- 2026-10-18 · c9df1a49 (!1074, no sign-in change; the integration suite does not load the server start-up where the About warm-up lives) · pipeline 2691 / `integration` job 36995 · same assertion: 1546.3 ms against a 1490.5 ms bound. Fourth sighting.
-
 ## v19-keyboard.spec.ts:568 "administration: the local-user controls are reachable and announced"
 
 - 2026-09-19 · d0d5b47 (+ #1062's uncommitted end-cap focus-ring work, none of it near administration) · local `scripts/test-e2e-local.sh --spec tests/e2e/v19-keyboard.spec.ts --project desktop-chromium` · the "send a new setup link" button was not found at all: `expect(locator).toHaveAttribute` on `.person` filtered to the row that is not "· you", timing out at 5s with "element(s) not found". The other 22 tests in the run passed. The same test passed on the same code in CI — pipeline 1281 / smoke (job 16738), `✓ 111 [desktop-chromium] ... (3.1s)` — where the run's only two failures were the belt end-caps #1062 was fixing. So the row either had no second person or had not rendered when the assertion looked, rather than the control being missing. First sighting; no issue yet (an issue on the third, per the testing-and-ci skill).
@@ -619,7 +612,28 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## preview.test.ts:760 "renderDocumentPagePreview > the page is drawn in the sandbox, never on the server's own thread (#1427) > draws a 300 dpi A4 scan to a PNG of the page's shape"
 
 - 2026-10-20 · 0469e455 (the accepted v0.3.0 commit, unchanged since preview pipeline 2677 passed every job first time) · pipeline 2774 / fast (job 37576), the stable-promotion run on `main`, with the !1078 pipeline and five local agent stacks on the same host · `Orbit could not draw a picture of this document` from the sandboxed renderer, in a 449 s `fast` run. Retried as job 37634. First sighting.
+- 2026-10-22 · 2b120e89 (signing-image re-pin and cosign bump only since the green bea1293c run; nothing near documents) · local `scripts/test-backend.sh`, worktree `v031-parts`, while a base-image rebuild ran on the same host · same message, in a 919 s run; the file alone passed at once (40.9 s with the test below). Second sighting.
 
 ## validation.test.ts "structural document classification > classifies unsupported %PDF-1.7 ... as unsupported_structure"
 
 - 2026-10-20 · 0469e455 · pipeline 2774 / fast (job 37576), same run as the sighting above · timed out at the 5 s default. Wall-clock-under-load shape. First sighting.
+
+## sign-out-descent.spec.ts:195 "sign out from home's menu reaches the dusk (narrow desk, as the browser is)" and "(wide desk, as the browser is)" on desktop-webkit
+
+- 2026-10-21 · 8a841e3c (!1074) · pipeline 2833 / `smoke_webkit` job 38057 · both cases failed first and passed on Playwright's retry in the same run ("2 flaky"), which fails the job; green on pipeline 2834 (b331397f, installer-only change, nothing under `web/`). First sighting.
+
+## local-sign-in.spec.ts:352 "no sign-in card sits over the chooser and the count" — desktop-chromium
+
+- 2026-10-21 · b331397f (!1074; installer-only change since the green 8a841e3c run) · pipeline 2834 / `smoke_local_only` job 38082 · "the chooser: the frame sampler never saw the newcomer's frame"; passed on the retried job 38096, same commit. First sighting.
+
+## settings-text-size-tab-stop.test.mjs:128 "settings, phone layout: the text size tab stop starts on the applied step > with standard applied, the one tab stop is the ticked tile"
+
+- 2026-10-22 · 2b120e89 (nothing near settings since the green bea1293c run) · local `scripts/test-backend.sh`, same 919 s run as preview.test.ts:760's second sighting · timed out at the 5 s default; the file alone passed at once. Wall-clock-under-load shape. First sighting.
+
+## sign-out-descent.spec.ts:274 "sign out from another page's menu plays the descent (wide desk)" on desktop-firefox
+
+- 2026-10-22 · 39134f33 (!1081) · pipeline 2875 / `smoke_firefox` job 38354 · "#1253: the page is still showing over the dusk", 10 s predicate timeout; passed on Playwright's retry in the same run. First sighting for this variant and browser.
+
+## v19-axe-sweep.spec.ts:388 "the signed-in v19 sweep › /settings/mail has no automated WCAG A/AA violations" on desktop-firefox
+
+- 2026-10-22 · 39134f33 (!1081) · pipeline 2875 / `smoke_firefox` job 38354 · failed its first attempt, passed on Playwright's retry in the same run. The same screen as the layout-and-themes axe flake above, from the sweep spec. First sighting.

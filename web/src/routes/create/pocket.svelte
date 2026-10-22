@@ -8,7 +8,7 @@
     unsavedWords, wordsOf,
   } from "$lib/data/workspace.js";
   import {
-    CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
+    CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
     suggestionsToCarry,
   } from "$lib/data/document-read.js";
   import Sheet from "$lib/pocket/Sheet.svelte";
@@ -40,6 +40,8 @@
    * `?name=` prefills the name (search's `add "x" as an item`, §2.4).
    */
 
+  /* #1459: false when the instance has no TIKA_URL; nothing is asked to be read. */
+  let { documentReading = true } = $props();
   /** @type {import('./entry.js').FormHousehold[]} */
   let households = $state([]);
   let phase = $state(/** @type {"loading" | "ready" | "none" | "failed"} */ ("loading"));
@@ -141,6 +143,8 @@
     picked.scanned = false;
     picked.refused = true;
     picked.read = true;
+    /* A refusal replaces whatever the read said, as the desk clears its line. */
+    picked.message = "";
     settle(FOCUS_REFUSED, why);
   }
 
@@ -155,8 +159,9 @@
     const current = () => reading === controller && attachment === file;
     picks += 1;
     picked = {
-      key: picks, name: file.name, size: file.size, page: null, scanned: false, refused: false,
-      settled: false, line: FOCUS_SCANNING, why: WHY_READING, read: false, caption: CAP_READING,
+      key: picks, head: documentReading ? undefined : CHECKING_HEAD, name: file.name, size: file.size, page: null, scanned: false, refused: false,
+      settled: false, line: FOCUS_SCANNING, why: documentReading ? WHY_READING : WHY_CHECKING, read: false, caption: documentReading ? CAP_READING : CAP_ATTACHED,
+      message: "",
     };
     const householdId = entry.householdId;
     if (!householdId) return;
@@ -167,7 +172,7 @@
       if (!current() || !picked || picked.page || picked.settled) return;
       picked.line = focusAfterScan(scanned);
     };
-    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned });
+    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned, documentReading });
     /** @type {string | null} */
     let undrawable = null;
 
@@ -205,6 +210,9 @@
         carried = carry.length;
       }
       picked.caption = captionOf(outcome, carried);
+      /* The server's words about the read, as the desk shows them under its
+         caption (e.g. nothing could be extracted). */
+      picked.message = outcome.kind === "read" || outcome.kind === "unread" ? outcome.message : "";
       picked.read = true;
       if (undrawable) settle(FOCUS_UNDRAWABLE, undrawable);
     });
