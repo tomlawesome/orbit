@@ -157,7 +157,7 @@ variables:
   # measurement of this image. Two pins move together: bumping
   # PLAYWRIGHT_IMAGE means rebuilding there first and re-pinning here.
   # Not ORBIT_CI_IMAGE, which is the tag `build_image` builds under.
-  ORBIT_ACCEPTANCE_IMAGE: registry.tomlawson.io/ai/orbit-base-image/ci@sha256:19409de802ca170bc69b02e3cfc0c46850819cfb71407799455174957255b117
+  ORBIT_ACCEPTANCE_IMAGE: registry.tomlawson.io/ai/orbit-base-image/ci@sha256:5831d1bf3b265f7de3a9df687c51724769daff68a6f8a3cca365a5114e72a8f9
   # sign_evidence's image (#1368): the Docker CLI plus bash, curl, node and
   # the pinned cosign, built and scanned by ai/orbit-base-image's
   # `build_signing`/`scan_signing`/`publish_signing` from its
@@ -168,9 +168,9 @@ variables:
   # digest from that pipeline's published-signing-digest.txt artifact.
   # First publish: ai/orbit-base-image pipeline 2406, job publish_signing
   # 34555 (cosign v3.1.3, docker 29.9.0 CLI), 2026-10-10.
-  # Current: pipeline 2863, job publish_signing 38280 (cosign v3.1.4,
+  # Current: pipeline 2867, job publish_signing 38298 (cosign v3.1.4,
   # docker 29.9.2 CLI), 2026-10-22.
-  ORBIT_SIGNING_IMAGE: registry.tomlawson.io/ai/orbit-base-image/signing@sha256:fa1787aedd5a40dd57c407b0a10f5b0b952b5894efddbb495c029333a4e50d2f
+  ORBIT_SIGNING_IMAGE: registry.tomlawson.io/ai/orbit-base-image/signing@sha256:21dad4f1976d1118e1a142b82bebc7b7eaf76f242f39edb14790543c3c2661f3
   # build_launcher's job image (ADR-0031 #3): at least the Go version in
   # launcher/pin.json's go.mod (go 1.27.2 at the pin this repository
   # currently carries). 1.27.3 fixes CVE-2026-111943 (crypto/x509 refuses the
