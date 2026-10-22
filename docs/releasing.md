@@ -84,11 +84,23 @@ checks that `main` and `preview` are the exact same commit.
 
 Each `preview` build carries one calculated version number.
 `scripts/calculate-version.mjs` reads the highest existing stable
-`vMAJOR.MINOR.PATCH` Git tag; an ordinary `preview` train increments minor and
-resets patch, and a `hotfix/*` train increments patch. Nobody types the
-version in, at preview time or at promotion time. Stable promotion reads it
-back out of the accepted image and runs the same calculation again to confirm
-the two agree.
+`vMAJOR.MINOR.PATCH` Git tag and increments the patch, for an ordinary
+`preview` train and a `hotfix/*` train alike (v0.3.0, then v0.3.1). Nobody
+types the version in, at preview time or at promotion time. Stable promotion
+reads it back out of the accepted image and runs the same calculation again
+to confirm the two agree.
+
+**Starting a new minor or major line.** `scripts/release-line.json` names the
+line releases from `dev` belong to, for example `"line": "v0.3"`. To start
+v0.4, set it to `"v0.4"` on `dev` before promoting: the next `preview` train
+is then v0.4.0, and the ones after it v0.4.1, v0.4.2 with the same setting, so
+it never needs resetting. A line at or below the latest release changes
+nothing, and a `hotfix/*` train ignores it. A missing or malformed file stops
+the build rather than guessing (#1499).
+
+Because both kinds of train now take the next patch, a hotfix and a preview
+can compute the same version. Whichever is promoted second is refused at step
+5 below (its version no longer matches the recalculation) and is rebuilt.
 
 ## Validation evidence and the publication split
 
