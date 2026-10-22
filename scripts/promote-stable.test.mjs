@@ -32,7 +32,9 @@ const REGISTRY_IMAGE = "registry.tomlawson.io/ai/orbit";
 const GOOD_SHA = "a".repeat(40);
 const PREVIEW_DIGEST = `sha256:${"1".repeat(64)}`;
 const OTHER_DIGEST = `sha256:${"2".repeat(64)}`;
-const VERSION = "v1.4.0";
+// The next version after stable v1.3.0 under the real scripts/release-line.json
+// (a line below v1.4, so a patch: #1499).
+const VERSION = "v1.3.1";
 const GHCR_TOKEN = "TEST-GHCR-TOKEN-NOT-REAL";
 const GITLAB_TOKEN = "TEST-GITLAB-TOKEN-NOT-REAL";
 const REGISTRY_PASSWORD = "TEST-REGISTRY-PASSWORD-NOT-REAL";
@@ -367,7 +369,7 @@ describe("scripts/ci/promote-stable.sh", () => {
   });
 
   it("refuses when the calculated version disagrees with the image's version label", () => {
-    // v1.3.0 already stable => the next preview-channel version is v1.4.0,
+    // v1.3.0 already stable => the next preview-channel version is v1.3.1,
     // not the v1.9.0 this image claims.
     const { result } = run({ labelVersion: "v1.9.0", embeddedVersion: "v1.9.0", reportedVersion: "Orbit v1.9.0" });
     expect(result.status).not.toBe(0);
