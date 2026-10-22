@@ -193,7 +193,7 @@ variables:
   # mirror.gcr.io that 403'd above.
   TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db:1
   # The digest scripts/test-integration.mjs pins for its disposable database.
-  POSTGRES_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/postgres:18-alpine@sha256:d8703cd7fba306b9fec9268ecedfa8a966846c053036a60e3635791957eb2f66
+  POSTGRES_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/postgres:18-alpine@sha256:3b0ef735388b2cb097fc29b8bb421d86d57d0ddbe7aa1fbd6493e06d65028503
   # scripts/ci/start-installer-registry.sh's disposable loopback registry
   # (acceptance, repair_journeys via its own copy below, and
   # launcher_install_compat all start it). Through the group dependency proxy,

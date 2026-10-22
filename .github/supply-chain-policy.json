@@ -933,28 +933,6 @@
     {
       "kind": "vulnerability",
       "scope": "image",
-      "id": "CVE-2026-92392",
-      "package": "libcurl3t64-gnutls",
-      "installedVersion": "8.18.0-1ubuntu2.7",
-      "owner": "Orbit maintainers",
-      "rationale": "curl library in apache/tika:4.1.0-full; the distribution fixed it in 8.18.0-1ubuntu2.8 (USN-8927-1) on 2026-10-14, but 4.1.0-full is still the newest release tag and has not been rebuilt since 2026-09-29. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-92392",
-      "package": "libcurl4t64",
-      "installedVersion": "8.18.0-1ubuntu2.7",
-      "owner": "Orbit maintainers",
-      "rationale": "curl library in apache/tika:4.1.0-full; the distribution fixed it in 8.18.0-1ubuntu2.8 (USN-8927-1) on 2026-10-14, but 4.1.0-full is still the newest release tag and has not been rebuilt since 2026-09-29. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
       "id": "CVE-2026-102276",
       "package": "brace-expansion",
       "installedVersion": "5.0.9",
@@ -1024,8 +1002,8 @@
     {
       "name": "PostgreSQL database",
       "tag": "postgres:18-alpine",
-      "reference": "postgres:18-alpine@sha256:d8703cd7fba306b9fec9268ecedfa8a966846c053036a60e3635791957eb2f66",
-      "indexDigest": "sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873",
+      "reference": "postgres:18-alpine@sha256:3b0ef735388b2cb097fc29b8bb421d86d57d0ddbe7aa1fbd6493e06d65028503",
+      "indexDigest": "sha256:83148c0bc09eac4d598b70a61e1404d0212b76c95c504bfd6c81a4c59ec91792",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml",
@@ -1038,7 +1016,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/docker-library/postgres/blob/master/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-09-24",
+      "resolvedOn": "2026-10-22",
       "reviewBy": "2026-10-30"
     },
     {
@@ -1062,8 +1040,8 @@
     {
       "name": "Apache Tika parser",
       "tag": "apache/tika:4.1.0-full",
-      "reference": "apache/tika:4.1.0-full@sha256:d7607239d4e9c2dc1fd396f41a370576a334aef28f767e5bc5511247a1e1adf7",
-      "indexDigest": "sha256:ab9cc988828c594d32d6409e1850d1c8d83152ea793ef5fe0e7862ac0f9e5891",
+      "reference": "apache/tika:4.1.0-full@sha256:1ae28c75a88fd4c4f583711520923bba44548e8bc3d2fc4671b2a3e24e0d59dd",
+      "indexDigest": "sha256:d69fab827fa004a5e1db786e6d78da947a6cfeedbf595bc5c353ef99622bb2e2",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml",
@@ -1074,7 +1052,7 @@
       "license": "Apache-2.0",
       "licenseSource": "https://github.com/apache/tika-docker/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-01",
+      "resolvedOn": "2026-10-22",
       "reviewBy": "2026-10-30"
     },
     {
