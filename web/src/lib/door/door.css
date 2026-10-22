@@ -13,6 +13,8 @@
  *                             Every rule for it hangs off that one class, so a dusk without it matches none of them. It
  *                             takes the dawn's measures and lit look (the dawn's rules above and below, widened to it),
  *                             follows html.rich as the dawn does, and needs no more of the host than the dawn does
+ *   .release                  the release tag under the wordmark (dawnMarkup/duskMarkup({ tag })): `.release[data-channel]`
+ *                             with an optional `.build` span; styled to the name's measure (--R, where the surface sets it)
  * What it gives the host: the keyframes driftf, driftn (a tiled sky's drift) and spinback (a lap of the ring),
  * which the site's own sky and hub also use.
  */
@@ -234,3 +236,23 @@ body.farewell #dusk.asdawn .farewell{opacity:1;transform:translateX(-50%)}
     font-size:13px;line-height:1.7;letter-spacing:.04em;color:#9aa0b8;text-shadow:0 1px 5px rgba(4,6,14,.9)}
   #dusk.asdawn .gate{position:relative;top:calc(26px + 2 * 13px * 1.7 + 24px - var(--R) * .34)}
 }
+
+/* ══ THE RELEASE TAG (#63; a host option: dawnMarkup({ tag }) / duskMarkup({ tag })): a word under the name ══ */
+.lockup .release{grid-area:1/1;align-self:start;justify-self:center;position:relative;z-index:4;pointer-events:none;white-space:nowrap;text-align:center;
+  font:500 clamp(11px,calc(var(--R,400px) * .036),13px) var(--mono);line-height:1;letter-spacing:.2em;text-transform:lowercase;color:#9aa0b8;text-shadow:0 1px 6px rgba(4,6,14,.85);
+  max-width:calc(var(--R,400px) * .5);overflow:hidden;text-overflow:ellipsis;
+  padding:8px;margin:-8px;transform:translateY(calc(var(--R,400px) * .615))}
+/* (the 8px of padding, taken back by the same negative margin, is room for the glyphs' descenders and the glow inside the clip) */
+/* a test build: the channel on one line, the short commit on the line under it (owner, 2026-10-15) */
+.lockup .release .build{display:block;margin:calc(.6em - 8px) -8px -8px;padding:8px;letter-spacing:.14em;overflow:hidden;text-overflow:ellipsis}
+/* it comes up with the name, a beat behind it */
+#door .lockup .release{opacity:0;transition:opacity 1.1s ease .9s}
+body.lit #door .lockup .release{opacity:1}
+/* the site's plain goodbye has no --R and keeps its way back in inside the ring: the tag sits tight under the name and
+   the way back in drops 18px to make room */
+#dusk:not(.asdawn) .lockup .release{font-size:11px;max-width:calc(min(420px,84vw) * .55);transform:translateY(calc(min(420px,84vw) * .5 + clamp(24px,7vw,36px) + 7px))}
+#dusk:not(.asdawn) .lockup:has(.release) .gate-wrap{transform:translateY(min(94px,20vw))}
+/* (and keeps the tag on one line: with the way back in inside the ring there is no room for two on a phone) */
+#dusk:not(.asdawn) .lockup .release .build{display:inline;margin:0 0 0 .6em;padding:0;overflow:visible}
+/* a phone's goodbye-as-sign-in puts the farewell where the name was: the tag goes with the name */
+@media (max-width:599.98px),(max-height:479.98px){#dusk.asdawn .lockup .release{visibility:hidden}}

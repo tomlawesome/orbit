@@ -64,6 +64,7 @@ import { settings } from "./settings.js";
 export const T = {
   ...ASCENT_BASE,
   get instrumentAt() { return ASCENT_BASE.land + settings.settle; },
+  /** @returns {number} */
   get tourAt() { return this.instrumentAt + ASCENT_BASE.instrument + ASCENT_BASE.tourGap; },
 };
 
