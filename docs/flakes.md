@@ -402,10 +402,11 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_webkit` · failed once (49.6s), passed on retry. First sighting.
 
-## sign-out-descent.spec.ts:175 "sign out from home's menu reaches the dusk (phone-narrow, as the browser is)" on desktop-webkit
+## sign-out-descent.spec.ts:195 "sign out from home's menu reaches the dusk (phone-narrow, as the browser is)" on desktop-webkit — #1505
 
 - 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_webkit` · failed once (10.4s), passed on retry. First sighting.
 - 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / smoke_webkit (job 36178) · "(phone-narrow, world forced)" at line 193, desktop-webkit, failed once and passed on retry.
+- 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_webkit (job 38686) · failed once, passed on retry. Third sighting: filed as #1505.
 
 ## sign-out-descent.spec.ts:195 "sign out from home's menu reaches the dusk (phone-narrow, world forced)" on mobile-webkit, desktop-webkit — quarantined 2026-10-16 (agent-infra#30)
 
@@ -547,9 +548,10 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke_firefox (job 36099) · failed its first attempt, passed on the in-job retry. First sighting.
 
-## v19-mail-review.spec.ts:399 "the desk reads a staged paper's page one, from the suggestion's drawer and from the inbox ..." — desktop-firefox
+## v19-mail-review.spec.ts:398 "the desk reads a staged paper's page one, from the suggestion's drawer and from the inbox ..." — desktop-firefox
 
 - 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke_firefox (job 36099) · failed its first attempt, passed on the in-job retry. First sighting.
+- 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_firefox (job 38685) · failed once, passed on retry. Second sighting.
 
 ## v19-mail-review.spec.ts:431 "the phone sheet reads a staged paper's page one, and tells a gone mail apart from one it just cannot draw (#1155)" — mobile-webkit, marked expected-to-fail for #1196
 
@@ -572,11 +574,12 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-15 · a6168fe6 (!1069, v0.3 security batch) · pipeline 2640 / acceptance and repair_journeys (jobs 36463 and 36464), 20:46-20:54 UTC · both failed while moving artifacts, GitLab answering 502 or refusing connections; both passed on retry (jobs 36469 and 36470) with no change. First sighting.
 
-## v19-document-preview.spec.ts:370 "a one-page document's reader says "one page" and has no arrows" — desktop-webkit — #1503
+## v19-document-preview.spec.ts:370 "a one-page document's reader says "one page" and has no arrows" — desktop-webkit, desktop-chromium — #1503
 
 - 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit (job 36491), desktop-webkit · failed its first attempt (20.1 s), passed on the in-job retry. No error text printed: the job was cut off at its 30-minute timeout before the report. First sighting.
 - 2026-10-16 · 6f768016 (!1070, `dev` -> `preview`) · pipeline 2657 / smoke_webkit (job 36650), desktop-webkit · now at :370; failed once, passed on retry.
 - 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed once, passed on retry. Third sighting: filed as #1503.
+- 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke (job 38684), desktop-chromium · failed once, passed on retry. Now seen on Chromium too.
 
 ## v19-archive.spec.ts:273 "an armed desk button relaxes back after 4 s without a second tap (#1342)" — desktop-webkit
 
@@ -608,10 +611,11 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-18 · c9df1a49 (!1074) · pipeline 2691 / `smoke_webkit_mobile` job 37001, mobile-webkit · failed once, passed on retry. Second sighting, two pipelines in a row; the test is new on this branch.
 - 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed once, passed on retry. Third sighting: filed as #1502.
 
-## v19-document-preview.spec.ts:299 "the reader turns a multi-page document to its last page and back, by arrows and by keys" — desktop-webkit
+## v19-document-preview.spec.ts:299 "the reader turns a multi-page document to its last page and back, by arrows and by keys" — desktop-webkit, mobile-webkit — #1501
 
 - 2026-10-18 · c9df1a49 (!1074, no document-preview change) · pipeline 2691 / `smoke_webkit` job 37000 · failed once, passed on retry. First sighting.
 - 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed once, passed on retry. Second sighting.
+- 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_webkit (job 38686) and smoke_webkit_mobile (job 38687) · failed once in each, passed on retry. Third sighting: same family as #1501, fixed with it.
 
 ## preview.test.ts:760 "renderDocumentPagePreview > the page is drawn in the sandbox, never on the server's own thread (#1427) > draws a 300 dpi A4 scan to a PNG of the page's shape"
 
@@ -649,3 +653,11 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-mail-sender-check.spec.ts:123 "a member sends the check email from the settings mail screen, opens the link, and the relay starts listening" — desktop-webkit
 
 - 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed once (`toHaveURL` expected `/settings/mail$`, got `/settings/mail?sender=verified`), passed on retry. First sighting.
+
+## v19-create.spec.ts:1182 "dropping a new file after a refusal relabels the button 'not this one' and hides 'refused'" — desktop-webkit
+
+- 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_webkit (job 38686) · failed once, passed on retry. First sighting.
+
+## v19-explore-search.spec.ts:336 "Enter on the no-match add act carries the typed name to /create" — desktop-webkit
+
+- 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_webkit (job 38686) · failed once, passed on retry. First sighting.
