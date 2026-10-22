@@ -637,3 +637,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## mail-relay-sender-check-failures.test.ts "finding 1: a mailer that never answers > ends the request at the send deadline (shortened to 300 ms here) with a stable 503"
 
 - 2026-10-22 · 2f16facd (!1081; browser-test and flakes-log changes only since the green 39134f33 run, nothing near mail) · pipeline 2878 / `integration` job 38382 · `expected 429 to be 503`: the request met the rate limit instead of the send deadline. Retried as job 38407. First sighting.
+
+## tour-pocket-webkit.spec.js:1188 "the danger-zone ring pulses red while chapter 5 shows it (#1174 round 5) › on the desk, normal motion" on pocket-webkit
+
+- 2026-10-22 · 2f16facd (!1081; e2e-test and flakes-log changes only since the green 39134f33 run, nothing under `web/`) · pipeline 2878 / `fidelity_webkit` job 38381 · "the danger ring red, pulsing (or still, reduced) and gone after"; 23 others passed. Retried as job 38420. First sighting.
