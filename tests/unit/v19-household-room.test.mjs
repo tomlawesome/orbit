@@ -51,6 +51,7 @@ describe("the stars are the entries (the chart law, not a copy of it)", () => {
       ["Car MOT — Volvo V60", 16, "due-soon"],
       ["Boiler service", 22, "due-soon"],
       ["Chimney sweep", 61, "upcoming"],
+      ["Roof replacement", 100, "ok"],
       ["Smoke alarm batteries", 122, "ok"],
       ["Car full service", 161, "ok"],
     ]);
@@ -76,7 +77,7 @@ describe("the stars are the entries (the chart law, not a copy of it)", () => {
 
   it("joins each section's entries in date order, in that section's accent", () => {
     expect(harlow().figures).toEqual([
-      { id: "s-home", name: "Home", accent: "sage", icon: "home", members: ["i-gutter", "i-boiler", "i-chimney"] },
+      { id: "s-home", name: "Home", accent: "sage", icon: "home", members: ["i-gutter", "i-boiler", "i-chimney", "i-roof"] },
       { id: "s-vehicles", name: "Vehicles", accent: "blue", icon: "vehicle", members: ["i-mot", "i-svc"] },
     ]);
   });
@@ -109,12 +110,12 @@ describe("where you stand (the rule the mockup hand-placed)", () => {
     // has moved with them and the change is wrong (the placement.js pin, for
     // the placement.js reason).
     const placed = room(harlow().marks);
-    expect(placed.sun).toEqual([656.9, 428.9]);
-    expect(placed.scale).toBeCloseTo(4.7958, 4);
-    expect(placed.rings).toEqual({ sun: 76.7, overdue: 297.3, year: 719.8, rim: 806.1 });
+    expect(placed.sun).toEqual([647.6, 425.1]);
+    expect(placed.scale).toBeCloseTo(4.9019, 4);
+    expect(placed.rings).toEqual({ sun: 78.4, overdue: 303.9, year: 735.7, rim: 824 });
     expect(seaside().marks.length).toBe(3);
-    expect(room(seaside().marks).sun).toEqual([1013.5, 404.8]);
-    expect(room(seaside().marks).scale).toBeCloseTo(4.1941, 4);
+    expect(room(seaside().marks).sun).toEqual([1017.8, 418.9]);
+    expect(room(seaside().marks).scale).toBeCloseTo(4.2750, 4);
   });
 
   it("lands in the neighbourhood the mockup authored by hand", () => {

@@ -17,6 +17,8 @@
  *   farewell      the dusk's words: { said, sub }, TEXT: escaped, so a person's name in them is never markup. (lockup,
  *                 gate and foot are RAW HTML, put in as given: the host's own markup, never a person's words)
  *   asDawn        the dusk dressed as the sign-in (Orbit's goodbye): see duskMarkup. Off by default (the site's own)
+ *   tag           the release tag under the wordmark, TEXT: escaped, one string, the channel word first and the build
+ *                 after the first whitespace ("alpha", "beta", "preview 3f2a9c1"). Nothing by default: no tag, no change
  *   heading       whether the wordmark is the page's <h1> (the default) or a plain <div class="name"> as the dusk's is,
  *                 for a page that has an h1 of its own (a docs page); styled the same either way (dawnMarkup only)
  *   indent        the whitespace before each line (the page's own), "" for none
@@ -30,6 +32,7 @@ const DEFS_DAWN = [
 /* the rich look's light: the ring and the orbits lit from the sunrise below, a deep disc behind the name (orblit is
    the site's orbits' stroke, drawn by its hub: kept here so the one glyph serves both). One set of gradients for both
    surfaces: the dawn's ids are bare, the dusk's (asDawn) carry "d-", so a page with both has no duplicate id */
+/** @param {string} p the id prefix */
 const glyphDefs = (p) => ({
   ringlit: `<linearGradient id="${p}ringlit" gradientUnits="userSpaceOnUse" x1="0" y1="26" x2="0" y2="174"><stop offset="0" stop-color="#6c76a0" stop-opacity=".6"/><stop offset=".5" stop-color="#aab2cf" stop-opacity=".85"/><stop offset=".86" stop-color="#ead2a4"/><stop offset="1" stop-color="#ffe2a8"/></linearGradient>`,
   orblit: `<linearGradient id="${p}orblit" gradientUnits="userSpaceOnUse" x1="0" y1="-15" x2="0" y2="215"><stop offset="0" stop-color="#8791b3" stop-opacity=".1"/><stop offset=".55" stop-color="#9aa2c2" stop-opacity=".2"/><stop offset="1" stop-color="#f2cf98" stop-opacity=".5"/></linearGradient>`,
@@ -47,18 +50,42 @@ const DEFS_DUSK = [
 
 const SLICE = 'viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMax slice"';
 /* a picture laid over the whole 1600×1000 frame, drawn once from its filter graph (glows.js) */
+/** @param {string} name @param {string} href @param {string} [cls] */
 const picture = (name, href, cls = "") => `<image${cls ? ` class="${cls}"` : ""} data-raster="${name}"${href ? ` href="${href}"` : ""} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>`;
 /* a compositor layer of its own, holding one picture */
+/** @param {string} cls @param {string} inner */
 const layer = (cls, inner) => `<svg class="wl ${cls}" ${SLICE}>${inner}</svg>`;
 
 /* text and attribute values: what a host gives as words (the dusk's farewell) is written as text, and what the picture
    resolver answers goes into an attribute, so neither can add an element or an attribute. Plain paths and the default
    words contain nothing it changes, so the site's own output is byte for byte what it was */
+/** @param {unknown} s */
 const text = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+/** @param {unknown} s */
 const attr = (s) => text(s).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
+/* the release tag under the wordmark (#63): one string of TEXT, the channel word first and, after the first
+   whitespace, the build ("alpha", "beta", "preview 3f2a9c1"). Only a string is a tag. Any run of whitespace in it
+   (tabs, line breaks, U+0085, U+2028, non-breaking spaces) is folded to one space, so the element stays on one line. The
+   result is [] when there is no tag, so the markup is byte for byte what it was. The channel is the first word if it
+   is alpha, beta or preview in any case, else "build" (door.css shows the tag in lowercase); the word and the build
+   go through text(), so nothing of the tag is markup, and the attribute only ever holds a fixed word */
+/** @param {unknown} tag @returns {string[]} */
+const releaseTag = (tag) => {
+  const m = typeof tag === "string" ? tag.replace(/[\s\u0085]+/g, " ").trim().match(/^(\S+)(?: (.*))?$/) : null;
+  if (!m) return [];
+  const channel = ["alpha", "beta", "preview"].find((c) => c === m[1].toLowerCase()) || "build";
+  return [`<div class="release" data-channel="${channel}">${text(m[1])}${m[2] ? ` <span class="build">${text(m[2])}</span>` : ""}</div>`];
+};
+
 /* lines joined with the page's indent: a nested array is one level deeper; a slot (raw) is kept as it came */
+/** @param {string} s */
 const raw = (s) => ({ raw: s });
+/**
+ * @typedef {string | null | undefined | { raw: string } | Line[]} Line a line, a raw slot, or a nested (indented) list
+ * @param {string} indent @param {Line[]} items @param {number} [depth]
+ * @returns {string}
+ */
 function lines(indent, items, depth = 0) {
   const out = [];
   for (const it of items) {
@@ -70,8 +97,35 @@ function lines(indent, items, depth = 0) {
   return out.join("\n");
 }
 
-/** the dawn: `<div id="door">…</div>` */
-export function dawnMarkup({ image: resolve = (p) => p, lockup = "", gate = "", foot = "", heading = true, indent = "" } = {}) {
+/**
+ * @typedef {object} Farewell the dusk's words, text
+ * @property {string} said
+ * @property {string} sub
+ * @typedef {object} DawnMarkupOptions
+ * @property {(path: string) => string} [image] where a picture is
+ * @property {string} [lockup] raw HTML
+ * @property {string} [gate] raw HTML
+ * @property {string} [foot] raw HTML
+ * @property {boolean} [heading]
+ * @property {unknown} [tag] text; anything but a string is no tag
+ * @property {string} [indent]
+ * @typedef {object} DuskMarkupOptions
+ * @property {(path: string) => string} [image] where a picture is
+ * @property {string} [gate] raw HTML
+ * @property {string} [foot] raw HTML
+ * @property {Farewell} [farewell]
+ * @property {boolean} [asDawn]
+ * @property {unknown} [tag] text; anything but a string is no tag
+ * @property {string} [indent]
+ */
+
+/**
+ * the dawn: `<div id="door">…</div>`
+ * @param {DawnMarkupOptions} [options]
+ * @returns {string}
+ */
+export function dawnMarkup({ image: resolve = (p) => p, lockup = "", gate = "", foot = "", heading = true, tag = "", indent = "" } = {}) {
+  /** @param {string} p */
   const image = (p) => attr(resolve(p));
   return lines(indent, [
     '<div id="door">',
@@ -139,6 +193,7 @@ export function dawnMarkup({ image: resolve = (p) => p, lockup = "", gate = "", 
           '</svg><i class="runner" aria-hidden="true"></i></div>',
           raw(lockup),
           heading ? '<h1 class="name">orbit</h1>' : '<div class="name">orbit</div>',
+          ...releaseTag(tag),
           `<div class="gate-wrap">${gate}</div>`,
         ],
         "</div>",
@@ -159,8 +214,11 @@ export function dawnMarkup({ image: resolve = (p) => p, lockup = "", gate = "", 
  * (`dawn/planet-gold.webp`) in place of the plain circle and no runner, the Earth's two pictures lie under the ember
  * rim (loaded as the dawn's are: dawn.js), and the farewell hangs off the way back in, the last child of `.gate-wrap`.
  * Without it the markup is byte for byte what it always was.
+ * @param {DuskMarkupOptions} [options]
+ * @returns {string}
  */
-export function duskMarkup({ image: resolve = (p) => p, gate = "", foot = "", farewell = { said: "You are signed out.", sub: "the sky keeps turning · your systems keep their orbits" }, asDawn = false, indent = "" } = {}) {
+export function duskMarkup({ image: resolve = (p) => p, gate = "", foot = "", farewell = { said: "You are signed out.", sub: "the sky keeps turning · your systems keep their orbits" }, asDawn = false, tag = "", indent = "" } = {}) {
+  /** @param {string} p */
   const image = (p) => attr(resolve(p));
   /* the farewell's lines: a block of its own beside the lockup, or (asDawn) nested in the way back in's box */
   const words = [
@@ -222,6 +280,7 @@ export function duskMarkup({ image: resolve = (p) => p, gate = "", foot = "", fa
             '<g class="tr"><circle cx="163" cy="63.5" r="7" fill="#d8b45a"/></g></svg></div>',
           ],
           '<div class="name">orbit</div>',
+          ...releaseTag(tag),
           ...(asDawn ? [`<div class="gate-wrap">${gate}`, words, "</div>"] : [`<div class="gate-wrap">${gate}</div>`]),
         ],
         "</div>",

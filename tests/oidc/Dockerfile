@@ -3,7 +3,7 @@
 # default, which is the direct Docker Hub pull local builds and GitHub Actions
 # use. Same digest either way.
 ARG OIDC_BASE_IMAGE_PREFIX=
-FROM ${OIDC_BASE_IMAGE_PREFIX}node:24-alpine@sha256:83f1c388c31fb2e51f7cbd4dea949b96260798c98f206e8e4696bc93bd964e3a
+FROM ${OIDC_BASE_IMAGE_PREFIX}node:24-alpine@sha256:f777d4615e9f225aa23d72dc05bd8454a0fadcb033e00417c5b9257f5585677b
 
 RUN apk add --no-cache openssl
 

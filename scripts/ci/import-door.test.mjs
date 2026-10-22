@@ -723,6 +723,71 @@ describe("import-door.sh when the door changed (item 5, as revised by decision 1
   });
 });
 
+describe("import-door.sh ignores the job checkout's git configuration (#1477)", () => {
+  /**
+   * GitLab Runner writes an `include.path` into the job checkout's .git/config
+   * that names a file outside the checkout, and that file carries
+   * `url.<the job's own login>.insteadOf <the server's URL>`. Here the "server's
+   * URL" is DOOR_IMPORT_PUSH_URL (the bare repository's path) and the rewrite
+   * points it at a decoy bare repository. Returns the decoy, after proving the
+   * rewrite really redirects a plain git command run in the checkout.
+   */
+  function installRunnerRewrite(world, { decoyHas = [] } = {}) {
+    const decoy = deployBare(world.orbit);
+    const decoyTip = git(decoy, ["rev-parse", "dev"]).trim();
+    /* only the decoy holds this branch; written without a push so the decoy's push log stays empty */
+    git(decoy, ["update-ref", "refs/heads/decoy-only", decoyTip]);
+    for (const name of decoyHas) git(decoy, ["update-ref", `refs/heads/${name}`, decoyTip]);
+
+    const runnerConfig = join(scratchDir("orbit-door-runner-config-"), "runner.gitconfig");
+    writeFileSync(runnerConfig, `[url "${decoy}"]\n\tinsteadOf = ${world.bare}\n`);
+    git(world.orbit, ["config", "--local", "include.path", runnerConfig]);
+
+    const listing = git(world.orbit, ["ls-remote", "--heads", world.bare]);
+    expect(listing, "the rewrite must redirect a plain git command in the checkout to the decoy").toContain("refs/heads/decoy-only");
+    return decoy;
+  }
+
+  it("the branch and its merge-request push options reach the real remote, and the decoy the checkout's insteadOf names gets no push", async () => {
+    const world = await deployWorld();
+    const decoy = installRunnerRewrite(world);
+
+    const result = await runImport(world);
+    expect(result.status, ok(result)).toBe(0);
+
+    const branch = onlyImportBranch(world);
+    const pushes = pushesTo(world.bare);
+    expect(pushes, ok(result)).toHaveLength(1);
+    expect(pushes[0]).toContain("merge_request.create");
+    expect(pushes[0]).toContain("merge_request.target=dev");
+    expect(pushedFile(world.bare, branch, "web/src/lib/door.upstream.json").length).toBeGreaterThan(0);
+
+    expect(pushesTo(decoy), "pushes the decoy received").toEqual([]);
+    expect(importedBranch(decoy), "import branches on the decoy").toEqual([]);
+    expect(world.api.requests).toEqual([]);
+  });
+
+  it("lists branches on the real remote, not the decoy: a branch name only the decoy holds does not make the run think it is already proposed", async () => {
+    /* learn the branch this door change is proposed on, from a throwaway world with the same upstream */
+    const probe = await deployWorld();
+    expect((await runImport(probe)).status).toBe(0);
+    const proposed = onlyImportBranch(probe);
+
+    const world = await deployWorld({ upstream: probe.upstream });
+    const decoy = installRunnerRewrite(world, { decoyHas: [proposed] });
+    expect(remoteBranches(world.bare)).not.toContain(proposed);
+
+    const result = await runImport(world);
+    expect(result.status, ok(result)).toBe(0);
+
+    expect(importedBranch(world.bare), ok(result)).toEqual([proposed]);
+    const pushes = pushesTo(world.bare);
+    expect(pushes, ok(result)).toHaveLength(1);
+    expect(pushes[0]).toContain("merge_request.create");
+    expect(pushesTo(decoy), "pushes the decoy received").toEqual([]);
+  });
+});
+
 describe("import-door.sh refuses what the credential review ruled out (kept in the build)", () => {
   /** An upstream whose assets/door/ holds a directory entry literally named "..", written without git's path checks. */
   function deployUpstreamWithDotDot() {

@@ -183,6 +183,8 @@ export const UPDUR: number;
 export const DOWNDUR: number;
 export const homeProps: (homes: HomeInput[]) => Prop[];
 export const mirrored: (props: Prop[]) => Prop[];
+/** how far the docs flight rests from where it started, for a screen of this size */
+export const docsRest: (screen: { width: number; height: number }) => { distance: number };
 export const descentProfile: (how?: { onto?: "dusk" | "dawn"; from?: Profile | null; homes?: HomeInput[] }) => Profile;
 export const createFlight: (...args: unknown[]) => unknown;
 export const createJourney: (options: JourneyOptions) => Journey;
@@ -206,6 +208,16 @@ export const hurryChores: (tags?: string | string[], opening?: number) => void;
 export const programs: () => { n: number; by: string };
 export const compilesAside: () => boolean;
 export const holdReveal: () => boolean;
+/** the longest a background compile is waited for, in ms */
+export const COMPILE_WAIT: number;
+/** true once every program has compiled; false if the context is lost, `stop()` says so or COMPILE_WAIT passes; true at once with no extension */
+export const compiledWithin: (
+  gl: WebGLRenderingContext | WebGL2RenderingContext,
+  par: { COMPLETION_STATUS_KHR: number } | null,
+  list: WebGLProgram[],
+  every?: number,
+  stop?: () => boolean,
+) => Promise<boolean>;
 export const uploadBanded: (...args: unknown[]) => unknown;
 
 export const probe: (...args: unknown[]) => Promise<{ ok: boolean }>;

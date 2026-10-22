@@ -58,7 +58,7 @@ describe("initials", () => {
 describe("the sections editor", () => {
   it("counts the entries sitting in each section", () => {
     expect(sectionRowsOf(harlow()).map((row) => [row.name, row.count])).toEqual([
-      ["Home", 3],
+      ["Home", 4],
       ["Vehicles", 2],
       ["Devices", 1],
       ["Services", 0],
@@ -171,7 +171,7 @@ describe("the danger line", () => {
 
 describe("the owner's screen", () => {
   it("reads the mockup's header line", () => {
-    expect(ownerScreen().subtitle).toBe("your system · you own it · 4 members · 6 entries in orbit");
+    expect(ownerScreen().subtitle).toBe("your system · you own it · 4 members · 7 entries in orbit");
   });
 
   it("marks the reader's own row and nobody else's", () => {

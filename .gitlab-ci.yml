@@ -142,7 +142,7 @@ variables:
   #
   # Pinned to the linux/amd64 manifest, the way Orbit pins its own base image:
   # a moving tag would silently change what the gate ran on.
-  NODE_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/node:22-bookworm@sha256:87a4f951f28b85d189df365d24c479d3bdb70be77c1ff5c9029db2ef67e251ac
+  NODE_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/node:22-bookworm@sha256:de636e50060a9908cf40a20a50d027ed74a99b2e31d2635f3b13e9e4e5e97e74
   # The image the v19 baselines were proven against, byte for byte the pin the
   # GitLab `fidelity` jobs use. Any other browser build is a different
   # rasteriser, and then the comparison measures the runner, not the design.
@@ -157,7 +157,7 @@ variables:
   # measurement of this image. Two pins move together: bumping
   # PLAYWRIGHT_IMAGE means rebuilding there first and re-pinning here.
   # Not ORBIT_CI_IMAGE, which is the tag `build_image` builds under.
-  ORBIT_ACCEPTANCE_IMAGE: registry.tomlawson.io/ai/orbit-base-image/ci@sha256:19409de802ca170bc69b02e3cfc0c46850819cfb71407799455174957255b117
+  ORBIT_ACCEPTANCE_IMAGE: registry.tomlawson.io/ai/orbit-base-image/ci@sha256:5831d1bf3b265f7de3a9df687c51724769daff68a6f8a3cca365a5114e72a8f9
   # sign_evidence's image (#1368): the Docker CLI plus bash, curl, node and
   # the pinned cosign, built and scanned by ai/orbit-base-image's
   # `build_signing`/`scan_signing`/`publish_signing` from its
@@ -168,13 +168,18 @@ variables:
   # digest from that pipeline's published-signing-digest.txt artifact.
   # First publish: ai/orbit-base-image pipeline 2406, job publish_signing
   # 34555 (cosign v3.1.3, docker 29.9.0 CLI), 2026-10-10.
-  ORBIT_SIGNING_IMAGE: registry.tomlawson.io/ai/orbit-base-image/signing@sha256:da750e179fd15e6955d28d54215838589b512ef1905c7fc866b39d87c3332550
-  # build_launcher's job image (ADR-0031 #3): matches launcher/pin.json's
-  # go.mod exactly (go 1.27.1) at the pin this repository currently carries.
-  # A pin bump to a launcher release built against a different Go version
-  # needs this bumped alongside it -- build-launcher.sh's own toolchain check
-  # fails closed and names the mismatch if it is not.
-  GOLANG_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/golang:1.27.1-bookworm@sha256:69a7b9788769bec032d238959b61854e9ae87f57be9029ec04e9885fabf99195
+  # Current: pipeline 2867, job publish_signing 38298 (cosign v3.1.4,
+  # docker 29.9.2 CLI), 2026-10-22.
+  ORBIT_SIGNING_IMAGE: registry.tomlawson.io/ai/orbit-base-image/signing@sha256:21dad4f1976d1118e1a142b82bebc7b7eaf76f242f39edb14790543c3c2661f3
+  # build_launcher's job image (ADR-0031 #3): at least the Go version in
+  # launcher/pin.json's go.mod (go 1.27.2 at the pin this repository
+  # currently carries). 1.27.3 fixes CVE-2026-111943 (crypto/x509 refuses the
+  # compromised eMudhra intermediates), so the launcher binary built here
+  # does not trust certificates forged with them (ai/orbit-launcher#280).
+  # A pin bump to a launcher release needing a newer Go needs this bumped
+  # alongside it -- build-launcher.sh's own toolchain check fails closed and
+  # names the mismatch if it is not.
+  GOLANG_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5
   # Same scanner build as the old workflow, so a finding here and a finding there
   # mean the same thing.
   TRIVY_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
@@ -1004,6 +1009,9 @@ fast:
     # The door copy is only ever changed by the import (#1371): offline, two
     # paths and one hash, so it runs before the install and fails in a second.
     - bash scripts/ci/check-door-unchanged.sh
+    # scripts/ci/carry-previous-release.sh needs jq, and its tests run it
+    # for real; the Node image has none (pipeline 2777: 32 tests at exit 127).
+    - command -v jq > /dev/null 2>&1 || { export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq --no-install-recommends jq; }
     - pnpm install --frozen-lockfile
     # Everything from here runs unprivileged, because two of these tests assert
     # a permission refusal that root does not receive. See .drop_to_node.
@@ -1086,7 +1094,9 @@ fast_docker:
     - apt-get install -y -qq --no-install-recommends jq
     - pnpm install --frozen-lockfile
     - *drop_to_node
-    - orbit_as_node 'pnpm exec vitest run src/lib/recovery-bundle.parity.test.ts scripts/test-e2e-local-reuse.test.mjs'
+    # app-memory-limit-contract.test.mjs (#1429) renders `docker compose config`,
+    # which needs the binary but no daemon.
+    - orbit_as_node 'pnpm exec vitest run src/lib/recovery-bundle.parity.test.ts scripts/test-e2e-local-reuse.test.mjs scripts/app-memory-limit-contract.test.mjs'
     - *reuse_evidence
   artifacts:
     name: orbit-fast-docker
@@ -2844,15 +2854,17 @@ repair_journeys:
         - .dockerignore
         - docker-compose.yml
         - docker-compose.mail.yml
+        - docker-compose.kek-rotation.yml
         - .env-orbit.example
         - config/tika-config.json
         - scripts/configure.sh
         - scripts/installer-ui.sh
-        - scripts/configuration.sh
         - scripts/backup.sh
         - scripts/restore.sh
         - scripts/repair.sh
-        - scripts/engine-check.sh
+        - scripts/export-recovery-bundle.sh
+        - scripts/import-recovery-bundle.sh
+        - scripts/end-maintenance.sh
         - launcher/pin.json
         - scripts/ci/build-launcher.sh
         - scripts/ci/checkout-launcher-source.sh
@@ -3259,7 +3271,9 @@ record_image:
     GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
   script:
     - *apk_retry
-    - apk_add bash
+    # openssl for carry-previous-release's manifest check (the verifier
+    # publish_channel uses); curl also fetches that verifier's pinned cosign.
+    - apk_add bash curl jq openssl
     - *step_outputs
     - docker load --input image.tar
     # Only the immutable anchor `sha-<commit>` is pushed here -- the channel
@@ -3311,11 +3325,24 @@ record_image:
       ORBIT_LAUNCHER_ARM64_ARCHIVE="${CI_PROJECT_DIR}/.orbit-launcher-artifacts/orbit-launcher_linux_arm64.tar.gz" \
         bash scripts/ci/write-release-manifest.sh "$CI_REGISTRY_IMAGE" "$published_digest"
       cat .orbit-supply-chain/orbit-release-manifest.json
+    # #1480: save the build before this one (its manifest and signature) as
+    # .orbit-supply-chain/previous/, read by branch from the latest-artifacts
+    # API, kept only if it verifies against cosign.pub. Never fails the
+    # publish: the verifier fetches the pinned cosign itself, as in
+    # publish_channel, and any failure there is "no predecessor". The
+    # launcher's update test finds the previous build by branch alone, with
+    # no job IDs to expire.
+    # $published_digest is still set: GitLab runs every script item in one
+    # shell, as the write-release-manifest step above relies on too.
+    - bash scripts/ci/carry-previous-release.sh "$published_digest"
   artifacts:
     name: orbit-gitlab-tested-image
     paths:
       - .orbit-supply-chain/gitlab-tested-image.json
       - .orbit-supply-chain/orbit-release-manifest.json
+      # #1480: absent on a branch's first build; GitLab only warns about a
+      # missing path.
+      - .orbit-supply-chain/previous/
     expire_in: 90 days
     when: on_success
 

@@ -10,6 +10,7 @@
  * (LINEAR). With ?holdreveal, or where the browser ignores a cut picture's crop (cropHonoured, below), the picture
  * is put on the GPU whole in one chore, its mipmaps with it, as before.
  */
+/** @import { Tag } from "./chores.js" */
 import { chore, note, holdReveal } from "./chores.js";
 import { flag } from "./settings.js";
 
@@ -17,6 +18,7 @@ import { flag } from "./settings.js";
    timed, and the rows halved after any that took over 4 ms (never doubled: a band doubled after a quick first one
    took 30-50 ms on the laptop in Edge, and the reveal dropped frames) */
 const BYTES = 1 << 20, FEWEST = 16, SLOW = 4;
+/** @type {ImageBitmapOptions} */
 const CUT = { colorSpaceConversion: "none", premultiplyAlpha: "none" };
 /* each texture's bands said in the console only with ?door3d (the console stays short otherwise) */
 const say = () => !!flag("door3d");
@@ -31,6 +33,15 @@ const say = () => !!flag("door3d");
    page never waits on the GPU for it. `run(fn)` is how the part that touches the GPU is run (the host's chore, so it takes
    its turn: uploadBanded); the bitmaps for it are made first, off the page's thread, and the wait for the fence is between
    chores */
+/**
+ * @typedef {object} Made what a crop probe put on the GPU, to be let go
+ * @property {WebGLTexture} t
+ * @property {WebGLBuffer} buf
+ * @property {WebGLProgram} p
+ * @property {WebGLShader[]} shaders
+ * @property {WebGLSync | null} sync the fence behind the work
+ */
+/** @type {WeakMap<WebGL2RenderingContext, Promise<boolean>>} */
 const probes = new WeakMap();
 const TF_VERT = `#version 300 es
 uniform sampler2D t; out vec2 v;
@@ -39,6 +50,7 @@ const TF_FRAG = `#version 300 es
 precision mediump float; out vec4 o;
 void main(){ o = vec4(0.0); }`;
 /* the state a probe touches, taken and put back */
+/** @param {WebGL2RenderingContext} gl @returns {() => void} */
 function keepState(gl) {
   const was = { unit: gl.getParameter(gl.ACTIVE_TEXTURE), program: gl.getParameter(gl.CURRENT_PROGRAM), vao: gl.getParameter(gl.VERTEX_ARRAY_BINDING),
     discard: gl.isEnabled(gl.RASTERIZER_DISCARD) };
@@ -52,13 +64,15 @@ function keepState(gl) {
   };
 }
 /* the bitmap put on the GPU and its first texel sent to a buffer: what was made, with a fence behind it */
+/** @param {WebGL2RenderingContext} gl @param {ImageBitmap} bitmap @returns {Made} */
 function submitTexel(gl, bitmap) {
   const T = gl.TEXTURE_2D, B = gl.TRANSFORM_FEEDBACK_BUFFER;
   const restore = keepState(gl);
+  /** @type {Made} */
   const made = { t: gl.createTexture(), buf: gl.createBuffer(), p: gl.createProgram(), shaders: [], sync: null };
   try {
-    for (const [type, src] of [[gl.VERTEX_SHADER, TF_VERT], [gl.FRAGMENT_SHADER, TF_FRAG]]) {
-      const x = gl.createShader(type); gl.shaderSource(x, src); gl.compileShader(x); gl.attachShader(made.p, x); made.shaders.push(x);
+    for (const [type, src] of /** @type {[number, string][]} */ ([[gl.VERTEX_SHADER, TF_VERT], [gl.FRAGMENT_SHADER, TF_FRAG]])) {
+      const x = /** @type {WebGLShader} */ (gl.createShader(type)); gl.shaderSource(x, src); gl.compileShader(x); gl.attachShader(made.p, x); made.shaders.push(x);
     }
     gl.transformFeedbackVaryings(made.p, ["v"], gl.SEPARATE_ATTRIBS);
     gl.linkProgram(made.p);
@@ -76,15 +90,17 @@ function submitTexel(gl, bitmap) {
   } catch (e) { letGo(gl, made); throw e; }
   finally { restore(); }
 }
+/** @param {WebGL2RenderingContext} gl @param {Made} made */
 function letGo(gl, made) {
   if (made.sync) gl.deleteSync(made.sync);
   gl.deleteTexture(made.t); gl.deleteBuffer(made.buf); for (const x of made.shaders) gl.deleteShader(x); gl.deleteProgram(made.p);
 }
 /* red and green of the texel, once the fence has passed (never waited for longer than the cap) */
+/** @param {WebGL2RenderingContext} gl @param {Made} made @returns {Promise<Float32Array>} */
 async function readTexel(gl, made) {
   try {
     for (const t0 = performance.now(); ;) {
-      const s = gl.clientWaitSync(made.sync, 0, 0);
+      const s = gl.clientWaitSync(/** @type {WebGLSync} */ (made.sync), 0, 0);
       if (s === gl.ALREADY_SIGNALED || s === gl.CONDITION_SATISFIED) break;
       if (s === gl.WAIT_FAILED || performance.now() - t0 > 3000) throw new Error("crop probe: the GPU did not finish");
       await new Promise((r) => setTimeout(r, 4));
@@ -94,6 +110,11 @@ async function readTexel(gl, made) {
     return out;
   } finally { letGo(gl, made); }
 }
+/**
+ * @param {WebGL2RenderingContext} gl
+ * @param {(fn: () => Made) => Made | Promise<Made>} [run] how the part that touches the GPU is run (the host's chore)
+ * @returns {Promise<boolean>}
+ */
 export function cropHonoured(gl, run = (fn) => fn()) {
   let p = probes.get(gl);
   if (!p) probes.set(gl, (p = (async () => {
@@ -108,28 +129,54 @@ export function cropHonoured(gl, run = (fn) => fn()) {
   return p;
 }
 
+/** @typedef {{ y: number, n: number, bm: ImageBitmap }} Band a band of rows: where it starts, how many, and its bitmap */
+
 /** a bitmap put on the GPU in bands (soft chores, tagged tag), its mipmaps after (an ordinary chore) if mips. setup(gl,
     texture): the caller's own parameters (wrap modes), set when the texture is made; after(gl, texture): set with the
     mipmaps (anisotropy); drawable(texture): called once the last band is in (the first level whole, no mipmaps yet);
     keep: the bitmap is not closed at the end (another context still wants it); name: for the console. Resolves with
-    the texture once its mipmaps are made (without mips: once the last band is in) */
+    the texture once its mipmaps are made (without mips: once the last band is in)
+ * @typedef {object} UploadOptions
+ * @property {number} [internal] the texture's internal format (default RGBA8)
+ * @property {number} [format] (default RGBA)
+ * @property {number} [type] (default UNSIGNED_BYTE)
+ * @property {Tag} [tag]
+ * @property {boolean} [mips]
+ * @property {(gl: WebGL2RenderingContext, texture: WebGLTexture) => void} [setup]
+ * @property {(gl: WebGL2RenderingContext, texture: WebGLTexture) => void} [after]
+ * @property {(texture: WebGLTexture) => void} [drawable]
+ * @property {boolean} [keep]
+ * @property {string} [name]
+ * @param {WebGL2RenderingContext} gl
+ * @param {ImageBitmap} bitmap
+ * @param {UploadOptions} [options]
+ * @returns {Promise<WebGLTexture>}
+ */
 export function uploadBanded(gl, bitmap, { internal = gl.RGBA8, format = gl.RGBA, type = gl.UNSIGNED_BYTE, tag = "", mips = true, setup, after, drawable, keep = false, name = "map" } = {}) {
   const T = gl.TEXTURE_2D, w = bitmap.width, h = bitmap.height;
+  /** @param {WebGLTexture} t */
   const params = (t) => {
     gl.texParameteri(T, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(T, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     setup?.(gl, t);
   };
+  /** @param {WebGLTexture} t */
   const levels = (t) => {
     gl.bindTexture(T, t); gl.generateMipmap(T);
     gl.texParameteri(T, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     after?.(gl, t);
   };
+  /* a texture made for a picture whose upload then failed is let go before the failure is reported, so none is left alive
+     for a picture that will never be drawn (a lost context: nothing to delete) */
+  /** @param {WebGLTexture | null} t */
+  const drop = (t) => { if (t) try { gl.deleteTexture(t); } catch { /* fine */ } };
   /* whole, in one ordinary chore, its mipmaps with it: with ?holdreveal, or where a cut picture's crop is not honoured */
   const whole = () => chore(() => {
     const t = gl.createTexture(); gl.bindTexture(T, t);
-    gl.texImage2D(T, 0, internal, format, type, bitmap);
-    params(t);
-    if (mips) levels(t);
+    try {
+      gl.texImage2D(T, 0, internal, format, type, bitmap);
+      params(t);
+      if (mips) levels(t);
+    } catch (e) { drop(t); throw e; }
     if (!keep) bitmap.close?.();
     drawable?.(t);
     return t;
@@ -138,12 +185,13 @@ export function uploadBanded(gl, bitmap, { internal = gl.RGBA8, format = gl.RGBA
   /* (the probe's GPU part is a chore of its own, once a context: it takes its turn like a band, and not before the chores may run) */
   return cropHonoured(gl, (fn) => chore(fn, 0, tag, { soft: true })).then((ok) => (ok ? inBands() : whole()));
   function inBands() {
-    let t = null, rows = Math.min(h, Math.max(FEWEST, Math.floor(BYTES / (w * 4)))), bands = 0, longest = 0, firstCut = 0, firstBand = 0;
+    let /** @type {WebGLTexture | null} */ t = null, rows = Math.min(h, Math.max(FEWEST, Math.floor(BYTES / (w * 4)))), bands = 0, longest = 0, firstCut = 0, firstBand = 0;
     /* (seen once on the laptop in Firefox and not again: a first band of 1012 ms, with the browser's warning that a
        texture made empty is cleared on its first partial upload; every other run cleared in 0-1 ms. Said with the
        bands: how long the first band's own bitmap took to come and how long its copy took, to tell a deferred decode
        from a slow clear if it is ever seen again) */
     /* a band's own bitmap, cut from the picture (off the page's thread) */
+    /** @param {number} y @returns {Promise<Band>} */
     const cut = (y) => {
       const n = Math.min(rows, h - y), c0 = performance.now(), p = createImageBitmap(bitmap, 0, y, w, n, CUT).then((bm) => { if (!y) firstCut = performance.now() - c0; return { y, n, bm }; });
       /* (a cut that fails is said where it is waited for, not before) */
@@ -151,6 +199,7 @@ export function uploadBanded(gl, bitmap, { internal = gl.RGBA8, format = gl.RGBA
       return p;
     };
     /* a band put in, in its own soft chore (the texture made with the first); how long the copy took (ms) */
+    /** @param {Band} band @returns {Promise<number>} */
     const put = ({ y, n, bm }) => chore(() => {
       if (!t) {
         t = gl.createTexture(); gl.bindTexture(T, t);
@@ -162,12 +211,12 @@ export function uploadBanded(gl, bitmap, { internal = gl.RGBA8, format = gl.RGBA
       return performance.now() - t0;
     }, 0, tag, { soft: true }).finally(() => bm.close?.());
     const bandsIn = (async () => {
-      let next = cut(0);
+      /** @type {Promise<Band> | null} */ let next = cut(0);
       try {
         for (;;) {
-          const band = await next;
+          /** @type {Band} */ const band = await next;
           /* the next band's bitmap cut while this one waits its turn */
-          const end = band.y + band.n;
+          /** @type {number} */ const end = band.y + band.n;
           next = end < h ? cut(end) : null;
           const ms = await put(band);
           if (!bands++) firstBand = ms;
@@ -177,14 +226,16 @@ export function uploadBanded(gl, bitmap, { internal = gl.RGBA8, format = gl.RGBA
         }
       } catch (e) {
         next?.then((b) => b.bm.close?.(), () => {});
+        drop(t);
         throw e;
       } finally {
         if (!keep) bitmap.close?.();
       }
       if (say()) note(`upload: ${name} ${w}x${h} in ${bands} bands, longest ${longest.toFixed(1)} ms (the first: cut ${firstCut.toFixed(0)} ms, copied ${firstBand.toFixed(1)})`);
-      drawable?.(t);
-      return t;
+      /* (t is set by the first band put in, in put(), a closure; the checker narrows it to null here) */
+      drawable?.(/** @type {WebGLTexture} */ (/** @type {unknown} */ (t)));
+      return /** @type {WebGLTexture} */ (/** @type {unknown} */ (t));
     })();
-    return mips ? bandsIn.then((tx) => chore(() => { levels(tx); return tx; }, 60, tag)) : bandsIn;
+    return mips ? bandsIn.then((tx) => chore(() => { try { levels(tx); } catch (e) { drop(tx); throw e; } return tx; }, 60, tag)) : bandsIn;
   }
 }

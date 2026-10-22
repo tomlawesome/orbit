@@ -22,6 +22,10 @@ import { SESSION_LIST_LIMIT } from "$lib/server/session-limits.js";
  * after that the list reads as "most active first". Capped at
  * SESSION_LIST_LIMIT after that sort, so the cap always keeps the current
  * session and the ones most worth acting on.
+ *
+ * `viaProvider` (#1444) says whether the session began at the sign-in
+ * provider, so settings tells a reader the provider signs them out only when
+ * it will. It is a yes/no; the sealed ID token is never read here.
  */
 export const GET = read(async (_event, session) => {
   const rows = await listSessions(session.user.id);
@@ -32,6 +36,7 @@ export const GET = read(async (_event, session) => {
       createdAt: row.createdAt.toISOString(),
       lastSeenAt: row.lastSeenAt ? row.lastSeenAt.toISOString() : null,
       device: describeDevice(row.userAgent),
+      viaProvider: row.viaProvider,
     }))
     .sort((left, right) => {
       if (left.current !== right.current) return left.current ? -1 : 1;
@@ -46,8 +51,8 @@ export const GET = read(async (_event, session) => {
      fixture-mode dev server to render a real list rather than an empty one. */
   fixture: () => json({
     sessions: [
-      { id: "s-fixture-current", current: true, createdAt: "2026-08-01T09:00:00.000Z", lastSeenAt: "2026-08-13T08:45:00.000Z", device: "Chrome · Linux" },
-      { id: "s-fixture-phone", current: false, createdAt: "2026-07-20T18:00:00.000Z", lastSeenAt: "2026-08-10T21:12:00.000Z", device: "Safari · iPhone" },
+      { id: "s-fixture-current", current: true, createdAt: "2026-08-01T09:00:00.000Z", lastSeenAt: "2026-08-13T08:45:00.000Z", device: "Chrome · Linux", viaProvider: true },
+      { id: "s-fixture-phone", current: false, createdAt: "2026-07-20T18:00:00.000Z", lastSeenAt: "2026-08-10T21:12:00.000Z", device: "Safari · iPhone", viaProvider: false },
     ],
   }, { headers: { "cache-control": "no-store" } }),
   errorResponse: authErrorResponse,

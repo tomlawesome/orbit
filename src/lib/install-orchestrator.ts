@@ -118,6 +118,8 @@ export interface InstallDependencies {
   onConfigurationFailure?: () => void;
   /** Test hook: runs right after InstallTransaction.begin, before the first write (ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE). */
   afterTransactionBegun?: () => void;
+  /** Test hook: runs right after the transaction commits, before the outcome is returned (ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE=transaction-committed). */
+  afterTransactionCommitted?: () => void;
 }
 
 export type OnEvent = (event: EngineEvent) => void;
@@ -671,6 +673,9 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
         if (missing.length === 0) missing = ["APP_URL", "ORBIT_IMAGE", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_CALLBACK_URL"];
         return configurationFailure(`Configuration fields require attention (${missing.join(" ")}); refusing to start Compose.`);
       }
+      // Readiness warnings (a memory limit below the import peak) do not stop
+      // the run, but the operator should see them in the installer window.
+      say(dependencies, readiness.text.split("\n").filter((line) => line.startsWith("warning ")));
       onEvent({ phase: "configuration", component: "configuration", state: "running", reason: "configuration-migration", action: "verify" });
 
       if (!verifyDatabasePasswordPreserved(transaction, context.targetDir, volumeState.databaseVolumeSeen)) {
@@ -715,6 +720,7 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
         return fail("compose", "compose", error.message);
       }
       committed = true;
+      dependencies.afterTransactionCommitted?.();
     } finally {
       interruptCleanups.delete(disposeTransaction);
       const disposal = transaction.dispose();

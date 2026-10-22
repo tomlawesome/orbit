@@ -5,7 +5,7 @@
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import { stagedPreviewHref } from "$lib/pocket/review.js";
   import { DAMAGED, DAMAGED_PLACEHOLDER } from "$lib/data/metadata-status.js";
-  import { PAGE_HEAD, READING_HEAD, whyLines } from "$lib/data/document-read.js";
+  import { DOCUMENT_ACCEPT, PAGE_HEAD, READING_HEAD, whyLines } from "$lib/data/document-read.js";
   import {
     KINDS, RECURRENCE_MAX, REMINDER_CHOICES, kindHasDate, kindRecurs, recurrenceWords, stepRecurrence, toggleReminder,
   } from "./entry.js";
@@ -166,11 +166,11 @@
           <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
           <span class="pc-doc-words">
             <b>add a document</b>
-            <span>photo or file · read for you</span>
+            <span>PDF or photo</span>
           </span>
         </button>
       {/if}
-      <input bind:this={picker} type="file" accept="application/pdf,image/*" hidden onchange={onPick}>
+      <input bind:this={picker} type="file" accept={DOCUMENT_ACCEPT} hidden onchange={onPick}>
     {/if}
   </section>
 
@@ -182,7 +182,7 @@
       <section class="p-card proposed pc-card pc-reading" class:pc-snap={Boolean(picked.page)} class:pc-still={picked.settled}
                class:pc-refused={picked.refused} class:pc-done={picked.read}
                style:--i="1" aria-labelledby="{uid}-reading" aria-live="polite">
-        <h2 class="p-caps" id="{uid}-reading">{picked.page ? PAGE_HEAD : READING_HEAD}</h2>
+        <h2 class="p-caps" id="{uid}-reading">{picked.page ? PAGE_HEAD : (picked.head ?? READING_HEAD)}</h2>
 
         <div class="pc-paper pc-paper-row">
           <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
@@ -218,6 +218,12 @@
             <p class="pc-focusline">{picked.line}</p>
             <p class="pc-why">{#each whyLines(picked.why) as line, index (index)}{#if index}<br>{/if}{line}{/each}</p>
           </div>
+        {/if}
+
+        {#if picked.message}
+          <!-- The server's words about the read, where the desk shows them
+               under its caption; the card's aria-live announces them. -->
+          <p class="pc-honest">{picked.message}</p>
         {/if}
 
         {#if picked.refused}
@@ -422,6 +428,14 @@
   /* Two rows, three over two (§2.5), each chip filling its share. */
   .pc-kinds .pc-chip{grid-column:span 2;padding:0 6px;gap:6px;font-size:.875rem}
   .pc-kinds .pc-chip:nth-child(n+4){grid-column:span 3}
+  /* #1180: at large text a chip may wrap its glyph and word and grow taller,
+     never spill (design note: wrap, never truncate). */
+  :global(html[data-text-size=large]) .pc-kinds .pc-chip,:global(html[data-text-size=extra-large]) .pc-kinds .pc-chip{flex-wrap:wrap;overflow-wrap:anywhere;padding-block:4px;row-gap:0}
+  /* #1180: at large text on a narrow phone three across will not hold the words: two columns. */
+  @media (max-width:389px){
+    :global(html[data-text-size=large]) .pc-kinds,:global(html[data-text-size=extra-large]) .pc-kinds{grid-template-columns:repeat(2,minmax(0,1fr))}
+    :global(html[data-text-size=large]) .pc-kinds .pc-chip,:global(html[data-text-size=extra-large]) .pc-kinds .pc-chip{grid-column:span 1;overflow-wrap:anywhere}
+  }
   .pc-glyph{color:var(--accent-text);font-size:var(--p-type-body);line-height:1}
 
   /* The document row: the desk's dashed drop target, as a 56px row. */
@@ -443,7 +457,7 @@
   .pc-need{letter-spacing:.04em;text-transform:none;font-size:var(--p-type-caps);color:var(--accent-text)}
   .pc-field input,.pc-field textarea{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;
     border-radius:12px;border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);
-    color:var(--ink);font:var(--p-type-body)/1.4 var(--ui);
+    color:var(--ink);font:var(--p-type-input)/1.4 var(--ui);
     scroll-margin-top:calc(var(--p-chrome) + 12px);scroll-margin-bottom:calc(var(--pc-bar, 0px) + var(--p-kb, 0px) + 12px)}
   .pc-field textarea{padding:12px 14px;resize:vertical;min-height:96px}
   .pc-field input.mono{font-family:var(--mono)}
@@ -568,6 +582,7 @@
   .pc-cap b{display:block;font-weight:500;color:var(--ink)}
   .pc-cap .p-body{display:inline-block;vertical-align:middle;margin:0 8px 2px 0}
   .pc-done .pc-cap .p-body{display:none}
+  .pc-honest{margin:8px 0 0;text-align:center;font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
   .pc-reading .pc-drop{margin-top:14px}
   .pc-refused-acts{display:flex;gap:var(--p-pill-gap);margin-top:14px}
   .pc-refused-acts .pc-drop{margin-top:0}

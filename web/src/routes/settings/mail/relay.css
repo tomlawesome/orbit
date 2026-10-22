@@ -20,26 +20,26 @@
  */
 
 .relay-page .relay-card{width:430px;padding:30px 32px}
-.relay-page .relay-card h1{font:600 19px var(--display)}
-.relay-page .relay-card .sub{font:11px var(--mono);color:var(--ink-mid);margin:6px 0 22px;line-height:1.8}
+.relay-page .relay-card h1{font:600 1.1875rem var(--display)}
+.relay-page .relay-card .sub{font:0.6875rem var(--mono);color:var(--ink-mid);margin:6px 0 22px;line-height:1.8}
 .relay-page .dish{position:relative;width:54px;height:54px;margin:0 auto 6px}
 .relay-page .dish i{position:absolute;inset:22px;border-radius:50%;background:var(--ok)}
 .relay-page .dish span{position:absolute;inset:0;border:1px solid var(--ok);border-radius:50%;
            animation:signal 3s ease-out infinite;opacity:0}
 .relay-page .dish span:nth-child(2){animation-delay:1s}.relay-page .dish span:nth-child(3){animation-delay:2s}
 @keyframes signal{from{opacity:.7;scale:.3}to{opacity:0;scale:1.4}}
-.relay-page .alias{font:13px var(--mono);color:var(--accent-text);background:var(--panel);
+.relay-page .alias{font:0.8125rem var(--mono);color:var(--accent-text);background:var(--panel);
        border:1px dashed var(--line);border-radius:10px;padding:11px 14px;text-align:center;margin:14px 0}
-.relay-page .kv{display:flex;justify-content:space-between;font:11.5px var(--mono);
+.relay-page .kv{display:flex;justify-content:space-between;font:0.71875rem var(--mono);
     color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
 .relay-page .kv:last-of-type{border:0}
 .relay-page .kv b{color:var(--ok-text);font-weight:500}
-.relay-page .note{font:10.5px var(--mono);color:var(--ink-quiet);margin-top:16px;line-height:1.8}
+.relay-page .note{font:0.65625rem var(--mono);color:var(--ink-quiet);margin-top:16px;line-height:1.8}
 /* #1151 W2-R6: rotate/pause/resume used to swallow a failure outright — same
    shape as .note, toned as the problem it is rather than small print. */
-.relay-page .problem{font:10.5px var(--mono);color:var(--warm-text);margin-top:16px;line-height:1.8}
+.relay-page .problem{font:0.65625rem var(--mono);color:var(--warm-text);margin-top:16px;line-height:1.8}
 .relay-page .btns{display:flex;gap:10px;margin-top:16px}
-.relay-page .btns button{flex:1;font:12px var(--mono);padding:9px;border-radius:9px;cursor:pointer;
+.relay-page .btns button{flex:1;font:0.75rem var(--mono);padding:9px;border-radius:9px;cursor:pointer;
              background:none;border:1px solid var(--line);color:var(--ink-mid)}
 .relay-page .btns button.pri{color:var(--accent-text);border-color:var(--accent)}
 
@@ -47,7 +47,7 @@
    where the user looks for "did my forward make it", so its failures live
    here, in the card's own kv grammar, toned as small print not alarm. */
 .relay-page .failures{margin-top:18px;border-top:1px solid var(--line-soft);padding-top:14px}
-.relay-page .failures h2{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+.relay-page .failures h2{font:0.65625rem var(--mono);letter-spacing:.16em;text-transform:uppercase;
   color:var(--ink-quiet);margin:0 0 8px}
 .relay-page .failures .kv span:first-child{white-space:nowrap;flex:none;margin-right:14px}
 .relay-page .failures .kv span:last-child{color:var(--overdue-text);text-align:right}
@@ -112,7 +112,7 @@ body:has(.satellites){overflow:auto}
    outcome line is the problem line's sibling, for good news. Either is empty
    most of the time, and an empty one takes no room, so the card is unmoved. */
 .relay-page .kv b.warm{color:var(--warm-text)}
-.relay-page .said{font:10.5px var(--mono);color:var(--ink-mid);margin-top:16px;line-height:1.8}
+.relay-page .said{font:0.65625rem var(--mono);color:var(--ink-mid);margin-top:16px;line-height:1.8}
 .relay-page .said:empty{display:none}
 /* The dish's rings stand still while the relay is not usable, as the phone's do. */
 .relay-page .dish.still span{animation:none}

@@ -12,7 +12,7 @@
  * doorWeight(): from that, the live door's weight (door3d.js): the rich Earth alone, the lean one alone, or both (the
  * lean first, the rich tried by the ladder), so only what will be drawn is compiled.
  */
-import { note } from "./chores.js";
+import { note, compiledWithin } from "./chores.js";
 import { settings, flag } from "./settings.js";
 import { gpu } from "./fitness.js";
 
@@ -49,13 +49,23 @@ void main(){
 
 /* kept a week, for this browser on this screen */
 const WEEK = 7 * 24 * 3600e3;
+/**
+ * @typedef {{ ok: true, background: boolean, compileMs: number, msPerMpx: number }} Probed the probe's measures
+ * @typedef {{ ok: false, background: null, compileMs: null, msPerMpx: null }} NotProbed no probe could be had
+ * @typedef {Probed | NotProbed} Probe
+ * @typedef {"rich" | "both" | "lean"} Weight
+ * @typedef {Navigator & { connection?: { saveData?: boolean } }} NavigatorWithConnection (the Network Information API, not in the DOM types)
+ */
 const KEY = () => `${settings.storagePrefix}-probe ${navigator.userAgent} ${screen.width}x${screen.height}@${devicePixelRatio || 1}`;
+/** @type {NotProbed} */
 const FAILED = { background: null, compileMs: null, msPerMpx: null, ok: false };
 
 /* the salt is code, not a comment (Safari hashes the source without its comments): no cache answers for the compiler */
+/** @param {string} src */
 const salted = (src) => src.replace(/out vec4 o;/, `out vec4 o; const float SALT=${Math.random().toFixed(6)};`)
   .replace(/o=vec4\(([^;]*)\);\s*}\s*$/, (m, inner) => `o=vec4(${inner})+vec4(SALT*1e-6); }`);
 /* a small texture of noise, for the probe's maps */
+/** @param {WebGL2RenderingContext} gl @param {number} w @param {number} h @param {number} seed */
 function noise(gl, w, h, seed) {
   const d = new Uint8Array(w * h * 4); let s = seed;
   for (let i = 0; i < d.length; i++) { s = (s * 16807) % 2147483647; d[i] = s & 255; }
@@ -65,20 +75,26 @@ function noise(gl, w, h, seed) {
   return t;
 }
 
+/** @param {WebGL2RenderingContext} gl @returns {Promise<Probe>} */
 async function measure(gl) {
   /* on the page's one context (fitness.js), which the flight's world is built on after: what the probe makes it lets
      go of, and the state it set is put back, so the context is left as it was found */
+  /** @type {[string, unknown][]} */
   const made = [];
+  /** @template T @param {string} kind @param {T} thing @returns {T} */
   const keep = (kind, thing) => { made.push([kind, thing]); return thing; };
   try {
     const par = gl.getExtension("KHR_parallel_shader_compile"), background = !!par;
     /* a program, timed to its link status (in the background: looked at once it is done, so the page never waits) */
     const compile = async () => {
       const t0 = performance.now();
-      const sh = (type, src) => { const s = keep("Shader", gl.createShader(type)); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+      /** @param {number} type @param {string} src */
+      const sh = (type, src) => { const s = keep("Shader", /** @type {WebGLShader} */ (gl.createShader(type))); gl.shaderSource(s, src); gl.compileShader(s); return s; };
       const p = keep("Program", gl.createProgram());
       gl.attachShader(p, sh(gl.VERTEX_SHADER, VERT)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, salted(PROBE))); gl.linkProgram(p);
-      if (par) while (!gl.getProgramParameter(p, par.COMPLETION_STATUS_KHR)) await new Promise((r) => setTimeout(r, 4));
+      /* (a context lost mid-compile never reports complete, nor may a stuck compiler: past COMPILE_WAIT the probe
+         fails, so the door keeps its pictures, rather than polling for ever) */
+      if (!(await compiledWithin(gl, par, [p], 4))) throw new Error("probe: the compile did not finish");
       if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) || "probe: no program");
       return { p, ms: performance.now() - t0 };
     };
@@ -93,11 +109,12 @@ async function measure(gl) {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     const f = keep("Framebuffer", gl.createFramebuffer()); gl.bindFramebuffer(gl.FRAMEBUFFER, f); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
     gl.bindVertexArray(keep("VertexArray", gl.createVertexArray())); gl.viewport(0, 0, 512, 512); gl.useProgram(pr.p);
+    /** @param {string} n */
     const u = (n) => gl.getUniformLocation(pr.p, n);
     gl.uniform2f(u("uRes"), 512, 512); gl.uniform1f(u("uT"), 1);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, A); gl.uniform1i(u("uA"), 0);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, B); gl.uniform1i(u("uB"), 1);
-    const px = new Uint8Array(4), times = [];
+    const px = new Uint8Array(4), /** @type {number[]} */ times = [];
     for (let i = 0; i < 4; i++) { const t0 = performance.now(); gl.drawArrays(gl.TRIANGLES, 0, 3); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); times.push(performance.now() - t0); }
     if (gl.getError() !== gl.NO_ERROR) return FAILED;
     const mean = (times[1] + times[2] + times[3]) / 3;
@@ -111,24 +128,25 @@ async function measure(gl) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.bindVertexArray(null); gl.useProgram(null);
       gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
       for (const unit of [1, 0]) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, null); }
-      for (const [kind, thing] of made) gl[`delete${kind}`](thing);
+      for (const [kind, thing] of made) /** @type {Record<string, (thing: unknown) => void>} */ (/** @type {unknown} */ (gl))[`delete${kind}`](thing);
     } catch { /* fine */ }
   }
 }
 
 /* the result, once the probe has resolved (doorWeight reads it) */
-let got = null, memo = null;
+let /** @type {Probe | null} */ got = null, /** @type {Promise<Probe> | null} */ memo = null;
 /** the probe, once a page view: { background, compileMs, msPerMpx, ok } (ok false, the rest null, where it could not be
     had); a week's stored one where there is one. Only for the live door (the host's flag door3d, not under save-data)
     on a page whose GPU gate accepted (fitness.js: gpu(), asked here if not yet), measured on that gate's context; otherwise nothing is
-    made or drawn and it resolves { ok: false } at once, without a line in the console (ADR-0002) */
+    made or drawn and it resolves { ok: false } at once, without a line in the console (ADR-0002)
+    @returns {Promise<Probe>} */
 export function probe() {
   if (memo) return memo;
   /* (under save-data the level is 0 whatever the probe finds, so it is not asked of the GPU either) */
-  const g = flag("door3d") && !navigator.connection?.saveData ? gpu() : null;
+  const g = flag("door3d") && !(/** @type {NavigatorWithConnection} */ (navigator)).connection?.saveData ? gpu() : null;
   if (!g) { got = FAILED; return (memo = Promise.resolve(FAILED)); }
   return (memo = (async () => {
-    let r = null, how = "fresh";
+    let /** @type {Probe | null} */ r = null, how = "fresh";
     try { const s = JSON.parse(localStorage.getItem(KEY()) || "null"); if (s?.r?.ok && Date.now() - s.t < WEEK) { r = s.r; how = "stored"; } } catch { /* probed afresh */ }
     if (!r) {
       r = await measure(g.gl).catch(() => FAILED);
@@ -145,11 +163,13 @@ export function probe() {
 export const BUDGET = 40;
 const RICH_K = 0.55, LEAN_K = 0.25;
 /** the door's band in million device pixels, sized as door3d.js sizes it (the frame's y 640..1000, to 2x) */
+/** @param {number} W @param {number} H */
 export function doorMpx(W, H) {
   const s = Math.max(W / 1600, H / 1000), bh = Math.min(H, 360 * s), px = Math.min(devicePixelRatio || 1, 2);
   return (W * bh * px * px) / 1e6;
 }
 /** what each weight is predicted to take a frame here (ms), or null without a probe */
+/** @param {number} W @param {number} H @param {Probe | null} [r] */
 export function predicted(W, H, r = got) {
   if (!r?.ok) return null;
   const mpx = doorMpx(W, H);
@@ -157,7 +177,9 @@ export function predicted(W, H, r = got) {
 }
 /** the door's weight, once the probe has resolved: "rich" (predicted to fit with room: the rich alone), "both" (it
     might: the lean first, the rich tried by the ladder), "lean" (it will not: the lean alone), or null without a
-    probe (then both, as before). &rich and &lean say which, whatever the probe */
+    probe (then both, as before). &rich and &lean say which, whatever the probe
+    @param {number} W @param {number} H @param {Probe | null} [r]
+    @returns {Weight | null} */
 export function doorWeight(W, H, r = got) {
   if (flag("rich")) return "rich";
   if (flag("lean")) return "lean";
@@ -166,6 +188,7 @@ export function doorWeight(W, H, r = got) {
   return p.rich <= 24 ? "rich" : p.rich <= BUDGET ? "both" : "lean";
 }
 /* the band: the door's world as it is laid out now (the window, where it is not yet) */
+/** @returns {[number, number]} */
 const band = () => {
   const box = document.querySelector("#door .world")?.getBoundingClientRect();
   return [box?.width || innerWidth, box?.height || innerHeight];
@@ -180,8 +203,12 @@ const NAMES = ["still", "live lean", "live rich"];
    no WebGL2 or no probe (whatever ?level= says), reduced motion or save-data, compiles on the page's own thread (each one stalls the page:
    the live door's could go nowhere but under the ring, and its loops would then run beside a page that stalls on
    every later compile), or a lean frame predicted over 16 ms. Else 2, live rich, where the rich is predicted to fit
-   the budget (40 ms), and 1, live lean, where it is not. ?level=0|1|2 says which, whatever the probe */
+   the budget (40 ms), and 1, live lean, where it is not. ?level=0|1|2 says which instead of that rule (reduced motion,
+   save-data, a slow lean frame, page-thread compiles), but only once the probe has worked: that is, under ?door3d with
+   the GPU accepted. Without a probe the level is 0 whatever ?level= says */
+/** @type {0 | 1 | 2 | null} */
 let lvl = null;
+/** @returns {0 | 1 | 2} */
 export function level() {
   if (lvl !== null) return lvl;
   /* (asked before the probe has resolved: still, and not kept) */
@@ -189,12 +216,14 @@ export function level() {
   let why;
   const asked = /^[012]$/.test(String(flag("level"))) ? String(flag("level")) : null;
   const quiet = (() => { try { return matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; } })();
-  const p = predicted(...band());
-  /* (no probe, no level: ?level= chooses among the live door's weights once the GPU is accepted, it never grants it) */
-  if (!got.ok) { lvl = 0; why = navigator.connection?.saveData ? "save-data" : "no WebGL2, or no probe"; }
-  else if (asked) { lvl = +asked; why = `?level=${asked}`; }
+  /* (p is used only where the probe worked, and then it is not null) */
+  const p = /** @type {NonNullable<ReturnType<typeof predicted>>} */ (predicted(...band()));
+  /* (no probe, no level: ?level= takes the place of the rule only once the probe has worked, under ?door3d with the GPU
+     accepted; it never grants the GPU) */
+  if (!got.ok) { lvl = 0; why = /** @type {NavigatorWithConnection} */ (navigator).connection?.saveData ? "save-data" : "no WebGL2, or no probe"; }
+  else if (asked) { lvl = /** @type {0 | 1 | 2} */ (+asked); why = `?level=${asked}`; }
   else if (quiet) { lvl = 0; why = "reduced motion"; }
-  else if (navigator.connection?.saveData) { lvl = 0; why = "save-data"; }
+  else if (/** @type {NavigatorWithConnection} */ (navigator).connection?.saveData) { lvl = 0; why = "save-data"; }
   else if (p.lean > LEAN_MAX) { lvl = 0; why = `lean predicted ${Math.round(p.lean)} ms of ${LEAN_MAX}`; }
   /* compiles on the page's thread: the lean live door, and only once every journey is ready (lateDoor: the still door
      first, on the quick path, its compile a short stall on the still door after the ways in are open); never the
@@ -214,7 +243,9 @@ export const lateDoor = () => liveDoor() && !!got && !got.background;
 /* the door's weight, chosen once a page view, after the probe (door3d.js draws it; voyage.js compiles the flight's
    Earth to match, so the click's handoff does not change the clouds), and said with why. By the level: 1, the lean
    alone (the rich never made, whatever &rich says); 2, doorWeight's answer; 0, none (nothing of the live door is made) */
+/** @type {Weight | null} */
 let chosen = null;
+/** @returns {Weight | null} */
 export function theDoorWeight() {
   if (chosen) return chosen;
   if (!got) return "both";

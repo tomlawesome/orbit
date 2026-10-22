@@ -127,3 +127,147 @@ describe("the About read's small parsers (#1256)", () => {
     expect(imageOf(undefined)).toBeNull();
   });
 });
+
+/*
+ * Service versions come from the background, never from a live probe on the
+ * request (#1465). Each test takes a fresh copy of the module (resetModules +
+ * import) so no saved answer carries over from another test, and runs on
+ * fake timers so "promptly" means "before any probe's own timer could fire".
+ *
+ * Choices this pins, where the issue leaves room:
+ *  - Nothing saved yet (the very first call): answer at once with
+ *    version null ("not known", row state still "running"), start the probe
+ *    in the background, and serve its answer from the next call on.
+ *  - A saved answer is served as it stands while a refresh runs or hangs, and
+ *    a refresh that fails or times out never replaces it with null.
+ *  - Calls that arrive while a probe is in flight share it: one probe each.
+ */
+describe("getAboutFacts serves the saved answer and probes in the background (#1465)", () => {
+  const PG_18_0 = "PostgreSQL 18.0 on x86_64-pc-linux-musl";
+  const CLAM_1_5 = "ClamAV 1.5.4/27800/Mon Oct  6 09:12:00 2026";
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.resetModules();
+  });
+
+  async function freshRead() {
+    vi.resetModules();
+    vi.useFakeTimers();
+    const mod = await import("@/server/about");
+    return mod.getAboutFacts;
+  }
+
+  /** The promise must settle within `ms` of fake time -- before a 2 s probe timeout or a slow probe could. */
+  async function answeredWithin<T>(promise: Promise<T>, ms = 10): Promise<T> {
+    let settled = false;
+    let value!: T;
+    void promise.then((v) => { settled = true; value = v; });
+    await vi.advanceTimersByTimeAsync(ms);
+    expect(settled, `the read was still waiting after ${ms} ms -- it must not wait on a live probe`).toBe(true);
+    return value;
+  }
+
+  const after = (ms: number, value: string) => () => new Promise<string>((resolve) => setTimeout(() => resolve(value), ms));
+
+  it("answers 'not known' at once on the very first call when the probes are slow, then serves what they found", async () => {
+    const getFacts = await freshRead();
+    const probes: AboutProbes = { ...HEALTHY, postgres: after(500, PG_18_0), clamav: after(1_500, CLAM_1_5) };
+
+    const first = await answeredWithin(getFacts(probes, {}));
+    expect(ROW(first, "postgres")).toEqual({ id: "postgres", state: "running", version: null });
+    expect(ROW(first, "clamav")).toEqual({ id: "clamav", state: "running", version: null });
+
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const second = await answeredWithin(getFacts(probes, {}));
+    expect(ROW(second, "postgres")).toEqual({ id: "postgres", state: "running", version: "18.0" });
+    expect(ROW(second, "clamav")).toEqual({ id: "clamav", state: "running", version: "1.5.4" });
+  });
+
+  it("never waits on a hanging probe once an answer is saved, and keeps the saved answer when the refresh gives up", async () => {
+    const getFacts = await freshRead();
+    let hang = false;
+    const probes: AboutProbes = {
+      ...HEALTHY,
+      postgres: () => (hang ? new Promise<string>(() => {}) : Promise.resolve(PG_18_0)),
+      clamav: () => (hang ? new Promise<string>(() => {}) : Promise.resolve(CLAM_1_5)),
+    };
+
+    await answeredWithin(getFacts(probes, {}));
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(ROW(await answeredWithin(getFacts(probes, {})), "postgres")?.version).toBe("18.0");
+
+    hang = true;
+    await vi.advanceTimersByTimeAsync(25 * 60 * 60 * 1_000);
+
+    const during = await answeredWithin(getFacts(probes, {}));
+    expect(ROW(during, "postgres")?.version).toBe("18.0");
+    expect(ROW(during, "clamav")?.version).toBe("1.5.4");
+
+    /* Long enough for any probe timeout to have fired: the answer still stands. */
+    await vi.advanceTimersByTimeAsync(10_000);
+    const later = await answeredWithin(getFacts(probes, {}));
+    expect(ROW(later, "postgres")).toEqual({ id: "postgres", state: "running", version: "18.0" });
+    expect(ROW(later, "clamav")).toEqual({ id: "clamav", state: "running", version: "1.5.4" });
+  });
+
+  it("refreshes the saved answer in the background, so a later call shows a changed version", async () => {
+    const getFacts = await freshRead();
+    let postgres = PG_18_0;
+    const probes: AboutProbes = { ...HEALTHY, postgres: async () => postgres };
+
+    await answeredWithin(getFacts(probes, {}));
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(ROW(await answeredWithin(getFacts(probes, {})), "postgres")?.version).toBe("18.0");
+
+    postgres = "PostgreSQL 18.1 on x86_64-pc-linux-musl";
+    await vi.advanceTimersByTimeAsync(25 * 60 * 60 * 1_000);
+    /* A call may be what triggers the refresh; it is still answered at once. */
+    await answeredWithin(getFacts(probes, {}));
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(ROW(await answeredWithin(getFacts(probes, {})), "postgres")?.version).toBe("18.1");
+  });
+
+  it("starts one probe per service for calls that arrive while it is in flight, not one per request", async () => {
+    const getFacts = await freshRead();
+    const postgres = vi.fn(after(1_000, PG_18_0));
+    const clamav = vi.fn(after(1_000, CLAM_1_5));
+    const probes: AboutProbes = { ...HEALTHY, postgres, clamav };
+
+    const calls = Array.from({ length: 5 }, () => getFacts(probes, {}));
+    await Promise.all(calls.map((call) => answeredWithin(call)));
+
+    expect(postgres).toHaveBeenCalledTimes(1);
+    expect(clamav).toHaveBeenCalledTimes(1);
+  });
+
+  /*
+   * ASSUMED NAME: `warmAboutFacts(probes, env)` is exported from
+   * @/server/about. The server calls it once at start-up; it starts the
+   * probes in the background and returns without waiting for them. No such
+   * export is confirmed by any existing test.
+   */
+  it("warms the saved answer at start-up, so the first visit after a restart shows versions", async () => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    const mod = (await import("@/server/about")) as unknown as {
+      warmAboutFacts: (probes: AboutProbes, env: Record<string, string | undefined>) => unknown;
+      getAboutFacts: typeof getAboutFacts;
+    };
+    const probes: AboutProbes = { ...HEALTHY, postgres: after(50, PG_18_0), clamav: after(50, CLAM_1_5) };
+
+    expect(typeof mod.warmAboutFacts, "warmAboutFacts is exported").toBe("function");
+    const started = mod.warmAboutFacts(probes, {});
+    /* Warming does not hold start-up up: it hands back at once. */
+    await Promise.resolve(started);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    /* The first call after start-up -- nobody has asked before it. */
+    const first = await answeredWithin(mod.getAboutFacts(probes, {}));
+    expect(ROW(first, "postgres")).toEqual({ id: "postgres", state: "running", version: "18.0" });
+    expect(ROW(first, "clamav")).toEqual({ id: "clamav", state: "running", version: "1.5.4" });
+  });
+});

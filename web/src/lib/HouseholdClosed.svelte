@@ -29,7 +29,7 @@
   .closed{position:relative;z-index:2;box-sizing:border-box;max-width:440px;margin:32px auto;
     padding:24px 26px;text-align:center;border:1px solid var(--line);border-radius:16px;
     background:var(--panel-raised, var(--panel));overflow-wrap:anywhere}
-  .closed h2{margin:0;font:600 20px/1.3 var(--display);color:var(--ink)}
-  .closed p{margin:12px 0 0;font:11.5px/1.9 var(--mono);color:var(--ink-mid);letter-spacing:.03em}
+  .closed h2{margin:0;font:600 1.25rem/1.3 var(--display);color:var(--ink)}
+  .closed p{margin:12px 0 0;font:0.71875rem/1.9 var(--mono);color:var(--ink-mid);letter-spacing:.03em}
   .closed .home{margin-top:20px}
 </style>

@@ -11,7 +11,7 @@ import { adjudicateProposal } from "@/server/documents/adjudication";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { MODEL_MAILBOX_DEADLINE_MS } from "@/server/documents/model-extraction";
 import { proposalFromText } from "@/server/documents/suggestions";
-import { extractTextWithTika } from "@/server/documents/tika";
+import { documentReadingEnabled, extractTextWithTika } from "@/server/documents/tika";
 import type { SupportedDocumentMediaType } from "@/server/documents/validation";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { reviewDraftMetadataFromProposal } from "@/server/reviewed-intake";
@@ -743,6 +743,7 @@ async function draftProposalTextFromAttachment(
   mediaType: SupportedDocumentMediaType,
   receiptId: string,
 ): Promise<string | undefined> {
+  if (!documentReadingEnabled()) return undefined;
   try {
     const text = await extractTextWithTika(bytes, mediaType, receiptId);
     return typeof text === "string" && text.length > 0 && text.length <= DRAFT_PROPOSAL_MAX_EXTRACTED_CHARACTERS ? text : undefined;

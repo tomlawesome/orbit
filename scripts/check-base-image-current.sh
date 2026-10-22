@@ -78,9 +78,9 @@ import json, sys
 doc = json.load(sys.stdin)
 manifests = doc.get("manifests")
 if not manifests:
-    # Single-architecture image: docker reports the manifest itself, whose own
-    # digest is not in the payload. Nothing to compare; treated as current.
-    print("")
+    # A single image, not an index: docker reports the manifest itself, and
+    # its own digest is not in that payload. Resolved below (#1483).
+    print("single")
     raise SystemExit
 for entry in manifests:
     platform = entry.get("platform") or {}
@@ -90,6 +90,24 @@ for entry in manifests:
 print("")
 '
 )"
+
+# The base image is published by a plain `docker push` of one image, so its tag
+# is a single manifest, not an index (#1483). `docker manifest inspect` leaves
+# that manifest's own digest out; `buildx imagetools inspect` reports it. The
+# job image (docker:*-cli) ships buildx. Skipping here instead would let a moved
+# tag through unnoticed.
+if [[ "$current_digest" == "single" ]]; then
+  single_json=""
+  if ! single_json="$(docker buildx imagetools inspect "$pinned_tag" --format '{{json .Manifest}}' 2>/dev/null)"; then
+    fail "could not read the digest of '$pinned_tag', which is a single image rather than an index."
+    exit 2
+  fi
+  current_digest="$(printf '%s' "$single_json" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("digest") or "")')"
+  if [[ "$current_digest" != sha256:* ]]; then
+    fail "'$pinned_tag' is a single image, but its digest could not be read: '${current_digest:-<none>}'"
+    exit 2
+  fi
+fi
 
 if [[ -z "$current_digest" ]]; then
   printf 'base image: tag %s has no linux/amd64 entry to compare; skipping the moved-tag check\n' "$pinned_tag"
@@ -145,7 +163,7 @@ elif [[ "$current_digest" != "$pinned_digest" ]]; then
   fail "Update the first FROM in $dockerfile to the new digest and run again."
   exit 1
 else
-  printf 'base image: pinned digest is the current linux/amd64 manifest of %s\n' "$pinned_tag"
+  printf 'base image: pinned digest is the current image of %s\n' "$pinned_tag"
 fi
 
 # --- Axis 2: are the pinned image's own packages behind? ---------------------

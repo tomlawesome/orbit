@@ -25,7 +25,7 @@
   import Pocket from "./pocket.svelte";
   import HouseholdClosed from "$lib/HouseholdClosed.svelte";
   import { attachIdFor, forget as forgetAttachId } from "./attach-id.js";
-  import { readSearchDocuments, searchPocket } from "./pocket-search.js";
+  import { costLabel, listedItems, readSearchDocuments, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "$lib/data/bands.js";
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
@@ -571,6 +571,17 @@
     if (modes.id === expanded && !modes.cancel()) return;
     if (pushedEntry) {
       pushedEntry = false;
+      /* #1472: Back is the right way to close a row we pushed (Back and
+         Forward then agree with each other), but SvelteKit answers it by
+         putting the page at the scroll it had when the row was opened, with
+         the page's own smooth scrolling. Closing a row is not a reason to
+         move the page, so this pop is handed the place the reader is at now:
+         the listener below runs after SvelteKit's own, in the same dispatch,
+         and an instant scroll replaces the glide before it has moved. */
+      const { scrollX: x, scrollY: y } = window;
+      const stay = () => scrollTo({ left: x, top: y, behavior: "instant" });
+      addEventListener("popstate", stay, { once: true });
+      setTimeout(() => removeEventListener("popstate", stay), 1000);
       history.back();
     } else {
       replaceState(resolve("/home"), {});
@@ -1120,12 +1131,11 @@
 
   /**
    * @typedef {import('./pocket-search.js').SearchItem} SearchItem
-   * @typedef {import('./pocket-search.js').SearchDocument} SearchDoc
    * @typedef {{ kind: string, paint: string, documentCount: number, suggestion?: boolean }} BodyPaint
    * @typedef {BodyPaint & { days: number | null, size: number, costMinor: number | null,
    *   currency: string, costIsEstimate: boolean }} DialBody
    * @typedef {{ itemId: string, title: string, days: number | null, body: DialBody | null,
-   *   hitDocs: string[] }} StripMatch
+   *   cost: string }} StripMatch
    */
 
   /* `bodyMark`'s own neutral stand-in for an unscheduled match, which draws no
@@ -1238,11 +1248,12 @@
   const emptyStripRows = $derived((groups?.attention ?? []).filter(dueOrLater).slice(0, 2));
   /** @param {SearchItem} row */
   function dueOrLater(row) { return row.days !== null && row.days >= 0; }
-  const stripItems = $derived(searchQuery ? searchResults.items : emptyStripRows);
-  const stripDocuments = $derived(searchQuery ? searchResults.documents : []);
+  /* #1438: a result is the item's title and its cost. A document-name match
+     is listed as its item; the document's name is not drawn. */
+  const stripItems = $derived(searchQuery ? listedItems(searchResults, searchRows) : emptyStripRows);
 
   /* The one selectable list, in the order §1 names: items (manifest order,
-     soonest first), then documents, then the note line's own act(s) (#1162)
+     soonest first), then the note line's own act(s) (#1162)
      — trailing, since a query with real matches never shows one at all
      (BUILD.md §1). The no-match sentence itself carries no act and is never
      in this list. */
@@ -1251,15 +1262,10 @@
      (#1138). */
   /** @param {SearchItem} item */
   function itemEntry(item) {
-    return { kind: /** @type {const} */ ("item"), itemId: item.id, title: item.title, days: item.days };
-  }
-  /** @param {SearchDoc} doc */
-  function docEntry(doc) {
-    return { kind: /** @type {const} */ ("doc"), itemId: doc.itemId, title: doc.name, itemTitle: doc.itemTitle };
+    return { kind: /** @type {const} */ ("item"), itemId: item.id, title: item.title, days: item.days, cost: costLabel(item) };
   }
   const selectable = $derived([
     ...stripItems.map(itemEntry),
-    ...stripDocuments.map(docEntry),
     ...stripActs,
   ]);
   let selectedIndex = $state(0);
@@ -1320,17 +1326,7 @@
     const byItem = new SvelteMap();
     for (const row of stripItems) {
       const b = bodiesById.get(row.id) ?? null;
-      byItem.set(row.id, { itemId: row.id, title: row.title, days: b ? b.days : row.days, body: b, hitDocs: [] });
-    }
-    for (const doc of stripDocuments) {
-      let m = byItem.get(doc.itemId);
-      if (!m) {
-        const b = bodiesById.get(doc.itemId) ?? null;
-        const row = searchRows.find((r) => r.id === doc.itemId);
-        m = { itemId: doc.itemId, title: doc.itemTitle, days: b ? b.days : (row?.days ?? null), body: b, hitDocs: [] };
-        byItem.set(doc.itemId, m);
-      }
-      m.hitDocs.push(doc.name);
+      byItem.set(row.id, { itemId: row.id, title: row.title, days: b ? b.days : row.days, body: b, cost: costLabel(row) });
     }
     const raw = [...byItem.values()].map((m) => {
       /* `days` rather than `m.days` from here on: a ternary keyed on a
@@ -1339,13 +1335,16 @@
       const days = m.days;
       const unscheduled = days === null;
       const x = days === null ? UNSCHEDULED_X : xOfDays(days);
-      const meta = days === null
-        ? `no date · ${m.body ? money(m.body.costMinor, m.body.currency, m.body.costIsEstimate) : ""}`
-        : `${tlabel({ days })} · ${stripDateOf(days)} · ${money(m.body?.costMinor ?? null, m.body?.currency ?? "GBP", m.body?.costIsEstimate ?? false)}`;
+      /* #1438: a typed search's result is the title and the cost; the strip
+         at rest keeps its date and countdown. */
+      const meta = searchQuery
+        ? m.cost
+        : days === null
+          ? `no date · ${m.body ? money(m.body.costMinor, m.body.currency, m.body.costIsEstimate) : ""}`
+          : `${tlabel({ days })} · ${stripDateOf(days)} · ${money(m.body?.costMinor ?? null, m.body?.currency ?? "GBP", m.body?.costIsEstimate ?? false)}`;
       const lines = [
         { cls: "title", text: m.title, size: 12.5 },
-        { cls: "meta", text: meta, size: 11 },
-        ...m.hitDocs.map((name) => ({ cls: "docs hitdoc", text: `◆ ${name}`, size: 11 })),
+        ...(meta ? [{ cls: "meta", text: meta, size: 11 }] : []),
       ];
       const width = Math.max(...lines.map((l) => textWidth(l.text, l.size)));
       return { ...m, unscheduled, x, lines, width };
@@ -1433,6 +1432,8 @@
     bodies.filter((b) => (b.suggestion ? b.trail : b.trail && (b.overdue || b.paint === "amber"))),
   );
   const closest = $derived(bodies.find((b) => b.closest) ?? null);
+  /** The body under the pointer or focus: its visible twin grows with it (#1460). */
+  let hotId = $state(/** @type {?string} */ (null));
   const firstOverdue = $derived(bodies.find((b) => b.overdue) ?? null);
   onMount(() => {
     const query = window.matchMedia(DESK);
@@ -1865,15 +1866,15 @@
   <div class="inner">
     <h2>Add to your orbit</h2>
     <div class="ctypes">
-      <button class="ctype"><span class="dot"></span>renewal</button>
-      <button class="ctype"><span class="dot"></span>service</button>
-      <button class="ctype"><span class="dot"></span>inspection</button>
-      <button class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
+      <button type="button" class="ctype" data-type="renewal"><span class="dot"></span>renewal</button>
+      <button type="button" class="ctype" data-type="service"><span class="dot"></span>service</button>
+      <button type="button" class="ctype" data-type="inspection"><span class="dot"></span>inspection</button>
+      <button type="button" class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
     </div>
     <div class="crow">
       <!-- #1243: a real drop target, and a button that opens the file
            picker; either way the file goes to the full form, which reads it. -->
-      <div class="cdrop" id="cdrop" role="button" tabindex="0" aria-label="drop a document, or press enter to choose one">drop a document here — we'll read what we can</div>
+      <div class="cdrop" id="cdrop" role="button" tabindex="0" aria-label="drop a document, or press enter to choose one">{data?.documentReading === false ? "drop a document here — it is attached as it is" : "drop a document here"}</div>
       <a class="cfull" href={resolve("/create")}>open the full form →</a>
     </div>
   </div>
@@ -1920,7 +1921,7 @@
     <!-- backdrop constellations are generated from the galaxy map -->
     <div class="dialwrap">
       <svg width="640" height="640" class="dial" viewBox="0 0 380 380" role="group"
-         aria-label="Gravity well: items orbit by due date; distance from the household is time remaining, body size is typical cost; details in the manifest below">
+         aria-label="Gravity well: items orbit by due date; distance from the household is time remaining, body size is typical cost per year; details in the manifest below">
       <defs aria-hidden="true">
         <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
           <feGaussianBlur stdDeviation="4"/>
@@ -1948,6 +1949,15 @@
         </radialGradient>
       </defs>
 
+      <!-- #1471: the overdue line is the event horizon, and it is the one
+           piece of the chart's drawing a screen reader is told about, so it
+           sits outside the decorative chrome (aria-hidden would hide it).
+           It wears the chrome's own motion through .horizon-line. -->
+      <g class="horizon-line">
+        <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)"
+                stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"
+                role="img" aria-label="Event horizon: items inside it are overdue"/>
+      </g>
       <g class="chrome" aria-hidden="true">
       <g class="celestial rotor">
         <g stroke="var(--chart-line-soft)" stroke-width=".5">
@@ -1960,8 +1970,6 @@
       </g>
 
       <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
-      <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)"
-              stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"/>
       <circle cx="190" cy="190" r="106" fill="none" stroke="var(--chart-line-soft)" stroke-width=".75"/>
       <circle cx="190" cy="190" r="150" fill="none" stroke="var(--chart-line)" stroke-width="1.5"/>
 
@@ -2028,31 +2036,47 @@
 
       {#if firstOverdue}
         <circle data-polish="POL-2" class="ping" cx={firstOverdue.placement.x} cy={firstOverdue.placement.y}
-                r="8" fill="none" style="stroke:var(--overdue)"/>
+                r={firstOverdue.size + 3} fill="none" style="stroke:var(--overdue)"/>
       {/if}
+      <!-- #1460: paint order only. The visible bodies are drawn largest first so a
+           small one never hides under a big neighbour; they are aria-hidden and
+           take no pointer. The links below keep the chart's order (soonest due
+           first), which is the tab order and the screen-reader order. -->
+      {#each [...bodies].sort((a, b) => b.size - a.size) as b (b.id)}
+        <g class="body-vis" data-vis={b.id} aria-hidden="true" class:hot={hotId === b.id}
+           id={b.closest ? "b-closest" : undefined}
+           class:breathe={!b.suggestion && (b.overdue || b.paint === "amber")}>
+          {#if b.suggestion}
+            <circle cx={b.placement.x} cy={b.placement.y} r={b.size + 1.2}
+                    style="fill:none;stroke:var(--accent);stroke-width:1.8"
+            /><circle cx={b.placement.x} cy={b.placement.y} r={b.size - 1.3}
+                    style="fill:var(--accent)" opacity=".12"/>
+          {:else}
+            {@render bodyMark(b, b.placement.x, b.placement.y, b.size)}
+          {/if}
+        </g>
+      {/each}
       {#each bodies as b (b.id)}
         {#if b.suggestion}
           <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
              data-cost={money(b.costMinor, b.currency, true)} href="#{b.id}"
+             onpointerenter={() => (hotId = b.id)} onpointerleave={() => (hotId = null)}
+             onfocus={() => (hotId = b.id)} onblur={() => (hotId = null)}
              aria-label={`suggested: ${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, true)}`}><g
-            ><circle cx={b.placement.x} cy={b.placement.y} r={b.size + 1.2}
-                     style="fill:none;stroke:var(--accent);stroke-width:1.8"
-            /><circle cx={b.placement.x} cy={b.placement.y} r={b.size - 1.3}
-                     style="fill:var(--accent)" opacity=".12"/></g></a>
+            ><circle cx={b.placement.x} cy={b.placement.y} r={b.size + 1.2} fill="transparent"/></g></a>
         {:else}
           <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
              data-cost={money(b.costMinor, b.currency, b.costIsEstimate)}
              data-docs={b.documentCount > 0 ? b.documentCount : undefined} href="#{b.id}"
+             onpointerenter={() => (hotId = b.id)} onpointerleave={() => (hotId = null)}
+             onfocus={() => (hotId = b.id)} onblur={() => (hotId = null)}
              aria-label={`${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, b.costIsEstimate)}${b.documentCount > 0 ? `, ${plural(b.documentCount, "document")}` : ""}`}><g
-             id={b.closest ? "b-closest" : undefined}
-             class={b.overdue || b.paint === "amber" ? "breathe" : undefined}>
-            {@render bodyMark(b, b.placement.x, b.placement.y, b.size)}
-          </g></a>
+            ><circle cx={b.placement.x} cy={b.placement.y} r={b.size} fill="transparent"/></g></a>
         {/if}
       {/each}
       {#each bodies.filter((b) => b.documentCount > 0 && b.paint === "jade") as b (b.id)}
         <g class="belt" aria-hidden="true">
-          <ellipse cx={b.placement.x} cy={b.placement.y} rx="13.5" ry="4.6"
+          <ellipse cx={b.placement.x} cy={b.placement.y} rx={b.size + 5} ry={(b.size + 5) * 0.34}
                    transform="rotate(-24 {b.placement.x} {b.placement.y})"
                    fill="none" style="stroke:var(--accent)" stroke-width="1.3" opacity=".8"/>
         </g>
@@ -2119,11 +2143,7 @@
                       >→ {a.title}</span>
               {/each}
             {:else}
-              <span>{searchResults.items.length} in your orbit</span>
-              {#if searchResults.documents.length}
-                <span class="sep">·</span>
-                <span>{plural(searchResults.documents.length, "document")}</span>
-              {/if}
+              <span>{stripItems.length} in your orbit</span>
               <span class="sep">·</span>
               <span class="hint">←→ step · ↵ open</span>
             {/if}
@@ -2140,8 +2160,8 @@
           <ul class="sr-only" id="explore-results" role="listbox" aria-label="Results">
             {#each selectable as entry, i (i)}
               <li id="sr-opt-{i}" role="option" aria-selected={i === selectedPos}>
-                {entry.kind === "item" ? `${entry.title} · ${tlabel({ days: entry.days })}`
-                  : entry.kind === "doc" ? `document ${entry.title} · ${entry.itemTitle}`
+                {entry.kind === "item"
+                  ? (searchQuery ? (entry.cost ? `${entry.title} · ${entry.cost}` : entry.title) : `${entry.title} · ${tlabel({ days: entry.days })}`)
                   : entry.title}
               </li>
             {/each}
@@ -2240,14 +2260,14 @@
   <button class="handle" aria-expanded="false">
     <i></i><span>key</span></button>
   <h2>Urgency</h2>
-  <div class="keyrow"><span class="sw" style="background:var(--overdue)"></span>overdue &mdash; inside the ring</div>
+  <div class="keyrow"><span class="sw" style="background:var(--overdue)"></span>overdue &mdash; inside the event horizon</div>
   <div class="keyrow"><span class="sw" style="background:var(--warm)"></span>due soon</div>
   <div class="keyrow"><span class="sw" style="background:var(--upcoming)"></span>upcoming</div>
   <div class="keyrow"><span class="sw" style="background:var(--ok)"></span>on track &mdash; wide orbit</div>
   <div class="keyrow"><span class="sw" style="background:none;border:1.6px solid var(--accent)"></span>suggestion &mdash; not yet accepted</div>
   <h2>Physics</h2>
   <div class="keyrow">closer = sooner</div>
-  <div class="keyrow">bigger = costlier</div>
+  <div class="keyrow">bigger = costlier per year</div>
   <div class="keyrow">belt = documents attached</div>
   <div class="keyrow">the sky&rsquo;s weather = your workload</div>
 </aside>

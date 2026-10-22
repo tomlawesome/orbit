@@ -14,6 +14,11 @@
  * dithered (paintSun), and mountRasters keeps the rays turning about the
  * sunrise point.
  */
+
+/**
+ * @typedef {{ defs: string, body: string }} Group a glow: its filter and gradient definitions, and what is drawn
+ * @typedef {{ cx: number, cy: number, r: number, stops: [number, string, number][] }} SunDisc one radial gradient: centre, radius, and [offset, colour, opacity] stops
+ */
 const F_B6L = '<filter id="b6l" filterUnits="userSpaceOnUse" x="-40" y="-40" width="1680" height="1080"><feGaussianBlur stdDeviation="6"/></filter>';
 const F_B20L = '<filter id="b20l" filterUnits="userSpaceOnUse" x="-100" y="-100" width="1800" height="1200"><feGaussianBlur stdDeviation="20"/></filter>';
 const F_RAYROUGH = '<filter id="rayrough" x="-30%" y="-30%" width="160%" height="160%"><feTurbulence type="fractalNoise" baseFrequency="0.004 0.03" numOctaves="2" seed="9" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="22"/><feGaussianBlur stdDeviation="17"/></filter>';
@@ -48,6 +53,7 @@ const G_DBELT = '<linearGradient id="d-belt" x1="0" y1="0" x2="0" y2="1"><stop o
 
 /* the sun's own glows (the door's sunrise point, 800,920): three radial gradients, as the SVG had them, but drawn by
    hand (paintSun), because a browser draws a gradient this soft in eight bits and each level is a flat ring */
+/** @type {SunDisc[]} */
 export const SUN = [
   { cx: 800, cy: 922, r: 520, stops: [[0, "#e2772b", 0.3], [0.55, "#c2571f", 0.12], [1, "#000000", 0]] },
   { cx: 800, cy: 922, r: 240, stops: [[0, "#f8c95e", 0.55], [0.3, "#f4c048", 0.3], [0.6, "#f0b429", 0.1], [0.82, "#f0b429", 0.025], [1, "#f0b429", 0]] },
@@ -74,25 +80,37 @@ const SOFT = new Set(["zod", "sway1", "sway2", "glow", "belt", "afterglow", "sun
 /* and the softest of them — nothing in them narrower than a 12-unit blur —
    at half of that, which a blur that wide cannot tell apart */
 const SOFTEST = new Set(["zod", "sway1", "sway2", "glow", "belt"]);
+/** @type {Map<string, string>} */
 const cache = new Map();
+/* a picture of a size no longer current: out of the cache, its blob: URL revoked (a data: URL holds nothing) */
+/** @param {string} key */
+function forget(key) {
+  const url = cache.get(key);
+  cache.delete(key);
+  if (typeof url === "string" && url.startsWith("blob:")) URL.revokeObjectURL(url);
+}
+/** @param {string} svg @returns {Promise<HTMLImageElement>} */
 function decodeSvg(svg) {
   const img = new Image();
   const done = new Promise((resolve, reject) => { img.onload = () => resolve(img); img.onerror = reject; });
   img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   return done;
 }
+/** @param {string} key @param {string} svg @param {number} w @param {number} h */
 async function rasterise(key, svg, w, h) {
   const hit = cache.get(key);
   if (hit) return hit;
   const img = await decodeSvg(svg);
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
-  canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+  /* a new canvas has no other context, so the 2D one is never null (HTML spec, getContext) */
+  /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d")).drawImage(img, 0, 0, w, h);
   return keep(key, canvas);
 }
 /* encoded off the main thread where the browser allows it, so the page keeps answering while the light lands */
+/** @param {string} key @param {HTMLCanvasElement} canvas */
 async function keep(key, canvas) {
-  const blob = await new Promise((r) => { try { canvas.toBlob(r, "image/png"); } catch { r(null); } });
+  /** @type {Blob | null} */ const blob = await new Promise((r) => { try { canvas.toBlob(r, "image/png"); } catch { r(null); } });
   const url = blob ? URL.createObjectURL(blob) : canvas.toDataURL("image/png");
   cache.set(key, url);
   return url;
@@ -105,21 +123,25 @@ async function keep(key, canvas) {
    Seeded by place, so it dithers the same way on every draw. The colour is kept as the canvas keeps it, times its
    alpha, and written back straight so the browser's own premultiplying lands on the very level chosen. Done in
    bands with a breath between each, so the page keeps answering. */
+/** @param {number} x @param {number} y @param {number} seed */
 const hash = (x, y, seed) => {
   let h = Math.imul(x, 0x27d4eb2d) ^ Math.imul(y, 0x165667b1) ^ seed;
   h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
   h = Math.imul(h ^ (h >>> 12), 0x297a2d39);
   return (h ^ (h >>> 15)) >>> 0;
 };
+/** @param {number} r */
 const tpdf = (r) => (r & 0xffff) / 0x10000 + (r >>> 16) / 0x10000 - 1;
+/** @param {string} hex @returns {number[]} */
 const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
-async function paintSun(key, w, h) {
+/** @param {string} key @param {number} w @param {number} h @param {() => boolean} [live] @returns {Promise<string | null>} */
+async function paintSun(key, w, h, live = () => true) {
   const hit = cache.get(key);
   if (hit) return hit;
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
-  const ctx = canvas.getContext("2d"), s = w / 1600;
-  const discs = SUN.map((d) => ({ ...d, stops: d.stops.map(([t, c, a]) => [t, rgb(c), a]) }));
+  const ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d")), s = w / 1600; // new canvas: never null
+  const discs = SUN.map((d) => ({ ...d, stops: d.stops.map(([t, c, a]) => /** @type {[number, number[], number]} */ ([t, rgb(c), a])) }));
   const rows = Math.max(1, Math.floor(6e5 / w));
   for (let y0 = 0; y0 < h; y0 += rows) {
     const n = Math.min(rows, h - y0), im = ctx.createImageData(w, n), d = im.data;
@@ -147,10 +169,15 @@ async function paintSun(key, w, h) {
       d[i + 3] = a8;
     }
     ctx.putImageData(im, 0, y0);
-    if (y0 + rows < h) await new Promise((r) => setTimeout(r, 0));
+    if (y0 + rows < h) {
+      await new Promise((r) => setTimeout(r, 0));
+      /* a build that a newer size has superseded stops painting between bands (nothing is made for it) */
+      if (!live()) return null;
+    }
   }
   return keep(key, canvas);
 }
+/** @param {string} defs @param {string} body @param {number} w @param {number} h */
 const frame = (defs, body, w, h) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 1600 1000"><defs>${defs}</defs>${body}</svg>`;
 
@@ -160,8 +187,15 @@ const frame = (defs, body, w, h) =>
    stays answerable while they land; the result is kept per size. Each
    picture is handed to `drawn(url, name)` as it is set, for a host to
    decode it ahead of showing it (the dawn's, #32). */
+/**
+ * @param {HTMLElement} world
+ * @param {Record<string, Group | SunDisc[]>} groups the pictures to make, by name (`SUN` is painted, the rest drawn from their SVG)
+ * @param {string} prefix
+ * @param {{ until?: () => Promise<unknown> | null, drawn?: (url: string, name: string) => void }} [options]
+ * @returns {{ start: () => void, stop: () => void }}
+ */
 export function mountRasters(world, groups, prefix, { until = () => null, drawn = () => {} } = {}) {
-  let timer, run = 0;
+  let /** @type {ReturnType<typeof setTimeout> | undefined} */ timer, run = 0, /** @type {Set<string>} */ current = new Set();
   /* where the sunrise point (800, 920 in the slice) falls on screen, for the
      layers that turn about it */
   const origin = () => {
@@ -175,19 +209,27 @@ export function mountRasters(world, groups, prefix, { until = () => null, drawn 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const base = Math.max(innerWidth / 1600, innerHeight / 1000);
     world.dataset.rasterised = "pending";
-    for (const [name, group] of Object.entries(groups)) {
+    /* this build's pictures: name -> [key, w, h] (the key says the size), the newest build's being the current sizes */
+    const sizes = Object.fromEntries(Object.keys(groups).map((name) => {
       const scale = base * (SOFTEST.has(name) ? 0.5 : SOFT.has(name) ? 1 : dpr);
       const w = Math.max(1, Math.round(1600 * scale)), h = Math.max(1, Math.round(1000 * scale));
-      const key = `${prefix}-${name}|${w}|${h}`;
+      return [name, /** @type {[string, number, number]} */ ([`${prefix}-${name}|${w}|${h}`, w, h])];
+    }));
+    current = new Set(Object.values(sizes).map(([key]) => key));
+    for (const [name, group] of Object.entries(groups)) {
+      const [key, w, h] = sizes[name];
       /* the sun is painted (paintSun); the rest are drawn from their SVG */
-      const url = await (group === SUN ? paintSun(key, w, h) : rasterise(key, frame(group.defs, group.body, w, h), w, h));
-      if (id !== run) return;
+      const url = /** @type {string} */ (await (group === SUN ? paintSun(key, w, h, () => id === run) : rasterise(key, frame(/** @type {Group} */ (group).defs, /** @type {Group} */ (group).body, w, h), w, h)));
+      /* superseded: what it made for a size that is no longer current is let go (the newer build's own sizes are kept) */
+      if (id !== run) { if (url && !current.has(key)) forget(key); return; }
       world.querySelector(`image[data-raster="${name}"]`)?.setAttribute("href", url);
       drawn(url, name);
       await new Promise((r) => setTimeout(r, 0));
       if (id !== run) return;
     }
     /* "ready" is "drawn": the host may hold it for more (`until()`: a promise it never rejects; the dawn's Earth) */
+    /* the newer build has ended: the pictures of sizes no longer current are let go (their blob: URLs revoked) */
+    for (const k of [...cache.keys()]) if (k.startsWith(`${prefix}-`) && !current.has(k)) forget(k);
     await until();
     if (id !== run) return;
     world.dataset.rasterised = "ready";

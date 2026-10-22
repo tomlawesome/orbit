@@ -6,7 +6,9 @@
   import Sheet from "$lib/pocket/Sheet.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
-  import { applyTheme } from "$lib/theme-swatches.js";
+  import { chooseTheme, chooseTextSize } from "$lib/pick.js";
+  import { TEXT_SIZE_CHOICES } from "$lib/text-size.js";
+  import Tiles from "$lib/editing/Tiles.svelte";
   import { agoLong, clockOf, dayMonth, localZone, plural } from "$lib/format.js";
   import { watchTour } from "$lib/tour/watch.js";
   import { alertsSupported, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
@@ -59,6 +61,7 @@
    *   methods: Methods | null,
    *   sessions: Sessions,
    *   active: string,
+   *   textSize: string,
    *   initials: string,
    *   providerOffered: boolean,
    *   emailApproval: boolean,
@@ -76,6 +79,7 @@
     methods = $bindable(),
     sessions = $bindable(),
     active = $bindable(),
+    textSize = $bindable(),
     initials,
     providerOffered,
     emailApproval,
@@ -89,6 +93,9 @@
        own sign-outs play the same goodbye, as the hatch's does. */
     onsignedout = undefined,
   } = $props();
+
+  /** #1444: this session came through the provider, so signing out reaches it; a password session has nothing there to end. */
+  const providerSession = $derived(providerOffered && sessions.some((row) => row.current && row.viaProvider));
 
   /* ── reminders ────────────────────────────────────────────────────────── */
   let tab = $state(/** @type {"reminders" | "sent"} */ ("reminders"));
@@ -203,7 +210,15 @@
   /** @param {string} id */
   function pickPack(id) {
     active = id;
-    applyTheme(id);
+    chooseTheme(id);
+  }
+
+  /* Text size (#1180): four tiles across, two by two under 430px (four 16px words do not fit across at 390). */
+  let width = $state(1024);
+  /** @param {string} id */
+  function pickTextSize(id) {
+    textSize = id;
+    chooseTextSize(id);
   }
 
   /* ── your relay: the address copies ───────────────────────────────────── */
@@ -382,6 +397,7 @@
   });
 </script>
 
+<svelte:window bind:innerWidth={width} />
 <div class="st-pocket">
   <Sky />
   <main class="st-column">
@@ -471,6 +487,9 @@
           </button>
         {/each}
       </div>
+      <h3 class="p-caps st-textsize" id="st-textsize">Text size</h3>
+      <!-- #1180, owner 2026-10-21: one column on a phone, so "extra large" at its own size fits a 360px screen. -->
+      <Tiles choices={[...TEXT_SIZE_CHOICES]} value={textSize} label="Text size" cols={width < 430 ? 1 : 4} onpick={pickTextSize} />
       <!-- Under the packs, where the desk card has it (#1189). -->
       <button class="st-watch" onclick={watchTour}>↻ watch the tour</button>
     </section>
@@ -639,7 +658,7 @@
         <ArmButton label="sign out of every device →" armedLabel="tap again to sign out everywhere" wide
                    onfire={signOutEverywhereNow} />
         {#if everywhereProblem}<p class="p-error" role="alert">{everywhereProblem}</p>{/if}
-        <p class="st-everywhere p-prose">This signs Orbit out everywhere{#if providerOffered}, and signs you out of your sign-in provider in this browser only: your other devices stay signed in at the provider{/if}.</p>
+        <p class="st-everywhere p-prose">This signs Orbit out everywhere{#if providerSession}, and signs you out of your sign-in provider in this browser only: your other devices stay signed in at the provider{/if}.</p>
       </div>
     </section>
   </main>
@@ -728,6 +747,7 @@
     margin:0 calc(var(--p-card-pad) * -1);padding:4px var(--p-card-pad) 6px;
     scroll-padding:0 var(--p-card-pad)}
   .st-packs::-webkit-scrollbar{display:none}
+  .st-textsize{margin:18px 0 0}
   .st-watch{appearance:none;display:flex;align-items:center;min-height:var(--p-hit);margin-top:4px;padding:0;
     border:0;background:none;cursor:pointer;font:var(--p-type-meta)/1.4 var(--mono);color:var(--accent-text)}
   .st-pack{appearance:none;flex:none;width:112px;height:88px;padding:0;border:0;background:none;cursor:pointer;
@@ -835,7 +855,7 @@
     text-transform:uppercase;color:var(--ink-quiet);margin:4px 0 6px}
   .st-input{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;margin:0 0 12px;border-radius:12px;
     border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);color:var(--ink);
-    font:var(--p-type-body)/1.2 var(--ui)}
+    font:var(--p-type-input)/1.2 var(--ui)}
   .st-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
   .st-proven{margin:0 0 12px;color:var(--ok-text)}
 

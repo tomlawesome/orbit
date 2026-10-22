@@ -4,12 +4,12 @@ import {
   wordsOf, notSavedWords,
 } from "$lib/data/workspace.js";
 import {
-  CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
-  WHY_UNDRAWABLE, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
+  CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
+  WHY_UNDRAWABLE, DOCUMENT_ACCEPT, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
 } from "$lib/data/document-read.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
-import { takeHeldDocument } from "$lib/data/held-document.js";
+import { takeHeldDocument, takeHeldType } from "$lib/data/held-document.js";
 import { addedWords, wireDropFeedback } from "./drop-feedback.js";
 import { dryRunner } from "$lib/data/dry-run.js";
 import { REMINDER_DEFAULT, createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, reminderPairOf } from "./entry.js";
@@ -64,7 +64,7 @@ import { sizeLabel } from "$lib/format.js";
  *      same class of bug satellites.js's own doc warns about ("a blurred
  *      scrim survived a trip to /create").
  */
-export function mountCreate() {
+export function mountCreate({ documentReading = true } = {}) {
   const { on, teardown } = screenScope();
 
   const card = /** @type {HTMLElement} */ (document.getElementById("card"));
@@ -278,7 +278,7 @@ export function mountCreate() {
   const picker = document.createElement("input");
   picker.type = "file";
   picker.hidden = true;
-  picker.accept = ".pdf,.eml,image/*";
+  picker.accept = DOCUMENT_ACCEPT;
   card.appendChild(picker);
 
   /* §14/#474: a document splits the screen — the form slides left and the
@@ -391,7 +391,7 @@ export function mountCreate() {
   }
 
   /** Back to the mockup's `doc` state: the reticle breathing, nothing settled. */
-  function resetLane(/** @type {File} */ file) {
+  function resetLane(/** @type {File} */ file, reading = true) {
     clearSheet();
     pageState = "pending";
     readDone = false;
@@ -399,10 +399,11 @@ export function mountCreate() {
     readcard.classList.remove("still", "rc-refused");
     delete readcard.dataset.page;
     readcard.dataset.reading = "true";
-    readHead.textContent = READING_HEAD;
+    readHead.textContent = reading ? READING_HEAD : CHECKING_HEAD;
     focusline.textContent = FOCUS_SCANNING;
-    focusWhy.innerHTML = WHY_READING;
-    capline.textContent = CAP_READING;
+    focusWhy.textContent = reading ? "" : WHY_CHECKING;
+    if (reading) focusWhy.innerHTML = WHY_READING;
+    capline.textContent = reading ? CAP_READING : CAP_ATTACHED;
     honest.textContent = "";
     rcFile.textContent = `◆ ${file.name}`;
     rcSize.textContent = sizeLabel(file.size);
@@ -495,7 +496,7 @@ export function mountCreate() {
        pocket's readDocument does: carrying only fills empty fields, so stale
        ones would otherwise be saved against the new file. */
     clearSuggestions();
-    resetLane(file);
+    resetLane(file, documentReading);
     const householdId = (household ?? await activeHousehold()).id;
     if (!current()) return;
 
@@ -505,7 +506,7 @@ export function mountCreate() {
       if (!current() || pageState !== "pending") return;
       focusline.textContent = focusAfterScan(scanned);
     };
-    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned });
+    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned, documentReading });
 
     const page = outcomes.page.then((outcome) => {
       if (!current()) {
@@ -539,6 +540,11 @@ export function mountCreate() {
         if (outcome.kind === "refused") {
           /* The upload would refuse it too, so the save is held now. */
           refuseDocument(file, outcome.why);
+          return;
+        }
+        if (outcome.kind === "attached") {
+          /* #1459: reading is off; the file goes with the entry as it is. */
+          capline.textContent = captionOf(outcome, 0);
           return;
         }
         if (outcome.kind === "unread") {
@@ -605,6 +611,19 @@ export function mountCreate() {
   /* #1243: a file the home drawer's quick add was given arrives here, and
      is taken exactly as if it had been dropped on this zone. */
   takeFile(takeHeldDocument());
+
+  /* #1467: a kind the home drawer's quick add was given arrives here and is
+     chosen exactly as if its chip had been pressed. Taken once, whether or
+     not a chip matches, so it can never linger for a later visit. The chip's
+     own handler reveals the fields, as a chosen type does, and marks the form
+     edited; but the reader has typed nothing, so Back must not ask to discard
+     it. `committed` is the "nothing of theirs to lose" baseline; their first
+     keystroke or choice makes it unsaved work again through `edited`. */
+  const heldType = takeHeldType();
+  if (heldType) {
+    typeButtons.find((button) => button.dataset.type === heldType)?.click();
+    committed = true;
+  }
 
   /* Accepting a suggestion clears the field's suggested marking. Nothing
      suggests anything yet — see the note above — but the grammar ships with

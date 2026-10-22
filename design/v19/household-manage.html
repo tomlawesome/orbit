@@ -699,7 +699,7 @@
     <div>
       <h1><span class="own-only">Harlow Home</span><span class="mem-only">Seaside Cottage</span></h1>
       <div class="sub">
-        <span class="own-only">your system · you own it · 4 members · 6 entries in orbit</span>
+        <span class="own-only">your system · you own it · 4 members · 7 entries in orbit</span>
         <span class="mem-only">a system you’re in · Emma Harlow owns it · 3 members · 3 entries in orbit</span>
       </div>
     </div>
@@ -779,7 +779,7 @@
             </svg><i></i>
           </span>
           <input class="lock" value="Home" maxlength="30" aria-label="Section name">
-          <span class="used">3 entries</span>
+          <span class="used">4 entries</span>
           <button class="toggle lock" aria-pressed="true" aria-label="Home on the chart" onclick="flipSec(this)"><i></i></button>
           <span class="state">shown</span>
           <button class="drop lock" title="remove" aria-label="Remove section" onclick="dropSec(this)">×</button>
@@ -1020,7 +1020,7 @@
       <div class="arch">
         <div id="arch-panel-out" role="tabpanel" aria-labelledby="arch-tab-out">
           <ul class="man" aria-label="What the file holds">
-            <li><b>6</b><span class="lab">entries</span></li>
+            <li><b>7</b><span class="lab">entries</span></li>
             <li><b>5</b><span class="lab">sections</span></li>
             <li><span class="lab">documents</span><small>travel with it</small></li>
             <li><span class="lab">people</span><small class="zero">never in the file</small></li>
@@ -1060,7 +1060,7 @@
            toward it, not to everyone who scrolls past. -->
       <div class="confirm" id="delconfirm">
         <p class="stake">
-          Everything in Harlow Home — 6 entries, their documents, their history and
+          Everything in Harlow Home — 7 entries, their documents, their history and
           every reminder still queued — stops the moment you ask. You have
           <b class="red">30 days</b> to change your mind; after that it is gone for good.
         </p>
@@ -1507,10 +1507,16 @@ function dialPlacement(days){
                            : Math.max(24, 62 - 0.625 * -days);
   return { angle, radius };
 }
-function bodySize(costMinor){
-  if (!costMinor) return 4;
-  const pounds = Math.max(costMinor / 100, 1);
-  return Math.min(8.5, Math.max(3.5, Math.round((0.8 + 1.09 * Math.log(pounds)) * 10) / 10));
+/* #1460, verbatim from web/src/lib/data/chart.js: planet size follows yearly
+   cost on a two-anchor power curve, 3.5 at 50 pounds a year to 13 at 50,000. */
+const DESK_SIZE = [3.5, 13];
+function bodySize(costMinor, recurrenceMonths, range = DESK_SIZE){
+  const [rMin, rMax] = range;
+  if (!costMinor || costMinor < 0) return rMin;
+  const yearly = (costMinor / 100) * (recurrenceMonths && recurrenceMonths > 0 ? 12 / recurrenceMonths : 1);
+  const k = Math.log(rMax / rMin) / Math.log(1000);
+  const radius = Math.min(rMax, Math.max(rMin, rMin * Math.pow(yearly / 50, k)));
+  return Math.round(radius * 10) / 10;
 }
 /* web/src/lib/format.js: T+ is behind you, T− is ahead. */
 const tminus = (due, today) => {
@@ -1538,12 +1544,13 @@ const SYSTEMS = {
       { id:"s-dates",    name:"Dates & renewals", accent:"coral" },
     ],
     items: [
-      { id:"i-gutter",  title:"Gutter clearing",       sectionId:"s-home",     dueDate:"2026-07-28", costMinor:15000 },
-      { id:"i-mot",     title:"Car MOT — Volvo V60",   sectionId:"s-vehicles", dueDate:"2026-08-29", costMinor:5485  },
-      { id:"i-boiler",  title:"Boiler service",        sectionId:"s-home",     dueDate:"2026-09-04", costMinor:12000 },
-      { id:"i-chimney", title:"Chimney sweep",         sectionId:"s-home",     dueDate:"2026-10-13", costMinor:9000  },
-      { id:"i-smoke",   title:"Smoke alarm batteries", sectionId:"s-devices",  dueDate:"2026-12-13", costMinor:1200  },
-      { id:"i-svc",     title:"Car full service",      sectionId:"s-vehicles", dueDate:"2027-01-21", costMinor:30000 },
+      { id:"i-gutter",  title:"Gutter clearing",       sectionId:"s-home",     dueDate:"2026-07-28", costMinor:15000, recurrenceMonths:12 },
+      { id:"i-mot",     title:"Car MOT — Volvo V60",   sectionId:"s-vehicles", dueDate:"2026-08-29", costMinor:5485, recurrenceMonths:12  },
+      { id:"i-boiler",  title:"Boiler service",        sectionId:"s-home",     dueDate:"2026-09-04", costMinor:12000, recurrenceMonths:12 },
+      { id:"i-chimney", title:"Chimney sweep",         sectionId:"s-home",     dueDate:"2026-10-13", costMinor:9000, recurrenceMonths:12  },
+      { id:"i-smoke",   title:"Smoke alarm batteries", sectionId:"s-devices",  dueDate:"2026-12-13", costMinor:1200, recurrenceMonths:6  },
+      { id:"i-svc",     title:"Car full service",      sectionId:"s-vehicles", dueDate:"2027-01-21", costMinor:30000, recurrenceMonths:12 },
+      { id:"i-roof",    title:"Roof replacement",      sectionId:"s-home",     dueDate:"2026-11-21", costMinor:5000000, recurrenceMonths:12 },
     ],
   },
   seaside: {
@@ -1552,9 +1559,9 @@ const SYSTEMS = {
       { id:"s-outside", name:"Outside", accent:"plum" },
     ],
     items: [
-      { id:"i-seaside-0", title:"Septic tank empty",       sectionId:"s-outside", dueDate:"2026-08-20", costMinor:21000 },
-      { id:"i-seaside-1", title:"Chimney sweep — Seaside", sectionId:"s-home",    dueDate:"2027-03-01", costMinor:9000  },
-      { id:"i-seaside-2", title:"Deck re-oiling",          sectionId:"s-outside", dueDate:"2027-06-15", costMinor:13000 },
+      { id:"i-seaside-0", title:"Septic tank empty",       sectionId:"s-outside", dueDate:"2026-08-20", costMinor:21000, recurrenceMonths:12 },
+      { id:"i-seaside-1", title:"Chimney sweep — Seaside", sectionId:"s-home",    dueDate:"2027-03-01", costMinor:9000, recurrenceMonths:12  },
+      { id:"i-seaside-2", title:"Deck re-oiling",          sectionId:"s-outside", dueDate:"2027-06-15", costMinor:13000, recurrenceMonths:12 },
     ],
   },
 };
@@ -1574,7 +1581,7 @@ function constellationOf(system, today){
       accent: accents.get(item.sectionId) ? accents.get(item.sectionId).accent : null,
       days, tag: tminus(item.dueDate, today), band: bandOf(days),
       dx: Math.cos(p.angle) * p.radius, dy: Math.sin(p.angle) * p.radius,
-      halo: bodySize(item.costMinor),
+      halo: bodySize(item.costMinor, item.recurrenceMonths),
     };
   });
   marks.sort((a, b) => a.days - b.days || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));

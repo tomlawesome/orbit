@@ -35,3 +35,33 @@ for (const pack of PACKS) {
     expect(results.violations).toEqual([]);
   });
 }
+
+/*
+ * TEXT SIZE (#1180): the "Text size" radiogroup under the theme packs. Four
+ * radios named standard / comfortable / large / extra large, exactly one
+ * checked, no automated violations at rest or with the largest step on.
+ */
+test("/settings text size is a four-option radiogroup with no automated WCAG A/AA violations", async ({ page }) => {
+  await page.goto(`${APP}/settings`, { waitUntil: "load" });
+  await page.waitForSelector(".st-pocket [data-row]");
+  await settle(page);
+  const group = page.getByRole("radiogroup", { name: "Text size" });
+  await expect(group).toBeVisible();
+  const radios = group.getByRole("radio");
+  await expect(radios).toHaveCount(4);
+  await expect(radios).toHaveText(["standard", "comfortable", "large", "extra large"]);
+  await expect(group.getByRole("radio", { checked: true })).toHaveCount(1);
+  const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(results.violations).toEqual([]);
+});
+
+test("/settings text size has no automated WCAG A/AA violations on extra large", async ({ page }) => {
+  await page.addInitScript(() => { localStorage.setItem("orbit-text-size", "extra-large"); });
+  await page.goto(`${APP}/settings`, { waitUntil: "load" });
+  await page.waitForSelector(".st-pocket [data-row]");
+  await settle(page);
+  await expect(page.getByRole("radiogroup", { name: "Text size" }).getByRole("radio", { name: "extra large" })).toBeChecked();
+  const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(results.violations).toEqual([]);
+});
+

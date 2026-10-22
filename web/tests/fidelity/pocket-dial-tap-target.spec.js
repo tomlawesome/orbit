@@ -81,3 +81,37 @@ for (const phone of PHONES) {
       .toHaveAttribute("data-open", "");
   });
 }
+
+/*
+ * #1460: planet size now follows yearly cost up to 12 dial units (24 drawn
+ * px at 390). A £50,000/yr body must not disturb the tap law: its target
+ * stays >= 44px and no pair of targets sits closer than 48px.
+ *
+ * BUILDER NOTE: the fixture household (web/src/lib/data/fixtures/workspace.js)
+ * has no such item (largest is £300). Add an active item titled
+ * "Roof replacement" with costMinor 5_000_000 and recurrenceMonths 12 and a
+ * dueDate that keeps it on the dial at least 48px from its neighbours.
+ */
+for (const phone of PHONES) {
+  test(`at ${phone.width}, a 50,000 pounds a year body keeps 44px targets and 48px spacing`, async ({ page }) => {
+    await page.setViewportSize(phone);
+    await page.goto(`${APP}/home`, { waitUntil: "load" });
+    await page.waitForFunction(() => document.body.dataset.homeReady === "true"
+      && document.querySelectorAll(".mdial [data-body]:not([data-body-sugg])").length > 0);
+    await settle(page);
+
+    const bodies = await dialBodies(page);
+    expect(bodies.map((one) => one.title).join("|"), "the fixture lacks its 50,000 pounds a year body")
+      .toContain("Roof replacement");
+    for (const body of bodies) {
+      expect(body.w, `${body.title}'s target is narrower than 44px`).toBeGreaterThanOrEqual(44);
+      expect(body.h, `${body.title}'s target is shorter than 44px`).toBeGreaterThanOrEqual(44);
+    }
+    for (const [i, a] of bodies.entries()) {
+      for (const b of bodies.slice(i + 1)) {
+        expect(Math.hypot(a.x - b.x, a.y - b.y), `${a.title} and ${b.title} sit closer than 48px`)
+          .toBeGreaterThanOrEqual(48);
+      }
+    }
+  });
+}

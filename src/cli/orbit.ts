@@ -17,7 +17,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { isatty } from "node:tty";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import {
   BackupRestoreCliRefusal,
@@ -69,7 +69,7 @@ import { type InstallOutcome, REPAIR_SIGNPOST, runInstall, runInterruptCleanups 
 import { type HostFacts, HostFactsRefusal, parseHostFacts } from "../lib/host-facts";
 import { HostOwnershipError, applyHostOwnership } from "../lib/host-ownership";
 import { type InstallTerminal, declined } from "../lib/install-terminal";
-import { DEPLOYMENT_ASSETS_ROOT } from "../lib/deployment-assets";
+import { DEPLOYMENT_ASSETS, DEPLOYMENT_ASSETS_ROOT, buildManagedPaths } from "../lib/deployment-assets";
 import { LAUNCHER_CONFIG_TREE_ENV, LAUNCHER_CONFIG_TREE_UNAVAILABLE_ENV, handOverLauncherConfigTree } from "../lib/launcher-config-tree";
 import {
   ConfigureEngineRefusal,
@@ -1445,6 +1445,27 @@ function writeInstallOutcome(path: string | undefined, outcome: InstallOutcome):
   }
 }
 
+/**
+ * The write-ahead journal install.sh's rollback reads: one line per managed
+ * path the engine may create in the target, a file as its relative path and
+ * a directory it owns whole with a trailing slash, written beside the outcome
+ * before the first write. The shell removes only these and moves anything
+ * else new aside, a file the person put inside a directory the engine created
+ * included, rather than deleting it (redesign r5 section 2).
+ */
+function writeInstallJournal(outcomePath: string | undefined): void {
+  if (!outcomePath) return;
+  const names = buildManagedPaths(DEPLOYMENT_ASSETS).map((entry) => (entry.type === "directory" ? `${entry.path}/` : entry.path));
+  const path = join(dirname(outcomePath), "written");
+  const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o600);
+  try {
+    applyHostOwnership(path);
+    writeSync(descriptor, `${names.join("\n")}\n`);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 function commandInstallOrUpdate(command: "install" | "update", deployDirArg: string | undefined, args: string[]): void {
   // F7: the engine runs inside its own image, never on a host.
   if (!isRunningAsEngineContainer()) {
@@ -1508,6 +1529,7 @@ function commandInstallOrUpdate(command: "install" | "update", deployDirArg: str
     });
   }
 
+  writeInstallJournal(outcomePath);
   const startedAt = Date.now();
   runInstall(
     {
@@ -1542,6 +1564,15 @@ function commandInstallOrUpdate(command: "install" | "update", deployDirArg: str
       // the staging and rollback areas exist and nothing has been written yet.
       afterTransactionBegun:
         process.env.ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE === "transaction-begun"
+          ? () => {
+              process.kill(process.pid, "SIGKILL");
+            }
+          : undefined,
+      // The drill's second kill point (redesign r5): the transaction has
+      // committed and no outcome is written, so install.sh's rollback must
+      // put a committed folder back.
+      afterTransactionCommitted:
+        process.env.ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE === "transaction-committed"
           ? () => {
               process.kill(process.pid, "SIGKILL");
             }

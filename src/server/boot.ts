@@ -8,6 +8,22 @@
  */
 const SCANNER_STARTUP_WINDOW_MS = 180_000;
 const SCANNER_READINESS_RETRY_INTERVAL_MS = 5_000;
+/** How long the claim notice waits for the start-up reports: well past a healthy answer, and a third of the scanner ping's 30 s limit, so a hung report delays the link, never withholds it (#1450). */
+const STARTUP_REPORTS_WAIT_MS = 10_000;
+
+/** Resolves when every report has settled or `waitMs` has passed, whichever is first; never rejects. */
+async function settleWithin(reports: Promise<unknown>[], waitMs: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, waitMs);
+    timer.unref?.();
+  });
+  try {
+    await Promise.race([Promise.allSettled(reports), bound]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * Where migrations are read from -- the one resolver both the running boot
@@ -575,9 +591,14 @@ export async function registerNode(): Promise<void> {
     });
   });
 
+  // #1459: say once, plainly, when document reading is off. Best-effort.
+  const documentReadingReport = import("@/server/documents/tika")
+    .then((tika) => tika.reportDocumentReadingStatus())
+    .catch(() => undefined);
+
   // Probed after workers start so a slow or absent scanner never delays them.
   // Failure is reported, never thrown: readiness is the health surface's job.
-  void reportScannerReadiness().catch(() => {
+  const scannerReport = reportScannerReadiness().catch(() => {
     log.error({
       event: "document.scanner",
       state: "degraded",
@@ -589,12 +610,18 @@ export async function registerNode(): Promise<void> {
 
   // Best-effort, like the scanner probe: a weakened PDF sandbox must be
   // visible in the log, but checking for it never delays or fails start-up.
-  void reportPdfSandboxSelfCheck().catch(() => undefined);
+  const pdfSandboxReport = reportPdfSandboxSelfCheck().catch(() => undefined);
+
+  /* #1450: the reports above are not boot steps and start-up does not depend
+     on them, but the claim notice is meant to be the last thing an operator
+     reads, so it waits for them. The wait is bounded: a hung report (the
+     scanner ping can take 30 s) delays the link, it never withholds it. */
+  await settleWithin([documentReadingReport, scannerReport, pdfSandboxReport], STARTUP_REPORTS_WAIT_MS);
 
   /* The last act of start-up (ADR-0022 §1). On an unclaimed instance this
-     prints the claim notice, so it is the last line of `docker logs
-     orbit-app` until the first request arrives and the operator can open it
-     straight from there. On a claimed instance it generates nothing and
+     prints the claim notice, after the start-up reports above, so it lands
+     last in `docker logs orbit-app` until the first request arrives and the
+     operator can find it by reading the logs. On a claimed instance it generates nothing and
      prints nothing. It throws only when no code can be produced at all, which
      is a start-up fault like any other: an instance that is up and unclaimed
      always has a live code (ADR-0022 §3). */

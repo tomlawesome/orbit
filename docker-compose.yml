@@ -28,6 +28,10 @@ services:
     # source is an explicit developer workflow through scripts/build-container.sh.
     image: "${ORBIT_IMAGE:?Set ORBIT_IMAGE to an immutable registry digest or a local build tag}"
     restart: unless-stopped
+    # Bounded like the other services (#1429): a runaway request cannot take
+    # the host with it. Keep it above about 1 GB, the peak of a maximum-size
+    # archive import.
+    mem_limit: ${ORBIT_MEMORY_LIMIT:-2g}
     env_file: .env-orbit
     environment:
       # The image reference itself, so the About page can say which image
@@ -72,7 +76,7 @@ services:
   # closed when it is unavailable, while the rest of the application stays up.
   orbit-clamav:
     container_name: orbit-clamav
-    image: clamav/clamav:1.5.4-debian@sha256:38482a33c6791529d57ece99e5fda54ab94f85534d43306a0b37f5c5bd0aa498
+    image: clamav/clamav:1.5.4-debian@sha256:bd1a3d9f7d90b1c1e2703b1e1e86354102e0be296899a3c941374a597f745e6c
     restart: unless-stopped
     # The image starts freshclam and clamd side by side. On a volume that
     # already holds an older database, freshclam downloads the newer one while
@@ -167,7 +171,7 @@ services:
   # separate, deliberate step -- see the one-shot model pull helper below.
   orbit-ollama:
     container_name: orbit-ollama
-    image: ollama/ollama:0.35.1@sha256:17e945f1aa6e505707eeb621e3f36847d0a4a063d4778f7007645acccfb8bd4f
+    image: ollama/ollama:0.40.8@sha256:242721b8a8dbb71c38fdc0a07ed60ca78363f278d33fdf171a48728abf40743a
     profiles: ["ai"]
     restart: unless-stopped
     environment:
@@ -226,7 +230,7 @@ services:
     # length of the download only, writes to the volume, and stops. Deliberately
     # no container_name, and restart "no": a one-shot `run` container must not
     # claim a name a long-lived service could want, nor come back by itself.
-    image: ollama/ollama:0.35.1@sha256:17e945f1aa6e505707eeb621e3f36847d0a4a063d4778f7007645acccfb8bd4f
+    image: ollama/ollama:0.40.8@sha256:242721b8a8dbb71c38fdc0a07ed60ca78363f278d33fdf171a48728abf40743a
     profiles: ["ai-model-pull"]
     restart: "no"
     environment:

@@ -53,6 +53,14 @@
      asserts what the call sites already guarantee rather than duplicating
      the check. */
   const need = () => /** @type {NonNullable<typeof view>} */ (view);
+  /* The account this screen last confirmed. A re-read whose session read
+     failed keeps it in the header instead of blanking it as if signed out;
+     the People card says the session is unconfirmed and offers a retry. */
+  /** @type {import("$lib/data/workspace.js").SessionUser | null} */
+  let confirmedUser = $state.raw(null);
+  $effect(() => {
+    if (view?.user) confirmedUser = view.user;
+  });
   /** @type {?HTMLDivElement} */
   let backdropRoot = null;
   /* #1123: on a phone the pocket's column holds the page's one main landmark. */
@@ -68,10 +76,31 @@
    * re-read, and a re-read that fails again keeps the screen it has.
    */
   async function rereadScreen() {
+    if (retrying) return;
+    retrying = true;
     try {
       view = await readAdminScreen();
-    } catch { /* the failed panels still say so */ }
+      /* readAdminScreen() still resolves when a card's own read fails
+         again (that card comes back failed), so that is a retry that came
+         back empty too (#1443). */
+      emptyAnswer = Object.values(view.failed).some(Boolean) ? view : null;
+    } catch {
+      /* the screen it has stays, and its failed cards say so */
+      emptyAnswer = view;
+    } finally {
+      retrying = false;
+    }
   }
+  /* The screen a "try again" came back with while some card was still
+     failed. The cards still failed on it say "still no answer" rather than
+     looking untouched; any other re-read replaces the screen, so a card
+     that fails for the first time afterwards does not say "tried again". */
+  /** @type {Awaited<ReturnType<typeof readAdminScreen>> | null} */
+  let emptyAnswer = $state.raw(null);
+  const stillNoAnswer = $derived(emptyAnswer !== null && emptyAnswer === view);
+  /* A press while its re-read is out is ignored, so an older answer cannot
+     land over a newer one. */
+  let retrying = $state(false);
   /* Set when the screen's first read fails outright — readAdminScreen()
      rejects when the workspace itself cannot be read (#1442) — so the page
      says so with a "try again" instead of staying blank. */
@@ -348,12 +377,20 @@
     try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(payload)); } catch { /* storage refused: the form simply starts empty */ }
   }
 
-  function restoreDraft() {
+  /**
+   * Refill the forms from the stashed draft, but only for the errand the
+   * provider sent back: a draft left by another errand (one that never left,
+   * or was abandoned) holds a different person and must not resurface. The
+   * draft is removed either way.
+   * @param {string} returnedIntent the `stepup` value the return carried
+   */
+  function restoreDraft(returnedIntent) {
     try {
       const held = sessionStorage.getItem(DRAFT_KEY);
       sessionStorage.removeItem(DRAFT_KEY);
       if (!held) return;
       const draft = JSON.parse(held);
+      if (draft.intent !== returnedIntent) return;
       if (draft.local) localDraft = { ...localDraft, ...draft.local };
       if (draft.intent === "system_create") {
         systemName = draft.systemName ?? "";
@@ -399,6 +436,8 @@
       stashDraft(intent, about);
       await startStepUp({ intent, returnTo: `/administration?stepup=${encodeURIComponent(intent)}` });
     } catch (error) {
+      // The handover never left, so nothing will come back for the draft.
+      try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* storage refused: nothing was kept */ }
       report(setupWords(error));
     }
   }
@@ -816,7 +855,7 @@
          was left rather than making them type the person in again. */
       const resumed = parameters.get("stepup");
       if (resumed) {
-        restoreDraft();
+        restoreDraft(resumed);
         actorHasPassword = false;
         provenIntent = resumed;
       }
@@ -836,7 +875,7 @@
 <div class="station-backdrop" bind:this={backdropRoot} aria-hidden="true"></div>
 <div class="vignette" aria-hidden="true"></div>
 
-<Chrome user={view?.user} current="administration" household={view?.household} />
+<Chrome user={view?.user ?? confirmedUser} current="administration" household={view?.household} />
 
 <!-- #1123, proposal §2.12: administration on a phone, chosen by CSS. It
      shares this page's state and acts (the step-up challenge, the re-read),
@@ -881,6 +920,9 @@
            finishing a rotation is a shell procedure, not a click. It is
            self-contained by design so #941's damaged/locked counts can stand
            beside it later without either being rewritten. -->
+      {#if view.failed.rotation}
+        <div class="adminproblem" role="alert">key rotation not shown — Orbit could not reach its status{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
+      {/if}
       {#if view.rotation?.inProgress}
         <div class="card wide rotation">
           <div class="cardhead"><h2>Document key rotation in progress</h2>
@@ -912,6 +954,12 @@
            is gone. The member sees neither number: a member gets the field in
            front of them and what they can do about it, and this screen gets the
            aggregate, so a missing key reads as one condition with one remedy. -->
+      {#if view.failed.metadata}
+        <div class="adminproblem" role="alert">encrypted-details health not shown — Orbit could not reach it{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
+      {/if}
+      {#if view.failed.recoveryBundle}
+        <div class="adminproblem" role="alert">recovery bundle status not shown — Orbit could not reach it{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
+      {/if}
       {#if view.metadata}
       {#if view.metadata.locked}
         <div class="card wide rotation">
@@ -1030,8 +1078,14 @@
         {/if}
         {#if localProblem}<div class="adminproblem">{localProblem}</div>{/if}
 
+        {#if view.failed.session}
+          <!-- Not knowing who is signed in is not "signed out": say so, and
+               hold back the per-person actions until a retry tells which
+               row is yours. -->
+          <div class="adminproblem" role="alert">your own row not marked and people's actions hidden — Orbit could not confirm who is signed in{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
+        {/if}
         {#if view.failed.users}
-          <div class="adminproblem" role="alert">people not shown — Orbit could not reach the list of people<button class="retry" onclick={rereadScreen}>try again</button></div>
+          <div class="adminproblem" role="alert">people not shown — Orbit could not reach the list of people{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
         {/if}
         {#each view.users ?? [] as person (person.id)}
           <div class="person">
@@ -1041,7 +1095,7 @@
               <span>{[person.email, view.peopleMeta[person.id]].filter(Boolean).join(" · ")}</span>
             </div>
             <span class="role" class:admin={person.isInstanceAdmin}>{person.isInstanceAdmin ? "admin" : "user"}</span>
-            {#if person.id !== view.user?.id}
+            {#if !view.failed.session && person.id !== view.user?.id}
               <button class="place" title="Admins can add any user to any system"
                       onclick={() => (placing = placing === person.id ? null : person.id)}>place in a system…</button>
               <!-- A fresh link for somebody who never used theirs, or who has
@@ -1162,7 +1216,7 @@
           </div>
         {/each}
         {#if view.failed.owners}
-          <div class="adminproblem" role="alert">owners not shown — Orbit could not reach every system’s members<button class="retry" onclick={rereadScreen}>try again</button></div>
+          <div class="adminproblem" role="alert">owners not shown — Orbit could not reach every system’s members{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
         {/if}
 
         <!-- ON THE CLOCK (#1001): readWorkspace excludes a household with a
@@ -1235,7 +1289,7 @@
           {/if}
         </div>
         {#if view.failed.contact}
-          <div class="adminproblem" role="alert">not shown — Orbit could not reach the public contact<button class="retry" onclick={rereadScreen}>try again</button></div>
+          <div class="adminproblem" role="alert">not shown — Orbit could not reach the public contact{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
         {:else}
           <div class="kv"><span>address</span><b>{view.contact?.address ?? "not set"}</b></div>
         {/if}
@@ -1268,6 +1322,9 @@
       <div class="card" id="jobs-card">
         <div class="cardhead"><h2>Document jobs</h2>
           {#if jobCounts}<span class="count">{jobCounts}</span>{/if}</div>
+        {#if view.failed.operations}
+          <div class="adminproblem" role="alert">not shown — Orbit could not reach the document jobs{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
+        {/if}
         {#each jobs as job (job.id)}
           <div class="person">
             <div class="who"><b>{JOB_KINDS[job.kind] ?? job.kind}</b><span>{jobMeta(job)}</span></div>
@@ -1277,14 +1334,20 @@
             {/if}
           </div>
         {:else}
-          <p class="jobfoot">no document jobs yet</p>
+          {#if !view.failed.operations}<p class="jobfoot">no document jobs yet</p>{/if}
         {/each}
-        <div class="jobfoot">the 25 most recently touched jobs are kept; older ones are not</div>
+        {#if !view.failed.operations}<div class="jobfoot">the 25 most recently touched jobs are kept; older ones are not</div>{/if}
         {#if jobsProblem}<div class="adminproblem">{jobsProblem}</div>{/if}
       </div>
 
       <!-- #1285: the document upload size limit — the configured default
            until an administrator sets their own. -->
+      {#if view.failed.uploadLimit}
+        <div class="card" id="upload-limit-card">
+          <div class="cardhead"><h2>Upload size limit</h2></div>
+          <div class="adminproblem" role="alert">not shown — Orbit could not reach the upload limit{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
+        </div>
+      {/if}
       {#if view.uploadLimit}
         {@const limit = view.uploadLimit}
         <div class="card" id="upload-limit-card">
@@ -1337,7 +1400,7 @@
             {/if}
           </div>
           {#if view.failed.relay}
-            <div class="adminproblem" role="alert">not shown — Orbit could not reach the mail settings<button class="retry" onclick={rereadScreen}>try again</button></div>
+            <div class="adminproblem" role="alert">not shown — Orbit could not reach the mail settings{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
           {/if}
           {#each view.relay ?? [] as [label, value, extra] (label)}
             <div class="kv"><span>{label}</span>
@@ -1486,7 +1549,7 @@
             <div class="svc"><i style="background:var(--{tone})"></i><b>{name}</b><small>{detail}</small></div>
           {/each}
           {#if view.failed.services}
-            <div class="adminproblem" role="alert">not shown — Orbit could not reach the service checks<button class="retry" onclick={rereadScreen}>try again</button></div>
+            <div class="adminproblem" role="alert">not shown — Orbit could not reach the service checks{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
           {/if}
         </div>
       </div>
@@ -1496,7 +1559,7 @@
     {#if view.instance}
       <div class="strip">{view.instance}</div>
     {:else if view.failed.instance}
-      <div class="strip" role="alert">version not shown — Orbit could not reach this instance’s build<button class="retry" onclick={rereadScreen}>try again</button></div>
+      <div class="strip" role="alert">version not shown — Orbit could not reach this instance’s build{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
     {/if}
   {/if}
 </div>

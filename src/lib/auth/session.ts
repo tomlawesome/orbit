@@ -230,6 +230,13 @@ export interface SessionSummary {
   createdAt: Date;
   lastSeenAt: Date | null;
   userAgent: string | null;
+  /**
+   * Whether this session began at the sign-in provider and holds its ID token
+   * (#1444): the only sessions a sign-out can hand on to the provider. A
+   * password session, or one whose token was too large to keep, has none.
+   * The token itself is never selected.
+   */
+  viaProvider: boolean;
 }
 
 /**
@@ -247,6 +254,7 @@ export async function listSessions(userId: string): Promise<SessionSummary[]> {
       createdAt: sessions.createdAt,
       lastSeenAt: sessions.lastSeenAt,
       userAgent: sessions.userAgent,
+      viaProvider: sql<boolean>`${sessions.idTokenEnc} is not null`,
     })
     .from(sessions)
     .where(eq(sessions.userId, userId));

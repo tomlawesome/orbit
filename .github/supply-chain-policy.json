@@ -23,11 +23,11 @@
   "signingTools": [
     {
       "name": "cosign",
-      "version": "3.1.3",
-      "sha256": "4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71",
+      "version": "3.1.4",
+      "sha256": "424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa",
       "asset": "cosign-linux-amd64",
       "license": "Apache-2.0",
-      "source": "https://github.com/sigstore/cosign/releases/tag/v3.1.3",
+      "source": "https://github.com/sigstore/cosign/releases/tag/v3.1.4",
       "updateOwner": "Orbit maintainers",
       "reviewBy": "2026-10-30"
     }
@@ -50,28 +50,6 @@
     ]
   },
   "exceptions": [
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-14257",
-      "package": "brace-expansion",
-      "installedVersion": "5.0.7",
-      "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-69152",
-      "package": "brace-expansion",
-      "installedVersion": "5.0.7",
-      "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
     {
       "kind": "vulnerability",
       "scope": "image",
@@ -306,13 +284,57 @@
     {
       "kind": "vulnerability",
       "scope": "image",
-      "id": "CVE-2026-69192",
-      "package": "ip-address",
-      "installedVersion": "10.2.0",
+      "id": "CVE-2026-56851",
+      "package": "golang.org/x/text",
+      "installedVersion": "v0.30.0",
       "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved.",
+      "rationale": "Compiled into /usr/bin/ollama (0.35.1); fixed upstream in x/text 0.41.0, which no Ollama release carries yet (0.40.6 declined, #794 note 40777). Owner granted, 2026-10-20. Clears when a re-pinned Ollama scans clean.",
       "expiresOn": "2026-11-04",
       "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-63209",
+      "package": "github.com/klauspost/compress",
+      "installedVersion": "v1.18.3",
+      "owner": "Orbit maintainers",
+      "rationale": "Compiled into /usr/bin/ollama (0.35.1); fixed upstream in compress 1.18.7, which no Ollama release carries yet. The model server is off in the default (Standard) profile, so no shipped install runs this binary unless the operator chooses the full local stack. Owner granted, 2026-10-20. Clears when a re-pinned Ollama scans clean.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-111943",
+      "package": "stdlib",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794,
+      "installedVersion": "v1.24.6",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; the newest 18-alpine build and gosu 1.19 are still on Go 1.24.6. Clears only when upstream rebuilds gosu on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-111943",
+      "package": "stdlib",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794,
+      "installedVersion": "v1.26.7",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; 4.1.0-1-full and 4.2.0-SNAPSHOT-full are still on Go 1.26.7. Clears when a Tika image ships pebble on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-111943",
+      "package": "stdlib",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794,
+      "installedVersion": "v1.26.0",
+      "rationale": "Go standard library compiled into /usr/bin/ollama (0.35.1); the newest release, 0.40.7, is still built on Go 1.26.0. The model server is off in the default (Standard) profile. Clears when a re-pinned Ollama scans clean. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
     },
     {
       "kind": "vulnerability",
@@ -878,127 +900,6 @@
     {
       "kind": "vulnerability",
       "scope": "image",
-      "id": "CVE-2026-73566",
-      "package": "tar",
-      "installedVersion": "7.5.19",
-      "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-102276",
-      "package": "brace-expansion",
-      "installedVersion": "5.0.7",
-      "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved (2026-10-01). Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-102278",
-      "package": "brace-expansion",
-      "installedVersion": "5.0.7",
-      "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved (2026-10-01). Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-19534",
-      "package": "undici",
-      "installedVersion": "6.27.0",
-      "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved (2026-10-01). Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-103111",
-      "package": "libpcre2-8-0",
-      "installedVersion": "10.46-1~deb13u2",
-      "owner": "Orbit maintainers",
-      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-75804",
-      "package": "libssl3t64",
-      "installedVersion": "3.5.7-1~deb13u2",
-      "owner": "Orbit maintainers",
-      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-75804",
-      "package": "openssl",
-      "installedVersion": "3.5.7-1~deb13u2",
-      "owner": "Orbit maintainers",
-      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-75804",
-      "package": "openssl-provider-legacy",
-      "installedVersion": "3.5.7-1~deb13u2",
-      "owner": "Orbit maintainers",
-      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-84782",
-      "package": "libssl3t64",
-      "installedVersion": "3.5.7-1~deb13u2",
-      "owner": "Orbit maintainers",
-      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-84782",
-      "package": "openssl",
-      "installedVersion": "3.5.7-1~deb13u2",
-      "owner": "Orbit maintainers",
-      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-84782",
-      "package": "openssl-provider-legacy",
-      "installedVersion": "3.5.7-1~deb13u2",
-      "owner": "Orbit maintainers",
-      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
       "id": "CVE-2026-78667",
       "package": "stdlib",
       "installedVersion": "v1.26.7",
@@ -1032,39 +933,6 @@
     {
       "kind": "vulnerability",
       "scope": "image",
-      "id": "CVE-2026-8286",
-      "package": "libcurl4t64",
-      "installedVersion": "8.14.1-2+deb13u5",
-      "owner": "Orbit maintainers",
-      "rationale": "curl library in clamav/clamav:1.5.4-debian; the distribution fixed it in 8.14.1-2+deb13u7 (DSA-6558-1) on 2026-10-14, but the 1.5.4-debian tag was last rebuilt on 2026-10-12, before the fix. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-8927",
-      "package": "libcurl4t64",
-      "installedVersion": "8.14.1-2+deb13u5",
-      "owner": "Orbit maintainers",
-      "rationale": "curl library in clamav/clamav:1.5.4-debian; the distribution fixed it in 8.14.1-2+deb13u7 (DSA-6558-1) on 2026-10-14, but the 1.5.4-debian tag was last rebuilt on 2026-10-12, before the fix. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-92392",
-      "package": "libcurl4t64",
-      "installedVersion": "8.14.1-2+deb13u5",
-      "owner": "Orbit maintainers",
-      "rationale": "curl library in clamav/clamav:1.5.4-debian; the distribution fixed it in 8.14.1-2+deb13u7 (DSA-6558-1) on 2026-10-14, but the 1.5.4-debian tag was last rebuilt on 2026-10-12, before the fix. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
       "id": "CVE-2026-92392",
       "package": "libcurl3t64-gnutls",
       "installedVersion": "8.18.0-1ubuntu2.7",
@@ -1083,14 +951,47 @@
       "rationale": "curl library in apache/tika:4.1.0-full; the distribution fixed it in 8.18.0-1ubuntu2.8 (USN-8927-1) on 2026-10-14, but 4.1.0-full is still the newest release tag and has not been rebuilt since 2026-09-29. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
       "expiresOn": "2026-11-04",
       "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-102276",
+      "package": "brace-expansion",
+      "installedVersion": "5.0.9",
+      "owner": "Orbit maintainers",
+      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-102278",
+      "package": "brace-expansion",
+      "installedVersion": "5.0.9",
+      "owner": "Orbit maintainers",
+      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-19534",
+      "package": "undici",
+      "installedVersion": "6.28.0",
+      "owner": "Orbit maintainers",
+      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
     }
   ],
   "containerImages": [
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:b0ec1e181077b68385b2a63b60fee05708a7f765a695750d9d7236af2b553bd3",
-      "indexDigest": "sha256:c3448847796f019728077caf63ddb20d9861e22fbd8f92c33de7b13a9e0335af",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:669375d6f866a55f12520710047ed03311377d303ab0aeff9daefa0a597acc99",
+      "indexDigest": "sha256:669375d6f866a55f12520710047ed03311377d303ab0aeff9daefa0a597acc99",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -1100,14 +1001,14 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-06",
+      "resolvedOn": "2026-10-22",
       "reviewBy": "2026-11-30"
     },
     {
       "name": "Node.js build and runtime",
       "tag": "node:24-alpine",
-      "reference": "node:24-alpine@sha256:83f1c388c31fb2e51f7cbd4dea949b96260798c98f206e8e4696bc93bd964e3a",
-      "indexDigest": "sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1",
+      "reference": "node:24-alpine@sha256:f777d4615e9f225aa23d72dc05bd8454a0fadcb033e00417c5b9257f5585677b",
+      "indexDigest": "sha256:6a1c190e17215d844926b0677f4bf87273ff7d5e54db06d3b5b5863ab0b09a3d",
       "platform": "linux/amd64",
       "locations": [
         "tests/oidc/Dockerfile"
@@ -1117,7 +1018,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/docker-node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-09-24",
+      "resolvedOn": "2026-10-21",
       "reviewBy": "2026-10-30"
     },
     {
@@ -1143,8 +1044,8 @@
     {
       "name": "ClamAV malware scanner",
       "tag": "clamav/clamav:1.5.4-debian",
-      "reference": "clamav/clamav:1.5.4-debian@sha256:38482a33c6791529d57ece99e5fda54ab94f85534d43306a0b37f5c5bd0aa498",
-      "indexDigest": "sha256:9bb8712a50f0e75166e936c452cd82dd5e5be0b85586598930b5bbb84a99a578",
+      "reference": "clamav/clamav:1.5.4-debian@sha256:bd1a3d9f7d90b1c1e2703b1e1e86354102e0be296899a3c941374a597f745e6c",
+      "indexDigest": "sha256:d7ede3cefeaf3b8a72ebcdee849d13f504bbca3f3b3cfade5bc7b6ee06a4f62c",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml",
@@ -1155,7 +1056,7 @@
       "license": "GPL-2.0-only",
       "licenseSource": "https://github.com/Cisco-Talos/clamav/blob/main/COPYING.txt",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-01",
+      "resolvedOn": "2026-10-20",
       "reviewBy": "2026-10-30"
     },
     {
@@ -1178,9 +1079,9 @@
     },
     {
       "name": "Ollama optional local AI service",
-      "tag": "ollama/ollama:0.35.1",
-      "reference": "ollama/ollama:0.35.1@sha256:17e945f1aa6e505707eeb621e3f36847d0a4a063d4778f7007645acccfb8bd4f",
-      "indexDigest": "sha256:292ee7945dfc3d5840a181f3ab86fedb1e66703e02c8af98b50f4da56b7e278c",
+      "tag": "ollama/ollama:0.40.8",
+      "reference": "ollama/ollama:0.40.8@sha256:242721b8a8dbb71c38fdc0a07ed60ca78363f278d33fdf171a48728abf40743a",
+      "indexDigest": "sha256:2b8eecdb85aa6ea67c381c8ecffec04b2658496cf2821a8f88b0485bdff198e8",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -1190,7 +1091,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/ollama/ollama/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-02",
+      "resolvedOn": "2026-10-22",
       "reviewBy": "2026-10-30"
     }
   ],

@@ -6,7 +6,15 @@
  *
  * Sizes are rem so the platform's larger-text setting scales them (§1.6).
  * The floor: nothing under 12px, and 12px only for tracked caps labels.
+ *
+ * TEXT SIZE (#1180): the reader's choice scales the root font, so every rem
+ * here and every desk size follows. Comfortable is today's look. Hit targets,
+ * gutters and the home dial stay px and do not scale.
  */
+html[data-text-size=standard]{font-size:93.75%}
+html[data-text-size=comfortable]{font-size:100%}
+html[data-text-size=large]{font-size:112.5%}
+html[data-text-size=extra-large]{font-size:125%}
 :root{
   /* type (§1.6) */
   --p-type-title:1.75rem;      /* 28px, page title, display, one per page */
@@ -15,9 +23,10 @@
   --p-type-body:1rem;          /* 16px, body, row title, inputs (no iOS zoom) */
   --p-type-sheet:1.125rem;     /* 18px, sheet title, ui 600 */
   --p-type-meta:.8125rem;      /* 13px, meta, T-labels, values */
-  --p-type-caps:.75rem;        /* 12px, tracked caps label, the floor */
+  --p-type-caps:max(12px,.75rem);  /* 12px, tracked caps label; never under 12px at standard (#1180) */
   --p-type-caps-track:.18em;  /* the desk's card h2 (§5.2) */
   --p-type-button:.9375rem;    /* 15px, pills */
+  --p-type-input:max(16px,1rem); /* pocket inputs: 16px floor, so iOS never zooms on focus (#1180) */
 
   /* spacing and targets (§1.7) */
   --p-hit:44px;                /* every tappable thing, at least */

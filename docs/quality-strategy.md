@@ -393,6 +393,8 @@ tests never reach a live daemon but still spawn real scripts that gate on
 preconditions that demand both the binary and a reachable daemon. That last
 one arrived red on `fast` rather than being predicted: a suite that spawns a
 real script belongs here whether or not the test file itself says "docker".
+`scripts/app-memory-limit-contract.test.mjs` (#1429) is here too: it renders
+`docker compose config`, which needs the binary but no daemon.
 The split frees the
 ~200-300 s `orbit-build` used to hold for `fast`'s docker-free work every
 pipeline.

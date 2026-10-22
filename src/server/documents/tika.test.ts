@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/server/documents/config", () => ({ getDocumentConfig: mocks.config }));
 
-import { extractTextWithTika, getTikaHealth, undoTikaMarkdownEscapes } from "./tika";
+import { documentReadingEnabled, extractTextWithTika, getTikaHealth, reportDocumentReadingStatus, undoTikaMarkdownEscapes } from "./tika";
 
 const TIKA_URL = "http://tika.internal:9998";
 const DOCUMENT_ID = "11111111-1111-4111-8111-111111111111";
@@ -336,5 +336,44 @@ describe("Tika's Markdown escapes (#982)", () => {
 
   it("leaves ordinary text alone", () => {
     expect(undoTikaMarkdownEscapes("Renewal date 14 March 2027")).toBe("Renewal date 14 March 2027");
+  });
+});
+
+describe("document reading capability (#1459)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("is on when TIKA_URL is set and off when it is not", () => {
+    mocks.config.mockReturnValue(config);
+    expect(documentReadingEnabled()).toBe(true);
+    mocks.config.mockReturnValue({ tika: { url: null, timeoutMs: 50 } });
+    expect(documentReadingEnabled()).toBe(false);
+  });
+
+  it("logs once at start-up that reading is off and why, naming TIKA_URL but no address", () => {
+    mocks.config.mockReturnValue({ tika: { url: null, timeoutMs: 50 } });
+    const info = vi.spyOn(log, "info").mockImplementation(() => undefined);
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    reportDocumentReadingStatus();
+    const all = [...info.mock.calls, ...warn.mock.calls];
+    expect(all).toHaveLength(1);
+    expect(JSON.stringify(all[0])).toContain("document reading is off: TIKA_URL is not set");
+  });
+
+  it("logs nothing about reading being off when Tika is on, and never prints its address", () => {
+    mocks.config.mockReturnValue(config);
+    const info = vi.spyOn(log, "info").mockImplementation(() => undefined);
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    reportDocumentReadingStatus();
+    expect(JSON.stringify([...info.mock.calls, ...warn.mock.calls])).not.toContain("document reading is off");
+    expect(JSON.stringify([...info.mock.calls, ...warn.mock.calls])).not.toContain("tika.internal");
+  });
+
+  it("asks nothing of Tika when reading is off (no request is made by the check)", () => {
+    mocks.config.mockReturnValue({ tika: { url: null, timeoutMs: 50 } });
+    vi.stubGlobal("fetch", vi.fn());
+    reportDocumentReadingStatus();
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

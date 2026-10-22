@@ -64,6 +64,8 @@ run_plain_simulation() {
   installer_ui_emit configuration configuration completed configuration-migration verify
   installer_ui_emit oidc oidc completed provider-discovery verify
   installer_ui_emit compose compose completed compose-validation check
+  installer_ui_emit preparation compose starting service-start start
+  installer_ui_emit preparation compose completed service-start start
   installer_ui_emit database database healthy database-health health
   installer_ui_emit application application healthy application-health health
   installer_ui_emit optional clamav healthy optional-status health
@@ -147,6 +149,30 @@ scenario_choice="$(installer_ui_select "$terminal_fd" \
 
 close_terminal
 
+# The same sequence install.sh plays (#1455, #1456 and its decision, note
+# 40388): starting the containers is the last preparation step, before the
+# database wait. On a fresh install a required service that stopped is a
+# failure, rolled back before the terminal event, which then says retry; one
+# still starting at the deadline is left running and points at Repair; an
+# optional service still starting never fails the install. A failed update
+# is never rolled back and points at Repair.
+installer_ui_emit preparation compose starting service-start start
+sim_pause
+installer_ui_emit preparation compose completed service-start start
+
+# sim_fail <phase> <component> <reason>
+sim_fail() {
+  if [[ "$top_choice" == install ]]; then
+    installer_ui_emit rollback installer running rollback rollback
+    sim_pause
+    installer_ui_emit rollback installer completed rollback rollback
+    installer_ui_emit "$1" "$2" failed "$3" retry
+    printf '\nOrbit installer simulation: %s stopped before it was ready (synthetic facts: status=exited exit-code=1 oom-killed=false restarts=3), so this fresh install is rolled back -- the folder is put back as it was and the containers and volumes it created are removed -- and the next step is retry. Nothing was actually created or removed here.\n' "$4"
+  else
+    installer_ui_emit "$1" "$2" failed "$3" repair
+  fi
+}
+
 case "$scenario_choice" in
   success)
     installer_ui_emit database database starting database-health start
@@ -165,20 +191,40 @@ case "$scenario_choice" in
   database-failure)
     installer_ui_emit database database starting database-health start
     sim_pause
-    installer_ui_emit database database failed database-auth-migration repair
+    installer_ui_emit database database waiting database-health wait
+    sim_fail database database database-auth-migration orbit-db
     printf '\nOrbit installer simulation: representative database-authentication failure shown above. This is a fixed, synthetic scenario; no real database or credential was involved.\n'
     ;;
   health-timeout)
     installer_ui_emit database database healthy database-health health
     installer_ui_emit application application starting application-health start
     sim_pause
-    installer_ui_emit application application failed health-timeout repair
+    installer_ui_emit application application waiting application-health wait
+    if [[ "$top_choice" == install ]]; then
+      # Still running at the deadline: not a failure to roll back.
+      installer_ui_emit application application failed health-timeout repair
+      printf '\nOrbit installer simulation: Orbit did not report ready within 180 s; it is left running and may still finish starting. Check: docker compose --env-file .env-orbit ps. If it is not ready in a few minutes, run Repair. Nothing is actually running here.\n'
+    else
+      sim_fail application application health-timeout orbit-app
+    fi
     printf '\nOrbit installer simulation: representative application-health-timeout failure shown above. This is a fixed, synthetic scenario; no real application was probed.\n'
     ;;
   optional-failure)
     installer_ui_emit database database healthy database-health health
     installer_ui_emit application application healthy application-health health
-    installer_ui_emit optional clamav failed optional-unavailable repair
+    installer_ui_emit optional clamav starting optional-status health
+    sim_pause
+    installer_ui_emit optional clamav waiting optional-status wait
+    if [[ "$top_choice" == install ]]; then
+      # An optional service never fails a fresh install.
+      installer_ui_emit optional clamav waiting optional-status continue
+      installer_ui_emit complete installer completed deployment-ready complete
+      printf '\nSimulation summary (synthetic; nothing was deployed):\n'
+      printf 'Profile: %s\n' "$profile_choice"
+      printf 'Scanner: still starting (first signature download); uploads are refused until it is ready.\n'
+    else
+      sim_fail optional clamav optional-unavailable orbit-clamav
+    fi
     printf '\nOrbit installer simulation: representative optional-service failure shown above. This is a fixed, synthetic scenario; no real optional service was probed.\n'
     ;;
 esac

@@ -11,11 +11,11 @@ decision is [ADR-0011](docs/adr/0011-operator-experience-as-product.md).
 
 **One project, not siblings** ([ADR-0036](docs/adr/0036-the-orbit-family-is-one-project.md);
 recorded as an exception in `~/.config/agents/EXCEPTIONS.md`).
-Orbit, `ai/orbit-base-image`, `ai/orbit-launcher` (project 50) and
-`ai/orbit-site` (project 57) are one project in four repositories. When one
-needs something from another, or something there is not working, act on it
-without asking: file the issue, tell that session. Anything describing Orbit to
-the public (a feature claim, an install step, a screenshot) belongs on the site,
+
+- The Orbit family (`ai/orbit`, `ai/orbit-launcher`, `ai/orbit-site`, `ai/orbit-base-image`) is one project (Orbit ADR-0036): each repo's files, layout and scripts are the whole project's own, never designed around as an outside system. The launcher owns install, update, repair and removal; removal work belongs in the launcher, not a separate tool in Orbit.
+- When work here needs a change in another of the four, do not make it from here: file an issue there with the design fully worked out, labelled `cross-repo`, in that repo's nearest open milestone, and link it from this repo's issue, parked as blocked. That repo's session builds and closes it; on resuming, check blocked issues, and bump any pin once the other repo has released. A `cross-repo` issue is ordinary work in its milestone. ADR-0036 still covers reading sibling repos and one-line pin or doc fixes (owner, 2026-10-22: avoids two sessions editing one repo at once).
+
+Anything describing Orbit to the public (a feature claim, an install step, a screenshot) belongs on the site,
 so check it when Orbit's behaviour changes. The launcher and site point here for
 this rule.
 
@@ -62,6 +62,7 @@ numbers are GitLab's. Operators pull from GHCR; GitLab publishes there
   handed over as a clickable link; sign-off is on running code, not a
   screenshot (`scripts/dev/test-bed.sh` header has the how).
 - Mockups and review screenshots use the app's default theme (after dark).
+- Mockups are shown to the owner only from the local design container (`orbit-design-host`, nginx, ports from 8307), with direct links in chat; never uploaded to issues or published on Pages (owner, 2026-10-21). Starting it needs no go-ahead: a standing auto-mode rule in the Claude settings allows it.
 - An internal test harness (labelling, evaluation page, debug view) is not
   product UX: build it the ordinary way, no top-model design call.
 
@@ -149,6 +150,10 @@ Reasoning for each is in [docs/testing.md](docs/testing.md#local-traps).
 - Never hand-write a control-character range in a regex: lose an escape and it
   matches most ordinary characters. Scan explicitly, as `isApplicationRelative`
   in `web/src/lib/return-path.js` does, and test empty, `//` and backslash.
+- Rebuild the base image yourself, never hand it to the owner: run
+  `~/projects/orbit-base-image/scripts/rebuild-and-publish.sh --as claude --wait`
+  with `~` written out in full, as the whole command; the allow rule matches
+  only that bare absolute path (2026-10-21).
 - A leftover volume of the same Compose project blocks an install;
   `scripts/cleanup-stacks.sh` lists them.
 - A lockfile diff adding an `@pnpm/exe` block means the host pnpm is older than
@@ -162,6 +167,13 @@ Reasoning for each is in [docs/testing.md](docs/testing.md#local-traps).
   is built or shipped.
 - Every tappable thing on the phone layout is at least 44x44px (`--p-hit`,
   gated by `web/tests/fidelity/pocket-measure.spec.js`).
+- While a sub-agent edits and commits on the batch branch in the main
+  checkout, make no other edits there: its commit can pick them up. Run
+  parallel work in its own worktree, or wait.
+- Docs that cite `scripts/install.sh` by line number
+  (`docs/installer-guarantees.md`) are fixed after the batch's last
+  `install.sh` change: every fix moves the lines, so an earlier docs fix goes
+  stale.
 
 ## Sources of truth
 

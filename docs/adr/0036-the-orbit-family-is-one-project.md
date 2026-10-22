@@ -57,6 +57,12 @@ siblings.** Specifically:
 4. **`AGENTS.md` is the single home of this rule.** The launcher's and site's
    own instructions point here rather than restating it.
 
+**Amended 2026-10-22 (owner, #1493):** the standing permission still covers
+reading sibling repositories and one-line pin or doc fixes; larger changes in
+another repository go by a `cross-repo` issue there, fully designed, which
+that repository's session builds. Two sessions editing one repository at once
+race each other for merge order and the shared runner.
+
 ## Consequences
 
 - Cross-repository issues and notes between these four need no owner round

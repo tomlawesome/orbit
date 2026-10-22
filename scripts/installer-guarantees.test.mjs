@@ -151,3 +151,39 @@ describe("installer guarantee catalogue aggregates", () => {
     expect(catalogue).not.toContain("no executor yet");
   });
 });
+
+/*
+ * Redesign r5 (B30, R5-drill-FR3): the test list cites the real-stack drill
+ * by the `note` line it prints. A quote the drill no longer prints is
+ * evidence of nothing, so every `ACC:` quote in the install.sh #31 and #58
+ * rows must appear verbatim in scripts/test-install-acceptance.sh, and #31's
+ * cell quotes the note of the hard interruption after the commit.
+ */
+describe("install.sh test list: the drill's quoted notes (redesign r5)", () => {
+  const drill = readFileSync(new URL("./test-install-acceptance.sh", import.meta.url), "utf8");
+  const listStart = catalogue.indexOf("### install.sh guarantees: now asserted by");
+
+  function accQuotes(number) {
+    expect(listStart, "the install.sh test list").toBeGreaterThan(-1);
+    const row = catalogue
+      .slice(listStart)
+      .split("\n")
+      .find((line) => line.startsWith(`| ${number} |`));
+    expect(row, `row ${number} of the install.sh test list`).toBeDefined();
+    const cell = row.slice(row.indexOf("ACC:") < 0 ? row.length : row.indexOf("ACC:"));
+    // ACC: "quote", "quote" -- up to the next `XX:` source or the end of the cell.
+    const accPart = cell.split(/\.\s+[A-Z]{2,4}:\s/u)[0];
+    return [...accPart.matchAll(/"([^"]+)"/gu)].map((match) => match[1]);
+  }
+
+  it.each([[31], [58]])("every ACC quote in row #%s appears verbatim in the drill", (number) => {
+    for (const quote of accQuotes(number)) expect(drill, quote).toContain(quote);
+  });
+
+  it("#31 quotes the drill's note for the hard interruption after the commit", () => {
+    const note =
+      "lifecycle: install.sh's rollback put .env-orbit and .orbit-secrets back byte-identical after a hard interruption after the commit, staging and lock gone (install.sh #58)";
+    expect(accQuotes(31)).toContain(note);
+    expect(drill).toContain(note);
+  });
+});
