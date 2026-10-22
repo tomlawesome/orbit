@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { execFileSync } from "node:child_process";
+import { readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SEVERITIES = new Set(["UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"]);
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
@@ -145,6 +146,25 @@ function validateContainerImage(entry, index, now) {
   requireLiveDate(entry?.reviewBy, `${label} review`, now);
 }
 
+// A pin the policy deliberately does not watch (#1490): used only by tests or
+// demos, so a stale digest costs nothing, but named so that finding a new pin
+// nobody has accounted for is an error rather than a silence.
+function validateUnwatchedImage(entry, index) {
+  const label = `Unwatched image ${index + 1}`;
+  const reference = requiredString(entry?.reference, `${label} reference`);
+  if (!/^[^@\s]+@sha256:[0-9a-f]{64}$/u.test(reference)) {
+    throw new Error(`${label} reference must be pinned to a full sha256 digest.`);
+  }
+  if (
+    !Array.isArray(entry?.locations) ||
+    entry.locations.length === 0 ||
+    entry.locations.some((location) => typeof location !== "string" || location.trim() === "")
+  ) {
+    throw new Error(`${label} requires at least one location.`);
+  }
+  requiredString(entry?.reason, `${label} reason`);
+}
+
 export function validateSupplyChainPolicy(policy, now = new Date().toISOString().slice(0, 10)) {
   const currentDate = validDate(now, "Policy evaluation date");
   if (policy?.schemaVersion !== 1) {
@@ -187,6 +207,12 @@ export function validateSupplyChainPolicy(policy, now = new Date().toISOString()
   ) {
     throw new Error("Pinned container image references must be unique.");
   }
+  if (policy.unwatchedImages !== undefined) {
+    if (!Array.isArray(policy.unwatchedImages)) {
+      throw new Error("Supply-chain unwatched images must be an array.");
+    }
+    policy.unwatchedImages.forEach((entry, index) => validateUnwatchedImage(entry, index));
+  }
   if (!Array.isArray(policy.mutableImageReferences)) {
     throw new Error("Mutable image references must be an array.");
   }
@@ -199,6 +225,94 @@ export function validateSupplyChainPolicy(policy, now = new Date().toISOString()
     pinnedImageCount: policy.containerImages.length,
     mutableReferenceCount: 0,
   };
+}
+
+// --- Every pinned image is in the policy or listed as unwatched (#1490) --------
+
+const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const IMAGE_PIN_PATTERN =
+  /([A-Za-z0-9$][A-Za-z0-9._\-/:${}]*)@(sha256:[0-9a-f]{64})/gu;
+const PIN_SCANNED_FILE_PATTERN =
+  /(?:\.(?:ya?ml|sh|bash|mjs|cjs|js|ts)|(?:^|\/)Dockerfile[^/]*|\.Dockerfile)$/u;
+const PIN_IGNORED_FILE_PATTERN = /(?:\.test\.(?:mjs|ts)|\.md)$|^docs\//u;
+const WALK_SKIPPED_DIRECTORIES = new Set([".git", "node_modules"]);
+
+function walkFiles(root, directory = "") {
+  const files = [];
+  for (const entry of readdirSync(join(root, directory), { withFileTypes: true })) {
+    const path = directory === "" ? entry.name : `${directory}/${entry.name}`;
+    if (entry.isDirectory()) {
+      if (!WALK_SKIPPED_DIRECTORIES.has(entry.name)) files.push(...walkFiles(root, path));
+    } else if (entry.isFile()) {
+      files.push(path);
+    }
+  }
+  return files;
+}
+
+// Tracked files when the root is itself a git repository, so untracked
+// scratch files never count; otherwise every file under it.
+function repositoryFiles(root) {
+  try {
+    const run = (...args) =>
+      execFileSync("git", ["-C", root, ...args], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        maxBuffer: 64 * 1024 * 1024,
+      });
+    if (realpathSync(run("rev-parse", "--show-toplevel").trim()) !== realpathSync(root)) {
+      return walkFiles(root);
+    }
+    return run("ls-files", "-z").split("\0").filter(Boolean);
+  } catch {
+    return walkFiles(root);
+  }
+}
+
+// `${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/redis:8@sha256:...` is the
+// image `redis:8@sha256:...` fetched through a proxy, and
+// `${IMAGE:-redis:8@sha256:...}` is a shell default for it: name the image.
+function normalizedPinReference(name, digest) {
+  const image = name
+    .replace(/^\$\{[A-Za-z0-9_]+:-/u, "")
+    .replace(/^\$\{[A-Za-z0-9_]+\}\/?/u, "")
+    .replace(/^library\//u, "");
+  return `${image}@${digest}`;
+}
+
+/**
+ * Every `image@sha256:...` pin in a tracked compose, Dockerfile, shell, script
+ * or CI file that the policy neither watches (`containerImages`, in a file its
+ * locations list) nor lists as deliberately unwatched (`unwatchedImages`).
+ * The scanner's own pin counts as accounted for wherever it appears. Offline.
+ */
+export function unaccountedImagePins(repoRoot, policy) {
+  const accounted = new Map();
+  const account = (reference, locations) => {
+    accounted.set(reference, new Set([...(accounted.get(reference) ?? []), ...(locations ?? [])]));
+  };
+  for (const entry of policy.containerImages ?? []) account(entry.reference, entry.locations);
+  for (const entry of policy.unwatchedImages ?? []) account(entry.reference, entry.locations);
+  const scannerImage = policy.scanner?.image;
+  const unaccounted = [];
+  for (const file of repositoryFiles(repoRoot).sort()) {
+    if (!PIN_SCANNED_FILE_PATTERN.test(file) || PIN_IGNORED_FILE_PATTERN.test(file)) continue;
+    let content;
+    try {
+      content = readFileSync(join(repoRoot, file), "utf8");
+    } catch {
+      continue;
+    }
+    const seen = new Set();
+    for (const match of content.matchAll(IMAGE_PIN_PATTERN)) {
+      const reference = normalizedPinReference(match[1], match[2]);
+      if (seen.has(reference)) continue;
+      seen.add(reference);
+      if (reference === scannerImage || accounted.get(reference)?.has(file)) continue;
+      unaccounted.push({ file, reference });
+    }
+  }
+  return unaccounted;
 }
 
 export function validateReport(report) {
@@ -463,6 +577,14 @@ function runCli() {
 
   if (command === "validate") {
     const result = validateSupplyChainPolicy(policy, now);
+    const unaccounted = unaccountedImagePins(REPOSITORY_ROOT, policy);
+    if (unaccounted.length > 0) {
+      throw new Error(
+        `Pinned image(s) the supply-chain policy does not account for (add to containerImages, or to unwatchedImages with a reason): ${unaccounted
+          .map(({ file, reference }) => `${file}: ${reference}`)
+          .join("; ")}.`,
+      );
+    }
     process.stdout.write(
       `Supply-chain policy: Trivy ${result.scannerVersion}, ${result.pinnedImageCount} pinned container image(s), ${result.exceptionCount} exception(s), ${result.mutableReferenceCount} mutable reference exception(s).\n`,
     );

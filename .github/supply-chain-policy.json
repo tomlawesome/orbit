@@ -1073,6 +1073,96 @@
       "reviewBy": "2026-10-30"
     }
   ],
+  "unwatchedImages": [
+    {
+      "reference": "node:22-bookworm@sha256:de636e50060a9908cf40a20a50d027ed74a99b2e31d2635f3b13e9e4e5e97e74",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI job image (NODE_IMAGE): runs the pipeline's Node steps and ships nothing to operators. Bumped by hand with the pipeline, not by sidecar-pins."
+    },
+    {
+      "reference": "mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI browser image (PLAYWRIGHT_IMAGE): it has to match the one the design fidelity checks were measured on, so it moves only with that measurement. Ships nothing to operators."
+    },
+    {
+      "reference": "registry.tomlawson.io/ai/orbit-base-image/ci@sha256:5831d1bf3b265f7de3a9df687c51724769daff68a6f8a3cca365a5114e72a8f9",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI acceptance image built by the orbit-base-image pipeline; its digest comes from that pipeline, as the base image's does, not from a registry tag. Ships nothing to operators."
+    },
+    {
+      "reference": "registry.tomlawson.io/ai/orbit-base-image/signing@sha256:21dad4f1976d1118e1a142b82bebc7b7eaf76f242f39edb14790543c3c2661f3",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI signing image built by the orbit-base-image pipeline; its digest comes from that pipeline, not from a registry tag. Ships nothing to operators."
+    },
+    {
+      "reference": "golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI toolchain image (GOLANG_IMAGE) that builds the launcher binaries; the image itself ships nothing to operators. Bumped by hand with the launcher's Go version."
+    },
+    {
+      "reference": "docker:29.6.2-dind@sha256:bfec1f5159c63a81ca6fdedbd81404d2c0e16378ed0feec3bb3fbf3998847659",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI Docker-in-Docker service for the pipeline's image-building jobs. Ships nothing to operators."
+    },
+    {
+      "reference": "docker:29.6.2-cli@sha256:be132a9f282288de4afaf63379dff75711fda0147c6b72a9df44e51841402144",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI Docker client image for the pipeline's image-building jobs. Ships nothing to operators."
+    },
+    {
+      "reference": "renovate/renovate:44.83.2@sha256:c1cb952b2e14a112d0d0c61987a10f60a2626fe9b9c1504436be46a17bd123bc",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI image for the weekly dependency-update job. Ships nothing to operators."
+    },
+    {
+      "reference": "greenmail/standalone:2.1.13@sha256:3df66b7edd01c8a301343ca5e3601d8674760d4708655573560c24745e624fb2",
+      "locations": [
+        "compose/docker-compose.acceptance.yml"
+      ],
+      "reason": "Throwaway mail server for the acceptance stack; never part of a deployment."
+    },
+    {
+      "reference": "nginx:alpine@sha256:060849a174666c53439dc7cecbf8f67e225c7cbfb1a44ca97915d9a172a81e6d",
+      "locations": [
+        "compose/docker-compose.demo.yml"
+      ],
+      "reason": "Demo-only TLS front end, never part of a release. Not in containerImages because sidecar-pins checks the file for the linux/amd64 digest while this file pins the multi-architecture index digest (#1490)."
+    },
+    {
+      "reference": "registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0",
+      "locations": [
+        ".gitlab-ci.yml",
+        "scripts/ci/start-installer-registry.sh",
+        "scripts/test-repair-journeys.sh",
+        "scripts/test-backup-restore.sh",
+        "scripts/test-install-acceptance.sh"
+      ],
+      "reason": "Throwaway registry the installer tests push to; never part of a deployment. Not in containerImages because sidecar-pins checks each file for the linux/amd64 digest while these files pin the multi-architecture index digest (#1490)."
+    },
+    {
+      "reference": "apache/tika:${TIKA_VERSION}-full@sha256:6c244af88e8575ebe8bf0bc5e2da03c49663dd0acc7809cd99c8e9ff8741cbfb",
+      "locations": [
+        "scripts/extract-bundle/cli.ts"
+      ],
+      "reason": "Tika image for the developer-run extract-bundle tool, whose version is set in scripts/extract-bundle/tika-version.mjs; separate from the Tika the deployment runs (watched in containerImages)."
+    }
+  ],
   "mutableImageReferences": [],
   "deploymentImageReferences": {
     "rule": "A deployment must run an immutable digest. A mutable tag may be resolved to a digest; it may never be deployed.",
