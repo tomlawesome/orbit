@@ -280,6 +280,28 @@ function normalizedPinReference(name, digest) {
   return `${image}@${digest}`;
 }
 
+// `FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:...` with
+// `ARG BASE_IMAGE_REGISTRY=ghcr.io/tomlawesome` above it is the image
+// `ghcr.io/tomlawesome/orbit-base-image:latest@sha256:...` (#1101: CI passes
+// its own registry as the build arg; the digest is the same either way), so
+// substitute a `${NAME}` the file itself gives a default for. Any other
+// `${...}` is left for normalizedPinReference's proxy-prefix rule.
+function dockerfileArgDefaults(content) {
+  const defaults = new Map();
+  for (const match of content.matchAll(/^ARG[ \t]+([A-Za-z0-9_]+)=(\S+)[ \t]*$/gmu)) {
+    defaults.set(match[1], match[2]);
+  }
+  return defaults;
+}
+
+function resolveArgDefaults(name, defaults) {
+  let resolved = name;
+  for (const [argName, value] of defaults) {
+    resolved = resolved.split("${" + argName + "}").join(value);
+  }
+  return resolved;
+}
+
 /**
  * Every `image@sha256:...` pin in a tracked compose, Dockerfile, shell, script
  * or CI file that the policy neither watches (`containerImages`, in a file its
@@ -304,8 +326,9 @@ export function unaccountedImagePins(repoRoot, policy) {
       continue;
     }
     const seen = new Set();
+    const argDefaults = dockerfileArgDefaults(content);
     for (const match of content.matchAll(IMAGE_PIN_PATTERN)) {
-      const reference = normalizedPinReference(match[1], match[2]);
+      const reference = normalizedPinReference(resolveArgDefaults(match[1], argDefaults), match[2]);
       if (seen.has(reference)) continue;
       seen.add(reference);
       if (reference === scannerImage || accounted.get(reference)?.has(file)) continue;

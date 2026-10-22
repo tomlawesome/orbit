@@ -43,12 +43,40 @@ fail() { printf 'base image: %s\n' "$1" >&2; }
 #
 # A function, not inlined, because the moved-tag check below needs the same
 # extraction applied to `dev`'s Dockerfile as well as this branch's.
+#
+# The Dockerfile's FROM names the registry through `ARG BASE_IMAGE_REGISTRY=...`
+# so CI can pull from this GitLab's own registry (#1101). This resolves
+# `${NAME}` from the ARG defaults declared above the FROM, so the answer is the
+# reference the default build pulls (GHCR). awk reads the whole input rather
+# than exiting at the first FROM, for the SIGPIPE reason above.
 first_pinned_reference() {
-  sed -n '/^FROM[[:space:]]/{s/^FROM[[:space:]]\{1,\}\([^[:space:]]*\).*/\1/p;q;}'
+  awk '
+    function replace_all(text, from, to,    out, at) {
+      out = ""
+      while ((at = index(text, from)) > 0) {
+        out = out substr(text, 1, at - 1) to
+        text = substr(text, at + length(from))
+      }
+      return out text
+    }
+    done { next }
+    /^ARG[[:space:]]/ {
+      arg = $2
+      eq = index(arg, "=")
+      if (eq > 1) defaults[substr(arg, 1, eq - 1)] = substr(arg, eq + 1)
+      next
+    }
+    /^FROM[[:space:]]/ {
+      ref = $2
+      for (name in defaults) ref = replace_all(ref, "${" name "}", defaults[name])
+      print ref
+      done = 1
+    }
+  '
 }
 
 pinned_reference="$(first_pinned_reference < "$dockerfile")"
-if [[ -z "$pinned_reference" || "$pinned_reference" != *@sha256:* ]]; then
+if [[ -z "$pinned_reference" || "$pinned_reference" != *@sha256:* || "$pinned_reference" == *'$'* ]]; then
   fail "the first FROM in $dockerfile is not a digest-pinned reference: '${pinned_reference:-<none>}'"
   fail "this check cannot verify an unpinned base, and an unpinned base must not ship."
   exit 2

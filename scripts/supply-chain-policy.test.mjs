@@ -103,9 +103,13 @@ describe("supply-chain policy", () => {
         // proxy path tests/oidc/Dockerfile's FROM carries for CI
         // (ai/orbit#1111): the policy tracks the vendor reference, and the
         // digest after it is unchanged either way.
+        // `${BASE_IMAGE_REGISTRY}` is the root Dockerfile's build arg for
+        // where CI pulls the base image from (#1101); its ARG default is the
+        // vendor reference the policy tracks.
         const from = line
           .match(/^FROM\s+(\S+)/u)?.[1]
-          ?.replace(/^\$\{OIDC_BASE_IMAGE_PREFIX\}/u, "");
+          ?.replace(/^\$\{OIDC_BASE_IMAGE_PREFIX\}/u, "")
+          ?.replace(/^\$\{BASE_IMAGE_REGISTRY\}/u, "ghcr.io/tomlawesome");
         const compose =
           file === "docker-compose.yml"
             ? line.match(/^\s+image:\s+"?([^"]+)"?\s*$/u)?.[1]
@@ -670,6 +674,28 @@ describe("image pins accounted for by the policy (#1490)", () => {
       }),
     );
     expect(result).toEqual([]);
+  });
+
+  it("reads a registry named by a Dockerfile ARG default as the image that default pulls (#1101)", () => {
+    const reference = `example.invalid/org/base:latest@${PIN_A}`;
+    const root = fixtureRoot({
+      Dockerfile:
+        "ARG BASE_REGISTRY=example.invalid/org\n" +
+        `FROM \${BASE_REGISTRY}/base:latest@${PIN_A} AS base\n` +
+        `FROM \${BASE_REGISTRY}/base:latest@${PIN_A} AS runner\n`,
+    });
+    expect(
+      unaccountedImagePins(
+        root,
+        policy({
+          containerImages: [watched(reference, ["Dockerfile"])],
+          unwatchedImages: [],
+        }),
+      ),
+    ).toEqual([]);
+    expect(unaccountedImagePins(root, policy({ unwatchedImages: [] }))).toEqual([
+      { file: "Dockerfile", reference },
+    ]);
   });
 
   it("reports the image after the prefix when a prefixed pin is unaccounted", () => {

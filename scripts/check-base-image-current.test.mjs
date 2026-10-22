@@ -213,6 +213,37 @@ describe("scripts/check-base-image-current.sh", () => {
     }
   });
 
+  it("resolves a registry named by a build arg default before checking the pin (#1101)", () => {
+    const path = join(workdir, "Dockerfile");
+    writeFileSync(
+      path,
+      [
+        "ARG BASE_IMAGE_REGISTRY=ghcr.io/tomlawesome",
+        `FROM \${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@${digest(1)} AS base`,
+        `FROM \${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@${digest(1)} AS runner`,
+        "",
+      ].join("\n"),
+    );
+
+    const result = runCheck(path);
+
+    expect(result.stdout).toContain(
+      `base image: pinned ghcr.io/tomlawesome/orbit-base-image:latest@${digest(1)}`,
+    );
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("could not resolve");
+  });
+
+  it("refuses a FROM whose registry variable has no default rather than guess it", () => {
+    const path = join(workdir, "Dockerfile");
+    writeFileSync(path, `FROM \${NO_DEFAULT}/orbit-base-image:latest@${digest(1)} AS base\n`);
+
+    const result = runCheck(path);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("is not a digest-pinned reference");
+  });
+
   it("refuses an unpinned first FROM rather than reporting a base it cannot verify", () => {
     const dockerfile = writeDockerfile({ firstReference: "alpine:3.22" });
 

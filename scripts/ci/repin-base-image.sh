@@ -217,8 +217,34 @@ rotate_digest() {
 # The first FROM, wherever it sits -- same extraction as
 # scripts/check-base-image-current.sh, for the same reason (#651): a
 # Dockerfile may open with comments.
+#
+# Also resolves `${NAME}` from the `ARG NAME=default` lines above the FROM
+# (#1101: the registry is a build arg), so this returns the reference the
+# default build pulls, the same one the policy file records.
 extract_pinned_reference() {
-  sed -n '/^FROM[[:space:]]/{s/^FROM[[:space:]]\{1,\}\([^[:space:]]*\).*/\1/p;q;}' "$1"
+  awk '
+    function replace_all(text, from, to,    out, at) {
+      out = ""
+      while ((at = index(text, from)) > 0) {
+        out = out substr(text, 1, at - 1) to
+        text = substr(text, at + length(from))
+      }
+      return out text
+    }
+    done { next }
+    /^ARG[[:space:]]/ {
+      arg = $2
+      eq = index(arg, "=")
+      if (eq > 1) defaults[substr(arg, 1, eq - 1)] = substr(arg, eq + 1)
+      next
+    }
+    /^FROM[[:space:]]/ {
+      ref = $2
+      for (name in defaults) ref = replace_all(ref, "${" name "}", defaults[name])
+      print ref
+      done = 1
+    }
+  ' "$1"
 }
 
 axis1_status() {
@@ -347,7 +373,7 @@ fi
 # --- Read the current pin ----------------------------------------------------
 
 pinned_reference="$(extract_pinned_reference "$dockerfile")"
-if [[ -z "$pinned_reference" || "$pinned_reference" != *@sha256:* ]]; then
+if [[ -z "$pinned_reference" || "$pinned_reference" != *@sha256:* || "$pinned_reference" == *'$'* ]]; then
   fail "the first FROM in $dockerfile is not a digest-pinned reference: '${pinned_reference:-<none>}'"
 fi
 pinned_tag="${pinned_reference%@*}"
@@ -550,7 +576,9 @@ new_reference="${pinned_tag}@${live_platform_digest}"
 
 # --- Edit every location that holds the digest, together ---------------------
 
-sed -i "s#${pinned_reference}#${new_reference}#g" "$dockerfile"
+# Only the digest changes, and the Dockerfile's FROM lines name the registry
+# through a build arg (#1101), so they never contain pinned_reference verbatim.
+sed -i "s#${pinned_digest}#${live_platform_digest}#g" "$dockerfile"
 
 today="$(date -u +%Y-%m-%d)"
 node -e '
