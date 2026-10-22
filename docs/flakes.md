@@ -629,3 +629,11 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## settings-text-size-tab-stop.test.mjs:128 "settings, phone layout: the text size tab stop starts on the applied step > with standard applied, the one tab stop is the ticked tile"
 
 - 2026-10-22 · 2b120e89 (nothing near settings since the green bea1293c run) · local `scripts/test-backend.sh`, same 919 s run as preview.test.ts:760's second sighting · timed out at the 5 s default; the file alone passed at once. Wall-clock-under-load shape. First sighting.
+
+## sign-out-descent.spec.ts:274 "sign out from another page's menu plays the descent (wide desk)" on desktop-firefox
+
+- 2026-10-22 · 39134f33 (!1081) · pipeline 2875 / `smoke_firefox` job 38354 · "#1253: the page is still showing over the dusk", 10 s predicate timeout; passed on Playwright's retry in the same run. First sighting for this variant and browser.
+
+## v19-axe-sweep.spec.ts:388 "the signed-in v19 sweep › /settings/mail has no automated WCAG A/AA violations" on desktop-firefox
+
+- 2026-10-22 · 39134f33 (!1081) · pipeline 2875 / `smoke_firefox` job 38354 · failed its first attempt, passed on Playwright's retry in the same run. The same screen as the layout-and-themes axe flake above, from the sweep spec. First sighting.
