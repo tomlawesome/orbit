@@ -1079,9 +1079,9 @@
     },
     {
       "name": "Ollama optional local AI service",
-      "tag": "ollama/ollama:0.35.1",
-      "reference": "ollama/ollama:0.35.1@sha256:17e945f1aa6e505707eeb621e3f36847d0a4a063d4778f7007645acccfb8bd4f",
-      "indexDigest": "sha256:292ee7945dfc3d5840a181f3ab86fedb1e66703e02c8af98b50f4da56b7e278c",
+      "tag": "ollama/ollama:0.40.8",
+      "reference": "ollama/ollama:0.40.8@sha256:242721b8a8dbb71c38fdc0a07ed60ca78363f278d33fdf171a48728abf40743a",
+      "indexDigest": "sha256:2b8eecdb85aa6ea67c381c8ecffec04b2658496cf2821a8f88b0485bdff198e8",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -1091,7 +1091,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/ollama/ollama/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-02",
+      "resolvedOn": "2026-10-22",
       "reviewBy": "2026-10-30"
     }
   ],
