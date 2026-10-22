@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { staleInstallShCitations } from "./installer-guarantee-citations.mjs";
+
 /*
  * #587: docs/installer-guarantees.md's per-script counts, family totals and
  * document-wide total are hand-maintained and drift whenever a guarantee is
@@ -185,5 +187,135 @@ describe("install.sh test list: the drill's quoted notes (redesign r5)", () => {
       "lifecycle: install.sh's rollback put .env-orbit and .orbit-secrets back byte-identical after a hard interruption after the commit, staging and lock gone (install.sh #58)";
     expect(accQuotes(31)).toContain(note);
     expect(drill).toContain(note);
+  });
+});
+
+/*
+ * #1481: a citation of `scripts/install.sh` that names a function the script
+ * no longer defines, or whose line range misses that function, points a
+ * reader at unrelated code. The check reads each `install.sh:<lines>
+ * (<function>)` citation in the catalogue and fails on both kinds of stale
+ * citation.
+ */
+describe("install.sh citations in the guarantee catalogue (#1481)", () => {
+  // Lines 1-3 are filler, `alpha` is defined at lines 4-8, `beta` at 10-12.
+  const installSh = [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "",
+    "alpha() {",
+    "  echo one",
+    "  echo two",
+    "  echo three",
+    "}",
+    "",
+    "beta() {",
+    "  echo b",
+    "}",
+    "",
+    "alpha",
+    "",
+  ].join("\n");
+
+  function doc(...entries) {
+    return [
+      "## install.sh (the installer)",
+      "",
+      ...entries.map((entry, index) => `${index + 1}. ${entry}`),
+      "",
+    ].join("\n");
+  }
+
+  const entry = (citation) =>
+    `The installer does a thing. \u2014 ${citation} \u2014 category: input-validation \u2014 criticality: LOW`;
+
+  it("accepts a citation of a defined function whose range overlaps it", () => {
+    expect(
+      staleInstallShCitations(doc(entry("install.sh:4-8 (alpha)")), installSh),
+    ).toEqual([]);
+  });
+
+  it("accepts a range that only partly overlaps the function", () => {
+    expect(
+      staleInstallShCitations(doc(entry("install.sh:7-20 (alpha)")), installSh),
+    ).toEqual([]);
+  });
+
+  it("reports a citation naming a function install.sh does not define", () => {
+    const problems = staleInstallShCitations(
+      doc(entry("install.sh:4-8 (gone_function)")),
+      installSh,
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0].problem).toBe("function not defined");
+    expect(problems[0].citation).toContain("gone_function");
+    expect(String(problems[0].guarantee)).toMatch(/\b1\b/u);
+  });
+
+  it("reports a defined function cited at a range entirely outside it", () => {
+    const problems = staleInstallShCitations(
+      doc(entry("install.sh:30-40 (alpha)")),
+      installSh,
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0].problem).toBe("lines do not overlap the function");
+    expect(problems[0].citation).toContain("alpha");
+  });
+
+  it("reports a range that sits wholly in a neighbouring function", () => {
+    const problems = staleInstallShCitations(
+      doc(entry("install.sh:10-12 (alpha)")),
+      installSh,
+    );
+    expect(problems.map((problem) => problem.problem)).toEqual([
+      "lines do not overlap the function",
+    ]);
+  });
+
+  it("accepts a single-line citation inside the function", () => {
+    expect(
+      staleInstallShCitations(doc(entry("install.sh:5 (alpha)")), installSh),
+    ).toEqual([]);
+  });
+
+  it("reports only the undefined function when one citation names two", () => {
+    const problems = staleInstallShCitations(
+      doc(entry("install.sh:4-12 (`alpha`, `missing_one`)")),
+      installSh,
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0].problem).toBe("function not defined");
+    expect(problems[0].citation).toContain("missing_one");
+  });
+
+  it("reports the right guarantee when only one of several is stale", () => {
+    const problems = staleInstallShCitations(
+      doc(
+        entry("install.sh:4-8 (alpha)"),
+        entry("install.sh:10-12 (nope)"),
+        entry("install.sh:10-12 (beta)"),
+      ),
+      installSh,
+    );
+    expect(problems).toHaveLength(1);
+    expect(String(problems[0].guarantee)).toMatch(/\b2\b/u);
+  });
+
+  it("ignores citations of other files", () => {
+    const text = doc(
+      entry("src/lib/x.ts:10-20 (f)"),
+      entry(
+        "src/lib/install-orchestrator.ts:364-369 (`runInstall`); install.sh:4-8 (alpha)",
+      ),
+    );
+    expect(staleInstallShCitations(text, installSh)).toEqual([]);
+  });
+
+  it("every install.sh citation in the real catalogue names a function install.sh defines, at its lines", () => {
+    const installShReal = readFileSync(
+      new URL("./install.sh", import.meta.url),
+      "utf8",
+    ).replaceAll("\r\n", "\n");
+    expect(staleInstallShCitations(catalogue, installShReal)).toEqual([]);
   });
 });
