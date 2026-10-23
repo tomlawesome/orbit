@@ -163,7 +163,7 @@ export const SIDECARS = [
   {
     name: "Ollama",
     service: "orbit-ollama",
-    image: "ollama/ollama:0.40.8",
+    image: "ollama/ollama:0.40.10",
     author: "Ollama",
     licence: "MIT License",
     spdx: "MIT",
