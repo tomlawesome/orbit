@@ -113,5 +113,5 @@ the file rather than the whole of it.
 `results.txt`, `results.csv`, `truth.csv` and the misses in `score.txt`. It
 stays on this machine; do not copy it into the repository or an issue.
 
-Tika 4.0.0 (Apache 2.0) and Node 22 (MIT) are redistributed with their
+Tika 4.1.0 (Apache 2.0) and Node 22 (MIT) are redistributed with their
 licences in `tika` and `node`.
