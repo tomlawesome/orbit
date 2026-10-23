@@ -241,8 +241,8 @@ re-run on a commit it already ran on, even if red: retry the failed job.
 Promotion stops on a red night: `nightly_not_red`, on the `dev -> preview`
 merge request only, fails if a nightly run on that same `dev` commit failed. No
 nightly yet on the commit is not a failure, since the promotion runs the
-browsers itself. It reads the pipelines API with `ORBIT_REUSE_TOKEN` (read-only,
-unprotected) and fails, saying so, if there is none.
+browsers itself. It reads the pipelines API with `ORBIT_REUSE_TOKEN` alone
+(read-only, unprotected, no fallback) and fails, saying so, if it is unset.
 
 The schedule is a GitLab setting the owner creates (Settings > CI/CD >
 Schedules): description "Nightly browsers on dev (#1412)", target branch `dev`,
@@ -420,10 +420,10 @@ malformed artefact, or any lookup failure, reads as "no reuse".
 Two ways to force a rerun regardless: the merge-request label `ci: rerun`,
 and `ORBIT_REUSE=off` on a pipeline started by hand. The lookup reads the
 API with `ORBIT_REUSE_TOKEN`, a read-only, unprotected credential the owner
-created on 2026-09-23 for exactly this; `BASE_REPIN_TOKEN` is a fallback but
-has been protected since #1084, so it is absent from merge-request
-pipelines. Without a usable token every merge-request verdict is "runs" —
-the safe direction.
+created for exactly this; nothing falls back to `BASE_REPIN_TOKEN`, which can
+push and has been protected since #1084 (it was the fallback until #1412). The
+nightly check reads the pipelines API with the same token alone. Without it
+every merge-request verdict is "runs" — the safe direction.
 
 `fast` (#950, owner ruling on #923 rec 15a, 2026-09-09) is the docker-free
 part of what used to be one job: type-check, lint, the coverage-bearing

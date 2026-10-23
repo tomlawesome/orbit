@@ -52,10 +52,11 @@
  *
  * The credential is read-only and is sent as a header, never printed.
  * ORBIT_REUSE_TOKEN is what this wants: a token an unprotected merge-request
- * pipeline can read, with no write scope anywhere. BASE_REPIN_TOKEN is
- * accepted as a fallback because it is what #898 used, but since #1084 it is
- * protected and so is absent from exactly the pipelines that would reuse
- * anything. With neither set there is no lookup at all and every job runs.
+ * pipeline can read, with no write scope anywhere. It is the only credential
+ * read: BASE_REPIN_TOKEN, which #898 used, has been protected since #1084 and
+ * so is absent from exactly the pipelines that would reuse anything, and it can
+ * push, so nothing falls back to it. With ORBIT_REUSE_TOKEN unset there is no
+ * lookup at all and every job runs.
  *
  * The API base URL is injectable (ORBIT_REUSE_API_URL) so the test can point
  * this at a local server and assert what it emits.
@@ -322,7 +323,7 @@ export function refusal(env) {
   if (labelled(env, "ci: rerun")) {
     return "the merge request is labelled 'ci: rerun': every job runs (remove the label or every push reruns everything)";
   }
-  if (!(env.ORBIT_REUSE_TOKEN || env.BASE_REPIN_TOKEN)) {
+  if (!env.ORBIT_REUSE_TOKEN) {
     return "no read-only token (ORBIT_REUSE_TOKEN), so earlier runs cannot be read: every job runs";
   }
   if (!(env.ORBIT_REUSE_API_URL || env.CI_API_V4_URL) || !env.CI_PROJECT_ID) {
@@ -380,7 +381,7 @@ export async function run({
 
   const decided = await lookupReuse({
     base: (env.ORBIT_REUSE_API_URL || env.CI_API_V4_URL).replace(/\/+$/u, ""),
-    token: env.ORBIT_REUSE_TOKEN || env.BASE_REPIN_TOKEN,
+    token: env.ORBIT_REUSE_TOKEN,
     projectId: env.CI_PROJECT_ID,
     pipelineId: env.CI_PIPELINE_ID,
     keys,

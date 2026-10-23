@@ -367,17 +367,19 @@ describe("the escape hatches", () => {
     expect(lines()).toContain("ORBIT_REUSE_TOKEN");
   });
 
-  // What #898 used. It is protected since #1084, so it is present only on the
-  // delivery refs that never consume evidence -- kept so nothing breaks if the
-  // owner points a read-only credential at the same name.
-  it("still accepts BASE_REPIN_TOKEN when ORBIT_REUSE_TOKEN is unset", async () => {
+  // What #898 used. It can push, and it is protected since #1084: the lookup
+  // reads ORBIT_REUSE_TOKEN alone and never falls back to it (#1412).
+  it("does not fall back to BASE_REPIN_TOKEN when ORBIT_REUSE_TOKEN is unset", async () => {
     await withOnePass();
 
     await run({
       env: environment({ ORBIT_REUSE_TOKEN: "", BASE_REPIN_TOKEN: TOKEN }), envFile, now: NOW, log,
     });
 
-    expect(emitted()).toContain("ORBIT_REUSE_FAST=9001");
+    expect(seen.paths).toEqual([]);
+    expect(seen.tokens).toEqual([]);
+    expect(emitted()).not.toContain("ORBIT_REUSE_");
+    expect(lines()).toContain("ORBIT_REUSE_TOKEN");
   });
 
   // ADR-0028 section 2: delivery branches never consume evidence; they record it.

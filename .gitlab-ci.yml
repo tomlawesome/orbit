@@ -3981,24 +3981,21 @@ install_bootstrap_latest:
 #                       publishes an image, only proposes a pin. Never
 #                       printed; read by scripts/ci/repin-base-image.sh,
 #                       which fails clearly if it is unset.
-#                       The reuse lookup accepts it as a fallback (#898), but
-#                       only ever sees it on a protected ref: since #1084 a
-#                       merge-request pipeline presents no token at all, so
-#                       the lookup finds nothing and every job runs -- a cost
-#                       accepted deliberately to keep a push-capable
-#                       credential out of merge-request pipelines.
+#                       Nothing else reads it: the reuse lookup (#898) and
+#                       the nightly check (#1412) read the pipelines API with
+#                       ORBIT_REUSE_TOKEN alone and never fall back to this
+#                       push-capable credential, which since #1084 a
+#                       merge-request pipeline cannot see anyway.
 #
-#                       That is why ADR-0028's lookup asks first for
-#                       ORBIT_REUSE_TOKEN, which does not exist yet and is the
-#                       owner's to create: a read-only credential (`read_api`,
-#                       no write scope anywhere) left UNprotected, so an
-#                       ordinary merge-request pipeline can read earlier
-#                       pipelines' evidence. Until it exists, every reuse
-#                       verdict on a merge request is "runs", which is the
-#                       safe direction and is the state #898 has been in since
-#                       #1084. The unset path is covered by
-#                       scripts/ci/reuse-lookup.test.mjs, "asks nothing at all
-#                       when there is no token".
+#   ORBIT_REUSE_TOKEN  A read-only credential (`read_api`, Reporter, masked, NOT
+#                       protected, no write scope anywhere), so an ordinary
+#                       merge-request pipeline can read earlier pipelines'
+#                       evidence. Unset, every reuse verdict on a merge request
+#                       is "runs", the safe direction, and `nightly_not_red`
+#                       fails saying so. The unset paths are covered by
+#                       scripts/ci/reuse-lookup.test.mjs ("asks nothing at all
+#                       when there is no token") and
+#                       scripts/ci/nightly-browsers.test.mjs.
 base_image_repin:
   stage: maintenance
   extends: .dind_service
@@ -4293,8 +4290,8 @@ nightly_report:
 #
 # Reads the project's pipelines through the API, so it needs a read-only token
 # a merge-request pipeline can see: ORBIT_REUSE_TOKEN (`read_api`, unprotected;
-# see base_image_repin for why it does not exist yet). With none set it fails
-# and says so -- an unchecked promotion is not a passed one.
+# see base_image_repin). It reads that token alone, never a fallback. With it
+# unset the job fails and says so -- an unchecked promotion is not a passed one.
 nightly_not_red:
   stage: policy
   tags: [light]

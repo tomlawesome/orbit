@@ -193,6 +193,18 @@ describe("blocked", () => {
     expect(result.code).toBe(1);
   });
 
+  it("reads ORBIT_REUSE_TOKEN alone: BASE_REPIN_TOKEN and SIDECAR_ISSUE_TOKEN are never used", async () => {
+    const api = await start({ pipelines: [{ id: 90, sha: SHA, status: "failed" }] });
+    const others = { ...base(api), ORBIT_REUSE_TOKEN: "", BASE_REPIN_TOKEN: "OTHER-TOKEN-1", SIDECAR_ISSUE_TOKEN: "OTHER-TOKEN-2" };
+    const result = await run(["blocked"], others);
+    expect(result.code).toBe(1);
+    expect(result.err).toMatch(/ORBIT_REUSE_TOKEN/u);
+    expect(seen.requests).toEqual([]);
+    // `moved` asks nothing either, and runs.
+    expect(await run(["moved"], others)).toMatchObject({ code: 0, out: "run" });
+    expect(seen.requests).toEqual([]);
+  });
+
   it("fails, saying why, with no token or when GitLab does not answer: an unchecked promotion is not a passed one", async () => {
     const api = await start({ fail: { "/pipelines": 500 } });
     const noToken = await run(["blocked"], { ...base(api), ORBIT_REUSE_TOKEN: "" });

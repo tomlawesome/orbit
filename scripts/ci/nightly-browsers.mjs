@@ -17,10 +17,9 @@
  * no other schedule starts one. The other schedules on `dev` (Renovate, base
  * image re-pin, door import) are skipped by that test.
  *
- * Credentials. Reading uses ORBIT_REUSE_TOKEN, else BASE_REPIN_TOKEN, else
- * SIDECAR_ISSUE_TOKEN, the same order of preference as the reuse lookup. Filing
- * needs SIDECAR_ISSUE_TOKEN (an `api` project token) and fails clearly without
- * it. The token travels in a header and is never printed.
+ * Credentials. Reading the pipelines API uses ORBIT_REUSE_TOKEN alone (read_api,
+ * unprotected), as the reuse lookup does; nothing else is tried. Filing needs
+ * SIDECAR_ISSUE_TOKEN (an `api` project token) and fails clearly without it. The token travels in a header and is never printed.
  */
 import { pathToFileURL } from "node:url";
 
@@ -63,7 +62,7 @@ function query(parameters) {
 }
 
 export function readToken(env) {
-  return env.ORBIT_REUSE_TOKEN || env.BASE_REPIN_TOKEN || env.SIDECAR_ISSUE_TOKEN || "";
+  return env.ORBIT_REUSE_TOKEN || "";
 }
 
 /*
