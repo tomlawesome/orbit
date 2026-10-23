@@ -178,7 +178,27 @@ describe("Tika version pin", () => {
     expect(source).toContain("${TIKA_VERSION}");
   });
 
-  it("is the version the stack's own bundled config pins", () => {
-    expect(TIKA_VERSION).toBe("4.0.0");
+  /*
+   * #1489: the bundle must read pages exactly as the deployment does, so its
+   * Tika is whatever docker-compose.yml pins. Renovate cannot see the
+   * bundle's own pin, so the expected values are derived from the compose
+   * file rather than a literal that goes stale.
+   */
+  function composeTikaPin() {
+    const compose = readFileSync(new URL("../../docker-compose.yml", import.meta.url), "utf8");
+    const references = compose.match(/apache\/tika:\S+/gu) ?? [];
+    expect(references, "docker-compose.yml must hold exactly one apache/tika reference").toHaveLength(1);
+    const pin = /^apache\/tika:([^\s@]+)-full@sha256:([0-9a-f]{64})$/u.exec(references[0]);
+    expect(pin, `unrecognised apache/tika reference: ${references[0]}`).not.toBeNull();
+    return { version: pin[1], digest: pin[2] };
+  }
+
+  it("#1489: TIKA_VERSION is the version docker-compose.yml pins for orbit-tika", () => {
+    expect(TIKA_VERSION).toBe(composeTikaPin().version);
+  });
+
+  it("#1489: cli.ts's Tika image carries the digest docker-compose.yml pins", () => {
+    const source = readFileSync(new URL("./cli.ts", import.meta.url), "utf8");
+    expect(source).toContain(`apache/tika:\${TIKA_VERSION}-full@sha256:${composeTikaPin().digest}`);
   });
 });
