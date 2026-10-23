@@ -453,7 +453,7 @@
       "name": "PostgreSQL database",
       "tag": "postgres:18-alpine",
       "reference": "postgres:18-alpine@sha256:3b0ef735388b2cb097fc29b8bb421d86d57d0ddbe7aa1fbd6493e06d65028503",
-      "indexDigest": "sha256:83148c0bc09eac4d598b70a61e1404d0212b76c95c504bfd6c81a4c59ec91792",
+      "indexDigest": "sha256:898c60cb390d1085bc97bdd6a1ae968757421df394b071848b52b1c09c89d6a5",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml",
@@ -465,7 +465,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/docker-library/postgres/blob/master/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-22",
+      "resolvedOn": "2026-10-23",
       "reviewBy": "2026-10-30"
     },
     {
