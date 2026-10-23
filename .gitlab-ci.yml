@@ -107,16 +107,16 @@ workflow:
   when: never
 
 # The nightly browser run (#1412, owner ruling 2026-10-22). Browsers are slow
-# and a merge request into `dev` no longer starts any of them: the six browser
+# and a merge request into `dev` no longer starts any of them: the seven browser
 # jobs (`smoke`, `smoke_firefox`, `smoke_webkit`, `smoke_webkit_mobile`,
-# `fidelity`, `fidelity_webkit`) run at promotion (the dev -> preview merge
+# `smoke_local_only`, `fidelity`, `fidelity_webkit`) run at promotion (the dev -> preview merge
 # request and the `preview` push, as before) and here, every night on `dev`.
 #
 # A schedule pushes no commit, which is why `*not_scheduled` stops every
 # validation job. This is the one schedule that must run them, and only the
 # ones the browsers need: `classify`, `fast` (it builds the web application
 # `fidelity` serves) and `build_image` (the image the smoke jobs test), then
-# the six. Nothing else lists it, so no other job starts.
+# the seven. Nothing else lists it, so no other job starts.
 #
 # The owner creates the schedule (Settings > CI/CD > Schedules); nothing here
 # can:
@@ -2632,8 +2632,12 @@ smoke_local_only:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     COMPOSE_FILES: -f docker-compose.yml -f compose/docker-compose.local-only.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
+  # No browser job on a merge request into `dev` or its push; at promotion and
+  # nightly (#1412, `.nightly_browsers`).
   rules:
+    - *nightly_browsers
     - *not_scheduled
+    - *no_browsers_on_dev
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: manual

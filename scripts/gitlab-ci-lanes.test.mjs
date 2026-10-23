@@ -553,7 +553,7 @@ describe("sidecar_images: the system-lane gate moved into rules: changes: (#944)
 
 /*
  * #1412 (owner ruling 2026-10-22): browsers are slow, so a merge request into
- * `dev` and the push that lands it start none of the six browser jobs. They
+ * `dev` and the push that lands it start none of the seven browser jobs. They
  * run at promotion (the dev -> preview merge request and the `preview` push)
  * and every night on `dev` from one named schedule.
  *
@@ -568,6 +568,7 @@ const BROWSER_JOBS = [
   "smoke_firefox",
   "smoke_webkit",
   "smoke_webkit_mobile",
+  "smoke_local_only",
   "fidelity",
   "fidelity_webkit",
 ];

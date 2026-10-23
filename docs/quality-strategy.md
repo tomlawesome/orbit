@@ -216,18 +216,17 @@ opens or refreshes one merge request. The header of
 ### Browsers run at promotion and every night, not on merge requests (#1412)
 
 Owner ruling, 2026-10-22. A merge request into `dev`, and the push that lands
-it, start none of the six browser jobs: `smoke`, `smoke_firefox`,
-`smoke_webkit`, `smoke_webkit_mobile`, `fidelity` and `fidelity_webkit`. They
-still get the fast checks, integration, the image build and the non-browser
-journeys. (`smoke_local_only` also drives Chromium but is not one of the six;
-it still runs on a `dev` merge request.) The six run in full:
+it, start none of the seven browser jobs: `smoke`, `smoke_firefox`,
+`smoke_webkit`, `smoke_webkit_mobile`, `smoke_local_only`, `fidelity` and
+`fidelity_webkit`. They still get the fast checks, integration, the image
+build and the non-browser journeys. The seven run in full:
 
 - at promotion: the `dev -> preview` merge request and the push to `preview`
   (and `hotfix/*` and `main`), exactly as before;
 - every night on `dev`, from a pipeline schedule that sets
   `ORBIT_NIGHTLY_BROWSERS=true`, 02:00 Europe/London every night except
   Monday. That pipeline holds only `classify`, `fast`, `build_image` and the
-  six, plus `nightly_report`. It does nothing when `dev` has not moved since the
+  seven, plus `nightly_report`. It does nothing when `dev` has not moved since the
   last nightly run (`classify` asks `scripts/ci/nightly-browsers.mjs`; the
   jobs stop on the `nightly_idle` lane). Other schedules on `dev` do not set the
   variable, so they start none of these jobs and the nightly none of theirs.

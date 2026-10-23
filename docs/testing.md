@@ -111,7 +111,7 @@ Merge requests and pushes to `dev` run:
   `smoke`, that one job took 29.9 of its 30 minutes, so it has its own
   (#1183); WebKit's desktop and phone projects together ran close to the same
   limit, so they split the same way (#1192). Merge requests into `dev` run
-  none of these browser jobs (#1412): they run at promotion and every night on
+  none of these browser jobs, nor `smoke_local_only` (#1412): they run at promotion and every night on
   `dev`, and a red night opens an issue.
 - the appearance checks, also two jobs: `fidelity` (Chromium appearance and
   the phone-floor measurements) and `fidelity_webkit` (the phone film in
