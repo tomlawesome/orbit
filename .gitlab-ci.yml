@@ -163,30 +163,32 @@ default:
       - scheduler_failure
 
 variables:
-  # Docker Hub images the pipeline pulls repeatedly go through the group
-  # dependency proxy (ai/orbit#1022, design ai/agent-infra#14, enabled on
-  # group `ai` 2026-09-23): same digest, same bytes, cached on the GitLab
-  # server instead of re-crossing the WAN every job. `library/` is Docker
-  # Hub's own namespace for an official, unprefixed image (node, postgres,
-  # docker); a namespaced image (aquasec/trivy, renovate/renovate) keeps its
-  # namespace after the prefix. ghcr.io and mcr.microsoft.com references are
-  # untouched -- the proxy only fronts Docker Hub, and the design ruling
-  # preferred that over a registry-mirror daemon that would need root on the
-  # runner host and its own cache GC.
+  # Registry pulls go through the open image cache (#1510, ai/agent-infra#14,
+  # live 2026-10-23), which replaced the GitLab group dependency proxy
+  # (#1022). The runner config sets CI_IMAGE_CACHE_DOCKERHUB,
+  # CI_IMAGE_CACHE_GHCR and CI_IMAGE_CACHE_MCR (host:port, plain HTTP, no
+  # login); the addresses are never written in this repository. The runner
+  # hosts' Docker daemons mirror Docker Hub through the cache, so a plain
+  # Docker Hub name (node, postgres, aquasec/trivy) needs no prefix. ghcr.io
+  # and mcr.microsoft.com images are named through $CI_IMAGE_CACHE_GHCR /
+  # $CI_IMAGE_CACHE_MCR instead. Digests are the same through the cache. A
+  # daemon the runner does not own -- the dind service and the in-job
+  # dockerd -- is told about the cache on its own command line.
   #
   # This only saves a pull when the runner's local image store is actually
   # empty or the pin just moved: `pull_policy: if-not-present` (below and on
   # every job image) already skips the network entirely once an image is
-  # cached on the runner, proxy or not.
+  # cached on the runner, cache or not.
   #
   # Pinned to the linux/amd64 manifest, the way Orbit pins its own base image:
   # a moving tag would silently change what the gate ran on.
-  NODE_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/node:22-bookworm@sha256:de636e50060a9908cf40a20a50d027ed74a99b2e31d2635f3b13e9e4e5e97e74
+  NODE_IMAGE: node:22-bookworm@sha256:de636e50060a9908cf40a20a50d027ed74a99b2e31d2635f3b13e9e4e5e97e74
   # The image the v19 baselines were proven against, byte for byte the pin the
   # GitLab `fidelity` jobs use. Any other browser build is a different
   # rasteriser, and then the comparison measures the runner, not the design.
-  # mcr.microsoft.com, not Docker Hub: stays direct.
-  PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+  # Through the MCR cache (#1510). CI_IMAGE_CACHE_MCR is a runner-config
+  # variable, so whether `image:` expands it is proven by the first pipeline.
+  PLAYWRIGHT_IMAGE: $CI_IMAGE_CACHE_MCR/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
   # The same Playwright build with docker.io, docker-compose-v2, jq, curl,
   # openssl and pnpm already in it (#951), built and scanned by
   # ai/orbit-base-image's `build_ci`/`scan_ci`/`publish_ci` from its
@@ -224,33 +226,38 @@ variables:
   # A pin bump to a launcher release needing a newer Go needs this bumped
   # alongside it -- build-launcher.sh's own toolchain check fails closed and
   # names the mismatch if it is not.
-  GOLANG_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5
+  GOLANG_IMAGE: golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5
   # Same scanner build as the old workflow, so a finding here and a finding there
   # mean the same thing.
-  TRIVY_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
+  TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
   # The vendor's own registry rather than Trivy's mirror.gcr.io default, which
   # has no availability commitment to us and 403'd this gate once already
-  # (#673). Deliberately one repository: Trivy does not fall back. ghcr.io,
-  # not Docker Hub: stays direct.
-  TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2
+  # (#673). Deliberately one repository: Trivy does not fall back. Read
+  # through the GHCR cache (#1510), which speaks plain HTTP, so TRIVY_INSECURE
+  # below lets Trivy use it.
+  TRIVY_DB_REPOSITORY: $CI_IMAGE_CACHE_GHCR/aquasecurity/trivy-db:2
   # The Java database the same way, for the same reason: `sidecar_images`
   # needs it for the tika image, and trivy's default for it is the same
   # mirror.gcr.io that 403'd above.
-  TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db:1
+  TRIVY_JAVA_DB_REPOSITORY: $CI_IMAGE_CACHE_GHCR/aquasecurity/trivy-java-db:1
+  # Trivy's own switch (`--insecure`, env TRIVY_INSECURE) for registries it
+  # reaches without TLS: it covers the two database repositories above and the
+  # sidecar images `sidecar_images` pulls from the cache. The cache is a
+  # trusted internal host and every image is still pinned by digest.
+  TRIVY_INSECURE: "true"
   # The digest scripts/test-integration.mjs pins for its disposable database.
-  POSTGRES_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/postgres:18-alpine@sha256:3b0ef735388b2cb097fc29b8bb421d86d57d0ddbe7aa1fbd6493e06d65028503
+  POSTGRES_IMAGE: postgres:18-alpine@sha256:3b0ef735388b2cb097fc29b8bb421d86d57d0ddbe7aa1fbd6493e06d65028503
   # scripts/ci/start-installer-registry.sh's disposable loopback registry
   # (acceptance, repair_journeys via its own copy below, and
-  # launcher_install_compat all start it). Through the group dependency proxy,
-  # same digest as the direct-Docker-Hub default the script falls back to, so
-  # these three jobs stop tripping Docker Hub's anonymous pull rate limit
-  # (ai/orbit#1111, pipeline 1597 jobs 22132/22133/22198/22199).
-  ORBIT_INSTALLER_REGISTRY_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0
-  # Same reasoning, for tests/oidc/Dockerfile's FROM node:24-alpine: `smoke`
-  # builds it through docker-compose.acceptance.yml's OIDC_BASE_IMAGE_PREFIX
-  # build arg, and install_bootstrap/install_bootstrap_latest through
-  # scripts/test-install-bootstrap.sh reading the same variable name.
-  OIDC_BASE_IMAGE_PREFIX: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/
+  # launcher_install_compat all start it). A plain Docker Hub name, which the
+  # image cache mirrors (#1510); same digest as the default the script falls
+  # back to. Pulling through the cache keeps these three jobs clear of Docker
+  # Hub's anonymous pull rate limit (ai/orbit#1111, pipeline 1597 jobs
+  # 22132/22133/22198/22199).
+  ORBIT_INSTALLER_REGISTRY_IMAGE: registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0
+  # tests/oidc/Dockerfile's FROM node:24-alpine is a plain Docker Hub name, so
+  # it goes through the image cache's mirror with no prefix (#1510);
+  # OIDC_BASE_IMAGE_PREFIX is deliberately left unset here.
   # The tag `build_image` builds under, and nothing else: it names this commit,
   # so it is only ever the tag inside image.tar when this pipeline really built
   # it. The jobs that load that tarball take ORBIT_IMAGE_TAG from build.env
@@ -617,12 +624,25 @@ variables:
     # "blob unknown to registry" (moby/moby#53293). The known-bad versions
     # are listed in renovate.json's docker rule; Renovate offers the next
     # release as usual, and record_image on that bump is the proof.
-    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/docker:29.6.2-dind@sha256:bfec1f5159c63a81ca6fdedbd81404d2c0e16378ed0feec3bb3fbf3998847659
-      # GitLab derives a service's hostname from its image name; through the
-      # proxy that name is the whole prefix path, not "docker", and every
-      # `tcp://docker:2375` below stops resolving (pipeline 1512, #1022).
+    - name: docker:29.6.2-dind@sha256:bfec1f5159c63a81ca6fdedbd81404d2c0e16378ed0feec3bb3fbf3998847659
+      # GitLab derives a service's hostname from its image name; keep the
+      # alias explicit so every `tcp://docker:2375` below resolves whatever the
+      # image is called (pipeline 1512, #1022).
       alias: docker
       pull_policy: if-not-present
+      # This daemon is not the runner host's, so the host's registry mirror
+      # does not reach it: tell it about the image cache (#1510,
+      # ai/agent-infra#14). The mirror serves Docker Hub names; the
+      # insecure-registry entries let it use the plain-HTTP cache hosts for
+      # ghcr.io and mcr.microsoft.com references too. Compose and install.sh
+      # pulls inside a job keep their names and still go through the cache.
+      # The variables come from the runner config; whether `command:` expands
+      # them is proven by the first pipeline (#1510).
+      command:
+        - --registry-mirror=http://$CI_IMAGE_CACHE_DOCKERHUB
+        - --insecure-registry=$CI_IMAGE_CACHE_DOCKERHUB
+        - --insecure-registry=$CI_IMAGE_CACHE_GHCR
+        - --insecure-registry=$CI_IMAGE_CACHE_MCR
   variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
@@ -630,7 +650,7 @@ variables:
 .dind:
   extends: .dind_service
   image:
-    name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/docker:29.6.2-cli@sha256:be132a9f282288de4afaf63379dff75711fda0147c6b72a9df44e51841402144
+    name: docker:29.6.2-cli@sha256:be132a9f282288de4afaf63379dff75711fda0147c6b72a9df44e51841402144
     pull_policy: if-not-present
 
 # The daemon inside the job's own container, for the two jobs that stand up a
@@ -676,22 +696,20 @@ variables:
   # No --dns here either, and for the reason the dind service above records:
   # this daemon hands its containers the job container's resolv.conf, which
   # the runner's config.toml sets.
-  nohup dockerd --data-root "$docker_data_root" > /tmp/dockerd.log 2>&1 &
+  # Not the runner host's daemon, so its registry mirror does not apply here:
+  # point this one at the image cache too (#1510, ai/agent-infra#14), so
+  # Compose and install.sh pulls keep their names and go through it.
+  nohup dockerd --data-root "$docker_data_root" \
+    --registry-mirror="http://$CI_IMAGE_CACHE_DOCKERHUB" \
+    --insecure-registry="$CI_IMAGE_CACHE_DOCKERHUB" \
+    --insecure-registry="$CI_IMAGE_CACHE_GHCR" \
+    --insecure-registry="$CI_IMAGE_CACHE_MCR" \
+    > /tmp/dockerd.log 2>&1 &
   for _ in $(seq 1 60); do
     docker info > /dev/null 2>&1 && break
     sleep 1
   done
   docker info > /dev/null 2>&1 || { echo "the in-job Docker daemon did not start"; cat /tmp/dockerd.log; exit 1; }
-  # This daemon is not the runner's own: GitLab authenticates the job's
-  # `image:`/`services:` pulls to the group dependency proxy automatically,
-  # but a pull this daemon makes on its own account -- `docker compose up`
-  # against a Docker Hub sidecar, `docker run` against a proxied job
-  # variable -- is not covered by that and needs its own login (ai/orbit#1022,
-  # design ai/agent-infra#14). Once, here, for every job that starts this
-  # daemon, rather than repeated in each job's script. --password-stdin only:
-  # never echo the password.
-  echo "$CI_DEPENDENCY_PROXY_PASSWORD" | docker login "$CI_DEPENDENCY_PROXY_SERVER" \
-    --username "$CI_DEPENDENCY_PROXY_USER" --password-stdin
 
 # The last step of every after_script that started the daemon above. /builds
 # outlives the job, so the daemon's image store -- a whole Orbit stack, 3 to
@@ -1427,13 +1445,6 @@ sidecar_images:
       - 3
   needs: *needs_gated
   cache: *trivy_db_cache
-  variables:
-    # Trivy's own auth variables (ai/orbit#1022, design ai/agent-infra#14):
-    # this job has no Docker daemon of its own for a `docker login`, so the
-    # scanner needs the dependency proxy credential handed to it directly to
-    # pull the Docker Hub sidecars it scans through the proxy below.
-    TRIVY_USERNAME: $CI_DEPENDENCY_PROXY_USER
-    TRIVY_PASSWORD: $CI_DEPENDENCY_PROXY_PASSWORD
   script:
     - *apk_retry
     # bash before the reuse gate: this image is Alpine, and both the gate and
@@ -1489,16 +1500,18 @@ sidecar_images:
             cp -a "$TRIVY_CACHE_DIR" "$cache"
             # $2 is the vendor reference: .github/supply-chain-policy.json
             # names it and the evidence below records it unchanged, so a
-            # reader never has to know the proxy exists (ai/orbit#1022,
-            # design ai/agent-infra#14). Only the byte source Trivy actually
-            # pulls from moves: ghcr.io stays direct (own registry, not
-            # Docker Hub); everything else here is Docker Hub and goes
-            # through the group dependency proxy, official images (no
-            # namespace, e.g. node, postgres) under "library/".
+            # reader never has to know the cache exists (#1510,
+            # ai/agent-infra#14). Only the byte source Trivy actually pulls
+            # from moves. This job has no Docker daemon, so Trivy pulls
+            # directly and the host mirror does not apply: name the cache host
+            # for each registry (plain HTTP, hence TRIVY_INSECURE above).
+            # Official Docker Hub images (no namespace, e.g. node, postgres)
+            # live under library/.
             case "$2" in
-              ghcr.io/*) pull_target="$2" ;;
-              */*) pull_target="${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/$2" ;;
-              *) pull_target="${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/$2" ;;
+              ghcr.io/*) pull_target="$CI_IMAGE_CACHE_GHCR/${2#ghcr.io/}" ;;
+              mcr.microsoft.com/*) pull_target="$CI_IMAGE_CACHE_MCR/${2#mcr.microsoft.com/}" ;;
+              */*) pull_target="$CI_IMAGE_CACHE_DOCKERHUB/$2" ;;
+              *) pull_target="$CI_IMAGE_CACHE_DOCKERHUB/library/$2" ;;
             esac
             echo "scanning $2 (pulled via $pull_target)"
             trivy image \
@@ -2206,7 +2219,7 @@ smoke:
     ORBIT_ACCEPTANCE_OIDC: "true"
     # #1183: the Chromium projects only; Firefox runs in smoke_firefox below.
     ORBIT_E2E_ENGINES: chromium
-    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
+    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
@@ -2306,7 +2319,7 @@ smoke_firefox:
     # desktop-firefox and maintenance-firefox, plus the unclaimed/setup pair
     # every run needs (tests/e2e/playwright.config.ts).
     ORBIT_E2E_ENGINES: firefox
-    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
+    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
@@ -2434,7 +2447,7 @@ smoke_webkit:
     # mapping below (.webkit_oidc_hosts) never has to rewrite a port: see its
     # comment.
     TEST_OIDC_PORT: "4443"
-    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
+    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
@@ -2532,7 +2545,7 @@ smoke_webkit_mobile:
     # mapping below (.webkit_oidc_hosts) never has to rewrite a port: see its
     # comment.
     TEST_OIDC_PORT: "4443"
-    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
+    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
@@ -2643,7 +2656,7 @@ smoke_local_only:
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
-    COMPOSE_FILES: -f docker-compose.yml -f compose/docker-compose.local-only.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
+    COMPOSE_FILES: -f docker-compose.yml -f compose/docker-compose.local-only.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
@@ -2883,13 +2896,13 @@ repair_journeys:
     ORBIT_REPAIR_JOURNEYS_IMAGE: orbit-repair-journeys:ci
     # The harness's own throwaway registry, not a sidecar Orbit ships, but it
     # still hit Docker Hub's anonymous pull rate limit unpinned (ai/orbit#1022,
-    # #1111), so it now shares ORBIT_INSTALLER_REGISTRY_IMAGE's proxy path and
+    # #1111), so it now shares ORBIT_INSTALLER_REGISTRY_IMAGE's name and
     # digest instead of a bare `:2` tag.
     ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE: ${ORBIT_INSTALLER_REGISTRY_IMAGE}
     # The hostile-value journey's disposable label vector (ai/orbit#1111):
     # same reasoning as the registry image above, but no digest -- see
     # scripts/test-repair-journeys.sh.
-    ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/busybox:stable
+    ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE: busybox:stable
   rules:
     - *not_scheduled
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -3689,7 +3702,7 @@ renovate:
   # pnpm that rewrites pnpm-lock.yaml comes from. `-full` preinstalls them and
   # costs several gigabytes of pull on a shared runner every week.
   image:
-    name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/renovate/renovate:44.83.2@sha256:c1cb952b2e14a112d0d0c61987a10f60a2626fe9b9c1504436be46a17bd123bc
+    name: renovate/renovate:44.83.2@sha256:c1cb952b2e14a112d0d0c61987a10f60a2626fe9b9c1504436be46a17bd123bc
     pull_policy: if-not-present
   timeout: 1h
   # A weekly maintenance run has nothing that could supersede it, and being

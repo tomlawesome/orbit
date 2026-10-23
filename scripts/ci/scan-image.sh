@@ -14,6 +14,8 @@
 #   TESTED_IMAGE_TAG      local tag that resolves to it
 #   TRIVY_IMAGE           pinned scanner image
 #   TRIVY_DB_REPOSITORY   vulnerability database, passed into the scanner
+#   TRIVY_INSECURE        optional; passed into the scanner so it can reach a
+#                         plain-HTTP database registry (the image cache, #1510)
 #   ORBIT_REVISION        source revision recorded in the evidence
 #   GITHUB_WORKSPACE      optional; defaults to the repository root
 #   RUNNER_TEMP           optional; defaults to $TMPDIR or /tmp
@@ -43,6 +45,7 @@ readonly workspace runner_temp trivy_cache_dir
 mkdir -p .orbit-supply-chain "${trivy_cache_dir}"
 bash scripts/trivy-db-retry.sh docker run --rm \
   --env TRIVY_DB_REPOSITORY \
+  --env TRIVY_INSECURE \
   --volume /var/run/docker.sock:/var/run/docker.sock \
   --volume "${workspace}:/workspace" \
   --volume "${trivy_cache_dir}:/root/.cache/trivy" \
@@ -53,6 +56,7 @@ bash scripts/trivy-db-retry.sh docker run --rm \
   "${TESTED_IMAGE_TAG}"
 bash scripts/trivy-db-retry.sh docker run --rm \
   --env TRIVY_DB_REPOSITORY \
+  --env TRIVY_INSECURE \
   --volume /var/run/docker.sock:/var/run/docker.sock \
   --volume "${workspace}:/workspace" \
   --volume "${trivy_cache_dir}:/root/.cache/trivy" \
