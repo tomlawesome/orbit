@@ -66,6 +66,27 @@ current user, it writes nothing and prints one stderr line; the event,
 guidance and exit status are unchanged either way. Unset or empty, nothing
 is written.
 
+## Profile request (v0)
+
+A consumer installing without a terminal (for `orbit-launcher`: plain mode)
+chooses the deployment profile by setting `ORBIT_INSTALL_PROFILE` before it
+runs `install.sh` (#1504). `install.sh` forwards the variable to the engine
+by name only, so the value never appears on a command line.
+
+| Value | Fresh install |
+|---|---|
+| unset | `standard`, as before |
+| `standard` | `standard` |
+| `processing` | `processing`: `COMPOSE_PROFILES=processing`, `TIKA_URL=http://orbit-tika:9998`, and `orbit-tika` is started |
+| anything else, empty included | refused before the engine writes anything: `phase=host component=host state=failed`, message `ORBIT_INSTALL_PROFILE must be standard or processing.` |
+
+`ai` and `full` are refused here on purpose: the local model's choice and
+download stay with the terminal wizard (guarantee #20). The request is read
+only on a fresh install that shows no wizard: an interactive run takes the
+wizard's answer, and an update keeps the deployment's profile whatever the
+variable holds. A later option to change an existing deployment's profile
+would ride this same variable on an update, and be documented here first.
+
 ## Vocabulary
 
 Additions to a field's vocabulary are allowed within v0 and must update
@@ -802,6 +823,7 @@ docker run --rm --init [-i [-t]] [-e ORBIT_INSTALL_INTERACTIVE=1] \
   -e ORBIT_HOST_UID=<uid> -e ORBIT_HOST_GID=<gid> \
   -e ORBIT_IMAGE=<verified digest reference> -e ORBIT_CHANNEL=<channel> \
   -e ORBIT_INSTALLER_ELAPSED=<seconds> -e ORBIT_INSTALL_HOST_FACTS \
+  -e ORBIT_INSTALL_PROFILE \
   -e ORBIT_CONFIGURE_PROMPTS -e ORBIT_CONFIGURE_APP_URL \
   -e ORBIT_CONFIGURE_OIDC_ISSUER -e ORBIT_CONFIGURE_OIDC_CLIENT_ID \
   -e ORBIT_CONFIGURE_AUTH_MODE \

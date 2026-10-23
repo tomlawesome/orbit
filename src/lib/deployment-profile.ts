@@ -62,21 +62,39 @@ export interface ProfileSelection {
   profileChange: boolean;
 }
 
+export interface ProfileRequestRefusal {
+  refused: true;
+  message: string;
+}
+
+/** The profiles a launcher may request on a fresh install (#1504); local AI stays a terminal choice. */
+const REQUESTABLE_INSTALL_PROFILES: readonly DeploymentProfile[] = ["standard", "processing"];
+
 /**
  * The non-interactive branch of resolve_installer_action (install.sh:826-841,
  * the only branch reached when `terminal_fd` was never opened): preserve the
- * existing profile on `update` (`profile_change` stays 0); always "standard"
- * on `install` (`profile_change=1`). See the module comment above for why
- * this is the only branch install-orchestrator.ts drives.
+ * existing profile on `update` (`profile_change` stays 0); on `install`
+ * (`profile_change=1`), the launcher's ORBIT_INSTALL_PROFILE if it names
+ * standard or processing, a refusal for any other value, and "standard" when
+ * unset (#1504). The request is ignored on `update`. See the module comment
+ * above for why this is the only branch install-orchestrator.ts drives.
  */
 export function resolveNonInteractiveProfileSelection(
   installerAction: "install" | "update",
   existingProfile: DeploymentProfile,
-): ProfileSelection {
-  if (installerAction === "install") {
+  requestedProfile?: string,
+): ProfileSelection | ProfileRequestRefusal {
+  if (installerAction === "update") {
+    return { selectedProfile: existingProfile, profileChange: false };
+  }
+  if (requestedProfile === undefined) {
     return { selectedProfile: "standard", profileChange: true };
   }
-  return { selectedProfile: existingProfile, profileChange: false };
+  const requested = REQUESTABLE_INSTALL_PROFILES.find((profile) => profile === requestedProfile);
+  if (requested === undefined) {
+    return { refused: true, message: "ORBIT_INSTALL_PROFILE must be standard or processing." };
+  }
+  return { selectedProfile: requested, profileChange: true };
 }
 
 /** check_local_ai_capacity's three answers: 0, 1 and 2 in install.sh. */

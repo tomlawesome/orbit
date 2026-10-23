@@ -88,6 +88,8 @@ export interface InstallContext {
   channel: string;
   /** COMPOSE_PROJECT_NAME from the shell's environment, if any. */
   requestedComposeProjectName?: string;
+  /** ORBIT_INSTALL_PROFILE from the launcher; read only on a non-interactive install (#1504). */
+  requestedProfile?: string;
   facts: HostFacts;
   /** Where this image keeps its deployment assets (/opt/orbit/deploy, ADR-0019). */
   assetsRoot: string;
@@ -443,7 +445,9 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       throw error;
     }
   } else {
-    profile = { ...resolveNonInteractiveProfileSelection(action, profileResult.profile), selectedModel: undefined, modelPullRequested: false };
+    const selection = resolveNonInteractiveProfileSelection(action, profileResult.profile, context.requestedProfile);
+    if ("refused" in selection) return fail("host", "host", selection.message);
+    profile = { ...selection, selectedModel: undefined, modelPullRequested: false };
   }
 
   // A private scratch directory inside the engine's own container: the

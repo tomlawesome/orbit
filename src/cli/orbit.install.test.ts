@@ -176,6 +176,43 @@ describe("orbit install: a run, as install.sh starts it", () => {
   });
 });
 
+// #1504: the launcher forwards ORBIT_INSTALL_PROFILE by name; the CLI hands it
+// to the engine as the requested profile of a plain-mode fresh install.
+describe("orbit install: ORBIT_INSTALL_PROFILE from the shell's environment (#1504)", () => {
+  it("installs the processing profile when the shell asks for it (#1504)", () => {
+    const target = preprovisioned();
+    const outcome = outcomeFile();
+    const result = runCli(["install", "--action", "auto", "--dir", target, "--outcome", outcome], { ORBIT_INSTALL_PROFILE: "processing" });
+
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.dockerCalls).toBe("");
+    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=processing\nmodel-pull=0\ndatabase-volume=\n");
+    const env = readFileSync(join(target, ".env-orbit"), "utf8");
+    expect(env).toContain("COMPOSE_PROFILES=processing\n");
+    expect(env).toContain("TIKA_URL=http://orbit-tika:9998\n");
+  });
+
+  it("installs the standard profile when the shell asks for it (#1504)", () => {
+    const outcome = outcomeFile();
+    const result = runCli(["install", "--action", "auto", "--dir", preprovisioned(), "--outcome", outcome], { ORBIT_INSTALL_PROFILE: "standard" });
+    expect(result.status).toBe(0);
+    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=standard\nmodel-pull=0\ndatabase-volume=\n");
+  });
+
+  it.each(["ai", "full", "bogus"])("refuses the unsupported profile %j before touching the target (#1504)", (requested) => {
+    const target = preprovisioned();
+    const before = readdirSync(target).sort();
+    const outcome = outcomeFile();
+    const result = runCli(["install", "--action", "auto", "--dir", target, "--outcome", outcome], { ORBIT_INSTALL_PROFILE: requested });
+
+    expect(result.status).toBe(1);
+    expect(readFileSync(outcome, "utf8")).toContain("status=failed\nphase=host\ncomponent=host\n");
+    expect(readFileSync(outcome, "utf8")).toContain("message=ORBIT_INSTALL_PROFILE must be standard or processing.\n");
+    expect(readdirSync(target).sort()).toEqual(before);
+  });
+});
+
 describe("orbit install: the launcher's configure tree on a configuration-failure (#1225)", () => {
   function launcherTree(): string {
     const tree = join(newSandbox("orbit-cli-install-launcher-"), "tree");

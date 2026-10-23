@@ -13,6 +13,7 @@ import {
   encryptDocumentArchive,
   encryptDocumentKek,
   decryptDocumentKek,
+  RecoveryBundleRefusal,
 } from "./recovery-bundle";
 
 // Cross-implementation parity for issue #296 slice 1, following the pattern
@@ -225,7 +226,12 @@ describe("AES-256-CBC document-archive crypto parity (openssl enc -pbkdf2, no Do
     expect(decrypted).toEqual(plaintext);
   });
 
-  it("a wrong document KEK is refused by both implementations (openssl: nonzero exit; TS: RecoveryBundleRefusal)", () => {
+  // Unauthenticated CBC: about 1 wrong key in 256 leaves a valid final pad, so
+  // both sides then "succeed" with garbage (#1512). The contract tested is the
+  // one decryptDocumentArchive documents: the two agree, and a wrong key never
+  // yields the plaintext. Restore refuses a wrong key earlier, on the
+  // manifest's document_kek_sha256 (recovery-bundle.backup.test.ts #19).
+  it("a wrong document KEK never yields the plaintext, and both implementations agree on refusing it", () => {
     const sandbox = newSandbox("orbit-document-archive-parity-wrong-key-");
     const keyFilePath = join(sandbox, "document-kek");
     writeFileSync(keyFilePath, `${KEK_A}\n`);
@@ -239,7 +245,18 @@ describe("AES-256-CBC document-archive crypto parity (openssl enc -pbkdf2, no Do
 
     const decryptedPath = join(sandbox, "documents.tar.decrypted-with-wrong-key");
     const opensslResult = opensslDecrypt(envelopePath, wrongKeyFilePath, decryptedPath);
-    expect(opensslResult.status).not.toBe(0);
-    expect(() => decryptDocumentArchive(readFileSync(envelopePath), KEK_B)).toThrow(/Document archive decryption failed/);
+    let tsOutput: Buffer | undefined;
+    try {
+      tsOutput = decryptDocumentArchive(readFileSync(envelopePath), KEK_B);
+    } catch (error) {
+      expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+      expect((error as Error).message).toMatch(/Document archive decryption failed/);
+    }
+
+    expect(opensslResult.status === 0).toBe(tsOutput !== undefined);
+    if (tsOutput !== undefined) {
+      expect(tsOutput.equals(readFileSync(decryptedPath))).toBe(true);
+      expect(tsOutput.equals(readFileSync(plaintextPath))).toBe(false);
+    }
   });
 });
