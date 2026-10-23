@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { type LocalAiCapacity, chooseDeploymentProfile, updateIdentityLines } from "./deployment-profile";
+import { type LocalAiCapacity, chooseDeploymentProfile, resolveNonInteractiveProfileSelection, updateIdentityLines } from "./deployment-profile";
 import { InstallPromptStop, selectChoice } from "./install-terminal";
 import { scriptedTerminal } from "../../tests/support/scripted-terminal";
 
@@ -171,5 +171,29 @@ describe("updateIdentityLines (show_update_identity)", () => {
       `Current: schema=v1 version=none digest=sha256:${"c".repeat(64)} optional-profile=full`,
       `Target: schema=v1 version=v1.2.3 digest=sha256:${"d".repeat(64)} channel=latest`,
     ]);
+  });
+});
+
+// #1504: the launcher's ORBIT_INSTALL_PROFILE reaches a plain-mode fresh
+// install; only `standard` and `processing` are accepted, and an update never
+// looks at it.
+describe("resolveNonInteractiveProfileSelection (#1504)", () => {
+  const refusal = { refused: true, message: "ORBIT_INSTALL_PROFILE must be standard or processing." };
+
+  it.each(["standard", "processing"])("installs the requested %s profile as a profile change (#1504)", (requested) => {
+    expect(resolveNonInteractiveProfileSelection("install", "standard", requested)).toEqual({ selectedProfile: requested, profileChange: true });
+  });
+
+  it("installs the standard profile when nothing is requested, as before (#1504)", () => {
+    expect(resolveNonInteractiveProfileSelection("install", "standard", undefined)).toEqual({ selectedProfile: "standard", profileChange: true });
+    expect(resolveNonInteractiveProfileSelection("install", "standard")).toEqual({ selectedProfile: "standard", profileChange: true });
+  });
+
+  it.each(["ai", "full", "bogus", "", "PROCESSING"])("refuses the unsupported request %j on an install (#1504)", (requested) => {
+    expect(resolveNonInteractiveProfileSelection("install", "standard", requested)).toEqual(refusal);
+  });
+
+  it.each([undefined, "standard", "processing", "ai", "full", "bogus", "", "PROCESSING"])("ignores the request %j on an update and keeps the existing profile (#1504)", (requested) => {
+    expect(resolveNonInteractiveProfileSelection("update", "processing", requested)).toEqual({ selectedProfile: "processing", profileChange: false });
   });
 });

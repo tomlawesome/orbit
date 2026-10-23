@@ -659,3 +659,70 @@ describe("runInstall: the hook after the transaction commits (redesign r5)", () 
     expect(calls).toEqual([]);
   });
 });
+
+// #1504: ORBIT_INSTALL_PROFILE, as the CLI hands it to the engine in
+// InstallContext.requestedProfile, picks the profile of a plain-mode fresh
+// install. The engine runs no Docker: the shell starts the services named by
+// the outcome's selectedProfile (orbit-tika for processing).
+describe("runInstall: requested profile on a non-interactive install (#1504)", () => {
+  it("installs the processing profile: Tika configured and the outcome naming processing (#1504)", async () => {
+    const target = preprovisioned();
+    const { outcome } = await run(target, { requestedProfile: "processing" });
+    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "processing", modelPullRequested: false, databaseVolume: undefined });
+    const env = readFileSync(join(target, ".env-orbit"), "utf8");
+    expect(env).toContain("COMPOSE_PROFILES=processing\n");
+    expect(env).toContain("TIKA_URL=http://orbit-tika:9998\n");
+  });
+
+  it.each([["standard"], [undefined]])("installs the standard profile for requestedProfile %j, as before (#1504)", async (requestedProfile) => {
+    const target = preprovisioned();
+    const { outcome } = await run(target, { requestedProfile });
+    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "standard", modelPullRequested: false, databaseVolume: undefined });
+    const env = readFileSync(join(target, ".env-orbit"), "utf8");
+    expect(env).not.toContain("COMPOSE_PROFILES=processing");
+    expect(env).not.toContain("TIKA_URL=http://orbit-tika:9998");
+  });
+
+  it.each([["ai"], ["full"], ["bogus"]])("refuses the %s profile in the host phase, before anything is written (#1504)", async (requestedProfile) => {
+    const target = preprovisioned();
+    const before = snapshot(target);
+    const { outcome } = await run(target, { requestedProfile });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host", component: "host", message: "ORBIT_INSTALL_PROFILE must be standard or processing." });
+    expect(snapshot(target)).toEqual(before);
+    expect(readdirSync(target).sort()).toEqual([".env-orbit", ".orbit-secrets"]);
+  });
+
+  it("ignores the request when the interactive wizard was shown: the wizard's answer wins (#1504)", async () => {
+    const target = sandbox("orbit-install-target-");
+    const terminal = scriptedTerminal(["install", "standard", "apply", "apply"]);
+    const answers: ConfigurationAnswers = {
+      guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "local" }),
+      oidcSecret: () => {
+        throw new Error("local-only: no secret is asked");
+      },
+    };
+    const { outcome } = await run(target, { interactive: true, requestedProfile: "processing" }, { terminal, answers });
+    expect(outcome).toMatchObject({ status: "ok", fresh: true, selectedProfile: "standard" });
+    expect(readFileSync(join(target, ".env-orbit"), "utf8")).not.toContain("COMPOSE_PROFILES=processing");
+  });
+
+  it("ignores an invalid request when the interactive wizard was shown (#1504)", async () => {
+    const target = sandbox("orbit-install-target-");
+    const terminal = scriptedTerminal(["install", "standard", "apply", "apply"]);
+    const answers: ConfigurationAnswers = {
+      guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "local" }),
+      oidcSecret: () => {
+        throw new Error("local-only: no secret is asked");
+      },
+    };
+    const { outcome } = await run(target, { interactive: true, requestedProfile: "bogus" }, { terminal, answers });
+    expect(outcome).toMatchObject({ status: "ok", fresh: true, selectedProfile: "standard" });
+  });
+
+  it.each([["standard"], ["bogus"]])("ignores requestedProfile %j on an update and keeps the existing profile (#1504)", async (requestedProfile) => {
+    const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
+    const { outcome } = await run(target, { requestedProfile, facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, databaseVolume: "orbit_orbit-db-data" });
+    expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("COMPOSE_PROFILES=processing\n");
+  });
+});
