@@ -74,6 +74,11 @@ const PLATFORM_KEYS = new Set([
   "ORBIT_INSTALLER_ELAPSED",
   "ORBIT_INSTALL_TEST_ASSETS_ROOT",
   "ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE",
+  // The launcher's profile request for a fresh install without a terminal
+  // (#1504, docs/engine-events.md "Profile request (v0)"): forwarded by
+  // install.sh by name, read once by the engine, never written to .env-orbit
+  // itself (the profile it selects is, as COMPOSE_PROFILES and TIKA_URL).
+  "ORBIT_INSTALL_PROFILE",
   // Release metadata baked into the image at build time (Dockerfile's
   // runner stage, from the ORBIT_VERSION/ORBIT_REVISION/ORBIT_CHANNEL
   // ARGs), read back by GET /api/admin/health (#1000,

@@ -1540,6 +1540,8 @@ function commandInstallOrUpdate(command: "install" | "update", deployDirArg: str
       resolvedReference,
       channel,
       requestedComposeProjectName: process.env.COMPOSE_PROJECT_NAME || undefined,
+      // Passed as set, empty included: an empty request is refused, not read as standard (#1504).
+      requestedProfile: process.env.ORBIT_INSTALL_PROFILE,
       facts,
       assetsRoot,
     },

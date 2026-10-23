@@ -825,6 +825,7 @@ run_engine() {
     -e ORBIT_CHANNEL="$channel"
     -e ORBIT_INSTALLER_ELAPSED="$((SECONDS - installer_process_started_at))"
     -e ORBIT_INSTALL_HOST_FACTS
+    -e ORBIT_INSTALL_PROFILE
     -e ORBIT_CONFIGURE_PROMPTS
     -e ORBIT_CONFIGURE_APP_URL
     -e ORBIT_CONFIGURE_OIDC_ISSUER
