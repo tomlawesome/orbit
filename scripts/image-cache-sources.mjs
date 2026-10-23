@@ -20,6 +20,10 @@ const DEPENDENCY_PROXY_PATTERN =
 const DIND_IMAGE_PATTERN = /(?:^|\/)docker:[^\s"']*dind/u;
 const MIRROR_FLAG_PATTERN =
   /--registry-mirror=https?:\/\/\$\{?CI_IMAGE_CACHE_DOCKERHUB\}?(?![A-Za-z0-9_])/u;
+// The form CI uses (pipeline 2936): GitLab cannot fill runner-config values
+// into a service's command, so the service reads the value itself at start.
+const MIRROR_FROM_ENVIRONMENT_PATTERN =
+  /printenv CI_IMAGE_CACHE_DOCKERHUB[\s\S]*--registry-mirror=/u;
 
 const CACHE_PREFIX = {
   "ghcr.io": "$CI_IMAGE_CACHE_GHCR",
@@ -147,7 +151,8 @@ function hostFindings(lines) {
 }
 
 // A Docker-in-Docker service pulls images itself, so it needs the mirror flag
-// as its command; the plain string form of a service has nowhere to put it.
+// in its command, or an entrypoint that reads the cache address from its
+// environment and passes it on; the plain string form of a service has nowhere to put it.
 function dindFindings(lines) {
   const found = [];
   for (let start = 0; start < lines.length; start += 1) {
@@ -188,7 +193,7 @@ function dindFindings(lines) {
         name = first.replace(/^["']|["']$/gu, "");
       }
       if (!name || !DIND_IMAGE_PATTERN.test(name)) return;
-      if (MIRROR_FLAG_PATTERN.test(text)) return;
+      if (MIRROR_FLAG_PATTERN.test(text) || MIRROR_FROM_ENVIRONMENT_PATTERN.test(text)) return;
       found.push({ line: start + 1 + offset + 1, reference: name, reason: dindReason() });
     });
   }

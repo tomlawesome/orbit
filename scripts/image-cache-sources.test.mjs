@@ -218,6 +218,36 @@ describe("Docker-in-Docker registry mirror (#1510)", () => {
     expect(ci(text)).toEqual([]);
   });
 
+  it("passes a dind service whose entrypoint reads the cache address from its environment", () => {
+    const text = [
+      "job:",
+      "  services:",
+      "    - name: docker:29.6.2-dind",
+      "      entrypoint:",
+      "        - /bin/sh",
+      "        - -c",
+      '        - >-',
+      '          set -- "$(printenv CI_IMAGE_CACHE_DOCKERHUB)";',
+      '          exec dockerd-entrypoint.sh --registry-mirror="http://$1"',
+      "",
+    ].join("\n");
+    expect(ci(text)).toEqual([]);
+  });
+
+  it("finds a dind service whose entrypoint reads the address but never passes a mirror", () => {
+    const text = [
+      "job:",
+      "  services:",
+      "    - name: docker:29.6.2-dind",
+      "      entrypoint:",
+      "        - /bin/sh",
+      "        - -c",
+      '        - set -- "$(printenv CI_IMAGE_CACHE_DOCKERHUB)"; exec dockerd-entrypoint.sh',
+      "",
+    ].join("\n");
+    expect(ci(text)).toHaveLength(1);
+  });
+
   it("finds a name-form dind service with no command, on the service's line", () => {
     const text = "job:\n  services:\n    - name: docker:29.6.2-dind\n      alias: docker\n";
     const findings = ci(text);

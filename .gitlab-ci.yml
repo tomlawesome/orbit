@@ -636,16 +636,26 @@ variables:
       # insecure-registry entries let it use the plain-HTTP cache hosts for
       # ghcr.io and mcr.microsoft.com references too. Compose and install.sh
       # pulls inside a job keep their names and still go through the cache.
-      # The variables come from the runner config; whether `command:` expands
-      # them is proven by the first pipeline (#1510).
-      command:
-        - --registry-mirror=http://$CI_IMAGE_CACHE_DOCKERHUB
-        - --insecure-registry=$CI_IMAGE_CACHE_DOCKERHUB
-        - --insecure-registry=$CI_IMAGE_CACHE_GHCR
-        - --insecure-registry=$CI_IMAGE_CACHE_MCR
+      # The CI_IMAGE_CACHE_* values come from the runner config, so GitLab
+      # cannot fill them into `command:` (pipeline 2936: the daemon got no
+      # usable mirror and died before answering). The service reads them from
+      # its own environment at start instead. Written with `$(printenv ...)`
+      # and `$1`-`$3` only, so no `$NAME` here is a GitLab variable reference
+      # whichever way GitLab treats this line. An unset value fails the
+      # service loudly rather than pulling around the cache.
+      entrypoint:
+        - /bin/sh
+        - -c
+        - >-
+          set -- "$(printenv CI_IMAGE_CACHE_DOCKERHUB)" "$(printenv CI_IMAGE_CACHE_GHCR)" "$(printenv CI_IMAGE_CACHE_MCR)";
+          [ -n "$1" ] && [ -n "$2" ] && [ -n "$3" ] || { echo "image cache variables are not set on this runner (#1510)" >&2; exit 1; };
+          exec dockerd-entrypoint.sh --registry-mirror="http://$1" --insecure-registry="$1" --insecure-registry="$2" --insecure-registry="$3"
   variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
+    # The service's own log goes into the job log, so a daemon that dies at
+    # start says why (pipeline 2936 showed only "not reachable", #1510).
+    CI_DEBUG_SERVICES: "true"
 
 .dind:
   extends: .dind_service
