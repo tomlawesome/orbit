@@ -550,3 +550,275 @@ describe("sidecar_images: the system-lane gate moved into rules: changes: (#944)
     }
   });
 });
+
+/*
+ * #1412 (owner ruling 2026-10-22): browsers are slow, so a merge request into
+ * `dev` and the push that lands it start none of the six browser jobs. They
+ * run at promotion (the dev -> preview merge request and the `preview` push)
+ * and every night on `dev` from one named schedule.
+ *
+ * Which jobs a pipeline event starts is decided by `workflow:rules` and each
+ * job's `rules:`, evaluated here with the small subset of GitLab's rule
+ * language this file uses (`==`, `!=`, `=~`, `&&`, `||`, parentheses, bare
+ * variables) rather than read as text: a regex over the rules would pass on a
+ * rule that said the opposite.
+ */
+const BROWSER_JOBS = [
+  "smoke",
+  "smoke_firefox",
+  "smoke_webkit",
+  "smoke_webkit_mobile",
+  "fidelity",
+  "fidelity_webkit",
+];
+// What the nightly needs besides the browsers: the build and the image.
+const NIGHTLY_SUPPORT_JOBS = ["classify", "fast", "build_image"];
+
+// The `rules:` list of a block as [{ if, when }], with `- *alias` entries
+// replaced by the hidden key's own rule, and `rules: *alias` followed to the
+// hidden list. A `changes:` condition is not evaluated (nothing here asks
+// about one). A job with no `rules:` at all starts in every pipeline, as it
+// does in GitLab, so it comes back as one rule that always matches.
+function rulesOf(name) {
+  const block = allBlocks.get(name);
+  const lines = block.split("\n");
+  let entries;
+  let indent;
+  const whole = lines.find((line) => /^ {2}rules: \*\S+$/u.test(line));
+  if (whole) {
+    entries = allBlocks.get(`.${whole.match(/\*(\S+)$/u)[1]}`).split("\n").slice(1);
+    indent = 2;
+  } else {
+    const start = lines.indexOf("  rules:");
+    if (start === -1) return [{}];
+    entries = [];
+    for (const line of lines.slice(start + 1)) {
+      if (/^ {2}\S/u.test(line)) break; // the next key of the job
+      entries.push(line);
+    }
+    indent = 4;
+  }
+  const lead = " ".repeat(indent);
+  const rules = [];
+  for (const line of entries) {
+    if (/^\s*(#.*)?$/u.test(line)) continue;
+    const alias = line.match(new RegExp(`^${lead}- \\*(\\S+)$`, "u"));
+    if (alias) {
+      const hidden = allBlocks.get(`.${alias[1]}`);
+      expect(hidden, `no hidden key defines *${alias[1]}`).toBeDefined();
+      const rule = {};
+      for (const entry of hidden.split("\n").slice(1)) {
+        const pair = entry.match(/^ {2}(if|when): (.*)$/u);
+        if (pair) rule[pair[1]] = pair[2];
+      }
+      rules.push(rule);
+      continue;
+    }
+    const first = line.match(new RegExp(`^${lead}- (if|when|changes): ?(.*)$`, "u"));
+    if (first) {
+      rules.push({ [first[1]]: first[2] });
+      continue;
+    }
+    const more = line.match(new RegExp(`^${lead}  (if|when): (.*)$`, "u"));
+    if (more && rules.length > 0) rules[rules.length - 1][more[1]] = more[2];
+  }
+  return rules;
+}
+
+function evaluate(expression, env) {
+  const value = (name) => {
+    const found = env[name];
+    return found === undefined || found === "" ? null : found;
+  };
+  const match = (subject, pattern, negate) => {
+    const hit = subject !== null && pattern.test(subject);
+    return negate ? !hit : hit;
+  };
+  const source = expression
+    .replace(
+      /\$([A-Z][A-Z0-9_]*)\s*(=~|!~)\s*\/((?:\\\/|[^/])*)\//gu,
+      (_all, name, operator, pattern) => `match(value("${name}"), new RegExp(${JSON.stringify(pattern.replace(/\\\//gu, "/"))}, "u"), ${operator === "!~"})`,
+    )
+    .replace(/\$([A-Z][A-Z0-9_]*)/gu, (_all, name) => `value("${name}")`);
+  return Boolean(new Function("value", "match", `return (${source});`)(value, match));
+}
+
+// "run" | "manual" | "failure" | "never" for the first rule that matches.
+function verdictOf(rules, env) {
+  for (const rule of rules) {
+    if (rule.if !== undefined && !evaluate(rule.if, env)) continue;
+    const when = rule.when ?? "on_success";
+    if (when === "never") return "never";
+    if (when === "manual") return "manual";
+    if (when === "on_failure") return "failure";
+    return "run";
+  }
+  return "never";
+}
+
+// What an event does to a job: no pipeline at all, or the job's own verdict.
+function jobVerdict(name, env) {
+  if (verdictOf(rulesOf("workflow"), env) === "never") return "never";
+  return verdictOf(rulesOf(name), env);
+}
+
+const events = {
+  devMergeRequest: {
+    CI_PIPELINE_SOURCE: "merge_request_event",
+    CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "dev",
+    CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "feature/x",
+  },
+  devPush: { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "dev" },
+  promotionMergeRequest: {
+    CI_PIPELINE_SOURCE: "merge_request_event",
+    CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview",
+    CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "dev",
+  },
+  previewPush: { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "preview" },
+  nightly: { CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "dev", ORBIT_NIGHTLY_BROWSERS: "true" },
+};
+
+describe("browser jobs by event (#1412)", () => {
+  it("starts no browser job on a merge request into dev, or on the push that lands it", () => {
+    for (const event of ["devMergeRequest", "devPush"]) {
+      for (const name of BROWSER_JOBS) {
+        expect(jobVerdict(name, events[event]), `${name} on ${event}`).toBe("never");
+      }
+    }
+  });
+
+  it("keeps the fast checks, the build and the non-browser journeys on a merge request into dev", () => {
+    for (const name of ["classify", "fast", "build_image", "integration", "acceptance", "repair_journeys", "launcher_install_compat"]) {
+      expect(jobVerdict(name, events.devMergeRequest), name).toBe("run");
+    }
+  });
+
+  it("starts every browser job at promotion: the dev -> preview merge request and the preview push", () => {
+    for (const event of ["promotionMergeRequest", "previewPush"]) {
+      for (const name of BROWSER_JOBS) {
+        expect(jobVerdict(name, events[event]), `${name} on ${event}`).toBe("run");
+      }
+    }
+    for (const environment of [
+      { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "hotfix/x" },
+      { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
+    ]) {
+      for (const name of BROWSER_JOBS) {
+        expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(environment)}`).toBe("run");
+      }
+    }
+  });
+
+  it("leaves a pipeline started by hand on dev as it was", () => {
+    for (const name of BROWSER_JOBS) {
+      expect(jobVerdict(name, { CI_PIPELINE_SOURCE: "web", CI_COMMIT_BRANCH: "dev" }), name).toBe("run");
+    }
+  });
+
+  it("starts every browser job, and only the jobs they need, on the nightly schedule", () => {
+    for (const name of [...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS]) {
+      expect(jobVerdict(name, events.nightly), `${name} on the nightly`).toBe("run");
+    }
+    const everyJob = jobs.filter(([, block]) => /^ {2}stage: /mu.test(block)).map(([name]) => name);
+    const started = everyJob.filter((name) => jobVerdict(name, events.nightly) !== "never");
+    expect(started.sort()).toEqual([...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "nightly_report"].sort());
+    // The alarm waits for a failure; it does not run on a green night.
+    expect(jobVerdict("nightly_report", events.nightly)).toBe("failure");
+  });
+
+  it("starts no browser job, and not the nightly's jobs, on any other schedule on dev", () => {
+    const others = [
+      { RENOVATE: "true" },
+      { BASE_IMAGE_REPIN: "true" },
+      { DOOR_IMPORT: "true" },
+      { SIDECAR_FRESHNESS: "true" },
+      { INSTALL_BOOTSTRAP: "true" },
+      { TIDY_FRESHNESS: "true" },
+      {},
+      { ORBIT_NIGHTLY_BROWSERS: "false" },
+    ];
+    for (const variables of others) {
+      const environment = { CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "dev", ...variables };
+      for (const name of [...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "nightly_report"]) {
+        expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(variables)}`).toBe("never");
+      }
+    }
+  });
+
+  it("starts the other schedules' jobs only on their own schedule, not on the nightly", () => {
+    for (const name of ["renovate", "sidecar_pin_freshness", "install_bootstrap", "base_image_repin", "door_import", "tidy_freshness"]) {
+      expect(jobVerdict(name, events.nightly), name).toBe("never");
+    }
+    expect(jobVerdict("base_image_repin", { CI_PIPELINE_SOURCE: "schedule", BASE_IMAGE_REPIN: "true" })).toBe("run");
+  });
+
+  it("runs the promotion's nightly check only on the dev -> preview merge request", () => {
+    expect(jobVerdict("nightly_not_red", events.promotionMergeRequest)).toBe("run");
+    for (const event of ["devMergeRequest", "devPush", "previewPush", "nightly"]) {
+      expect(jobVerdict("nightly_not_red", events[event]), event).toBe("never");
+    }
+    expect(
+      jobVerdict("nightly_not_red", {
+        CI_PIPELINE_SOURCE: "merge_request_event",
+        CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview",
+        CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "hotfix/x",
+      }),
+    ).toBe("never");
+  });
+
+  it("turns every axis on for the nightly, and only for a schedule that names it", () => {
+    const nightly = runClassifyEnv({ ...events.nightly });
+    expect(nightly.variables).toEqual(everythingOn);
+    expect(nightly.stdout).toMatch(/nightly browser run/u);
+    const renovate = runClassifyEnv({ CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "dev", RENOVATE: "true" });
+    expect(renovate.variables.ORBIT_WEB).toBe("false");
+    expect(renovate.variables.ORBIT_E2E).toBe("false");
+    // The variable alone, off a schedule, changes nothing.
+    expect(runClassifyEnv({ ORBIT_NIGHTLY_BROWSERS: "true" }).variables.ORBIT_E2E).toBe("false");
+  });
+
+  it("stops every job the nightly starts when dev has not moved (the nightly_idle lane)", () => {
+    for (const name of [...BROWSER_JOBS, "fast", "build_image"]) {
+      const script = `${hiddenBlockScript(".reach_helpers")}\norbit_lane_admits ${name} && echo ADMITTED || echo STOPPED`;
+      const stdout = execFileSync("sh", ["-c", script], {
+        encoding: "utf8",
+        env: { PATH: process.env.PATH, ORBIT_LANE: "nightly_idle" },
+      });
+      expect(stdout, name).toMatch(/dev has not moved/u);
+      expect(stdout, name).toMatch(/STOPPED/u);
+      expect(stdout, name).not.toMatch(/ADMITTED/u);
+    }
+  });
+
+  it("makes classify set that lane only when the nightly script says idle", () => {
+    const classify = allBlocks.get("classify");
+    const start = classify.indexOf('      if [ "${CI_PIPELINE_SOURCE:-}" = "schedule" ] && [ "${ORBIT_NIGHTLY_BROWSERS:-}" = "true" ]; then\n        verdict=');
+    expect(start, "the nightly idle step moved").toBeGreaterThan(-1);
+    const end = classify.indexOf("\n  artifacts:", start);
+    const step = `set -eu\n${classify
+      .slice(start, end)
+      .split("\n")
+      .map((line) => line.replace(/^ {6}/u, ""))
+      .join("\n")}`;
+    const run = (verdict, environment) => {
+      const directory = mkdtempSync(join(tmpdir(), "orbit-nightly-idle-"));
+      try {
+        writeFileSync(join(directory, "classify.env"), "ORBIT_WEB=true\nORBIT_LANE=full\n", "utf8");
+        writeFileSync(join(directory, "node"), `#!/bin/sh\necho ${verdict}\n`, { mode: 0o755 });
+        execFileSync("sh", ["-c", step], {
+          cwd: directory,
+          encoding: "utf8",
+          env: { PATH: `${directory}:${process.env.PATH}`, ...environment },
+        });
+        return readFileSync(join(directory, "classify.env"), "utf8");
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    };
+    const nightly = { CI_PIPELINE_SOURCE: "schedule", ORBIT_NIGHTLY_BROWSERS: "true" };
+    expect(run("idle", nightly)).toBe("ORBIT_WEB=true\nORBIT_LANE=nightly_idle\n");
+    expect(run("run", nightly)).toBe("ORBIT_WEB=true\nORBIT_LANE=full\n");
+    // Not the nightly: even an `idle` answer changes nothing.
+    expect(run("idle", { CI_PIPELINE_SOURCE: "merge_request_event" })).toBe("ORBIT_WEB=true\nORBIT_LANE=full\n");
+  });
+});
