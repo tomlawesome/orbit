@@ -65,7 +65,7 @@ source_id="$(docker image inspect --format '{{.Id}}' "${TESTED_IMAGE_TAG}")"
 # Docker Hub, for the GitHub workflow and any local run that has no proxy.
 registry_id="$(
   docker run --detach --name "${registry_name}" --publish 127.0.0.1:5000:5000 \
-    "${ORBIT_INSTALLER_REGISTRY_IMAGE:-registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373}"
+    "${ORBIT_INSTALLER_REGISTRY_IMAGE:-registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0}"
 )"
 [[ "${registry_id}" =~ ^[0-9a-f]{64}$ ]] || {
   printf 'The disposable registry returned an invalid container identity.\n' >&2

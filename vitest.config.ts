@@ -226,11 +226,16 @@ const test: TestUserConfig = {
     // previous global floors (28/28/26/29) were set against a codebase that
     // no longer exists and would now pass while half the engine went
     // untested.
+    //
+    // Raised to the measured values, rounded down (owner, 2026-10-22): CI's
+    // `fast` on 39134f33 (pipeline 2875, job 38340) measured 63.63%
+    // statements, 60.35% branches, 64.51% functions, 65.06% lines, and the
+    // old floors sat 12-14 points below. #1099 replaces raising by hand.
     thresholds: {
-      statements: 50,
-      branches: 48,
-      functions: 51,
-      lines: 51,
+      statements: 63,
+      branches: 60,
+      functions: 64,
+      lines: 65,
       "src/lib/**": { statements: 60 },
       "src/server/documents/**": { statements: 75 },
     },

@@ -41,7 +41,7 @@ services:
     ports: !override
       - "0.0.0.0:4443:4443"
   demo-tls:
-    image: nginx:alpine@sha256:72ba65eb42c10344912a84ff42408db7d34f2feb642204570ab8fc5ffd29f1d3
+    image: nginx:alpine@sha256:060849a174666c53439dc7cecbf8f67e225c7cbfb1a44ca97915d9a172a81e6d
     volumes:
       - ./demo-tls:/etc/demo:ro
       - ./demo-tls/nginx.conf:/etc/nginx/nginx.conf:ro

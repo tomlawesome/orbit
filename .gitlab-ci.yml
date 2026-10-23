@@ -210,6 +210,12 @@ variables:
   # Current: pipeline 2867, job publish_signing 38298 (cosign v3.1.4,
   # docker 29.9.2 CLI), 2026-10-22.
   ORBIT_SIGNING_IMAGE: registry.tomlawson.io/ai/orbit-base-image/signing@sha256:21dad4f1976d1118e1a142b82bebc7b7eaf76f242f39edb14790543c3c2661f3
+  # Where `build_image` pulls Orbit's base image from (#1101): this GitLab's own
+  # registry, ai/orbit-base-image, instead of GHCR, so a GHCR outage cannot fail
+  # the build. Passed as the Dockerfile's BASE_IMAGE_REGISTRY build arg, whose
+  # public default stays ghcr.io/tomlawesome. The digest in the Dockerfile pins
+  # the content, so both registries serve the same bytes.
+  ORBIT_BASE_IMAGE_REGISTRY: registry.tomlawson.io/ai
   # build_launcher's job image (ADR-0031 #3): at least the Go version in
   # launcher/pin.json's go.mod (go 1.27.2 at the pin this repository
   # currently carries). 1.27.3 fixes CVE-2026-111943 (crypto/x509 refuses the
@@ -232,14 +238,14 @@ variables:
   # mirror.gcr.io that 403'd above.
   TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db:1
   # The digest scripts/test-integration.mjs pins for its disposable database.
-  POSTGRES_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/postgres:18-alpine@sha256:d8703cd7fba306b9fec9268ecedfa8a966846c053036a60e3635791957eb2f66
+  POSTGRES_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/postgres:18-alpine@sha256:3b0ef735388b2cb097fc29b8bb421d86d57d0ddbe7aa1fbd6493e06d65028503
   # scripts/ci/start-installer-registry.sh's disposable loopback registry
   # (acceptance, repair_journeys via its own copy below, and
   # launcher_install_compat all start it). Through the group dependency proxy,
   # same digest as the direct-Docker-Hub default the script falls back to, so
   # these three jobs stop tripping Docker Hub's anonymous pull rate limit
   # (ai/orbit#1111, pipeline 1597 jobs 22132/22133/22198/22199).
-  ORBIT_INSTALLER_REGISTRY_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+  ORBIT_INSTALLER_REGISTRY_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0
   # Same reasoning, for tests/oidc/Dockerfile's FROM node:24-alpine: `smoke`
   # builds it through docker-compose.acceptance.yml's OIDC_BASE_IMAGE_PREFIX
   # build arg, and install_bootstrap/install_bootstrap_latest through
@@ -1880,11 +1886,15 @@ build_image:
       # instead of failing the job: this project's own registry credential
       # must never be the reason an ordinary merge request's image build
       # goes red.
+      # The same login lets buildx pull the base image from this registry
+      # (#1101); without it the build keeps the Dockerfile's public GHCR default.
       if echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin; then
         orbit_build_cache_usable=true
+        base_image_registry_arg="--build-arg BASE_IMAGE_REGISTRY=${ORBIT_BASE_IMAGE_REGISTRY}"
       else
-        echo "could not log in to $CI_REGISTRY; building without the layer cache" >&2
+        echo "could not log in to $CI_REGISTRY; building without the layer cache and pulling the base image from GHCR" >&2
         orbit_build_cache_usable=false
+        base_image_registry_arg=""
       fi
     - |
       set -eu
@@ -1935,6 +1945,7 @@ build_image:
         --file ./Dockerfile \
         --load \
         $cache_from_args \
+        $base_image_registry_arg \
         --build-arg "ORBIT_VERSION=${version}" \
         --build-arg "ORBIT_REVISION=${CI_COMMIT_SHA}" \
         --build-arg "ORBIT_CHANNEL=${publication_channel}" \
@@ -1964,6 +1975,7 @@ build_image:
           --file ./Dockerfile \
           --cache-from type=registry,ref="${ORBIT_BUILD_CACHE_REF}" \
           --cache-to type=registry,ref="${ORBIT_BUILD_CACHE_REF}",mode=max \
+          $base_image_registry_arg \
           --build-arg "ORBIT_VERSION=${version}" \
           --build-arg "ORBIT_REVISION=${CI_COMMIT_SHA}" \
           --build-arg "ORBIT_CHANNEL=${publication_channel}" \

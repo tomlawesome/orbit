@@ -402,10 +402,11 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_webkit` · failed once (49.6s), passed on retry. First sighting.
 
-## sign-out-descent.spec.ts:175 "sign out from home's menu reaches the dusk (phone-narrow, as the browser is)" on desktop-webkit
+## sign-out-descent.spec.ts:195 "sign out from home's menu reaches the dusk (phone-narrow, as the browser is)" on desktop-webkit — #1505
 
 - 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_webkit` · failed once (10.4s), passed on retry. First sighting.
 - 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / smoke_webkit (job 36178) · "(phone-narrow, world forced)" at line 193, desktop-webkit, failed once and passed on retry.
+- 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_webkit (job 38686) · failed once, passed on retry. Third sighting: filed as #1505.
 
 ## sign-out-descent.spec.ts:195 "sign out from home's menu reaches the dusk (phone-narrow, world forced)" on mobile-webkit, desktop-webkit — quarantined 2026-10-16 (agent-infra#30)
 
@@ -521,10 +522,11 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · `#1249: the menu is still open after sign-out started` at line 284. Second sighting.
 - 2026-10-16 · d8fa9475 (!1069) · pipeline 2645 / smoke_webkit_mobile (job 36538), mobile-webkit · now at :271: failed its first attempt with `Error: #1253: the menu is still open after sign-out started`; passed on the in-job retry.
 
-## v19-document-preview.spec.ts:397 "the preview's pager turns a multi-page document in place, and the reader opens on its page" — mobile-webkit, desktop-webkit
+## v19-document-preview.spec.ts:401 "the preview's pager turns a multi-page document in place, and the reader opens on its page" — mobile-webkit, desktop-webkit — #1501
 
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934) · failed its first attempt (9.0 s), passed on the in-job retry (13.5 s). First sighting.
 - 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit (job 36591), desktop-webkit · now at :401: failed once, passed on retry.
+- 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed every attempt: at :423 the image stayed "Page one of pager-proving.pdf" where "Page 2" was expected (20 s). Third sighting: filed as #1501. Job retried as 38651.
 
 ## tour-pocket-webkit.spec.js:1284 "chapter 8 plays through on a new household (#1174 round 6)" — at 390x844, chapters 7 to 9
 
@@ -546,9 +548,10 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke_firefox (job 36099) · failed its first attempt, passed on the in-job retry. First sighting.
 
-## v19-mail-review.spec.ts:399 "the desk reads a staged paper's page one, from the suggestion's drawer and from the inbox ..." — desktop-firefox
+## v19-mail-review.spec.ts:398 "the desk reads a staged paper's page one, from the suggestion's drawer and from the inbox ..." — desktop-firefox
 
 - 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke_firefox (job 36099) · failed its first attempt, passed on the in-job retry. First sighting.
+- 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_firefox (job 38685) · failed once, passed on retry. Second sighting.
 
 ## v19-mail-review.spec.ts:431 "the phone sheet reads a staged paper's page one, and tells a gone mail apart from one it just cannot draw (#1155)" — mobile-webkit, marked expected-to-fail for #1196
 
@@ -571,10 +574,12 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-15 · a6168fe6 (!1069, v0.3 security batch) · pipeline 2640 / acceptance and repair_journeys (jobs 36463 and 36464), 20:46-20:54 UTC · both failed while moving artifacts, GitLab answering 502 or refusing connections; both passed on retry (jobs 36469 and 36470) with no change. First sighting.
 
-## v19-document-preview.spec.ts:366 "a one-page document's reader says "one page" and has no arrows" — desktop-webkit
+## v19-document-preview.spec.ts:370 "a one-page document's reader says "one page" and has no arrows" — desktop-webkit, desktop-chromium — #1503
 
 - 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit (job 36491), desktop-webkit · failed its first attempt (20.1 s), passed on the in-job retry. No error text printed: the job was cut off at its 30-minute timeout before the report. First sighting.
 - 2026-10-16 · 6f768016 (!1070, `dev` -> `preview`) · pipeline 2657 / smoke_webkit (job 36650), desktop-webkit · now at :370; failed once, passed on retry.
+- 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed once, passed on retry. Third sighting: filed as #1503.
+- 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke (job 38684), desktop-chromium · failed once, passed on retry. Now seen on Chromium too.
 
 ## v19-archive.spec.ts:273 "an armed desk button relaxes back after 4 s without a second tap (#1342)" — desktop-webkit
 
@@ -600,14 +605,17 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-16 · 6f768016 (`dev` merge of !1069; same tree as a08de7a1, whose pipeline 2650 passed this job) · pipeline 2655 / fidelity (job 36615) · `[data-preview-card].snap` not visible within the 5000ms wait: the preview card never reached its loaded page. The same 5 s family as the document-preview page-count wait raised to 20 s in 614118ff. First sighting; job retried as 36629.
 
-## v19-about-loading.spec.ts:69 "a slow click on About shows that it is loading before the content arrives" — desktop-webkit, mobile-webkit
+## v19-about-loading.spec.ts:69 "a slow click on About shows that it is loading before the content arrives" — desktop-webkit, mobile-webkit — #1502
 
 - 2026-10-18 · 5bfff8b6 (!1074, the branch that adds this test) · pipeline 2688 / `smoke_webkit` job 36975 · no loading sign (`aria-busy`, progress bar, a "loading" status or text) appeared within 10 s while the About data request was held; passed on its retry in the same job (11.1 s). The same run was loaded enough that one wheel scroll landed over a second late (#1472 note 40486). First sighting.
 - 2026-10-18 · c9df1a49 (!1074) · pipeline 2691 / `smoke_webkit_mobile` job 37001, mobile-webkit · failed once, passed on retry. Second sighting, two pipelines in a row; the test is new on this branch.
+- 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed once, passed on retry. Third sighting: filed as #1502.
 
-## v19-document-preview.spec.ts:299 "the reader turns a multi-page document to its last page and back, by arrows and by keys" — desktop-webkit
+## v19-document-preview.spec.ts:299 "the reader turns a multi-page document to its last page and back, by arrows and by keys" — desktop-webkit, mobile-webkit — #1501
 
 - 2026-10-18 · c9df1a49 (!1074, no document-preview change) · pipeline 2691 / `smoke_webkit` job 37000 · failed once, passed on retry. First sighting.
+- 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed once, passed on retry. Second sighting.
+- 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_webkit (job 38686) and smoke_webkit_mobile (job 38687) · failed once in each, passed on retry. Third sighting: same family as #1501, fixed with it.
 
 ## preview.test.ts:760 "renderDocumentPagePreview > the page is drawn in the sandbox, never on the server's own thread (#1427) > draws a 300 dpi A4 scan to a PNG of the page's shape"
 
@@ -629,6 +637,30 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## settings-text-size-tab-stop.test.mjs:128 "settings, phone layout: the text size tab stop starts on the applied step > with standard applied, the one tab stop is the ticked tile"
 
 - 2026-10-22 · 2b120e89 (nothing near settings since the green bea1293c run) · local `scripts/test-backend.sh`, same 919 s run as preview.test.ts:760's second sighting · timed out at the 5 s default; the file alone passed at once. Wall-clock-under-load shape. First sighting.
+
+## build_image: Corepack could not download the pnpm binary from registry.npmjs.org
+
+- 2026-10-22 · 39134f33 (!1081) · pipeline 2875 / `build_image` job 38351 · `Could not download the pnpm 12.4.1 binary: Could not reach https://registry.npmjs.org/@pnpm/exe.linux-x64-musl/12.4.1: timed out after 30s` in the `web-deploy.sh` step, a minute after the `deps` stage of the same build, on the same base image, had fetched pnpm 12.4.1 fine. Retried. First sighting.
+
+## mail-relay-sender-check-failures.test.ts "finding 1: a mailer that never answers > ends the request at the send deadline (shortened to 300 ms here) with a stable 503"
+
+- 2026-10-22 · 2f16facd (!1081; browser-test and flakes-log changes only since the green 39134f33 run, nothing near mail) · pipeline 2878 / `integration` job 38382 · `expected 429 to be 503`: the request met the rate limit instead of the send deadline. Retried as job 38407. First sighting.
+
+## tour-pocket-webkit.spec.js:1188 "the danger-zone ring pulses red while chapter 5 shows it (#1174 round 5) › on the desk, normal motion" on pocket-webkit
+
+- 2026-10-22 · 2f16facd (!1081; e2e-test and flakes-log changes only since the green 39134f33 run, nothing under `web/`) · pipeline 2878 / `fidelity_webkit` job 38381 · "the danger ring red, pulsing (or still, reduced) and gone after"; 23 others passed. Retried as job 38420. First sighting.
+
+## v19-mail-sender-check.spec.ts:123 "a member sends the check email from the settings mail screen, opens the link, and the relay starts listening" — desktop-webkit
+
+- 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed once (`toHaveURL` expected `/settings/mail$`, got `/settings/mail?sender=verified`), passed on retry. First sighting.
+
+## v19-create.spec.ts:1182 "dropping a new file after a refusal relabels the button 'not this one' and hides 'refused'" — desktop-webkit
+
+- 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_webkit (job 38686) · failed once, passed on retry. First sighting.
+
+## v19-explore-search.spec.ts:336 "Enter on the no-match add act carries the typed name to /create" — desktop-webkit
+
+- 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_webkit (job 38686) · failed once, passed on retry. First sighting.
 
 ## sign-out-descent.spec.ts:274 "sign out from another page's menu plays the descent (wide desk)" on desktop-firefox
 

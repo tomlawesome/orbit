@@ -933,28 +933,6 @@
     {
       "kind": "vulnerability",
       "scope": "image",
-      "id": "CVE-2026-92392",
-      "package": "libcurl3t64-gnutls",
-      "installedVersion": "8.18.0-1ubuntu2.7",
-      "owner": "Orbit maintainers",
-      "rationale": "curl library in apache/tika:4.1.0-full; the distribution fixed it in 8.18.0-1ubuntu2.8 (USN-8927-1) on 2026-10-14, but 4.1.0-full is still the newest release tag and has not been rebuilt since 2026-09-29. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-92392",
-      "package": "libcurl4t64",
-      "installedVersion": "8.18.0-1ubuntu2.7",
-      "owner": "Orbit maintainers",
-      "rationale": "curl library in apache/tika:4.1.0-full; the distribution fixed it in 8.18.0-1ubuntu2.8 (USN-8927-1) on 2026-10-14, but 4.1.0-full is still the newest release tag and has not been rebuilt since 2026-09-29. Clears when the image is rebuilt on the fixed package and re-pinned (pipeline 2624).",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
       "id": "CVE-2026-102276",
       "package": "brace-expansion",
       "installedVersion": "5.0.9",
@@ -1007,8 +985,8 @@
     {
       "name": "Node.js build and runtime",
       "tag": "node:24-alpine",
-      "reference": "node:24-alpine@sha256:f777d4615e9f225aa23d72dc05bd8454a0fadcb033e00417c5b9257f5585677b",
-      "indexDigest": "sha256:6a1c190e17215d844926b0677f4bf87273ff7d5e54db06d3b5b5863ab0b09a3d",
+      "reference": "node:24-alpine@sha256:1200d815de24f8dcca745fbf7651d166034a35adbcad8860a8538ffff44f1420",
+      "indexDigest": "sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53",
       "platform": "linux/amd64",
       "locations": [
         "tests/oidc/Dockerfile"
@@ -1018,14 +996,14 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/docker-node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-21",
+      "resolvedOn": "2026-10-22",
       "reviewBy": "2026-10-30"
     },
     {
       "name": "PostgreSQL database",
       "tag": "postgres:18-alpine",
-      "reference": "postgres:18-alpine@sha256:d8703cd7fba306b9fec9268ecedfa8a966846c053036a60e3635791957eb2f66",
-      "indexDigest": "sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873",
+      "reference": "postgres:18-alpine@sha256:3b0ef735388b2cb097fc29b8bb421d86d57d0ddbe7aa1fbd6493e06d65028503",
+      "indexDigest": "sha256:83148c0bc09eac4d598b70a61e1404d0212b76c95c504bfd6c81a4c59ec91792",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml",
@@ -1038,7 +1016,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/docker-library/postgres/blob/master/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-09-24",
+      "resolvedOn": "2026-10-22",
       "reviewBy": "2026-10-30"
     },
     {
@@ -1062,8 +1040,8 @@
     {
       "name": "Apache Tika parser",
       "tag": "apache/tika:4.1.0-full",
-      "reference": "apache/tika:4.1.0-full@sha256:d7607239d4e9c2dc1fd396f41a370576a334aef28f767e5bc5511247a1e1adf7",
-      "indexDigest": "sha256:ab9cc988828c594d32d6409e1850d1c8d83152ea793ef5fe0e7862ac0f9e5891",
+      "reference": "apache/tika:4.1.0-full@sha256:1ae28c75a88fd4c4f583711520923bba44548e8bc3d2fc4671b2a3e24e0d59dd",
+      "indexDigest": "sha256:d69fab827fa004a5e1db786e6d78da947a6cfeedbf595bc5c353ef99622bb2e2",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml",
@@ -1074,7 +1052,7 @@
       "license": "Apache-2.0",
       "licenseSource": "https://github.com/apache/tika-docker/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-01",
+      "resolvedOn": "2026-10-22",
       "reviewBy": "2026-10-30"
     },
     {
@@ -1093,6 +1071,96 @@
       "updateOwner": "Orbit maintainers",
       "resolvedOn": "2026-10-22",
       "reviewBy": "2026-10-30"
+    }
+  ],
+  "unwatchedImages": [
+    {
+      "reference": "node:22-bookworm@sha256:de636e50060a9908cf40a20a50d027ed74a99b2e31d2635f3b13e9e4e5e97e74",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI job image (NODE_IMAGE); ships nothing to operators. A `_IMAGE:` pin in .gitlab-ci.yml, which Renovate's CI-variables regex (renovate.json) proposes updates for; not watched by sidecar-pins."
+    },
+    {
+      "reference": "mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI browser image (PLAYWRIGHT_IMAGE); it must match the image the design fidelity baselines were measured on, so a bump moves with those baselines. Ships nothing to operators. A `_IMAGE:` pin in .gitlab-ci.yml, which Renovate's CI-variables regex (renovate.json) proposes updates for; not watched by sidecar-pins."
+    },
+    {
+      "reference": "registry.tomlawson.io/ai/orbit-base-image/ci@sha256:5831d1bf3b265f7de3a9df687c51724769daff68a6f8a3cca365a5114e72a8f9",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI acceptance image built by the orbit-base-image pipeline; its digest comes from that pipeline, as the base image's does, not from a registry tag. Ships nothing to operators."
+    },
+    {
+      "reference": "registry.tomlawson.io/ai/orbit-base-image/signing@sha256:21dad4f1976d1118e1a142b82bebc7b7eaf76f242f39edb14790543c3c2661f3",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI signing image built by the orbit-base-image pipeline; its digest comes from that pipeline, not from a registry tag. Ships nothing to operators."
+    },
+    {
+      "reference": "golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI toolchain image (GOLANG_IMAGE) that builds the launcher binaries; the image itself ships nothing to operators. A `_IMAGE:` pin in .gitlab-ci.yml, which Renovate's CI-variables regex (renovate.json) proposes updates for; not watched by sidecar-pins."
+    },
+    {
+      "reference": "docker:29.6.2-dind@sha256:bfec1f5159c63a81ca6fdedbd81404d2c0e16378ed0feec3bb3fbf3998847659",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI Docker-in-Docker service for the image-building jobs; ships nothing to operators. Pinned under an `image:`/`services:` key in .gitlab-ci.yml, which Renovate's gitlabci manager proposes updates for; not watched by sidecar-pins."
+    },
+    {
+      "reference": "docker:29.6.2-cli@sha256:be132a9f282288de4afaf63379dff75711fda0147c6b72a9df44e51841402144",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI Docker client image for the image-building jobs; ships nothing to operators. Pinned under an `image:`/`services:` key in .gitlab-ci.yml, which Renovate's gitlabci manager proposes updates for; not watched by sidecar-pins."
+    },
+    {
+      "reference": "renovate/renovate:44.83.2@sha256:c1cb952b2e14a112d0d0c61987a10f60a2626fe9b9c1504436be46a17bd123bc",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI image for the weekly dependency-update job; ships nothing to operators. Pinned under an `image:`/`services:` key in .gitlab-ci.yml, which Renovate's gitlabci manager proposes updates for; not watched by sidecar-pins."
+    },
+    {
+      "reference": "greenmail/standalone:2.1.13@sha256:3df66b7edd01c8a301343ca5e3601d8674760d4708655573560c24745e624fb2",
+      "locations": [
+        "compose/docker-compose.acceptance.yml"
+      ],
+      "reason": "Throwaway mail server for the acceptance stack; never part of a deployment. In a compose file Renovate's docker-compose manager proposes updates for; not watched by sidecar-pins."
+    },
+    {
+      "reference": "nginx:alpine@sha256:060849a174666c53439dc7cecbf8f67e225c7cbfb1a44ca97915d9a172a81e6d",
+      "locations": [
+        "compose/docker-compose.demo.yml"
+      ],
+      "reason": "Demo-only TLS front end, never part of a release. In a compose file Renovate's docker-compose manager proposes updates for; not watched by sidecar-pins. Not in containerImages because sidecar-pins checks each file for the linux/amd64 digest while this file pins the multi-architecture index digest (#1490)."
+    },
+    {
+      "reference": "registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0",
+      "locations": [
+        ".gitlab-ci.yml",
+        "scripts/ci/start-installer-registry.sh",
+        "scripts/test-repair-journeys.sh",
+        "scripts/test-backup-restore.sh",
+        "scripts/test-install-acceptance.sh"
+      ],
+      "reason": "Throwaway registry the installer tests push to; never part of a deployment. Its CI copy (ORBIT_INSTALLER_REGISTRY_IMAGE) is a `_IMAGE:` pin Renovate proposes updates for; the scripts' fallback defaults are not seen by Renovate and move by hand with it. Not in containerImages because sidecar-pins checks each file for the linux/amd64 digest while these files pin the multi-architecture index digest (#1490)."
+    },
+    {
+      "reference": "apache/tika:${TIKA_VERSION}-full@sha256:6c244af88e8575ebe8bf0bc5e2da03c49663dd0acc7809cd99c8e9ff8741cbfb",
+      "locations": [
+        "scripts/extract-bundle/cli.ts"
+      ],
+      "reason": "Tika image for the developer-run extract-bundle tool, version from scripts/extract-bundle/tika-version.mjs (4.0.0, separate from the deployment's watched 4.1.0). Nothing watches it: the reference is a template Renovate cannot read, so it moves by hand."
     }
   ],
   "mutableImageReferences": [],

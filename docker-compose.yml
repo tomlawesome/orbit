@@ -3,7 +3,7 @@ name: orbit
 services:
   orbit-db:
     container_name: orbit-postgres
-    image: postgres:18-alpine@sha256:d8703cd7fba306b9fec9268ecedfa8a966846c053036a60e3635791957eb2f66
+    image: postgres:18-alpine@sha256:3b0ef735388b2cb097fc29b8bb421d86d57d0ddbe7aa1fbd6493e06d65028503
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-orbit}
@@ -125,7 +125,7 @@ services:
   # docker compose --profile processing up -d
   orbit-tika:
     container_name: orbit-tika
-    image: apache/tika:4.1.0-full@sha256:d7607239d4e9c2dc1fd396f41a370576a334aef28f767e5bc5511247a1e1adf7
+    image: apache/tika:4.1.0-full@sha256:1ae28c75a88fd4c4f583711520923bba44548e8bc3d2fc4671b2a3e24e0d59dd
     profiles: ["processing"]
     restart: unless-stopped
     user: "35002:35002"

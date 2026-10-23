@@ -72,7 +72,8 @@ fail on a global percentage.
 3. Exclude generated declarations, tests, and intentionally declarative assets;
    do not exclude difficult production code merely to improve a number.
 4. Ratcheting thresholds are active (vitest.config.ts, issue #302): global
-   floors just under the measured baseline (29.5% statements, 2026-08-12)
+   floors at the measured baseline, rounded down (63% statements, 60%
+   branches, 64% functions, 65% lines, 2026-10-22)
    plus per-layer floors for scaffolded layers (`src/lib` 60%,
    `src/server/documents` 75%). CI fails on regression below a floor.
    Floors are raised when a phase durably lifts a layer and are never
