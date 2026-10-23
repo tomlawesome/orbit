@@ -181,6 +181,10 @@ pipeline until it gets one. `~/.local/bin/gl-pipeline-run ai/orbit <ref>` starts
 a pipeline on any branch. `dev`, `preview` and `main` all take push
 "No one", merge "Maintainers".
 
+Browsers are the exception to "a merge request is tested like a push": a merge
+request into `dev` starts no browser job. They run at promotion and nightly on
+`dev` (see "Browsers run at promotion and every night" below, #1412).
+
 Two runners serve the project, both on the host `gitlab-runners` (32 cores,
 48 GB): the shared group runner, and runner 8, a privileged project runner owned
 by `ai/orbit` and tagged `orbit-build`, which every job needing a Docker daemon
@@ -209,6 +213,46 @@ why); the `base_image_repin` job (#708) owns that one: it needs its own schedule
 `dev`/`preview`/`main` and never merges; it pushes `chore/base-image-repin` and
 opens or refreshes one merge request. The header of
 `scripts/ci/repin-base-image.sh` holds how it is authorised.
+
+### Browsers run at promotion and every night, not on merge requests (#1412)
+
+Owner ruling, 2026-10-22. A merge request into `dev`, and the push that lands
+it, start none of the seven browser jobs: `smoke`, `smoke_firefox`,
+`smoke_webkit`, `smoke_webkit_mobile`, `smoke_local_only`, `fidelity` and
+`fidelity_webkit`. They still get the fast checks, integration, the image
+build and the non-browser journeys. The seven run in full:
+
+- at promotion: the `dev -> preview` merge request and the push to `preview`
+  (and `hotfix/*` and `main`), exactly as before;
+- every night on `dev`, from a pipeline schedule that sets
+  `ORBIT_NIGHTLY_BROWSERS=true`, 02:00 Europe/London every night except
+  Monday. That pipeline holds only `classify`, `fast`, `build_image` and the
+  seven, plus `nightly_report`. It does nothing when `dev` has not moved since the
+  last nightly run (`classify` asks `scripts/ci/nightly-browsers.mjs`; the
+  jobs stop on the `nightly_idle` lane). Other schedules on `dev` do not set the
+  variable, so they start none of these jobs and the nightly none of theirs.
+
+A red night must be seen. `nightly_report`, the last job and `on_failure`
+only, files one issue titled "Nightly browser run failed on dev" in the
+nearest open milestone, listing the failed jobs and failing tests, or comments
+on it while it is open. It reads `SIDECAR_ISSUE_TOKEN`, the same project token
+`sidecar_pin_freshness` uses, and fails clearly if it is unset. A night is not
+re-run on a commit it already ran on, even if red: retry the failed job.
+
+Promotion stops on a red night: `nightly_not_red`, on the `dev -> preview`
+merge request only, fails if a nightly run on that same `dev` commit failed. No
+nightly yet on the commit is not a failure, since the promotion runs the
+browsers itself. It reads the pipelines API with `ORBIT_REUSE_TOKEN` alone
+(read-only, unprotected, no fallback) and fails, saying so, if it is unset.
+
+The schedule is a GitLab setting the owner creates (Settings > CI/CD >
+Schedules): description "Nightly browsers on dev (#1412)", target branch `dev`,
+interval `0 2 * * 0,2-6`, time zone Europe/London, variable
+`ORBIT_NIGHTLY_BROWSERS` = `true`.
+
+The cost: a change that breaks only a browser check is no longer caught on its
+merge request. It is caught that night, or at promotion, against whatever else
+has landed since.
 
 ### Risk-proportional pull-request lanes
 
@@ -312,6 +356,10 @@ runtime-property checks (`verify-health-endpoint.sh`,
 `verify-privacy-boundary.sh`) stay unconditional, because they prove the
 image runs at all and every change can break that.
 
+(#1412 has since taken the browser jobs off merge requests into `dev` and the
+`dev` push altogether; see the section on nightly browsers above. The axes
+still decide what a promotion reaches.)
+
 The trade-off is accepted knowingly, not a side effect: a change that carries
 no web risk and no system risk by `classifyCiRisk`'s reckoning — for example a
 server route, a schema change, or a dependency bump that moves a rendered
@@ -373,10 +421,10 @@ malformed artefact, or any lookup failure, reads as "no reuse".
 Two ways to force a rerun regardless: the merge-request label `ci: rerun`,
 and `ORBIT_REUSE=off` on a pipeline started by hand. The lookup reads the
 API with `ORBIT_REUSE_TOKEN`, a read-only, unprotected credential the owner
-created on 2026-09-23 for exactly this; `BASE_REPIN_TOKEN` is a fallback but
-has been protected since #1084, so it is absent from merge-request
-pipelines. Without a usable token every merge-request verdict is "runs" —
-the safe direction.
+created for exactly this; nothing falls back to `BASE_REPIN_TOKEN`, which can
+push and has been protected since #1084 (it was the fallback until #1412). The
+nightly check reads the pipelines API with the same token alone. Without it
+every merge-request verdict is "runs" — the safe direction.
 
 `fast` (#950, owner ruling on #923 rec 15a, 2026-09-09) is the docker-free
 part of what used to be one job: type-check, lint, the coverage-bearing

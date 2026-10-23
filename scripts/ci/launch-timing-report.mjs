@@ -35,8 +35,9 @@
  *                             instead of the API -- how the tests drive the
  *                             comparison, and how a local run compares
  *                             against an artefact downloaded by hand
- *   BASE_REPIN_TOKEN          the credential an unprotected merge-request
- *                             pipeline can read; sent as a header from inside
+ *   ORBIT_REUSE_TOKEN         the read-only credential (`read_api`,
+ *                             unprotected) an ordinary pipeline can read, and
+ *                             the only one used; sent as a header from inside
  *                             this process, never on a command line. Absent,
  *                             unreachable or expired all read as "no previous
  *                             candidate", which is never a failure.
@@ -89,11 +90,11 @@ async function fetchPreviousCandidate() {
 
   const api = process.env.CI_API_V4_URL;
   const project = process.env.CI_PROJECT_ID;
-  const token = process.env.BASE_REPIN_TOKEN;
+  const token = process.env.ORBIT_REUSE_TOKEN;
   const ref = process.env.ORBIT_LAUNCH_TIMING_REF ?? "preview";
   const job = process.env.ORBIT_LAUNCH_TIMING_JOB ?? "launch_timing";
   if (!api || !project) return { report: null, why: "no API URL or project id in the environment" };
-  if (!token) return { report: null, why: "no BASE_REPIN_TOKEN, so the previous run's artefact cannot be read" };
+  if (!token) return { report: null, why: "no ORBIT_REUSE_TOKEN, so the previous run's artefact cannot be read" };
 
   const path = `web/test-results/launch-timing/${REPORT_NAME}`;
   const url =

@@ -61,11 +61,11 @@ workflow:
       when: never
     # A scheduled pipeline is the Renovate lane, the sidecar-pin-freshness
     # lane, the install-bootstrap lane, the base-image-repin lane, the
-    # tidy-freshness lane, the door-import lane, or nothing (#801 step 6,
-    # #820, #724, #708, #1023, #1371). `renovate`, `sidecar_pin_freshness`,
-    # `install_bootstrap`, `base_image_repin`, `tidy_freshness` and
-    # `door_import` are the only jobs that opt
-    # in, so a schedule that forgot its variable would produce a pipeline
+    # tidy-freshness lane, the door-import lane, the nightly browser lane, or
+    # nothing (#801 step 6, #820, #724, #708, #1023, #1371, #1412).
+    # `renovate`, `sidecar_pin_freshness`, `install_bootstrap`,
+    # `base_image_repin`, `tidy_freshness` and `door_import` are the only jobs
+    # that opt in on their own (the nightly lane opts in a set of jobs, below), so a schedule that forgot its variable would produce a pipeline
     # with no jobs, which GitLab rejects with a message that names neither
     # the schedule nor the variable. Refusing it here says why.
     - if: $CI_PIPELINE_SOURCE == "schedule" && $RENOVATE == "true"
@@ -74,6 +74,8 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $BASE_IMAGE_REPIN == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule" && $TIDY_FRESHNESS == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule" && $DOOR_IMPORT == "true"
+    # The nightly browser run on `dev` (#1412): see `.nightly_browsers`.
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $ORBIT_NIGHTLY_BROWSERS == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -102,6 +104,43 @@ workflow:
 # the job that wanted it. So the guard is repeated on each job instead.
 .not_scheduled: &not_scheduled
   if: $CI_PIPELINE_SOURCE == "schedule"
+  when: never
+
+# The nightly browser run (#1412, owner ruling 2026-10-22). Browsers are slow
+# and a merge request into `dev` no longer starts any of them: the seven browser
+# jobs (`smoke`, `smoke_firefox`, `smoke_webkit`, `smoke_webkit_mobile`,
+# `smoke_local_only`, `fidelity`, `fidelity_webkit`) run at promotion (the dev -> preview merge
+# request and the `preview` push, as before) and here, every night on `dev`.
+#
+# A schedule pushes no commit, which is why `*not_scheduled` stops every
+# validation job. This is the one schedule that must run them, and only the
+# ones the browsers need: `classify`, `fast` (it builds the web application
+# `fidelity` serves) and `build_image` (the image the smoke jobs test), then
+# the seven. Nothing else lists it, so no other job starts.
+#
+# The owner creates the schedule (Settings > CI/CD > Schedules); nothing here
+# can:
+#
+#   Description   Nightly browsers on dev (#1412)
+#   Target branch dev
+#   Interval      0 2 * * 0,2-6   (02:00 every night except Monday)
+#   Time zone     Europe/London
+#   Variable      ORBIT_NIGHTLY_BROWSERS = true
+#
+# It runs only when `dev` has moved since the last nightly run: `classify`
+# asks scripts/ci/nightly-browsers.mjs and, if not, sets the lane to
+# `nightly_idle`, which every job above stops on in `orbit_lane_admits`. The
+# other schedules on `dev` (Renovate, base-image re-pin, door import, ...) do
+# not set the variable, so they start none of these jobs and the nightly
+# starts none of theirs.
+.nightly_browsers: &nightly_browsers
+  if: $CI_PIPELINE_SOURCE == "schedule" && $ORBIT_NIGHTLY_BROWSERS == "true"
+
+# The other half (#1412): neither a merge request into `dev` nor the push that
+# lands it starts a browser job. A pipeline started by hand on `dev` (source
+# `web` or `api`) still can, through each job's later rules.
+.no_browsers_on_dev: &no_browsers_on_dev
+  if: ($CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev") || ($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "dev")
   when: never
 
 default:
@@ -370,6 +409,7 @@ variables:
   # coverage, same as before the split.
   orbit_lane_admits() {
     case "${ORBIT_LANE:-full}:$1" in
+      nightly_idle:*) echo "skipped: dev has not moved since the last nightly browser run (#1412)"; return 1 ;;
       full:*) return 0 ;;
       ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:names_guard | ignore_policy:supply_chain_source) return 0 ;;
       ci:fast | ci:fast_docker | ci:gitleaks | ci:names_guard | ci:supply_chain_source) return 0 ;;
@@ -795,6 +835,7 @@ classify:
   before_script: []
   timeout: 10m
   rules:
+    - *nightly_browsers
     - *not_scheduled
     - when: on_success
   variables:
@@ -849,6 +890,14 @@ classify:
       esac
       if [ "$forced" = true ]; then
         echo "the merge request is labelled 'ci: acceptance': running the full pipeline whatever the diff holds (#572)"
+      fi
+
+      # The nightly browser run (#1412) tests the whole of `dev`, not a diff
+      # (a schedule has none), so every axis is on, exactly as the label
+      # turns them on. Only the jobs the nightly lists exist in that pipeline.
+      if [ "${CI_PIPELINE_SOURCE:-}" = "schedule" ] && [ "${ORBIT_NIGHTLY_BROWSERS:-}" = "true" ]; then
+        forced=true
+        echo "the nightly browser run: every axis on (#1412)"
       fi
 
       # The narrow lanes (#889) are a merge-request economy, never a
@@ -953,6 +1002,20 @@ classify:
       rm -f .orbit-reuse/keys.env
       node scripts/ci/reuse-lookup.mjs .orbit-reuse/reuse.env \
         || echo "the reuse lookup failed: every job will run"
+    # The nightly browser run does nothing when `dev` has not moved since the
+    # last nightly run (#1412). The verdict is the lane: `nightly_idle` is
+    # stopped on by every job the nightly starts, in `orbit_lane_admits`. Any
+    # doubt (no token, API down) leaves the lane alone and the nightly runs.
+    - |
+      set -eu
+      if [ "${CI_PIPELINE_SOURCE:-}" = "schedule" ] && [ "${ORBIT_NIGHTLY_BROWSERS:-}" = "true" ]; then
+        verdict="$(node scripts/ci/nightly-browsers.mjs moved || echo run)"
+        echo "nightly browser run: ${verdict}"
+        if [ "$verdict" = "idle" ]; then
+          sed -i 's/^ORBIT_LANE=.*/ORBIT_LANE=nightly_idle/' classify.env
+          cat classify.env
+        fi
+      fi
   artifacts:
     paths:
       - .orbit-reuse/reuse.env
@@ -998,6 +1061,7 @@ fast:
   # shared runner timed it out (#1377). Cutting its run time is still open.
   timeout: 15m
   rules:
+    - *nightly_browsers
     - *not_scheduled
     - when: on_success
   needs:
@@ -1598,8 +1662,12 @@ fidelity:
   # `smoke` already takes. Run side by side they shared four CPUs and failed
   # each other's timing; see web/playwright.config.js.
   timeout: 30m
+  # No browser job on a merge request into `dev` or its push; at promotion and
+  # nightly (#1412, `.nightly_browsers`).
   rules:
+    - *nightly_browsers
     - *not_scheduled
+    - *no_browsers_on_dev
     - when: on_success
   needs: *needs_gated_with_fast_artifacts
   script:
@@ -1669,8 +1737,12 @@ fidelity_webkit:
   # project). It reached 24m with two boards side by side (#1237), so 45m
   # keeps the headroom `fidelity` keeps for its own Playwright runs.
   timeout: 45m
+  # No browser job on a merge request into `dev` or its push; at promotion and
+  # nightly (#1412, `.nightly_browsers`).
   rules:
+    - *nightly_browsers
     - *not_scheduled
+    - *no_browsers_on_dev
     - when: on_success
   needs: *needs_gated_with_fast_artifacts
   script:
@@ -1772,6 +1844,7 @@ build_image:
   extends: .dind
   timeout: 20m
   rules:
+    - *nightly_browsers
     - *not_scheduled
     - when: on_success
   needs: *needs_gated
@@ -2134,8 +2207,12 @@ smoke:
     # #1183: the Chromium projects only; Firefox runs in smoke_firefox below.
     ORBIT_E2E_ENGINES: chromium
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
+  # No browser job on a merge request into `dev` or its push; at promotion and
+  # nightly (#1412, `.nightly_browsers`).
   rules:
+    - *nightly_browsers
     - *not_scheduled
+    - *no_browsers_on_dev
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: manual
@@ -2230,8 +2307,12 @@ smoke_firefox:
     # every run needs (tests/e2e/playwright.config.ts).
     ORBIT_E2E_ENGINES: firefox
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
+  # No browser job on a merge request into `dev` or its push; at promotion and
+  # nightly (#1412, `.nightly_browsers`).
   rules:
+    - *nightly_browsers
     - *not_scheduled
+    - *no_browsers_on_dev
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: manual
@@ -2354,8 +2435,12 @@ smoke_webkit:
     # comment.
     TEST_OIDC_PORT: "4443"
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
+  # No browser job on a merge request into `dev` or its push; at promotion and
+  # nightly (#1412, `.nightly_browsers`).
   rules:
+    - *nightly_browsers
     - *not_scheduled
+    - *no_browsers_on_dev
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: manual
@@ -2448,8 +2533,12 @@ smoke_webkit_mobile:
     # comment.
     TEST_OIDC_PORT: "4443"
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
+  # No browser job on a merge request into `dev` or its push; at promotion and
+  # nightly (#1412, `.nightly_browsers`).
   rules:
+    - *nightly_browsers
     - *not_scheduled
+    - *no_browsers_on_dev
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: manual
@@ -2555,8 +2644,12 @@ smoke_local_only:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     COMPOSE_FILES: -f docker-compose.yml -f compose/docker-compose.local-only.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
+  # No browser job on a merge request into `dev` or its push; at promotion and
+  # nightly (#1412, `.nightly_browsers`).
   rules:
+    - *nightly_browsers
     - *not_scheduled
+    - *no_browsers_on_dev
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: manual
@@ -3900,24 +3993,21 @@ install_bootstrap_latest:
 #                       publishes an image, only proposes a pin. Never
 #                       printed; read by scripts/ci/repin-base-image.sh,
 #                       which fails clearly if it is unset.
-#                       The reuse lookup accepts it as a fallback (#898), but
-#                       only ever sees it on a protected ref: since #1084 a
-#                       merge-request pipeline presents no token at all, so
-#                       the lookup finds nothing and every job runs -- a cost
-#                       accepted deliberately to keep a push-capable
-#                       credential out of merge-request pipelines.
+#                       Nothing else reads it: the reuse lookup (#898) and
+#                       the nightly check (#1412) read the pipelines API with
+#                       ORBIT_REUSE_TOKEN alone and never fall back to this
+#                       push-capable credential, which since #1084 a
+#                       merge-request pipeline cannot see anyway.
 #
-#                       That is why ADR-0028's lookup asks first for
-#                       ORBIT_REUSE_TOKEN, which does not exist yet and is the
-#                       owner's to create: a read-only credential (`read_api`,
-#                       no write scope anywhere) left UNprotected, so an
-#                       ordinary merge-request pipeline can read earlier
-#                       pipelines' evidence. Until it exists, every reuse
-#                       verdict on a merge request is "runs", which is the
-#                       safe direction and is the state #898 has been in since
-#                       #1084. The unset path is covered by
-#                       scripts/ci/reuse-lookup.test.mjs, "asks nothing at all
-#                       when there is no token".
+#   ORBIT_REUSE_TOKEN  A read-only credential (`read_api`, Reporter, masked, NOT
+#                       protected, no write scope anywhere), so an ordinary
+#                       merge-request pipeline can read earlier pipelines'
+#                       evidence. Unset, every reuse verdict on a merge request
+#                       is "runs", the safe direction, and `nightly_not_red`
+#                       fails saying so. The unset paths are covered by
+#                       scripts/ci/reuse-lookup.test.mjs ("asks nothing at all
+#                       when there is no token") and
+#                       scripts/ci/nightly-browsers.test.mjs.
 base_image_repin:
   stage: maintenance
   extends: .dind_service
@@ -4170,3 +4260,59 @@ launch_timing:
       - web/test-results/launch-timing/
     expire_in: 1 year
     when: always
+
+# The nightly browser run's alarm (#1412). The last job of the nightly
+# pipeline, `when: on_failure`: it runs only if a job before it failed, and
+# files one GitLab issue (title "Nightly browser run failed on dev") in the
+# nearest open milestone listing the failed jobs and, where the log shows them,
+# the failing tests. While that issue is open, a later failed night adds a
+# comment to it instead of a second issue. scripts/ci/nightly-browsers.mjs
+# does the filing, the same way scripts/ci/sidecar-freshness-issue.sh does for
+# `sidecar_pin_freshness`, with the same token:
+#
+#   SIDECAR_ISSUE_TOKEN   A project access token on ai/orbit with the `api`
+#                         scope, masked, as `sidecar_pin_freshness` documents.
+#                         The nightly runs on `dev`, which is protected, so
+#                         the variable may be protected too. If it is unset
+#                         this job fails with a message saying so, so a night
+#                         that failed is still red, just not filed.
+#
+# A passing night, and a night skipped because `dev` had not moved, create
+# nothing: the job is `on_failure` only.
+nightly_report:
+  stage: maintenance
+  tags: [light]
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  timeout: 10m
+  interruptible: false
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $ORBIT_NIGHTLY_BROWSERS == "true"
+      when: on_failure
+  script:
+    - node scripts/ci/nightly-browsers.mjs report
+
+# Stops a promotion to `preview` when the last nightly run on this `dev`
+# commit failed (#1412). The nightly runs the whole browser set on `dev`; a
+# promotion is what that run is for. Only the dev -> preview merge request
+# runs it. No nightly on this commit yet is not a failure: the promotion runs
+# the browsers itself. A nightly that failed and was then retried green is
+# green here, because the check reads the pipeline's status now.
+#
+# Reads the project's pipelines through the API, so it needs a read-only token
+# a merge-request pipeline can see: ORBIT_REUSE_TOKEN (`read_api`, unprotected;
+# see base_image_repin). It reads that token alone, never a fallback. With it
+# unset the job fails and says so -- an unchecked promotion is not a passed one.
+nightly_not_red:
+  stage: policy
+  tags: [light]
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  timeout: 5m
+  needs: []
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "dev"
+  script:
+    - node scripts/ci/nightly-browsers.mjs blocked

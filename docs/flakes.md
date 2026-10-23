@@ -669,3 +669,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-axe-sweep.spec.ts:388 "the signed-in v19 sweep › /settings/mail has no automated WCAG A/AA violations" on desktop-firefox
 
 - 2026-10-22 · 39134f33 (!1081) · pipeline 2875 / `smoke_firefox` job 38354 · failed its first attempt, passed on Playwright's retry in the same run. The same screen as the layout-and-themes axe flake above, from the sweep spec. First sighting.
+
+## install.backups.test.mjs:358 "a slow but healthy `compose down` (4 s) is not a timeout: the rollback completes, no cause line, all three volumes removed (guards FR2)"
+
+- 2026-10-23 · c1d9a453 (!1088, which changes no installer code) · pipeline 2932 / `fast` job 38895 · the output carried "Docker did not finish within": the fake's 4 s `compose down` overran its 6 s cap. The `fast` job took 584 s, near its limit, so the runner was loaded. Wall-clock-under-load shape (#1447). First sighting.

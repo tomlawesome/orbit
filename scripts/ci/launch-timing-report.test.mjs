@@ -127,4 +127,16 @@ describe("the promotion gate's launch-timing report", () => {
     });
     expect(output).toContain("No previous release candidate to compare with");
   });
+
+  it("reads the previous report with ORBIT_REUSE_TOKEN alone, never BASE_REPIN_TOKEN (#1412)", () => {
+    const directory = workspace();
+    measure(directory, [pack("starchart", { mean: 17.1, max: 41.2, over32: 2, over50: 0 })]);
+    const output = run(directory, {
+      CI_API_V4_URL: "http://127.0.0.1:9/api/v4",
+      CI_PROJECT_ID: "49",
+      BASE_REPIN_TOKEN: "TEST-NOT-A-REAL-TOKEN",
+      SIDECAR_ISSUE_TOKEN: "TEST-NOT-A-REAL-TOKEN",
+    });
+    expect(output).toContain("No previous release candidate to compare with: no ORBIT_REUSE_TOKEN");
+  });
 });
