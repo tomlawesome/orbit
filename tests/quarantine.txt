@@ -5,7 +5,6 @@
 # any tag this list does not account for.
 #
 # <path> <tag count> <issue refs> [note]. docs/flakes.md has the sightings.
-tests/e2e/sign-out-descent.spec.ts 2 #1367 the :195 dusk test has no issue of its own yet
 tests/e2e/v19-keyboard-pocket.spec.ts 1 #1381
 tests/e2e/v19-feedback-recovery.spec.ts 1 #1313
 tests/e2e/v19-mail-collection.spec.ts 2 #1415 serial file: the test after it is quarantined with it

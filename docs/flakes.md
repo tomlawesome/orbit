@@ -408,27 +408,6 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / smoke_webkit (job 36178) · "(phone-narrow, world forced)" at line 193, desktop-webkit, failed once and passed on retry.
 - 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_webkit (job 38686) · failed once, passed on retry. Third sighting: filed as #1505.
 
-## sign-out-descent.spec.ts:195 "sign out from home's menu reaches the dusk (phone-narrow, world forced)" on mobile-webkit, desktop-webkit — quarantined 2026-10-16 (agent-infra#30)
-
-- 2026-10-08 · 687cb0f4 (door batch, !1044; the hatch's descent and this spec are new in it) · pipeline 2251 / smoke_webkit_mobile (job 33372) · `#1262: the menu is still open after sign-out started` at line 198, on the first attempt and the in-job retry. The menu lost its `open` class, but its layer kept `visibility: visible` past the 2 s check: the layer hides 300 ms after closing (Sheet.svelte), and the retry's screencast has no frame from 0.2 s to 2.1 s after the press, so the page drew nothing in that time. The forced world was on in this run ("flight world: on", "moon on the GPU" in the console); pipeline 2248's pass on the same code flew "on the canvas". Suspected, not established: drawing the forced world without a GPU stalls WebKit's rendering as the descent starts. First sighting.
-- 2026-10-09 · 1e0299ab (engine batch, !1050; no front-end change but one household page's time-zone list) · pipeline 2313 / smoke_webkit_mobile (job 33895) · the same `#1262: the menu is still open after sign-out started` at line 198, first attempt and in-job retry. The job was re-run as 33901. Second sighting.
-- 2026-10-10 · a318e11b (v0.3 batch, !1054) · pipeline 2382 / smoke_webkit (job 34368), **desktop-webkit**, same world-forced test · the same `#1262: the menu is still open after sign-out started`, first attempt and in-job retry. Filed as #1367 after the third sighting; this is the first on desktop-webkit.
-- 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 35081, the first re-run) · the same `#1262: the menu is still open after sign-out started`, first attempt and in-job retry. Fourth sighting; noted on #1367.
-- 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35145, the second re-run) · failed its first attempt, passed on the in-job retry.
-- 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · the same `#1262: the menu is still open after sign-out started` at line 198.
-- 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36018, the second re-run; the job passed) · `#1262: the descent did not keep time`, 13224 ms against 9000; passed on the in-job retry.
-- 2026-10-13 · 7906d9f4 (#1316 audit fixes; no change to the sign-out descent, its spec, or `web/src/lib/flight`) · local `scripts/test-e2e-local.sh --project mobile-webkit`, no retries · the same `#1262: the menu is still open after sign-out started` at line 198. Sixth sighting, the first outside CI (#1367).
-- 2026-10-15 · 34384732 (v0.3 final batch, !1067; no change to the sign-out descent, its spec or `web/src/lib/flight` since 15c029b7) · pipeline 2624 / smoke_webkit (job 36326), **desktop-webkit**, line 193 · first attempt: `#1262: the menu is still open after sign-out started` (spec :216); in-job retry: the `Sign back in` link not found after /logout (spec :227). Still #1367.
-- 2026-10-15 · a6168fe6 (!1069, v0.3 security batch) · pipeline 2640 / smoke_webkit (job 36460), **desktop-webkit**, line 193 · first attempt: `expect(locator).toBeVisible() failed`, the `Sign back in` link not found within 10 s after /logout (spec :227); passed on the in-job retry. Still #1367.
-- 2026-10-15 · a6168fe6 (!1069) · pipeline 2640 / smoke_webkit (job 36471, the re-run), **desktop-webkit**, line 193 · first attempt: `#1262: the menu is still open after sign-out started` (spec :216); passed on the in-job retry. Still #1367.
-- 2026-10-16 · 6f768016 (`dev` merge of !1069) · pipeline 2655 / smoke_webkit (job 36622), desktop-webkit · failed once, passed on retry.
-- 2026-10-16 · 6f768016 (!1070, `dev` -> `preview`) · pipeline 2657 / smoke_webkit_mobile (job 36651), mobile-webkit · failed once, passed on retry.
-
-## sign-out-descent.spec.ts:274 "sign out from another page's menu plays the descent (phone-narrow)" on desktop-webkit — quarantined 2026-10-16 (agent-infra#30)
-
-- 2026-10-08 · 91df467a (door batch, !1044) · CI pipeline 2254 `smoke_webkit` · failed once, passed on retry. First sighting since the spec counts page errors from /settings once it is the document (ddab9b62).
-- 2026-10-16 · 6f768016 (`dev` merge of !1069) · pipeline 2655 / smoke_webkit (job 36622), desktop-webkit · failed once, passed on retry.
-
 ## v19-keyboard.spec.ts:338 "home: every control is reachable…" — Tab reached controls the snapshot missed
 
 Not the `ERR_ABORTED` under #1096 above: the test ran, and Tab reached two
@@ -516,12 +495,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit_mobile (job 36492), mobile-webkit · `Error: home (pocket) with the item drawer open`: `Tab reached a control the screen does not show as visible` for the drawer's Snooze, Complete, Attach, Retire, Edit and Copy link buttons (`support/keyboard.ts:322`); passed on the in-job retry. Still #1381.
 - 2026-10-16 · 6f768016 (!1070, `dev` -> `preview`) · pipeline 2657 / smoke (job 36648), mobile-chromium · failed once, passed on retry.
 
-## sign-out-descent.spec.ts:274 "sign out from another page's menu plays the descent (phone-narrow)" on mobile-webkit — #1367 — quarantined 2026-10-16 (agent-infra#30)
-
-- 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (jobs 35081 and 35145, both re-runs) · failed its first attempt and passed on the in-job retry, in both. First sightings on mobile-webkit; the heading above is desktop-webkit.
-- 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · `#1249: the menu is still open after sign-out started` at line 284. Second sighting.
-- 2026-10-16 · d8fa9475 (!1069) · pipeline 2645 / smoke_webkit_mobile (job 36538), mobile-webkit · now at :271: failed its first attempt with `Error: #1253: the menu is still open after sign-out started`; passed on the in-job retry.
-
 ## v19-document-preview.spec.ts:401 "the preview's pager turns a multi-page document in place, and the reader opens on its page" — mobile-webkit, desktop-webkit — #1501
 
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934) · failed its first attempt (9.0 s), passed on the in-job retry (13.5 s). First sighting.
@@ -539,10 +512,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-tour.spec.ts:170 "a first-time reader gets the film, works its transport, and a second arrival stays silent" — desktop-webkit
 
 - 2026-10-13 · 3a297cc8 (!1065) · pipeline 2570 / smoke_webkit (job 36069) · failed its first attempt in 3.4 s, passed on the in-job retry. First sighting.
-
-## sign-out-descent.spec.ts:274 "sign out from another page's menu plays the descent (phone-narrow)" on desktop-chromium — quarantined 2026-10-16 (agent-infra#30)
-
-- 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke (job 36098) · failed its first attempt, passed on the in-job retry. First sighting.
 
 ## v19-administration.spec.ts:146 "document jobs and the two mail tests (#1071) › the relay test's pill and reason ..." — desktop-firefox
 
