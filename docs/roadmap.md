@@ -1,6 +1,6 @@
 # Orbit roadmap: promises against delivery
 
-> **Current.** Checked against the code on `dev` (3379d6cb), 2026-10-07.
+> **Current.** Checked against the code on `dev` (3379d6cb), 2026-10-07; the rows v0.3.1's issues touched re-checked against v0.3.1 (77ffcabb), 2026-10-23.
 
 This page lists everything Orbit has promised and says whether it has been
 kept. One row is one promise; a promise made in several places is one row that
@@ -91,7 +91,7 @@ closed.
 | RM-024 | Item kinds service, renewal, inspection, document and suggestion; a section must be picked, with no default | decision #1058 | M14 | delivered | #1069 |
 | RM-025 | Sections stay an attribute printed on each row but leave navigation | charter V1-ITEM-02; owner-decisions §10 | v0.3 | delivered | #413 |
 | RM-026 | Add, rename, reorder and recolour your own sections | site: "Around your household" | unscheduled | partial | add, rename, hide, reorder exist; colour follows the chosen mark, no recolour |
-| RM-027 | Display choices stay consistent across sessions: five colourways, light or dark, three text sizes | charter V1-ITEM-02; site: "Around your household" | v0.3.1 | delivered | five packs shipped (#486); #1180: text size chosen in Settings, applied before first paint, and pack and size stored on the account (a0f3b007); the code offers four sizes, the site says three |
+| RM-027 | Display choices stay consistent across sessions: five colourways, light or dark, four text sizes | charter V1-ITEM-02; site: "Around your household" | v0.3.1 | delivered | five packs shipped (#486); #1180: text size chosen in Settings, applied before first paint, and pack and size stored on the account (a0f3b007) |
 | RM-028 | Assign an item to a household member | decision #1058 | unscheduled | not started | no assignee in the model; the owner-decided follow-up issue was never filed |
 | RM-029 | Dial: nearer is sooner, bigger is costlier, a belt shows documents; nothing on it is decoration | owner-decisions §1, §12; site: "The orbit" | v0.3 | delivered | #414, #458; size follows cost per year on a power curve, radius = clamp(rMin·(yearly£/50)^k, rMin, rMax), k = ln(rMax/rMin)/ln(1000), £50/yr smallest to £50,000/yr largest, desk 3.5-13, pocket 5-12 (#1460, f1312280); #1471: the overdue line is called the event horizon (068bfc6c) |
 | RM-030 | "The sky's weather = your workload" | site: "The orbit" | unscheduled | not started | the weather layer is decoration on one pack; nothing maps workload to it |
@@ -255,7 +255,6 @@ closed.
 - "The sky's weather = your workload": nothing maps workload to the weather (RM-030).
 - "A history for everything": no screen lists an item's history (RM-022).
 - "Recolour your own sections": colour follows the chosen mark (RM-026).
-- "Three text sizes": the setting works since v0.3.1 (#1180) but offers four sizes (RM-027).
 
 ### Delivered but nobody promised, which the site might claim
 
