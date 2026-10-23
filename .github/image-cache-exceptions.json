@@ -1,1 +1,10 @@
-{ "exceptions": [] }
+{
+  "exceptions": [
+    { "path": ".gitlab-ci.yml", "reference": "ghcr.io/*", "reason": "sidecar_images' case pattern that maps a ghcr.io reference to its cache path; not a pull" },
+    { "path": ".gitlab-ci.yml", "reference": "ghcr.io/}", "reason": "the ${2#ghcr.io/} expansion in the same mapping; not a pull" },
+    { "path": ".gitlab-ci.yml", "reference": "mcr.microsoft.com/*", "reason": "sidecar_images' case pattern that maps an mcr.microsoft.com reference to its cache path; not a pull" },
+    { "path": ".gitlab-ci.yml", "reference": "mcr.microsoft.com/}", "reason": "the ${2#mcr.microsoft.com/} expansion in the same mapping; not a pull" },
+    { "path": "Dockerfile", "reference": "ghcr.io/tomlawesome", "reason": "public default for building from source without credentials; build_image passes ORBIT_BASE_IMAGE_REGISTRY (#1101)" },
+    { "path": "scripts/sidecar-pins.mjs", "reference": "ghcr.io/tomlawesome/orbit-base-image", "reason": "the policy entry's name, used to recognise it; this tool pulls nothing" }
+  ]
+}

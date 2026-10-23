@@ -1283,6 +1283,11 @@ supply_chain_source:
     - |
       apk_add nodejs
       node scripts/supply-chain-policy.mjs validate
+      # Every image CI pulls comes through the image cache (#1510): no direct
+      # ghcr.io or mcr.microsoft.com reference, no Dependency Proxy, every dind
+      # with the cache mirror. Exceptions, each with a reason:
+      # .github/image-cache-exceptions.json.
+      node scripts/image-cache-sources.mjs
       # A pin lives in the file that uses it and in the policy that records it.
       # Dependabot can rewrite the first and cannot see the second, so its pull
       # requests arrive with the two disagreeing. `--offline` is that
