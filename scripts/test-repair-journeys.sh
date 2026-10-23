@@ -1211,9 +1211,10 @@ journey_hostile_value_privacy_negatives() {
   cp -a -- "$target/.env-orbit" "$workdir/env-orbit.orig"
   printf 'ORBIT_PORT=%s\n' "$canary" >> "$target/.env-orbit"
 
-  # ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE routes this pull through the group
-  # dependency proxy in CI (ai/orbit#1111); a plain Docker Hub pull of the
-  # moving `busybox:stable` tag everywhere else -- this container is a
+  # ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE overrides the image (CI sets it to the
+  # same plain Docker Hub name, which the runner's image cache mirrors,
+  # ai/orbit#1510); a plain Docker Hub pull of the
+  # moving `busybox:stable` tag by default -- this container is a
   # disposable label vector for the hostile-value journey, not a pin Orbit
   # ships, so nothing here needs a digest.
   docker run -d --name "orbit-journeys-$canary" \

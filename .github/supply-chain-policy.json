@@ -1008,8 +1008,7 @@
       "locations": [
         "docker-compose.yml",
         "scripts/test-integration.mjs",
-        ".gitlab-ci.yml",
-        "compose/docker-compose.dependency-proxy.yml"
+        ".gitlab-ci.yml"
       ],
       "source": "https://github.com/docker-library/postgres",
       "registry": "https://hub.docker.com/_/postgres",
@@ -1026,8 +1025,7 @@
       "indexDigest": "sha256:d7ede3cefeaf3b8a72ebcdee849d13f504bbca3f3b3cfade5bc7b6ee06a4f62c",
       "platform": "linux/amd64",
       "locations": [
-        "docker-compose.yml",
-        "compose/docker-compose.dependency-proxy.yml"
+        "docker-compose.yml"
       ],
       "source": "https://github.com/Cisco-Talos/clamav-docker",
       "registry": "https://hub.docker.com/r/clamav/clamav",
@@ -1044,8 +1042,7 @@
       "indexDigest": "sha256:d69fab827fa004a5e1db786e6d78da947a6cfeedbf595bc5c353ef99622bb2e2",
       "platform": "linux/amd64",
       "locations": [
-        "docker-compose.yml",
-        "compose/docker-compose.dependency-proxy.yml"
+        "docker-compose.yml"
       ],
       "source": "https://github.com/apache/tika-docker",
       "registry": "https://hub.docker.com/r/apache/tika",

@@ -203,6 +203,17 @@ root cron, not in the repository:
   2026-09-08). It was set to 02:15; a later flake entry says 03:15, so read the
   cron entry for the real time.
 
+CI pulls images through the open image cache (#1510, ai/agent-infra#14), which
+replaced the GitLab group dependency proxy (#1022). The runner hosts mirror
+Docker Hub, so a plain Docker Hub name in `.gitlab-ci.yml` or a Compose file
+needs no prefix. ghcr.io and mcr.microsoft.com images are named through the
+runner variables `CI_IMAGE_CACHE_GHCR` and `CI_IMAGE_CACHE_MCR` (the cache
+hosts are plain HTTP and their addresses are never written in the repository).
+The dind service and the in-job `dockerd` are not the host's daemon, so each is
+started with the cache's mirror and insecure-registry flags. Trivy reads its
+databases from the GHCR cache with `TRIVY_INSECURE`. Digests are unchanged
+through the cache.
+
 Renovate replaces Dependabot on this host: `renovate.json` at the repo root, the
 `renovate` job in `.gitlab-ci.yml`, and pipeline schedule 5 (`Renovate`,
 Mondays 05:00 London, ref `dev`, variable `RENOVATE=true`). It runs nowhere else

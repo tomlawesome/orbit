@@ -59,10 +59,9 @@ source_id="$(docker image inspect --format '{{.Id}}' "${TESTED_IMAGE_TAG}")"
 # Bound to loopback only: this registry is disposable evidence, never a
 # publication target.
 #
-# ORBIT_INSTALLER_REGISTRY_IMAGE lets GitLab CI route this pull through the
-# group dependency proxy instead of hitting Docker Hub directly (ai/orbit#1111);
-# the fallback is the same image, pinned by the same digest, straight from
-# Docker Hub, for the GitHub workflow and any local run that has no proxy.
+# ORBIT_INSTALLER_REGISTRY_IMAGE overrides the image (GitLab CI sets it to the
+# same plain Docker Hub name and digest, which the runner's image cache
+# mirrors, ai/orbit#1510); the fallback is the same image and digest.
 registry_id="$(
   docker run --detach --name "${registry_name}" --publish 127.0.0.1:5000:5000 \
     "${ORBIT_INSTALLER_REGISTRY_IMAGE:-registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0}"

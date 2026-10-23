@@ -269,11 +269,17 @@ function repositoryFiles(root) {
   }
 }
 
-// `${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/redis:8@sha256:...` is the
-// image `redis:8@sha256:...` fetched through a proxy, and
+// `${IMAGE_PREFIX}/library/redis:8@sha256:...` is the image
+// `redis:8@sha256:...` fetched through a registry prefix, and
 // `${IMAGE:-redis:8@sha256:...}` is a shell default for it: name the image.
+// The image cache's host variables (#1510) are the one prefix that changes the
+// registry: `$CI_IMAGE_CACHE_MCR/playwright:...` is
+// `mcr.microsoft.com/playwright:...`, and GHCR likewise.
 function normalizedPinReference(name, digest) {
   const image = name
+    .replace(/^\$\{?CI_IMAGE_CACHE_MCR\}?\//u, "mcr.microsoft.com/")
+    .replace(/^\$\{?CI_IMAGE_CACHE_GHCR\}?\//u, "ghcr.io/")
+    .replace(/^\$\{?CI_IMAGE_CACHE_DOCKERHUB\}?\//u, "")
     .replace(/^\$\{[A-Za-z0-9_]+:-/u, "")
     .replace(/^\$\{[A-Za-z0-9_]+\}\/?/u, "")
     .replace(/^library\//u, "");
@@ -285,7 +291,7 @@ function normalizedPinReference(name, digest) {
 // `ghcr.io/tomlawesome/orbit-base-image:latest@sha256:...` (#1101: CI passes
 // its own registry as the build arg; the digest is the same either way), so
 // substitute a `${NAME}` the file itself gives a default for. Any other
-// `${...}` is left for normalizedPinReference's proxy-prefix rule.
+// `${...}` is left for normalizedPinReference's prefix rule.
 function dockerfileArgDefaults(content) {
   const defaults = new Map();
   for (const match of content.matchAll(/^ARG[ \t]+([A-Za-z0-9_]+)=(\S+)[ \t]*$/gmu)) {

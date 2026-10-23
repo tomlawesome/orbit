@@ -471,8 +471,9 @@ negative_scenarios() {
 start_oidc() {
   local waited=0 host_port
   oidc_image="${project_name}-oidc:test"
-  # OIDC_BASE_IMAGE_PREFIX routes the sidecar's base image through the group
-  # dependency proxy in CI (ai/orbit#1111); empty everywhere else.
+  # OIDC_BASE_IMAGE_PREFIX is an optional registry prefix for the sidecar's
+  # base image; empty everywhere, CI included (the image cache mirrors Docker
+  # Hub, ai/orbit#1510).
   docker build --quiet -t "$oidc_image" \
     --build-arg "OIDC_BASE_IMAGE_PREFIX=${OIDC_BASE_IMAGE_PREFIX:-}" \
     "$repo_root/tests/oidc" >/dev/null ||

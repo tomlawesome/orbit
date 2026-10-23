@@ -36,9 +36,9 @@ services:
   orbit-oidc:
     build:
       context: ./tests/oidc
-      # Empty everywhere but CI (ai/orbit#1111): the smoke job sets this to
-      # the group dependency proxy prefix so its build of this image goes
-      # through the proxy instead of Docker Hub directly.
+      # Optional registry prefix for the base image; empty everywhere, CI
+      # included, because the runner's image cache mirrors Docker Hub
+      # (ai/orbit#1510).
       args:
         OIDC_BASE_IMAGE_PREFIX: ${OIDC_BASE_IMAGE_PREFIX:-}
     environment:

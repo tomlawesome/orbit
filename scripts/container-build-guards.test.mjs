@@ -51,13 +51,14 @@ describe("GitLab pipeline definition", () => {
     expect(gitlabCi).toContain("require('./package.json').packageManager");
   });
 
-  it("routes every pull of the disposable registry through the dependency proxy (#1111)", () => {
+  it("pins every pull of the disposable registry by digest, as a plain Docker Hub name (#1111, #1510)", () => {
     // Three jobs start scripts/ci/start-installer-registry.sh's disposable
     // registry -- acceptance, repair_journeys and launcher_install_compat --
     // and all three once pulled it straight from Docker Hub and tripped its
     // anonymous rate limit. The script's fallback stays a direct pull, so the
-    // pipeline must always override it with a proxied, digest-pinned image.
-    const proxyPrefix = "${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/";
+    // pipeline must always override it with a digest-pinned image. A plain
+    // Docker Hub name is right: the runners' image cache mirrors Docker Hub
+    // (#1510), so no prefix is needed and none may reappear.
     const registryDigest =
       "registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0";
     const lines = gitlabCi.split(/\r?\n/u);
@@ -66,25 +67,24 @@ describe("GitLab pipeline definition", () => {
       /^\s*ORBIT_INSTALLER_REGISTRY_IMAGE:/u.test(line),
     );
     expect(installerRegistryLine, "ORBIT_INSTALLER_REGISTRY_IMAGE must be set").toBeDefined();
-    expect(installerRegistryLine).toContain(proxyPrefix);
+    expect(installerRegistryLine).toMatch(/:\s+registry:3\.1\.2@/u);
+    expect(installerRegistryLine).not.toContain("$");
     expect(installerRegistryLine).toContain(registryDigest);
 
     // repair_journeys keeps its own job-level variable; it must still resolve
-    // to the same proxied, digest-pinned image, never a bare Docker Hub tag.
+    // to the same digest-pinned image, never a bare Docker Hub tag.
     const repairRegistryLine = lines.find((line) =>
       /^\s*ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE:/u.test(line),
     );
     expect(repairRegistryLine, "ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE must be set").toBeDefined();
     expect(repairRegistryLine).toMatch(
-      /\$\{(?:CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX\}\/library\/registry|ORBIT_INSTALLER_REGISTRY_IMAGE\})/u,
+      /\$\{ORBIT_INSTALLER_REGISTRY_IMAGE\}/u,
     );
     expect(repairRegistryLine).not.toMatch(/registry:[^@\s]*\s*$/u);
 
-    // The disposable OIDC sidecar `smoke` builds pulls a Docker Hub base image
-    // and needs the same proxy route.
-    const oidcPrefixLine = lines.find((line) => /^\s*OIDC_BASE_IMAGE_PREFIX:/u.test(line));
-    expect(oidcPrefixLine, "OIDC_BASE_IMAGE_PREFIX must be set").toBeDefined();
-    expect(oidcPrefixLine).toContain(proxyPrefix);
+    // The disposable OIDC sidecar `smoke` builds pulls a plain Docker Hub base
+    // image through the cache's mirror: no prefix variable is set for it.
+    expect(lines.find((line) => /^\s*OIDC_BASE_IMAGE_PREFIX:/u.test(line))).toBeUndefined();
   });
 });
 
