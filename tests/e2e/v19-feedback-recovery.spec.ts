@@ -381,9 +381,13 @@ const householdDeletion: Journey = {
 
 const JOURNEYS = [createOffline, drawerApproval, inboxApproval, householdDeletion];
 
-/* #1313: the /create journey's two checks are quarantined 2026-10-16
-   (agent-infra#30) -- they run outside the merge gate; the other journeys stay in it. */
+/* #1313: the /create journey's announcement check is quarantined 2026-10-16
+   (agent-infra#30) -- it runs outside the merge gate; the other checks stay in it.
+   The focus check asserts its end state with generous waits (#1447), so it is back in. */
 const quarantineTag = (journey: Journey) => ({ tag: journey === createOffline ? ["@quarantine"] : [] });
+
+/* #1447: UI settling is waited for, never timed -- 20 s, far beyond what any reader would feel. */
+const SETTLE = 20_000;
 
 for (const journey of JOURNEYS) {
   test(`${journey.name} is announced, and the act can be repeated by keyboard`, quarantineTag(journey), async ({ page }) => {
@@ -403,7 +407,7 @@ for (const journey of JOURNEYS) {
     }
   });
 
-  test(`${journey.name} leaves focus where the reader was`, quarantineTag(journey), async ({ page }) => {
+  test(`${journey.name} leaves focus where the reader was`, async ({ page }) => {
     const defect = journey.focusDefect?.();
     test.fixme(Boolean(journey.focusFixme?.()), journey.focusFixme?.());
     test.fixme(Boolean(defect) && isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
@@ -413,8 +417,12 @@ for (const journey of JOURNEYS) {
     const household = await seedHousehold(page, "feedback-recovery", { withItem: journey.withItem });
     try {
       await journey.fire(page, household);
-      await expect(shownText(page, journey.words), `${journey.name}: the failure is shown`).toBeVisible();
-      expect(await focusedElement(page), `${journey.name}: focus is not dropped to the page`).not.toBe("body");
+      await expect(shownText(page, journey.words), `${journey.name}: the failure is shown`).toBeVisible({ timeout: SETTLE });
+      /* The end state, not a single read the instant the failure shows: focus
+         may take a moment to settle, and what matters is where it stays. */
+      await expect
+        .poll(() => focusedElement(page), { message: `${journey.name}: focus is not dropped to the page`, timeout: SETTLE })
+        .not.toBe("body");
     } finally {
       await page.unrouteAll({ behavior: "ignoreErrors" });
       await cleanup(page, household);
