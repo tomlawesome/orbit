@@ -189,10 +189,12 @@ test("notfound's starfield falls in, and nothing that moves is filtered", async 
   expect(before.animatedFiltered, "an animated element carries a live filter").toEqual([]);
 
   /* "Running" means the transform is changing, not just that a name is set:
-     a paused or zero-duration animation would satisfy the name check. */
-  await page.waitForTimeout(400);
-  const after = await sample();
-  for (let i = 0; i < before.falls.length; i++) {
-    expect(after.falls[i].transform, `star group ${i} is not moving`).not.toBe(before.falls[i].transform);
-  }
+     a paused or zero-duration animation would satisfy the name check. These
+     are CSS animations, which page.clock does not drive, so the end state is
+     awaited instead of a fixed 400 ms: every group's transform has left the
+     value it was sampled at, within 20 s. A stopped animation never does. */
+  await expect.poll(async () => {
+    const after = await sample();
+    return before.falls.map((g, i) => after.falls[i].transform !== g.transform);
+  }, { message: "a star group is not moving", timeout: 20_000 }).toEqual(before.falls.map(() => true));
 });
