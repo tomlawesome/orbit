@@ -234,7 +234,11 @@ const STUBS = {
 printf '%s\\n' "$*" >> "$DOCKER_STUB_LOG"
 up_marker="$DOCKER_STUB_LOG.up"
 case "$1" in
-  info) exit 0 ;;
+  info)
+    # the WebKit-in-image path asks for the compose plugin's path (#1513)
+    [[ "$*" != *--format* ]] || echo "\${DOCKER_STUB_COMPOSE_PLUGIN:-}"
+    exit 0 ;;
+  context) echo "unix://\${DOCKER_STUB_SOCKET:-}"; exit 0 ;; # the WebKit-in-image path wants a socket (#1513)
   rm) touch "$DOCKER_STUB_LOG.removed"; exit 0 ;;
   inspect)
     if [[ -e "$up_marker" ]]; then
@@ -304,6 +308,7 @@ exit 0
 `,
 };
 
+const ciConfigPath = fileURLToPath(new URL("../.gitlab-ci.yml", import.meta.url));
 const checkQuarantine = fileURLToPath(new URL("./check-quarantine.mjs", import.meta.url));
 const fixtures = [];
 afterEach(() => {
@@ -335,6 +340,7 @@ function makeFixture() {
   writeFileSync(join(dir, ".env-orbit.example"), "");
   writeFileSync(join(dir, "docker-compose.yml"), "services: {}\n");
   writeFileSync(join(dir, "tests/e2e/local-only-specs.txt"), "tests/e2e/a.spec.ts\n");
+  copyFileSync(ciConfigPath, join(dir, ".gitlab-ci.yml")); // where the script reads PLAYWRIGHT_IMAGE (#1513)
   writeFileSync(
     join(dir, "node_modules/@playwright/test/cli.js"),
     `const fs = require("fs");
@@ -361,9 +367,21 @@ if (process.env.FAKE_SUITE_HANG) {
   const dockerLog = join(dir, "docker.log");
   writeFileSync(dockerLog, "");
   const artifactRoot = join(dir, "artifacts");
+  const composePlugin = join(bin, "docker-compose");
+  writeFileSync(composePlugin, "#!/usr/bin/env bash\nexit 0\n");
+  chmodSync(composePlugin, 0o755);
+  const socket = join(dir, "docker.sock"); // binding leaves a real socket file behind
+  const bound = spawnSync(
+    "python3",
+    ["-c", "import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])", socket],
+    { encoding: "utf8" },
+  );
+  expect(bound.status, bound.stderr).toBe(0);
   const env = {
     PATH: `${bin}:${process.env.PATH}`,
     HOME: process.env.HOME,
+    DOCKER_STUB_COMPOSE_PLUGIN: composePlugin,
+    DOCKER_STUB_SOCKET: socket,
     COMPOSE_PROJECT_NAME: project,
     ORBIT_E2E_ARTIFACT_ROOT: artifactRoot,
     DOCKER_STUB_LOG: dockerLog,
@@ -719,5 +737,168 @@ describe("the quarantine list guard before the gate run", () => {
     expect(result.status, result.stderr).not.toBe(0);
     expect(result.stderr).toContain("tests/quarantine.txt");
     expect(existsSync(log), "Playwright ran despite the failed check").toBe(false);
+  });
+});
+
+/*
+ * #1513: WebKit runs inside CI's Playwright image, whose reference the script
+ * reads from the PLAYWRIGHT_IMAGE line of .gitlab-ci.yml. That line is
+ * `$CI_IMAGE_CACHE_MCR/playwright:<tag>@sha256:<digest>`, and the variable is
+ * set only on CI runners, so a local run has to expand it itself: to the
+ * variable's value when set, else to the public registry. The expected images
+ * are derived from the real line (the fixture carries a copy), so a digest
+ * bump does not break these. Cache hosts are made-up `.invalid` names.
+ */
+const ciImageTemplate = readFileSync(ciConfigPath, "utf8").match(/^\s*PLAYWRIGHT_IMAGE:\s*(\S+)\s*$/m)?.[1];
+const expandImage = (host) => ciImageTemplate.replace("$CI_IMAGE_CACHE_MCR", host);
+const webkit = ["--project", "desktop-webkit"];
+
+describe("the Playwright image docker run receives (#1513)", () => {
+  async function imagesDockerSaw(extraEnv) {
+    const fx = makeFixture();
+    writeFileSync(`${fx.dockerLog}.up`, ""); // the stub's stack is already up
+    const result = await runToEnd(
+      fx,
+      ["--reuse", fx.project, "--spec", "tests/e2e/x.spec.ts", ...webkit],
+      extraEnv,
+    );
+    expect(result.status, result.stderr).toBe(0);
+    const runs = dockerCalls(fx).filter((l) => /^run /.test(l));
+    expect(runs, "WebKit did not run through docker run").not.toHaveLength(0);
+    const images = dockerCalls(fx)
+      .flatMap((l) => l.split(/\s+/))
+      .filter((token) => token.includes("playwright:"));
+    return { runs, images };
+  }
+
+  it("has the shape the specification assumes (control)", () => {
+    expect(ciImageTemplate, "no PLAYWRIGHT_IMAGE line in .gitlab-ci.yml").toBeDefined();
+    expect(ciImageTemplate).toMatch(/^\$CI_IMAGE_CACHE_MCR\/playwright:\S+@sha256:[0-9a-f]{64}$/);
+  });
+
+  it("expands $CI_IMAGE_CACHE_MCR to its value when the variable is set", async () => {
+    const host = "cache.example.invalid/mcr";
+    const { images } = await imagesDockerSaw({ CI_IMAGE_CACHE_MCR: host });
+    expect(images).not.toHaveLength(0);
+    for (const image of images) expect(image).toBe(expandImage(host));
+    expect(images[0]).toMatch(/^cache\.example\.invalid\/mcr\/playwright:v1\.63\.0-noble@sha256:/);
+  });
+
+  for (const [label, env] of [
+    ["unset", {}],
+    ["empty", { CI_IMAGE_CACHE_MCR: "" }],
+  ]) {
+    it(`uses the public image, same digest, when the variable is ${label}`, async () => {
+      const { images } = await imagesDockerSaw(env);
+      expect(images).not.toHaveLength(0);
+      for (const image of images) expect(image).toBe(expandImage("mcr.microsoft.com"));
+    });
+  }
+
+  for (const [label, env] of [
+    ["set", { CI_IMAGE_CACHE_MCR: "cache.example.invalid/mcr" }],
+    ["unset", {}],
+  ]) {
+    it(`never hands docker a literal $ in the image, variable ${label}`, async () => {
+      const { images } = await imagesDockerSaw(env);
+      expect(images).not.toHaveLength(0);
+      for (const image of images) expect(image).not.toContain("$");
+    });
+  }
+});
+
+/*
+ * #1513: everything after `--` goes to the Playwright command line unchanged,
+ * after the script's own Playwright arguments, for WebKit (inside the image,
+ * so seen as the end of the logged `docker run`) and for other projects (on
+ * the host, so seen in the fake CLI's argv) alike.
+ */
+describe("arguments after -- reach Playwright (#1513)", () => {
+  const passThrough = ["--repeat-each=10", "--workers=1"];
+  const tail = passThrough.join(" ");
+  const own = ["--reuse", "P", "--spec", "tests/e2e/x.spec.ts"];
+
+  function recordArgv(fx) {
+    const log = join(fx.dir, "playwright-argv.jsonl");
+    writeFileSync(
+      join(fx.dir, "node_modules/@playwright/test/cli.js"),
+      `require("fs").appendFileSync(process.env.PW_ARGV_LOG, JSON.stringify(process.argv.slice(2)) + "\\n");\n`,
+    );
+    return log;
+  }
+  const argvRuns = (log) =>
+    readFileSync(log, "utf8")
+      .split("\n")
+      .filter((l) => l.length > 0)
+      .map((l) => JSON.parse(l));
+
+  async function hostRun(extraArgs) {
+    const fx = makeFixture();
+    const log = recordArgv(fx);
+    writeFileSync(`${fx.dockerLog}.up`, "");
+    const args = ["--reuse", fx.project, "--spec", "tests/e2e/x.spec.ts", ...chromium, ...extraArgs];
+    const result = await runToEnd(fx, args, { PW_ARGV_LOG: log });
+    expect(result.status, result.stderr).toBe(0);
+    return argvRuns(log);
+  }
+
+  async function webkitDockerRun(extraArgs) {
+    const fx = makeFixture();
+    writeFileSync(`${fx.dockerLog}.up`, "");
+    const args = ["--reuse", fx.project, "--spec", "tests/e2e/x.spec.ts", ...webkit, ...extraArgs];
+    const result = await runToEnd(fx, args);
+    expect(result.status, result.stderr).toBe(0);
+    return dockerCalls(fx).filter((l) => /^run /.test(l));
+  }
+
+  it("appends them to a WebKit run's command inside the image", async () => {
+    const runs = await webkitDockerRun(["--", ...passThrough]);
+    expect(runs).not.toHaveLength(0);
+    for (const line of runs) {
+      // tolerate the command being wrapped in a closing quote
+      expect(line).toMatch(new RegExp(`${tail}['"]?$`));
+      // after the script's own Playwright arguments, not before them
+      expect(line.indexOf("--project=desktop-webkit")).toBeGreaterThanOrEqual(0);
+      expect(line.indexOf("--project=desktop-webkit")).toBeLessThan(line.indexOf("--repeat-each=10"));
+      expect(line.indexOf("tests/e2e/x.spec.ts")).toBeLessThan(line.indexOf("--repeat-each=10"));
+    }
+  });
+
+  it("adds nothing to a WebKit run when there is no --", async () => {
+    const runs = await webkitDockerRun([]);
+    expect(runs).not.toHaveLength(0);
+    for (const line of runs) expect(line).not.toContain("--repeat-each");
+  });
+
+  it("appends them to the host Playwright command of a non-WebKit run", async () => {
+    const baseline = await hostRun([]);
+    const withExtras = await hostRun(["--", ...passThrough]);
+    expect(baseline.length).toBeGreaterThan(0);
+    expect(withExtras).toHaveLength(baseline.length);
+    withExtras.forEach((argv, i) => {
+      expect(argv.slice(-passThrough.length)).toEqual(passThrough);
+      // the script's own arguments are untouched and come first
+      expect(argv.slice(0, -passThrough.length)).toEqual(baseline[i]);
+    });
+  });
+
+  it("adds nothing to a non-WebKit run when there is no --", async () => {
+    for (const argv of await hostRun([])) {
+      expect(argv.join(" ")).not.toContain("--repeat-each");
+    }
+  });
+
+  it("passes the arguments after -- unchanged, whatever they look like", async () => {
+    const odd = ["--grep", "a b", "--reporter=line", "-x"];
+    const baseline = await hostRun([]);
+    const withExtras = await hostRun(["--", ...odd]);
+    withExtras.forEach((argv, i) => {
+      expect(argv).toEqual([...baseline[i], ...odd]);
+    });
+  });
+
+  it("still refuses an unknown option before the --", () => {
+    const result = dryRunArgsRaw(["--no-such-option", "--", ...passThrough]);
+    expect(result.status).toBe(2);
   });
 });
