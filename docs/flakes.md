@@ -473,10 +473,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit (job 36591), desktop-webkit · failed once, passed on retry. First sighting; an issue on the third.
 
-## fidelity: document-preview.spec.js:47 "a paper's page loads on the fixture item's drawer at desk (1600x1000)"
-
-- 2026-10-16 · 6f768016 (`dev` merge of !1069; same tree as a08de7a1, whose pipeline 2650 passed this job) · pipeline 2655 / fidelity (job 36615) · `[data-preview-card].snap` not visible within the 5000ms wait: the preview card never reached its loaded page. The same 5 s family as the document-preview page-count wait raised to 20 s in 614118ff. First sighting; job retried as 36629.
-
 ## v19-about-loading.spec.ts:69 "a slow click on About shows that it is loading before the content arrives" — desktop-webkit, mobile-webkit — #1502
 
 - 2026-10-18 · 5bfff8b6 (!1074, the branch that adds this test) · pipeline 2688 / `smoke_webkit` job 36975 · no loading sign (`aria-busy`, progress bar, a "loading" status or text) appeared within 10 s while the About data request was held; passed on its retry in the same job (11.1 s). The same run was loaded enough that one wheel scroll landed over a second late (#1472 note 40486). First sighting.
