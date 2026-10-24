@@ -212,12 +212,40 @@ test("a planet opens its row; a second tap on the lit body brings the row back o
   await expect(page).toHaveURL(/\/home/);
 });
 test("the dial arrives on a forward arrival, never on Back", async ({ page }) => {
+  /* The arrival is a 1s animation, so reading "is it playing" after a
+     navigation races its lifetime (#1164, #1447). The page keeps a record
+     instead: from before the first load, every `pocket-arrive` start, end
+     and cancel on the dial goes into a log that survives client-side
+     navigation. A forward arrival is judged by the log holding its start and
+     then its end; Back by the log holding nothing once the dial is on the
+     page and everything has settled. */
+  await page.addInitScript(() => {
+    /** @type {{kind: string}[]} */
+    const log = [];
+    /** @type {any} */ (window).__dialLog = log;
+    const isDial = (/** @type {any} */ el) => el instanceof Element && el.matches(".pocket .mdial");
+    for (const kind of /** @type {const} */ (["animationstart", "animationend", "animationcancel"])) {
+      document.addEventListener(kind, (e) => {
+        const a = /** @type {AnimationEvent} */ (e);
+        if (a.animationName === "pocket-arrive" && isDial(a.target)) log.push({ kind });
+      }, true);
+    }
+  });
+  /** The kinds logged since the last `forget`, in order, repeats collapsed. */
+  const logged = async () => (await page.evaluate(() => /** @type {any} */ (window).__dialLog.map((/** @type {{kind: string}} */ e) => e.kind)))
+    .filter((/** @type {string} */ kind, /** @type {number} */ i, /** @type {string[]} */ all) => kind !== all[i - 1]);
+  const forget = () => page.evaluate(() => { /** @type {any} */ (window).__dialLog.length = 0; });
+  /** Every finite animation finished, then two frames with nothing new to run. */
+  const quiet = () => page.waitForFunction(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() =>
+    resolve(document.getAnimations().every((a) => !Number.isFinite(Number(a.effect?.getComputedTiming().endTime)) || a.playState === "finished"))))),
+    undefined, { timeout: 20_000 });
+
   const dial = page.locator(".pocket .mdial");
-  /** Whether the arrival is playing, or has played, on the dial now. */
-  const arriving = () => dial.evaluate((el) => el.getAnimations().some((a) => /** @type {CSSAnimation} */ (a).animationName === "pocket-arrive"));
   await page.goto(`${APP}/home`, { waitUntil: "load" });
   await expect(dial).toHaveClass(/arrive/);
   await settle(page);
+  await quiet();
+  expect(await logged(), "the first arrival did not start and finish").toEqual(["animationstart", "animationend"]);
   /* #1319: the item screen this used to leave for retired with the belt;
      the inbox, through the signals' mail row, is a forward way off home. */
   await page.locator(".pocket .pk-signals a[data-row-face][href='/inbox']").click();
@@ -226,13 +254,19 @@ test("the dial arrives on a forward arrival, never on Back", async ({ page }) =>
      would (#1164); pressed before then, it can stay under /home (#1217). */
   await expect(dial).toHaveCount(0);
   await settle(page);
+  await forget();
   await page.goBack();
   await expect(page).toHaveURL(/\/home/);
   await expect(dial).toBeAttached({ timeout: 30000 });
+  await settle(page);
+  await quiet();
   expect(await dial.getAttribute("class"), "Back replayed the arrival").not.toMatch(/\barrive\b/);
-  expect(await arriving(), "Back replayed the arrival").toBe(false);
+  expect(await logged(), "Back replayed the arrival").toEqual([]);
   await page.goForward();
   await expect(page).toHaveURL(/\/inbox$/);
+  await expect(dial).toHaveCount(0);
+  await settle(page);
+  await forget();
   /* A forward arrival again, as a link on any screen makes it. */
   await page.evaluate(() => {
     const a = document.createElement("a");
@@ -242,7 +276,8 @@ test("the dial arrives on a forward arrival, never on Back", async ({ page }) =>
   });
   await expect(page).toHaveURL(/\/home$/);
   await expect(dial).toHaveClass(/arrive/);
-  expect(await arriving(), "a second forward arrival did not arrive").toBe(true);
+  await expect.poll(logged, { message: "a second forward arrival did not start and finish", timeout: 20_000 })
+    .toEqual(["animationstart", "animationend"]);
 });
 
 /* A chip in "other skies" flies to that household, as the desk does (#1118,
