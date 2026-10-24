@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { expect, test } from "@playwright/test";
 
+import { settle } from "./pocket-states.js";
+
 /*
  * #873 step 1: measure the launch hand-off before anything about it changes.
  *
@@ -144,7 +146,7 @@ function summarise(values) {
 
 for (const pack of THEME_PACKS) {
   test(`launch hand-off frame timings — ${pack} pack`, async ({ page }) => {
-    test.setTimeout(20_000);
+    test.setTimeout(60_000);
 
     await page.addInitScript(installFrameLog);
     /* Same mechanism screens.spec.js's capture() uses: the app reads
@@ -177,13 +179,15 @@ for (const pack of THEME_PACKS) {
     await page.click("#gobtn");
 
     /* Arrival.svelte's submit() navigates (#1263: no reclaim any more). */
-    await page.waitForURL(/\/home(?:$|[/?#])/, { timeout: 5000 });
+    await page.waitForURL(/\/home(?:$|[/?#])/, { timeout: 20_000 });
     await page.waitForLoadState("load");
-    /* Lets the ascent's opening beats run live: warp (200ms), the mark's ride
-       to centre (260-1340ms) and the release (430ms) all fall inside this
-       window, unpinned — Flight.ascend() runs on its own real clock here,
-       not the PINNED path screens.spec.js's baselines use. */
-    await page.waitForTimeout(1800);
+    /* Lets home's arrival run live, then waits for it to have run: the page
+       says it can answer (#1064), then every finite animation and transition
+       on it has finished (settle) -- the warp (200ms), the mark's ride and the
+       release among them. This used to be a fixed 1.8s sleep standing in for
+       exactly that. Frame counts below are only reported, never judged. */
+    await page.locator("body[data-home-ready]").waitFor({ state: "attached", timeout: 20_000 });
+    await settle(page);
 
     const report = await page.evaluate(() => {
       /** @type {any} */ (window).__flushLaunchFrameLog?.();
