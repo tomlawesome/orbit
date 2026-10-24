@@ -71,8 +71,21 @@ for (const size of SIZES) {
         : `${door.name}: the ring's centre at ${(station.share ?? 0) * 100}% of the visible height`, async ({ page }) => {
         await door.reach(page);
         await page.evaluate(() => document.fonts.ready);
-        /* reduced motion still crossfades the card in over .7s (ringcard.css) */
-        await page.waitForTimeout(900);
+        /* reduced motion still crossfades the card in over .7s (ringcard.css):
+           read the ring once every finite animation has finished and its box
+           has held still for two frames running -- an end state, not a delay */
+        await page.waitForFunction((selector) => {
+          const finished = document.getAnimations()
+            .filter((a) => Number.isFinite(Number(a.effect?.getComputedTiming().endTime)))
+            .every((a) => a.playState === "finished");
+          const ring = document.querySelector(selector);
+          if (!finished || !ring) { window.__stationBox = undefined; return false; }
+          const r = ring.getBoundingClientRect();
+          const box = `${r.x},${r.y},${r.width},${r.height}`;
+          const held = window.__stationBox === box;
+          window.__stationBox = box;
+          return held;
+        }, station.ring, { timeout: 20_000 });
 
         const rect = await page.locator(station.ring).first().boundingBox();
         expect(rect, `${station.ring} has no box`).toBeTruthy();
@@ -127,47 +140,135 @@ for (const motion of /** @type {const} */ (["no-preference", "reduce"])) {
   test.describe(`the ring's hand-over to a card at 390x664, motion ${motion}`, () => {
     test.use({ viewport: { width: 390, height: 664 }, hasTouch: true, isMobile: true, reducedMotion: motion });
 
-    /* Quarantined (#1306, agent-infra#30): the travelling ring's frame-to-frame
-       check measures how fast a loaded runner paints, not the hand-over. It
-       still runs, outside the merge gate (`fidelity:quarantine`). */
-    test(motion === "reduce" ? "the ring stands at the card's station at once" : "the ring travels from the door's station to the card's", { tag: motion === "reduce" ? [] : ["@quarantine"] }, async ({ page }) => {
+    /* The hand-over is a CSS transition (door-phone.css: margin-top, width and
+       height over .5s, started from @starting-style). This used to sample the
+       ring on every animation frame and bound the jump between frames, which
+       measured how fast a loaded runner paints rather than the hand-over
+       (#1306, #1447, agent-infra#30). What that
+       guarded is a ring that teleports to the card's station instead of
+       travelling, and that is a fact about the transition, not about frames:
+       the ring's own transitions are paused the moment the card creates it,
+       then stepped by hand to fixed points in their .5s, and the ring is
+       measured at each. No frame rate or wall-clock time is involved. */
+    test(motion === "reduce" ? "the ring stands at the card's station at once" : "the ring travels from the door's station to the card's", async ({ page }) => {
       const door = DOOR_STATES.find((s) => s.slug === "login" && s.state === "mixed");
       if (!door) throw new Error("no door state login · mixed in pocket-states.js");
       await door.reach(page);
       await page.locator("#localopen").waitFor();
       await page.evaluate(() => document.fonts.ready);
 
-      /* sampled in the page, frame by frame, from the tap that opens the card */
-      const samples = await page.evaluate(async () => {
-        /** @type {{t:number,centre:number,width:number}[]} */
-        const out = [];
-        const start = performance.now();
-        /** @type {HTMLElement} */ (document.querySelector("#localopen")).click();
-        while (performance.now() - start < 800) {
-          await new Promise((resolve) => requestAnimationFrame(resolve));
-          const ring = document.querySelector(".ringcard .bigring");
-          if (!ring) continue;
-          const r = ring.getBoundingClientRect();
-          out.push({ t: performance.now() - start, centre: r.top + r.height / 2, width: r.width });
-        }
-        return out;
+      if (motion === "reduce") {
+        /* sampled in the page, frame by frame, from the tap that opens the card */
+        const samples = await page.evaluate(async () => {
+          /** @type {{t:number,centre:number,width:number}[]} */
+          const out = [];
+          const start = performance.now();
+          /** @type {HTMLElement} */ (document.querySelector("#localopen")).click();
+          while (performance.now() - start < 800) {
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+            const ring = document.querySelector(".ringcard .bigring");
+            if (!ring) continue;
+            const r = ring.getBoundingClientRect();
+            out.push({ t: performance.now() - start, centre: r.top + r.height / 2, width: r.width });
+          }
+          return out;
+        });
+        expect(samples.length, "the card's ring never appeared").toBeGreaterThan(2);
+        const first = samples[0];
+        const last = samples[samples.length - 1];
+        console.log(`390x664 motion ${motion}: ring first seen at ${first.centre.toFixed(1)}px, ${first.width.toFixed(1)}px across; after ${last.t.toFixed(0)}ms at ${last.centre.toFixed(1)}px, ${last.width.toFixed(1)}px across`);
+
+        expect(Math.abs(last.centre - 0.3 * 664)).toBeLessThanOrEqual(TOLERANCE);
+        expect(last.width).toBeCloseTo(240, 0);
+        expect(Math.abs(first.centre - 0.3 * 664), "the ring travelled under reduced motion").toBeLessThanOrEqual(TOLERANCE);
+        return;
+      }
+
+      /* where the bare door's glyph stands, read before the tap (SignIn.svelte
+         seeds the card's ring from this same rect: .72R across, same centre) */
+      const doorRing = await page.locator("#login-glyph svg").evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return { centre: r.top + r.height / 2, width: r.width };
       });
-      expect(samples.length, "the card's ring never appeared").toBeGreaterThan(2);
+
+      const run = await page.evaluate(async () => {
+        const travelling = ["margin-top", "width", "height"];
+        /** @param {Element} ring */
+        const transitionsOf = (ring) => ring.getAnimations().filter((a) =>
+          a instanceof CSSTransition && travelling.includes(a.transitionProperty));
+        /* The card creates the ring on the tap, and the observer runs before the
+           next frame, so its transitions are caught and held. They are stepped by
+           hand below, so a late catch changes nothing. A ring with none (placed,
+           not travelling) is given three frames to show one, then reported as
+           it is rather than waited for. */
+        const held = new Promise((resolve) => {
+          const watch = new MutationObserver(async () => {
+            const ring = document.querySelector(".ringcard .bigring");
+            if (!ring) return;
+            watch.disconnect();
+            let found = transitionsOf(ring);
+            for (let i = 0; i < 3 && !found.length; i++) {
+              await new Promise((next) => requestAnimationFrame(next));
+              found = transitionsOf(ring);
+            }
+            for (const a of found) a.pause();
+            resolve({ ring, found });
+          });
+          watch.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+        });
+        /** @type {HTMLElement} */ (document.querySelector("#localopen")).click();
+        const { ring, found } = /** @type {{ring: Element, found: CSSTransition[]}} */ (await held);
+        if (!found.length) return { properties: [], samples: [] };
+        const properties = found.map((a) => ({
+          property: a.transitionProperty,
+          duration: Number(a.effect?.getComputedTiming().duration),
+        }));
+        const duration = Math.max(...properties.map((p) => p.duration));
+        const steps = 10;
+        /** @type {{at:number,centre:number,width:number}[]} */
+        const samples = [];
+        for (let i = 0; i <= steps; i++) {
+          const at = duration * i / steps;
+          for (const a of found) a.currentTime = at;
+          const r = ring.getBoundingClientRect();
+          samples.push({ at, centre: r.top + r.height / 2, width: r.width });
+        }
+        for (const a of found) a.finish();
+        return { properties, samples };
+      });
+      /* everything finite on the page finished, then the end is read */
+      await page.waitForFunction(() => document.getAnimations()
+        .filter((a) => Number.isFinite(Number(a.effect?.getComputedTiming().endTime)))
+        .every((a) => a.playState === "finished"), undefined, { timeout: 20_000 });
+      const landed = await page.locator(".ringcard .bigring").evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return { centre: r.top + r.height / 2, width: r.width };
+      });
+
+      const { properties, samples } = run;
+      /* the ring carries its position and size over .5s, rather than being placed */
+      expect(properties.map((p) => p.property).sort(), "the ring's margin-top, width and height do not all transition").toEqual(["height", "margin-top", "width"]);
+      for (const p of properties) expect(p.duration, `${p.property} travels over .5s`).toBe(500);
       const first = samples[0];
       const last = samples[samples.length - 1];
-      console.log(`390x664 motion ${motion}: ring first seen at ${first.centre.toFixed(1)}px, ${first.width.toFixed(1)}px across; after ${last.t.toFixed(0)}ms at ${last.centre.toFixed(1)}px, ${last.width.toFixed(1)}px across`);
+      console.log(`390x664 motion ${motion}: door's ring at ${doorRing.centre.toFixed(1)}px, ${doorRing.width.toFixed(1)}px across; hand-over ${properties.map((p) => `${p.property} ${p.duration}ms`).join(", ")}; stepped from ${first.centre.toFixed(1)}px (${first.width.toFixed(1)} across) to ${last.centre.toFixed(1)}px (${last.width.toFixed(1)} across); landed at ${landed.centre.toFixed(1)}px, ${landed.width.toFixed(1)}px across`);
 
+      /* it starts at the door's station... */
+      expect(first.centre, "the ring did not start from the door's station").toBeGreaterThan(0.36 * 664);
+      expect(Math.abs(first.centre - doorRing.centre), "the ring did not start where the door's ring stands").toBeLessThanOrEqual(TOLERANCE);
+      expect(first.width, "the ring did not start at the door's ring size (.72R of the glyph)").toBeCloseTo(0.72 * doorRing.width, 0);
+      /* ...ends at the card's, 30% down and 240 across... */
       expect(Math.abs(last.centre - 0.3 * 664)).toBeLessThanOrEqual(TOLERANCE);
       expect(last.width).toBeCloseTo(240, 0);
-      if (motion === "reduce") {
-        expect(Math.abs(first.centre - 0.3 * 664), "the ring travelled under reduced motion").toBeLessThanOrEqual(TOLERANCE);
-      } else {
-        /* first seen at (or just leaving) the door's station, never jumping */
-        expect(first.centre, "the ring did not start from the door's station").toBeGreaterThan(0.36 * 664);
-        for (let i = 1; i < samples.length; i++) {
-          expect(Math.abs(samples[i].centre - samples[i - 1].centre), `a jump between frames at ${samples[i].t.toFixed(0)}ms`).toBeLessThan(20);
-        }
+      expect(Math.abs(landed.centre - 0.3 * 664), "the ring did not stay at the card's station").toBeLessThanOrEqual(TOLERANCE);
+      expect(landed.width).toBeCloseTo(240, 0);
+      /* ...and in between it is neither: every step lies between the two, in order */
+      for (let i = 1; i < samples.length - 1; i++) {
+        expect(samples[i].centre, `step ${i} of ${samples.length - 1}: the ring went back towards the door's station`).toBeLessThan(samples[i - 1].centre + 0.001);
+        expect(samples[i].centre, `step ${i} of ${samples.length - 1}: the ring is already at the card's station`).toBeGreaterThan(last.centre + 0.01);
+        expect(samples[i].centre, `step ${i} of ${samples.length - 1}: the ring is still at the door's station`).toBeLessThan(first.centre - 0.01);
       }
+      expect(samples[Math.floor(samples.length / 2)].centre, "the ring never left the door's station on its way").toBeLessThan(first.centre - 5);
     });
   });
 }
