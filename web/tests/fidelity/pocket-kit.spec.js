@@ -1,5 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { expect, test } from "@playwright/test";
+import { settle } from "./pocket-states.js";
 
 /* Same app the fidelity gate photographs (playwright.config.js webServer). */
 const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
@@ -150,7 +151,7 @@ for (const width of [390, 360]) {
       await face.tap();
       const row = face.locator("xpath=ancestor::*[@data-row][1]");
       await expect(row).toHaveAttribute("data-open", "");
-      await page.waitForTimeout(350);
+      await settle(page);
       await expectOpenLayout(row);
       await shot(page, `03-row-open-${width}`);
 
@@ -159,13 +160,13 @@ for (const width of [390, 360]) {
       await expect(page.getByRole("button", { name: "tap again to remove Ada Harlow" })).toBeVisible();
       await expect(row.getByText("tap again to remove", { exact: true })).toBeVisible();
       await expect(row, "arming closed the row").toHaveAttribute("data-open", "");
-      await page.waitForTimeout(200);
+      await settle(page);
       await expectOpenLayout(row);
       await shot(page, `04-row-armed-${width}`);
       await page.getByRole("button", { name: "tap again to remove Ada Harlow" }).tap();
       await expect(memberFace(page, "Ada Harlow")).toHaveCount(0);
       await expect(page.locator(".p-wake-host [role=status]")).toHaveText("Ada Harlow removed");
-      await page.waitForTimeout(300);
+      await settle(page);
       await shot(page, `05-wake-undo-${width}`);
       await page.getByRole("button", { name: "undo" }).tap();
       await expect(memberFace(page, "Ada Harlow")).toHaveCount(1);
@@ -174,12 +175,22 @@ for (const width of [390, 360]) {
 }
 
 test("arm-then-fire disarms by itself after 4s", async ({ page }) => {
+  /* Installed before the page loads, stopped before the pill is armed, so how
+     long the browser takes between steps cannot move the hold: only what is
+     advanced below passes. */
+  await page.clock.install();
   await open(page);
+  await page.clock.pauseAt(new Date(Date.now() + 2_000));
   const pill = page.getByRole("button", { name: "Remove the boiler service" });
   await pill.tap();
   await expect(page.getByRole("button", { name: "tap again to remove the boiler service" })).toBeVisible();
-  await page.waitForTimeout(4300);
-  await expect(page.getByRole("button", { name: "Remove the boiler service" })).toBeVisible();
+  /* The 4 s hold is the page's own timer, so the page's clock is the test's. */
+  await page.clock.runFor(3_900);
+  await expect(page.getByRole("button", { name: "tap again to remove the boiler service" }), "disarmed before 4 s").toBeVisible();
+  await page.clock.runFor(200);
+  /* exact: the armed pill's name, "tap again to remove the boiler service", contains this one */
+  await expect(page.getByRole("button", { name: "Remove the boiler service", exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "tap again to remove the boiler service" })).toHaveCount(0);
 });
 
 test("sheets are dialogs: focus in, Tab held, Escape out, focus back, page inert", async ({ page }) => {
@@ -196,7 +207,7 @@ test("sheets are dialogs: focus in, Tab held, Escape out, focus back, page inert
     await page.keyboard.press("Tab");
     expect(await page.evaluate(() => Boolean(document.activeElement?.closest("[role=dialog]")))).toBe(true);
   }
-  await page.waitForTimeout(350);
+  await settle(page);
   expect(await floors(page, "[role=dialog]")).toEqual([]);
   await shot(page, "07-sheet-list");
   await page.keyboard.press("Escape");
@@ -211,7 +222,7 @@ test("sheets: back closes the sheet without leaving the page; the scrim closes i
   await page.locator("[data-open=callout]").tap();
   const dialog = page.getByRole("dialog", { name: "Boiler service" });
   await expect(dialog).toBeVisible();
-  await page.waitForTimeout(350);
+  await settle(page);
   await shot(page, "06-sheet-callout");
   await page.goBack();
   await expect(dialog).toBeHidden();
@@ -220,7 +231,7 @@ test("sheets: back closes the sheet without leaving the page; the scrim closes i
   await page.locator("[data-open=full]").tap();
   const full = page.getByRole("dialog", { name: "Edit item" });
   await expect(full).toBeVisible();
-  await page.waitForTimeout(350);
+  await settle(page);
   const top = await full.evaluate((el) => el.getBoundingClientRect().top);
   expect(top, "the full sheet's head is off the top of the screen").toBeGreaterThanOrEqual(0);
   await shot(page, "08-sheet-full");
@@ -239,7 +250,7 @@ test("sheets: dragging the handle down dismisses", async ({ page }) => {
   await page.locator("[data-open=list]").tap();
   const dialog = page.getByRole("dialog", { name: "Documents" });
   await expect(dialog).toBeVisible();
-  await page.waitForTimeout(350);
+  await settle(page);
   const grab = /** @type {{ x: number, y: number, width: number, height: number }} */ (
     await dialog.locator(".grab").boundingBox());
   await page.mouse.move(grab.x + grab.width / 2, grab.y + grab.height / 2);
@@ -262,7 +273,7 @@ test("the hatch: the orb opens the account sheet; sign-out is one tap", async ({
   await expect(hatch.getByRole("link", { name: "Items", exact: true })).toHaveCount(0);
   /* The fixtures instance has no session, so no admin. */
   await expect(hatch.getByRole("link", { name: "Administration" })).toHaveCount(0);
-  await page.waitForTimeout(350);
+  await settle(page);
   expect(await floors(page, "[role=dialog]")).toEqual([]);
   await shot(page, "09-hatch");
   /* one tap, not arm-then-fire (owner, 2026-10-06): it is a plain pill,
@@ -281,11 +292,11 @@ test("the top chrome retracts on scroll down and returns on scroll up", async ({
   await expect(chrome).not.toHaveClass(/hidden/);
   await page.mouse.wheel(0, 600);
   await expect(chrome).toHaveClass(/hidden/);
-  await page.waitForTimeout(300);
+  await settle(page);
   await shot(page, "11-chrome-retracted");
   await page.mouse.wheel(0, -120);
   await expect(chrome).not.toHaveClass(/hidden/);
-  await page.waitForTimeout(300);
+  await settle(page);
   await shot(page, "12-chrome-returned");
 });
 
@@ -312,8 +323,8 @@ test("reorder: Alt-arrow and the move pills move a row; long-press lifts and dro
   const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await car.boundingBox());
   await page.mouse.move(box.x + 60, box.y + box.height / 2);
   await page.mouse.down();
-  await page.waitForTimeout(600);
-  await expect(page.locator("[data-kit=sections] [data-row][data-lifted]")).toHaveCount(1);
+  /* The lift is the page's own long-press timer: wait for its end state. */
+  await expect(page.locator("[data-kit=sections] [data-row][data-lifted]")).toHaveCount(1, { timeout: 20_000 });
   await page.mouse.move(box.x + 60, box.y + box.height / 2 + box.height * 2 + 4, { steps: 8 });
   await shot(page, "13-reorder-lifted");
   await page.mouse.up();
