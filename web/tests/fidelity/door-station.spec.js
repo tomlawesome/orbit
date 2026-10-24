@@ -79,11 +79,12 @@ for (const size of SIZES) {
             .filter((a) => Number.isFinite(Number(a.effect?.getComputedTiming().endTime)))
             .every((a) => a.playState === "finished");
           const ring = document.querySelector(selector);
-          if (!finished || !ring) { window.__stationBox = undefined; return false; }
+          const w = /** @type {Window & { __stationBox?: string }} */ (window);
+          if (!finished || !ring) { w.__stationBox = undefined; return false; }
           const r = ring.getBoundingClientRect();
           const box = `${r.x},${r.y},${r.width},${r.height}`;
-          const held = window.__stationBox === box;
-          window.__stationBox = box;
+          const held = w.__stationBox === box;
+          w.__stationBox = box;
           return held;
         }, station.ring, { timeout: 20_000 });
 
