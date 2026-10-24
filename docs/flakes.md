@@ -469,10 +469,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit (job 36491), desktop-webkit · failed its first attempt (1.8 s); the live log shows the in-job retry passing (3.1 s). No error text printed: the job was cut off at its 30-minute timeout before the report. First sighting.
 
-## v19-document-preview.spec.ts:162 "pressing a paper opens the preview, and Esc closes it" — desktop-chromium
-
-- 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke (job 36589), desktop-chromium · failed once, passed on retry. First sighting; an issue on the third.
-
 ## v19-create.spec.ts:1022 "the desk's lane offers 'not this one' while it is still reading, and pressing it closes the lane" — desktop-webkit
 
 - 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit (job 36591), desktop-webkit · failed once, passed on retry. First sighting; an issue on the third.

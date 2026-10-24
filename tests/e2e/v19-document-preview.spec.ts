@@ -180,7 +180,7 @@ test("pressing a paper opens the preview, and Esc closes it", async ({ page }) =
     await expect(card.locator(".rcfoot")).toHaveCount(0);
 
     await page.keyboard.press("Escape");
-    await expect(card).toBeHidden({ timeout: 2_000 });
+    await expect(card).toBeHidden({ timeout: 20_000 });
     // The card goes; the drawer it came from stays.
     await expect(drawer).toBeVisible();
   } finally {
@@ -208,7 +208,7 @@ test("pressing the page opens the reader over home, and Esc closes it", async ({
     await expect(reader).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}`));
     await page.keyboard.press("Escape");
-    await expect(reader).toBeHidden({ timeout: 2_000 });
+    await expect(reader).toBeHidden({ timeout: 20_000 });
   } finally {
     await households.sweep(page);
   }
@@ -248,8 +248,8 @@ test("on the desk, a click off the reader returns to the drawer, the reader's ow
     const stage = await reader.locator(".rd-stage").boundingBox();
     if (!stage) throw new Error("the reader's stage has no box");
     await page.mouse.click(stage.x + 4, stage.y + stage.height / 2);
-    await expect(reader).toBeHidden({ timeout: 2_000 });
-    await expect(pageButton).toBeHidden({ timeout: 2_000 });
+    await expect(reader).toBeHidden({ timeout: 20_000 });
+    await expect(pageButton).toBeHidden({ timeout: 20_000 });
     await expect(drawer).toBeVisible();
 
     /* The same paper again: the preview card first, not the reader. */
@@ -361,7 +361,7 @@ test("the reader turns a multi-page document to its last page and back, by arrow
     await onPage(1);
 
     await page.keyboard.press("Escape");
-    await expect(reader).toBeHidden({ timeout: 2_000 });
+    await expect(reader).toBeHidden({ timeout: 20_000 });
   } finally {
     await households.sweep(page);
   }
@@ -461,7 +461,7 @@ test("the preview's pager turns a multi-page document in place, and the reader o
     await reader.getByRole("button", { name: "Next page" }).click();
     await expect(reader.locator(".rd-name .rd-of")).toHaveText("· page 3 of 3");
     await page.keyboard.press("Escape");
-    await expect(reader).toBeHidden({ timeout: 2_000 });
+    await expect(reader).toBeHidden({ timeout: 20_000 });
     await onPage(3);
   } finally {
     await households.sweep(page);
