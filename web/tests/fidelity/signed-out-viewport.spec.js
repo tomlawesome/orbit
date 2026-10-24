@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { settle } from "./pocket-states.js";
 
 /* Same app the fidelity gate photographs (playwright.config.js webServer). */
 const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
@@ -57,8 +58,8 @@ for (const height of HEIGHTS) {
       ),
     );
     // The farewell and the gate both ride a .9s opacity/transform entrance
-    // (flight.css); let it finish so the boxes below are the settled ones.
-    await page.waitForTimeout(1700);
+    // (flight.css); wait for it to finish so the boxes below are the settled ones.
+    await settle(page);
 
     /** @param {string} selector */
     const box = async (selector) => {
@@ -116,7 +117,7 @@ for (const [width, height] of [[390, 844], [390, 664], [360, 640], [320, 568]]) 
         document.body.classList.contains("showdusk") && document.body.classList.contains("farewell"),
       );
       await page.evaluate(() => document.fonts.ready);
-      await page.waitForTimeout(1700);
+      await settle(page);
 
       const ring = await page.locator("#dusk .glyph svg").boundingBox();
       expect(ring, "the ring has no box").toBeTruthy();
