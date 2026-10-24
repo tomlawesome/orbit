@@ -461,10 +461,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed once, passed on retry. Third sighting: filed as #1503.
 - 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke (job 38684), desktop-chromium · failed once, passed on retry. Now seen on Chromium too.
 
-## v19-archive.spec.ts:273 "an armed desk button relaxes back after 4 s without a second tap (#1342)" — desktop-webkit
-
-- 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit (job 36491), desktop-webkit · failed its first attempt (23.8 s), passed on the in-job retry. No error text printed: the job was cut off at its 30-minute timeout before the report. First sighting.
-
 ## v19-create.spec.ts:207 "a document picked on the create form is attached to the saved item" — desktop-webkit
 
 - 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit (job 36491), desktop-webkit · failed its first attempt (9.8 s), passed on the in-job retry. No error text printed: the job was cut off at its 30-minute timeout before the report. First sighting.
