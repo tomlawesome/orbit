@@ -77,38 +77,54 @@ function sampleClashes() {
   return clashes;
 }
 
+/** Runs in the page: samples with `sample` on every animation frame until
+ *  stopped, into window.__clashes. @param {() => string[] | null} sample */
+function installClashRecorder(sample) {
+  /** @type {{ counts: Record<string, number>, sawPill: boolean, stopped: boolean }} */
+  const recorded = { counts: {}, sawPill: false, stopped: false };
+  /** @type {any} */ (window).__clashes = recorded;
+  const frame = () => {
+    if (recorded.stopped) return;
+    const clashes = sample();
+    if (clashes) {
+      recorded.sawPill = true;
+      for (const clash of clashes) recorded.counts[clash] = (recorded.counts[clash] ?? 0) + 1;
+    }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+
 for (const width of WIDTHS) {
   test(`the pocket transport never clashes at ${width.name}`, async ({ page }) => {
-    test.setTimeout(240_000);
+    test.setTimeout(300_000);
     await page.setViewportSize(width.viewport);
     await page.route("**/api/settings/tour", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: '{"tour":{"tourSeenAt":null}}' }));
     await page.goto(`${APP}/home`, { waitUntil: "load" });
     await page.waitForFunction(() => Array.isArray(/** @type {any} */ (window).__chapters));
 
-    /** @type {Record<string, number>} */
-    const counts = {};
-    // W3-Q6 (#1151): sampleClashes() returns null both while the film has
-    // not started yet AND when the pill never renders at all -- the old
-    // loop treated both the same (nothing to count), so a regression that
-    // kept the pill from ever appearing sampled nothing but null for the
-    // whole run and still reported "zero clashes". Track whether a real
-    // sample (the pill actually present and sized) was ever seen.
-    let sawPill = false;
-    let ended = false;
-    const start = Date.now();
-    while (!ended && Date.now() - start < 220_000) {
-      const clashes = await page.evaluate(sampleClashes);
-      if (clashes) {
-        sawPill = true;
-        for (const clash of clashes) counts[clash] = (counts[clash] ?? 0) + 1;
-      }
-      ended = await page.evaluate(() => {
-        const reading = /** @type {any} */ (window).__reading?.();
-        return Boolean(reading && reading.total > 0 && reading.cursor >= reading.total);
-      });
-      await page.waitForTimeout(250);
-    }
+    /* The sampler runs in the page, on every one of its own frames, from here
+       to the end of the film: a clash on any frame is counted, however briefly
+       it lasts, and how fast the runner can ask the page is not part of it
+       (this used to be a 250 ms poll from the runner, which could step over a
+       clash that lived less than that). W3-Q6 (#1151): sampleClashes() returns
+       null both while the film has not started yet AND when the pill never
+       renders at all, so the recorder keeps whether a real sample (the pill
+       actually present and sized) was ever seen. */
+    await page.evaluate(`(${installClashRecorder})(${sampleClashes})`);
+
+    /* The end state: the film has read to its last chapter. 280 s covers the
+       2:55 film with room to spare. */
+    await page.waitForFunction(() => {
+      const reading = /** @type {any} */ (window).__reading?.();
+      return Boolean(reading && reading.total > 0 && reading.cursor >= reading.total);
+    }, null, { timeout: 280_000, polling: 1_000 });
+    const { sawPill, counts } = await page.evaluate(() => {
+      const recorded = /** @type {any} */ (window).__clashes;
+      recorded.stopped = true;
+      return { sawPill: recorded.sawPill, counts: recorded.counts };
+    });
 
     expect(sawPill, `the pocket transport pill never appeared at ${width.name}`).toBe(true);
 
