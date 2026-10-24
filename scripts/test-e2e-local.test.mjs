@@ -816,7 +816,6 @@ describe("the Playwright image docker run receives (#1513)", () => {
 describe("arguments after -- reach Playwright (#1513)", () => {
   const passThrough = ["--repeat-each=10", "--workers=1"];
   const tail = passThrough.join(" ");
-  const own = ["--reuse", "P", "--spec", "tests/e2e/x.spec.ts"];
 
   function recordArgv(fx) {
     const log = join(fx.dir, "playwright-argv.jsonl");
