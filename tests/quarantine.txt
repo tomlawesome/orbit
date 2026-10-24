@@ -13,4 +13,3 @@ tests/e2e/v19-layout-and-themes.spec.ts 1 #1307
 tests/e2e/v19-arrival.spec.ts 2 #1085 serial file: the test after it is quarantined with it; #1085 is closed
 web/tests/fidelity/door-station.spec.js 1 #1306
 web/tests/fidelity/pocket-measure.spec.js 1 #1376
-web/tests/fidelity/tour-pocket-webkit.spec.js 1 #1449
