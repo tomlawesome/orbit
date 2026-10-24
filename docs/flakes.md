@@ -450,11 +450,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-14 · 0c6e60bf · local `scripts/test-e2e-local.sh` full run, 2 workers, stopped at 681/1413 under host load · `apiRequestContext.get: socket hang up` on `GET /api/auth/session` from the household-cleanup helper, after 9.9s. Passed alone on the same code and a fresh stack (`--reuse … --project desktop-firefox --spec tests/e2e/v19-create.spec.ts:399`, 9.7s). First sighting.
 
-## local-sign-in.spec.ts:330 "no sign-in card sits over the arrival with no climb owed" — desktop-chromium
-
-- 2026-10-15 · 34384732 (v0.3 final batch, !1067; nothing since 15c029b7 touches the arrival, the root route, sign-in or this spec) · pipeline 2624 / smoke_local_only (job 36328) · `the arrival, no climb: the frame sampler never saw the newcomer's frame` at line 275 (`frames` 0) after 2.2s; the spec sets `retries: 0`, so no retry. Locally `scripts/test-e2e-local.sh --profile local-only --project desktop-chromium` passed 3/3. Suspected, not established: no animation frame ran between `.nf` appearing and the check on a loaded runner (the sampler is a `requestAnimationFrame` loop, `:248-261`). First sighting.
-- 2026-10-15 · 53133760 (!1068, #1431: changes only `launcher/pin.json`) · pipeline 2637 / smoke_local_only (job 36409) · the same `the arrival, no climb: the frame sampler never saw the newcomer's frame` (expected > 0); retried as job 36420 by the launcher session. Second sighting.
-
 ## GitLab outage during artifact transfer (502 / connection refused)
 
 - 2026-10-15 · a6168fe6 (!1069, v0.3 security batch) · pipeline 2640 / acceptance and repair_journeys (jobs 36463 and 36464), 20:46-20:54 UTC · both failed while moving artifacts, GitLab answering 502 or refusing connections; both passed on retry (jobs 36469 and 36470) with no change. First sighting.
@@ -514,10 +509,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## sign-out-descent.spec.ts:195 "sign out from home's menu reaches the dusk (narrow desk, as the browser is)" and "(wide desk, as the browser is)" on desktop-webkit
 
 - 2026-10-21 · 8a841e3c (!1074) · pipeline 2833 / `smoke_webkit` job 38057 · both cases failed first and passed on Playwright's retry in the same run ("2 flaky"), which fails the job; green on pipeline 2834 (b331397f, installer-only change, nothing under `web/`). First sighting.
-
-## local-sign-in.spec.ts:352 "no sign-in card sits over the chooser and the count" — desktop-chromium
-
-- 2026-10-21 · b331397f (!1074; installer-only change since the green 8a841e3c run) · pipeline 2834 / `smoke_local_only` job 38082 · "the chooser: the frame sampler never saw the newcomer's frame"; passed on the retried job 38096, same commit. First sighting.
 
 ## settings-text-size-tab-stop.test.mjs:128 "settings, phone layout: the text size tab stop starts on the applied step > with standard applied, the one tab stop is the ticked tile"
 

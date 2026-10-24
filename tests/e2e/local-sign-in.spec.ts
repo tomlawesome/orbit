@@ -240,31 +240,34 @@ async function signInWithoutLaunch(page: Page): Promise<void> {
 }
 
 /**
- * Frame by frame, from inside the page: is any `.ringcard` drawn (has a box)
- * while the newcomer's own frame (`.nf`) is in the document? Sampled every
- * animation frame because the climb is seconds long and a poll from outside
- * can miss it whole (the same reason witnessBodyClasses is an observer).
+ * Whether a sign-in card layer was EVER drawn over the newcomer's frame, from
+ * inside the page, with no clock in it: a MutationObserver installed before
+ * the document that flies looks after every change to the document (a node
+ * added, a class or style changed) and notes whether any `.ringcard` has a box
+ * while the newcomer's own frame (`.nf`) is in the document. A layer that
+ * flashed up and went again in between polls from outside is still caught,
+ * which is what a poll cannot promise (the same reason witnessBodyClasses is
+ * an observer). It counts appearances and asks nothing of how many there were
+ * to look at: that nothing was drawn is the end state, not a number of frames.
  */
 async function watchCardLayer(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    const seen = { frames: 0, drawn: 0 };
+    const seen = { drawn: 0 };
     (window as unknown as { __orbitCardLayer: typeof seen }).__orbitCardLayer = seen;
     const sample = () => {
-      if (document.querySelector(".nf")) {
-        seen.frames += 1;
-        if ([...document.querySelectorAll(".ringcard")].some((layer) => layer.getClientRects().length > 0)) seen.drawn += 1;
+      if (document.querySelector(".nf") && [...document.querySelectorAll(".ringcard")].some((layer) => layer.getClientRects().length > 0)) {
+        seen.drawn += 1;
       }
-      requestAnimationFrame(sample);
     };
-    requestAnimationFrame(sample);
+    new MutationObserver(sample).observe(document, { subtree: true, childList: true, attributes: true });
   });
 }
 
-async function cardLayerSamples(page: Page): Promise<{ frames: number; drawn: number }> {
-  return page.evaluate(() => (window as unknown as { __orbitCardLayer: { frames: number; drawn: number } }).__orbitCardLayer);
+async function cardLayerSamples(page: Page): Promise<{ drawn: number }> {
+  return page.evaluate(() => (window as unknown as { __orbitCardLayer: { drawn: number } }).__orbitCardLayer);
 }
 
-/** No sign-in card layer is drawn, now, and none was in any frame the newcomer's frame was up. */
+/** No sign-in card layer is drawn, now, and none was drawn at any change while the newcomer's frame was up. */
 async function expectNoCardLayer(page: Page, where: string): Promise<void> {
   await expect(page.locator(".nf"), `${where}: the newcomer's frame is not up`).toBeAttached();
   const drawn = await page.evaluate(
@@ -272,8 +275,7 @@ async function expectNoCardLayer(page: Page, where: string): Promise<void> {
   );
   expect(drawn, `${where}: a sign-in card layer is drawn over the arrival`).toBe(0);
   const samples = await cardLayerSamples(page);
-  expect(samples.frames, `${where}: the frame sampler never saw the newcomer's frame`).toBeGreaterThan(0);
-  expect(samples.drawn, `${where}: a sign-in card layer was drawn in ${samples.drawn} of ${samples.frames} frames`).toBe(0);
+  expect(samples.drawn, `${where}: a sign-in card layer was drawn at ${samples.drawn} changes to the page`).toBe(0);
 }
 
 /** A click at the control's centre lands on the control itself, not on a layer above it. */
