@@ -15,7 +15,11 @@
 # validation.
 #
 # Usage:
-#   bash scripts/test-e2e-local.sh [--profile NAME] [--spec PATH] [--project NAME] [--keep] [--ci-cap] [--reuse PROJECT]
+#   bash scripts/test-e2e-local.sh [--profile NAME] [--spec PATH] [--project NAME] [--keep] [--ci-cap] [--reuse PROJECT] [-- PLAYWRIGHT_ARGS...]
+#
+#   -- ARGS...      Passed to Playwright unchanged, after this script's own
+#                    arguments, in the gate and the quarantine run alike
+#                    (e.g. `-- --repeat-each=10` to show a rewrite is stable).
 #
 #   --ci-cap        Apply compose/docker-compose.ci-cap.yml — the cpu/memory
 #                    cap CI's acceptance stack always runs under — so local
@@ -194,8 +198,16 @@ profile="oidc"
 keep=0
 ci_cap=0
 reuse_project=""
+# Everything after `--` goes to Playwright unchanged, after this script's own
+# arguments (e.g. `-- --repeat-each=10`; #1513).
+playwright_passthrough=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --)
+      shift
+      playwright_passthrough=("$@")
+      break
+      ;;
     --keep)
       keep=1
       shift
@@ -228,7 +240,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h | --help)
-      printf 'Usage: %s [--profile oidc|local-only] [--spec PATH] [--project desktop-chromium|mobile-chromium|desktop-firefox|desktop-webkit|mobile-webkit] [--keep] [--ci-cap] [--reuse PROJECT]\n' "$0"
+      printf 'Usage: %s [--profile oidc|local-only] [--spec PATH] [--project desktop-chromium|mobile-chromium|desktop-firefox|desktop-webkit|mobile-webkit] [--keep] [--ci-cap] [--reuse PROJECT] [-- PLAYWRIGHT_ARGS...]\n' "$0"
       exit 0
       ;;
     *)
@@ -961,6 +973,10 @@ if [[ "$in_image" == 1 ]]; then
   # grep -m1, not `| head` (scripts/acceptance-sigpipe-safety.test.mjs, #809).
   playwright_image="$(grep -m1 '^  PLAYWRIGHT_IMAGE: ' .gitlab-ci.yml | sed 's/^  PLAYWRIGHT_IMAGE: *//')"
   [[ -n "$playwright_image" ]] || fail "could not read PLAYWRIGHT_IMAGE from .gitlab-ci.yml; the WebKit run needs CI's Playwright image."
+  # CI pulls through the image cache, whose address only the runner's config
+  # holds (#1510); off a runner the same digest comes from its public home (#1513).
+  playwright_image="${playwright_image//\$CI_IMAGE_CACHE_MCR/${CI_IMAGE_CACHE_MCR:-mcr.microsoft.com}}"
+  [[ "$playwright_image" != *'$'* ]] || fail "PLAYWRIGHT_IMAGE in .gitlab-ci.yml names a variable this script cannot fill: ${playwright_image}"
   docker_cli="$(command -v docker)"
   compose_plugin="$(docker info --format '{{range .ClientInfo.Plugins}}{{if eq .Name "compose"}}{{.Path}}{{end}}{{end}}')"
   [[ -n "$compose_plugin" ]] || fail "docker's compose plugin was not found; the suite needs it inside the image."
@@ -979,12 +995,12 @@ if [[ "$in_image" == 1 ]]; then
   fi
   log "running Playwright inside ${playwright_image} (WebKit needs it; #1235)"
 fi
-run_suite suite_status ORBIT_E2E_QUARANTINE=exclude --
+run_suite suite_status ORBIT_E2E_QUARANTINE=exclude -- "${playwright_passthrough[@]}"
 
 if [[ "$suite_status" == 0 ]]; then
   log "running the quarantined tests (@quarantine, agent-infra#30): reported, never failing this run"
   quarantine_status=0
-  run_suite quarantine_status ORBIT_E2E_QUARANTINE=only -- "${quarantine_args[@]}"
+  run_suite quarantine_status ORBIT_E2E_QUARANTINE=only -- "${quarantine_args[@]}" "${playwright_passthrough[@]}"
   [[ "$quarantine_status" == 0 ]] ||
     log "a quarantined test failed (non-blocking; see the issue named in the test; traces in test-results/quarantine)"
 else

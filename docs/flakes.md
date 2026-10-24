@@ -169,17 +169,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-09-22 · 25b3c913 (the `dev` merge of !966, which touches only `web/src` and one e2e spec) · pipeline 1454 / fast (job 19676) · `Error: Test timed out in 5000ms`, alongside a timeout in `password.test.ts`. Retried as job 19693 on the same commit: green, 273 of 273 files and 4338 tests. The diff cannot reach either file, and both failures were timeouts rather than assertions, which is why the job was re-run rather than investigated as a regression. Two pipelines were executing on the same host at the time — 1455 was started manually two minutes into 1454 — so the contention was partly self-inflicted. **Third sighting: #1087 filed.**
 
-## v19-arrival.spec.ts:160 "the newcomer's arrival: the climb, the labelled sky, the real count, the question" — #1085 — quarantined 2026-10-16 (agent-infra#30)
-
-- 2026-09-22 · 4fc18a27 (#1080, feature/1080-parallel-e2e-workers rebased onto dev's #1077 merge) · local `scripts/test-e2e-local.sh --ci-cap`, `ORBIT_E2E_WORKERS=2`, desktop-chromium · `expect(locator('.nf .disc .big')).toHaveText("2")` received `"1"` at `tests/e2e/v19-arrival.spec.ts:229`, 5000ms timeout. Passed on the same code at `ORBIT_E2E_WORKERS=1` (full 198/198 green) immediately before this run. Under the CI cpu cap, `orbit-app` is shared across concurrently-running workers; this spec counts a discovered household population that another worker's fixtures may still be settling, so a worker-count-dependent race in the count (not the sharing #1080 already removed) is the first thing to check on the next sighting.
-- 2026-09-22 · 4fc18a27, same session · local `scripts/test-e2e-local.sh --ci-cap`, `ORBIT_E2E_WORKERS=4`, desktop-chromium · different symptom, same spec: `signInThroughTheDoor` (`tests/e2e/v19-arrival.spec.ts:79`) timed out after 180000ms waiting for `getByRole('link', { name: 'Orbit W0 Newcomer' })` — the sign-in itself never completed, well before the count assertion the first sighting hit.
-- 2026-09-22 · 4fc18a27, same session · local `scripts/test-e2e-local.sh --ci-cap`, `ORBIT_E2E_WORKERS=8`, desktop-chromium · same symptom as the second sighting: `signInThroughTheDoor` timed out after 180000ms waiting for `getByRole('link', { name: 'Orbit W4 Newcomer' })`. Third sighting; filed as #1085.
-- 2026-09-23 · 079bd351 (#1080, rebased onto dev's 1e2883ae; carries the count fix) · local `scripts/test-e2e-local.sh --ci-cap`, `ORBIT_E2E_WORKERS=4`, desktop-chromium · the sign-in symptom again, not the count one: `signInThroughTheDoor` (`tests/e2e/v19-arrival.spec.ts:79`) exhausted the test's whole 180000ms budget waiting for `getByRole('link', { name: 'Orbit W0 Newcomer' })`, and the `page.waitForResponse` set up before it timed out with it. The same commit ran the full suite green at `ORBIT_E2E_WORKERS=2` immediately before (204 passed, 79 skipped, 9.2m), so the count race the fix addressed is gone and this half is not. Two other specs failed in the same four-worker run, one of them a chromium page crash, which is why this is being read as the capped app and the loaded host rather than as one spec reading another's data. Four workers is above the count the suite ships on (two).
-- 2026-09-23 · 42271b4f · local `scripts/test-e2e-local.sh --ci-cap --spec tests/e2e/v19-arrival.spec.ts --project desktop-chromium`, `ORBIT_E2E_WORKERS=4` · did not reproduce: "Running 9 tests using 1 worker", green in 58.9s. Naming one spec file leaves Playwright only that file plus its own required setup/claim files to schedule, so `ORBIT_E2E_WORKERS` never gets a second file to hand to a second worker — the isolated run cannot exercise the cross-worker contention the four sightings above were taken under, whatever the env var says. Read this as ruling out nothing about the earlier sightings, only as ruling out single-spec isolation as a way to reproduce them.
-  Code read alongside it found a candidate mechanism for the earlier sightings that single-spec isolation structurally cannot exercise: `createSession` (`src/lib/auth/session.ts:58`) takes `pg_advisory_xact_lock` on `ACCOUNT_LIFECYCLE_LOCK_KEY` (`src/lib/auth/authority-locks.ts:2`, `"orbit:account-lifecycle"`) — one key, not scoped to the signing-in user — and holds it for the whole transaction. `provisionIdentity`'s sign-in branch (`src/lib/auth/provision.ts:200`) takes the same key. Every sign-in on the instance, across every worker, therefore queues on one Postgres lock while `orbit-app` grinds through each transaction at 0.6 cpu; that is a real serialisation point, not a deadlock (the queue drains, FIFO-ish, on commit), but it turns concurrent sign-in load from several workers' specs into one queue with no bound tied to the 180s test timeout. Not confirmed against a hang — the single-file run above could not put load behind the lock — so this is the next thing to check with `pg_stat_activity`/`pg_locks` filtered to `hashtextextended('orbit:account-lifecycle', 0)` during a real multi-file four-worker run, not an established cause.
-- 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_webkit`, desktop-webkit (the test now sits at line 159) · failed once, passed on retry.
-- 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit (job 36591), desktop-webkit (the test now sits at line 159) · failed once, passed on retry.
-
 ## v19-create.spec.ts:50 "the create form saves a real item into the orbit"
 
 - 2026-09-22 · 4fc18a27, same session · local `scripts/test-e2e-local.sh --ci-cap`, `ORBIT_E2E_WORKERS=8`, desktop-chromium · `expect(page).toHaveURL(/\/home$/)` at `tests/e2e/v19-create.spec.ts:69` stayed on `/create` after 5000ms instead of navigating to `/home`. Did not occur at 1, 2 or 4 workers on the same code, only at 8. First sighting; no issue yet (an issue on the third, per the testing-and-ci skill).
@@ -235,19 +224,6 @@ page's URL at failure, which this one has to infer.
 
 - 2026-09-27 · 68c86337 (the `dev` merge of !995) · pipeline 1734 / smoke (job 25072) · failed after 20.5s. Passed in pipeline 1740 on d97cb335 (!997), whose diff touches only mail-in failure reasons and cannot reach the signed-out screens. First sighting; an issue on the third.
 
-## fidelity: pocket-home-drawers.spec.js:73 "the dial arrives on a forward arrival, never on Back" (#1164)
-
-- 2026-09-27 · 667f28d8 (the M14 desk batch; its only home change is the desk's `+page.svelte` search wiring, not the pocket dial) · local fidelity gate in the pinned Playwright image on a loaded host · after Back to /home, `expect(dial).not.toHaveClass(/arrive/)` found no dial element within the timeout. Rerun alone in the same image straight after: passed in 4.8s. First sighting.
-- 2026-09-27 · b1157cd6 (#1142/#1159 pocket row changes on `fix/1142-opened-signal`, none in the dial's arrival) · local pocket fidelity in the pinned Playwright image, during the pocket-measure run and another agent's work · failed the same way; rerun alone in the same image: passed in 8.3s. Second sighting.
-- 2026-09-27 · ee496987 (`fix/1131-desk-contrast`, a desk filled-primary button colour change, none in the pocket dial) · local fidelity gate in the pinned Playwright image · failed the same way; rerun alone in the same image: passed in 41.1s (whole file) with test 7 of 13 clean at 3.1s. Third sighting: filed as #1164.
-- 2026-10-01 · d3141346 (!1013, #1183's Firefox projects for tests/e2e; nothing under web/ or tests/fidelity) · pipeline 1926 / fidelity (job 28697) · now at line 95: after Back to /home, `expect(dial).not.toHaveClass(/arrive/)` found no dial element. The same pipeline's smoke ran about eleven minutes longer than usual alongside it on the shared runner.
-- 2026-10-04 · 0bfe9636 (!1021, #1151's audit fixes; the batch's home changes are the pocket's save and leave-guard paths, not the dial's arrival) · pipeline 2079 / fidelity (job 31205) · at line 95 again: after Back to /home, `expect(dial).not.toHaveClass(/arrive/)` failed; 176 of 177 passed in the same job, which ran 17.8 minutes alongside fidelity_webkit and repair_journeys on the shared runner. Fifth sighting, still #1164.
-- 2026-10-04 · 03320b1f (!1021; since the last green run of this test at bc9ba29e the batch touched only the create form, the item page's panel-switch confirm, an admin pocket line and `push/alerts.js`, none on the dial's path) · pipeline 2085 / fidelity (job 31292) · at line 108 again: after Back to /home, `.pocket .mdial` not found within 5s; 176 of 177 passed. Re-run as job 31304 on the same commit: green. Sixth sighting, still #1164; the second in a row on this branch (2079 was the fifth).
-- 2026-10-04 · 0d43ca97 (`dev` after !1021 merged; nothing new on the dial's path since the sighting above) · pipeline 2087 / fidelity (job 31333) · at line 95 again: after Back to /home, `expect(dial).not.toHaveClass(/arrive/)` found no dial within 5s; 176 of 177 passed in the job, which ran 17 minutes alongside `fidelity_webkit` and the acceptance jobs. Seventh sighting, still #1164.
-- 2026-10-04 · 2714596f (!1023, the range-fix batch: scripts, `src/lib` and their tests, nothing under `web/`) · pipeline 2095 / fidelity (job 31389) · the same failure at line 95, the job's only red check; a 17.5-minute run in the full acceptance stage. Eighth sighting, still #1164.
-- 2026-10-04 · 6329566d (`dev`, the merge of !1023; nothing new on the dial's path) · pipeline 2098 / fidelity (job 31451) · at line 108: after Back to /home, `.pocket .mdial` not found within 5s; 176 of 177 passed. Ninth sighting, still #1164.
-- 2026-10-04 · no harness change on `fix/1208-webkit-fidelity-wait`: the approved wait (the dial attached within 30s, then judged once) failed 3 of 5 in the pinned image on an idle host, the dial never coming back. The address reads /item/i-mot before the item screen has rendered; the test's Back lands in that gap, the popstate to /home arrives while the forward navigation is still finishing, and the item screen then renders under /home and stays (a probe: popstate at 181-203ms, the item's title at 271-303ms, no dial 3s later). Waiting for the item screen before Back passed 4 of 4. Not load: a navigation race in the product, left for a ruling.
-
 ## sign-in-methods.spec.ts:158 "a reader changes their password from the helm, inline" — desktop-chromium
 
 - 2026-09-27 · d97cb335 (!997) · pipeline 1740 / smoke (job 25230) · `.note.ok` never showed "password changed" within 5000ms at line 190. Retried as job 25322 on the same commit: green. !997 touches only mail-in failure reasons and cannot reach the password form. First sighting; an issue on the third.
@@ -280,47 +256,6 @@ page's URL at failure, which this one has to infer.
 
 - 2026-09-30 · 0135f516 (!1006, the batch that built this film chapter) · pipeline 1855 / fidelity (job 27168) · `page.waitForFunction` hit the 60000ms test timeout. The same test passed on pipeline 1836 (same film code), and the job retried as 27270 on the same commit was green. First sighting; an issue on the third.
 
-## fidelity: door-station.spec.js:133 "the ring's hand-over to a card at 390x664, motion no-preference › the ring travels from the door's station to the card's" — #1306 — quarantined 2026-10-16 (agent-infra#30): runs as `fidelity:quarantine`, outside the merge gate
-
-- 2026-10-01 · d3141346 (!1013, #1183's Firefox projects for tests/e2e; nothing under web/ or tests/fidelity) · pipeline 1926 / fidelity (job 28697) · "a jump between frames at 317ms": 38.9 against the < 20 bound. The full fidelity runs on !1010 and !1012 just before it passed, and the same pipeline's smoke ran about eleven minutes longer than usual alongside it on the shared runner. First sighting; an issue on the third.
-- 2026-10-04 · bc9ba29e (!1021, #1151's audit fixes; the only door-side change since the green run on bcaf64e0 is a waiting-card timeout constant, nothing in the ring's motion) · pipeline 2064 / fidelity (job 31041) · "a jump between frames at 280ms": 25.5 against the < 20 bound, same shape as the first sighting. The same test passed on pipeline 2054 ten commits earlier. Second sighting; an issue on the third.
-- 2026-10-07 · 5a12b2bd (!1043, the create-form batch; nothing in the ring's motion) · pipeline 2233 / fidelity (job 33106) · "a jump between frames at 328ms": 20.008 against the < 20 bound. Third sighting: filed as #1306.
-- 2026-10-12 · 9232c92c (!1064, #1371's shared door import) · pipeline 2559 / fidelity (job 35977) · "a jump between frames at 270ms": 22.06 against the < 20 bound, the job's only failure (162 passed). Retried as job 35991 on the same commit: green. Fourth sighting.
-- 2026-10-13 · 01666c27 (`fix/1408-invented-names`, a fixture-name sweep; nothing in the ring's motion) · local `pnpm fidelity`, run while other Playwright captures loaded the host · "a jump between frames at 282ms": 26.8 against the < 20 bound, the run's only failure (174 passed). Green on a rerun of door-station.spec.js alone on the same code (29 passed). Fifth sighting, still #1306.
-- 2026-10-13 · a76e6d44 (door branch; nothing in the ring's motion since the fifth sighting) · local `pnpm fidelity`, run while the full e2e suite loaded the host · "a jump between frames at 294ms": 28.9 against the < 20 bound, the run's only failure (488 passed). Green on a rerun of door-station.spec.js alone on the same code. Sixth sighting, still #1306.
-- 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / fidelity (job 36171) · `a jump between frames at 263ms` (spec now at line 130); 174 other fidelity tests and all 488 pocket measurements passed. Seventh sighting.
-- 2026-10-14 · 00987a9d (door branch, !1066) · pipeline 2590 / fidelity retry (job 36215) · `a jump between frames at 402ms`; 174 others and all 488 pocket measurements passed. Eighth sighting. Owner merged !1066 with this red (12b).
-- 2026-10-15 · 0a2cec29 (dev, !1067 merged) · dev pipeline 2628 / fidelity (job 36373) · `a jump between frames at 303ms`: 23.19 against the < 20 bound, the job's only failure (174 passed, all 488 pocket measurements passed). Still #1306.
-- 2026-10-16 · 614118ff (!1069; nothing in the ring's motion) · pipeline 2649 / fidelity (jobs 36573 and 36574, two retries in a row) · `a jump between frames at 314ms`, then `at 235ms`, each the job's only failure. Quarantined the same day (owner decision on agent-infra#30).
-
-## tour-pocket-webkit.spec.js "plays end to end at 430x932 under normal motion" — pill moving between places (#1174)
-
-- 2026-10-01 · c952834f · local `pocket-webkit` (Playwright image, WebKit) · one fault, "pill moving between places (dim raised) · /create · ch2": the pill was mid-move for over the check's 3s at one sample, with the page painting 9.6 frames a second on a busy host. Green on an immediate rerun of the test alone on the same code (12.2 frames a second). The move is a 350ms fade, so this is the sampler's wall-clock bound under load.
-- 2026-10-01 · b6154cd4 · local `pocket-webkit`, full project run (24.8 minutes, host load average above 20) · the same fault, 5 samples. Second sighting.
-- 2026-10-01 · b6154cd4 · the test alone, load average 22.7, 5.0 frames a second · the same fault, 3 samples. Third sighting.
-- 2026-10-01 · b6154cd4 · the test alone, 10.1 frames a second · the same fault, 2 samples. Fourth sighting. The same test passed on round 4's tour code (dad90e83) at 11.3 frames a second, and then on b6154cd4 at 9.7 frames a second. Round 5 changes nothing in chapter 2, /create or the pill. Past the third sighting, so it needs an issue; not filed from this session (#1174 round 5 note).
-- 2026-10-01 · 854f84a4 · local `pocket-webkit`, the sibling play "plays through chapter 3 at 390x844", run with four other tests, 6.0 frames a second · "pill faint (dim raised) · /create · ch2", 8 samples: the same pill at the same place, caught at low opacity rather than marked as moving. Green on a rerun of the test alone on the same code (9.8 frames a second). Round 6 changes nothing in chapters 2 or 3, /create or the pill. Fifth sighting; the issue is #1184.
-- 2026-10-03 · 60ada53e (!1018) · pipeline 1987 / fidelity_webkit (job 29946) · "pill moving between places (dim raised) · /create · ch2", 5 samples, 7.0 frames a second at 430x932 — same shape and the same degraded-host range as every sighting above. Sixth sighting, still #1184.
-- 2026-10-04 · bc9ba29e (!1021) · pipeline 2064 / fidelity_webkit (job 31042) · "pill faint (dim raised) · /create · ch2", 6 samples, in the 24.5-minute run alongside the full acceptance stage. Seventh sighting, still #1184.
-- 2026-10-04 · 0bfe9636 (!1021; its tour changes are W3's shared demo-body scaffolding, film vocabulary and veil tap blocking, none in the pill's motion) · pipeline 2079 / fidelity_webkit (job 31206) · "pill moving between places (dim raised) · /create · ch2", 4 samples, in a 23.6-minute run alongside fidelity and repair_journeys. Eighth sighting, still #1184.
-- 2026-10-04 · 0d43ca97 (`dev` after !1021; the batch's tour changes are the film's own transport leak fix, not chapter 2, /create or the pill) · pipeline 2087 / fidelity_webkit (job 31334, 22.0 minutes, alongside `fidelity` and the acceptance stack on the shared runner) · the same assertion at line 671, "the pill in front and never faint; the callouts and rings where the design puts them", failed on every attempt including Playwright's in-job retry; 25 of 26 passed. First sighting in CI rather than locally; still #1174.
-- 2026-10-04 · 6329566d (`dev`, the merge of !1023; no `web/` change in it) · pipeline 2098 / fidelity_webkit (job 31452) · "pill faint (dim raised) · /create · ch2", 7 samples, the page painting 6.4 frames a second at 430x932; 25 of 26 passed. Ninth sighting, still #1184.
-- 2026-10-04 · harness change on `fix/1208-webkit-fidelity-wait` (82041eb4): a pill fault now counts once it has lasted 60 painted frames (moving: 180) rather than 1000ms (3000ms) of wall time. Ten runs of the test in the pinned image passed at 12 to 16 frames a second.
-
-## tour-pocket-webkit.spec.js "suggested values give way to real text (#1174 round 4)" — at 430x932 only (#1208)
-
-- 2026-10-03 · 60ada53e (!1018) · pipeline 1987 / fidelity_webkit (job 29946) · green: this test is not in the job's failure list at this commit.
-- 2026-10-03 · 60ada53e, unchanged · local `pocket-webkit`, full project run · "add-add: #c8-cost's suggestion shows through the film's typed line". 390x844 and 360x780 passed in the same run. First local sighting.
-- 2026-10-03 · 60ada53e, unchanged · local `pocket-webkit`, full project run (the app server restarted fresh, nothing in `web/build` touched this time) · the same fault, same field, same size only. Second local sighting.
-- 2026-10-04 · 0bfe9636 (!1021; its tour changes are W3's shared demo-body scaffolding, film vocabulary and veil tap blocking, none in the ghost cover or #c8-cost) · pipeline 2079 / fidelity_webkit (job 31206) · "add-add: #c8-cost's suggestion shows through the film's typed line", the same field and size as both local sightings. Third sighting: filed as #1208.
-- 2026-10-04 · ad005a79 (!1023, the range-fix batch; its only `web/` change is `web/tests/rolldown-repro/`, so the tour and `/create` code are byte-identical to `dev` at 0d43ca97) · pipeline 2096 / fidelity_webkit (job 31410) · "add-add: #c8-cost's suggestion shows through the film's typed line", the same field and size; 25 of 26 passed in a 21.5-minute run. Fourth sighting.
-- 2026-10-04 · ad005a79, unchanged · pipeline 2096 / fidelity_webkit (job 31421, the retry of 31410) · the same fault again, 25 of 26 passed in 20.1 minutes. Fifth sighting. The same check passed twice today on the identical tour code (`dev` 0d43ca97: jobs 31293 and 31334), so this is still the flake and not batch-caused, but it is now failing about half of WebKit runs: #1208's "every run" caveat is close, and the fix for the check moves ahead of the next WebKit-heavy batch. Retried as job 31422 (outcome recorded on #1208).
-
-Both local sightings are on the exact commit CI passed, which is the flake definition itself (fails and passes on unchanged code) rather than grounds for a third sighting's issue. A targeted diagnostic (jump to add-typing, play on to add-add, the real test's own sequence, repeated twice) measured the ghost div's box against the real `#c8-cost` input's box — identical to the sub-pixel, including the fraction — and a pixel-for-pixel compare of the field with and without its placeholder at that exact moment came back at 0 differing pixels both times: the diagnostic could not reproduce what the real test caught. The cause is likely a paint-timing race between WebKit's native placeholder and the ghost's opaque cover rather than a sizing or placement defect, but that is not established — not fixed. The third sighting is on changed code (!1021), so if the fault starts appearing on every WebKit run after the merge it is batch-caused, not this flake — #1208 carries that caveat.
-
-- 2026-10-04 · harness change on `fix/1208-webkit-fidelity-wait` (0098575b): each typed-over field is judged from a settled frame (shot until two in a row match, at most 20) instead of 350ms after the hold. Ten isolated runs in the pinned image could not reproduce the fault before or after the change, so CI is the proof.
-- 2026-10-05 · cause found, on the pre-preview batch (`217496af`, `b9a84c57`): once the second picture was itself a settled frame, the 430x932 case failed 3 of 3 on `#c8-name`, and a probe showed why: removing the placeholder of a field half off the top of the screen makes WebKit scroll the page 10 px (scroll anchoring; scrollY 475 to 485), so the second picture was of a different strip (5.92% of pixels differing; 0.0% scrolled back; the film's cover box equals the input's). The old check sometimes shot before the scroll, hence the flake. The check now restores the scroll position before each picture: 9 of 9 across the three sizes and the whole file 24 of 24 in the pinned image. Not a product fault; #1208 closes with the batch.
-
 ## v19-layout-and-themes.spec.ts:282, /household/[id] axe check — desktop-firefox, desktop-chromium — #1307 — quarantined 2026-10-16 (agent-infra#30)
 
 - 2026-10-03 · 594b745a (!1017) · pipeline 1999 / smoke_firefox (job 30199) · two theme packs in one run, each a real axe violation rather than a timeout: "/household/[id] in the clouds pack has no WCAG A/AA violations" reported one violation, `color-contrast` on `.zero`; "/household/[id] in the dawn pack has no WCAG A/AA violations" reported the same, `color-contrast` on `.zero`. The merged report's own outcome field marks both "expected" (its usual sign that a later attempt passed), but that later attempt's own result is not present in this job's artifact, so this entry records only the one failing attempt actually captured — not why or how it later passed, and not whether other packs or screens share the same `.zero` contrast gap without being caught. First sighting; an issue on the third.
@@ -343,7 +278,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-08 · 89ca8357 (`fix/door-site-whole`, the door batch; nothing in it touches administration) · local `scripts/test-e2e-local.sh --project desktop-webkit`, the whole suite inside the CI Playwright image, with other sessions using the host · `page.evaluate: TypeError: Load failed` in the spec's seeding fetch; green on the rerun of the file alone against a fresh stack on 64a4ad67 (same administration code). Second sighting (the first is above, same words, in CI).
 - 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit_mobile (job 36592), mobile-webkit · failed once, passed on retry.
 
-## v19-feedback-recovery.spec.ts:406 "a save on /create that cannot reach Orbit leaves focus where the reader was" — mobile-webkit, desktop-webkit, desktop-chromium, mobile-chromium — #1313 — quarantined 2026-10-16 (agent-infra#30)
+## v19-feedback-recovery.spec.ts "a save on /create that cannot reach Orbit is announced, and the act can be repeated by keyboard" — mobile-webkit, desktop-webkit, desktop-chromium, mobile-chromium — #1313 — quarantined 2026-10-16 (agent-infra#30). The focus check beside it (:406) was rewritten to wait for its end state (#1447) and is out of quarantine; the sightings below that name the focus check predate that.
 
 - 2026-10-05 · c352cf77 (same run and same unchanged web tree as the heading above) · pipeline 2188 / smoke_webkit_mobile (job 32287) · `focus is not dropped to the page` at line 373: `focusedElement` was `body` after the staged failure was shown, 5.9 s in; the in-job retry passed (6.5 s), so Playwright counted it flaky. First sighting; an issue on the third.
 - 2026-10-07 · f6939a21 (create-form batch with ADR-0033 merged; nothing in it touches the save path this journey stages) · local targeted run, desktop-webkit, inside CI's Playwright image (#1235), no retries · `focus is not dropped to the page` at line 384: `focusedElement` was `body`. Same race on the other WebKit project; #1233 (v0.4) owns the fix. Second sighting.
@@ -385,15 +320,6 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-15 · a6168fe6 (!1069, v0.3 security batch) · pipeline 2640 / smoke_webkit (job 36460) · `#1253: the menu is still open after sign-out started` at line 303 (the menu layer still visible after 2 s); passed on the in-job retry. Second sighting.
 - 2026-10-10 · a318e11b (#1342 batch) · pipeline 2382 `smoke_firefox` (job 34367) · failed both attempts, and once in three local desktop-firefox runs after the worker fix. Cause found: the sign-in-again challenge opened on the busy screen, then moved to the form once GET /api/auth/methods answered, rebuilding its password field under Playwright's fill (the trace shows the field empty and the button disabled). Fixed with tests/unit/archive-challenge-opens-once.test.mjs; four local runs green after.
 
-## v19-mail-collection.spec.ts:239 "a spoofed PDF travels the real pipe" on desktop-webkit, desktop-firefox, desktop-chromium — #1415 — quarantined 2026-10-16 (agent-infra#30)
-
-- 2026-10-06 · 4bb20449 (dev, !1035 merged) · local full desktop-webkit suite inside CI's Playwright image (#1235), four workers · the pipe worked (mail collected, suggestion row shown, drawer opened, "Add to orbit" tapped), then the test spent its 240 s budget waiting for "tap again to approve": the page snapshot at timeout has neither the drawer nor the suggestion row. The app log shows no receipt approval, dismissal or error in that window. Passed in a targeted run 3 minutes later (56 s). Not the scanner (ready in 15 ms at every check) and not the certificate (#1236, fixed before this run). Candidates: the cross-file database reset gate wiping the receipt under a parallel worker, or a WebKit race on the first tap; a trace is needed to tell, and local runs keep none.
-- 2026-10-08 · 687cb0f4 (door batch, !1044; its home changes are the flight and the menu, not the suggestion rows or their drawer) · pipeline 2251 / smoke_firefox (job 33370), desktop-firefox · first attempt: the row was shown and clicked, and the drawer (`.itemview.suggestview`) never appeared in 5 s; the snapshot still says "Inbox — 1 waiting". In-job retry: the drawer opened and the approval was sent (`POST /api/reviewed-intake/approve` 200, then home re-read the workspace and the inbox), yet `.item.suggest` stayed at 1 for 30 s; the retry's mail was a second one, so the first attempt's unapproved receipt may be the row that stayed (the trace keeps no response bodies to tell). Passed in pipeline 2248 on the same home code, and in dev pipelines 2244, 2235 and 2230. Second sighting.
-- 2026-10-09 · 40850119 · dev push pipeline 2297 / smoke_firefox (job 33780) · `.itemview.suggestview` not visible after the row click (line 352), on the first attempt and the retry, so the job failed. Passed on desktop-firefox in pipelines 2290 and 2313.
-- 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / smoke (job 36176), desktop-chromium · `apiRequestContext.get: socket hang up` in `waitForReceipts`, first attempt and retry; the job failed. Fourth sighting; #1415 filed.
-- 2026-10-15 · 0a2cec29 (dev, !1067 merged) · dev pipeline 2628 / smoke_firefox (job 36379), desktop-firefox · the test (now :238) failed its first attempt and the retry, the job's only failure (252 passed, 3 flaky). Still #1415.
-- 2026-10-16 · 9c4b8b88 (`preview` after !1070; same tree as 6f768016, green in pipelines 2655 and 2657) · pipeline 2658 / smoke_firefox (job 36673), desktop-firefox, now at :238 · failed on the first attempt AND on retry #1: the suggestion drawer `.itemview.suggestview` never opened (:301), then `.item.suggest` count wrong on the retry. Job retried as 36697.
-
 ## web/tests/fidelity screens.spec.js "household"
 
 - 2026-10-06 · f3e61aeb (#1248, #1251; neither touches the household screen) · local `pnpm --filter orbit-web fidelity` · drifted 0.1109% once, passed on the next run on the same code. First sighting.
@@ -407,27 +333,6 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_webkit` · failed once (10.4s), passed on retry. First sighting.
 - 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / smoke_webkit (job 36178) · "(phone-narrow, world forced)" at line 193, desktop-webkit, failed once and passed on retry.
 - 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_webkit (job 38686) · failed once, passed on retry. Third sighting: filed as #1505.
-
-## sign-out-descent.spec.ts:195 "sign out from home's menu reaches the dusk (phone-narrow, world forced)" on mobile-webkit, desktop-webkit — quarantined 2026-10-16 (agent-infra#30)
-
-- 2026-10-08 · 687cb0f4 (door batch, !1044; the hatch's descent and this spec are new in it) · pipeline 2251 / smoke_webkit_mobile (job 33372) · `#1262: the menu is still open after sign-out started` at line 198, on the first attempt and the in-job retry. The menu lost its `open` class, but its layer kept `visibility: visible` past the 2 s check: the layer hides 300 ms after closing (Sheet.svelte), and the retry's screencast has no frame from 0.2 s to 2.1 s after the press, so the page drew nothing in that time. The forced world was on in this run ("flight world: on", "moon on the GPU" in the console); pipeline 2248's pass on the same code flew "on the canvas". Suspected, not established: drawing the forced world without a GPU stalls WebKit's rendering as the descent starts. First sighting.
-- 2026-10-09 · 1e0299ab (engine batch, !1050; no front-end change but one household page's time-zone list) · pipeline 2313 / smoke_webkit_mobile (job 33895) · the same `#1262: the menu is still open after sign-out started` at line 198, first attempt and in-job retry. The job was re-run as 33901. Second sighting.
-- 2026-10-10 · a318e11b (v0.3 batch, !1054) · pipeline 2382 / smoke_webkit (job 34368), **desktop-webkit**, same world-forced test · the same `#1262: the menu is still open after sign-out started`, first attempt and in-job retry. Filed as #1367 after the third sighting; this is the first on desktop-webkit.
-- 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 35081, the first re-run) · the same `#1262: the menu is still open after sign-out started`, first attempt and in-job retry. Fourth sighting; noted on #1367.
-- 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35145, the second re-run) · failed its first attempt, passed on the in-job retry.
-- 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · the same `#1262: the menu is still open after sign-out started` at line 198.
-- 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36018, the second re-run; the job passed) · `#1262: the descent did not keep time`, 13224 ms against 9000; passed on the in-job retry.
-- 2026-10-13 · 7906d9f4 (#1316 audit fixes; no change to the sign-out descent, its spec, or `web/src/lib/flight`) · local `scripts/test-e2e-local.sh --project mobile-webkit`, no retries · the same `#1262: the menu is still open after sign-out started` at line 198. Sixth sighting, the first outside CI (#1367).
-- 2026-10-15 · 34384732 (v0.3 final batch, !1067; no change to the sign-out descent, its spec or `web/src/lib/flight` since 15c029b7) · pipeline 2624 / smoke_webkit (job 36326), **desktop-webkit**, line 193 · first attempt: `#1262: the menu is still open after sign-out started` (spec :216); in-job retry: the `Sign back in` link not found after /logout (spec :227). Still #1367.
-- 2026-10-15 · a6168fe6 (!1069, v0.3 security batch) · pipeline 2640 / smoke_webkit (job 36460), **desktop-webkit**, line 193 · first attempt: `expect(locator).toBeVisible() failed`, the `Sign back in` link not found within 10 s after /logout (spec :227); passed on the in-job retry. Still #1367.
-- 2026-10-15 · a6168fe6 (!1069) · pipeline 2640 / smoke_webkit (job 36471, the re-run), **desktop-webkit**, line 193 · first attempt: `#1262: the menu is still open after sign-out started` (spec :216); passed on the in-job retry. Still #1367.
-- 2026-10-16 · 6f768016 (`dev` merge of !1069) · pipeline 2655 / smoke_webkit (job 36622), desktop-webkit · failed once, passed on retry.
-- 2026-10-16 · 6f768016 (!1070, `dev` -> `preview`) · pipeline 2657 / smoke_webkit_mobile (job 36651), mobile-webkit · failed once, passed on retry.
-
-## sign-out-descent.spec.ts:274 "sign out from another page's menu plays the descent (phone-narrow)" on desktop-webkit — quarantined 2026-10-16 (agent-infra#30)
-
-- 2026-10-08 · 91df467a (door batch, !1044) · CI pipeline 2254 `smoke_webkit` · failed once, passed on retry. First sighting since the spec counts page errors from /settings once it is the document (ddab9b62).
-- 2026-10-16 · 6f768016 (`dev` merge of !1069) · pipeline 2655 / smoke_webkit (job 36622), desktop-webkit · failed once, passed on retry.
 
 ## v19-keyboard.spec.ts:338 "home: every control is reachable…" — Tab reached controls the snapshot missed
 
@@ -465,12 +370,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-10 · e0d5d796 (`dev`, merge of !1057; its head 327d32c1 passed fidelity in pipeline 2440, and the merge adds only `scripts/install.sh`, its test and `scripts/ci/repin-base-image.sh`) · pipeline 2461 / fidelity (job 35271) · "/home · row-complete meets the pocket floors" at 390x664, `locator.waitFor` ran to the 60 s test timeout; 487 of 488 passed.
 - 2026-10-14 · 00987a9d (door branch, !1066) · pipeline 2590 / fidelity (job 36196) · `pocket-measure.spec.js:544` "pocket measurement at 390x664 › /home · row-open meets the pocket floors" — `locator.waitFor: Test timeout of 60000ms exceeded`; 487 others passed. Diff since pipeline 2588 (where it passed) is an e2e keyboard spec and docs only; job retried as 36215.
 - 2026-10-16 · 614118ff (!1069; one e2e spec and this file changed since pipeline 2645, where fidelity passed) · pipeline 2649 / fidelity (job 36559) · "pocket measurement at 360x640 › /home · row-edit": `openRow` tapped the Car MOT row and the panel never opened (`locator.waitFor: Test timeout of 60000ms exceeded`); 487 others passed. Retried as 36573.
-
-## tour-pocket-webkit.spec.js:541 "plays through chapter 3 at 360x780 under normal motion" — chapters skipped — #1449 — quarantined 2026-10-16 (agent-infra#30)
-
-- 2026-10-09 · abcb06f1 · pipeline 2301 / fidelity_webkit (job 33823) · the film reached only chapters 1 and 2 (`done` false, chapters `[0, 1]`) in 3.4 min. Neither of the next commits (63354fb6, 6afb412e) touches chapters 1–3; on 6afb412e, locally in the pinned image, it passed. First sighting.
-- 2026-10-10 · e0d5d796 (`dev`, merge of !1057; its head 327d32c1 passed fidelity_webkit in pipeline 2440, and the merge touches no web file) · pipeline 2461 / fidelity_webkit (job 35272) · at 390x844 this time: "the film plays as far as this phone watches it" false and "every chapter, in order, none skipped" short by two; 25 of 26 passed. Second sighting.
-- 2026-10-16 · 9c4b8b88 (`preview` after !1070; same tree as 6f768016, green in pipelines 2655 and 2657) · pipeline 2658 / fidelity_webkit (job 36668), at 390x844 · "no hole or ring snaps on or off between one frame and the next" (a frame-to-frame timing check). Job retried as 36698.
 
 ## install-orchestrator.test.ts "runInstall: success > installs a pre-provisioned target unattended: assets from the image, secrets, migration, digest (#6, #42, #45, #53)"
 
@@ -516,21 +415,11 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit_mobile (job 36492), mobile-webkit · `Error: home (pocket) with the item drawer open`: `Tab reached a control the screen does not show as visible` for the drawer's Snooze, Complete, Attach, Retire, Edit and Copy link buttons (`support/keyboard.ts:322`); passed on the in-job retry. Still #1381.
 - 2026-10-16 · 6f768016 (!1070, `dev` -> `preview`) · pipeline 2657 / smoke (job 36648), mobile-chromium · failed once, passed on retry.
 
-## sign-out-descent.spec.ts:274 "sign out from another page's menu plays the descent (phone-narrow)" on mobile-webkit — #1367 — quarantined 2026-10-16 (agent-infra#30)
-
-- 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (jobs 35081 and 35145, both re-runs) · failed its first attempt and passed on the in-job retry, in both. First sightings on mobile-webkit; the heading above is desktop-webkit.
-- 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · `#1249: the menu is still open after sign-out started` at line 284. Second sighting.
-- 2026-10-16 · d8fa9475 (!1069) · pipeline 2645 / smoke_webkit_mobile (job 36538), mobile-webkit · now at :271: failed its first attempt with `Error: #1253: the menu is still open after sign-out started`; passed on the in-job retry.
-
 ## v19-document-preview.spec.ts:401 "the preview's pager turns a multi-page document in place, and the reader opens on its page" — mobile-webkit, desktop-webkit — #1501
 
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934) · failed its first attempt (9.0 s), passed on the in-job retry (13.5 s). First sighting.
 - 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit (job 36591), desktop-webkit · now at :401: failed once, passed on retry.
 - 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed every attempt: at :423 the image stayed "Page one of pager-proving.pdf" where "Page 2" was expected (20 s). Third sighting: filed as #1501. Job retried as 38651.
-
-## tour-pocket-webkit.spec.js:1284 "chapter 8 plays through on a new household (#1174 round 6)" — at 390x844, chapters 7 to 9
-
-- 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / fidelity_webkit (job 34927) · `chapters 7, 8 and 9 in order, none skipped` did not hold (soft assertion). Passed on the re-run, job 35082. First sighting.
 
 ## v19-upload-limit.spec.ts:76 "an administrator lowers the upload limit, an over-limit upload is refused, and the default comes back" — desktop-chromium
 
@@ -539,10 +428,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-tour.spec.ts:170 "a first-time reader gets the film, works its transport, and a second arrival stays silent" — desktop-webkit
 
 - 2026-10-13 · 3a297cc8 (!1065) · pipeline 2570 / smoke_webkit (job 36069) · failed its first attempt in 3.4 s, passed on the in-job retry. First sighting.
-
-## sign-out-descent.spec.ts:274 "sign out from another page's menu plays the descent (phone-narrow)" on desktop-chromium — quarantined 2026-10-16 (agent-infra#30)
-
-- 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke (job 36098) · failed its first attempt, passed on the in-job retry. First sighting.
 
 ## v19-administration.spec.ts:146 "document jobs and the two mail tests (#1071) › the relay test's pill and reason ..." — desktop-firefox
 
@@ -565,11 +450,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-14 · 0c6e60bf · local `scripts/test-e2e-local.sh` full run, 2 workers, stopped at 681/1413 under host load · `apiRequestContext.get: socket hang up` on `GET /api/auth/session` from the household-cleanup helper, after 9.9s. Passed alone on the same code and a fresh stack (`--reuse … --project desktop-firefox --spec tests/e2e/v19-create.spec.ts:399`, 9.7s). First sighting.
 
-## local-sign-in.spec.ts:330 "no sign-in card sits over the arrival with no climb owed" — desktop-chromium
-
-- 2026-10-15 · 34384732 (v0.3 final batch, !1067; nothing since 15c029b7 touches the arrival, the root route, sign-in or this spec) · pipeline 2624 / smoke_local_only (job 36328) · `the arrival, no climb: the frame sampler never saw the newcomer's frame` at line 275 (`frames` 0) after 2.2s; the spec sets `retries: 0`, so no retry. Locally `scripts/test-e2e-local.sh --profile local-only --project desktop-chromium` passed 3/3. Suspected, not established: no animation frame ran between `.nf` appearing and the check on a loaded runner (the sampler is a `requestAnimationFrame` loop, `:248-261`). First sighting.
-- 2026-10-15 · 53133760 (!1068, #1431: changes only `launcher/pin.json`) · pipeline 2637 / smoke_local_only (job 36409) · the same `the arrival, no climb: the frame sampler never saw the newcomer's frame` (expected > 0); retried as job 36420 by the launcher session. Second sighting.
-
 ## GitLab outage during artifact transfer (502 / connection refused)
 
 - 2026-10-15 · a6168fe6 (!1069, v0.3 security batch) · pipeline 2640 / acceptance and repair_journeys (jobs 36463 and 36464), 20:46-20:54 UTC · both failed while moving artifacts, GitLab answering 502 or refusing connections; both passed on retry (jobs 36469 and 36470) with no change. First sighting.
@@ -581,10 +461,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 - 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed once, passed on retry. Third sighting: filed as #1503.
 - 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke (job 38684), desktop-chromium · failed once, passed on retry. Now seen on Chromium too.
 
-## v19-archive.spec.ts:273 "an armed desk button relaxes back after 4 s without a second tap (#1342)" — desktop-webkit
-
-- 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit (job 36491), desktop-webkit · failed its first attempt (23.8 s), passed on the in-job retry. No error text printed: the job was cut off at its 30-minute timeout before the report. First sighting.
-
 ## v19-create.spec.ts:207 "a document picked on the create form is attached to the saved item" — desktop-webkit
 
 - 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit (job 36491), desktop-webkit · failed its first attempt (9.8 s), passed on the in-job retry. No error text printed: the job was cut off at its 30-minute timeout before the report. First sighting.
@@ -592,10 +468,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-screen-reader.spec.ts:312 "/household/[id]" — desktop-webkit
 
 - 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit (job 36491), desktop-webkit · failed its first attempt (1.8 s); the live log shows the in-job retry passing (3.1 s). No error text printed: the job was cut off at its 30-minute timeout before the report. First sighting.
-
-## v19-document-preview.spec.ts:162 "pressing a paper opens the preview, and Esc closes it" — desktop-chromium
-
-- 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke (job 36589), desktop-chromium · failed once, passed on retry. First sighting; an issue on the third.
 
 ## v19-create.spec.ts:1022 "the desk's lane offers 'not this one' while it is still reading, and pressing it closes the lane" — desktop-webkit
 
@@ -630,10 +502,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-21 · 8a841e3c (!1074) · pipeline 2833 / `smoke_webkit` job 38057 · both cases failed first and passed on Playwright's retry in the same run ("2 flaky"), which fails the job; green on pipeline 2834 (b331397f, installer-only change, nothing under `web/`). First sighting.
 
-## local-sign-in.spec.ts:352 "no sign-in card sits over the chooser and the count" — desktop-chromium
-
-- 2026-10-21 · b331397f (!1074; installer-only change since the green 8a841e3c run) · pipeline 2834 / `smoke_local_only` job 38082 · "the chooser: the frame sampler never saw the newcomer's frame"; passed on the retried job 38096, same commit. First sighting.
-
 ## settings-text-size-tab-stop.test.mjs:128 "settings, phone layout: the text size tab stop starts on the applied step > with standard applied, the one tab stop is the ticked tile"
 
 - 2026-10-22 · 2b120e89 (nothing near settings since the green bea1293c run) · local `scripts/test-backend.sh`, same 919 s run as preview.test.ts:760's second sighting · timed out at the 5 s default; the file alone passed at once. Wall-clock-under-load shape. First sighting.
@@ -645,10 +513,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## mail-relay-sender-check-failures.test.ts "finding 1: a mailer that never answers > ends the request at the send deadline (shortened to 300 ms here) with a stable 503"
 
 - 2026-10-22 · 2f16facd (!1081; browser-test and flakes-log changes only since the green 39134f33 run, nothing near mail) · pipeline 2878 / `integration` job 38382 · `expected 429 to be 503`: the request met the rate limit instead of the send deadline. Retried as job 38407. First sighting.
-
-## tour-pocket-webkit.spec.js:1188 "the danger-zone ring pulses red while chapter 5 shows it (#1174 round 5) › on the desk, normal motion" on pocket-webkit
-
-- 2026-10-22 · 2f16facd (!1081; e2e-test and flakes-log changes only since the green 39134f33 run, nothing under `web/`) · pipeline 2878 / `fidelity_webkit` job 38381 · "the danger ring red, pulsing (or still, reduced) and gone after"; 23 others passed. Retried as job 38420. First sighting.
 
 ## v19-mail-sender-check.spec.ts:123 "a member sends the check email from the settings mail screen, opens the link, and the relay starts listening" — desktop-webkit
 

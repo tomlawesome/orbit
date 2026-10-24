@@ -3,7 +3,7 @@ import { householdRegister } from "./support/households";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { bodyClassAdds, bodyClassSeen, witnessBodyClasses } from "./support/arrival";
+import { bodyClassAdds, bodyClassOrder, bodyClassSeen, witnessBodyClasses } from "./support/arrival";
 import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -156,8 +156,7 @@ test.afterAll(async ({ browser }) => {
   }
 });
 
-/* #1085: quarantined 2026-10-16 (agent-infra#30) -- runs outside the merge gate. */
-test("the newcomer's arrival: the climb, the labelled sky, the real count, the question", { tag: ["@quarantine"] }, async ({ page, browser }) => {
+test("the newcomer's arrival: the climb, the labelled sky, the real count, the question", async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the journey is asserted on the desk dialect");
   test.setTimeout(180_000);
 
@@ -215,9 +214,9 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: 20_000 }).toBe(true);
   /* #1263: once. */
   expect(await bodyClassAdds(page, "showwarp")).toBe(1);
-  /* and while it flies, the question has not arrived: the staging is
-     class-driven, so the beat that has not happened is a class that is absent */
-  await expect(page.locator("body")).not.toHaveClass(/belong/);
+  /* "while it flies, the question has not arrived" is an ORDER, checked below
+     against the witness once the question has landed: asking <body> at one
+     moment inside a 4.6 s window is a clock reading, not a behaviour. */
 
   /* THE LANDING: the labelled sky, every system a bearing and a name. */
   await expect(page.locator(".minisys").first()).toBeVisible({ timeout: 30_000 });
@@ -248,13 +247,26 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   const drawn = await page.locator(".minisys").count();
   expect(drawn).toBeGreaterThan(0);
   expect(drawn).toBeLessThanOrEqual(discovered);
-  await expect(page.locator("body")).toHaveClass(/counting/, { timeout: 30_000 });
-  await expect(page.locator(".nf .disc .big")).toHaveText(String(discovered));
-  await expect(page.locator(".nf .disc p")).toContainText("discovered in this universe");
+  /* the count beat is a 3.2 s window of `counting`: asked of the witness, for
+     the reason the climb is. The number itself is in the document throughout,
+     so it is read for what it says, not for when. */
+  await expect.poll(() => bodyClassSeen(page, "counting"), { timeout: 30_000 }).toBe(true);
+  await expect(page.locator(".nf .disc .big")).toHaveText(String(discovered), { timeout: 30_000 });
+  await expect(page.locator(".nf .disc p")).toContainText("discovered in this universe", { timeout: 30_000 });
 
   /* AND THEN THE QUESTION, in the space the count left. */
   await expect(page.getByRole("heading", { name: "where do you belong?" })).toBeVisible({ timeout: 30_000 });
   await expect(page.locator("body")).not.toHaveClass(/counting/);
+  /* THE ORDER of the staging, from the witness: the climb, then the count,
+     then the question -- the question had not arrived while the climb flew.
+     The heading is in the document, transparent, before `belong` is put on
+     (the card arrives a beat after the count), so wait for the class itself. */
+  await expect.poll(() => bodyClassSeen(page, "belong"), { timeout: 30_000 }).toBe(true);
+  const order = await bodyClassOrder(page);
+  expect(order, "the staging classes arrive as the climb, the count, the question")
+    .toEqual(expect.arrayContaining(["showwarp", "counting", "belong"]));
+  expect(order.indexOf("showwarp"), "the climb before the count").toBeLessThan(order.indexOf("counting"));
+  expect(order.indexOf("counting"), "the count before the question").toBeLessThan(order.indexOf("belong"));
 
   /* The card lists the same systems as the sky, and one road out of it. */
   const row = page.locator(".nf .belong li", { hasText: HOUSEHOLD });
@@ -294,9 +306,7 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   await ownerContext.close();
 });
 
-// Quarantined with the newcomer's arrival above (#1085): this file runs in serial order and
-// this test uses the state it leaves, so the two move together (agent-infra#30).
-test("naming your own system: one climb, the drawer, the refusal, then home without a second flight", { tag: ["@quarantine"] }, async ({ page }) => {
+test("naming your own system: one climb, the drawer, the refusal, then home without a second flight", async ({ page }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the journey is asserted on the desk dialect");
   test.setTimeout(180_000);
 

@@ -328,6 +328,43 @@ async function openFilm(page) {
   return errors;
 }
 
+/**
+ * Waits for the page to come to rest, as an end state and not a delay
+ * (#1447): every finite animation and transition that is running has
+ * finished, then two painted frames, so the sync loops (the veil's holes,
+ * the rings) have measured what the animations left. Animations the film
+ * has paused (a held mark) are not waited for, and infinite ones (the
+ * danger ring's beat, the sky's drift) never finish; the 20s race is only
+ * the bound on a wait that cannot end, after which the caller judges what
+ * is there.
+ * @param {import("@playwright/test").Page} page
+ */
+async function settled(page) {
+  await page.evaluate(async () => {
+    const finite = document.getAnimations().filter((a) => a.playState === "running"
+      && Number.isFinite(Number(a.effect?.getComputedTiming().endTime)));
+    await Promise.race([
+      Promise.all(finite.map((a) => a.finished.catch(() => {}))),
+      new Promise((done) => setTimeout(done, 20_000)),
+    ]);
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(undefined))));
+  });
+}
+
+/** The pill at rest: not between places (20s at most for a move that never
+ *  arrives, which the sample after it then reports as a fault), then the
+ *  page settled.
+ *  @param {import("@playwright/test").Page} page */
+async function pillSettled(page) {
+  await page.waitForFunction(() => {
+    const pill = document.getElementById("orbit-tour-transport");
+    if (!pill) return true;
+    return pill.style.opacity !== "0"
+      && !pill.getAnimations().some((a) => a instanceof CSSTransition && a.transitionProperty === "opacity" && a.playState === "running");
+  }, null, { timeout: 20_000 }).catch(() => {});
+  await settled(page);
+}
+
 /* ---- round 3 (#1174, the owner's iPhone, 2026-10-01) -------------------
    The first round's passes were green and the owner's phone still showed
    the film stuck at 0:37 on /create, the screen flickering as the film
@@ -422,11 +459,13 @@ function sampleTransport() {
  *  leaves while still open (veil.js marks a closing hole `.leaving` and
  *  fades it); a data-URI mask (the veil before round 3) has no fade at all,
  *  so any change in its hole count with the veil up is a snap. A ring is a
- *  snap if it leaves in the same breath it began to fade (under 50ms: the
- *  observer hears of a change only at the end of the task that made it, so
- *  a fade's start is heard late and a snap's removal arrives with it),
- *  unless the screen has just changed under it (a ring goes with its
- *  element, then). */
+ *  snap if it is taken off the screen without a fade begun first (its
+ *  opacity set to 0 under a transition that takes time), unless the
+ *  elements it was drawn round have left the document (vocabulary.js's
+ *  `dropGone`: a ring goes with its element, then). Judged on the order the
+ *  DOM records the changes in, never on how long apart they were (#1447):
+ *  how soon a ring is removed after its fade begins is the film's timer, and
+ *  on a starved host a timer and a frame say nothing about each other. */
 function installFrameWatch() {
   const w = /** @type {any} */ (window);
   if (w.__frameWatch) return;
@@ -442,13 +481,11 @@ function installFrameWatch() {
     return m ? (decodeURIComponent(m[1]).match(/fill="#000"/gu) ?? []).length : 0;
   };
   let lastUri = 0;
-  let url = location.pathname;
-  let urlChangedAt = -Infinity;
-  /** @type {WeakMap<Element, number>} when each ring began to fade */
-  const fadingSince = new WeakMap();
+  /** @type {WeakSet<Element>} the rings that have begun to fade */
+  const fading = new WeakSet();
+  /** @type {WeakMap<Element, Element[]>} the elements each ring was drawn round */
+  const drawnRound = new WeakMap();
   new MutationObserver((records) => {
-    const now = performance.now();
-    if (location.pathname !== url) { url = location.pathname; urlChangedAt = now; }
     for (const record of records) {
       const t = /** @type {HTMLElement} */ (record.target);
       if (record.type === "attributes") {
@@ -456,12 +493,29 @@ function installFrameWatch() {
           const n = uriHoles(t);
           if (n !== lastUri && veilUp()) w.__flicker.push(`a veil hole ${n > lastUri ? "cut" : "closed"} with no fade (${lastUri} → ${n} holes)`);
           lastUri = n;
-        } else if (t.classList?.contains("tourfilm-ring") && t.style.opacity === "0" && !fadingSince.has(t)) {
-          fadingSince.set(t, now);
+        } else if (t.classList?.contains("tourfilm-ring") && t.style.opacity === "0" && !fading.has(t)) {
+          fading.add(t);
+          /* a "fade" under no transition is a snap; so is one whose ring is
+             already out of the document by the time the change is heard
+             (taken out in the same task that began the fade) */
+          if (!t.isConnected) { w.__flicker.push("a ring put out in the same breath it began to fade"); continue; }
+          const cs = getComputedStyle(t);
+          const props = cs.transitionProperty.split(",").map((x) => x.trim());
+          const times = cs.transitionDuration.split(",").map((x) => parseFloat(x));
+          const at = props.findIndex((x) => x === "opacity" || x === "all");
+          if (at < 0 || !(times[at % times.length] > 0)) w.__flicker.push("a ring put out with no fade (no opacity transition)");
         }
         continue;
       }
       for (const node of record.addedNodes) {
+        if (node instanceof Element && node.classList.contains("tourfilm-ring")) {
+          /* which control this ring belongs to: the film's own account
+             (`__lit`) names it by its selector, matched by the ring's box */
+          const box = node.getBoundingClientRect();
+          const mine = (/** @type {any[]} */ (w.__lit?.() ?? [])).find((one) =>
+            Math.abs(one.ring.x - box.left) < 0.5 && Math.abs(one.ring.y - box.top) < 0.5 && Math.abs(one.ring.w - box.width) < 0.5);
+          if (mine) drawnRound.set(node, [...document.querySelectorAll(mine.sel)]);
+        }
         if (!(node instanceof Element) || !node.classList.contains("hole") || !veilUp()) continue;
         const open = parseFloat(getComputedStyle(node).fillOpacity);
         if (open >= 0.6) w.__flicker.push(`a veil hole cut already open (${open.toFixed(2)})`);
@@ -471,9 +525,10 @@ function installFrameWatch() {
         if (node.classList.contains("hole") && !node.classList.contains("leaving") && veilUp()) {
           w.__flicker.push("a veil hole closed while still open");
         }
-        if (node.classList.contains("tourfilm-ring") && now - urlChangedAt > 2000) {
-          const since = fadingSince.get(node);
-          if (since === undefined || now - since < 50) w.__flicker.push(`a ring put out ${since === undefined ? "while showing" : `${Math.round(now - since)}ms into its fade`}`);
+        if (node.classList.contains("tourfilm-ring") && !fading.has(node)) {
+          const round = drawnRound.get(node);
+          const gone = round !== undefined && round.length > 0 && !round.some((el) => el.isConnected);
+          if (!gone) w.__flicker.push("a ring put out while showing");
         }
       }
     }
@@ -536,11 +591,14 @@ test.describe("the pocket film in WebKit (#1174)", () => {
   test.use({ reducedMotion: "reduce" });
 
   for (const phone of PHONES) {
-    /* #1449: "plays through chapter 3" (390x844, 360x780) is quarantined 2026-10-16
-       (agent-infra#30) -- it runs outside the merge gate (`fidelity:webkit:quarantine`). */
-    const tag = phone.through === "yours" ? [] : ["@quarantine"];
-    test(`plays ${phone.through === "yours" ? "end to end" : "through chapter 3"} at ${phone.width}x${phone.height} under normal motion: the clock keeps moving through a reader's tap, the pill stays in front and readable, nothing flashes, and every mark is where it belongs`, { tag }, async ({ browser }) => {
-      test.setTimeout(phone.through === "yours" ? 540_000 : 240_000);
+    /* The sampler is judged on END STATES (#1447, agent-infra#30): the film
+       reaches its end, and wherever the sampler finds a fault it waits for
+       the page to come to rest (animations finished, painted frames) and
+       judges what is there. Nothing here counts frames or seconds; the only
+       clocks are the generous bounds that end a film that never finishes.
+       Speed is logged, not asserted. */
+    test(`plays ${phone.through === "yours" ? "end to end" : "through chapter 3"} at ${phone.width}x${phone.height} under normal motion: the clock keeps moving through a reader's tap, the pill stays in front and readable, nothing flashes, and every mark is where it belongs`, async ({ browser }) => {
+      test.setTimeout(phone.through === "yours" ? 900_000 : 420_000);
       const size = { width: phone.width, height: phone.height };
       const context = await browser.newContext({
         viewport: size, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
@@ -549,7 +607,22 @@ test.describe("the pocket film in WebKit (#1174)", () => {
       const page = await context.newPage();
       const errors = await openFilm(page);
       await page.evaluate(installFrameWatch);
-      await page.evaluate(() => { const w = /** @type {any} */ (window); w.__frames = 0; const count = () => { w.__frames++; requestAnimationFrame(count); }; requestAnimationFrame(count); });
+      /* the page's own frames, counted for the log; and a latch for the film's
+         end, which the play bar holds for only a moment (transport.js's
+         HOLD_MS) before it leaves, so a sample that comes late must not
+         mistake a finished film for a stopped one */
+      await page.evaluate(() => {
+        const w = /** @type {any} */ (window);
+        w.__frames = 0;
+        w.__filmEnded = false;
+        const count = () => {
+          w.__frames++;
+          const r = w.__reading?.();
+          if (r && r.total > 0 && r.cursor >= r.total) w.__filmEnded = true;
+          requestAnimationFrame(count);
+        };
+        requestAnimationFrame(count);
+      });
       const chapterIds = await page.evaluate(() => /** @type {any} */ (window).__chapters.map((/** @type {any} */ c) => c.id));
       const last = chapterIds.indexOf(phone.through);
 
@@ -561,68 +634,60 @@ test.describe("the pocket film in WebKit (#1174)", () => {
       const contrast = [];
       /** @type {number[]} */
       const chapters = [];
-      /** The film's longest honest stall: `waitForReal`'s own 12s bound
-       *  (vocabulary.js), plus the sheet's close and a navigation. */
-      const STALL_BUDGET_MS = 15_000;
-      let lastCursor = -1;
-      let lastMoved = Date.now();
-      /** @type {string | null} */
-      let stuck = null;
-      /** A fault seen on two samples running is on the screen long enough
-       *  to be read (the chrome re-measures a frame after the page moves, a
-       *  callout fades over 180ms). The pill's own move between places is a
-       *  fade through nothing over 350ms (owner's call, round 8), so a pill
-       *  fault counts once it has lasted a second's worth of painted frames
-       *  — a pill at 38% or 16% is faint for whole chapters. Counted in the
-       *  page's own frames (`__frames`), not wall time (#1184): at 6 frames
-       *  a second a 350ms fade outlasts a wall-clock second.
-       *  @type {Map<string, { run: number, sinceFrame: number }>} */
-      let streak = new Map();
-      /* 1000ms and 3000ms at 60 frames a second; they do not stretch on a slow host. */
-      const PILL_FAULT_FRAMES = 60;
-      /** A move between places is 350ms; one still under way after three
-       *  seconds' worth of frames is a pill that never arrived. */
-      const PILL_MOVE_FRAMES = 180;
       let tapped = false;
       let tapTook = false;
       let done = false;
       let samples = 0;
+      let barSeen = false;
       const started = Date.now();
-      while (!done && Date.now() - started < (phone.through === "yours" ? 480_000 : 200_000)) {
-        const [s, first, frame] = await Promise.all([page.evaluate(sampleTransport), page.evaluate(sample),
-          page.evaluate(() => /** @type {number} */ (/** @type {any} */ (window).__frames))]);
-        /* A ring off its element is looked at again two painted frames on:
-           the chrome re-measures once a frame, and a busy host paints few
-           of them — a ring that is back on its element by then was a frame
-           in transit, one still off is in the wrong place. */
+      /* A bound on a film that never ends, far past a loaded host's pace
+         (a quiet one plays it in ~3 minutes); the test's own limit is above it. */
+      const bound = phone.through === "yours" ? 840_000 : 380_000;
+      while (!done && Date.now() - started < bound) {
+        const [s, first] = await Promise.all([page.evaluate(sampleTransport), page.evaluate(sample)]);
+        /* A callout or ring fault is judged once the page has come to rest:
+           a callout is fading, a ring is catching up with a control that
+           has just moved (the chrome re-measures a frame after the page
+           moves). One still there when the animations have finished and two
+           frames have painted is a fault; "pointing at nothing" is the
+           film's own account and needs no waiting. */
         let m = first;
-        if (first?.faults.some((f) => f.startsWith("a ring ") && f.includes("px off its element"))) {
-          await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(undefined)))));
+        if (first?.faults.some((f) => !f.startsWith("callout pointing at nothing"))) {
+          await settled(page);
           const again = await page.evaluate(sample);
-          if (again) m = { ...first, faults: [...first.faults.filter((f) => !f.includes("px off its element")), ...again.faults.filter((f) => f.includes("px off its element"))] };
+          m = again ? { ...again, faults: [...first.faults.filter((f) => f.startsWith("callout pointing at nothing")), ...again.faults.filter((f) => !f.startsWith("callout pointing at nothing"))] }
+            : { ...first, faults: first.faults.filter((f) => f.startsWith("callout pointing at nothing")) };
         }
+        /* A film that has stopped itself is over: it logs the error and takes
+           its play bar down (an end state, so nothing waits out the bound on
+           it). A bar that was up and is gone, with the film not ended, is that. */
+        if (!s && barSeen) { done = await page.evaluate(() => /** @type {any} */ (window).__filmEnded); break; }
         if (s) {
           samples++;
-          if (s.cursor !== lastCursor) { lastCursor = s.cursor; lastMoved = Date.now(); }
-          else if (!s.ended && Date.now() - lastMoved > STALL_BUDGET_MS) {
-            stuck = `the clock stood at ${mmssOf(s.cursor)} of ${mmssOf(s.total)} for ${Math.round((Date.now() - lastMoved) / 1000)}s on ${s.url}, chapter ${s.chapter + 1}`;
-            break;
+          barSeen = true;
+          /* The pill's own move between places is a fade out and in
+             (owner's call, round 8); a pill fault is judged once it has
+             arrived and the page is at rest. Faint, or painted over, then,
+             is a fault; so is a move that never arrives (20s). #1190: once
+             the film has ended, the pill holds then fades out and is gone
+             — that is the ruling now, not a fault to sample. */
+          /** @type {string[]} */
+          let pillFaults = [];
+          if (!s.ended && s.faults.length) {
+            for (let round = 0; round < 3; round++) {
+              await pillSettled(page);
+              const rested = await page.evaluate(sampleTransport);
+              pillFaults = rested && !rested.ended ? rested.faults : [];
+              if (!pillFaults.some((f) => f.startsWith("pill moving"))) break;
+            }
           }
-          const now = new Map();
-          /* #1190: once the film has ended, the pill holds then fades out
-             and is gone — that is the ruling now, not a fault to sample. */
-          const seen = [...(s.ended ? [] : s.faults.map((f) => ({ f, pill: true, need: 0 }))), ...(m?.faults ?? []).map((f) => ({ f, pill: false, need: f.startsWith("callout pointing at nothing") ? 1 : 2 }))];
-          for (const { f, pill, need } of seen) {
+          const seen = [...pillFaults, ...(m?.faults ?? [])];
+          for (const f of seen) {
             /* the pill's faults are keyed without their opacity figure, so
                a fade in progress is one fault lasting, not several */
-            const key = `${pill ? f.replace(/\(opacity [\d.]+, /u, "(") : f} · ${s.url} · ch${s.chapter + 1}`;
-            const was = streak.get(key);
-            const run = { run: (was?.run ?? 0) + 1, sinceFrame: was?.sinceFrame ?? frame };
-            now.set(key, run);
-            const limit = f.startsWith("pill moving") ? PILL_MOVE_FRAMES : PILL_FAULT_FRAMES;
-            if (pill ? frame - run.sinceFrame >= limit : run.run >= need) faults[key] = (faults[key] ?? 0) + 1;
+            const key = `${pillFaults.includes(f) ? f.replace(/\(opacity [\d.]+, /u, "(") : f} · ${s.url} · ch${s.chapter + 1}`;
+            faults[key] = (faults[key] ?? 0) + 1;
           }
-          streak = now;
           for (const one of s.flicker) flicker.push(`${one} · ${s.url} · ch${s.chapter + 1}`);
           if (chapters.at(-1) !== s.chapter) chapters.push(s.chapter);
           /* The readout's contrast every eighth sample: often enough to see
@@ -630,13 +695,13 @@ test.describe("the pocket film in WebKit (#1174)", () => {
              wears Dawn). */
           if (s.readout && samples % 8 === 0) {
             /* Measured only on a pill at full strength (a faint or moving
-               one is the fault above), and once more 400ms on if it reads
+               one is the fault above), and once more at rest if it reads
                low: a move between places can begin between the sample and
                the shot. */
             const weak = (/** @type {{ faults: string[] }} */ t) => t.faults.some((f) => f.startsWith("pill faint") || f.startsWith("pill moving"));
             let ratio = weak(s) ? null : await pillContrast(page, s.readout);
             if (ratio !== null && ratio < 4.5) {
-              await page.waitForTimeout(400);
+              await pillSettled(page);
               const again = await page.evaluate(sampleTransport);
               ratio = again?.readout && !weak(again) ? await pillContrast(page, again.readout) : null;
             }
@@ -650,23 +715,26 @@ test.describe("the pocket film in WebKit (#1174)", () => {
             if (await chip.count()) {
               tapped = true;
               await chip.tap({ force: true });
-              await page.waitForTimeout(100);
+              await settled(page);
               tapTook = await chip.evaluate((el) => el.getAttribute("aria-pressed") === "true");
             }
           }
           done = s.ended || s.chapter > last;
         }
+        /* pacing between samples: the sample reads a lot of layout, and a
+           loop with no pause starves the page's own frames (#1174 round 3);
+           nothing is judged on how long this is */
         await page.waitForTimeout(250);
       }
+      const elapsed = (Date.now() - started) / 1000;
       const frames = await page.evaluate(() => /** @type {any} */ (window).__frames);
-      console.log(`${phone.width}x${phone.height}: ${samples} samples, the page painted ${(frames / ((Date.now() - started) / 1000)).toFixed(1)} frames a second`);
+      console.log(`${phone.width}x${phone.height}: ${samples} samples, ${elapsed.toFixed(0)}s to ${done ? "the end" : "the bound"}, the page painted ${(frames / elapsed).toFixed(1)} frames a second`);
       const waitedOut = await page.evaluate(waitsRunOut);
       await context.close();
 
       const unreadable = contrast.filter((one) => one.ratio < 4.5).map((one) => `${one.ratio.toFixed(1)}:1 at ${one.at} on ${one.url}`);
       const expected = chapterIds.map((/** @type {string} */ _, /** @type {number} */ k) => k).filter((/** @type {number} */ k) => k <= last + (phone.through === "yours" ? 0 : 1));
       expect.soft(errors, "no error in the console — a film that stopped itself says so there").toEqual([]);
-      expect.soft(stuck, "the clock keeps moving — a film that stops advancing is stuck").toBeNull();
       expect.soft(waitedOut, "no wait for the page ran out — the clock stood still for something that never came").toEqual([]);
       expect.soft(done, "the film plays as far as this phone watches it").toBe(true);
       expect.soft(chapters, "every chapter, in order, none skipped").toEqual(expected);
@@ -701,8 +769,8 @@ test.describe("the pocket film in WebKit (#1174)", () => {
           wrong.push(`${mark}: never reached`);
           continue;
         }
-        /* the callout's own slide-in, and a frame for the sync loop */
-        await page.waitForTimeout(350);
+        /* the callout's own slide-in finished, and frames for the sync loop */
+        await settled(page);
         const s = await page.evaluate(sample);
         if (!s) { wrong.push(`${mark}: no transport`); continue; }
         for (const fault of s.faults) wrong.push(`${mark}: ${fault}`);
@@ -768,7 +836,7 @@ test.describe("chapter 4 takes the page down to the manifest (#1174 round 4)", (
         wrong.push(`${mark}: never reached`);
         reached = false;
       }
-      if (reached) await page.waitForTimeout(350);
+      if (reached) await settled(page);
       for (const [what, sel] of reached ? [["the header", ".pocket .pk-below h2.p-caps"], ["the first row", ".pocket .pk-below .p-row"]] : []) {
         const seen = await page.evaluate((s) => {
           const el = document.querySelector(s);
@@ -839,25 +907,28 @@ async function shareDiffering(page, a, b) {
 }
 
 /**
- * A box photographed once it has stopped changing (#1208): shot after shot,
- * about 100ms apart, until two in a row are the same picture -- the way
- * Playwright's own `toHaveScreenshot` waits for a settled page. A fixed
- * wait guessed how long WebKit takes to paint, and on a loaded CI runner,
- * late in the run, it sometimes had not finished. Bounded: after 20 shots
- * whatever is there is judged, so a page that never settles still fails
- * on what it shows rather than on the clock.
+ * A box photographed once it has stopped changing (#1208): the page comes
+ * to rest first (every animation and transition finished, two painted
+ * frames: `settled`), then shot after shot until two in a row are the same
+ * picture -- the way Playwright's own `toHaveScreenshot` waits for a settled
+ * page -- retried by `toPass` for up to 20 seconds. No fixed wait guesses
+ * how long WebKit takes to paint (#1447): the picture is taken when it has
+ * stopped changing, however long that takes. If it never does, whatever is
+ * there is judged, so a page that never settles fails on what it shows
+ * rather than on the clock.
  * @param {import("@playwright/test").Page} page
  * @param {{ x: number, y: number, width: number, height: number }} box
  */
 async function settledShot(page, box) {
   const shot = () => page.screenshot({ clip: box, animations: "disabled", caret: "hide" });
+  await settled(page);
   let last = await shot();
-  for (let k = 1; k < 20; k++) {
-    await page.waitForTimeout(100);
+  await expect(async () => {
     const next = await shot();
-    if (next.equals(last)) return next;
+    const same = next.equals(last);
     last = next;
-  }
+    expect(same, "the picture has stopped changing").toBe(true);
+  }).toPass({ timeout: 20_000 }).catch(() => {});
   return last;
 }
 
@@ -988,13 +1059,13 @@ test.describe("suggested values give way to real text (#1174 round 4)", () => {
         const field = page.locator(`[id="${id}"]`);
         /* centred, clear of the save bar along the bottom */
         await field.evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" }));
-        await page.waitForTimeout(150);
+        await settled(page);
         if (!(await placeholderShows(page, id))) wrong.push(`#${id}: its suggestion is not drawn while it is empty`);
         await field.fill(id.endsWith("-cost") ? "54.85" : "Kwik Fit Bristol");
-        await page.waitForTimeout(100);
+        await settled(page);
         if (await placeholderShows(page, id)) wrong.push(`#${id}: its suggestion still shows with real text in it`);
         await field.fill("");
-        await page.waitForTimeout(100);
+        await settled(page);
         if (!(await placeholderShows(page, id))) wrong.push(`#${id}: its suggestion did not come back once emptied`);
       }
       await context.close();
@@ -1073,7 +1144,7 @@ test.describe("chapter 4's manifest holds rows to point at on a new household (#
           wrong.push(`${mark}: never reached`);
           continue;
         }
-        await page.waitForTimeout(350);
+        await settled(page);
         const seen = await page.evaluate(() => {
           const pill = document.getElementById("orbit-tour-transport")?.getBoundingClientRect();
           const floor = pill ? pill.top : window.innerHeight;
@@ -1120,7 +1191,9 @@ test.describe("chapter 4's manifest holds rows to point at on a new household (#
       try {
         await page.waitForFunction(() => /** @type {any} */ (window).__held === "manifest-today", null, { timeout: 60_000 });
         await page.evaluate(() => /** @type {any} */ (window).__stop());
-        await page.waitForTimeout(300);
+        /* nothing staged is left: waited for as an end state (20s at most;
+           what is still there then is counted below) */
+        await page.waitForFunction((sel) => document.querySelectorAll(sel).length === 0, STAGED, { timeout: 20_000 }).catch(() => {});
         const left = await page.evaluate((s) => document.querySelectorAll(s).length, STAGED);
         if (left) wrong.push(`stopped at manifest-today: ${left} staged nodes left on the page`);
       } catch {
@@ -1132,6 +1205,29 @@ test.describe("chapter 4's manifest holds rows to point at on a new household (#
     });
   }
 });
+
+/** The beat of the danger ring, read from the animations themselves
+ *  (#1447): each animation on the ring's parts by the part it runs on, the
+ *  properties it animates, how often it repeats, and whether its keyframes
+ *  differ (an animation between equal values moves nothing). A page function. */
+function ringBeats() {
+  const ring = document.querySelector(".tourfilm-danger");
+  if (!ring) return [];
+  const skip = new Set(["offset", "easing", "composite", "computedOffset"]);
+  return ring.getAnimations({ subtree: true }).filter((a) => a.playState !== "finished").map((a) => {
+    const effect = /** @type {KeyframeEffect} */ (a.effect);
+    const frames = effect.getKeyframes();
+    const props = [...new Set(frames.flatMap((frame) => Object.keys(frame).filter((k) => !skip.has(k))))].sort();
+    return {
+      on: effect.target?.getAttribute("class") ?? "",
+      props: props.join(","),
+      iterations: effect.getComputedTiming().iterations,
+      duration: Number(effect.getComputedTiming().duration),
+      varies: props.some((p) => new Set(frames.map((frame) => String(/** @type {any} */ (frame)[p]))).size > 1),
+      state: a.playState,
+    };
+  }).sort((x, y) => x.on.localeCompare(y.on));
+}
 
 /** The danger ring as painted now: its stroke on every pack, with the
  *  contrast against that pack's ground, and what of it is moving. */
@@ -1164,17 +1260,12 @@ function dangerRing() {
   if (before === undefined) delete root.dataset.theme;
   else root.dataset.theme = before;
   const box = ring.getBoundingClientRect();
-  const moving = document.getAnimations().filter((a) => {
-    const target = /** @type {KeyframeEffect} */ (a.effect)?.target;
-    return target instanceof Element && ring.contains(target) && a.playState !== "finished";
-  });
+  const moving = ring.getAnimations({ subtree: true }).filter((a) => a.playState !== "finished");
   return {
     packs,
     onScreen: box.width > 20 && box.top >= 0 && box.bottom <= window.innerHeight,
     opacity: Number(getComputedStyle(stroked).strokeOpacity) * Number(getComputedStyle(stroked).opacity),
     animations: moving.length,
-    /* what a frame shows: every part's opacity and transform */
-    frame: [...ring.querySelectorAll("*")].map((el) => `${getComputedStyle(el).opacity}|${getComputedStyle(el).transform}|${getComputedStyle(el).strokeOpacity}`).join(";"),
   };
 }
 
@@ -1199,7 +1290,7 @@ test.describe("the danger-zone ring pulses red while chapter 5 shows it (#1174 r
       await page.evaluate((k) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = "time-warmed"; hooks.__jump(k); }, index);
       try {
         await page.waitForFunction(() => /** @type {any} */ (window).__held === "time-warmed", null, { timeout: 60_000 });
-        await page.waitForTimeout(300);
+        await settled(page);
         const held = await page.evaluate(dangerRing);
         if (!held) wrong.push("time-warmed: no danger ring drawn");
         else {
@@ -1212,20 +1303,36 @@ test.describe("the danger-zone ring pulses red while chapter 5 shows it (#1174 r
           if (one.reduced) {
             if (held.animations) wrong.push(`time-warmed: ${held.animations} animations on the ring under reduced motion`);
             if (held.opacity < 0.9) wrong.push(`time-warmed: the still ring is faint (${held.opacity})`);
-          } else if (!held.animations) wrong.push("time-warmed: the ring has no animation under normal motion");
-          /* played on: under normal motion the frames differ, under reduced they do not */
-          await page.evaluate(() => /** @type {any} */ (window).__play());
-          const frames = [];
-          for (let k = 0; k < 5; k++) {
-            await page.waitForTimeout(140);
-            frames.push(await page.evaluate(() => {
-              const ring = document.querySelector(".tourfilm-danger");
-              return ring ? [...ring.querySelectorAll("*")].map((el) => `${getComputedStyle(el).opacity}|${getComputedStyle(el).transform}|${getComputedStyle(el).strokeOpacity}`).join(";") : "gone";
-            }));
+          } else {
+            /* the beat, by name (chapters/05-time-runs.js): the line dips
+               and returns, the wash breathes, the swell grows and fades,
+               each for ever */
+            const BEAT = [
+              { on: "tourfilm-danger-line", props: "strokeOpacity" },
+              { on: "tourfilm-danger-swell", props: "opacity,transform" },
+              { on: "tourfilm-danger-wash", props: "fillOpacity" },
+            ];
+            const beats = await page.evaluate(ringBeats);
+            const named = beats.map((b) => `${b.on}:${b.props}`).sort();
+            if (JSON.stringify(named) !== JSON.stringify(BEAT.map((b) => `${b.on}:${b.props}`).sort())) {
+              wrong.push(`time-warmed: the ring's animations are not the beat (${named.join(" ") || "none"})`);
+            }
+            for (const beat of beats) {
+              if (beat.iterations !== Infinity) wrong.push(`time-warmed: ${beat.on} beats ${beat.iterations} times, not for ever`);
+              if (!beat.varies) wrong.push(`time-warmed: ${beat.on} animates ${beat.props} between equal values`);
+            }
           }
-          const distinct = new Set(frames.filter((f) => f !== "gone")).size;
-          if (!one.reduced && distinct < 2) wrong.push(`playing: the ring's frames never changed (${frames.length} samples)`);
-          if (one.reduced && distinct > 1) wrong.push("playing: the ring moved under reduced motion");
+          /* played on: under normal motion the beat runs; under reduced
+             nothing on the ring animates at all */
+          await page.evaluate(() => /** @type {any} */ (window).__play());
+          if (one.reduced) {
+            const after = await page.evaluate(ringBeats);
+            if (after.length) wrong.push(`playing: ${after.length} animations on the ring under reduced motion`);
+          } else {
+            const running = await expect.poll(async () => (await page.evaluate(ringBeats)).filter((b) => b.state === "running").length,
+              { timeout: 20_000, message: "the ring's three animations run once the film plays" }).toBe(3).then(() => true, () => false);
+            if (!running) wrong.push(`playing: the ring's beat is not running (${(await page.evaluate(ringBeats)).map((b) => `${b.on} ${b.state}`).join(", ")})`);
+          }
         }
       } catch (error) {
         wrong.push(`time-warmed: never reached (${String(error).slice(0, 80)})`);
@@ -1285,7 +1392,7 @@ test.describe("chapter 8 plays through on a new household (#1174 round 6)", () =
   ];
   for (const { phone, household } of CASES) {
     test(`at ${phone.width}x${phone.height} on ${household === "empty" ? "a household with nothing in it" : "a household whose items carry no papers"}, chapters 7 to 9 play on without the clock standing still and without the film stopping itself`, async ({ browser }) => {
-      test.setTimeout(180_000);
+      test.setTimeout(480_000);
       const context = await browser.newContext({
         viewport: { width: phone.width, height: phone.height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
         reducedMotion: "no-preference",
@@ -1306,34 +1413,40 @@ test.describe("chapter 8 plays through on a new household (#1174 round 6)", () =
       const from = ids.indexOf("inbox");
       const until = ids.indexOf("others");
       await page.evaluate((k) => /** @type {any} */ (window).__jump(k), from);
-      /** The film's longest honest stall, as above. */
-      const STALL_BUDGET_MS = 15_000;
-      /** @type {string | null} */
-      let stuck = null;
-      /** @type {number[]} */
-      const chapters = [];
-      let lastCursor = -1;
-      let lastMoved = Date.now();
-      let reached = false;
-      let gone = false;
-      const started = Date.now();
-      while (Date.now() - started < 150_000) {
-        const s = await page.evaluate(sampleTransport);
-        if (!s) { gone = true; break; }
-        if (chapters.at(-1) !== s.chapter) chapters.push(s.chapter);
-        if (s.chapter >= until) { reached = true; break; }
-        if (s.cursor !== lastCursor) { lastCursor = s.cursor; lastMoved = Date.now(); }
-        else if (Date.now() - lastMoved > STALL_BUDGET_MS) {
-          stuck = `the clock stood at ${mmssOf(s.cursor)} for ${Math.round((Date.now() - lastMoved) / 1000)}s on ${s.url}, chapter ${s.chapter + 1}`;
-          break;
-        }
-        await page.waitForTimeout(250);
-      }
+      /* The chapters the film passes through are recorded in the page, one
+         entry each time the chapter changes, on the page's own frames. The
+         test then waits for the end state -- the film in chapter 10, or its
+         play bar gone (it goes when the film stops itself) -- with a bound
+         far past a loaded host's pace. No clock judges the film's pace
+         (#1447). */
+      await page.evaluate((stop) => {
+        const w = /** @type {any} */ (window);
+        w.__chapterLog = [];
+        w.__barGone = false;
+        const tick = () => {
+          const reading = w.__reading?.();
+          const pill = document.getElementById("orbit-tour-transport");
+          const box = pill?.getBoundingClientRect();
+          if (!reading || !box || (box.width === 0 && box.height === 0)) { w.__barGone = true; return; }
+          if (w.__chapterLog.at(-1) !== reading.chapter) w.__chapterLog.push(reading.chapter);
+          if (reading.chapter >= stop) return;
+          requestAnimationFrame(tick);
+        };
+        tick();
+      }, until);
+      await page.waitForFunction((stop) => {
+        const w = /** @type {any} */ (window);
+        return w.__barGone || (w.__chapterLog.at(-1) ?? -1) >= stop;
+      }, until, { timeout: 420_000 }).catch(() => {});
+      const { chapters, gone } = await page.evaluate(() => {
+        const w = /** @type {any} */ (window);
+        return { chapters: /** @type {number[]} */ (w.__chapterLog), gone: /** @type {boolean} */ (w.__barGone) };
+      });
+      const reached = (chapters.at(-1) ?? -1) >= until;
       const waitedOut = await page.evaluate(waitsRunOut);
       await context.close();
       expect.soft(errors, "no error in the console — a film that stopped itself says so there").toEqual([]);
       expect.soft(waitedOut, "no wait for the page ran out — the clock stood still for something that never came").toEqual([]);
-      expect.soft(stuck, "the clock keeps moving").toBeNull();
       expect.soft(gone, "the play bar stays up — it goes when the film stops itself").toBe(false);
       expect.soft(reached, "the film plays on into chapter 10").toBe(true);
       expect.soft(chapters, "chapters 7, 8 and 9 in order, none skipped").toEqual([from, from + 1, from + 2, until]);

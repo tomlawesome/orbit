@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { exclusiveSpecFile } from "./support/exclusive-spec";
 import { sessionHeaders } from "./support/households";
@@ -257,7 +257,8 @@ test("while one archive upload is in progress a second is refused at once, and g
 
 /**
  * From inside the page, POST `size` bytes of text to `path` with the session's
- * CSRF token, and report how the browser's own fetch settled within 15 s: the
+ * CSRF token, and report how the browser's own fetch settled (given 30 s, the server-work allowance, before it is
+ * abandoned as a hang): the
  * status, the refusal code and Retry-After, or the network error it died with.
  */
 async function largePostFromPage(page: Page, path: string, size: number, csrfOverride?: string) {
@@ -270,7 +271,7 @@ async function largePostFromPage(page: Page, path: string, size: number, csrfOve
         credentials: "same-origin",
         headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
         body: "x".repeat(size),
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(30_000),
       });
       const body = (await response.json().catch(() => null)) as { error?: { code?: string } } | null;
       return { status: response.status, code: body?.error?.code ?? null, retryAfter: response.headers.get("retry-after"), failure: null as string | null };
@@ -278,6 +279,13 @@ async function largePostFromPage(page: Page, path: string, size: number, csrfOve
       return { status: 0, code: null, retryAfter: null, failure: error instanceof Error ? `${error.name}: ${error.message}` : String(error) };
     }
   }, { path, size, csrfToken });
+}
+
+/** How long the answer took: reported, never asserted -- speed is a figure to read, not a gate (agent-infra#30, #1447). */
+function logElapsed(testInfo: TestInfo, started: number) {
+  const elapsed = `${Date.now() - started} ms`;
+  testInfo.annotations.push({ type: "elapsed", description: elapsed });
+  console.log(`${testInfo.title}: answered in ${elapsed}`);
 }
 
 test("a 25 MB body sent to a busy archive route still gets its 429 in the browser", async ({ page }, testInfo) => {
@@ -293,12 +301,12 @@ test("a 25 MB body sent to a busy archive route still gets its 429 in the browse
 
     const started = Date.now();
     const answer = await largePostFromPage(page, PREVIEW_PATH, LARGE_BODY_BYTES);
+    logElapsed(testInfo, started);
 
     expect(answer.failure, "the browser got an answer rather than a network error").toBeNull();
     expect(answer.status).toBe(429);
     expect(answer.code).toBe("archive_busy");
     expect(answer.retryAfter).toBe("60");
-    expect(Date.now() - started).toBeLessThan(15_000);
   } finally {
     await holder?.end();
     /* The server frees the slot a moment after it sees the client go; the next test must not start while it is still held. */
@@ -312,16 +320,16 @@ test("a 25 MB body sent to a busy archive route still gets its 429 in the browse
 
 test("a 25 MB body sent to an ordinary route gets its 413 in the browser", async ({ page }, testInfo) => {
   test.skip(!LARGE_BODY_PROJECTS.includes(testInfo.project.name), "the large-body refusal is proved on Firefox and Chromium on the desk");
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
   await signIn(page, "/home");
 
   const started = Date.now();
   const answer = await largePostFromPage(page, "/api/workspace/commands", LARGE_BODY_BYTES);
+  logElapsed(testInfo, started);
 
   expect(answer.failure, "the browser got an answer rather than a network error").toBeNull();
   expect(answer.status).toBe(413);
   expect(answer.code).toBe("request_too_large");
-  expect(Date.now() - started).toBeLessThan(15_000);
 });
 
 test("a 25 MB body sent to an archive route with the wrong CSRF token still gets its 403 in the browser", async ({ page }, testInfo) => {
@@ -331,8 +339,8 @@ test("a 25 MB body sent to an archive route with the wrong CSRF token still gets
 
   const started = Date.now();
   const answer = await largePostFromPage(page, PREVIEW_PATH, LARGE_BODY_BYTES, "not-the-session-token");
+  logElapsed(testInfo, started);
 
   expect(answer.failure, "the browser got an answer rather than a network error").toBeNull();
   expect(answer.status).toBe(403);
-  expect(Date.now() - started).toBeLessThan(15_000);
 });

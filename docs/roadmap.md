@@ -1,6 +1,6 @@
 # Orbit roadmap: promises against delivery
 
-> **Current.** Checked against the code on `dev` (3379d6cb), 2026-10-07.
+> **Current.** Checked against the code on `dev` (3379d6cb), 2026-10-07; the rows v0.3.1's issues touched re-checked against v0.3.1 (77ffcabb), 2026-10-23.
 
 This page lists everything Orbit has promised and says whether it has been
 kept. One row is one promise; a promise made in several places is one row that
@@ -55,8 +55,8 @@ closed.
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-001 | Sign in and out through standard OIDC, with revocable, rotated sessions and cross-site protection | charter V1-ID-01; site: "The system" | v1.0 | partial | #14, 81bbb0ac; real-provider sign-in not proven (#1242) |
-| RM-002 | Orbit's own accounts, no identity provider needed; optional OIDC linking; the first administrator claims a fresh install | site: "The system"; owner-decisions §17 | M7 | delivered | #259, #909, 19f042a8 |
+| RM-001 | Sign in and out through standard OIDC, with revocable, rotated sessions and cross-site protection | charter V1-ID-01; site: "The system" | v1.0 | partial | #14, 81bbb0ac; real-provider sign-in not proven (#1242); #1444: the sign-out sentence about the provider shows only for provider sessions (138224f7) |
+| RM-002 | Orbit's own accounts, no identity provider needed; optional OIDC linking; the first administrator claims a fresh install | site: "The system"; owner-decisions §17 | M7 | delivered | #259, #909, 19f042a8; #1450: the claim link is said to be in the logs and printed after start-up (250e1b0a); #1457: a provider sign-in refused for an existing account says to sign in and link from Settings (b396198b) |
 | RM-003 | Ask for the password again (step-up) before sensitive actions | owner-decisions §17 (m7 plan) | M7 | partial | #910, 264453ed; not applied to household ownership transfer, member removal or hard delete |
 | RM-004 | Signed-out visitors and non-members cannot find a household's records, members, documents or archives | charter V1-ID-02 | v1.0 | delivered | #14, #25 |
 | RM-005 | An administrator can disable and re-enable an account; disabling ends its sessions; never an ownerless household or an administrator-less instance | charter V1-ID-03; ORB-FUT-005 | v1.0 | delivered | #26, 8e8086f2 |
@@ -82,7 +82,7 @@ closed.
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-018 | Create, edit, search and schedule household items | charter V1-ITEM-01; site: "The rhythm" | v1.0 | delivered | #16, #40, #455 |
+| RM-018 | Create, edit, search and schedule household items | charter V1-ITEM-01; site: "The rhythm" | v1.0 | delivered | #16, #40, #455; #1467: the quick-add type buttons open Add with that type; #1472: one press on the north star opens the drawer when scrolled (b396198b) |
 | RM-019 | Complete an item and its next date is worked out; one-offs simply end | site: "The rhythm" | v0.3 | delivered | #455 |
 | RM-020 | Reschedule or snooze an item when life gets in the way | site: "The rhythm"; charter V1-ITEM-01 | v0.3 | delivered | #455 |
 | RM-021 | Archive and restore items | charter V1-ITEM-01 | v0.3 | delivered | #455 |
@@ -91,13 +91,13 @@ closed.
 | RM-024 | Item kinds service, renewal, inspection, document and suggestion; a section must be picked, with no default | decision #1058 | M14 | delivered | #1069 |
 | RM-025 | Sections stay an attribute printed on each row but leave navigation | charter V1-ITEM-02; owner-decisions §10 | v0.3 | delivered | #413 |
 | RM-026 | Add, rename, reorder and recolour your own sections | site: "Around your household" | unscheduled | partial | add, rename, hide, reorder exist; colour follows the chosen mark, no recolour |
-| RM-027 | Display choices stay consistent across sessions: five colourways, light or dark, three text sizes | charter V1-ITEM-02; site: "Around your household" | v0.4 | partial | five packs shipped (#486); pack kept in the browser only; text size has no effect (#1180) |
+| RM-027 | Display choices stay consistent across sessions: five colourways, light or dark, four text sizes | charter V1-ITEM-02; site: "Around your household" | v0.3.1 | delivered | five packs shipped (#486); #1180: text size chosen in Settings, applied before first paint, and pack and size stored on the account (a0f3b007) |
 | RM-028 | Assign an item to a household member | decision #1058 | unscheduled | not started | no assignee in the model; the owner-decided follow-up issue was never filed |
-| RM-029 | Dial: nearer is sooner, bigger is costlier, a belt shows documents; nothing on it is decoration | owner-decisions §1, §12; site: "The orbit" | v0.3 | delivered | #414, #458; size follows cost per year on a power curve, radius = clamp(rMin·(yearly£/50)^k, rMin, rMax), k = ln(rMax/rMin)/ln(1000), £50/yr smallest to £50,000/yr largest, desk 3.5-13, pocket 5-12 (#1460) |
+| RM-029 | Dial: nearer is sooner, bigger is costlier, a belt shows documents; nothing on it is decoration | owner-decisions §1, §12; site: "The orbit" | v0.3 | delivered | #414, #458; size follows cost per year on a power curve, radius = clamp(rMin·(yearly£/50)^k, rMin, rMax), k = ln(rMax/rMin)/ln(1000), £50/yr smallest to £50,000/yr largest, desk 3.5-13, pocket 5-12 (#1460, f1312280); #1471: the overdue line is called the event horizon (068bfc6c) |
 | RM-030 | "The sky's weather = your workload" | site: "The orbit" | unscheduled | not started | the weather layer is decoration on one pack; nothing maps workload to it |
 | RM-031 | One schedule surface: the manifest list is the accessible source of truth, and reduced-motion and no-JS readers get the plain list | owner-decisions §7, §14 | v0.3 | delivered | #469 |
-| RM-032 | Search that unrolls the year on the desk and opens as a sheet on a phone | owner-decisions §31; decision #1058 | M14 | delivered | #1057, #1161; open bugs #1302, #1303 |
-| RM-033 | One skippable first-login tour film, replayable from the account menu, with a phone cut | owner-decisions §23, §24, §32, §33 | M14 | delivered | #477, #1083, #1189, #1190; weak steps #1254 |
+| RM-032 | Search that unrolls the year on the desk and opens as a sheet on a phone | owner-decisions §31; decision #1058 | M14 | delivered | #1057, #1161; open bugs #1302, #1303; #1438: results show only the item's title and cost (a0898fe8) |
+| RM-033 | One skippable first-login tour film, replayable from the account menu, with a phone cut | owner-decisions §23, §24, §32, §33 | M14 | delivered | #477, #1083, #1189, #1190; weak steps #1254; #1473: the page is inert while the tour plays, so the menu cannot open with dead links (264c3b26) |
 | RM-034 | First run seeds demonstration data so the tour has something to show | decision #484 | M2 | partial | nothing is seeded into real data; the tour uses its own example body (#752) |
 | RM-035 | A ratified goodbye screen when signing out | decision #483 | M2 | delivered | #483 |
 | RM-036 | Keep structured provider contact details (phone, email, address, website) with an item | ORB-FUT-009 | unscheduled | not started | no such columns; no issue |
@@ -117,7 +117,7 @@ closed.
 | RM-045 | Per-file and per-instance limits, with an upload limit the administrator can set | ORB-FUT-003 | v0.3 | delivered | #1285: administrator-set upload limit in Administration |
 | RM-046 | Orphan cleanup and storage reconciliation | ORB-FUT-003 | v1.0 | delivered | #42 |
 | RM-047 | Document events recorded in the household audit history | ORB-FUT-003 | unscheduled | partial | events reach the instance audit log; only administrators read it; download auditing unconfirmed |
-| RM-048 | Optional Apache Tika parser, bounded, OCR off, on an internal network | ORB-FUT-003 | v1.1 | delivered | 1cb5917b |
+| RM-048 | Optional Apache Tika parser, bounded, OCR off, on an internal network | ORB-FUT-003 | v1.1 | delivered | 1cb5917b; #1459: with TIKA_URL unset, reading is skipped and no longer promised (0293c6d8, 7a21455f) |
 | RM-049 | Optional S3-compatible object storage | ORB-FUT-003 | unscheduled | dropped | owner 2026-10-07: no S3 storage; local storage only (the charter already lists it as a non-goal) |
 | RM-050 | Upload from a phone's file picker or camera | ORB-FUT-003; ORB-FUT-007 | v1.0 | partial | picker accepts PDF and images; no capture setting |
 | RM-051 | Mobile capture with preview, rotate, remove, retry and progress that survives bad connectivity | ORB-FUT-007 | unscheduled | not started | no issue |
@@ -127,9 +127,9 @@ closed.
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-053 | An uploaded document may suggest item fields; bounded, best effort, every field editable, nothing saved until the user submits | charter V1-DOC-02; site: "The relay" | v1.0 | delivered | #43 |
+| RM-053 | An uploaded document may suggest item fields; bounded, best effort, every field editable, nothing saved until the user submits | charter V1-DOC-02; site: "The relay" | v1.0 | delivered | #43; #1459: skipped when reading is off, and the Add page says the file is attached as it is |
 | RM-054 | Extraction accuracy measured on real-world documents | decision #977 | M15 | partial | #319, #986, #962 open; corpus built in M8 |
-| RM-055 | An optional local model (Ollama) that proposes and never writes | ORB-FUT-003; charter non-goals | M8 | delivered | #935, #936, fa5f07b6 |
+| RM-055 | An optional local model (Ollama) that proposes and never writes | ORB-FUT-003; charter non-goals | M8 | delivered | #935, #936, fa5f07b6; #1474: the installer downloads the confirmed model in a one-off container with a route out |
 | RM-056 | The model reads mailed-in items on CPU, live uploads only with a GPU, and live goes first | decision #974 | M15 | not started | #974, #1031; no GPU detection or queue |
 | RM-057 | Extraction sieves every candidate, tags it, then chooses per field | decision #989 | M8 | partial | stages built (d3e607e9) but used only by evaluation tools; production still uses heuristics and the model (#990, #991) |
 | RM-058 | Choose the extraction method per field by testing on unseen documents | decision #977 | M15 | not started | #977, #986 |
@@ -139,7 +139,7 @@ closed.
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-060 | Forward a bill or policy to Orbit; it reads the attachment and asks before anything is added | charter V1-DOC-03; ORB-FUT-001; site: "The relay" | v1.0 | partial | #22, #57, #58, #59, #60; proof against a real mailbox open (#1255) |
+| RM-060 | Forward a bill or policy to Orbit; it reads the attachment and asks before anything is added | charter V1-DOC-03; ORB-FUT-001; site: "The relay" | v1.0 | partial | #22, #57, #58, #59, #60; proof against a real mailbox open (#1255); #1459: with TIKA_URL unset, mail-in skips reading |
 | RM-061 | Every user has their own relay address, which they can rotate and pause | decision #336; owner-decisions §7; site: "The relay" | M4 | delivered | #336, #744, #746 |
 | RM-062 | Mail-in pulls from one mailbox and never opens a port; container mail settings are for sending only | owner-decisions §7 | M4 | delivered | #742, #743, #747 |
 | RM-063 | Support Mailcow, Gmail and Outlook, with OAuth2 for Outlook and Hotmail | owner-decisions §7 | v0.4 | partial | password IMAP works; OAuth2 is a stored setting only, no flow; #1312 (owner 2026-10-07: build it in v0.4) |
@@ -169,10 +169,10 @@ closed.
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-080 | One pasteable command installs a prebuilt image by digest, without Git or prompts, and fails closed | ORB-FUT-012; charter V1-REL-01; site: "Get into Orbit" | v1.1 | delivered | #117, 4cd22c34 |
+| RM-080 | One pasteable command installs a prebuilt image by digest, without Git or prompts, and fails closed | ORB-FUT-012; charter V1-REL-01; site: "Get into Orbit" | v1.1 | delivered | #117, 4cd22c34; #1455, #1485: a failed start shows Docker's own error, bounded; #1456: a failed fresh install rolls back all-or-nothing so a retry works |
 | RM-081 | Update by running the installer again with settings carried over; migrations applied safely; fresh install and upgrade both proven | charter V1-OPS-03; site: "The system" | v0.4 | partial | migration tests exist; the update path has no test (#725, #680) |
 | RM-082 | Install without secrets in Git, environment output, logs or process arguments | charter V1-OPS-01 | v1.0 | delivered | #180 |
-| RM-083 | Health and administrator views separate configuration, dependency, provider, queue and storage failures without leaking secrets | charter V1-OPS-02 | v1.0 | delivered | #95 |
+| RM-083 | Health and administrator views separate configuration, dependency, provider, queue and storage failures without leaking secrets | charter V1-OPS-02 | v1.0 | delivered | #95; #1443: a failed read on every administration card says so and offers try again (cbcbb9de) |
 | RM-084 | Backup and restore keep the database and encrypted documents, detect corruption and a wrong key, and say the recovery key is separate | charter V1-OPS-04 | v1.0 | partial | #28, b8859295; the backup CLI never run against a real stack (#1199, #1211) |
 | RM-085 | Backups run on a schedule | charter quality attributes | unscheduled | dropped | owner 2026-10-07: operators run their own backups; the docs tell them to schedule backup.sh |
 | RM-086 | Real restore exercises | charter quality attributes | M16 | partial | #1273: local --own-stack drill, and the CI drill; no drill an operator runs against their own deployment |
@@ -180,7 +180,7 @@ closed.
 | RM-088 | Three containers on PostgreSQL 18, optional parser, scanner and model | charter supported deployment; site: "The system" | M5 | delivered | #686; the site still says PostgreSQL 17 |
 | RM-089 | Orbit never needs the Docker socket | feature-register conventions | v1.0 | delivered | compose files hold none |
 | RM-090 | Maintenance mode shows a rolling timeline of timed updates | decision #580 | M0 | delivered | #585, #526 |
-| RM-091 | A signed launcher installs Orbit from a terminal app | site: "Yours all the way down" | M12 | partial | #1107; end-to-end proof still open (#1154) |
+| RM-091 | A signed launcher installs Orbit from a terminal app | site: "Yours all the way down" | M12 | partial | #1107; end-to-end proof still open (#1154); launcher pinned at v0.4.2 (#1495, #1202, 20e2ac8b); previews carry the previous signed manifest for the update check (#1480, 7782060e) |
 | RM-092 | Open source under AGPL-3.0-or-later, no paywall, no account with us | site: "Yours all the way down" | v0.3 | delivered | 30a23545 |
 
 ### Administration
@@ -207,7 +207,7 @@ closed.
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-103 | A compact phone home with the first item visible and safe-area and text scaling respected, checked on iOS and Android | ORB-FUT-002 | M14 | partial | #430, #1120; no first-item test; text size broken (#1180) |
+| RM-103 | A compact phone home with the first item visible and safe-area and text scaling respected, checked on iOS and Android | ORB-FUT-002 | M14 | partial | #430, #1120; no first-item test; text size now applies and extra-large is measured on the phone (#1180, 13155cdb) |
 | RM-104 | Core journeys keyboard accessible with no automated WCAG A/AA violations at phone and desktop widths | charter V1-UX-01 | M3 | partial | #20, #87; whole-package check open (#496), defects #1182 |
 | RM-105 | Accessibility means real access, tested on a real iPhone, Android phone and desktop | owner-decisions §25 | v0.4 | partial | #496 |
 | RM-106 | Feedback is readable, non-blocking and short-lived | charter V1-UX-03 | v1.0 | delivered | #20 |
@@ -226,7 +226,7 @@ closed.
 | RM-109 | CI tests the exact image that may be published, by digest, and promotion never rebuilds | charter V1-REL-01 | v1.0 | delivered | #21, #34, #61 |
 | RM-110 | Validation evidence is signed and bound to the digest, separate from publication | decision #573 | M5 | delivered | #661 |
 | RM-111 | Validation runs on the self-hosted GitLab; releases mirror to GitHub and GHCR | ORB-FUT-008 | M5 | delivered | #801 |
-| RM-112 | Orbit's base image is controlled and upstream fixes reach releases | decision #650 | M5 | delivered | #650, #1081 |
+| RM-112 | Orbit's base image is controlled and upstream fixes reach releases | decision #650 | M5 | delivered | #650, #1081; #1478: the repin reads the publish artifact from main (9ff54d17); #1483: repin and check accept a single-manifest tag (6f679c54) |
 | RM-113 | A stable release is accepted by digest on a test bed: update, sign-in, records, documents, backup, restore, restart | charter release acceptance | v0.3 | not started | #1152, #1153, #885 |
 
 ## Mismatches
@@ -255,7 +255,6 @@ closed.
 - "The sky's weather = your workload": nothing maps workload to the weather (RM-030).
 - "A history for everything": no screen lists an item's history (RM-022).
 - "Recolour your own sections": colour follows the chosen mark (RM-026).
-- "Three text sizes": the setting has no effect (RM-027); scheduled for v0.4 (#1180).
 
 ### Delivered but nobody promised, which the site might claim
 

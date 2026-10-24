@@ -3,4 +3,4 @@
 // it looks for) both read it from here instead of each hard-coding "4.0.0",
 // so bumping the stack's pinned Tika version cannot update one file and
 // silently leave the other behind.
-export const TIKA_VERSION = "4.0.0";
+export const TIKA_VERSION = "4.1.0";

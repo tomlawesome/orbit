@@ -603,11 +603,11 @@
       "reason": "Throwaway registry the installer tests push to; never part of a deployment. Its CI copy (ORBIT_INSTALLER_REGISTRY_IMAGE) is a `_IMAGE:` pin Renovate proposes updates for; the scripts' fallback defaults are not seen by Renovate and move by hand with it. Not in containerImages because sidecar-pins checks each file for the linux/amd64 digest while these files pin the multi-architecture index digest (#1490)."
     },
     {
-      "reference": "apache/tika:${TIKA_VERSION}-full@sha256:6c244af88e8575ebe8bf0bc5e2da03c49663dd0acc7809cd99c8e9ff8741cbfb",
+      "reference": "apache/tika:${TIKA_VERSION}-full@sha256:1ae28c75a88fd4c4f583711520923bba44548e8bc3d2fc4671b2a3e24e0d59dd",
       "locations": [
         "scripts/extract-bundle/cli.ts"
       ],
-      "reason": "Tika image for the developer-run extract-bundle tool, version from scripts/extract-bundle/tika-version.mjs (4.0.0, separate from the deployment's watched 4.1.0). Nothing watches it: the reference is a template Renovate cannot read, so it moves by hand."
+      "reason": "Tika image for the developer-run extract-bundle tool, version from scripts/extract-bundle/tika-version.mjs. Renovate cannot read the template reference, so it does not watch it; instead scripts/extract-bundle/build.test.mjs requires the version and digest to equal the deployment's orbit-tika pin in docker-compose.yml (#1489), so it moves with the watched image."
     }
   ],
   "mutableImageReferences": [],
