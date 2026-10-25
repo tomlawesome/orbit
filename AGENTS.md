@@ -110,7 +110,9 @@ rig or handing a check to the owner. It lists each script; the rules that matter
   projects, before pushing). Never run every browser and size by habit: the
   full matrix is for promotion (owner, 2026-10-06 and 2026-10-14). WebKit runs
   on this host only inside the CI Playwright image; `test-e2e-local.sh` does
-  that itself.
+  that itself. Proof that a test is stable is `--repeat-each=3` on those
+  projects; ten repeats only while chasing a flake's cause (owner, 2026-10-25:
+  proof had come to cost more than the work; #1517).
 - `scripts/ci/prove-content-id.sh` runs by hand or as a manual job only; it
   builds the image three times.
 
