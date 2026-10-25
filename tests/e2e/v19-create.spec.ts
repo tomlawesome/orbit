@@ -4,6 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { gotoCreate, tabTo } from "./support/keyboard";
+import { renderedFrames } from "./support/frames";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
@@ -19,12 +20,17 @@ resetDatabaseBetweenSpecFiles();
  */
 
 /* #730: this proving ground is removed at the end of the test that makes it,
-   so it is not still in the sky when a later spec measures one. */
+   so it is not still in the sky when a later spec measures one. Each one has
+   its own suffix: a household's name is unique across the instance, so two
+   copies of this file running at once (--repeat-each, with several workers)
+   would otherwise refuse each other's seed with "a removed household already
+   uses this name" in the moment between one's schedule and hard delete. */
 const HOUSEHOLD = "Creation Proving Ground";
 const households = householdRegister();
 
 async function seedHousehold(page: Page): Promise<{ id: string; name: string }> {
-  return await page.evaluate(async (householdName) => {
+  return await page.evaluate(async (baseName) => {
+    const householdName = `${baseName} ${crypto.randomUUID().slice(0, 8)}`;
     const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
     const householdId = crypto.randomUUID();
     const response = await fetch("/api/workspace/commands", {
@@ -476,15 +482,24 @@ test.describe(() => {
     try {
       let asked: () => void = () => {};
       const workspaceAsked = new Promise<void>((resolve) => { asked = resolve; });
+      /* The read is held until the test has clicked, not for a stretch of real
+         time; the 20 s timer is only a safety so a test that fails before
+         clicking cannot leave the page hanging. */
+      let release: () => void = () => {};
+      const clicked = new Promise<void>((resolve) => {
+        release = resolve;
+        setTimeout(resolve, 20_000);
+      });
       await page.route("**/api/workspace", async (route) => {
         asked();
-        await new Promise((resolve) => setTimeout(resolve, 6_000));
+        await clicked;
         await route.continue().catch(() => {});
       });
       await page.goto("/home");
       await workspaceAsked;
       await expect(page.locator("body[data-home-ready]")).toHaveCount(0);
       await page.locator("#nstar").click();
+      release();
       await expect(page.locator("#createdrawer")).toHaveClass(/\bopen\b/, { timeout: 20_000 });
       await expect(page.locator("#nstar")).toHaveAttribute("aria-expanded", "true");
     } finally {
@@ -1031,8 +1046,20 @@ test.describe(() => {
       await expect(add).toHaveAttribute("aria-disabled", "true");
       await expect(nameField).toHaveValue(name);
       expect(upserts).toHaveLength(0);
+      /* A press the page takes for a save shows "Adding…" on the button in the
+         same breath, before anything is sent. Watch for that in the page itself,
+         so the press is judged after the page has handled it, not after a guess
+         at how long handling takes. */
+      await page.evaluate(() => {
+        const watch = window as unknown as { __addingSeen: number };
+        watch.__addingSeen = 0;
+        new MutationObserver(() => {
+          if (document.body.textContent?.includes("Adding…")) watch.__addingSeen += 1;
+        }).observe(document.body, { subtree: true, childList: true, characterData: true });
+      });
       await add.click({ force: true });
-      await page.waitForTimeout(500);
+      await renderedFrames(page);
+      expect(await page.evaluate(() => (window as unknown as { __addingSeen: number }).__addingSeen), "the press on a held Add was not taken for a save").toBe(0);
       expect(stagePosts).toBe(1);
       expect(upserts).toHaveLength(0);
       expect(await itemIdOf(page, household.id, name)).toBeNull();
@@ -1308,6 +1335,7 @@ test.describe(() => {
 
         // Whatever the form did with it, the zone still names the file the save is carrying.
         await expect(page.locator("#dz-held-name")).toHaveText(FIRST_DOCUMENT);
+        await renderedFrames(page);
 
         releaseItemWrite();
         await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
@@ -1315,8 +1343,9 @@ test.describe(() => {
         expect(upserts).toEqual([itemId]);
 
         // Exactly one stage POST, for the first file, under the id its pick minted,
-        // and the one item command binds that same id.
-        await page.waitForTimeout(1_000);
+        // and the one item command binds that same id. The save has finished
+        // (the page is on the item), so nothing the form had to send is still
+        // unsent, and the interference was handled before the write was released.
         expect(documentPosts).toHaveLength(1);
         expect(documentPosts[0].name).toBe(FIRST_DOCUMENT);
         const postedId = documentPosts[0].documentId as string;
@@ -1397,6 +1426,48 @@ test.describe("#1425 review round 1", () => {
     });
   }
 
+  /**
+   * Counts, in the page, each answer the preview and inspection routes have
+   * given once the page has read it to the end (or lost it), so a check that
+   * "a late answer changed nothing" can wait for the page to have taken the
+   * answer in, rather than for a stretch of real time. Install before the
+   * page loads.
+   */
+  async function recordAnswers(page: Page): Promise<void> {
+    await page.addInitScript(() => {
+      const answered: Record<string, number> = {};
+      (window as unknown as { __answered: Record<string, number> }).__answered = answered;
+      const real = window.fetch.bind(window);
+      window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const key = ["item-document-preview", "item-document-inspection"].find((route) => url.includes(route));
+        const pending = real(input, init);
+        if (key) {
+          pending
+            .then((response) => response.clone().arrayBuffer().catch(() => undefined), () => undefined)
+            .finally(() => { answered[key] = (answered[key] ?? 0) + 1; });
+        }
+        return pending;
+      };
+    });
+  }
+
+  /**
+   * Waits until the page has taken in the route's answer (see recordAnswers)
+   * and then drawn two frames, by which time everything the answer set off in
+   * the page's scripts has run. A "nothing changed" check made after this is
+   * made after the page handled the answer, not after a guess at how long
+   * that takes.
+   */
+  async function pageHandled(page: Page, route: "item-document-preview" | "item-document-inspection"): Promise<void> {
+    await page.waitForFunction(
+      (key) => ((window as unknown as { __answered?: Record<string, number> }).__answered?.[key] ?? 0) >= 1,
+      route,
+      { timeout: 20_000 },
+    );
+    await renderedFrames(page);
+  }
+
   const pickerOf = (page: Page) =>
     onPhone() ? page.getByRole("form", { name: "New entry" }).locator('input[type="file"]') : page.locator('#card input[type="file"]');
   const laneOf = (page: Page) =>
@@ -1473,6 +1544,7 @@ test.describe("#1425 review round 1", () => {
         const previewAnswered = new Promise<void>((resolveSent) => { previewSent = resolveSent; });
         await answerInspection(page, REJECTED);
         await previewIgnoresAbort(page);
+        await recordAnswers(page);
         await page.route("**/item-document-preview", async (route) => {
           await held;
           await route.continue();
@@ -1491,7 +1563,8 @@ test.describe("#1425 review round 1", () => {
       },
       after: async (page: Page) => {
         const lane = laneOf(page);
-        await page.waitForTimeout(1_500);
+        // The page has taken the late page in (and drawn the frames its handling needs) before it is judged.
+        await pageHandled(page, "item-document-preview");
         await expect(page.locator("body")).not.toHaveClass(/\bsnap\b/);
         if (onPhone()) await expect(lane.getByRole("img")).toHaveCount(0);
         else await expect(page.locator("#sheet-page")).toBeHidden();
@@ -1509,6 +1582,7 @@ test.describe("#1425 review round 1", () => {
         const held = new Promise<void>((resolveHeld) => { release = resolveHeld; });
         let previewSent: () => void = () => undefined;
         const previewAnswered = new Promise<void>((resolveSent) => { previewSent = resolveSent; });
+        await recordAnswers(page);
         await page.route("**/item-document-preview", async (route) => {
           await route.fulfill(previewFailed);
           previewSent();
@@ -1521,14 +1595,16 @@ test.describe("#1425 review round 1", () => {
         await fillEntry(page, "Undrawable then refused proving");
         await pickerOf(page).setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
         await previewAnswered;
-        await page.waitForTimeout(500);
+        // The page has taken the failed preview in before the refusal is let through behind it.
+        await pageHandled(page, "item-document-preview");
         release();
         return () => release();
       },
       after: async (page: Page) => {
         const lane = laneOf(page);
         await expect(lane).toContainText("Orbit refused this file.", { timeout: 20_000 });
-        await page.waitForTimeout(1_000);
+        // The page has taken the refusal in (and drawn the frames its handling needs) before it is judged.
+        await pageHandled(page, "item-document-inspection");
         await expect(lane).toContainText("Orbit refused this file.");
         expect(await seen(page)).not.toMatch(COULD_NOT_DRAW);
         await expect(lane).toContainText(REASON);
@@ -1545,6 +1621,7 @@ test.describe("#1425 review round 1", () => {
         const previewAnswered = new Promise<void>((resolveSent) => { previewSent = resolveSent; });
         await answerInspection(page, REJECTED);
         await previewIgnoresAbort(page);
+        await recordAnswers(page);
         await page.route("**/item-document-preview", async (route) => {
           await held;
           await route.fulfill(previewFailed);
@@ -1560,7 +1637,8 @@ test.describe("#1425 review round 1", () => {
       },
       after: async (page: Page) => {
         const lane = laneOf(page);
-        await page.waitForTimeout(1_500);
+        // The page has taken the failed preview in (and drawn the frames its handling needs) before it is judged.
+        await pageHandled(page, "item-document-preview");
         await expect(lane).toContainText("Orbit refused this file.");
         expect(await seen(page)).not.toMatch(COULD_NOT_DRAW);
         await expect(lane).toContainText(REASON);
@@ -1597,6 +1675,7 @@ test.describe("#1425 review round 1", () => {
       const posts = await refuseEveryStage(page);
       await answerInspection(page, ATTACHABLE);
       await previewIgnoresAbort(page);
+      await recordAnswers(page);
       let release: () => void = () => undefined;
       const held = new Promise<void>((resolveHeld) => { release = resolveHeld; });
       let previewSent: () => void = () => undefined;
@@ -1615,7 +1694,8 @@ test.describe("#1425 review round 1", () => {
         await expect(lane).toContainText(/refused/);
         release();
         await previewAnswered;
-        await page.waitForTimeout(1_500);
+        // The page has taken the late page in (and drawn the frames its handling needs) before it is judged.
+        await pageHandled(page, "item-document-preview");
 
         await expect(page.locator("body")).not.toHaveClass(/\bsnap\b/);
         if (onPhone()) await expect(lane.getByRole("img")).toHaveCount(0);
