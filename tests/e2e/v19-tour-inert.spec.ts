@@ -3,6 +3,7 @@ import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { homeIsLive } from "./support/keyboard";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { seedHousehold, signIn } from "./support/signed-in";
+import { renderedFrames } from "./support/frames";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
@@ -37,6 +38,25 @@ function opener(page: Page, phone: boolean) {
 /** The account menu this width draws: the desk's card, or the pocket's hatch. */
 function menuOf(page: Page, phone: boolean) {
   return phone ? page.locator('.p-sheet-layer:has(nav[aria-label="Go to"])') : page.locator("#account");
+}
+
+/**
+ * Makes a press and waits until the page has taken it in: a capturing
+ * listener on the window records the `event` the press produces (a click for
+ * a pointer or a finger, a keydown for the keyboard), and the page then draws
+ * two frames, by which time whatever the press set off in its own scripts has
+ * run. "The menu did not open" is then judged after the page has handled the
+ * press, not after a guess at how long that takes.
+ */
+async function pressAndLetThePageTakeItIn(page: Page, event: "click" | "keydown", press: () => Promise<void>) {
+  await page.evaluate((type) => {
+    const seen = window as unknown as { __pressSeen: number };
+    seen.__pressSeen = 0;
+    addEventListener(type, () => { seen.__pressSeen += 1; }, { capture: true, once: true });
+  }, event);
+  await press();
+  await page.waitForFunction(() => (window as unknown as { __pressSeen: number }).__pressSeen >= 1, undefined, { timeout: 20_000 });
+  await renderedFrames(page);
 }
 
 /** Puts the tour record back to "never taken" through the product's own route. */
@@ -77,8 +97,7 @@ test("a pointer press on the menu opener does nothing while the tour plays", asy
   await withTourPlaying(page, isMobile, async ({ orb, about }) => {
     /* force skips Playwright's wait for the opener to be hittable (what burnt
        120 s in the report); the press goes to whatever is on top at that spot. */
-    await orb.click({ force: true, timeout: SHORT }).catch(() => undefined);
-    await page.waitForTimeout(800);
+    await pressAndLetThePageTakeItIn(page, "click", () => orb.click({ force: true, timeout: 20_000 }));
     await expect(about, "#1473: the menu opened while the tour plays").toBeHidden({ timeout: SHORT });
   });
 });
@@ -89,8 +108,7 @@ test("a touch on the menu opener does nothing while the tour plays", async ({ pa
   await withTourPlaying(page, isMobile, async ({ orb, about }) => {
     const box = await orb.boundingBox();
     if (!box) throw new Error("the menu opener has no box to touch");
-    await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
-    await page.waitForTimeout(800);
+    await pressAndLetThePageTakeItIn(page, "click", () => page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2));
     await expect(about, "#1473: the menu opened by touch while the tour plays").toBeHidden({ timeout: SHORT });
   });
 });
@@ -99,9 +117,8 @@ test("the menu opener cannot be operated by keyboard while the tour plays", asyn
   test.setTimeout(90_000);
   await withTourPlaying(page, isMobile, async ({ orb, about }) => {
     /* An inert control cannot take focus, so Enter on it does nothing either. */
-    await orb.focus({ timeout: SHORT }).catch(() => undefined);
-    await page.keyboard.press("Enter");
-    await page.waitForTimeout(800);
+    await orb.evaluate((el) => el.focus());
+    await pressAndLetThePageTakeItIn(page, "keydown", () => page.keyboard.press("Enter"));
     await expect(about, "#1473: the menu opened by keyboard while the tour plays").toBeHidden({ timeout: SHORT });
   });
 });
