@@ -351,7 +351,9 @@ describe("pipeline lanes", () => {
       expect(gate, `${name}: no ORBIT_E2E gate`).toBeGreaterThan(-1);
       const after = entries.slice(gate + 1);
       expect(after.some((entry) => entry.startsWith("bash scripts/test-frontend.sh")), name).toBe(true);
-      expect(after.at(-1), name).toBe("*reuse_evidence");
+      /* Evidence is the last step, but for #1447's warning exit after it. */
+      const tail = after.at(-1).startsWith("if [ -f .quarantine-failed ]") ? after.at(-2) : after.at(-1);
+      expect(tail.split("\n")[0], name).toBe("*reuse_evidence");
       // The gate entry itself, then a stand-in for every later entry.
       const shell = `${entries[gate].replace(/^\|\n/u, "").replace(/^ {6}/gmu, "")}\necho REACHED_EVIDENCE\n`;
       const run = (value) =>
@@ -361,6 +363,17 @@ describe("pipeline lanes", () => {
         });
       expect(run("false"), `${name}: a skipped suite reached *reuse_evidence`).not.toMatch(/REACHED_EVIDENCE/u);
       expect(run("true"), name).toMatch(/REACHED_EVIDENCE/u);
+    }
+  });
+
+  it("shows a failed quarantined test as a warning, after the gate and its evidence (#1447, owner 13a)", () => {
+    for (const name of ["fidelity", "fidelity_webkit", "smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
+      const block = allBlocks.get(name);
+      expect(block, `${name}: only exit 3 is allowed to fail`).toMatch(/\n  allow_failure:\n    exit_codes:\n      - 3\n/u);
+      expect(block, `${name}: the quarantine run marks its failure`).toMatch(/--quarantine|:quarantine/u);
+      expect(block, name).toMatch(/\|\| \{ echo "[a-z_]+: a quarantined test failed[^"]*"; touch \.quarantine-failed; \}/u);
+      expect(block, `${name}: the warning exit comes straight after the evidence`)
+        .toMatch(/\n {4}- \*reuse_evidence\n(?: {4}#[^\n]*\n)* {4}- if \[ -f \.quarantine-failed \]; then exit 3; fi\n/u);
     }
   });
 

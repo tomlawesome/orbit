@@ -1731,8 +1731,15 @@ fidelity:
       node scripts/web-build-stamp.mjs check || echo "the fidelity gate will build its own copy"
       pnpm --filter orbit-web fidelity
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-      timeout -k 30s 8m pnpm --filter orbit-web fidelity:quarantine || echo "fidelity: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"
+      timeout -k 30s 8m pnpm --filter orbit-web fidelity:quarantine || { echo "fidelity: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
+    # #1447 (owner 13a): a failed quarantined test shows as "passed with
+    # warnings", after the gate passed and its evidence was written.
+    - if [ -f .quarantine-failed ]; then exit 3; fi
+  # Only the exit above; every other failure still fails the job.
+  allow_failure:
+    exit_codes:
+      - 3
   artifacts:
     name: orbit-fidelity-diffs
     paths:
@@ -1793,8 +1800,15 @@ fidelity_webkit:
       node scripts/web-build-stamp.mjs check || echo "the fidelity gate will build its own copy"
       pnpm --filter orbit-web fidelity:webkit
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-      timeout -k 30s 8m pnpm --filter orbit-web fidelity:webkit:quarantine || echo "fidelity_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"
+      timeout -k 30s 8m pnpm --filter orbit-web fidelity:webkit:quarantine || { echo "fidelity_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
+    # #1447 (owner 13a): a failed quarantined test shows as "passed with
+    # warnings", after the gate passed and its evidence was written.
+    - if [ -f .quarantine-failed ]; then exit 3; fi
+  # Only the exit above; every other failure still fails the job.
+  allow_failure:
+    exit_codes:
+      - 3
   artifacts:
     name: orbit-fidelity-webkit-diffs
     paths:
@@ -2290,8 +2304,15 @@ smoke:
     - bash scripts/test-frontend.sh
     # Quarantined tests (agent-infra#30): run and reported, never failing the job.
     - |
-      timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || echo "smoke: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"
+      timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || { echo "smoke: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
+    # #1447 (owner 13a): a failed quarantined test shows as "passed with
+    # warnings", after the gate passed and its evidence was written.
+    - if [ -f .quarantine-failed ]; then exit 3; fi
+  # Only the exit above; every other failure still fails the job.
+  allow_failure:
+    exit_codes:
+      - 3
   after_script:
     # No diagnostics here: this shell has no daemon to ask (#1100), so the
     # stack's logs are captured by *stack_diagnostics_on_failure above. The
@@ -2388,8 +2409,15 @@ smoke_firefox:
     - bash scripts/test-frontend.sh
     # Quarantined tests (agent-infra#30): run and reported, never failing the job.
     - |
-      timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || echo "smoke_firefox: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"
+      timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || { echo "smoke_firefox: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
+    # #1447 (owner 13a): a failed quarantined test shows as "passed with
+    # warnings", after the gate passed and its evidence was written.
+    - if [ -f .quarantine-failed ]; then exit 3; fi
+  # Only the exit above; every other failure still fails the job.
+  allow_failure:
+    exit_codes:
+      - 3
   after_script:
     # No diagnostics here: this shell has no daemon to ask (#1100), so the
     # stack's logs are captured by *stack_diagnostics_on_failure above. The
@@ -2517,8 +2545,15 @@ smoke_webkit:
     - bash scripts/test-frontend.sh
     # Quarantined tests (agent-infra#30): run and reported, never failing the job.
     - |
-      timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || echo "smoke_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"
+      timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || { echo "smoke_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
+    # #1447 (owner 13a): a failed quarantined test shows as "passed with
+    # warnings", after the gate passed and its evidence was written.
+    - if [ -f .quarantine-failed ]; then exit 3; fi
+  # Only the exit above; every other failure still fails the job.
+  allow_failure:
+    exit_codes:
+      - 3
   after_script:
     # No diagnostics here: this shell has no daemon to ask (#1100), so the
     # stack's logs are captured by *stack_diagnostics_on_failure above. The
@@ -2615,8 +2650,15 @@ smoke_webkit_mobile:
     - bash scripts/test-frontend.sh
     # Quarantined tests (agent-infra#30): run and reported, never failing the job.
     - |
-      timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || echo "smoke_webkit_mobile: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"
+      timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || { echo "smoke_webkit_mobile: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
+    # #1447 (owner 13a): a failed quarantined test shows as "passed with
+    # warnings", after the gate passed and its evidence was written.
+    - if [ -f .quarantine-failed ]; then exit 3; fi
+  # Only the exit above; every other failure still fails the job.
+  allow_failure:
+    exit_codes:
+      - 3
   after_script:
     # No diagnostics here: this shell has no daemon to ask (#1100), so the
     # stack's logs are captured by *stack_diagnostics_on_failure above. The
