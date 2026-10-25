@@ -220,10 +220,6 @@ page's URL at failure, which this one has to infer.
 
 - 2026-10-03 · 58dec64f (!1017) · pipeline 2005, jobs 30264 (`smoke_webkit_mobile`) and 30265 (`smoke_local_only`) · both jobs' `step_script` sections ended at the identical second, `section_end:1791018971:step_script` at 09:16:11Z, and both then failed with `exit code 137` a few seconds into `after_script`. 30265 was still mid-pull of a 489MB image layer with no error logged first; 30264 was 15 tests from the end of its own run. Neither job's own log explains the kill -- a job container cannot see the host's OOM killer -- and `after_script`'s own "Cannot connect to the Docker daemon" is the same non-diagnostic noise already recorded under the `v19-first-run-door.spec.ts:250` heading above (#1096's own note), not evidence of cause here. The same pipeline's `smoke_webkit` (30263) had already finished 55s earlier, on its own `maxFailures` cutoff, with several previously-green tests failing or flaky (below) -- consistent with the host already under load before whatever killed the other two, though not proof of it. First sighting of two jobs dying together like this; a one-off host event, not a code suspect, so no issue yet.
 
-## v19-reduced-motion.spec.ts:244 "reduced motion › signed-out screens hold still" — desktop-chromium
-
-- 2026-09-27 · 68c86337 (the `dev` merge of !995) · pipeline 1734 / smoke (job 25072) · failed after 20.5s. Passed in pipeline 1740 on d97cb335 (!997), whose diff touches only mail-in failure reasons and cannot reach the signed-out screens. First sighting; an issue on the third.
-
 ## sign-in-methods.spec.ts:158 "a reader changes their password from the helm, inline" — desktop-chromium
 
 - 2026-09-27 · d97cb335 (!997) · pipeline 1740 / smoke (job 25230) · `.note.ok` never showed "password changed" within 5000ms at line 190. Retried as job 25322 on the same commit: green. !997 touches only mail-in failure reasons and cannot reach the password form. First sighting; an issue on the third.
