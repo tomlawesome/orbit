@@ -402,10 +402,19 @@ test("home: an Enter on the avatar before home goes live still opens the account
   await installKeyboardAudit(page);
   await signIn(page, "/home");
   const household = await seedHousehold(page);
+  let release: () => void = () => {};
   try {
+    /* The read is held until the test has pressed, not for a stretch of real
+       time: `release` is called right after the press. The 20 s timer is only
+       a safety so a test that fails before pressing cannot leave the page
+       hanging. */
+    const pressed = new Promise<void>((resolve) => {
+      release = resolve;
+      setTimeout(resolve, 20_000);
+    });
     await page.route("**/api/workspace", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 8_000));
-      await route.continue();
+      await pressed;
+      await route.continue().catch(() => {});
     });
     await page.goto("/home");
     await dismissTourIfShown(page);
@@ -417,9 +426,11 @@ test("home: an Enter on the avatar before home goes live still opens the account
     await expect(page.locator("body[data-home-ready]")).toHaveCount(0);
     await tabTo(page, { selector: "button.orb" }, { screen: "home (not yet live)" });
     await page.keyboard.press("Enter");
+    release();
     await expect(page.locator("#account")).toHaveClass(/open/, { timeout: 20_000 });
     await expect(page.locator("button.orb")).toHaveAttribute("aria-expanded", "true");
   } finally {
+    release();
     await page.unroute("**/api/workspace").catch(() => {});
     await cleanup(page, household);
   }
