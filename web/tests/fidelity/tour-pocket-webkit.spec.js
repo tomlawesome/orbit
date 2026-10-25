@@ -722,9 +722,10 @@ test.describe("the pocket film in WebKit (#1174)", () => {
           done = s.ended || s.chapter > last;
         }
         /* pacing between samples: the sample reads a lot of layout, and a
-           loop with no pause starves the page's own frames (#1174 round 3);
-           nothing is judged on how long this is */
-        await page.waitForTimeout(250);
+           loop with no pause starves the page's own frames (#1174 round 3).
+           The pause is the page coming to rest (every finite animation
+           finished, then two painted frames), not a length of time. */
+        await settled(page);
       }
       const elapsed = (Date.now() - started) / 1000;
       const frames = await page.evaluate(() => /** @type {any} */ (window).__frames);
@@ -1491,7 +1492,7 @@ test.describe("chapters 8 and 9 stay on the sky when the household has nothing i
       const s = await page.evaluate(sampleTransport);
       if (!s || !m) break;
       if (s.chapter >= until) { reached = true; break; }
-      if (s.chapter < from) { await page.waitForTimeout(250); continue; }
+      if (s.chapter < from) { await settled(page); continue; }
       urls.add(s.url);
       for (const text of await page.evaluate(() => [.../** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".tourfilm-callout"))]
         .filter((el) => el.style.opacity !== "0").map((el) => (el.textContent ?? "").slice(0, 28)))) lines.add(text);
@@ -1503,7 +1504,9 @@ test.describe("chapters 8 and 9 stay on the sky when the household has nothing i
         if (run >= (f.startsWith("callout pointing at nothing") ? 1 : 2)) faults[key] = (faults[key] ?? 0) + 1;
       }
       streak = now;
-      await page.waitForTimeout(250);
+      /* the page at rest (animations finished, two frames painted) before the
+         next sample, so the sample never starves the page's frames */
+      await settled(page);
     }
     const waitedOut = await page.evaluate(waitsRunOut);
     await context.close();

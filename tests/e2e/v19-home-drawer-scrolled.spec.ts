@@ -3,6 +3,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { settled } from "./support/keyboard";
+import { finiteMotionSettled } from "./support/motion";
+import { renderedFrames } from "./support/frames";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
@@ -110,19 +112,31 @@ async function wheelToManifest(page: Page) {
   }).toPass({ timeout: 10_000 });
 }
 
-/** The window's scroll position once it has stopped moving (two reads,
- *  300 ms apart, agree), so a smooth scroll in flight is not mistaken for
- *  where the page is resting. */
+/** The window's scroll position once it has stopped moving (20 frames the
+ *  page drew in a row at the same place), so a smooth scroll in flight is not
+ *  mistaken for where the page is resting. Counted in frames, not time: a
+ *  slow machine draws them slowly and is given as long as it needs. */
 async function restingScrollY(page: Page): Promise<number> {
-  let last = -1;
-  await expect.poll(async () => {
-    const now = await page.evaluate(() => window.scrollY);
-    const still = Math.abs(now - last) < 1;
-    last = now;
-    await page.waitForTimeout(300);
-    return still;
-  }, { timeout: 10_000 }).toBe(true);
-  return last;
+  const rest = await page.evaluate(
+    () =>
+      new Promise<number>((resolve) => {
+        let last = window.scrollY;
+        let still = 0;
+        let drawn = 0;
+        const look = () => {
+          const now = window.scrollY;
+          still = Math.abs(now - last) < 1 ? still + 1 : 0;
+          last = now;
+          drawn += 1;
+          if (still >= 20) resolve(now);
+          else if (drawn > 3_000) resolve(-1);
+          else requestAnimationFrame(look);
+        };
+        requestAnimationFrame(look);
+      }),
+  );
+  expect(rest, "the page never stopped scrolling").toBeGreaterThanOrEqual(0);
+  return rest;
 }
 
 /** Home, live, with the first-run tour put away and the page wheeled down to
@@ -139,11 +153,25 @@ async function homeScrolledToManifest(page: Page): Promise<string[]> {
 }
 
 /** The press: the star is on screen where the page rests, one click opens
- *  the drawer, and after any smooth scroll would have finished the window is
- *  where it was. */
+ *  the drawer, and at no frame from before the press until the drawer's
+ *  animations have ended and 60 more frames have been drawn is the window
+ *  anywhere but where it was. */
 async function pressNorthStarOnce(page: Page, restedAt: number, how: "click" | "Space" | "Enter" = "click") {
   const star = page.locator("#nstar");
   await expect(star, "the north star is not on screen while scrolled; it cannot be pressed from here").toBeInViewport();
+
+  /* Watch the window's place on every frame the page draws from here on, so a
+     scroll away and back is seen as well as one that stays away. */
+  await page.evaluate((from) => {
+    const watch = window as unknown as { __farthest: number; __watching: boolean };
+    watch.__farthest = 0;
+    watch.__watching = true;
+    const look = () => {
+      watch.__farthest = Math.max(watch.__farthest, Math.abs(window.scrollY - from));
+      if (watch.__watching) requestAnimationFrame(look);
+    };
+    look();
+  }, restedAt);
 
   if (how === "click") {
     await star.click();
@@ -157,13 +185,18 @@ async function pressNorthStarOnce(page: Page, restedAt: number, how: "click" | "
   await expect(page.locator("#createdrawer"), "one press on the north star did not open the drawer").toHaveClass(/\bopen\b/);
   await expect(star).toHaveAttribute("aria-expanded", "true");
 
-  /* A smooth scroll to the top takes the better part of a second. Wait it out
-     rather than race it: the claim is about where the page ends up. */
-  await page.waitForTimeout(1_000);
-  const after = await page.evaluate(() => window.scrollY);
+  /* A smooth scroll to the top takes the better part of a second. Let the
+     drawer's own motion end and then draw 60 frames, rather than race it or
+     guess a time: the claim is about where the page goes. */
+  await finiteMotionSettled(page, 60);
+  const farthest = await page.evaluate(() => {
+    const watch = window as unknown as { __farthest: number; __watching: boolean };
+    watch.__watching = false;
+    return watch.__farthest;
+  });
   expect(
-    Math.abs(after - restedAt),
-    `the page moved from scrollY ${restedAt} to ${after} when the north star was pressed`,
+    farthest,
+    `the page moved ${farthest}px from scrollY ${restedAt} when the north star was pressed`,
   ).toBeLessThanOrEqual(TOLERANCE);
   /* and the drawer is still the open one, not opened-then-closed */
   await expect(page.locator("#createdrawer")).toHaveClass(/\bopen\b/);
@@ -272,9 +305,12 @@ for (const key of ["Space", "Enter"] as const) {
 }
 
 /* Guards: the drawer still closes when the READER scrolls. */
-async function homeWithQuickAddOpenNearTheTop(page: Page) {
+async function homeWithQuickAddOpenNearTheTop(page: Page, { fakeClock = false }: { fakeClock?: boolean } = {}) {
   await signIn(page);
   await seedHouseholdWithItems(page);
+  /* The page's clock, from here on, is the test's to move (time still passes
+     at its own pace until the test moves it on). */
+  if (fakeClock) await page.clock.install();
   await page.goto("/home");
   await settled(page);
   await page.locator("#nstar").click();
@@ -324,14 +360,16 @@ async function scrollFromScript(page: Page) {
 
 /* However late the scroll lands after the reader's input, it is the reader's:
    WebKit on a loaded CI machine applied a wheel's scroll more than a second
-   after the wheel. The wait makes that lateness deterministic. */
+   after the wheel. The page's clock is moved on 1.5 s, so the lateness is
+   exact and costs no real time: a rule that let the input expire on a timer
+   would fire here. */
 test("with the quick-add drawer open, a scroll landing 1.5 s after the reader's wheel still closes it", async ({ page }) => {
   test.setTimeout(90_000);
-  await homeWithQuickAddOpenNearTheTop(page);
+  await homeWithQuickAddOpenNearTheTop(page, { fakeClock: true });
   const before = await page.evaluate(() => window.scrollY);
 
   await wheelInputWithoutScroll(page);
-  await page.waitForTimeout(1_500);
+  await page.clock.runFor(1_500);
   await scrollFromScript(page);
 
   await expect(page.locator("#createdrawer"), "a scroll 1.5 s after the reader's wheel did not close the drawer").not.toHaveClass(/\bopen\b/);
@@ -354,10 +392,18 @@ test("a wheel before the quick-add drawer opened does not close it on a later sc
   await expect(page.locator("#createdrawer"), "one press on the north star did not open the drawer").toHaveClass(/\bopen\b/);
   const before = await page.evaluate(() => window.scrollY);
 
+  /* The page's own scroll handling is the thing under test, and it listens
+     for the window's `scroll` event. This listener is added after it, so by
+     the time this one has run for the script's scroll, that handling has. */
+  await page.evaluate(() => {
+    const seen = window as unknown as { __scrollHandled: boolean };
+    seen.__scrollHandled = false;
+    addEventListener("scroll", () => { seen.__scrollHandled = true; }, { passive: true });
+  });
   await scrollFromScript(page);
   await expect.poll(() => page.evaluate(() => window.scrollY), { message: "the script's scroll did not move the page" }).toBeGreaterThan(before);
-  /* give a wrongly-triggered close time to show */
-  await page.waitForTimeout(1_000);
+  await page.waitForFunction(() => (window as unknown as { __scrollHandled: boolean }).__scrollHandled, undefined, { timeout: 20_000 });
+  await renderedFrames(page);
 
   await expect(page.locator("#createdrawer"), "a scroll the reader did not make closed the drawer, on the strength of a wheel from before it opened").toHaveClass(/\bopen\b/);
 });

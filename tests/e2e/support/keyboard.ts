@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import { householdDateFromToday } from "./household-dates";
+import { entrancesSettled } from "./motion";
 
 /**
  * #849: keyboard-audit machinery shared between the desktop walk
@@ -158,6 +159,33 @@ export async function currentFocus(p: Page, exclude: string | null = null): Prom
   return p.evaluate((x) => (window as unknown as KbWindow).__kb.focused(x), exclude);
 }
 
+/**
+ * What has focus once a Tab press has had its effect. Reads focus in the
+ * page, frame by frame, until its key differs from `previousKey` or `frames`
+ * rendered frames have gone by (focus did not move: a control with several
+ * Tab stops inside it, a page's last control, or a press that really was a
+ * no-op), and answers what it last read. The wait is a count of frames the
+ * page drew, not a stretch of real time, so a slow runner gets as many
+ * milliseconds as it needs and a fast one spends none.
+ */
+async function focusAfterTab(p: Page, exclude: string | null, previousKey: string | null, frames = 6): Promise<FocusedInfo | null> {
+  return p.evaluate(
+    ([x, key, limit]) =>
+      new Promise<FocusedInfo | null>((resolve) => {
+        const kb = (window as unknown as KbWindow).__kb;
+        let drawn = 0;
+        const look = () => {
+          const info = kb.focused(x);
+          if ((info && info.key !== key) || drawn >= limit) return resolve(info);
+          drawn += 1;
+          requestAnimationFrame(look);
+        };
+        look();
+      }),
+    [exclude, previousKey, frames] as const,
+  );
+}
+
 /** A short name for whatever has focus, for failure messages. */
 async function focusLabel(p: Page): Promise<string> {
   return p.evaluate(() => {
@@ -248,6 +276,11 @@ export async function tabTo(p: Page, match: Match, { cap = 60, screen = "" }: { 
  * rather than the first failure hiding the rest.
  */
 export async function auditTabOrder(p: Page, screen: string, { root = null, exclude = null }: { root?: string | null; exclude?: string | null } = {}) {
+  /* The list of what the screen shows is taken once, before the first press,
+     and a control still fading in (opacity 0) is not counted as shown: Tab
+     then reached controls the list had missed (docs/flakes.md, "Tab reached
+     controls the snapshot missed"). Take it once the entrances have ended. */
+  await entrancesSettled(p.locator("body"));
   const expected = await collectVisible(p, root, exclude);
   const expectedKeys = new Set(expected.map((e) => e.key));
 
@@ -276,10 +309,8 @@ export async function auditTabOrder(p: Page, screen: string, { root = null, excl
        audit must walk through it rather than call it a trap. */
     for (let retry = 0; retry < 6; retry += 1) {
       await p.keyboard.press("Tab");
-      await p.waitForTimeout(20); // pacing this loop matters, not just its length
-      info = await currentFocus(p, exclude);
+      info = await focusAfterTab(p, exclude, lastKey);
       if (!info || info.key !== lastKey) break;
-      await p.waitForTimeout(50);
     }
     /* #1183: still on the same control after every retry, and it is the
        page's last: Firefox's end of page, not a trap. Hand focus round to the
@@ -287,8 +318,7 @@ export async function auditTabOrder(p: Page, screen: string, { root = null, excl
        falls through to the "stuck" break below exactly as before. */
     if (info && info.key === lastKey && await wrapPastEndOfPage(p)) {
       await p.keyboard.press("Tab");
-      await p.waitForTimeout(20);
-      info = await currentFocus(p, exclude);
+      info = await focusAfterTab(p, exclude, lastKey);
     }
     if (!info) continue; // focus passed through browser chrome; keep pressing rather than giving up
     lastKey = info.key;

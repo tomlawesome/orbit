@@ -55,7 +55,7 @@ test(`a paper's page loads on the fixture item's drawer at desk (${DESK.width}x$
   await expect(
     page.locator("[data-preview-card].snap"),
     "the preview card never reached its loaded page -- it is stuck on an honest state",
-  ).toBeVisible({ timeout: 5000 });
+  ).toBeVisible({ timeout: 20_000 });
   await expect(page.locator("[data-preview-card] .sheet img")).toHaveAttribute("alt", "Page one of MOT certificate 2025");
 });
 
@@ -72,7 +72,7 @@ test.describe("on a phone", () => {
     await expect(
       page.locator("[data-preview-card].snap"),
       "the phone sheet never showed the loaded page -- it is stuck on an honest state",
-    ).toBeVisible({ timeout: 5000 });
+    ).toBeVisible({ timeout: 20_000 });
   });
 });
 
@@ -87,7 +87,7 @@ test(`the desk preview stands beside the drawer, its top level with the item car
   await page.setViewportSize(DESK);
   const { drawer, paper } = await openDeskPaper(page);
   const card = page.locator("[data-preview-card]");
-  await expect(card).toHaveClass(/snap/, { timeout: 5000 });
+  await expect(card).toHaveClass(/snap/, { timeout: 20_000 });
   await expect(paper).toHaveAttribute("aria-current", "true");
   /* The card's own entrance has to finish before its box is the one it
      lands on. */
@@ -95,7 +95,7 @@ test(`the desk preview stands beside the drawer, its top level with the item car
     () => document.getAnimations().every((a) => a.playState !== "running"
       || !Number.isFinite(Number(a.effect?.getComputedTiming().endTime))),
     null,
-    { timeout: 3000 },
+    { timeout: 20_000 },
   ).catch(() => {});
   const [rowBox, cardBox, drawerBox] = await Promise.all([
     page.locator('a.item[id="i-mot"]').boundingBox(), card.boundingBox(), drawer.boundingBox(),

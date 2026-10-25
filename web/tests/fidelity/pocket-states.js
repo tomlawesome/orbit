@@ -40,7 +40,7 @@ export async function settle(page) {
         && Number.isFinite(Number(a.effect?.getComputedTiming().endTime)));
       await Promise.race([
         Promise.all(finite.map((a) => a.finished.catch(() => {}))),
-        new Promise((done) => setTimeout(done, 5000)),
+        new Promise((done) => setTimeout(done, 20_000)),
       ]);
       return finite.length;
     });

@@ -220,10 +220,6 @@ page's URL at failure, which this one has to infer.
 
 - 2026-10-03 · 58dec64f (!1017) · pipeline 2005, jobs 30264 (`smoke_webkit_mobile`) and 30265 (`smoke_local_only`) · both jobs' `step_script` sections ended at the identical second, `section_end:1791018971:step_script` at 09:16:11Z, and both then failed with `exit code 137` a few seconds into `after_script`. 30265 was still mid-pull of a 489MB image layer with no error logged first; 30264 was 15 tests from the end of its own run. Neither job's own log explains the kill -- a job container cannot see the host's OOM killer -- and `after_script`'s own "Cannot connect to the Docker daemon" is the same non-diagnostic noise already recorded under the `v19-first-run-door.spec.ts:250` heading above (#1096's own note), not evidence of cause here. The same pipeline's `smoke_webkit` (30263) had already finished 55s earlier, on its own `maxFailures` cutoff, with several previously-green tests failing or flaky (below) -- consistent with the host already under load before whatever killed the other two, though not proof of it. First sighting of two jobs dying together like this; a one-off host event, not a code suspect, so no issue yet.
 
-## v19-reduced-motion.spec.ts:244 "reduced motion › signed-out screens hold still" — desktop-chromium
-
-- 2026-09-27 · 68c86337 (the `dev` merge of !995) · pipeline 1734 / smoke (job 25072) · failed after 20.5s. Passed in pipeline 1740 on d97cb335 (!997), whose diff touches only mail-in failure reasons and cannot reach the signed-out screens. First sighting; an issue on the third.
-
 ## sign-in-methods.spec.ts:158 "a reader changes their password from the helm, inline" — desktop-chromium
 
 - 2026-09-27 · d97cb335 (!997) · pipeline 1740 / smoke (job 25230) · `.note.ok` never showed "password changed" within 5000ms at line 190. Retried as job 25322 on the same commit: green. !997 touches only mail-in failure reasons and cannot reach the password form. First sighting; an issue on the third.
@@ -266,7 +262,6 @@ page's URL at failure, which this one has to infer.
 ## v19-layout-and-themes.spec.ts:288, /settings/mail axe check in the retrograde pack — desktop-firefox
 
 - 2026-10-15 · 0a2cec29 (dev, !1067 merged) · dev pipeline 2628 / smoke_firefox (job 36379) · "/settings/mail in the retrograde pack has no WCAG A/AA violations" failed its first attempt and passed on the in-job retry. The same parametrised axe check as #1307, on another screen. First sighting.
-- 2026-10-15 · a6168fe6 (!1069, v0.3 security batch) · pipeline 2640 / smoke_webkit (job 36460), desktop-webkit · the /create announcement check (:385) and focus check (:402) failed their first attempts with `the failure is shown` not visible after 5 s (waiting for `not saved|Failed to fetch|NetworkError when attempting to fetch resource|Load failed`); both passed on the in-job retry (two of the job's 4 flaky). Still #1313.
 
 ## v19-arrival.spec.ts:290 — the newcomer never reaches /home — desktop-webkit
 
@@ -277,36 +272,6 @@ page's URL at failure, which this one has to infer.
 - 2026-10-05 · dac67650 (!1017) · pipeline 2131 / smoke_webkit (job 31782) · `page.evaluate: TypeError: Load failed` (WebKit's words for a fetch that did not complete) inside `createHousehold`'s in-page `fetch` at line 35, 7.2s in, straight after sign-in; the in-job retry passed (11.8s). Only the passing retry was traced, so the failing attempt's network is not recorded. Suspected, not established: the arrival at `/` navigating on to `/home` while the in-page fetch was out (support/arrival.ts describes that #840 race; this file's sign-in does not wait for it), made likelier on WebKit by the multi-second sky rasterising stall measured on #1219. First sighting; an issue on the third.
 - 2026-10-08 · 89ca8357 (`fix/door-site-whole`, the door batch; nothing in it touches administration) · local `scripts/test-e2e-local.sh --project desktop-webkit`, the whole suite inside the CI Playwright image, with other sessions using the host · `page.evaluate: TypeError: Load failed` in the spec's seeding fetch; green on the rerun of the file alone against a fresh stack on 64a4ad67 (same administration code). Second sighting (the first is above, same words, in CI).
 - 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit_mobile (job 36592), mobile-webkit · failed once, passed on retry.
-
-## v19-feedback-recovery.spec.ts "a save on /create that cannot reach Orbit is announced, and the act can be repeated by keyboard" — mobile-webkit, desktop-webkit, desktop-chromium, mobile-chromium — #1313 — quarantined 2026-10-16 (agent-infra#30). The focus check beside it (:406) was rewritten to wait for its end state (#1447) and is out of quarantine; the sightings below that name the focus check predate that.
-
-- 2026-10-05 · c352cf77 (same run and same unchanged web tree as the heading above) · pipeline 2188 / smoke_webkit_mobile (job 32287) · `focus is not dropped to the page` at line 373: `focusedElement` was `body` after the staged failure was shown, 5.9 s in; the in-job retry passed (6.5 s), so Playwright counted it flaky. First sighting; an issue on the third.
-- 2026-10-07 · f6939a21 (create-form batch with ADR-0033 merged; nothing in it touches the save path this journey stages) · local targeted run, desktop-webkit, inside CI's Playwright image (#1235), no retries · `focus is not dropped to the page` at line 384: `focusedElement` was `body`. Same race on the other WebKit project; #1233 (v0.4) owns the fix. Second sighting.
-- 2026-10-07 · 68040844 (!1043; the repair-journeys fixture only) · pipeline 2236 / smoke (job 33177), desktop-chromium and mobile-chromium · the :373 focus check for /create, the item view and /inbox, and the :356 announcement check for /inbox and household deletion, each failed once and passed on the in-job retry. Third sighting, and now on Chromium too: filed as #1313.
-- 2026-10-08 · 687cb0f4 (door batch, !1044; nothing in it touches /create or its save) · pipeline 2251 / smoke_webkit (job 33371), desktop-webkit · `focus is not dropped to the page` at line 384, `focusedElement` was `body`, on the first attempt and on the in-job retry alike, so the job failed. Still #1313.
-- 2026-10-09 · 11e0e1c4 (#1325) · pipeline 2277 / smoke (job 33639), mobile-chromium · the :373 /create focus check failed its first attempt with "Expected to fail, but passed" (focus stayed on the pressed button) and met its expected failure on the retry, so Playwright counted it flaky. Chromium kept the focus this time: the race runs both ways. Not reproduced locally in four mobile-chromium runs, three of them under CPU load. Still #1313.
-- 2026-10-09 · 0ff6cbbf (engine batch, !1051; its only web change is the household page, nowhere near /create) · pipeline 2317 / smoke_webkit_mobile (job 33987), mobile-webkit · the :379 announcement check for /create timed out after 5 s waiting for `not saved|Failed to fetch|Load failed`; the in-job retry passed, so Playwright counted it flaky. Still #1313.
-- 2026-10-10 · a318e11b (#1342 batch) · pipeline 2382 / smoke (job 34366), desktop-chromium and mobile-chromium, and smoke_webkit (job 34368), desktop-webkit · the :379 announcement check and the :396 focus check for /create timed out waiting for the error words; each passed on the in-job retry. Not the new service worker: this file already keeps it out on WebKit, and a local run on the fixed branch passed on desktop-chromium, mobile-chromium, desktop-firefox and desktop-webkit. Still #1313.
-- 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934), mobile-webkit · the :379 announcement check for /create failed its first attempt and passed on the in-job retry.
-- 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (jobs 35081 and 35145), mobile-webkit · the :396 focus check for /create failed its first attempt and passed on the in-job retry, in both re-runs.
-- 2026-10-13 · 5e852f6f (!1064, a flake-log line on top of 9232c92c, whose pipeline 2559 passed this job) · pipeline 2560 / smoke_webkit_mobile (job 36008), in a pipeline slowed by a GitLab update · "a save on /create that cannot reach Orbit is announced, and the act can be repeated by keyboard": `the failure is shown` not visible at line 387.
-- 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36017, the first re-run) · the same `the failure is shown` check at line 387 on the first attempt; passed on the in-job retry.
-- 2026-10-13 · 5e852f6f (!1064) · pipeline 2560 / smoke_webkit_mobile (job 36018, the second re-run; the job passed) · the same `the failure is shown` check at line 387; passed on the in-job retry.
-- 2026-10-13 · 3a297cc8 (!1065) · pipeline 2570 / smoke (job 36067), smoke_webkit (job 36069), smoke_webkit_mobile (job 36070) · the /create announcement check (now :386) and focus check (now :403) failed their first attempts on desktop-chromium, mobile-chromium, desktop-webkit and mobile-webkit, and passed on the in-job retries. Still #1313.
-- 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke (job 36098), desktop-chromium and mobile-chromium · the /create announcement check (now :386) and focus check (now :403) failed its first attempt, passed on the in-job retry. Still #1313.
-- 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke_webkit (job 36100), desktop-webkit · the /create announcement check (now :386) failed its first attempt, passed on the in-job retry. Still #1313.
-- 2026-10-13 · 6a06e88d (!1065) · pipeline 2574 / smoke_webkit_mobile (job 36101), mobile-webkit · the /create announcement check (now :386) failed its first attempt, passed on the in-job retry. Still #1313.
-- 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / smoke (job 36176) · "a save on /create that cannot reach Orbit" announce and focus cases on desktop-chromium and mobile-chromium failed once each and passed on retry (4 flaky); pipeline 2588 / smoke_webkit (job 36178), the focus case flaky on desktop-webkit.
-- 2026-10-15 · 34384732 (v0.3 final batch, !1067) · pipeline 2624 / smoke (job 36324), desktop-chromium and mobile-chromium · the /create announcement check (:385) and focus check (:402) failed their first attempts and passed on the in-job retry (the job's 4 flaky). Still #1313.
-- 2026-10-15 · 0a2cec29 (dev, !1067 merged) · dev pipeline 2628 / smoke_firefox (job 36379), desktop-firefox · the /create announcement check (:385) and focus check (:402) failed their first attempts and passed on the in-job retry (two of the job's 3 flaky). Still #1313.
-- 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke (job 36489), desktop-chromium and mobile-chromium · the /create announcement check (:385) and focus check (:402) failed their first attempts with `Error: a save on /create that cannot reach Orbit: the failure is shown` (`element(s) not found` after 5 s) and passed on the in-job retry. Still #1313.
-- 2026-10-15 · 1c636dbd (!1069) · pipeline 2643 / smoke_webkit (job 36491), desktop-webkit · the /create announcement check (:385) and focus check (:402) failed their first attempts and passed on the in-job retry. No error text printed: the job was cut off at its 30-minute timeout before the report (raised to 45m in a7c8ccad). Still #1313.
-- 2026-10-15 · 1c636dbd (!1069) · pipeline 2643 / smoke_webkit_mobile (job 36492), mobile-webkit · the /create announcement check (:385) and focus check (:402) failed their first attempts with `Error: a save on /create that cannot reach Orbit: the failure is shown` (`element(s) not found` after 5 s) and passed on the in-job retry. Still #1313.
-- 2026-10-16 · d8fa9475 (!1069) · pipeline 2645 / smoke (job 36535), desktop-chromium and mobile-chromium · the /create announcement check (:385) and focus check (:402) failed their first attempts with `Error: a save on /create that cannot reach Orbit: the failure is shown` (`element(s) not found` after 5 s) and passed on the in-job retry. Still #1313.
-- 2026-10-16 · d8fa9475 (!1069) · pipeline 2645 / smoke_webkit (job 36537), desktop-webkit · the /create announcement check (:385) and focus check (:402) failed their first attempts with `Error: a save on /create that cannot reach Orbit: the failure is shown` (`element(s) not found` after 5 s) and passed on the in-job retry. Still #1313.
-- 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke (job 36589), smoke_webkit (job 36591), smoke_webkit_mobile (job 36592), desktop-chromium, mobile-chromium, desktop-webkit and mobile-webkit · the /create announcement check (:385) failed once, passed on retry. Still #1313.
-- 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke (job 36589), smoke_firefox (job 36590), smoke_webkit_mobile (job 36592), desktop-chromium, mobile-chromium, desktop-firefox and mobile-webkit · the /create focus check (:402) failed once, passed on retry. Still #1313.
-- 2026-10-16 · 6f768016 (!1070, `dev` -> `preview`) · pipeline 2657 / smoke (job 36648) desktop-chromium and mobile-chromium; smoke_firefox (job 36649) desktop-firefox; smoke_webkit (job 36650) desktop-webkit; smoke_webkit_mobile (job 36651) mobile-webkit · the /create announcement check (:385) failed once on all five, the focus check (:402) on both Chromium projects and Firefox; all passed on retry.
 
 ## settings-notification-history.spec.ts:137 "a member sees their own last sent reminders, plainly, on both dialects" — desktop-firefox
 
@@ -333,16 +298,6 @@ page's URL at failure, which this one has to infer.
 - 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_webkit` · failed once (10.4s), passed on retry. First sighting.
 - 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / smoke_webkit (job 36178) · "(phone-narrow, world forced)" at line 193, desktop-webkit, failed once and passed on retry.
 - 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_webkit (job 38686) · failed once, passed on retry. Third sighting: filed as #1505.
-
-## v19-keyboard.spec.ts:338 "home: every control is reachable…" — Tab reached controls the snapshot missed
-
-Not the `ERR_ABORTED` under #1096 above: the test ran, and Tab reached two
-links the expected-controls snapshot (taken once, before the first press)
-had not listed — the sun's `Open <household>` link and the seeded item's
-second link (`…, T−20d · —`). The snapshot was taken before home finished
-drawing, the same shape as the item-page failure fixed in 34ae6e3d.
-
-- 2026-10-08 · 9fc44ba2 · local, `scripts/test-e2e-local.sh --spec tests/e2e/v19-keyboard.spec.ts` (desktop-webkit) — first run failed with the two unlisted links; the re-run on the same code passed 24/24, and pipeline 2271's smoke_webkit passed it too.
 
 ## bootstrap-protection.spec.ts:387 "once the instance is claimed the code is spent, cookie or no cookie" — [unclaimed]
 
@@ -472,10 +427,6 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-create.spec.ts:1022 "the desk's lane offers 'not this one' while it is still reading, and pressing it closes the lane" — desktop-webkit
 
 - 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit (job 36591), desktop-webkit · failed once, passed on retry. First sighting; an issue on the third.
-
-## fidelity: document-preview.spec.js:47 "a paper's page loads on the fixture item's drawer at desk (1600x1000)"
-
-- 2026-10-16 · 6f768016 (`dev` merge of !1069; same tree as a08de7a1, whose pipeline 2650 passed this job) · pipeline 2655 / fidelity (job 36615) · `[data-preview-card].snap` not visible within the 5000ms wait: the preview card never reached its loaded page. The same 5 s family as the document-preview page-count wait raised to 20 s in 614118ff. First sighting; job retried as 36629.
 
 ## v19-about-loading.spec.ts:69 "a slow click on About shows that it is loading before the content arrives" — desktop-webkit, mobile-webkit — #1502
 
