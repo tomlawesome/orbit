@@ -146,8 +146,14 @@ const createOffline: Journey = {
     }
     await page.getByRole("group", { name: /^section/ }).filter({ visible: true }).getByRole("button", { name: "Home" }).click();
 
-    await page.route("**/api/workspace/commands", failCommands);
+    /* #1313: Add is held (aria-disabled) until the engine's first dry-run
+       answer, and a press on a held Add is ignored by design
+       (create.behaviour.js `refusal`, pocket.svelte `refusal`). Pressed
+       before that answer, nothing is sent and no failure ever shows. */
     const save = isPocket() ? ".pk-save" : "#card .btn-primary";
+    await expect(page.locator(save).filter({ visible: true }), "create: Add is live once the engine has answered")
+      .not.toHaveAttribute("aria-disabled", "true", { timeout: SETTLE });
+    await page.route("**/api/workspace/commands", failCommands);
     await tabTo(page, { selector: save }, { screen: "create" });
     await page.keyboard.press("Enter");
 
