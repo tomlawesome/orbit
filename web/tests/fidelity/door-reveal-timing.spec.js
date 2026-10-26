@@ -1,34 +1,30 @@
 import { expect, test } from "@playwright/test";
 
 /*
- * THE DOOR'S FIRST LIGHT, TIMED (#1253). Since the owner's ruling of
- * 2026-10-07 the door keeps orbit-site's own timing (first-light.js, ported
- * from the site's main.js `showDoor`), and the 2026-10-06 limits (button by
- * 2s, sunrise by 3-3.5s from navigation) are withdrawn.
+ * THE DOOR'S FIRST LIGHT: ITS ORDER AND OFFSETS (#1253, #1515). Since the
+ * owner's ruling of 2026-10-07 the door keeps orbit-site's own timing (the
+ * imported door, web/src/lib/door: dawn.js and door.css), and this holds the
+ * door to it:
  *
- * What is held now is the site's ORDER and its OFFSETS FROM `lit`:
+ *   · `lit` waits for the fonts and the Earth's first picture (`dawn-pre`,
+ *     which sets `.world.earthy`), and on a first visit (every Playwright
+ *     context is one) for at least a whole lap of the ring's running light
+ *     (`body.loading`): the door is never lit before the pieces are in, and
+ *     never without that lap;
+ *   · `lit` starts the button and the sunrise together. The button is ready
+ *     2.45s after (its 1.25s delay and 1.2s fade: door.css `.gate`); the
+ *     rays are up 2.9s after (opacity .3s + 2.2s, their rise .3s + 2.6s), and
+ *     the Earth's day side fades in over 2.2s after .3s, from `lit` or from
+ *     its own picture arriving (`.up.in`), whichever is later.
  *
- *   · `lit` waits for the fonts and the Earth's first picture (`dawn-pre`),
- *     and on a first visit (every Playwright context is one) for a whole lap
- *     of the ring's running light, `body.loading`, about 1.8s: the door is
- *     never lit before the pieces are in, and never without that lap;
- *   · after `lit` the button is ready at about 2.45s (its 1.25s delay and
- *     1.2s fade) and the sunrise is done at about 4.8s (the Earth's day side,
- *     4.5s after .3s; the rays end at 4.4s), each give or take OFFSET_GIVE.
- *
- * "Button ready" is the moment the gate can be pressed and looks it: the
- * `.gate` is in the document, `body.lit` is set and the gate's computed
- * opacity has reached 1. "Sunrise end" is the last of the rays and the
- * Earth's day side (`#dawn .earth .up`) arriving, after `lit`.
- *
- * Shaped like launch-timing.spec.js and for the same reason kept out of the
- * per-merge-request `fidelity` project (playwright.config.js runs it as
- * `door-timing` in Chromium and `door-timing-firefox`): it measures time on
- * whatever machine it is given. Everything is read inside the page, on
- * every animation frame from before the first script, so nothing the test
- * runner does in between is counted. Two runs at each size, desktop and
- * phone. (The late-page runs, which held the page's code back to prove
- * first light caught up with a clock, went with the clock.)
+ * No clock is read (#1447). The lap is counted from the runner's own
+ * `animationiteration` events, and the offsets are read from the page's
+ * animation timeline: each CSS transition `lit` sets off carries its start,
+ * delay and duration, and those say when it ends however busy the machine is.
+ * (`page.clock` does not drive CSS transitions, so it could not stand in.)
+ * It stays out of the per-merge-request `fidelity` project
+ * (playwright.config.js runs it as `door-timing` in Chromium and
+ * `door-timing-firefox`), as before.
  */
 
 const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
@@ -41,12 +37,13 @@ const DOOR = { ...HEALTHY, claimed: true, methods: { local: true, oidc: true, lo
 /** @param {import("@playwright/test").Route} route @param {number} status @param {unknown} body */
 const answer = (route, status, body) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 
-/* the site's offsets after `lit` (site.css: gate 1.25s + 1.2s; Earth .3s + 4.5s) */
+/* the door's offsets after `lit`, in ms (door.css) */
+const GATE = { delay: 1250, duration: 1200 };
+const RAYS_OPACITY = { delay: 300, duration: 2200 };
+const RAYS_RISE = { delay: 300, duration: 2600 };
+const DAY_SIDE = { delay: 300, duration: 2200 };
 const BUTTON_AFTER_LIT = 2450;
-const SUNRISE_AFTER_LIT = 4800;
-const OFFSET_GIVE = 250;
-/* one lap of the runner (site.css: `runner 1.8s`), the least `loading` lasts on a first visit */
-const LAP_MS = 1800;
+const SUNRISE_AFTER_LIT = 2900;
 
 const SIZES = [
   { name: "desktop", viewport: { width: 1600, height: 1000 } },
@@ -54,40 +51,58 @@ const SIZES = [
 ];
 
 function installReveal() {
-  /** @type {{ loading: number, lit: number, button: number, sunrise: number, fonts: string, earth: string, earthy: boolean }} */
-  const at = { loading: 0, lit: 0, button: 0, sunrise: 0, fonts: "", earth: "", earthy: false };
+  /**
+   * @typedef {{ who: string, property: string, start: number, delay: number, duration: number }} Run
+   * @type {{ laps: number, lapsAtLit: number, loading: boolean, lit: boolean, fonts: string, earthy: boolean,
+   *   inAtLit: boolean[], runs: Run[], done: boolean }}
+   */
+  const at = { laps: 0, lapsAtLit: -1, loading: false, lit: false, fonts: "", earthy: false, inAtLit: [], runs: [], done: false };
   /** @type {any} */ (window).__reveal = at;
+  /* each lap of the ring's running light ends in an `animationiteration` on it */
+  document.addEventListener("animationiteration", (e) => {
+    if (e.target instanceof Element && e.target.matches(".lockup .runner")) at.laps++;
+  }, true);
   /** @param {Element | null} el */
-  const opacity = (el) => (el ? Number(getComputedStyle(el).opacity) : 0);
+  const whoIs = (el) => !el ? ""
+    : el.matches("#dawn .gate") ? "gate"
+    : el.matches("#dawn .rays") ? "rays"
+    : el.matches("#dawn .earth .up") ? `day ${[...document.querySelectorAll("#dawn .earth .up")].indexOf(el)}`
+    : "";
+  /** @type {Set<Animation>} */
+  const seen = new Set();
   const tick = () => {
-    const t = performance.now();
     const b = document.body;
-    if (b && !at.loading && b.classList.contains("loading")) at.loading = t;
+    if (b && !at.lit && b.classList.contains("loading")) at.loading = true;
     if (b && !at.lit && b.classList.contains("lit")) {
-      at.lit = t;
-      /* what `lit` found: the fonts in, and the Earth's first picture settled and shown */
-      const world = document.querySelector("#dawn .world");
+      at.lit = true;
+      /* what `lit` found: the fonts in, the Earth's first picture shown, and the laps run */
+      at.lapsAtLit = at.laps;
       at.fonts = document.fonts.status;
-      at.earth = /** @type {HTMLElement | null} */ (world)?.dataset.earth ?? "";
-      at.earthy = !!world?.classList.contains("earthy");
+      at.earthy = !!document.querySelector("#dawn .world")?.classList.contains("earthy");
+      at.inAtLit = [...document.querySelectorAll("#dawn .earth .up")].map((u) => u.classList.contains("in"));
     }
-    if (at.lit && !at.button && opacity(document.querySelector(".gate")) >= 1) at.button = t;
-    if (at.lit && !at.sunrise) {
-      const rays = document.querySelector("#dawn .rays");
-      const ups = [...document.querySelectorAll("#dawn .earth .up")];
-      const raysDone = rays && opacity(rays) >= 1 && getComputedStyle(rays).transform.replace(/\s/g, "") === "matrix(1,0,0,1,0,0)";
-      const dayDone = ups.length > 0 && ups.every((u) => u.classList.contains("in") && opacity(u) >= 1);
-      if (raysDone && dayDone) at.sunrise = t;
+    if (at.lit) {
+      /* every transition on the gate, the rays and the day side, once it has a start on the timeline */
+      for (const a of document.getAnimations()) {
+        if (seen.has(a) || !(a instanceof CSSTransition) || a.startTime === null) continue;
+        const who = whoIs(/** @type {KeyframeEffect} */ (a.effect).target);
+        if (!who) continue;
+        seen.add(a);
+        const t = /** @type {KeyframeEffect} */ (a.effect).getTiming();
+        at.runs.push({ who, property: a.transitionProperty, start: Number(a.startTime), delay: Number(t.delay), duration: Number(t.duration) });
+      }
+      const ups = document.querySelectorAll("#dawn .earth .up").length;
+      const has = (/** @type {string} */ who, /** @type {string} */ property) => at.runs.some((r) => r.who === who && r.property === property);
+      at.done = has("gate", "opacity") && has("rays", "opacity") && has("rays", "transform")
+        && ups > 0 && [...Array(ups).keys()].every((i) => has(`day ${i}`, "opacity"));
     }
-    if (!at.sunrise || !at.button) requestAnimationFrame(tick);
+    if (!at.done) requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
 }
 
-const RUNS = SIZES.flatMap((size) => [1, 2].map((run) => ({ size, run })));
-
-for (const { size, run } of RUNS) {
-  test(`door first light: the site's order and offsets, ${size.name}, run ${run}`, async ({ page, browserName }) => {
+for (const size of SIZES) {
+  test(`door first light: the site's order and offsets, ${size.name}`, async ({ page, browserName }) => {
     test.setTimeout(40_000);
     await page.setViewportSize(size.viewport);
     await page.route("**/api/health", (r) => answer(r, 200, { status: "ready" }));
@@ -96,44 +111,43 @@ for (const { size, run } of RUNS) {
     await page.addInitScript(installReveal);
 
     await page.goto(`${APP}/login`, { waitUntil: "load" });
-    /* waited out rather than thrown, so a moment that never comes is
-       named below instead of hidden behind a timeout */
-    await page.waitForFunction(() => {
-      const at = /** @type {any} */ (window).__reveal;
-      return at && at.button && at.sunrise;
-    }, null, { timeout: 25_000 }).catch(() => {});
+    /* waited out rather than thrown, so what never came is named below
+       instead of hidden behind a timeout */
+    await page.waitForFunction(() => /** @type {any} */ (window).__reveal?.done, null, { timeout: 20_000 }).catch(() => {});
     const at = await page.evaluate(() => /** @type {any} */ (window).__reveal);
-    if (!at.button || !at.sunrise) {
-      const seen = await page.evaluate(() => {
-        const g = document.querySelector(".gate"), r = document.querySelector("#dawn .rays");
-        return {
-          body: document.body.className, state: document.body.dataset.state ?? null,
-          gate: g ? getComputedStyle(g).opacity : "absent",
-          rays: r ? `${getComputedStyle(r).opacity} ${getComputedStyle(r).transform}` : "absent",
-          day: [...document.querySelectorAll("#dawn .earth .up")].map((u) => `${u.getAttribute("class")} ${getComputedStyle(u).opacity}`),
-        };
-      });
-      console.log(`DOOR_TIMING incomplete ${JSON.stringify({ at, seen })}`);
-    }
-    const ms = {
-      loading: Math.round(at.loading), lit: Math.round(at.lit), button: Math.round(at.button), sunrise: Math.round(at.sunrise),
-      buttonAfterLit: Math.round(at.button - at.lit), sunriseAfterLit: Math.round(at.sunrise - at.lit),
-      loadingFor: Math.round(at.lit - at.loading),
-    };
-    console.log(`DOOR_TIMING ${JSON.stringify({ browser: browserName, size: size.name, run, ...ms, fonts: at.fonts, earth: at.earth })}`);
+    console.log(`DOOR_REVEAL ${JSON.stringify({ browser: browserName, size: size.name, ...at })}`);
 
-    expect(at.lit, "first light never came").toBeGreaterThan(0);
+    expect(at.lit, "first light never came").toBe(true);
     /* `lit` waited for the fonts and the Earth's first picture */
     expect(at.fonts, "`lit` came before the fonts").toBe("loaded");
-    expect(at.earth, "`lit` came before the Earth's first picture").toBe("settled");
     expect(at.earthy, "`lit` came before the Earth's first picture was shown").toBe(true);
     /* and, on a first visit, for a whole lap of the runner */
-    expect(at.loading, "the runner never ran").toBeGreaterThan(0);
-    expect(at.lit - at.loading, "a first visit runs at least a lap").toBeGreaterThanOrEqual(LAP_MS - 100);
-    /* the site's order and offsets after `lit` */
-    expect(at.button, "the button never became ready").toBeGreaterThan(at.lit);
-    expect(at.sunrise, "the sunrise never ended").toBeGreaterThan(at.button);
-    expect(Math.abs(at.button - at.lit - BUTTON_AFTER_LIT), "the button is ready about 2.45s after lit").toBeLessThanOrEqual(OFFSET_GIVE);
-    expect(Math.abs(at.sunrise - at.lit - SUNRISE_AFTER_LIT), "the sunrise ends about 4.8s after lit").toBeLessThanOrEqual(OFFSET_GIVE);
+    expect(at.loading, "the runner never ran").toBe(true);
+    expect(at.lapsAtLit, "a first visit runs at least a lap").toBeGreaterThanOrEqual(1);
+    expect(at.done, `not every transition of the reveal began: ${JSON.stringify(at.runs.map((/** @type {any} */ r) => `${r.who} ${r.property}`))}`).toBe(true);
+
+    /** @param {string} who @param {string} property */
+    const run = (who, property) => at.runs.find((/** @type {any} */ r) => r.who === who && r.property === property);
+    const gate = run("gate", "opacity"), raysOpacity = run("rays", "opacity"), raysRise = run("rays", "transform");
+    const days = at.runs.filter((/** @type {any} */ r) => r.who.startsWith("day ") && r.property === "opacity");
+    /* `lit` set off the button and the rays together, and the day side no earlier */
+    const litAt = gate.start;
+    expect(raysOpacity.start, "the rays and the button start together, at `lit`").toBe(litAt);
+    expect(raysRise.start, "the rays rise with the button, at `lit`").toBe(litAt);
+    for (const d of days) {
+      if (at.inAtLit[Number(d.who.slice(4))]) expect(d.start, `${d.who} was in at \`lit\`, so starts with it`).toBe(litAt);
+      else expect(d.start, `${d.who} starts no earlier than \`lit\``).toBeGreaterThanOrEqual(litAt);
+    }
+    /* each one's delay and length, the door's own */
+    expect({ delay: gate.delay, duration: gate.duration }, "the button: 1.25s, then a 1.2s fade").toEqual(GATE);
+    expect({ delay: raysOpacity.delay, duration: raysOpacity.duration }, "the rays: .3s, then 2.2s to full").toEqual(RAYS_OPACITY);
+    expect({ delay: raysRise.delay, duration: raysRise.duration }, "the rays: .3s, then a 2.6s rise").toEqual(RAYS_RISE);
+    for (const d of days) expect({ delay: d.delay, duration: d.duration }, `${d.who}: .3s, then 2.2s`).toEqual(DAY_SIDE);
+    /* so the order and offsets after `lit`: the button, then the sunrise */
+    /* (start - litAt first: the starts are equal above, so it is exactly 0, not a float's rounding of it) */
+    /** @param {any} r */
+    const end = (r) => r.start - litAt + r.delay + r.duration;
+    expect(end(gate), "the button is ready 2.45s after lit").toBe(BUTTON_AFTER_LIT);
+    expect(Math.max(end(raysOpacity), end(raysRise)), "the rays are up 2.9s after lit").toBe(SUNRISE_AFTER_LIT);
   });
 }
