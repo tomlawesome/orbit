@@ -14,7 +14,7 @@ import { optionalText } from "@/lib/workspace";
 import { getDocumentConfig } from "@/server/documents/config";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { readDocumentDownload, uploadItemDocument } from "@/server/document-repository";
-import { decryptPortableArchive, encryptPortableArchive, isEncryptedPortableArchive, type EncryptedPortableArchive } from "@/server/portable-archive";
+import { decryptPortableArchive, isEncryptedPortableArchive, PortableArchiveSealer, type EncryptedPortableArchive } from "@/server/portable-archive";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 import { normalizeComparableMetadata } from "@/server/metadata/crypto";
 import { MetadataCipher, openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
@@ -23,6 +23,8 @@ import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS, MAX_ARCHIVE_DOCUM
 import { acquireActiveHouseholdLock, requireHouseholdAccess } from "@/server/workspace-access";
 
 const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
+/** Bytes of a document base64-encoded per piece: a multiple of 3, so only the last piece is padded. */
+const BASE64_CHUNK_BYTES = 3 * 65_536;
 
 // Name, icon and accent mirror `workspaceSectionSchema` (src/lib/workspace.ts)
 // for the same reason as the item caps below: the reader re-validates every
@@ -83,10 +85,6 @@ export async function requirePortableArchiveAccess(
   _act: "export" | "import",
 ): Promise<void> {
   await requireHouseholdAccess(userId, householdId, true);
-}
-
-function jsonBuffer(value: unknown): Buffer {
-  return Buffer.from(JSON.stringify(value));
 }
 
 
@@ -196,52 +194,76 @@ export async function createPortableArchive(input: {
     reminderRules: reminders,
     documents: documentRows.map((document) => ({ id: document.id, itemId: document.itemId, displayName: document.displayName, mediaType: document.mediaType, sizeBytes: document.sizeBytes, contentSha256: document.contentSha256, lifecycle: document.lifecycle, scanStatus: document.scanStatus, failureCode: document.failureCode, deleteAfter: document.deleteAfter, deletedAt: document.deletedAt, availableAt: document.availableAt, version: document.version })),
   };
+  const tooLarge = () => new AppError("archive_too_large", `Document-inclusive exports are limited to about ${MAX_ARCHIVE_DOCUMENT_MIB} MiB of documents; export metadata only or remove documents first`, 413);
+  const included = input.includeDocuments ? documentRows.filter((document) => document.lifecycle === "available" && document.itemId) : [];
   if (input.includeDocuments) {
-    const tooLarge = () => new AppError("archive_too_large", `Document-inclusive exports are limited to about ${MAX_ARCHIVE_DOCUMENT_MIB} MiB of documents; export metadata only or remove documents first`, 413);
-    const included = documentRows.filter((document) => document.lifecycle === "available" && document.itemId);
     // Every included document's recorded size, counted at the base64 size the
     // archive carries it in, is summed first, so a household over the limit
     // is refused before any document is read.
     const recordedTotal = included.reduce((sum, document) => sum + Math.ceil(document.sizeBytes / 3) * 4, 0);
     if (recordedTotal > MAX_ARCHIVE_BYTES) throw tooLarge();
-    const bytes: Array<{ id: string; contentBase64: string }> = [];
-    let total = 0;
-    for (const document of included) {
-      // The running total of what was actually read still guards against a
-      // recorded size smaller than the stored document.
-      if (total + Math.ceil(document.sizeBytes / 3) * 4 > MAX_ARCHIVE_BYTES) throw tooLarge();
-      const downloaded = await readDocumentDownload(input.userId, document.id);
-      const contentBase64 = downloaded.bytes.toString("base64");
-      total += contentBase64.length;
-      bytes.push({ id: document.id, contentBase64 });
-      downloaded.bytes.fill(0);
-    }
-    payload.documentBytes = bytes;
   }
 
-  const plaintext = jsonBuffer(payload);
-  // The same bound the import decrypts to, checked before the cipher work.
-  if (plaintext.length > MAX_ARCHIVE_BYTES) {
-    plaintext.fill(0);
-    throw new AppError("archive_too_large", "That export exceeds Orbit's portable archive limit", 413);
-  }
-  let encrypted: EncryptedPortableArchive;
-  try {
-    encrypted = encryptPortableArchive(plaintext, input.passphrase);
-  } finally {
-    plaintext.fill(0);
-  }
-  const contents = jsonBuffer(encrypted);
   const id = randomUUID();
   const storageKey = storage().createStorageKey();
   const expiresAt = new Date(Date.now() + ARCHIVE_TTL_MS);
+  // Streaming authenticated encryption (#1506): the plaintext JSON is made
+  // piece by piece (one document at a time, base64 in 3-byte-aligned chunks),
+  // each piece goes through the cipher, and the ciphertext goes straight to a
+  // temporary file that is renamed into place once complete. The bytes are
+  // the same JSON as ever; only the order of the outer fields differs (the
+  // authentication tag follows the ciphertext), which no reader depends on.
+  const written = await storage().writeStream(storageKey, async (write) => {
+    const sealer = new PortableArchiveSealer(input.passphrase, write);
+    let plaintextBytes = 0;
+    const feed = async (piece: Buffer | string): Promise<void> => {
+      const chunk = typeof piece === "string" ? Buffer.from(piece) : piece;
+      plaintextBytes += chunk.length;
+      // The same bound the import decrypts to, checked as the bytes are made.
+      if (plaintextBytes > MAX_ARCHIVE_BYTES) {
+        throw new AppError("archive_too_large", "That export exceeds Orbit's portable archive limit", 413);
+      }
+      await sealer.push(chunk);
+    };
+    const head = JSON.stringify(payload);
+    if (!input.includeDocuments) {
+      await feed(head);
+    } else {
+      // `documentBytes` is the payload's last key, so the object's closing
+      // brace is held back and the array is streamed in before it.
+      await feed(`${head.slice(0, -1)},"documentBytes":[`);
+      let total = 0;
+      let first = true;
+      for (const document of included) {
+        // The running total of what was actually read still guards against a
+        // recorded size smaller than the stored document.
+        if (total + Math.ceil(document.sizeBytes / 3) * 4 > MAX_ARCHIVE_BYTES) throw tooLarge();
+        const downloaded = await readDocumentDownload(input.userId, document.id);
+        try {
+          await feed(`${first ? "" : ","}{"id":${JSON.stringify(document.id)},"contentBase64":"`);
+          first = false;
+          // Multiples of 3 input bytes, so every chunk but the last encodes
+          // to base64 with no padding and the chunks join into one string.
+          for (let offset = 0; offset < downloaded.bytes.length; offset += BASE64_CHUNK_BYTES) {
+            const encoded = downloaded.bytes.toString("base64", offset, Math.min(offset + BASE64_CHUNK_BYTES, downloaded.bytes.length));
+            total += encoded.length;
+            await feed(Buffer.from(encoded, "ascii"));
+          }
+          await feed('"}');
+        } finally {
+          downloaded.bytes.fill(0);
+        }
+      }
+      await feed("]}");
+    }
+    await sealer.finish();
+  });
   try {
     await db.transaction(async (transaction) => {
       await acquireActiveHouseholdLock(transaction, input.householdId);
-      await storage().write(storageKey, contents);
       await transaction.insert(portableArchives).values({
         id, householdId: input.householdId, requestedByUserId: input.userId, storageKey,
-        contentSha256: createHash("sha256").update(contents).digest("hex"), sizeBytes: contents.length,
+        contentSha256: written.sha256, sizeBytes: written.sizeBytes,
         includesDocuments: input.includeDocuments, expiresAt,
       });
       await transaction.insert(auditLog).values({
@@ -252,8 +274,6 @@ export async function createPortableArchive(input: {
   } catch (error) {
     await storage().delete(storageKey).catch(() => undefined);
     throw error;
-  } finally {
-    contents.fill(0);
   }
   return { id, expiresAt: expiresAt.toISOString(), includesDocuments: input.includeDocuments };
 }

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { validUuid } from "@/lib/uuid";
@@ -26,6 +26,45 @@ export class PortableArchiveStorage {
     try {
       await writeFile(temporary, contents, { mode: 0o600, flag: "wx" });
       await rename(temporary, destination);
+    } finally {
+      await rm(temporary, { force: true }).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Writes a file as it is produced, never holding it whole (#1506): write-
+   * then-rename, so the final name only ever holds a finished file. `produce`
+   * is handed a `write` that resolves once the bytes are in the file, so a
+   * slow disk slows the producer (backpressure). Returns the SHA-256 and
+   * length of exactly the bytes written. On any failure the temporary file is
+   * removed and the error rethrown.
+   */
+  async writeStream(
+    storageKey: string,
+    produce: (write: (chunk: Buffer) => Promise<void>) => Promise<void>,
+  ): Promise<{ sha256: string; sizeBytes: number }> {
+    const destination = this.pathFor(storageKey);
+    await mkdir(this.root, { recursive: true, mode: 0o700 });
+    const temporary = `${destination}.${randomUUID()}.tmp`;
+    const hash = createHash("sha256");
+    let sizeBytes = 0;
+    try {
+      const handle = await open(temporary, "wx", 0o600);
+      try {
+        await produce(async (chunk) => {
+          let offset = 0;
+          while (offset < chunk.length) {
+            const { bytesWritten } = await handle.write(chunk, offset, chunk.length - offset);
+            offset += bytesWritten;
+          }
+          hash.update(chunk);
+          sizeBytes += chunk.length;
+        });
+      } finally {
+        await handle.close();
+      }
+      await rename(temporary, destination);
+      return { sha256: hash.digest("hex"), sizeBytes };
     } finally {
       await rm(temporary, { force: true }).catch(() => undefined);
     }
