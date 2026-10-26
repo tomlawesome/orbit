@@ -173,8 +173,8 @@ describe("the hash an export records is the hash of the file on disk (#1506)", (
 describe("the export holds about one document in memory, not the archive (#1506)", () => {
   it("raises the exporting process's peak memory by less than the archive's plaintext size when the documents total more than 100 MiB", async () => {
     const fixture = await createIntegrationFixture("portable-archive-stream-memory");
-    const documentBytes = 30 * MIB;
-    const documentCount = 4;
+    const documentBytes = 10 * MIB;
+    const documentCount = 12;
     // Seeded one at a time here, in this process; the export below runs in a
     // fresh one, so this process's peak (and the vitest runner's) is not counted.
     const ids: string[] = [];
