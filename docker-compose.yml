@@ -44,6 +44,9 @@ services:
       VAPID_PRIVATE_KEY_FILE: /run/orbit-secrets/orbit-vapid-private-key
       MIGRATE_ON_START: "true"
       WORKER_ENABLED: "true"
+      # Archive preview and import decrypt into the tmpfs below, not the
+      # container's writable layer on the host disk.
+      ORBIT_ARCHIVE_SCRATCH_DIR: /tmp/orbit-archive-scratch
     volumes:
       # Must track wherever the app actually writes documents (src/server/
       # documents/config.ts's DOCUMENTS_ROOT, same default) -- mounting the
@@ -56,6 +59,10 @@ services:
       # (src/server/documents/config.ts); raise this if that ceiling rises.
       # tmpfs only uses memory for bytes actually in flight.
       - /tmp/orbit-document-quarantine:rw,noexec,nosuid,nodev,uid=1001,gid=1001,mode=0700,size=256m
+      # One decrypted archive at the 256 MiB maximum (MAX_ARCHIVE_BYTES in
+      # src/server/portable-archive-limits.ts) plus margin; it counts against
+      # mem_limit only while an archive is being read.
+      - /tmp/orbit-archive-scratch:rw,noexec,nosuid,nodev,uid=1001,gid=1001,mode=0700,size=320m
       - /run/orbit-secrets:rw,noexec,nosuid,nodev,uid=0,gid=1001,mode=0750,size=1m
     secrets:
       - orbit-postgres-password
