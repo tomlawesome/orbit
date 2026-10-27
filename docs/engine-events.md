@@ -304,9 +304,11 @@ before it on stdout is a `recovery-command:` line ("Recovery command (v0)").
   interrupt ends the run as below, complete, exit status 0.
 - `compose up -d` runs under a bound of **300 seconds** (then TERM, and KILL
   10 seconds later), in its own process group, so neither a signal to the
-  installer's group nor a terminal Ctrl-C reaches it. A consumer that stops
-  an update after the commit should therefore allow the bound plus a margin
-  before it kills the installer outright. An up that reaches the bound ends
+  installer's group nor a terminal Ctrl-C reaches it. This holds for a fresh
+  install as well as an update. A consumer that stops the installer while
+  `compose up` runs, on either, should therefore allow the bound plus a
+  margin before it kills the installer outright. On a fresh install the
+  rollback follows once `compose up` has ended. An up that reaches the bound ends
   as a failed start (`reason=docker-host`, above), and stderr says it was
   stopped at the bound. `ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS`
   (1-900) lowers or raises it.
