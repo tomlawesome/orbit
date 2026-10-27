@@ -32,24 +32,29 @@ fail() { printf 'Orbit restore: %s\n' "$*" >&2; exit 1; }
 
 # Reads a single KEY=value line out of $environment_file (the last one wins).
 read_environment_value() {
-  local requested_key="$1" line value="" found=0
+  local requested_key="$1" line value="" found=0 head tail quote
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "${requested_key}="* ]]; then
       # A CRLF .env-orbit is valid; drop the CR.
       value="${line#*=}"
       value="${value%$'\r'}"
-      # Read the value the way Compose's env-file parser does: one pair of
-      # matching quotes comes off, and an unquoted value loses a trailing
-      # comment (spaces or tabs, then "#", to the end) and then any trailing
-      # spaces and tabs. Otherwise a quoted or commented COMPOSE_FILE keeps
-      # its quote marks or padding and the overlay appended to it names a
-      # file that does not exist.
+      # Read the value the way Compose's env-file parser does: a trailing
+      # comment (spaces or tabs, then "#", to the end) comes off, then
+      # trailing spaces and tabs, then one pair of matching quotes. Otherwise
+      # a quoted or commented COMPOSE_FILE keeps its quote marks or padding
+      # and the overlay appended to it names a file that does not exist.
+      # A "#" inside the quotes is part of the value, so for a quoted value
+      # the comment is looked for only after the last closing quote.
+      head="" tail="$value" quote="${value:0:1}"
+      if [[ ( "$quote" == \" || "$quote" == \' ) && "${value:1}" == *"$quote"* ]]; then
+        head="${value%"$quote"*}$quote"
+        tail="${value##*"$quote"}"
+      fi
+      tail="${tail%%[[:blank:]]#*}"
+      while [[ "$tail" == *[[:blank:]] ]]; do tail="${tail%[[:blank:]]}"; done
+      value="$head$tail"
       case "$value" in
         \"*\" | \'*\') value="${value:1:${#value}-2}" ;;
-        *)
-          value="${value%%[[:blank:]]#*}"
-          while [[ "$value" == *[[:blank:]] ]]; do value="${value%[[:blank:]]}"; done
-          ;;
       esac
       found=1
     fi
