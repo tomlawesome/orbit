@@ -37,6 +37,8 @@ set -Eeuo pipefail
 #     nothing. It writes nothing, and says so in one stderr line, if the
 #     directory is missing, not a directory, a symlink, not mode 0700, not
 #     empty or not owned by the current user (#1225, docs/engine-events.md).
+#     The launcher may leave .env-orbit and .orbit-secrets/ there for the
+#     engine to take in as its configuration (#1519), which "empty" allows.
 #     This script only mounts the directory into the engine.
 
 readonly repository="${ORBIT_REPOSITORY:-tomlawesome/orbit}"
@@ -161,6 +163,13 @@ if [[ ! "$readiness_poll_seconds" =~ ^[1-9]$ ]]; then
   printf 'Orbit installer: ORBIT_INSTALLER_POLL_INTERVAL_SECONDS must be between 1 and 9.\n' >&2
   exit 2
 fi
+# The bound on `compose up` (#1518; docs/engine-events.md publishes it).
+compose_up_timeout_seconds="${ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS:-300}"
+if [[ ! "$compose_up_timeout_seconds" =~ ^[1-9][0-9]{0,2}$ ]] ||
+  ((10#$compose_up_timeout_seconds > 900)); then
+  printf 'Orbit installer: ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS must be between 1 and 900.\n' >&2
+  exit 2
+fi
 [[ "$channel" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || {
   printf 'Orbit installer: ORBIT_CHANNEL is invalid.\n' >&2
   exit 2
@@ -274,6 +283,13 @@ rollback_action=""
 optional_window=0
 optional_interrupted=0
 interruptible_pid=""
+# An update after the commit rolls forward (#1518): nothing is undone and no
+# step is cut part-way. rolling_forward is set once the engine has committed
+# an update; an interrupt from then on only records its exit status here
+# (130, 143 or 129), the step under way ends (at once, if it only waits or
+# pulls), and fail() ends the run as that step's failure.
+rolling_forward=0
+stop_status=""
 container_restarts=""
 declare -A restarts_before=()
 
@@ -354,6 +370,23 @@ fail() {
   action="${installer_failure_action:-$(default_failure_action)}"
   phase="${installer_ui_phase:-host}"
   component="${installer_ui_component:-host}"
+  # An update stopped after the commit (#1518) ends as a failure of the step
+  # it stopped in, whatever that step then said: nothing is undone, and the
+  # next step is a retry while the running services are unchanged (the image
+  # pulls), Repair once Compose has begun starting them. Docker's words from
+  # a stopped command are not the cause, so they are not shown.
+  if [[ -n "$stop_status" ]]; then
+    reason=failure
+    installer_failure_detail=""
+    installer_failure_notes=()
+    if [[ "$compose_started" == 1 ]]; then
+      action=repair
+      set -- "The update was stopped after its files were committed, while Orbit's services were being started or checked; nothing was undone. Run Repair."
+    else
+      action=retry
+      set -- "The update was stopped after its files were committed, before Orbit's services were changed; nothing was undone. Run the update again."
+    fi
+  fi
   # A fresh install that fails after the commit is undone before the
   # terminal event, so the event can say whether a retry can work (#1456).
   # A complete rollback leaves nothing to repair, so the next step is a
@@ -397,8 +430,10 @@ fail() {
       fi
       ;;
   esac
-  # An interrupt during the rollback ends the run with that signal's status.
+  # An interrupt during the rollback ends the run with that signal's status,
+  # as does an update's stop.
   ((rollback_interrupted == 0)) || exit "$rollback_interrupted"
+  [[ -z "$stop_status" ]] || exit "$stop_status"
   exit 1
 }
 
@@ -887,7 +922,7 @@ bounded_compose_probe() {
   # launcher gives it one), and `compose exec` keeps stdin attached even with
   # -T. Its first read of the terminal would stop it with SIGTTIN, TERM cannot
   # wake a stopped process, and every probe would fail at the bound.
-  if [[ "${optional_window:-0}" == 1 ]]; then
+  if [[ "${optional_window:-0}" == 1 || "${rolling_forward:-0}" == 1 ]]; then
     run_interruptibly timeout --signal=TERM --kill-after=1s 5s \
       docker compose --project-name "$compose_project_name" --env-file "$environment_file" "$@" </dev/null
     return
@@ -896,10 +931,24 @@ bounded_compose_probe() {
     docker compose --project-name "$compose_project_name" --env-file "$environment_file" "$@" </dev/null
 }
 
+# stopping: an interrupt has asked the run to end (the optional phase's, or
+# an update's after the commit).
+stopping() {
+  [[ "$optional_interrupted" == 1 || -n "$stop_status" ]]
+}
+
+# stop_point: between two steps of an update after the commit, a stop that
+# came during the last one ends the run here, as a failure of the step
+# about to begin (fail(), #1518).
+stop_point() {
+  [[ -z "$stop_status" ]] || fail "stopped"
+}
+
 # run_interruptibly <program> <argument>...
 #
-# In the optional phase: runs the program as a background child and waits
-# for it, so a trapped INT/TERM/HUP returns at once (bash runs a trap only
+# In the optional phase, and on an update after the commit: runs the
+# program as a background child and waits for it, so a trapped INT/TERM/HUP
+# returns at once (bash runs a trap only
 # after a foreground child ends), then kills the child itself -- it may not
 # have had the signal: `timeout` puts itself in its own process group, and
 # the signal may have been sent to this script alone. Returns 130 when
@@ -911,10 +960,10 @@ run_interruptibly() {
   while :; do
     # A signal that landed before `wait` began is seen here, not after the
     # child ends by itself.
-    if [[ "$optional_interrupted" != 1 ]]; then
+    if ! stopping; then
       if wait "$interruptible_pid"; then status=0; else status=$?; fi
     fi
-    if [[ "$optional_interrupted" == 1 ]]; then
+    if stopping; then
       kill -TERM "$interruptible_pid" 2>/dev/null || true
       for ((tries = 0; tries < 30; tries++)); do
         kill -0 "$interruptible_pid" 2>/dev/null || break
@@ -958,19 +1007,19 @@ wait_for_component_health() {
   local phase="$1" component="$2" reason="$3" probe="$4"
   local deadline=$((SECONDS + 10#$readiness_timeout_seconds)) remaining pause
   while true; do
-    [[ "$optional_interrupted" != 1 ]] || return 1
+    ! stopping || return 1
     if "$probe"; then
       installer_ui_event "$phase" "$component" healthy "$reason" health
       return 0
     fi
-    [[ "$optional_interrupted" != 1 ]] || return 1
+    ! stopping || return 1
     installer_ui_event "$phase" "$component" waiting "$reason" wait
     remaining=$((deadline - SECONDS))
     ((remaining > 0)) || return 1
     pause=$((10#$readiness_poll_seconds))
     ((pause <= remaining)) || pause="$remaining"
-    if [[ "$optional_window" == 1 ]]; then
-      run_interruptibly sleep "$pause" || [[ "$optional_interrupted" != 1 ]] || return 1
+    if [[ "$optional_window" == 1 || "$rolling_forward" == 1 ]]; then
+      run_interruptibly sleep "$pause" || ! stopping || return 1
     else
       sleep "$pause"
     fi
@@ -986,12 +1035,70 @@ wait_for_component_health() {
 # not in a file: a full disk is one of the reasons it fails -- and, when it
 # fails, keeps Docker's own words for fail() to show. pipefail keeps the
 # command's own status.
+#
+# On an update after the commit (#1518) it runs as a background child
+# (run_interruptibly), so a stop ends it at once rather than after it; the
+# excerpt comes back through a pipe, still in memory. A stopped command's
+# words are not kept: the stop, not Docker, is the cause. (The launcher's
+# stop and a Ctrl-C reach the whole group, Docker's client included; a
+# signal to this script alone ends the wait, and the pull it leaves running
+# changes nothing that runs.)
 docker_reporting() {
-  local output
-  if output="$("$@" 2>&1 | tail -c 16384)"; then
+  local output status=0 words_fd
+  if [[ "$rolling_forward" != 1 ]]; then
+    if output="$("$@" 2>&1 | tail -c 16384)"; then
+      return 0
+    fi
+    installer_failure_detail="$(printf '%s' "$output" | docker_output_excerpt)"
+    return 1
+  fi
+  # A pipe open at both ends: the child writes the excerpt (at most
+  # docker_output_bound characters, well inside a pipe's buffer) and a NUL,
+  # and has ended before it is read, so the read never waits.
+  exec {words_fd}<> <(:)
+  run_interruptibly docker_reporting_child "$words_fd" "$@" || status=$?
+  if ((status != 0)) && ! stopping; then
+    IFS= read -r -d '' -t 1 -u "$words_fd" installer_failure_detail || true
+  fi
+  exec {words_fd}>&-
+  ((status == 0))
+}
+
+# docker_reporting_child <fd> <command>...: docker_reporting's background
+# half. pipefail keeps the command's own status.
+docker_reporting_child() {
+  local fd="$1" status=0
+  shift
+  "$@" 2>&1 | docker_output_excerpt >&"$fd" || status=$?
+  printf '\0' >&"$fd"
+  return "$status"
+}
+
+# docker_reporting_whole <bound-seconds> <command>...
+#
+# docker_reporting for the one step that is never cut part-way, `compose up`
+# (#1518): an update stopped half-way through it is left with only some
+# containers restarted. `timeout` runs the command in a process group of its
+# own, so neither the launcher's stop (a signal to the installer's whole
+# group) nor a terminal Ctrl-C reaches it, and the capture around it ignores
+# INT, TERM and HUP, so its words are still read. bash runs the trap once it
+# has ended. The bound is published (docs/engine-events.md): the launcher's
+# grace for a stop after the commit is the bound plus a margin. stdin is
+# closed, as for the probes (#836): a background group that reads the
+# terminal is stopped.
+docker_reporting_whole() {
+  local bound="$1" output status=0
+  shift
+  if output="$(trap '' INT TERM HUP
+    timeout --signal=TERM --kill-after=10s "${bound}s" "$@" </dev/null 2>&1 | tail -c 16384)"; then
     return 0
+  else
+    status=$?
   fi
   installer_failure_detail="$(printf '%s' "$output" | docker_output_excerpt)"
+  if ((status == 124 || status == 137)); then
+    installer_failure_notes+=("Docker Compose did not finish within ${bound} s, so it was stopped.")
+  fi
   return 1
 }
 
@@ -1762,6 +1869,7 @@ prepare_service_images() {
   installer_ui_phase=preparation
   installer_ui_component=database
   installer_ui_event preparation database starting service-preparation pull
+  stop_point
   docker_reporting compose pull orbit-db ||
     fail_with image-registry retry "Could not prepare the Orbit database image."
   installer_ui_event preparation database completed service-preparation pull
@@ -1777,6 +1885,7 @@ prepare_service_images() {
 
   installer_ui_component=clamav
   installer_ui_event preparation clamav starting service-preparation pull
+  stop_point
   docker_reporting compose pull orbit-clamav ||
     fail_with image-registry retry "Could not prepare the private scanner image."
   installer_ui_event preparation clamav completed service-preparation pull
@@ -1785,6 +1894,7 @@ prepare_service_images() {
     processing|full)
       installer_ui_component=tika
       installer_ui_event preparation tika starting service-preparation pull
+      stop_point
       docker_reporting compose pull orbit-tika ||
         fail_with image-registry retry "Could not prepare the optional document-processing image."
       installer_ui_event preparation tika completed service-preparation pull
@@ -1795,6 +1905,7 @@ prepare_service_images() {
     ai|full)
       installer_ui_component=ollama
       installer_ui_event preparation ollama starting service-preparation pull
+      stop_point
       docker_reporting compose pull orbit-ollama ||
         fail_with image-registry retry "Could not prepare the optional local-model service image."
       installer_ui_event preparation ollama completed service-preparation pull
@@ -1819,13 +1930,16 @@ start_services() {
     fail_with docker-host retry "Could not list Docker volumes before starting services, so a failed start could not be cleaned up; nothing was started."
   fi
   installer_ui_event preparation compose starting service-start start
+  stop_point
   compose_started=1
-  if ! docker_reporting compose up -d --no-build --remove-orphans; then
+  if ! docker_reporting_whole "$compose_up_timeout_seconds" \
+    docker compose --project-name "$compose_project_name" --env-file "$environment_file" up -d --no-build --remove-orphans; then
     note_why_not_running orbit-db orbit-app
     # A fresh install is rolled back by fail(), Docker included, and then
     # says retry; an update keeps its deployment and points at Repair.
     fail_with docker-host repair "Orbit services could not be created or started."
   fi
+  stop_point
   installer_ui_event preparation compose completed service-start start
 }
 
@@ -2030,6 +2144,13 @@ wait_for_deployment_readiness() {
   # (#1456 ruling, note 40394). The rollback is disarmed, and an interrupt
   # from here kills the waiting child and ends the optional waits.
   trap 'optional_interrupted=1' INT TERM HUP
+  # An update's stop that came as the application became ready is the
+  # optional phase's from here: the deployment is ready (#1518).
+  if [[ -n "$stop_status" ]]; then
+    optional_interrupted=1
+    stop_status=""
+  fi
+  rolling_forward=0
   rollback_armed=0
   # Nothing is rolled back from here, so the copy of the originals goes.
   release_rollback_copies || true
@@ -2323,6 +2444,14 @@ case "${engine_outcome[status]}" in
     # The engine committed: from here a fresh install is rolled back on any
     # failure, this one included (#1456).
     [[ "${engine_outcome[fresh]:-}" != 1 ]] || rollback_armed=1
+    # An update committed: from here it rolls forward (#1518). An interrupt
+    # is recorded, not obeyed: the step under way ends (a pull or a wait at
+    # once; `compose up` only by itself), and the run ends as its failure,
+    # with the signal's exit status.
+    if [[ "${engine_outcome[fresh]:-}" != 1 ]]; then
+      trap 'stop_status=130' INT; trap 'stop_status=143' TERM; trap 'stop_status=129' HUP
+      rolling_forward=1
+    fi
     [[ "$engine_status" == 0 ]] ||
       fail_with failure retry "The install engine reported success but exited with status ${engine_status}."
     ;;
@@ -2382,6 +2511,7 @@ fi
 export ORBIT_IMAGE="$resolved_reference"
 installer_ui_phase=compose
 installer_ui_component=compose
+stop_point
 if ! compose config --quiet >/dev/null 2>&1; then
   fail_with failure retry "Docker Compose configuration is invalid; review the named configuration fields and rerun."
 fi
