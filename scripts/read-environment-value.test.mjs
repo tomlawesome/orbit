@@ -43,6 +43,20 @@ const CASES = [
   ["a plain value is unchanged", "COMPOSE_FILE=a.yml:b.yml\n", "a.yml:b.yml"],
   ["a quoted value keeps a hash inside the quotes", 'COMPOSE_FILE="a #b.yml"\n', "a #b.yml"],
   ["quotes that do not match are left alone", "COMPOSE_FILE=\"a.yml'\n", "\"a.yml'"],
+  // Fail on the code before the round-2 change: the unquoted branch removes
+  // only the last space before " #", so the padding in front of it stays.
+  ["an aligned comment leaves no trailing spaces", "COMPOSE_FILE=a.yml    # note\n", "a.yml"],
+  // Fails because the comment marker is matched as space-then-hash only, so a
+  // tab before the hash is not seen and the comment stays in the value.
+  ["a comment after a tab is removed", "COMPOSE_FILE=a.yml\t# note\n", "a.yml"],
+  // Fail because the quoted branch needs the value to end in a quote: a
+  // comment after the closing quote sends it to the unquoted branch, which
+  // keeps the quote marks.
+  ["a quoted value followed by a comment loses quotes and comment", 'COMPOSE_FILE="a.yml:b.yml" # note\n', "a.yml:b.yml"],
+  ["a single-quoted value with an aligned comment loses quotes and comment", "COMPOSE_FILE='a.yml'    # note\n", "a.yml"],
+  // Pass today; guard against a fix that cuts at any hash or inside quotes.
+  ["a hash with no space before it is kept", "COMPOSE_FILE=a.yml#b\n", "a.yml#b"],
+  ["a quoted value keeps a spaced hash inside the quotes", 'COMPOSE_FILE="a # b.yml"\n', "a # b.yml"],
   ["a CRLF line with quotes loses the CR and the quotes", 'COMPOSE_FILE="a.yml"\r\n', "a.yml"],
   ["a CRLF line with a plain value loses the CR", "COMPOSE_FILE=a.yml\r\n", "a.yml"],
 ];
