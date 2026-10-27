@@ -54,6 +54,11 @@ const CASES = [
   // keeps the quote marks.
   ["a quoted value followed by a comment loses quotes and comment", 'COMPOSE_FILE="a.yml:b.yml" # note\n', "a.yml:b.yml"],
   ["a single-quoted value with an aligned comment loses quotes and comment", "COMPOSE_FILE='a.yml'    # note\n", "a.yml"],
+  // Fail because the quoted branch takes the LAST matching quote on the line
+  // as the closing quote: a quote inside the trailing comment is picked, so the
+  // value keeps its opening quote and the comment.
+  ["a single-quoted value whose comment holds an apostrophe", "COMPOSE_FILE='a.yml:b.yml' # operator's overlay\n", "a.yml:b.yml"],
+  ["a double-quoted value whose comment holds double quotes", 'COMPOSE_FILE="a.yml" # say "hi"\n', "a.yml"],
   // Pass today; guard against a fix that cuts at any hash or inside quotes.
   ["a hash with no space before it is kept", "COMPOSE_FILE=a.yml#b\n", "a.yml#b"],
   ["a quoted value keeps a spaced hash inside the quotes", 'COMPOSE_FILE="a # b.yml"\n', "a # b.yml"],
