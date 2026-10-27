@@ -126,8 +126,9 @@ export function decryptPortableArchive(archive: EncryptedPortableArchive, passph
  * a piece at a time, so the plaintext is never held whole. Nothing `next`
  * returns may be used until `finish` has verified the authentication tag; a
  * caller writes the pieces somewhere private and reads them back only after.
- * A wrong passphrase, a short tag or an unsupported archive throws here, in
- * the constructor; a changed ciphertext or tag throws from `finish`.
+ * A short tag or an unsupported archive throws here, in the constructor; a
+ * wrong passphrase, a changed ciphertext or a changed tag can only show at
+ * `finish`, when GCM checks the tag.
  */
 export class PortableArchiveOpener {
   private readonly decipher: DecipherGCM;

@@ -376,7 +376,9 @@ export async function reconcilePortableArchiveStorage(): Promise<void> {
   }
   await storage().sweepTemporaryFiles(60 * 60 * 1_000);
   // A preview or import killed mid-way leaves its decrypted payload file;
-  // one older than the import lease belongs to no live request.
+  // one older than the import lease belongs to no live request. This tidy
+  // runs every cycle of the document worker, not only at boot; an import
+  // still running past the lease keeps reading through its open handle.
   await sweepPayloadScratch(PORTABLE_IMPORT_LEASE_MS);
 }
 
