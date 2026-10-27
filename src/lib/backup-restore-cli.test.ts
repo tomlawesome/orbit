@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -2173,6 +2173,190 @@ runImportRecoveryBundle({
       expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(LIVE_KEK);
       expect(existsSync(rollbackFile)).toBe(false);
       expect(existsSync(paths.journalPath)).toBe(false);
+    });
+  });
+
+  // #1420: an operator who lost .orbit-secrets/document-kek can import the
+  // bundle into the existing install. A restore never needs the thing it is
+  // restoring: with no live key there is nothing to set aside, and a rollback
+  // removes the key the import wrote, leaving the deployment as it was.
+  describe("#1420: the live document key file is missing", () => {
+    const passphrase = "correct horse battery staple";
+    const objectPath = (root: string, key: string): string => join(root, "objects", key.slice(0, 2), key.slice(2, 4), `${key}.bin`);
+
+    function missingKeyTarget(suffix: string): { liveDocumentsRoot: string; liveDocumentKekFile: string; rollbackFile: string; backupDirectory: string; adapter: FakeAdapter } {
+      const liveDocumentsRoot = join(sandbox, `live-docs-import-nokey-${suffix}`);
+      buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+      const liveDocumentKekFile = join(sandbox, `live-document-kek-nokey-${suffix}`);
+      const backupDirectory = join(sandbox, `import-target-backups-nokey-${suffix}`);
+      mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+      return {
+        liveDocumentsRoot,
+        liveDocumentKekFile,
+        rollbackFile: `${liveDocumentKekFile}.import-rollback`,
+        backupDirectory,
+        adapter: new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10),
+      };
+    }
+
+    it("imports into a deployment with no live key: installs the bundle's key and content, and leaves no rollback file", () => {
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+      const { liveDocumentsRoot, liveDocumentKekFile, rollbackFile, backupDirectory, adapter } = missingKeyTarget("ok");
+      expect(existsSync(liveDocumentKekFile)).toBe(false);
+
+      const result = runImportRecoveryBundle({
+        recoveryBundlePath,
+        passphrase,
+        liveDocumentKekFile,
+        backupDirectory,
+        adapter,
+        importConfirmed: true,
+        confirmRestore: () => true,
+      });
+
+      expect(result.outcome).toBe("completed");
+      expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(UPDATED_KEY);
+      expect(statSync(liveDocumentKekFile).mode & 0o777).toBe(0o600);
+      expect(existsSync(rollbackFile)).toBe(false);
+      expect(existsSync(objectPath(liveDocumentsRoot, UPDATED_KEY))).toBe(true);
+      expect(adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toBe(reportsFor(UPDATED_KEY, 22).crypto);
+    });
+
+    it("declining the import confirmation changes nothing: still no key, app never stopped", () => {
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+      const { liveDocumentKekFile, rollbackFile, backupDirectory, adapter } = missingKeyTarget("declined");
+
+      let caught: unknown;
+      try {
+        runImportRecoveryBundle({
+          recoveryBundlePath,
+          passphrase,
+          liveDocumentKekFile,
+          backupDirectory,
+          adapter,
+          importConfirmed: false,
+          confirmRestore: () => true,
+        });
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).toBeInstanceOf(BackupRestoreCliRefusal);
+      expect((caught as BackupRestoreCliRefusal).code).toBe("import-not-confirmed");
+      expect(existsSync(liveDocumentKekFile)).toBe(false);
+      expect(existsSync(rollbackFile)).toBe(false);
+      expect(adapter.stopCalls).toBe(0);
+    });
+
+    it("rolls back to no key when the inner restore fails before any checkpoint: the key it wrote is removed, the app is restarted", () => {
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+      const { liveDocumentKekFile, rollbackFile, backupDirectory, adapter } = missingKeyTarget("early-fail");
+
+      expect(() =>
+        runImportRecoveryBundle({
+          recoveryBundlePath,
+          passphrase,
+          liveDocumentKekFile,
+          backupDirectory,
+          adapter,
+          importConfirmed: true,
+          // Declined after the key was written and before any checkpoint exists.
+          confirmRestore: () => false,
+        }),
+      ).toThrow();
+
+      // The import got as far as stopping the app (it was not refused up front), then undid itself.
+      expect(adapter.stopCalls).toBe(1);
+      expect(existsSync(liveDocumentKekFile)).toBe(false);
+      expect(existsSync(rollbackFile)).toBe(false);
+      expect(adapter.appRunning).toBe(true);
+      expect(existsSync(deriveRestorePaths(backupDirectory, liveDocumentKekFile).journalPath)).toBe(false);
+    });
+
+    it("rolls back to no key, and the old content, when the restore fails after the checkpoint and its automatic rollback succeeds", () => {
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+      const { liveDocumentsRoot, liveDocumentKekFile, rollbackFile, backupDirectory, adapter } = missingKeyTarget("late-fail");
+
+      let documentsReplaced = 0;
+      expect(() =>
+        runImportRecoveryBundle({
+          recoveryBundlePath,
+          passphrase,
+          liveDocumentKekFile,
+          backupDirectory,
+          adapter,
+          importConfirmed: true,
+          confirmRestore: () => true,
+          testHooks: {
+            afterDocumentsReplaced: () => {
+              documentsReplaced += 1;
+              throw new Error("simulated failure after the documents were replaced");
+            },
+          },
+        }),
+      ).toThrow();
+
+      // The failure happened after the checkpoint, so this is the automatic rollback, not a refusal up front.
+      expect(documentsReplaced).toBe(1);
+      expect(existsSync(liveDocumentKekFile)).toBe(false);
+      expect(existsSync(rollbackFile)).toBe(false);
+      expect(existsSync(deriveRestorePaths(backupDirectory, liveDocumentKekFile).journalPath)).toBe(false);
+      expect(adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toBe(reportsFor(ORIGINAL_KEY, 10).crypto);
+      expect(existsSync(objectPath(liveDocumentsRoot, ORIGINAL_KEY))).toBe(true);
+      expect(existsSync(objectPath(liveDocumentsRoot, UPDATED_KEY))).toBe(false);
+      expect(adapter.appRunning).toBe(true);
+    });
+
+    it("`restore --recover` after a completed missing-key import removes the key the import wrote", () => {
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+      const { liveDocumentsRoot, liveDocumentKekFile, rollbackFile, backupDirectory, adapter } = missingKeyTarget("recover");
+      const paths = deriveRestorePaths(backupDirectory, liveDocumentKekFile);
+
+      runImportRecoveryBundle({
+        recoveryBundlePath,
+        passphrase,
+        liveDocumentKekFile,
+        backupDirectory,
+        adapter,
+        importConfirmed: true,
+        confirmRestore: () => true,
+      });
+      expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(UPDATED_KEY);
+      expect(existsSync(paths.journalPath)).toBe(true);
+
+      const result = runRecoverRestore({ adapter, paths, workDir: mkdtempSync(join(sandbox, "recover-after-nokey-import-")) });
+
+      expect(result.outcome).toBe("completed");
+      expect(existsSync(liveDocumentKekFile)).toBe(false);
+      expect(existsSync(rollbackFile)).toBe(false);
+      expect(existsSync(paths.journalPath)).toBe(false);
+      expect(adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toBe(reportsFor(ORIGINAL_KEY, 10).crypto);
+      expect(existsSync(objectPath(liveDocumentsRoot, ORIGINAL_KEY))).toBe(true);
+    });
+
+    it("still refuses a live key path that is a symbolic link, and leaves it alone", () => {
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+      const { liveDocumentKekFile, rollbackFile, backupDirectory, adapter } = missingKeyTarget("symlink");
+      const realKey = join(sandbox, "real-document-kek-symlink");
+      writeFileSync(realKey, `${LIVE_KEK}\n`, { mode: 0o600 });
+      symlinkSync(realKey, liveDocumentKekFile);
+
+      expect(() =>
+        runImportRecoveryBundle({
+          recoveryBundlePath,
+          passphrase,
+          liveDocumentKekFile,
+          backupDirectory,
+          adapter,
+          importConfirmed: true,
+          confirmRestore: () => true,
+        }),
+      ).toThrow(RecoveryBundleRefusal);
+
+      expect(lstatSync(liveDocumentKekFile).isSymbolicLink()).toBe(true);
+      expect(readFileSync(realKey, "utf8").trim()).toBe(LIVE_KEK);
+      expect(existsSync(rollbackFile)).toBe(false);
+      expect(adapter.stopCalls).toBe(0);
     });
   });
 

@@ -122,6 +122,13 @@ require_deployment() {
   [[ "${1:-}" != health ]] || command -v curl >/dev/null 2>&1 || fail 'preflight/tools failed; curl is required.'
   [[ -f "$environment_file" ]] || fail 'preflight/configuration failed; the Orbit environment file is missing.'
   [[ -d "$secrets_directory" && ! -L "$secrets_directory" ]] || fail 'preflight/configuration failed; the secrets directory must be a regular directory.'
+}
+
+# The live document key must be a regular file: Orbit cannot start without it.
+# The recovery import and restore.sh --recover do not ask for it: each puts a
+# key back, or puts back "no key" (#1420).
+# shellcheck disable=SC2317  # import-recovery-bundle.sh carries it unused
+require_live_key() {
   [[ -f "$secrets_directory/document-kek" && ! -L "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; the configured document key is missing.'
 }
 
@@ -172,6 +179,21 @@ run_engine() {
   if [[ -n "$input_file" ]]; then
     run_args+=(-v "$input_file:/orbit-input/bundle.tar:ro" -e "ORBIT_HOST_INPUT_FILE=$input_file")
   fi
+  # No live key file (#1420): Docker will not mount a missing secret file, so this one call adds
+  # the overlay that points the secret at /dev/null. The engine reads the key from the deployment
+  # directory, never from the secret. The files Compose would use otherwise are kept, in its order:
+  # an exported COMPOSE_FILE, then .env-orbit's, then docker-compose.yml plus the
+  # docker-compose.override.yml Compose loads by default when one is present.
+  if [[ ! -e "$secrets_directory/document-kek" && ! -L "$secrets_directory/document-kek" ]]; then
+    local compose_files="${COMPOSE_FILE:-}" separator="${COMPOSE_PATH_SEPARATOR:-}"
+    [[ -n "$compose_files" ]] || compose_files="$(read_environment_value COMPOSE_FILE 2>/dev/null || true)"
+    [[ -n "$separator" ]] || separator="$(read_environment_value COMPOSE_PATH_SEPARATOR 2>/dev/null || true)"
+    if [[ -z "$compose_files" ]]; then
+      compose_files=docker-compose.yml
+      [[ ! -e docker-compose.override.yml ]] || compose_files+="${separator:-:}docker-compose.override.yml"
+    fi
+    local -x COMPOSE_FILE="${compose_files}${separator:-:}docker-compose.no-document-key.yml"
+  fi
   compose "${run_args[@]}" --entrypoint node orbit-app /opt/orbit/cli/orbit.js "$@" --dir /orbit-deploy "${directory_args[@]}"
 }
 
@@ -221,6 +243,7 @@ done
 if [[ "$finish" == true ]]; then
   [[ "$#" == 1 ]] || fail 'usage failed; --finish takes no other argument.'
   require_deployment
+  require_live_key
   if [[ -f "$journal_path" ]]; then
     grep -qx 'state=database-restored' "$journal_path" || fail 'finish failed; the restore journal does not record a completed restore; keep Orbit stopped and run bash scripts/restore.sh --recover.'
     # The checkpoint is the only way back, so it goes only once the restored data is serving.
@@ -241,6 +264,7 @@ fi
 [[ "${#yes_flag[@]}" == 0 || "${ORBIT_NONINTERACTIVE_RESTORE:-}" == true ]] || fail 'usage failed; --yes also needs ORBIT_NONINTERACTIVE_RESTORE=true (one switch alone never confirms a restore).'
 
 require_deployment health
+[[ "$recover" == true ]] || require_live_key
 engine_host_identity
 [[ "$recover" == true ]] || run_engine "$backup_file" restore --preflight /orbit-input/bundle.tar </dev/null || exit $?
 keep_stopped_message='Orbit restore: recovery evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.'

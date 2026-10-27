@@ -27,6 +27,9 @@
 #     reopens it afterwards
 #   recovery-bundle export/import path          export/import-recovery-bundle.sh
 #     entries (Part 2)
+#   test_import_with_missing_key                import-recovery-bundle.sh (#1420): a
+#     bundle imports into a deployment whose live document key file is gone,
+#     installs the bundle's key and leaves Orbit healthy on the backup's data.
 #   test_restore_removes_post_backup_table      restore.sh #8 (#1316): a table
 #     created after the backup point does not survive restoring it, Orbit
 #     boots healthy and the restore does not roll back.
@@ -1299,6 +1302,37 @@ test_wrong_recovery_material() {
   assert_recovery_jobs_restored
 }
 
+# #1420: the bundle brings its own key, so importing it into a deployment whose
+# live document key file is gone must work -- nothing to set aside -- and leave
+# Orbit healthy on the backup's data with the key installed. The key is moved
+# aside the way test_local_key_rejections does (teardown puts it back if this
+# fails midway); the recovery bundle was exported from this same key, so the
+# installed key must equal the one moved aside.
+test_import_with_missing_key() {
+  local original_key_hash output
+  original_key_hash="$(sha256sum "$live_kek" | awk '{print $1}')"
+  key_backup="$test_directory/document-kek.import-missing.backup"
+  mv -- "$live_kek" "$key_backup"
+  if ! output="$(printf '%s\n%s\n%s\n' 'orbit-test-recovery-passphrase' 'IMPORT RECOVERY' 'RESTORE' |
+    ORBIT_RECOVERY_TEST_MODE=true bash scripts/import-recovery-bundle.sh "$recovery_bundle_path" 2>&1)"; then
+    fail "Recovery import refused a deployment whose live document key is missing: ${output}"
+  fi
+  [[ "$output" != *'document key is missing'* ]] || fail 'Recovery import still reports the missing live document key.'
+  [[ -f "$live_kek" && ! -L "$live_kek" ]] || fail 'Recovery import did not install the bundle document key.'
+  [[ "$(sha256sum "$live_kek" | awk '{print $1}')" == "$original_key_hash" ]] ||
+    fail 'Recovery import installed a document key other than the bundle key.'
+  [[ ! -e "$live_kek.import-rollback" ]] || fail 'Recovery import left a rollback key behind although there was no key to set aside.'
+  [[ ! -f "${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore/restore.journal" ]] ||
+    fail 'Recovery import left its restore journal behind.'
+  wait_for_health
+  assert_fixture_present
+  assert_recovery_jobs_restored
+  assert_credential_fixture_present
+  insert_post_backup_session_fixture
+  rm -f -- "$key_backup"
+  key_backup=""
+}
+
 test_directory="$(mktemp -d "${TMPDIR:-/tmp}/orbit-backup-test.XXXXXX")"
 # From here the deployment is changed, so teardown puts it back (#1241).
 touched=1
@@ -1350,6 +1384,7 @@ test_ordinary_rollback
 test_checkpoint_failure_recovery
 test_hard_interruption_recovery
 test_wrong_recovery_material
+test_import_with_missing_key
 test_restore_removes_post_backup_table
 test_restore_during_maintenance
 

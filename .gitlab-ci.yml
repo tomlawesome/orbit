@@ -1433,6 +1433,7 @@ sidecar_images:
           - cosign.pub
           - docker-compose.kek-rotation.yml
           - docker-compose.mail.yml
+          - docker-compose.no-document-key.yml
           - docker-compose.yml
           - drizzle.config.ts
           - eslint.config.mjs
@@ -3068,6 +3069,7 @@ repair_journeys:
         - docker-compose.yml
         - docker-compose.mail.yml
         - docker-compose.kek-rotation.yml
+        - docker-compose.no-document-key.yml
         - .env-orbit.example
         - config/tika-config.json
         - scripts/configure.sh

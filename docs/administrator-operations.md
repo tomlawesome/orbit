@@ -759,10 +759,9 @@ instance, and it clears the moment `export-recovery-bundle.sh` completes.
 To use a recovery bundle, run `bash scripts/import-recovery-bundle.sh
 <recovery.tar>` (it asks for the passphrase, then for `IMPORT RECOVERY`, then
 for `RESTORE`) and see "Restoring
-the document key-encryption key" below. The import needs the deployment's
-current key file in `.orbit-secrets/document-kek` and refuses without it
-("the configured document key is missing"); when that file is gone, see the
-same section.
+the document key-encryption key" below. The import also works when the
+deployment's key file in `.orbit-secrets/document-kek` is gone: the bundle
+brings its own key.
 
 ## Restoring the document key-encryption key
 
@@ -830,16 +829,16 @@ restart the exact deployed image:
    screen that no "Encrypted details are locked" card remains. Nothing needs
    re-encrypting and no backfill runs, because the values were never changed.
 
-If you have no copy of the key file but do have a recovery bundle, the way
-back is to restore the backup bundle or reinstall. The bundle import needs the
-deployment's current key file and refuses while that file is missing ("the
-configured document key is missing"), so do not run it there. Reinstall
-Orbit into a fresh directory ([Installing Orbit](installing.md)), then import
-the bundle there:
+If you have no copy of the key file but do have a recovery bundle, import the
+bundle into this deployment, missing key file and all:
 
 ```sh
 bash scripts/import-recovery-bundle.sh <recovery.tar>
 ```
+
+It installs the bundle's key and restores the backup inside it. If the import
+fails and rolls back, it removes the key it wrote, so the deployment is left
+as it was, with no key file; `bash scripts/restore.sh --recover` does the same.
 
 If the key is really gone and no recovery bundle holds it, this is not a
 restore. Encrypted documents and Tier 1 and Tier 2 metadata, every account

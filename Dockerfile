@@ -194,12 +194,12 @@ RUN ORBIT_WEB_BUILD_ROOT=/opt/orbit/web node scripts/web-pdfjs-runtime-check.mjs
   && rm -f /opt/orbit/scripts/web-pdfjs-runtime-check.mjs
 COPY --chown=orbit:orbit scripts/recovery-crypto.mjs ./scripts/recovery-crypto.mjs
 COPY --chown=root:root scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
-# The twelve deployment assets, at the same relative paths an install uses
+# The fourteen deployment assets, at the same relative paths an install uses
 # them at (ADR-0019). They travel with the digest, so the compose file an
 # operator runs and the image it configures are the same artifact, and an
 # install needs nothing but the registry. Root-owned data: the install engine
 # copies them into the deployment and sets its own modes (#1212).
-COPY --chown=root:root docker-compose.yml docker-compose.mail.yml docker-compose.kek-rotation.yml .env-orbit.example ./deploy/
+COPY --chown=root:root docker-compose.yml docker-compose.mail.yml docker-compose.kek-rotation.yml docker-compose.no-document-key.yml .env-orbit.example ./deploy/
 COPY --chown=root:root config/tika-config.json ./deploy/config/
 COPY --chown=root:root \
   scripts/configure.sh \
