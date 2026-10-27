@@ -183,7 +183,9 @@ a pipeline on any branch. `dev`, `preview` and `main` all take push
 
 Browsers are the exception to "a merge request is tested like a push": a merge
 request into `dev` starts no browser job. They run at promotion and nightly on
-`dev` (see "Browsers run at promotion and every night" below, #1412).
+`dev` (see "Browsers run at promotion and every night" below, #1412). The
+exception is a merge request labelled `ci: acceptance`, which runs them before
+it merges (#1514).
 
 Two runners serve the project, both on the host `gitlab-runners` (32 cores,
 48 GB): the shared group runner, and runner 8, a privileged project runner owned
@@ -318,7 +320,9 @@ sometimes a change deserves the whole gate before it merges. The label
 `CI_MERGE_REQUEST_LABELS`, turns every flag on — lane `full`, system risk,
 launcher install compatibility included — and says so in its log, so a full
 run on a small diff is never a mystery. Remove the label and the next pipeline
-is classified again.
+is classified again. On a merge request into `dev` the label also brings back
+the browser jobs (#1514). Adding a label starts no pipeline: start one on the
+merge request afterwards (Pipelines tab, "Run pipeline").
 
 A branch pipeline leaves the acceptance jobs manual, so playing one there asks
 for the same thing.
