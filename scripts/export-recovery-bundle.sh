@@ -43,11 +43,14 @@ read_environment_value() {
       # a quoted or commented COMPOSE_FILE keeps its quote marks or padding
       # and the overlay appended to it names a file that does not exist.
       # A "#" inside the quotes is part of the value, so for a quoted value
-      # the comment is looked for only after the last closing quote.
+      # the comment is looked for only after the closing quote. That is the
+      # first same quote after the opening one, not the last on the line: a
+      # comment may hold an apostrophe or quote marks of its own.
       head="" tail="$value" quote="${value:0:1}"
       if [[ ( "$quote" == \" || "$quote" == \' ) && "${value:1}" == *"$quote"* ]]; then
-        head="${value%"$quote"*}$quote"
-        tail="${value##*"$quote"}"
+        tail="${value:1}"
+        head="$quote${tail%%"$quote"*}$quote"
+        tail="${tail#*"$quote"}"
       fi
       tail="${tail%%[[:blank:]]#*}"
       while [[ "$tail" == *[[:blank:]] ]]; do tail="${tail%[[:blank:]]}"; done
