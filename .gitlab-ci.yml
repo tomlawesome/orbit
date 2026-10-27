@@ -1920,6 +1920,32 @@ build_image:
     - apk_add bash git nodejs
     - |
       set -eu
+      # The base image for bot-started pipelines (#1167). A job token reads
+      # only what the user who started the pipeline can, and the project bots
+      # behind Renovate, base-image re-pin and door-import merge requests
+      # cannot read ai/orbit-base-image. So a read-only deploy token
+      # (`read_registry` on that one project; owner decision on #1167,
+      # 2026-10-27) pulls the pinned digest first, and buildx then builds from
+      # the local copy without asking the registry again (verified against
+      # docker:29.6.2-dind: a build FROM a pre-pulled digest succeeds with its
+      # registry stopped). A registry host keeps one login, so this one is
+      # logged out before the job-token login below takes the host for the
+      # cache. If the pull fails, the build takes the base from GHCR instead:
+      # same digest, no credential.
+      base_image_from_ghcr=false
+      if [ -n "${ORBIT_BASE_IMAGE_PULL_USER:-}" ] && [ -n "${ORBIT_BASE_IMAGE_PULL_TOKEN:-}" ]; then
+        base_image_host="${ORBIT_BASE_IMAGE_REGISTRY%%/*}"
+        base_image_path="$(sed -n 's|^FROM \${BASE_IMAGE_REGISTRY}\(/orbit-base-image:[^ ]*@sha256:[0-9a-f]*\) .*|\1|p' Dockerfile | head -n 1)"
+        if [ -n "$base_image_path" ] \
+          && printf '%s\n' "$ORBIT_BASE_IMAGE_PULL_TOKEN" | docker login "$base_image_host" --username "$ORBIT_BASE_IMAGE_PULL_USER" --password-stdin \
+          && docker pull --quiet "${ORBIT_BASE_IMAGE_REGISTRY}${base_image_path}"; then
+          echo "pulled the pinned base image with the read-only deploy token"
+        else
+          echo "could not pull the base image with the deploy token; taking it from GHCR" >&2
+          base_image_from_ghcr=true
+        fi
+        docker logout "$base_image_host" || true
+      fi
       # Read access to the cache is attempted below on every build; write
       # access stays on delivery branches only, the same trust boundary
       # record_image's push down in the publish stage already draws -- an
@@ -1933,6 +1959,9 @@ build_image:
       if echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin; then
         orbit_build_cache_usable=true
         base_image_registry_arg="--build-arg BASE_IMAGE_REGISTRY=${ORBIT_BASE_IMAGE_REGISTRY}"
+        if [ "$base_image_from_ghcr" = true ]; then
+          base_image_registry_arg=""
+        fi
       else
         echo "could not log in to $CI_REGISTRY; building without the layer cache and pulling the base image from GHCR" >&2
         orbit_build_cache_usable=false
