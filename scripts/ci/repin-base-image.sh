@@ -32,8 +32,8 @@
 # The exact setting: ai/orbit-base-image > Settings > CI/CD > Job token
 # permissions > "CI/CD job token allowlist" > Add `ai/orbit`. Create this job's
 # schedule (variable BASE_IMAGE_REPIN=true) under the same user as the
-# `renovate` and `sidecar_pin_freshness` schedules (currently `Claude`, already
-# Maintainer on ai/orbit-base-image) and the membership half needs nothing
+# `renovate` and `sidecar_pin_freshness` schedules (currently the assistant's
+# GitLab account, already Maintainer on ai/orbit-base-image) and the membership half needs nothing
 # further. A group-wide `ai` token was the first cut of this job and was
 # narrowed once cross-project job-token access turned out to cover artifact
 # downloads (investigated on #708, 2026-09-06).
@@ -637,7 +637,7 @@ Opened automatically by the base_image_repin schedule (#708). Nothing here
 merges itself.
 "
 
-git -C "$repo_dir" config user.email "base-image-repin@ci.local"
+git -C "$repo_dir" config user.email "base-image-repin@example.invalid"
 git -C "$repo_dir" config user.name "base-image-repin"
 git -C "$repo_dir" checkout -B "$branch_name"
 git -C "$repo_dir" add -- "$dockerfile" "$policy_path"
