@@ -453,7 +453,7 @@
       "name": "PostgreSQL database",
       "tag": "postgres:18-alpine",
       "reference": "postgres:18-alpine@sha256:3b0ef735388b2cb097fc29b8bb421d86d57d0ddbe7aa1fbd6493e06d65028503",
-      "indexDigest": "sha256:898c60cb390d1085bc97bdd6a1ae968757421df394b071848b52b1c09c89d6a5",
+      "indexDigest": "sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml",
@@ -465,14 +465,14 @@
       "license": "MIT",
       "licenseSource": "https://github.com/docker-library/postgres/blob/master/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-23",
+      "resolvedOn": "2026-10-27",
       "reviewBy": "2026-10-30"
     },
     {
       "name": "ClamAV malware scanner",
       "tag": "clamav/clamav:1.5.4-debian",
-      "reference": "clamav/clamav:1.5.4-debian@sha256:bd1a3d9f7d90b1c1e2703b1e1e86354102e0be296899a3c941374a597f745e6c",
-      "indexDigest": "sha256:d7ede3cefeaf3b8a72ebcdee849d13f504bbca3f3b3cfade5bc7b6ee06a4f62c",
+      "reference": "clamav/clamav:1.5.4-debian@sha256:9eba83760ce432270bbaf4bda2319e532c3df8627750610f9ed0a00d4480fc0c",
+      "indexDigest": "sha256:cce3e1a43ae2bb40e11335c52c0e1e98273b12fa3d587e617f63a6907cc4b70b",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -482,7 +482,7 @@
       "license": "GPL-2.0-only",
       "licenseSource": "https://github.com/Cisco-Talos/clamav/blob/main/COPYING.txt",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-20",
+      "resolvedOn": "2026-10-27",
       "reviewBy": "2026-10-30"
     },
     {
