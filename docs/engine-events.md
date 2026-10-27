@@ -266,9 +266,31 @@ before it on stdout is a `recovery-command:` line ("Recovery command (v0)").
   where. `.env-orbit` and `.orbit-secrets/` are put back whole from the copy
   taken at the start, so an edit or a file added inside them while the
   install ran is replaced (the closing line says so when the rollback
-  finishes). An update is never rolled back, and its failures keep their usual action. An interrupt or other unplanned exit after the commit is
+  finishes). An update is never rolled back, and its failures keep their usual action (an interrupt: below). A fresh install's interrupt or other unplanned exit after the commit is
   rolled back the same way, and then ends with one terminal
   `state=failed reason=failure` event for the phase it stopped in.
+- An update is never rolled back; once the engine has committed it, it
+  rolls forward (#1518). The first event after the commit is
+  `phase=compose component=compose state=completed
+  reason=compose-validation`, so a consumer can tell before the commit from
+  after it. From there an interrupt (INT, TERM or HUP, to the installer or
+  its whole process group) undoes nothing and cuts no step part-way: an
+  image pull or a required wait (`database`, `application`) stops at once
+  (within one poll), `compose up` is left to finish, and the run ends with
+  exactly one terminal `state=failed reason=failure` event carrying the
+  phase and component of the step it stopped in, and exit status 130 (INT),
+  143 (TERM) or 129 (HUP). Its action is `retry` while the containers have
+  not been started (the image pulls: the running services were not
+  changed), and `repair` from `compose up` on. In the optional phase an
+  interrupt ends the run as below, complete, exit status 0.
+- `compose up -d` runs under a bound of **300 seconds** (then TERM, and KILL
+  10 seconds later), in its own process group, so neither a signal to the
+  installer's group nor a terminal Ctrl-C reaches it. A consumer that stops
+  an update after the commit should therefore allow the bound plus a margin
+  before it kills the installer outright. An up that reaches the bound ends
+  as a failed start (`reason=docker-host`, above), and stderr says it was
+  stopped at the bound. `ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS`
+  (1-900) lowers or raises it.
 - A failed image pull (`compose pull`, or the release image's
   `docker pull`) carries Docker's words on the same `Docker said:` line.
 - A required service's wait that ends on a fresh install (#1456 decision):
