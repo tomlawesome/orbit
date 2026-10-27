@@ -142,9 +142,10 @@ workflow:
 # A merge request into `dev` labelled `ci: acceptance` is the one exception: the
 # label asks for the whole gate before merging (#572), browsers included
 # (#1514, owner 2026-10-27). Labels start no pipeline themselves; start one on
-# the merge request after adding it.
+# the merge request after adding it. `[ ]` is the label's space: a plain
+# colon-space would end the YAML value.
 .no_browsers_on_dev: &no_browsers_on_dev
-  if: '($CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev" && $CI_MERGE_REQUEST_LABELS !~ /(^|,)ci: acceptance(,|$)/) || ($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "dev")'
+  if: ($CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev" && $CI_MERGE_REQUEST_LABELS !~ /(^|,)ci:[ ]acceptance(,|$)/) || ($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "dev")
   when: never
 
 default:
