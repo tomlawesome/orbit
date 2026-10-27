@@ -1935,10 +1935,19 @@ build_image:
       base_image_from_ghcr=false
       if [ -n "${ORBIT_BASE_IMAGE_PULL_USER:-}" ] && [ -n "${ORBIT_BASE_IMAGE_PULL_TOKEN:-}" ]; then
         base_image_host="${ORBIT_BASE_IMAGE_REGISTRY%%/*}"
-        base_image_path="$(sed -n 's|^FROM \${BASE_IMAGE_REGISTRY}\(/orbit-base-image:[^ ]*@sha256:[0-9a-f]*\) .*|\1|p' Dockerfile | head -n 1)"
-        if [ -n "$base_image_path" ] \
-          && printf '%s\n' "$ORBIT_BASE_IMAGE_PULL_TOKEN" | docker login "$base_image_host" --username "$ORBIT_BASE_IMAGE_PULL_USER" --password-stdin \
-          && docker pull --quiet "${ORBIT_BASE_IMAGE_REGISTRY}${base_image_path}"; then
+        # Every distinct base the Dockerfile pins (its `base` and `runner`
+        # stages each name one), so a later split between them cannot leave
+        # one stage asking the registry.
+        base_image_paths="$(sed -n 's|^FROM \${BASE_IMAGE_REGISTRY}\(/orbit-base-image:[^ ]*@sha256:[0-9a-f]*\) .*|\1|p' Dockerfile | sort -u)"
+        base_image_pulled=false
+        if [ -n "$base_image_paths" ] \
+          && printf '%s\n' "$ORBIT_BASE_IMAGE_PULL_TOKEN" | docker login "$base_image_host" --username "$ORBIT_BASE_IMAGE_PULL_USER" --password-stdin; then
+          base_image_pulled=true
+          for base_image_path in $base_image_paths; do
+            docker pull --quiet "${ORBIT_BASE_IMAGE_REGISTRY}${base_image_path}" || base_image_pulled=false
+          done
+        fi
+        if [ "$base_image_pulled" = true ]; then
           echo "pulled the pinned base image with the read-only deploy token"
         else
           echo "could not pull the base image with the deploy token; taking it from GHCR" >&2
