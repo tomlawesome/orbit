@@ -485,7 +485,7 @@ describe("refusals that never reach docker", () => {
     expect(verbs(result.calls)).toEqual([]);
   });
 
-  it.each(["backup.sh", "restore.sh", "import-recovery-bundle.sh"])("%s refuses a missing document key before stopping the app, which could not start again without it", (script) => {
+  it.each(["backup.sh", "restore.sh"])("%s refuses a missing document key before stopping the app, which could not start again without it", (script) => {
     const deployment = makeDeployment({ key: false });
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
@@ -493,6 +493,19 @@ describe("refusals that never reach docker", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("the configured document key is missing");
     expect(verbs(result.calls)).toEqual([]);
+  });
+
+  // #1420: the bundle brings its own key, so a lost live key is no reason to
+  // refuse: nothing is set aside, the import runs, and a missing key is not
+  // reported as a preflight failure.
+  it("import-recovery-bundle.sh accepts a missing document key: it preflights, stops the app and runs the import", () => {
+    const deployment = makeDeployment({ key: false });
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const result = run(deployment, "import-recovery-bundle.sh", [bundle]);
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain("document key is missing");
+    expect(verbs(result.calls).slice(0, 3)).toEqual(["run", "stop", "run"]);
   });
 
   it.each(SCRIPTS)("%s refuses without .env-orbit", (script) => {
