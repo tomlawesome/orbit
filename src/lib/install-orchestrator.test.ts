@@ -726,3 +726,214 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("COMPOSE_PROFILES=processing\n");
   });
 });
+
+// #1519: the launcher leaves its configuration (.env-orbit, .orbit-secrets/)
+// in the tree it mounted into the engine; the engine takes it in through its
+// own transaction, so the engine is the only writer of the deployment folder.
+// `InstallContext.launcherConfigTree` and `InstallDependencies.notice` are the
+// new seams; until they exist these tests fail on behaviour and, under tsc,
+// on the unknown fields.
+describe("runInstall: the launcher's configuration goes through the install transaction (#1519)", () => {
+  const TREE_ENV = ["APP_URL=https://tree.example.invalid", "ORBIT_AUTH_OIDC=false", ""].join("\n");
+  const TREE_SECRETS = { "oidc-client-secret": "tree-s3cr3t\n" };
+
+  /** The directory the launcher mounted (mode 0700), holding what the launcher saved there. */
+  function launcherTree(files: { env?: string; secrets?: Record<string, string> } = {}): string {
+    const tree = join(sandbox("orbit-install-launcher-"), "tree");
+    mkdirSync(tree, { mode: 0o700 });
+    chmodSync(tree, 0o700);
+    if (files.env !== undefined) writeFileSync(join(tree, ".env-orbit"), files.env, { mode: 0o600 });
+    if (files.secrets) {
+      mkdirSync(join(tree, ".orbit-secrets"), { mode: 0o700 });
+      chmodSync(join(tree, ".orbit-secrets"), 0o700);
+      for (const [name, content] of Object.entries(files.secrets)) writeFileSync(join(tree, ".orbit-secrets", name), content, { mode: 0o600 });
+    }
+    return tree;
+  }
+
+  const treeNotices = (said: string[]) => said.filter((line) => line.includes("ORBIT_LAUNCHER_CONFIG_TREE"));
+
+  async function runWithTree(target: string, tree: string | undefined, overrides: Partial<InstallContext> = {}, dependencies: Partial<InstallDependencies> = {}) {
+    const notices: string[] = [];
+    const result = await run(target, { launcherConfigTree: tree, ...overrides }, { notice: (line) => notices.push(line), ...dependencies });
+    return { ...result, notices };
+  }
+
+  describe("taken in", () => {
+    it("installs a complete handed-in configuration with no terminal, asking nothing, and leaves the launcher's tree as it was", async () => {
+      const target = sandbox("orbit-install-target-");
+      const tree = launcherTree({ env: TREE_ENV, secrets: TREE_SECRETS });
+      const treeBefore = snapshot(tree);
+      const { outcome, notices } = await runWithTree(target, tree);
+
+      expect(outcome).toMatchObject({ status: "ok", fresh: true, selectedProfile: "standard" });
+      const env = readFileSync(join(target, ".env-orbit"), "utf8");
+      expect(env).toContain("APP_URL=https://tree.example.invalid\n");
+      expect(env).toContain("ORBIT_AUTH_OIDC=false\n");
+      expect(env.match(/^ORBIT_IMAGE=.*$/gm)).toEqual([`ORBIT_IMAGE=${REFERENCE}`]);
+      expect(statSync(join(target, ".env-orbit")).mode & 0o777).toBe(0o600);
+      expect(readFileSync(join(target, ".orbit-secrets", "oidc-client-secret"))).toEqual(Buffer.from(TREE_SECRETS["oidc-client-secret"]));
+      expect(statSync(join(target, ".orbit-secrets")).mode & 0o777).toBe(0o700);
+      expect(statSync(join(target, ".orbit-secrets", "oidc-client-secret")).mode & 0o777).toBe(0o600);
+      expect(notices).toEqual([]);
+      // The engine copies; it never moves or edits what the launcher left.
+      expect(snapshot(tree)).toEqual(treeBefore);
+    });
+
+    it("takes it in at a terminal in plain mode too, without showing a prompt", async () => {
+      const target = sandbox("orbit-install-target-");
+      const terminal = scriptedTerminal([]);
+      const { outcome } = await runWithTree(target, launcherTree({ env: TREE_ENV, secrets: TREE_SECRETS }), { interactive: true, plainMode: true }, { terminal });
+      expect(outcome.status).toBe("ok");
+      expect(terminal.output()).toBe("");
+      expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("APP_URL=https://tree.example.invalid\n");
+    });
+
+    it("takes in a .env-orbit that comes without a .orbit-secrets directory, and the engine makes the secrets it needs", async () => {
+      const target = sandbox("orbit-install-target-");
+      const { outcome } = await runWithTree(target, launcherTree({ env: TREE_ENV }));
+      expect(outcome.status).toBe("ok");
+      expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("APP_URL=https://tree.example.invalid\n");
+      for (const secret of ["session-secret", "postgres-password", "document-kek"]) {
+        expect(statSync(join(target, ".orbit-secrets", secret)).mode & 0o777).toBe(0o600);
+      }
+    });
+  });
+
+  describe("incomplete", () => {
+    it.each([
+      ["APP_URL missing", "ORBIT_AUTH_OIDC=false\n"],
+      ["APP_URL empty", "APP_URL=\nORBIT_AUTH_OIDC=false\n"],
+    ])("fails as a configuration failure when %s, changing nothing and offering the configure tree", async (_label, env) => {
+      const target = sandbox("orbit-install-target-");
+      const tree = launcherTree({ env, secrets: TREE_SECRETS });
+      const treeBefore = snapshot(tree);
+      let handedOver = 0;
+      const { outcome } = await runWithTree(target, tree, {}, { onConfigurationFailure: () => { handedOver += 1; } });
+
+      expect(outcome).toMatchObject({ status: "failed", phase: "configuration", reason: "configuration-failure", action: "retry" });
+      // The readiness check ran on the handed-in settings: it names the field, it does not ask for everything again.
+      if (outcome.status === "failed") expect(outcome.guidance?.[0]).toMatch(/^Orbit installer: configuration fields requiring attention: APP_URL\b/);
+      expect(readdirSync(target)).toEqual([]);
+      expect(handedOver).toBe(1);
+      // Writing the configure tree is the callback's job; the orchestrator itself leaves the handed-in files alone.
+      expect(snapshot(tree)).toEqual(treeBefore);
+    });
+  });
+
+  describe("unsafe", () => {
+    const outsideConfig = () => {
+      const outside = sandbox("orbit-install-outside-");
+      writeFileSync(join(outside, "config"), TREE_ENV, { mode: 0o600 });
+      mkdirSync(join(outside, "secrets"), { mode: 0o700 });
+      writeFileSync(join(outside, "secrets", "oidc-client-secret"), "outside\n", { mode: 0o600 });
+      return outside;
+    };
+
+    const writeMode = (path: string, content: string, mode: number) => {
+      writeFileSync(path, content, { mode });
+      chmodSync(path, mode);
+    };
+    const withSecrets = (tree: string, mode: number) => {
+      writeMode(join(tree, ".env-orbit"), TREE_ENV, 0o600);
+      mkdirSync(join(tree, ".orbit-secrets"), { mode: 0o700 });
+      writeMode(join(tree, ".orbit-secrets", "oidc-client-secret"), "x\n", mode);
+    };
+
+    it.each([
+      ["a symlink to a complete configuration", (tree: string) => symlinkSync(join(outsideConfig(), "config"), join(tree, ".env-orbit"))],
+      ["a directory", (tree: string) => mkdirSync(join(tree, ".env-orbit"), { mode: 0o700 })],
+      ["readable by other users (0644)", (tree: string) => writeMode(join(tree, ".env-orbit"), TREE_ENV, 0o644)],
+      ["readable by its group (0640)", (tree: string) => writeMode(join(tree, ".env-orbit"), TREE_ENV, 0o640)],
+      ["next to a .orbit-secrets that is a symlink to a directory of secrets", (tree: string) => {
+        writeMode(join(tree, ".env-orbit"), TREE_ENV, 0o600);
+        symlinkSync(join(outsideConfig(), "secrets"), join(tree, ".orbit-secrets"));
+      }],
+      ["next to a secret readable by other users (0644)", (tree: string) => withSecrets(tree, 0o644)],
+      ["next to a secret readable by its group (0640)", (tree: string) => withSecrets(tree, 0o640)],
+    ])("refuses a tree whose configuration is %s, as a configuration failure, changing nothing", async (_label, arrange) => {
+      const target = sandbox("orbit-install-target-");
+      const tree = launcherTree();
+      arrange(tree);
+      const { outcome } = await runWithTree(target, tree);
+
+      expect(outcome).toMatchObject({ status: "failed", reason: "configuration-failure", action: "retry" });
+      expect(readdirSync(target)).toEqual([]);
+    });
+  });
+
+  describe("already configured", () => {
+    it("ignores the handed-in configuration of a pre-provisioned folder: one notice, the folder's own .env-orbit used, the rest as without a tree", async () => {
+      const target = preprovisioned();
+      const control = preprovisioned();
+      const tree = launcherTree({ env: "APP_URL=https://tree-should-lose.example.invalid\nORBIT_AUTH_OIDC=false\n", secrets: TREE_SECRETS });
+      const treeBefore = snapshot(tree);
+
+      const { outcome, notices } = await runWithTree(target, tree);
+      const without = await runWithTree(control, undefined);
+
+      expect(treeNotices(notices)).toHaveLength(1);
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toContain("ORBIT_LAUNCHER_CONFIG_TREE");
+      expect(notices[0]).toMatch(/ignored/i);
+      expect(without.notices).toEqual([]);
+      expect(outcome).toEqual(without.outcome);
+      const env = readFileSync(join(target, ".env-orbit"), "utf8");
+      expect(env).toContain("APP_URL=https://orbit.example.invalid\n");
+      expect(env).not.toContain("tree-should-lose");
+      expect(env).toEqual(readFileSync(join(control, ".env-orbit"), "utf8"));
+      expect(readFileSync(join(target, ".orbit-secrets", "oidc-client-secret"), "utf8")).toBe("s3cr3t");
+      expect(snapshot(tree)).toEqual(treeBefore);
+    });
+
+    it("ignores it on an update of a recognised deployment, the same way", async () => {
+      const target = recognised();
+      const tree = launcherTree({ env: "APP_URL=https://tree-should-lose.example.invalid\nORBIT_AUTH_OIDC=false\n", secrets: TREE_SECRETS });
+      const { outcome, notices } = await runWithTree(target, tree, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+
+      expect(outcome).toMatchObject({ status: "ok", fresh: false });
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toContain("ORBIT_LAUNCHER_CONFIG_TREE");
+      expect(notices[0]).toMatch(/ignored/i);
+      expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("APP_URL=https://orbit.example.invalid\n");
+      expect(readFileSync(join(target, ".env-orbit"), "utf8")).not.toContain("tree-should-lose");
+    });
+
+    it("says nothing about a tree when none was set", async () => {
+      const { notices } = await runWithTree(preprovisioned(), undefined);
+      expect(notices).toEqual([]);
+    });
+  });
+
+  describe("rollback of the handed-in files", () => {
+    it("removes them again when a later step fails before the commit: the folder is as the person had it, the tree untouched", async () => {
+      const target = sandbox("orbit-install-target-");
+      const tree = launcherTree({ env: ENV_OIDC, secrets: { "oidc-client-secret": "tree-s3cr3t\n" } });
+      const treeBefore = snapshot(tree);
+      const { outcome } = await runWithTree(target, tree, {}, { fetchImpl: async () => Promise.reject(new Error("offline")) });
+
+      expect(outcome).toMatchObject({ status: "failed", phase: "oidc", reason: "provider-unavailable", action: "retry" });
+      expect(readdirSync(target)).toEqual([]);
+      expect(existsSync(join(target, ".env-orbit"))).toBe(false);
+      expect(existsSync(join(target, ".orbit-secrets"))).toBe(false);
+      expect(snapshot(tree)).toEqual(treeBefore);
+    });
+  });
+
+  describe("guard: no handed-in configuration", () => {
+    it("still ends in a configuration failure for a non-interactive fresh install with no tree set", async () => {
+      const target = sandbox("orbit-install-target-");
+      const { outcome, notices } = await runWithTree(target, undefined);
+      expect(outcome).toMatchObject({ status: "failed", reason: "configuration-failure", action: "retry" });
+      expect(readdirSync(target)).toEqual([]);
+      expect(notices).toEqual([]);
+    });
+
+    it("still ends in a configuration failure when the tree is empty", async () => {
+      const target = sandbox("orbit-install-target-");
+      const { outcome } = await runWithTree(target, launcherTree());
+      expect(outcome).toMatchObject({ status: "failed", reason: "configuration-failure", action: "retry" });
+      expect(readdirSync(target)).toEqual([]);
+    });
+  });
+});

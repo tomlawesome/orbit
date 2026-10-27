@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -270,6 +270,138 @@ describe("orbit install: the launcher's configure tree on a configuration-failur
     });
     expect(result.status).toBe(1);
     expect(readdirSync(tree)).toEqual([]);
+  });
+});
+
+// #1519: the launcher leaves its configuration in the mounted tree; the
+// engine takes it in through its own transaction and is the only writer of the
+// deployment folder.
+describe("orbit install: the launcher's configuration in ORBIT_LAUNCHER_CONFIG_TREE (#1519)", () => {
+  const TREE_ENV = "APP_URL=https://tree.example.invalid\nORBIT_AUTH_OIDC=false\n";
+  const TREE_SECRET = "tree-s3cr3t\n";
+
+  function launcherTree(files: { env?: string; secret?: string } = {}): string {
+    const tree = join(newSandbox("orbit-cli-install-launcher-"), "tree");
+    mkdirSync(tree, { mode: 0o700 });
+    chmodSync(tree, 0o700);
+    if (files.env !== undefined) writeFileSync(join(tree, ".env-orbit"), files.env, { mode: 0o600 });
+    if (files.secret !== undefined) {
+      mkdirSync(join(tree, ".orbit-secrets"), { mode: 0o700 });
+      chmodSync(join(tree, ".orbit-secrets"), 0o700);
+      writeFileSync(join(tree, ".orbit-secrets", "oidc-client-secret"), files.secret, { mode: 0o600 });
+    }
+    return tree;
+  }
+
+  const hostIds = () => ({ ORBIT_HOST_UID: String(process.getuid?.() ?? 0), ORBIT_HOST_GID: String(process.getgid?.() ?? 0) });
+
+  function snapshotTree(dir: string, relative = ""): Record<string, string> {
+    const found: Record<string, string> = {};
+    for (const name of readdirSync(join(dir, relative)).sort()) {
+      const path = join(relative, name);
+      const stat = lstatSync(join(dir, path));
+      if (stat.isDirectory()) {
+        found[`${path}/`] = (stat.mode & 0o777).toString(8);
+        Object.assign(found, snapshotTree(dir, path));
+      } else {
+        found[path] = `${(stat.mode & 0o777).toString(8)}:${readFileSync(join(dir, path), "utf8")}`;
+      }
+    }
+    return found;
+  }
+
+  it("installs a fresh folder from the tree's configuration: no terminal, the files in place byte for byte, the tree left as it was", () => {
+    const target = newSandbox("orbit-cli-install-target-");
+    const tree = launcherTree({ env: TREE_ENV, secret: TREE_SECRET });
+    const treeBefore = snapshotTree(tree);
+    const outcome = outcomeFile();
+    const result = runCli(["install", "--action", "auto", "--dir", target, "--outcome", outcome], { ORBIT_LAUNCHER_CONFIG_TREE: tree, ...hostIds() });
+
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.dockerCalls).toBe("");
+    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=standard\nmodel-pull=0\ndatabase-volume=\n");
+    const env = readFileSync(join(target, ".env-orbit"), "utf8");
+    expect(env).toContain("APP_URL=https://tree.example.invalid\n");
+    expect(env).toContain(`ORBIT_IMAGE=${REFERENCE}\n`);
+    expect(statSync(join(target, ".env-orbit")).mode & 0o777).toBe(0o600);
+    expect(readFileSync(join(target, ".orbit-secrets", "oidc-client-secret"), "utf8")).toBe(TREE_SECRET);
+    expect(statSync(join(target, ".orbit-secrets")).mode & 0o777).toBe(0o700);
+    expect(snapshotTree(tree)).toEqual(treeBefore);
+  });
+
+  it("journals .env-orbit and .orbit-secrets/ as paths the transaction may create, before it writes them", () => {
+    const target = newSandbox("orbit-cli-install-target-");
+    const outcome = outcomeFile();
+    const result = runCli(["install", "--action", "auto", "--dir", target, "--outcome", outcome], {
+      ORBIT_LAUNCHER_CONFIG_TREE: launcherTree({ env: TREE_ENV, secret: TREE_SECRET }),
+      ...hostIds(),
+    });
+    expect(result.status).toBe(0);
+    const lines = readFileSync(join(dirname(outcome), "written"), "utf8").split("\n").filter(Boolean);
+    expect(lines.filter((line) => line === ".env-orbit")).toHaveLength(1);
+    expect(lines.filter((line) => line === ".orbit-secrets/")).toHaveLength(1);
+  });
+
+  it("fails an incomplete configuration as a configuration failure, leaves the folder empty, and writes the configure tree beside the handed-in files", () => {
+    const target = newSandbox("orbit-cli-install-target-");
+    const incomplete = "ORBIT_AUTH_OIDC=false\n";
+    const tree = launcherTree({ env: incomplete, secret: TREE_SECRET });
+    const outcome = outcomeFile();
+    const result = runCli(["install", "--dir", target, "--outcome", outcome], { ORBIT_LAUNCHER_CONFIG_TREE: tree, ...hostIds() });
+
+    expect(result.status).toBe(1);
+    expect(readFileSync(outcome, "utf8")).toContain("status=failed\nphase=configuration\ncomponent=configuration\nreason=configuration-failure\naction=retry\n");
+    expect(readdirSync(target)).toEqual([]);
+    expect(readdirSync(tree).sort()).toEqual([".env-orbit", ".env-orbit.example", ".orbit-image", ".orbit-secrets", "scripts"]);
+    expect(readFileSync(join(tree, ".env-orbit"), "utf8")).toBe(incomplete);
+    expect(statSync(join(tree, ".env-orbit")).mode & 0o777).toBe(0o600);
+    expect(readFileSync(join(tree, ".orbit-secrets", "oidc-client-secret"), "utf8")).toBe(TREE_SECRET);
+    expect(readFileSync(join(tree, ".orbit-image"), "utf8")).toBe(`${REFERENCE}\n`);
+    expect(readFileSync(join(tree, "scripts", "configure.sh"))).toEqual(readFileSync(join(repoRoot, "scripts", "configure.sh")));
+    expect(result.stderr).not.toContain("was not written because");
+  });
+
+  it("refuses a .env-orbit that is a symlink, reads nothing through it, and leaves the folder empty", () => {
+    const target = newSandbox("orbit-cli-install-target-");
+    const outside = newSandbox("orbit-cli-install-outside-");
+    writeFileSync(join(outside, "config"), "APP_URL=https://outside-leak.example.invalid\nORBIT_AUTH_OIDC=false\n", { mode: 0o600 });
+    const tree = launcherTree();
+    symlinkSync(join(outside, "config"), join(tree, ".env-orbit"));
+    const outcome = outcomeFile();
+    const result = runCli(["install", "--dir", target, "--outcome", outcome], { ORBIT_LAUNCHER_CONFIG_TREE: tree, ...hostIds() });
+
+    expect(result.status).toBe(1);
+    expect(readFileSync(outcome, "utf8")).toContain("reason=configuration-failure\naction=retry\n");
+    expect(readdirSync(target)).toEqual([]);
+    expect(result.stdout + result.stderr).not.toContain("outside-leak");
+  });
+
+  it("ignores the tree's configuration when the folder already has a .env-orbit: one stderr line, the folder's own settings used", () => {
+    const target = preprovisioned();
+    const tree = launcherTree({ env: "APP_URL=https://tree-should-lose.example.invalid\nORBIT_AUTH_OIDC=false\n", secret: TREE_SECRET });
+    const treeBefore = snapshotTree(tree);
+    const result = runCli(["install", "--action", "auto", "--dir", target, "--outcome", outcomeFile()], { ORBIT_LAUNCHER_CONFIG_TREE: tree, ...hostIds() });
+
+    expect(result.status).toBe(0);
+    const lines = result.stderr.split("\n").filter(Boolean);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("ORBIT_LAUNCHER_CONFIG_TREE");
+    expect(lines[0]).toMatch(/ignored/i);
+    const env = readFileSync(join(target, ".env-orbit"), "utf8");
+    expect(env).toContain("APP_URL=https://orbit.example.invalid\n");
+    expect(env).not.toContain("tree-should-lose");
+    expect(readFileSync(join(target, ".orbit-secrets", "oidc-client-secret"), "utf8")).toBe("s3cr3t");
+    expect(snapshotTree(tree)).toEqual(treeBefore);
+  });
+
+  it("guard: with no tree set, a fresh folder with no configuration still ends in a configuration failure", () => {
+    const target = newSandbox("orbit-cli-install-target-");
+    const outcome = outcomeFile();
+    const result = runCli(["install", "--dir", target, "--outcome", outcome]);
+    expect(result.status).toBe(1);
+    expect(readFileSync(outcome, "utf8")).toContain("reason=configuration-failure\naction=retry\n");
+    expect(readdirSync(target)).toEqual([]);
   });
 });
 
