@@ -188,12 +188,17 @@ run_engine() {
   # No live key file (#1420): Docker will not mount a missing secret file, so this one call adds
   # the overlay that points the secret at /dev/null. The engine reads the key from the deployment
   # directory, never from the secret. The files Compose would use otherwise are kept, in its order:
-  # an exported COMPOSE_FILE, then .env-orbit's, then docker-compose.yml.
+  # an exported COMPOSE_FILE, then .env-orbit's, then docker-compose.yml plus the
+  # docker-compose.override.yml Compose loads by default when one is present.
   if [[ ! -e "$secrets_directory/document-kek" && ! -L "$secrets_directory/document-kek" ]]; then
     local compose_files="${COMPOSE_FILE:-}" separator="${COMPOSE_PATH_SEPARATOR:-}"
     [[ -n "$compose_files" ]] || compose_files="$(read_environment_value COMPOSE_FILE 2>/dev/null || true)"
     [[ -n "$separator" ]] || separator="$(read_environment_value COMPOSE_PATH_SEPARATOR 2>/dev/null || true)"
-    local -x COMPOSE_FILE="${compose_files:-docker-compose.yml}${separator:-:}docker-compose.no-document-key.yml"
+    if [[ -z "$compose_files" ]]; then
+      compose_files=docker-compose.yml
+      [[ ! -e docker-compose.override.yml ]] || compose_files+="${separator:-:}docker-compose.override.yml"
+    fi
+    local -x COMPOSE_FILE="${compose_files}${separator:-:}docker-compose.no-document-key.yml"
   fi
   compose "${run_args[@]}" --entrypoint node orbit-app /opt/orbit/cli/orbit.js "$@" --dir /orbit-deploy "${directory_args[@]}"
 }
