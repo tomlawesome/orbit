@@ -836,3 +836,28 @@ describe("browser jobs by event (#1412)", () => {
     expect(run("idle", { CI_PIPELINE_SOURCE: "merge_request_event" })).toBe("ORBIT_WEB=true\nORBIT_LANE=full\n");
   });
 });
+
+// v0.3.2 audit D-F9/D-F18. Fails on current code: build_image starts with
+// base_image_from_ghcr=false and flips it to true only inside the branch that
+// needs both pull credentials, so with them unset the build points buildx at
+// the GitLab registry with a job token that cannot read it.
+describe("build_image base image source (D-F9/D-F18)", () => {
+  const script = allBlocks.get("build_image");
+
+  it("defaults base_image_from_ghcr to true before the credential check", () => {
+    const credentialCheck = script.indexOf('if [ -n "${ORBIT_BASE_IMAGE_PULL_USER');
+    const defaultTrue = script.indexOf("base_image_from_ghcr=true");
+    expect(credentialCheck).toBeGreaterThan(-1);
+    expect(defaultTrue).toBeGreaterThan(-1);
+    expect(defaultTrue).toBeLessThan(credentialCheck);
+    expect(script.slice(0, credentialCheck)).not.toContain("base_image_from_ghcr=false");
+  });
+
+  it("sets base_image_from_ghcr=false only after base_image_pulled=true", () => {
+    const pulled = script.indexOf('if [ "$base_image_pulled" = true ]; then');
+    const falses = [...script.matchAll(/base_image_from_ghcr=false/gu)].map((match) => match.index);
+    expect(pulled).toBeGreaterThan(-1);
+    expect(falses.length).toBeGreaterThan(0);
+    for (const index of falses) expect(index).toBeGreaterThan(pulled);
+  });
+});
