@@ -56,7 +56,7 @@
       "id": "CVE-2026-111943",
       "package": "stdlib",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794,
       "installedVersion": "v1.24.6",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; the newest 18-alpine build and gosu 1.19 are still on Go 1.24.6. Clears only when upstream rebuilds gosu on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
@@ -67,7 +67,7 @@
       "id": "CVE-2026-111943",
       "package": "stdlib",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794,
       "installedVersion": "v1.26.7",
       "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; 4.1.0-1-full and 4.2.0-SNAPSHOT-full are still on Go 1.26.7. Clears when a Tika image ships pebble on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
@@ -80,7 +80,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -91,7 +91,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -102,7 +102,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -113,7 +113,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -124,7 +124,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -135,7 +135,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -146,7 +146,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -157,7 +157,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -168,7 +168,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -179,7 +179,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -190,7 +190,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -201,7 +201,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -212,7 +212,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -223,7 +223,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -234,7 +234,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -245,7 +245,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -256,7 +256,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -267,7 +267,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -278,7 +278,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -289,7 +289,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -300,7 +300,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -311,7 +311,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -322,7 +322,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366).",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -333,7 +333,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366).",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -344,7 +344,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366).",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -355,7 +355,7 @@
       "installedVersion": "v1.26.7",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; clears only when the image is rebuilt on a newer pebble. 4.1.0-full is still the newest release tag (#1366).",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -366,7 +366,7 @@
       "installedVersion": "v1.26.7",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; clears only when the image is rebuilt on a newer pebble. 4.1.0-full is still the newest release tag (#1366).",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -377,7 +377,7 @@
       "installedVersion": "v1.26.7",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; clears only when the image is rebuilt on a newer pebble. 4.1.0-full is still the newest release tag (#1366).",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -388,7 +388,7 @@
       "installedVersion": "5.0.9",
       "owner": "Orbit maintainers",
       "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -399,7 +399,7 @@
       "installedVersion": "5.0.9",
       "owner": "Orbit maintainers",
       "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
     {
@@ -410,8 +410,41 @@
       "installedVersion": "6.28.0",
       "owner": "Orbit maintainers",
       "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20.",
-      "expiresOn": "2026-11-04",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 794,
+      "id": "CVE-2026-109869",
+      "package": "undici",
+      "installedVersion": "6.28.0",
+      "rationale": "Bundled with npm inside node:24-alpine; fixed in undici 6.29.1, but the pinned tag is still the current upstream build, so only an upstream rebuild replaces it. Owner granted, 2026-10-27."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 794,
+      "id": "CVE-2026-111497",
+      "package": "brotli-libs",
+      "installedVersion": "1.2.0-r1",
+      "rationale": "Alpine package in postgres:18-alpine; fixed in 1.2.1-r0, but the pinned amd64 manifest is still the current upstream build, so only an upstream rebuild replaces it. Owner granted, 2026-10-27."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 794,
+      "id": "CVE-2026-92392",
+      "package": "libcurl",
+      "installedVersion": "8.22.0-r0",
+      "rationale": "Alpine package in postgres:18-alpine; fixed in 8.23.0-r0, but the pinned amd64 manifest is still the current upstream build, so only an upstream rebuild replaces it. Owner granted, 2026-10-27."
     }
   ],
   "containerImages": [
