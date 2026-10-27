@@ -318,7 +318,7 @@ variables:
 # (`supply_chain_source`, `sidecar_images`, `supply_chain_image`) instead of
 # downloaded fresh by each of them on every pipeline (#946, owner ruling on
 # #923 rec 18, 2026-09-09; #923 finding 6c measured ~111 MB and ~9 s per job
-# per pipeline). A GitLab `cache:` under one fixed key, dated inside by the
+# per pipeline). A GitLab `cache:` (keyed below), dated inside by the
 # job rather than by the key: each job looks for a subdirectory named for
 # today's UTC date, and downloads only when that is missing.
 #
@@ -332,11 +332,15 @@ variables:
 # today: nothing here can fail the job on its own, only fall back to the
 # unwarmed download `*apk_retry`/`trivy` would have done anyway.
 #
-# Shared by one literal key rather than scoped per branch, the same trust
-# model the `.pnpm-store` cache above already uses: this project takes no
-# external fork merge requests, so nothing untrusted can poison it.
+# Keyed by whether the branch is protected, so there are two caches: one
+# written and read only by protected-branch pipelines, one by everything
+# else. Every scan trusts the cached database as-is (--skip-db-update), so a
+# single shared cache would let code in any unprotected branch's pipeline
+# upload an emptied or stale database that delivery scans then pass against.
+# Split this way, an unprotected branch cannot poison the database protected
+# pipelines scan with; it can only spoil its own.
 .trivy_db_cache: &trivy_db_cache
-  key: trivy-vulnerability-db
+  key: trivy-vulnerability-db-$CI_COMMIT_REF_PROTECTED
   paths:
     - .trivy-db-cache
 
