@@ -496,11 +496,16 @@ read_environment_value() {
       value="${value%$'\r'}"
       # Read the value the way Compose's env-file parser does: one pair of
       # matching quotes comes off, and an unquoted value loses a trailing
-      # " # note". Otherwise a quoted COMPOSE_FILE keeps its quote marks and
-      # the overlay appended to it names a file that does not exist.
+      # comment (spaces or tabs, then "#", to the end) and then any trailing
+      # spaces and tabs. Otherwise a quoted or commented COMPOSE_FILE keeps
+      # its quote marks or padding and the overlay appended to it names a
+      # file that does not exist.
       case "$value" in
         \"*\" | \'*\') value="${value:1:${#value}-2}" ;;
-        *) value="${value%% \#*}" ;;
+        *)
+          value="${value%%[[:blank:]]#*}"
+          while [[ "$value" == *[[:blank:]] ]]; do value="${value%[[:blank:]]}"; done
+          ;;
       esac
       found=1
     fi
