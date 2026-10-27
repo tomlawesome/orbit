@@ -316,6 +316,19 @@ function run({
   return { result, calls: stubs.calls };
 }
 
+describe("promote-stable.test.mjs expected version", () => {
+  // T-Q28. Fails on the current code: VERSION is a hard-coded literal, so the
+  // first time scripts/release-line.json is raised every happy-path test
+  // fails on a correct config edit. Passes once VERSION is derived with
+  // calculateReleaseTrainVersion from the real release-line file.
+  it("derives VERSION from calculateReleaseTrainVersion rather than a literal", () => {
+    const source = readFileSync(new URL(import.meta.url), "utf8");
+    expect(source).not.toMatch(/^const VERSION = "v\d+\.\d+\.\d+";/mu);
+    expect(source).toMatch(/^import \{[^}]*calculateReleaseTrainVersion[^}]*\} from /mu);
+    expect(source).toMatch(/readFileSync\([^)]*release-line\.json/u);
+  });
+});
+
 describe("scripts/ci/promote-stable.sh", () => {
   it("refuses a missing or malformed PREVIEW_DIGEST, without calling docker or git", () => {
     for (const bad of ["", "not-a-digest", `sha256:${"1".repeat(63)}`, `sha1:${"1".repeat(64)}`]) {

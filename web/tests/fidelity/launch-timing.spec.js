@@ -187,6 +187,7 @@ for (const pack of THEME_PACKS) {
        release among them. This used to be a fixed 1.8s sleep standing in for
        exactly that. Frame counts below are only reported, never judged. */
     await page.locator("body[data-home-ready]").waitFor({ state: "attached", timeout: 20_000 });
+    const homeReadyAt = await page.evaluate(() => performance.now());
     await settle(page);
 
     const report = await page.evaluate(() => {
@@ -199,6 +200,16 @@ for (const pack of THEME_PACKS) {
     expect(createPhase?.samples?.length ?? 0, "expected frames captured on the arrival (Create to the navigation)").toBeGreaterThan(0);
     expect(homePhase?.samples?.length ?? 0, "expected frames captured on /home (its ordinary arrival)").toBeGreaterThan(0);
     expect(createPhase?.submitAt, "expected the click timestamp to have been recorded").not.toBeNull();
+
+    /* T-Q14: the home window is a fixed 1.8s after body[data-home-ready], not
+       "until settle returned". Fails on the current code, which flushes only
+       after settle(page), so the last sample lands wherever settle ended on
+       this machine (not at 1.8s); passes once the home phase is flushed after
+       a fixed waitForTimeout(1800). One frame of slack each way. */
+    const lastHomeSample = homePhase.samples[homePhase.samples.length - 1];
+    const homeWindowMs = lastHomeSample - homeReadyAt;
+    expect(homeWindowMs, "home window must be at most 1.8s plus one frame after home-ready").toBeLessThanOrEqual(1800 + 50);
+    expect(homeWindowMs, "home window must run the full fixed 1.8s after home-ready").toBeGreaterThanOrEqual(1800 - 50);
 
     /* Only frames from the click onward are the hand-off; everything before
        is the test setup sitting idle on the settled card. */
