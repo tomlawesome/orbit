@@ -181,19 +181,21 @@ for (const pack of THEME_PACKS) {
     /* Arrival.svelte's submit() navigates (#1263: no reclaim any more). */
     await page.waitForURL(/\/home(?:$|[/?#])/, { timeout: 20_000 });
     await page.waitForLoadState("load");
-    /* Lets home's arrival run live, then waits for it to have run: the page
-       says it can answer (#1064), then every finite animation and transition
-       on it has finished (settle) -- the warp (200ms), the mark's ride and the
-       release among them. This used to be a fixed 1.8s sleep standing in for
-       exactly that. Frame counts below are only reported, never judged. */
+    /* Lets home's arrival run live: the page says it can answer (#1064),
+       then the home phase is flushed a fixed 1.8s later. Fixed, not "until
+       settle returns", because the promotion gate compares these counts and
+       the max with the previous candidate's over the same 1.8s window; a
+       window as long as settle takes on that machine would drift against
+       it. settle then waits out whatever is still running. Frame counts
+       below are only reported, never judged. */
     await page.locator("body[data-home-ready]").waitFor({ state: "attached", timeout: 20_000 });
     const homeReadyAt = await page.evaluate(() => performance.now());
-    await settle(page);
-
+    await page.waitForTimeout(1800);
     const report = await page.evaluate(() => {
       /** @type {any} */ (window).__flushLaunchFrameLog?.();
       return JSON.parse(sessionStorage.getItem("orbit-launch-frame-log") ?? "[]");
     });
+    await settle(page);
 
     const createPhase = report.find((/** @type {any} */ r) => r.phase === "create");
     const homePhase = report.find((/** @type {any} */ r) => r.phase === "home");
