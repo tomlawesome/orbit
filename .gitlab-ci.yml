@@ -1930,9 +1930,10 @@ build_image:
       # docker:29.6.2-dind: a build FROM a pre-pulled digest succeeds with its
       # registry stopped). A registry host keeps one login, so this one is
       # logged out before the job-token login below takes the host for the
-      # cache. If the pull fails, the build takes the base from GHCR instead:
-      # same digest, no credential.
-      base_image_from_ghcr=false
+      # cache. The build takes the base from GHCR (same digest, no credential)
+      # unless that pull succeeds: with the deploy token unset, or hidden from
+      # a bot branch, the job token alone cannot read the base image here.
+      base_image_from_ghcr=true
       if [ -n "${ORBIT_BASE_IMAGE_PULL_USER:-}" ] && [ -n "${ORBIT_BASE_IMAGE_PULL_TOKEN:-}" ]; then
         base_image_host="${ORBIT_BASE_IMAGE_REGISTRY%%/*}"
         # Every distinct base the Dockerfile pins (its `base` and `runner`
@@ -1949,9 +1950,9 @@ build_image:
         fi
         if [ "$base_image_pulled" = true ]; then
           echo "pulled the pinned base image with the read-only deploy token"
+          base_image_from_ghcr=false
         else
           echo "could not pull the base image with the deploy token; taking it from GHCR" >&2
-          base_image_from_ghcr=true
         fi
         docker logout "$base_image_host" || true
       fi
@@ -1963,8 +1964,9 @@ build_image:
       # instead of failing the job: this project's own registry credential
       # must never be the reason an ordinary merge request's image build
       # goes red.
-      # The same login lets buildx pull the base image from this registry
-      # (#1101); without it the build keeps the Dockerfile's public GHCR default.
+      # The base image is named from this registry (#1101) only when the
+      # deploy token pulled it above; otherwise, or without this login, the
+      # build keeps the Dockerfile's public GHCR default.
       if echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin; then
         orbit_build_cache_usable=true
         base_image_registry_arg="--build-arg BASE_IMAGE_REGISTRY=${ORBIT_BASE_IMAGE_REGISTRY}"
