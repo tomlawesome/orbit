@@ -210,9 +210,12 @@ needs no prefix. ghcr.io and mcr.microsoft.com images are named through the
 runner variables `CI_IMAGE_CACHE_GHCR` and `CI_IMAGE_CACHE_MCR` (the cache
 hosts are plain HTTP and their addresses are never written in the repository).
 The dind service and the in-job `dockerd` are not the host's daemon, so each is
-started with the cache's mirror and insecure-registry flags. Trivy reads its
-databases from the GHCR cache with `TRIVY_INSECURE`. Digests are unchanged
-through the cache.
+started with the cache's mirror and insecure-registry flags. Digests are
+unchanged through the cache. Trivy's databases are the exception: they have no
+digest, so Trivy downloads them from ghcr.io directly over HTTPS, with
+`TRIVY_INSECURE` unset, before any scan. Only the sidecar scans set
+`TRIVY_INSECURE`, to pull their pinned images from the cache, and they skip
+the database update.
 
 Renovate replaces Dependabot on this host: `renovate.json` at the repo root, the
 `renovate` job in `.gitlab-ci.yml`, and pipeline schedule 5 (`Renovate`,

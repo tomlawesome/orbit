@@ -134,7 +134,8 @@ describe("Trivy wiring in scripts/ci/scan-image.sh", () => {
     const scanSites = lines
       .map((line, index) => ({ line, index }))
       .filter(({ line }) => /"\$\{TRIVY_IMAGE\}" (fs|image) \\/.test(line));
-    expect(scanSites.length).toBe(2);
+    // The database download, then the two scans that read it offline.
+    expect(scanSites.length).toBe(3);
     for (const site of scanSites) {
       let start = site.index;
       while (start >= 0 && !lines[start].includes("docker run")) {
