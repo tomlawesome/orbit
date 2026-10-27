@@ -529,6 +529,18 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
         } catch {
           return unchanged("Secret generation failed");
         }
+        // The launcher's file carries the profile it was configured with, so
+        // without a wizard choice an unset ORBIT_INSTALL_PROFILE keeps it
+        // rather than resetting it to standard; a set one wins, and says so.
+        if (!(menuShown && terminal)) {
+          const handedInProfile = currentDeploymentProfile(scratchDir, true);
+          if (context.requestedProfile === undefined) {
+            if (!handedInProfile.ok) return unchanged(`The configuration in ${LAUNCHER_CONFIG_TREE_ENV} was refused: its optional-service configuration is unsupported or ambiguous`);
+            profile = { ...profile, selectedProfile: handedInProfile.profile, profileChange: false };
+          } else if (handedInProfile.ok && handedInProfile.profile !== profile.selectedProfile) {
+            say(dependencies, [`ORBIT_INSTALL_PROFILE=${profile.selectedProfile} replaces the ${handedInProfile.profile} profile in the handed-in configuration`]);
+          }
+        }
         if (profile.profileChange) {
           try {
             say(dependencies, [setDeploymentProfile(scratchDir, profile.selectedProfile, profile.selectedModel)]);

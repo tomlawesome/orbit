@@ -800,6 +800,50 @@ describe("runInstall: the launcher's configuration goes through the install tran
     });
   });
 
+  // L-F1 (v0.3.2 audit): an unset ORBIT_INSTALL_PROFILE on a handed-in install
+  // keeps the launcher's profile; a set one wins and the install says so.
+  describe("profile of a handed-in configuration (L-F1)", () => {
+    const PROCESSING_ENV = [TREE_ENV.trimEnd(), "COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998", ""].join("\n");
+    const REPLACE_LINE = "ORBIT_INSTALL_PROFILE=standard replaces the processing profile in the handed-in configuration";
+
+    // Fails today: the handed-in branch resolves standard with profileChange=true
+    // when the variable is unset and calls setDeploymentProfile, which strips
+    // COMPOSE_PROFILES and TIKA_URL and reports standard.
+    it("keeps the handed-in processing profile and its TIKA_URL when the variable is unset", async () => {
+      const target = sandbox("orbit-install-target-");
+      const tree = launcherTree({ env: PROCESSING_ENV, secrets: TREE_SECRETS });
+      const { outcome, said, notices } = await runWithTree(target, tree, { requestedProfile: undefined });
+      expect(outcome).toMatchObject({ status: "ok", fresh: true, selectedProfile: "processing" });
+      const env = readFileSync(join(target, ".env-orbit"), "utf8");
+      expect(env).toContain("COMPOSE_PROFILES=processing\n");
+      expect(env).toContain("TIKA_URL=http://orbit-tika:9998\n");
+      expect([...said, ...notices]).not.toContain(REPLACE_LINE);
+    });
+
+    // Fails today: the variable already wins, but no line says it replaced the
+    // handed-in profile, so the said-line assertion fails.
+    it("lets ORBIT_INSTALL_PROFILE=standard win over a handed-in processing profile, and says so in one line", async () => {
+      const target = sandbox("orbit-install-target-");
+      const tree = launcherTree({ env: PROCESSING_ENV, secrets: TREE_SECRETS });
+      const { outcome, said } = await runWithTree(target, tree, { requestedProfile: "standard" });
+      expect(outcome).toMatchObject({ status: "ok", fresh: true, selectedProfile: "standard" });
+      const env = readFileSync(join(target, ".env-orbit"), "utf8");
+      expect(env).not.toContain("COMPOSE_PROFILES=processing");
+      expect(env).not.toContain("TIKA_URL=http://orbit-tika:9998");
+      expect(said.filter((line) => line === REPLACE_LINE)).toHaveLength(1);
+    });
+
+    // Passes today and must keep passing: a regression guard for the no-profile case.
+    it("installs standard when the variable is unset and the handed-in file names no profile", async () => {
+      const target = sandbox("orbit-install-target-");
+      const tree = launcherTree({ env: TREE_ENV, secrets: TREE_SECRETS });
+      const { outcome, said } = await runWithTree(target, tree, { requestedProfile: undefined });
+      expect(outcome).toMatchObject({ status: "ok", fresh: true, selectedProfile: "standard" });
+      expect(readFileSync(join(target, ".env-orbit"), "utf8")).not.toContain("COMPOSE_PROFILES=processing");
+      expect(said).not.toContain(REPLACE_LINE);
+    });
+  });
+
   describe("incomplete", () => {
     it.each([
       ["APP_URL missing", "ORBIT_AUTH_OIDC=false\n"],
