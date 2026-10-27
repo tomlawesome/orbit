@@ -114,11 +114,13 @@ export async function moved({ base, projectId, pipelineId, sha, token, fetchImpl
   return "run";
 }
 
-/* The nightly runs on `sha` that failed. An empty list means go ahead. */
-export async function failedNightlies({ base, projectId, sha, token, fetchImpl = fetch, log = () => {} }) {
+/* The nightly runs on `sha` that hold a promotion: every one not a success,
+ * so a run still in flight (running, pending, created, waiting) blocks as a
+ * failed one does. An empty list means go ahead. */
+export async function blockingNightlies({ base, projectId, sha, token, fetchImpl = fetch, log = () => {} }) {
   const options = { token, fetchImpl };
   const nightlies = await nightlyPipelines({ base, projectId, options, sha, log });
-  return nightlies.filter((pipeline) => pipeline.status === "failed");
+  return nightlies.filter((pipeline) => pipeline.status !== "success");
 }
 
 /* Failing test titles out of a job log: Playwright's `  1) [project] › ...`
@@ -244,20 +246,26 @@ export async function main(argv, env = process.env, { fetchImpl = fetch, out = c
       err("nightly-browsers: the API URL, project or commit is unknown; this must run inside a GitLab job.");
       return 1;
     }
-    let failed;
+    let blocking;
     try {
-      failed = await failedNightlies({ base, projectId, sha, token, fetchImpl, log });
+      blocking = await blockingNightlies({ base, projectId, sha, token, fetchImpl, log });
     } catch (error) {
       err(`nightly-browsers: could not read the nightly runs (${error.message}); an unchecked promotion is not a passed one.`);
       return 1;
     }
-    if (failed.length === 0) {
-      out(`no failed nightly run on ${sha.slice(0, 12)}`);
+    if (blocking.length === 0) {
+      out(`no failed or unfinished nightly run on ${sha.slice(0, 12)}`);
       return 0;
     }
-    err(`nightly-browsers: the nightly browser run failed on this dev commit (${sha.slice(0, 12)}):`);
-    for (const pipeline of failed) err(`  ${pipeline.web_url ?? `pipeline ${pipeline.id}`}`);
-    err("Fix it and retry the failed job, or promote a different dev commit.");
+    const failed = blocking.filter((pipeline) => pipeline.status === "failed");
+    for (const pipeline of blocking.filter((candidate) => candidate.status !== "failed")) {
+      err(`nightly-browsers: nightly pipeline ${pipeline.id} is still running on this commit: wait for it, then retry.`);
+    }
+    if (failed.length > 0) {
+      err(`nightly-browsers: the nightly browser run failed on this dev commit (${sha.slice(0, 12)}):`);
+      for (const pipeline of failed) err(`  ${pipeline.web_url ?? `pipeline ${pipeline.id}`}`);
+      err("Fix it and retry the failed job, or promote a different dev commit.");
+    }
     return 1;
   }
 
