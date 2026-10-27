@@ -34,6 +34,7 @@ import { missingConfigurationFields, missingGuidedFields, missingRequiredFields,
 import { type HostFacts, hostFactsVolumeAdapter } from "./host-facts";
 import { type InstallTerminal, InstallPromptStop, declined, selectChoice } from "./install-terminal";
 import { InstallTransaction, InstallTransactionRefusal } from "./install-transaction";
+import { LAUNCHER_CONFIG_TREE_ENV, takeHandedInConfiguration, treeHoldsConfiguration } from "./launcher-config-tree";
 import { verifyOidcDiscovery } from "./oidc-discovery";
 import {
   COMPOSE_FILE,
@@ -93,6 +94,8 @@ export interface InstallContext {
   facts: HostFacts;
   /** Where this image keeps its deployment assets (/opt/orbit/deploy, ADR-0019). */
   assetsRoot: string;
+  /** ORBIT_LAUNCHER_CONFIG_TREE as mounted: the launcher's tree, which may hand in a configuration (#1519). */
+  launcherConfigTree?: string;
 }
 
 /** What a guided configuration step needs answered: the configure engine's own sources, in its own order (src/cli/orbit.ts). */
@@ -112,6 +115,8 @@ export interface InstallDependencies {
   capacity?: (deployDir: string) => LocalAiCapacity;
   /** The configure engine's own advisory lines, printed as configure.sh printed them. */
   say?: (line: string) => void;
+  /** One-line notices for stderr (a handed-in configuration ignored, #1519). */
+  notice?: (line: string) => void;
   /**
    * Called once on a failure whose reason is configuration-failure, before
    * anything is rolled back: the launcher's configure tree is handed over
@@ -482,9 +487,72 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
     }
     onEvent({ phase: "assets", component: "assets", state: "completed", reason: "assets-verified", action: "fetch" });
 
-    // stage_guided_install_configuration (guarantees #30-32).
+    // The launcher's configuration, handed in through its tree (#1519): taken
+    // in on a fresh install, with or without a terminal, and staged as a
+    // guided configuration is, so the transaction is the only writer in the
+    // folder and both rollbacks remove it. A folder that has a configuration
+    // keeps its own.
     let guidedStaged = false;
+    const targetConfigured = pathExists(join(context.targetDir, ENVIRONMENT_FILE)) || pathExists(join(context.targetDir, SECRETS_DIRECTORY));
+    if (treeHoldsConfiguration(context.launcherConfigTree) && (targetConfigured || action !== "install")) {
+      dependencies.notice?.(`Orbit installer: the configuration in ${LAUNCHER_CONFIG_TREE_ENV} was ignored: this folder already has one, and it is used.`);
+    } else if (action === "install") {
+      const unchanged = (message: string, guidance?: string[]) =>
+        fail("configuration", "configuration", `${message}; the target remains unchanged.`, "configuration-failure", "retry", guidance);
+      const handedIn = takeHandedInConfiguration(context.launcherConfigTree, scratchDir);
+      if (handedIn.kind === "refused") return unchanged(`The configuration in ${LAUNCHER_CONFIG_TREE_ENV} was refused: ${handedIn.problem}`);
+      if (handedIn.kind === "taken") {
+        onEvent({ phase: "configuration", component: "configuration", state: "starting", reason: "configuration-migration", action: "configure" });
+        // The launcher's file is a pre-provisioned one: bring it to the current
+        // schema, with the project name the transaction will use (the compose
+        // file's own `name:` replaces a provisional guess, as below), before
+        // configure will accept it.
+        let projectName = volumeState.composeProjectName || context.facts.targetBasename;
+        if (volumeState.composeProjectNameProvisional) {
+          try {
+            projectName = deriveComposeProjectName(context.targetDir, context.requestedComposeProjectName, context.facts.targetBasename, join(scratchDir, COMPOSE_FILE)).composeProjectName;
+          } catch (error) {
+            if (!(error instanceof ComposeProjectNameRefusal)) throw error;
+            return fail("compose", "compose", error.message);
+          }
+        }
+        const migration = runConfigurationMigration({
+          environmentFile: join(scratchDir, ENVIRONMENT_FILE),
+          orbitImage: context.resolvedReference,
+          appliedVersion: context.facts.imageVersion,
+          appliedDigest: context.facts.appliedDigest,
+          composeProjectName: projectName,
+        });
+        if (!migration.ok) return unchanged(`The configuration in ${LAUNCHER_CONFIG_TREE_ENV} was refused: ${migration.message}`);
+        try {
+          say(dependencies, runConfigureApply(scratchDir, context.resolvedReference, { trustOrbitImage: true, stampAbsentBeforeMigration: true }).messages);
+        } catch {
+          return unchanged("Secret generation failed");
+        }
+        if (profile.profileChange) {
+          try {
+            say(dependencies, [setDeploymentProfile(scratchDir, profile.selectedProfile, profile.selectedModel)]);
+          } catch {
+            return unchanged("Deployment profile configuration failed");
+          }
+        }
+        const readiness = readinessText(scratchDir);
+        if (!readiness.ok) {
+          const missing = missingConfigurationFields(readiness.text);
+          return unchanged(
+            `The configuration in ${LAUNCHER_CONFIG_TREE_ENV} is incomplete${missing.length > 0 ? ` (${missing.join(" ")})` : ""}`,
+            missing.length > 0 ? noninteractiveConfigurationGuidance(missing) : undefined,
+          );
+        }
+        guidedStaged = true;
+        profile = { ...profile, profileChange: false };
+        onEvent({ phase: "configuration", component: "configuration", state: "running", reason: "configuration-migration", action: "verify" });
+      }
+    }
+
+    // stage_guided_install_configuration (guarantees #30-32).
     if (
+      !guidedStaged &&
       action === "install" &&
       !context.plainMode &&
       terminal &&

@@ -1544,6 +1544,7 @@ function commandInstallOrUpdate(command: "install" | "update", deployDirArg: str
       requestedProfile: process.env.ORBIT_INSTALL_PROFILE,
       facts,
       assetsRoot,
+      launcherConfigTree: process.env[LAUNCHER_CONFIG_TREE_ENV] || undefined,
     },
     {
       terminal,
@@ -1552,6 +1553,7 @@ function commandInstallOrUpdate(command: "install" | "update", deployDirArg: str
         oidcSecret: () => collectOidcSecret(guidedIo),
       },
       say: (line) => process.stdout.write(`${line}\n`),
+      notice: (line) => process.stderr.write(`${line}\n`),
       onConfigurationFailure: () => {
         handOverLauncherConfigTree({
           tree: process.env[LAUNCHER_CONFIG_TREE_ENV] || undefined,

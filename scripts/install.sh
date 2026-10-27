@@ -37,6 +37,8 @@ set -Eeuo pipefail
 #     nothing. It writes nothing, and says so in one stderr line, if the
 #     directory is missing, not a directory, a symlink, not mode 0700, not
 #     empty or not owned by the current user (#1225, docs/engine-events.md).
+#     The launcher may leave .env-orbit and .orbit-secrets/ there for the
+#     engine to take in as its configuration (#1519), which "empty" allows.
 #     This script only mounts the directory into the engine.
 
 readonly repository="${ORBIT_REPOSITORY:-tomlawesome/orbit}"

@@ -66,6 +66,25 @@ current user, it writes nothing and prints one stderr line; the event,
 guidance and exit status are unchanged either way. Unset or empty, nothing
 is written.
 
+The tree is two-way (#1519). Once the consumer has run configuration in it,
+it leaves the result there and runs the install again with the same
+setting, rather than writing anything into the deployment folder itself:
+`.env-orbit` (an owner-only regular file, mode 0600) and, when it has one,
+`.orbit-secrets/` (a real directory, mode 0700, of owner-only regular
+files). On a fresh install whose folder has neither, the engine takes them
+in as the guided configuration, asks nothing, and writes them through its
+install transaction like any staged configuration, so the engine's own
+rollback and `install.sh`'s rollback after the commit both remove them and
+leave the folder as the person had it. The tree itself is never changed.
+A handed-in configuration that is incomplete is refused before anything is
+written, with `reason=configuration-failure`, the missing field names as
+above, and the configure tree written beside it (those two entries are the
+only ones it may be written beside; anything else still counts as "not
+empty"). One of another shape (a symlink, a file open to group or others)
+is refused the same way. When the folder already has a configuration, or
+the run is an update, the handed-in one is ignored, with one stderr line
+saying so, and the folder's own is used.
+
 ## Profile request (v0)
 
 A consumer installing without a terminal (for `orbit-launcher`: plain mode)

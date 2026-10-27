@@ -881,7 +881,9 @@ describe("runInstall: the launcher's configuration goes through the install tran
       const env = readFileSync(join(target, ".env-orbit"), "utf8");
       expect(env).toContain("APP_URL=https://orbit.example.invalid\n");
       expect(env).not.toContain("tree-should-lose");
-      expect(env).toEqual(readFileSync(join(control, ".env-orbit"), "utf8"));
+      // Every run generates its own VAPID key pair, so those lines are left out of the comparison.
+      const withoutVapid = (text: string) => text.split("\n").filter((line) => !line.startsWith("VAPID_")).join("\n");
+      expect(withoutVapid(env)).toEqual(withoutVapid(readFileSync(join(control, ".env-orbit"), "utf8")));
       expect(readFileSync(join(target, ".orbit-secrets", "oidc-client-secret"), "utf8")).toBe("s3cr3t");
       expect(snapshot(tree)).toEqual(treeBefore);
     });
