@@ -925,6 +925,14 @@ rotation is undone).
    the current key, and every row it has moved is readable under the next
    one. Each batch is one transaction, so a row is never left half-moved. It
    records one `document_kek_rotation_completed` audit entry when it finishes.
+
+   Builds before #1316 did not move held mail attachments or scanner-recovery
+   objects, so an earlier rotation may have left some on a key older than the
+   current one. Neither key you hold can read those, so the worker skips them
+   rather than stalling (#1392): it says how many at the start and the end,
+   and logs a `document.kek_rotation` warning. They are left exactly as they
+   were, and do not stop the rotation completing. A held object whose key
+   cannot be identified at all still stops the worker with an error.
 4. **The point of no return.** Only once the worker reports completion, make
    the next key the current one and drop the overlay:
    ```sh

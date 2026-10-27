@@ -36,10 +36,12 @@
  * removed.
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, ne, not, sql, type SQL } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentStagingObjects, imapIngestionAttachments, mailInSecrets, metadataKeys } from "@/db/schema";
 import { log, operationalDetail } from "@/lib/logger";
+import { DOCUMENT_KEY_ID_SHAPE } from "@/server/documents/config";
 import { envelopeOf, rewrapDocumentKey } from "@/server/documents/crypto";
 import { rewrapMetadataKey, type MetadataKeyContext } from "@/server/metadata/crypto";
 import { rewrapMailInSecret } from "@/server/mail-in/core/secret-crypto";
@@ -70,6 +72,18 @@ export const METADATA_KEY_ROTATION_BATCH = 100;
 export const MAIL_IN_SECRET_ROTATION_BATCH = 100;
 export const HELD_OBJECT_ROTATION_BATCH = 100;
 export const DOCUMENT_REWRAP_CLAIM_LIMIT = 25;
+
+/**
+ * A held object wrapped under an older document key (#1392): its key id has
+ * the shape `deriveDocumentKeyId` gives every key but is neither key this
+ * rotation holds. Builds before #1316 never rewrapped held attachments or
+ * staged objects, so a rotation A -> B left them on A; B -> C cannot read
+ * them either way, so it skips them, leaves them byte-identical and reports
+ * them. A key id of any other shape is not identifiable and still fails closed.
+ */
+function onOlderKey(column: AnyPgColumn, keys: RotationKeys): SQL {
+  return sql`(${column} <> ${keys.currentKeyId} and ${column} <> ${keys.nextKeyId} and ${column} ~ ${DOCUMENT_KEY_ID_SHAPE})`;
+}
 
 /**
  * Finds every `document_crypto` row not already on the next key and gives it
@@ -304,7 +318,7 @@ export async function runImapAttachmentRotationBatch(keys: RotationKeys, batchSi
       wrapIv: imapIngestionAttachments.wrapIv,
       wrapAuthTag: imapIngestionAttachments.wrapAuthTag,
     }).from(imapIngestionAttachments)
-      .where(ne(imapIngestionAttachments.keyId, keys.nextKeyId))
+      .where(and(ne(imapIngestionAttachments.keyId, keys.nextKeyId), not(onOlderKey(imapIngestionAttachments.keyId, keys))))
       .limit(batchSize)
       .for("update", { skipLocked: true });
 
@@ -348,7 +362,7 @@ export async function runStagingObjectRotationBatch(keys: RotationKeys, batchSiz
       wrapIv: documentStagingObjects.wrapIv,
       wrapAuthTag: documentStagingObjects.wrapAuthTag,
     }).from(documentStagingObjects)
-      .where(ne(documentStagingObjects.keyId, keys.nextKeyId))
+      .where(and(ne(documentStagingObjects.keyId, keys.nextKeyId), not(onOlderKey(documentStagingObjects.keyId, keys))))
       .limit(batchSize)
       .for("update", { skipLocked: true });
 
@@ -374,6 +388,24 @@ export async function runStagingObjectRotationBatch(keys: RotationKeys, batchSiz
   });
 }
 
+/** Held objects skipped on an older key (#1392), by id: never key material. */
+export interface SkippedOnOlderKey {
+  heldAttachmentIds: string[];
+  stagingObjectIds: string[];
+}
+
+export async function heldObjectsOnOlderKey(keys: RotationKeys): Promise<SkippedOnOlderKey> {
+  const [attachments, staged] = await Promise.all([
+    getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments).where(onOlderKey(imapIngestionAttachments.keyId, keys)),
+    getDb().select({ id: documentStagingObjects.documentId }).from(documentStagingObjects).where(onOlderKey(documentStagingObjects.keyId, keys)),
+  ]);
+  return { heldAttachmentIds: attachments.map((row) => row.id), stagingObjectIds: staged.map((row) => row.id) };
+}
+
+export function skippedCount(skipped: SkippedOnOlderKey): number {
+  return skipped.heldAttachmentIds.length + skipped.stagingObjectIds.length;
+}
+
 export interface RotationCycleResult {
   documentsEnqueued: number;
   documentJobsProcessed: number;
@@ -381,6 +413,7 @@ export interface RotationCycleResult {
   mailInSecretsRewrapped: number;
   heldAttachmentsRewrapped: number;
   stagingObjectsRewrapped: number;
+  skippedOnOlderKey: SkippedOnOlderKey;
 }
 
 /** One pass over all five populations: enqueue, claim and process a batch of each. */
@@ -400,6 +433,7 @@ export async function runKekRotationCycle(keys: RotationKeys, batchSize = DOCUME
   const mailInSecretsRewrapped = await runMailInSecretRotationBatch(keys, batchSize);
   const heldAttachmentsRewrapped = await runImapAttachmentRotationBatch(keys, batchSize);
   const stagingObjectsRewrapped = await runStagingObjectRotationBatch(keys, batchSize);
+  const skippedOnOlderKey = await heldObjectsOnOlderKey(keys);
   return {
     documentsEnqueued,
     documentJobsProcessed,
@@ -407,6 +441,7 @@ export async function runKekRotationCycle(keys: RotationKeys, batchSize = DOCUME
     mailInSecretsRewrapped,
     heldAttachmentsRewrapped,
     stagingObjectsRewrapped,
+    skippedOnOlderKey,
   };
 }
 
@@ -416,16 +451,20 @@ export interface RotationProgress {
   mailInSecretsRemaining: number;
   heldAttachmentsRemaining: number;
   stagingObjectsRemaining: number;
+  skippedOnOlderKey: SkippedOnOlderKey;
 }
 
-/** How many rows, in each population, are not yet wrapped under the next key. */
+/** How many rows, in each population, are not yet wrapped under the next key, leaving out held objects skipped on an older key. */
 export async function rotationRemaining(keys: RotationKeys): Promise<RotationProgress> {
-  const [[documentsRow], [metadataRow], [secretsRow], [attachmentsRow], [stagingRow]] = await Promise.all([
+  const [[documentsRow], [metadataRow], [secretsRow], [attachmentsRow], [stagingRow], skippedOnOlderKey] = await Promise.all([
     getDb().select({ count: sql<number>`count(*)::int` }).from(documentCrypto).where(ne(documentCrypto.keyId, keys.nextKeyId)),
     getDb().select({ count: sql<number>`count(*)::int` }).from(metadataKeys).where(ne(metadataKeys.keyId, keys.nextKeyId)),
     getDb().select({ count: sql<number>`count(*)::int` }).from(mailInSecrets).where(ne(mailInSecrets.keyId, keys.nextKeyId)),
-    getDb().select({ count: sql<number>`count(*)::int` }).from(imapIngestionAttachments).where(ne(imapIngestionAttachments.keyId, keys.nextKeyId)),
-    getDb().select({ count: sql<number>`count(*)::int` }).from(documentStagingObjects).where(ne(documentStagingObjects.keyId, keys.nextKeyId)),
+    getDb().select({ count: sql<number>`count(*)::int` }).from(imapIngestionAttachments)
+      .where(and(ne(imapIngestionAttachments.keyId, keys.nextKeyId), not(onOlderKey(imapIngestionAttachments.keyId, keys)))),
+    getDb().select({ count: sql<number>`count(*)::int` }).from(documentStagingObjects)
+      .where(and(ne(documentStagingObjects.keyId, keys.nextKeyId), not(onOlderKey(documentStagingObjects.keyId, keys)))),
+    heldObjectsOnOlderKey(keys),
   ]);
   return {
     documentsRemaining: documentsRow.count,
@@ -433,6 +472,7 @@ export async function rotationRemaining(keys: RotationKeys): Promise<RotationPro
     mailInSecretsRemaining: secretsRow.count,
     heldAttachmentsRemaining: attachmentsRow.count,
     stagingObjectsRemaining: stagingRow.count,
+    skippedOnOlderKey,
   };
 }
 
@@ -456,7 +496,18 @@ export async function runKekRotationToCompletion(keys: RotationKeys, batchSize =
   for (;;) {
     const cycle = await runKekRotationCycle(keys, batchSize);
     const progress = await rotationRemaining(keys);
-    if (rotationComplete(progress)) return progress;
+    if (rotationComplete(progress)) {
+      const skipped = skippedCount(progress.skippedOnOlderKey);
+      if (skipped > 0) {
+        log.warn({
+          event: "document.kek_rotation",
+          state: "completed",
+          action: "none",
+          detail: operationalDetail`${skipped} held object(s) left untouched on an older key this rotation does not hold`,
+        });
+      }
+      return progress;
+    }
 
     const remaining = totalRemaining(progress);
     const madeProgress = cycle.documentJobsProcessed > 0 || cycle.metadataKeysRewrapped > 0 || cycle.mailInSecretsRewrapped > 0

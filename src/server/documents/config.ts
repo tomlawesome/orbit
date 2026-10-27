@@ -93,6 +93,9 @@ export function deriveDocumentKeyId(keyEncryptionKey: Buffer): string {
   return createHash("sha256").update("orbit-document-kek-v1\0").update(keyEncryptionKey).digest("hex").slice(0, 24);
 }
 
+/** The shape every id `deriveDocumentKeyId` returns has, as a Postgres/JS regex source. */
+export const DOCUMENT_KEY_ID_SHAPE = "^[0-9a-f]{24}$";
+
 let cachedDocumentConfig: DocumentConfig | undefined;
 
 /**
