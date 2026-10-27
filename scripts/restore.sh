@@ -38,6 +38,14 @@ read_environment_value() {
       # A CRLF .env-orbit is valid; drop the CR.
       value="${line#*=}"
       value="${value%$'\r'}"
+      # Read the value the way Compose's env-file parser does: one pair of
+      # matching quotes comes off, and an unquoted value loses a trailing
+      # " # note". Otherwise a quoted COMPOSE_FILE keeps its quote marks and
+      # the overlay appended to it names a file that does not exist.
+      case "$value" in
+        \"*\" | \'*\') value="${value:1:${#value}-2}" ;;
+        *) value="${value%% \#*}" ;;
+      esac
       found=1
     fi
   done < "$environment_file"
