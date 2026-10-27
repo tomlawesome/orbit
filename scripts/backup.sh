@@ -134,6 +134,13 @@ require_deployment() {
   [[ "${1:-}" != health ]] || command -v curl >/dev/null 2>&1 || fail 'preflight/tools failed; curl is required.'
   [[ -f "$environment_file" ]] || fail 'preflight/configuration failed; the Orbit environment file is missing.'
   [[ -d "$secrets_directory" && ! -L "$secrets_directory" ]] || fail 'preflight/configuration failed; the secrets directory must be a regular directory.'
+}
+
+# The live document key must be a regular file: Orbit cannot start without it.
+# The recovery import and restore.sh --recover do not ask for it: each puts a
+# key back, or puts back "no key" (#1420).
+# shellcheck disable=SC2317  # import-recovery-bundle.sh carries it unused
+require_live_key() {
   [[ -f "$secrets_directory/document-kek" && ! -L "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; the configured document key is missing.'
 }
 
@@ -184,6 +191,16 @@ run_engine() {
   if [[ -n "$input_file" ]]; then
     run_args+=(-v "$input_file:/orbit-input/bundle.tar:ro" -e "ORBIT_HOST_INPUT_FILE=$input_file")
   fi
+  # No live key file (#1420): Docker will not mount a missing secret file, so this one call adds
+  # the overlay that points the secret at /dev/null. The engine reads the key from the deployment
+  # directory, never from the secret. The files Compose would use otherwise are kept, in its order:
+  # an exported COMPOSE_FILE, then .env-orbit's, then docker-compose.yml.
+  if [[ ! -e "$secrets_directory/document-kek" && ! -L "$secrets_directory/document-kek" ]]; then
+    local compose_files="${COMPOSE_FILE:-}" separator="${COMPOSE_PATH_SEPARATOR:-}"
+    [[ -n "$compose_files" ]] || compose_files="$(read_environment_value COMPOSE_FILE 2>/dev/null || true)"
+    [[ -n "$separator" ]] || separator="$(read_environment_value COMPOSE_PATH_SEPARATOR 2>/dev/null || true)"
+    local -x COMPOSE_FILE="${compose_files:-docker-compose.yml}${separator:-:}docker-compose.no-document-key.yml"
+  fi
   compose "${run_args[@]}" --entrypoint node orbit-app /opt/orbit/cli/orbit.js "$@" --dir /orbit-deploy "${directory_args[@]}"
 }
 
@@ -230,6 +247,7 @@ if [[ "${1:-}" == "--verify" ]]; then
   [[ "$#" == 2 ]] || fail "Usage: bash scripts/backup.sh --verify <backup.tar>"
   # shellcheck disable=SC2119  # this script does not wait for health
   require_deployment
+  require_live_key
   bundle="$(input_bundle "$2")"
   engine_host_identity
   # --verify reads a bundle and changes nothing: the app keeps running.
@@ -237,6 +255,7 @@ if [[ "${1:-}" == "--verify" ]]; then
 elif [[ "$#" == 0 ]]; then
   # shellcheck disable=SC2119  # this script does not wait for health
   require_deployment
+  require_live_key
   # Before the stop: an unfinished restore (in its health wait, or failed and
   # left stopped for --recover) owns orbit-app, and stopping then restarting
   # it would undo that. The engine checks again under the lock.
