@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { calculateReleaseTrainVersion } from "./calculate-version.mjs";
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
 
 /*
@@ -32,9 +33,19 @@ const REGISTRY_IMAGE = "registry.tomlawson.io/ai/orbit";
 const GOOD_SHA = "a".repeat(40);
 const PREVIEW_DIGEST = `sha256:${"1".repeat(64)}`;
 const OTHER_DIGEST = `sha256:${"2".repeat(64)}`;
-// The next version after stable v1.3.0 under the real scripts/release-line.json
-// (a line below v1.4, so a patch: #1499).
-const VERSION = "v1.3.1";
+// The stable tags the git stub lists unless a test says otherwise.
+const STABLE_TAGS = "v1.3.0";
+// The version the script should calculate from those tags, worked out the way
+// the script's own scripts/calculate-version.mjs does and from the same real
+// release-line and retracted-tags files, so raising the release line is a
+// config edit these tests follow rather than one that breaks them.
+const VERSION = calculateReleaseTrainVersion({
+  tags: STABLE_TAGS.split("\n"),
+  fallbackVersion: JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version,
+  channel: "preview",
+  retractedTags: JSON.parse(readFileSync(new URL("./retracted-tags.json", import.meta.url), "utf8")).tags,
+  releaseLine: JSON.parse(readFileSync(new URL("./release-line.json", import.meta.url), "utf8")).line,
+});
 const GHCR_TOKEN = "TEST-GHCR-TOKEN-NOT-REAL";
 const GITLAB_TOKEN = "TEST-GITLAB-TOKEN-NOT-REAL";
 const REGISTRY_PASSWORD = "TEST-REGISTRY-PASSWORD-NOT-REAL";
@@ -261,7 +272,7 @@ function run({
   versionTagDigest = null,
   latestTagDigest = null,
   tagExistsOnGitLab = false,
-  stableTags = "v1.3.0",
+  stableTags = STABLE_TAGS,
   labelRevision = GOOD_SHA,
   labelVersion = VERSION,
   labelReleaseStage = "preview",
@@ -382,7 +393,7 @@ describe("scripts/ci/promote-stable.sh", () => {
   });
 
   it("refuses when the calculated version disagrees with the image's version label", () => {
-    // v1.3.0 already stable => the next preview-channel version is v1.3.1,
+    // v1.3.0 already stable => the next preview-channel version is VERSION,
     // not the v1.9.0 this image claims.
     const { result } = run({ labelVersion: "v1.9.0", embeddedVersion: "v1.9.0", reportedVersion: "Orbit v1.9.0" });
     expect(result.status).not.toBe(0);
