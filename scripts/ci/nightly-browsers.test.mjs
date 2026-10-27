@@ -307,3 +307,30 @@ describe("helpers", () => {
     expect((await run(["frobnicate"], {})).code).toBe(2);
   });
 });
+
+// v0.3.2 audit D-F11/D-F19. Fails on current code: failedNightlies filters on
+// status === "failed" alone, so a nightly still in flight on this commit lets
+// the promotion gate pass (exit 0, no in-flight message).
+describe("blocked: nightlies still in flight (D-F11/D-F19)", () => {
+  for (const status of ["running", "pending", "created"]) {
+    it(`refuses while a nightly on this commit is ${status}, saying to wait`, async () => {
+      const api = await start({ pipelines: [{ id: 91, sha: SHA, status }] });
+      const result = await run(["blocked"], base(api));
+      expect(result.code).not.toBe(0);
+      expect(result.err).toMatch(/nightly pipeline 91 is still running on this commit: wait for it, then retry/u);
+    });
+  }
+
+  it("passes a success and keeps the failed message for a failure", async () => {
+    let api = await start({ pipelines: [{ id: 92, sha: SHA, status: "success" }] });
+    expect((await run(["blocked"], base(api))).code).toBe(0);
+    await new Promise((resolve) => server.close(resolve));
+    server = undefined;
+
+    api = await start({ pipelines: [{ id: 93, sha: SHA, status: "failed" }] });
+    const failed = await run(["blocked"], base(api));
+    expect(failed.code).toBe(1);
+    expect(failed.err).toMatch(/pipelines\/93/u);
+    expect(failed.err).not.toMatch(/still running/u);
+  });
+});

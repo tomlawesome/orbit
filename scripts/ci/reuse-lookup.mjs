@@ -152,11 +152,20 @@ async function readEvidence(base, projectId, jobId, job, options) {
 /*
  * The successful run of each named job in one pipeline. A retried job appears
  * more than once, so the highest id wins -- the run that stands.
+ *
+ * A browser job whose only failure was a quarantined test exits 3, which
+ * `allow_failure: exit_codes: [3]` records as status failed with allow_failure
+ * true; that run passed and counts. GitLab sets a job's allow_failure to false
+ * when it fails with an exit code outside the list, so a real failure never
+ * counts. The evidence check downstream still refuses a job that never reached
+ * reuse-evidence.sh.
  */
 export function successfulJobs(jobs) {
   const found = new Map();
   for (const entry of jobs) {
-    if (entry?.status !== "success") continue;
+    const passed = entry?.status === "success"
+      || (entry?.status === "failed" && entry?.allow_failure === true);
+    if (!passed) continue;
     const previous = found.get(entry.name);
     if (!previous || Number(entry.id) > Number(previous.id)) found.set(entry.name, entry);
   }
