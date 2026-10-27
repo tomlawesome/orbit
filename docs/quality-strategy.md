@@ -225,6 +225,17 @@ why); the `base_image_repin` job (#708) owns that one: it needs its own schedule
 opens or refreshes one merge request. The header of
 `scripts/ci/repin-base-image.sh` holds how it is authorised.
 
+Merge requests opened by the project bots (Renovate, the base-image re-pin,
+door imports) run with a job token that cannot read `ai/orbit-base-image`
+(#1167), so their pipelines rely on two CI/CD variables the owner sets:
+
+- `ORBIT_REUSE_TOKEN` -- read-only, unprotected; reuse lookup and the nightly
+  check (see below).
+- `ORBIT_BASE_IMAGE_PULL_USER` / `ORBIT_BASE_IMAGE_PULL_TOKEN` -- a deploy
+  token with `read_registry` on `ai/orbit-base-image` only; unprotected (bot
+  branches are not protected) and masked. `build_image` pulls the pinned base
+  image with it; without it the build takes the same digest from GHCR.
+
 ### Browsers run at promotion and every night, not on merge requests (#1412)
 
 Owner ruling, 2026-10-22. A merge request into `dev`, and the push that lands
@@ -251,10 +262,11 @@ on it while it is open. It reads `SIDECAR_ISSUE_TOKEN`, the same project token
 re-run on a commit it already ran on, even if red: retry the failed job.
 
 Promotion stops on a red night: `nightly_not_red`, on the `dev -> preview`
-merge request only, fails if a nightly run on that same `dev` commit failed. No
-nightly yet on the commit is not a failure, since the promotion runs the
-browsers itself. It reads the pipelines API with `ORBIT_REUSE_TOKEN` alone
-(read-only, unprotected, no fallback) and fails, saying so, if it is unset.
+merge request only, fails if a nightly run on that same `dev` commit failed or
+has not finished yet (wait for it, then retry). No nightly yet on the commit
+is not a failure, since the promotion runs the browsers itself. It reads the
+pipelines API with `ORBIT_REUSE_TOKEN` alone (read-only, unprotected, no
+fallback) and fails, saying so, if it is unset.
 
 The schedule is a GitLab setting the owner creates (Settings > CI/CD >
 Schedules): description "Nightly browsers on dev (#1412)", target branch `dev`,
