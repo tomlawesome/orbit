@@ -60,6 +60,10 @@ node --test scripts/bump-launcher-pin.test.mjs
 # Same reason (#1374): uses node:test, with a stub docker on PATH.
 node --test scripts/corpus/stages-rerun.test.mjs
 
+# Same reason: uses node:test; cuts read_environment_value out of the seven
+# scripts that carry a copy and runs each.
+node --test scripts/read-environment-value.test.mjs
+
 # Static analysis covers the full-stack boundary; Vitest exercises all fast
 # server, authentication, database, domain, and reducer tests without Docker.
 #

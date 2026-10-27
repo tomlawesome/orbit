@@ -1,0 +1,79 @@
+/**
+ * `read_environment_value` reads one KEY=value line of .env-orbit the way
+ * Compose's own env-file parser does: a value in matching quotes loses them,
+ * and an unquoted value loses a trailing " # note". Seven scripts each carry
+ * their own copy of the function, so each is cut out of its script with sed
+ * and run, so none can drift from the others.
+ *
+ * Uses node:test, not vitest globals: run standalone with
+ * `node --test scripts/read-environment-value.test.mjs`, and by
+ * scripts/test-backend.sh. vitest.config.ts excludes it.
+ *
+ * Why each case fails on the code before the change: the function returned the
+ * raw text after "=", so the quoted values came back with their quote marks
+ * and the commented value came back with its comment. The no-key overlay then
+ * appended to that text, giving Compose a path that does not exist. The plain
+ * value and the CRLF line already passed and must keep passing.
+ */
+import { strict as assert } from "node:assert";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+
+const scriptsDir = fileURLToPath(new URL("./", import.meta.url));
+
+const SCRIPTS = [
+  "backup.sh",
+  "restore.sh",
+  "repair.sh",
+  "install.sh",
+  "end-maintenance.sh",
+  "export-recovery-bundle.sh",
+  "import-recovery-bundle.sh",
+];
+
+// [label, the raw line in .env-orbit, what the function must print]
+const CASES = [
+  ["a double-quoted list loses its quotes", 'COMPOSE_FILE="a.yml:b.yml"\n', "a.yml:b.yml"],
+  ["a single-quoted value loses its quotes", "COMPOSE_FILE='a.yml'\n", "a.yml"],
+  ["an unquoted value loses a trailing comment", "COMPOSE_FILE=a.yml # note\n", "a.yml"],
+  ["a plain value is unchanged", "COMPOSE_FILE=a.yml:b.yml\n", "a.yml:b.yml"],
+  ["a quoted value keeps a hash inside the quotes", 'COMPOSE_FILE="a #b.yml"\n', "a #b.yml"],
+  ["quotes that do not match are left alone", "COMPOSE_FILE=\"a.yml'\n", "\"a.yml'"],
+  ["a CRLF line with quotes loses the CR and the quotes", 'COMPOSE_FILE="a.yml"\r\n', "a.yml"],
+  ["a CRLF line with a plain value loses the CR", "COMPOSE_FILE=a.yml\r\n", "a.yml"],
+];
+
+function extractFunction(script) {
+  const cut = spawnSync(
+    "sed",
+    ["-n", "/^read_environment_value() {$/,/^}$/p", join(scriptsDir, script)],
+    { encoding: "utf8" },
+  );
+  assert.equal(cut.status, 0, `sed failed on ${script}`);
+  assert.match(cut.stdout, /^read_environment_value\(\) \{/u, `${script} defines read_environment_value`);
+  return cut.stdout;
+}
+
+const workDir = mkdtempSync(join(tmpdir(), "orbit-read-env-"));
+process.on("exit", () => rmSync(workDir, { recursive: true, force: true }));
+
+for (const script of SCRIPTS) {
+  const definition = extractFunction(script);
+  for (const [label, line, expected] of CASES) {
+    test(`${script}: ${label}`, () => {
+      const environmentFile = join(workDir, `${script}.env`);
+      writeFileSync(environmentFile, `OTHER=x\n${line}`);
+      const run = spawnSync(
+        "bash",
+        ["-c", `${definition}\nenvironment_file="$1"\nread_environment_value COMPOSE_FILE`, "bash", environmentFile],
+        { encoding: "utf8" },
+      );
+      assert.equal(run.status, 0, run.stderr);
+      assert.equal(run.stdout, expected);
+    });
+  }
+}
