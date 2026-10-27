@@ -481,7 +481,7 @@ page's URL at failure, which this one has to infer.
 
 - 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_webkit (job 38686) · failed once, passed on retry. First sighting.
 
-## sign-out-descent.spec.ts:274 "sign out from another page's menu plays the descent (wide desk)" on desktop-firefox
+## sign-out-descent.spec.ts:267 "sign out from another page's menu plays the descent (wide desk)" on desktop-firefox
 
 - 2026-10-22 · 39134f33 (!1081) · pipeline 2875 / `smoke_firefox` job 38354 · "#1253: the page is still showing over the dusk", 10 s predicate timeout; passed on Playwright's retry in the same run. First sighting for this variant and browser.
 

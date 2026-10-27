@@ -28,6 +28,7 @@ import {
   type RotationKeys,
   type SkippedOnOlderKey,
 } from "@/server/documents/rewrap-worker";
+import { completionReport } from "./rewrap-kek-report";
 
 /** #1392: held objects a rotation cannot move, in plain words, or "" when there are none. */
 function skippedLine(skipped: SkippedOnOlderKey): string {
@@ -87,12 +88,7 @@ async function main(): Promise<void> {
     );
     const after = await runKekRotationToCompletion(keys);
     await recordRotationCompleted(keys);
-    process.stdout.write(
-      (skippedCount(after.skippedOnOlderKey) === 0
-        ? "Rewrap complete: every row now decrypts only under the next key.\n"
-        : `Rewrap complete: every row now decrypts only under the next key, except the ${skippedCount(after.skippedOnOlderKey)} skipped held object(s) above.\n`)
-      + "Replace the live document-kek secret with it, remove DOCUMENT_KEK_NEXT, and restart Orbit to finish the rotation.\n",
-    );
+    process.stdout.write(`${completionReport(before, after).join("\n")}\n`);
   } finally {
     nextKek.fill(0);
     await closeDatabase();
