@@ -27,6 +27,6 @@ export function completionReport(_before: RotationProgress, after: RotationProgr
     ...heldAttachmentIds.map((id) => `  held mail attachment: ${id}`),
     ...stagingObjectIds.map((id) => `  scanner-recovery object: ${id}`),
     "Keep the older document key: these objects stay unreadable until a rotation from that key.",
-    "Replace the live document-kek secret with it, remove DOCUMENT_KEK_NEXT, and restart Orbit to finish the rotation.",
+    "Replace the live document-kek secret with the next key, remove DOCUMENT_KEK_NEXT, and restart Orbit to finish the rotation.",
   ];
 }
