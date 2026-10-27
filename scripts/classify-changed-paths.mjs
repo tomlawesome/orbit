@@ -99,6 +99,7 @@ const launcherCompatPatterns = [
   /^docker-compose\.yml$/u,
   /^docker-compose\.mail\.yml$/u,
   /^docker-compose\.kek-rotation\.yml$/u,
+  /^docker-compose\.no-document-key\.yml$/u,
   /^\.env-orbit\.example$/u,
   /^config\/tika-config\.json$/u,
   /^scripts\/(?:configure|installer-ui|backup|restore|repair|export-recovery-bundle|import-recovery-bundle|end-maintenance)\.sh$/u,

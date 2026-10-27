@@ -110,7 +110,10 @@ function deployRepinRepo({ dockerfile } = {}) {
   runGit(repoDir, ["init", "--quiet", "--initial-branch=work"]);
   runGit(repoDir, ["config", "user.email", "test@example.invalid"]);
   runGit(repoDir, ["config", "user.name", "Test"]);
-  runGit(repoDir, ["add", "-A"]);
+  // Only what the script edits (#1523). The script itself needs to be on
+  // disk for BASH_SOURCE, never tracked: committing a copy of it put its own
+  // lines in front of the host's commit gates.
+  runGit(repoDir, ["add", "--", "Dockerfile", ".github/supply-chain-policy.json"]);
   runGit(repoDir, ["commit", "--quiet", "-m", "initial"]);
 
   return repoDir;

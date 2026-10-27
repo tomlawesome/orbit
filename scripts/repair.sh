@@ -1433,6 +1433,7 @@ readonly -a restore_transaction_paths=(
   docker-compose.yml
   docker-compose.mail.yml
   docker-compose.kek-rotation.yml
+  docker-compose.no-document-key.yml
   .env-orbit.example
   config/tika-config.json
   scripts/configure.sh

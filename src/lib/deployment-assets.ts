@@ -17,11 +17,14 @@ import type { ManagedPath } from "./install-transaction";
  * reopen path the administrator docs give, so it must be in the deployment,
  * not only the source tree. docker-compose.kek-rotation.yml likewise: the
  * document-key rotation the docs describe is run from the deployment.
+ * docker-compose.no-document-key.yml is the overlay the backup scripts add
+ * when the live document key file is missing (#1420).
  */
 export const DEPLOYMENT_ASSETS: readonly string[] = [
   "docker-compose.yml",
   "docker-compose.mail.yml",
   "docker-compose.kek-rotation.yml",
+  "docker-compose.no-document-key.yml",
   ".env-orbit.example",
   "config/tika-config.json",
   "scripts/configure.sh",

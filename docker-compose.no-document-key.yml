@@ -1,0 +1,9 @@
+# Overlay the backup and recovery scripts add on their own, for one engine run
+# only, when the live document key file (.orbit-secrets/document-kek) is
+# missing (#1420). Docker will not mount a secret file that does not exist, so
+# the engine one-off on orbit-app could not start; this points the secret at
+# /dev/null instead. The engine reads the key from the deployment directory,
+# never from this secret. Never apply it to the running application.
+secrets:
+  orbit-document-kek:
+    file: /dev/null

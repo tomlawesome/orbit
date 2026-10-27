@@ -147,6 +147,16 @@ function isSymlinkPath(path: string): boolean {
   }
 }
 
+/** Nothing at all at the path: not a file, a directory, or a link (even a dangling one). */
+function isAbsentPath(path: string): boolean {
+  try {
+    lstatSync(path);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT";
+  }
+}
+
 // --- cross-process backup/restore lock (O2-R7, #1151 RANGE-R6/S3/S4) -------
 //
 // Before O2-R7, two concurrent `orbit restore` runs were only ever
@@ -490,6 +500,8 @@ export interface RunRestoreOptions {
   confirmedByYesFlag?: boolean;
   /** ORBIT_RESTORE_ROLLBACK_KEK_FILE equivalent (import-recovery-bundle.sh's key-swap safety net). */
   rollbackDocumentKekFile?: string;
+  /** #1420: the recovery import found no live key file; the checkpoint records "no key" (RestoreRunOptions.noPreviousDocumentKek). */
+  noPreviousDocumentKek?: boolean;
   hooks?: RestoreDurabilityHooks;
   testHooks?: RestoreOrchestrationTestHooks;
   /** The caller already holds the backup/restore lock (runImportRecoveryBundle takes it before swapping the key, as import-recovery-bundle.sh did). */
@@ -570,6 +582,7 @@ function runRestoreLocked(options: RunRestoreOptions): RunRestoreResult {
     paths: options.paths,
     workDir: runWorkDir,
     rollbackDocumentKekFile: options.rollbackDocumentKekFile,
+    noPreviousDocumentKek: options.noPreviousDocumentKek,
     hooks: options.hooks,
   });
 
@@ -916,7 +929,10 @@ function importRecoveryBundleUnlocked(options: RunImportRecoveryBundleOptions): 
         refuse("import-not-confirmed", "Recovery import cancelled.");
       }
       refuseIfDocumentKekRotationOpen(options.liveDocumentKekFile);
-      requireRegularNonSymlinkFile(options.liveDocumentKekFile, "The current document KEK must be a regular file.");
+      // #1420: no live key file at all is accepted (the bundle brings one); anything else there must be a regular file.
+      if (!isAbsentPath(options.liveDocumentKekFile)) {
+        requireRegularNonSymlinkFile(options.liveDocumentKekFile, "The current document KEK must be a regular file.");
+      }
       options.beforeRestore?.();
       return swapKeyAndRestore(options, paths, previousKekPath, recoveredKekHex, join(extractedDir, "orbit-backup.tar"), workDir);
     } finally {
@@ -973,9 +989,12 @@ function swapKeyAndRestore(
   if (!options.adapter.stopApp()) {
     refuse("app-stop-failed", "The Orbit application could not be stopped; the document KEK was not changed.");
   }
+  // #1420: decided once, here, and passed on: with no live key file there is
+  // nothing to set aside, and a rollback removes the key this import writes.
+  const noPreviousKek = isAbsentPath(options.liveDocumentKekFile);
   const restoreWorkDir = mkdtempSync(join(workDir, "restore-"));
   try {
-    renameSecretFileAcrossDevices(options.liveDocumentKekFile, previousKekPath);
+    if (!noPreviousKek) renameSecretFileAcrossDevices(options.liveDocumentKekFile, previousKekPath);
     writeSecretFile(options.liveDocumentKekFile, `${recoveredKekHex}\n`, SECURE_FILE_MODE);
 
     runRestore({
@@ -985,13 +1004,13 @@ function swapKeyAndRestore(
       adapter: options.adapter,
       workDir: restoreWorkDir,
       confirm: options.confirmRestore,
-      rollbackDocumentKekFile: previousKekPath,
+      ...(noPreviousKek ? { noPreviousDocumentKek: true } : { rollbackDocumentKekFile: previousKekPath }),
       hooks: options.hooks,
       testHooks: options.testHooks,
       lockHeld: true,
     });
     // Success: the previous key is no longer needed.
-    rmSafely(previousKekPath);
+    if (!noPreviousKek) rmSafely(previousKekPath);
     return { outcome: "completed" };
   } catch (error) {
     if (existsSync(paths.journalPath)) {
@@ -1006,11 +1025,19 @@ function swapKeyAndRestore(
     // the key swap and restart the app, keeping the prior deployment usable.
     let revertFailed = false;
     try {
-      renameSecretFileAcrossDevices(previousKekPath, options.liveDocumentKekFile);
+      if (noPreviousKek) rmSync(options.liveDocumentKekFile, { force: true });
+      else renameSecretFileAcrossDevices(previousKekPath, options.liveDocumentKekFile);
     } catch {
       revertFailed = true;
     }
     options.adapter.startApp();
+    if (revertFailed && noPreviousKek) {
+      const originalMessage = error instanceof Error ? error.message : String(error);
+      refuse(
+        "live-key-invalid",
+        `Import failed (${originalMessage}) and the document KEK it wrote to ${options.liveDocumentKekFile} could not be removed; there was no key there before. Remove it by hand before using Orbit again.`,
+      );
+    }
     if (revertFailed) {
       // O2-S3: never silently lose the old key — it is still sitting at
       // previousKekPath (outside workDir, so the `finally` below never
