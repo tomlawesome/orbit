@@ -106,6 +106,15 @@ workflow:
   if: $CI_PIPELINE_SOURCE == "schedule"
   when: never
 
+# A push to `main` runs `promote_stable` and nothing else (#1546, owner ruling
+# 2026-10-28). The tree is the one already tested and accepted on `preview`, and
+# `promote_stable` verifies that identity itself (same commit, digest unchanged,
+# labels agree, tag unused), so a second run proves nothing. Put first in every
+# job except `promote_stable`; merge requests into `main` are unaffected.
+.not_on_main_push: &not_on_main_push
+  if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"
+  when: never
+
 # The nightly browser run (#1412, owner ruling 2026-10-22). Browsers are slow
 # and a merge request into `dev` no longer starts any of them: the seven browser
 # jobs (`smoke`, `smoke_firefox`, `smoke_webkit`, `smoke_webkit_mobile`,
@@ -146,6 +155,14 @@ workflow:
 # colon-space would end the YAML value.
 .no_browsers_on_dev: &no_browsers_on_dev
   if: ($CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev" && $CI_MERGE_REQUEST_LABELS !~ /(^|,)ci:[ ]acceptance(,|$)/) || ($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "dev")
+  when: never
+
+# Nor does the merge request into `preview` (#1546, owner ruling 2026-10-28,
+# question 7a): it runs the quick checks, the same jobs a merge request into
+# `dev` runs. The `preview` push is the one full run, browsers included, before
+# the evidence is signed and published.
+.no_browsers_on_preview_mr: &no_browsers_on_preview_mr
+  if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
   when: never
 
 default:
@@ -900,6 +917,7 @@ classify:
     name: ci-read-tokens
     action: prepare
   rules:
+    - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
     - when: on_success
@@ -1126,6 +1144,7 @@ fast:
   # shared runner timed it out (#1377). Cutting its run time is still open.
   timeout: 15m
   rules:
+    - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
     - when: on_success
@@ -1210,6 +1229,7 @@ fast_docker:
     - .dind_service
   timeout: 15m
   rules:
+    - *not_on_main_push
     - *not_scheduled
     - when: on_success
   needs:
@@ -1249,6 +1269,7 @@ names_guard:
   extends: .node
   timeout: 5m
   rules:
+    - *not_on_main_push
     - *not_scheduled
     - when: on_success
   needs:
@@ -1280,6 +1301,7 @@ base_image:
   extends: .dind
   timeout: 10m
   rules:
+    - *not_on_main_push
     - *not_scheduled
     - when: on_success
   needs:
@@ -1316,6 +1338,7 @@ supply_chain_source:
     pull_policy: if-not-present
   timeout: 10m
   rules:
+    - *not_on_main_push
     - *not_scheduled
     - when: on_success
   needs:
@@ -1392,6 +1415,7 @@ licence_policy:
   extends: .node
   timeout: 10m
   rules:
+    - *not_on_main_push
     - *not_scheduled
     - when: on_success
   needs:
@@ -1462,6 +1486,7 @@ sidecar_images:
   # and the merge request into `main` keep running unconditionally, same as
   # `orbit_full_gate` gave every job that called `.system_lane_gate`.
   rules:
+    - *not_on_main_push
     - *not_scheduled
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^hotfix\//
     - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
@@ -1675,6 +1700,7 @@ gitleaks:
     pull_policy: if-not-present
   timeout: 10m
   rules:
+    - *not_on_main_push
     - *not_scheduled
     - when: on_success
   needs: []
@@ -1746,9 +1772,11 @@ fidelity:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
+    - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
     - *no_browsers_on_dev
+    - *no_browsers_on_preview_mr
     - when: on_success
   needs: *needs_gated_with_fast_artifacts
   script:
@@ -1828,9 +1856,11 @@ fidelity_webkit:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
+    - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
     - *no_browsers_on_dev
+    - *no_browsers_on_preview_mr
     - when: on_success
   needs: *needs_gated_with_fast_artifacts
   script:
@@ -1888,6 +1918,7 @@ integration:
   extends: .node
   timeout: 15m
   rules:
+    - *not_on_main_push
     - *not_scheduled
     - when: on_success
   needs: *needs_gated_with_fast_artifacts
@@ -1945,6 +1976,7 @@ build_image:
     name: ci-read-tokens
     action: prepare
   rules:
+    - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
     - when: on_success
@@ -2276,6 +2308,7 @@ supply_chain_image:
     RUNNER_TEMP: $CI_BUILDS_DIR/orbit-runner-temp
   cache: *trivy_db_cache
   rules:
+    - *not_on_main_push
     - *not_scheduled
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
@@ -2351,9 +2384,11 @@ smoke:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
+    - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
     - *no_browsers_on_dev
+    - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: manual
@@ -2458,9 +2493,11 @@ smoke_firefox:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
+    - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
     - *no_browsers_on_dev
+    - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: manual
@@ -2593,9 +2630,11 @@ smoke_webkit:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
+    - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
     - *no_browsers_on_dev
+    - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: manual
@@ -2698,9 +2737,11 @@ smoke_webkit_mobile:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
+    - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
     - *no_browsers_on_dev
+    - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: manual
@@ -2816,9 +2857,11 @@ smoke_local_only:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
+    - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
     - *no_browsers_on_dev
+    - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: manual
@@ -2910,6 +2953,7 @@ acceptance:
     ORBIT_RUN_ID: $CI_PIPELINE_ID
     ORBIT_RUN_ATTEMPT: $CI_JOB_ID
   rules:
+    - *not_on_main_push
     - *not_scheduled
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
@@ -3060,6 +3104,7 @@ repair_journeys:
     # scripts/test-repair-journeys.sh.
     ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE: busybox:stable
   rules:
+    - *not_on_main_push
     - *not_scheduled
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
@@ -3116,6 +3161,7 @@ repair_journeys:
 # artifact (ADR-0031 #2) -- if the two rule sets could ever disagree, compat
 # could run on a ref build_launcher did not.
 .launcher_compat_rules: &launcher_compat_rules
+  - *not_on_main_push
   - *not_scheduled
   - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^hotfix\//
   - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
@@ -4367,9 +4413,9 @@ tidy_freshness:
 # dev -> preview promotion too (#1078), but it also says yes to a push to
 # `main` or `hotfix/*` and to the preview -> main merge request, none of
 # which is the frequency this job measures: once per dev -> preview
-# promotion, not every promotion. The two events below are only that one:
-# the merge request whose target branch is `preview`, and the push to
-# `preview` that lands it. Everything else is `never`, including a branch
+# promotion, not every promotion. The one event below is only that: the push
+# to `preview` that lands it (the merge request into `preview` runs the quick
+# checks only, #1546). Everything else is `never`, including a branch
 # pipeline started by hand, so nothing can reach this job by accident. These
 # are all predefined variables, so the decision is taken before a runner slot
 # is claimed and the job needs no classifier dotenv and no
@@ -4421,7 +4467,6 @@ launch_timing:
   resource_group: launch_timing
   rules:
     - *not_scheduled
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
     - when: never
   script:

@@ -689,6 +689,7 @@ const events = {
     CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "dev",
   },
   previewPush: { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "preview" },
+  mainPush: { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "main" },
   nightly: { CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "dev", ORBIT_NIGHTLY_BROWSERS: "true" },
 };
 
@@ -707,13 +708,9 @@ describe("browser jobs by event (#1412)", () => {
     }
   });
 
-  it("starts every browser job at promotion: the dev -> preview merge request and the preview push", () => {
-    for (const event of ["promotionMergeRequest", "previewPush"]) {
-      for (const name of BROWSER_JOBS) {
-        expect(jobVerdict(name, events[event]), `${name} on ${event}`).toBe("run");
-      }
-    }
+  it("starts every browser job at promotion: the preview push, hotfix pushes and the merge request into main (#1546)", () => {
     for (const environment of [
+      events.previewPush,
       { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "hotfix/x" },
       { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
     ]) {
@@ -721,6 +718,23 @@ describe("browser jobs by event (#1412)", () => {
         expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(environment)}`).toBe("run");
       }
     }
+  });
+
+  it("starts the same jobs on the dev -> preview merge request as on a merge request into dev (#1546)", () => {
+    const everyJob = jobs.filter(([, block]) => /^ {2}stage: /mu.test(block)).map(([name]) => name);
+    for (const name of everyJob) {
+      expect(jobVerdict(name, events.promotionMergeRequest), name).toBe(jobVerdict(name, events.devMergeRequest));
+    }
+    for (const name of [...BROWSER_JOBS, "launch_timing"]) {
+      expect(jobVerdict(name, events.promotionMergeRequest), name).toBe("never");
+    }
+  });
+
+  it("starts nothing but promote_stable on a push to main (#1546)", () => {
+    const everyJob = jobs.filter(([, block]) => /^ {2}stage: /mu.test(block)).map(([name]) => name);
+    const started = everyJob.filter((name) => jobVerdict(name, events.mainPush) !== "never");
+    expect(started).toEqual(["promote_stable"]);
+    expect(jobVerdict("promote_stable", events.mainPush)).toBe("manual");
   });
 
   it("leaves a pipeline started by hand on dev as it was", () => {
