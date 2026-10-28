@@ -298,14 +298,26 @@ describe("handOverLauncherConfigTree beside the launcher's configuration (#1519)
     untouched(tree);
   });
 
-  it("still refuses a tree that already holds one of the configure-tree files, even beside the configuration", () => {
+  it("replaces a regular configure-tree file left beside the configuration", () => {
     const tree = configTree({ env: true });
     writeFileSync(join(tree, ".orbit-image"), "PLANTED\n");
+    expect(handOver(tree)).toEqual({ result: "written", notices: [] });
+    expect(readdirSync(tree).sort()).toEqual([".env-orbit", ".env-orbit.example", ".orbit-image", "scripts"]);
+    expect(readFileSync(join(tree, ".orbit-image"), "utf8")).toBe(`${REFERENCE}\n`);
+    untouched(tree);
+  });
+
+  it("refuses a symlinked configure-tree file beside the configuration, as not ours", () => {
+    const tree = configTree({ env: true });
+    const elsewhere = join(sandbox(), "planted");
+    writeFileSync(elsewhere, "PLANTED\n");
+    symlinkSync(elsewhere, join(tree, ".orbit-image"));
     const { result, notices } = handOver(tree);
     expect(result).toBe("refused");
-    expect(notices).toHaveLength(1);
+    expect(notices).toEqual(["Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because it holds something that is not ours."]);
     expect(readdirSync(tree).sort()).toEqual([".env-orbit", ".orbit-image"]);
-    expect(readFileSync(join(tree, ".orbit-image"), "utf8")).toBe("PLANTED\n");
+    expect(lstatSync(join(tree, ".orbit-image")).isSymbolicLink()).toBe(true);
+    expect(readFileSync(elsewhere, "utf8")).toBe("PLANTED\n");
   });
 
   it("still refuses a tree that is not mode 0700, though it holds the configuration", () => {
@@ -333,5 +345,70 @@ describe("handOverLauncherConfigTree beside the launcher's configuration (#1519)
     expect(notices).toEqual(["Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because scripts/installer-ui.sh could not be written."]);
     expect(readdirSync(tree).sort()).toEqual([".env-orbit", ".orbit-secrets"]);
     untouched(tree);
+  });
+});
+
+// The configure tree's own three names are leftovers of an earlier failed
+// hand-over, not foreign content.
+describe("handOverLauncherConfigTree over its own earlier hand-over", () => {
+  function assetsWith(marker: string): string {
+    const root = assets();
+    for (const asset of LAUNCHER_CONFIG_TREE_ASSETS) writeFileSync(join(root, asset), `${marker} ${asset}\n`, { mode: 0o644 });
+    return root;
+  }
+
+  function handOverRef(tree: string, assetsRoot: string, imageReference: string) {
+    const notices: string[] = [];
+    const result = handOverLauncherConfigTree({ tree, assetsRoot, imageReference, notice: (line) => notices.push(line) });
+    return { result, notices };
+  }
+
+  it("replaces its own earlier leftovers: the second hand-over is written with the new image pin and fresh scripts", () => {
+    const tree = emptyTree();
+    writeFileSync(join(tree, ".env-orbit"), "APP_URL=https://tree.example.invalid\n", { mode: 0o600 });
+    const other = `ghcr.io/tomlawesome/orbit@sha256:${"b".repeat(64)}`;
+    expect(handOverRef(tree, assetsWith("first"), REFERENCE)).toEqual({ result: "written", notices: [] });
+    expect(handOverRef(tree, assetsWith("second"), other)).toEqual({ result: "written", notices: [] });
+    expect(readFileSync(join(tree, ".orbit-image"), "utf8")).toBe(`${other}\n`);
+    expect(readFileSync(join(tree, "scripts", "configure.sh"), "utf8")).toBe("second scripts/configure.sh\n");
+    expect(readFileSync(join(tree, "scripts", "installer-ui.sh"), "utf8")).toBe("second scripts/installer-ui.sh\n");
+    expect(readFileSync(join(tree, ".env-orbit.example"), "utf8")).toBe("second .env-orbit.example\n");
+    expect(readdirSync(tree).sort()).toEqual([".env-orbit", ".env-orbit.example", ".orbit-image", "scripts"]);
+    expect(readFileSync(join(tree, ".env-orbit"), "utf8")).toBe("APP_URL=https://tree.example.invalid\n");
+  });
+
+  // Anything else still refuses as not empty.
+  it("still refuses a tree with a stray file beside its own leftovers", () => {
+    const tree = emptyTree();
+    expect(handOver(tree).result).toBe("written");
+    writeFileSync(join(tree, ".launcher-own"), "KEEP\n");
+    const { result, notices } = handOver(tree);
+    expect(result).toBe("refused");
+    expect(notices).toEqual(["Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because it is not empty."]);
+    expect(readFileSync(join(tree, ".launcher-own"), "utf8")).toBe("KEEP\n");
+  });
+
+  it("refuses, with the not-ours reason and removing nothing, when .orbit-image is a symlink", () => {
+    const tree = emptyTree();
+    const elsewhere = join(sandbox(), "elsewhere");
+    writeFileSync(elsewhere, "OUTSIDE\n");
+    symlinkSync(elsewhere, join(tree, ".orbit-image"));
+    const { result, notices } = handOver(tree);
+    expect(result).toBe("refused");
+    expect(notices).toEqual(["Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because it holds something that is not ours."]);
+    expect(lstatSync(join(tree, ".orbit-image")).isSymbolicLink()).toBe(true);
+    expect(readFileSync(elsewhere, "utf8")).toBe("OUTSIDE\n");
+  });
+
+  it("refuses, with the not-ours reason, when scripts is a symlink to a directory", () => {
+    const tree = emptyTree();
+    const elsewhere = join(sandbox(), "dir");
+    mkdirSync(elsewhere);
+    writeFileSync(join(elsewhere, "keep"), "OUTSIDE\n");
+    symlinkSync(elsewhere, join(tree, "scripts"));
+    const { result, notices } = handOver(tree);
+    expect(result).toBe("refused");
+    expect(notices).toEqual(["Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because it holds something that is not ours."]);
+    expect(readFileSync(join(elsewhere, "keep"), "utf8")).toBe("OUTSIDE\n");
   });
 });
