@@ -766,18 +766,21 @@ describe("browser jobs by event (#1412)", () => {
     expect(jobVerdict("base_image_repin", { CI_PIPELINE_SOURCE: "schedule", BASE_IMAGE_REPIN: "true" })).toBe("run");
   });
 
-  it("runs the promotion's nightly check only on the dev -> preview merge request", () => {
-    expect(jobVerdict("nightly_not_red", events.promotionMergeRequest)).toBe("run");
-    for (const event of ["devMergeRequest", "devPush", "previewPush", "nightly"]) {
-      expect(jobVerdict("nightly_not_red", events[event]), event).toBe("never");
+  // #1544 (owner decision 5a): promotion no longer waits on a nightly.
+  it("has no nightly_not_red job: the promotion merge request is not gated on a nightly", () => {
+    expect(allBlocks.has("nightly_not_red")).toBe(false);
+    const uncommented = gitlabCi
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .filter((line) => line.includes("nightly_not_red"));
+    expect(uncommented).toEqual([]);
+  });
+
+  it("says nowhere in the docs that promotion waits on, or stops on, a nightly", () => {
+    for (const file of ["quality-strategy.md", "releasing.md"]) {
+      const text = readFileSync(new URL(`../docs/${file}`, import.meta.url), "utf8");
+      expect(text, file).not.toContain("nightly_not_red");
     }
-    expect(
-      jobVerdict("nightly_not_red", {
-        CI_PIPELINE_SOURCE: "merge_request_event",
-        CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview",
-        CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "hotfix/x",
-      }),
-    ).toBe("never");
   });
 
   it("turns every axis on for the nightly, and only for a schedule that names it", () => {
@@ -878,7 +881,7 @@ describe("read-only tokens reach only the jobs that read them (audit 11a)", () =
   // nightly-browsers.mjs reads the token in every mode: `report` reads the
   // night's failed jobs with it before filing with SIDECAR_ISSUE_TOKEN (the
   // first nightly, 3069, got 401 when the job lacked the environment).
-  const TOKEN_MODES = { "nightly-browsers.mjs": ["moved", "blocked", "report"] };
+  const TOKEN_MODES = { "nightly-browsers.mjs": ["moved", "report"] };
 
   function code(block) {
     return block
@@ -902,7 +905,7 @@ describe("read-only tokens reach only the jobs that read them (audit 11a)", () =
 
   it("finds the scripts and jobs that read the tokens", () => {
     expect(readingScripts).toEqual(expect.arrayContaining(["reuse-lookup.mjs", "nightly-browsers.mjs"]));
-    expect(readers).toEqual(expect.arrayContaining(["build_image", "nightly_not_red"]));
+    expect(readers).toEqual(expect.arrayContaining(["build_image"]));
     // Hidden blocks are spliced into jobs by anchor; one reading a token would
     // hand it to jobs this test cannot see.
     const hiddenReaders = [...allBlocks].filter(([name, block]) => name.startsWith(".") && readsToken(block));
