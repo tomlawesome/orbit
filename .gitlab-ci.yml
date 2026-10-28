@@ -4156,7 +4156,8 @@ install_bootstrap_latest:
 #                       evidence. Environment scope `ci-read-tokens` (owner,
 #                       2026-10-28), as are ORBIT_BASE_IMAGE_PULL_USER/_TOKEN:
 #                       only the jobs declaring that environment -- classify,
-#                       build_image, launch_timing, nightly_not_red -- receive
+#                       build_image, launch_timing, nightly_not_red,
+#                       nightly_report -- receive
 #                       them; scripts/gitlab-ci-lanes.test.mjs keeps that list
 #                       and the readers equal.
 #                       Unset, every reuse verdict on a merge request
@@ -4450,6 +4451,11 @@ nightly_report:
     pull_policy: if-not-present
   timeout: 10m
   interruptible: false
+  # Reads the night's jobs with ORBIT_REUSE_TOKEN, which is scoped to this
+  # environment (the first nightly, 3069, got 401 without it).
+  environment:
+    name: ci-read-tokens
+    action: prepare
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $ORBIT_NIGHTLY_BROWSERS == "true"
       when: on_failure
