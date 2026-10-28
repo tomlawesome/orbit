@@ -183,9 +183,15 @@ pipeline until it gets one. `~/.local/bin/gl-pipeline-run ai/orbit <ref>` starts
 a pipeline on any branch. `dev`, `preview` and `main` all take push
 "No one", merge "Maintainers".
 
+A push to `main` starts a pipeline holding only the manual `promote_stable`
+(#1546, owner ruling 2026-10-28): the tree is the one already tested and
+accepted on `preview`, and `promote_stable` itself verifies that identity (same
+commit, digest unchanged, labels agree, tag unused). Merge requests into `main`
+are unchanged.
+
 Browsers are the exception to "a merge request is tested like a push": a merge
-request into `dev` starts no browser job. They run at promotion and nightly on
-`dev` (see "Browsers run at promotion and every night" below, #1412). The
+request into `dev` or `preview` starts no browser job. They run at promotion
+and nightly on `dev` (see "Browsers run at promotion and every night" below, #1412). The
 exception is a merge request labelled `ci: acceptance`, which runs them before
 it merges (#1514).
 
@@ -262,8 +268,9 @@ it, start none of the seven browser jobs: `smoke`, `smoke_firefox`,
 `fidelity_webkit`. They still get the fast checks, integration, the image
 build and the non-browser journeys. The seven run in full:
 
-- at promotion: the `dev -> preview` merge request and the push to `preview`
-  (and `hotfix/*` and `main`), exactly as before;
+- at promotion: the push to `preview` (and `hotfix/*`). The `dev -> preview`
+  merge request runs the quick checks a merge request into `dev` runs, no
+  browsers (#1546);
 - every night on `dev`, from a pipeline schedule that sets
   `ORBIT_NIGHTLY_BROWSERS=true`, 02:00 Europe/London every night except
   Monday. That pipeline holds only `classify`, `fast`, `build_image` and the
@@ -279,9 +286,9 @@ on it while it is open. It reads `SIDECAR_ISSUE_TOKEN`, the same project token
 `sidecar_pin_freshness` uses, and fails clearly if it is unset. A night is not
 re-run on a commit it already ran on, even if red: retry the failed job.
 
-Promotion does not wait on the nightly. The `dev -> preview` merge request's
-own pipeline runs the full browser set on the commit being promoted, and that
-run is the promotion proof (owner decision 5a, 2026-10-28). A nightly that is
+Promotion does not wait on the nightly. The push to `preview` runs the full
+browser set on the commit being promoted, and that run is the promotion proof
+(owner decision 5a, 2026-10-28; moved from the merge request by #1546). A nightly that is
 red or unfinished on the same commit does not hold it.
 
 The schedule is a GitLab setting the owner creates (Settings > CI/CD >
@@ -617,9 +624,9 @@ regression and a bad one as a win.
 The spec is now its own Playwright project. `fidelity` runs the `fidelity`
 project — appearance, every front-end merge request, unchanged otherwise — and
 the `launch_timing` job runs the `launch-timing` project at the `dev` →
-`preview` promotion: the merge request whose target branch is `preview`, and
-the push to `preview` that lands it. Those two `rules:` conditions are written
-out rather than reusing `orbit_full_gate`, whose first arm matches every push
+`preview` promotion: the push to `preview` that lands it (the merge request
+into `preview` runs the quick checks only, #1546). That `rules:` condition is
+written out rather than reusing `orbit_full_gate`, whose first arm matches every push
 to `dev` — the merge frequency this job exists to escape — and whose second
 targets `main`, which is the later gate.
 

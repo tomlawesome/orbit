@@ -267,7 +267,8 @@ after a rotation.
 ## Stable promotion (on GitLab)
 
 Promotion is a manual GitLab CI job, `promote_stable` in `.gitlab-ci.yml`. It
-only appears, as a manual step, on a pipeline running on `main`, or on a
+only appears, as a manual step, on a pipeline running on `main` (a push to
+`main` starts nothing else, #1546), or on a
 pipeline you start yourself against any ref by giving it a `PREVIEW_DIGEST`
 variable. Nothing runs it automatically: accepting a release is a human
 decision.
@@ -504,8 +505,9 @@ protected (the job only ever runs on a protected ref):
   cannot.
 
 Promotion to `preview` does not wait on the nightly browser run: the
-`dev -> preview` merge request's own pipeline runs the full browser set on the
-commit being promoted, and that run is the promotion proof. `ORBIT_REUSE_TOKEN`
+push to `preview` runs the full browser set on the commit being promoted, and
+that run is the promotion proof; the `dev -> preview` merge request runs the
+quick checks only. `ORBIT_REUSE_TOKEN`
 (read-only, unprotected, masked, environment scope `ci-read-tokens`, so only the
 jobs that read it receive it -- see "Who starts a pipeline, and where it runs"
 in `docs/quality-strategy.md`) is still read by the jobs that look up earlier
