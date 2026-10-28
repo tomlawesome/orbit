@@ -504,7 +504,9 @@ protected (the job only ever runs on a protected ref):
   cannot.
 
 Promotion to `preview` also needs `ORBIT_REUSE_TOKEN` (read-only,
-unprotected, masked). The `nightly_not_red` check on the `dev -> preview`
+unprotected, masked, environment scope `ci-read-tokens`, so only the jobs that
+read it receive it -- see "Who starts a pipeline, and where it runs" in
+`docs/quality-strategy.md`). The `nightly_not_red` check on the `dev -> preview`
 merge request reads the nightly runs with it, and without it fails closed:
 the promotion stops, saying the token is missing.
 

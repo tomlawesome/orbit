@@ -878,6 +878,12 @@ classify:
   cache: []
   before_script: []
   timeout: 10m
+  # The two read-only tokens (ORBIT_REUSE_TOKEN, ORBIT_BASE_IMAGE_PULL_*) are
+  # scoped to this environment, so no job without it sees them (owner,
+  # 2026-10-28). `prepare` records no deployment.
+  environment:
+    name: ci-read-tokens
+    action: prepare
   rules:
     - *nightly_browsers
     - *not_scheduled
@@ -1910,6 +1916,12 @@ build_image:
   stage: acceptance
   extends: .dind
   timeout: 20m
+  # The two read-only tokens (ORBIT_REUSE_TOKEN, ORBIT_BASE_IMAGE_PULL_*) are
+  # scoped to this environment, so no job without it sees them (owner,
+  # 2026-10-28). `prepare` records no deployment.
+  environment:
+    name: ci-read-tokens
+    action: prepare
   rules:
     - *nightly_browsers
     - *not_scheduled
@@ -4138,7 +4150,13 @@ install_bootstrap_latest:
 #   ORBIT_REUSE_TOKEN  A read-only credential (`read_api`, Reporter, masked, NOT
 #                       protected, no write scope anywhere), so an ordinary
 #                       merge-request pipeline can read earlier pipelines'
-#                       evidence. Unset, every reuse verdict on a merge request
+#                       evidence. Environment scope `ci-read-tokens` (owner,
+#                       2026-10-28), as are ORBIT_BASE_IMAGE_PULL_USER/_TOKEN:
+#                       only the jobs declaring that environment -- classify,
+#                       build_image, launch_timing, nightly_not_red -- receive
+#                       them; scripts/gitlab-ci-lanes.test.mjs keeps that list
+#                       and the readers equal.
+#                       Unset, every reuse verdict on a merge request
 #                       is "runs", the safe direction, and `nightly_not_red`
 #                       fails saying so. The unset paths are covered by
 #                       scripts/ci/reuse-lookup.test.mjs ("asks nothing at all
@@ -4369,6 +4387,12 @@ launch_timing:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
   timeout: 30m
+  # The two read-only tokens (ORBIT_REUSE_TOKEN, ORBIT_BASE_IMAGE_PULL_*) are
+  # scoped to this environment, so no job without it sees them (owner,
+  # 2026-10-28). `prepare` records no deployment.
+  environment:
+    name: ci-read-tokens
+    action: prepare
   resource_group: launch_timing
   rules:
     - *not_scheduled
@@ -4437,8 +4461,9 @@ nightly_report:
 # green here, because the check reads the pipeline's status now.
 #
 # Reads the project's pipelines through the API, so it needs a read-only token
-# a merge-request pipeline can see: ORBIT_REUSE_TOKEN (`read_api`, unprotected;
-# see base_image_repin). It reads that token alone, never a fallback. With it
+# a merge-request pipeline can see: ORBIT_REUSE_TOKEN (`read_api`, unprotected,
+# scoped to the `ci-read-tokens` environment declared below; see
+# base_image_repin). It reads that token alone, never a fallback. With it
 # unset the job fails and says so -- an unchecked promotion is not a passed one.
 nightly_not_red:
   stage: policy
@@ -4447,6 +4472,12 @@ nightly_not_red:
     name: $NODE_IMAGE
     pull_policy: if-not-present
   timeout: 5m
+  # The two read-only tokens (ORBIT_REUSE_TOKEN, ORBIT_BASE_IMAGE_PULL_*) are
+  # scoped to this environment, so no job without it sees them (owner,
+  # 2026-10-28). `prepare` records no deployment.
+  environment:
+    name: ci-read-tokens
+    action: prepare
   needs: []
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "dev"

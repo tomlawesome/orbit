@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -859,5 +859,62 @@ describe("build_image base image source (D-F9/D-F18)", () => {
     expect(pulled).toBeGreaterThan(-1);
     expect(falses.length).toBeGreaterThan(0);
     for (const index of falses) expect(index).toBeGreaterThan(pulled);
+  });
+});
+
+// v0.3.2 audit security finding, owner decision 11a (2026-10-28). The two
+// read-only tokens -- ORBIT_REUSE_TOKEN and the base-image pull pair -- stay
+// unprotected and masked, and are scoped in the project's CI/CD settings to
+// the `ci-read-tokens` environment, so GitLab hands them only to jobs that
+// declare it. A job that reads them without the block silently loses them; a
+// job that declares it without reading them is given them for nothing.
+describe("read-only tokens reach only the jobs that read them (audit 11a)", () => {
+  const TOKEN = /\bORBIT_REUSE_TOKEN\b|\bORBIT_BASE_IMAGE_PULL_(?:USER|TOKEN)\b/u;
+  const ciDir = new URL("./ci/", import.meta.url);
+  // Helper scripts that read a token, found by reading them rather than listed.
+  const readingScripts = readdirSync(ciDir)
+    .filter((file) => !/\.test\.[cm]?[jt]s$/u.test(file))
+    .filter((file) => TOKEN.test(readFileSync(new URL(file, ciDir), "utf8")));
+  // nightly-browsers.mjs reads the token only in these modes; `report` files
+  // with SIDECAR_ISSUE_TOKEN instead.
+  const TOKEN_MODES = { "nightly-browsers.mjs": ["moved", "blocked"] };
+
+  function code(block) {
+    return block
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .join("\n");
+  }
+
+  function readsToken(block) {
+    const text = code(block);
+    if (TOKEN.test(text)) return true;
+    return readingScripts.some((file) => {
+      const calls = [...text.matchAll(new RegExp(`scripts/ci/${file.replace(".", "\\.")}(?:\\s+(\\S+))?`, "gu"))];
+      const modes = TOKEN_MODES[file];
+      return calls.some((call) => !modes || modes.includes(call[1]));
+    });
+  }
+
+  const ENVIRONMENT = /^ {2}environment:\n {4}name: ci-read-tokens\n {4}action: prepare$/mu;
+  const readers = jobs.filter(([, block]) => readsToken(block)).map(([name]) => name);
+
+  it("finds the scripts and jobs that read the tokens", () => {
+    expect(readingScripts).toEqual(expect.arrayContaining(["reuse-lookup.mjs", "nightly-browsers.mjs"]));
+    expect(readers).toEqual(expect.arrayContaining(["build_image", "nightly_not_red"]));
+    // Hidden blocks are spliced into jobs by anchor; one reading a token would
+    // hand it to jobs this test cannot see.
+    const hiddenReaders = [...allBlocks].filter(([name, block]) => name.startsWith(".") && readsToken(block));
+    expect(hiddenReaders.map(([name]) => name)).toEqual([]);
+  });
+
+  it("every job that reads a token declares environment ci-read-tokens with action: prepare", () => {
+    const missing = readers.filter((name) => !ENVIRONMENT.test(allBlocks.get(name)));
+    expect(missing).toEqual([]);
+  });
+
+  it("no other job declares the ci-read-tokens environment", () => {
+    const declaring = jobs.filter(([, block]) => /ci-read-tokens/u.test(code(block))).map(([name]) => name);
+    expect(declaring.sort()).toEqual([...readers].sort());
   });
 });

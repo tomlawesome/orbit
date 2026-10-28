@@ -241,6 +241,17 @@ door imports) run with a job token that cannot read `ai/orbit-base-image`
   branches are not protected) and masked. `build_image` pulls the pinned base
   image with it; without it the build takes the same digest from GHCR.
 
+All three stay unprotected and masked, and are scoped to the `ci-read-tokens`
+environment (owner decision 11a, v0.3.2 audit, 2026-10-28): GitLab gives an
+environment-scoped variable only to jobs that declare that environment, so
+only `classify`, `build_image`, `launch_timing` and `nightly_not_red` receive
+them. Every other merge-request job, including those running a dependency
+branch's install and tests, sees none of them. The four jobs declare it with
+`action: prepare`, which records no deployment;
+`scripts/gitlab-ci-lanes.test.mjs` checks that exactly the jobs reading the
+tokens declare it. Scope them in Settings > CI/CD > Variables > Edit >
+Environment scope: `ci-read-tokens`.
+
 ### Browsers run at promotion and every night, not on merge requests (#1412)
 
 Owner ruling, 2026-10-22. A merge request into `dev`, and the push that lands
