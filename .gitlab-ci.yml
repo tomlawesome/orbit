@@ -4156,13 +4156,12 @@ install_bootstrap_latest:
 #                       evidence. Environment scope `ci-read-tokens` (owner,
 #                       2026-10-28), as are ORBIT_BASE_IMAGE_PULL_USER/_TOKEN:
 #                       only the jobs declaring that environment -- classify,
-#                       build_image, launch_timing, nightly_not_red,
+#                       build_image, launch_timing,
 #                       nightly_report -- receive
 #                       them; scripts/gitlab-ci-lanes.test.mjs keeps that list
 #                       and the readers equal.
 #                       Unset, every reuse verdict on a merge request
-#                       is "runs", the safe direction, and `nightly_not_red`
-#                       fails saying so. The unset paths are covered by
+#                       is "runs", the safe direction. The unset paths are covered by
 #                       scripts/ci/reuse-lookup.test.mjs ("asks nothing at all
 #                       when there is no token") and
 #                       scripts/ci/nightly-browsers.test.mjs.
@@ -4461,34 +4460,3 @@ nightly_report:
       when: on_failure
   script:
     - node scripts/ci/nightly-browsers.mjs report
-
-# Stops a promotion to `preview` when the last nightly run on this `dev`
-# commit failed (#1412). The nightly runs the whole browser set on `dev`; a
-# promotion is what that run is for. Only the dev -> preview merge request
-# runs it. No nightly on this commit yet is not a failure: the promotion runs
-# the browsers itself. A nightly that failed and was then retried green is
-# green here, because the check reads the pipeline's status now.
-#
-# Reads the project's pipelines through the API, so it needs a read-only token
-# a merge-request pipeline can see: ORBIT_REUSE_TOKEN (`read_api`, unprotected,
-# scoped to the `ci-read-tokens` environment declared below; see
-# base_image_repin). It reads that token alone, never a fallback. With it
-# unset the job fails and says so -- an unchecked promotion is not a passed one.
-nightly_not_red:
-  stage: policy
-  tags: [light]
-  image:
-    name: $NODE_IMAGE
-    pull_policy: if-not-present
-  timeout: 5m
-  # The two read-only tokens (ORBIT_REUSE_TOKEN, ORBIT_BASE_IMAGE_PULL_*) are
-  # scoped to this environment, so no job without it sees them (owner,
-  # 2026-10-28). `prepare` records no deployment.
-  environment:
-    name: ci-read-tokens
-    action: prepare
-  needs: []
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "dev"
-  script:
-    - node scripts/ci/nightly-browsers.mjs blocked

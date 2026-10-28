@@ -503,12 +503,13 @@ protected (the job only ever runs on a protected ref):
   job create the tag through the API; a lower role or a `read_api`-only scope
   cannot.
 
-Promotion to `preview` also needs `ORBIT_REUSE_TOKEN` (read-only,
-unprotected, masked, environment scope `ci-read-tokens`, so only the jobs that
-read it receive it -- see "Who starts a pipeline, and where it runs" in
-`docs/quality-strategy.md`). The `nightly_not_red` check on the `dev -> preview`
-merge request reads the nightly runs with it, and without it fails closed:
-the promotion stops, saying the token is missing.
+Promotion to `preview` does not wait on the nightly browser run: the
+`dev -> preview` merge request's own pipeline runs the full browser set on the
+commit being promoted, and that run is the promotion proof. `ORBIT_REUSE_TOKEN`
+(read-only, unprotected, masked, environment scope `ci-read-tokens`, so only the
+jobs that read it receive it -- see "Who starts a pipeline, and where it runs"
+in `docs/quality-strategy.md`) is still read by the jobs that look up earlier
+pipelines' evidence.
 
 Neither token is ever a command-line argument or printed: the GHCR token is
 piped to `docker login` on stdin, and the GitLab token travels to `curl` as a

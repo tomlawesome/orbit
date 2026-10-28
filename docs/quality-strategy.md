@@ -246,7 +246,7 @@ door imports) run with a job token that cannot read `ai/orbit-base-image`
 All three stay unprotected and masked, and are scoped to the `ci-read-tokens`
 environment (owner decision 11a, v0.3.2 audit, 2026-10-28): GitLab gives an
 environment-scoped variable only to jobs that declare that environment, so
-only `classify`, `build_image`, `launch_timing` and `nightly_not_red` receive
+only `classify`, `build_image`, `launch_timing` and `nightly_report` receive
 them. Every other merge-request job, including those running a dependency
 branch's install and tests, sees none of them. The four jobs declare it with
 `action: prepare`, which records no deployment;
@@ -279,12 +279,10 @@ on it while it is open. It reads `SIDECAR_ISSUE_TOKEN`, the same project token
 `sidecar_pin_freshness` uses, and fails clearly if it is unset. A night is not
 re-run on a commit it already ran on, even if red: retry the failed job.
 
-Promotion stops on a red night: `nightly_not_red`, on the `dev -> preview`
-merge request only, fails if a nightly run on that same `dev` commit failed or
-has not finished yet (wait for it, then retry). No nightly yet on the commit
-is not a failure, since the promotion runs the browsers itself. It reads the
-pipelines API with `ORBIT_REUSE_TOKEN` alone (read-only, unprotected, no
-fallback) and fails, saying so, if it is unset.
+Promotion does not wait on the nightly. The `dev -> preview` merge request's
+own pipeline runs the full browser set on the commit being promoted, and that
+run is the promotion proof (owner decision 5a, 2026-10-28). A nightly that is
+red or unfinished on the same commit does not hold it.
 
 The schedule is a GitLab setting the owner creates (Settings > CI/CD >
 Schedules): description "Nightly browsers on dev (#1412)", target branch `dev`,
