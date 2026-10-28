@@ -129,12 +129,16 @@ function runCli() {
   const packageManifest = JSON.parse(
     readFileSync(resolve(repositoryRoot, "package.json"), "utf8"),
   );
+  const channel = requestedChannel(process.argv.slice(2));
   const version = calculateReleaseTrainVersion({
     tags: repositoryTags(repositoryRoot),
     fallbackVersion: packageManifest.version,
-    channel: requestedChannel(process.argv.slice(2)),
+    channel,
     retractedTags: retractedTagList(repositoryRoot),
-    releaseLine: declaredReleaseLine(repositoryRoot),
+    // Only a preview train reads the release line; a hotfix branch can be cut
+    // from a tag older than release-line.json, and docs/releasing.md says a
+    // hotfix ignores the file.
+    releaseLine: channel === "preview" ? declaredReleaseLine(repositoryRoot) : undefined,
   });
   process.stdout.write(`${version}\n`);
 }

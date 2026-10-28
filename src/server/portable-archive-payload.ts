@@ -14,6 +14,15 @@ import { log, operationalDetail } from "@/lib/logger";
  */
 
 const SCRATCH_PREFIX = "orbit-archive-import-";
+
+/**
+ * Where payload files go. docker-compose.yml points ORBIT_ARCHIVE_SCRATCH_DIR
+ * at a small tmpfs, so a decrypted archive never lands on the host's disk and
+ * cannot fill it; outside a container it is the process temporary directory.
+ */
+function scratchDirectory(): string {
+  return process.env.ORBIT_ARCHIVE_SCRATCH_DIR || tmpdir();
+}
 /** Bytes read from the file per piece while reading the payload's JSON. */
 const READ_PIECE_BYTES = 64 * 1024;
 /** Base64 characters decoded per piece of a document: a multiple of 4, so each piece decodes on its own. */
@@ -42,7 +51,7 @@ export class PayloadScratch {
   private constructor(private readonly path: string, private readonly handle: FileHandle) {}
 
   static async create(): Promise<PayloadScratch> {
-    const path = join(tmpdir(), `${SCRATCH_PREFIX}${randomUUID()}.tmp`);
+    const path = join(scratchDirectory(), `${SCRATCH_PREFIX}${randomUUID()}.tmp`);
     return new PayloadScratch(path, await open(path, "wx+", 0o600));
   }
 
@@ -109,9 +118,9 @@ export class PayloadScratch {
   }
 }
 
-/** Removes payload files a killed process left in the temporary directory. A younger one may be in use. */
+/** Removes payload files a killed process left in the scratch directory. A younger one may be in use. */
 export async function sweepPayloadScratch(olderThanMs: number): Promise<void> {
-  const directory = tmpdir();
+  const directory = scratchDirectory();
   const boundary = Date.now() - olderThanMs;
   let names: string[];
   try { names = await readdir(directory); } catch { return; }

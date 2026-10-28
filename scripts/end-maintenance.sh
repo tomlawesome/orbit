@@ -64,12 +64,33 @@ fi
 # engine-check.sh's own copy: this script is deliberately standalone and
 # source-less, as repair.sh is.
 read_environment_value() {
-  local requested_key="$1" line value="" found=0
+  local requested_key="$1" line value="" found=0 head tail quote
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "${requested_key}="* ]]; then
       # A CRLF .env-orbit is valid; drop the CR.
       value="${line#*=}"
       value="${value%$'\r'}"
+      # Read the value the way Compose's env-file parser does: a trailing
+      # comment (spaces or tabs, then "#", to the end) comes off, then
+      # trailing spaces and tabs, then one pair of matching quotes. Otherwise
+      # a quoted or commented COMPOSE_FILE keeps its quote marks or padding
+      # and the overlay appended to it names a file that does not exist.
+      # A "#" inside the quotes is part of the value, so for a quoted value
+      # the comment is looked for only after the closing quote. That is the
+      # first same quote after the opening one, not the last on the line: a
+      # comment may hold an apostrophe or quote marks of its own.
+      head="" tail="$value" quote="${value:0:1}"
+      if [[ ( "$quote" == \" || "$quote" == \' ) && "${value:1}" == *"$quote"* ]]; then
+        tail="${value:1}"
+        head="$quote${tail%%"$quote"*}$quote"
+        tail="${tail#*"$quote"}"
+      fi
+      tail="${tail%%[[:blank:]]#*}"
+      while [[ "$tail" == *[[:blank:]] ]]; do tail="${tail%[[:blank:]]}"; done
+      value="$head$tail"
+      case "$value" in
+        \"*\" | \'*\') value="${value:1:${#value}-2}" ;;
+      esac
       found=1
     fi
   done < "$environment_file"

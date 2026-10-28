@@ -214,9 +214,12 @@ needs no prefix. ghcr.io and mcr.microsoft.com images are named through the
 runner variables `CI_IMAGE_CACHE_GHCR` and `CI_IMAGE_CACHE_MCR` (the cache
 hosts are plain HTTP and their addresses are never written in the repository).
 The dind service and the in-job `dockerd` are not the host's daemon, so each is
-started with the cache's mirror and insecure-registry flags. Trivy reads its
-databases from the GHCR cache with `TRIVY_INSECURE`. Digests are unchanged
-through the cache.
+started with the cache's mirror and insecure-registry flags. Digests are
+unchanged through the cache. Trivy's databases are the exception: they have no
+digest, so Trivy downloads them from ghcr.io directly over HTTPS, with
+`TRIVY_INSECURE` unset, before any scan. Only the sidecar scans set
+`TRIVY_INSECURE`, to pull their pinned images from the cache, and they skip
+the database update.
 
 Renovate replaces Dependabot on this host: `renovate.json` at the repo root, the
 `renovate` job in `.gitlab-ci.yml`, and pipeline schedule 5 (`Renovate`,
@@ -228,6 +231,28 @@ why); the `base_image_repin` job (#708) owns that one: it needs its own schedule
 `dev`/`preview`/`main` and never merges; it pushes `chore/base-image-repin` and
 opens or refreshes one merge request. The header of
 `scripts/ci/repin-base-image.sh` holds how it is authorised.
+
+Merge requests opened by the project bots (Renovate, the base-image re-pin,
+door imports) run with a job token that cannot read `ai/orbit-base-image`
+(#1167), so their pipelines rely on two CI/CD variables the owner sets:
+
+- `ORBIT_REUSE_TOKEN` -- read-only, unprotected; reuse lookup and the nightly
+  check (see below).
+- `ORBIT_BASE_IMAGE_PULL_USER` / `ORBIT_BASE_IMAGE_PULL_TOKEN` -- a deploy
+  token with `read_registry` on `ai/orbit-base-image` only; unprotected (bot
+  branches are not protected) and masked. `build_image` pulls the pinned base
+  image with it; without it the build takes the same digest from GHCR.
+
+All three stay unprotected and masked, and are scoped to the `ci-read-tokens`
+environment (owner decision 11a, v0.3.2 audit, 2026-10-28): GitLab gives an
+environment-scoped variable only to jobs that declare that environment, so
+only `classify`, `build_image`, `launch_timing` and `nightly_not_red` receive
+them. Every other merge-request job, including those running a dependency
+branch's install and tests, sees none of them. The four jobs declare it with
+`action: prepare`, which records no deployment;
+`scripts/gitlab-ci-lanes.test.mjs` checks that exactly the jobs reading the
+tokens declare it. Scope them in Settings > CI/CD > Variables > Edit >
+Environment scope: `ci-read-tokens`.
 
 ### Browsers run at promotion and every night, not on merge requests (#1412)
 
@@ -255,10 +280,11 @@ on it while it is open. It reads `SIDECAR_ISSUE_TOKEN`, the same project token
 re-run on a commit it already ran on, even if red: retry the failed job.
 
 Promotion stops on a red night: `nightly_not_red`, on the `dev -> preview`
-merge request only, fails if a nightly run on that same `dev` commit failed. No
-nightly yet on the commit is not a failure, since the promotion runs the
-browsers itself. It reads the pipelines API with `ORBIT_REUSE_TOKEN` alone
-(read-only, unprotected, no fallback) and fails, saying so, if it is unset.
+merge request only, fails if a nightly run on that same `dev` commit failed or
+has not finished yet (wait for it, then retry). No nightly yet on the commit
+is not a failure, since the promotion runs the browsers itself. It reads the
+pipelines API with `ORBIT_REUSE_TOKEN` alone (read-only, unprotected, no
+fallback) and fails, saying so, if it is unset.
 
 The schedule is a GitLab setting the owner creates (Settings > CI/CD >
 Schedules): description "Nightly browsers on dev (#1412)", target branch `dev`,

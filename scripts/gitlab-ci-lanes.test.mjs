@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -834,5 +834,88 @@ describe("browser jobs by event (#1412)", () => {
     expect(run("run", nightly)).toBe("ORBIT_WEB=true\nORBIT_LANE=full\n");
     // Not the nightly: even an `idle` answer changes nothing.
     expect(run("idle", { CI_PIPELINE_SOURCE: "merge_request_event" })).toBe("ORBIT_WEB=true\nORBIT_LANE=full\n");
+  });
+});
+
+// v0.3.2 audit D-F9/D-F18. Fails on current code: build_image starts with
+// base_image_from_ghcr=false and flips it to true only inside the branch that
+// needs both pull credentials, so with them unset the build points buildx at
+// the GitLab registry with a job token that cannot read it.
+describe("build_image base image source (D-F9/D-F18)", () => {
+  const script = allBlocks.get("build_image");
+
+  it("defaults base_image_from_ghcr to true before the credential check", () => {
+    const credentialCheck = script.indexOf('if [ -n "${ORBIT_BASE_IMAGE_PULL_USER');
+    const defaultTrue = script.indexOf("base_image_from_ghcr=true");
+    expect(credentialCheck).toBeGreaterThan(-1);
+    expect(defaultTrue).toBeGreaterThan(-1);
+    expect(defaultTrue).toBeLessThan(credentialCheck);
+    expect(script.slice(0, credentialCheck)).not.toContain("base_image_from_ghcr=false");
+  });
+
+  it("sets base_image_from_ghcr=false only after base_image_pulled=true", () => {
+    const pulled = script.indexOf('if [ "$base_image_pulled" = true ]; then');
+    const falses = [...script.matchAll(/base_image_from_ghcr=false/gu)].map((match) => match.index);
+    expect(pulled).toBeGreaterThan(-1);
+    expect(falses.length).toBeGreaterThan(0);
+    for (const index of falses) expect(index).toBeGreaterThan(pulled);
+  });
+});
+
+// v0.3.2 audit security finding, owner decision 11a (2026-10-28). The two
+// read-only tokens -- ORBIT_REUSE_TOKEN and the base-image pull pair -- stay
+// unprotected and masked, and are scoped in the project's CI/CD settings to
+// the `ci-read-tokens` environment, so GitLab hands them only to jobs that
+// declare it. A job that reads them without the block silently loses them; a
+// job that declares it without reading them is given them for nothing.
+describe("read-only tokens reach only the jobs that read them (audit 11a)", () => {
+  const TOKEN = /\bORBIT_REUSE_TOKEN\b|\bORBIT_BASE_IMAGE_PULL_(?:USER|TOKEN)\b/u;
+  const ciDir = new URL("./ci/", import.meta.url);
+  // Helper scripts that read a token, found by reading them rather than listed.
+  const readingScripts = readdirSync(ciDir)
+    .filter((file) => !/\.test\.[cm]?[jt]s$/u.test(file))
+    .filter((file) => TOKEN.test(readFileSync(new URL(file, ciDir), "utf8")));
+  // nightly-browsers.mjs reads the token in every mode: `report` reads the
+  // night's failed jobs with it before filing with SIDECAR_ISSUE_TOKEN (the
+  // first nightly, 3069, got 401 when the job lacked the environment).
+  const TOKEN_MODES = { "nightly-browsers.mjs": ["moved", "blocked", "report"] };
+
+  function code(block) {
+    return block
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .join("\n");
+  }
+
+  function readsToken(block) {
+    const text = code(block);
+    if (TOKEN.test(text)) return true;
+    return readingScripts.some((file) => {
+      const calls = [...text.matchAll(new RegExp(`scripts/ci/${file.replace(".", "\\.")}(?:\\s+(\\S+))?`, "gu"))];
+      const modes = TOKEN_MODES[file];
+      return calls.some((call) => !modes || modes.includes(call[1]));
+    });
+  }
+
+  const ENVIRONMENT = /^ {2}environment:\n {4}name: ci-read-tokens\n {4}action: prepare$/mu;
+  const readers = jobs.filter(([, block]) => readsToken(block)).map(([name]) => name);
+
+  it("finds the scripts and jobs that read the tokens", () => {
+    expect(readingScripts).toEqual(expect.arrayContaining(["reuse-lookup.mjs", "nightly-browsers.mjs"]));
+    expect(readers).toEqual(expect.arrayContaining(["build_image", "nightly_not_red"]));
+    // Hidden blocks are spliced into jobs by anchor; one reading a token would
+    // hand it to jobs this test cannot see.
+    const hiddenReaders = [...allBlocks].filter(([name, block]) => name.startsWith(".") && readsToken(block));
+    expect(hiddenReaders.map(([name]) => name)).toEqual([]);
+  });
+
+  it("every job that reads a token declares environment ci-read-tokens with action: prepare", () => {
+    const missing = readers.filter((name) => !ENVIRONMENT.test(allBlocks.get(name)));
+    expect(missing).toEqual([]);
+  });
+
+  it("no other job declares the ci-read-tokens environment", () => {
+    const declaring = jobs.filter(([, block]) => /ci-read-tokens/u.test(code(block))).map(([name]) => name);
+    expect(declaring.sort()).toEqual([...readers].sort());
   });
 });

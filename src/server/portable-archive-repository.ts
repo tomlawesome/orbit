@@ -414,6 +414,15 @@ function isBadDateFailure(error: unknown): boolean {
   return error instanceof z.ZodError && error.issues.some((issue) => issue.code === "custom" && issue.message === CALENDAR_DATE_MESSAGE);
 }
 
+// The payload scratch is a fixed-size tmpfs (docker-compose.yml), sized for
+// one maximum archive; a full one is a passing condition, like the document
+// quarantine, so the person is told to retry rather than shown a bare 500.
+function scratchFullError(error: unknown): unknown {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  if (code !== "ENOSPC" && code !== "EDQUOT") return error;
+  return new AppError("archive_scratch_full", "That export could not be stored for reading: Orbit's space for archives is full. Try again shortly.", 503);
+}
+
 function passphraseInvalidError(): AppError {
   return new AppError("archive_passphrase_invalid", "The passphrase or archive is invalid", 422);
 }
@@ -435,10 +444,10 @@ async function withImportArchive<T>(serialized: unknown, passphrase: string, use
   rejectOversizedCiphertext(serialized);
   let opener: PortableArchiveOpener;
   try { opener = new PortableArchiveOpener(serialized, passphrase); } catch { throw passphraseInvalidError(); }
-  const scratch = await PayloadScratch.create();
+  const scratch = await PayloadScratch.create().catch((error: unknown) => { throw scratchFullError(error); });
   try {
     for (let piece = opener.next(); piece; piece = opener.next()) {
-      try { await scratch.append(piece); } finally { piece.fill(0); }
+      try { await scratch.append(piece); } catch (error) { throw scratchFullError(error); } finally { piece.fill(0); }
     }
     try { opener.finish(); } catch { throw passphraseInvalidError(); }
     if (scratch.sizeBytes > MAX_ARCHIVE_BYTES) throw new AppError("archive_too_large", "That export is too large", 413);

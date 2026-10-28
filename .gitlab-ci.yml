@@ -237,19 +237,23 @@ variables:
   TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
   # The vendor's own registry rather than Trivy's mirror.gcr.io default, which
   # has no availability commitment to us and 403'd this gate once already
-  # (#673). Deliberately one repository: Trivy does not fall back. Read
-  # through the GHCR cache (#1510), which speaks plain HTTP, so TRIVY_INSECURE
-  # below lets Trivy use it.
-  TRIVY_DB_REPOSITORY: $CI_IMAGE_CACHE_GHCR/aquasecurity/trivy-db:2
+  # (#673). Deliberately one repository: Trivy does not fall back. Read from
+  # ghcr.io directly over HTTPS, anonymously, not through the plain-HTTP GHCR
+  # cache (#1510): the databases carry no digest, so verified TLS to the
+  # vendor is the only transport integrity they have.
+  TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2
   # The Java database the same way, for the same reason: `sidecar_images`
   # needs it for the tika image, and trivy's default for it is the same
   # mirror.gcr.io that 403'd above.
-  TRIVY_JAVA_DB_REPOSITORY: $CI_IMAGE_CACHE_GHCR/aquasecurity/trivy-java-db:1
-  # Trivy's own switch (`--insecure`, env TRIVY_INSECURE) for registries it
-  # reaches without TLS: it covers the two database repositories above and the
-  # sidecar images `sidecar_images` pulls from the cache. The cache is a
-  # trusted internal host and every image is still pinned by digest.
-  TRIVY_INSECURE: "true"
+  TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db:1
+  # Deliberately no pipeline-wide TRIVY_INSECURE. Trivy's `--insecure` (env
+  # TRIVY_INSECURE) turns off TLS verification on every registry connection
+  # it makes, the database downloads included, even over HTTPS. So it is never
+  # in force while a database download can happen: every scanning job
+  # downloads the databases it reads first, with it unset (`*trivy_db_warm`,
+  # scripts/ci/scan-image.sh), then scans with `--skip-db-update
+  # --skip-java-db-update`. Only `sidecar_images` sets it, on its scan step,
+  # for the digest-pinned images it pulls from the plain-HTTP cache.
   # The digest scripts/test-integration.mjs pins for its disposable database.
   POSTGRES_IMAGE: postgres:18-alpine@sha256:3b0ef735388b2cb097fc29b8bb421d86d57d0ddbe7aa1fbd6493e06d65028503
   # scripts/ci/start-installer-registry.sh's disposable loopback registry
@@ -314,7 +318,7 @@ variables:
 # (`supply_chain_source`, `sidecar_images`, `supply_chain_image`) instead of
 # downloaded fresh by each of them on every pipeline (#946, owner ruling on
 # #923 rec 18, 2026-09-09; #923 finding 6c measured ~111 MB and ~9 s per job
-# per pipeline). A GitLab `cache:` under one fixed key, dated inside by the
+# per pipeline). A GitLab `cache:` (keyed below), dated inside by the
 # job rather than by the key: each job looks for a subdirectory named for
 # today's UTC date, and downloads only when that is missing.
 #
@@ -328,11 +332,15 @@ variables:
 # today: nothing here can fail the job on its own, only fall back to the
 # unwarmed download `*apk_retry`/`trivy` would have done anyway.
 #
-# Shared by one literal key rather than scoped per branch, the same trust
-# model the `.pnpm-store` cache above already uses: this project takes no
-# external fork merge requests, so nothing untrusted can poison it.
+# Keyed by whether the branch is protected, so there are two caches: one
+# written and read only by protected-branch pipelines, one by everything
+# else. Every scan trusts the cached database as-is (--skip-db-update), so a
+# single shared cache would let code in any unprotected branch's pipeline
+# upload an emptied or stale database that delivery scans then pass against.
+# Split this way, an unprotected branch cannot poison the database protected
+# pipelines scan with; it can only spoil its own.
 .trivy_db_cache: &trivy_db_cache
-  key: trivy-vulnerability-db
+  key: trivy-vulnerability-db-$CI_COMMIT_REF_PROTECTED
   paths:
     - .trivy-db-cache
 
@@ -345,9 +353,9 @@ variables:
 #
 # Split from the download below because `supply_chain_image` never runs a
 # local trivy binary at all -- it scans through `docker run` inside
-# scripts/ci/scan-image.sh, and that trivy, run without `--skip-db-update`,
-# already downloads into whatever TRIVY_CACHE_DIR points at when it finds no
-# current database there. Nothing here needs to invoke trivy a second time.
+# scripts/ci/scan-image.sh, which downloads into whatever TRIVY_CACHE_DIR
+# points at with its own `--download-db-only` step in that container before
+# it scans. Nothing here needs to invoke trivy a second time.
 .trivy_db_dir: &trivy_db_dir |
   trivy_db_dir="$CI_PROJECT_DIR/.trivy-db-cache/$(date -u +%Y-%m-%d)"
   if [ ! -d "$trivy_db_dir" ]; then
@@ -359,10 +367,13 @@ variables:
 # The download itself, for the two jobs that run the trivy CLI directly
 # (`supply_chain_source`, `sidecar_images`). Put after `*trivy_db_dir` in a
 # job's `script:`; a cold miss -- first run of a new day, or an
-# empty/expired cache -- costs exactly what every run cost before #946:
-# nothing here can fail the job on its own, only fall back to the unwarmed
-# download trivy would have done anyway.
+# empty/expired cache -- costs exactly what every run cost before #946. The
+# scans after it pass `--skip-db-update`, so they never download a database
+# themselves: a download that fails here fails the job before any scan.
+# TRIVY_INSECURE is unset first, so a CI variable of that name can never
+# turn off TLS verification for the download.
 .trivy_db_warm: &trivy_db_warm |
+  unset TRIVY_INSECURE
   if [ ! -e "$TRIVY_CACHE_DIR/db/trivy.db" ]; then
     trivy image --download-db-only
   fi
@@ -867,6 +878,12 @@ classify:
   cache: []
   before_script: []
   timeout: 10m
+  # The two read-only tokens (ORBIT_REUSE_TOKEN, ORBIT_BASE_IMAGE_PULL_*) are
+  # scoped to this environment, so no job without it sees them (owner,
+  # 2026-10-28). `prepare` records no deployment.
+  environment:
+    name: ci-read-tokens
+    action: prepare
   rules:
     - *nightly_browsers
     - *not_scheduled
@@ -1320,7 +1337,12 @@ supply_chain_source:
     - *trivy_db_dir
     - *trivy_db_warm
     - |
+      # The database is already local. The source tree holds no Java
+      # archive, so this scan never opens the Java database: if one ever
+      # appears, --skip-java-db-update fails the scan instead of fetching it.
       trivy fs \
+        --skip-db-update \
+        --skip-java-db-update \
         --scanners vuln,secret \
         --format json \
         --output .orbit-supply-chain/source-raw.json \
@@ -1525,7 +1547,10 @@ sidecar_images:
             # ai/agent-infra#14). Only the byte source Trivy actually pulls
             # from moves. This job has no Docker daemon, so Trivy pulls
             # directly and the host mirror does not apply: name the cache host
-            # for each registry (plain HTTP, hence TRIVY_INSECURE above).
+            # for each registry. The cache is plain HTTP, so this scan, and
+            # only this scan, sets TRIVY_INSECURE: both databases are
+            # already local, and --skip-db-update and --skip-java-db-update
+            # keep it from fetching either while TLS checks are off.
             # Official Docker Hub images (no namespace, e.g. node, postgres)
             # live under library/.
             case "$2" in
@@ -1535,7 +1560,7 @@ sidecar_images:
               *) pull_target="$CI_IMAGE_CACHE_DOCKERHUB/library/$2" ;;
             esac
             echo "scanning $2 (pulled via $pull_target)"
-            trivy image \
+            TRIVY_INSECURE=true trivy image \
               --cache-dir "$cache" \
               --skip-db-update \
               --skip-java-db-update \
@@ -1891,6 +1916,12 @@ build_image:
   stage: acceptance
   extends: .dind
   timeout: 20m
+  # The two read-only tokens (ORBIT_REUSE_TOKEN, ORBIT_BASE_IMAGE_PULL_*) are
+  # scoped to this environment, so no job without it sees them (owner,
+  # 2026-10-28). `prepare` records no deployment.
+  environment:
+    name: ci-read-tokens
+    action: prepare
   rules:
     - *nightly_browsers
     - *not_scheduled
@@ -1936,9 +1967,10 @@ build_image:
       # docker:29.6.2-dind: a build FROM a pre-pulled digest succeeds with its
       # registry stopped). A registry host keeps one login, so this one is
       # logged out before the job-token login below takes the host for the
-      # cache. If the pull fails, the build takes the base from GHCR instead:
-      # same digest, no credential.
-      base_image_from_ghcr=false
+      # cache. The build takes the base from GHCR (same digest, no credential)
+      # unless that pull succeeds: with the deploy token unset, or hidden from
+      # a bot branch, the job token alone cannot read the base image here.
+      base_image_from_ghcr=true
       if [ -n "${ORBIT_BASE_IMAGE_PULL_USER:-}" ] && [ -n "${ORBIT_BASE_IMAGE_PULL_TOKEN:-}" ]; then
         base_image_host="${ORBIT_BASE_IMAGE_REGISTRY%%/*}"
         # Every distinct base the Dockerfile pins (its `base` and `runner`
@@ -1955,9 +1987,9 @@ build_image:
         fi
         if [ "$base_image_pulled" = true ]; then
           echo "pulled the pinned base image with the read-only deploy token"
+          base_image_from_ghcr=false
         else
           echo "could not pull the base image with the deploy token; taking it from GHCR" >&2
-          base_image_from_ghcr=true
         fi
         docker logout "$base_image_host" || true
       fi
@@ -1969,8 +2001,9 @@ build_image:
       # instead of failing the job: this project's own registry credential
       # must never be the reason an ordinary merge request's image build
       # goes red.
-      # The same login lets buildx pull the base image from this registry
-      # (#1101); without it the build keeps the Dockerfile's public GHCR default.
+      # The base image is named from this registry (#1101) only when the
+      # deploy token pulled it above; otherwise, or without this login, the
+      # build keeps the Dockerfile's public GHCR default.
       if echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin; then
         orbit_build_cache_usable=true
         base_image_registry_arg="--build-arg BASE_IMAGE_REGISTRY=${ORBIT_BASE_IMAGE_REGISTRY}"
@@ -2238,10 +2271,10 @@ supply_chain_image:
     # TRIVY_IMAGE, TRIVY_DB_REPOSITORY and TRIVY_CACHE_DIR are exported
     # already (the pipeline-wide pins above, and *trivy_db_dir just above);
     # the script passes the database repository into the scanner container
-    # itself and mounts the cache directory in unmodified. scan-image.sh's
-    # own trivy, run without --skip-db-update, downloads into it exactly when
-    # it finds nothing current there -- the same check `*trivy_db_warm` makes
-    # explicitly for the other two scanner jobs.
+    # itself and mounts the cache directory in unmodified. scan-image.sh
+    # downloads into it first, with TLS verified, then scans with
+    # --skip-db-update -- the same order `*trivy_db_warm` gives the other two
+    # scanner jobs.
     - |
       set -eu
       TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \
@@ -3425,11 +3458,14 @@ launcher_install_compat:
 #                    other way).
 #
 # Why a runner mount and not CI/CD variables: this instance is GitLab CE
-# (19.3.1, verified 2026-09-08), which has no protected environments and no
-# environment-scoped variables -- both are Premium. A project-level variable
+# (19.5.1, verified 2026-10-28), which has no protected environments (an EE
+# feature). A variable can be scoped to an environment on CE, but any branch
+# can declare that environment in its own pipeline file and receive the
+# variable (that is what `ci-read-tokens` relies on for the read-only
+# tokens: it narrows exposure, it fences nothing). A project-level variable
 # is readable by every job in every protected-branch pipeline, which would
 # hand the signing key to the whole acceptance suite's dependency tree; an
-# `environment:` block would parse and enforce nothing. The runner mount
+# `environment:` block would parse and fence nothing. The runner mount
 # keeps the key out of GitLab's variable store entirely, and the runner is
 # protected and locked to this project, so a job on an unprotected ref that
 # gives itself the tag gets no runner, not the key (#661 criterion 6;
@@ -4117,7 +4153,14 @@ install_bootstrap_latest:
 #   ORBIT_REUSE_TOKEN  A read-only credential (`read_api`, Reporter, masked, NOT
 #                       protected, no write scope anywhere), so an ordinary
 #                       merge-request pipeline can read earlier pipelines'
-#                       evidence. Unset, every reuse verdict on a merge request
+#                       evidence. Environment scope `ci-read-tokens` (owner,
+#                       2026-10-28), as are ORBIT_BASE_IMAGE_PULL_USER/_TOKEN:
+#                       only the jobs declaring that environment -- classify,
+#                       build_image, launch_timing, nightly_not_red,
+#                       nightly_report -- receive
+#                       them; scripts/gitlab-ci-lanes.test.mjs keeps that list
+#                       and the readers equal.
+#                       Unset, every reuse verdict on a merge request
 #                       is "runs", the safe direction, and `nightly_not_red`
 #                       fails saying so. The unset paths are covered by
 #                       scripts/ci/reuse-lookup.test.mjs ("asks nothing at all
@@ -4348,6 +4391,12 @@ launch_timing:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
   timeout: 30m
+  # The two read-only tokens (ORBIT_REUSE_TOKEN, ORBIT_BASE_IMAGE_PULL_*) are
+  # scoped to this environment, so no job without it sees them (owner,
+  # 2026-10-28). `prepare` records no deployment.
+  environment:
+    name: ci-read-tokens
+    action: prepare
   resource_group: launch_timing
   rules:
     - *not_scheduled
@@ -4402,6 +4451,11 @@ nightly_report:
     pull_policy: if-not-present
   timeout: 10m
   interruptible: false
+  # Reads the night's jobs with ORBIT_REUSE_TOKEN, which is scoped to this
+  # environment (the first nightly, 3069, got 401 without it).
+  environment:
+    name: ci-read-tokens
+    action: prepare
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $ORBIT_NIGHTLY_BROWSERS == "true"
       when: on_failure
@@ -4416,8 +4470,9 @@ nightly_report:
 # green here, because the check reads the pipeline's status now.
 #
 # Reads the project's pipelines through the API, so it needs a read-only token
-# a merge-request pipeline can see: ORBIT_REUSE_TOKEN (`read_api`, unprotected;
-# see base_image_repin). It reads that token alone, never a fallback. With it
+# a merge-request pipeline can see: ORBIT_REUSE_TOKEN (`read_api`, unprotected,
+# scoped to the `ci-read-tokens` environment declared below; see
+# base_image_repin). It reads that token alone, never a fallback. With it
 # unset the job fails and says so -- an unchecked promotion is not a passed one.
 nightly_not_red:
   stage: policy
@@ -4426,6 +4481,12 @@ nightly_not_red:
     name: $NODE_IMAGE
     pull_policy: if-not-present
   timeout: 5m
+  # The two read-only tokens (ORBIT_REUSE_TOKEN, ORBIT_BASE_IMAGE_PULL_*) are
+  # scoped to this environment, so no job without it sees them (owner,
+  # 2026-10-28). `prepare` records no deployment.
+  environment:
+    name: ci-read-tokens
+    action: prepare
   needs: []
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "dev"

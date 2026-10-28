@@ -98,24 +98,30 @@ there is no upgrade path and none is needed.
 
 ## CI relationship
 
-Merge requests and pushes to `dev` run:
+Merge requests into `dev` and pushes to `dev` run:
 
 - lint, type checking and the complete unit suite;
 - the source secret scan;
 - the licence-policy check over the whole installed dependency tree;
 - PostgreSQL integration;
-- the container build, then the smoke, browser and recovery journeys against
-  that build. The browser suite is four jobs side by side: `smoke` runs it in
-  Chromium, `smoke_firefox` in Firefox, and `smoke_webkit` /
-  `smoke_webkit_mobile` in WebKit, desktop and phone. With Firefox inside
-  `smoke`, that one job took 29.9 of its 30 minutes, so it has its own
-  (#1183); WebKit's desktop and phone projects together ran close to the same
-  limit, so they split the same way (#1192). Merge requests into `dev` run
-  none of these browser jobs, nor `smoke_local_only` (#1412): they run at promotion and every night on
-  `dev`, and a red night opens an issue.
-- the appearance checks, also two jobs: `fidelity` (Chromium appearance and
-  the phone-floor measurements) and `fidelity_webkit` (the phone film in
-  WebKit), split in #1174 so neither risks the 30-minute job limit.
+- the container build, then `acceptance` (the deployment asset set, the
+  confined document processor and the installer checks) and the recovery
+  journeys (`repair_journeys`) against that build.
+
+The seven browser jobs run elsewhere (#1412). They are the browser suite in
+four jobs side by side -- `smoke` in Chromium, `smoke_firefox` in Firefox, and
+`smoke_webkit` / `smoke_webkit_mobile` in WebKit, desktop and phone, split so
+none nears the 30-minute job limit (#1183, #1192) -- plus `smoke_local_only`
+and the appearance checks `fidelity` (Chromium appearance and the phone-floor
+measurements) and `fidelity_webkit` (the phone film in WebKit, split in
+#1174). They run every night on `dev` when `dev` has moved since the last
+nightly run, and a red night opens an issue; at promotion, meaning the merge
+requests into `preview` and `main` and pushes to `preview` and `hotfix/*`
+branches; in a pipeline started by hand on `dev` (on any other working branch
+the smoke jobs wait to be started by hand); and on a merge request into `dev`
+labelled `ci: acceptance`, in a pipeline started on the merge request after
+the label is added (#1514). A merge request into `dev` without that label,
+and every push to `dev`, run none of them.
 
 CodeQL runs separately on the GitHub mirror.
 

@@ -6,11 +6,14 @@ import { describe, expect, it } from "vitest";
  * The shape of the #661 split, asserted over .gitlab-ci.yml and the scripts
  * it calls. Criterion 6 is the one that matters: if the publishing job can
  * reach the signing key, the split is theatre. This instance is GitLab CE,
- * which has no protected environments or environment-scoped variables, so
- * the key lives on the `orbit-signing` runner's host and reaches exactly one
- * job, by runner tag; within the pipeline config that boundary is review
- * plus these tests, which make a quiet edit moving the tag (or a channel
- * tag, or a push) to the wrong job loud. ADR-0020 records the whole story.
+ * which has no protected environments (an EE feature): a variable can be
+ * scoped to an environment, but any branch can declare that environment in
+ * its own pipeline file and receive the variable, so an environment narrows
+ * exposure and fences nothing. The key therefore lives on the
+ * `orbit-signing` runner's host and reaches exactly one job, by runner tag;
+ * within the pipeline config that boundary is review plus these tests, which
+ * make a quiet edit moving the tag (or a channel tag, or a push) to the
+ * wrong job loud. ADR-0020 records the whole story.
  */
 
 const pipeline = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8").replaceAll(
@@ -57,12 +60,22 @@ describe("the validation/publication split (#661)", () => {
     expect(declarations).toHaveLength(1);
   });
 
-  it("declares no environment anywhere: CE enforces nothing through it", () => {
-    // An `environment:` block parses fine on CE while scoping nothing, which
-    // is how the first cut of this split shipped a fence that did not exist
-    // (ADR-0020). If a real deployment environment ever appears here, this
-    // assertion is the reminder that it must not be trusted as a key fence.
-    expect(code).not.toContain("environment:");
+  it("declares only the ci-read-tokens environment, and never on sign_evidence", () => {
+    // CE has no protected environments, so an `environment:` block is not a
+    // key fence: a branch can declare one in its own pipeline file and
+    // receive whatever is scoped to it. That is how the first cut of this
+    // split shipped a fence that did not exist (ADR-0020). The one
+    // environment allowed here, `ci-read-tokens`, scopes three read-only
+    // tokens to the jobs that read them (v0.3.2 audit, owner 2026-10-28); a
+    // second name, or an environment on the signing job, must fail here and
+    // be argued for in review.
+    const environments = code.match(/^\s*environment:\n\s*name: (\S+)/gmu) ?? [];
+    expect(environments.length).toBeGreaterThan(0);
+    for (const block of environments) {
+      expect(block).toMatch(/name: ci-read-tokens$/u);
+    }
+    expect(code.match(/environment:/gu)).toHaveLength(environments.length);
+    expect(job("sign_evidence")).not.toContain("environment:");
     expect(code).not.toContain("validation-signing");
   });
 

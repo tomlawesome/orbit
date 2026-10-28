@@ -43,12 +43,12 @@ function menuOf(page: Page, phone: boolean) {
 /**
  * Makes a press and waits until the page has taken it in: a capturing
  * listener on the window records the `event` the press produces (a click for
- * a pointer or a finger, a keydown for the keyboard), and the page then draws
- * two frames, by which time whatever the press set off in its own scripts has
- * run. "The menu did not open" is then judged after the page has handled the
- * press, not after a guess at how long that takes.
+ * a pointer, a touchend for a finger, a keydown for the keyboard), and the
+ * page then draws two frames, by which time whatever the press set off in its
+ * own scripts has run. "The menu did not open" is then judged after the page
+ * has handled the press, not after a guess at how long that takes.
  */
-async function pressAndLetThePageTakeItIn(page: Page, event: "click" | "keydown", press: () => Promise<void>) {
+async function pressAndLetThePageTakeItIn(page: Page, event: "click" | "touchend" | "keydown", press: () => Promise<void>) {
   await page.evaluate((type) => {
     const seen = window as unknown as { __pressSeen: number };
     seen.__pressSeen = 0;
@@ -108,7 +108,10 @@ test("a touch on the menu opener does nothing while the tour plays", async ({ pa
   await withTourPlaying(page, isMobile, async ({ orb, about }) => {
     const box = await orb.boundingBox();
     if (!box) throw new Error("the menu opener has no box to touch");
-    await pressAndLetThePageTakeItIn(page, "click", () => page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2));
+    /* touchend, not click: the tour's catch pane cancels the touch, so no
+       click is ever made from it, and the capturing listener still sees the
+       touchend before the pane does. */
+    await pressAndLetThePageTakeItIn(page, "touchend", () => page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2));
     await expect(about, "#1473: the menu opened by touch while the tour plays").toBeHidden({ timeout: SHORT });
   });
 });

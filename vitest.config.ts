@@ -141,6 +141,8 @@ const test: TestUserConfig = {
           "scripts/bump-launcher-pin.test.mjs",
           // Same reason (#1374): uses node:test. Run by scripts/test-backend.sh.
           "scripts/corpus/stages-rerun.test.mjs",
+          // Same reason: uses node:test. Run by scripts/test-backend.sh.
+          "scripts/read-environment-value.test.mjs",
           // Same reason (#1099): uses node:test. Run by scripts/test-backend.sh.
           "scripts/ci/coverage-floor-check.test.mjs",
           // Same reason (#1408): uses node:test. Run by the `names_guard` CI job.

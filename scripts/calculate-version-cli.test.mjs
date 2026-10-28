@@ -156,3 +156,26 @@ describe("calculate-version CLI", () => {
     expect(result.stderr).not.toBe("");
   });
 });
+
+// v0.3.2 audit D-F8. Fails on current code: runCli reads release-line.json for
+// every channel, so a hotfix branch cut from a tag older than the file dies
+// with "must exist" instead of printing a version.
+describe("calculate-version CLI without release-line.json (D-F8)", () => {
+  it("prints a hotfix version when release-line.json does not exist", () => {
+    const root = makeRepo({ tags: ["v0.3.5"] });
+    const result = runCli(root, "hotfix");
+
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("v0.3.6\n");
+  });
+
+  it("still fails a preview train when release-line.json does not exist", () => {
+    const root = makeRepo({ tags: ["v0.3.5"] });
+    const result = runCli(root, "preview");
+
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toMatch(/release-line/u);
+  });
+});
