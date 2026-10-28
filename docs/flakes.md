@@ -326,6 +326,8 @@ page's URL at failure, which this one has to infer.
 - 2026-10-10 · e0d5d796 (`dev`, merge of !1057; its head 327d32c1 passed fidelity in pipeline 2440, and the merge adds only `scripts/install.sh`, its test and `scripts/ci/repin-base-image.sh`) · pipeline 2461 / fidelity (job 35271) · "/home · row-complete meets the pocket floors" at 390x664, `locator.waitFor` ran to the 60 s test timeout; 487 of 488 passed.
 - 2026-10-14 · 00987a9d (door branch, !1066) · pipeline 2590 / fidelity (job 36196) · `pocket-measure.spec.js:544` "pocket measurement at 390x664 › /home · row-open meets the pocket floors" — `locator.waitFor: Test timeout of 60000ms exceeded`; 487 others passed. Diff since pipeline 2588 (where it passed) is an e2e keyboard spec and docs only; job retried as 36215.
 - 2026-10-16 · 614118ff (!1069; one e2e spec and this file changed since pipeline 2645, where fidelity passed) · pipeline 2649 / fidelity (job 36559) · "pocket measurement at 360x640 › /home · row-edit": `openRow` tapped the Car MOT row and the panel never opened (`locator.waitFor: Test timeout of 60000ms exceeded`); 487 others passed. Retried as 36573.
+- 2026-10-28 · 6274d16c (!1104) · pipeline 3086 / fidelity (job 40427, the `pocket-measure` project; the job's allowed exit code 3 kept the pipeline green) · "pocket measurement at 390x664 › /home · row-edit-section", tagged `@quarantine`: `locator.waitFor: Test timeout of 60000ms exceeded` after 1.0 m; 189 fidelity shots and every other measurement passed. Not retried.
+- 2026-10-28 · bffece83 (`dev`, nightly started by hand) · pipeline 3094 / fidelity (job 40514, `pocket-measure`; allowed exit code 3, nightly stayed green) · "pocket measurement at 390x664 › /home · row-snooze", tagged `@quarantine`: timed out; 486 fidelity shots and every other measurement passed. Not retried.
 
 ## install-orchestrator.test.ts "runInstall: success > installs a pre-provisioned target unattended: assets from the image, secrets, migration, digest (#6, #42, #45, #53)"
 
@@ -385,6 +387,7 @@ page's URL at failure, which this one has to infer.
 ## v19-tour.spec.ts:170 "a first-time reader gets the film, works its transport, and a second arrival stays silent" — desktop-webkit
 
 - 2026-10-13 · 3a297cc8 (!1065) · pipeline 2570 / smoke_webkit (job 36069) · failed its first attempt in 3.4 s, passed on the in-job retry. First sighting.
+- 2026-10-28 · 6274d16c (!1104, a merge of `dev` into the audit branch; the same app code passed this job on pipeline 3073, job 40320) · pipeline 3086 / smoke_webkit (job 40434) · `anEmptySky`'s `page.evaluate` fetch of the session failed with WebKit's `TypeError: Load failed` on both in-job attempts (3.8 s and 5.3 s); 287 others passed. Job retried as 40443. Second sighting.
 
 ## v19-administration.spec.ts:146 "document jobs and the two mail tests (#1071) › the relay test's pill and reason ..." — desktop-firefox
 

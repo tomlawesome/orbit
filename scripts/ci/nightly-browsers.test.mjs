@@ -11,13 +11,12 @@ import {
 } from "./nightly-browsers.mjs";
 
 /*
- * The nightly browser run's three questions (#1412), against a real HTTP
- * server standing in for GitLab: has dev moved since the last nightly, did a
- * nightly fail on this commit, and file the failure once.
+ * The nightly browser run's two questions (#1412), against a real HTTP
+ * server standing in for GitLab: has dev moved since the last nightly, and
+ * file the failure once.
  *
- * `moved` must only ever err toward running; `blocked` must only ever err
- * toward refusing; `report` must file one issue, not one a night. Most of
- * what follows is about those three directions.
+ * `moved` must only ever err toward running; `report` must file one issue,
+ * not one a night. Most of what follows is about those two directions.
  */
 
 const TOKEN = "TEST-NIGHTLY-TOKEN-NOT-REAL";
@@ -164,55 +163,17 @@ describe("moved", () => {
   });
 });
 
-describe("blocked", () => {
-  it("refuses a commit whose nightly run failed, naming the run", async () => {
+// #1544 (owner decision 5a): promotion no longer waits on a nightly, so the
+// script has no `blocked` mode. It is an unknown command: exit non-zero and
+// print the usage line, which lists `moved` and `report` only.
+describe("blocked (removed)", () => {
+  it("is refused as an unknown command, with a usage line listing only moved | report", async () => {
     const api = await start({ pipelines: [{ id: 90, sha: SHA, status: "failed" }] });
     const result = await run(["blocked"], base(api));
-    expect(result.code).toBe(1);
-    expect(result.err).toMatch(/pipelines\/90/u);
-    expect(seen.requests[0]).toContain(`sha=${SHA}`);
-  });
-
-  it("passes a commit with a green nightly, with no nightly, or with only another commit's failure", async () => {
-    for (const pipelines of [
-      [{ id: 90, sha: SHA, status: "success" }],
-      [],
-      [{ id: 90, sha: OTHER_SHA, status: "failed" }],
-      [{ id: 90, sha: SHA, status: "failed", jobs: ["renovate"] }],
-    ]) {
-      const api = await start({ pipelines });
-      expect((await run(["blocked"], base(api))).code).toBe(0);
-      await new Promise((resolve) => server.close(resolve));
-      server = undefined;
-    }
-  });
-
-  it("asks about the merge request's own commit when merged results are in use", async () => {
-    const api = await start({ pipelines: [{ id: 90, sha: OTHER_SHA, status: "failed" }] });
-    const result = await run(["blocked"], { ...base(api), CI_MERGE_REQUEST_SOURCE_BRANCH_SHA: OTHER_SHA });
-    expect(result.code).toBe(1);
-  });
-
-  it("reads ORBIT_REUSE_TOKEN alone: BASE_REPIN_TOKEN and SIDECAR_ISSUE_TOKEN are never used", async () => {
-    const api = await start({ pipelines: [{ id: 90, sha: SHA, status: "failed" }] });
-    const others = { ...base(api), ORBIT_REUSE_TOKEN: "", BASE_REPIN_TOKEN: "OTHER-TOKEN-1", SIDECAR_ISSUE_TOKEN: "OTHER-TOKEN-2" };
-    const result = await run(["blocked"], others);
-    expect(result.code).toBe(1);
-    expect(result.err).toMatch(/ORBIT_REUSE_TOKEN/u);
+    expect(result.code).not.toBe(0);
+    expect(result.err).toContain("usage: nightly-browsers.mjs moved | report");
+    expect(result.err).not.toMatch(/blocked/u);
     expect(seen.requests).toEqual([]);
-    // `moved` asks nothing either, and runs.
-    expect(await run(["moved"], others)).toMatchObject({ code: 0, out: "run" });
-    expect(seen.requests).toEqual([]);
-  });
-
-  it("fails, saying why, with no token or when GitLab does not answer: an unchecked promotion is not a passed one", async () => {
-    const api = await start({ fail: { "/pipelines": 500 } });
-    const noToken = await run(["blocked"], { ...base(api), ORBIT_REUSE_TOKEN: "" });
-    expect(noToken.code).toBe(1);
-    expect(noToken.err).toMatch(/ORBIT_REUSE_TOKEN/u);
-    const down = await run(["blocked"], base(api));
-    expect(down.code).toBe(1);
-    expect(down.err).toMatch(/unchecked promotion/u);
   });
 });
 
@@ -305,32 +266,5 @@ describe("helpers", () => {
 
   it("refuses an unknown command", async () => {
     expect((await run(["frobnicate"], {})).code).toBe(2);
-  });
-});
-
-// v0.3.2 audit D-F11/D-F19. Fails on current code: failedNightlies filters on
-// status === "failed" alone, so a nightly still in flight on this commit lets
-// the promotion gate pass (exit 0, no in-flight message).
-describe("blocked: nightlies still in flight (D-F11/D-F19)", () => {
-  for (const status of ["running", "pending", "created"]) {
-    it(`refuses while a nightly on this commit is ${status}, saying to wait`, async () => {
-      const api = await start({ pipelines: [{ id: 91, sha: SHA, status }] });
-      const result = await run(["blocked"], base(api));
-      expect(result.code).not.toBe(0);
-      expect(result.err).toMatch(/nightly pipeline 91 is still running on this commit: wait for it, then retry/u);
-    });
-  }
-
-  it("passes a success and keeps the failed message for a failure", async () => {
-    let api = await start({ pipelines: [{ id: 92, sha: SHA, status: "success" }] });
-    expect((await run(["blocked"], base(api))).code).toBe(0);
-    await new Promise((resolve) => server.close(resolve));
-    server = undefined;
-
-    api = await start({ pipelines: [{ id: 93, sha: SHA, status: "failed" }] });
-    const failed = await run(["blocked"], base(api));
-    expect(failed.code).toBe(1);
-    expect(failed.err).toMatch(/pipelines\/93/u);
-    expect(failed.err).not.toMatch(/still running/u);
   });
 });

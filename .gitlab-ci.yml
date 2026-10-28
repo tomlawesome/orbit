@@ -374,8 +374,23 @@ variables:
 # turn off TLS verification for the download.
 .trivy_db_warm: &trivy_db_warm |
   unset TRIVY_INSECURE
+  # ghcr.io drops a long download now and then: pipeline 3110 lost the Java
+  # database at 66 percent to "stream error: PROTOCOL_ERROR" (#1545). Nothing
+  # partial is kept, so each attempt starts from zero; try three times, a
+  # minute apart, before failing the job. Shell functions last for the rest
+  # of the job's `script:`, so later steps call this too.
+  trivy_fetch() {
+    for attempt in 1 2 3; do
+      trivy image "$@" && return 0
+      echo "trivy_fetch: attempt $attempt of 3 failed: trivy image $*" >&2
+      [ "$attempt" -eq 3 ] || sleep 60
+    done
+    return 1
+  }
   if [ ! -e "$TRIVY_CACHE_DIR/db/trivy.db" ]; then
-    trivy image --download-db-only
+    # --timeout 40m: a warm-up gets its own deadline, sized to the download,
+    # not trivy's 5-minute scan default (#1545).
+    trivy_fetch --download-db-only --timeout 40m
   fi
 
 # Which events reach the expensive lanes. `ORBIT_SYSTEM` arrives as a dotenv
@@ -1420,7 +1435,9 @@ sidecar_images:
     name: $TRIVY_IMAGE
     entrypoint: [""]
     pull_policy: if-not-present
-  timeout: 15m
+  # 90m: room for a cold download of both databases with one retry
+  # (`trivy_fetch`, #1545); a warm day takes a few minutes.
+  timeout: 90m
   # #944 (owner ruling on #923 rec 16a, 2026-09-09): this and
   # launcher_install_compat used to queue for a slot on this runner and only
   # then, inside `script:`, decide from ORBIT_SYSTEM that there was nothing to
@@ -1513,8 +1530,13 @@ sidecar_images:
       # the ollama scan to that 5-minute default; the dev run the same
       # afternoon came in at 145 s. Warmed into the shared cache once, it
       # costs the same as the vulnerability database: nothing on a warm day.
+      # --timeout 40m: the cache is keyed by branch protection, so the
+      # first run on a protected ref starts cold, and at the 500 KiB/s
+      # ghcr.io gave on 2026-10-28 the 944 MiB Java database needs about
+      # 30 minutes; trivy's 5-minute default cut it at 93 percent twice and
+      # held the v0.3.2 promotion (#1545). The job's own timeout covers it.
       if [ ! -e "$TRIVY_CACHE_DIR/java-db/trivy-java.db" ]; then
-        trivy image --download-java-db-only
+        trivy_fetch --download-java-db-only --timeout 40m
       fi
     - |
       # Fan the scans out, four at a time: this loop is almost all network
@@ -4156,13 +4178,12 @@ install_bootstrap_latest:
 #                       evidence. Environment scope `ci-read-tokens` (owner,
 #                       2026-10-28), as are ORBIT_BASE_IMAGE_PULL_USER/_TOKEN:
 #                       only the jobs declaring that environment -- classify,
-#                       build_image, launch_timing, nightly_not_red,
+#                       build_image, launch_timing,
 #                       nightly_report -- receive
 #                       them; scripts/gitlab-ci-lanes.test.mjs keeps that list
 #                       and the readers equal.
 #                       Unset, every reuse verdict on a merge request
-#                       is "runs", the safe direction, and `nightly_not_red`
-#                       fails saying so. The unset paths are covered by
+#                       is "runs", the safe direction. The unset paths are covered by
 #                       scripts/ci/reuse-lookup.test.mjs ("asks nothing at all
 #                       when there is no token") and
 #                       scripts/ci/nightly-browsers.test.mjs.
@@ -4461,34 +4482,3 @@ nightly_report:
       when: on_failure
   script:
     - node scripts/ci/nightly-browsers.mjs report
-
-# Stops a promotion to `preview` when the last nightly run on this `dev`
-# commit failed (#1412). The nightly runs the whole browser set on `dev`; a
-# promotion is what that run is for. Only the dev -> preview merge request
-# runs it. No nightly on this commit yet is not a failure: the promotion runs
-# the browsers itself. A nightly that failed and was then retried green is
-# green here, because the check reads the pipeline's status now.
-#
-# Reads the project's pipelines through the API, so it needs a read-only token
-# a merge-request pipeline can see: ORBIT_REUSE_TOKEN (`read_api`, unprotected,
-# scoped to the `ci-read-tokens` environment declared below; see
-# base_image_repin). It reads that token alone, never a fallback. With it
-# unset the job fails and says so -- an unchecked promotion is not a passed one.
-nightly_not_red:
-  stage: policy
-  tags: [light]
-  image:
-    name: $NODE_IMAGE
-    pull_policy: if-not-present
-  timeout: 5m
-  # The two read-only tokens (ORBIT_REUSE_TOKEN, ORBIT_BASE_IMAGE_PULL_*) are
-  # scoped to this environment, so no job without it sees them (owner,
-  # 2026-10-28). `prepare` records no deployment.
-  environment:
-    name: ci-read-tokens
-    action: prepare
-  needs: []
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "dev"
-  script:
-    - node scripts/ci/nightly-browsers.mjs blocked

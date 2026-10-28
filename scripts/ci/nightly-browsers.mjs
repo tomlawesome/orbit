@@ -1,14 +1,12 @@
 #!/usr/bin/env node
 /*
- * The nightly browser run on `dev` (#1412): three small questions the pipeline
- * asks GitLab, in one file.
+ * The nightly browser run on `dev` (#1412): two small jobs the pipeline gives
+ * GitLab, in one file.
  *
  *   moved    Has `dev` moved since the last nightly run? Prints `idle` when the
  *            last nightly pipeline ran on this very commit, otherwise `run`.
  *            Any doubt prints `run`: a night that tests twice costs minutes, a
  *            night that wrongly skips costs a day's coverage.
- *   blocked  Did a nightly run on this commit fail? Exit 1, naming the runs, if
- *            so. The dev -> preview merge request asks it (`nightly_not_red`).
  *   report   File the failure: one issue in the nearest open milestone, or a
  *            comment on the one already open. The nightly's last job
  *            (`nightly_report`, on_failure) calls it.
@@ -112,15 +110,6 @@ export async function moved({ base, projectId, pipelineId, sha, token, fetchImpl
   }
   log(`dev has moved since nightly pipeline ${last.id} (${String(last.sha).slice(0, 12)}): running`);
   return "run";
-}
-
-/* The nightly runs on `sha` that hold a promotion: every one not a success,
- * so a run still in flight (running, pending, created, waiting) blocks as a
- * failed one does. An empty list means go ahead. */
-export async function blockingNightlies({ base, projectId, sha, token, fetchImpl = fetch, log = () => {} }) {
-  const options = { token, fetchImpl };
-  const nightlies = await nightlyPipelines({ base, projectId, options, sha, log });
-  return nightlies.filter((pipeline) => pipeline.status !== "success");
 }
 
 /* Failing test titles out of a job log: Playwright's `  1) [project] › ...`
@@ -235,40 +224,6 @@ export async function main(argv, env = process.env, { fetchImpl = fetch, out = c
     return 0;
   }
 
-  if (command === "blocked") {
-    const sha = env.CI_MERGE_REQUEST_SOURCE_BRANCH_SHA || env.CI_COMMIT_SHA;
-    const token = readToken(env);
-    if (!token) {
-      err("nightly-browsers: no read-only token. Create a project access token on ai/orbit with the `read_api` scope, leave it UNprotected (merge-request pipelines must see it) and set it as the masked CI/CD variable ORBIT_REUSE_TOKEN. Until then this check cannot tell whether the nightly run is red.");
-      return 1;
-    }
-    if (!base || !projectId || !sha) {
-      err("nightly-browsers: the API URL, project or commit is unknown; this must run inside a GitLab job.");
-      return 1;
-    }
-    let blocking;
-    try {
-      blocking = await blockingNightlies({ base, projectId, sha, token, fetchImpl, log });
-    } catch (error) {
-      err(`nightly-browsers: could not read the nightly runs (${error.message}); an unchecked promotion is not a passed one.`);
-      return 1;
-    }
-    if (blocking.length === 0) {
-      out(`no failed or unfinished nightly run on ${sha.slice(0, 12)}`);
-      return 0;
-    }
-    const failed = blocking.filter((pipeline) => pipeline.status === "failed");
-    for (const pipeline of blocking.filter((candidate) => candidate.status !== "failed")) {
-      err(`nightly-browsers: nightly pipeline ${pipeline.id} is still running on this commit: wait for it, then retry.`);
-    }
-    if (failed.length > 0) {
-      err(`nightly-browsers: the nightly browser run failed on this dev commit (${sha.slice(0, 12)}):`);
-      for (const pipeline of failed) err(`  ${pipeline.web_url ?? `pipeline ${pipeline.id}`}`);
-      err("Fix it and retry the failed job, or promote a different dev commit.");
-    }
-    return 1;
-  }
-
   if (command === "report") {
     const token = env.SIDECAR_ISSUE_TOKEN;
     if (!token) {
@@ -301,7 +256,7 @@ export async function main(argv, env = process.env, { fetchImpl = fetch, out = c
     return 0;
   }
 
-  err("usage: nightly-browsers.mjs moved | blocked | report");
+  err("usage: nightly-browsers.mjs moved | report");
   return 2;
 }
 
