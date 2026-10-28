@@ -8,7 +8,7 @@
 //   node scripts/extract-bundle/build.mjs --no-fetch  # just the JavaScript
 //
 // Downloads are pinned and checked against the publishers' own checksums.
-// Tika stays at 4.0.0 because that is the image the stack pins in
+// Tika is the version the stack pins in
 // docker-compose.yml: the point of the bundle is to read pages exactly as
 // the deployment does, so it moves when the stack moves. Node is the
 // version this host runs.

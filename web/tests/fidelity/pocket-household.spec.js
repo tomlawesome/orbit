@@ -121,14 +121,19 @@ test("a failed save stays on the bar in red until the next attempt", async ({ pa
     status: 500, contentType: "application/json",
     body: JSON.stringify({ error: { code: "internal", message: "Orbit could not store the sections just now" } }),
   }));
+  /* Any timer the page runs on its own (a toast's hold, a bar's reset) is the
+     page's clock's, not the runner's: installed before the screen loads, then
+     stopped before the save, so only what is advanced below passes. */
+  await page.clock.install();
   await open(page);
   const services = page.getByRole("switch", { name: "Services shown on the chart" });
   await services.scrollIntoViewIfNeeded();
   await services.click();
   const bar = page.locator("[data-hh=savebar]");
+  await page.clock.pauseAt(new Date(Date.now() + 2_000));
   await bar.getByRole("button", { name: "save" }).click();
-  await expect(bar.getByRole("alert")).toHaveText("not saved — Orbit could not store the sections just now");
-  await page.waitForTimeout(4500);
+  await expect(bar.getByRole("alert")).toHaveText("not saved — Orbit could not store the sections just now", { timeout: 20_000 });
+  await page.clock.runFor(4_500);
   await expect(bar.getByRole("alert")).toBeVisible();
   await expect(services).toHaveAttribute("aria-checked", "false");
 });

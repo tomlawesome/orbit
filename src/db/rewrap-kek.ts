@@ -24,8 +24,18 @@ import {
   recordRotationStarted,
   rotationRemaining,
   runKekRotationToCompletion,
+  skippedCount,
   type RotationKeys,
+  type SkippedOnOlderKey,
 } from "@/server/documents/rewrap-worker";
+import { completionReport } from "./rewrap-kek-report";
+
+/** #1392: held objects a rotation cannot move, in plain words, or "" when there are none. */
+function skippedLine(skipped: SkippedOnOlderKey): string {
+  if (skippedCount(skipped) === 0) return "";
+  return `Skipping ${skipped.heldAttachmentIds.length} held mail attachment(s) and ${skipped.stagingObjectIds.length} `
+    + "scanner-recovery object(s) still on an older key that neither key here can read; they are left exactly as they are.\n";
+}
 
 function usageExit(message: string): never {
   process.stderr.write(`orbit rewrap-kek: ${message}\n`);
@@ -73,14 +83,12 @@ async function main(): Promise<void> {
     process.stdout.write(
       `Starting rewrap: ${before.documentsRemaining} document(s), ${before.metadataKeysRemaining} metadata key(s), `
       + `${before.mailInSecretsRemaining} mail-in secret(s), ${before.heldAttachmentsRemaining} held mail attachment(s), `
-      + `${before.stagingObjectsRemaining} scanner-recovery object(s) to move from ${keys.currentKeyId} to ${keys.nextKeyId}.\n`,
+      + `${before.stagingObjectsRemaining} scanner-recovery object(s) to move from ${keys.currentKeyId} to ${keys.nextKeyId}.\n`
+      + skippedLine(before.skippedOnOlderKey),
     );
-    await runKekRotationToCompletion(keys);
+    const after = await runKekRotationToCompletion(keys);
     await recordRotationCompleted(keys);
-    process.stdout.write(
-      "Rewrap complete: every row now decrypts only under the next key.\n"
-      + "Replace the live document-kek secret with it, remove DOCUMENT_KEK_NEXT, and restart Orbit to finish the rotation.\n",
-    );
+    process.stdout.write(`${completionReport(before, after).join("\n")}\n`);
   } finally {
     nextKek.fill(0);
     await closeDatabase();

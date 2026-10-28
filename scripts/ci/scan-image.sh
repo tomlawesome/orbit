@@ -24,6 +24,15 @@
 #                         (#946) -- RUNNER_TEMP itself is wiped at the end of
 #                         every job on that runner, so a cache placed there
 #                         could never survive to the next pipeline.
+#
+# TRIVY_INSECURE is never passed into the scanner. It would turn off TLS
+# verification for the database download too, and no step here needs it:
+# the database is downloaded first, over verified HTTPS, and both scans then
+# run with --skip-db-update and --skip-java-db-update; the image under test
+# is read from the local Docker daemon through the socket (the job has just
+# `docker load`ed it), never pulled through the plain-HTTP image cache. The
+# image holds no Java archive, so neither scan opens the Java database; if
+# one ever appears, the scan fails rather than fetching it.
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -43,10 +52,17 @@ readonly workspace runner_temp trivy_cache_dir
 mkdir -p .orbit-supply-chain "${trivy_cache_dir}"
 bash scripts/trivy-db-retry.sh docker run --rm \
   --env TRIVY_DB_REPOSITORY \
+  --volume "${trivy_cache_dir}:/root/.cache/trivy" \
+  "${TRIVY_IMAGE}" image \
+  --download-db-only
+bash scripts/trivy-db-retry.sh docker run --rm \
+  --env TRIVY_DB_REPOSITORY \
   --volume /var/run/docker.sock:/var/run/docker.sock \
   --volume "${workspace}:/workspace" \
   --volume "${trivy_cache_dir}:/root/.cache/trivy" \
   "${TRIVY_IMAGE}" image \
+  --skip-db-update \
+  --skip-java-db-update \
   --scanners vuln \
   --format json \
   --output /workspace/.orbit-supply-chain/image-vulnerabilities.json \
@@ -57,6 +73,8 @@ bash scripts/trivy-db-retry.sh docker run --rm \
   --volume "${workspace}:/workspace" \
   --volume "${trivy_cache_dir}:/root/.cache/trivy" \
   "${TRIVY_IMAGE}" image \
+  --skip-db-update \
+  --skip-java-db-update \
   --scanners vuln \
   --format spdx-json \
   --output /workspace/.orbit-supply-chain/image.spdx.json \

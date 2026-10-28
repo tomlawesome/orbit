@@ -94,6 +94,21 @@ async function signInAsMember(page: Page) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: workerAccount("member") }).click();
   await settleArrival(page);
+  /* The first-run film is not this file's subject, so the member has already
+     taken it: the same record "take the walk again" writes (v19-tour.spec.ts
+     puts it back to null when the walk IS the subject). Without it the film
+     goes up on the member's first /home with a household, and whether its
+     pill had appeared inside a fixed wait decided if the page under its veil
+     was usable (#1415). Only when nothing is recorded, so a rerun keeps the
+     first timestamp. */
+  const walk = (await (await page.request.get("/api/settings/tour")).json()) as { tour?: { tourSeenAt: string | null } };
+  if (!walk.tour?.tourSeenAt) {
+    const recorded = await page.request.put("/api/settings/tour", {
+      headers: await sessionHeaders(page),
+      data: { tourSeenAt: new Date().toISOString() },
+    });
+    expect(recorded.ok(), `the member's walk could not be recorded as taken (HTTP ${recorded.status()})`).toBe(true);
+  }
 }
 
 // Admins have an empty relay inbox by design, so the administrator takes the
@@ -235,8 +250,7 @@ test.afterAll(async ({ browser }) => {
   }
 });
 
-/* #1415: quarantined 2026-10-16 (agent-infra#30) -- runs outside the merge gate. */
-test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item", { tag: ["@quarantine"] }, async ({ page, browser }) => {
+test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item", async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the pocket has no suggestion rows yet (#434 follow-up)");
   test.setTimeout(240_000);
 
@@ -268,19 +282,18 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
   await waitForReceipts(page, 1, 120_000, (receipt) => receipt.canApprove);
 
   // The suggestion is on home, from the real pipe.
+  /* The member has taken the first-run film (signInAsMember), so no veil
+     stands over the row about to be pressed. Said by the read /home itself
+     makes of the record (the film starts only when it comes back empty), not
+     by asking whether a pill is up yet, which is true before the film mounts
+     whether or not it is about to. */
+  const filmRecord = page.waitForResponse(
+    (response) => response.request().method() === "GET" && new URL(response.url()).pathname === "/api/settings/tour",
+    { timeout: 30_000 },
+  );
   await page.goto("/home");
-  /* The member's first landing on a fresh stack gets the first-run film,
-     and the veiled page behind it is inert (#844) — a reader has to stop
-     the film before tapping anything, so this test does too. */
-  const transport = page.locator("#orbit-tour-transport");
-  if (await transport.waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false)) {
-    await page.keyboard.press("Escape");
-    /* Esc -> player.stop() clears the veil synchronously; the pill itself
-       lingers as a low-opacity ghost until the film unmounts, so the veil
-       is what actually says the screen underneath is free (see
-       keyboard.ts's `dismissTourIfShown`). */
-    await expect(page.locator("#orbit-tour-veil")).toBeHidden();
-  }
+  const walkAsHomeReadIt = (await (await filmRecord).json()) as { tour?: { tourSeenAt: string | null } };
+  expect(walkAsHomeReadIt.tour?.tourSeenAt, "home read the member's walk as already taken").toBeTruthy();
   const row = page.locator(".item.suggest").first();
   await expect(row).toBeVisible({ timeout: 30_000 });
 
@@ -335,9 +348,7 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
   expect(documents.documents.length).toBeGreaterThanOrEqual(1);
 });
 
-// Quarantined with the spoofed-PDF test above (#1415): this file runs in serial order and
-// this test uses the state it leaves, so the two move together (agent-infra#30).
-test("a message with no readable document lands in a bounded state on the relay", { tag: ["@quarantine"] }, async ({ page }) => {
+test("a message with no readable document lands in a bounded state on the relay", async ({ page }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "relay assertion covered on desktop");
   test.setTimeout(240_000);
 

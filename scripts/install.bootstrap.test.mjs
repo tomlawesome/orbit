@@ -335,6 +335,40 @@ describe("install.sh: the engine run", () => {
     expect(result.calls).toContain("docker info");
   });
 
+  it("forwards ORBIT_INSTALL_PROFILE to the engine by name only: the value never appears in argv (#1504)", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+    const result = runInstall(targetDir, { ORBIT_INSTALL_PROFILE: "processing" }, ["--install"]);
+    const [run] = result.engineRuns;
+    expect(run.argv).toContain("ORBIT_INSTALL_PROFILE");
+    expect(run.argv).not.toContain("ORBIT_INSTALL_PROFILE=processing");
+    expect(run.argv.filter((arg) => arg.includes("ORBIT_INSTALL_PROFILE"))).toEqual(["ORBIT_INSTALL_PROFILE"]);
+    expect(run.argv[run.argv.indexOf("ORBIT_INSTALL_PROFILE") - 1]).toBe("-e");
+    expect(run.argv).toContain("ORBIT_INSTALL_HOST_FACTS");
+    expect(run.env.ORBIT_INSTALL_PROFILE).toBe("processing");
+    expect(result.calls).not.toContain("ORBIT_INSTALL_PROFILE=");
+  });
+
+  it("installs the processing profile when the launcher sets ORBIT_INSTALL_PROFILE=processing, starting orbit-tika (#1504)", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+    const result = runInstall(targetDir, { ORBIT_INSTALL_PROFILE: "processing" }, ["--plain", "--install"]);
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain("COMPOSE_PROFILES=processing\n");
+    expect(result.calls).toContain("compose --project-name orbit --env-file .env-orbit pull orbit-tika");
+    expect(result.stdout).toContain("Optional profiles: processing");
+  });
+
+  it("refuses an unsupported ORBIT_INSTALL_PROFILE with the engine's message, starting nothing (#1504)", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+    const result = runInstall(targetDir, { ORBIT_INSTALL_PROFILE: "bogus" }, ["--plain", "--install"]);
+    expect(result.status).toBe(1);
+    expect(result.stdout + result.stderr).toContain("ORBIT_INSTALL_PROFILE must be standard or processing.");
+    expect(result.calls).not.toContain(" up -d");
+    expect(targetEntries(targetDir)).toEqual([".env-orbit", ".orbit-secrets"]);
+  });
+
   it("hands stdin to the engine only for machine prompts", () => {
     const targetDir = makeTarget();
     makePreprovisionedDeployment(targetDir);

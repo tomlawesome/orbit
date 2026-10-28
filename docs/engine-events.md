@@ -66,6 +66,46 @@ current user, it writes nothing and prints one stderr line; the event,
 guidance and exit status are unchanged either way. Unset or empty, nothing
 is written.
 
+The tree is two-way (#1519). Once the consumer has run configuration in it,
+it leaves the result there and runs the install again with the same
+setting, rather than writing anything into the deployment folder itself:
+`.env-orbit` (an owner-only regular file, mode 0600) and, when it has one,
+`.orbit-secrets/` (a real directory, mode 0700, of owner-only regular
+files). On a fresh install whose folder has neither, the engine takes them
+in as the guided configuration, asks nothing, and writes them through its
+install transaction like any staged configuration, so the engine's own
+rollback and `install.sh`'s rollback after the commit both remove them and
+leave the folder as the person had it. The tree itself is never changed.
+A handed-in configuration that is incomplete is refused before anything is
+written, with `reason=configuration-failure`, the missing field names as
+above, and the configure tree written beside it (those two entries are the
+only ones it may be written beside; anything else still counts as "not
+empty"). One of another shape (a symlink, a file open to group or others)
+is refused the same way. When the folder already has a configuration, or
+the run is an update, the handed-in one is ignored, with one stderr line
+saying so, and the folder's own is used.
+
+## Profile request (v0)
+
+A consumer installing without a terminal (for `orbit-launcher`: plain mode)
+chooses the deployment profile by setting `ORBIT_INSTALL_PROFILE` before it
+runs `install.sh` (#1504). `install.sh` forwards the variable to the engine
+by name only, so the value never appears on a command line.
+
+| Value | Fresh install |
+|---|---|
+| unset | `standard`, as before |
+| `standard` | `standard` |
+| `processing` | `processing`: `COMPOSE_PROFILES=processing`, `TIKA_URL=http://orbit-tika:9998`, and `orbit-tika` is started |
+| anything else, empty included | refused before the engine writes anything: `phase=host component=host state=failed`, message `ORBIT_INSTALL_PROFILE must be standard or processing.` |
+
+`ai` and `full` are refused here on purpose: the local model's choice and
+download stay with the terminal wizard (guarantee #20). The request is read
+only on a fresh install that shows no wizard: an interactive run takes the
+wizard's answer, and an update keeps the deployment's profile whatever the
+variable holds. A later option to change an existing deployment's profile
+would ride this same variable on an update, and be documented here first.
+
 ## Vocabulary
 
 Additions to a field's vocabulary are allowed within v0 and must update
@@ -245,9 +285,33 @@ before it on stdout is a `recovery-command:` line ("Recovery command (v0)").
   where. `.env-orbit` and `.orbit-secrets/` are put back whole from the copy
   taken at the start, so an edit or a file added inside them while the
   install ran is replaced (the closing line says so when the rollback
-  finishes). An update is never rolled back, and its failures keep their usual action. An interrupt or other unplanned exit after the commit is
+  finishes). An update is never rolled back, and its failures keep their usual action (an interrupt: below). A fresh install's interrupt or other unplanned exit after the commit is
   rolled back the same way, and then ends with one terminal
   `state=failed reason=failure` event for the phase it stopped in.
+- An update is never rolled back; once the engine has committed it, it
+  rolls forward (#1518). The first event after the commit is
+  `phase=compose component=compose state=completed
+  reason=compose-validation`, so a consumer can tell before the commit from
+  after it. From there an interrupt (INT, TERM or HUP, to the installer or
+  its whole process group) undoes nothing and cuts no step part-way: an
+  image pull or a required wait (`database`, `application`) stops at once
+  (within one poll), `compose up` is left to finish, and the run ends with
+  exactly one terminal `state=failed reason=failure` event carrying the
+  phase and component of the step it stopped in, and exit status 130 (INT),
+  143 (TERM) or 129 (HUP). Its action is `retry` while the containers have
+  not been started (the image pulls: the running services were not
+  changed), and `repair` from `compose up` on. In the optional phase an
+  interrupt ends the run as below, complete, exit status 0.
+- `compose up -d` runs under a bound of **300 seconds** (then TERM, and KILL
+  10 seconds later), in its own process group, so neither a signal to the
+  installer's group nor a terminal Ctrl-C reaches it. This holds for a fresh
+  install as well as an update. A consumer that stops the installer while
+  `compose up` runs, on either, should therefore allow the bound plus a
+  margin before it kills the installer outright. On a fresh install the
+  rollback follows once `compose up` has ended. An up that reaches the bound ends
+  as a failed start (`reason=docker-host`, above), and stderr says it was
+  stopped at the bound. `ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS`
+  (1-900) lowers or raises it.
 - A failed image pull (`compose pull`, or the release image's
   `docker pull`) carries Docker's words on the same `Docker said:` line.
 - A required service's wait that ends on a fresh install (#1456 decision):
@@ -802,6 +866,7 @@ docker run --rm --init [-i [-t]] [-e ORBIT_INSTALL_INTERACTIVE=1] \
   -e ORBIT_HOST_UID=<uid> -e ORBIT_HOST_GID=<gid> \
   -e ORBIT_IMAGE=<verified digest reference> -e ORBIT_CHANNEL=<channel> \
   -e ORBIT_INSTALLER_ELAPSED=<seconds> -e ORBIT_INSTALL_HOST_FACTS \
+  -e ORBIT_INSTALL_PROFILE \
   -e ORBIT_CONFIGURE_PROMPTS -e ORBIT_CONFIGURE_APP_URL \
   -e ORBIT_CONFIGURE_OIDC_ISSUER -e ORBIT_CONFIGURE_OIDC_CLIENT_ID \
   -e ORBIT_CONFIGURE_AUTH_MODE \

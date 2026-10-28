@@ -71,12 +71,15 @@ fail on a global percentage.
 2. Use uncovered critical modules and branches to refine risk-ranked issues.
 3. Exclude generated declarations, tests, and intentionally declarative assets;
    do not exclude difficult production code merely to improve a number.
-4. Ratcheting thresholds are active (vitest.config.ts, issue #302): global
-   floors just under the measured baseline (29.5% statements, 2026-08-12)
-   plus per-layer floors for scaffolded layers (`src/lib` 60%,
-   `src/server/documents` 75%). CI fails on regression below a floor.
-   Floors are raised when a phase durably lifts a layer and are never
-   lowered to make a change pass; no floor is a target.
+4. Coverage floors are per directory, in `supply-chain/coverage-floors.mjs`
+   (#1099). The gate (`scripts/ci/coverage-floor-check.mjs`) fails when a
+   directory drops below its floor, and also when it sits more than 5 points
+   above it, so a gain is locked in by raising the floor. Floors only go up and
+   are set at the measured value rounded down; a change that needs a lower
+   floor needs more tests. To get numbers that match CI, run
+   `ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh`
+   and read `coverage/coverage-summary.json`, or download the `fast` job's
+   `coverage/` artifact. A local run with the Docker suites moves the numbers.
 5. Apply stronger expectations to security, authorization, lifecycle, and
    migration code than to declarative UI composition.
 
@@ -180,6 +183,18 @@ pipeline until it gets one. `~/.local/bin/gl-pipeline-run ai/orbit <ref>` starts
 a pipeline on any branch. `dev`, `preview` and `main` all take push
 "No one", merge "Maintainers".
 
+A push to `main` starts a pipeline holding only the manual `promote_stable`
+(#1546, owner ruling 2026-10-28): the tree is the one already tested and
+accepted on `preview`, and `promote_stable` itself verifies that identity (same
+commit, digest unchanged, labels agree, tag unused). Merge requests into `main`
+are unchanged.
+
+Browsers are the exception to "a merge request is tested like a push": a merge
+request into `dev` or `preview` starts no browser job. They run at promotion
+and nightly on `dev` (see "Browsers run at promotion and every night" below, #1412). The
+exception is a merge request labelled `ci: acceptance`, which runs them before
+it merges (#1514).
+
 Two runners serve the project, both on the host `gitlab-runners` (32 cores,
 48 GB): the shared group runner, and runner 8, a privileged project runner owned
 by `ai/orbit` and tagged `orbit-build`, which every job needing a Docker daemon
@@ -198,6 +213,20 @@ root cron, not in the repository:
   2026-09-08). It was set to 02:15; a later flake entry says 03:15, so read the
   cron entry for the real time.
 
+CI pulls images through the open image cache (#1510, ai/agent-infra#14), which
+replaced the GitLab group dependency proxy (#1022). The runner hosts mirror
+Docker Hub, so a plain Docker Hub name in `.gitlab-ci.yml` or a Compose file
+needs no prefix. ghcr.io and mcr.microsoft.com images are named through the
+runner variables `CI_IMAGE_CACHE_GHCR` and `CI_IMAGE_CACHE_MCR` (the cache
+hosts are plain HTTP and their addresses are never written in the repository).
+The dind service and the in-job `dockerd` are not the host's daemon, so each is
+started with the cache's mirror and insecure-registry flags. Digests are
+unchanged through the cache. Trivy's databases are the exception: they have no
+digest, so Trivy downloads them from ghcr.io directly over HTTPS, with
+`TRIVY_INSECURE` unset, before any scan. Only the sidecar scans set
+`TRIVY_INSECURE`, to pull their pinned images from the cache, and they skip
+the database update.
+
 Renovate replaces Dependabot on this host: `renovate.json` at the repo root, the
 `renovate` job in `.gitlab-ci.yml`, and pipeline schedule 5 (`Renovate`,
 Mondays 05:00 London, ref `dev`, variable `RENOVATE=true`). It runs nowhere else
@@ -208,6 +237,68 @@ why); the `base_image_repin` job (#708) owns that one: it needs its own schedule
 `dev`/`preview`/`main` and never merges; it pushes `chore/base-image-repin` and
 opens or refreshes one merge request. The header of
 `scripts/ci/repin-base-image.sh` holds how it is authorised.
+
+Merge requests opened by the project bots (Renovate, the base-image re-pin,
+door imports) run with a job token that cannot read `ai/orbit-base-image`
+(#1167), so their pipelines rely on two CI/CD variables the owner sets:
+
+- `ORBIT_REUSE_TOKEN` -- read-only, unprotected; reuse lookup and the nightly
+  check (see below).
+- `ORBIT_BASE_IMAGE_PULL_USER` / `ORBIT_BASE_IMAGE_PULL_TOKEN` -- a deploy
+  token with `read_registry` on `ai/orbit-base-image` only; unprotected (bot
+  branches are not protected) and masked. `build_image` pulls the pinned base
+  image with it; without it the build takes the same digest from GHCR.
+
+All three stay unprotected and masked, and are scoped to the `ci-read-tokens`
+environment (owner decision 11a, v0.3.2 audit, 2026-10-28): GitLab gives an
+environment-scoped variable only to jobs that declare that environment, so
+only `classify`, `build_image`, `launch_timing` and `nightly_report` receive
+them. Every other merge-request job, including those running a dependency
+branch's install and tests, sees none of them. The four jobs declare it with
+`action: prepare`, which records no deployment;
+`scripts/gitlab-ci-lanes.test.mjs` checks that exactly the jobs reading the
+tokens declare it. Scope them in Settings > CI/CD > Variables > Edit >
+Environment scope: `ci-read-tokens`.
+
+### Browsers run at promotion and every night, not on merge requests (#1412)
+
+Owner ruling, 2026-10-22. A merge request into `dev`, and the push that lands
+it, start none of the seven browser jobs: `smoke`, `smoke_firefox`,
+`smoke_webkit`, `smoke_webkit_mobile`, `smoke_local_only`, `fidelity` and
+`fidelity_webkit`. They still get the fast checks, integration, the image
+build and the non-browser journeys. The seven run in full:
+
+- at promotion: the push to `preview` (and `hotfix/*`). The `dev -> preview`
+  merge request runs the quick checks a merge request into `dev` runs, no
+  browsers (#1546);
+- every night on `dev`, from a pipeline schedule that sets
+  `ORBIT_NIGHTLY_BROWSERS=true`, 02:00 Europe/London every night except
+  Monday. That pipeline holds only `classify`, `fast`, `build_image` and the
+  seven, plus `nightly_report`. It does nothing when `dev` has not moved since the
+  last nightly run (`classify` asks `scripts/ci/nightly-browsers.mjs`; the
+  jobs stop on the `nightly_idle` lane). Other schedules on `dev` do not set the
+  variable, so they start none of these jobs and the nightly none of theirs.
+
+A red night must be seen. `nightly_report`, the last job and `on_failure`
+only, files one issue titled "Nightly browser run failed on dev" in the
+nearest open milestone, listing the failed jobs and failing tests, or comments
+on it while it is open. It reads `SIDECAR_ISSUE_TOKEN`, the same project token
+`sidecar_pin_freshness` uses, and fails clearly if it is unset. A night is not
+re-run on a commit it already ran on, even if red: retry the failed job.
+
+Promotion does not wait on the nightly. The push to `preview` runs the full
+browser set on the commit being promoted, and that run is the promotion proof
+(owner decision 5a, 2026-10-28; moved from the merge request by #1546). A nightly that is
+red or unfinished on the same commit does not hold it.
+
+The schedule is a GitLab setting the owner creates (Settings > CI/CD >
+Schedules): description "Nightly browsers on dev (#1412)", target branch `dev`,
+interval `0 2 * * 0,2-6`, time zone Europe/London, variable
+`ORBIT_NIGHTLY_BROWSERS` = `true`.
+
+The cost: a change that breaks only a browser check is no longer caught on its
+merge request. It is caught that night, or at promotion, against whatever else
+has landed since.
 
 ### Risk-proportional pull-request lanes
 
@@ -262,7 +353,9 @@ sometimes a change deserves the whole gate before it merges. The label
 `CI_MERGE_REQUEST_LABELS`, turns every flag on — lane `full`, system risk,
 launcher install compatibility included — and says so in its log, so a full
 run on a small diff is never a mystery. Remove the label and the next pipeline
-is classified again.
+is classified again. On a merge request into `dev` the label also brings back
+the browser jobs (#1514). Adding a label starts no pipeline: start one on the
+merge request afterwards (Pipelines tab, "Run pipeline").
 
 A branch pipeline leaves the acceptance jobs manual, so playing one there asks
 for the same thing.
@@ -310,6 +403,10 @@ runtime-property checks (`verify-health-endpoint.sh`,
 `verify-startup-banner.sh`, `verify-nonroot-runtime.sh`,
 `verify-privacy-boundary.sh`) stay unconditional, because they prove the
 image runs at all and every change can break that.
+
+(#1412 has since taken the browser jobs off merge requests into `dev` and the
+`dev` push altogether; see the section on nightly browsers above. The axes
+still decide what a promotion reaches.)
 
 The trade-off is accepted knowingly, not a side effect: a change that carries
 no web risk and no system risk by `classifyCiRisk`'s reckoning — for example a
@@ -372,10 +469,10 @@ malformed artefact, or any lookup failure, reads as "no reuse".
 Two ways to force a rerun regardless: the merge-request label `ci: rerun`,
 and `ORBIT_REUSE=off` on a pipeline started by hand. The lookup reads the
 API with `ORBIT_REUSE_TOKEN`, a read-only, unprotected credential the owner
-created on 2026-09-23 for exactly this; `BASE_REPIN_TOKEN` is a fallback but
-has been protected since #1084, so it is absent from merge-request
-pipelines. Without a usable token every merge-request verdict is "runs" —
-the safe direction.
+created for exactly this; nothing falls back to `BASE_REPIN_TOKEN`, which can
+push and has been protected since #1084 (it was the fallback until #1412). The
+nightly check reads the pipelines API with the same token alone. Without it
+every merge-request verdict is "runs" — the safe direction.
 
 `fast` (#950, owner ruling on #923 rec 15a, 2026-09-09) is the docker-free
 part of what used to be one job: type-check, lint, the coverage-bearing
@@ -527,9 +624,9 @@ regression and a bad one as a win.
 The spec is now its own Playwright project. `fidelity` runs the `fidelity`
 project — appearance, every front-end merge request, unchanged otherwise — and
 the `launch_timing` job runs the `launch-timing` project at the `dev` →
-`preview` promotion: the merge request whose target branch is `preview`, and
-the push to `preview` that lands it. Those two `rules:` conditions are written
-out rather than reusing `orbit_full_gate`, whose first arm matches every push
+`preview` promotion: the push to `preview` that lands it (the merge request
+into `preview` runs the quick checks only, #1546). That `rules:` condition is
+written out rather than reusing `orbit_full_gate`, whose first arm matches every push
 to `dev` — the merge frequency this job exists to escape — and whose second
 targets `main`, which is the later gate.
 

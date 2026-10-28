@@ -64,6 +64,7 @@ export const deploymentAssets = [
   "docker-compose.yml",
   "docker-compose.mail.yml",
   "docker-compose.kek-rotation.yml",
+  "docker-compose.no-document-key.yml",
   ".env-orbit.example",
   "config/tika-config.json",
   "scripts/configure.sh",
@@ -362,6 +363,13 @@ function compose() {
       };
       // Every root named (tmp, xdg, and the target folder for redesign r5 B2), listed by its key.
       fs.writeFileSync(env.FAKE_STATE_DIR + "/snapshot.json", JSON.stringify(Object.fromEntries(Object.entries(roots).map(([key, root]) => [key, list(root)]))));
+    }
+    // #1518: a start that never ends, and one that takes a while and records that it ran to the end (it must not be cut).
+    if (env.FAKE_HANG_UP === "1") hang("up");
+    if (env.FAKE_UP_DELAY) {
+      if (env.FAKE_STATE_DIR) fs.writeFileSync(env.FAKE_STATE_DIR + "/hung-up", String(process.pid));
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(env.FAKE_UP_DELAY) * 1000);
+      if (env.FAKE_STATE_DIR) fs.writeFileSync(env.FAKE_STATE_DIR + "/up-finished", "");
     }
     exit(env.FAKE_COMPOSE_UP_FAIL === "1" ? 1 : 0);
   }

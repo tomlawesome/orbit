@@ -98,22 +98,30 @@ there is no upgrade path and none is needed.
 
 ## CI relationship
 
-Merge requests and pushes to `dev` run:
+Merge requests into `dev` and pushes to `dev` run:
 
 - lint, type checking and the complete unit suite;
 - the source secret scan;
 - the licence-policy check over the whole installed dependency tree;
 - PostgreSQL integration;
-- the container build, then the smoke, browser and recovery journeys against
-  that build. The browser suite is four jobs side by side: `smoke` runs it in
-  Chromium, `smoke_firefox` in Firefox, and `smoke_webkit` /
-  `smoke_webkit_mobile` in WebKit, desktop and phone. With Firefox inside
-  `smoke`, that one job took 29.9 of its 30 minutes, so it has its own
-  (#1183); WebKit's desktop and phone projects together ran close to the same
-  limit, so they split the same way (#1192).
-- the appearance checks, also two jobs: `fidelity` (Chromium appearance and
-  the phone-floor measurements) and `fidelity_webkit` (the phone film in
-  WebKit), split in #1174 so neither risks the 30-minute job limit.
+- the container build, then `acceptance` (the deployment asset set, the
+  confined document processor and the installer checks) and the recovery
+  journeys (`repair_journeys`) against that build.
+
+The seven browser jobs run elsewhere (#1412). They are the browser suite in
+four jobs side by side -- `smoke` in Chromium, `smoke_firefox` in Firefox, and
+`smoke_webkit` / `smoke_webkit_mobile` in WebKit, desktop and phone, split so
+none nears the 30-minute job limit (#1183, #1192) -- plus `smoke_local_only`
+and the appearance checks `fidelity` (Chromium appearance and the phone-floor
+measurements) and `fidelity_webkit` (the phone film in WebKit, split in
+#1174). They run every night on `dev` when `dev` has moved since the last
+nightly run, and a red night opens an issue; at promotion, meaning the merge
+requests into `preview` and `main` and pushes to `preview` and `hotfix/*`
+branches; in a pipeline started by hand on `dev` (on any other working branch
+the smoke jobs wait to be started by hand); and on a merge request into `dev`
+labelled `ci: acceptance`, in a pipeline started on the merge request after
+the label is added (#1514). A merge request into `dev` without that label,
+and every push to `dev`, run none of them.
 
 CodeQL runs separately on the GitHub mirror.
 
@@ -316,7 +324,7 @@ Each script's own header holds its full usage.
 | --- | --- |
 | `scripts/test-all.sh` | `test-backend.sh`, then `test-frontend.sh` (Playwright against a running instance; `ORBIT_SKIP_E2E=true` skips it). |
 | `scripts/test-backend.sh` | Static analysis and the fast Vitest suite. |
-| `scripts/test-frontend.sh` | Playwright against a running instance. It leaves out tests tagged `@quarantine` (flaky at three sightings, agent-infra#30), which `--quarantine` runs on their own: CI's browser jobs, `fidelity` and `fidelity_webkit` run their quarantined tests after the gate and report a failure without failing the job. In a file that runs in serial order, the tests after a quarantined one usually use its state, so they are tagged too and move with it. |
+| `scripts/test-frontend.sh` | Playwright against a running instance. It leaves out tests tagged `@quarantine` (flaky at three sightings, agent-infra#30), which `--quarantine` runs on their own: CI's browser jobs, `fidelity` and `fidelity_webkit` run their quarantined tests after the gate; a failure there marks the job "passed with warnings" (exit 3, the only failure it allows; #1447), and a run so marked is not reused. In a file that runs in serial order, the tests after a quarantined one usually use its state, so they are tagged too and move with it. |
 | `pnpm --filter orbit-web fidelity` | The v19 visual gate: stands up the adapter-node build and the mockup host, compares every screen in `SCREENS` against the committed baselines. In CI it runs pinned to the Playwright image the baselines were proven against; run it locally the same way if a diff disagrees. |
 | `scripts/test-integration.mjs` | Integration suite against a real database. |
 | `scripts/test-e2e-local.sh` | Local stack with disposable OIDC and GreenMail sidecars, then Playwright. `--profile local-only` swaps them for an Orbit with no identity provider and runs the short list in `tests/e2e/local-only-specs.txt`, which is what CI's `smoke_local_only` runs too (#916). `--reuse PROJECT` skips the build and `compose up` and runs Playwright against a stack a prior `--keep` run left up, identified by Compose's project/service labels and health-checked first; it never tears that stack down (#947). `--ci-cap` adds the cpu/memory overlay CI's acceptance stack runs under, so a local timing measurement transfers; off by default because an uncapped stack is the faster loop (#1080). **WebKit runs on this host only inside the CI Playwright image** (`mcr.microsoft.com/playwright:v1.63.0-noble`, already pulled): the host lacks WebKit's system packages, and that is not a reason to leave the check to a pipeline. The script does this itself for any run that includes a WebKit project (#1235); `--project desktop-webkit --spec <file>` with `--reuse` runs one file in WebKit alone. A change to a WebKit-affected e2e test is run locally on both WebKit projects before it is pushed; the pipeline is the second check, not the first (owner, 2026-10-06). |

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { settle } from "./pocket-states.js";
 
 const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 
@@ -28,8 +29,8 @@ for (const width of WIDTHS) {
     await page.setViewportSize(width.viewport);
     await page.goto(`${APP}/?arrival=newcomer&drawer=1`, { waitUntil: "load" });
     await page.waitForSelector(".nf .belong #hhname", { state: "visible", timeout: 20_000 });
-    /* the card's 1.1s fade and the drawer's .3s open */
-    await page.waitForTimeout(1500);
+    /* the card's 1.1s fade and the drawer's .3s open: wait for them to finish */
+    await settle(page);
 
     const seen = await page.evaluate(() => {
       /** @param {Element | null} el */

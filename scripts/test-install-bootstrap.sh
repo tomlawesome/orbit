@@ -131,9 +131,9 @@ trap cleanup EXIT INT TERM
 # --- the disposable identity provider --------------------------------------
 
 start_oidc() {
-  # OIDC_BASE_IMAGE_PREFIX routes the sidecar's FROM node:24-alpine through
-  # the group dependency proxy in CI (ai/orbit#1111); empty, and so a direct
-  # Docker Hub pull, everywhere else.
+  # OIDC_BASE_IMAGE_PREFIX is an optional registry prefix for the sidecar's
+  # FROM node:24-alpine; empty everywhere, CI included (the image cache mirrors
+  # Docker Hub, ai/orbit#1510).
   docker build --quiet -t "${project_name}-oidc:test" \
     --build-arg "OIDC_BASE_IMAGE_PREFIX=${OIDC_BASE_IMAGE_PREFIX:-}" \
     "$repo_root/tests/oidc" >/dev/null ||

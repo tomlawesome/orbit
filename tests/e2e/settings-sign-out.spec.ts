@@ -132,12 +132,20 @@ async function everyDeviceControl(page: Page): Promise<Locator> {
   return page.locator('[data-e2e-every="target"]');
 }
 
-/** An armed control: the first press arms it, the second confirms. A one-press control has gone by the second. */
+/**
+ * An armed control: the first press arms it, the second confirms (lib/arm.js,
+ * every sign-out here). The second press waits for the control to show it is
+ * armed -- the desk's buttons then read "tap again to ...", the phone's pills
+ * take the `armed` class -- and is then an ordinary press with Playwright's
+ * ordinary waits; a press that fails fails the test.
+ */
 async function pressArmed(control: Locator) {
   await control.click();
-  if (await control.isVisible().catch(() => false)) {
-    await control.click({ timeout: 5_000 }).catch(() => {});
-  }
+  await expect.poll(
+    () => control.evaluate((el) => el.classList.contains("armed") || /^\s*tap again/iu.test(el.textContent ?? "")),
+    { message: "the first press armed the control", timeout: 20_000 },
+  ).toBe(true);
+  await control.click();
 }
 
 async function expectGoodbyeThroughProvider(page: Page, before: number, logins: string[]) {

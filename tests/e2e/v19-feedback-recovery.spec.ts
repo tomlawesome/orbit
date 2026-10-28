@@ -146,15 +146,21 @@ const createOffline: Journey = {
     }
     await page.getByRole("group", { name: /^section/ }).filter({ visible: true }).getByRole("button", { name: "Home" }).click();
 
-    await page.route("**/api/workspace/commands", failCommands);
+    /* #1313: Add is held (aria-disabled) until the engine's first dry-run
+       answer, and a press on a held Add is ignored by design
+       (create.behaviour.js `refusal`, pocket.svelte `refusal`). Pressed
+       before that answer, nothing is sent and no failure ever shows. */
     const save = isPocket() ? ".pk-save" : "#card .btn-primary";
+    await expect(page.locator(save).filter({ visible: true }), "create: Add is live once the engine has answered")
+      .not.toHaveAttribute("aria-disabled", "true", { timeout: SETTLE });
+    await page.route("**/api/workspace/commands", failCommands);
     await tabTo(page, { selector: save }, { screen: "create" });
     await page.keyboard.press("Enter");
 
     return async () => {
       /* Nothing typed was lost, and the page has not moved. */
-      await expect(nameField).toHaveValue(name);
-      await expect(page).toHaveURL(/\/create$/);
+      await expect(nameField).toHaveValue(name, { timeout: SETTLE });
+      await expect(page).toHaveURL(/\/create$/, { timeout: SETTLE });
       await page.unroute("**/api/workspace/commands", failCommands);
       await reach(page, save, "create, retry");
       await page.keyboard.press("Enter");
@@ -255,16 +261,16 @@ const drawerApproval: Journey = {
     await expect(page.locator(act)).toBeEnabled({ timeout: 30_000 });
     await tabTo(page, { selector: act }, { screen: "home, suggestion drawer" });
     await press();
-    await expect.poll(mail.approvals).toBe(1);
+    await expect.poll(mail.approvals, { timeout: SETTLE }).toBe(1);
     return async () => {
       /* The failure stays where it is said: the phone's row stays open,
          its words and its decisions with it. */
       if (isPocket()) {
-        await expect(page.locator(`.pocket .pk-signals [data-row-key="${mail.receiptId}"]`)).toHaveAttribute("data-open", "");
+        await expect(page.locator(`.pocket .pk-signals [data-row-key="${mail.receiptId}"]`)).toHaveAttribute("data-open", "", { timeout: SETTLE });
       }
       await reach(page, act, "home drawer, retry");
       await press();
-      await expect.poll(mail.approvals).toBe(2);
+      await expect.poll(mail.approvals, { timeout: SETTLE }).toBe(2);
       /* Approved: the suggestion leaves home, its decisions with it. */
       await expect(page.locator(act)).toHaveCount(0, { timeout: 30_000 });
     };
@@ -294,15 +300,15 @@ const inboxApproval: Journey = {
     await tabTo(page, { selector: act }, { screen: "inbox" });
     await page.keyboard.press("Enter");
     await page.keyboard.press("Enter");
-    await expect.poll(mail.approvals).toBe(1);
+    await expect.poll(mail.approvals, { timeout: SETTLE }).toBe(1);
     return async () => {
       await reach(page, act, "inbox, retry");
       await page.keyboard.press("Enter");
       await page.keyboard.press("Enter");
-      await expect.poll(mail.approvals).toBe(2);
+      await expect.poll(mail.approvals, { timeout: SETTLE }).toBe(2);
       /* Approved: the suggestion's card leaves the inbox. (Not its title
          text: the pocket's wake still carries it, "added to your orbit".) */
-      await expect(page.locator(act)).toHaveCount(0);
+      await expect(page.locator(act)).toHaveCount(0, { timeout: SETTLE });
     };
   },
   announceDefect: () =>
@@ -368,7 +374,7 @@ const householdDeletion: Journey = {
     return async () => {
       await page.unroute(lifecycle, failDeletion);
       await fire("household, ask again");
-      await expect(shownText(page, /requested · .*gone for good in 30 days/)).toBeVisible();
+      await expect(shownText(page, /requested · .*gone for good in 30 days/)).toBeVisible({ timeout: SETTLE });
     };
   },
   announceDefect: () =>
@@ -381,12 +387,11 @@ const householdDeletion: Journey = {
 
 const JOURNEYS = [createOffline, drawerApproval, inboxApproval, householdDeletion];
 
-/* #1313: the /create journey's two checks are quarantined 2026-10-16
-   (agent-infra#30) -- they run outside the merge gate; the other journeys stay in it. */
-const quarantineTag = (journey: Journey) => ({ tag: journey === createOffline ? ["@quarantine"] : [] });
+/* #1447: UI settling is waited for, never timed -- 20 s, far beyond what any reader would feel. */
+const SETTLE = 20_000;
 
 for (const journey of JOURNEYS) {
-  test(`${journey.name} is announced, and the act can be repeated by keyboard`, quarantineTag(journey), async ({ page }) => {
+  test(`${journey.name} is announced, and the act can be repeated by keyboard`, async ({ page }) => {
     const defect = journey.announceDefect?.();
     test.fail(Boolean(defect), defect);
     test.setTimeout(90_000);
@@ -394,8 +399,12 @@ for (const journey of JOURNEYS) {
     const household = await seedHousehold(page, "feedback-recovery", { withItem: journey.withItem });
     try {
       const retry = await journey.fire(page, household);
-      await expect(shownText(page, journey.words), `${journey.name}: the failure is shown`).toBeVisible();
-      expect(await liveRegionFor(page, journey.words), `${journey.name}: the failure is in a live region`).not.toMatch(/^(none|absent)$/);
+      /* End states, as the focus check below (#1313, #1447): the failure is
+         waited for, and so is the live region that carries it. */
+      await expect(shownText(page, journey.words), `${journey.name}: the failure is shown`).toBeVisible({ timeout: SETTLE });
+      await expect
+        .poll(() => liveRegionFor(page, journey.words), { message: `${journey.name}: the failure is in a live region`, timeout: SETTLE })
+        .not.toMatch(/^(none|absent)$/);
       await retry();
     } finally {
       await page.unrouteAll({ behavior: "ignoreErrors" });
@@ -403,7 +412,7 @@ for (const journey of JOURNEYS) {
     }
   });
 
-  test(`${journey.name} leaves focus where the reader was`, quarantineTag(journey), async ({ page }) => {
+  test(`${journey.name} leaves focus where the reader was`, async ({ page }) => {
     const defect = journey.focusDefect?.();
     test.fixme(Boolean(journey.focusFixme?.()), journey.focusFixme?.());
     test.fixme(Boolean(defect) && isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
@@ -413,8 +422,12 @@ for (const journey of JOURNEYS) {
     const household = await seedHousehold(page, "feedback-recovery", { withItem: journey.withItem });
     try {
       await journey.fire(page, household);
-      await expect(shownText(page, journey.words), `${journey.name}: the failure is shown`).toBeVisible();
-      expect(await focusedElement(page), `${journey.name}: focus is not dropped to the page`).not.toBe("body");
+      await expect(shownText(page, journey.words), `${journey.name}: the failure is shown`).toBeVisible({ timeout: SETTLE });
+      /* The end state, not a single read the instant the failure shows: focus
+         may take a moment to settle, and what matters is where it stays. */
+      await expect
+        .poll(() => focusedElement(page), { message: `${journey.name}: focus is not dropped to the page`, timeout: SETTLE })
+        .not.toBe("body");
     } finally {
       await page.unrouteAll({ behavior: "ignoreErrors" });
       await cleanup(page, household);

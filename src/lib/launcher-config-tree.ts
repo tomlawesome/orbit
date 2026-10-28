@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, constants, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 
 import { applyHostOwnership, readHostIdentity } from "./host-ownership";
@@ -19,9 +19,23 @@ import { applyHostOwnership, readHostIdentity } from "./host-ownership";
 // never over an existing entry (O_EXCL); owner-only files; all or nothing,
 // with everything written removed when any copy fails. Every outcome leaves
 // the install's own exit unchanged; a refusal is one stderr line.
+//
+// The tree is two-way since #1519: the launcher may leave the configuration
+// it ran in it (`.env-orbit`, and `.orbit-secrets/`) for the next install to
+// take in (takeHandedInConfiguration), so the install's transaction is the
+// only writer in the deployment folder. Those two entries are the only ones
+// the configure tree may be written beside, apart from the tree's own
+// leftovers: a launcher that reconfigures and fails again still holds the
+// last hand-over, so those three names are replaced, never refused.
 
 /** What the launcher tree receives from the image, beside the .orbit-image pin. */
 export const LAUNCHER_CONFIG_TREE_ASSETS: readonly string[] = ["scripts/configure.sh", "scripts/installer-ui.sh", ".env-orbit.example"];
+
+/** What the launcher may leave in the tree for the install to take in (#1519). */
+export const LAUNCHER_HANDED_IN_ENTRIES: readonly string[] = [".env-orbit", ".orbit-secrets"];
+
+/** What an earlier hand-over left in the tree, replaced by the next one: the directory first, then the files. */
+const OWN_LEFTOVERS: readonly string[] = ["scripts", ".env-orbit.example", ".orbit-image"];
 
 export const LAUNCHER_CONFIG_TREE_ENV = "ORBIT_LAUNCHER_CONFIG_TREE";
 export const LAUNCHER_CONFIG_TREE_UNAVAILABLE_ENV = "ORBIT_LAUNCHER_CONFIG_TREE_UNAVAILABLE";
@@ -76,7 +90,33 @@ function refusal(tree: string): string | undefined {
   } catch {
     return "it could not be entered";
   }
-  if (entries.length > 0) return "it is not empty";
+  if (entries.some((entry) => !LAUNCHER_HANDED_IN_ENTRIES.includes(entry) && !OWN_LEFTOVERS.includes(entry))) return "it is not empty";
+  return undefined;
+}
+
+/**
+ * Removes an earlier hand-over's leftovers, after checking every one has the
+ * shape a hand-over writes (lstat, so a symlink is never followed): scripts a
+ * real directory, the two files regular files. Anything else is refused with
+ * nothing removed.
+ */
+function removeOwnLeftovers(tree: string): string | undefined {
+  const present: string[] = [];
+  for (const name of OWN_LEFTOVERS) {
+    let stat;
+    try {
+      stat = lstatSync(join(tree, name));
+    } catch {
+      continue;
+    }
+    if (name === "scripts" ? !stat.isDirectory() : !stat.isFile()) return "it holds something that is not ours";
+    present.push(name);
+  }
+  try {
+    for (const name of present) rmSync(join(tree, name), { recursive: true, force: true });
+  } catch {
+    return "its earlier copies could not be removed";
+  }
   return undefined;
 }
 
@@ -124,7 +164,7 @@ export function handOverLauncherConfigTree(request: LauncherConfigTreeRequest): 
   }
   sources.set(".orbit-image", Buffer.from(`${request.imageReference}\n`, "utf8"));
 
-  const reason = refusal(tree);
+  const reason = refusal(tree) ?? removeOwnLeftovers(tree);
   if (reason) {
     request.notice(noticeLine(reason));
     return "refused";
@@ -169,4 +209,83 @@ export function handOverLauncherConfigTree(request: LauncherConfigTreeRequest): 
     }
   }
   return "written";
+}
+
+export type HandedInConfiguration = { kind: "none" } | { kind: "taken" } | { kind: "refused"; problem: string };
+
+/** Whether the tree holds a `.env-orbit` at all (of any kind): a configuration the launcher handed in. */
+export function treeHoldsConfiguration(tree: string | undefined): boolean {
+  if (tree === undefined || tree === "") return false;
+  try {
+    lstatSync(join(tree, LAUNCHER_HANDED_IN_ENTRIES[0]));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** One owner-only regular file, read through an O_NOFOLLOW descriptor (a symlink is refused, never followed). */
+function readOwnerOnlyFile(path: string, name: string): { content: Buffer; mode: number } | { problem: string } {
+  let descriptor: number;
+  try {
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    return { problem: `its ${name} is a symlink or cannot be read` };
+  }
+  try {
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile()) return { problem: `its ${name} is not a regular file` };
+    if ((stat.mode & 0o077) !== 0) return { problem: `its ${name} is readable by others than its owner` };
+    return { content: readFileSync(descriptor), mode: stat.mode & 0o777 };
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+/**
+ * The launcher's configuration, handed in through its tree (#1519), copied
+ * into the install's scratch directory, where the engine stages a guided
+ * configuration, so it reaches the deployment only through the transaction:
+ * `.env-orbit`, an owner-only regular file, and `.orbit-secrets/` when
+ * there is one, a real directory of owner-only regular files. Nothing in the
+ * tree is changed. "none" when the tree holds no `.env-orbit`; "refused",
+ * with what is wrong, for anything of another shape (and nothing copied).
+ */
+export function takeHandedInConfiguration(tree: string | undefined, scratchDir: string): HandedInConfiguration {
+  if (tree === undefined || !treeHoldsConfiguration(tree)) return { kind: "none" };
+  const root = tree;
+  const [environmentName, secretsName] = LAUNCHER_HANDED_IN_ENTRIES;
+  const environment = readOwnerOnlyFile(join(root, environmentName), environmentName);
+  if ("problem" in environment) return { kind: "refused", problem: environment.problem };
+
+  const secrets = new Map<string, { content: Buffer; mode: number }>();
+  const secretsDir = join(root, secretsName);
+  let secretsStat;
+  try {
+    secretsStat = lstatSync(secretsDir);
+  } catch {
+    secretsStat = undefined;
+  }
+  if (secretsStat) {
+    if (secretsStat.isSymbolicLink() || !secretsStat.isDirectory()) return { kind: "refused", problem: `its ${secretsName} is not a real directory` };
+    if ((secretsStat.mode & 0o077) !== 0) return { kind: "refused", problem: `its ${secretsName} is open to others than its owner` };
+    let names: string[];
+    try {
+      names = readdirSync(secretsDir);
+    } catch {
+      return { kind: "refused", problem: `its ${secretsName} could not be read` };
+    }
+    for (const name of names) {
+      const file = readOwnerOnlyFile(join(secretsDir, name), `${secretsName}/${name}`);
+      if ("problem" in file) return { kind: "refused", problem: file.problem };
+      secrets.set(name, file);
+    }
+  }
+
+  writeFileSync(join(scratchDir, environmentName), environment.content, { mode: 0o600, flag: "wx" });
+  if (secretsStat) {
+    mkdirSync(join(scratchDir, secretsName), { mode: 0o700 });
+    for (const [name, file] of secrets) writeFileSync(join(scratchDir, secretsName, name), file.content, { mode: file.mode, flag: "wx" });
+  }
+  return { kind: "taken" };
 }

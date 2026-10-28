@@ -367,17 +367,19 @@ describe("the escape hatches", () => {
     expect(lines()).toContain("ORBIT_REUSE_TOKEN");
   });
 
-  // What #898 used. It is protected since #1084, so it is present only on the
-  // delivery refs that never consume evidence -- kept so nothing breaks if the
-  // owner points a read-only credential at the same name.
-  it("still accepts BASE_REPIN_TOKEN when ORBIT_REUSE_TOKEN is unset", async () => {
+  // What #898 used. It can push, and it is protected since #1084: the lookup
+  // reads ORBIT_REUSE_TOKEN alone and never falls back to it (#1412).
+  it("does not fall back to BASE_REPIN_TOKEN when ORBIT_REUSE_TOKEN is unset", async () => {
     await withOnePass();
 
     await run({
       env: environment({ ORBIT_REUSE_TOKEN: "", BASE_REPIN_TOKEN: TOKEN }), envFile, now: NOW, log,
     });
 
-    expect(emitted()).toContain("ORBIT_REUSE_FAST=9001");
+    expect(seen.paths).toEqual([]);
+    expect(seen.tokens).toEqual([]);
+    expect(emitted()).not.toContain("ORBIT_REUSE_");
+    expect(lines()).toContain("ORBIT_REUSE_TOKEN");
   });
 
   // ADR-0028 section 2: delivery branches never consume evidence; they record it.
@@ -473,5 +475,48 @@ describe("the image jobs' keys", () => {
 
     expect(emittedImage()).toBe("");
     expect(lines()).toContain("smoke: classify published no source key");
+  });
+});
+
+// v0.3.2 audit D-F17. Fails on current code: successfulJobs counts only
+// status === "success", so a browser job that exited 3 (a quarantined test;
+// GitLab records status failed with allow_failure true) is never reused.
+describe("a job that failed with an allowed exit code (D-F17)", () => {
+  const allowedFailure = (id, name) => ({
+    id,
+    name,
+    status: "failed",
+    allow_failure: true,
+    finished_at: RECENT,
+  });
+
+  it("is reused when status is failed and allow_failure is true, highest id winning", async () => {
+    await start({
+      pipelines: [{ id: 299, jobs: [allowedFailure(9001, "fast"), allowedFailure(9002, "fast")] }],
+      evidence: {
+        9001: { fast: { job: "fast", inputs: KEY, pipeline: 299, job_id: 9001, stands_on: null } },
+        9002: { fast: { job: "fast", inputs: KEY, pipeline: 299, job_id: 9002, stands_on: null } },
+      },
+    });
+
+    await run({ env: environment(), envFile, now: NOW, log });
+
+    expect(emitted()).toContain("ORBIT_REUSE_FAST=9002");
+  });
+
+  it("is not reused when status is failed and allow_failure is false", async () => {
+    await start({
+      pipelines: [
+        {
+          id: 299,
+          jobs: [{ id: 9001, name: "fast", status: "failed", allow_failure: false, finished_at: RECENT }],
+        },
+      ],
+      evidence: { 9001: { fast: { job: "fast", inputs: KEY, pipeline: 299, job_id: 9001, stands_on: null } } },
+    });
+
+    await run({ env: environment(), envFile, now: NOW, log });
+
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
   });
 });

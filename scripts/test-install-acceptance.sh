@@ -59,7 +59,7 @@
 #     services and orphans, named volumes, networks (removed by `compose
 #     down`, then by the project label so a SIGKILLed run's debris goes too)
 #   - the local registry container <project>-registry and its anonymous
-#     volume (`docker rm -v`; registry:2 declares a VOLUME)
+#     volume (`docker rm -v`; the registry image declares a VOLUME)
 #   - the disposable OIDC sidecar container <project>-oidc and the image
 #     <project>-oidc:test this run built for it
 #   - the image tags it made: 127.0.0.1:<port>/acceptance/orbit (the tag and
@@ -186,7 +186,7 @@ evidence_dir=""
 
 sweep_debris() {
   local sweep_project="${1:-$project_name}"
-  # -v: a container's anonymous volumes die with it. registry:2 declares a
+  # -v: a container's anonymous volumes die with it. The registry image declares a
   # VOLUME, so a plain `rm -f` left one dangling per run (#1241).
   docker rm -f -v "$registry_name" >/dev/null 2>&1 || true
   docker rm -f -v "$oidc_container" >/dev/null 2>&1 || true
@@ -471,8 +471,9 @@ negative_scenarios() {
 start_oidc() {
   local waited=0 host_port
   oidc_image="${project_name}-oidc:test"
-  # OIDC_BASE_IMAGE_PREFIX routes the sidecar's base image through the group
-  # dependency proxy in CI (ai/orbit#1111); empty everywhere else.
+  # OIDC_BASE_IMAGE_PREFIX is an optional registry prefix for the sidecar's
+  # base image; empty everywhere, CI included (the image cache mirrors Docker
+  # Hub, ai/orbit#1510).
   docker build --quiet -t "$oidc_image" \
     --build-arg "OIDC_BASE_IMAGE_PREFIX=${OIDC_BASE_IMAGE_PREFIX:-}" \
     "$repo_root/tests/oidc" >/dev/null ||
@@ -628,10 +629,10 @@ prepare_image() {
 
   docker rm -f -v "$registry_name" >/dev/null 2>&1 || true
   # Pinned by digest, the same one scripts/ci/start-installer-registry.sh uses
-  # (ai/orbit#1111): a moving `:2` tag is what let this local-run harness keep
+  # (ai/orbit#1111): a moving tag is what let this local-run harness keep
   # hitting Docker Hub's anonymous pull rate limit.
   docker run -d --name "$registry_name" -p "127.0.0.1:$registry_port:5000" \
-    registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373 >/dev/null ||
+    registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0 >/dev/null ||
     fail "local registry did not start"
   docker tag "$image" "127.0.0.1:$registry_port/$repository:latest"
   docker push --quiet "127.0.0.1:$registry_port/$repository:latest" >/dev/null ||

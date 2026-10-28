@@ -80,12 +80,15 @@ const NEW_PLATFORM_DIGEST = digest(4); // What the live tag's index resolves lin
  * (checkout, add, commit, push) to land in the scratch repo rather than this
  * checkout.
  */
-function deployRepinRepo() {
+function deployRepinRepo({ dockerfile } = {}) {
   const repoDir = scratchDir("orbit-repin-repo-");
   mkdirSync(join(repoDir, "scripts", "ci"), { recursive: true });
   mkdirSync(join(repoDir, ".github"), { recursive: true });
   writeFileSync(join(repoDir, "scripts", "ci", "repin-base-image.sh"), scriptSource);
-  writeFileSync(join(repoDir, "Dockerfile"), `FROM ${IMAGE_TAG}@${OLD_PLATFORM_DIGEST} AS base\n`);
+  writeFileSync(
+    join(repoDir, "Dockerfile"),
+    dockerfile ?? `FROM ${IMAGE_TAG}@${OLD_PLATFORM_DIGEST} AS base\n`,
+  );
   writeFileSync(
     join(repoDir, ".github", "supply-chain-policy.json"),
     `${JSON.stringify(
@@ -107,7 +110,10 @@ function deployRepinRepo() {
   runGit(repoDir, ["init", "--quiet", "--initial-branch=work"]);
   runGit(repoDir, ["config", "user.email", "test@example.invalid"]);
   runGit(repoDir, ["config", "user.name", "Test"]);
-  runGit(repoDir, ["add", "-A"]);
+  // Only what the script edits (#1523). The script itself needs to be on
+  // disk for BASH_SOURCE, never tracked: committing a copy of it put its own
+  // lines in front of the host's commit gates.
+  runGit(repoDir, ["add", "--", "Dockerfile", ".github/supply-chain-policy.json"]);
   runGit(repoDir, ["commit", "--quiet", "-m", "initial"]);
 
   return repoDir;
@@ -207,6 +213,25 @@ for (const packagesStale of [true, false]) {
     });
   });
 }
+
+describe("repin-base-image.sh with the registry named by a Dockerfile build arg (#1101)", () => {
+  it("re-pins only the digest, in both stages, and leaves the build arg reference intact", () => {
+    const argForm = (digestValue) =>
+      [
+        "ARG BASE_IMAGE_REGISTRY=ghcr.io/tomlawesome",
+        `FROM \${BASE_IMAGE_REGISTRY}/orbit-repin-test:latest@${digestValue} AS base`,
+        `FROM \${BASE_IMAGE_REGISTRY}/orbit-repin-test:latest@${digestValue} AS runner`,
+        "",
+      ].join("\n");
+    const repoDir = deployRepinRepo({ dockerfile: argForm(OLD_PLATFORM_DIGEST) });
+    const bareDir = deployBareRemote();
+
+    const result = runRepin({ repoDir, bareDir, packagesStale: false });
+
+    assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(pushedDockerfile(bareDir), argForm(NEW_PLATFORM_DIGEST));
+  });
+});
 
 describe("repin-base-image.sh clears the runner's inherited auth header before pushing (#1081)", () => {
   it("removes every http.*.extraheader from the checkout, naming each without printing its value", () => {

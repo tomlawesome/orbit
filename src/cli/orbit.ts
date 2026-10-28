@@ -1540,8 +1540,11 @@ function commandInstallOrUpdate(command: "install" | "update", deployDirArg: str
       resolvedReference,
       channel,
       requestedComposeProjectName: process.env.COMPOSE_PROJECT_NAME || undefined,
+      // Passed as set, empty included: an empty request is refused, not read as standard (#1504).
+      requestedProfile: process.env.ORBIT_INSTALL_PROFILE,
       facts,
       assetsRoot,
+      launcherConfigTree: process.env[LAUNCHER_CONFIG_TREE_ENV] || undefined,
     },
     {
       terminal,
@@ -1550,6 +1553,7 @@ function commandInstallOrUpdate(command: "install" | "update", deployDirArg: str
         oidcSecret: () => collectOidcSecret(guidedIo),
       },
       say: (line) => process.stdout.write(`${line}\n`),
+      notice: (line) => process.stderr.write(`${line}\n`),
       onConfigurationFailure: () => {
         handOverLauncherConfigTree({
           tree: process.env[LAUNCHER_CONFIG_TREE_ENV] || undefined,

@@ -270,6 +270,35 @@ describe("install.sh: a file saved while the engine ran survives a failed start 
   });
 });
 
+// #1519: the launcher leaves its configuration in the tree it mounts into the
+// engine; the engine takes it in through its transaction, so install.sh's
+// rollback after the commit removes it with the rest of the engine's files.
+describe("install.sh: a failed start after the launcher's configuration was taken in (#1519)", () => {
+  it("fresh install handed its configuration through ORBIT_LAUNCHER_CONFIG_TREE, compose up fails: the folder is put back, and the launcher's tree still holds its files", () => {
+    const targetDir = makeTarget();
+    const tree = join(scratchDir("launcher"), "tree");
+    mkdirSync(tree, { mode: 0o700 });
+    chmodSync(tree, 0o700);
+    writeFileSync(join(tree, ".env-orbit"), "APP_URL=https://launcher-tree.internal\nORBIT_AUTH_OIDC=false\n", { mode: 0o600 });
+    mkdirSync(join(tree, ".orbit-secrets"), { mode: 0o700 });
+    chmodSync(join(tree, ".orbit-secrets"), 0o700);
+    writeFileSync(join(tree, ".orbit-secrets", "oidc-client-secret"), "launcher-tree-secret", { mode: 0o600 });
+    const treeBefore = treeSnapshot(tree);
+
+    const result = runInstall(targetDir, { ORBIT_LAUNCHER_CONFIG_TREE: tree, FAKE_COMPOSE_UP_FAIL: "1" });
+
+    // The engine really took the configuration in and committed, and Compose really was asked to start: otherwise an empty folder proves nothing.
+    expect(result.engineRuns[0].env.ORBIT_LAUNCHER_CONFIG_TREE).toBeDefined();
+    expect(result.calls).toMatch(/\bup\b/u);
+    expect(result.status).toBe(1);
+    expectFolderPutBack(result, targetDir, undefined);
+    expect(existsSync(join(targetDir, ".env-orbit"))).toBe(false);
+    expect(existsSync(join(targetDir, ".orbit-secrets"))).toBe(false);
+    expect(filesNamed(backupsDir(targetDir), [".env-orbit", "oidc-client-secret", "docker-compose.yml", "orbit-ops.sh"])).toEqual([]);
+    expect(treeSnapshot(tree)).toEqual(treeBefore);
+  });
+});
+
 describe("install.sh: an engine killed hard, by what its journal says (redesign r2)", () => {
   it("T7: no journal, only staging and the lock left: both removed by their fixed names, the folder put back, nothing moved, the copy released", () => {
     const { targetDir, stateRoot, environment, before } = privateStateFixture();

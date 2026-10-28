@@ -413,12 +413,13 @@ key-encryption key" is the master key that protects each document's own key.
 | `COMPOSE_PROFILES` | Compose | Optional services to run: `processing` for the document text reader, `ai` for the private model server, or both. Empty runs the standard stack. | `processing,ai` |
 | `ORBIT_BIND_ADDRESS` | Compose | Host interface that publishes Orbit. Use loopback when a reverse proxy is on the same host. | `0.0.0.0` |
 | `ORBIT_PORT` | Compose | Host TCP port mapped to container port 3000. | `3000` |
-| `ORBIT_MEMORY_LIMIT` | Compose | Memory limit for the Orbit application container. It must cover the peak of importing a maximum-size archive (about 1 GB), the 256 MiB quarantine space and Node's own overhead; 2 GB is the default. Node's heap is set to 70% of the limit automatically, unless `NODE_OPTIONS` sets `--max-old-space-size`. | `2g` |
+| `ORBIT_MEMORY_LIMIT` | Compose | Memory limit for the Orbit application container. It must cover the peak of previewing or importing a maximum-size archive (about 1.9 GB, measured; #1521 brings it down), the 256 MiB quarantine space and Node's own overhead; 2 GB is the default, which that peak only just fits, so on a host without swap set `3g` before importing an archive near the 256 MiB maximum. Exporting one peaks near 0.25 GB. Node's heap is set to 70% of the limit automatically, unless `NODE_OPTIONS` sets `--max-old-space-size`. | `2g` |
 | `SESSION_SECRET` | Orbit | Direct session-signing secret. Leave empty when `SESSION_SECRET_FILE` is set. | `<64-character-random-hex>` |
 | `SESSION_SECRET_FILE` | Orbit | File containing the session-signing secret. The Compose stack sets this to `/run/orbit-secrets/orbit-session-secret`. | `.orbit-secrets/session-secret` |
 | `SESSION_TTL_SECONDS` | Orbit | How long a sign-in lasts, in seconds. | `604800` |
 | `DOCUMENTS_ROOT` | Orbit | Where encrypted documents are kept inside the container. | `/var/lib/orbit/documents` |
 | `DOCUMENTS_QUARANTINE_ROOT` | Orbit | Temporary holding area for an upload while it is scanned; Compose supplies a private 256 MiB in-memory folder that disappears on restart; it must hold two uploads at the 100 MiB size-limit ceiling, and a member who finds it full is told to try again shortly. | `/tmp/orbit-document-quarantine` |
+| `ORBIT_ARCHIVE_SCRATCH_DIR` | Orbit | Where an archive being previewed or imported is decrypted. Compose sets this to `/tmp/orbit-archive-scratch`, a private 320 MiB in-memory folder, so decrypted data never reaches the host disk; without it Orbit uses the system temporary folder. | `/tmp/orbit-archive-scratch` |
 | `DOCUMENT_KEK` | Orbit | Direct 32-byte hexadecimal document key-encryption key. Leave empty when the file form is used. | `<64-character-random-hex>` |
 | `DOCUMENT_KEK_FILE` | Orbit | File containing the document key-encryption key. Compose mounts the generated file at `/run/orbit-secrets/orbit-document-kek`. | `.orbit-secrets/document-kek` |
 | `DOCUMENT_KEK_NEXT` / `DOCUMENT_KEK_NEXT_FILE` | Orbit | Second document key-encryption key, held alongside the first only while a key rotation is in progress (#954). Set only via the `docker-compose.kek-rotation.yml` overlay — see "Rotating the document key-encryption key" in `docs/administrator-operations.md`. | `<64-character-random-hex>` |
@@ -759,10 +760,9 @@ instance, and it clears the moment `export-recovery-bundle.sh` completes.
 To use a recovery bundle, run `bash scripts/import-recovery-bundle.sh
 <recovery.tar>` (it asks for the passphrase, then for `IMPORT RECOVERY`, then
 for `RESTORE`) and see "Restoring
-the document key-encryption key" below. The import needs the deployment's
-current key file in `.orbit-secrets/document-kek` and refuses without it
-("the configured document key is missing"); when that file is gone, see the
-same section.
+the document key-encryption key" below. The import also works when the
+deployment's key file in `.orbit-secrets/document-kek` is gone: the bundle
+brings its own key.
 
 ## Restoring the document key-encryption key
 
@@ -830,16 +830,16 @@ restart the exact deployed image:
    screen that no "Encrypted details are locked" card remains. Nothing needs
    re-encrypting and no backfill runs, because the values were never changed.
 
-If you have no copy of the key file but do have a recovery bundle, the way
-back is to restore the backup bundle or reinstall. The bundle import needs the
-deployment's current key file and refuses while that file is missing ("the
-configured document key is missing"), so do not run it there. Reinstall
-Orbit into a fresh directory ([Installing Orbit](installing.md)), then import
-the bundle there:
+If you have no copy of the key file but do have a recovery bundle, import the
+bundle into this deployment, missing key file and all:
 
 ```sh
 bash scripts/import-recovery-bundle.sh <recovery.tar>
 ```
+
+It installs the bundle's key and restores the backup inside it. If the import
+fails and rolls back, it removes the key it wrote, so the deployment is left
+as it was, with no key file; `bash scripts/restore.sh --recover` does the same.
 
 If the key is really gone and no recovery bundle holds it, this is not a
 restore. Encrypted documents and Tier 1 and Tier 2 metadata, every account
@@ -925,6 +925,14 @@ rotation is undone).
    the current key, and every row it has moved is readable under the next
    one. Each batch is one transaction, so a row is never left half-moved. It
    records one `document_kek_rotation_completed` audit entry when it finishes.
+
+   Builds before #1316 did not move held mail attachments or scanner-recovery
+   objects, so an earlier rotation may have left some on a key older than the
+   current one. Neither key you hold can read those, so the worker skips them
+   rather than stalling (#1392): it says how many at the start and the end,
+   and logs a `document.kek_rotation` warning. They are left exactly as they
+   were, and do not stop the rotation completing. A held object whose key
+   cannot be identified at all still stops the worker with an error.
 4. **The point of no return.** Only once the worker reports completion, make
    the next key the current one and drop the overlay:
    ```sh

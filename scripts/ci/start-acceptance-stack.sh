@@ -11,8 +11,7 @@
 # Inputs (environment):
 #   COMPOSE_FILES  overlay set to bring up. Defaults to the base, mail and
 #                  acceptance files; the GitLab smoke jobs append the
-#                  dependency-proxy and compose/docker-compose.ci-cap.yml
-#                  overlays to it.
+#                  compose/docker-compose.ci-cap.yml overlay to it.
 #   ORBIT_IMAGE    the image under test, plus the .env-orbit written by
 #                  scripts/ci/create-test-configuration.sh
 #

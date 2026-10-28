@@ -93,7 +93,8 @@ describe("bounded esbuild override", () => {
        Moved 8.2.1 -> 8.2.2 with esbuild 0.28.1 -> 0.28.2 in the #882 sweep;
        the deprecated core-utils edge above stayed at 0.25.12, which is what
        this policy is actually about. Moved 8.2.2 -> 8.3.0 in the non-major
-       sweep that superseded !922; esbuild stayed at 0.28.2. */
-    expect(lockfile).toMatch(/  vite@8\.3\.0\([^\n]*esbuild@0\.28\.2[^\n]*\):[\s\S]*?\n      esbuild: 0\.28\.2\n/m);
+       sweep that superseded !922; esbuild stayed at 0.28.2. Moved 8.3.0 -> 8.3.3
+       for the dev-server advisories (#1522), then 8.3.3 -> 8.3.5; esbuild stayed at 0.28.2. */
+    expect(lockfile).toMatch(/  vite@8\.3\.5\([^\n]*esbuild@0\.28\.2[^\n]*\):[\s\S]*?\n      esbuild: 0\.28\.2\n/m);
   });
 });

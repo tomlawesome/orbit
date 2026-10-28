@@ -1,10 +1,13 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   evaluateImageEvidence,
   evaluateSourceEvidence,
+  unaccountedImagePins,
   validateSupplyChainPolicy,
 } from "./supply-chain-policy.mjs";
 
@@ -90,19 +93,21 @@ describe("supply-chain policy", () => {
       "docker-compose.yml",
       "scripts/test-integration.mjs",
       ".gitlab-ci.yml",
-      "compose/docker-compose.dependency-proxy.yml",
     ];
     const discovered = new Map();
     for (const file of files) {
       const content = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
       for (const line of content.split(/\r?\n/u)) {
-        // The optional ${OIDC_BASE_IMAGE_PREFIX} strips the group dependency
-        // proxy path tests/oidc/Dockerfile's FROM carries for CI
-        // (ai/orbit#1111): the policy tracks the vendor reference, and the
-        // digest after it is unchanged either way.
+        // The optional ${OIDC_BASE_IMAGE_PREFIX} strips the registry prefix
+        // tests/oidc/Dockerfile's FROM may carry: the policy tracks the vendor
+        // reference, and the digest after it is unchanged either way.
+        // `${BASE_IMAGE_REGISTRY}` is the root Dockerfile's build arg for
+        // where CI pulls the base image from (#1101); its ARG default is the
+        // vendor reference the policy tracks.
         const from = line
           .match(/^FROM\s+(\S+)/u)?.[1]
-          ?.replace(/^\$\{OIDC_BASE_IMAGE_PREFIX\}/u, "");
+          ?.replace(/^\$\{OIDC_BASE_IMAGE_PREFIX\}/u, "")
+          ?.replace(/^\$\{BASE_IMAGE_REGISTRY\}/u, "ghcr.io/tomlawesome");
         const compose =
           file === "docker-compose.yml"
             ? line.match(/^\s+image:\s+"?([^"]+)"?\s*$/u)?.[1]
@@ -110,27 +115,17 @@ describe("supply-chain policy", () => {
         const integration = line.match(/^\s+"(postgres:[^"]+)",?$/u)?.[1];
         // The pipeline pins the same PostgreSQL sidecar for its integration
         // job; other `*_IMAGE:` pins here (node, playwright) are unrelated
-        // images with no policy entry, so this only picks out postgres. The
-        // optional prefix strips the group dependency proxy path
-        // (ai/orbit#1022): the policy tracks the vendor reference, and the
-        // digest after it is unchanged either way.
+        // images with no policy entry, so this only picks out postgres. It
+        // is a plain Docker Hub name (#1510), the vendor reference itself.
         const pipelinePostgres = (
           file === ".gitlab-ci.yml"
             ? line.match(
-                /^\s*POSTGRES_IMAGE:\s+(?:\$\{CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX\}\/library\/)?(postgres:\S+)\s*$/u,
+                /^\s*POSTGRES_IMAGE:\s+(postgres:\S+)\s*$/u,
               )?.[1]
             : undefined
         );
-        // The dependency-proxy overlay (ai/orbit#1109) holds its own copies
-        // of the sidecar pins behind the same group proxy prefix.
-        const proxied =
-          file === "compose/docker-compose.dependency-proxy.yml"
-            ? line.match(
-                /^\s+image:\s+\$\{CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX\}\/(?:library\/)?(\S+)\s*$/u,
-              )?.[1]
-            : undefined;
         const reference =
-          from ?? compose ?? integration ?? pipelinePostgres ?? proxied;
+          from ?? compose ?? integration ?? pipelinePostgres;
         if (!reference || reference === "base") continue;
         if (reference.startsWith("${ORBIT_IMAGE:")) {
           expect(reference).toBe(
@@ -585,5 +580,185 @@ describe("deployment reference rule", () => {
 
   it("ignores an empty assignment, which deploys nothing", () => {
     expect(deploysOnlyImmutableReferences('ORBIT_IMAGE=""')).toBe(true);
+  });
+});
+
+describe("image pins accounted for by the policy (#1490)", () => {
+  const PIN_A = `sha256:${"1".repeat(64)}`;
+  const PIN_B = `sha256:${"2".repeat(64)}`;
+  const PIN_C = `sha256:${"3".repeat(64)}`;
+  const roots = [];
+
+  afterEach(() => {
+    while (roots.length > 0) rmSync(roots.pop(), { recursive: true, force: true });
+  });
+
+  // A throwaway repository root holding the given files (path -> content).
+  function fixtureRoot(files) {
+    const root = mkdtempSync(join(tmpdir(), "orbit-image-pins-"));
+    roots.push(root);
+    for (const [file, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      writeFileSync(join(root, file), content);
+    }
+    return root;
+  }
+
+  function composeWith(reference) {
+    return `services:\n  web:\n    image: ${reference}\n`;
+  }
+
+  function watched(reference, locations) {
+    return { ...policy().containerImages[0], tag: reference.split("@")[0], reference, locations };
+  }
+
+  function unwatched(reference, locations) {
+    return { reference, locations, reason: "Throwaway fixture image, not shipped." };
+  }
+
+  it("does not report a pin that is one of the policy's pinned images", () => {
+    const reference = `registry:3.1.2@${PIN_A}`;
+    const root = fixtureRoot({ "compose/test.yml": composeWith(reference) });
+    const result = unaccountedImagePins(
+      root,
+      policy({
+        containerImages: [watched(reference, ["compose/test.yml"])],
+        unwatchedImages: [],
+      }),
+    );
+    expect(result).toEqual([]);
+  });
+
+  it("does not report a pin listed as deliberately unwatched", () => {
+    const reference = `nginx:alpine@${PIN_B}`;
+    const root = fixtureRoot({ "compose/demo.yml": composeWith(reference) });
+    const result = unaccountedImagePins(
+      root,
+      policy({ unwatchedImages: [unwatched(reference, ["compose/demo.yml"])] }),
+    );
+    expect(result).toEqual([]);
+  });
+
+  it("reports a pin that is in neither list, naming the file and the reference", () => {
+    const reference = `redis:8@${PIN_C}`;
+    const root = fixtureRoot({ "compose/extra.yml": composeWith(reference) });
+    const result = unaccountedImagePins(root, policy({ unwatchedImages: [] }));
+    expect(result).toEqual([{ file: "compose/extra.yml", reference }]);
+  });
+
+  it("matches a prefixed reference by the image after the prefix", () => {
+    const reference = `postgres:18-alpine@${PIN_A}`;
+    const root = fixtureRoot({
+      "compose/proxy.yml": composeWith(
+        `\${IMAGE_PREFIX}/library/${reference}`,
+      ),
+      "tests/oidc/Dockerfile": `FROM \${OIDC_BASE_IMAGE_PREFIX}node:24-alpine@${PIN_B}\n`,
+    });
+    const result = unaccountedImagePins(
+      root,
+      policy({
+        containerImages: [watched(reference, ["compose/proxy.yml"])],
+        unwatchedImages: [unwatched(`node:24-alpine@${PIN_B}`, ["tests/oidc/Dockerfile"])],
+      }),
+    );
+    expect(result).toEqual([]);
+  });
+
+  it("reads a registry named by a Dockerfile ARG default as the image that default pulls (#1101)", () => {
+    const reference = `example.invalid/org/base:latest@${PIN_A}`;
+    const root = fixtureRoot({
+      Dockerfile:
+        "ARG BASE_REGISTRY=example.invalid/org\n" +
+        `FROM \${BASE_REGISTRY}/base:latest@${PIN_A} AS base\n` +
+        `FROM \${BASE_REGISTRY}/base:latest@${PIN_A} AS runner\n`,
+    });
+    expect(
+      unaccountedImagePins(
+        root,
+        policy({
+          containerImages: [watched(reference, ["Dockerfile"])],
+          unwatchedImages: [],
+        }),
+      ),
+    ).toEqual([]);
+    expect(unaccountedImagePins(root, policy({ unwatchedImages: [] }))).toEqual([
+      { file: "Dockerfile", reference },
+    ]);
+  });
+
+  it("reports the image after the prefix when a prefixed pin is unaccounted", () => {
+    const root = fixtureRoot({
+      "compose/proxy.yml": composeWith(
+        `\${IMAGE_PREFIX}/library/redis:8@${PIN_C}`,
+      ),
+    });
+    const result = unaccountedImagePins(root, policy({ unwatchedImages: [] }));
+    expect(result).toEqual([{ file: "compose/proxy.yml", reference: `redis:8@${PIN_C}` }]);
+  });
+
+  it("reads an image-cache host variable as the registry it fronts (#1510)", () => {
+    const root = fixtureRoot({
+      "compose/cache.yml": composeWith(`$CI_IMAGE_CACHE_MCR/playwright:v1@${PIN_C}`),
+      "compose/cache-ghcr.yml": composeWith(`\${CI_IMAGE_CACHE_GHCR}/org/tool:2@${PIN_C}`),
+    });
+    expect(unaccountedImagePins(root, policy({ unwatchedImages: [] }))).toEqual([
+      { file: "compose/cache-ghcr.yml", reference: `ghcr.io/org/tool:2@${PIN_C}` },
+      { file: "compose/cache.yml", reference: `mcr.microsoft.com/playwright:v1@${PIN_C}` },
+    ]);
+  });
+
+  it("ignores pins inside test files, which hold fake fixture digests", () => {
+    const line = `const image = "fake:1@${PIN_C}";\n`;
+    const root = fixtureRoot({
+      "scripts/fixture.test.mjs": line,
+      "tests/unit/fixture.test.ts": line,
+    });
+    const result = unaccountedImagePins(root, policy({ unwatchedImages: [] }));
+    expect(result).toEqual([]);
+  });
+
+  it("reports a policy image pinned in a file its locations do not list", () => {
+    const reference = `registry:3.1.2@${PIN_A}`;
+    const root = fixtureRoot({
+      "compose/listed.yml": composeWith(reference),
+      "scripts/elsewhere.sh": `docker run ${reference}\n`,
+    });
+    const result = unaccountedImagePins(
+      root,
+      policy({
+        containerImages: [watched(reference, ["compose/listed.yml"])],
+        unwatchedImages: [],
+      }),
+    );
+    expect(result).toEqual([{ file: "scripts/elsewhere.sh", reference }]);
+  });
+
+  it("accounts for every image the real repository pins by digest", () => {
+    const root = new URL("..", import.meta.url).pathname;
+    const policyDocument = JSON.parse(
+      readFileSync(new URL("../.github/supply-chain-policy.json", import.meta.url), "utf8"),
+    );
+    expect(unaccountedImagePins(root, policyDocument)).toEqual([]);
+  });
+
+  describe("unwatchedImages validation", () => {
+    const entry = {
+      reference: `nginx:alpine@${DIGEST}`,
+      locations: ["compose/docker-compose.demo.yml"],
+      reason: "Demo-only web server, never part of a release.",
+    };
+
+    it("accepts an entry with a reference, locations and a reason", () => {
+      expect(
+        validateSupplyChainPolicy(policy({ unwatchedImages: [entry] }), "2026-07-30"),
+      ).toMatchObject({ pinnedImageCount: 1 });
+    });
+
+    it("refuses an entry with no reason", () => {
+      const { reason: _reason, ...withoutReason } = entry;
+      expect(() =>
+        validateSupplyChainPolicy(policy({ unwatchedImages: [withoutReason] }), "2026-07-30"),
+      ).toThrow(/reason/iu);
+    });
   });
 });

@@ -7,8 +7,8 @@ import { afterAll, describe, expect, it } from "vitest";
 // #1429 (owner decision 8a): the application container has a memory limit,
 // 2 GB by default, that an operator can change from .env-orbit through its own
 // variable, the same way CLAMAV_MEMORY_LIMIT, TIKA_MEMORY_LIMIT and
-// OLLAMA_MEMORY_LIMIT work. A maximum-size archive import peaks near 1 GB, so
-// 2 GB leaves headroom. The limit must also be documented where the others are.
+// OLLAMA_MEMORY_LIMIT work. A maximum-size archive preview or import peaks near 1.9 GB (#1506, #1521), which
+// 2 GB only just fits. The limit must also be documented where the others are.
 
 const repoRoot = join(import.meta.dirname, "..");
 const read = (path) => readFileSync(join(repoRoot, path), "utf8").replaceAll("\r\n", "\n");
@@ -109,7 +109,7 @@ describe("ORBIT_MEMORY_LIMIT is documented where the other limits are (#1429)", 
     const index = lines.findIndex((line) => /^#?\s*ORBIT_MEMORY_LIMIT=2g\s*$/u.test(line));
     expect(index).toBeGreaterThan(0);
     const comment = lines.slice(Math.max(0, index - 8), index).join("\n");
-    expect(comment).toContain("1 GB");
+    expect(comment).toContain("1.9 GB");
     expect(comment).toMatch(/quarantine/iu);
     expect(comment).toContain("256 MiB");
     expect(comment).toMatch(/overhead/iu);
@@ -121,7 +121,7 @@ describe("ORBIT_MEMORY_LIMIT is documented where the other limits are (#1429)", 
   it("the administrator operations guide row says the same: import peak, quarantine space, 70% heap unless NODE_OPTIONS sets it (#1429 B1)", () => {
     const row = operationsGuide.split("\n").find((line) => line.startsWith("| `ORBIT_MEMORY_LIMIT`"));
     expect(row, "no ORBIT_MEMORY_LIMIT row in docs/administrator-operations.md").toBeDefined();
-    expect(row).toContain("1 GB");
+    expect(row).toContain("1.9 GB");
     expect(row).toMatch(/quarantine/iu);
     expect(row).toContain("256 MiB");
     expect(row).toMatch(/overhead/iu);

@@ -482,17 +482,30 @@ export function syncCheckpointArtifacts(checkpointDirectory: string, hooks: Rest
   }
 }
 
-function isValidCheckpointKeyFile(checkpointDirectory: string): boolean {
+/**
+ * What a checkpoint's `document-kek` holds when the deployment had no live
+ * key file before the run (#1420: a recovery import into an install that lost
+ * it). Deliberately not a valid key, so it can never be installed as one;
+ * putting the checkpoint back removes the live key instead.
+ */
+export const CHECKPOINT_NO_DOCUMENT_KEK = "no-live-document-kek";
+
+/** The checkpoint's key: a valid document key, CHECKPOINT_NO_DOCUMENT_KEK, or undefined for anything else. */
+function readCheckpointKey(checkpointDirectory: string): string | undefined {
   const keyPath = join(checkpointDirectory, "document-kek");
-  if (!isRegularNonSymlinkFile(keyPath)) return false;
+  if (!isRegularNonSymlinkFile(keyPath)) return undefined;
   try {
     const content = readFileNoFollow(keyPath)
       .toString("utf8")
       .replace(/[\r\n]+$/, "");
-    return isValidDocumentKekHex(content);
+    return content === CHECKPOINT_NO_DOCUMENT_KEK || isValidDocumentKekHex(content) ? content : undefined;
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+function isValidCheckpointKeyFile(checkpointDirectory: string): boolean {
+  return readCheckpointKey(checkpointDirectory) !== undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -770,14 +783,12 @@ function fetchActiveCorrespondenceReports(adapter: Pick<RestoreDockerAdapter, "q
 }
 
 function installCheckpointKey(checkpointDirectory: string, documentKekFile: string): boolean {
-  const keyPath = join(checkpointDirectory, "document-kek");
-  if (!isRegularNonSymlinkFile(keyPath)) return false;
+  const content = readCheckpointKey(checkpointDirectory);
+  if (content === undefined) return false;
   try {
-    const content = readFileNoFollow(keyPath)
-      .toString("utf8")
-      .replace(/[\r\n]+$/, "");
-    if (!isValidDocumentKekHex(content)) return false;
-    writeSecretFile(documentKekFile, `${content}\n`, SECURE_FILE_MODE);
+    // #1420: the deployment had no key before the run, so putting it back removes the one written since.
+    if (content === CHECKPOINT_NO_DOCUMENT_KEK) rmSync(documentKekFile, { force: true });
+    else writeSecretFile(documentKekFile, `${content}\n`, SECURE_FILE_MODE);
     return true;
   } catch {
     return false;
@@ -1011,6 +1022,8 @@ export interface RestoreRunOptions {
   workDir: string;
   /** ORBIT_RESTORE_ROLLBACK_KEK_FILE equivalent (import-recovery-bundle.sh's key-swap safety net, restore.sh:509). */
   rollbackDocumentKekFile?: string;
+  /** #1420: the deployment had no live key file before this run (the recovery import decides it once); the checkpoint records that, and putting it back removes the key. */
+  noPreviousDocumentKek?: boolean;
   hooks?: RestoreDurabilityHooks;
 }
 
@@ -1093,6 +1106,7 @@ export class RestoreRun {
     private readonly paths: RestorePaths,
     private readonly workDir: string,
     private readonly rollbackDocumentKekFile: string | undefined,
+    private readonly noPreviousDocumentKek: boolean,
     private readonly hooks: RestoreDurabilityHooks,
     checkpointDirectory: string,
     restoreId: string,
@@ -1129,6 +1143,7 @@ export class RestoreRun {
       options.paths,
       options.workDir,
       options.rollbackDocumentKekFile,
+      options.noPreviousDocumentKek ?? false,
       options.hooks ?? {},
       checkpointDirectory,
       restoreId,
@@ -1148,8 +1163,13 @@ export class RestoreRun {
    * checkpoint even while unverified, mirroring restore.sh:855's
    * `recover_mode != true` cleanup guard.
    */
-  static resume(options: Omit<RestoreRunOptions, "rollbackDocumentKekFile">, checkpointDirectory: string, restoreId: string, digests: RestoreCheckpointDigests): RestoreRun {
-    const run = new RestoreRun(options.adapter, options.paths, options.workDir, undefined, options.hooks ?? {}, checkpointDirectory, restoreId);
+  static resume(
+    options: Omit<RestoreRunOptions, "rollbackDocumentKekFile" | "noPreviousDocumentKek">,
+    checkpointDirectory: string,
+    restoreId: string,
+    digests: RestoreCheckpointDigests,
+  ): RestoreRun {
+    const run = new RestoreRun(options.adapter, options.paths, options.workDir, undefined, false, options.hooks ?? {}, checkpointDirectory, restoreId);
     run.recoverMode = true;
     run.checkpointDigests = digests;
     return run;
@@ -1224,6 +1244,10 @@ export class RestoreRun {
   }
 
   private copyCheckpointKey(): void {
+    if (this.noPreviousDocumentKek) {
+      writeSecretFile(join(this.checkpointDirectory, "document-kek"), `${CHECKPOINT_NO_DOCUMENT_KEK}\n`, SECURE_FILE_MODE);
+      return;
+    }
     const source = this.rollbackDocumentKekFile ?? this.paths.documentKekFile;
     if (!isRegularNonSymlinkFile(source)) {
       refuse("checkpoint-key-invalid", "checkpoint/key failed; the current document key could not be checkpointed safely.");

@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { settled } from "./support/keyboard";
+import { renderedFrames } from "./support/frames";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
@@ -89,8 +90,13 @@ function watchForDiscardQuestion(page: Page): string[] {
 }
 
 async function expectNoDiscardQuestion(page: Page, asked: string[]) {
-  /* the question, if there is one, comes on the Back itself; give it room */
-  await page.waitForTimeout(1_000);
+  /* The question, if there is one, comes on the Back itself, before it
+     completes. Back has landed on home (the callers wait for its address);
+     wait for home to be live and the page to draw its frames, so the
+     absence is judged after the Back was handled, not after a guess at how
+     long that takes. */
+  await settled(page);
+  await renderedFrames(page);
   expect(asked, "Back from an untouched Add asked a question").toEqual([]);
   await expect(page.getByText(/discard this entry/i), "Back from an untouched Add drew a discard question").toHaveCount(0);
   await expect(page.getByRole("alertdialog")).toHaveCount(0);

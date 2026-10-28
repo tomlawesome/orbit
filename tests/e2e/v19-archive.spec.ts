@@ -277,6 +277,11 @@ test("an armed desk button relaxes back after 4 s without a second tap (#1342)",
   await ensureReaderCanAnswerTheChallenge(page);
   const desk = await pageAfterStepUp(page);
   try {
+    /* The 4 s hold is the page's own timer, so the page's clock is the test's:
+       installed before the screen is loaded, then stopped before the button is
+       armed, so how long the browser takes between steps cannot move the
+       hold. Real time stays out of it; only what is advanced below passes. */
+    await desk.clock.install();
     await desk.goto(`/household/${source.id}`);
     await expect(desk.locator(".c-archive")).toBeVisible({ timeout: 30_000 });
     await desk.getByRole("button", { name: "write an archive →" }).click();
@@ -284,15 +289,18 @@ test("an armed desk button relaxes back after 4 s without a second tap (#1342)",
     await desk.getByLabel("the passphrase again").fill(PASSPHRASE);
 
     const armed = desk.getByRole("button", { name: "tap again to write the archive" });
+    await desk.clock.pauseAt(new Date(Date.now() + 2_000));
     await desk.getByRole("button", { name: "write the archive" }).click(); // arm
+    await expect(armed).toBeVisible({ timeout: 20_000 });
+    // Still armed 3.9 s into the hold ...
+    await desk.clock.runFor(3_900);
     await expect(armed).toBeVisible();
-    // Still armed shortly before 4 s ...
-    await desk.waitForTimeout(3_000);
-    await expect(armed).toBeVisible();
-    // ... and relaxed by 4 s (plus slack), 5 s being the old hold on this screen.
-    await expect(armed).toHaveCount(0, { timeout: 1_500 });
-    await expect(desk.getByRole("button", { name: "write the archive" })).toBeVisible();
+    // ... and relaxed once 4 s have passed, 5 s being the old hold on this screen.
+    await desk.clock.runFor(200);
+    await expect(armed).toHaveCount(0, { timeout: 20_000 });
+    await expect(desk.getByRole("button", { name: "write the archive" })).toBeVisible({ timeout: 20_000 });
   } finally {
+    await desk.clock.resume().catch(() => {});
     await cleanup(desk, source);
   }
 });

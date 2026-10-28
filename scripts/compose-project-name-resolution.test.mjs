@@ -191,6 +191,7 @@ describe("end-maintenance.sh resolves the project from docker-compose.yml's name
 const SHARED_OPERATOR_FUNCTIONS = [
   "compose",
   "require_deployment",
+  "require_live_key",
   "run_engine",
   "health_probe_url",
   "wait_for_health",

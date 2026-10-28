@@ -11,7 +11,10 @@
 # `apk upgrade` this replaces is no longer needed here. #649 also stops
 # applying: that upgrade froze behind the layer cache, and there is no upgrade
 # layer left to freeze.
-FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:669375d6f866a55f12520710047ed03311377d303ab0aeff9daefa0a597acc99 AS base
+# Default is GHCR so anyone can build from source with no credentials; CI passes
+# this GitLab's own registry (same digest, #1101). The digest pins the content.
+ARG BASE_IMAGE_REGISTRY=ghcr.io/tomlawesome
+FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:669375d6f866a55f12520710047ed03311377d303ab0aeff9daefa0a597acc99 AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -82,7 +85,7 @@ RUN pnpm run build:cli
 
 # The runtime stage starts from the base image again rather than from `base`,
 # so it pins the same digest for the same reasons (see the base stage).
-FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:669375d6f866a55f12520710047ed03311377d303ab0aeff9daefa0a597acc99 AS runner
+FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:669375d6f866a55f12520710047ed03311377d303ab0aeff9daefa0a597acc99 AS runner
 
 # The three release-metadata patterns, copied in early because this layer's
 # content never varies between builds; the values themselves are declared,
@@ -191,12 +194,12 @@ RUN ORBIT_WEB_BUILD_ROOT=/opt/orbit/web node scripts/web-pdfjs-runtime-check.mjs
   && rm -f /opt/orbit/scripts/web-pdfjs-runtime-check.mjs
 COPY --chown=orbit:orbit scripts/recovery-crypto.mjs ./scripts/recovery-crypto.mjs
 COPY --chown=root:root scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
-# The twelve deployment assets, at the same relative paths an install uses
+# The fourteen deployment assets, at the same relative paths an install uses
 # them at (ADR-0019). They travel with the digest, so the compose file an
 # operator runs and the image it configures are the same artifact, and an
 # install needs nothing but the registry. Root-owned data: the install engine
 # copies them into the deployment and sets its own modes (#1212).
-COPY --chown=root:root docker-compose.yml docker-compose.mail.yml docker-compose.kek-rotation.yml .env-orbit.example ./deploy/
+COPY --chown=root:root docker-compose.yml docker-compose.mail.yml docker-compose.kek-rotation.yml docker-compose.no-document-key.yml .env-orbit.example ./deploy/
 COPY --chown=root:root config/tika-config.json ./deploy/config/
 COPY --chown=root:root \
   scripts/configure.sh \

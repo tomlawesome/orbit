@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { expect, test } from "@playwright/test";
 
+import { settle } from "./pocket-states.js";
+
 /*
  * #873 step 1: measure the launch hand-off before anything about it changes.
  *
@@ -92,8 +94,9 @@ const THEME_PACKS = ["starchart", "afterdark", "clouds", "dawn", "retrograde"];
  * `location.assign("/home")` tears the create document down mid-sequence, so
  * its samples are flushed onto sessionStorage on `pagehide` — same-origin
  * sessionStorage survives that navigation — tagged with which phase
- * collected them and the click time, if any. /home's own phase is flushed on
- * demand once the test has waited out the ascent's opening beats.
+ * collected them and the click time, if any. /home's own phase flushes
+ * itself 1.8s after `body[data-home-ready]` appears, timed here in the page
+ * (see the test for why), and carries that moment as `homeReadyAt`.
  */
 function installFrameLog() {
   const KEY = "orbit-launch-frame-log";
@@ -101,6 +104,8 @@ function installFrameLog() {
   /** @type {number[]} */
   const samples = [];
   let flushed = false;
+  /** @type {number | null} */
+  let homeReadyAt = null;
   const stopAt = performance.now() + 4000;
   function tick(/** @type {number} */ t) {
     samples.push(t);
@@ -111,11 +116,20 @@ function installFrameLog() {
     if (flushed) return;
     flushed = true;
     const prior = JSON.parse(sessionStorage.getItem(KEY) ?? "[]");
-    prior.push({ phase, samples, submitAt: /** @type {any} */ (window).__submitAt ?? null });
+    prior.push({ phase, samples, submitAt: /** @type {any} */ (window).__submitAt ?? null, homeReadyAt });
     sessionStorage.setItem(KEY, JSON.stringify(prior));
   }
   addEventListener("pagehide", flush);
-  /** @type {any} */ (window).__flushLaunchFrameLog = flush;
+  if (phase === "home") {
+    const seen = new MutationObserver(() => {
+      if (document.body?.dataset.homeReady !== "true") return;
+      seen.disconnect();
+      homeReadyAt = performance.now();
+      setTimeout(flush, 1800);
+    });
+    /* `document`, not its root element: this runs before the page has one. */
+    seen.observe(document, { subtree: true, attributes: true, attributeFilter: ["data-home-ready"] });
+  }
 }
 
 /** @param {number[]} samples absolute performance.now() rAF timestamps */
@@ -144,7 +158,7 @@ function summarise(values) {
 
 for (const pack of THEME_PACKS) {
   test(`launch hand-off frame timings — ${pack} pack`, async ({ page }) => {
-    test.setTimeout(20_000);
+    test.setTimeout(60_000);
 
     await page.addInitScript(installFrameLog);
     /* Same mechanism screens.spec.js's capture() uses: the app reads
@@ -177,24 +191,44 @@ for (const pack of THEME_PACKS) {
     await page.click("#gobtn");
 
     /* Arrival.svelte's submit() navigates (#1263: no reclaim any more). */
-    await page.waitForURL(/\/home(?:$|[/?#])/, { timeout: 5000 });
+    await page.waitForURL(/\/home(?:$|[/?#])/, { timeout: 20_000 });
     await page.waitForLoadState("load");
-    /* Lets the ascent's opening beats run live: warp (200ms), the mark's ride
-       to centre (260-1340ms) and the release (430ms) all fall inside this
-       window, unpinned — Flight.ascend() runs on its own real clock here,
-       not the PINNED path screens.spec.js's baselines use. */
-    await page.waitForTimeout(1800);
-
-    const report = await page.evaluate(() => {
-      /** @type {any} */ (window).__flushLaunchFrameLog?.();
-      return JSON.parse(sessionStorage.getItem("orbit-launch-frame-log") ?? "[]");
-    });
+    /* Lets home's arrival run live: the page says it can answer (#1064),
+       then the home phase is flushed a fixed 1.8s later. Fixed, not "until
+       settle returns", because the promotion gate compares these counts and
+       the max with the previous candidate's over the same 1.8s window; a
+       window as long as settle takes on that machine would drift against
+       it. The page times the window itself (installFrameLog notes the
+       moment and flushes from its own 1.8s timer), so no round trip to the
+       test runner sits inside it. settle then waits out whatever is still
+       running. Frame counts below are only reported, never judged. */
+    await page.waitForFunction(
+      () => (JSON.parse(sessionStorage.getItem("orbit-launch-frame-log") ?? "[]")).some((/** @type {any} */ r) => r.phase === "home"),
+      undefined,
+      { timeout: 20_000 },
+    );
+    const report = await page.evaluate(() => JSON.parse(sessionStorage.getItem("orbit-launch-frame-log") ?? "[]"));
+    await settle(page);
 
     const createPhase = report.find((/** @type {any} */ r) => r.phase === "create");
     const homePhase = report.find((/** @type {any} */ r) => r.phase === "home");
     expect(createPhase?.samples?.length ?? 0, "expected frames captured on the arrival (Create to the navigation)").toBeGreaterThan(0);
     expect(homePhase?.samples?.length ?? 0, "expected frames captured on /home (its ordinary arrival)").toBeGreaterThan(0);
     expect(createPhase?.submitAt, "expected the click timestamp to have been recorded").not.toBeNull();
+
+    /* The home window is a fixed 1.8s after body[data-home-ready], not
+       "until settle returned": its last sample must land no later than 1.8s
+       plus 250ms of slack after home-ready. The slack is for the page's own
+       1.8s timer firing late, which a busy main thread on a loaded runner
+       does by more than a frame. Upper bound only. A loaded runner can
+       leave a gap of a frame or more before the flush, so the last sample
+       may come short of 1.8s on a correct build; and the recorder stops
+       itself 4s after the page loaded (installFrameLog's stopAt), so a slow
+       home-ready truncates the window outright (#1536). */
+    expect(homePhase.homeReadyAt, "expected the page to have noted body[data-home-ready]").not.toBeNull();
+    const lastHomeSample = homePhase.samples[homePhase.samples.length - 1];
+    const homeWindowMs = lastHomeSample - homePhase.homeReadyAt;
+    expect(homeWindowMs, "home window must be at most 1.8s plus 250ms timer slack after home-ready").toBeLessThanOrEqual(1800 + 250);
 
     /* Only frames from the click onward are the hand-off; everything before
        is the test setup sitting idle on the settled card. */

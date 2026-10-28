@@ -6,6 +6,8 @@ import { ensureWorkerAdministrator, workerAccount } from "./support/worker-ident
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { householdDateFromToday } from "./support/household-dates";
+import { finiteMotionSettled } from "./support/motion";
+import { renderedFrames } from "./support/frames";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -140,13 +142,15 @@ async function runningMotion(page: Page) {
 /** Load has finished and every one-shot reduced-motion entrance (the
  * login/arrival crossfade and the 404 well's staged reveal, both driven by
  * `transition`, which `family.css`'s reduced-motion rule does not touch --
- * only `animation` is `!important`-cleared there) has had time to finish, so
- * a real "still animating" reading isn't just "caught mid-transition".
- * Measured empirically: 1s left genuine one-shot fades still running; 3s
- * clears every screen that has no ongoing violation. */
+ * only `animation` is `!important`-cleared there) has finished, so a real
+ * "still animating" reading isn't just "caught mid-transition". It waits for
+ * the finite animations and transitions themselves to end (finiteMotionSettled)
+ * rather than for a guessed number of seconds: a fade that takes 1 s on one
+ * runner and 4.6 s on another ends the same way. What is still running after
+ * that is an endless loop, which is what this file is about. */
 async function settle(page: Page) {
   await page.waitForLoadState("load");
-  await page.waitForTimeout(3000);
+  await finiteMotionSettled(page);
 }
 
 /**
@@ -160,10 +164,11 @@ async function settle(page: Page) {
  * held 3.2-3.7 s on / and /login and the error page re-rasterised its world
  * until 2.5 s, so the same 400-900 ms opacity fades Chromium finishes by
  * 1.5 s ran from 3.4 s to 4.6 s, and a reading 3 s after `load` caught them
- * mid-fade (pipeline 2144). Every one of them ended. So the 3 s window opens
- * once the sky is ready rather than at `load` -- which fires before the
- * surfaces are even marked, hence a `.world` must be present -- and anything
- * still running after it is still reported.
+ * mid-fade (pipeline 2144). Every one of them ended. So the wait for the
+ * finite animations to end begins once the sky is ready rather than at `load`
+ * -- which fires before the surfaces are even marked, hence a `.world` must
+ * be present -- and it ends when they have, however long the thread held
+ * them; anything still running after it is still reported.
  */
 async function settleSignedOut(page: Page) {
   await page.waitForLoadState("load");
@@ -172,7 +177,7 @@ async function settleSignedOut(page: Page) {
     return surfaces.some((surface) => surface.classList.contains("world"))
       && surfaces.every((surface) => surface.dataset.rasterised === "ready");
   }, undefined, { timeout: 30_000 });
-  await page.waitForTimeout(3000);
+  await finiteMotionSettled(page);
 }
 
 /**
@@ -196,7 +201,7 @@ async function drawerMotion(page: Page, itemId: string, title: string, isMobile:
   await drawer.getByRole("button", { name: "Edit this item" }).click();
   await drawer.getByRole("button", { name: /^due: / }).click();
   await expect(page.getByRole("dialog", { name: /due date/i })).toBeVisible();
-  await page.waitForTimeout(1000);
+  await finiteMotionSettled(page);
   const choosing = await runningMotion(page);
   if (choosing.length > 0) problems.push(`/home?item=: the chooser up, still animating -> ${choosing.join(", ")}`);
   return problems;
@@ -215,7 +220,7 @@ test.describe("reduced motion", () => {
 
   test("signed-in screens hold still (desktop dial)", async ({ page, isMobile }) => {
     test.skip(isMobile, "desktop-chromium dial only; the pocket dialect has its own test below");
-    // Nine real navigations, each needing the full 3s settle (see settle()),
+    // Nine real navigations, each waiting for its finite motion to end (see settle()),
     // plus sign-in and seeding: comfortably over the 30s default per-test
     // timeout on its own merits, not because anything is slow to fail.
     test.setTimeout(150_000);
@@ -260,7 +265,9 @@ test.describe("reduced motion", () => {
         const drift = page.locator("#pdrift");
         if ((await drift.count()) > 0) {
           const before = await drift.getAttribute("transform");
-          await page.waitForTimeout(700);
+          /* 30 frames the page drew, not 700 ms: a drift that ran on any frame
+             would have moved its transform by the end of them. */
+          await renderedFrames(page, 30);
           const after = await drift.getAttribute("transform");
           if (before !== after) {
             problems.push(`/home: sky drift (#pdrift transform) moved under reduced motion: ${before} -> ${after}`);
@@ -295,7 +302,7 @@ test.describe("reduced motion", () => {
 
   test("home's pocket dialect holds still (mobile)", async ({ page, isMobile }) => {
     test.skip(!isMobile, "mobile-chromium only: the pocket dialect (CON-10) has its own reduced-motion rules");
-    /* home, then the drawer (#1319), each with settle()'s 3 s */
+    /* home, then the drawer (#1319), each waiting for its finite motion to end (settle()) */
     test.setTimeout(90_000);
 
     await signIn(page);
@@ -323,7 +330,7 @@ test.describe("reduced motion", () => {
 
   test("signed-out screens hold still", async ({ page, isMobile }) => {
     test.skip(isMobile, "desktop-chromium only");
-    /* Five screens, each the sky's rasterising plus settle()'s 3 s: 30-33 s
+    /* Five screens, each the sky's rasterising plus the wait for its finite motion to end: 30-33 s
        on desktop-webkit locally, so the 60 s default is too close for a
        slower runner (the signed-in sibling above declares 150 s). */
     test.setTimeout(90_000);

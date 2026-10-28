@@ -38,12 +38,33 @@ fail() { printf 'Orbit recovery import: %s\n' "$*" >&2; exit 1; }
 
 # Reads a single KEY=value line out of $environment_file (the last one wins).
 read_environment_value() {
-  local requested_key="$1" line value="" found=0
+  local requested_key="$1" line value="" found=0 head tail quote
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "${requested_key}="* ]]; then
       # A CRLF .env-orbit is valid; drop the CR.
       value="${line#*=}"
       value="${value%$'\r'}"
+      # Read the value the way Compose's env-file parser does: a trailing
+      # comment (spaces or tabs, then "#", to the end) comes off, then
+      # trailing spaces and tabs, then one pair of matching quotes. Otherwise
+      # a quoted or commented COMPOSE_FILE keeps its quote marks or padding
+      # and the overlay appended to it names a file that does not exist.
+      # A "#" inside the quotes is part of the value, so for a quoted value
+      # the comment is looked for only after the closing quote. That is the
+      # first same quote after the opening one, not the last on the line: a
+      # comment may hold an apostrophe or quote marks of its own.
+      head="" tail="$value" quote="${value:0:1}"
+      if [[ ( "$quote" == \" || "$quote" == \' ) && "${value:1}" == *"$quote"* ]]; then
+        tail="${value:1}"
+        head="$quote${tail%%"$quote"*}$quote"
+        tail="${tail#*"$quote"}"
+      fi
+      tail="${tail%%[[:blank:]]#*}"
+      while [[ "$tail" == *[[:blank:]] ]]; do tail="${tail%[[:blank:]]}"; done
+      value="$head$tail"
+      case "$value" in
+        \"*\" | \'*\') value="${value:1:${#value}-2}" ;;
+      esac
       found=1
     fi
   done < "$environment_file"
@@ -128,6 +149,13 @@ require_deployment() {
   [[ "${1:-}" != health ]] || command -v curl >/dev/null 2>&1 || fail 'preflight/tools failed; curl is required.'
   [[ -f "$environment_file" ]] || fail 'preflight/configuration failed; the Orbit environment file is missing.'
   [[ -d "$secrets_directory" && ! -L "$secrets_directory" ]] || fail 'preflight/configuration failed; the secrets directory must be a regular directory.'
+}
+
+# The live document key must be a regular file: Orbit cannot start without it.
+# The recovery import and restore.sh --recover do not ask for it: each puts a
+# key back, or puts back "no key" (#1420).
+# shellcheck disable=SC2317  # import-recovery-bundle.sh carries it unused
+require_live_key() {
   [[ -f "$secrets_directory/document-kek" && ! -L "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; the configured document key is missing.'
 }
 
@@ -177,6 +205,21 @@ run_engine() {
   fi
   if [[ -n "$input_file" ]]; then
     run_args+=(-v "$input_file:/orbit-input/bundle.tar:ro" -e "ORBIT_HOST_INPUT_FILE=$input_file")
+  fi
+  # No live key file (#1420): Docker will not mount a missing secret file, so this one call adds
+  # the overlay that points the secret at /dev/null. The engine reads the key from the deployment
+  # directory, never from the secret. The files Compose would use otherwise are kept, in its order:
+  # an exported COMPOSE_FILE, then .env-orbit's, then docker-compose.yml plus the
+  # docker-compose.override.yml Compose loads by default when one is present.
+  if [[ ! -e "$secrets_directory/document-kek" && ! -L "$secrets_directory/document-kek" ]]; then
+    local compose_files="${COMPOSE_FILE:-}" separator="${COMPOSE_PATH_SEPARATOR:-}"
+    [[ -n "$compose_files" ]] || compose_files="$(read_environment_value COMPOSE_FILE 2>/dev/null || true)"
+    [[ -n "$separator" ]] || separator="$(read_environment_value COMPOSE_PATH_SEPARATOR 2>/dev/null || true)"
+    if [[ -z "$compose_files" ]]; then
+      compose_files=docker-compose.yml
+      [[ ! -e docker-compose.override.yml ]] || compose_files+="${separator:-:}docker-compose.override.yml"
+    fi
+    local -x COMPOSE_FILE="${compose_files}${separator:-:}docker-compose.no-document-key.yml"
   fi
   compose "${run_args[@]}" --entrypoint node orbit-app /opt/orbit/cli/orbit.js "$@" --dir /orbit-deploy "${directory_args[@]}"
 }

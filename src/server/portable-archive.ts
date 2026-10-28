@@ -1,9 +1,13 @@
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes, scryptSync, type CipherGCM, type DecipherGCM } from "node:crypto";
 import { MIN_PASSWORD_LENGTH, passwordLength } from "@/lib/password-length";
 
 const ARCHIVE_VERSION = 1;
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
+/** The full GCM tag. Node accepts a shorter one unless told otherwise, and a short tag is easier to forge (#1524). */
+const TAG_BYTES = 16;
+/** Ciphertext characters decoded per piece when opening: a multiple of 4, so each piece decodes on its own. */
+const OPEN_PIECE_CHARACTERS = 4 * 65_536;
 
 export interface EncryptedPortableArchive {
   version: 1;
@@ -19,14 +23,18 @@ function keyFor(passphrase: string, salt: Buffer): Buffer {
   return scryptSync(passphrase, salt, 32, { N: 16_384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
 }
 
-/** Encrypts a portable archive with a user-supplied passphrase that is never persisted. */
-export function encryptPortableArchive(plaintext: Buffer, passphrase: string): EncryptedPortableArchive {
+function requireExportPassphrase(passphrase: string): void {
   // The floor is held here, where a passphrase is made, and not in `keyFor`,
   // which opening an archive shares: an archive sealed under a shorter
   // passphrase than today's floor must still open (#1333).
   if (passwordLength(passphrase) < MIN_PASSWORD_LENGTH) {
     throw new Error(`Export passphrase must contain at least ${MIN_PASSWORD_LENGTH} characters`);
   }
+}
+
+/** Encrypts a portable archive with a user-supplied passphrase that is never persisted. */
+export function encryptPortableArchive(plaintext: Buffer, passphrase: string): EncryptedPortableArchive {
+  requireExportPassphrase(passphrase);
   const salt = randomBytes(SALT_BYTES);
   const iv = randomBytes(IV_BYTES);
   const key = keyFor(passphrase, salt);
@@ -38,15 +46,114 @@ export function encryptPortableArchive(plaintext: Buffer, passphrase: string): E
   } finally { key.fill(0); }
 }
 
-export function decryptPortableArchive(archive: EncryptedPortableArchive, passphrase: string): Buffer {
+/**
+ * Streaming authenticated encryption for the export (#1506): the same
+ * AES-256-GCM, scrypt key, salt, IV, AAD and JSON fields as
+ * `encryptPortableArchive`, but the plaintext goes in piece by piece and the
+ * archive file comes out piece by piece, with the authentication tag written
+ * last (GCM only knows it after the final block). Neither side is ever held
+ * whole. Base64url is written in 3-byte groups so the pieces concatenate to
+ * exactly what one `toString("base64url")` of the whole ciphertext gives.
+ */
+export class PortableArchiveSealer {
+  private readonly cipher: CipherGCM;
+  private header: string | null;
+  private carry: Buffer = Buffer.alloc(0);
+
+  constructor(passphrase: string, private readonly write: (chunk: Buffer) => Promise<void>) {
+    requireExportPassphrase(passphrase);
+    const salt = randomBytes(SALT_BYTES);
+    const iv = randomBytes(IV_BYTES);
+    const key = keyFor(passphrase, salt);
+    try {
+      this.cipher = createCipheriv("aes-256-gcm", key, iv);
+    } finally { key.fill(0); }
+    this.cipher.setAAD(Buffer.from(`orbit-portable-archive:${ARCHIVE_VERSION}`));
+    this.header = `{"version":${ARCHIVE_VERSION},"algorithm":"aes-256-gcm","kdf":"scrypt","salt":${JSON.stringify(salt.toString("base64url"))},"iv":${JSON.stringify(iv.toString("base64url"))},"ciphertext":"`;
+  }
+
+  private async emit(ciphertext: Buffer, last: boolean): Promise<void> {
+    if (this.header !== null) {
+      const header = this.header;
+      this.header = null;
+      await this.write(Buffer.from(header));
+    }
+    const joined = this.carry.length === 0 ? ciphertext : Buffer.concat([this.carry, ciphertext]);
+    const aligned = last ? joined.length : joined.length - (joined.length % 3);
+    this.carry = Buffer.from(joined.subarray(aligned));
+    if (aligned > 0) await this.write(Buffer.from(joined.subarray(0, aligned).toString("base64url"), "ascii"));
+  }
+
+  /** Encrypts one piece of the plaintext and writes its ciphertext. */
+  async push(plaintext: Buffer): Promise<void> {
+    if (plaintext.length === 0) return;
+    await this.emit(this.cipher.update(plaintext), false);
+  }
+
+  /** Ends the ciphertext and writes the authentication tag after it. */
+  async finish(): Promise<void> {
+    await this.emit(this.cipher.final(), true);
+    await this.write(Buffer.from(`","authTag":${JSON.stringify(this.cipher.getAuthTag().toString("base64url"))}}`));
+  }
+}
+
+/**
+ * The archive's authentication tag, refused unless it is the full 16 bytes
+ * (#1524), and its decipher, made to accept only a 16-byte tag as well.
+ */
+function openDecipher(archive: EncryptedPortableArchive, passphrase: string): DecipherGCM {
   if (archive.version !== ARCHIVE_VERSION || archive.algorithm !== "aes-256-gcm" || archive.kdf !== "scrypt") throw new Error("Unsupported portable archive");
+  const tag = Buffer.from(archive.authTag, "base64url");
+  if (tag.length !== TAG_BYTES) throw new Error("Portable archive authentication tag is not 16 bytes");
   const key = keyFor(passphrase, Buffer.from(archive.salt, "base64url"));
+  let decipher: DecipherGCM;
   try {
-    const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(archive.iv, "base64url"));
-    decipher.setAAD(Buffer.from(`orbit-portable-archive:${ARCHIVE_VERSION}`));
-    decipher.setAuthTag(Buffer.from(archive.authTag, "base64url"));
-    return Buffer.concat([decipher.update(Buffer.from(archive.ciphertext, "base64url")), decipher.final()]);
+    decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(archive.iv, "base64url"), { authTagLength: TAG_BYTES });
   } finally { key.fill(0); }
+  decipher.setAAD(Buffer.from(`orbit-portable-archive:${ARCHIVE_VERSION}`));
+  decipher.setAuthTag(tag);
+  return decipher;
+}
+
+export function decryptPortableArchive(archive: EncryptedPortableArchive, passphrase: string): Buffer {
+  const decipher = openDecipher(archive, passphrase);
+  return Buffer.concat([decipher.update(Buffer.from(archive.ciphertext, "base64url")), decipher.final()]);
+}
+
+/**
+ * Streaming authenticated decryption for preview and import (#1521), the
+ * reverse of `PortableArchiveSealer`: the ciphertext is decoded and decrypted
+ * a piece at a time, so the plaintext is never held whole. Nothing `next`
+ * returns may be used until `finish` has verified the authentication tag; a
+ * caller writes the pieces somewhere private and reads them back only after.
+ * A short tag or an unsupported archive throws here, in the constructor; a
+ * wrong passphrase, a changed ciphertext or a changed tag can only show at
+ * `finish`, when GCM checks the tag.
+ */
+export class PortableArchiveOpener {
+  private readonly decipher: DecipherGCM;
+  private readonly encoded = Buffer.alloc((OPEN_PIECE_CHARACTERS / 4) * 3);
+  private offset = 0;
+
+  constructor(private readonly archive: EncryptedPortableArchive, passphrase: string) {
+    this.decipher = openDecipher(archive, passphrase);
+  }
+
+  /** The next piece of unverified plaintext, or null once the ciphertext is used up. */
+  next(): Buffer | null {
+    const { ciphertext } = this.archive;
+    if (this.offset >= ciphertext.length) return null;
+    const end = Math.min(this.offset + OPEN_PIECE_CHARACTERS, ciphertext.length);
+    const length = this.encoded.write(ciphertext.slice(this.offset, end), "base64url");
+    this.offset = end;
+    return this.decipher.update(this.encoded.subarray(0, length));
+  }
+
+  /** Verifies the authentication tag over everything `next` returned; throws if it does not match. */
+  finish(): void {
+    // GCM is a stream mode: `final` returns no further plaintext, only the verdict.
+    this.decipher.final();
+  }
 }
 
 /** Validates the outer wire shape before deriving a passphrase key. */

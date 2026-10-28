@@ -52,10 +52,11 @@
  *
  * The credential is read-only and is sent as a header, never printed.
  * ORBIT_REUSE_TOKEN is what this wants: a token an unprotected merge-request
- * pipeline can read, with no write scope anywhere. BASE_REPIN_TOKEN is
- * accepted as a fallback because it is what #898 used, but since #1084 it is
- * protected and so is absent from exactly the pipelines that would reuse
- * anything. With neither set there is no lookup at all and every job runs.
+ * pipeline can read, with no write scope anywhere. It is the only credential
+ * read: BASE_REPIN_TOKEN, which #898 used, has been protected since #1084 and
+ * so is absent from exactly the pipelines that would reuse anything, and it can
+ * push, so nothing falls back to it. With ORBIT_REUSE_TOKEN unset there is no
+ * lookup at all and every job runs.
  *
  * The API base URL is injectable (ORBIT_REUSE_API_URL) so the test can point
  * this at a local server and assert what it emits.
@@ -151,11 +152,20 @@ async function readEvidence(base, projectId, jobId, job, options) {
 /*
  * The successful run of each named job in one pipeline. A retried job appears
  * more than once, so the highest id wins -- the run that stands.
+ *
+ * A browser job whose only failure was a quarantined test exits 3, which
+ * `allow_failure: exit_codes: [3]` records as status failed with allow_failure
+ * true; that run passed and counts. GitLab sets a job's allow_failure to false
+ * when it fails with an exit code outside the list, so a real failure never
+ * counts. The evidence check downstream still refuses a job that never reached
+ * reuse-evidence.sh.
  */
 export function successfulJobs(jobs) {
   const found = new Map();
   for (const entry of jobs) {
-    if (entry?.status !== "success") continue;
+    const passed = entry?.status === "success"
+      || (entry?.status === "failed" && entry?.allow_failure === true);
+    if (!passed) continue;
     const previous = found.get(entry.name);
     if (!previous || Number(entry.id) > Number(previous.id)) found.set(entry.name, entry);
   }
@@ -322,7 +332,7 @@ export function refusal(env) {
   if (labelled(env, "ci: rerun")) {
     return "the merge request is labelled 'ci: rerun': every job runs (remove the label or every push reruns everything)";
   }
-  if (!(env.ORBIT_REUSE_TOKEN || env.BASE_REPIN_TOKEN)) {
+  if (!env.ORBIT_REUSE_TOKEN) {
     return "no read-only token (ORBIT_REUSE_TOKEN), so earlier runs cannot be read: every job runs";
   }
   if (!(env.ORBIT_REUSE_API_URL || env.CI_API_V4_URL) || !env.CI_PROJECT_ID) {
@@ -380,7 +390,7 @@ export async function run({
 
   const decided = await lookupReuse({
     base: (env.ORBIT_REUSE_API_URL || env.CI_API_V4_URL).replace(/\/+$/u, ""),
-    token: env.ORBIT_REUSE_TOKEN || env.BASE_REPIN_TOKEN,
+    token: env.ORBIT_REUSE_TOKEN,
     projectId: env.CI_PROJECT_ID,
     pipelineId: env.CI_PIPELINE_ID,
     keys,

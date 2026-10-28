@@ -388,6 +388,32 @@ function covered({ scope, only = -1 }) {
 }
 
 /**
+ * Waits for a scroll to be answered. The scrolls here are instant, so the
+ * position is already final; what is left is the page reacting to it: the
+ * handlers that run on the next frame, the north star's leaving fade and the
+ * state it settles into, the chrome's slide. Each round is two painted frames
+ * (the handlers have run), then every finite animation and transition running
+ * finished (up to 20 s); it is over when a round finds nothing running and
+ * the north star no longer leaving. Not `settle()`: this runs after every
+ * scroll, hundreds of times, and settle also waits for the network.
+ * @param {import("@playwright/test").Page} page
+ */
+async function scrolled(page) {
+  await page.evaluate(async () => {
+    for (let round = 0; round < 50; round++) {
+      await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+      const finite = document.getAnimations().filter((a) => a.playState === "running"
+        && Number.isFinite(Number(a.effect?.getComputedTiming().endTime)));
+      if (!finite.length && !document.querySelector("[data-station=leaving]")) return;
+      await Promise.race([
+        Promise.all(finite.map((a) => a.finished.catch(() => {}))),
+        new Promise((done) => setTimeout(done, 20_000)),
+      ]);
+    }
+  });
+}
+
+/**
  * Covered at every scroll position that could show it: looked for at the
  * state as reached and at the end of every scroll, and anything found is
  * scrolled to the middle of its scroller and looked at again -- only what
@@ -406,7 +432,7 @@ async function coveredEverywhere(page, scope) {
       if (o === "auto" || o === "scroll") p.scrollTo({ top: p.scrollHeight, behavior: "instant" });
     }
   });
-  await page.waitForTimeout(450);
+  await scrolled(page);
   for (const [index, what] of await page.evaluate(covered, { scope })) if (!found.has(index)) found.set(index, what);
   const problems = [];
   for (const [index] of found) {
@@ -417,7 +443,7 @@ async function coveredEverywhere(page, scope) {
       const all = roots.flatMap((root) => [root, ...root.querySelectorAll(TAPPABLE)].filter((el) => el.matches(TAPPABLE)));
       all[index]?.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
     }, { scope, index });
-    await page.waitForTimeout(450);
+    await scrolled(page);
     const still = await page.evaluate(covered, { scope, only: index });
     if (still.length) problems.push(still[0][1]);
   }
@@ -577,8 +603,9 @@ for (const phone of MEASURED) {
         test.fail(Boolean(defect), defect);
         await state.reach(page);
         await page.evaluate(() => document.fonts.ready);
-        /* reduced motion still crossfades the card in over .7s (ringcard.css) */
-        await page.waitForTimeout(900);
+        /* reduced motion still crossfades the card in over .7s (ringcard.css):
+           wait for that transition to finish, not for a fixed time */
+        await settle(page);
         const problems = await inspect(page, { rest: state.state === "rest" });
         expect(problems, problems.join("\n")).toEqual([]);
       });
