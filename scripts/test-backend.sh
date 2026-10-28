@@ -64,6 +64,10 @@ node --test scripts/corpus/stages-rerun.test.mjs
 # scripts that carry a copy and runs each.
 node --test scripts/read-environment-value.test.mjs
 
+# Same reason (#1099): uses node:test -- the per-directory coverage gate's own
+# tests. The gate itself runs after each coverage run below.
+node --test scripts/ci/coverage-floor-check.test.mjs
+
 # Static analysis covers the full-stack boundary; Vitest exercises all fast
 # server, authentication, database, domain, and reducer tests without Docker.
 #
@@ -114,6 +118,7 @@ if command -v pnpm >/dev/null 2>&1; then
   node scripts/check-v19-types.mjs
   if [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
     pnpm test:coverage
+    node scripts/ci/coverage-floor-check.mjs
   else
     pnpm test
   fi
@@ -135,6 +140,7 @@ elif command -v node >/dev/null 2>&1 && [[ -d node_modules ]]; then
   node scripts/check-v19-types.mjs
   if [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
     node node_modules/vitest/vitest.mjs run --coverage
+    node scripts/ci/coverage-floor-check.mjs
   else
     node node_modules/vitest/vitest.mjs run
   fi

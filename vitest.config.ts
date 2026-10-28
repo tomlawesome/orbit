@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { floors } from "./supply-chain/coverage-floors.mjs";
 import { configDefaults, defineConfig, type TestUserConfig } from "vitest/config";
 
 // The aliases both projects need. The engine's own tests reach it through "@",
@@ -142,6 +143,8 @@ const test: TestUserConfig = {
           "scripts/corpus/stages-rerun.test.mjs",
           // Same reason: uses node:test. Run by scripts/test-backend.sh.
           "scripts/read-environment-value.test.mjs",
+          // Same reason (#1099): uses node:test. Run by scripts/test-backend.sh.
+          "scripts/ci/coverage-floor-check.test.mjs",
           // Same reason (#1408): uses node:test. Run by the `names_guard` CI job.
           "tests/unit/no-real-names.test.mjs",
           // ORBIT_TEST_SKIP_DOCKER (#950): the CI `fast` job runs on the
@@ -215,32 +218,16 @@ const test: TestUserConfig = {
     exclude: ["src/**/*.test.ts", "scripts/*.test.mjs", "scripts/install-test-support.mjs"],
     reporter: ["text-summary", "json-summary", "html"],
     reportsDirectory: "coverage",
-    // Ratchet, not target (#302): floors sit just under the measured
-    // baseline so CI fails on regression while no percentage is ever a goal
-    // in itself. Raise floors when a phase durably lifts a layer; never
-    // lower them to make a change pass.
-    //
-    // Re-pinned once at the cut (#735), which is the one case the
-    // architecture ruling allows: deleting src/app and src/components
-    // removed ~5000 largely untested statements, so the denominator changed
-    // rather than the testing. Measured on the cut commit: 50.34%
-    // statements, 48.3% branches, 51.68% functions, 52.04% lines. The
-    // previous global floors (28/28/26/29) were set against a codebase that
-    // no longer exists and would now pass while half the engine went
-    // untested.
-    //
-    // Raised to the measured values, rounded down (owner, 2026-10-22): CI's
-    // `fast` on 39134f33 (pipeline 2875, job 38340) measured 63.63%
-    // statements, 60.35% branches, 64.51% functions, 65.06% lines, and the
-    // old floors sat 12-14 points below. #1099 replaces raising by hand.
-    thresholds: {
-      statements: 63,
-      branches: 60,
-      functions: 64,
-      lines: 65,
-      "src/lib/**": { statements: 60 },
-      "src/server/documents/**": { statements: 75 },
-    },
+    // Ratchet, not target (#302): floors sit at the measured value rounded
+    // down, so CI fails on regression and no percentage is a goal in itself.
+    // The numbers now live in supply-chain/coverage-floors.mjs, per directory
+    // (#1099); scripts/ci/coverage-floor-check.mjs adds the upper bound, so a
+    // gain has to be locked in by raising the floor. Never lower one to make
+    // a change pass. Vitest evaluates glob thresholds independently, so the
+    // nested src/server/documents/** beside src/server/** is fine.
+    thresholds: Object.fromEntries(
+      Object.entries(floors).map(([key, metrics]) => [`${key}/**`, { ...metrics }]),
+    ),
   },
 };
 

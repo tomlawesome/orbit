@@ -71,13 +71,15 @@ fail on a global percentage.
 2. Use uncovered critical modules and branches to refine risk-ranked issues.
 3. Exclude generated declarations, tests, and intentionally declarative assets;
    do not exclude difficult production code merely to improve a number.
-4. Ratcheting thresholds are active (vitest.config.ts, issue #302): global
-   floors at the measured baseline, rounded down (63% statements, 60%
-   branches, 64% functions, 65% lines, 2026-10-22)
-   plus per-layer floors for scaffolded layers (`src/lib` 60%,
-   `src/server/documents` 75%). CI fails on regression below a floor.
-   Floors are raised when a phase durably lifts a layer and are never
-   lowered to make a change pass; no floor is a target.
+4. Coverage floors are per directory, in `supply-chain/coverage-floors.mjs`
+   (#1099). The gate (`scripts/ci/coverage-floor-check.mjs`) fails when a
+   directory drops below its floor, and also when it sits more than 5 points
+   above it, so a gain is locked in by raising the floor. Floors only go up and
+   are set at the measured value rounded down; a change that needs a lower
+   floor needs more tests. To get numbers that match CI, run
+   `ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh`
+   and read `coverage/coverage-summary.json`, or download the `fast` job's
+   `coverage/` artifact. A local run with the Docker suites moves the numbers.
 5. Apply stronger expectations to security, authorization, lifecycle, and
    migration code than to declarative UI composition.
 
