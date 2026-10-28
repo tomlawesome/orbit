@@ -24,13 +24,18 @@ import { applyHostOwnership, readHostIdentity } from "./host-ownership";
 // it ran in it (`.env-orbit`, and `.orbit-secrets/`) for the next install to
 // take in (takeHandedInConfiguration), so the install's transaction is the
 // only writer in the deployment folder. Those two entries are the only ones
-// the configure tree may be written beside.
+// the configure tree may be written beside, apart from the tree's own
+// leftovers: a launcher that reconfigures and fails again still holds the
+// last hand-over, so those three names are replaced, never refused.
 
 /** What the launcher tree receives from the image, beside the .orbit-image pin. */
 export const LAUNCHER_CONFIG_TREE_ASSETS: readonly string[] = ["scripts/configure.sh", "scripts/installer-ui.sh", ".env-orbit.example"];
 
 /** What the launcher may leave in the tree for the install to take in (#1519). */
 export const LAUNCHER_HANDED_IN_ENTRIES: readonly string[] = [".env-orbit", ".orbit-secrets"];
+
+/** What an earlier hand-over left in the tree, replaced by the next one: the directory first, then the files. */
+const OWN_LEFTOVERS: readonly string[] = ["scripts", ".env-orbit.example", ".orbit-image"];
 
 export const LAUNCHER_CONFIG_TREE_ENV = "ORBIT_LAUNCHER_CONFIG_TREE";
 export const LAUNCHER_CONFIG_TREE_UNAVAILABLE_ENV = "ORBIT_LAUNCHER_CONFIG_TREE_UNAVAILABLE";
@@ -85,7 +90,33 @@ function refusal(tree: string): string | undefined {
   } catch {
     return "it could not be entered";
   }
-  if (entries.some((entry) => !LAUNCHER_HANDED_IN_ENTRIES.includes(entry))) return "it is not empty";
+  if (entries.some((entry) => !LAUNCHER_HANDED_IN_ENTRIES.includes(entry) && !OWN_LEFTOVERS.includes(entry))) return "it is not empty";
+  return undefined;
+}
+
+/**
+ * Removes an earlier hand-over's leftovers, after checking every one has the
+ * shape a hand-over writes (lstat, so a symlink is never followed): scripts a
+ * real directory, the two files regular files. Anything else is refused with
+ * nothing removed.
+ */
+function removeOwnLeftovers(tree: string): string | undefined {
+  const present: string[] = [];
+  for (const name of OWN_LEFTOVERS) {
+    let stat;
+    try {
+      stat = lstatSync(join(tree, name));
+    } catch {
+      continue;
+    }
+    if (name === "scripts" ? !stat.isDirectory() : !stat.isFile()) return "it holds something that is not ours";
+    present.push(name);
+  }
+  try {
+    for (const name of present) rmSync(join(tree, name), { recursive: true, force: true });
+  } catch {
+    return "its earlier copies could not be removed";
+  }
   return undefined;
 }
 
@@ -133,7 +164,7 @@ export function handOverLauncherConfigTree(request: LauncherConfigTreeRequest): 
   }
   sources.set(".orbit-image", Buffer.from(`${request.imageReference}\n`, "utf8"));
 
-  const reason = refusal(tree);
+  const reason = refusal(tree) ?? removeOwnLeftovers(tree);
   if (reason) {
     request.notice(noticeLine(reason));
     return "refused";
