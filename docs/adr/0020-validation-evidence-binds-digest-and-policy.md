@@ -2,9 +2,11 @@
 
 **Status:** Accepted (ratified by the owner, 2026-09-08). §4–§5 and the
 owner setup were corrected the same day: the ratified text fenced the key
-with protected environments and environment-scoped variables, which are
-Premium features this GitLab CE instance (19.3.1, verified 2026-09-08) does
-not have — the fence as ratified would have parsed and enforced nothing.
+with protected environments, which are an EE feature this GitLab CE instance
+(19.3.1, verified 2026-09-08) does not have — the fence as ratified would have
+parsed and enforced nothing. (Wording corrected 2026-10-28: CE does scope a
+variable to an environment, verified on 19.5.1; what it lacks is the
+protection that stops a branch declaring the environment itself.)
 The correction — the dedicated signing runner below — was ratified by the
 owner on 2026-09-08, after the original ratification and on the same day.
 **Date:** 2026-09-08
@@ -80,10 +82,11 @@ rejected.
    cosign binary and this repository's scripts — not the image build or the
    test suites. Publishers hold only `cosign.pub`.
    Why not CI/CD variables, as first ratified: this instance is GitLab CE,
-   which has no protected environments and no environment-scoped variables
-   (both Premium; `projects/49/protected_environments` returns 404). An
-   `environment:` block is valid YAML on CE and scopes nothing, so the fence
-   would have been silently absent while appearing present; and a
+   which has no protected environments (EE;
+   `projects/49/protected_environments` returns 404). CE does scope a
+   variable to an environment, but any branch can declare that environment
+   in its own `.gitlab-ci.yml` and receive the variable, so the fence would
+   have been silently absent while appearing present; and a
    project-level variable is readable by every job in every protected-branch
    pipeline, handing the key to the whole acceptance suite's dependency
    tree — a wider exposure than the theatre criterion 6 forbids. Keeping the
@@ -102,8 +105,10 @@ rejected.
    project-level variables (the silent exposure just described); public
    Sigstore keyless (already rejected above, and a self-hosted CE issuer
    cannot join the public trust root). Revisit if the instance ever gains
-   environment-scoped variables or another project must share this trust
-   model.
+   protected environments or another project must share this trust model.
+   The `ci-read-tokens` environment added for the v0.3.2 audit scopes three
+   read-only tokens, not the key: it narrows which jobs see them and is
+   not a fence, for the reason above.
 
 6. **cosign is pinned** (version + SHA-256) in one place,
    `scripts/ci/ensure-cosign.sh`, used by attestor and verifiers alike.

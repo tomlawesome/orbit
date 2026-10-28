@@ -3458,11 +3458,14 @@ launcher_install_compat:
 #                    other way).
 #
 # Why a runner mount and not CI/CD variables: this instance is GitLab CE
-# (19.3.1, verified 2026-09-08), which has no protected environments and no
-# environment-scoped variables -- both are Premium. A project-level variable
+# (19.5.1, verified 2026-10-28), which has no protected environments (an EE
+# feature). A variable can be scoped to an environment on CE, but any branch
+# can declare that environment in its own pipeline file and receive the
+# variable (that is what `ci-read-tokens` relies on for the read-only
+# tokens: it narrows exposure, it fences nothing). A project-level variable
 # is readable by every job in every protected-branch pipeline, which would
 # hand the signing key to the whole acceptance suite's dependency tree; an
-# `environment:` block would parse and enforce nothing. The runner mount
+# `environment:` block would parse and fence nothing. The runner mount
 # keeps the key out of GitLab's variable store entirely, and the runner is
 # protected and locked to this project, so a job on an unprotected ref that
 # gives itself the tag gets no runner, not the key (#661 criterion 6;
