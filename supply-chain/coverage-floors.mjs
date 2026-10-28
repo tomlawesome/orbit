@@ -21,10 +21,13 @@ export const floors = {
   // the CLI is exercised by the install acceptance stacks, not unit tests;
   // below the 70-85 band and known
   "src/cli": { statements: 5, branches: 4, functions: 4, lines: 6 },
-  // measured on `dev` 230e6396, pipeline 3049, job `fast` 39963, 2026-10-27
+  // re-measured on `dev` 582a0d58, pipeline 3069, job `fast` 40245, 2026-10-28
+  // (#1540): the 2026-10-27 values came from a `dev` without !1102, which added
+  // code here; the owner ruled the introduction measurement stale, so this is
+  // the floor's true starting value, not a lowering
   // migrations and schema; functions are covered by the `integration`
   // project, which runs without coverage
-  "src/db": { statements: 48, branches: 62, functions: 13, lines: 48 },
+  "src/db": { statements: 47, branches: 58, functions: 13, lines: 47 },
   // measured on `dev` 230e6396, pipeline 3049, job `fast` 39963, 2026-10-27
   "src/lib": { statements: 87, branches: 82, functions: 89, lines: 89 },
   // measured on `dev` 230e6396, pipeline 3049, job `fast` 39963, 2026-10-27
