@@ -375,7 +375,9 @@ variables:
 .trivy_db_warm: &trivy_db_warm |
   unset TRIVY_INSECURE
   if [ ! -e "$TRIVY_CACHE_DIR/db/trivy.db" ]; then
-    trivy image --download-db-only
+    # --timeout 40m: a warm-up gets its own deadline, sized to the download,
+    # not trivy's 5-minute scan default (#1545).
+    trivy image --download-db-only --timeout 40m
   fi
 
 # Which events reach the expensive lanes. `ORBIT_SYSTEM` arrives as a dotenv
@@ -1420,7 +1422,9 @@ sidecar_images:
     name: $TRIVY_IMAGE
     entrypoint: [""]
     pull_policy: if-not-present
-  timeout: 15m
+  # 50m: room for one cold download of both databases (#1545); a warm day
+  # takes a few minutes.
+  timeout: 50m
   # #944 (owner ruling on #923 rec 16a, 2026-09-09): this and
   # launcher_install_compat used to queue for a slot on this runner and only
   # then, inside `script:`, decide from ORBIT_SYSTEM that there was nothing to
@@ -1513,8 +1517,13 @@ sidecar_images:
       # the ollama scan to that 5-minute default; the dev run the same
       # afternoon came in at 145 s. Warmed into the shared cache once, it
       # costs the same as the vulnerability database: nothing on a warm day.
+      # --timeout 40m: the cache is keyed by branch protection, so the
+      # first run on a protected ref starts cold, and at the 500 KiB/s
+      # ghcr.io gave on 2026-10-28 the 944 MiB Java database needs about
+      # 30 minutes; trivy's 5-minute default cut it at 93 percent twice and
+      # held the v0.3.2 promotion (#1545). The job's own timeout covers it.
       if [ ! -e "$TRIVY_CACHE_DIR/java-db/trivy-java.db" ]; then
-        trivy image --download-java-db-only
+        trivy image --download-java-db-only --timeout 40m
       fi
     - |
       # Fan the scans out, four at a time: this loop is almost all network
