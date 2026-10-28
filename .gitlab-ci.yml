@@ -262,25 +262,6 @@ variables:
   # Same scanner build as the old workflow, so a finding here and a finding there
   # mean the same thing.
   TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
-  # The vendor's own registry rather than Trivy's mirror.gcr.io default, which
-  # has no availability commitment to us and 403'd this gate once already
-  # (#673). Deliberately one repository: Trivy does not fall back. Read from
-  # ghcr.io directly over HTTPS, anonymously, not through the plain-HTTP GHCR
-  # cache (#1510): the databases carry no digest, so verified TLS to the
-  # vendor is the only transport integrity they have.
-  TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2
-  # The Java database the same way, for the same reason: `sidecar_images`
-  # needs it for the tika image, and trivy's default for it is the same
-  # mirror.gcr.io that 403'd above.
-  TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db:1
-  # Deliberately no pipeline-wide TRIVY_INSECURE. Trivy's `--insecure` (env
-  # TRIVY_INSECURE) turns off TLS verification on every registry connection
-  # it makes, the database downloads included, even over HTTPS. So it is never
-  # in force while a database download can happen: every scanning job
-  # downloads the databases it reads first, with it unset (`*trivy_db_warm`,
-  # scripts/ci/scan-image.sh), then scans with `--skip-db-update
-  # --skip-java-db-update`. Only `sidecar_images` sets it, on its scan step,
-  # for the digest-pinned images it pulls from the plain-HTTP cache.
   # The digest scripts/test-integration.mjs pins for its disposable database.
   POSTGRES_IMAGE: postgres:18-alpine@sha256:3b0ef735388b2cb097fc29b8bb421d86d57d0ddbe7aa1fbd6493e06d65028503
   # scripts/ci/start-installer-registry.sh's disposable loopback registry
@@ -361,9 +342,9 @@ variables:
 #
 # Keyed by whether the branch is protected, so there are two caches: one
 # written and read only by protected-branch pipelines, one by everything
-# else. Every scan trusts the cached database as-is (--skip-db-update), so a
-# single shared cache would let code in any unprotected branch's pipeline
-# upload an emptied or stale database that delivery scans then pass against.
+# else. Every scan trusts a current cached database as-is, so a single shared
+# cache would let code in any unprotected branch's pipeline upload an emptied
+# or stale database that delivery scans then pass against.
 # Split this way, an unprotected branch cannot poison the database protected
 # pipelines scan with; it can only spoil its own.
 .trivy_db_cache: &trivy_db_cache
@@ -380,9 +361,9 @@ variables:
 #
 # Split from the download below because `supply_chain_image` never runs a
 # local trivy binary at all -- it scans through `docker run` inside
-# scripts/ci/scan-image.sh, which downloads into whatever TRIVY_CACHE_DIR
-# points at with its own `--download-db-only` step in that container before
-# it scans. Nothing here needs to invoke trivy a second time.
+# scripts/ci/scan-image.sh, whose own trivy, run without `--skip-db-update`,
+# already downloads into whatever TRIVY_CACHE_DIR points at when it finds no
+# current database there. Nothing here needs to invoke trivy a second time.
 .trivy_db_dir: &trivy_db_dir |
   trivy_db_dir="$CI_PROJECT_DIR/.trivy-db-cache/$(date -u +%Y-%m-%d)"
   if [ ! -d "$trivy_db_dir" ]; then
@@ -390,34 +371,29 @@ variables:
     mkdir -p "$trivy_db_dir"
   fi
   export TRIVY_CACHE_DIR="$trivy_db_dir"
+  # Trivy's databases come through the runner host's image cache like every
+  # image: plain HTTP, hence TRIVY_INSECURE (owner decision, #1547). Built
+  # here because CI_IMAGE_CACHE_GHCR is a runner-level value, known only at
+  # run time. The vendor's own registry rather than Trivy's mirror.gcr.io
+  # default, which 403'd this gate once (#673); Trivy does not fall back.
+  : "${CI_IMAGE_CACHE_GHCR:?CI_IMAGE_CACHE_GHCR is not set on this runner}"
+  export TRIVY_DB_REPOSITORY="$CI_IMAGE_CACHE_GHCR/aquasecurity/trivy-db:2"
+  export TRIVY_JAVA_DB_REPOSITORY="$CI_IMAGE_CACHE_GHCR/aquasecurity/trivy-java-db:1"
+  export TRIVY_INSECURE=true
 
 # The download itself, for the two jobs that run the trivy CLI directly
 # (`supply_chain_source`, `sidecar_images`). Put after `*trivy_db_dir` in a
 # job's `script:`; a cold miss -- first run of a new day, or an
-# empty/expired cache -- costs exactly what every run cost before #946. The
-# scans after it pass `--skip-db-update`, so they never download a database
-# themselves: a download that fails here fails the job before any scan.
-# TRIVY_INSECURE is unset first, so a CI variable of that name can never
-# turn off TLS verification for the download.
+# empty/expired cache -- costs exactly what every run cost before #946:
+# nothing here can fail the job on its own, only fall back to the unwarmed
+# download trivy would have done anyway. Both jobs have bash (the wrapper
+# needs it); scripts/trivy-db-retry.sh retries only a database-download
+# failure, three times.
 .trivy_db_warm: &trivy_db_warm |
-  unset TRIVY_INSECURE
-  # ghcr.io drops a long download now and then: pipeline 3110 lost the Java
-  # database at 66 percent to "stream error: PROTOCOL_ERROR" (#1545). Nothing
-  # partial is kept, so each attempt starts from zero; try three times, a
-  # minute apart, before failing the job. Shell functions last for the rest
-  # of the job's `script:`, so later steps call this too.
-  trivy_fetch() {
-    for attempt in 1 2 3; do
-      trivy image "$@" && return 0
-      echo "trivy_fetch: attempt $attempt of 3 failed: trivy image $*" >&2
-      [ "$attempt" -eq 3 ] || sleep 60
-    done
-    return 1
-  }
   if [ ! -e "$TRIVY_CACHE_DIR/db/trivy.db" ]; then
     # --timeout 40m: a warm-up gets its own deadline, sized to the download,
     # not trivy's 5-minute scan default (#1545).
-    trivy_fetch --download-db-only --timeout 40m
+    bash scripts/trivy-db-retry.sh trivy image --download-db-only --timeout 40m
   fi
 
 # Which events reach the expensive lanes. `ORBIT_SYSTEM` arrives as a dotenv
@@ -1361,7 +1337,7 @@ supply_chain_source:
     - *system_lane_gate
     - *apk_retry
     - |
-      apk_add nodejs
+      apk_add bash nodejs
       node scripts/supply-chain-policy.mjs validate
       # Every image CI pulls comes through the image cache (#1510): no direct
       # ghcr.io or mcr.microsoft.com reference, no Dependency Proxy, every dind
@@ -1385,12 +1361,7 @@ supply_chain_source:
     - *trivy_db_dir
     - *trivy_db_warm
     - |
-      # The database is already local. The source tree holds no Java
-      # archive, so this scan never opens the Java database: if one ever
-      # appears, --skip-java-db-update fails the scan instead of fetching it.
       trivy fs \
-        --skip-db-update \
-        --skip-java-db-update \
         --scanners vuln,secret \
         --format json \
         --output .orbit-supply-chain/source-raw.json \
@@ -1469,9 +1440,9 @@ sidecar_images:
     name: $TRIVY_IMAGE
     entrypoint: [""]
     pull_policy: if-not-present
-  # 90m: room for a cold download of both databases with one retry
-  # (`trivy_fetch`, #1545); a warm day takes a few minutes.
-  timeout: 90m
+  # 50m: room for one cold download of both databases from the host cache
+  # (#1545); a warm day takes a few minutes.
+  timeout: 50m
   # #944 (owner ruling on #923 rec 16a, 2026-09-09): this and
   # launcher_install_compat used to queue for a slot on this runner and only
   # then, inside `script:`, decide from ORBIT_SYSTEM that there was nothing to
@@ -1571,7 +1542,7 @@ sidecar_images:
       # 30 minutes; trivy's 5-minute default cut it at 93 percent twice and
       # held the v0.3.2 promotion (#1545). The job's own timeout covers it.
       if [ ! -e "$TRIVY_CACHE_DIR/java-db/trivy-java.db" ]; then
-        trivy_fetch --download-java-db-only --timeout 40m
+        bash scripts/trivy-db-retry.sh trivy image --download-java-db-only --timeout 40m
       fi
     - |
       # Fan the scans out, four at a time: this loop is almost all network
@@ -1604,10 +1575,8 @@ sidecar_images:
             # ai/agent-infra#14). Only the byte source Trivy actually pulls
             # from moves. This job has no Docker daemon, so Trivy pulls
             # directly and the host mirror does not apply: name the cache host
-            # for each registry. The cache is plain HTTP, so this scan, and
-            # only this scan, sets TRIVY_INSECURE: both databases are
-            # already local, and --skip-db-update and --skip-java-db-update
-            # keep it from fetching either while TLS checks are off.
+            # for each registry (plain HTTP, hence TRIVY_INSECURE, exported
+            # by *trivy_db_dir).
             # Official Docker Hub images (no namespace, e.g. node, postgres)
             # live under library/.
             case "$2" in
@@ -1617,7 +1586,7 @@ sidecar_images:
               *) pull_target="$CI_IMAGE_CACHE_DOCKERHUB/library/$2" ;;
             esac
             echo "scanning $2 (pulled via $pull_target)"
-            TRIVY_INSECURE=true trivy image \
+            trivy image \
               --cache-dir "$cache" \
               --skip-db-update \
               --skip-java-db-update \
@@ -2335,13 +2304,13 @@ supply_chain_image:
     - *docker_in_job
     - mkdir -p "$RUNNER_TEMP"
     - docker load --input image.tar
-    # TRIVY_IMAGE, TRIVY_DB_REPOSITORY and TRIVY_CACHE_DIR are exported
-    # already (the pipeline-wide pins above, and *trivy_db_dir just above);
-    # the script passes the database repository into the scanner container
-    # itself and mounts the cache directory in unmodified. scan-image.sh
-    # downloads into it first, with TLS verified, then scans with
-    # --skip-db-update -- the same order `*trivy_db_warm` gives the other two
-    # scanner jobs.
+    # TRIVY_IMAGE is a pipeline-wide pin; TRIVY_CACHE_DIR, TRIVY_DB_REPOSITORY
+    # and TRIVY_INSECURE are exported by *trivy_db_dir just above. The script
+    # passes the database repository and TRIVY_INSECURE into the scanner
+    # container itself and mounts the cache directory in unmodified.
+    # scan-image.sh's own trivy, run without --skip-db-update, downloads into
+    # it exactly when it finds nothing current there -- the same check
+    # `*trivy_db_warm` makes explicitly for the other two scanner jobs.
     - |
       set -eu
       TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \

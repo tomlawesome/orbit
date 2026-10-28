@@ -134,8 +134,7 @@ describe("Trivy wiring in scripts/ci/scan-image.sh", () => {
     const scanSites = lines
       .map((line, index) => ({ line, index }))
       .filter(({ line }) => /"\$\{TRIVY_IMAGE\}" (fs|image) \\/.test(line));
-    // The database download, then the two scans that read it offline.
-    expect(scanSites.length).toBe(3);
+    expect(scanSites.length).toBe(2);
     for (const site of scanSites) {
       let start = site.index;
       while (start >= 0 && !lines[start].includes("docker run")) {
@@ -173,6 +172,63 @@ describe("Trivy wiring in scripts/ci/scan-image.sh", () => {
       if (line.includes("${TRIVY_IMAGE}") || line.includes("trivy-db-retry")) {
         expect(line).not.toContain("|| true");
       }
+    }
+  });
+});
+
+describe("Trivy databases through the runner host's image cache (#1547)", () => {
+  const ci = readFileSync(
+    new URL("../.gitlab-ci.yml", import.meta.url),
+    "utf8",
+  ).replaceAll("\r\n", "\n");
+  const block = (anchor) => {
+    const start = ci.indexOf(`${anchor}: &`);
+    expect(start, `${anchor} anchor`).toBeGreaterThan(-1);
+    const end = ci.indexOf("\n\n", start);
+    return ci.slice(start, end);
+  };
+
+  it("builds both database repositories from CI_IMAGE_CACHE_GHCR inside a job script", () => {
+    const dir = block(".trivy_db_dir");
+    expect(dir).toContain(
+      'export TRIVY_DB_REPOSITORY="$CI_IMAGE_CACHE_GHCR/aquasecurity/trivy-db:2"',
+    );
+    expect(dir).toContain(
+      'export TRIVY_JAVA_DB_REPOSITORY="$CI_IMAGE_CACHE_GHCR/aquasecurity/trivy-java-db:1"',
+    );
+    // The cache is plain HTTP.
+    expect(dir).toContain("export TRIVY_INSECURE=true");
+  });
+
+  it("names neither database on ghcr.io directly nor in the variables block", () => {
+    expect(ci).not.toMatch(/(?<!GHCR\/)ghcr\.io\/aquasecurity/);
+    expect(ci).not.toMatch(/^ {2}TRIVY_(JAVA_)?(DB_REPOSITORY|INSECURE):/m);
+  });
+
+  it("downloads both databases through the retry wrapper, with the long timeout", () => {
+    expect(ci).not.toContain("trivy_fetch");
+    expect(block(".trivy_db_warm")).toContain(
+      "bash scripts/trivy-db-retry.sh trivy image --download-db-only --timeout 40m",
+    );
+    expect(ci).toContain(
+      "bash scripts/trivy-db-retry.sh trivy image --download-java-db-only --timeout 40m",
+    );
+  });
+
+  it("gives supply_chain_source the bash the wrapper needs", () => {
+    const job = ci.slice(ci.indexOf("\nsupply_chain_source:"));
+    expect(job.slice(0, job.indexOf("\n  artifacts:"))).toContain(
+      "apk_add bash nodejs",
+    );
+  });
+
+  it("passes the repositories and TRIVY_INSECURE into scan-image.sh's scanner", () => {
+    for (const name of [
+      "TRIVY_DB_REPOSITORY",
+      "TRIVY_JAVA_DB_REPOSITORY",
+      "TRIVY_INSECURE",
+    ]) {
+      expect(imageScan.split(`  --env ${name} \\`).length - 1, name).toBe(2);
     }
   });
 });
