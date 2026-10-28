@@ -875,9 +875,10 @@ describe("read-only tokens reach only the jobs that read them (audit 11a)", () =
   const readingScripts = readdirSync(ciDir)
     .filter((file) => !/\.test\.[cm]?[jt]s$/u.test(file))
     .filter((file) => TOKEN.test(readFileSync(new URL(file, ciDir), "utf8")));
-  // nightly-browsers.mjs reads the token only in these modes; `report` files
-  // with SIDECAR_ISSUE_TOKEN instead.
-  const TOKEN_MODES = { "nightly-browsers.mjs": ["moved", "blocked"] };
+  // nightly-browsers.mjs reads the token in every mode: `report` reads the
+  // night's failed jobs with it before filing with SIDECAR_ISSUE_TOKEN (the
+  // first nightly, 3069, got 401 when the job lacked the environment).
+  const TOKEN_MODES = { "nightly-browsers.mjs": ["moved", "blocked", "report"] };
 
   function code(block) {
     return block
