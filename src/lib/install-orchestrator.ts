@@ -101,9 +101,9 @@ export interface InstallContext {
 /** What a guided configuration step needs answered: the configure engine's own sources, in its own order (src/cli/orbit.ts). */
 export interface ConfigurationAnswers {
   /** `configure.sh --init`'s answers; the hint is the deployment's existing sign-in mode. Throws to refuse or cancel. */
-  guidedInit(authModeHint: "local" | "oidc" | undefined): GuidedInitInput;
+  guidedInit(authModeHint: "local" | "oidc" | undefined): GuidedInitInput | Promise<GuidedInitInput>;
   /** `configure.sh --set-oidc-secret`'s secret. Throws to refuse or cancel. */
-  oidcSecret(): string;
+  oidcSecret(): string | Promise<string>;
 }
 
 export interface InstallDependencies {
@@ -574,7 +574,8 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       onEvent({ phase: "configuration", component: "configuration", state: "starting", reason: "configuration-migration", action: "configure" });
       const unchanged = (message: string) => fail("configuration", "configuration", `${message}; the target remains unchanged.`, "configuration-failure", "retry");
       try {
-        say(dependencies, [applyGuidedInit(scratchDir, dependencies.answers.guidedInit(undefined))]);
+        const answers = await dependencies.answers.guidedInit(undefined);
+        say(dependencies, [applyGuidedInit(scratchDir, answers)]);
       } catch {
         return unchanged("Guided configuration was cancelled or invalid");
       }
@@ -587,7 +588,8 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       // but the literal "false" is OIDC, guided_init's own fail-safe default.
       if (readEnvironmentValue(scratchDir, "ORBIT_AUTH_OIDC") !== "false") {
         try {
-          say(dependencies, [applySetOidcSecret(scratchDir, dependencies.answers.oidcSecret())]);
+          const secret = await dependencies.answers.oidcSecret();
+          say(dependencies, [applySetOidcSecret(scratchDir, secret)]);
         } catch {
           return unchanged("OIDC client secret collection was cancelled or invalid");
         }
@@ -734,7 +736,8 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
             const existingMode = readEnvironmentValue(context.targetDir, "ORBIT_AUTH_OIDC");
             const hint = existingMode === "true" ? "oidc" : existingMode === "false" ? "local" : undefined;
             try {
-              say(dependencies, [transaction.shareLock(() => applyGuidedInit(context.targetDir, dependencies.answers.guidedInit(hint)))]);
+              const answers = await dependencies.answers.guidedInit(hint);
+              say(dependencies, [transaction.shareLock(() => applyGuidedInit(context.targetDir, answers))]);
             } catch {
               return configurationFailure("Guided configuration was cancelled or invalid; restoring the previous deployment.");
             }
@@ -742,7 +745,8 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
           }
           if (readiness.text.split("\n").includes("missing OIDC_CLIENT_SECRET")) {
             try {
-              say(dependencies, [transaction.shareLock(() => applySetOidcSecret(context.targetDir, dependencies.answers.oidcSecret()))]);
+              const secret = await dependencies.answers.oidcSecret();
+              say(dependencies, [transaction.shareLock(() => applySetOidcSecret(context.targetDir, secret))]);
             } catch {
               return configurationFailure("OIDC client secret collection was cancelled or invalid; restoring the previous deployment.");
             }

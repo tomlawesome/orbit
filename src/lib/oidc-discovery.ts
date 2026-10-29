@@ -1,3 +1,4 @@
+import { isValidOidcIssuer } from "./config-contract";
 import { readEnvironmentValue } from "./target-identity";
 
 // OIDC discovery validation, ported from scripts/install.sh's
@@ -224,4 +225,74 @@ export async function verifyOidcDiscovery(targetDir: string, options: VerifyOidc
   if (fetchFailure) return fetchFailure;
   if (result.body === undefined || !validateDiscoveryDocument(issuer, result.body)) return configurationFailure();
   return { status: "ok" };
+}
+
+export type OidcIssuerPromptReason =
+  | "invalid-issuer"
+  | "trailing-slash-mismatch"
+  | "issuer-mismatch"
+  | "provider-unreachable";
+
+export type OidcIssuerPromptOutcome =
+  | { status: "ok" }
+  | { status: "rejected"; reason: OidcIssuerPromptReason; message: string; publishedIssuer?: string };
+
+const withoutTrailingSlash = (value: string): string => value.replace(/\/+$/, "");
+
+/**
+ * #1454: the issuer answer, checked at the prompt against the issuer the
+ * provider itself publishes, so a trailing-slash mismatch (Authentik ends its
+ * issuer in "/", Keycloak does not) is caught where it is typed and not at
+ * install time. Shape first (no request for a badly shaped answer), then one
+ * discovery fetch under the limits verifyOidcDiscovery enforces. Only the
+ * `issuer` field is compared here; the rest of the document is still checked
+ * by verifyOidcDiscovery at install time, which stays as it is.
+ */
+export async function checkOidcIssuerAgainstDiscovery(
+  issuerAnswer: string,
+  options: VerifyOidcDiscoveryOptions = {},
+): Promise<OidcIssuerPromptOutcome> {
+  if (!isValidOidcIssuer(issuerAnswer)) {
+    return {
+      status: "rejected",
+      reason: "invalid-issuer",
+      message: "The OIDC issuer must be an https URL without credentials, a query string or a fragment.",
+    };
+  }
+
+  const discoveryUrl = buildDiscoveryUrl(issuerAnswer);
+  const unreachable: OidcIssuerPromptOutcome = {
+    status: "rejected",
+    reason: "provider-unreachable",
+    message:
+      `The OIDC provider's discovery document could not be read from ${discoveryUrl}; ` +
+      "check the issuer and that the provider is reachable from this machine.",
+  };
+
+  const result = await fetchDiscovery(discoveryUrl, options);
+  if (classifyOidcFetchResult(result) !== null || result.body === undefined) return unreachable;
+
+  let published: unknown;
+  try {
+    published = (JSON.parse(result.body) as { issuer?: unknown } | null)?.issuer;
+  } catch {
+    return unreachable;
+  }
+  if (typeof published !== "string" || published === "") return unreachable;
+
+  if (published === issuerAnswer) return { status: "ok" };
+  if (withoutTrailingSlash(published) === withoutTrailingSlash(issuerAnswer)) {
+    return {
+      status: "rejected",
+      reason: "trailing-slash-mismatch",
+      publishedIssuer: published,
+      message: `The provider publishes its issuer as ${published} (the trailing slash differs); enter it exactly as published.`,
+    };
+  }
+  return {
+    status: "rejected",
+    reason: "issuer-mismatch",
+    publishedIssuer: published,
+    message: `The provider publishes its issuer as ${published}, which differs from the issuer entered; enter it exactly as published.`,
+  };
 }
