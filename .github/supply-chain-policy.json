@@ -565,7 +565,7 @@
     {
       "name": "Apache Tika parser",
       "tag": "apache/tika:4.2.0-full",
-      "reference": "apache/tika:4.2.0-full@sha256:4774eaac44f86cdf648ae7b5a367016eaf6f9052adec31e5cff07cff1a0c6e24",
+      "reference": "apache/tika:4.2.0-full@sha256:701ce79199164d9347914ebcce6585cbfbcde05553b99944479373612cf28d96",
       "indexDigest": "sha256:4774eaac44f86cdf648ae7b5a367016eaf6f9052adec31e5cff07cff1a0c6e24",
       "platform": "linux/amd64",
       "locations": [
@@ -680,7 +680,7 @@
       "reason": "Throwaway registry the installer tests push to; never part of a deployment. Its CI copy (ORBIT_INSTALLER_REGISTRY_IMAGE) is a `_IMAGE:` pin Renovate proposes updates for; the scripts' fallback defaults are not seen by Renovate and move by hand with it. Not in containerImages because sidecar-pins checks each file for the linux/amd64 digest while these files pin the multi-architecture index digest (#1490)."
     },
     {
-      "reference": "apache/tika:${TIKA_VERSION}-full@sha256:4774eaac44f86cdf648ae7b5a367016eaf6f9052adec31e5cff07cff1a0c6e24",
+      "reference": "apache/tika:${TIKA_VERSION}-full@sha256:701ce79199164d9347914ebcce6585cbfbcde05553b99944479373612cf28d96",
       "locations": [
         "scripts/extract-bundle/cli.ts"
       ],

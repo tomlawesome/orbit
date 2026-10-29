@@ -132,7 +132,7 @@ services:
   # docker compose --profile processing up -d
   orbit-tika:
     container_name: orbit-tika
-    image: apache/tika:4.2.0-full@sha256:4774eaac44f86cdf648ae7b5a367016eaf6f9052adec31e5cff07cff1a0c6e24
+    image: apache/tika:4.2.0-full@sha256:701ce79199164d9347914ebcce6585cbfbcde05553b99944479373612cf28d96
     profiles: ["processing"]
     restart: unless-stopped
     user: "35002:35002"
