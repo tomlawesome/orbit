@@ -304,10 +304,12 @@ page's URL at failure, which this one has to infer.
 
 - 2026-10-08 · 059878f1 (#1325, which touches no sign-in code) · local `scripts/test-e2e-local.sh --spec 'tests/e2e/v19-(home-drawer|create|item-actions|mail-review)\.spec\.ts'` · `expect(session.ok()).toBe(true)` at `tests/e2e/support/bootstrap.ts:112` (`claimInstanceAsAdministrator`): `/api/auth/session` was not OK straight after the claim's sign-in. Every project depends on `[unclaimed]`, so 141 tests did not run. The next run of the same command on the same commit passed it. Traces: `~/projects/.backups/orbit/e2e-orbit-e2e-local-ecd11949-2436667-20261008-222859`. First sighting.
 
-## v19-keyboard.spec.ts:313 "arrive: the sign-in door opens by Tab and Enter alone" on desktop-chromium
+## v19-keyboard.spec.ts:313 "arrive: the sign-in door opens by Tab and Enter alone" — desktop-chromium, `net::ERR_ABORTED` on /home or a landing on the provider's /authorize (the #1096 symptom, after its fix) — #1554
 
 - 2026-10-09 · 79c68846 (#1319 stage 3b; this test unchanged on the branch) · local `scripts/test-e2e-local.sh --keep --project desktop-chromium`, whole suite, with the fidelity suite running alongside · `page.goto: net::ERR_ABORTED` on `/home` at line 328. Passed on a rerun of the file against the same stack. Traces: `~/projects/.backups/orbit/e2e-1319-stage3b-79c68846-desktop-chromium`. First sighting.
 - 2026-10-16 · 7264f015 (`dev` after !1073, which touches test tooling and scripts only; this test now at line 315) · pipeline 2674 / smoke (job 36868, !1072) · first attempt: signed out, `/home` landed on the test identity provider's `/authorize` page instead of Orbit's `/login?returnTo=%2Fhome` (`toHaveURL` at line 331); retry #1: `page.goto: net::ERR_ABORTED` on `/home` at line 330, as the first sighting. 392 others passed. Job retried as 36881. Second sighting.
+- 2026-10-14 · 0c6e60bf · local `scripts/test-e2e-local.sh` full run, 2 workers, stopped at 681/1413 under host load · `page.goto: net::ERR_ABORTED at http://127.0.0.1:<port>/home` after 1.9s. Passed alone on the same code and a fresh stack (`--reuse … --project desktop-chromium --spec tests/e2e/v19-keyboard.spec.ts:314`, 3.7s). #1096's fix reasoned from `workers: 1`; this run had 2. First sighting.
+- Cause found (#1554, 2026-10-29): the test signed in, seeded, then cleared the cookies under the live page. An administrator's sign-in lands on `/home` instead of the arrival whenever ANY live household exists on the instance (`hasOnwardHousehold`, hooks.server.js), and with two workers the other worker's seed is enough, so `settleArrival` returned on the `/home` URL with home's reads still out. A read answered after the cookies were gone got 401, and the seam's 401 journey (`workspace.js` `json()`, `location.assign` to the login flow) cancelled the test's `page.goto("/home")` (`ERR_ABORTED`) or left the page on the provider's `/authorize`. Reproduced on demand: a decoy household so the sign-in lands on `/home`, `/api/workspace` held until the cookies were cleared and `/home` navigations slowed 600 ms: 3 of 3 failed with `net::ERR_ABORTED`. Fixed by `dropSession` (`support/arrival.ts`): the test leaves for `about:blank`, which replaces the signed-in document and cancels its requests, and only then clears the cookies. The same injection passes 3 of 3 with it. Single-worker runs always land on the arrival, which is why they never showed it.
 
 ## v19-home-drawer.spec.ts:212 "on the desk › the dial's documents chip opens the item's drawer at its real documents" (desktop-webkit)
 
@@ -401,10 +403,6 @@ page's URL at failure, which this one has to infer.
 ## v19-mail-review.spec.ts:431 "the phone sheet reads a staged paper's page one, and tells a gone mail apart from one it just cannot draw (#1155)" — mobile-webkit, marked expected-to-fail for #1196
 
 - 2026-10-13 · 5e852f6f (!1064; the same app code passed this job on pipeline 2559, where the test failed as expected) · pipeline 2560 / smoke_webkit_mobile (job 36017, the first re-run) · "Expected to fail, but passed", on the first attempt and the in-job retry: the #1196 driver fault it is marked for does not happen every run. First sighting.
-
-## v19-keyboard.spec.ts:314 "arrive: the sign-in door opens by Tab and Enter alone" — desktop-chromium, `net::ERR_ABORTED` on /home (the #1096 symptom, after its fix)
-
-- 2026-10-14 · 0c6e60bf · local `scripts/test-e2e-local.sh` full run, 2 workers, stopped at 681/1413 under host load · `page.goto: net::ERR_ABORTED at http://127.0.0.1:<port>/home` after 1.9s. Passed alone on the same code and a fresh stack (`--reuse … --project desktop-chromium --spec tests/e2e/v19-keyboard.spec.ts:314`, 3.7s). #1096's fix reasoned from `workers: 1`; this run had 2. First sighting.
 
 ## v19-create.spec.ts:399 "the quick add's box takes a document by click or by drop, and opens the full form with it" — desktop-firefox, `socket hang up`
 
