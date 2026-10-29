@@ -421,6 +421,7 @@ page's URL at failure, which this one has to infer.
 - 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed once, passed on retry. Third sighting: filed as #1503.
 - 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke (job 38684), desktop-chromium · failed once, passed on retry. Now seen on Chromium too.
 - 2026-10-25 · 9dba0fd1 (dev, !1092 merged; hand-started for browser evidence) · pipeline 2981 / smoke_firefox (job 39404), desktop-firefox · the reader's page count empty after 5 s (`"one page"` expected); passed on the in-job retry.
+- Cause found (not yet run in a browser; see the commit): the test waited for the reader's picture to be "visible", but the reader's `<img>` has its alt from the moment it opens, before its own render of the page has arrived, so that wait passed at once and the page count (which arrives with the render) then had only the 5 s default. Fixed by waiting for the drawn picture first, as :299 already does, on this branch.
 
 ## v19-create.spec.ts:207 "a document picked on the create form is attached to the saved item" — desktop-webkit
 
