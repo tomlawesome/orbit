@@ -45,7 +45,7 @@
  * tween frame purely to re-sync the ring to the body's new box. Nothing here
  * reaches past the vocabulary into veil.js directly.
  */
-import { drawDemoBody, ease, positionDemoBody } from "./demo-body.js";
+import { drawDemoBody, positionDemoBody, walkDemoBody } from "./demo-body.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -162,7 +162,7 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { pocket, setScreen, veil, ctl, goto, light, unlight, callout, dropCallout, tween, w, mark, dry, doc, animate } = ctx;
+    const { pocket, setScreen, veil, ctl, goto, light, unlight, callout, dropCallout, w, mark, dry, doc, animate } = ctx;
     const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
@@ -191,12 +191,7 @@ export default {
          one here; it misled this chapter and chapter 12 once already. */
       const body = ctl({ sel: S.body, round: true, optional: true });
       light(body);
-      await tween(WALK_MS, (t) => {
-        if (dry() || !bodyEl) return;
-        const days = Math.round(DAYS_FAR + (DAYS_NEAR - DAYS_FAR) * ease(t));
-        positionTimeBody(bodyEl, days);
-        light(body);
-      });
+      await walkDemoBody(ctx, { group: bodyEl, position: positionTimeBody, ring: body, from: DAYS_FAR, to: DAYS_NEAR, ms: WALK_MS });
 
       /* Landed, close in: the danger zone it is walking toward pulses red
          (owner, 2026-10-01). Not in the dry run, which draws nothing. */

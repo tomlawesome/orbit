@@ -42,7 +42,7 @@
  * keeps pace on its own. The veil is down for the walk: the swing back out
  * plays on the reader's own, undimmed sky.
  */
-import { drawDemoBody, ease, positionDemoBody } from "./demo-body.js";
+import { drawDemoBody, positionDemoBody, walkDemoBody } from "./demo-body.js";
 import { SELECTORS as ITEM, glide, itemBody, openItem, readyHome } from "./08-the-item.js";
 
 /** Ratified beat: the demo body walks from 16 days out (just completed) to
@@ -112,7 +112,7 @@ export default {
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
     const {
-      pocket, setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, tween, w, T, mark, dry, doc,
+      pocket, setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, w, T, mark, dry, doc,
       shut, room,
     } = ctx;
     const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
@@ -160,12 +160,7 @@ export default {
 
     const body = ctl({ sel: S.body, round: true, optional: true });
     light(body);
-    await tween(WALK_MS, (t) => {
-      if (dry() || !bodyEl) return;
-      const days = Math.round(DAYS_NEAR + (DAYS_FAR - DAYS_NEAR) * ease(t));
-      positionTimeBody(bodyEl, days);
-      light(body);
-    });
+    await walkDemoBody(ctx, { group: bodyEl, position: positionTimeBody, ring: body, from: DAYS_NEAR, to: DAYS_FAR, ms: WALK_MS });
     await mark("done-swung");
 
     /* "A repeat is never finished..." — a sky line on the pocket (§3.3):
