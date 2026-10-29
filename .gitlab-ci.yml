@@ -792,23 +792,38 @@ variables:
 
 # What the job and everything it started -- the in-job daemon, the stack, the
 # browsers -- cost at their peak, read from the job container's own cgroup
-# before the teardown below kills the daemon (#1546: shard sizes and the
-# runner's per-job cap are set from these lines, not guessed). `memory.peak`
-# is the high-water mark in bytes, kept after the processes have gone;
-# `cpu.stat`'s usage_usec is total CPU time. Both tolerate a kernel or runner
-# without them: the line is then "resource peak: unavailable".
+# (#1546: shard sizes and the runner's per-job cap are set from these lines,
+# not guessed). `memory.peak` is the high-water mark in bytes, kept after the
+# processes have gone; `cpu.stat`'s usage_usec is total CPU time. Both
+# tolerate a kernel or runner without them: the line is then "resource peak:
+# unavailable".
+#
+# Printed from an EXIT trap in `script`, never from after_script: after_script
+# runs in a fresh container with its own cgroup (see "So the capture has to
+# happen before `script` exits" below), so there it read 6 MiB and 0 s for a
+# whole acceptance stack (pipeline 3156). Placed straight after
+# *docker_in_job; *stack_diagnostics_on_failure replaces the trap later and
+# calls orbit_resource_peak itself, so the line prints on success and failure
+# alike. The trap re-exits with the status it was handed.
 .resource_peak: &resource_peak |
-  if [ -r /sys/fs/cgroup/memory.peak ]; then
-    peak_bytes=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null)
-    cpu_usec=$(awk '/^usage_usec/ {print $2}' /sys/fs/cgroup/cpu.stat 2>/dev/null)
-    # Empty reads become 0 so the arithmetic never aborts this shell, which
-    # also runs the teardown below.
-    peak_mib=$(( ${peak_bytes:-0} / 1048576 ))
-    cpu_s=$(( ${cpu_usec:-0} / 1000000 ))
-    echo "resource peak: memory=${peak_mib} MiB cpu=${cpu_s} s (job ${CI_JOB_NAME:-?}, runner ${CI_RUNNER_DESCRIPTION:-?})"
-  else
-    echo "resource peak: unavailable (no /sys/fs/cgroup/memory.peak)"
-  fi
+  orbit_resource_peak() {
+    if [ -r /sys/fs/cgroup/memory.peak ]; then
+      peak_bytes=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null)
+      cpu_usec=$(awk '/^usage_usec/ {print $2}' /sys/fs/cgroup/cpu.stat 2>/dev/null)
+      peak_mib=$(( ${peak_bytes:-0} / 1048576 ))
+      cpu_s=$(( ${cpu_usec:-0} / 1000000 ))
+      echo "resource peak: memory=${peak_mib} MiB cpu=${cpu_s} s (job ${CI_JOB_NAME:-?}, runner ${CI_RUNNER_DESCRIPTION:-?})"
+    else
+      echo "resource peak: unavailable (no /sys/fs/cgroup/memory.peak)"
+    fi
+  }
+  orbit_resource_peak_on_exit() {
+    orbit_exit_status=$?
+    trap - EXIT
+    orbit_resource_peak || :
+    exit "$orbit_exit_status"
+  }
+  trap orbit_resource_peak_on_exit EXIT
 
 # The last step of every after_script that started the daemon above. /builds
 # outlives the job, so the daemon's image store -- a whole Orbit stack, 3 to
@@ -854,6 +869,7 @@ variables:
   orbit_stack_diagnostics_on_exit() {
     orbit_exit_status=$?
     trap - EXIT
+    if command -v orbit_resource_peak > /dev/null 2>&1; then orbit_resource_peak || :; fi
     if [ "$orbit_exit_status" -ne 0 ]; then
       bash "$CI_PROJECT_DIR/scripts/ci/show-stack-diagnostics.sh" || :
     fi
@@ -2451,6 +2467,7 @@ smoke:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
     # configure.sh runs inside the image under test (#1210), so the
@@ -2500,7 +2517,6 @@ smoke:
     exit_codes:
       - 3
   after_script:
-    - *resource_peak
     # No diagnostics here: this shell has no daemon to ask (#1100), so the
     # stack's logs are captured by *stack_diagnostics_on_failure above. The
     # teardown call stays because it costs nothing and reads plainly; what
@@ -2564,6 +2580,7 @@ smoke_firefox:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
     # configure.sh runs inside the image under test (#1210), so the
@@ -2611,7 +2628,6 @@ smoke_firefox:
     exit_codes:
       - 3
   after_script:
-    - *resource_peak
     # No diagnostics here: this shell has no daemon to ask (#1100), so the
     # stack's logs are captured by *stack_diagnostics_on_failure above. The
     # teardown call stays because it costs nothing and reads plainly; what
@@ -2705,6 +2721,7 @@ smoke_webkit:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - *webkit_oidc_hosts
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
@@ -2753,7 +2770,6 @@ smoke_webkit:
     exit_codes:
       - 3
   after_script:
-    - *resource_peak
     # No diagnostics here: this shell has no daemon to ask (#1100), so the
     # stack's logs are captured by *stack_diagnostics_on_failure above. The
     # teardown call stays because it costs nothing and reads plainly; what
@@ -2816,6 +2832,7 @@ smoke_webkit_mobile:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - *webkit_oidc_hosts
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
@@ -2864,7 +2881,6 @@ smoke_webkit_mobile:
     exit_codes:
       - 3
   after_script:
-    - *resource_peak
     # No diagnostics here: this shell has no daemon to ask (#1100), so the
     # stack's logs are captured by *stack_diagnostics_on_failure above. The
     # teardown call stays because it costs nothing and reads plainly; what
@@ -2940,6 +2956,7 @@ smoke_local_only:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
     # configure.sh runs inside the image under test (#1210), so the
@@ -2960,7 +2977,6 @@ smoke_local_only:
       node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts $specs
     - *reuse_evidence
   after_script:
-    - *resource_peak
     # No diagnostics here: this shell has no daemon to ask (#1100), so the
     # stack's logs are captured by *stack_diagnostics_on_failure above. The
     # teardown call stays because it costs nothing and reads plainly; what
@@ -3037,6 +3053,7 @@ acceptance:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - *step_outputs
     - |
       set -eu
@@ -3121,7 +3138,6 @@ acceptance:
         bash scripts/ci/verify-installed-image.sh
     - *reuse_evidence
   after_script:
-    - *resource_peak
     # A second shell, so the outputs are re-read from the file rather than
     # inherited. Every removal the cleanup makes is guarded by the path prefix
     # or container identity this run recorded, so a step that never ran leaves
@@ -3192,12 +3208,12 @@ repair_journeys:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - docker load --input image.tar
     - docker tag "$ORBIT_IMAGE_TAG" "$ORBIT_REPAIR_JOURNEYS_IMAGE"
     - bash scripts/test-repair-journeys.sh
     - *reuse_evidence
   after_script:
-    - *resource_peak
     - *docker_in_job_teardown
   artifacts:
     paths:
