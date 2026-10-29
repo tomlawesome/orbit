@@ -30,6 +30,7 @@
  *     this one — nothing here dims the chart ink by day/night.
  */
 import { runBackdropClock, streamFactory, svgEl } from "$lib/sky.js";
+import { onResizeSettled } from "$lib/resize.js";
 
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -818,17 +819,11 @@ export function mountSatellites(root, seed) {
      height. */
   const sky = runBackdropClock({ build, draw: (clock) => { ensure(clock); place(clock); } });
 
-  let resizeTimer = /** @type {?ReturnType<typeof setTimeout>} */ (null);
-  const onResize = () => {
-    if (resizeTimer !== null) clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => build(sky.now()), 140);
-  };
-  addEventListener("resize", onResize);
+  const stopResize = onResizeSettled(() => build(sky.now()), 140);
 
   return () => {
     sky.stop();
-    if (resizeTimer !== null) clearTimeout(resizeTimer);
-    removeEventListener("resize", onResize);
+    stopResize();
     root.textContent = "";
   };
 }

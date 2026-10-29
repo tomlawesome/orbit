@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { decodeSvg } from "$lib/raster.js";
+  import { onResizeSettled } from "$lib/resize.js";
 
   /**
    * POL-13's film grain, once (#445) — and now rasterised once too (#499).
@@ -106,8 +107,6 @@
     const effectiveSlope = packSlope || String(slope);
 
     let cancelled = false;
-    /** @type {ReturnType<typeof setTimeout>} */
-    let timer;
 
     async function build() {
       const { width, height } = host.getBoundingClientRect();
@@ -145,17 +144,11 @@
       host.dataset.rasterised = "ready";
     }
 
-    function onResize() {
-      clearTimeout(timer);
-      timer = setTimeout(build, 120);
-    }
-
     build();
-    window.addEventListener("resize", onResize);
+    const stopResize = onResizeSettled(build, 120);
     return () => {
       cancelled = true;
-      clearTimeout(timer);
-      window.removeEventListener("resize", onResize);
+      stopResize();
     };
   });
 </script>
