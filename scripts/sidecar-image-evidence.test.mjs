@@ -381,3 +381,150 @@ describe("sidecar image evidence: evaluate", () => {
     );
   });
 });
+
+describe("sidecar image evidence: cache address is kept out of recorded targets", () => {
+  const CACHE_HOST = "cache.example.invalid:5000";
+  const VENDOR_REFERENCE = `postgres:18-alpine@${DIGEST}`;
+  const CACHE_ARTIFACT = `${CACHE_HOST}/library/postgres:18-alpine@${DIGEST}`;
+
+  function cachePolicy(overrides = {}) {
+    return policy({
+      containerImages: [
+        containerImage(),
+        containerImage({
+          name: "PostgreSQL database",
+          tag: "postgres:18-alpine",
+          reference: VENDOR_REFERENCE,
+          locations: ["docker-compose.yml"],
+          source: "https://github.com/docker-library/postgres",
+          registry: "https://hub.docker.com/_/postgres",
+          licenseSource: "https://github.com/docker-library/postgres/blob/master/LICENSE",
+        }),
+      ],
+      ...overrides,
+    });
+  }
+
+  // `artifactName: null` writes a report with no ArtifactName at all; a
+  // destructured default would swallow `undefined`.
+  function postgresReport({ artifactName = CACHE_ARTIFACT, results }) {
+    const document = { SchemaVersion: 2, Results: results };
+    if (artifactName !== null) {
+      document.ArtifactName = artifactName;
+    }
+    return document;
+  }
+
+  function evaluate(policyDocument, postgresDocument) {
+    const dir = scratchDir();
+    const { policyPath, scansDir } = writeFixtures(dir, {
+      policyDocument,
+      reports: {
+        "node-22-alpine": report(),
+        "postgres-18-alpine": postgresDocument,
+      },
+    });
+    const outputPath = join(dir, "evidence.json");
+    const result = runCli([
+      "evaluate",
+      "--policy",
+      policyPath,
+      "--scans",
+      scansDir,
+      "--output",
+      outputPath,
+      "--revision",
+      REVISION,
+    ]);
+    const evidence = JSON.parse(readFileSync(outputPath, "utf8"));
+    const image = evidence.images.find((entry) => entry.tag === "postgres:18-alpine");
+    return { result, evidence, image };
+  }
+
+  it("rewrites the cache-prefixed OS-package target to the vendor reference and leaks no cache address", () => {
+    const { result, evidence, image } = evaluate(
+      cachePolicy(),
+      postgresReport({
+        results: [
+          {
+            Target: `${CACHE_ARTIFACT} (alpine 3.22.2)`,
+            Vulnerabilities: [vulnerability({ Severity: "MEDIUM" })],
+          },
+        ],
+      }),
+    );
+
+    expect(result.status).toBe(0);
+    expect(image.findings).toHaveLength(1);
+    expect(image.findings[0].target).toBe(`${VENDOR_REFERENCE} (alpine 3.22.2)`);
+    expect(JSON.stringify(evidence)).not.toContain("cache.example.invalid");
+  });
+
+  it("records a file-level target unchanged", () => {
+    const { result, image } = evaluate(
+      cachePolicy(),
+      postgresReport({
+        results: [
+          {
+            Target: "usr/local/bin/gosu",
+            Vulnerabilities: [vulnerability({ Severity: "MEDIUM" })],
+          },
+        ],
+      }),
+    );
+
+    expect(result.status).toBe(0);
+    expect(image.findings).toHaveLength(1);
+    expect(image.findings[0].target).toBe("usr/local/bin/gosu");
+  });
+
+  it("records the target unchanged when the report has no ArtifactName", () => {
+    const target = `${CACHE_ARTIFACT} (alpine 3.22.2)`;
+    const { result, image } = evaluate(
+      cachePolicy(),
+      postgresReport({
+        artifactName: null,
+        results: [
+          {
+            Target: target,
+            Vulnerabilities: [vulnerability({ Severity: "MEDIUM" })],
+          },
+        ],
+      }),
+    );
+
+    expect(result.status).toBe(0);
+    expect(image.findings).toHaveLength(1);
+    expect(image.findings[0].target).toBe(target);
+  });
+
+  it("matches an exception written with the rewritten target against the cache-prefixed finding", () => {
+    const exception = {
+      kind: "vulnerability",
+      scope: "image",
+      id: "CVE-2026-0001",
+      package: "example",
+      target: `${VENDOR_REFERENCE} (alpine 3.22.2)`,
+      owner: "Orbit maintainers",
+      rationale: "A bounded compatibility check is underway.",
+      expiresOn: LIVE_DATE,
+      trackingIssue: 81,
+    };
+    const { result, image } = evaluate(
+      cachePolicy({ exceptions: [exception] }),
+      postgresReport({
+        results: [
+          {
+            Target: `${CACHE_ARTIFACT} (alpine 3.22.2)`,
+            Vulnerabilities: [vulnerability({ Severity: "HIGH" })],
+          },
+        ],
+      }),
+    );
+
+    expect(result.status).toBe(0);
+    expect(image.excepted).toBe(1);
+    expect(image.blocked).toBe(0);
+    expect(image.findings[0].policy).toBe("excepted");
+  });
+});

@@ -445,6 +445,50 @@
       "package": "libcurl",
       "installedVersion": "8.22.0-r0",
       "rationale": "Alpine package in postgres:18-alpine; fixed in 8.23.0-r0, but the pinned amd64 manifest is still the current upstream build, so only an upstream rebuild replaces it. Owner granted, 2026-10-27."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 1548,
+      "id": "CVE-2026-56857",
+      "package": "stdlib",
+      "installedVersion": "v1.24.6",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine. Windows-only (GO-2026-6604: os.Root Mkdir can follow a junction out of the root); the image runs Linux, so it is not reachable. Dismissed on #1543, 2026-10-28; clears when upstream rebuilds gosu on a fixed Go. Expires with the #794 set so it is reviewed on the same day."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 1548,
+      "id": "CVE-2026-56857",
+      "package": "stdlib",
+      "installedVersion": "v1.26.7",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full. Windows-only (GO-2026-6604: os.Root Mkdir can follow a junction out of the root); the image runs Linux, so it is not reachable. Dismissed on #1543, 2026-10-28; clears when a Tika image ships pebble on a fixed Go. Expires with the #794 set so it is reviewed on the same day."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 1541,
+      "id": "CVE-2026-109383",
+      "package": "undici",
+      "installedVersion": "6.28.0",
+      "rationale": "Bundled with npm inside node:24-alpine, used only by tests/oidc/Dockerfile (the test sign-in provider CI stands up); not a shipped sidecar and no operator runs it. Fixed in undici 6.29.1, but no Node 24 release bundles it yet (checked 2026-10-28). Clears when scripts/sidecar-pins.mjs sync moves the pin to a rebuilt node:24-alpine (#1541). Granted so that the scan's blanket exit-3 tolerance could go (#1548), 2026-10-29."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 1541,
+      "id": "CVE-2026-87018",
+      "package": "undici",
+      "installedVersion": "6.28.0",
+      "rationale": "Bundled with npm inside node:24-alpine, used only by tests/oidc/Dockerfile (the test sign-in provider CI stands up); not a shipped sidecar and no operator runs it. Fixed in undici 6.29.1, but no Node 24 release bundles it yet (checked 2026-10-28). Clears when scripts/sidecar-pins.mjs sync moves the pin to a rebuilt node:24-alpine (#1541). Granted so that the scan's blanket exit-3 tolerance could go (#1548), 2026-10-29."
     }
   ],
   "containerImages": [

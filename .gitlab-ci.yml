@@ -1409,19 +1409,17 @@ licence_policy:
 # Scans every image pinned in .github/supply-chain-policy.json, not just the
 # one Orbit builds: an operator's deployment runs the sidecars too (#647).
 #
-# Findings are reporting-only, as `allow_failure` makes them here:
-# every pinned sidecar currently has fixable HIGH findings with no clean
-# upstream digest to re-pin to. When the pins scan clean, delete `allow_failure`
-# so a newly published advisory against a pinned digest fails the job.
-#
-# The scanner failing to *run* is not reporting-only, and used to be treated as
-# if it were (#810). `allow_failure: true` covered every exit status, so when
-# the runner host filled up and Trivy could not download its vulnerability
-# database the job went yellow with nothing scanned, and the pipeline stayed
-# green -- pipelines 636 and 637, "no space left on device". `exit_codes: [3]`
-# narrows the permission to the one status the script uses for findings; a
-# failed database download, a failed image pull or a scan that errored exits
-# with its own status and fails the job.
+# A blocked finding fails the job (#1548). Until 2026-10-29 the job was
+# allowed to fail with exit 3, the status the script gave findings, so that
+# known findings with no clean upstream digest to re-pin to did not hold
+# releases; but that tolerance covered *any* finding, and on 2026-10-28
+# (pipeline 3116) it hid two new CRITICAL ones behind a green pipeline. Each
+# known finding is now its own time-limited entry in
+# .github/supply-chain-policy.json `exceptions`, with the issue that retires
+# it, so a newly published advisory against a pinned digest fails the job
+# again. The scanner failing to *run* was never tolerated either (#810:
+# `allow_failure: true` once hid a failed database download behind a yellow
+# job, pipelines 636 and 637).
 #
 # Stays on big: it peaks at ~4.9 GB, close to the 6 GB light cap.
 sidecar_images:
@@ -1496,9 +1494,7 @@ sidecar_images:
           - web/**/*
     - when: manual
       allow_failure: true
-  allow_failure:
-    exit_codes:
-      - 3
+  allow_failure: false
   needs: *needs_gated
   cache: *trivy_db_cache
   script:
@@ -1615,8 +1611,10 @@ sidecar_images:
         echo "the sidecar scan could not be evaluated: this is not a findings failure"
         exit 1
       fi
-      # The one status `allow_failure` accepts, and nothing else in this job
-      # produces it: trivy and node exit 1 on error, xargs 1 or 123-127.
+      # Findings keep their own status (nothing else in this job produces
+      # it: trivy and node exit 1 on error, xargs 1 or 123-127) so the trace
+      # tells a finding from a scanner fault at a glance; both fail the job.
+      echo "blocked findings: grant a per-finding exception in .github/supply-chain-policy.json or re-pin (#1548)"
       exit 3
   artifacts:
     name: orbit-supply-chain-sidecars
