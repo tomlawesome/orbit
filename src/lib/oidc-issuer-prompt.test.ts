@@ -133,4 +133,75 @@ describe("checkOidcIssuerAgainstDiscovery (#1454)", () => {
     expect(outcome.status).toBe("rejected");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  // Review finding (Medium): the message is printed on the operator's
+  // terminal, so a published issuer that is not itself a well-shaped issuer
+  // must never reach it.
+  it.each([
+    ["an ANSI clear-screen escape", "https://idp.example.invalid/realms/x\u001b[2J"],
+    ["a carriage return", "https://idp.example.invalid/realms/x\rOK: all good"],
+    ["a bell", "https://idp.example.invalid/realms/x\u0007"],
+    ["a newline", "https://idp.example.invalid/realms/x\nOK: all good"],
+    ["a delete character", "https://idp.example.invalid/realms/x\u007f"],
+    ["an escape inside the path", "https://idp.example.invalid/\u001b]0;pwned\u0007/x"],
+  ])("never prints a published issuer containing %s", async (_label, hostile) => {
+    const outcome = await checkOidcIssuerAgainstDiscovery(WITHOUT_SLASH, { fetchImpl: providerPublishing(hostile) });
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status !== "rejected") throw new Error("unreachable");
+    expect(outcome.reason).toBe("issuer-mismatch");
+    expect(outcome.message).not.toMatch(/[\u0000-\u001f\u007f]/);
+    expect(outcome.message).not.toContain(hostile);
+    expect(outcome.publishedIssuer).toBeUndefined();
+  });
+
+  it.each([
+    ["plain http", "http://idp.example.invalid/realms/x"],
+    ["credentials", "https://user:pw@idp.example.invalid/realms/x"],
+    ["a query string", "https://idp.example.invalid/realms/x?a=b"],
+    ["a fragment", "https://idp.example.invalid/realms/x#frag"],
+  ])("does not echo a published issuer with %s, which fails the issuer shape check", async (_label, malformed) => {
+    const outcome = await checkOidcIssuerAgainstDiscovery(WITHOUT_SLASH, { fetchImpl: providerPublishing(malformed) });
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status !== "rejected") throw new Error("unreachable");
+    expect(outcome.reason).toBe("issuer-mismatch");
+    expect(outcome.message).not.toContain(malformed);
+    expect(outcome.message).not.toMatch(/[\u0000-\u001f\u007f]/);
+    expect(outcome.publishedIssuer).toBeUndefined();
+  });
+
+  it("does not echo an enormous published issuer (over 2,048 characters)", async () => {
+    const enormous = `https://idp.example.invalid/${"a".repeat(5000)}`;
+    const outcome = await checkOidcIssuerAgainstDiscovery(WITHOUT_SLASH, { fetchImpl: providerPublishing(enormous) });
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status !== "rejected") throw new Error("unreachable");
+    expect(outcome.reason).toBe("issuer-mismatch");
+    expect(outcome.message).not.toContain("a".repeat(100));
+    expect(outcome.message.length).toBeLessThan(1000);
+    expect(outcome.publishedIssuer).toBeUndefined();
+  });
+
+  it("still names a well-shaped published issuer that differs by more than a slash", async () => {
+    const published = "https://idp.example.invalid/realms/other";
+    const outcome = await checkOidcIssuerAgainstDiscovery(WITHOUT_SLASH, { fetchImpl: providerPublishing(published) });
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status !== "rejected") throw new Error("unreachable");
+    expect(outcome.reason).toBe("issuer-mismatch");
+    expect(outcome.message).toContain(published);
+    expect(outcome.publishedIssuer).toBe(published);
+  });
+
+  // Review finding (Low): trailing-slash-mismatch means exactly one "/" apart,
+  // because the launcher offers the answer with that one slash toggled.
+  it.each([
+    ["answer has two extra slashes", "https://idp.example.invalid/realms/a//", "https://idp.example.invalid/realms/a/"],
+    ["published has two extra slashes", "https://idp.example.invalid/a", "https://idp.example.invalid/a//"],
+    ["answer has three, published none", "https://idp.example.invalid/a///", "https://idp.example.invalid/a"],
+    ["both end in different runs of slashes", "https://idp.example.invalid/a//", "https://idp.example.invalid/a///"],
+  ])("reports issuer-mismatch, not a slash hint, when %s", async (_label, answer, published) => {
+    const outcome = await checkOidcIssuerAgainstDiscovery(answer, { fetchImpl: providerPublishing(published) });
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status !== "rejected") throw new Error("unreachable");
+    expect(outcome.reason).toBe("issuer-mismatch");
+    expect(outcome.reason).not.toBe("trailing-slash-mismatch");
+  });
 });
