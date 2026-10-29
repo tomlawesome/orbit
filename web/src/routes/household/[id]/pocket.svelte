@@ -607,7 +607,7 @@
     <section class="p-card" style:--i="2" aria-labelledby="hh-system-head" data-hh="system">
       {#if v.canManage}
         <label class="hh-label" for="hh-name">name</label>
-        <input id="hh-name" class="hh-input" maxlength="60" autocomplete="off" enterkeyhint="done" bind:value={identity.name}>
+        <input id="hh-name" class="hh-input p-input" maxlength="60" autocomplete="off" enterkeyhint="done" bind:value={identity.name}>
         <div class="hh-flushrows">
           <Row title="time zone" trail={zoneLabel(identity.timezone)} onactivate={() => pick("timezone")}>
             {#snippet mark()}<span class="hh-kmark">◷</span>{/snippet}
@@ -632,7 +632,7 @@
                  acts={sectionActs(row, index, shown.length)} onmove={(direction) => moveBy(index, direction)}>
               {#snippet mark()}<span class="hh-secmark" class:off={!row.visible}><Mark icon={row.icon} accent={row.accent} size={20} /></span>{/snippet}
               {#snippet end()}
-                <button class="hh-switch" role="switch" aria-checked={row.visible}
+                <button class="hh-switch p-switch" role="switch" aria-checked={row.visible}
                         aria-label="{sectionName(row)} shown on the chart" onclick={() => flip(row)}><i></i></button>
               {/snippet}
             </Row>
@@ -687,7 +687,7 @@
   <Sheet bind:open={inviteOpen} size="callout" title="Invite someone">
     <form id="hh-invite-form" onsubmit={(event) => { event.preventDefault(); invite(); }}>
       <label class="hh-label" for="hh-invite">their email address</label>
-      <input id="hh-invite" class="hh-input" type="email" inputmode="email" autocomplete="email" enterkeyhint="send"
+      <input id="hh-invite" class="hh-input p-input" type="email" inputmode="email" autocomplete="email" enterkeyhint="send"
              placeholder="name@example.com" bind:value={inviteEmail}>
       <p class="hh-note">the link admits only someone signed in with this exact address</p>
       {#if inviteProblem}<p class="p-error" role="alert">{inviteProblem}</p>{/if}
@@ -699,7 +699,7 @@
   </Sheet>
 
   <Sheet bind:open={addOpen} size="list" title="Add an existing account">
-    <input class="hh-input hh-filter" type="search" enterkeyhint="search" aria-label="Find an account by name"
+    <input class="hh-input p-input hh-filter" type="search" enterkeyhint="search" aria-label="Find an account by name"
            placeholder="find by name" bind:value={addQuery}>
     <div class="hh-flushrows">
       {#each candidates as candidate (candidate.id)}
@@ -733,7 +733,7 @@
     {#if editing}
       <form id="hh-section-form" onsubmit={(event) => { event.preventDefault(); keepSection(); }}>
         <label class="hh-label" for="hh-secname">name</label>
-        <input id="hh-secname" class="hh-input" maxlength="30" autocomplete="off" enterkeyhint="done"
+        <input id="hh-secname" class="hh-input p-input" maxlength="30" autocomplete="off" enterkeyhint="done"
                placeholder="name it" bind:value={editing.name}>
         {#if !editing.shipped}
           <p class="hh-label" id="hh-tray-head">mark · tap to swap</p>
@@ -765,7 +765,7 @@
       your mind; after that it is gone for good.
     </p>
     <label class="hh-label" for="hh-delname">type the system’s name exactly</label>
-    <input id="hh-delname" class="hh-input" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"
+    <input id="hh-delname" class="hh-input p-input" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"
            placeholder={v.name} bind:value={typedName}>
     {#if doomProblem}<p class="p-error" role="alert">{doomProblem}</p>{/if}
     {#snippet foot()}
@@ -847,11 +847,6 @@
   /* The system card. */
   .hh-label{display:block;font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
     text-transform:uppercase;color:var(--ink-quiet);margin:0 0 6px}
-  .hh-input{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;border-radius:12px;
-    border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);color:var(--ink);
-    font:var(--p-type-body)/1.2 var(--ui)}
-  .hh-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
-  .hh-input::placeholder{color:var(--ink-quiet)}
   .hh-last{border-bottom:0}
   .hh-note{margin:8px 0 0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet)}
 
@@ -867,17 +862,7 @@
   .hh-secmark{display:grid;place-items:center;transition:opacity 150ms}
   .hh-secmark.off{opacity:.4}
   .hh-sections :global(.p-row:has(.hh-secmark.off) .title){color:var(--ink-quiet)}
-  /* The switch: 52x32 drawn, 44 tall hit (§1.7). */
-  .hh-switch{appearance:none;box-sizing:border-box;width:56px;height:var(--p-hit);padding:0;border:0;background:none;
-    display:grid;place-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent;margin-right:-6px}
-  .hh-switch i{position:relative;box-sizing:border-box;width:46px;height:28px;border-radius:14px;
-    border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 60%, transparent);
-    transition:background-color var(--p-spring),border-color var(--p-spring)}
-  .hh-switch i::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;
-    background:var(--ink-quiet);transition:transform var(--p-spring) var(--p-ease),background-color var(--p-spring)}
-  .hh-switch[aria-checked=true] i{background:color-mix(in srgb, var(--accent) 30%, transparent);border-color:var(--accent)}
-  .hh-switch[aria-checked=true] i::after{transform:translateX(18px);background:var(--accent)}
-  :global([data-theme=retrograde]) .hh-switch[aria-checked=true] i::after{box-shadow:0 0 8px var(--bloom)}
+  /* The switch is kit.css's .p-switch; its focus ring is this screen's. */
   /* §25: the ring sits on the focused button itself, not its drawn track --
      a ring on the child left the button with no indicator of its own. The
      pill inset by 3px rings the track as the track's own outline did. */

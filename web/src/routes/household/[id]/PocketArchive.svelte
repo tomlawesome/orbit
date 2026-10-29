@@ -256,7 +256,7 @@
 <section class="p-card hh-archive" aria-labelledby="hh-archive-title" data-hh="archive">
   <div class="hh-archive-head">
     <h2 class="p-caps" id="hh-archive-title">The archive</h2>
-    <div class="hh-tabs" role="tablist" aria-labelledby="hh-archive-title">
+    <div class="hh-tabs p-tabs" role="tablist" aria-labelledby="hh-archive-title">
       <button role="tab" id="hh-tab-out" aria-selected={tab === "out"} aria-controls="hh-panel-out"
               tabindex={tab === "out" ? 0 : -1} onclick={() => (tab = "out")} onkeydown={tabKey}>take it with you</button>
       <button role="tab" id="hh-tab-in" aria-selected={tab === "in"} aria-controls="hh-panel-in"
@@ -279,10 +279,10 @@
     {:else if outPhase === "form"}
       <div class="hh-fields">
         <label class="hh-label" for="hh-pass-out">a passphrase for the file</label>
-        <input id="hh-pass-out" class="hh-input" type="password" autocomplete="new-password" enterkeyhint="next"
+        <input id="hh-pass-out" class="hh-input p-input" type="password" autocomplete="new-password" enterkeyhint="next"
                bind:value={passOut}>
         <label class="hh-label" for="hh-pass-again">the passphrase again</label>
-        <input id="hh-pass-again" class="hh-input" type="password" autocomplete="new-password" enterkeyhint="done"
+        <input id="hh-pass-again" class="hh-input p-input" type="password" autocomplete="new-password" enterkeyhint="done"
                bind:value={passAgain}>
         <p class="hh-note warm">Orbit never keeps this passphrase · without it the file cannot be opened</p>
         {#if outRefusal && (passOut || passAgain)}<p class="hh-note">{outRefusal}</p>{/if}
@@ -330,7 +330,7 @@
       {:else if inPhase === "chosen" || inPhase === "looking"}
         <div class="hh-fields">
           <label class="hh-label" for="hh-pass-in">the file's passphrase</label>
-          <input id="hh-pass-in" class="hh-input" type="password" autocomplete="off" enterkeyhint="go"
+          <input id="hh-pass-in" class="hh-input p-input" type="password" autocomplete="off" enterkeyhint="go"
                  bind:value={passIn} onkeydown={(event) => { if (event.key === "Enter") lookInside(); }}>
         </div>
         <div class="hh-pair">
@@ -372,7 +372,7 @@
   {#if hasPassword !== false}
     <form id="hh-challenge-form" onsubmit={(event) => { event.preventDefault(); prove(); }}>
       <label class="hh-label" for="hh-proof">your password</label>
-      <input id="hh-proof" class="hh-input" type="password" autocomplete="current-password" enterkeyhint="done"
+      <input id="hh-proof" class="hh-input p-input" type="password" autocomplete="current-password" enterkeyhint="done"
              bind:value={currentPassword}>
     </form>
   {/if}
@@ -391,15 +391,6 @@
   /* §22 under 560px: the pill pair follows the heading, wrapping under it. */
   .hh-archive-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;margin:0 0 12px}
   .hh-archive-head .p-caps{margin:0}
-  .hh-tabs{display:flex;border:1px solid var(--line);border-radius:calc(var(--p-hit) / 2);overflow:hidden;flex:1 1 100%}
-  .hh-tabs button{appearance:none;flex:1;min-height:var(--p-hit);padding:0 6px;white-space:nowrap;border:0;background:none;
-    font:var(--p-type-meta)/1.2 var(--mono);color:var(--ink-mid);cursor:pointer;
-    transition:background-color var(--p-arm),color var(--p-arm)}
-  .hh-tabs button + button{border-left:1px solid var(--line)}
-  .hh-tabs button[aria-selected=true]{background:var(--accent);color:var(--bg);font-weight:600}
-  :global(:is([data-theme=dawn],[data-theme=clouds])) .hh-tabs button[aria-selected=true]{color:#fff}
-  :global([data-theme=retrograde]) .hh-tabs button[aria-selected=true]{box-shadow:0 0 12px -2px var(--bloom)}
-  .hh-tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:-4px}
   [role=tabpanel]{animation:hh-panel 240ms var(--p-ease) both}
   @keyframes hh-panel{from{opacity:0;transform:translateY(4px)}}
 
@@ -411,10 +402,6 @@
   .hh-label{font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);text-transform:uppercase;
     color:var(--ink-quiet);margin:12px 0 6px}
   .hh-label:first-child{margin-top:0}
-  .hh-input{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;border-radius:12px;
-    border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);color:var(--ink);
-    font:var(--p-type-body)/1.2 var(--ui)}
-  .hh-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
   .hh-note{margin:8px 0 0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet)}
   .hh-note.warm{color:var(--warm-text)}
   .p-pill:disabled{opacity:.45;cursor:default}
