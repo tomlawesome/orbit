@@ -517,6 +517,34 @@ export function refusesFile(error) {
 }
 
 /**
+ * #1520: set from the moment a sign-out of THIS browser's session begins, and
+ * kept once it has succeeded. From then on a 401 is the sign-out's own doing,
+ * not an expired session, and `json()` must not answer it by sending the
+ * reader through the login flow: a screen read that was still in flight (or
+ * was only issued afterwards, as settings' sequential reads are) would reach
+ * the provider's sign-in and take the page from the goodbye, and where the
+ * provider's sign-on is still live it would sign the reader straight back in.
+ * A failed sign-out puts it back, so a real expiry still bounces.
+ */
+let endingThisSession = false;
+
+/**
+ * Runs the request that ends this browser's session with the 401 bounce held.
+ * @template T
+ * @param {() => Promise<T>} request
+ * @returns {Promise<T>}
+ */
+async function whileEndingThisSession(request) {
+  endingThisSession = true;
+  try {
+    return await request();
+  } catch (error) {
+    endingThisSession = false;
+    throw error;
+  }
+}
+
+/**
  * The decoded body, or a WorkspaceError carrying the server's own words.
  *
  * Generic because every route answers a different shape, and this module is
@@ -537,9 +565,10 @@ export async function json(response) {
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     /* Signed out is not an error state the screens handle — it is a journey:
-       into the login flow and back to this exact page (#451). The throw below
-       still happens so pending callers settle while the navigation takes over. */
-    if (response.status === 401 && typeof window !== "undefined") {
+       into the login flow and back to this exact page (#451), unless this is
+       the sign-out's own 401 (#1520). The throw below still happens so pending
+       callers settle while the navigation takes over. */
+    if (response.status === 401 && typeof window !== "undefined" && !endingThisSession) {
       window.location.assign(
         `/api/auth/login?returnTo=${encodeURIComponent(window.location.pathname)}`,
       );
@@ -2659,14 +2688,19 @@ export async function readSentLately() {
  * still-live sign-on, straight back in).
  *
  * @param {string} sessionId
+ * @param {{ own?: boolean }} [how]  `own`: this is the browser's own session, so
+ *   the page is leaving and a 401 from now on is not a reason to sign in (#1520)
  * @returns {Promise<?string>}  the provider's own logout URL, when this
  *   browser's own provider session ended with it (#1439); always null for
  *   another device
  */
-export async function revokeSession(sessionId) {
-  /** @type {?{ redirectTo?: ?string }} */
-  const body = await json(await csrfFetch(`/api/auth/sessions/${sessionId}/revoke`));
-  return body?.redirectTo ?? null;
+export async function revokeSession(sessionId, { own = false } = {}) {
+  const revoke = async () => {
+    /** @type {?{ redirectTo?: ?string }} */
+    const body = await json(await csrfFetch(`/api/auth/sessions/${sessionId}/revoke`));
+    return body?.redirectTo ?? null;
+  };
+  return own ? whileEndingThisSession(revoke) : revoke();
 }
 
 /**
@@ -2685,10 +2719,12 @@ export async function revokeSession(sessionId) {
  *   browser, when it has one (#1439)
  */
 export async function signOutEverywhere() {
-  /** @type {?{ redirectTo?: ?string }} */
-  const body = await json(await csrfFetch("/api/auth/sessions/revoke"));
-  sessionPromise = null;              /* the cached session is a dead letter now */
-  return body?.redirectTo ?? null;
+  return whileEndingThisSession(async () => {
+    /** @type {?{ redirectTo?: ?string }} */
+    const body = await json(await csrfFetch("/api/auth/sessions/revoke"));
+    sessionPromise = null;              /* the cached session is a dead letter now */
+    return body?.redirectTo ?? null;
+  });
 }
 
 /**
@@ -2706,7 +2742,12 @@ export async function signOutEverywhere() {
  *
  * @returns {Promise<?string>}  the provider's own logout URL, when it has one
  */
-export async function signOut() {
+export function signOut() {
+  return whileEndingThisSession(endThisSession);
+}
+
+/** The requests of `signOut`, run with the 401 bounce held (#1520). */
+async function endThisSession() {
   /* Read the session fresh, not from the cache: another tab may have replaced
      it, and its old CSRF token would be refused on every press. A 401 is not
      sent through `json()`, which would bounce into the login flow; with no
