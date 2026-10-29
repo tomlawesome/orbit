@@ -167,11 +167,16 @@ workflow:
 
 default:
   interruptible: true
-  # Runner lanes (#830). `big` is the 8 CPU / 18 GB runner (two jobs at a
-  # time); `light` is the 4 CPU / 6 GB runner (four jobs at a time). The big
-  # runner is moving to reject untagged jobs, so every job needs one of the
-  # two -- this covers everything that does not already ask for the
-  # dedicated `orbit-build` runner by tag (see .privileged_runner below).
+  # Runner lanes (#830). The runners this project sees (owner, #1546,
+  # 2026-10-28; the host as a whole takes 13 jobs over 32 CPUs and 47 GB):
+  #   big (gitlab-runners-01)  2 jobs at once, 8 CPUs / 18 GB each
+  #   light                    4 jobs at once, 6 CPUs / 6 GB each
+  #   orbit-build              2 jobs at once, 8 CPUs / 16 GB each; privileged,
+  #                            every job needing a Docker daemon (.privileged_runner)
+  #   docker                   2 jobs at once, 8 CPUs / 18 GB each
+  #   orbit-signing and the other publish runners: one job each
+  # The big runner rejects untagged jobs, so every job needs a tag -- this
+  # covers everything that does not ask for `orbit-build` by tag.
   tags: [big]
   # Infrastructure only: a job that failed on its own merits is never retried.
   # These three are what this GitLab still accepts without a deprecation
@@ -441,6 +446,7 @@ variables:
   orbit_lane_admits() {
     case "${ORBIT_LANE:-full}:$1" in
       nightly_idle:*) echo "skipped: dev has not moved since the last nightly browser run (#1412)"; return 1 ;;
+      nightly_yield:*) echo "skipped: a pipeline on preview or main is running; the nightly yields to it (#1546)"; return 1 ;;
       full:*) return 0 ;;
       ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:names_guard | ignore_policy:supply_chain_source) return 0 ;;
       ci:fast | ci:fast_docker | ci:gitleaks | ci:names_guard | ci:supply_chain_source) return 0 ;;
@@ -575,6 +581,45 @@ variables:
     artifacts: false
     optional: true
   - job: fast_docker
+    artifacts: false
+    optional: true
+
+# The same, for the jobs that stand a stack up (the browser suites,
+# `acceptance`, `repair_journeys`): they also wait for the quick, failure-prone
+# checks (#1546, owner 1c, 2026-10-28). A scanner or policy failure then skips
+# the browsers and costs minutes, not the hours pipeline 3095 lost when
+# `sidecar_images` failed after every browser job had passed. `optional`,
+# because a pipeline whose rules create none of these must not fail to build;
+# no artefacts, it is a waiting order. On a warm day `sidecar_images` and the
+# policy jobs finish before `build_image` does; `supply_chain_image` scans
+# the built image, so the stack jobs wait its two minutes after the build
+# (a slot on the same runner, deliberately: a red image scan after every
+# browser job had passed is the case this is for). `supply_chain_image`
+# keeps `.needs_gated_image`: it is one of the checks.
+.needs_gated_image_checked: &needs_gated_image_checked
+  - job: classify
+    artifacts: true
+  - job: build_image
+    artifacts: true
+  - job: fast
+    artifacts: false
+    optional: true
+  - job: fast_docker
+    artifacts: false
+    optional: true
+  - job: sidecar_images
+    artifacts: false
+    optional: true
+  - job: supply_chain_image
+    artifacts: false
+    optional: true
+  - job: gitleaks
+    artifacts: false
+    optional: true
+  - job: licence_policy
+    artifacts: false
+    optional: true
+  - job: supply_chain_source
     artifacts: false
     optional: true
 
@@ -745,6 +790,41 @@ variables:
   done
   docker info > /dev/null 2>&1 || { echo "the in-job Docker daemon did not start"; cat /tmp/dockerd.log; exit 1; }
 
+# What the job and everything it started -- the in-job daemon, the stack, the
+# browsers -- cost at their peak, read from the job container's own cgroup
+# (#1546: shard sizes and the runner's per-job cap are set from these lines,
+# not guessed). `memory.peak` is the high-water mark in bytes, kept after the
+# processes have gone; `cpu.stat`'s usage_usec is total CPU time. Both
+# tolerate a kernel or runner without them: the line is then "resource peak:
+# unavailable".
+#
+# Printed from an EXIT trap in `script`, never from after_script: after_script
+# runs in a fresh container with its own cgroup (see "So the capture has to
+# happen before `script` exits" below), so there it read 6 MiB and 0 s for a
+# whole acceptance stack (pipeline 3156). Placed straight after
+# *docker_in_job; *stack_diagnostics_on_failure replaces the trap later and
+# calls orbit_resource_peak itself, so the line prints on success and failure
+# alike. The trap re-exits with the status it was handed.
+.resource_peak: &resource_peak |
+  orbit_resource_peak() {
+    if [ -r /sys/fs/cgroup/memory.peak ]; then
+      peak_bytes=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null)
+      cpu_usec=$(awk '/^usage_usec/ {print $2}' /sys/fs/cgroup/cpu.stat 2>/dev/null)
+      peak_mib=$(( ${peak_bytes:-0} / 1048576 ))
+      cpu_s=$(( ${cpu_usec:-0} / 1000000 ))
+      echo "resource peak: memory=${peak_mib} MiB cpu=${cpu_s} s (job ${CI_JOB_NAME:-?}, runner ${CI_RUNNER_DESCRIPTION:-?})"
+    else
+      echo "resource peak: unavailable (no /sys/fs/cgroup/memory.peak)"
+    fi
+  }
+  orbit_resource_peak_on_exit() {
+    orbit_exit_status=$?
+    trap - EXIT
+    orbit_resource_peak || :
+    exit "$orbit_exit_status"
+  }
+  trap orbit_resource_peak_on_exit EXIT
+
 # The last step of every after_script that started the daemon above. /builds
 # outlives the job, so the daemon's image store -- a whole Orbit stack, 3 to
 # 4 GB -- would otherwise sit in the slot's cache volume until the next such
@@ -789,6 +869,7 @@ variables:
   orbit_stack_diagnostics_on_exit() {
     orbit_exit_status=$?
     trap - EXIT
+    if command -v orbit_resource_peak > /dev/null 2>&1; then orbit_resource_peak || :; fi
     if [ "$orbit_exit_status" -ne 0 ]; then
       bash "$CI_PROJECT_DIR/scripts/ci/show-stack-diagnostics.sh" || :
     fi
@@ -1062,18 +1143,22 @@ classify:
       node scripts/ci/reuse-lookup.mjs .orbit-reuse/reuse.env \
         || echo "the reuse lookup failed: every job will run"
     # The nightly browser run does nothing when `dev` has not moved since the
-    # last nightly run (#1412). The verdict is the lane: `nightly_idle` is
-    # stopped on by every job the nightly starts, in `orbit_lane_admits`. Any
-    # doubt (no token, API down) leaves the lane alone and the nightly runs.
+    # last nightly run (#1412), or when a pipeline on `preview` or `main` is
+    # running (#1546). The verdict is the lane: `nightly_idle` and
+    # `nightly_yield` are stopped on by every job the nightly starts, in
+    # `orbit_lane_admits`. Any doubt (no token, API down) leaves the lane
+    # alone and the nightly runs.
     - |
       set -eu
       if [ "${CI_PIPELINE_SOURCE:-}" = "schedule" ] && [ "${ORBIT_NIGHTLY_BROWSERS:-}" = "true" ]; then
         verdict="$(node scripts/ci/nightly-browsers.mjs moved || echo run)"
         echo "nightly browser run: ${verdict}"
-        if [ "$verdict" = "idle" ]; then
-          sed -i 's/^ORBIT_LANE=.*/ORBIT_LANE=nightly_idle/' classify.env
-          cat classify.env
-        fi
+        case "$verdict" in
+          idle) sed -i 's/^ORBIT_LANE=.*/ORBIT_LANE=nightly_idle/' classify.env; cat classify.env ;;
+          # A promotion is running on preview or main (#1546): the nightly
+          # yields rather than doubling its time on the shared runner.
+          yield) sed -i 's/^ORBIT_LANE=.*/ORBIT_LANE=nightly_yield/' classify.env; cat classify.env ;;
+        esac
       fi
   artifacts:
     paths:
@@ -1492,10 +1577,23 @@ sidecar_images:
           - supply-chain/**/*
           - tests/**/*
           - web/**/*
+    # A merge request that touches none of those paths gets no job at all
+    # rather than a manual one: the stack jobs now wait on this job (#1546,
+    # `.needs_gated_image_checked`), and `optional: true` covers a job that
+    # is absent, not one left unplayed. A branch pipeline started by hand
+    # still gets the manual job, beside the manual stack jobs.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
     - when: manual
       allow_failure: true
   allow_failure: false
-  needs: *needs_gated
+  # `classify` alone, not `.needs_gated` (#1546): this job reads nothing
+  # `fast` builds, runs on `big` beside it, and is one of the quick checks the
+  # stack jobs now wait for, so it starts at minute one and has answered
+  # before `build_image` is done.
+  needs:
+    - job: classify
+      artifacts: true
   cache: *trivy_db_cache
   script:
     - *apk_retry
@@ -2340,7 +2438,10 @@ smoke:
     pull_policy: if-not-present
   # 30m + the quarantine run after the gate (capped at 8m, agent-infra#30).
   timeout: 40m
-  needs: *needs_gated_image
+  needs: *needs_gated_image_checked
+  # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke
+  # queues behind an earlier one's instead of the two slowing each other.
+  resource_group: heavy-smoke
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
@@ -2366,6 +2467,7 @@ smoke:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
     # configure.sh runs inside the image under test (#1210), so the
@@ -2448,7 +2550,10 @@ smoke_firefox:
     pull_policy: if-not-present
   # 30m + the quarantine run after the gate (capped at 8m, agent-infra#30).
   timeout: 40m
-  needs: *needs_gated_image
+  needs: *needs_gated_image_checked
+  # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_firefox
+  # queues behind an earlier one's instead of the two slowing each other.
+  resource_group: heavy-smoke_firefox
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
@@ -2475,6 +2580,7 @@ smoke_firefox:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
     # configure.sh runs inside the image under test (#1210), so the
@@ -2579,7 +2685,10 @@ smoke_webkit:
     name: $ORBIT_ACCEPTANCE_IMAGE
     pull_policy: if-not-present
   timeout: 45m
-  needs: *needs_gated_image
+  needs: *needs_gated_image_checked
+  # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_webkit
+  # queues behind an earlier one's instead of the two slowing each other.
+  resource_group: heavy-smoke_webkit
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
@@ -2612,6 +2721,7 @@ smoke_webkit:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - *webkit_oidc_hosts
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
@@ -2686,7 +2796,10 @@ smoke_webkit_mobile:
     name: $ORBIT_ACCEPTANCE_IMAGE
     pull_policy: if-not-present
   timeout: 30m
-  needs: *needs_gated_image
+  needs: *needs_gated_image_checked
+  # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_webkit_mobile
+  # queues behind an earlier one's instead of the two slowing each other.
+  resource_group: heavy-smoke_webkit_mobile
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
@@ -2719,6 +2832,7 @@ smoke_webkit_mobile:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - *webkit_oidc_hosts
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
@@ -2816,7 +2930,10 @@ smoke_local_only:
     name: $ORBIT_ACCEPTANCE_IMAGE
     pull_policy: if-not-present
   timeout: 30m
-  needs: *needs_gated_image
+  needs: *needs_gated_image_checked
+  # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_local_only
+  # queues behind an earlier one's instead of the two slowing each other.
+  resource_group: heavy-smoke_local_only
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
@@ -2839,6 +2956,7 @@ smoke_local_only:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
     # configure.sh runs inside the image under test (#1210), so the
@@ -2900,7 +3018,10 @@ acceptance:
     name: $ORBIT_ACCEPTANCE_IMAGE
     pull_policy: if-not-present
   timeout: 45m
-  needs: *needs_gated_image
+  needs: *needs_gated_image_checked
+  # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's acceptance
+  # queues behind an earlier one's instead of the two slowing each other.
+  resource_group: heavy-acceptance
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     # The scripts default $GITHUB_WORKSPACE to their own repository root, which
@@ -2932,6 +3053,7 @@ acceptance:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - *step_outputs
     - |
       set -eu
@@ -3058,7 +3180,10 @@ repair_journeys:
     name: $ORBIT_ACCEPTANCE_IMAGE
     pull_policy: if-not-present
   timeout: 30m
-  needs: *needs_gated_image
+  needs: *needs_gated_image_checked
+  # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's repair_journeys
+  # queues behind an earlier one's instead of the two slowing each other.
+  resource_group: heavy-repair_journeys
   variables:
     ORBIT_REPAIR_JOURNEYS_IMAGE: orbit-repair-journeys:ci
     # The harness's own throwaway registry, not a sidecar Orbit ships, but it
@@ -3083,6 +3208,7 @@ repair_journeys:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - docker load --input image.tar
     - docker tag "$ORBIT_IMAGE_TAG" "$ORBIT_REPAIR_JOURNEYS_IMAGE"
     - bash scripts/test-repair-journeys.sh
