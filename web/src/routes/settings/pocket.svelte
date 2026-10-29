@@ -25,6 +25,7 @@
   import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
   import { PACKS, intentOf, issuerHost, methodWords, on } from "./helm.js";
   import { signOutOfDevice, signOutOfEveryDevice } from "./sign-out.js";
+  import { tabArrows } from "$lib/tabs.js";
 
   /*
    * SETTINGS ON A PHONE (#1125, proposal §2.7-§2.8). Rendered beside the
@@ -198,13 +199,9 @@
   const bothOff = $derived(view !== null && !emailOn && !browserAlerts);
 
   /* §22's keyboard: one tab in the Tab order, ← → between them. */
-  /** @param {KeyboardEvent} event */
-  function tabKey(event) {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    tab = tab === "reminders" ? "sent" : "reminders";
-    queueMicrotask(() => document.getElementById(`st-tab-${tab}`)?.focus());
-  }
+  const tabKey = tabArrows(["reminders", "sent"], {
+    get: () => tab, set: (key) => (tab = key), id: (key) => `st-tab-${key}`,
+  });
 
   /* ── your sky ─────────────────────────────────────────────────────────── */
   /** @param {string} id */

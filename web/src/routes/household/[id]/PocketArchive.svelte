@@ -14,6 +14,7 @@
     writePortableArchive,
   } from "$lib/data/workspace.js";
   import { archiveFileProblem, passphraseFloor, passphraseLength, passphraseProblem } from "./archive.js";
+  import { tabArrows } from "$lib/tabs.js";
 
   /*
    * THE ARCHIVE ON A PHONE (#1122, proposal §2.10 item 5; the card ratified
@@ -243,13 +244,9 @@
   }
 
   /* §22's keyboard: one tab in the Tab order, ← → between them. */
-  /** @param {KeyboardEvent} event */
-  function tabKey(event) {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    tab = tab === "out" ? "in" : "out";
-    queueMicrotask(() => document.getElementById(`hh-tab-${tab}`)?.focus());
-  }
+  const tabKey = tabArrows(["out", "in"], {
+    get: () => tab, set: (key) => (tab = key), id: (key) => `hh-tab-${key}`,
+  });
 
   const readyUntil = $derived(written
     ? `${dayMonth(written.expiresAt, localZone())}, ${clockOf(written.expiresAt, localZone())}`
