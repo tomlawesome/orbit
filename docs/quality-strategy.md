@@ -195,10 +195,21 @@ and nightly on `dev` (see "Browsers run at promotion and every night" below, #14
 exception is a merge request labelled `ci: acceptance`, which runs them before
 it merges (#1514).
 
-Two runners serve the project, both on the host `gitlab-runners` (32 cores,
-48 GB): the shared group runner, and runner 8, a privileged project runner owned
-by `ai/orbit` and tagged `orbit-build`, which every job needing a Docker daemon
-reaches through `.privileged_runner` (#811). Its `/builds` persists between
+Five runners serve the project, all on the host `gitlab-runners` (32 CPUs,
+47 GB, 13 jobs at once in all; owner, #1546, 2026-10-28). Each runner's job
+limit and per-job cap are set in its `config.toml` on that host, not here:
+
+| Tag | Jobs at once | Per job | Used for |
+|---|---|---|---|
+| `big` (gitlab-runners-01) | 2 | 8 CPUs, 18 GB | the default lane: `fast`, `sidecar_images`, `build_launcher` |
+| `light` | 4 | 6 CPUs, 6 GB | the quick policy jobs, `fidelity`, `fidelity_webkit`, `integration` |
+| `orbit-build` (runner 8) | 2 | 8 CPUs, 16 GB | privileged; every job needing a Docker daemon (`.privileged_runner`, #811): the image build, the browser suites and the other stack jobs |
+| `docker` | 2 | 8 CPUs, 18 GB | the sibling projects' Docker jobs |
+| `orbit-signing` and the publish runners | 1 each | | `sign_evidence`, `publish_channel`, `promote_stable` |
+
+The `orbit-build` limit is why the browser suites run two at a time, and why
+`#1546` sizes its shards from the `resource peak:` line each stack job prints
+rather than from the host's size. `/builds` on that runner persists between
 jobs, so a job that must start clean says so (#813, and the data-root wipe in
 `.docker_in_job`). Three facts about that host live in its `config.toml` and
 root cron, not in the repository:
@@ -273,7 +284,10 @@ build and the non-browser journeys. The seven run in full:
   Monday. That pipeline holds only `classify`, `fast`, `build_image` and the
   seven, plus `nightly_report`. It does nothing when `dev` has not moved since the
   last nightly run (`classify` asks `scripts/ci/nightly-browsers.mjs`; the
-  jobs stop on the `nightly_idle` lane). Other schedules on `dev` do not set the
+  jobs stop on the `nightly_idle` lane), and it yields when a pipeline on
+  `preview` or `main` is running or pending (the `nightly_yield` lane, #1546:
+  two heavy pipelines on the one runner double each other's time, and the
+  promotion is the one that matters). Other schedules on `dev` do not set the
   variable, so they start none of these jobs and the nightly none of theirs.
 
 A red night must be seen. `nightly_report`, the last job and `on_failure`

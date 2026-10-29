@@ -3,10 +3,13 @@
  * The nightly browser run on `dev` (#1412): two small jobs the pipeline gives
  * GitLab, in one file.
  *
- *   moved    Has `dev` moved since the last nightly run? Prints `idle` when the
- *            last nightly pipeline ran on this very commit, otherwise `run`.
- *            Any doubt prints `run`: a night that tests twice costs minutes, a
- *            night that wrongly skips costs a day's coverage.
+ *   moved    Should the nightly run? Prints `yield` when a pipeline on `preview`
+ *            or `main` is running or pending (#1546: a promotion and a nightly
+ *            on the same runner double each other's time, and the promotion
+ *            is the one that matters); `idle` when the last nightly pipeline
+ *            ran on this very commit; otherwise `run`. Any doubt prints `run`:
+ *            a night that tests twice costs minutes, a night that wrongly
+ *            skips costs a day's coverage.
  *   report   File the failure: one issue in the nearest open milestone, or a
  *            comment on the one already open. The nightly's last job
  *            (`nightly_report`, on_failure) calls it.
@@ -89,9 +92,36 @@ export async function nightlyPipelines({ base, projectId, options, sha, skipId, 
   return found;
 }
 
-/* `idle` when the newest earlier nightly ran on this commit, else `run`. */
+/*
+ * The first running or pending pipeline on `preview` or `main` that is not this
+ * one, or null. Four small requests; the first hit answers.
+ */
+export async function promotionInFlight({ base, projectId, options, skipId }) {
+  for (const ref of ["preview", "main"]) {
+    for (const status of ["running", "pending"]) {
+      const listed = await request(`${project(base, projectId)}/pipelines?${query({ ref, status })}`, options);
+      const hit = (Array.isArray(listed) ? listed : []).find((pipeline) => Number(pipeline.id) !== Number(skipId));
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+/*
+ * `yield` while a promotion is in flight; else `idle` when the newest earlier
+ * nightly ran on this commit; else `run`.
+ */
 export async function moved({ base, projectId, pipelineId, sha, token, fetchImpl = fetch, log = () => {} }) {
   const options = { token, fetchImpl };
+  try {
+    const promotion = await promotionInFlight({ base, projectId, options, skipId: pipelineId });
+    if (promotion) {
+      log(`pipeline ${promotion.id} on ${promotion.ref} is ${promotion.status}: the nightly yields to it (#1546)`);
+      return "yield";
+    }
+  } catch (error) {
+    log(`the preview and main pipelines could not be listed (${error.message}): going on to the nightly check`);
+  }
   let nightlies;
   try {
     nightlies = await nightlyPipelines({ base, projectId, options, skipId: pipelineId, log });

@@ -27,7 +27,7 @@ let server;
 let seen;
 
 // pipelines: [{ id, sha, status, ref, source, jobs: [name] }], newest first.
-function start({ pipelines = [], issues = [], milestones = [], failedJobs = [], traces = {}, fail = {} } = {}) {
+function start({ pipelines = [], issues = [], milestones = [], failedJobs = [], traces = {}, fail = {}, failStatusLookup = false } = {}) {
   seen = { requests: [], tokens: [], created: null, noted: null };
   return new Promise((resolve) => {
     server = createServer((request, response) => {
@@ -48,10 +48,14 @@ function start({ pipelines = [], issues = [], milestones = [], failedJobs = [], 
         if (request.method === "GET" && path === "/pipelines") {
           const sha = url.searchParams.get("sha");
           const ref = url.searchParams.get("ref");
+          const status = url.searchParams.get("status");
+          const source = url.searchParams.get("source");
+          if (status && failStatusLookup) return send(500, { message: "boom" });
           return send(
             200,
             pipelines
-              .filter((pipeline) => url.searchParams.get("source") === (pipeline.source ?? "schedule"))
+              .filter((pipeline) => (source ? source === (pipeline.source ?? "schedule") : true))
+              .filter((pipeline) => (status ? pipeline.status === status : true))
               .filter((pipeline) => (sha ? pipeline.sha === sha : ref ? (pipeline.ref ?? "dev") === ref : true))
               .map(({ id, sha: pipelineSha, status, ref: pipelineRef }) => ({
                 id,
@@ -151,7 +155,10 @@ describe("moved", () => {
   it("only looks at dev's schedule pipelines", async () => {
     const api = await start({ pipelines: [{ id: 90, sha: SHA, status: "success", ref: "other" }] });
     expect((await run(["moved"], base(api))).out).toBe("run");
-    expect(seen.requests[0]).toContain("ref=dev");
+    // The yield check's four preview/main requests come first (#1546); the
+    // nightly lookup is the one that names the schedule.
+    const nightlyLookup = seen.requests.find((request) => request.includes("source=schedule"));
+    expect(nightlyLookup).toContain("ref=dev");
   });
 
   it("runs, and exits 0, when GitLab cannot be asked or does not answer", async () => {
@@ -160,6 +167,80 @@ describe("moved", () => {
     const noToken = { ...base(api), ORBIT_REUSE_TOKEN: "" };
     expect(await run(["moved"], noToken)).toMatchObject({ code: 0, out: "run" });
     expect((await run(["moved"], noToken)).err).toMatch(/token unknown\): running/u);
+  });
+});
+
+// #1546 (the nightly yields to a promotion): a running or pending pipeline on
+// preview or main means a promotion is under way, so the nightly steps aside.
+describe("moved yields to a promotion", () => {
+  it("yields to a running preview pipeline, names it, and never looks at the nightlies", async () => {
+    const api = await start({
+      pipelines: [
+        { id: 3200, sha: OTHER_SHA, status: "running", ref: "preview", source: "push" },
+        { id: 90, sha: SHA, status: "success" },
+      ],
+    });
+    const result = await run(["moved"], base(api));
+    expect(result.out).toBe("yield");
+    expect(result.err).toMatch(/pipeline 3200/u);
+    expect(result.err).toContain("preview");
+    expect(seen.requests.some((request) => request.includes("source=schedule"))).toBe(false);
+  });
+
+  it("asks for running and pending pipelines on both preview and main", async () => {
+    const api = await start({ pipelines: [{ id: 90, sha: SHA, status: "success" }] });
+    await run(["moved"], base(api));
+    for (const ref of ["preview", "main"]) {
+      for (const status of ["running", "pending"]) {
+        expect(seen.requests).toContain(`GET /api/v4/projects/49/pipelines?ref=${ref}&status=${status}`);
+      }
+    }
+  });
+
+  it("yields to a pending main pipeline", async () => {
+    const api = await start({
+      pipelines: [{ id: 3300, sha: OTHER_SHA, status: "pending", ref: "main", source: "push" }],
+    });
+    expect((await run(["moved"], base(api))).out).toBe("yield");
+  });
+
+  it("does not yield to its own pipeline: the nightly lookup runs as today", async () => {
+    const api = await start({
+      pipelines: [
+        { id: 100, sha: SHA, status: "running", ref: "preview", source: "push" },
+        { id: 90, sha: SHA, status: "success" },
+      ],
+    });
+    const result = await run(["moved"], base(api));
+    expect(result.out).toBe("idle");
+    expect(seen.requests.some((request) => request.includes("source=schedule"))).toBe(true);
+  });
+
+  it("does not yield to a finished preview pipeline", async () => {
+    const api = await start({
+      pipelines: [{ id: 3200, sha: OTHER_SHA, status: "success", ref: "preview", source: "push" }],
+    });
+    expect((await run(["moved"], base(api))).out).toBe("run");
+  });
+
+  it("goes on to the nightly lookup when the yield lookup answers 500", async () => {
+    for (const [pipelines, expected] of [
+      [[{ id: 90, sha: SHA, status: "success" }], "idle"],
+      [[{ id: 90, sha: OTHER_SHA, status: "success" }], "run"],
+    ]) {
+      const api = await start({ pipelines, failStatusLookup: true });
+      const result = await run(["moved"], base(api));
+      expect(result).toMatchObject({ code: 0, out: expected });
+      await new Promise((resolve) => server.close(resolve));
+      server = undefined;
+    }
+  });
+
+  it("prints yield through the CLI, on its own line, like idle and run", async () => {
+    const api = await start({
+      pipelines: [{ id: 3200, sha: OTHER_SHA, status: "running", ref: "preview", source: "push" }],
+    });
+    expect(await run(["moved"], base(api))).toMatchObject({ code: 0, out: "yield" });
   });
 });
 
