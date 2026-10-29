@@ -172,13 +172,6 @@ page's URL at failure, which this one has to infer.
 
 - 2026-10-09 · 11e0e1c4 (#1325; the spec's only change there is its seed payload) · pipeline 2277 / smoke_firefox (job 33640) · `getByRole('tabpanel', { name: 'sent to you lately' })` not visible in 5 s after the tab click; passed on the in-job retry. First sighting.
 
-## v19-archive.spec.ts:262 "a wrong passphrase is refused, and nothing is read" on desktop-webkit (#1233)
-
-- 2026-10-06 · 4bb20449 (dev, !1035 merged) · local full suite, both WebKit projects, inside CI's Playwright image (#1235), local worker count · `page.waitForResponse: Timeout 30000ms exceeded` on the slow POST; the same test passed in a five-file targeted run minutes earlier and in a second full desktop-webkit run an hour later. Error context lost to a later run clearing `test-results/`.
-- 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_firefox`, desktop-firefox · failed once, passed on retry: the same test on a second browser.
-- 2026-10-08 · 91df467a (door batch, !1044) · CI pipeline 2254 `smoke_webkit` · failed once, passed on retry.
-- 2026-10-10 · a318e11b (#1342 batch) · pipeline 2382 `smoke_firefox` (job 34367) · failed both attempts, and once in three local desktop-firefox runs after the worker fix. Cause found: the sign-in-again challenge opened on the busy screen, then moved to the form once GET /api/auth/methods answered, rebuilding its password field under Playwright's fill (the trace shows the field empty and the button disabled). Fixed with tests/unit/archive-challenge-opens-once.test.mjs; four local runs green after.
-
 ## web/tests/fidelity screens.spec.js "household"
 
 - 2026-10-06 · f3e61aeb (#1248, #1251; neither touches the household screen) · local `pnpm --filter orbit-web fidelity` · drifted 0.1109% once, passed on the next run on the same code. First sighting.
@@ -422,3 +415,8 @@ page's URL at failure, which this one has to infer.
 ## local-sign-in.spec.ts:352 "no sign-in card sits over the chooser and the count" — desktop-chromium
 
 - 2026-10-21 · b331397f (!1074, installer-only change) · pipeline 2834 / smoke_local_only (job 38082) · `the chooser: the frame sampler never saw the newcomer's frame` (0 frames, line 275). 77 others passed in 1.9 m. Job retried as 38096: green. The spec's timing was reworked afterwards under #1447 (33b94d9e). First sighting.
+
+
+## v19-archive.spec.ts:303 the account menu is still drawn 2 s after sign-out started (#1253 symptom) — desktop-webkit — #1367
+
+- 2026-10-15 · a6168fe6 (!1069, v0.3 security batch) · pipeline 2640 / smoke_webkit (job 36460) · `#1253: the menu is still open after sign-out started` at line 303 (the menu layer still visible after 2 s); passed on the in-job retry. First sighting under this heading; moved 2026-10-29 from the v19-archive.spec.ts:262 heading, where it was misfiled: it is the sign-out menu symptom (#1253), not the archive passphrase check.
