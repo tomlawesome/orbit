@@ -191,7 +191,7 @@ recoverable state.
   emailed PDF whose page decodes to hundreds of megabytes used to stall or
   crash the server when a member opened its preview. Now each preview is one
   child process that applies the open check's gate, draws the page and
-  returns a PNG, under the render budget (ten seconds), a process-memory
+  returns a PNG, under the render budget (thirty seconds), a process-memory
   ceiling of 768 MB plus the file's size (which counts canvases, patterns,
   images and fonts alike), and the same heap cap, two-at-once limit and empty
   environment; a child that is not ready within five seconds is stopped as a
