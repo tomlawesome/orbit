@@ -445,6 +445,50 @@
       "package": "libcurl",
       "installedVersion": "8.22.0-r0",
       "rationale": "Alpine package in postgres:18-alpine; fixed in 8.23.0-r0, but the pinned amd64 manifest is still the current upstream build, so only an upstream rebuild replaces it. Owner granted, 2026-10-27."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 1548,
+      "id": "CVE-2026-56857",
+      "package": "stdlib",
+      "installedVersion": "v1.24.6",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine. Windows-only (GO-2026-6604: os.Root Mkdir can follow a junction out of the root); the image runs Linux, so it is not reachable. Dismissed on #1543, 2026-10-28; clears when upstream rebuilds gosu on a fixed Go. Expires with the #794 set so it is reviewed on the same day."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 1548,
+      "id": "CVE-2026-56857",
+      "package": "stdlib",
+      "installedVersion": "v1.26.7",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full. Windows-only (GO-2026-6604: os.Root Mkdir can follow a junction out of the root); the image runs Linux, so it is not reachable. Dismissed on #1543, 2026-10-28; clears when a Tika image ships pebble on a fixed Go. Expires with the #794 set so it is reviewed on the same day."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 1541,
+      "id": "CVE-2026-109383",
+      "package": "undici",
+      "installedVersion": "6.28.0",
+      "rationale": "Bundled with npm inside node:24-alpine, used only by tests/oidc/Dockerfile (the test sign-in provider CI stands up); not a shipped sidecar and no operator runs it. Fixed in undici 6.29.1, but no Node 24 release bundles it yet (checked 2026-10-28). Clears when scripts/sidecar-pins.mjs sync moves the pin to a rebuilt node:24-alpine (#1541). Granted so that the scan's blanket exit-3 tolerance could go (#1548), 2026-10-29."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 1541,
+      "id": "CVE-2026-87018",
+      "package": "undici",
+      "installedVersion": "6.28.0",
+      "rationale": "Bundled with npm inside node:24-alpine, used only by tests/oidc/Dockerfile (the test sign-in provider CI stands up); not a shipped sidecar and no operator runs it. Fixed in undici 6.29.1, but no Node 24 release bundles it yet (checked 2026-10-28). Clears when scripts/sidecar-pins.mjs sync moves the pin to a rebuilt node:24-alpine (#1541). Granted so that the scan's blanket exit-3 tolerance could go (#1548), 2026-10-29."
     }
   ],
   "containerImages": [
@@ -469,7 +513,7 @@
       "name": "Node.js build and runtime",
       "tag": "node:24-alpine",
       "reference": "node:24-alpine@sha256:1200d815de24f8dcca745fbf7651d166034a35adbcad8860a8538ffff44f1420",
-      "indexDigest": "sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53",
+      "indexDigest": "sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85",
       "platform": "linux/amd64",
       "locations": [
         "tests/oidc/Dockerfile"
@@ -479,7 +523,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/docker-node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-22",
+      "resolvedOn": "2026-10-29",
       "reviewBy": "2026-10-30"
     },
     {
@@ -520,9 +564,9 @@
     },
     {
       "name": "Apache Tika parser",
-      "tag": "apache/tika:4.1.0-full",
-      "reference": "apache/tika:4.1.0-full@sha256:1ae28c75a88fd4c4f583711520923bba44548e8bc3d2fc4671b2a3e24e0d59dd",
-      "indexDigest": "sha256:d69fab827fa004a5e1db786e6d78da947a6cfeedbf595bc5c353ef99622bb2e2",
+      "tag": "apache/tika:4.2.0-full",
+      "reference": "apache/tika:4.2.0-full@sha256:4774eaac44f86cdf648ae7b5a367016eaf6f9052adec31e5cff07cff1a0c6e24",
+      "indexDigest": "sha256:4774eaac44f86cdf648ae7b5a367016eaf6f9052adec31e5cff07cff1a0c6e24",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -532,7 +576,7 @@
       "license": "Apache-2.0",
       "licenseSource": "https://github.com/apache/tika-docker/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-22",
+      "resolvedOn": "2026-10-29",
       "reviewBy": "2026-10-30"
     },
     {
@@ -636,7 +680,7 @@
       "reason": "Throwaway registry the installer tests push to; never part of a deployment. Its CI copy (ORBIT_INSTALLER_REGISTRY_IMAGE) is a `_IMAGE:` pin Renovate proposes updates for; the scripts' fallback defaults are not seen by Renovate and move by hand with it. Not in containerImages because sidecar-pins checks each file for the linux/amd64 digest while these files pin the multi-architecture index digest (#1490)."
     },
     {
-      "reference": "apache/tika:${TIKA_VERSION}-full@sha256:1ae28c75a88fd4c4f583711520923bba44548e8bc3d2fc4671b2a3e24e0d59dd",
+      "reference": "apache/tika:${TIKA_VERSION}-full@sha256:4774eaac44f86cdf648ae7b5a367016eaf6f9052adec31e5cff07cff1a0c6e24",
       "locations": [
         "scripts/extract-bundle/cli.ts"
       ],

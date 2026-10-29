@@ -48,6 +48,20 @@ function writeEvidence(path, evidence) {
   writeFileSync(path, `${JSON.stringify(evidence, null, 2)}\n`, "utf8");
 }
 
+// Trivy names the image it was given, and the job gives it the runner host's
+// image cache rather than the vendor's registry (#1510, #1547), so the
+// OS-package result's `Target` starts with the cache address. The evidence
+// promises a reader never has to know the cache exists, so that prefix is
+// recorded as the vendor reference the policy names (#1548). File-level
+// targets (`usr/local/bin/gosu`) never carry it and pass through unchanged.
+function recordedTarget(target, artifactName, reference) {
+  if (typeof target !== "string") return "";
+  if (typeof artifactName !== "string" || artifactName === "" || !target.startsWith(artifactName)) {
+    return target;
+  }
+  return `${reference}${target.slice(artifactName.length)}`;
+}
+
 export function listContainerImageReferences(policy) {
   return policy.containerImages.map((entry) => ({
     slug: slugForTag(entry.tag),
@@ -70,7 +84,7 @@ export function evaluateSidecarImageEvidence({
     const report = readScanReport(scansDir, entry);
     const vulnerabilities = [];
     for (const result of report.Results) {
-      const target = typeof result?.Target === "string" ? result.Target : "";
+      const target = recordedTarget(result?.Target, report.ArtifactName, entry.reference);
       for (const vulnerability of result?.Vulnerabilities ?? []) {
         vulnerabilities.push(vulnerabilityFinding(vulnerability, target));
       }

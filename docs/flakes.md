@@ -447,10 +447,11 @@ page's URL at failure, which this one has to infer.
 - 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed once, passed on retry. Second sighting.
 - 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_webkit (job 38686) and smoke_webkit_mobile (job 38687) · failed once in each, passed on retry. Third sighting: same family as #1501, fixed with it.
 
-## preview.test.ts:760 "renderDocumentPagePreview > the page is drawn in the sandbox, never on the server's own thread (#1427) > draws a 300 dpi A4 scan to a PNG of the page's shape"
+## preview.test.ts:760 "renderDocumentPagePreview > the page is drawn in the sandbox, never on the server's own thread (#1427) > draws a 300 dpi A4 scan to a PNG of the page's shape" (#1549)
 
 - 2026-10-20 · 0469e455 (the accepted v0.3.0 commit, unchanged since preview pipeline 2677 passed every job first time) · pipeline 2774 / fast (job 37576), the stable-promotion run on `main`, with the !1078 pipeline and five local agent stacks on the same host · `Orbit could not draw a picture of this document` from the sandboxed renderer, in a 449 s `fast` run. Retried as job 37634. First sighting.
 - 2026-10-22 · 2b120e89 (signing-image re-pin and cosign bump only since the green bea1293c run; nothing near documents) · local `scripts/test-backend.sh`, worktree `v031-parts`, while a base-image rebuild ran on the same host · same message, in a 919 s run; the file alone passed at once (40.9 s with the test below). Second sighting.
+- 2026-10-28 · 6565ed47 (!1109, CI config only; the same app passed `fast` in pipeline 3116) · pipeline 3123 / `fast` (job 41139), another project's jobs filling both shared runners · same message. Third sighting: #1549.
 
 ## validation.test.ts "structural document classification > classifies unsupported %PDF-1.7 ... as unsupported_structure"
 
@@ -511,3 +512,7 @@ page's URL at failure, which this one has to infer.
 ## v19-create.spec.ts:1256 "the desk's create form: dropping another file while Adding… shows still attaches the file that was picked" — desktop-firefox
 
 - 2026-10-25 · 9dba0fd1 (dev, !1092 merged; hand-started for browser evidence) · pipeline 2981 / smoke_firefox (job 39404) · the held item write never seen within 20 s after Add was clicked (line 1317); passed on the in-job retry. First sighting.
+
+## `fast_docker` job: the runner's container lost its network bridge while fetching download.docker.com
+
+- 2026-10-28 · deb80eac (!1107) · pipeline 3110 / fast_docker (job 40867), 19:13 UTC · `apt`'s fetch of download.docker.com got no answer for 5 minutes and the runner logged the job container as disconnected from its network bridge; every later job in the pipeline was skipped. Retried as job 40990 on the same commit: passed in the usual time. Noted on #1546 at the time. First sighting.
