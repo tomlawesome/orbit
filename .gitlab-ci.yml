@@ -161,16 +161,6 @@ workflow:
 # question 7a): it runs the quick checks, the same jobs a merge request into
 # `dev` runs. The `preview` push is the one full run, browsers included, before
 # the evidence is signed and published.
-# One-off for v0.3.2 only (owner, #1543, 2026-10-28): every browser and
-# visual job passed on an identical app in pipeline 3095, so the `preview`
-# push whose merge commit message carries the marker skips them, and
-# `record_image` (whose needs on them are `optional`) publishes without
-# waiting. Only a merge into `preview` sets the message. Remove in v0.3.3,
-# where the `preview` push is the one full run (#1546).
-.v032_fast_track: &v032_fast_track
-  if: $CI_COMMIT_BRANCH == "preview" && $CI_COMMIT_MESSAGE =~ /\[fast-track v0\.3\.2\]/
-  when: never
-
 .no_browsers_on_preview_mr: &no_browsers_on_preview_mr
   if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
   when: never
@@ -1751,7 +1741,6 @@ fidelity:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
-    - *v032_fast_track
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -1836,7 +1825,6 @@ fidelity_webkit:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
-    - *v032_fast_track
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -2365,7 +2353,6 @@ smoke:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
-    - *v032_fast_track
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -2475,7 +2462,6 @@ smoke_firefox:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
-    - *v032_fast_track
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -2613,7 +2599,6 @@ smoke_webkit:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
-    - *v032_fast_track
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -2721,7 +2706,6 @@ smoke_webkit_mobile:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
-    - *v032_fast_track
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -2842,7 +2826,6 @@ smoke_local_only:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
-    - *v032_fast_track
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -3550,15 +3533,11 @@ record_image:
     - job: build_image
       artifacts: true
     - job: smoke
-      optional: true
     # #1183: Firefox gated publication while it ran inside smoke; it still does.
     - job: smoke_firefox
-      optional: true
     # #1192: WebKit, desktop and phone, gates publication the same way.
     - job: smoke_webkit
-      optional: true
     - job: smoke_webkit_mobile
-      optional: true
     - job: acceptance
     - job: supply_chain_image
     - job: repair_journeys
@@ -3574,11 +3553,8 @@ record_image:
     # through to `when: manual`), so none is `optional: true` -- a push here
     # would never create a pipeline missing one of them.
     - job: fidelity
-      optional: true
     - job: fidelity_webkit
-      optional: true
     - job: smoke_local_only
-      optional: true
     - job: launcher_install_compat
     # ADR-0031 #1/#3: the two launcher archives the release-manifest step
     # below hashes.
