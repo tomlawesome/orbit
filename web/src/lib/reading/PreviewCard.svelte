@@ -8,6 +8,7 @@
   import { pageKeyTarget } from "$lib/data/page-turn.js";
   import Pager from "./Pager.svelte";
   import Reader from "./Reader.svelte";
+  import Reticle from "./Reticle.svelte";
   import { inertPage } from "$lib/pocket/focus.js";
   import { prefersReducedMotion } from "$lib/motion.js";
 
@@ -361,20 +362,7 @@
         <!-- create-v3's focus block, verbatim: the reticle, the owner's
              words breathing while the page is on its way. -->
         <div class="focus">
-          <svg class="reticle" viewBox="0 0 96 96" aria-hidden="true">
-            <circle cx="48" cy="48" r="43" fill="none" stroke="var(--chart-line)" stroke-width="1"
-                    stroke-dasharray="3 7" opacity=".8"/>
-            <g class="sweep">
-              <line x1="48" y1="5" x2="48" y2="14" stroke="var(--accent)" stroke-width="1.2" opacity=".8"/>
-              <line x1="48" y1="82" x2="48" y2="91" stroke="var(--accent)" stroke-width="1.2" opacity=".35"/>
-            </g>
-            <g class="pull" fill="none" stroke="var(--accent)" stroke-width="1.1" opacity=".7">
-              <path d="M 26 18 H 18 V 26"/><path d="M 70 18 H 78 V 26"/>
-              <path d="M 26 78 H 18 V 70"/><path d="M 70 78 H 78 V 70"/>
-            </g>
-            <circle cx="48" cy="48" r="16" fill="none" stroke="var(--chart-line)" stroke-width="1" opacity=".9"/>
-            <circle cx="48" cy="48" r="1.8" fill="var(--accent)"/>
-          </svg>
+          <Reticle class="reticle" />
           <div class="focusline">Focusing on the anomaly</div>
           <div class="why">orbit is drawing the page it holds<br>nothing is changed, and nothing is assumed</div>
         </div>
@@ -499,9 +487,9 @@
   /* create-v3, verbatim: the focus — the reticle, the owner's line breathing */
   .focus{display:flex;flex-direction:column;align-items:center;text-align:center;
     padding:18px 0 4px;max-width:360px;margin:0 auto}
-  .reticle{width:96px;height:96px;margin-bottom:20px}
-  .reticle .sweep{transform-origin:48px 48px;animation:pv-sweep 9s linear infinite}
-  .reticle .pull{transform-origin:48px 48px;animation:pv-pull 3.6s ease-in-out infinite}
+  .focus :global(.reticle){width:96px;height:96px;margin-bottom:20px}
+  .focus :global(.reticle .sweep){transform-origin:48px 48px;animation:pv-sweep 9s linear infinite}
+  .focus :global(.reticle .pull){transform-origin:48px 48px;animation:pv-pull 3.6s ease-in-out infinite}
   @keyframes pv-sweep{to{transform:rotate(360deg)}}
   @keyframes pv-pull{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(.88);opacity:.5}}
   .focusline{font:600 0.96875rem var(--display);letter-spacing:.01em;color:var(--ink);
@@ -584,6 +572,6 @@
   }
   @media (prefers-reduced-motion: reduce){
     .readcard,.readcard.open{transition:none}
-    .readcard.snap .topsheet,.reticle .sweep,.reticle .pull,.focusline,.plate.scanning,.plate.scanning::after{animation:none}
+    .readcard.snap .topsheet,.focus :global(.reticle .sweep),.focus :global(.reticle .pull),.focusline,.plate.scanning,.plate.scanning::after{animation:none}
   }
 </style>

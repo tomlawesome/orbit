@@ -9,6 +9,7 @@
   import { readHome } from "$lib/data/workspace.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { isPocket } from "$lib/pocket/media.js";
+  import Reticle from "$lib/reading/Reticle.svelte";
   import Pocket from "./pocket.svelte";
 
   /**
@@ -261,20 +262,7 @@
     <h2 id="read-head">Reading your document</h2>
 
     <div class="focus">
-      <svg class="reticle" viewBox="0 0 96 96" aria-hidden="true">
-        <circle cx="48" cy="48" r="43" fill="none" stroke="var(--chart-line)" stroke-width="1"
-                stroke-dasharray="3 7" opacity=".8"/>
-        <g class="sweep">
-          <line x1="48" y1="5" x2="48" y2="14" stroke="var(--accent)" stroke-width="1.2" opacity=".8"/>
-          <line x1="48" y1="82" x2="48" y2="91" stroke="var(--accent)" stroke-width="1.2" opacity=".35"/>
-        </g>
-        <g class="pull" fill="none" stroke="var(--accent)" stroke-width="1.1" opacity=".7">
-          <path d="M 26 18 H 18 V 26"/><path d="M 70 18 H 78 V 26"/>
-          <path d="M 26 78 H 18 V 70"/><path d="M 70 78 H 78 V 70"/>
-        </g>
-        <circle cx="48" cy="48" r="16" fill="none" stroke="var(--chart-line)" stroke-width="1" opacity=".9"/>
-        <circle cx="48" cy="48" r="1.8" fill="var(--accent)"/>
-      </svg>
+      <Reticle class="reticle" />
       <div class="focusline" id="focusline">Focusing on the anomaly</div>
       <div class="why" id="focuswhy">
         orbit is reading the pages it was given<br>
