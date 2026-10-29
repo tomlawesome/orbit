@@ -373,12 +373,13 @@ page's URL at failure, which this one has to infer.
 - 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit_mobile (job 36492), mobile-webkit · `Error: home (pocket) with the item drawer open`: `Tab reached a control the screen does not show as visible` for the drawer's Snooze, Complete, Attach, Retire, Edit and Copy link buttons (`support/keyboard.ts:322`); passed on the in-job retry. Still #1381.
 - 2026-10-16 · 6f768016 (!1070, `dev` -> `preview`) · pipeline 2657 / smoke (job 36648), mobile-chromium · failed once, passed on retry.
 
-## v19-document-preview.spec.ts:401 "the preview's pager turns a multi-page document in place, and the reader opens on its page" — mobile-webkit, desktop-webkit — #1501
+## v19-document-preview.spec.ts:409 "the preview's pager turns a multi-page document in place, and the reader opens on its page" — mobile-webkit, desktop-webkit — #1501
 
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934) · failed its first attempt (9.0 s), passed on the in-job retry (13.5 s). First sighting.
 - 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit (job 36591), desktop-webkit · now at :401: failed once, passed on retry.
 - 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed every attempt: at :423 the image stayed "Page one of pager-proving.pdf" where "Page 2" was expected (20 s). Third sighting: filed as #1501. Job retried as 38651.
 - 2026-10-25 · 9dba0fd1 (dev, !1092 merged; hand-started for browser evidence) · pipeline 2981 / smoke (job 39403), desktop-chromium · page 3 never reached: `Page 2 of pager-proving.pdf` after 20 s; passed on the in-job retry. First sighting on Chromium.
+- Reproduced 2026-10-29 (local `--ci-cap`, desktop-webkit, one run): a temporary 22 s hold on every `?page=2`+ preview response (removed afterwards) fails this test with CI's exact message at the first turn (`Expected: "Page 2 of pager-proving.pdf"`, `Received: "Page one of pager-proving.pdf"`, 20 s), while the pager number already says "2 of 3". So the signature is a page fetch that takes about 20 s or more (or is refused) on a loaded server, not a wrong wait. Unfixed; the fix is in the app (one fetch per turn, the reader reusing the preview's page), see #1501. This heading is :409 now (:401 before the 24a7a62b edit).
 
 ## v19-upload-limit.spec.ts:76 "an administrator lowers the upload limit, an over-limit upload is refused, and the default comes back" — desktop-chromium
 
