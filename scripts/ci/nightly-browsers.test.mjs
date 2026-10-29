@@ -26,7 +26,7 @@ const OTHER_SHA = "b".repeat(40);
 let server;
 let seen;
 
-// pipelines: [{ id, sha, status, ref, source, jobs: [name] }], newest first.
+// pipelines: [{ id, sha, status, ref, source, updated_at, jobs: [name] }], newest first.
 function start({ pipelines = [], issues = [], milestones = [], failedJobs = [], traces = {}, fail = {}, failStatusLookup = false } = {}) {
   seen = { requests: [], tokens: [], created: null, noted: null };
   return new Promise((resolve) => {
@@ -57,11 +57,12 @@ function start({ pipelines = [], issues = [], milestones = [], failedJobs = [], 
               .filter((pipeline) => (source ? source === (pipeline.source ?? "schedule") : true))
               .filter((pipeline) => (status ? pipeline.status === status : true))
               .filter((pipeline) => (sha ? pipeline.sha === sha : ref ? (pipeline.ref ?? "dev") === ref : true))
-              .map(({ id, sha: pipelineSha, status, ref: pipelineRef }) => ({
+              .map(({ id, sha: pipelineSha, status, ref: pipelineRef, updated_at: updatedAt }) => ({
                 id,
                 sha: pipelineSha,
                 status,
                 ref: pipelineRef ?? "dev",
+                ...(updatedAt ? { updated_at: updatedAt } : {}),
                 web_url: `https://gitlab.example.test/ai/orbit/-/pipelines/${id}`,
               })),
           );
@@ -231,6 +232,63 @@ describe("moved yields to a promotion", () => {
       const api = await start({ pipelines, failStatusLookup: true });
       const result = await run(["moved"], base(api));
       expect(result).toMatchObject({ code: 0, out: expected });
+      await new Promise((resolve) => server.close(resolve));
+      server = undefined;
+    }
+  });
+
+  // A promotion pipeline stuck in running or pending for days must not hold the
+  // nightly off for good: only one updated in the last 12 hours is live.
+  const ago = (hours) => new Date(Date.now() - hours * 3600 * 1000).toISOString();
+
+  it("ignores a running preview pipeline last updated two days ago, names it as stale, and runs the nightly lookup", async () => {
+    const api = await start({
+      pipelines: [
+        { id: 3200, sha: OTHER_SHA, status: "running", ref: "preview", source: "push", updated_at: ago(48) },
+        { id: 90, sha: SHA, status: "success" },
+      ],
+    });
+    const result = await run(["moved"], base(api));
+    expect(result).toMatchObject({ code: 0, out: "idle" });
+    expect(result.err).toMatch(/pipeline 3200/u);
+    expect(result.err).toMatch(/stale/iu);
+    expect(seen.requests.some((request) => request.includes("source=schedule"))).toBe(true);
+  });
+
+  it("yields to a running preview pipeline last updated one hour ago", async () => {
+    const api = await start({
+      pipelines: [
+        { id: 3200, sha: OTHER_SHA, status: "running", ref: "preview", source: "push", updated_at: ago(1) },
+        { id: 90, sha: SHA, status: "success" },
+      ],
+    });
+    const result = await run(["moved"], base(api));
+    expect(result.out).toBe("yield");
+    expect(result.err).toMatch(/pipeline 3200/u);
+  });
+
+  it("treats a pipeline with no updated_at as live and yields", async () => {
+    const api = await start({
+      pipelines: [
+        { id: 3200, sha: OTHER_SHA, status: "pending", ref: "main", source: "push" },
+        { id: 90, sha: SHA, status: "success" },
+      ],
+    });
+    expect((await run(["moved"], base(api))).out).toBe("yield");
+  });
+
+  it("draws the line at 12 hours: 11 hours ago is live, 13 hours ago is stale", async () => {
+    for (const [hours, expected] of [
+      [11, "yield"],
+      [13, "idle"],
+    ]) {
+      const api = await start({
+        pipelines: [
+          { id: 3200, sha: OTHER_SHA, status: "pending", ref: "main", source: "push", updated_at: ago(hours) },
+          { id: 90, sha: SHA, status: "success" },
+        ],
+      });
+      expect((await run(["moved"], base(api))).out, `${hours}h`).toBe(expected);
       await new Promise((resolve) => server.close(resolve));
       server = undefined;
     }

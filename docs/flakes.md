@@ -516,3 +516,7 @@ page's URL at failure, which this one has to infer.
 ## `fast_docker` job: the runner's container lost its network bridge while fetching download.docker.com
 
 - 2026-10-28 · deb80eac (!1107) · pipeline 3110 / fast_docker (job 40867), 19:13 UTC · `apt`'s fetch of download.docker.com got no answer for 5 minutes and the runner logged the job container as disconnected from its network bridge; every later job in the pipeline was skipped. Retried as job 40990 on the same commit: passed in the usual time. Noted on #1546 at the time. First sighting.
+
+## test-e2e-local.test.mjs "tears down exactly once when SIGINT interrupts the suite"
+
+- 2026-10-29 · 37c9fcad (+ uncommitted #1546 review fixes, none near this script) · local `vitest run scripts/` on this host while Docker was pulling two Tika images · the `suite-running` marker file never appeared inside its 25 s wait (`e2e-local-teardown-…/suite-running never appeared`); the file alone passed on an immediate rerun, 50 of 50. Wall-clock under load. First sighting.

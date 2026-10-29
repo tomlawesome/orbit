@@ -28,8 +28,11 @@
  *     that job and nothing else. ADR-0028 first hashed the whole file and
  *     rejected "only the job's own YAML" because anchors make the block
  *     boundary meaningless; following the anchors is what makes it sound.
- *     `pipelineOwned` names the paths this axis owns, kept out of every
- *     checkout axis so a CI edit reaches a key through this axis alone.
+ *     `pipelineOwned` names the paths this axis owns; a job marked
+ *     `definitionCoversPipeline` drops them from its checkout axis, so a CI
+ *     edit reaches its key through this axis alone. `fast`, `fast_docker`
+ *     and `names_guard` are not marked: their suites read the pipeline
+ *     file and every ci script, so any CI edit still reruns them.
  *
  * This replaces #898's allow-list of globs. That version could only be wrong
  * by omission and silently: a file a job read but nobody had declared left the
@@ -206,15 +209,28 @@ export function definitionGlobs(config) {
   return resolveList(config, config.definition ?? []);
 }
 
-/* The paths the definition axis owns; never in a checkout axis. */
+/* The paths the definition axis owns. */
 export function pipelineOwnedGlobs(config) {
   return resolveList(config, config.pipelineOwned ?? []);
 }
 
-/* The checkout axis: everything, minus this job's deny-list and the paths the
- * definition axis owns. */
+/*
+ * Whether a job reaches the pipeline file and scripts/ci only through its own
+ * definition (`definitionCoversPipeline` in job-inputs.json). The stack jobs
+ * do; `fast` and `names_guard` do not, because their suites read the whole
+ * pipeline file and every ci script, so for them those paths stay in the
+ * checkout axis and any CI edit still reruns them.
+ */
+export function definitionCoversPipeline(config, job) {
+  const declared = config.jobs?.[job];
+  if (!declared) throw new Error(`job-inputs.json declares no job named ${job}`);
+  return declared.definitionCoversPipeline === true;
+}
+
+/* The checkout axis: everything, minus this job's deny-list, and minus the
+ * pipeline-owned paths for a job whose definition covers them. */
 export function checkoutEntries(config, job, entries) {
-  const owned = pipelineOwnedGlobs(config);
+  const owned = definitionCoversPipeline(config, job) ? pipelineOwnedGlobs(config) : [];
   const only = onlyGlobs(config, job);
   if (only) return entries.filter((entry) => selects(only, entry.path) && !selects(owned, entry.path));
   const deny = denyGlobs(config, job);
@@ -223,10 +239,18 @@ export function checkoutEntries(config, job, entries) {
 
 /* ---- The per-job definition (#1546) ------------------------------------ */
 
-const SCRIPT_PATH = /scripts\/ci\/[A-Za-z0-9_./-]+/gu;
-const ANCHOR_DEFINITION = /(?<=\s)&([A-Za-z0-9_-]+)(?![\w-])/gu;
-const ANCHOR_REFERENCE = /(?<=\s)\*([A-Za-z0-9_-]+)(?![\w-])/gu;
-const GLOBAL_BLOCKS = ["default", "variables", "workflow", "stages", "include"];
+// A path ends on a name character, never on the dot that ends a sentence.
+const SCRIPT_PATH = /scripts\/ci\/[A-Za-z0-9_./-]*[A-Za-z0-9_/-]/gu;
+// What the walk opens to find more ci scripts: the scripts, the compose
+// files and the Dockerfiles a job's text names. Only scripts/ci paths are
+// hashed here; the rest sit in the checkout axis.
+const REFERENCE_PATH = /(?:scripts\/[A-Za-z0-9_./-]*[A-Za-z0-9_/-]|compose\/[A-Za-z0-9_./-]*[A-Za-z0-9_/-]|docker-compose[A-Za-z0-9_.-]*\.ya?ml|Dockerfile[A-Za-z0-9_.-]*)/gu;
+// An anchor or alias follows whitespace or a flow-collection bracket or comma.
+const ANCHOR_DEFINITION = /(?<=[\s[{,])&([A-Za-z0-9_-]+)(?![\w-])/gu;
+const ANCHOR_REFERENCE = /(?<=[\s[{,])\*([A-Za-z0-9_-]+)(?![\w-])/gu;
+// In every job's definition: the global keywords, and `classify`, whose
+// outputs (lane, axes) every other job reads from its environment.
+const GLOBAL_BLOCKS = ["default", "variables", "workflow", "stages", "include", "classify"];
 
 /*
  * The top-level blocks of a pipeline file, in file order. A block starts at a
@@ -259,25 +283,32 @@ function topLevelBlocks(ciText) {
 
 /* The names an `extends:` in a block points at: a scalar, a flow list, or a
  * block list on the following lines. */
+function withoutInlineComment(line) {
+  return line.replace(/\s+#.*$/u, "").trim();
+}
+
 function extendsTargets(kept) {
   const targets = [];
   kept.forEach((line, index) => {
     const match = /^\s*extends:\s*(.*)$/u.exec(line);
     if (!match) return;
-    const value = match[1].trim();
+    let value = withoutInlineComment(match[1]);
     if (value.startsWith("[")) {
+      // A flow list may run on over several lines until its `]`.
+      let next = index + 1;
+      while (!value.includes("]") && next < kept.length) value += ` ${withoutInlineComment(kept[next++])}`;
       value.slice(1, value.lastIndexOf("]")).split(",").forEach((item) => targets.push(item.trim()));
     } else if (value !== "") {
       targets.push(value);
     } else {
       for (let next = index + 1; next < kept.length; next += 1) {
-        const item = /^\s*-\s*(\S+)\s*$/u.exec(kept[next]);
+        const item = /^\s*-\s*(\S+)/u.exec(withoutInlineComment(kept[next]));
         if (!item) break;
         targets.push(item[1]);
       }
     }
   });
-  return targets.map((target) => target.replace(/^["']|["']$/gu, ""));
+  return targets.map((target) => target.replace(/^["']|["']$/gu, "")).filter((target) => target !== "");
 }
 
 /*
@@ -313,18 +344,22 @@ export function jobDefinition(ciText, job) {
   }
   const text = `${[...included].sort((left, right) => left - right).map((index) => blocks[index].text).join("\n")}\n`;
   const scripts = [...new Set(text.match(SCRIPT_PATH) ?? [])].sort();
-  return { text, scripts };
+  const references = [...new Set(text.match(REFERENCE_PATH) ?? [])].sort();
+  return { text, scripts, references };
 }
 
 /*
- * The `scripts/ci/...` paths reachable from `scriptPaths` through the scripts'
- * own text, read with `readFile(path)` (null, undefined or a throw means the
- * file is not there: the path stays in the list and is not followed). Sorted,
- * once each; a cycle ends because nothing is visited twice.
+ * The `scripts/ci/...` paths reachable from `paths` through the files' own
+ * text: every script, compose file and Dockerfile named is opened with
+ * `readFile(path)` (null, undefined or a throw means the file is not there:
+ * a ci path then stays in the list unfollowed) and searched for more, so a
+ * `scripts/test-*.sh` or a compose overlay that calls a ci script carries
+ * it in. Only the ci paths are returned, sorted, once each; a cycle ends
+ * because nothing is visited twice.
  */
-export function definitionScripts(scriptPaths, readFile) {
+export function definitionScripts(paths, readFile) {
   const seen = new Set();
-  const queue = [...scriptPaths];
+  const queue = [...paths];
   while (queue.length > 0) {
     const path = queue.shift();
     if (seen.has(path)) continue;
@@ -336,9 +371,9 @@ export function definitionScripts(scriptPaths, readFile) {
       continue;
     }
     if (typeof text !== "string") continue;
-    for (const found of text.match(SCRIPT_PATH) ?? []) if (!seen.has(found)) queue.push(found);
+    for (const found of text.match(REFERENCE_PATH) ?? []) if (!seen.has(found)) queue.push(found);
   }
-  return [...seen].sort();
+  return [...seen].filter((path) => /^scripts\/ci\//u.test(path)).sort();
 }
 
 /*
@@ -347,9 +382,9 @@ export function definitionScripts(scriptPaths, readFile) {
  * and the reuse machinery on the always list.
  */
 export function jobDefinitionHash(config, job, entries, { ciText, readFile }) {
-  const { text, scripts } = jobDefinition(ciText, job);
+  const { text, references } = jobDefinition(ciText, job);
   const shaByPath = new Map(entries.map((entry) => [entry.path, entry.sha]));
-  const scriptLines = definitionScripts(scripts, readFile).map((path) => `${path}\t${shaByPath.get(path) ?? "missing"}`);
+  const scriptLines = definitionScripts(references, readFile).map((path) => `${path}\t${shaByPath.get(path) ?? "missing"}`);
   return digestOf([KEY_VERSION, "definition", job, text, scriptLines.join("\n"), hashEntries(definitionEntries(config, entries))]);
 }
 
@@ -483,11 +518,13 @@ function main(argv) {
   }
   if (command === "paths") {
     const job = argv[1];
-    const { scripts } = jobDefinition(options.ciText, job);
+    // The pipeline file is listed once as `.gitlab-ci.yml (own definition)`:
+    // the job's key carries its own blocks, not the file's sha.
+    const { references } = jobDefinition(options.ciText, job);
     const covered = [
       ...checkoutEntries(config, job, entries),
       ...definitionEntries(config, entries),
-    ].map((entry) => entry.path).concat(".gitlab-ci.yml", definitionScripts(scripts, options.readFile));
+    ].map((entry) => entry.path).concat(".gitlab-ci.yml (own definition)", definitionScripts(references, options.readFile));
     process.stdout.write(`${[...new Set(covered)].sort().join("\n")}\n`);
     return 0;
   }

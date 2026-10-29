@@ -247,9 +247,14 @@ as today") becomes per job. A job's definition hash covers:
 - the reuse machinery itself, the `definition` list in `job-inputs.json`
   (`job-inputs.*`, `reuse-*`), in every key as before.
 
-`.gitlab-ci.yml` and `scripts/ci/**` (`pipelineOwned`) leave every checkout
-axis, so a CI edit reaches a key only through this axis. The key version
-moved to `orbit-reuse-key/3`, so every key moved once.
+`.gitlab-ci.yml` and `scripts/ci/**` (`pipelineOwned`) leave the checkout
+axis of every job marked `definitionCoversPipeline` (the stack, image,
+scanner and front-end jobs), so for them a CI edit reaches the key only
+through this axis. `fast`, `fast_docker` and `names_guard` are not marked:
+their suites read the whole pipeline file and every ci script
+(`scripts/gitlab-ci-*.test.mjs`, the no-real-names scan), so those paths
+stay in their checkout axis and any CI edit still reruns them, as before.
+The key version moved to `orbit-reuse-key/3`, so every key moved once.
 
 The 2026-09 objection was that anchors make a block boundary meaningless.
 Following the anchors answers it: a job that writes `*needs_gated_image`
@@ -257,8 +262,9 @@ carries the block that defines `&needs_gated_image`. The direction of error
 is still the safe one: a reference the reader cannot resolve pulls in
 nothing it should not and a block it cannot bound is hashed whole, so the
 worst case is a rerun, never a stale reuse. The same holds for the script
-walk, which stops at `scripts/ci/` by design: scripts outside it are in
-the checkout axis, where a change already reruns the job.
+walk, which opens every script, compose file and Dockerfile the text
+names to find the ci scripts they call, but hashes only `scripts/ci/`:
+the rest are in the checkout axis, where a change already reruns the job.
 
 ## Supersession
 

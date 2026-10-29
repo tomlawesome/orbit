@@ -21,9 +21,12 @@
     "lines dropped), the scripts/ci/** files that text names (followed through",
     "the scripts themselves), and the `definition` list below: the reuse",
     "machinery, in every key, so a change to it invalidates all evidence at once.",
-    "`pipelineOwned` names the paths that axis owns; they are kept out of every",
-    "checkout axis, so a CI edit reaches a key through the definition axis alone",
-    "and a change to one job's YAML reruns that job and nothing else.",
+    "`pipelineOwned` names the paths that axis owns. A job marked",
+    "`definitionCoversPipeline` reaches them only through its own definition, so",
+    "they leave its checkout axis and a change to one job's YAML reruns that job",
+    "and nothing else. `fast`, `fast_docker` and `names_guard` are not marked:",
+    "their suites read the whole pipeline file and every ci script, so for them",
+    "those paths stay in the checkout axis and any CI edit still reruns them.",
     "`artefact` names the thing under test whose identity the key also carries.",
     "`image` means the image content ID build_image computes; a job with no",
     "`artefact` is keyed on the source alone."
@@ -77,13 +80,16 @@
       "deny": []
     },
     "integration": {
-      "deny": []
+      "deny": [],
+      "definitionCoversPipeline": true
     },
     "fidelity": {
-      "deny": []
+      "deny": [],
+      "definitionCoversPipeline": true
     },
     "fidelity_webkit": {
-      "deny": []
+      "deny": [],
+      "definitionCoversPipeline": true
     },
     "sidecar_images": {
       "only": [
@@ -96,62 +102,72 @@
         "scripts/supply-chain-policy.mjs",
         "scripts/sidecar-image-evidence.mjs",
         "scripts/sidecar-pins.mjs"
-      ]
+      ],
+      "definitionCoversPipeline": true
     },
     "smoke": {
       "artefact": "image",
       "deny": [
         "@image"
-      ]
+      ],
+      "definitionCoversPipeline": true
     },
     "smoke_firefox": {
       "artefact": "image",
       "deny": [
         "@image"
-      ]
+      ],
+      "definitionCoversPipeline": true
     },
     "smoke_webkit": {
       "artefact": "image",
       "deny": [
         "@image"
-      ]
+      ],
+      "definitionCoversPipeline": true
     },
     "smoke_webkit_mobile": {
       "artefact": "image",
       "deny": [
         "@image"
-      ]
+      ],
+      "definitionCoversPipeline": true
     },
     "smoke_local_only": {
       "artefact": "image",
       "deny": [
         "@image"
-      ]
+      ],
+      "definitionCoversPipeline": true
     },
     "acceptance": {
       "artefact": "image",
       "deny": [
         "@image",
         "!docs/installer-guarantees.md"
-      ]
+      ],
+      "definitionCoversPipeline": true
     },
     "repair_journeys": {
       "artefact": "image",
       "deny": [
         "@image"
-      ]
+      ],
+      "definitionCoversPipeline": true
     },
     "launcher_install_compat": {
       "artefact": "image",
       "deny": [
         "@image"
-      ]
+      ],
+      "definitionCoversPipeline": true
     },
     "supply_chain_image": {
       "artefact": "image",
       "deny": [
         "@image"
-      ]
+      ],
+      "definitionCoversPipeline": true
     }
   }
 }

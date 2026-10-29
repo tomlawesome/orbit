@@ -96,12 +96,29 @@ export async function nightlyPipelines({ base, projectId, options, sha, skipId, 
  * The first running or pending pipeline on `preview` or `main` that is not this
  * one, or null. Four small requests; the first hit answers.
  */
-export async function promotionInFlight({ base, projectId, options, skipId }) {
+export const PROMOTION_LIVE_MS = 12 * 60 * 60 * 1000;
+
+/* A pipeline touched within the last twelve hours; one stuck for days (a
+ * signing runner down, a job never played) must not cost every night's
+ * coverage. No `updated_at` reads as live. */
+function isLive(pipeline, now) {
+  if (typeof pipeline.updated_at !== "string") return true;
+  const updated = Date.parse(pipeline.updated_at);
+  return Number.isNaN(updated) || now - updated <= PROMOTION_LIVE_MS;
+}
+
+export async function promotionInFlight({ base, projectId, options, skipId, now = Date.now(), log = () => {} }) {
   for (const ref of ["preview", "main"]) {
     for (const status of ["running", "pending"]) {
       const listed = await request(`${project(base, projectId)}/pipelines?${query({ ref, status })}`, options);
-      const hit = (Array.isArray(listed) ? listed : []).find((pipeline) => Number(pipeline.id) !== Number(skipId));
-      if (hit) return hit;
+      for (const pipeline of Array.isArray(listed) ? listed : []) {
+        if (Number(pipeline.id) === Number(skipId)) continue;
+        if (!isLive(pipeline, now)) {
+          log(`pipeline ${pipeline.id} on ${ref} has been ${status} since ${pipeline.updated_at}: stale, not yielded to`);
+          continue;
+        }
+        return pipeline;
+      }
     }
   }
   return null;
@@ -114,7 +131,7 @@ export async function promotionInFlight({ base, projectId, options, skipId }) {
 export async function moved({ base, projectId, pipelineId, sha, token, fetchImpl = fetch, log = () => {} }) {
   const options = { token, fetchImpl };
   try {
-    const promotion = await promotionInFlight({ base, projectId, options, skipId: pipelineId });
+    const promotion = await promotionInFlight({ base, projectId, options, skipId: pipelineId, log });
     if (promotion) {
       log(`pipeline ${promotion.id} on ${promotion.ref} is ${promotion.status}: the nightly yields to it (#1546)`);
       return "yield";

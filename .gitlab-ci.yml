@@ -590,9 +590,12 @@ variables:
 # the browsers and costs minutes, not the hours pipeline 3095 lost when
 # `sidecar_images` failed after every browser job had passed. `optional`,
 # because a pipeline whose rules create none of these must not fail to build;
-# no artefacts, it is a waiting order. On a warm day the scanners finish
-# before `build_image` does, so the happy path waits for nothing new.
-# `supply_chain_image` keeps `.needs_gated_image`: it is one of the checks.
+# no artefacts, it is a waiting order. On a warm day `sidecar_images` and the
+# policy jobs finish before `build_image` does; `supply_chain_image` scans
+# the built image, so the stack jobs wait its two minutes after the build
+# (a slot on the same runner, deliberately: a red image scan after every
+# browser job had passed is the case this is for). `supply_chain_image`
+# keeps `.needs_gated_image`: it is one of the checks.
 .needs_gated_image_checked: &needs_gated_image_checked
   - job: classify
     artifacts: true
@@ -796,8 +799,12 @@ variables:
 # without them: the line is then "resource peak: unavailable".
 .resource_peak: &resource_peak |
   if [ -r /sys/fs/cgroup/memory.peak ]; then
-    peak_mib=$(( $(cat /sys/fs/cgroup/memory.peak) / 1048576 ))
-    cpu_s=$(( $(awk '/^usage_usec/ {print $2}' /sys/fs/cgroup/cpu.stat 2>/dev/null || echo 0) / 1000000 ))
+    peak_bytes=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null)
+    cpu_usec=$(awk '/^usage_usec/ {print $2}' /sys/fs/cgroup/cpu.stat 2>/dev/null)
+    # Empty reads become 0 so the arithmetic never aborts this shell, which
+    # also runs the teardown below.
+    peak_mib=$(( ${peak_bytes:-0} / 1048576 ))
+    cpu_s=$(( ${cpu_usec:-0} / 1000000 ))
     echo "resource peak: memory=${peak_mib} MiB cpu=${cpu_s} s (job ${CI_JOB_NAME:-?}, runner ${CI_RUNNER_DESCRIPTION:-?})"
   else
     echo "resource peak: unavailable (no /sys/fs/cgroup/memory.peak)"
@@ -1554,6 +1561,13 @@ sidecar_images:
           - supply-chain/**/*
           - tests/**/*
           - web/**/*
+    # A merge request that touches none of those paths gets no job at all
+    # rather than a manual one: the stack jobs now wait on this job (#1546,
+    # `.needs_gated_image_checked`), and `optional: true` covers a job that
+    # is absent, not one left unplayed. A branch pipeline started by hand
+    # still gets the manual job, beside the manual stack jobs.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
     - when: manual
       allow_failure: true
   allow_failure: false

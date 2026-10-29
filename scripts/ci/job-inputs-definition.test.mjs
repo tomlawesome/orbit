@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { computeKeys, definitionScripts, jobDefinition, readConfig } from "./job-inputs.mjs";
+import { checkoutEntries, computeKeys, definitionScripts, jobDefinition, readConfig } from "./job-inputs.mjs";
 
 /*
  * The per-job definition axis (#1546, amending ADR-0028). Written from the
@@ -546,5 +546,318 @@ describe("the per-job definition axis", () => {
       const withOptions = keys(FIXTURE);
       for (const job of JOBS) expect(source(withOptions, job)).not.toBe(source(without, job));
     });
+  });
+});
+
+// Fixes found in review (#1546), written from the specification alone.
+
+describe("jobDefinition: references", () => {
+  it("lists the scripts, compose and Dockerfile paths a job's text names, sorted and without repeats", () => {
+    const refs = jobDefinition(FIXTURE, "smoke").references;
+    expect(refs).toEqual([
+      "scripts/ci/common-setup.sh",
+      "scripts/ci/lib/probe.mjs",
+      "scripts/ci/setup-runner.sh",
+      "scripts/ci/start-acceptance-stack.sh",
+    ]);
+  });
+
+  const REPAIR = `${FIXTURE}
+repair:
+  stage: test
+  script:
+    - bash scripts/test-repair-journeys.sh
+
+e2e:
+  stage: test
+  script:
+    - docker compose -f compose/docker-compose.e2e.yml up
+    - docker compose -f docker-compose.override.yml up
+    - docker build -f Dockerfile.e2e .
+`;
+
+  it("includes non-ci scripts, compose files and Dockerfiles, as well as scripts/ci paths", () => {
+    const repair = jobDefinition(REPAIR, "repair").references;
+    expect(repair).toContain("scripts/test-repair-journeys.sh");
+    expect(repair).toContain("scripts/ci/common-setup.sh");
+    const e2e = jobDefinition(REPAIR, "e2e").references;
+    expect(e2e).toContain("compose/docker-compose.e2e.yml");
+    expect(e2e).toContain("docker-compose.override.yml");
+    expect(e2e).toContain("Dockerfile.e2e");
+    for (const refs of [repair, e2e]) {
+      expect(refs).toEqual([...new Set(refs)].sort());
+    }
+  });
+
+  it("leaves scripts unchanged: only the scripts/ci paths", () => {
+    expect(jobDefinition(REPAIR, "repair").scripts).toEqual(["scripts/ci/common-setup.sh"]);
+    expect(jobDefinition(REPAIR, "e2e").scripts).toEqual(["scripts/ci/common-setup.sh"]);
+  });
+
+  it("does not list a path another job names", () => {
+    expect(jobDefinition(REPAIR, "smoke").references).not.toContain("scripts/test-repair-journeys.sh");
+    expect(jobDefinition(REPAIR, "fast").references).not.toContain("compose/docker-compose.e2e.yml");
+  });
+});
+
+describe("definitionScripts: following non-ci files", () => {
+  it("follows a non-ci script to the ci script it names, and returns only the ci path", () => {
+    const files = {
+      "scripts/test-repair-journeys.sh": "#!/bin/sh\nscripts/ci/write-test-manifest.sh\n",
+      "scripts/ci/write-test-manifest.sh": "#!/bin/sh\necho manifest\n",
+    };
+    expect(definitionScripts(["scripts/test-repair-journeys.sh"], reader(files))).toEqual([
+      "scripts/ci/write-test-manifest.sh",
+    ]);
+  });
+
+  it("follows a compose file to the ci script it names", () => {
+    const files = {
+      "compose/docker-compose.e2e.yml": "services:\n  app:\n    command: scripts/ci/create-test-configuration.sh\n",
+      "scripts/ci/create-test-configuration.sh": "echo configure\n",
+    };
+    expect(definitionScripts(["compose/docker-compose.e2e.yml"], reader(files))).toEqual([
+      "scripts/ci/create-test-configuration.sh",
+    ]);
+  });
+
+  it("follows a Dockerfile and a docker-compose file at the root", () => {
+    const files = {
+      "Dockerfile.e2e": "COPY scripts/ci/in-image.sh /bin/\n",
+      "docker-compose.override.yml": "x: scripts/ci/from-override.sh\n",
+    };
+    expect(definitionScripts(["Dockerfile.e2e", "docker-compose.override.yml"], reader(files))).toEqual([
+      "scripts/ci/from-override.sh",
+      "scripts/ci/in-image.sh",
+    ]);
+  });
+
+  it("follows through a chain that passes through a non-ci file, and returns sorted unique ci paths", () => {
+    const files = {
+      "scripts/test-x.sh": "scripts/lib-y.sh scripts/ci/b.sh\n",
+      "scripts/lib-y.sh": "scripts/ci/a.sh scripts/ci/b.sh\n",
+      "scripts/ci/a.sh": "\n",
+      "scripts/ci/b.sh": "\n",
+    };
+    expect(definitionScripts(["scripts/test-x.sh"], reader(files))).toEqual(["scripts/ci/a.sh", "scripts/ci/b.sh"]);
+  });
+
+  it("terminates on a cycle that runs through non-ci files", () => {
+    const files = {
+      "scripts/test-x.sh": "scripts/test-y.sh\n",
+      "scripts/test-y.sh": "scripts/test-x.sh scripts/ci/z.sh\n",
+    };
+    expect(definitionScripts(["scripts/test-x.sh"], reader(files))).toEqual(["scripts/ci/z.sh"]);
+  });
+
+  it("still keeps an unreadable scripts/ci path", () => {
+    const files = { "scripts/test-x.sh": "scripts/ci/gone.sh\n" };
+    expect(definitionScripts(["scripts/test-x.sh"], reader(files))).toEqual(["scripts/ci/gone.sh"]);
+  });
+});
+
+describe("the key follows references through non-ci files", () => {
+  const entry = (path, sha) => ({ type: "blob", path, sha });
+  const REPAIR = `${FIXTURE}
+repair:
+  stage: test
+  script:
+    - bash scripts/test-repair-journeys.sh
+
+e2e:
+  stage: test
+  script:
+    - docker compose -f compose/docker-compose.e2e.yml up
+`;
+  const FILES = {
+    ...SCRIPT_FILES,
+    "scripts/test-repair-journeys.sh": "#!/bin/sh\nexec scripts/ci/write-test-manifest.sh\n",
+    "compose/docker-compose.e2e.yml": "command: scripts/ci/create-test-configuration.sh\n",
+    "scripts/ci/write-test-manifest.sh": "echo manifest\n",
+    "scripts/ci/create-test-configuration.sh": "echo configure\n",
+  };
+  const ALWAYS = ["scripts/ci/job-inputs.json", "scripts/ci/reuse-gate.sh"];
+  const DENY = [".gitlab-ci.yml", "scripts/ci/**"];
+  const JOBS = ["fast", "smoke", "acceptance", "repair", "e2e"];
+  const config = {
+    ...readConfig(),
+    definition: ALWAYS,
+    jobs: Object.fromEntries(JOBS.map((job) => [job, { deny: DENY }])),
+  };
+  const baseTree = [
+    entry(".gitlab-ci.yml", "a0"),
+    entry("scripts/ci/job-inputs.json", "a2"),
+    entry("scripts/ci/reuse-gate.sh", "a3"),
+    entry("scripts/ci/common-setup.sh", "a4"),
+    entry("scripts/ci/setup-runner.sh", "a5"),
+    entry("scripts/ci/start-acceptance-stack.sh", "a6"),
+    entry("scripts/ci/lib/wait.sh", "a7"),
+    entry("scripts/ci/lib/probe.mjs", "a8"),
+    entry("scripts/ci/write-test-manifest.sh", "b1"),
+    entry("scripts/ci/create-test-configuration.sh", "b2"),
+    entry("scripts/test-repair-journeys.sh", "b3"),
+    entry("compose/docker-compose.e2e.yml", "b4"),
+  ];
+  const withSha = (tree, path, sha) => tree.map((file) => (file.path === path ? entry(path, sha) : file));
+  const keys = (tree) => computeKeys(config, tree, { ciText: REPAIR, readFile: reader(FILES) });
+  const movedJobs = (before, after) => JOBS.filter((job) => after.get(job).source !== before.get(job).source);
+
+  it("moves only the job whose non-ci script names a ci script when that ci script's sha moves", () => {
+    const before = keys(baseTree);
+    const after = keys(withSha(baseTree, "scripts/ci/write-test-manifest.sh", "zz"));
+    expect(movedJobs(before, after)).toEqual(["repair"]);
+  });
+
+  it("moves only the job whose compose file names a ci script when that ci script's sha moves", () => {
+    const before = keys(baseTree);
+    const after = keys(withSha(baseTree, "scripts/ci/create-test-configuration.sh", "zz"));
+    expect(movedJobs(before, after)).toEqual(["e2e"]);
+  });
+});
+
+describe("opt-in removal of the pipeline files from a job's checkout axis", () => {
+  const entry = (path, sha) => ({ type: "blob", path, sha });
+  const ALWAYS = ["scripts/ci/job-inputs.json", "scripts/ci/reuse-gate.sh"];
+  const config = {
+    ...readConfig(),
+    definition: ALWAYS,
+    pipelineOwned: [".gitlab-ci.yml", "scripts/ci/**"],
+    jobs: {
+      fast: { deny: [] },
+      smoke: { deny: [], definitionCoversPipeline: true },
+    },
+  };
+  const tree = [
+    entry(".gitlab-ci.yml", "a0"),
+    entry("src/app.ts", "a1"),
+    entry("scripts/ci/job-inputs.json", "a2"),
+    entry("scripts/ci/reuse-gate.sh", "a3"),
+    entry("scripts/ci/common-setup.sh", "a4"),
+    entry("scripts/ci/setup-runner.sh", "a5"),
+    entry("scripts/ci/start-acceptance-stack.sh", "a6"),
+    entry("scripts/ci/lib/wait.sh", "a7"),
+    entry("scripts/ci/lib/probe.mjs", "a8"),
+    entry("scripts/ci/unrelated.sh", "a9"),
+  ];
+  const withSha = (path, sha) => tree.map((file) => (file.path === path ? entry(path, sha) : file));
+  const keys = (files) => computeKeys(config, files, { ciText: FIXTURE, readFile: reader(SCRIPT_FILES) });
+  const source = (map, job) => map.get(job).source;
+
+  it("a new sha for the pipeline file alone moves fast and not smoke", () => {
+    const before = keys(tree);
+    const after = keys(withSha(".gitlab-ci.yml", "zz"));
+    expect(source(after, "fast")).not.toBe(source(before, "fast"));
+    expect(source(after, "smoke")).toBe(source(before, "smoke"));
+  });
+
+  it("a new sha for a script no job names moves fast and not smoke", () => {
+    const before = keys(tree);
+    const after = keys(withSha("scripts/ci/unrelated.sh", "zz"));
+    expect(source(after, "fast")).not.toBe(source(before, "fast"));
+    expect(source(after, "smoke")).toBe(source(before, "smoke"));
+  });
+
+  it("checkoutEntries keeps the pipeline file for fast and drops it for smoke", () => {
+    const paths = (job) => checkoutEntries(config, job, tree).map((file) => file.path);
+    expect(paths("fast")).toContain(".gitlab-ci.yml");
+    expect(paths("fast")).toContain("scripts/ci/unrelated.sh");
+    expect(paths("smoke")).not.toContain(".gitlab-ci.yml");
+    expect(paths("smoke")).not.toContain("scripts/ci/unrelated.sh");
+    expect(paths("smoke")).toContain("src/app.ts");
+  });
+});
+
+describe("classify is in every job's definition", () => {
+  const entry = (path, sha) => ({ type: "blob", path, sha });
+  const CLASSIFIED = edit(
+    FIXTURE,
+    "fast:\n",
+    "classify:\n  stage: build\n  script:\n    - node classify-changes.mjs\n\nfast:\n",
+  );
+  const JOBS = ["fast", "smoke", "acceptance"];
+  const DENY = [".gitlab-ci.yml", "scripts/ci/**"];
+  const config = {
+    ...readConfig(),
+    definition: [],
+    jobs: Object.fromEntries(JOBS.map((job) => [job, { deny: DENY }])),
+  };
+  const tree = [entry(".gitlab-ci.yml", "a0"), entry("src/app.ts", "a1")];
+  const keys = (ciText) => computeKeys(config, tree, { ciText, readFile: reader(SCRIPT_FILES) });
+
+  it("includes the top-level classify block in each job's text", () => {
+    for (const job of JOBS) {
+      const { text } = jobDefinition(CLASSIFIED, job);
+      expect(hasLine(text, "classify:"), job).toBe(true);
+      expect(text, job).toContain("node classify-changes.mjs");
+    }
+  });
+
+  it("moves every job's key when the classify block is edited", () => {
+    const before = keys(CLASSIFIED);
+    const after = keys(edit(CLASSIFIED, "classify-changes.mjs", "classify-other.mjs"));
+    for (const job of JOBS) expect(after.get(job).source, job).not.toBe(before.get(job).source);
+  });
+});
+
+describe("anchor references inside flow collections", () => {
+  it("follows both anchors in needs: [*a, *b]", () => {
+    const edited = edit(FIXTURE, "  needs: *needs_gated\n", "  needs: [*needs_gated, *build_rules]\n");
+    const { text } = jobDefinition(edited, "fast");
+    expect(hasLine(text, ".needs_gated: &needs_gated")).toBe(true);
+    expect(hasLine(text, ".build_rules: &build_rules")).toBe(true);
+    expect(text).toContain("job: classify");
+    expect(text).toContain('$CI_PIPELINE_SOURCE == "push"');
+    expect(hasLine(text, ".unused_anchor: &unused_anchor")).toBe(false);
+  });
+
+  it("follows the anchor in a flow mapping {k: *a}", () => {
+    const edited = edit(FIXTURE, "  needs: *needs_gated\n", "  needs: *needs_gated\n  rules_ref: {k: *unused_anchor}\n");
+    const { text } = jobDefinition(edited, "fast");
+    expect(hasLine(text, ".unused_anchor: &unused_anchor")).toBe(true);
+    expect(text).toContain("job: nobody");
+  });
+});
+
+describe("extends: parsing", () => {
+  it("resolves a value followed by an inline comment", () => {
+    const edited = edit(FIXTURE, "  extends: .privileged_runner\n", "  extends: .privileged_runner  # why\n");
+    const { text } = jobDefinition(edited, "smoke");
+    expect(hasLine(text, ".privileged_runner:")).toBe(true);
+    expect(hasLine(text, ".base_runner:")).toBe(true);
+  });
+
+  it("resolves a block list indented under the key", () => {
+    const edited = edit(
+      FIXTURE,
+      "  extends: .privileged_runner\n",
+      "  extends:\n    - .privileged_runner\n    - .cache_settings\n",
+    );
+    const { text } = jobDefinition(edited, "smoke");
+    expect(hasLine(text, ".privileged_runner:")).toBe(true);
+    expect(hasLine(text, ".cache_settings:")).toBe(true);
+    expect(hasLine(text, ".base_runner:")).toBe(true);
+    expect(hasLine(text, ".unrelated_template:")).toBe(false);
+    expect(text).toContain("stage: test");
+  });
+
+  it("resolves a block list whose dashes sit at the key's own indent", () => {
+    const edited = edit(
+      FIXTURE,
+      "  extends: .privileged_runner\n",
+      "  extends:\n  - .privileged_runner\n  - .cache_settings\n",
+    );
+    const { text } = jobDefinition(edited, "smoke");
+    expect(hasLine(text, ".privileged_runner:")).toBe(true);
+    expect(hasLine(text, ".cache_settings:")).toBe(true);
+  });
+});
+
+describe("a scripts/ci path at the end of a sentence", () => {
+  it("is recorded without the trailing dot", () => {
+    const edited = edit(FIXTURE, "    - pnpm test\n", "    - echo see scripts/ci/x.sh.\n");
+    const definition = jobDefinition(edited, "fast");
+    expect(definition.scripts).toEqual(["scripts/ci/common-setup.sh", "scripts/ci/x.sh"]);
+    expect(definition.references).toContain("scripts/ci/x.sh");
+    expect(definition.references).not.toContain("scripts/ci/x.sh.");
   });
 });

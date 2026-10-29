@@ -21,6 +21,7 @@ import {
   selects,
   sourceKey,
   sourceVariable,
+  definitionCoversPipeline,
   pipelineOwnedGlobs,
 } from "./job-inputs.mjs";
 
@@ -223,7 +224,15 @@ describe("the deny-lists", () => {
         if (onlyGlobs(config, job)) continue;
         expect(selects(denyGlobs(config, job), path), `${job} denies ${path}`).toBe(false);
       }
-      expect(covers(job, ".gitlab-ci.yml"), `${job} carries the pipeline file in its checkout axis`).toBe(false);
+      // A job whose suites read the pipeline file keeps it in its checkout
+      // axis; the stack jobs, marked definitionCoversPipeline, do not.
+      expect(covers(job, ".gitlab-ci.yml"), `${job} and the pipeline file`).toBe(!definitionCoversPipeline(config, job));
+    }
+    for (const job of ["fast", "fast_docker", "names_guard"]) {
+      expect(definitionCoversPipeline(config, job), `${job} must keep the pipeline file in its checkout axis`).toBe(false);
+    }
+    for (const job of ["smoke", "acceptance", "repair_journeys", "supply_chain_image"]) {
+      expect(definitionCoversPipeline(config, job), `${job} reaches the pipeline only through its definition`).toBe(true);
     }
   });
 });
@@ -287,9 +296,10 @@ describe("the key", () => {
     expect(computeKeys(config, withNewSource).get("integration").source).not.toBe(before.get("integration").source);
   });
 
-  it("moves for every job when the default block of the pipeline file changes, and for none when only its sha does", () => {
+  it("moves for every job when the default block of the pipeline file changes, and on its sha alone only for the jobs whose suites read it", () => {
     // #1546: the definition axis is per job. A `default:` edit reaches every
-    // job; a new sha for an unchanged text reaches none.
+    // job; a new sha for an unchanged text reaches only the jobs that keep
+    // the file in their checkout axis (fast, fast_docker, names_guard).
     const readFile = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
     const before = computeKeys(config, tree, { ciText: pipeline, readFile });
     expect(pipeline.split("\n  interruptible: true\n").length, "the default block's interruptible line").toBe(2);
@@ -300,7 +310,11 @@ describe("the key", () => {
     ), { ciText: pipeline, readFile });
     for (const job of jobNames(config)) {
       expect(after.get(job).source, `${job} ignored a default: change`).not.toBe(before.get(job).source);
-      expect(resha.get(job).source, `${job} moved on the file's sha alone`).toBe(before.get(job).source);
+      if (definitionCoversPipeline(config, job)) {
+        expect(resha.get(job).source, `${job} moved on the file's sha alone`).toBe(before.get(job).source);
+      } else {
+        expect(resha.get(job).source, `${job} ignored the file's sha, which its suites read`).not.toBe(before.get(job).source);
+      }
     }
   });
 
