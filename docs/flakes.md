@@ -335,6 +335,7 @@ page's URL at failure, which this one has to infer.
 - 2026-10-09 · 73481e5e (#1345) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
 - 2026-10-09 · 3d6d7c20 (#1349) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
 - Third sighting: filed as #1365 (unattended-install case times out under host load).
+- Cause found: the test compared each installed asset to its source with `expect(Buffer).toEqual(Buffer)`, which Vitest walks byte by byte; for `scripts/repair.sh` (226 KB) that is about 1 s of CPU alone and about 2.4 s for the whole case, against the 5 s default budget, so any load that slows the CPU by 2x or more tipped it over (the install itself takes about 70 ms). Fixed by comparing with `Buffer.equals` (case now about 70 ms; 8 parallel runs went from about 2.9 s to under 0.4 s) in the commit on `fix/flake-1365-install-orchestrator`. The same `toEqual` on file buffers remains in `launcher-config-tree.test.ts` and `backup-restore-cli.test.ts`.
 
 ## v19-tour-chapter-add.test.mjs
 
