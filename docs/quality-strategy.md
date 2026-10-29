@@ -445,8 +445,11 @@ and both browser suites run at promotion even when its diff never touched
 A fix pushed after one red job used to rerun every job that had already
 passed. Now each job's reuse key is one SHA-256 over three axes: the checkout
 minus that job's deny-list (`scripts/ci/job-inputs.json` — what the job
-provably does not read, not what it is guessed to read), the CI definition
-(`.gitlab-ci.yml` and `scripts/ci/**`, so a pipeline change reruns
+provably does not read, not what it is guessed to read), the job's own CI
+definition (its block of `.gitlab-ci.yml` with every anchor, `extends` and
+global block it reaches, the `scripts/ci/**` files that text calls, and the
+reuse scripts; ADR-0028's 2026-10-29 amendment, #1546: a change to one
+job's YAML reruns that job and nothing else, where it used to rerun
 everything), and, for the six jobs that test the image (`smoke`,
 `smoke_local_only`, `acceptance`, `repair_journeys`,
 `launcher_install_compat`, `supply_chain_image`), the image's content ID.

@@ -223,8 +223,42 @@ push is untouched.
   cache proves unreliable.
 - **Reproducible builds** (`SOURCE_DATE_EPOCH`, rewritten timestamps) so
   content IDs match even on a cache miss. Optional refinement.
-- **Hash only the job's own YAML** for the definition axis. Rejected:
-  anchors make the block boundary meaningless.
+- **Hash only the job's own YAML** for the definition axis. Rejected in
+  2026-09: anchors make the block boundary meaningless. Adopted in the
+  amendment below, which follows the anchors.
+
+## Amendment, 2026-10-29: the definition axis is per job (#1546)
+
+Owner, 2026-10-28, after !1107 changed only the scanner download and two
+nightly jobs yet threw away every saved result, so the v0.3.2 promotion
+reran all browser jobs for an app image that had not changed: "run the
+full pipeline again when we've changed almost none of it?"
+
+The definition axis in section 1 ("`.gitlab-ci.yml` and `scripts/ci/**`,
+as today") becomes per job. A job's definition hash covers:
+
+- its own top-level block of `.gitlab-ci.yml`, plus every block it reaches
+  through a `*anchor` reference or an `extends:` entry, transitively, plus
+  the global `default`, `variables`, `workflow`, `stages` and `include`
+  blocks; each once, in file order, with comment and blank lines dropped,
+  so a comment-only edit moves nothing;
+- the `scripts/ci/**` files that text names, followed through the scripts'
+  own text (a script a job calls that calls another);
+- the reuse machinery itself, the `definition` list in `job-inputs.json`
+  (`job-inputs.*`, `reuse-*`), in every key as before.
+
+`.gitlab-ci.yml` and `scripts/ci/**` (`pipelineOwned`) leave every checkout
+axis, so a CI edit reaches a key only through this axis. The key version
+moved to `orbit-reuse-key/3`, so every key moved once.
+
+The 2026-09 objection was that anchors make a block boundary meaningless.
+Following the anchors answers it: a job that writes `*needs_gated_image`
+carries the block that defines `&needs_gated_image`. The direction of error
+is still the safe one: a reference the reader cannot resolve pulls in
+nothing it should not and a block it cannot bound is hashed whole, so the
+worst case is a rerun, never a stale reuse. The same holds for the script
+walk, which stops at `scripts/ci/` by design: scripts outside it are in
+the checkout axis, where a change already reruns the job.
 
 ## Supersession
 

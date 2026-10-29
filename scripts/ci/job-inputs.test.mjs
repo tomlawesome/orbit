@@ -21,6 +21,7 @@ import {
   selects,
   sourceKey,
   sourceVariable,
+  pipelineOwnedGlobs,
 } from "./job-inputs.mjs";
 
 /*
@@ -208,8 +209,13 @@ describe("the deny-lists", () => {
   // The definition axis is added to every key separately, so no deny-list can
   // reach it -- but a deny-list that tried would be a lie worth catching here.
   it("lets no job deny the pipeline definition or the reuse scripts", () => {
+    // The pipeline file and scripts/ci/** belong to the definition axis
+    // (#1546): the reuse machinery is on its always list, and the file itself
+    // reaches a key through the job's own definition text, not its sha.
+    expect(selects(pipelineOwnedGlobs(config), ".gitlab-ci.yml")).toBe(true);
+    expect(selects(pipelineOwnedGlobs(config), "scripts/ci/start-acceptance-stack.sh")).toBe(true);
     for (const job of jobNames(config)) {
-      for (const path of [".gitlab-ci.yml", "scripts/ci/job-inputs.json", "scripts/ci/reuse-lookup.mjs"]) {
+      for (const path of ["scripts/ci/job-inputs.json", "scripts/ci/reuse-lookup.mjs"]) {
         expect(
           definitionEntries(config, [entry(path, "x")]).length,
           `${path} must be in the definition axis`,
@@ -217,6 +223,7 @@ describe("the deny-lists", () => {
         if (onlyGlobs(config, job)) continue;
         expect(selects(denyGlobs(config, job), path), `${job} denies ${path}`).toBe(false);
       }
+      expect(covers(job, ".gitlab-ci.yml"), `${job} carries the pipeline file in its checkout axis`).toBe(false);
     }
   });
 });
@@ -280,13 +287,20 @@ describe("the key", () => {
     expect(computeKeys(config, withNewSource).get("integration").source).not.toBe(before.get("integration").source);
   });
 
-  it("moves for every job when the pipeline file moves", () => {
-    const before = computeKeys(config, tree);
-    const after = computeKeys(config, tree.map(
+  it("moves for every job when the default block of the pipeline file changes, and for none when only its sha does", () => {
+    // #1546: the definition axis is per job. A `default:` edit reaches every
+    // job; a new sha for an unchanged text reaches none.
+    const readFile = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
+    const before = computeKeys(config, tree, { ciText: pipeline, readFile });
+    expect(pipeline.split("\n  interruptible: true\n").length, "the default block's interruptible line").toBe(2);
+    const edited = pipeline.replace("\n  interruptible: true\n", "\n  interruptible: false\n");
+    const after = computeKeys(config, tree, { ciText: edited, readFile });
+    const resha = computeKeys(config, tree.map(
       (file) => (file.path === ".gitlab-ci.yml" ? entry(file.path, "zz") : file),
-    ));
+    ), { ciText: pipeline, readFile });
     for (const job of jobNames(config)) {
-      expect(after.get(job).source, `${job} ignored a pipeline change`).not.toBe(before.get(job).source);
+      expect(after.get(job).source, `${job} ignored a default: change`).not.toBe(before.get(job).source);
+      expect(resha.get(job).source, `${job} moved on the file's sha alone`).toBe(before.get(job).source);
     }
   });
 
@@ -324,10 +338,11 @@ describe("the key", () => {
    * in the project at once; these two lines are what makes that deliberate.
    */
   it("serialises the key exactly as both sides of the pipeline assume", () => {
+    // orbit-reuse-key/3 (#1546: the definition axis became per job).
     expect(sourceKey("smoke", "cc", "dd"))
-      .toBe("c4829c456f7cde4f7dc0c3bbd6dd095f9f5f8889997fbf47f103d58385c61ac1");
+      .toBe("7fb5c79e9b7f2702bcbca6ffb76e3108b6006ddef5c6fcde61f8bedd9909914f");
     expect(compositeKey("smoke", "ss", "aa"))
-      .toBe("f9b95a72b24becde135fae334c8cfc1ac57c62175fe9b22e39a5c0de42a0122c");
+      .toBe("4bc76345e4633ee9e4b45583fbdfaef5fc881df1f82cd70bf9ba41b3b1423554");
   });
 });
 
