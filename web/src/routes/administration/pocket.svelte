@@ -10,6 +10,7 @@
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
   import { BAND_VAR } from "$lib/data/bands.js";
+  import { prefersReducedMotion } from "$lib/motion.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
     JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, ingestShort, lapsesShort,
@@ -154,7 +155,7 @@
     const target = document.getElementById(id);
     if (!target) return;
     event.preventDefault();
-    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const still = prefersReducedMotion();
     target.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
     history.replaceState(history.state, "", `#${id}`);
     target.focus({ preventScroll: true });

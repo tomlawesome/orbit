@@ -41,6 +41,8 @@
  * runner swallows exactly that one value. Nothing else is caught.
  */
 
+import { prefersReducedMotion } from "$lib/motion.js";
+
 /** Thrown through a chapter's awaits to unwind it when the film moves on. */
 export const CANCEL = Symbol("orbit-tour-film-cancel");
 
@@ -63,7 +65,7 @@ export function frameDelta(ts, last) {
  *  already use, so an OS-level change mid-film is honoured without a remount.
  *  @returns {boolean} */
 export function stillMotion() {
-  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return prefersReducedMotion();
 }
 
 /**

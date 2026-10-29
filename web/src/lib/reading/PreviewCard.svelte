@@ -9,6 +9,7 @@
   import Pager from "./Pager.svelte";
   import Reader from "./Reader.svelte";
   import { inertPage } from "$lib/pocket/focus.js";
+  import { prefersReducedMotion } from "$lib/motion.js";
 
   /**
    * A DOCUMENT'S PREVIEW, FROM HOME'S ITEM DRAWER (#1319; owner-decisions
@@ -95,7 +96,7 @@
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let hideTimer;
 
-  const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduced = () => prefersReducedMotion();
   const wide = () => matchMedia(WIDE).matches;
 
   /* .by, not a bare expression: read at the top level, `shown` would be

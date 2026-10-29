@@ -45,6 +45,7 @@
  */
 
 import { seededRng, streamFactory } from "$lib/sky.js";
+import { REDUCED_MOTION } from "$lib/motion.js";
 import { THEME_PACKS } from "$lib/theme.js";
 
 /**
@@ -927,7 +928,7 @@ const ENGINES = {
  */
 export function mountSkies({ seed: pinnedSeed = null, pinClock = false, onCamera, onGalaxy }) {
   const doc = document.documentElement;
-  const motion = matchMedia("(prefers-reduced-motion: reduce)");
+  const motion = matchMedia(REDUCED_MOTION);
   /*
    * TWO PINS, NOT ONE, because a mockup and a gate want different things and
    * conflating them costs one of them its point:

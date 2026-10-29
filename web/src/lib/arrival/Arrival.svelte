@@ -20,6 +20,7 @@
      here by SignIn's own door. arrival.css keeps only the newcomer's landing
      and its create drawer (#1263). */
   import "$lib/ringcard.css";
+  import { prefersReducedMotion } from "$lib/motion.js";
   import "./arrival.css";
 
   /**
@@ -129,8 +130,7 @@
   const launchOwed = browser && consumeLaunch();
 
   const body = () => document.body;
-  const reduced = () =>
-    typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduced = () => prefersReducedMotion();
 
   /** Set by this component's own teardown (#1151 W1-R6), the same pattern
    *  SignIn.svelte already carries for its own async checks: `decide()`'s
