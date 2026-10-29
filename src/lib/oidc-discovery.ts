@@ -237,7 +237,16 @@ export type OidcIssuerPromptOutcome =
   | { status: "ok" }
   | { status: "rejected"; reason: OidcIssuerPromptReason; message: string; publishedIssuer?: string };
 
-const withoutTrailingSlash = (value: string): string => value.replace(/\/+$/, "");
+/** Longest published issuer the prompt will repeat back to the operator. */
+const MAX_NAMED_ISSUER_LENGTH = 2048;
+
+/**
+ * True when one value has no trailing "/" and the other is that value plus
+ * one "/" (Authentik ends its issuer in "/", Keycloak does not). Only then can
+ * the launcher show the published value by toggling the answer's slash.
+ */
+const differsByOneTrailingSlash = (a: string, b: string): boolean =>
+  (!b.endsWith("/") && a === `${b}/`) || (!a.endsWith("/") && b === `${a}/`);
 
 /**
  * #1454: the issuer answer, checked at the prompt against the issuer the
@@ -281,12 +290,23 @@ export async function checkOidcIssuerAgainstDiscovery(
   if (typeof published !== "string" || published === "") return unreachable;
 
   if (published === issuerAnswer) return { status: "ok" };
-  if (withoutTrailingSlash(published) === withoutTrailingSlash(issuerAnswer)) {
+  // The published value comes from the provider, not the operator: it is only
+  // repeated back when it is itself a well-shaped issuer of bounded length, so
+  // a hostile provider cannot put control sequences on the operator's screen.
+  const nameable = published.length <= MAX_NAMED_ISSUER_LENGTH && isValidOidcIssuer(published);
+  if (nameable && differsByOneTrailingSlash(published, issuerAnswer)) {
     return {
       status: "rejected",
       reason: "trailing-slash-mismatch",
       publishedIssuer: published,
       message: `The provider publishes its issuer as ${published} (the trailing slash differs); enter it exactly as published.`,
+    };
+  }
+  if (!nameable) {
+    return {
+      status: "rejected",
+      reason: "issuer-mismatch",
+      message: "The provider's discovery document names a different issuer, which is not a valid https issuer URL; check the provider's OIDC configuration.",
     };
   }
   return {
