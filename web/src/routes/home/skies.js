@@ -44,7 +44,7 @@
  *    (fixed layers, <html> classes), and home is a route the reader leaves.
  */
 
-import { seededRng, streamFactory } from "$lib/sky.js";
+import { seededRng, streamFactory, svgEl } from "$lib/sky.js";
 import { REDUCED_MOTION } from "$lib/motion.js";
 import { THEME_PACKS } from "$lib/theme.js";
 
@@ -57,13 +57,6 @@ import { THEME_PACKS } from "$lib/theme.js";
  * @typedef {[number, number]} Stop
  */
 
-const NS = "http://www.w3.org/2000/svg";
-/** @type {(name: string, attrs: Record<string, string | number>) => Element} */
-const svgel = (name, attrs) => {
-  const el = document.createElementNS(NS, name);
-  for (const key in attrs) el.setAttribute(key, /** @type {string} */ (attrs[key]));
-  return el;
-};
 /** @type {(v: number) => number} */
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 /** @type {(t: number) => number} */
@@ -209,7 +202,7 @@ function mountPlane({ seed, still, onCamera }) {
   /** @param {number} i */
   function build(i) {
     const r = streamFor(0, i), x0 = i * CW;
-    const mk = () => svgel("g", { transform: `translate(${x0},0)` });
+    const mk = () => svgEl("g", { transform: `translate(${x0},0)` });
     const gg = mk(), gs = mk(), gd = mk();
 
     /* 2. THE DUST GLOW, in three sizes. The first attempt used a handful of very
@@ -223,7 +216,7 @@ function mountPlane({ seed, still, onCamera }) {
     const lobe = (n, opts) => {
       for (let k = 0; k < n; k++) {
         const u = r() * CW, X = x0 + u, cy = centreY(X) + (r() * 2 - 1) * opts.off;
-        gg.appendChild(svgel("ellipse", {
+        gg.appendChild(svgEl("ellipse", {
           cx: u.toFixed(1), cy: cy.toFixed(1),
           rx: (opts.rx0 + r() * opts.rxd).toFixed(0),
           ry: (opts.ry0 + r() * opts.ryd).toFixed(0),
@@ -254,7 +247,7 @@ function mountPlane({ seed, still, onCamera }) {
       const u = r() * CW, X = x0 + u;
       const v = 175 * (r() + r() + r() - 1.5) / 1.5;
       const warm = r() < 0.40;
-      const c = svgel("circle", {
+      const c = svgEl("circle", {
         cx: u.toFixed(1), cy: (centreY(X) + v).toFixed(1),
         r: (0.28 + r() * 0.20).toFixed(2),
         opacity: (0.09 + Math.pow(r(), 1.4) * 0.21).toFixed(3),
@@ -270,7 +263,7 @@ function mountPlane({ seed, still, onCamera }) {
       const v = core ? 210 * (r() + r() + r() - 1.5) / 1.5 : 470 * (r() + r() - 1);
       const out = Math.min(1, Math.abs(v) / 470);
       const warm = core && r() < 0.34;
-      const c = svgel("circle", {
+      const c = svgEl("circle", {
         cx: u.toFixed(1), cy: (centreY(X) + v).toFixed(1),
         /* a floor of .38 is not decoration: below about a third of a pixel the
            antialiaser hands back a grey smudge and the grain is lost, which is
@@ -286,7 +279,7 @@ function mountPlane({ seed, still, onCamera }) {
        has grain, and grain is what says "stars" at a glance. */
     for (let k = 0; k < 14; k++) {
       const u = r() * CW, X = x0 + u;
-      gs.appendChild(svgel("circle", {
+      gs.appendChild(svgEl("circle", {
         cx: u.toFixed(1),
         cy: (centreY(X) + 150 * (r() + r() + r() - 1.5) / 1.5).toFixed(1),
         r: (0.85 + r() * 0.75).toFixed(2), opacity: (0.5 + r() * 0.36).toFixed(2),
@@ -306,7 +299,7 @@ function mountPlane({ seed, still, onCamera }) {
       for (let b = 0; b < beads; b++) {
         const u = u0 + b * (78 + r() * 96), X = x0 + u;
         const cy = centreY(X) + v0 + (r() * 2 - 1) * 15;
-        gd.appendChild(svgel("ellipse", {
+        gd.appendChild(svgEl("ellipse", {
           cx: u.toFixed(1), cy: cy.toFixed(1),
           rx: (78 + r() * 150).toFixed(0), ry: (8 + r() * 15).toFixed(0),
           transform: `rotate(${(degAt(X) + tilt).toFixed(1)} ${u.toFixed(1)} ${cy.toFixed(1)})`,
@@ -658,9 +651,9 @@ function mountTerminator({ seed, still, onCamera, onGalaxy }) {
   function fill(L, offset) {
     streamChunks(L.live, offset, L.w, BEHIND, AHEAD, (i) => {
       const r = streamFor(L.key, i);
-      const g = svgel("g", { transform: `translate(${i * L.w},0)` });
+      const g = svgEl("g", { transform: `translate(${i * L.w},0)` });
       for (let k = 0; k < L.n; k++) {
-        g.appendChild(svgel("circle", {
+        g.appendChild(svgEl("circle", {
           cx: (r() * L.w).toFixed(1), cy: (r() * 1000).toFixed(1),
           r: (L.r0 + r() * (L.r1 - L.r0)).toFixed(2),
           opacity: (L.o0 + r() * (L.o1 - L.o0)).toFixed(2),
@@ -787,10 +780,10 @@ function mountCloudSea({ seed, still }) {
        on the way through it a shorter deck's bottom edge would swing up into the
        window as a ruled line. Below the first screen either way, so nothing at
        rest moves by a pixel. */
-    g.appendChild(svgel("rect", { x: -1, y: L.shoulder + 6, width: L.w + 2, height: 2200 - L.shoulder }));
+    g.appendChild(svgEl("rect", { x: -1, y: L.shoulder + 6, width: L.w + 2, height: 2200 - L.shoulder }));
     for (let k = 0; k < L.n; k++) {
       const slot = L.w / L.n;
-      g.appendChild(svgel("ellipse", {
+      g.appendChild(svgEl("ellipse", {
         cx: ((k + 0.5) * slot + (r() - 0.5) * slot * 0.95).toFixed(1),
         cy: (L.shoulder + (r() * 2 - 1) * L.lift).toFixed(1),
         rx: (L.rx[0] + r() * (L.rx[1] - L.rx[0])).toFixed(1),
@@ -801,7 +794,7 @@ function mountCloudSea({ seed, still }) {
   /** @param {Stratum} L @param {number} off */
   function fillStratum(L, off) {
     streamChunks(L.live, off, L.w, BEHIND, AHEAD, (i) => {
-      const g = svgel("g", { transform: `translate(${i * L.w},0)` });
+      const g = svgEl("g", { transform: `translate(${i * L.w},0)` });
       buildStratum(L, g, streamFor(L.key, i));
       return g;
     }, (g) => /** @type {HTMLElement} */ (L.node).appendChild(g), (g) => g.remove());
@@ -846,13 +839,13 @@ function mountCloudSea({ seed, still }) {
     const body = "M " + pt([x - half, FOOT]) + " L " + left.map(pt).join(" L ") +
                  " L " + pt([sx, apex]) + " L " + right.map(pt).join(" L ") +
                  " L " + pt([x + half, FOOT]) + " Z";
-    g.appendChild(svgel("path", { d: body, fill: "url(#cs-rock)",
+    g.appendChild(svgEl("path", { d: body, fill: "url(#cs-rock)",
                                   opacity: (0.42 + r() * 0.16).toFixed(2),
                                   filter: "url(#cs-peak)" }));
     /* the rim: the sunward flank only. The one warm edge up here that is not
        cloud, and the only reason a distant peak reads as rock rather than as a
        hole in the sky. It fades into the same air the rock does. */
-    g.appendChild(svgel("path", {
+    g.appendChild(svgEl("path", {
       d: "M " + pt([sx, apex]) + " L " + right.map(pt).join(" L "),
       fill: "none", stroke: "url(#cs-rim)", "stroke-width": 1.8,
       "stroke-linejoin": "round", "stroke-linecap": "round",
@@ -865,7 +858,7 @@ function mountCloudSea({ seed, still }) {
     // offset+1600+ahead form streamChunks takes (#1151 W1-Q13): 2000 is
     // 1600+400, the same 400 as the behind margin.
     streamChunks(P.live, off, P.w, 400, 400, (i) => {
-      const g = svgel("g", { transform: `translate(${i * P.w},0)` });
+      const g = svgEl("g", { transform: `translate(${i * P.w},0)` });
       buildPeak(g, streamFor(P.key, i));
       return g;
     }, (g) => /** @type {HTMLElement} */ (peakHost).appendChild(g), (g) => g.remove());

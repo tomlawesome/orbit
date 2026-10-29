@@ -29,20 +29,8 @@
  *   - the chart-alpha damper belongs to the administration backdrop, not
  *     this one — nothing here dims the chart ink by day/night.
  */
-import { streamFactory } from "$lib/sky.js";
+import { runBackdropClock, streamFactory, svgEl } from "$lib/sky.js";
 
-const NS = "http://www.w3.org/2000/svg";
-
-/**
- * @param {string} name
- * @param {Record<string, string>} [attrs]
- * @returns {SVGElement}
- */
-function svgEl(name, attrs) {
-  const el = document.createElementNS(NS, name);
-  if (attrs) for (const key in attrs) el.setAttribute(key, attrs[key]);
-  return el;
-}
 
 /* ────────────────────────────────────────────────────────────────────────
    THE CHART PEN — ~1px chart-ink strokes, no fills, no gloss: the same pen
@@ -778,7 +766,7 @@ export function mountSatellites(root, seed) {
   }
 
   /* --- build / rebuild ------------------------------------------------------ */
-  function build() {
+  function build(/** @type {number} */ clock) {
     const W = window.innerWidth, H = window.innerHeight;
     state.W = W; state.H = H;
     skySvg.setAttribute("viewBox", `0 0 ${W} ${H}`);
@@ -823,52 +811,22 @@ export function mountSatellites(root, seed) {
     place(clock);
   }
 
-  /* --- the clock: honours prefers-reduced-motion the way skies.js does ----
-     `still()` is read every frame rather than cached, so an OS-level change
-     mid-session freezes or resumes the drift without a remount. */
-  const motion = matchMedia("(prefers-reduced-motion: reduce)");
-  const still = () => motion.matches;
-  let clock = 0, lastTs = /** @type {?number} */ (null), lastDrawn = -1;
-  let raf = /** @type {?number} */ (null);
-  function tick(/** @type {number} */ ts) {
-    if (lastTs === null) lastTs = ts;
-    const dt = Math.min(0.2, (ts - lastTs) / 1000);
-    lastTs = ts;
-    if (!still()) clock += dt;
-    if (clock !== lastDrawn) { ensure(clock); place(clock); lastDrawn = clock; }
-    raf = requestAnimationFrame(tick);
-  }
-
-  /* Built once the faces are in, as the sheet is: the card keep-out and the
-     dish the beams aim at are measured from the card, and a card set in a
-     fallback face is 30px the wrong height — the craft would be placed round
-     a card that is not the one on screen. A face only starts loading once
-     something laid out has asked for it, so the layout is forced first;
-     `fonts.ready` then settles once those loads land, and at once when
-     nothing is loading. Bundled faces make this a tick, not a wait; a
-     teardown before then leaves nothing to build. Test DOMs have no
-     `document.fonts` and build synchronously. */
-  let torn = false;
-  const boot = () => {
-    if (torn) return;
-    build();
-    if (!still()) raf = requestAnimationFrame(tick);
-  };
-  if (document.fonts) {
-    void document.documentElement.getBoundingClientRect();
-    document.fonts.ready.then(boot);
-  } else boot();
+  /* The clock and the font-gated boot are $lib/sky.js's, shared with
+     constellations.js and station.js (#1356). The wait for the faces matters
+     most here: the card keep-out and the dish the beams aim at are measured
+     from the card, and a card set in a fallback face is 30px the wrong
+     height. */
+  const sky = runBackdropClock({ build, draw: (clock) => { ensure(clock); place(clock); } });
 
   let resizeTimer = /** @type {?ReturnType<typeof setTimeout>} */ (null);
   const onResize = () => {
     if (resizeTimer !== null) clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(build, 140);
+    resizeTimer = setTimeout(() => build(sky.now()), 140);
   };
   addEventListener("resize", onResize);
 
   return () => {
-    torn = true;
-    if (raf !== null) cancelAnimationFrame(raf);
+    sky.stop();
     if (resizeTimer !== null) clearTimeout(resizeTimer);
     removeEventListener("resize", onResize);
     root.textContent = "";

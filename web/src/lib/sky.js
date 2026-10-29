@@ -11,6 +11,8 @@
  * Park–Miller, seeded, so a given seed always yields the same sky and the
  * fidelity gate can hold it still.
  */
+import { REDUCED_MOTION } from "./motion.js";
+
 /**
  * @param {number} seed
  * @returns {() => number} the next value in [0, 1)
@@ -86,6 +88,74 @@ export const TILED_LAYERS = [
 export const TILED_SEED = 17170812;
 
 const NS = "http://www.w3.org/2000/svg";
+
+/**
+ * One SVG element with its attributes set — the backdrop engines' and
+ * home's skies' shared builder (#1356, web-20; it was four private copies).
+ * @param {string} name
+ * @param {Record<string, string | number>} [attrs]
+ * @returns {SVGElement}
+ */
+export function svgEl(name, attrs) {
+  const el = /** @type {SVGElement} */ (document.createElementNS(NS, name));
+  if (attrs) for (const key in attrs) el.setAttribute(key, String(attrs[key]));
+  return el;
+}
+
+/**
+ * The backdrop engines' clock (#1356, web-20; constellations, satellites and
+ * station each carried a copy).
+ *
+ * Honours prefers-reduced-motion: `still()` is read every frame rather than
+ * cached, so an OS-level change mid-session freezes or resumes the drift
+ * without a remount. A frame is at most 0.2 s, so a tab coming back from the
+ * background does not jump the sky.
+ *
+ * Built once the faces are in: a face only starts loading once something laid
+ * out has asked for it, so the layout is forced first; `fonts.ready` then
+ * settles once those loads land, and at once when nothing is loading. A
+ * teardown before then leaves nothing to build. Test DOMs have no
+ * `document.fonts` and build synchronously.
+ *
+ * @param {object} hooks
+ * @param {(clock: number) => void} hooks.build  stands the sky up at `clock` seconds (0 at boot)
+ * @param {(clock: number) => void} hooks.draw   moves it to `clock` seconds, once per changed frame
+ * @returns {{ now: () => number, stop: () => void }} the clock's reading, and the
+ *   teardown of the clock alone (the caller clears its own nodes and listeners)
+ */
+export function runBackdropClock({ build, draw }) {
+  const motion = matchMedia(REDUCED_MOTION);
+  const still = () => motion.matches;
+  let clock = 0, lastTs = /** @type {?number} */ (null), lastDrawn = -1;
+  let raf = /** @type {?number} */ (null);
+  function tick(/** @type {number} */ ts) {
+    if (lastTs === null) lastTs = ts;
+    const dt = Math.min(0.2, (ts - lastTs) / 1000);
+    lastTs = ts;
+    if (!still()) clock += dt;
+    if (clock !== lastDrawn) { draw(clock); lastDrawn = clock; }
+    raf = requestAnimationFrame(tick);
+  }
+
+  let torn = false;
+  const boot = () => {
+    if (torn) return;
+    build(clock);
+    if (!still()) raf = requestAnimationFrame(tick);
+  };
+  if (document.fonts) {
+    void document.documentElement.getBoundingClientRect();
+    document.fonts.ready.then(boot);
+  } else boot();
+
+  return {
+    now: () => clock,
+    stop() {
+      torn = true;
+      if (raf !== null) cancelAnimationFrame(raf);
+    },
+  };
+}
 
 /** Fills existing far/near tile groups. One rng, far then near — the call
  *  order is part of the contract, because it is what makes seeds stable.
