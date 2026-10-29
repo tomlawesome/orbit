@@ -512,3 +512,7 @@ page's URL at failure, which this one has to infer.
 ## v19-create.spec.ts:1256 "the desk's create form: dropping another file while Adding… shows still attaches the file that was picked" — desktop-firefox
 
 - 2026-10-25 · 9dba0fd1 (dev, !1092 merged; hand-started for browser evidence) · pipeline 2981 / smoke_firefox (job 39404) · the held item write never seen within 20 s after Add was clicked (line 1317); passed on the in-job retry. First sighting.
+
+## `fast_docker` job: the runner's container lost its network bridge while fetching download.docker.com
+
+- 2026-10-28 · deb80eac (!1107) · pipeline 3110 / fast_docker (job 40867), 19:13 UTC · `apt`'s fetch of download.docker.com got no answer for 5 minutes and the runner logged the job container as disconnected from its network bridge; every later job in the pipeline was skipped. Retried as job 40990 on the same commit: passed in the usual time. Noted on #1546 at the time. First sighting.
