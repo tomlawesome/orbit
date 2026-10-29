@@ -1805,6 +1805,27 @@ gitleaks:
     expire_in: 14 days
     when: always
 
+# The flake log acts (#1553, agent-infra#30): a flake at three sightings with no
+# issue, or still in the merge gate, fails the pipeline. The quarantine list is
+# read off the @quarantine tags, not kept by hand (scripts/ci/quarantine-list.sh).
+# Like `gitleaks` it needs nothing, reads no lane, and takes no reuse gate:
+# seconds of sh and awk over one Markdown file.
+flake_check:
+  stage: classify
+  tags: [light]
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  timeout: 5m
+  rules:
+    - *not_on_main_push
+    - *not_scheduled
+    - when: on_success
+  needs: []
+  script:
+    - sh scripts/ci/quarantine-list.sh > quarantine-list.txt
+    - sh scripts/ci/flake-check.sh --quarantined quarantine-list.txt docs/flakes.md
+
 # --- acceptance --------------------------------------------------------------
 
 # The only automatic check the v19 presentation layer has (#620). A change that
