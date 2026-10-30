@@ -32,6 +32,8 @@
 #                          this refuses again so a later change to them cannot
 #                          reopen a release button on a branch a Developer can
 #                          push to.
+#   CI_COMMIT_SHA          GitLab's predefined commit of this pipeline. With
+#                          no PREVIEW_DIGEST it must be main's head (#1482).
 #   PREVIEW_DIGEST         Optional (#1482). The accepted preview digest,
 #                          "sha256:<64 hex>", set as a job variable by whoever
 #                          runs the job. Unset or empty, the digest is the one
@@ -159,6 +161,11 @@ sha_resolved="$(resolve_digest "$sha_ref")"
 if [[ -n "${PREVIEW_DIGEST:-}" ]]; then
   printf 'promote-stable: digest from PREVIEW_DIGEST: %s\n' "$PREVIEW_DIGEST"
 else
+  # The button is pressed on one pipeline's page, but main's head is what is
+  # promoted; with nothing typed, refuse a press on an older main pipeline so
+  # the image promoted is the one whose pipeline the operator was looking at.
+  [[ "${CI_COMMIT_SHA:-}" == "$main_head" ]] ||
+    fail "this pipeline is for ${CI_COMMIT_SHA:-<unknown commit>}, but main is now ${main_head}; run promote_stable in main's newest pipeline, or set PREVIEW_DIGEST"
   [[ -n "$sha_resolved" ]] ||
     fail "${sha_ref} resolves to nothing; main's commit has no published image to promote"
   PREVIEW_DIGEST="$sha_resolved"

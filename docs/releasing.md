@@ -300,7 +300,8 @@ The job (`scripts/ci/promote-stable.sh`) then does the following, in order:
 2. Confirms `main` and `preview` point at the exact same commit.
 3. Resolves GHCR's `:preview` tag and `:sha-<main HEAD>` tag. With no
    `PREVIEW_DIGEST`, the `:sha-<main HEAD>` digest is the one promoted, and
-   the job refuses if that tag does not exist. It then confirms both tags
+   the job refuses if that tag does not exist, or if the pipeline you pressed
+   it in is not for main's current commit. It then confirms both tags
    equal the digest. It refuses if `preview` has moved on, or the digest
    never reached main's own commit.
 4. Checks that everything the image says about its own version agrees. It
