@@ -242,10 +242,15 @@ Use a focused merge request for image updates:
 3. CI goes red on that merge request, in the `supply_chain_source` job at the
    line `node scripts/sidecar-pins.mjs check --offline`. That is the drift
    check doing its job, not a broken build.
-4. Run `node scripts/sidecar-pins.mjs sync`. It takes the pin now in the file
-   as the truth, looks up the tag's index digest from the registry again, and
-   writes the reference, the index digest and today's date into the policy.
-   Then it rewrites any other file that pins the same image. Review the diff
+4. Move the pin first, then run `node scripts/sidecar-pins.mjs sync`. It
+   takes the pin now in the file as the truth, looks up the tag's index digest
+   from the registry again, and writes the reference, the index digest and
+   today's date into the policy, but only when the pinned digest is the
+   linux/amd64 manifest inside the tag's current index. If it is not, `sync`
+   skips that pin, prints a line saying the pinned manifest is not in the
+   current index, and leaves its policy entry unchanged (#1551); move the pin
+   to the current manifest and run it again. Then it rewrites any other file
+   that pins the same image. Review the diff
    and push it to the Renovate branch. Do not update an untracked reference
    or add a temporary mutable fallback.
 5. Run `node scripts/supply-chain-policy.mjs validate`, the focused policy
@@ -281,7 +286,10 @@ was ported from GitHub Actions (#820) once GitHub issues on the mirror were
 switched off (#801); the report and the issue title are unchanged, only where
 the issue lives.
 
-A moved tag is fixed by re-pinning, and `sidecar-pins.mjs sync` does it. Stale
+A moved tag is fixed by re-pinning: move the pin in the file to the new
+linux/amd64 manifest, then `sidecar-pins.mjs sync` records it. A pin that names
+the multi-platform index rather than the linux/amd64 manifest is reported by
+`check` as a problem. Stale
 packages inside a current pin have no such remedy: there is nothing newer to
 pin to. Either upstream rebuilds the image, or the finding becomes a named
 entry in the policy's `exceptions[]` with an owner, a reason, a tracking
