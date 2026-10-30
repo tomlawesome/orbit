@@ -87,10 +87,12 @@ async function main(): Promise<void> {
       + `${before.stagingObjectsRemaining} scanner-recovery object(s) to move from ${keys.currentKeyId} to ${keys.nextKeyId}.\n`
       + skippedLine(before),
     );
-    const after = await runKekRotationToCompletion(keys);
+    await runKekRotationToCompletion(keys);
+    // The ids are loaded once, here, for the report, before the completion is
+    // recorded; the progress holds counts only.
+    const skippedIds = await heldObjectsOnOlderKey(keys);
     await recordRotationCompleted(keys);
-    // The ids are loaded once, here, for the report; the progress holds counts only.
-    process.stdout.write(`${completionReport(before, after, await heldObjectsOnOlderKey(keys)).join("\n")}\n`);
+    process.stdout.write(`${completionReport(skippedIds).join("\n")}\n`);
   } finally {
     nextKek.fill(0);
     await closeDatabase();
