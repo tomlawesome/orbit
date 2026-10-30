@@ -164,10 +164,11 @@ describe("a body that is not the client's shape is refused with 400 request_malf
       // Catches: a lenient reader; a refusal that leaves scratch behind or the body unread (the next request on the connection would hang).
       const fixture = await createIntegrationFixture(`arch1566-malformed-${route}`);
       const owner = await fixture.session("owner");
-      const cookie = route === "import" ? await proofCookie(owner, "archive_import") : undefined;
       const before = await itemCount(fixture.household.id);
 
       for (const [label, contentType, bytes] of bodies(fixture, route === "import")) {
+        // A fresh proof per body: a body that gets past the fields spends its proof (ADR-0023 section 5).
+        const cookie = route === "import" ? await proofCookie(owner, "archive_import") : undefined;
         const { body, stats } = trackedBody(bytes, { chunkSize: 16 * 1024 });
         const response = await postUpload(handler, { path, session: owner, body, contentType, cookie });
         expect(response.status, label).toBe(400);
