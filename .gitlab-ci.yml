@@ -418,10 +418,13 @@ variables:
 # itself skipped instead of failing or vanishing.
 .reach_helpers: &reach_helpers |
   # `dev` is deliberately not here (#1078, owner ruling 2026-09-21): a push to
-  # `dev` now tests what the push changed, same as a merge request, and the
+  # `dev` runs the classifier-selected jobs, same as a merge request, and the
   # dev -> preview merge request is where the full gate -- the catch-all
-  # sanity check against accidental drift -- runs instead. `preview`, `main`
-  # and `hotfix/*` are unaffected: pushing there still runs everything.
+  # sanity check against accidental drift -- runs instead. No browser job runs
+  # on `dev` at all, push or merge request, apart from the nightly run and a
+  # merge request labelled `ci: acceptance` (#1412, #1514,
+  # `.no_browsers_on_dev`). `preview`, `main` and `hotfix/*` are unaffected:
+  # pushing there still runs everything.
   orbit_on_delivery_branch() {
     case "${CI_COMMIT_BRANCH:-}" in
       preview | main | hotfix/*) return 0 ;;
@@ -1093,8 +1096,9 @@ classify:
       # `hotfix/*`, and the merge request into `preview` or `main`. Without
       # this a promotion whose diff never touched `web/` skipped `fidelity`
       # and both browser suites -- the full gate in every job but those. Not
-      # `dev`: a push there tests what it changed (#1078). Keep the two lists
-      # in step with `orbit_on_delivery_branch` and `orbit_full_gate`.
+      # `dev`: no browser job runs there (#1412, `.no_browsers_on_dev`). Keep
+      # the two lists in step with `orbit_on_delivery_branch` and
+      # `orbit_full_gate`.
       browser_gate=false
       case "${CI_COMMIT_BRANCH:-}" in
         preview | main | hotfix/*) browser_gate=true ;;
@@ -2508,8 +2512,12 @@ smoke:
     - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
+    # the job's exit code list for this rule, so a failed suite in a manually
+    # started job showed as a warning. Left unset, the job-level list decides. Cost: GitLab treats a `when: manual` rule without `allow_failure`
+    # as blocking, so a pipeline that reaches it (a branch with no merge request)
+    # shows "blocked" until the job is played or the pipeline is left alone.
     - when: manual
-      allow_failure: true
   script:
     - *reach_helpers
     - orbit_lane_admits smoke || exit 0
@@ -2621,8 +2629,12 @@ smoke_firefox:
     - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
+    # the job's exit code list for this rule, so a failed suite in a manually
+    # started job showed as a warning. Left unset, the job-level list decides. Cost: GitLab treats a `when: manual` rule without `allow_failure`
+    # as blocking, so a pipeline that reaches it (a branch with no merge request)
+    # shows "blocked" until the job is played or the pipeline is left alone.
     - when: manual
-      allow_failure: true
   script:
     - *reach_helpers
     - orbit_lane_admits smoke_firefox || exit 0
@@ -2762,8 +2774,12 @@ smoke_webkit:
     - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
+    # the job's exit code list for this rule, so a failed suite in a manually
+    # started job showed as a warning. Left unset, the job-level list decides. Cost: GitLab treats a `when: manual` rule without `allow_failure`
+    # as blocking, so a pipeline that reaches it (a branch with no merge request)
+    # shows "blocked" until the job is played or the pipeline is left alone.
     - when: manual
-      allow_failure: true
   script:
     - *reach_helpers
     - orbit_lane_admits smoke_webkit || exit 0
@@ -2873,8 +2889,12 @@ smoke_webkit_mobile:
     - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
+    # the job's exit code list for this rule, so a failed suite in a manually
+    # started job showed as a warning. Left unset, the job-level list decides. Cost: GitLab treats a `when: manual` rule without `allow_failure`
+    # as blocking, so a pipeline that reaches it (a branch with no merge request)
+    # shows "blocked" until the job is played or the pipeline is left alone.
     - when: manual
-      allow_failure: true
   script:
     - *reach_helpers
     - orbit_lane_admits smoke_webkit_mobile || exit 0
