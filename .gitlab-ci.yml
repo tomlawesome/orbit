@@ -3954,11 +3954,12 @@ publish_channel:
 
 # Promotes a tested `preview` digest to a stable release (#821), the same
 # thing .github/workflows/promote-container.yml did before GitLab was the
-# source of truth: an operator supplies the accepted PREVIEW_DIGEST (not a
-# typed version -- the version comes from the image itself, verified the same
-# way that workflow always verified it) and this job does the rest. Manual
-# only, and only reachable from a pipeline on `main` -- a push, or one you
-# start by hand on `main` (`web`/`api`) with a `PREVIEW_DIGEST` variable.
+# source of truth: the accepted digest is the image `main`'s commit was
+# published as (#1482), or an operator's optional PREVIEW_DIGEST job variable
+# -- never a typed version; the version comes from the image itself, verified
+# the same way that workflow always verified it -- and this job does the rest.
+# Manual only, and only reachable from a pipeline on `main` -- a push, or one
+# you start by hand on `main` (`web`/`api`).
 # There is no automatic trigger, because accepting a release is a human
 # decision this pipeline cannot infer from a push.
 #
