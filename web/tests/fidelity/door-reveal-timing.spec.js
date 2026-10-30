@@ -12,10 +12,11 @@ import { expect, test } from "@playwright/test";
  *     (`body.loading`): the door is never lit before the pieces are in, and
  *     never without that lap;
  *   · `lit` starts the button and the sunrise together. The button is ready
- *     2.45s after (its 1.25s delay and 1.2s fade: door.css `.gate`); the
- *     rays are up 2.9s after (opacity .3s + 2.2s, their rise .3s + 2.6s), and
- *     the Earth's day side fades in over 2.2s after .3s, from `lit` or from
- *     its own picture arriving (`.up.in`), whichever is later.
+ *     after its delay and fade (GATE, door.css `.gate`); the sunrise is up
+ *     when the last of the rays' opacity and rise (RAYS_OPACITY, RAYS_RISE)
+ *     and the Earth's day side (DAY_SIDE) has ended, the day side starting
+ *     from `lit` or from its own picture arriving (`.up.in`), whichever is
+ *     later. Their sums are BUTTON_AFTER_LIT and SUNRISE_AFTER_LIT.
  *
  * No clock is read (#1447). The lap is counted from the runner's own
  * `animationiteration` events, and the offsets are read from the page's
@@ -42,8 +43,11 @@ const GATE = { delay: 1250, duration: 1200 };
 const RAYS_OPACITY = { delay: 300, duration: 2200 };
 const RAYS_RISE = { delay: 300, duration: 2600 };
 const DAY_SIDE = { delay: 300, duration: 2200 };
-const BUTTON_AFTER_LIT = 2450;
-const SUNRISE_AFTER_LIT = 2900;
+/** @param {{ delay: number, duration: number }} t */
+const ends = (t) => t.delay + t.duration;
+/* when each is ready after `lit`: the sums of the figures above, not figures of their own (T-Q20) */
+const BUTTON_AFTER_LIT = ends(GATE);
+const SUNRISE_AFTER_LIT = Math.max(ends(RAYS_OPACITY), ends(RAYS_RISE), ends(DAY_SIDE));
 
 const SIZES = [
   { name: "desktop", viewport: { width: 1600, height: 1000 } },
@@ -147,7 +151,9 @@ for (const size of SIZES) {
     /* (start - litAt first: the starts are equal above, so it is exactly 0, not a float's rounding of it) */
     /** @param {any} r */
     const end = (r) => r.start - litAt + r.delay + r.duration;
-    expect(end(gate), "the button is ready 2.45s after lit").toBe(BUTTON_AFTER_LIT);
-    expect(Math.max(end(raysOpacity), end(raysRise)), "the rays are up 2.9s after lit").toBe(SUNRISE_AFTER_LIT);
+    expect(end(gate), "the button is ready when its delay and fade are done, counted from lit").toBe(BUTTON_AFTER_LIT);
+    /* the day side counts when it began with `lit`; one that waited for its picture ends later by that wait */
+    const daysFromLit = days.filter((/** @type {any} */ d) => d.start === litAt);
+    expect(Math.max(end(raysOpacity), end(raysRise), ...daysFromLit.map(end)), "the sunrise is up when the last of the rays and the day side has ended, counted from lit").toBe(SUNRISE_AFTER_LIT);
   });
 }
