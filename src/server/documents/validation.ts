@@ -116,7 +116,12 @@ async function classifyImageStructure(bytes: Buffer, mediaType: "image/jpeg" | "
 const PDF_DELIMITERS = new Set([..."()<>[]{}/%"]);
 const PDF_WHITESPACE = new Set([..."\0\t\n\f\r "]);
 const PDF_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)$/u;
-const MAX_PDF_XREF_SECTIONS = 32;
+/* #1397: each incremental save (a form filled in, a signature added) appends
+   one cross-reference section, and 32 refused real household PDFs that pdf.js
+   opens. MAX_PDF_XREF_ENTRIES already bounds the work of checking a file, so
+   this only stops a pathological chain: 256 is eight times the old limit and
+   well past what repeated filling and signing produces. */
+const MAX_PDF_XREF_SECTIONS = 256;
 const MAX_PDF_NESTING = 64;
 
 type PdfValue = number | string | PdfValue[] | Map<string, PdfValue> | { ref: number } | null;
