@@ -138,36 +138,28 @@ describe("household workspace", () => {
         item: { id: "boiler", sectionId: "home", title: "Boiler", currency: "GBP", dueDate: "2026-11-02", recurrenceMonths: 12, ...item },
         activity: { id: `act-${String(item.version ?? 1)}`, itemId: "boiler", occurredAt: at },
       });
-      const kindOnItem = (state: ReturnType<typeof createTestWorkspace>) =>
-        (activeHousehold(state).items.find((entry) => entry.id === "boiler") as { kind?: unknown } | undefined)?.kind ?? null;
-      const apply = (state: ReturnType<typeof createTestWorkspace>, input: unknown) => {
+      /* The pure reducer is gone (#1347), so the command schema is the only
+         door a client's item reaches the engine through: a kind on the item
+         is refused there, or dropped before anything reads it. */
+      const parsedKind = (input: unknown) => {
         try {
-          return reduceWorkspace(state, parseWorkspaceCommand(input));
+          return { refused: false, kind: (parseWorkspaceCommand(input) as { item: { kind?: unknown } }).item.kind };
         } catch {
-          return null; // refused as invalid input, which is allowed
+          return { refused: true, kind: undefined }; // refused as invalid input, which is allowed
         }
       };
 
       it.each(["document", "suggestion", "inspection", "service", "nonsense", null])(
         "a create that sends kind %j on the item is refused or the kind is dropped",
         (sent) => {
-          const clean = reduceWorkspace(createTestWorkspace(), parseWorkspaceCommand(renewal()));
-          const result = apply(createTestWorkspace(), renewal({ kind: sent }));
-          if (result === null) return;
-          if (sent !== null) expect(kindOnItem(result)).not.toBe(sent);
-          expect(activeHousehold(result).items).toEqual(activeHousehold(clean).items);
+          expect(parsedKind(renewal()).refused).toBe(false);
+          expect(parsedKind(renewal({ kind: sent })).kind).toBeUndefined();
         },
       );
 
-      it("an update that sends a disagreeing kind never changes the stored kind", () => {
-        const created = reduceWorkspace(createTestWorkspace(), parseWorkspaceCommand(renewal()));
-        const before = kindOnItem(created);
-        const clean = reduceWorkspace(created, parseWorkspaceCommand(renewal({ version: 2, title: "Boiler plan" })));
-        const result = apply(created, renewal({ version: 2, title: "Boiler plan", kind: "document" }));
-        if (result === null) return;
-        expect(kindOnItem(result)).not.toBe("document");
-        expect(kindOnItem(result)).toBe(before);
-        expect(activeHousehold(result).items).toEqual(activeHousehold(clean).items);
+      it("an update that sends a disagreeing kind is refused or the kind is dropped", () => {
+        expect(parsedKind(renewal({ version: 2, title: "Boiler plan" })).refused).toBe(false);
+        expect(parsedKind(renewal({ version: 2, title: "Boiler plan", kind: "document" })).kind).toBeUndefined();
       });
 
       it("the command schema does not pass a client's kind through on the item", () => {
