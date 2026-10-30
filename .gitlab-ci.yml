@@ -3593,9 +3593,13 @@ launcher_install_compat:
       collector=$!
       status=0
       # #1560: as orbit-ci, with its own home for the Go caches and Docker's
-      # client config. setpriv keeps the exports above, PATH included; the job
-      # token and its aliases are dropped, as the launcher's live legs do.
-      (cd .orbit-launcher-src && setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env -u CI_JOB_TOKEN -u CI_BUILD_TOKEN -u CI_REGISTRY_PASSWORD -u CI_DEPENDENCY_PROXY_PASSWORD -u CI_REPOSITORY_URL HOME=/home/orbit-ci go test -tags live -count=1 -v -timeout 30m ./test/live/...) || status=$?
+      # client config. setpriv keeps the exports above, PATH included. The job
+      # token and every project secret a protected-branch pipeline hands this
+      # job are dropped (docs/releasing.md), so none can reach the raw log or
+      # the artifacts by accident; add a new project secret here too. This is
+      # leak hygiene, not a security boundary: orbit-ci is in the docker group
+      # of a root daemon, which is root in all but name.
+      (cd .orbit-launcher-src && setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env -u CI_JOB_TOKEN -u CI_BUILD_TOKEN -u CI_REGISTRY_PASSWORD -u CI_DEPENDENCY_PROXY_PASSWORD -u CI_REPOSITORY_URL -u CI_DEPLOY_PASSWORD -u GITLAB_RELEASE_TOKEN -u GHCR_PUBLISH_TOKEN -u BASE_REPIN_TOKEN -u DOOR_IMPORT_TOKEN -u RENOVATE_TOKEN -u GITHUB_COM_TOKEN -u SIDECAR_ISSUE_TOKEN -u ORBIT_BASE_IMAGE_PULL_TOKEN -u ORBIT_REGISTRY_TOKEN -u ORBIT_READ_TOKEN HOME=/home/orbit-ci go test -tags live -count=1 -v -timeout 30m ./test/live/...) || status=$?
       kill "$collector" 2>/dev/null || :
       wait "$collector" 2>/dev/null || :
       # Not `exit "$status"`: the reuse evidence below is the job's last line
