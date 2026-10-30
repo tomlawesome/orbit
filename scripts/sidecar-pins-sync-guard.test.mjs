@@ -342,3 +342,89 @@ describe("sidecar pins check: a pin must be the linux/amd64 manifest, not the in
     expect(text).not.toMatch(/multi-platform|\bis an? (?:image )?index\b|names? the index/i);
   });
 });
+
+// Review findings for #1551: sync must also skip when the tag cannot say what
+// its current linux/amd64 child is, or cannot be resolved at all.
+describe("sidecar pins sync: skips what it cannot verify (#1551 review)", () => {
+  it("skips a pin when the tag's current index has no linux/amd64 entry", async () => {
+    const images = [baseImage(), node()];
+    const { repoDir, policyPath } = repoFor(images);
+    const before = readFileSync(policyPath, "utf8");
+
+    const { text } = await run(["sync", "--policy", policyPath], {
+      repoDir,
+      resolveTag: resolverFor({
+        "node:24-alpine": { indexDigest: NODE_REBUILD_INDEX, platformDigest: null },
+      }),
+    });
+
+    expect(readFileSync(policyPath, "utf8")).toBe(before);
+    expect(entryFor(policyPath, "node:24-alpine").indexDigest).toBe(NODE_INDEX);
+    expect(entryFor(policyPath, "node:24-alpine").resolvedOn).toBe(OLD_DATE);
+    const line = text.split("\n").find((l) => /skip/i.test(l) && l.includes("node:24-alpine"));
+    expect(line, `no line naming node:24-alpine and 'skip' in:\n${text}`).toBeDefined();
+  });
+
+  it.each([
+    ["null", null],
+    ["undefined", undefined],
+  ])("skips a pin whose tag cannot be resolved (resolver returns %s)", async (_label, answer) => {
+    const images = [baseImage(), node()];
+    const { repoDir, policyPath } = repoFor(images);
+    const before = readFileSync(policyPath, "utf8");
+
+    const { text } = await run(["sync", "--policy", policyPath], {
+      repoDir,
+      resolveTag: resolverFor({ "node:24-alpine": answer }),
+    });
+
+    // Not stamped with today's date, not rewritten at all.
+    expect(readFileSync(policyPath, "utf8")).toBe(before);
+    expect(entryFor(policyPath, "node:24-alpine").resolvedOn).toBe(OLD_DATE);
+    const line = text.split("\n").find((l) => /skip/i.test(l) && l.includes("node:24-alpine"));
+    expect(line, `no line naming node:24-alpine and 'skip' in:\n${text}`).toBeDefined();
+  });
+
+  it("skips a pin that equals the tag's index digest instead of a platform child", async () => {
+    const images = [baseImage(), tikaPinnedToIndex()];
+    const { repoDir, policyPath } = repoFor(images);
+    const before = readFileSync(policyPath, "utf8");
+
+    const { text } = await run(["sync", "--policy", policyPath], {
+      repoDir,
+      resolveTag: resolverFor({
+        "apache/tika:4.0.0-full": { indexDigest: TIKA_INDEX, platformDigest: TIKA_DIGEST },
+      }),
+    });
+
+    expect(readFileSync(policyPath, "utf8")).toBe(before);
+    expect(entryFor(policyPath, "apache/tika:4.0.0-full").resolvedOn).toBe(OLD_DATE);
+    const line = text.split("\n").find((l) => /skip/i.test(l) && l.includes("apache/tika:4.0.0-full"));
+    expect(line, `no line naming apache/tika:4.0.0-full and 'skip' in:\n${text}`).toBeDefined();
+  });
+
+  it("leaves every location file byte for byte unchanged when a multi-location entry is skipped", async () => {
+    const multi = { ...node(), locations: ["tests/oidc/Dockerfile", "tests/oidc/Dockerfile.second"] };
+    const images = [baseImage(), multi];
+    const { repoDir, policyPath } = repoFor(images);
+    // The primary location was bumped to the rebuilt manifest, the secondary
+    // still holds the old one; the tag's current child is neither of them.
+    writeFile(repoDir, "tests/oidc/Dockerfile", `FROM node:24-alpine@${NODE_REBUILD_DIGEST}\n`);
+    writeFile(repoDir, "tests/oidc/Dockerfile.second", `FROM node:24-alpine@${NODE_DIGEST}\n# second\n`);
+    const files = ["Dockerfile", "docker-compose.yml", "tests/oidc/Dockerfile", "tests/oidc/Dockerfile.second"];
+    const read = () => files.map((f) => readFileSync(join(repoDir, f)).toString("hex"));
+    const before = read();
+    const policyBefore = readFileSync(policyPath, "utf8");
+
+    const { text } = await run(["sync", "--policy", policyPath], {
+      repoDir,
+      resolveTag: resolverFor({
+        "node:24-alpine": { indexDigest: NODE_REBUILD_INDEX, platformDigest: hex("e") },
+      }),
+    });
+
+    expect(read()).toEqual(before);
+    expect(readFileSync(policyPath, "utf8")).toBe(policyBefore);
+    expect(text).toMatch(/skip/i);
+  });
+});

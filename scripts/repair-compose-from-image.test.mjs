@@ -473,3 +473,88 @@ describe("docs/administrator-operations.md describes what Repair does with the C
     expect(relevant).toMatch(/never\s+(overwr[a-z]*|replac[a-z]*)/i);
   });
 });
+
+// Review findings for #1484: the drift report must show what differs without
+// printing anything that looks like a credential, and must stay short.
+describe("repair.sh --check drift report hides credentials and stays short (#1484 review)", () => {
+  const HIDDEN = "(line hidden: it looks like a credential)";
+
+  // The image's compose file with extra lines added to the deployment folder's copy.
+  function composeWithExtra(extra) {
+    const text = IMAGE_COMPOSE.toString("utf8").split("\n");
+    text.splice(text.indexOf("services:") + 1, 0, ...extra);
+    return Buffer.from(text.join("\n"), "utf8");
+  }
+
+  function check(extra) {
+    const targetDir = makeDeployment({ compose: composeWithExtra(extra) });
+    return runRepair(targetDir, ["--check"]);
+  }
+
+  it("never prints a DB_PASSWORD value, and says the line is hidden", () => {
+    const result = check(["      DB_PASSWORD: hunter2-not-real"]);
+
+    expect(composeFindings(result.stdout).length, `no Compose-file finding.\n${result.combined}`).toBeGreaterThan(0);
+    expect(result.stdout).not.toContain("hunter2-not-real");
+    expect(result.stderr).not.toContain("hunter2-not-real");
+    const hidden = lines(result.combined).find((l) => l.includes(HIDDEN));
+    expect(hidden, `no hidden-line text in:\n${result.combined}`).toBeDefined();
+    expect(hidden).toContain("<");
+  });
+
+  it.each([
+    ["secret", "      SESSION_SECRET: zz-secret-value-not-real"],
+    ["token", "      AUTH_TOKEN: zz-token-value-not-real"],
+    ["passphrase", "      KEY_PASSPHRASE: zz-passphrase-value-not-real"],
+    ["api_key", "      API_KEY: zz-apikey-value-not-real"],
+    ["api-key", "      x-api-key: zz-apikeyhyphen-value-not-real"],
+    ["private_key", "      PRIVATE_KEY: zz-privatekey-value-not-real"],
+    ["upper-case keyword", "      MY_SECRET: ZZ-UPPER-VALUE-NOT-REAL"],
+  ])("hides a %s line (case-insensitive)", (_label, line) => {
+    const value = line.split(": ")[1];
+    const result = check([line]);
+
+    expect(result.combined).not.toContain(value);
+    expect(result.combined).toContain(HIDDEN);
+  });
+
+  it("hides a URL carrying credentials even when the line has no keyword", () => {
+    const result = check(["      DATABASE_URL: postgres://orbit:s3cr3t-not-real@db:5432/orbit"]);
+
+    expect(composeFindings(result.stdout).length, `no Compose-file finding.\n${result.combined}`).toBeGreaterThan(0);
+    expect(result.combined).not.toContain("s3cr3t-not-real");
+  });
+
+  it("shows a harmless differing line as it is", () => {
+    const result = check(["      LOG_LEVEL: harmless-not-real"]);
+
+    expect(result.combined).toContain("harmless-not-real");
+    expect(result.combined).not.toContain(HIDDEN);
+    expect(result.combined).not.toContain("(more differences not shown)");
+  });
+
+  it("shows exactly 20 differing lines and says more were not shown when there are more than 20", () => {
+    const extra = Array.from({ length: 30 }, (_, i) => `    # extra-line-${String(i + 1).padStart(2, "0")}`);
+    const result = check(extra);
+
+    const shown = lines(result.combined).filter((l) => /extra-line-\d+/.test(l));
+    expect(shown).toHaveLength(20);
+    expect(result.combined).toContain("(more differences not shown)");
+  });
+
+  it("shows all 20 lines and no 'more' note when there are exactly 20", () => {
+    const extra = Array.from({ length: 20 }, (_, i) => `    # extra-line-${String(i + 1).padStart(2, "0")}`);
+    const result = check(extra);
+
+    const shown = lines(result.combined).filter((l) => /extra-line-\d+/.test(l));
+    expect(shown).toHaveLength(20);
+    expect(result.combined).not.toContain("(more differences not shown)");
+  });
+
+  it("cuts a long differing line to 200 bytes", () => {
+    const result = check([`    # ${"q".repeat(400)}`]);
+
+    expect(result.combined).toContain("q".repeat(150));
+    expect(result.combined).not.toContain("q".repeat(201));
+  });
+});
