@@ -335,7 +335,8 @@ export async function getImapReview(userId: string, receiptId: string, household
   if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   // The owner's read applies the approval's reclaim rule too (ADR-0005,
   // #1396), so an abandoned approval that made its item is offered back here.
-  if (receipt.status === "approving" && receipt.approvalStartedAt && await reclaimAbandonedMailboxApproval(getDb(), receipt.id)) {
+  if (receipt.status === "approving" && receipt.approvalStartedAt && receipt.approvalRequestEnc !== null
+    && await reclaimAbandonedMailboxApproval(getDb(), receipt.id)) {
     receipt = await readOwned();
     if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   }

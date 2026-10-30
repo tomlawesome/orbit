@@ -696,7 +696,7 @@ export async function reclaimAbandonedMailboxApproval(executor: MetadataExecutor
     failureCode: "approval_interrupted",
     approvalResultId: sql`coalesce(${imapIngestionMessages.approvalResultId}, ${randomUUID()}::uuid)`,
     updatedAt: new Date(),
-  }).where(and(abandoned, isNotNull(imapIngestionMessages.approvedItemId))).returning();
+  }).where(and(abandoned, isNotNull(imapIngestionMessages.approvedItemId), isNotNull(imapIngestionMessages.approvalRequestEnc))).returning();
   if (interrupted) return interrupted;
   const [reset] = await executor.update(imapIngestionMessages).set({
     status: "pending_review",
@@ -706,7 +706,7 @@ export async function reclaimAbandonedMailboxApproval(executor: MetadataExecutor
     approvalRequestEnc: null,
     approvalStartedAt: null,
     updatedAt: new Date(),
-  }).where(and(abandoned, isNull(imapIngestionMessages.approvedItemId))).returning();
+  }).where(and(abandoned, or(isNull(imapIngestionMessages.approvedItemId), isNull(imapIngestionMessages.approvalRequestEnc)))).returning();
   return reset;
 }
 
@@ -807,7 +807,7 @@ async function finishMailboxApproval(
       updatedAt: new Date(),
       // The review is only actually over once this reaches "completed"; a
       // partial success is still retryable and keeps its draft meanwhile.
-      ...(partial ? {} : clearedReviewDraftMetadata),
+      ...(partial ? {} : { ...clearedReviewDraftMetadata, approvalRequestEnc: null }),
     }).where(and(
       eq(imapIngestionMessages.id, input.source.receiptId),
       eq(imapIngestionMessages.approvalOperationId, input.operationId),
