@@ -164,6 +164,7 @@
   border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);color:var(--ink);
   font:var(--p-type-body)/1.2 var(--ui)}
 .p-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
+select.p-input:focus-visible{outline-offset:1px}
 .p-input::placeholder{color:var(--ink-quiet)}
 .p-tabs{display:flex;border:1px solid var(--line);border-radius:calc(var(--p-hit) / 2);overflow:hidden;flex:1 1 100%}
 .p-tabs button{appearance:none;flex:1;min-height:var(--p-hit);padding:0 6px;white-space:nowrap;border:0;background:none;

@@ -248,7 +248,8 @@ Use a focused merge request for image updates:
    today's date into the policy, but only when the pinned digest is the
    linux/amd64 manifest inside the tag's current index. If it is not, `sync`
    skips that pin, prints a line saying the pinned manifest is not in the
-   current index, and leaves its policy entry unchanged (#1551); move the pin
+   current index, and leaves its policy entry unchanged (#1551), and the run
+   exits 2 so automation cannot read it as nothing to do (#1558); move the pin
    to the current manifest and run it again. Then it rewrites any other file
    that pins the same image. Review the diff
    and push it to the Renovate branch. Do not update an untracked reference

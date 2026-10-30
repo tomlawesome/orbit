@@ -256,7 +256,7 @@
 <section class="p-card hh-archive" aria-labelledby="hh-archive-title" data-hh="archive">
   <div class="hh-archive-head">
     <h2 class="p-caps" id="hh-archive-title">The archive</h2>
-    <div class="hh-tabs p-tabs" role="tablist" aria-labelledby="hh-archive-title">
+    <div class="p-tabs" role="tablist" aria-labelledby="hh-archive-title">
       <button role="tab" id="hh-tab-out" aria-selected={tab === "out"} aria-controls="hh-panel-out"
               tabindex={tab === "out" ? 0 : -1} onclick={() => (tab = "out")} onkeydown={tabKey}>take it with you</button>
       <button role="tab" id="hh-tab-in" aria-selected={tab === "in"} aria-controls="hh-panel-in"
@@ -279,10 +279,10 @@
     {:else if outPhase === "form"}
       <div class="hh-fields">
         <label class="hh-label" for="hh-pass-out">a passphrase for the file</label>
-        <input id="hh-pass-out" class="hh-input p-input" type="password" autocomplete="new-password" enterkeyhint="next"
+        <input id="hh-pass-out" class="p-input" type="password" autocomplete="new-password" enterkeyhint="next"
                bind:value={passOut}>
         <label class="hh-label" for="hh-pass-again">the passphrase again</label>
-        <input id="hh-pass-again" class="hh-input p-input" type="password" autocomplete="new-password" enterkeyhint="done"
+        <input id="hh-pass-again" class="p-input" type="password" autocomplete="new-password" enterkeyhint="done"
                bind:value={passAgain}>
         <p class="hh-note warm">Orbit never keeps this passphrase · without it the file cannot be opened</p>
         {#if outRefusal && (passOut || passAgain)}<p class="hh-note">{outRefusal}</p>{/if}
@@ -330,7 +330,7 @@
       {:else if inPhase === "chosen" || inPhase === "looking"}
         <div class="hh-fields">
           <label class="hh-label" for="hh-pass-in">the file's passphrase</label>
-          <input id="hh-pass-in" class="hh-input p-input" type="password" autocomplete="off" enterkeyhint="go"
+          <input id="hh-pass-in" class="p-input" type="password" autocomplete="off" enterkeyhint="go"
                  bind:value={passIn} onkeydown={(event) => { if (event.key === "Enter") lookInside(); }}>
         </div>
         <div class="hh-pair">
@@ -372,7 +372,7 @@
   {#if hasPassword !== false}
     <form id="hh-challenge-form" onsubmit={(event) => { event.preventDefault(); prove(); }}>
       <label class="hh-label" for="hh-proof">your password</label>
-      <input id="hh-proof" class="hh-input p-input" type="password" autocomplete="current-password" enterkeyhint="done"
+      <input id="hh-proof" class="p-input" type="password" autocomplete="current-password" enterkeyhint="done"
              bind:value={currentPassword}>
     </form>
   {/if}

@@ -607,7 +607,7 @@
     <section class="p-card" style:--i="2" aria-labelledby="hh-system-head" data-hh="system">
       {#if v.canManage}
         <label class="hh-label" for="hh-name">name</label>
-        <input id="hh-name" class="hh-input p-input" maxlength="60" autocomplete="off" enterkeyhint="done" bind:value={identity.name}>
+        <input id="hh-name" class="p-input" maxlength="60" autocomplete="off" enterkeyhint="done" bind:value={identity.name}>
         <div class="hh-flushrows">
           <Row title="time zone" trail={zoneLabel(identity.timezone)} onactivate={() => pick("timezone")}>
             {#snippet mark()}<span class="hh-kmark">◷</span>{/snippet}
@@ -687,7 +687,7 @@
   <Sheet bind:open={inviteOpen} size="callout" title="Invite someone">
     <form id="hh-invite-form" onsubmit={(event) => { event.preventDefault(); invite(); }}>
       <label class="hh-label" for="hh-invite">their email address</label>
-      <input id="hh-invite" class="hh-input p-input" type="email" inputmode="email" autocomplete="email" enterkeyhint="send"
+      <input id="hh-invite" class="p-input" type="email" inputmode="email" autocomplete="email" enterkeyhint="send"
              placeholder="name@example.com" bind:value={inviteEmail}>
       <p class="hh-note">the link admits only someone signed in with this exact address</p>
       {#if inviteProblem}<p class="p-error" role="alert">{inviteProblem}</p>{/if}
@@ -699,7 +699,7 @@
   </Sheet>
 
   <Sheet bind:open={addOpen} size="list" title="Add an existing account">
-    <input class="hh-input p-input hh-filter" type="search" enterkeyhint="search" aria-label="Find an account by name"
+    <input class="p-input hh-filter" type="search" enterkeyhint="search" aria-label="Find an account by name"
            placeholder="find by name" bind:value={addQuery}>
     <div class="hh-flushrows">
       {#each candidates as candidate (candidate.id)}
@@ -733,7 +733,7 @@
     {#if editing}
       <form id="hh-section-form" onsubmit={(event) => { event.preventDefault(); keepSection(); }}>
         <label class="hh-label" for="hh-secname">name</label>
-        <input id="hh-secname" class="hh-input p-input" maxlength="30" autocomplete="off" enterkeyhint="done"
+        <input id="hh-secname" class="p-input" maxlength="30" autocomplete="off" enterkeyhint="done"
                placeholder="name it" bind:value={editing.name}>
         {#if !editing.shipped}
           <p class="hh-label" id="hh-tray-head">mark · tap to swap</p>
@@ -765,7 +765,7 @@
       your mind; after that it is gone for good.
     </p>
     <label class="hh-label" for="hh-delname">type the system’s name exactly</label>
-    <input id="hh-delname" class="hh-input p-input" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"
+    <input id="hh-delname" class="p-input" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"
            placeholder={v.name} bind:value={typedName}>
     {#if doomProblem}<p class="p-error" role="alert">{doomProblem}</p>{/if}
     {#snippet foot()}

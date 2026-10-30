@@ -1068,6 +1068,70 @@ describe("sidecar pins: sync", () => {
   });
 });
 
+describe("sidecar pins: sync's exit code when a pin is skipped (#1558)", () => {
+  // node's tag resolves to an index with no linux/amd64 image, so sync skips it.
+  const NODE_UNCHECKABLE = { indexDigest: NODE_INDEX, platformDigest: null };
+
+  async function runSync(resolveTag, repoDir, policyPath) {
+    const output = [];
+    const status = await runSidecarPins(["sync", "--policy", policyPath], {
+      repoDir,
+      today: TODAY,
+      resolveTag,
+      write: (line) => output.push(line),
+      writeError: (line) => output.push(line),
+    });
+    return { status, text: output.join("") };
+  }
+
+  it("exits 2 when a pin is skipped and nothing was synced", async () => {
+    const { repoDir, policyPath } = alignedRepo();
+
+    const { status, text } = await runSync(
+      resolverFor({
+        "postgres:18-alpine": { indexDigest: POSTGRES_INDEX, platformDigest: POSTGRES_DIGEST },
+        "node:24-alpine": NODE_UNCHECKABLE,
+      }),
+      repoDir,
+      policyPath,
+    );
+
+    expect(text).toContain("sidecar pins: node:24-alpine skipped:");
+    expect(status).toBe(2);
+  });
+
+  it("exits 2 when a pin is skipped even though another pin was synced", async () => {
+    const { repoDir, policyPath } = alignedRepo();
+    writeFile(
+      repoDir,
+      "docker-compose.yml",
+      `services:\n  postgres:\n    image: postgres:18-alpine@${MOVED_DIGEST}\n`,
+    );
+
+    const { status, text } = await runSync(
+      resolverFor({
+        "postgres:18-alpine": { indexDigest: MOVED_INDEX, platformDigest: MOVED_DIGEST },
+        "node:24-alpine": NODE_UNCHECKABLE,
+      }),
+      repoDir,
+      policyPath,
+    );
+
+    expect(text).toContain("sidecar pins: node:24-alpine skipped:");
+    expect(text).toContain("sidecar pins: postgres:18-alpine synced from");
+    expect(status).toBe(2);
+  });
+
+  it("exits 0 when nothing is skipped and there is nothing to sync", async () => {
+    const { repoDir, policyPath } = alignedRepo();
+
+    const { status, text } = await runSync(CURRENT_RESOLVER, repoDir, policyPath);
+
+    expect(text).not.toContain("skipped:");
+    expect(status).toBe(0);
+  });
+});
+
 describe("sidecar pins: the CI job has the tools the check shells out to", () => {
   it("installs the buildx plugin alongside the Docker client", () => {
     // Axis 1 resolves a tag with `docker buildx imagetools inspect --format`.

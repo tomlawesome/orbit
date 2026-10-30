@@ -57,6 +57,9 @@ node --test scripts/ci/repin-base-image.test.mjs
 # entry for this file too.
 node --test scripts/bump-launcher-pin.test.mjs
 
+# Same reason (#1557): uses node:test, with stub node and pnpm on PATH.
+node --test scripts/test-backend-build-path.test.mjs
+
 # Same reason (#1374): uses node:test, with a stub docker on PATH.
 node --test scripts/corpus/stages-rerun.test.mjs
 
@@ -96,7 +99,15 @@ node --test scripts/ci/coverage-floor-check.test.mjs
 # directly against this repo's config), so passing it here would look correct
 # and run both excluded files anyway. Unset locally, where a daemon is
 # normally present and the full suite runs.
-if command -v pnpm >/dev/null 2>&1; then
+# A worktree that shares the main checkout's dependencies through symlinked
+# node_modules takes the direct-node path even with pnpm installed (#1557):
+# pnpm refuses a symlinked node_modules as its task-state directory
+# (ERR_PNPM_UNSAFE_TASK_RUN_STATE_PATH) and stops before a test runs.
+use_pnpm=false
+if command -v pnpm >/dev/null 2>&1 && [[ ! -L node_modules && ! -L web/node_modules ]]; then
+  use_pnpm=true
+fi
+if [[ "$use_pnpm" == true ]]; then
   pnpm typecheck
   pnpm lint
   node scripts/check-rolldown-jsdoc-trap.mjs
@@ -132,9 +143,14 @@ elif command -v node >/dev/null 2>&1 && [[ -d node_modules ]]; then
   # Mirrors web/package.json's own `build`: the licence collector writes
   # static/licenses, which the SvelteKit build then bundles, and the stamp
   # records what it was built from (#1061).
-  if ! node scripts/web-build-stamp.mjs check; then
+  # vite and svelte-kit are web/'s dependencies, so they run from
+  # web/node_modules (#1557). The sync mirrors the pnpm branch: the type check
+  # below needs the tsconfig it generates.
+  if node scripts/web-build-stamp.mjs check; then
+    (cd web && node node_modules/@sveltejs/kit/svelte-kit.js sync)
+  else
     (cd web && node scripts/collect-font-licences.mjs \
-      && node ../node_modules/vite/bin/vite.js build \
+      && node node_modules/vite/bin/vite.js build \
       && node ../scripts/web-build-stamp.mjs write)
   fi
   node scripts/check-v19-types.mjs

@@ -162,7 +162,6 @@ export async function moved({ base, projectId, pipelineId, sha, token, fetchImpl
 /* Failing test titles out of a job log: Playwright's `  1) [project] › ...`
  * and Vitest's ` FAIL  file > test` lines, ANSI colour removed. */
 export function failingTests(trace) {
-  // eslint-disable-next-line no-control-regex
   const plain = String(trace).replace(/\u001b\[[0-9;]*[A-Za-z]/gu, "").replace(/\r/gu, "");
   const lines = plain
     .split("\n")
