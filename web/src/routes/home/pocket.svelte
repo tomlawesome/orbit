@@ -34,6 +34,7 @@
   import { BAND_VAR, tlabel } from "$lib/data/bands.js";
   import ItemDrawer from "./ItemDrawer.svelte";
   import { attachIdFor, forget as forgetAttachId } from "./attach-id.js";
+  import { prefersReducedMotion } from "$lib/motion.js";
   import SuggestionDrawer from "./SuggestionDrawer.svelte";
 
   /**
@@ -441,7 +442,7 @@
     const control = rowOf(el);
     if (!el || !control) return false;
     control.open();
-    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const still = prefersReducedMotion();
     el.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
     if (focus) /** @type {HTMLElement | null} */ (el.querySelector("[data-row-face]"))?.focus({ preventScroll: true });
     return true;
@@ -938,7 +939,7 @@
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     markDoor("sky");
     if (flying) { event.preventDefault(); return; }
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches || !dialEl) return;
+    if (prefersReducedMotion() || !dialEl) return;
     event.preventDefault();
     const chip = /** @type {HTMLElement} */ (event.currentTarget).getBoundingClientRect();
     const dial = dialEl.getBoundingClientRect();

@@ -66,7 +66,7 @@
  * and never touches `document.documentElement.dataset.theme` itself. The
  * closing chapter's only cleanup is its own: the demo body it drew.
  */
-import { drawDemoBody, ease, positionDemoBody } from "./demo-body.js";
+import { drawDemoBody, positionDemoBody, walkDemoBody } from "./demo-body.js";
 
 /** Ratified beat: the year makes one more circuit, 381 days out to 20 and
  *  back to 381, each leg 1500ms — the mockup's own numbers, not data. */
@@ -128,7 +128,7 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { pocket, setScreen, veil, ctl, goto, light, unlight, callout, dropCallout, tween, w, mark, dry, doc } = ctx;
+    const { pocket, setScreen, veil, ctl, goto, light, unlight, callout, dropCallout, w, mark, dry, doc } = ctx;
     const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
@@ -155,18 +155,8 @@ export default {
        raise one; it misled this chapter and chapter 5 once already. */
     const body = ctl({ sel: S.body, round: true, optional: true });
     light(body);
-    await tween(WALK_MS, (t) => {
-      if (dry() || !bodyEl) return;
-      const days = Math.round(DAYS_FAR + (DAYS_NEAR - DAYS_FAR) * ease(t));
-      positionYearBody(bodyEl, days);
-      light(body);
-    });
-    await tween(WALK_MS, (t) => {
-      if (dry() || !bodyEl) return;
-      const days = Math.round(DAYS_NEAR + (DAYS_FAR - DAYS_NEAR) * ease(t));
-      positionYearBody(bodyEl, days);
-      light(body);
-    });
+    await walkDemoBody(ctx, { group: bodyEl, position: positionYearBody, ring: body, from: DAYS_FAR, to: DAYS_NEAR, ms: WALK_MS });
+    await walkDemoBody(ctx, { group: bodyEl, position: positionYearBody, ring: body, from: DAYS_NEAR, to: DAYS_FAR, ms: WALK_MS });
     await mark("yours-year");
     unlight(body);
 

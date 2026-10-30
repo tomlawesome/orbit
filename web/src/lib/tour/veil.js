@@ -59,6 +59,8 @@
  * this layer's z-index, not through a hole in it.
  */
 
+import { prefersReducedMotion } from "$lib/motion.js";
+
 export const OPACITY = 0.62;
 const FADE_MS = 450;
 /** A hole opening or closing (#1174 round 3): long enough that no frame
@@ -102,7 +104,7 @@ let hideTimer = null;
    so an OS-level reduced-motion change mid-tour is honoured without a
    remount. Only the FADE is skipped; holes still move (#866 requirement). */
 function stillMotion() {
-  return matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return prefersReducedMotion();
 }
 
 /**

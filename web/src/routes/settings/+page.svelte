@@ -31,6 +31,7 @@
   import { signOutOfDevice, signOutOfEveryDevice } from "./sign-out.js";
   import Pocket from "./pocket.svelte";
   import "./settings.css";
+  import { tabArrows } from "$lib/tabs.js";
 
   /**
    * Settings — the helm (#464). Built from design/v19/settings.html
@@ -209,13 +210,9 @@
       : row.status === "retry" ? `, still trying · ${row.reason ?? "no reason given"}` : "");
 
   /* §22's keyboard: one tab in the Tab order, ← → between them. */
-  /** @param {KeyboardEvent} event */
-  function remTabKey(event) {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    tab = tab === "reminders" ? "sent" : "reminders";
-    queueMicrotask(() => document.getElementById(`rem-tab-${tab}`)?.focus());
-  }
+  const remTabKey = tabArrows(["reminders", "sent"], {
+    get: () => tab, set: (key) => (tab = key), id: (key) => `rem-tab-${key}`,
+  });
 
   /**
    * SIGN-IN METHODS (#915, ADR-0023 §5, §6; composition ruled in
