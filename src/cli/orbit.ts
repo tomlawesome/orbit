@@ -30,7 +30,8 @@ import {
   runRestore,
   verifyBackupBundle,
 } from "../lib/backup-restore-cli";
-import { isValidClientId, isValidOidcIssuer, normalizePublicOrigin } from "../lib/config-contract";
+import { isValidClientId, normalizePublicOrigin } from "../lib/config-contract";
+import { checkOidcIssuerAgainstDiscovery } from "../lib/oidc-discovery";
 import { runConfigurationCommand } from "../lib/configuration-migration";
 import { readinessReport } from "../lib/deployment-readiness";
 import { InstallTransaction, type ManagedPath } from "../lib/install-transaction";
@@ -554,6 +555,9 @@ const configureTerminalIo: GuidedPromptIo = {
   notice: (text) => process.stderr.write(`${text}\n`),
 };
 
+const ISSUER_SHAPE_HINT =
+  "Enter a complete https:// issuer URL with no credentials, query, fragment, loopback address or example.com placeholder.";
+
 /** Asks until a valid answer or end of input (configure.sh's prompt_* loops). */
 function promptUntilValid<T>(io: GuidedPromptIo, promptText: string, validate: (input: string) => T | undefined, rejection: string): T {
   for (;;) {
@@ -562,6 +566,24 @@ function promptUntilValid<T>(io: GuidedPromptIo, promptText: string, validate: (
     const value = validate(input);
     if (value !== undefined) return value;
     io.notice(rejection);
+  }
+}
+
+/**
+ * promptUntilValid for a check that has to ask the network (the OIDC issuer,
+ * #1454): `validate` returns the accepted value or the text to show.
+ */
+async function promptUntilValidAsync<T>(
+  io: GuidedPromptIo,
+  promptText: string,
+  validate: (input: string) => Promise<{ value: T } | { rejection: string }>,
+): Promise<T> {
+  for (;;) {
+    const input = io.line(promptText);
+    if (input === undefined) throw new GuidedAnswerStop("orbit: Guided configuration was cancelled.");
+    const checked = await validate(input);
+    if ("value" in checked) return checked.value;
+    io.notice(checked.rejection);
   }
 }
 
@@ -587,7 +609,7 @@ function promptAuthMode(io: GuidedPromptIo): "local" | "oidc" {
  * ORBIT_CONFIGURE_AUTH_MODE, else what the caller already knows. Throws
  * GuidedAnswerStop with configure's own message on anything else.
  */
-function collectGuidedInitInput(authMode: "local" | "oidc" | undefined, io: GuidedPromptIo | undefined): GuidedInitInput {
+async function collectGuidedInitInput(authMode: "local" | "oidc" | undefined, io: GuidedPromptIo | undefined): Promise<GuidedInitInput> {
   const envAppUrl = process.env.ORBIT_CONFIGURE_APP_URL;
   const envIssuer = process.env.ORBIT_CONFIGURE_OIDC_ISSUER;
   const envClientId = process.env.ORBIT_CONFIGURE_OIDC_CLIENT_ID;
@@ -615,7 +637,7 @@ function collectGuidedInitInput(authMode: "local" | "oidc" | undefined, io: Guid
     // O1-F1: a local-only machine-prompt init only ever needs APP_URL.
     const resolvedAuthMode = authMode ?? "oidc";
     try {
-      return { ...collectMachineGuidedInit(stdoutConfigureMachineDriver(), resolvedAuthMode), authMode: resolvedAuthMode };
+      return { ...(await collectMachineGuidedInit(stdoutConfigureMachineDriver(), resolvedAuthMode)), authMode: resolvedAuthMode };
     } catch (error) {
       if (error instanceof ConfigureMachinePromptAbortedError) throw new GuidedAnswerStop("orbit: Guided configuration was cancelled.");
       throw error;
@@ -630,12 +652,13 @@ function collectGuidedInitInput(authMode: "local" | "oidc" | undefined, io: Guid
       "Enter a complete https:// public origin with no credentials, path, query, fragment, loopback address or example.com placeholder.",
     );
     if (resolvedAuthMode === "local") return { appUrl, authMode: "local" };
-    const issuer = promptUntilValid(
-      io,
-      "OIDC issuer URL (e.g. https://sso.your-domain.tld/application/o/orbit/): ",
-      (input) => (isValidOidcIssuer(input) ? input : undefined),
-      "Enter a complete https:// issuer URL with no credentials, query, fragment, loopback address or example.com placeholder.",
-    );
+    const issuer = await promptUntilValidAsync(io, "OIDC issuer URL (e.g. https://sso.your-domain.tld/application/o/orbit/): ", async (input) => {
+      // #1454: checked against the provider's own discovery document, so a
+      // trailing-slash mismatch is caught here and names the published value.
+      const outcome = await checkOidcIssuerAgainstDiscovery(input);
+      if (outcome.status === "ok") return { value: input };
+      return { rejection: outcome.reason === "invalid-issuer" ? ISSUER_SHAPE_HINT : outcome.message };
+    });
     const clientId = promptUntilValid(
       io,
       "OIDC client ID: ",
@@ -650,10 +673,10 @@ function collectGuidedInitInput(authMode: "local" | "oidc" | undefined, io: Guid
 }
 
 /** set_oidc_secret's answer: machine prompts, one hidden entry on the terminal (no retry), or one raw line piped in. */
-function collectOidcSecret(io: GuidedPromptIo | undefined): string {
+async function collectOidcSecret(io: GuidedPromptIo | undefined): Promise<string> {
   if (isConfigureMachinePromptMode()) {
     try {
-      return collectMachineOidcSecret(stdoutConfigureMachineDriver());
+      return await collectMachineOidcSecret(stdoutConfigureMachineDriver());
     } catch (error) {
       if (error instanceof ConfigureMachinePromptAbortedError) {
         throw new GuidedAnswerStop("orbit: could not read a complete OIDC client secret from standard input.");
@@ -673,10 +696,10 @@ function collectOidcSecret(io: GuidedPromptIo | undefined): string {
   return line;
 }
 
-function commandConfigureInit(deployDir: string): never {
+async function commandConfigureInit(deployDir: string): Promise<never> {
   let input: GuidedInitInput;
   try {
-    input = collectGuidedInitInput(readConfigureAuthMode(), hasTerminal() ? configureTerminalIo : undefined);
+    input = await collectGuidedInitInput(readConfigureAuthMode(), hasTerminal() ? configureTerminalIo : undefined);
   } catch (error) {
     if (error instanceof GuidedAnswerStop) fail(error.message);
     throw error;
@@ -691,10 +714,10 @@ function commandConfigureInit(deployDir: string): never {
   }
 }
 
-function commandConfigureSetOidcSecret(deployDir: string): never {
+async function commandConfigureSetOidcSecret(deployDir: string): Promise<never> {
   let secret: string;
   try {
-    secret = collectOidcSecret(hasTerminal() && !isConfigureMachinePromptMode() ? configureTerminalIo : undefined);
+    secret = await collectOidcSecret(hasTerminal() && !isConfigureMachinePromptMode() ? configureTerminalIo : undefined);
   } catch (error) {
     if (error instanceof GuidedAnswerStop) fail(error.message);
     throw error;
@@ -735,7 +758,7 @@ function commandConfigureMigration(deployDir: string, args: string[]): never {
   process.exit(result.status);
 }
 
-function commandConfigure(deployDir: string, args: string[]): never {
+async function commandConfigure(deployDir: string, args: string[]): Promise<void> {
   if (args.length === 0) {
     commandConfigureApply(deployDir);
   }
@@ -744,11 +767,11 @@ function commandConfigure(deployDir: string, args: string[]): never {
   switch (first) {
     case "--init":
       if (rest.length > 0) usageExit("orbit: usage: orbit configure --init");
-      commandConfigureInit(deployDir);
+      await commandConfigureInit(deployDir);
       break;
     case "--set-oidc-secret":
       if (rest.length > 0) usageExit("orbit: usage: orbit configure --set-oidc-secret");
-      commandConfigureSetOidcSecret(deployDir);
+      await commandConfigureSetOidcSecret(deployDir);
       break;
     case "--set-deployment-profile": {
       if (rest.length < 1 || rest.length > 2) {
@@ -1810,7 +1833,8 @@ function main(): void {
         commandCheck(deployDir, commandArgs[0] === "--rollback");
         break;
       case "configure":
-        commandConfigure(deployDir, commandArgs);
+        // The only asynchronous command: the issuer is checked against the provider (#1454). Its refusals take the same path as the synchronous ones.
+        commandConfigure(deployDir, commandArgs).catch(exitOnCommandError);
         break;
       case "install":
       case "update":
@@ -1838,29 +1862,34 @@ function main(): void {
         failUsage();
     }
   } catch (error) {
-    // Every refusal class in the modules this CLI wires together throws a
-    // stable, category-only message (no secret material, no
-    // attacker-controlled path/member names — asserted by each module's own
-    // no-leak sweep), so surfacing `error.message` directly here is safe;
-    // anything else is a genuine bug and should keep its stack trace.
-    // Another backup or restore holds the lock: a status of its own, so the
-    // shell leaves orbit-app to the run that owns it (#1211 E3). A
-    // "backup-busy" refusal (an export holds the lock and never stopped the
-    // app) takes the ordinary failure path, so the shell restarts orbit-app.
-    if (error instanceof BackupRestoreCliRefusal && error.code === "restore-locked") {
-      process.stderr.write(`${displayHostPaths(`orbit: ${error.message}`)}\n`);
-      process.exit(BACKUP_RESTORE_LOCKED_EXIT_CODE);
-    }
-    if (
-      error instanceof RecoveryBundleRefusal ||
-      error instanceof RestoreEngineRefusal ||
-      error instanceof BackupRestoreCliRefusal ||
-      error instanceof HostOwnershipError
-    ) {
-      fail(`orbit: ${error.message}`);
-    }
-    throw error;
+    exitOnCommandError(error);
   }
+}
+
+/** Turns a refusal from any command into its exit status; anything else is a genuine bug and keeps its stack trace. */
+function exitOnCommandError(error: unknown): never {
+  // Every refusal class in the modules this CLI wires together throws a
+  // stable, category-only message (no secret material, no
+  // attacker-controlled path/member names — asserted by each module's own
+  // no-leak sweep), so surfacing `error.message` directly here is safe;
+  // anything else is a genuine bug and should keep its stack trace.
+  // Another backup or restore holds the lock: a status of its own, so the
+  // shell leaves orbit-app to the run that owns it (#1211 E3). A
+  // "backup-busy" refusal (an export holds the lock and never stopped the
+  // app) takes the ordinary failure path, so the shell restarts orbit-app.
+  if (error instanceof BackupRestoreCliRefusal && error.code === "restore-locked") {
+    process.stderr.write(`${displayHostPaths(`orbit: ${error.message}`)}\n`);
+    process.exit(BACKUP_RESTORE_LOCKED_EXIT_CODE);
+  }
+  if (
+    error instanceof RecoveryBundleRefusal ||
+    error instanceof RestoreEngineRefusal ||
+    error instanceof BackupRestoreCliRefusal ||
+    error instanceof HostOwnershipError
+  ) {
+    fail(`orbit: ${error.message}`);
+  }
+  throw error;
 }
 
 function failUsage(): never {

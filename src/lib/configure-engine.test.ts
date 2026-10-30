@@ -17,7 +17,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CANONICAL_OIDC_SECRET_FILE_PATH } from "./config-contract";
 import {
@@ -941,9 +941,18 @@ describe("machine prompts (v0) — configure.sh field vocabulary", () => {
     };
   }
 
-  it("accepts a fully valid guided-init transcript on the first attempt", () => {
+  // #1454: the issuer is checked against the provider's discovery document,
+  // so a transcript needs a provider; this one publishes whatever issuer the
+  // discovery URL implies, i.e. one that matches the answer.
+  const echoingProvider = vi.fn<typeof fetch>(async (input) => {
+    const issuer = String(input).replace(".well-known/openid-configuration", "");
+    return new Response(JSON.stringify({ issuer }), { status: 200 });
+  });
+  const providerPublishing = (issuer: string) => vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ issuer }), { status: 200 }));
+
+  it("accepts a fully valid guided-init transcript on the first attempt", async () => {
     const { driver, lines } = scriptedDriver(["https://orbit.configure-engine-test.invalid", "https://auth.configure-engine-test.invalid/", "my-client"]);
-    const result = collectMachineGuidedInit(driver);
+    const result = await collectMachineGuidedInit(driver, "oidc", { fetchImpl: echoingProvider });
     expect(result).toEqual({ appUrl: "https://orbit.configure-engine-test.invalid", issuer: "https://auth.configure-engine-test.invalid/", clientId: "my-client" });
     expect(lines).toEqual([
       "prompt field=APP_URL kind=url required=true attempt=1",
@@ -955,42 +964,111 @@ describe("machine prompts (v0) — configure.sh field vocabulary", () => {
     ]);
   });
 
-  it("rejects, retries, and classifies a loopback APP_URL as forbidden-host before accepting a valid answer", () => {
+  it("rejects, retries, and classifies a loopback APP_URL as forbidden-host before accepting a valid answer", async () => {
     const { driver, lines } = scriptedDriver(["https://127.0.0.1", "https://orbit.configure-engine-test.invalid", "https://auth.configure-engine-test.invalid/", "id"]);
-    collectMachineGuidedInit(driver);
+    await collectMachineGuidedInit(driver, "oidc", { fetchImpl: echoingProvider });
     expect(lines).toContain("prompt-reject field=APP_URL reason=forbidden-host");
     expect(lines).toContain("prompt field=APP_URL kind=url required=true attempt=2");
   });
 
-  it("aborts after a third rejection, without a fourth prompt", () => {
+  it("aborts after a third rejection, without a fourth prompt", async () => {
     const { driver, lines } = scriptedDriver(["not-https", "still-not-https", "nope"]);
-    expect(() => collectMachineGuidedInit(driver)).toThrow(ConfigureMachinePromptAbortedError);
+    await expect(collectMachineGuidedInit(driver)).rejects.toThrow(ConfigureMachinePromptAbortedError);
     const promptLines = lines.filter((l) => l.startsWith("prompt field="));
     expect(promptLines).toHaveLength(3);
     expect(lines.at(-1)).toBe("prompt-abort field=APP_URL");
   });
 
-  it("aborts on end-of-input without a fourth prompt", () => {
+  it("aborts on end-of-input without a fourth prompt", async () => {
     const { driver, lines } = scriptedDriver([]);
-    expect(() => collectMachineGuidedInit(driver)).toThrow(ConfigureMachinePromptAbortedError);
+    await expect(collectMachineGuidedInit(driver)).rejects.toThrow(ConfigureMachinePromptAbortedError);
     expect(lines).toEqual(["prompt field=APP_URL kind=url required=true attempt=1", "prompt-abort field=APP_URL"]);
   });
 
-  it("never echoes the OIDC_CLIENT_SECRET answer in any protocol line", () => {
+  it("never echoes the OIDC_CLIENT_SECRET answer in any protocol line", async () => {
     const secret = "top-secret-value";
     const { driver, lines } = scriptedDriver([secret]);
-    const result = collectMachineOidcSecret(driver);
+    const result = await collectMachineOidcSecret(driver);
     expect(result).toBe(secret);
     for (const line of lines) {
       expect(line).not.toContain(secret);
     }
   });
 
-  it("classifies an empty OIDC_CLIENT_SECRET answer as empty, and an oversized one as too-large", () => {
+  it("classifies an empty OIDC_CLIENT_SECRET answer as empty, and an oversized one as too-large", async () => {
     const { driver: driver1, lines: lines1 } = scriptedDriver(["", "x".repeat(MAXIMUM_SECRET_BYTES + 1), "ok"]);
-    collectMachineOidcSecret(driver1);
+    await collectMachineOidcSecret(driver1);
     expect(lines1).toContain("prompt-reject field=OIDC_CLIENT_SECRET reason=empty");
     expect(lines1).toContain(`prompt-reject field=OIDC_CLIENT_SECRET reason=too-large`);
+  });
+
+  describe("OIDC_ISSUER is checked against the provider's discovery document (#1454)", () => {
+    const APP = "https://orbit.configure-engine-test.invalid";
+    const WITH_SLASH = "https://auth.configure-engine-test.invalid/application/o/orbit/";
+    const WITHOUT_SLASH = "https://auth.configure-engine-test.invalid/application/o/orbit";
+
+    it("rejects a trailing-slash mismatch with the reason token alone, then accepts the corrected answer on attempt 2", async () => {
+      const { driver, lines } = scriptedDriver([APP, WITHOUT_SLASH, WITH_SLASH, "my-client"]);
+      const fetchImpl = providerPublishing(WITH_SLASH);
+      const result = await collectMachineGuidedInit(driver, "oidc", { fetchImpl });
+      expect(result.issuer).toBe(WITH_SLASH);
+      expect(lines).toEqual([
+        "prompt field=APP_URL kind=url required=true attempt=1",
+        "prompt-accept field=APP_URL",
+        "prompt field=OIDC_ISSUER kind=url required=true attempt=1",
+        "prompt-reject field=OIDC_ISSUER reason=trailing-slash-mismatch",
+        "prompt field=OIDC_ISSUER kind=url required=true attempt=2",
+        "prompt-accept field=OIDC_ISSUER",
+        "prompt field=OIDC_CLIENT_ID kind=text required=true attempt=1",
+        "prompt-accept field=OIDC_CLIENT_ID",
+      ]);
+      // One discovery request per attempt, never a second one to classify.
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it("never puts a URL on any prompt line, whichever way the issuer is refused", async () => {
+      for (const published of [WITH_SLASH, "https://other.configure-engine-test.invalid/"]) {
+        const { driver, lines } = scriptedDriver([APP, WITHOUT_SLASH, WITHOUT_SLASH, WITHOUT_SLASH]);
+        await expect(collectMachineGuidedInit(driver, "oidc", { fetchImpl: providerPublishing(published) })).rejects.toThrow(
+          ConfigureMachinePromptAbortedError,
+        );
+        const issuerLines = lines.filter((line) => line.includes("field=OIDC_ISSUER"));
+        expect(issuerLines.filter((line) => line.startsWith("prompt-reject"))).toHaveLength(3);
+        for (const line of lines) {
+          expect(line).not.toContain("http");
+          expect(line).not.toContain("configure-engine-test");
+        }
+      }
+    });
+
+    it("classifies a different published issuer as issuer-mismatch and an unreachable provider as provider-unreachable", async () => {
+      const { driver, lines } = scriptedDriver([APP, WITH_SLASH, WITH_SLASH, WITH_SLASH]);
+      let calls = 0;
+      const fetchImpl = vi.fn<typeof fetch>(async () => {
+        calls += 1;
+        if (calls === 1) return new Response(JSON.stringify({ issuer: "https://other.configure-engine-test.invalid/" }), { status: 200 });
+        if (calls === 2) throw new TypeError("fetch failed");
+        return new Response("{}", { status: 200 });
+      });
+      await expect(collectMachineGuidedInit(driver, "oidc", { fetchImpl })).rejects.toThrow(ConfigureMachinePromptAbortedError);
+      expect(lines.filter((line) => line.startsWith("prompt-reject"))).toEqual([
+        "prompt-reject field=OIDC_ISSUER reason=issuer-mismatch",
+        "prompt-reject field=OIDC_ISSUER reason=provider-unreachable",
+        "prompt-reject field=OIDC_ISSUER reason=provider-unreachable",
+      ]);
+    });
+
+    it("keeps the shape words for a badly shaped issuer and makes no request for it", async () => {
+      const { driver, lines } = scriptedDriver([APP, "http://auth.configure-engine-test.invalid/", "https://127.0.0.1/x", "https://auth.configure-engine-test.invalid/?a=b"]);
+      const fetchImpl = providerPublishing(WITH_SLASH);
+      await expect(collectMachineGuidedInit(driver, "oidc", { fetchImpl })).rejects.toThrow(ConfigureMachinePromptAbortedError);
+      expect(lines.filter((line) => line.startsWith("prompt-reject"))).toEqual([
+        "prompt-reject field=OIDC_ISSUER reason=not-https",
+        "prompt-reject field=OIDC_ISSUER reason=forbidden-host",
+        "prompt-reject field=OIDC_ISSUER reason=not-absolute-url",
+      ]);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
   });
 });
 

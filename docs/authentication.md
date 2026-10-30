@@ -105,6 +105,14 @@ bash scripts/configure.sh --check
 `--init` asks "Sign in with local accounts only, or also with an identity
 provider?" and, when the answer is "also", collects the public Orbit origin,
 the provider's issuer URL and the client ID, and derives the callback URL.
+The issuer is checked while it is asked for: Orbit reads the provider's
+discovery document (`<issuer>/.well-known/openid-configuration`) from the
+machine running the installer and compares the `issuer` it publishes with the
+answer. A mismatch is refused there, naming the published value on a terminal,
+so a trailing slash that differs (Authentik publishes its issuer with one,
+Keycloak without) is fixed at the prompt and not after the other questions.
+If the provider cannot be reached from that machine, the prompt says so
+instead.
 `--set-oidc-secret` reads the provider's client secret directly from the
 terminal (never as a command argument) and stores it file-backed under
 `.orbit-secrets/`. `--check` confirms readiness without printing any value.

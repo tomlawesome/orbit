@@ -19,12 +19,41 @@ import { fileURLToPath } from "node:url";
  * $ORBIT_FAKE_DOCKER_LOG when that is set.
  *
  * Options (all optional): imagePresent (default true), pullSucceeds
- * (default true), rootless (default false).
+ * (default true), rootless (default false), oidcDiscoveryStub (default
+ * false: the pretend container's engine gets writeOidcDiscoveryStub's
+ * provider; the environment's ORBIT_TEST_OIDC_PUBLISHED_ISSUER does not cross
+ * into it, so it answers with the entered issuer).
  */
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
-export function writeEngineDockerShim(binDir, { imagePresent = true, pullSucceeds = true, rootless = false } = {}) {
+/*
+ * #1454: the engine now fetches the OIDC provider's discovery document when
+ * it asks for the issuer, and a test has no provider. This preload answers
+ * every discovery request with the discovery URL minus its well-known suffix
+ * (an issuer entered with its trailing slash matches), or with
+ * $ORBIT_TEST_OIDC_PUBLISHED_ISSUER when that is set. Start a child with
+ * NODE_OPTIONS=--require <the returned path>.
+ */
+const OIDC_STUB_FILE = "oidc-discovery-stub.cjs";
+export function writeOidcDiscoveryStub(dir) {
+  const path = join(dir, OIDC_STUB_FILE);
+  writeFileSync(
+    path,
+    `const real = globalThis.fetch;
+const suffix = ".well-known/openid-configuration";
+globalThis.fetch = async (input, init) => {
+  const url = String(input);
+  if (!url.endsWith(suffix)) return real(input, init);
+  return new Response(JSON.stringify({ issuer: process.env.ORBIT_TEST_OIDC_PUBLISHED_ISSUER || url.slice(0, -suffix.length) }), { status: 200 });
+};
+`,
+  );
+  return path;
+}
+
+export function writeEngineDockerShim(binDir, { imagePresent = true, pullSucceeds = true, rootless = false, oidcDiscoveryStub = false } = {}) {
+  if (oidcDiscoveryStub) writeOidcDiscoveryStub(binDir);
   const tsx = join(repoRoot, "node_modules", "tsx", "dist", "cli.mjs");
   const cli = join(repoRoot, "src", "cli", "orbit.ts");
   const source = `#!/usr/bin/env node
@@ -39,6 +68,7 @@ if (command === "info") { process.stdout.write(${JSON.stringify(rootless ? "[nam
 if (command !== "run") { process.stderr.write("fake docker: unsupported " + argv.join(" ") + "\\n"); process.exit(1); }
 // The image's own ENV (Dockerfile): every engine one-off runs with it.
 const env = { PATH: process.env.PATH, HOME: process.env.HOME, TERM: process.env.TERM, ORBIT_ENGINE_CONTEXT: "container" };
+${oidcDiscoveryStub ? `env.NODE_OPTIONS = ${JSON.stringify(`--require ${join(binDir, OIDC_STUB_FILE)}`)};` : ""}
 const mounts = [];
 let index = 1;
 const flagsWithValue = new Set(["-e", "--env", "-v", "--volume", "--entrypoint", "--network", "--user", "--name"]);
