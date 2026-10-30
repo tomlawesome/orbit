@@ -1075,7 +1075,8 @@ to be on this host already.
   reports it as `compose-file-drift` and prints the lines that differ (`<` is
   your file, `>` is the image's). It never overwrites or replaces the file,
   because the difference may be a deliberate edit. Lines that look like they
-  carry a password, secret or token are hidden in that report. The report is
+  carry a password, secret or token, or a web address with a user name and
+  password in it, are hidden in that report. The report is
   information only; it does not make the deployment count as unhealthy. If you
   want the image's version back, copy it out of the image yourself.
 - **Identical:** nothing is reported and nothing is written.

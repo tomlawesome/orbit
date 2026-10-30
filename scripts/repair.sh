@@ -1939,12 +1939,14 @@ drop_compose_missing_finding() {
 # Sets $compose_drift_detail to the differing lines between the folder's
 # docker-compose.yml and the image's copy in $compose_image_tmp: at most 20,
 # each cut to 200 bytes, '<' for the folder's file and '>' for the image's.
-# A line that looks like it carries a credential is hidden, not shown: an
-# operator may have put one inline, and this text reaches a terminal or log.
+# A line that looks like it carries a credential (a keyword, or a URL with
+# user details before an '@') is hidden, not shown: an operator may have put
+# one inline, and this text reaches a terminal or log.
 describe_compose_drift() {
   local all
   all="$(diff -- "$compose_file" "$compose_image_tmp" 2>/dev/null | grep -E '^[<>] ' | cut -c1-200 |
-    sed -E '/(password|secret|token|passphrase|api[_-]?key|private[_-]?key)/I s/^(.).*/\1 (line hidden: it looks like a credential)/' || true)"
+    sed -E -e '/(password|secret|token|passphrase|api[_-]?key|private[_-]?key)/I s/^(.).*/\1 (line hidden: it looks like a credential)/' \
+      -e '/:\/\/[^/@[:space:]]+@/ s/^(.).*/\1 (line hidden: it looks like a credential)/' || true)"
   compose_drift_detail="$(printf '%s\n' "$all" | head -n 20)"
   if [[ "$(printf '%s\n' "$all" | wc -l)" -gt 20 ]]; then
     compose_drift_detail+=$'\n(more differences not shown)'

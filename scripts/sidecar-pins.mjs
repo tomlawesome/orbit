@@ -811,9 +811,21 @@ export async function syncPins({
     // #1551: record the tag's current index only when the pin is its
     // linux/amd64 child. Otherwise the policy would claim an index that does
     // not hold the pinned image. Leave the entry (and the other files) alone.
+    // A tag that cannot be resolved, or whose index has no linux/amd64 entry,
+    // gives nothing to check the pin against, so it is skipped too: syncing it
+    // would stamp a record nobody verified.
     const pinDigest = digestOf(reference);
     const platformDigest = resolution?.platformDigest ?? null;
-    if (platformDigest !== null && pinDigest !== platformDigest) {
+    if (platformDigest === null) {
+      skipped.push({
+        tag: entry.tag,
+        reason: resolution
+          ? `the tag's current index has no linux/amd64 image to check the pin against`
+          : `the tag could not be resolved, so the pin cannot be checked`,
+      });
+      continue;
+    }
+    if (pinDigest !== platformDigest) {
       skipped.push({
         tag: entry.tag,
         reason: `the pinned manifest is not in the tag's current index; move the pin first, then sync`,
