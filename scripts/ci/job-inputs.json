@@ -24,7 +24,7 @@
     "`pipelineOwned` names the paths that axis owns. A job marked",
     "`definitionCoversPipeline` reaches them only through its own definition, so",
     "they leave its checkout axis and a change to one job's YAML reruns that job",
-    "and nothing else. `fast`, `fast_docker` and `names_guard` are not marked:",
+    "and nothing else. `fast` and `fast_docker` are not marked:",
     "their suites read the whole pipeline file and every ci script, so for them",
     "those paths stay in the checkout axis and any CI edit still reruns them.",
     "`artefact` names the thing under test whose identity the key also carries.",
@@ -75,9 +75,6 @@
         "@source_only",
         "web/**"
       ]
-    },
-    "names_guard": {
-      "deny": []
     },
     "integration": {
       "deny": [],

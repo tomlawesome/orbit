@@ -634,6 +634,13 @@
       "reason": "CI toolchain image (GOLANG_IMAGE) that builds the launcher binaries; the image itself ships nothing to operators. A `_IMAGE:` pin in .gitlab-ci.yml, which Renovate's CI-variables regex (renovate.json) proposes updates for; not watched by sidecar-pins."
     },
     {
+      "reference": "ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f",
+      "locations": [
+        ".gitlab-ci.yml"
+      ],
+      "reason": "CI image for the shared private-details check (#1562), named through the GHCR image cache ($CI_IMAGE_CACHE_GHCR/gitleaks/gitleaks); ships nothing to operators. Pinned by hand to the release GITLEAKS_VERSION names. Renovate does not propose moves for it yet (renovate.json has no registryAliases for the cache prefix); not watched by sidecar-pins."
+    },
+    {
       "reference": "docker:29.6.2-dind@sha256:bfec1f5159c63a81ca6fdedbd81404d2c0e16378ed0feec3bb3fbf3998847659",
       "locations": [
         ".gitlab-ci.yml"

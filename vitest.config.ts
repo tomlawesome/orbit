@@ -147,8 +147,6 @@ const test: TestUserConfig = {
           "scripts/test-backend-build-path.test.mjs",
           // Same reason (#1099): uses node:test. Run by scripts/test-backend.sh.
           "scripts/ci/coverage-floor-check.test.mjs",
-          // Same reason (#1408): uses node:test. Run by the `names_guard` CI job.
-          "tests/unit/no-real-names.test.mjs",
           // ORBIT_TEST_SKIP_DOCKER (#950): the CI `fast` job runs on the
           // unprivileged `big` lane, which has no `docker` binary on PATH.
           // test-e2e-local-reuse.test.mjs joined the list on #947: it drives

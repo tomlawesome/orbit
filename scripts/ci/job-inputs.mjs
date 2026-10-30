@@ -30,9 +30,9 @@
  *     boundary meaningless; following the anchors is what makes it sound.
  *     `pipelineOwned` names the paths this axis owns; a job marked
  *     `definitionCoversPipeline` drops them from its checkout axis, so a CI
- *     edit reaches its key through this axis alone. `fast`, `fast_docker`
- *     and `names_guard` are not marked: their suites read the pipeline
- *     file and every ci script, so any CI edit still reruns them.
+ *     edit reaches its key through this axis alone. `fast` and `fast_docker`
+ *     are not marked: their suites read the pipeline file and every ci
+ *     script, so any CI edit still reruns them.
  *
  * This replaces #898's allow-list of globs. That version could only be wrong
  * by omission and silently: a file a job read but nobody had declared left the
@@ -217,7 +217,7 @@ export function pipelineOwnedGlobs(config) {
 /*
  * Whether a job reaches the pipeline file and scripts/ci only through its own
  * definition (`definitionCoversPipeline` in job-inputs.json). The stack jobs
- * do; `fast` and `names_guard` do not, because their suites read the whole
+ * do; `fast` and `fast_docker` do not, because their suites read the whole
  * pipeline file and every ci script, so for them those paths stay in the
  * checkout axis and any CI edit still reruns them.
  */
