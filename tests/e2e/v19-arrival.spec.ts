@@ -3,7 +3,7 @@ import { householdRegister } from "./support/households";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { bodyClassAdds, bodyClassOrder, bodyClassSeen, witnessBodyClasses } from "./support/arrival";
+import { bodyClassAdds, bodyClassOrder, bodyClassSeen, bodyClassesTogether, witnessBodyClasses } from "./support/arrival";
 import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -267,6 +267,11 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
     .toEqual(expect.arrayContaining(["showwarp", "counting", "belong"]));
   expect(order.indexOf("showwarp"), "the climb before the count").toBeLessThan(order.indexOf("counting"));
   expect(order.indexOf("counting"), "the count before the question").toBeLessThan(order.indexOf("belong"));
+  /* and the question never arrived while either was still on (T-Q3): the order
+     above is each class's first sight, which a question put on during the climb,
+     after the count had begun, would still satisfy */
+  expect(await bodyClassesTogether(page, "belong", "showwarp"), "the question arrived while the climb flew").toBe(false);
+  expect(await bodyClassesTogether(page, "belong", "counting"), "the question arrived while the count was up").toBe(false);
 
   /* The card lists the same systems as the sky, and one road out of it. */
   const row = page.locator(".nf .belong li", { hasText: HOUSEHOLD });
