@@ -52,10 +52,11 @@ request would have changed something, an unchanged audit trail.
 
 ## Writing a migration: generate, then read the SQL
 
-The migration history is one baseline, `drizzle/0000_baseline.sql`, with its
-snapshot `drizzle/meta/0000_snapshot.json` (#1403). `pnpm db:generate` works
-again: drizzle-kit compares `src/db/schema.ts` with the newest snapshot and
-writes the difference.
+The migration history starts at one baseline, `drizzle/0000_baseline.sql`,
+with its snapshot `drizzle/meta/0000_snapshot.json` (#1403); later migrations
+follow it, each with its own snapshot. `pnpm db:generate` works again:
+drizzle-kit compares `src/db/schema.ts` with the newest snapshot and writes
+the difference.
 
 1. Change `src/db/schema.ts`, then run `pnpm db:generate`. It writes
    `drizzle/NNNN_name.sql`, a new snapshot and a journal entry. Run it once

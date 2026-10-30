@@ -20,6 +20,9 @@ export type ReviewInboxStateContext = {
 };
 
 const attachmentTransferFailureCodes = new Set([
+  // An abandoned approval reclaimed after its item was made (#1396): the same
+  // pair, reported by the review read, finishes it.
+  "approval_interrupted",
   "attachment_state_changed",
   "attachment_state_invalid",
   "attachment_transfer_failed",

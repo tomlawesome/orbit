@@ -380,8 +380,10 @@ ADR-0024 extends the same envelope encryption to household metadata, in the
 tiers #365 names.
 
 **Tier 1** is `items.notes`, `items.reference`,
-`imap_ingestion_messages.proposal` and
-`imap_ingestion_messages.field_evidence`.
+`imap_ingestion_messages.proposal`,
+`imap_ingestion_messages.field_evidence` and, since #1396, the approval
+request a mailbox approval accepted, `imap_ingestion_messages.approval_request`
+(ADR-0005 amendment), under the same key as the receipt's draft.
 
 **Tier 2** is `items.title`, `items.provider` (a provider *name*), the cost
 `items.cost_minor`, the invited member address `household_invitations.email`,

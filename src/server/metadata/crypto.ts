@@ -47,6 +47,7 @@ export type MetadataColumn =
   | "items.cost_minor"
   | "imap_ingestion_messages.proposal"
   | "imap_ingestion_messages.field_evidence"
+  | "imap_ingestion_messages.approval_request"
   | "household_invitations.email"
   | "users.email"
   | "mail_in_sender_addresses.address"

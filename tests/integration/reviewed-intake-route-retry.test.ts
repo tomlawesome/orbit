@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, items } from "@/db/schema";
@@ -31,6 +31,9 @@ afterAll(async () => {
 
 type Fixture = Awaited<ReturnType<typeof createIntegrationFixture>>;
 type Session = Awaited<ReturnType<Fixture["session"]>>;
+
+/** The request the review read reports beside its key. */
+type ReportedRequest = Record<string, unknown> & { item: { title?: unknown } };
 
 const APPROVE_URL = "http://127.0.0.1:3000/api/reviewed-intake/approve";
 const reviewUrl = (fixture: Fixture, receiptId: string) => `http://127.0.0.1:3000/api/imap-inbox/${receiptId}?householdId=${fixture.household.id}`;
@@ -131,7 +134,7 @@ describe("approve retry: the review read hands back the pending pair (#1396)", (
 
       const read = await readReview(member, fixture, receiptId);
       expect(read.status).toBe(200);
-      const review = await read.json() as { approval?: { operationId: string; request: Record<string, any> } };
+      const review = await read.json() as { approval?: { operationId: string; request: ReportedRequest } };
       expect(review.approval?.operationId).toBe(operationId);
       expect(review.approval?.request).toMatchObject({
         householdId: fixture.household.id,
@@ -178,7 +181,7 @@ describe("approve retry: the review read hands back the pending pair (#1396)", (
       expect(freshKey.status).toBe(409);
       expect((await freshKey.json()).error).toEqual({ code: "reviewed_intake_conflict", message: "That approval identity was already used" });
 
-      const review = await (await readReview(member, fixture, receiptId)).json() as { approval?: { operationId: string; request: Record<string, any> } };
+      const review = await (await readReview(member, fixture, receiptId)).json() as { approval?: { operationId: string; request: ReportedRequest } };
       expect(review.approval?.operationId).toBe(operationId);
       expect(review.approval?.request.item.title).toBe("First amendment");
       const finished = await approve(member, { ...review.approval!.request, operationId: review.approval!.operationId });
@@ -313,7 +316,7 @@ describe("approve retry: the reclaim remembers the item (#1396)", () => {
       // Ten minutes on, the member reads the review.
       const read = await readReview(member, fixture, receiptId);
       expect(read.status).toBe(200);
-      const review = await read.json() as { approval?: { operationId: string; request: Record<string, any> } };
+      const review = await read.json() as { approval?: { operationId: string; request: ReportedRequest } };
       expect(await receiptRow(receiptId)).toMatchObject({
         status: "recoverable", failureCode: "approval_interrupted",
         approvalOperationId: operationId, approvalRequestSha256: bound.approvalRequestSha256, approvedItemId: operationId,
