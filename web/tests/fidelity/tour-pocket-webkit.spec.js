@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { THEME_PACKS } from "../../src/lib/theme.js";
+
 const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 
 /*
@@ -1232,7 +1234,8 @@ function ringBeats() {
 
 /** The danger ring as painted now: its stroke on every pack, with the
  *  contrast against that pack's ground, and what of it is moving. */
-function dangerRing() {
+/** @param {readonly string[]} themePacks */
+function dangerRing(themePacks) {
   const ring = document.querySelector(".tourfilm-danger");
   if (!ring) return null;
   /** @param {string} c */
@@ -1251,7 +1254,7 @@ function dangerRing() {
   const root = document.documentElement;
   const before = root.dataset.theme;
   const packs = [];
-  for (const theme of ["starchart", "afterdark", "dawn", "clouds", "retrograde"]) {
+  for (const theme of themePacks) {
     root.dataset.theme = theme;
     const stroke = rgb(getComputedStyle(stroked).stroke);
     const ground = rgb(getComputedStyle(root).getPropertyValue("--bg"));
@@ -1292,7 +1295,7 @@ test.describe("the danger-zone ring pulses red while chapter 5 shows it (#1174 r
       try {
         await page.waitForFunction(() => /** @type {any} */ (window).__held === "time-warmed", null, { timeout: 60_000 });
         await settled(page);
-        const held = await page.evaluate(dangerRing);
+        const held = await page.evaluate(dangerRing, THEME_PACKS);
         if (!held) wrong.push("time-warmed: no danger ring drawn");
         else {
           if (!held.onScreen) wrong.push("time-warmed: the danger ring is not on the screen");

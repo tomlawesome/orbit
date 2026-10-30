@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { expect, test } from "@playwright/test";
 
+import { THEME_PACKS } from "../../src/lib/theme.js";
 import { settle } from "./pocket-states.js";
 
 /*
@@ -77,7 +78,6 @@ const REPORT_DIR =
  * viewport, so there is no second dialect of this hand-off to measure. Said
  * plainly in docs/launch-animation-timings.md rather than left implicit.
  */
-const THEME_PACKS = ["starchart", "afterdark", "clouds", "dawn", "retrograde"];
 
 /*
  * Runs inside the page, installed before its first script so it never misses
