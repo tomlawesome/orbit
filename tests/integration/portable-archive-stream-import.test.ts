@@ -11,10 +11,16 @@
  * src/server/portable-archive-import-stream.test.ts, which needs no database.
  * Here, with the real database and the real document store: nothing from a
  * tampered archive reaches either, and the memory bound.
+ *
+ * #1566 moved the round trip and the tamper refusal to the new wire: the
+ * exported file, as written, is posted to the preview and import routes as
+ * the last part of a multipart upload. The memory child now takes its
+ * baseline before the file is read and streams it from disk, and a case with
+ * one 50 MiB document is added.
  */
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,13 +30,19 @@ import { getDb } from "@/db";
 import { documents, items } from "@/db/schema";
 import { readDocumentDownload } from "@/server/document-repository";
 import { decryptPortableArchive } from "@/server/portable-archive";
-import { createPortableArchive, importPortableArchive, previewPortableImport, readPortableArchive } from "@/server/portable-archive-repository";
+import { createPortableArchive, readPortableArchive } from "@/server/portable-archive-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { archiveForm } from "./support/portable-archive-upload";
+import { errorOf, postForm, proofCookie } from "./support/portable-archive-routes";
+import { loadRoute } from "./support/request-event";
 import { seedStoredDocuments } from "./support/stored-documents";
 import { syntheticPdf } from "../support/synthetic-documents";
 
 const MIB = 1_048_576;
 const passphrase = "correct-horse-battery-staple";
+
+const { POST: previewRoute } = await loadRoute("portable-archives/preview");
+const { POST: importRoute } = await loadRoute("portable-archives/import");
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -38,7 +50,8 @@ afterAll(async () => {
 
 type Fixture = Awaited<ReturnType<typeof createIntegrationFixture>>;
 
-async function exportParsed(fixture: Fixture, includeDocuments: boolean) {
+/** The exported archive file, byte for byte as the download gives it. */
+async function exportFile(fixture: Fixture, includeDocuments: boolean): Promise<Buffer> {
   const archive = await createPortableArchive({
     userId: fixture.users.owner.id,
     householdId: fixture.household.id,
@@ -46,7 +59,29 @@ async function exportParsed(fixture: Fixture, includeDocuments: boolean) {
     includeDocuments,
   });
   const { bytes } = await readPortableArchive(fixture.users.owner.id, archive.id);
-  return JSON.parse(bytes.toString("utf8")) as { ciphertext: string; authTag: string };
+  return Buffer.from(bytes);
+}
+
+async function exportParsed(fixture: Fixture, includeDocuments: boolean) {
+  return JSON.parse((await exportFile(fixture, includeDocuments)).toString("utf8")) as { ciphertext: string; authTag: string };
+}
+
+/** Preview, as the owner's browser posts it. */
+async function previewUpload(fixture: Fixture, file: Buffer | object) {
+  const owner = await fixture.session("owner");
+  return postForm(previewRoute, "/api/portable-archives/preview", owner, archiveForm({ householdId: fixture.household.id, passphrase }, file));
+}
+
+/** Import, as the owner's browser posts it, with a fresh proof that it is them. */
+async function importUpload(fixture: Fixture, file: Buffer | object) {
+  const owner = await fixture.session("owner");
+  return postForm(
+    importRoute,
+    "/api/portable-archives/import",
+    owner,
+    archiveForm({ householdId: fixture.household.id, passphrase, conflictItemIds: [] }, file),
+    await proofCookie(owner, "archive_import"),
+  );
 }
 
 type Payload = {
@@ -95,18 +130,15 @@ describe("an export imports into another household with identical documents and 
     // a row but no stored file, which would stop that export.
     await getDb().delete(documents).where(eq(documents.id, target.document.id));
 
-    const archive = await exportParsed(source, true);
-    const preview = await previewPortableImport(target.users.owner.id, target.household.id, archive, passphrase);
-    expect(preview).toMatchObject({ documents: contents.length, sections: expect.any(Number), items: 1, documentsExcluded: false });
+    const file = await exportFile(source, true);
+    const previewed = await previewUpload(target, file);
+    expect(previewed.status, JSON.stringify(await errorOf(previewed).catch(() => ({})))).toBe(200);
+    expect(((await previewed.json()) as { preview: unknown }).preview)
+      .toMatchObject({ documents: contents.length, sections: expect.any(Number), items: 1, documentsExcluded: false });
 
-    const outcome = await importPortableArchive({
-      userId: target.users.owner.id,
-      householdId: target.household.id,
-      archive,
-      passphrase,
-      conflictItemIds: [],
-    });
-    expect(outcome).toEqual({ importedItems: 1, documentsExcluded: 0 });
+    const imported = await importUpload(target, file);
+    expect(imported.status, JSON.stringify(await errorOf(imported).catch(() => ({})))).toBe(200);
+    expect(await imported.json()).toEqual({ importedItems: 1, documentsExcluded: 0 });
 
     const before = await exportedPayload(source);
     const after = await exportedPayload(target);
@@ -152,7 +184,7 @@ describe("a tampered archive reaches neither the database nor the document store
     const archive = await exportParsed(source, true);
 
     // Control: the untouched archive is acceptable, so the refusals below come from the change.
-    await expect(previewPortableImport(target.users.owner.id, target.household.id, archive, passphrase)).resolves.toBeDefined();
+    expect((await previewUpload(target, archive)).status).toBe(200);
 
     const position = 64;
     const flipped = { ...archive, ciphertext: archive.ciphertext.slice(0, position) + (archive.ciphertext[position] === "A" ? "B" : "A") + archive.ciphertext.slice(position + 1) };
@@ -162,10 +194,12 @@ describe("a tampered archive reaches neither the database nor the document store
     const documentsBefore = (await getDb().select({ id: documents.id }).from(documents).where(eq(documents.householdId, target.household.id))).length;
 
     for (const tampered of [flipped, truncated]) {
-      await expect(previewPortableImport(target.users.owner.id, target.household.id, tampered, passphrase))
-        .rejects.toMatchObject({ code: "archive_passphrase_invalid", status: 422 });
-      await expect(importPortableArchive({ userId: target.users.owner.id, householdId: target.household.id, archive: tampered, passphrase, conflictItemIds: [] }))
-        .rejects.toMatchObject({ code: "archive_passphrase_invalid", status: 422 });
+      const previewed = await previewUpload(target, tampered);
+      expect(previewed.status).toBe(422);
+      expect((await errorOf(previewed)).code).toBe("archive_passphrase_invalid");
+      const imported = await importUpload(target, tampered);
+      expect(imported.status).toBe(422);
+      expect((await errorOf(imported)).code).toBe("archive_passphrase_invalid");
     }
 
     expect(await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, target.household.id)))
@@ -178,9 +212,43 @@ describe("a tampered archive reaches neither the database nor the document store
 
 // ---------------------------------------------------------------------------
 
+type Measured = { beforeKiB: number; afterKiB: number; result: Record<string, unknown> };
+
+/** Runs one preview or import in a child process and reads back its peak-memory growth. */
+async function measure(mode: "preview" | "import", fixture: Fixture, archiveFile: string): Promise<Measured> {
+  const tsx = fileURLToPath(new URL("../../node_modules/tsx/dist/cli.mjs", import.meta.url));
+  const child = fileURLToPath(new URL("./support/archive-import-memory-child.ts", import.meta.url));
+  const run = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+    const proc = spawn(process.execPath, [tsx, child, mode, fixture.users.owner.id, fixture.household.id, archiveFile], {
+      env: { ...process.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+    proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+    proc.on("error", reject);
+    proc.on("close", (code) => resolve({ code, stdout, stderr }));
+  });
+  expect(run.code, run.stderr).toBe(0);
+  const line = run.stdout.split("\n").find((candidate) => candidate.startsWith("MEMORY_RESULT "));
+  expect(line, `child output: ${run.stdout}\n${run.stderr}`).toBeDefined();
+  return JSON.parse(line!.slice("MEMORY_RESULT ".length)) as Measured;
+}
+
+function expectGrowthBelow(measured: Measured, boundKiB: number, what: string, boundName: string) {
+  const growthKiB = measured.afterKiB - measured.beforeKiB;
+  expect(
+    growthKiB,
+    `${what}: peak RSS grew ${(growthKiB / 1024).toFixed(0)} MiB; bound is ${(boundKiB / 1024).toFixed(0)} MiB (${boundName})`,
+  ).toBeLessThan(boundKiB);
+}
+
 describe("preview and import hold about one document in memory, not the archive (#1521)", () => {
   // The same shape as the export's test (#1506): 12 x 10 MiB, more than
   // 100 MiB of documents, and the same bound -- the archive's plaintext size.
+  // #1566: the child's baseline now comes before the file is read, so the
+  // bound covers the request body too (it did not before, note 46283).
   const documentBytes = 10 * MIB;
   const documentCount = 12;
   const plaintextKiB = (Math.ceil(documentBytes / 3) * 4 * documentCount) / 1024;
@@ -193,60 +261,81 @@ describe("preview and import hold about one document in memory, not the archive 
     for (let index = 0; index < documentCount; index += 1) {
       await seedStoredDocuments(source, [pdfOfSize(documentBytes, `memory ${index}`)]);
     }
-    const archive = await exportParsed(source, true);
     scratch = await mkdtemp(join(tmpdir(), "orbit-1521-memory-"));
     archiveFile = join(scratch, "archive.json");
-    await writeFile(archiveFile, JSON.stringify(archive), { mode: 0o600 });
+    await writeFile(archiveFile, await exportFile(source, true), { mode: 0o600 });
   }, 600_000);
 
   afterAll(async () => {
     if (scratch) await rm(scratch, { recursive: true, force: true });
   });
 
-  async function measure(mode: "preview" | "import", fixture: Fixture) {
-    const tsx = fileURLToPath(new URL("../../node_modules/tsx/dist/cli.mjs", import.meta.url));
-    const child = fileURLToPath(new URL("./support/archive-import-memory-child.ts", import.meta.url));
-    const run = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-      const proc = spawn(process.execPath, [tsx, child, mode, fixture.users.owner.id, fixture.household.id, archiveFile], {
-        env: { ...process.env },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let stdout = "";
-      let stderr = "";
-      proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
-      proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
-      proc.on("error", reject);
-      proc.on("close", (code) => resolve({ code, stdout, stderr }));
-    });
-    expect(run.code, run.stderr).toBe(0);
-    const line = run.stdout.split("\n").find((candidate) => candidate.startsWith("MEMORY_RESULT "));
-    expect(line, `child output: ${run.stdout}\n${run.stderr}`).toBeDefined();
-    return JSON.parse(line!.slice("MEMORY_RESULT ".length)) as { beforeKiB: number; afterKiB: number; result: Record<string, unknown> };
-  }
-
-  function expectBounded(measured: { beforeKiB: number; afterKiB: number }, what: string) {
-    const growthKiB = measured.afterKiB - measured.beforeKiB;
-    expect(
-      growthKiB,
-      `${what}: peak RSS grew ${(growthKiB / 1024).toFixed(0)} MiB; bound is ${(plaintextKiB / 1024).toFixed(0)} MiB (the archive's plaintext)`,
-    ).toBeLessThan(plaintextKiB);
-  }
-
   it("raises the previewing process's peak memory by less than the archive's plaintext size", async () => {
     const target = await createIntegrationFixture("arch1521-memory-preview");
-    const measured = await measure("preview", target);
+    const measured = await measure("preview", target, archiveFile);
     expect(measured.result).toMatchObject({ documents: documentCount, items: 1, documentsExcluded: false });
-    expectBounded(measured, "preview");
+    expectGrowthBelow(measured, plaintextKiB, "preview", "the archive's plaintext");
   }, 600_000);
 
   it("raises the importing process's peak memory by less than the archive's plaintext size, and restores every document", async () => {
     const target = await createIntegrationFixture("arch1521-memory-import");
-    const measured = await measure("import", target);
+    const measured = await measure("import", target, archiveFile);
     expect(measured.result).toEqual({ importedItems: 1, documentsExcluded: 0 });
     const restored = await getDb().select({ displayName: documents.displayName, sizeBytes: documents.sizeBytes }).from(documents)
       .where(eq(documents.householdId, target.household.id));
     expect(restored.filter((row) => row.displayName.startsWith("stored-"))).toHaveLength(documentCount);
     expect(restored.filter((row) => row.displayName.startsWith("stored-")).every((row) => row.sizeBytes === documentBytes)).toBe(true);
-    expectBounded(measured, "import");
+    expectGrowthBelow(measured, plaintextKiB, "import", "the archive's plaintext");
+  }, 600_000);
+});
+
+describe("one large document: the upload is never held whole (#1566)", () => {
+  // Note 46292: one 50 MiB document. Preview must grow by less than the
+  // archive FILE's size (about 89 MiB with this one document): holding the
+  // body even once breaks it. Import must grow by less than eight times the
+  // document's bytes (400 MiB), the allowance for the per-document copies of
+  // the ordinary upload path; this bound drops to the archive's plaintext
+  // when #1567 (document path holds each document whole) lands.
+  const documentBytes = 50 * MIB;
+  let source: Fixture;
+  let content: Buffer;
+  let scratch: string;
+  let archiveFile: string;
+  let archiveFileKiB: number;
+
+  beforeAll(async () => {
+    source = await createIntegrationFixture("arch1566-large-source");
+    content = pdfOfSize(documentBytes, "large single document");
+    await seedStoredDocuments(source, [content]);
+    scratch = await mkdtemp(join(tmpdir(), "orbit-1566-memory-"));
+    archiveFile = join(scratch, "archive.json");
+    await writeFile(archiveFile, await exportFile(source, true), { mode: 0o600 });
+    archiveFileKiB = (await stat(archiveFile)).size / 1024;
+  }, 600_000);
+
+  afterAll(async () => {
+    if (scratch) await rm(scratch, { recursive: true, force: true });
+  });
+
+  it("raises the previewing process's peak memory by less than the archive file's size", async () => {
+    const target = await createIntegrationFixture("arch1566-large-preview");
+    const measured = await measure("preview", target, archiveFile);
+    expect(measured.result).toMatchObject({ documents: 1, items: 1, documentsExcluded: false });
+    expectGrowthBelow(measured, archiveFileKiB, "preview", "the archive file's size");
+  }, 600_000);
+
+  it("raises the importing process's peak memory by less than eight times the document, and the document round-trips byte for byte", async () => {
+    const target = await createIntegrationFixture("arch1566-large-import");
+    const measured = await measure("import", target, archiveFile);
+    expect(measured.result).toEqual({ importedItems: 1, documentsExcluded: 0 });
+    expectGrowthBelow(measured, (8 * documentBytes) / 1024, "import", "eight times the document, until #1567");
+
+    const restored = (await getDb().select({ id: documents.id, displayName: documents.displayName, sizeBytes: documents.sizeBytes }).from(documents)
+      .where(eq(documents.householdId, target.household.id))).find((row) => row.displayName === "stored-0.pdf")!;
+    expect(restored, "the document came across").toBeDefined();
+    expect(restored.sizeBytes).toBe(documentBytes);
+    const downloaded = await readDocumentDownload(target.users.owner.id, restored.id);
+    expect(downloaded.bytes.length).toBe(content.length);
+    expect(downloaded.bytes.equals(content)).toBe(true);
   }, 600_000);
 });

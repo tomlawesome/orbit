@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { AppError } from "@/lib/app-error";
 import { encryptPortableArchive } from "@/server/portable-archive";
 import { PayloadScratch } from "@/server/portable-archive-payload";
+import { archiveStream } from "../../tests/integration/support/portable-archive-upload";
 
 /**
  * Where the decrypted archive payload is written, and what a full disk there
@@ -192,8 +193,9 @@ describe("a full scratch is reported as an archive that could not be stored", ()
   }
 
   const operations: Array<[string, () => Promise<unknown>]> = [
-    ["preview", () => previewPortableImport(userId, householdId, archive, passphrase)],
-    ["import", () => importPortableArchive({ userId, householdId, archive, passphrase, conflictItemIds: [] })],
+    // #1566: the archive file reaches both as a stream, a fresh one per call.
+    ["preview", () => previewPortableImport(userId, householdId, archiveStream(archive), passphrase)],
+    ["import", () => importPortableArchive({ userId, householdId, archive: archiveStream(archive), passphrase, conflictItemIds: [] })],
   ];
 
   it.each(operations.flatMap(([name, run]) => ["ENOSPC", "EDQUOT"].map((code) => [name, code, run] as const)))(
@@ -211,7 +213,7 @@ describe("a full scratch is reported as an archive that could not be stored", ()
   it("still reports other write failures as they are", async () => {
     seedHousehold();
     await scratchFailsWith("EIO");
-    const failure = await previewPortableImport(userId, householdId, archive, passphrase).then(() => undefined, (error: unknown) => error);
+    const failure = await previewPortableImport(userId, householdId, archiveStream(archive), passphrase).then(() => undefined, (error: unknown) => error);
     expect(failure).not.toBeInstanceOf(AppError);
     expect((failure as NodeJS.ErrnoException).code).toBe("EIO");
   });
