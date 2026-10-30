@@ -778,6 +778,7 @@ fi
 # safe: an install there writes only inside the worktree, through pnpm's
 # shared store. It gets the main checkout's treatment; only a worktree that
 # reaches into the main checkout's install is held to the checks below.
+shared_node_modules=0
 if [[ "$in_worktree" == 0 || ( -d "$repo_dir/node_modules" && ! -L "$repo_dir/node_modules" ) ]]; then
   pnpm install --frozen-lockfile
 else
@@ -786,7 +787,6 @@ else
   # this branch needs, and only proceed if so.
   worktree_lock="$repo_dir/pnpm-lock.yaml"
   main_installed_lock="$main_checkout_dir/node_modules/.pnpm/lock.yaml"
-  shared_node_modules=0
   if [[ -L "$repo_dir/node_modules" \
      && "$(readlink -f "$repo_dir/node_modules")" == "$main_checkout_dir/node_modules" ]]; then
     shared_node_modules=1
@@ -944,6 +944,13 @@ quarantine_args=(--pass-with-no-tests --output test-results/quarantine)
 #     https://orbit-oidc:4443/ issuer URL -- reaches the random host port the
 #     sidecar was actually published on. The suite is told TEST_OIDC_PORT=4443
 #     for the same reason.
+#   - A worktree's node_modules (and web/node_modules) are symlinks onto the
+#     main checkout's, which the worktree mount does not contain, so inside
+#     the image they dangle and Playwright's cli.js is not found (#1555). When
+#     the worktree uses that shared install (shared_node_modules=1), the main
+#     checkout's node_modules and web/node_modules are also mounted at their
+#     own absolute paths, read-only: the container can read the dependencies
+#     but never write into the main checkout.
 #   - Only `node` runs on the mounted tree: never `pnpm install` in here, which
 #     rewrites the host's node_modules (environment skill, 2026-08-24).
 # in_image was decided above, before the browser download.
@@ -957,8 +964,14 @@ run_suite() { # run_suite STATUS_VAR EXTRA_ENV... -- EXTRA_PLAYWRIGHT_ARGS...
     local run_env=()
     for kv in "${image_env[@]}"; do run_env+=("$kv"); done
     for kv in "${extra_env[@]}"; do run_env+=(-e "$kv"); done
+    local shared_mounts=()
+    if [[ "$shared_node_modules" == 1 ]]; then
+      shared_mounts=(-v "${main_checkout_dir}/node_modules:${main_checkout_dir}/node_modules:ro")
+      [[ ! -d "${main_checkout_dir}/web/node_modules" ]] \
+        || shared_mounts+=(-v "${main_checkout_dir}/web/node_modules:${main_checkout_dir}/web/node_modules:ro")
+    fi
     docker run --rm --label "orbit-e2e-run=${project_name}" --network host --ipc=host --add-host orbit-oidc:127.0.0.1 \
-      -v "${repo_dir}:${repo_dir}" -w "$repo_dir" \
+      -v "${repo_dir}:${repo_dir}" "${shared_mounts[@]}" -w "$repo_dir" \
       -v "${docker_cli}:/usr/local/bin/docker:ro" \
       -v "$(dirname -- "$compose_plugin"):/usr/local/lib/docker/cli-plugins:ro" \
       -v "${docker_sock}:/var/run/docker.sock" -e DOCKER_HOST=unix:///var/run/docker.sock \
