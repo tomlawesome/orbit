@@ -7,6 +7,7 @@ import { ensureWorkerAdministrator, workerAccount } from "./worker-identity";
 import { settleArrival } from "./arrival";
 import { answerPushWithoutAService } from "./webkit-push";
 import { householdDateFromToday } from "./household-dates";
+import { SETTLE } from "./settle";
 
 /**
  * #1178: the signed-in fixtures v19-axe-sweep.spec.ts grew (#496), lifted
@@ -40,7 +41,7 @@ export async function signIn(page: Page, returnTo: string) {
      another navigation to /home" on WebKit (pipeline 2131), and a 7 s stall
      before /inbox loaded on desktop-webkit (pipeline 2203, job 32545). So:
      land first, then ask. */
-  await settleArrival(page, 20_000, returnTo);
+  await settleArrival(page, SETTLE, returnTo);
   /* #1080: waits for the session, then holds administrator access. */
   await ensureWorkerAdministrator(page);
 }

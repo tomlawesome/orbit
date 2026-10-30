@@ -4,6 +4,7 @@ import { homeIsLive } from "./support/keyboard";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { seedHousehold, signIn } from "./support/signed-in";
 import { renderedFrames } from "./support/frames";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
@@ -55,7 +56,7 @@ async function pressAndLetThePageTakeItIn(page: Page, event: "click" | "touchend
     addEventListener(type, () => { seen.__pressSeen += 1; }, { capture: true, once: true });
   }, event);
   await press();
-  await page.waitForFunction(() => (window as unknown as { __pressSeen: number }).__pressSeen >= 1, undefined, { timeout: 20_000 });
+  await page.waitForFunction(() => (window as unknown as { __pressSeen: number }).__pressSeen >= 1, undefined, { timeout: SETTLE });
   await renderedFrames(page);
 }
 
@@ -97,7 +98,7 @@ test("a pointer press on the menu opener does nothing while the tour plays", asy
   await withTourPlaying(page, isMobile, async ({ orb, about }) => {
     /* force skips Playwright's wait for the opener to be hittable (what burnt
        120 s in the report); the press goes to whatever is on top at that spot. */
-    await pressAndLetThePageTakeItIn(page, "click", () => orb.click({ force: true, timeout: 20_000 }));
+    await pressAndLetThePageTakeItIn(page, "click", () => orb.click({ force: true, timeout: SETTLE }));
     await expect(about, "#1473: the menu opened while the tour plays").toBeHidden({ timeout: SHORT });
   });
 });

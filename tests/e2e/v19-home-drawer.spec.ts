@@ -8,6 +8,7 @@ import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { householdDateFromToday } from "./support/household-dates";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
@@ -266,7 +267,7 @@ async function editTheTitle(page: Page, itemId: string) {
   await expect(page.locator("body[data-home-ready]")).toBeAttached();
   await page.locator(`a.item[id="${itemId}"]`).click();
   const drawer = page.locator(`[id="${itemId}-view"]`);
-  await expect(drawer).toBeVisible({ timeout: 20_000 });
+  await expect(drawer).toBeVisible({ timeout: SETTLE });
   await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}$`));
   await drawer.getByRole("button", { name: "Edit this item" }).click();
   const title = page.locator(`[id="${itemId}"]`).getByRole("textbox", { name: "title" });
@@ -309,11 +310,11 @@ test.describe("an item in another of the reader's households", () => {
     await page.goto(`/home?item=${first.itemId}`);
     if (isMobile) {
       await expect(page.locator(`.pocket .pk-below [data-row-key="${first.itemId}"]`))
-        .toHaveAttribute("data-open", "", { timeout: 20_000 });
+        .toHaveAttribute("data-open", "", { timeout: SETTLE });
       await expect(page.locator(`.pocket .pk-below [data-row-key="${second.itemId}"]`)).toHaveCount(0);
     } else {
       const drawer = page.locator(`[id="${first.itemId}-view"]`);
-      await expect(drawer).toBeVisible({ timeout: 20_000 });
+      await expect(drawer).toBeVisible({ timeout: SETTLE });
       await expect(drawer.getByText(NOTE)).toBeVisible();
       /* the manifest is the first household's now: its row, not the second's */
       await expect(page.locator(`[id="${first.itemId}"]`)).toBeVisible();
@@ -339,7 +340,7 @@ test.describe("on the desk", () => {
 
     await page.goto("/home");
     const body = page.locator(`.body-link[data-body="${itemId}"]`);
-    await expect(body).toHaveAttribute("data-docs", "1", { timeout: 20_000 });
+    await expect(body).toHaveAttribute("data-docs", "1", { timeout: SETTLE });
     /* The markup is drawn before home's listeners are bound (#1064): a
        synthetic mouseenter sent in that gap is heard by nobody, and there is
        no second one. Wait for the screen to be able to answer. */
@@ -350,7 +351,7 @@ test.describe("on the desk", () => {
     await chip.click();
 
     const drawer = page.locator(`[id="${itemId}-view"]`);
-    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    await expect(drawer).toBeVisible({ timeout: SETTLE });
     await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}$`));
     const paper = drawer.getByRole("button", { name: "Open chip-proving.pdf" });
     await expect(paper).toBeFocused();
@@ -405,7 +406,7 @@ test.describe("on the desk", () => {
 
     const useTheChip = async () => {
       const body = page.locator(`.body-link[data-body="${otherId}"]`);
-      await expect(body).toHaveAttribute("data-docs", "1", { timeout: 20_000 });
+      await expect(body).toHaveAttribute("data-docs", "1", { timeout: SETTLE });
       // The callout is fixed beside the body; a body scrolled off-screen puts it
       // off-screen too. A member scrolls to the dial before pointing at it.
       await body.scrollIntoViewIfNeeded();
@@ -432,7 +433,7 @@ test.describe("on the desk", () => {
     await page.goto(`/home?item=${itemId}`);
     const row = page.locator(`a.item[id="${itemId}"]`);
     const drawer = page.locator(`[id="${itemId}-view"]`);
-    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    await expect(drawer).toBeVisible({ timeout: SETTLE });
     /* the drawer is the item now: no way onward to the belt */
     await expect(drawer.getByRole("link", { name: "manage this item →" })).toHaveCount(0);
     /* notes above documents (owner, 2026-10-08) */
@@ -449,7 +450,7 @@ test.describe("on the desk", () => {
     await expect(card).toBeVisible();
     await expect(paper).toHaveAttribute("aria-current", "true");
     const pageButton = card.getByRole("button", { name: "Read drawer-proving.pdf" });
-    await expect(pageButton).toBeEnabled({ timeout: 20_000 });
+    await expect(pageButton).toBeEnabled({ timeout: SETTLE });
     await expect(card.getByRole("img", { name: "Page one of drawer-proving.pdf" })).toBeVisible();
 
     /* round 3 (F): beside the drawer, its top level with the item card's */
@@ -491,7 +492,7 @@ test.describe("on the desk", () => {
 
     await page.goto(`/home?item=${itemId}`);
     const drawer = page.locator(`[id="${itemId}-view"]`);
-    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    await expect(drawer).toBeVisible({ timeout: SETTLE });
     const acts = drawer.getByRole("group", { name: `Actions for ${TITLE}` });
     await expect(acts.getByRole("button")).toHaveText(["snooze", "complete", "attach a document", "retire"]);
     await expect(drawer.getByRole("button", { name: "Edit this item" })).toBeVisible();
@@ -528,7 +529,7 @@ test.describe("on the desk", () => {
 
     await page.goto(`/home?item=${itemId}`);
     const drawer = page.locator(`[id="${itemId}-view"]`);
-    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    await expect(drawer).toBeVisible({ timeout: SETTLE });
     const pencil = drawer.getByRole("button", { name: "Edit this item" });
     await pencil.click();
     await expect(pencil).toHaveAttribute("aria-pressed", "true");
@@ -597,7 +598,7 @@ test.describe("on the desk", () => {
 
       await page.goto(`/home?item=${itemId}`);
       const drawer = page.locator(`[id="${itemId}-view"]`);
-      await expect(drawer).toBeVisible({ timeout: 20_000 });
+      await expect(drawer).toBeVisible({ timeout: SETTLE });
       const typed = "Drawer proving item, renamed";
       await drawer.getByRole("button", { name: "Edit this item" }).click();
       const title = page.locator(`[id="${itemId}"]`).getByRole("textbox", { name: "title" });
@@ -633,7 +634,7 @@ test.describe("on the desk", () => {
 
       await page.goto(`/home?item=${itemId}`);
       const drawer = page.locator(`[id="${itemId}-view"]`);
-      await expect(drawer).toBeVisible({ timeout: 20_000 });
+      await expect(drawer).toBeVisible({ timeout: SETTLE });
       await drawer.getByRole("group", { name: `Actions for ${TITLE}` })
         .getByRole("button", { name: `Complete ${TITLE}` }).click();
       const completing = drawer.getByRole("group", { name: `Completing ${TITLE}` });
@@ -677,7 +678,7 @@ test.describe("on the desk", () => {
 
     await page.goto(`/home?item=${itemId}`);
     const drawer = page.locator(`[id="${itemId}-view"]`);
-    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    await expect(drawer).toBeVisible({ timeout: SETTLE });
     await drawer.getByRole("group", { name: `Actions for ${TITLE}` })
       .getByRole("button", { name: `Complete ${TITLE}` }).click();
     const completing = drawer.getByRole("group", { name: `Completing ${TITLE}` });
@@ -723,11 +724,11 @@ test.describe("on the desk", () => {
 
       await page.goto(`/home?item=${itemId}`);
       const drawer = page.locator(`[id="${itemId}-view"]`);
-      await expect(drawer).toBeVisible({ timeout: 20_000 });
+      await expect(drawer).toBeVisible({ timeout: SETTLE });
       await drawer.getByRole("button", { name: "Open undo-refused.pdf" }).click();
       const card = page.getByRole("dialog", { name: /^undo-refused\.pdf/ });
       const readButton = card.getByRole("button", { name: "Read undo-refused.pdf" });
-      await expect(readButton).toBeEnabled({ timeout: 20_000 });
+      await expect(readButton).toBeEnabled({ timeout: SETTLE });
 
       await removeThenFailTheUndo(page, readButton, doc.id, "undo-refused.pdf");
 
@@ -752,18 +753,18 @@ test.describe("on the phone", () => {
 
     await page.goto(`/home?item=${itemId}`);
     const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
     /* the foot row, as the desk's */
     await expect(row.getByRole("group", { name: `Actions for ${TITLE}` }).getByRole("button"))
       .toHaveText(["snooze", "complete", "attach a document", "retire"]);
     await expect(row.getByRole("link", { name: /^Open / })).toHaveCount(0);
 
     const paper = row.getByRole("button", { name: "Open drawer-proving.pdf" });
-    await expect(paper).toBeVisible({ timeout: 20_000 });
+    await expect(paper).toBeVisible({ timeout: SETTLE });
     await paper.tap();
     const sheet = page.getByRole("dialog", { name: /^drawer-proving\.pdf/ });
     await expect(sheet).toBeVisible();
-    await expect(sheet.getByRole("button", { name: "Read drawer-proving.pdf" })).toBeEnabled({ timeout: 20_000 });
+    await expect(sheet.getByRole("button", { name: "Read drawer-proving.pdf" })).toBeEnabled({ timeout: SETTLE });
     /* the bottom sheet: fixed to the foot of the screen */
     const box = await sheet.boundingBox();
     const height = page.viewportSize()?.height ?? 0;
@@ -804,8 +805,8 @@ test.describe("on the phone", () => {
 
     await page.goto(`/home?item=${itemId}`);
     const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
-    await expect(row.getByRole("heading", { name: /^documents$/i })).toBeVisible({ timeout: 20_000 });
+    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
+    await expect(row.getByRole("heading", { name: /^documents$/i })).toBeVisible({ timeout: SETTLE });
     await expect(row.getByRole("button", { name: "Open archived-proving.pdf" })).toBeVisible();
   });
 
@@ -819,7 +820,7 @@ test.describe("on the phone", () => {
 
     await page.goto(`/home?item=${itemId}`);
     const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
     /* the item starts with no papers: nothing to list, no heading */
     await expect(row.getByRole("heading", { name: /^documents$/i })).toHaveCount(0);
     await expect(row.getByRole("button", { name: /^Open .*\.pdf$/ })).toHaveCount(0);
@@ -831,7 +832,7 @@ test.describe("on the phone", () => {
     });
 
     await expect(page.getByRole("status").filter({ hasText: "attached-late.pdf attached" }))
-      .toHaveText("attached-late.pdf attached", { timeout: 20_000 });
+      .toHaveText("attached-late.pdf attached", { timeout: SETTLE });
     /* the row has stayed open throughout: no close, no reopen */
     await expect(row).toHaveAttribute("data-open", "");
     await expect(row.getByRole("heading", { name: /^documents$/i })).toBeVisible({ timeout: 10_000 });
@@ -850,7 +851,7 @@ test.describe("on the phone", () => {
 
       await page.goto(`/home?item=${itemId}`);
       const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-      await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+      await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
       const typed = "Drawer proving item, renamed";
       await row.getByRole("button", { name: "Edit this item" }).tap();
       const title = row.getByRole("textbox", { name: "title" });
@@ -883,7 +884,7 @@ test.describe("on the phone", () => {
 
       await page.goto(`/home?item=${itemId}`);
       const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-      await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+      await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
       await row.getByRole("group", { name: `Actions for ${TITLE}` })
         .getByRole("button", { name: `Complete ${TITLE}` }).tap();
       const completing = row.getByRole("group", { name: `Completing ${TITLE}` });
@@ -921,7 +922,7 @@ test.describe("on the phone", () => {
 
     await page.goto(`/home?item=${itemId}`);
     const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
     await row.getByRole("group", { name: `Actions for ${TITLE}` })
       .getByRole("button", { name: `Complete ${TITLE}` }).tap();
     const completing = row.getByRole("group", { name: `Completing ${TITLE}` });
@@ -965,11 +966,11 @@ test.describe("on the phone", () => {
 
       await page.goto(`/home?item=${itemId}`);
       const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-      await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+      await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
       await row.getByRole("button", { name: "Open undo-refused.pdf" }).tap();
       const sheet = page.getByRole("dialog", { name: /^undo-refused\.pdf/ });
       const readButton = sheet.getByRole("button", { name: "Read undo-refused.pdf" });
-      await expect(readButton).toBeEnabled({ timeout: 20_000 });
+      await expect(readButton).toBeEnabled({ timeout: SETTLE });
 
       await removeThenFailTheUndo(page, readButton, doc.id, "undo-refused.pdf");
 

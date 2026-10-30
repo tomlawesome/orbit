@@ -1,4 +1,5 @@
 import type { BrowserContext, Page } from "@playwright/test";
+import { SETTLE } from "./settle";
 
 /**
  * #840: wait for the arrival at `/` to finish deciding before doing anything
@@ -24,7 +25,7 @@ import type { BrowserContext, Page } from "@playwright/test";
  * account already has a household never meets the arrival, and this returns
  * as soon as that page is up.
  */
-export async function settleArrival(page: Page, timeout = 20_000, returnTo?: string) {
+export async function settleArrival(page: Page, timeout = SETTLE, returnTo?: string) {
   /* #1233: a sign-in that asked for somewhere other than /home lands there
      instead, and that landing is as much "settled" as /home is. */
   const asked = returnTo ? new URL(returnTo, "http://orbit.invalid").pathname : null;

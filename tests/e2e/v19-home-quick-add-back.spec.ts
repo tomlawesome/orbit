@@ -6,6 +6,7 @@ import { renderedFrames } from "./support/frames";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
+import { SETTLE } from "./support/settle";
 
 resetDatabaseBetweenSpecFiles();
 
@@ -76,7 +77,7 @@ function drawerControl(page: Page, label: RegExp) {
 
 async function addIsOpen(page: Page, why: string) {
   await expect(page, why).toHaveURL(/\/create(\?.*)?$/);
-  await page.locator("#card[data-ready]").waitFor({ state: "attached", timeout: 20_000 });
+  await page.locator("#card[data-ready]").waitFor({ state: "attached", timeout: SETTLE });
 }
 
 /** Any "Discard this entry?" asking, native or drawn in the page. */

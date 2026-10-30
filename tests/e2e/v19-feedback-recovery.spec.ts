@@ -10,6 +10,7 @@ import {
   signIn,
   type Household,
 } from "./support/signed-in";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
@@ -387,8 +388,6 @@ const householdDeletion: Journey = {
 
 const JOURNEYS = [createOffline, drawerApproval, inboxApproval, householdDeletion];
 
-/* #1447: UI settling is waited for, never timed -- 20 s, far beyond what any reader would feel. */
-const SETTLE = 20_000;
 
 for (const journey of JOURNEYS) {
   test(`${journey.name} is announced, and the act can be repeated by keyboard`, async ({ page }) => {

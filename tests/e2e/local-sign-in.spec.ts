@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { claimCodeFromLog, stackLog } from "./support/bootstrap";
 import { bodyClassSeen, witnessBodyClasses } from "./support/arrival";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -316,7 +317,7 @@ test("no sign-in card sits over the climb, or the drawer it lands on", async ({ 
   await page.locator("#idbtn").click();
 
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
-  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: SETTLE }).toBe(true);
   await expect(page.locator(".nf")).toBeAttached();
   /* mid-climb */
   await expectNoCardLayer(page, "the climb");
@@ -388,7 +389,7 @@ test("no sign-in card sits over an invited reader's landing", async ({ page }) =
     });
   });
   await page.goto("/");
-  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: SETTLE }).toBe(true);
   await expect(page.locator(".nf")).toBeAttached();
   await expectNoCardLayer(page, "the invited climb");
 });

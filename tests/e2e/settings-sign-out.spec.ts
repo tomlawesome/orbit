@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { seedHousehold, signIn, type Household } from "./support/signed-in";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { SETTLE } from "./support/settle";
 
 resetDatabaseBetweenSpecFiles();
 
@@ -143,7 +144,7 @@ async function pressArmed(control: Locator) {
   await control.click();
   await expect.poll(
     () => control.evaluate((el) => el.classList.contains("armed") || /^\s*tap again/iu.test(el.textContent ?? "")),
-    { message: "the first press armed the control", timeout: 20_000 },
+    { message: "the first press armed the control", timeout: SETTLE },
   ).toBe(true);
   await control.click();
 }

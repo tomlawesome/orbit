@@ -5,6 +5,7 @@ import { ensureWorkerAdministrator, workerAccount } from "./support/worker-ident
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { bodyClassAdds, bodyClassOrder, bodyClassSeen, bodyClassesTogether, witnessBodyClasses } from "./support/arrival";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -211,7 +212,7 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   /* THE CLIMB — the ratified launch, whole, on the authenticated return.
      Asked of the witness, not of <body> at the moment of asking: the warp is
      a 4.6 s window a stalled poll can miss entirely (#1233). */
-  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: SETTLE }).toBe(true);
   /* #1263: once. */
   expect(await bodyClassAdds(page, "showwarp")).toBe(1);
   /* "while it flies, the question has not arrived" is an ORDER, checked below
@@ -322,7 +323,7 @@ test("naming your own system: one climb, the drawer, the refusal, then home with
   await witnessBodyClasses(page);
   await signInThroughTheDoor(page, workerAccount("newcomer"));
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
-  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: SETTLE }).toBe(true);
   /* the card is in the document, transparent, for the whole climb; the
      question has arrived when `belong` does (13.8s in, after the count) */
   await expect(page.locator("body")).toHaveClass(/\bbelong\b/, { timeout: 40_000 });
