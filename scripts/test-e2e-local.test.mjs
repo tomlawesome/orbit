@@ -97,6 +97,48 @@ describe("test-e2e-local.sh Playwright argument assembly", () => {
     expect(args).toEqual(["--project=desktop-chromium"]);
   });
 
+  // #1561: repeated --project flags used to keep only the last one.
+  it("passes every --project when several are given, in order", () => {
+    const args = dryRunArgs([
+      "--project",
+      "desktop-chromium",
+      "--project",
+      "mobile-chromium",
+    ]);
+    expect(args).toEqual(["--project=desktop-chromium", "--project=mobile-chromium"]);
+  });
+
+  it("passes every --project in the order given, not sorted", () => {
+    const args = dryRunArgs([
+      "--project",
+      "mobile-chromium",
+      "--project",
+      "desktop-chromium",
+    ]);
+    expect(args).toEqual(["--project=mobile-chromium", "--project=desktop-chromium"]);
+  });
+
+  it("passes every --project and still keeps the spec out of their values", () => {
+    const args = dryRunArgs([
+      "--project",
+      "desktop-chromium",
+      "--spec",
+      "tests/e2e/v19-hit-routing.spec.ts",
+      "--project",
+      "mobile-chromium",
+    ]);
+    expect(args).toEqual([
+      "--project=desktop-chromium",
+      "--project=mobile-chromium",
+      "tests/e2e/v19-hit-routing.spec.ts",
+    ]);
+  });
+
+  it("passes a single --project exactly once", () => {
+    const args = dryRunArgs(["--project", "mobile-chromium"]);
+    expect(args.filter((arg) => arg.startsWith("--project"))).toEqual(["--project=mobile-chromium"]);
+  });
+
   it("passes --spec alone", () => {
     const args = dryRunArgs(["--spec", "tests/e2e/v19-hit-routing.spec.ts"]);
     expect(args).toEqual(["tests/e2e/v19-hit-routing.spec.ts"]);
