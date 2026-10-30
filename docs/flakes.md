@@ -336,3 +336,7 @@ timeout on this one case rather than a global raise.
 - 2026-10-21 · b331397f (!1074, installer-only change) · pipeline 2834 / smoke_local_only (job 38082) · `the chooser: the frame sampler never saw the newcomer's frame` (0 frames, line 275). 77 others passed in 1.9 m. Job retried as 38096: green. The spec's timing was reworked afterwards under #1447 (33b94d9e). First sighting.
 
 
+
+## settings-text-size-tab-stop.test.mjs — timed out at the 5 s default under load
+
+- 2026-10-30 · ee51542d (#1396's build on `fix/1396-approve-retry`; nothing near settings or text size) · local `scripts/test-backend.sh` unit tests in shard 1, worktree `1396-approve-retry`, other agents' Docker stacks running on the shared host · timed out at 5 s; passed alone in 1.7 s and on the shard's rerun. Wall-clock-under-load shape, as #869's sightings above. First sighting.
