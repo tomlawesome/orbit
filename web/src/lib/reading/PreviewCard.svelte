@@ -83,6 +83,9 @@
   let restoring = $state(false);
   /** @type {string | null} */
   let problem = $state(null);
+  /* #1501: the page last turned to could not be loaded (the reader shows
+     that in place of its picture). */
+  let turnLost = $state(false);
   let readerOpen = $state(false);
   /** @type {HTMLElement | undefined} */
   let card = $state();
@@ -135,6 +138,7 @@
     gone = false;
     restoring = false;
     problem = null;
+    turnLost = false;
     src = "";
     pageNo = 1;
     shownPage = 1;
@@ -156,6 +160,10 @@
 
   /** Page `n`, through loadStagedPage: the response says how many pages
       there are (#1300). The page on show stays up until the next arrives.
+      The card's fetch is the only one (#1501): the reader draws what it
+      lands, so a turn costs one server render, wherever it was made.
+      Once a page is up, a failure is that turn's own (missed), never the
+      whole paper's.
       @param {PreviewDoc} paper @param {number} n @param {number} mine */
   function loadPage(paper, n, mine) {
     abort?.abort();
@@ -170,17 +178,23 @@
         revoke();
         src = result.url;
         shownPage = n;
+        turnLost = false;
         if (result.pageCount !== null) pageCount = result.pageCount;
       } else if (result.kind === "gone" && paper.staged) {
         clearTimeout(loadTimer);
         gone = true;
-      } else if (n > 1) problem = UNDRAWN_PAGE;
+      } else if (src) missed();
       else failed();
     }).catch((error) => {
       if (mine !== token || (error instanceof DOMException && error.name === "AbortError")) return;
-      if (n > 1) problem = UNDRAWN_PAGE;
+      if (src) missed();
       else failed();
     });
+  }
+
+  function missed() {
+    problem = UNDRAWN_PAGE;
+    turnLost = true;
   }
 
   /** The pager's arrows, the keys, and the reader's turns all land here. @param {number} n */
@@ -188,6 +202,7 @@
     if (!shown || n === pageNo) return;
     pageNo = n;
     problem = null;
+    turnLost = false;
     loadPage(shown, n, token);
   }
 
@@ -450,8 +465,11 @@
 </div>
 
 {#if shown && showing}
+  <!-- #1501: the reader draws the card's own page and count; a turn there
+       calls turn() here, the one fetch. -->
   <Reader bind:open={readerOpen} doc={shown} {itemTitle} onremove={remove}
-          staged={Boolean(shown.staged)} pageHref={shown.staged ? shown.previewHref : ""}
+          staged={Boolean(shown.staged)}
+          picture={{ src, page: shownPage, count: pageCount, failed: turnLost }}
           bind:pageNo={() => pageNo, turn} />
 {/if}
 

@@ -110,7 +110,7 @@ function readyReceipt(householdId: string) {
     canApprove: true,
     canDiscard: true,
     message: "Ready for your review.",
-    proposal: { title: "Reviewed intake 1786823446152", provider: "Reviewed Cover", costMinor: 12550, currency: "GBP", dueDate: "2031-01-10", scheduleKind: "renewal", recurrenceMonths: 12 },
+    proposal: { title: "Reviewed intake 1786823446152", provider: "Reviewed Cover", costMinor: 12550, currency: "GBP", dueDate: "2031-01-10", scheduleKind: "renewal", kind: "renewal", recurrenceMonths: 12 },
     fieldEvidence: { title: { source: "parser", confidence: "medium" }, costMinor: { source: "parser", confidence: "low" } },
     // #1155: the list answers the same named shape the detail route does, so
     // the belt's staged paper (and the inbox chip) has a page to press into.
@@ -309,7 +309,7 @@ test("amend then accept from home's drawer", async ({ page }) => {
       sectionId,
       action: "create_separate",
       item: { title: "Home insurance, corrected", provider: "Reviewed Cover", currency: "GBP",
-        dueDate: "2031-01-10", scheduleKind: "renewal", recurrenceMonths: 12 },
+        dueDate: "2031-01-10", scheduleKind: "renewal", kind: "renewal", recurrenceMonths: 12 },
       attachmentIds: [attachmentId],
     });
     // The drawer's rows send the cost as typed, for the engine to read (ADR-0034, #1325).

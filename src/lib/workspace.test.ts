@@ -129,6 +129,46 @@ describe("household workspace", () => {
       expect(workspaceCommandSchema.safeParse(command).success).toBe(false);
     });
 
+    describe("a client never decides the item's kind (#1346)", () => {
+      const at = "2026-07-25T10:00:00.000Z";
+      const renewal = (item: Record<string, unknown> = {}) => ({
+        type: "item.upsert",
+        householdId: "our-home",
+        kind: "renewal",
+        item: { id: "boiler", sectionId: "home", title: "Boiler", currency: "GBP", dueDate: "2026-11-02", recurrenceMonths: 12, ...item },
+        activity: { id: `act-${String(item.version ?? 1)}`, itemId: "boiler", occurredAt: at },
+      });
+      /* The pure reducer is gone (#1347), so the command schema is the only
+         door a client's item reaches the engine through: a kind on the item
+         is refused there, or dropped before anything reads it. */
+      const parsedKind = (input: unknown) => {
+        try {
+          return { refused: false, kind: (parseWorkspaceCommand(input) as { item: { kind?: unknown } }).item.kind };
+        } catch {
+          return { refused: true, kind: undefined }; // refused as invalid input, which is allowed
+        }
+      };
+
+      it.each(["document", "suggestion", "inspection", "service", "nonsense", null])(
+        "a create that sends kind %j on the item is refused or the kind is dropped",
+        (sent) => {
+          expect(parsedKind(renewal()).refused).toBe(false);
+          expect(parsedKind(renewal({ kind: sent })).kind).toBeUndefined();
+        },
+      );
+
+      it("an update that sends a disagreeing kind is refused or the kind is dropped", () => {
+        expect(parsedKind(renewal({ version: 2, title: "Boiler plan" })).refused).toBe(false);
+        expect(parsedKind(renewal({ version: 2, title: "Boiler plan", kind: "document" })).kind).toBeUndefined();
+      });
+
+      it("the command schema does not pass a client's kind through on the item", () => {
+        const parsed = workspaceCommandSchema.safeParse(renewal({ kind: "document" }));
+        if (!parsed.success) return;
+        expect((parsed.data as { item: { kind?: unknown } }).item.kind).toBeUndefined();
+      });
+    });
+
     it("refuses a kind sent on a completion or a status change", () => {
       expect(() => parseWorkspaceCommand(status("cancelled", { kind: "cancelled" }))).toThrow(/does not send its activity's kind/);
       expect(() => parseWorkspaceCommand({

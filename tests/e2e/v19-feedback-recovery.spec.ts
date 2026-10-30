@@ -201,7 +201,7 @@ async function interceptFailingMail(page: Page, household: Household) {
     canApprove: true,
     canDiscard: true,
     message: "Ready for your review.",
-    proposal: { title, provider: "Synthetic Cover", costMinor: 9900, currency: "GBP", dueDate: "2031-03-01", scheduleKind: "renewal", recurrenceMonths: 12 },
+    proposal: { title, provider: "Synthetic Cover", costMinor: 9900, currency: "GBP", dueDate: "2031-03-01", scheduleKind: "renewal", kind: "renewal", recurrenceMonths: 12 },
     fieldEvidence: { title: { source: "parser", confidence: "medium" } },
     attachments: [attachment],
   };

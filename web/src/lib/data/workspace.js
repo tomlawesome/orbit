@@ -47,6 +47,7 @@
  * @property {?string} [dueDate]        calendar date, YYYY-MM-DD
  * @property {?string} [snoozedUntil]   calendar date, YYYY-MM-DD
  * @property {?string} [scheduleKind]   scheduleKinds
+ * @property {?string} [kind]           itemKinds: the engine's reading of subtype and schedule (read-only)
  * @property {?number} [recurrenceMonths]
  * @property {?number[]} [reminderDays]
  * @property {?{reference?: string, notes?: string, title?: string, provider?: string, costMinor?: string}} [metadataStatus]
@@ -210,6 +211,7 @@
  * @property {string} [provider]
  * @property {string} [reference]
  * @property {string} [subtype]
+ * @property {string} [kind]            the engine's reading of subtype and schedule (item-kind.ts)
  * @property {string} [notes]
  * @property {number} [costMinor]
  * @property {string} [currency]
