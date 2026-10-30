@@ -78,7 +78,7 @@ describe("launcher install compatibility gate", () => {
     // #1560: as the unprivileged orbit-ci, because launcher v0.4.3 refuses root.
     expect(job).toContain("useradd --create-home --shell /bin/bash --groups docker orbit-ci");
     expect(job).toContain(
-      "(cd .orbit-launcher-src && setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env HOME=/home/orbit-ci go test -tags live -count=1 -v -timeout 30m ./test/live/...)",
+      "(cd .orbit-launcher-src && setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env -u CI_JOB_TOKEN -u CI_BUILD_TOKEN -u CI_REGISTRY_PASSWORD -u CI_DEPENDENCY_PROXY_PASSWORD -u CI_REPOSITORY_URL HOME=/home/orbit-ci go test -tags live -count=1 -v -timeout 30m ./test/live/...)",
     );
   });
 

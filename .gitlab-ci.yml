@@ -3593,8 +3593,9 @@ launcher_install_compat:
       collector=$!
       status=0
       # #1560: as orbit-ci, with its own home for the Go caches and Docker's
-      # client config. setpriv keeps the exports above, PATH included.
-      (cd .orbit-launcher-src && setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env HOME=/home/orbit-ci go test -tags live -count=1 -v -timeout 30m ./test/live/...) || status=$?
+      # client config. setpriv keeps the exports above, PATH included; the job
+      # token and its aliases are dropped, as the launcher's live legs do.
+      (cd .orbit-launcher-src && setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env -u CI_JOB_TOKEN -u CI_BUILD_TOKEN -u CI_REGISTRY_PASSWORD -u CI_DEPENDENCY_PROXY_PASSWORD -u CI_REPOSITORY_URL HOME=/home/orbit-ci go test -tags live -count=1 -v -timeout 30m ./test/live/...) || status=$?
       kill "$collector" 2>/dev/null || :
       wait "$collector" 2>/dev/null || :
       # Not `exit "$status"`: the reuse evidence below is the job's last line
