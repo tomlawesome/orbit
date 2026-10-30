@@ -305,3 +305,32 @@ Owner decisions 5a and 6a (2026-10-15): the ceilings below, shipped in v0.3.
    is the renderer child, not the server. `/bin/sh` and `/proc` become
    requirements; both are in the image, and a host without `/proc` (macOS
    development) loses the watchdog, which the self-check reports.
+
+## Amendment, 2026-10-29: the page-render budget is 30 s (#1549)
+
+Owner decision 6a on #1549 (2026-10-29). `DOCUMENT_PREVIEW_RENDER_BUDGET_MS`
+moves from ten seconds to **30 s**, replacing the figure in item 2 of the
+first amendment (and the ten-second budget its last sentence mentions).
+
+1. **Why.** A 300 dpi A4 scan (a 2480x3508 JPEG in a 755 kB PDF) costs about
+   7 s to render on the development host (7.2 to 8.8 s over four runs), nearly
+   all of it pdf.js's JavaScript JPEG decoder, which the parser options this
+   ADR and ADR-0033 choose over the native decoder; turning on WASM made no
+   difference. Ten seconds left 1.4x headroom, so ordinary household scans
+   failed under load with "could not draw a picture of this document"
+   (`processing_interrupted`, at 10.65 s and 11.0 s in CI; at 11.3 s with the
+   test pinned to two busy CPUs, where it passes in 23.5 s with the budget
+   lifted). Thirty seconds is about 4x the measured cost.
+2. **What follows.** The child's `RLIMIT_CPU` is start-up + wall clock + 5 s
+   as before, so it is now 40 s. The upload-time structure check keeps its
+   own 5 s budget; nothing there moves, and a preview was already looser
+   than upload's.
+3. **Cost accepted.** A hostile file can hold one of the two render slots for
+   up to 30 s instead of 10 s. The memory ceiling, the two-slot limit and the
+   empty environment are unchanged.
+4. **Not chosen.** Scaling the budget with the page's pixel count, and a
+   faster decoder (which reopens this ADR's security choice).
+5. **Test.** The 300 dpi scan test injects its own budget with
+   `setDocumentPreviewRenderBudgetForTests`, as the bomb tests do, so it no
+   longer races the production clock; a separate test pins the production
+   default at 30 s.

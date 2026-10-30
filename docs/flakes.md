@@ -446,6 +446,7 @@ page's URL at failure, which this one has to infer.
 
 ## preview.test.ts:760 "renderDocumentPagePreview > the page is drawn in the sandbox, never on the server's own thread (#1427) > draws a 300 dpi A4 scan to a PNG of the page's shape" (#1549)
 
+- Cause found: the 10 s render budget against a ~7 s CPU-bound JPEG decode of a 300 dpi scan; budget raised to 30 s (ADR-0038 amendment) and the test injects its own budget. Fixed on fix/flake-1549-preview-render.
 - 2026-10-20 · 0469e455 (the accepted v0.3.0 commit, unchanged since preview pipeline 2677 passed every job first time) · pipeline 2774 / fast (job 37576), the stable-promotion run on `main`, with the !1078 pipeline and five local agent stacks on the same host · `Orbit could not draw a picture of this document` from the sandboxed renderer, in a 449 s `fast` run. Retried as job 37634. First sighting.
 - 2026-10-22 · 2b120e89 (signing-image re-pin and cosign bump only since the green bea1293c run; nothing near documents) · local `scripts/test-backend.sh`, worktree `v031-parts`, while a base-image rebuild ran on the same host · same message, in a 919 s run; the file alone passed at once (40.9 s with the test below). Second sighting.
 - 2026-10-28 · 6565ed47 (!1109, CI config only; the same app passed `fast` in pipeline 3116) · pipeline 3123 / `fast` (job 41139), another project's jobs filling both shared runners · same message. Third sighting: #1549.
