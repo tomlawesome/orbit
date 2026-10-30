@@ -389,7 +389,17 @@ describe("skipped ids are loaded once per rotation, not twice per cycle (#1536 D
     expect(progress.stagingObjectsSkipped).toBe(1);
   });
 
-  it("a rotation that takes many cycles loads each table's ids at most once", async () => {
+  it("the report's own load counts exactly one id load per table (the counter sees real loads)", async () => {
+    const { keys } = await seedOlderKeyObjects();
+    const loads = watchIdLoads();
+
+    await heldObjectsOnOlderKey(keys);
+
+    expect(loads.count("imap_ingestion_attachments")).toBe(1);
+    expect(loads.count("document_staging_objects")).toBe(1);
+  });
+
+  it("a rotation that takes many cycles loads no ids (the report loads them, once, afterwards)", async () => {
     const { household, keys } = await seedOlderKeyObjects();
     const current = getDocumentConfig();
     // Four documents at one per cycle: at least four cycles, so a per-cycle
@@ -400,7 +410,7 @@ describe("skipped ids are loaded once per rotation, not twice per cycle (#1536 D
     const after = await runKekRotationToCompletion(keys, 1);
 
     expect(rotationComplete(after)).toBe(true);
-    expect(loads.count("imap_ingestion_attachments")).toBeLessThanOrEqual(1);
-    expect(loads.count("document_staging_objects")).toBeLessThanOrEqual(1);
+    expect(loads.count("imap_ingestion_attachments")).toBe(0);
+    expect(loads.count("document_staging_objects")).toBe(0);
   });
 });
