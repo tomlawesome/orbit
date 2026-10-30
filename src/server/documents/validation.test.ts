@@ -7,6 +7,7 @@ import { LocalDocumentStorage } from "./storage";
 import {
   classifyDocumentStructure,
   detectDocumentMediaType,
+  hasPdfIndexBudget,
   normalizedDocumentFilename,
   PDF_STRUCTURE_PARSER_OPTIONS,
   type PdfDocumentParameters,
@@ -118,12 +119,38 @@ describe("structural document classification", () => {
       await expect(classifyDocumentStructure(xrefStmChainPdf({ cycle: true }), "application/pdf")).resolves.toBe("supported_structure");
     });
 
-    it("accepts a chain of 32 classic tables linked by /Prev (the section cap is not reached)", async () => {
-      await expect(classifyDocumentStructure(classicChainPdf({ sections: 32 }), "application/pdf")).resolves.toBe("supported_structure");
+    // #1397 left the new section limit to be decided from real files. Its own reasoning gives the rule:
+    // the entry cap (1,250,000) already bounds the checking work, so the section cap only needs to sit
+    // well above what repeated Acrobat saves and signatures produce. Chosen: 256. Change it here only.
+    const SECTION_CAP = 256;
+
+    it("accepts a chain of 33 classic tables, one past the old limit of 32 (#1397)", async () => {
+      await expect(classifyDocumentStructure(classicChainPdf({ sections: 33 }), "application/pdf")).resolves.toBe("supported_structure");
     });
 
-    it("refuses a chain of 33 classic tables linked by /Prev (the section cap)", async () => {
-      await expect(classifyDocumentStructure(classicChainPdf({ sections: 33 }), "application/pdf")).resolves.toBe("unsupported_structure");
+    it("accepts a chain of 100 classic tables, a file saved incrementally many times (#1397)", async () => {
+      await expect(classifyDocumentStructure(classicChainPdf({ sections: 100 }), "application/pdf")).resolves.toBe("supported_structure");
+    });
+
+    it(`accepts a chain of ${SECTION_CAP} classic tables (the section cap is not reached)`, async () => {
+      await expect(classifyDocumentStructure(classicChainPdf({ sections: SECTION_CAP }), "application/pdf")).resolves.toBe("supported_structure");
+    });
+
+    it(`refuses a chain of ${SECTION_CAP + 1} classic tables linked by /Prev (the section cap)`, async () => {
+      await expect(classifyDocumentStructure(classicChainPdf({ sections: SECTION_CAP + 1 }), "application/pdf")).resolves.toBe("unsupported_structure");
+    });
+
+    it("reports a many-section chain as within budget, and one past the cap as not", () => {
+      expect(hasPdfIndexBudget(classicChainPdf({ sections: 33 }))).toBe(true);
+      expect(hasPdfIndexBudget(classicChainPdf({ sections: SECTION_CAP }))).toBe(true);
+      expect(hasPdfIndexBudget(classicChainPdf({ sections: SECTION_CAP + 1 }))).toBe(false);
+    });
+
+    it("still refuses a many-section chain whose declared counts sum past the entry cap (#1397)", async () => {
+      // 40 sections is within the section cap; 40 x 40,000 = 1,600,000 declared entries is over 1,250,000.
+      await expect(classifyDocumentStructure(classicChainPdf({ sections: 40, countEach: 40_000 }), "application/pdf"))
+        .resolves.toBe("unsupported_structure");
+      expect(hasPdfIndexBudget(classicChainPdf({ sections: 40, countEach: 40_000 }))).toBe(false);
     });
 
     it("refuses two chained classic tables whose declared counts are each under the entry cap but sum past it", async () => {

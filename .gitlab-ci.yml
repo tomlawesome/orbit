@@ -37,6 +37,27 @@
 # stay on the shared runner's `big` or `light` lane (#830), so the one
 # privileged runner is not the queue for the whole pipeline.
 
+# The shared check for personal details (ai/agent-infra#32, #1562): one set of
+# rules for every project, kept on the agent host and mounted read-only into
+# job containers by the runner host (/etc/private-details/rules.toml). It
+# looks at every commit's added lines, message, author and committer for the
+# owner's surname, real host logins in home paths, private network addresses
+# and AI credit in commits. No project carries its own copy of the rules; this
+# one's earlier guard of its own, with a job and a test, is retired (#1562).
+# The job is defined by the template; its stage, runner, image pin and start
+# point are set here, at the `private-details` job below, and what is allowed
+# on purpose is in .private-details-allow.toml.
+#
+# The ref is the commit the tag names, not the tag: a tag can be deleted and
+# created again on other code by a Maintainer of ai/agent-infra, and this
+# template is merged into every pipeline here, including the privileged
+# runner's. A new private-details tag is adopted by moving this commit and the
+# comment on the same line together.
+include:
+  - project: ai/agent-infra
+    ref: c93bc8e78bf5807b8f2c2f5d7c13784f4a54746d  # private-details/v3
+    file: scripts/private-details/ci-template.yml
+
 stages:
   - classify
   - fast
@@ -430,17 +451,17 @@ variables:
   # request into `main`, so this never re-checks the branch.
   #
   #   ignore_policy  .gitleaksignore, supply-chain/licence-policy.yml
-  #                  -> gitleaks, licence_policy, names_guard,
+  #                  -> gitleaks, licence_policy, private-details,
   #                     supply_chain_source
   #   ci             .gitlab-ci.yml, scripts/ci/, the classifier and the two
   #                  tests that read this file
-  #                  -> fast, fast_docker, gitleaks, names_guard,
+  #                  -> fast, fast_docker, gitleaks, private-details,
   #                     supply_chain_source
   #
-  # `gitleaks` is in both and needs no call: it starts before `classify` and so
-  # never sees ORBIT_LANE. Membership is unconditional -- a member runs whether
-  # or not its own axis would also have asked for it, which is the point of a
-  # lane naming the job. `fast_docker` joined the `ci` lane's membership when
+  # `gitleaks` and `private-details` are in both and need no call: they start
+  # before `classify` and so never see ORBIT_LANE. Membership is
+  # unconditional -- a member runs whether or not its own axis would also have
+  # asked for it, which is the point of a lane naming the job. `fast_docker` joined the `ci` lane's membership when
   # #950 split it out of `fast`: both are the pipeline-definition change's own
   # coverage, same as before the split.
   orbit_lane_admits() {
@@ -448,8 +469,8 @@ variables:
       nightly_idle:*) echo "skipped: dev has not moved since the last nightly browser run (#1412)"; return 1 ;;
       nightly_yield:*) echo "skipped: a pipeline on preview or main is running; the nightly yields to it (#1546)"; return 1 ;;
       full:*) return 0 ;;
-      ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:names_guard | ignore_policy:supply_chain_source) return 0 ;;
-      ci:fast | ci:fast_docker | ci:gitleaks | ci:names_guard | ci:supply_chain_source) return 0 ;;
+      ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:private-details | ignore_policy:supply_chain_source) return 0 ;;
+      ci:fast | ci:fast_docker | ci:gitleaks | ci:private-details | ci:supply_chain_source) return 0 ;;
     esac
     echo "skipped: the ${ORBIT_LANE:-full} lane does not run ${1} (#889)"
     return 1
@@ -1321,34 +1342,6 @@ fast_docker:
     expire_in: 14 days
     when: on_success
 
-# The names guard (#1408) is its own job because it reads every tracked file,
-# docs and tests included, so it cannot share `fast`'s narrowed key: its
-# job-inputs.json entry denies nothing (ADR-0028 section 6). It needs only
-# `node` and `git`, so it runs in seconds with no `pnpm install`.
-names_guard:
-  stage: fast
-  extends: .node
-  timeout: 5m
-  rules:
-    - *not_on_main_push
-    - *not_scheduled
-    - when: on_success
-  needs:
-    - job: classify
-      artifacts: true
-  script:
-    - *reach_helpers
-    - orbit_lane_admits names_guard || exit 0
-    - *reuse_gate
-    - node --test tests/unit/no-real-names.test.mjs
-    - *reuse_evidence
-  artifacts:
-    name: orbit-names-guard
-    paths:
-      - ci-evidence/
-    expire_in: 14 days
-    when: on_success
-
 # Blocking, like the old workflow's job: Orbit pins its own base image, so a stale
 # base is a fixable condition rather than one to wait out.
 #
@@ -1804,6 +1797,41 @@ gitleaks:
       - .orbit-gitleaks/report.json
     expire_in: 14 days
     when: always
+
+# The template's job (see the `include:` at the top), in this pipeline's own
+# stage and on the shared light runner, starting at once like gitleaks and so
+# on every pipeline that has any job, in every lane (#1562). It is blocking:
+# no `allow_failure`. The template names `test`, which this file does not
+# have, so the stage is restated; `rules:` follow gitleaks, so a push to `main`
+# (promote_stable only, #1546) and a schedule do not run it.
+#
+# The template names the image by tag only, and anyone who could repoint that
+# tag would run their image with the checkout, the mounted rules and the job
+# token. So it is pinned here to the tag's OCI index digest, as every other
+# image in this file is. The tag stays the gitleaks release GITLEAKS_VERSION
+# names. Renovate does not watch this copy yet: renovate.json would need a
+# `registryAliases` entry for $CI_IMAGE_CACHE_GHCR first.
+#
+# The scan starts after PRIVATE_DETAILS_SINCE, the last commit with a message,
+# author or committer the allowlist cannot cover: before it, commit messages
+# carry AI co-author credit from before the ban (#1562). Paths after it are
+# checked in full; what is allowed on purpose, by rule and path, is in
+# .private-details-allow.toml. Rewriting the history, then dropping this
+# variable, is the owner's call.
+private-details:
+  stage: policy
+  rules:
+    - *not_on_main_push
+    - *not_scheduled
+    - when: on_success
+  needs: []
+  tags: [light]
+  image:
+    pull_policy: if-not-present
+    name: $CI_IMAGE_CACHE_GHCR/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+    entrypoint: [""]
+  variables:
+    PRIVATE_DETAILS_SINCE: f40e25eafc55adced720cfaa49a68bf84088f814
 
 # The flake log acts (#1553, agent-infra#30): a flake at three sightings with no
 # issue, or still in the merge gate, fails the pipeline. The quarantine list is
@@ -3926,13 +3954,24 @@ publish_channel:
 
 # Promotes a tested `preview` digest to a stable release (#821), the same
 # thing .github/workflows/promote-container.yml did before GitLab was the
-# source of truth: an operator supplies the accepted PREVIEW_DIGEST (not a
-# typed version -- the version comes from the image itself, verified the same
-# way that workflow always verified it) and this job does the rest. Manual
-# only, and only reachable from a pipeline on `main` or a pipeline you start
-# yourself (`web`/`api`) carrying a `PREVIEW_DIGEST` variable -- there is no
-# automatic trigger, because accepting a release is a human decision this
-# pipeline cannot infer from a push.
+# source of truth: the accepted digest is the image `main`'s commit was
+# published as (#1482), or an operator's optional PREVIEW_DIGEST job variable
+# -- never a typed version; the version comes from the image itself, verified
+# the same way that workflow always verified it -- and this job does the rest.
+# Manual only, and only reachable from a pipeline on `main` -- a push, or one
+# you start by hand on `main` (`web`/`api`).
+# There is no automatic trigger, because accepting a release is a human
+# decision this pipeline cannot infer from a push.
+#
+# `main` only, however the pipeline was started (#1564). It used to have a
+# second route for any hand-started pipeline carrying `PREVIEW_DIGEST`, on any
+# branch. A manual job on protected `main` needs Maintainer rights, so the
+# assistant accounts, being Developers, cannot press it there; on `dev` or a
+# feature branch they could, and the role change would not have stopped them.
+# Nothing needed that route: a hand-started pipeline on `main` is covered by
+# the `main` rule below, the hotfix flow promotes from `main` too (the script
+# needs `main` and `preview` on one commit), and promote-stable.sh refuses a
+# branch other than `main` again, so a change to these rules cannot reopen it.
 #
 # GHCR stays the public image source; the GitLab registry keeps only
 # `:sha-*`/`:preview` (see record_image/publish_channel above). So this
@@ -3983,9 +4022,6 @@ promote_stable:
   rules:
     - *not_scheduled
     - if: $CI_COMMIT_BRANCH == "main"
-      when: manual
-      allow_failure: false
-    - if: ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $PREVIEW_DIGEST
       when: manual
       allow_failure: false
   script:

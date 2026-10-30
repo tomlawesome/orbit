@@ -1,7 +1,7 @@
 <script>
   import { onDestroy, untrack } from "svelte";
   import { dryRunner } from "$lib/data/dry-run.js";
-  import { readReminders } from "$lib/data/workspace.js";
+  import { readPendingApproval, readReminders } from "$lib/data/workspace.js";
   import Sheet from "./Sheet.svelte";
   import EntryForm from "../../routes/create/EntryForm.svelte";
   import { createCommandOf, entryChanged, entryOfProposal, reviewItemOf } from "../../routes/create/entry.js";
@@ -15,6 +15,11 @@
    * and the dial's hollow body, in place) and the receipt page all raise
    * this one. `onsave` approves the amended item into the chosen section and
    * answers whether it went in; the sheet closes when it did.
+   *
+   * While the receipt has a pending approval pair (#1396, owner decision 7a)
+   * -- `approval`, given or reported by the receipt's review read -- the
+   * amend fields are not drawn: the approval finishes the earlier one with
+   * the values it carried, so an amendment made now would not apply.
    * @typedef {{
    *   open?: boolean,
    *   title: string,
@@ -26,14 +31,24 @@
    *   receiptId?: string | null,
    *   busy?: boolean,
    *   problem?: string | null,
+   *   approval?: import('$lib/data/workspace.js').PendingApproval | null,
    *   onsave: (item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<boolean>,
    * }} Props
    */
   /** @type {Props} */
   let {
     open = $bindable(false), title, proposal, householdId, households = [], readings = [], papers = [],
-    receiptId = null, busy = false, problem = null, onsave,
+    receiptId = null, busy = false, problem = null, approval = null, onsave,
   } = $props();
+
+  /* The review read's word on a pending approval, asked each time the sheet
+     rises; the form waits for it, so nothing can be amended that would not
+     apply. A read that fails leaves the form as it was: the approval reads
+     the review again anyway. */
+  /** @type {import('$lib/data/workspace.js').PendingApproval | null} */
+  let reported = $state(null);
+  let checked = $state(false);
+  const pending = $derived(Boolean(approval ?? reported));
 
   /** @type {import('../../routes/create/entry.js').Entry | null} */
   let entry = $state(null);
@@ -64,6 +79,16 @@
         entry = { ...entry, reminderDays: [...pair] };
         start = { ...start, reminderDays: [...pair] };
       });
+      reported = null;
+      const query = !approval && receiptId && householdId ? { receiptId, householdId } : null;
+      checked = !query;
+      if (query) {
+        readPendingApproval(query.receiptId, query.householdId).catch(() => null).then((pair) => {
+          if (opening !== openings) return;
+          reported = pair;
+          checked = true;
+        });
+      }
     });
   });
   $effect(() => {
@@ -92,14 +117,20 @@
   onDestroy(() => dryRun.stop());
 
   async function save() {
-    if (!entry || refusal !== null || busy) return;
+    if (!entry || busy || !checked) return;
+    if (!pending && refusal !== null) return;
     const currency = proposal?.currency ?? household?.currency ?? "GBP";
     if (await onsave(reviewItemOf(entry, currency, proposal ?? {}), entry.sectionId)) open = false;
   }
 </script>
 
 <Sheet bind:open size="full" title="Review & amend" confirmDiscard={dirty}>
-  {#if entry}
+  {#if entry && pending}
+    <form id="{uid}-form" aria-label="Review {title}" onsubmit={(event) => { event.preventDefault(); save(); }}>
+      <p class="rv-pending" role="status">finishing your earlier approval</p>
+    </form>
+    {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
+  {:else if entry && checked}
     <form id="{uid}-form" aria-label="Review {title}" onsubmit={(event) => { event.preventDefault(); save(); }}>
       <EntryForm bind:entry households={household ? [household] : []} mode="review" nested
                  disabled={busy} {readings} {papers} {receiptId} />
@@ -108,8 +139,9 @@
     {:else if refusal}<p class="rv-refusal" id="{uid}-refusal">{refusal}</p>{/if}
   {/if}
   {#snippet foot()}
-    <button type="submit" form="{uid}-form" class="p-pill filled rv-go" aria-disabled={busy || refusal !== null ? "true" : undefined}
-            aria-describedby={refusal ? `${uid}-refusal` : undefined}>
+    {@const held = busy || !checked || (!pending && refusal !== null)}
+    <button type="submit" form="{uid}-form" class="p-pill filled rv-go" aria-disabled={held ? "true" : undefined}
+            aria-describedby={!pending && refusal ? `${uid}-refusal` : undefined}>
       {busy ? "adding…" : "add to orbit"}
     </button>
   {/snippet}
@@ -117,5 +149,6 @@
 
 <style>
   .rv-refusal{margin:12px 0 0;font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-mid)}
+  .rv-pending{margin:0;font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-mid)}
   .rv-go[aria-disabled="true"]{opacity:.5;cursor:default;box-shadow:none}
 </style>

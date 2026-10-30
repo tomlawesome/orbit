@@ -271,11 +271,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-22 · 39134f33 (!1081) · pipeline 2875 / `build_image` job 38351 · `Could not download the pnpm 12.4.1 binary: Could not reach https://registry.npmjs.org/@pnpm/exe.linux-x64-musl/12.4.1: timed out after 30s` in the `web-deploy.sh` step, a minute after the `deps` stage of the same build, on the same base image, had fetched pnpm 12.4.1 fine. Retried. First sighting.
 
-## mail-relay-sender-check-failures.test.ts "finding 1: a mailer that never answers > ends the request at the send deadline (shortened to 300 ms here) with a stable 503"
-
-- 2026-10-22 · 2f16facd (!1081; browser-test and flakes-log changes only since the green 39134f33 run, nothing near mail) · pipeline 2878 / `integration` job 38382 · `expected 429 to be 503`: the request met the rate limit instead of the send deadline. Retried as job 38407. First sighting.
-- 2026-10-30 · 38f86955 (!1117; the batch touches nothing near mail) · pipeline 3213 / `integration` job 42069 · `expected 429 to be 503` again: rate limit before the send deadline. Second sighting.
-
 ## v19-mail-sender-check.spec.ts:123 "a member sends the check email from the settings mail screen, opens the link, and the relay starts listening" — desktop-webkit
 
 - 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed once (`toHaveURL` expected `/settings/mail$`, got `/settings/mail?sender=verified`), passed on retry. First sighting.
@@ -341,3 +336,7 @@ timeout on this one case rather than a global raise.
 - 2026-10-21 · b331397f (!1074, installer-only change) · pipeline 2834 / smoke_local_only (job 38082) · `the chooser: the frame sampler never saw the newcomer's frame` (0 frames, line 275). 77 others passed in 1.9 m. Job retried as 38096: green. The spec's timing was reworked afterwards under #1447 (33b94d9e). First sighting.
 
 
+
+## settings-text-size-tab-stop.test.mjs — timed out at the 5 s default under load
+
+- 2026-10-30 · ee51542d (#1396's build on `fix/1396-approve-retry`; nothing near settings or text size) · local `scripts/test-backend.sh` unit tests in shard 1, worktree `1396-approve-retry`, other agents' Docker stacks running on the shared host · timed out at 5 s; passed alone in 1.7 s and on the shard's rerun. Wall-clock-under-load shape, as #869's sightings above. First sighting.

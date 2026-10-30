@@ -958,11 +958,84 @@ export async function readInbox(fetchImpl = globalThis.fetch) {
 }
 
 /**
+ * A pending approval the server holds for its owner (ADR-0005, #1396): the
+ * key and the request it accepted, reported by the review read for a receipt
+ * whose approval can be finished. Sent back verbatim it finishes the earlier
+ * approval; the browser keeps neither (ADR-0006).
+ *
+ * @typedef {{ operationId: string, request: Record<string, unknown> }} PendingApproval
+ */
+
+/**
+ * Read a receipt's review for approving: assign a household if the receipt
+ * has none, then read the review (fresh draftVersion, sections, the staged
+ * attachments, and any pending approval pair).
+ *
+ * @param {ReceiptSuggestion} suggestion
+ * @param {?string} fallbackHouseholdId
+ */
+async function readApprovalReview(suggestion, fallbackHouseholdId) {
+  const householdId = suggestion.householdId ?? fallbackHouseholdId;
+  if (!householdId) throw new WorkspaceError("This account has no household yet", { code: "no_household" });
+  if (!suggestion.householdId) {
+    await json(await csrfFetch(`/api/imap-inbox/${suggestion.receiptId}`, { method: "PUT", body: { householdId } }));
+  }
+  /** @type {{ sections?: WorkspaceSection[], receipt?: Receipt, attachments?: { id: string }[], approval?: PendingApproval }} */
+  const review = await json(
+    await fetch(`/api/imap-inbox/${suggestion.receiptId}?householdId=${householdId}`, { credentials: "same-origin" }),
+  );
+  return { householdId, review };
+}
+
+/**
+ * The approval body built from a review: built once per key, then pinned.
+ *
+ * @param {ReceiptSuggestion} suggestion
+ * @param {string} householdId
+ * @param {{ sections?: WorkspaceSection[], receipt?: Receipt, attachments?: { id: string }[] }} review
+ * @param {string} operationId
+ * @param {?ItemProposal} amendedItem
+ * @param {?string} sectionId
+ * @returns {Record<string, unknown> & { operationId: string }}
+ */
+function approvalBodyOf(suggestion, householdId, review, operationId, amendedItem, sectionId) {
+  const section = review.sections?.find((one) => one.id === sectionId) ?? review.sections?.[0];
+  if (!section) throw new WorkspaceError("This household has no section to file into", { code: "no_section" });
+  return {
+    operationId,
+    source: {
+      kind: "mailbox_draft",
+      receiptId: suggestion.receiptId,
+      draftVersion: review.receipt?.draftVersion ?? suggestion.draftVersion,
+    },
+    householdId,
+    sectionId: section.id,
+    action: "create_separate",
+    item: amendedItem ?? approvalItemOf(review.receipt?.proposal ?? {}, suggestion.currency),
+    attachmentIds: (review.attachments ?? []).map((attachment) => attachment.id),
+  };
+}
+
+/** The pair the server reported, as the body that finishes it.
+ *  @param {PendingApproval} approval */
+const replayOf = (approval) => ({ ...approval.request, operationId: approval.operationId });
+
+/**
+ * @param {Record<string, unknown>} body
+ * @returns {Promise<{ outcome: string, itemId?: string }>}
+ */
+async function sendApproval(body) {
+  return await json(await csrfFetch("/api/reviewed-intake/approve", { body }));
+}
+
+/**
  * Approve a mail-in suggestion as proposed (#434): assign a household if the
  * receipt has none, read the review (fresh draftVersion, first section, the
  * staged attachments), then approve through the reviewed-intake protocol.
  * The operationId makes retries idempotent — a double-tap cannot create two
- * items — so callers keep ONE id per receipt across attempts.
+ * items — so callers keep ONE id per receipt across attempts. When the review
+ * reports a pending approval pair (#1396), that pair is sent instead: the
+ * item already exists with the values it carries.
  *
  * @param {ReceiptSuggestion} suggestion
  * @param {?string} fallbackHouseholdId  used when the receipt names no household
@@ -973,34 +1046,28 @@ export async function readInbox(fetchImpl = globalThis.fetch) {
  * @returns {Promise<{ outcome: string, itemId?: string }>}
  */
 export async function approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem = null, sectionId = null) {
-  const householdId = suggestion.householdId ?? fallbackHouseholdId;
-  if (!householdId) throw new WorkspaceError("This account has no household yet", { code: "no_household" });
-  if (!suggestion.householdId) {
-    await json(await csrfFetch(`/api/imap-inbox/${suggestion.receiptId}`, { method: "PUT", body: { householdId } }));
-  }
-  /** @type {{ sections?: WorkspaceSection[], receipt?: Receipt, attachments?: { id: string }[] }} */
+  const { householdId, review } = await readApprovalReview(suggestion, fallbackHouseholdId);
+  return sendApproval(review.approval
+    ? replayOf(review.approval)
+    : approvalBodyOf(suggestion, householdId, review, operationId, amendedItem, sectionId));
+}
+
+/**
+ * Whether the server holds a pending approval for this receipt (#1396): the
+ * pair its review read reports, or null. The review sheet asks, so it can say
+ * it is finishing the earlier approval rather than offer amendments that
+ * would not apply (owner decision 7a).
+ *
+ * @param {string} receiptId
+ * @param {string} householdId
+ * @returns {Promise<?PendingApproval>}
+ */
+export async function readPendingApproval(receiptId, householdId) {
+  /** @type {{ approval?: PendingApproval }} */
   const review = await json(
-    await fetch(`/api/imap-inbox/${suggestion.receiptId}?householdId=${householdId}`, { credentials: "same-origin" }),
+    await fetch(`/api/imap-inbox/${receiptId}?householdId=${householdId}`, { credentials: "same-origin" }),
   );
-  const section = review.sections?.find((one) => one.id === sectionId) ?? review.sections?.[0];
-  if (!section) throw new WorkspaceError("This household has no section to file into", { code: "no_section" });
-  /** @type {{ outcome: string, itemId?: string }} */
-  const body = await json(await csrfFetch("/api/reviewed-intake/approve", {
-    body: {
-      operationId,
-      source: {
-        kind: "mailbox_draft",
-        receiptId: suggestion.receiptId,
-        draftVersion: review.receipt?.draftVersion ?? suggestion.draftVersion,
-      },
-      householdId,
-      sectionId: section.id,
-      action: "create_separate",
-      item: amendedItem ?? approvalItemOf(review.receipt?.proposal ?? {}, suggestion.currency),
-      attachmentIds: (review.attachments ?? []).map((attachment) => attachment.id),
-    },
-  }));
-  return body; // { outcome: "approved" | "partial_success", itemId }
+  return review.approval ?? null;
 }
 
 /** The one sentence for a receipt that is recorded but whose documents failed. */
@@ -1015,6 +1082,11 @@ const PARTIAL_APPROVAL_MESSAGE = "The item is recorded, but its documents need a
  * `{ partial: true, message }`, the id kept; callers branch on that shape,
  * never on the words. A plain refusal throws, as approveReceipt does.
  *
+ * The server is the authority on what it accepted (ADR-0005, #1396): a pair
+ * the review reports is sent verbatim, whatever this tab holds or was given.
+ * Otherwise the body is built once and pinned whole, so an in-tab retry
+ * resends it byte for byte rather than re-deriving it from a newer review.
+ *
  * @param {ReceiptSuggestion} suggestion
  * @param {Map<string, string>} operationIds  the screen's ids, by receiptId
  * @param {?string} fallbackHouseholdId
@@ -1023,35 +1095,43 @@ const PARTIAL_APPROVAL_MESSAGE = "The item is recorded, but its documents need a
  * @returns {Promise<{ ok: true } | { partial: true, message: string }>}
  */
 export async function approveWithOperation(suggestion, operationIds, fallbackHouseholdId, amendedItem = null, sectionId = null) {
-  let operationId = operationIds.get(suggestion.receiptId);
-  if (!operationId) {
-    operationId = crypto.randomUUID();
-    operationIds.set(suggestion.receiptId, operationId);
+  const { householdId, review } = await readApprovalReview(suggestion, fallbackHouseholdId);
+  const held = operationIds.get(suggestion.receiptId);
+  /** @type {Record<string, unknown> & { operationId: string }} */
+  let body;
+  if (review.approval) {
+    body = replayOf(review.approval);
+    if (held && held !== body.operationId) pinnedApprovals.delete(held);
+  } else {
+    const operationId = held ?? crypto.randomUUID();
+    // The engine binds an operation id to the body it first carried, so a
+    // plain retry (no amendment given) re-sends the whole body sent first.
+    const pinned = pinnedApprovals.get(operationId);
+    body = pinned && !amendedItem
+      ? pinned
+      : approvalBodyOf(suggestion, householdId, review, operationId, amendedItem, sectionId);
   }
-  // The engine binds an operation id to the body it first carried, so a plain
-  // retry (no amendment given) re-sends the amendment and section sent first.
-  // A refusal (4xx) bound nothing, so it unpins and the next tap sends afresh;
-  // a lost answer may have been accepted, so the pin stays for the retry.
-  const pinned = pinnedApprovals.get(operationId);
-  if (pinned && !amendedItem) ({ amendedItem, sectionId } = pinned);
-  else pinnedApprovals.set(operationId, { amendedItem, sectionId });
+  operationIds.set(suggestion.receiptId, body.operationId);
+  pinnedApprovals.set(body.operationId, body);
   let result;
   try {
-    result = await approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem, sectionId);
+    result = await sendApproval(body);
   } catch (error) {
+    // A refusal (4xx) bound nothing, so it unpins and the next tap sends
+    // afresh; a lost answer may have been accepted, so the pin stays.
     if (error instanceof WorkspaceError && typeof error.status === "number" && error.status >= 400 && error.status < 500) {
-      pinnedApprovals.delete(operationId);
+      pinnedApprovals.delete(body.operationId);
     }
     throw error;
   }
   if (result.outcome === "partial_success") return { partial: true, message: PARTIAL_APPROVAL_MESSAGE };
   operationIds.delete(suggestion.receiptId);
-  pinnedApprovals.delete(operationId);
+  pinnedApprovals.delete(body.operationId);
   return { ok: true };
 }
 
-/** What each kept operation id first sent, by operation id.
- *  @type {Map<string, { amendedItem: ?ItemProposal, sectionId: ?string }>} */
+/** The whole body each kept operation id first sent, by operation id.
+ *  @type {Map<string, Record<string, unknown> & { operationId: string }>} */
 const pinnedApprovals = new Map();
 
 /**

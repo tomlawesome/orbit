@@ -19,10 +19,14 @@ const PARTIAL_SENTENCE = "The item is recorded, but its documents need another t
 let approveAnswers = [];
 /** @type {Array<Record<string, any>>} */
 let approvalBodies = [];
+/** Reviews to answer the next GETs with, in order; the default review when empty.
+ *  @type {Array<Record<string, any>>} */
+let reviewAnswers = [];
 
 beforeEach(() => {
   approveAnswers = [];
   approvalBodies = [];
+  reviewAnswers = [];
   vi.stubGlobal("fetch", vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ init) => {
     if (String(url).includes("/api/auth/session")) {
       return new Response(JSON.stringify({ user: { id: "u1" }, csrfToken: "token" }), { status: 200, headers: { "content-type": "application/json" } });
@@ -31,7 +35,7 @@ beforeEach(() => {
     // receipt under the household with a PUT); only the approval itself
     // takes a queued answer.
     if (String(url).includes("/api/imap-inbox/")) {
-      const review = { receipt: { draftVersion: 1 }, sections: [{ id: "s1", name: "Home" }], attachments: [] };
+      const review = reviewAnswers.shift() ?? { receipt: { draftVersion: 1 }, sections: [{ id: "s1", name: "Home" }], attachments: [] };
       return new Response(JSON.stringify(init?.method === "PUT" ? {} : review), { status: 200, headers: { "content-type": "application/json" } });
     }
     const next = approveAnswers.shift();
@@ -124,6 +128,158 @@ describe("approveWithOperation", () => {
     const { approveWithOperation } = await seam();
     approveAnswers.push({ status: 409, body: { error: { code: "stale_draft", message: "This email changed; look again." } } });
     await expect(approveWithOperation(suggestionOf("r-1"), new Map(), "h-1")).rejects.toThrow();
+  });
+});
+
+/*
+ * Retry after a reload or a refusal (#1396). The server keeps the request it
+ * accepted and the review read reports it as `approval: { operationId,
+ * request }` for a receipt the owner may retry (ADR-0005; the browser persists
+ * nothing, ADR-0006). The client replays a reported pair verbatim; otherwise it
+ * mints the key and builds the body once, and pins the whole body it sent.
+ * A fresh module import below stands for a page reload: no map, no pin.
+ */
+
+/** @param {Record<string, any>} [over] */
+function reviewOf(over = {}) {
+  return {
+    receipt: { draftVersion: 1, proposal: { title: "From the review" } },
+    sections: [{ id: "s1", name: "Home" }, { id: "s2", name: "Other" }],
+    attachments: [],
+    ...over,
+  };
+}
+
+const REPORTED_ID = "7a7a7a7a-7a7a-47a7-87a7-7a7a7a7a7a7a";
+const reportedRequest = () => ({
+  source: { kind: "mailbox_draft", receiptId: "r-1", draftVersion: 2 },
+  householdId: "h-1",
+  sectionId: "s2",
+  action: "create_separate",
+  item: { kind: "service", title: "Amended before the reload", currency: "GBP", status: "active" },
+  attachmentIds: ["a-1"],
+});
+const reportedPair = () => ({ operationId: REPORTED_ID, request: reportedRequest() });
+
+describe("approveWithOperation replays the pair the server reports (#1396)", () => {
+  it("after a reload (no map, no pin), sends the reported operationId and request verbatim", async () => {
+    const { approveWithOperation } = await seam();
+    // The review now lists different values than the accepted request carries.
+    reviewAnswers.push(reviewOf({ receipt: { draftVersion: 9, proposal: { title: "Different now" } }, attachments: [{ id: "a-1" }, { id: "a-2" }], approval: reportedPair() }));
+    approveAnswers.push({ status: 200, body: { outcome: "approved", itemId: REPORTED_ID } });
+    const operationIds = new Map();
+    await expect(approveWithOperation(suggestionOf("r-1"), operationIds, "h-1")).resolves.toEqual({ ok: true });
+    expect(approvalBodies).toEqual([{ ...reportedRequest(), operationId: REPORTED_ID }]);
+    expect(operationIds.size).toBe(0);
+  });
+
+  it("ignores an id this tab already holds for the receipt", async () => {
+    const { approveWithOperation } = await seam();
+    reviewAnswers.push(reviewOf({ approval: reportedPair() }));
+    approveAnswers.push({ status: 200, body: { outcome: "approved", itemId: REPORTED_ID } });
+    const operationIds = new Map([["r-1", "11111111-2222-4333-8444-555555555555"]]);
+    await approveWithOperation(suggestionOf("r-1"), operationIds, "h-1");
+    expect(approvalBodies).toHaveLength(1);
+    expect(approvalBodies[0].operationId).toBe(REPORTED_ID);
+  });
+
+  it("sends the stored pair, not a new amendment or section, when the member amends differently", async () => {
+    const { approveWithOperation } = await seam();
+    reviewAnswers.push(reviewOf({ approval: reportedPair() }));
+    approveAnswers.push({ status: 200, body: { outcome: "approved", itemId: REPORTED_ID } });
+    const amended = { kind: "service", title: "A different amendment", currency: "GBP", status: "active" };
+    await approveWithOperation(suggestionOf("r-1"), new Map(), "h-1", amended, "s1");
+    expect(approvalBodies).toEqual([{ ...reportedRequest(), operationId: REPORTED_ID }]);
+  });
+
+  it("a second device with no memory sends the same pair as the first", async () => {
+    const first = await seam();
+    reviewAnswers.push(reviewOf({ approval: reportedPair() }));
+    approveAnswers.push({ status: 200, body: { outcome: "partial_success", itemId: REPORTED_ID } });
+    await first.approveWithOperation(suggestionOf("r-1"), new Map(), "h-1");
+    vi.resetModules();
+    const second = await seam();
+    reviewAnswers.push(reviewOf({ approval: reportedPair() }));
+    approveAnswers.push({ status: 200, body: { outcome: "approved", itemId: REPORTED_ID } });
+    await expect(second.approveWithOperation(suggestionOf("r-1"), new Map(), "h-1")).resolves.toEqual({ ok: true });
+    expect(approvalBodies).toHaveLength(2);
+    expect(approvalBodies[1]).toEqual(approvalBodies[0]);
+  });
+
+  it("builds from the review as before when the review reports no approval", async () => {
+    const { approveWithOperation } = await seam();
+    reviewAnswers.push(reviewOf({ attachments: [{ id: "a-9" }] }));
+    approveAnswers.push({ status: 200, body: { outcome: "approved", itemId: "i-1" } });
+    await approveWithOperation(suggestionOf("r-1"), new Map(), "h-1");
+    expect(approvalBodies[0]).toMatchObject({
+      source: { kind: "mailbox_draft", receiptId: "r-1", draftVersion: 1 },
+      householdId: "h-1",
+      sectionId: "s1",
+      action: "create_separate",
+      attachmentIds: ["a-9"],
+    });
+    expect(approvalBodies[0].operationId).not.toBe(REPORTED_ID);
+  });
+});
+
+describe("approveWithOperation pins the whole body it sent (#1396)", () => {
+  const amended = { kind: "service", title: "Amended in this tab", currency: "GBP", status: "active" };
+  const firstReview = () => reviewOf({ receipt: { draftVersion: 1, proposal: { title: "First read" } }, attachments: [{ id: "a-1" }] });
+  const laterReview = () => reviewOf({ receipt: { draftVersion: 4, proposal: { title: "Later read" } }, attachments: [{ id: "a-1" }, { id: "a-2" }] });
+
+  it.each([
+    ["a lost answer", { status: 502, body: { error: { code: "bad_gateway", message: "Try again." } } }],
+    ["partial_success", { status: 200, body: { outcome: "partial_success", itemId: "i-1" } }],
+  ])("after %s, a retry in the same tab resends the identical body under the same key", async (_label, first) => {
+    const { approveWithOperation } = await seam();
+    const operationIds = new Map();
+    reviewAnswers.push(firstReview(), laterReview());
+    approveAnswers.push(first, { status: 200, body: { outcome: "approved", itemId: "i-1" } });
+    await approveWithOperation(suggestionOf("r-1"), operationIds, "h-1", amended, "s2").catch(() => {});
+    // The review has moved on (draft version, attachments, proposal); the body must not.
+    await approveWithOperation(suggestionOf("r-1"), operationIds, "h-1");
+    expect(approvalBodies).toHaveLength(2);
+    expect(approvalBodies[1]).toEqual(approvalBodies[0]);
+    expect(approvalBodies[1].source.draftVersion).toBe(1);
+    expect(approvalBodies[1].attachmentIds).toEqual(["a-1"]);
+  });
+
+  it("pins a body built from the review too, when no amendment was given", async () => {
+    const { approveWithOperation } = await seam();
+    const operationIds = new Map();
+    reviewAnswers.push(firstReview(), laterReview());
+    approveAnswers.push({ status: 200, body: { outcome: "partial_success", itemId: "i-1" } }, { status: 200, body: { outcome: "approved", itemId: "i-1" } });
+    await approveWithOperation(suggestionOf("r-1"), operationIds, "h-1");
+    await approveWithOperation(suggestionOf("r-1"), operationIds, "h-1");
+    expect(approvalBodies[1]).toEqual(approvalBodies[0]);
+  });
+
+  it("drops the pin on a refusal: the next tap sends what the review lists now", async () => {
+    const { approveWithOperation } = await seam();
+    const operationIds = new Map();
+    reviewAnswers.push(firstReview(), laterReview());
+    approveAnswers.push(
+      { status: 404, body: { error: { code: "attachment_not_found", message: "That staged attachment is not available" } } },
+      { status: 200, body: { outcome: "approved", itemId: "i-1" } },
+    );
+    await expect(approveWithOperation(suggestionOf("r-1"), operationIds, "h-1", amended, "s2")).rejects.toThrow();
+    await approveWithOperation(suggestionOf("r-1"), operationIds, "h-1");
+    expect(approvalBodies).toHaveLength(2);
+    expect(approvalBodies[1].source.draftVersion).toBe(4);
+    expect(approvalBodies[1].attachmentIds).toEqual(["a-1", "a-2"]);
+    expect(approvalBodies[1].sectionId).toBe("s1");
+  });
+
+  it("drops the pair on success: the next approval of the receipt makes a new key and a fresh body", async () => {
+    const { approveWithOperation } = await seam();
+    const operationIds = new Map();
+    reviewAnswers.push(firstReview(), laterReview());
+    approveAnswers.push({ status: 200, body: { outcome: "approved", itemId: "i-1" } }, { status: 200, body: { outcome: "approved", itemId: "i-2" } });
+    await approveWithOperation(suggestionOf("r-1"), operationIds, "h-1", amended, "s2");
+    expect(operationIds.size).toBe(0);
+    await approveWithOperation(suggestionOf("r-1"), operationIds, "h-1");
+    expect(approvalBodies[1].operationId).not.toBe(approvalBodies[0].operationId);
+    expect(approvalBodies[1].source.draftVersion).toBe(4);
   });
 });
 

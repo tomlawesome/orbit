@@ -60,21 +60,32 @@ async function copyOfMigrations(): Promise<string> {
   return directory;
 }
 
+/* The history starts at the one baseline; migrations generated since
+   (docs/testing.md, "Writing a migration") follow it in order, each with its
+   SQL and its snapshot, and nothing else sits in the folder. */
+async function journalTags(directory: string): Promise<string[]> {
+  const journal = JSON.parse(await readFile(join(directory, "meta", "_journal.json"), "utf8")) as {
+    entries: Array<{ idx: number; tag: string }>;
+  };
+  journal.entries.forEach(({ idx }, position) => expect(idx).toBe(position));
+  return journal.entries.map(({ tag }) => tag);
+}
+
 describe("the migration history is one baseline (#1403 slice E)", () => {
-  it("is a single 0000_baseline migration with its snapshot and nothing else", async () => {
-    const journal = JSON.parse(await readFile(join(MIGRATIONS, "meta", "_journal.json"), "utf8")) as {
-      entries: Array<{ idx: number; tag: string }>;
-    };
-    expect(journal.entries.map(({ idx, tag }) => ({ idx, tag }))).toEqual([{ idx: 0, tag: BASELINE_TAG }]);
-    expect((await readdir(MIGRATIONS)).sort()).toEqual([`${BASELINE_TAG}.sql`, "meta"]);
-    expect((await readdir(join(MIGRATIONS, "meta"))).sort()).toEqual(["0000_snapshot.json", "_journal.json"]);
+  it("starts at the single 0000_baseline migration, and every later one has its SQL and snapshot and nothing else", async () => {
+    const tags = await journalTags(MIGRATIONS);
+    expect(tags[0]).toBe(BASELINE_TAG);
+    expect(tags.filter((tag) => tag.endsWith("_baseline"))).toEqual([BASELINE_TAG]);
+    expect((await readdir(MIGRATIONS)).sort()).toEqual([...tags.map((tag) => `${tag}.sql`), "meta"].sort());
+    expect((await readdir(join(MIGRATIONS, "meta"))).sort())
+      .toEqual([...tags.map((tag) => `${tag.slice(0, 4)}_snapshot.json`), "_journal.json"].sort());
   });
 
-  it("migrates a fresh database to exactly the catalogue oracle, recording one migration", async () => {
+  it("migrates a fresh database to exactly the catalogue oracle, recording the baseline first", async () => {
     const database = await freshDatabase("baseline-oracle");
 
     const hashes = await readAppliedMigrationHashes(database.client);
-    expect(hashes).toEqual([canonicalMigrationChecksum(await readFile(join(MIGRATIONS, `${BASELINE_TAG}.sql`)))]);
+    expect(hashes[0]).toBe(canonicalMigrationChecksum(await readFile(join(MIGRATIONS, `${BASELINE_TAG}.sql`))));
     expect(hashes).toEqual(await readExpectedMigrationHashes(MIGRATIONS));
 
     const contract = await readSchemaContract(database.client);
@@ -121,6 +132,7 @@ describe("the migration history is one baseline (#1403 slice E)", () => {
     const copy = await copyOfMigrations();
     const before = (await readdir(copy)).sort();
     const journalBefore = await readFile(join(copy, "meta", "_journal.json"), "utf8");
+    const metaBefore = (await readdir(join(copy, "meta"))).sort();
 
     /* drizzle-kit joins --out onto the working directory, so hand it a path
        relative to it. It needs no database to generate. */
@@ -133,7 +145,7 @@ describe("the migration history is one baseline (#1403 slice E)", () => {
     expect(result.status).toBe(0);
     expect((await readdir(copy)).sort()).toEqual(before);
     expect(await readFile(join(copy, "meta", "_journal.json"), "utf8")).toBe(journalBefore);
-    expect((await readdir(join(copy, "meta"))).sort()).toEqual(["0000_snapshot.json", "_journal.json"]);
+    expect((await readdir(join(copy, "meta"))).sort()).toEqual(metaBefore);
   });
 });
 

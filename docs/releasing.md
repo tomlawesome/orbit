@@ -44,9 +44,9 @@ To ship a stable release:
    that will not be kept is marked `dropped` and removed from where it was
    made.
 4. Merge `preview` into `main`.
-5. On GitLab, start a pipeline on `main` with `PREVIEW_DIGEST` set to the
-   accepted digest, and run the manual `promote_stable` job. It tags the image
-   `vX.Y.Z` and `latest` and creates the `vX.Y.Z` tag.
+5. On GitLab, run the manual `promote_stable` job in the pipeline the merge
+   started on `main`. It promotes the image built for `main`'s commit, tags
+   it `vX.Y.Z` and `latest`, and creates the `vX.Y.Z` tag.
 6. Straight away, run the **Countersign a stable release** workflow on GitHub
    with that tag. This adds the owner's second signature.
 
@@ -267,39 +267,43 @@ after a rotation.
 ## Stable promotion (on GitLab)
 
 Promotion is a manual GitLab CI job, `promote_stable` in `.gitlab-ci.yml`. It
-only appears, as a manual step, on a pipeline running on `main` (a push to
-`main` starts nothing else, #1546), or on a
-pipeline you start yourself against any ref by giving it a `PREVIEW_DIGEST`
-variable. Nothing runs it automatically: accepting a release is a human
-decision.
+only appears, as a manual step, on a pipeline running on `main`: the push to
+`main` (which starts nothing else, #1546) or one you start yourself on `main`.
+A pipeline on any other branch has no such
+job, and `promote-stable.sh` refuses to run off `main` as well (#1564), so
+only someone who can press a manual job on protected `main` can promote.
+Nothing runs it automatically: accepting a release is a human decision.
 
-The only input is `PREVIEW_DIGEST`, the accepted preview image's digest
-(`sha256:<64 hex>`). Find it either:
+It needs no input (#1482). The digest it promotes is the one GHCR's
+`:sha-<main HEAD>` tag names: the image built and tested for the commit
+`main` now holds, which is `preview`'s commit. Pressing the button on that
+pipeline is the acceptance; the checks below hold the digest to the same
+standard a typed one meets.
 
-- in the `record_image` job's log for the pipeline that tested the commit
-  being promoted (it prints the digest it pushed, and records the same value
-  in the `gitlab-tested-image.json` artifact); or
-- by resolving GHCR's `:preview` tag directly:
-  `docker buildx imagetools inspect ghcr.io/tomlawesome/orbit:preview`.
+An optional `PREVIEW_DIGEST` job variable (`sha256:<64 hex>`) still
+overrides that, for a re-run against a digest you name: it must then equal
+both tags as well. The job log says which route chose the digest, and prints
+it.
 
 To run it:
 
 1. Deploy the accepted preview digest and complete release acceptance.
 2. Merge the `preview` -> `main` merge request once acceptance is done.
-3. Open `https://gitlab.tomlawson.io/ai/orbit/-/pipelines/new`, choose the
-   `main` branch (or the ref you are promoting), add a pipeline variable named
-   `PREVIEW_DIGEST` set to the digest, e.g. `sha256:abcd...`, and start the
-   pipeline.
-4. Find the `promote_stable` job in the pipeline and click Run.
+3. Open the pipeline that merge started on `main`
+   (`https://gitlab.tomlawson.io/ai/orbit/-/pipelines?ref=main`), find the
+   `promote_stable` job and click Run.
 
 
 The job (`scripts/ci/promote-stable.sh`) then does the following, in order:
 
-1. Checks `PREVIEW_DIGEST` is `sha256:<64 hex>`.
+1. If `PREVIEW_DIGEST` is given, checks it is `sha256:<64 hex>`.
 2. Confirms `main` and `preview` point at the exact same commit.
-3. Resolves GHCR's `:preview` tag and `:sha-<main HEAD>` tag and confirms both
-   still equal `PREVIEW_DIGEST`. It refuses if `preview` has moved on, or the
-   digest never reached main's own commit.
+3. Resolves GHCR's `:preview` tag and `:sha-<main HEAD>` tag. With no
+   `PREVIEW_DIGEST`, the `:sha-<main HEAD>` digest is the one promoted, and
+   the job refuses if that tag does not exist, or if the pipeline you pressed
+   it in is not for main's current commit. It then confirms both tags
+   equal the digest. It refuses if `preview` has moved on, or the digest
+   never reached main's own commit.
 4. Checks that everything the image says about its own version agrees. It
    reads the image's `org.opencontainers.image.version` and `.revision`
    labels, its `io.github.tomlawesome.orbit.release-stage` and

@@ -2,6 +2,8 @@
 
 **Status:** Accepted
 **Date:** 2026-07-28
+**Amended:** 2026-10-30 — mailbox approval is an idempotency-key operation
+with a stored request; see the amendment at the end (#1396).
 
 ## Context
 
@@ -146,3 +148,57 @@ safety property while giving both sources one approval boundary.
   less reconnect and lifecycle complexity.
 - **Automatically merge likely duplicates:** rejected because a confidence
   error could silently corrupt household data.
+
+## Amendment (#1396, 2026-10-30): approval keeps the request it accepted
+
+Decided 2026-10-30 (#1396, decision note and owner answer 7a). It amends the
+review and approval boundary for mailbox approvals; direct uploads
+(`reviewed_intake_operations`, ADR-0010's document idempotency) are unchanged.
+
+**The pattern.** A mailbox approval is an idempotency-key operation with a
+stored request fingerprint, as in the IETF httpapi `Idempotency-Key` draft and
+Stripe's documented behaviour. `operationId` is the key and
+`approval_request_sha256` the fingerprint. The same key with the same request
+continues or replays the original; the same key with a changed request, or a
+different key on a bound receipt, is refused 409 `reviewed_intake_conflict`
+("That approval identity was already used"). The created item's id is the
+operation id.
+
+**The stored request.** The claim stores the accepted request beside its hash,
+in `imap_ingestion_messages.approval_request_enc`, Tier 1 metadata keyed as
+`proposal_enc` is (ADR-0024). It is the parsed request less its key, with the
+attachment selection sorted, so sent back verbatim with its key it hashes to
+the stored fingerprint. It is cleared wherever the hash is cleared.
+
+**Validation precedes the claim.** The request's checks run before anything
+is recorded, and the selected-attachment check (`attachment_not_found`), which
+ran after the item was created, now runs with them. A request refused there
+binds no key and creates no item, so the next tap sends afresh with what the
+review lists now. A failure after the claim keeps the key, so the same
+request finishes it.
+
+**The review read returns the pending pair to its owner.** ADR-0006 forbids
+the browser holding a workspace command across a reload, so it cannot keep the
+key and request itself. Instead `GET /api/imap-inbox/:receiptId` reports
+`approval: { operationId, request }` for a `recoverable` receipt whose
+approval its owner may retry, and for nothing else; the route's ownership
+check is the only authorisation. The client sends a reported pair verbatim,
+whatever it holds or was given; otherwise it mints a key and builds the
+request once, keeping the whole request in memory for in-tab retries. While a
+pair is pending, the review sheet hides its amend fields and says it is
+finishing the earlier approval, since an amendment would not apply (owner
+decision 7a).
+
+**The reclaim remembers the item.** An `approving` receipt abandoned for more
+than 10 minutes is reclaimed by the next approval or by its owner's review
+read. If its item was already created, it becomes `recoverable` with the
+retryable failure code `approval_interrupted` and keeps its key, hash and
+request, so the review reports the pair and a tap finishes it; a fresh key
+would be a second item. Only a receipt with no item yet is reset to
+`pending_review` and forgets its key, as before.
+
+**Not taken.** Keeping the pair in browser storage (ADR-0006, and another
+device cannot see it); accepting a changed request under the same key (it
+defeats the fingerprint); releasing the claim after a refusal past the claim,
+or a fresh key after the claim (the item already exists, and a second key is a
+second item).

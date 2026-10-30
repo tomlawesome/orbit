@@ -18,7 +18,7 @@ import { provisionIdentity } from "@/lib/auth/provision";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
 import { listSenderAddresses, requestSenderCheck, seedSenderAddress, setSenderSendDeadlineForTests, verifySenderAddress } from "@/server/mail-in/sender-addresses";
-import { cleanupIntegrationEnvironment, createIntegrationFixture, senderAddressColumns, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, damageEnvelope, senderAddressColumns, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 
 /*
@@ -48,6 +48,8 @@ const mail = vi.hoisted(() => ({
   sent: [] as Array<{ from: string; to: string; subject: string; text: string }>,
   mode: "ok" as "ok" | "throw" | "stall",
   stalled: [] as Array<() => void>,
+  /** Called once a send has reached the stalled mailer: the press's lock is released by then. */
+  entered: null as null | (() => void),
 }));
 
 vi.mock("nodemailer", () => {
@@ -55,7 +57,7 @@ vi.mock("nodemailer", () => {
     async sendMail(message: { from: string; to: string; subject: string; text: string }) {
       if (mail.mode === "throw") throw new Error("the mail server refused the message");
       if (mail.mode === "stall") {
-        await new Promise<void>((resolve) => { mail.stalled.push(resolve); });
+        await new Promise<void>((resolve) => { mail.stalled.push(resolve); mail.entered?.(); });
         return { messageId: "never-recorded" };
       }
       mail.sent.push({ from: message.from, to: message.to, subject: message.subject, text: message.text });
@@ -92,6 +94,7 @@ const savedEnvironment: Record<string, string | undefined> = {};
 beforeEach(async () => {
   mail.sent.length = 0;
   mail.stalled.length = 0;
+  mail.entered = null;
   mail.mode = "ok";
   for (const name of ["SMTP_PORT", "SMTP_FROM", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "APP_URL"]) savedEnvironment[name] = process.env[name];
   process.env.SMTP_HOST = "smtp.example.test"; process.env.SMTP_PORT = "587"; process.env.SMTP_USER = "orbit-test"; process.env.SMTP_PASSWORD = "fake-smtp-password";
@@ -191,8 +194,16 @@ describe("finding 1: a mailer that never answers", () => {
     setSenderSendDeadlineForTests(300);
     const started = Date.now();
 
+    /* Read only once the press is inside the mailer, not after a fixed pause:
+       a press takes the member's try-lock and a relay read takes the same one,
+       so a read that lands while the press still holds it (session and route
+       set-up run slowly on a loaded runner) wins the lock and the press is
+       refused 429 sender_check_too_soon. The mailer is entered after the
+       reservation has committed and the lock is released (#1552). */
+    const enteredMailer = new Promise<void>((resolve) => { mail.entered = resolve; });
     const sending = send().then((response) => ({ response, at: Date.now() - started }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const entryGuard = new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 5 * SECOND));
+    expect(await Promise.race([enteredMailer.then(() => "entered" as const), entryGuard])).toBe("entered");
     const reading = readRelaySettings(memberActor()).then(() => Date.now() - started);
     const guard = new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 5 * SECOND));
 
@@ -246,8 +257,7 @@ describe("finding 3: a damaged stored address while the key is available", () =>
     await seedSenderAddress(userId);
     const [row] = await rowsOf(userId);
     if (!row.addressEnc) throw new Error("the seeded row holds no encrypted address to damage");
-    const damaged = row.addressEnc.slice(0, -2) + (row.addressEnc.endsWith("A") ? "BB" : "AA");
-    await getDb().update(mailInSenderAddresses).set({ addressEnc: damaged }).where(eq(mailInSenderAddresses.id, row.id));
+    await getDb().update(mailInSenderAddresses).set({ addressEnc: damageEnvelope(row.addressEnc) }).where(eq(mailInSenderAddresses.id, row.id));
     const [view] = await listSenderAddresses(userId);
     expect(view.address).toBeNull();
     expect(view.metadataStatus?.address).toBe("metadata_integrity_failed");

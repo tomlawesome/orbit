@@ -1,0 +1,58 @@
+# Paths the shared private-details check (ai/agent-infra#32) allows on
+# purpose, each for the named rules only (#1562). Never list commits here.
+#
+# This replaces the fixture map in tests/unit/no-real-names.test.mjs (#1408):
+# that guard allowed an invented address per file; the shared rules allow a
+# rule per path, so a surname or a real login in the same file is still caught.
+
+[[allowlists]]
+description = "invented network addresses: classifier and redaction test inputs on textbook subnets, never paired with a real host (the old guard's fixture map, #1408)"
+targetRules = ["ip-address", "ipv6-address"]
+paths = [
+  '''^scripts/test-backup-restore\.test\.mjs$''',
+  '''^src/db/migration-outcome\.test\.ts$''',
+  '''^src/server/boot\.test\.ts$''',
+  '''^src/server/mail-in/mailbox-settings\.test\.ts$''',
+  '''^src/server/notification-worker\.test\.ts$''',
+  '''^src/server/sign-in-approvals\.test\.ts$''',
+  '''^src/server/sign-in-approvals\.ts$''',
+  # the retired guard's own fixture map, still in the commits the scan covers
+  '''^tests/unit/no-real-names\.test\.mjs$''',
+]
+
+[[allowlists]]
+description = "text that only looks like an address: a public DNS resolver in the quality notes, and SVG path data in an old mock-up"
+targetRules = ["ip-address"]
+paths = [
+  '''^docs/quality-strategy\.md$''',
+  '''^design/v19/belt-purpose/round-2/e-preview-in-drawer\.html$''',
+]
+
+[[allowlists]]
+description = "text that only looks like an email address: credentials in invented URLs, a CI git identity, invented sender and recipient lines in document-extraction fixtures, and @2x image names in the old README-art rounds"
+targetRules = ["email-address"]
+paths = [
+  '''^src/lib/app-error\.test\.ts$''',
+  '''^src/lib/logger\.test\.ts$''',
+  '''^src/lib/configure-engine\.retired-bash\.test\.ts$''',
+  '''^src/server/boot\.test\.ts$''',
+  '''^src/server/documents/extraction-corpus-fullpage\.ts$''',
+  '''^scripts/ci/import-door\.sh$''',
+  '''^design/v19/readme-art/''',
+]
+
+[[allowlists]]
+description = "the development disclosure keeps the tool's name, and the tool's name appears in the agent notes and a CI comment about the assistant's account"
+targetRules = ["ai-attribution"]
+paths = [
+  '''^README\.md$''',
+  '''^AGENTS\.md$''',
+  '''^scripts/ci/repin-base-image\.sh$''',
+]
+
+[[allowlists]]
+description = "the owner-decisions record names the model that made a call, as a record of who decided"
+targetRules = ["ai-tool-credit"]
+paths = [
+  '''^design/owner-decisions\.md$''',
+]

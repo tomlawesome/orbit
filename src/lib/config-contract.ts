@@ -157,8 +157,9 @@ export function isValidSessionTtlSeconds(value: string): boolean {
 // hex floats); refusing those is deliberate. Anything outside the grammar
 // would only surface as a failed `docker compose up`. A well-formed value
 // below 1 GiB still starts, so it is warned about rather than refused: it
-// only fails when a large archive is imported
-// (docs/administrator-operations.md puts that peak at about 1 GB).
+// only fails when a large archive is previewed or imported
+// (docs/administrator-operations.md puts that peak at about 1.45 GB, measured
+// in #1537; the 1 GiB floor is kept, owner decision 10a).
 const MEMORY_LIMIT_PATTERN = /^([0-9]+\.?[0-9]*|\.[0-9]+) ?(b|[kmgtp](?:ib|b)?)?$/i;
 const MEMORY_LIMIT_IMPORT_FLOOR_BYTES = 1024 ** 3;
 const MEMORY_LIMIT_UNIT_BYTES: Record<string, number> = {
@@ -597,7 +598,7 @@ export function evaluateReadiness(
     ok = false;
   } else if (memoryLimit !== undefined && memoryLimit < MEMORY_LIMIT_IMPORT_FLOOR_BYTES) {
     lines.push(
-      "warning ORBIT_MEMORY_LIMIT is below about 1 GB, the peak of importing a maximum-size archive; such an import may be stopped part-way (docs/administrator-operations.md)",
+      "warning ORBIT_MEMORY_LIMIT is below about 1 GB; previewing or importing a maximum-size archive needs about 1.45 GB and may be stopped part-way (docs/administrator-operations.md)",
     );
   }
 

@@ -5,9 +5,10 @@
 # This ports .github/workflows/promote-container.yml's "Resolve and verify
 # tested preview" step and scripts/stable-promotion-policy.mjs's promote
 # phase verbatim in spirit -- same inputs, same checks, same failure modes --
-# onto GitLab: an operator supplies the accepted PREVIEW_DIGEST (not a typed
-# version; the version comes from the image itself, exactly as it always
-# has), and everything else is derived and verified from that.
+# onto GitLab: the accepted digest is the image main's own commit was
+# published as, or an operator's PREVIEW_DIGEST when given (#1482) -- never a
+# typed version; the version comes from the image itself, exactly as it
+# always has -- and everything else is derived and verified from that.
 #
 # GHCR stays the public image source; the GitLab registry keeps only
 # `:sha-*`/`:preview`. So this script retags ghcr.io/tomlawesome/orbit by
@@ -26,10 +27,19 @@
 #   scripts/ci/promote-stable.sh
 #
 # Inputs (environment):
-#   PREVIEW_DIGEST         The accepted preview digest, "sha256:<64 hex>". A
-#                          GitLab pipeline variable set by whoever runs the
-#                          job -- the same input promote-container.yml's
-#                          workflow_dispatch took.
+#   CI_COMMIT_BRANCH       GitLab's predefined branch name. Must be `main`
+#                          (#1564): the job's `rules:` already say so, and
+#                          this refuses again so a later change to them cannot
+#                          reopen a release button on a branch a Developer can
+#                          push to.
+#   CI_COMMIT_SHA          GitLab's predefined commit of this pipeline. With
+#                          no PREVIEW_DIGEST it must be main's head (#1482).
+#   PREVIEW_DIGEST         Optional (#1482). The accepted preview digest,
+#                          "sha256:<64 hex>", set as a job variable by whoever
+#                          runs the job. Unset or empty, the digest is the one
+#                          :sha-<main's commit> resolves to on GHCR; either
+#                          way :preview and :sha-<commit> must both resolve to
+#                          it, and the evidence gate below must pass for it.
 #   CI_API_V4_URL          GitLab's predefined API base URL, for the release
 #                          tag created at the end.
 #   CI_PROJECT_ID          GitLab's predefined numeric project id, for that
@@ -82,7 +92,12 @@ cd "${repo_root}"
 
 fail() { printf 'promote-stable: %s\n' "$1" >&2; exit 1; }
 
-: "${PREVIEW_DIGEST:?PREVIEW_DIGEST is required: the accepted preview digest, sha256:<64 hex>}"
+# Promoting to stable is for protected `main` only (#1564), where a manual job
+# needs Maintainer rights. Before anything else, so nothing is read or called
+# from a pipeline on any other branch, however it was started.
+[[ "${CI_COMMIT_BRANCH:-}" == "main" ]] ||
+  fail "stable promotion runs only on main (CI_COMMIT_BRANCH is '${CI_COMMIT_BRANCH:-}')"
+
 : "${CI_API_V4_URL:?CI_API_V4_URL is not set; this script must run inside a GitLab CI job}"
 : "${CI_PROJECT_ID:?CI_PROJECT_ID is not set; this script must run inside a GitLab CI job}"
 : "${CI_REGISTRY:?CI_REGISTRY is not set; this script must run inside a GitLab CI job}"
@@ -92,8 +107,10 @@ fail() { printf 'promote-stable: %s\n' "$1" >&2; exit 1; }
 : "${GHCR_PUBLISH_TOKEN:?GHCR_PUBLISH_TOKEN is not set. Create a GHCR token scoped only to write:packages and set it as a masked CI/CD variable (docs/releasing.md).}"
 : "${GITLAB_RELEASE_TOKEN:?GITLAB_RELEASE_TOKEN is not set. Create a project access token (Maintainer, scope: api) named release-tagging and set it as a masked CI/CD variable (docs/releasing.md).}"
 
-[[ "$PREVIEW_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] ||
-  fail "PREVIEW_DIGEST must be sha256 followed by 64 lowercase hexadecimal characters (got ${PREVIEW_DIGEST})"
+if [[ -n "${PREVIEW_DIGEST:-}" ]]; then
+  [[ "$PREVIEW_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    fail "PREVIEW_DIGEST must be sha256 followed by 64 lowercase hexadecimal characters (got ${PREVIEW_DIGEST})"
+fi
 
 image="${GHCR_IMAGE:-ghcr.io/tomlawesome/orbit}"
 remote="${GIT_REMOTE:-origin}"
@@ -110,8 +127,12 @@ run_node() { "${PROMOTE_NODE:-node}" "$@"; }
 # (1.3.4-20200120) has no interval expressions, so `{64}` silently matches
 # nothing there and the unit test read every tag as unresolvable (pipeline
 # 317, job 2114). Alpine's awk accepts both; this form works on either.
+#
+# A tag that does not exist makes `inspect` fail; under pipefail that would end
+# the script with no message (#1482), so a missing tag resolves to nothing and
+# the caller names it.
 resolve_digest() {
-  docker buildx imagetools inspect "$1" 2> /dev/null |
+  { docker buildx imagetools inspect "$1" 2> /dev/null || true; } |
     awk '$1 == "Digest:" && length($2) == 71 && $2 ~ /^sha256:[0-9a-f]+$/ && !found { digest = $2; found = 1 }
          END { if (found) print digest }'
 }
@@ -134,6 +155,22 @@ preview_ref="${image}:preview"
 sha_ref="${image}:sha-${main_head}"
 preview_resolved="$(resolve_digest "$preview_ref")"
 sha_resolved="$(resolve_digest "$sha_ref")"
+# With no digest given (#1482), the one main's own commit was published as is
+# the accepted one: the button on main's pipeline is the acceptance, and the
+# checks below and the evidence gate hold it to the same standard.
+if [[ -n "${PREVIEW_DIGEST:-}" ]]; then
+  printf 'promote-stable: digest from PREVIEW_DIGEST: %s\n' "$PREVIEW_DIGEST"
+else
+  # The button is pressed on one pipeline's page, but main's head is what is
+  # promoted; with nothing typed, refuse a press on an older main pipeline so
+  # the image promoted is the one whose pipeline the operator was looking at.
+  [[ "${CI_COMMIT_SHA:-}" == "$main_head" ]] ||
+    fail "this pipeline is for ${CI_COMMIT_SHA:-<unknown commit>}, but main is now ${main_head}; run promote_stable in main's newest pipeline, or set PREVIEW_DIGEST"
+  [[ -n "$sha_resolved" ]] ||
+    fail "${sha_ref} resolves to nothing; main's commit has no published image to promote"
+  PREVIEW_DIGEST="$sha_resolved"
+  printf 'promote-stable: digest from %s: %s\n' "$sha_ref" "$PREVIEW_DIGEST"
+fi
 [[ "$preview_resolved" == "$PREVIEW_DIGEST" ]] ||
   fail "${preview_ref} resolves to ${preview_resolved:-<nothing>}, not the accepted ${PREVIEW_DIGEST}"
 [[ "$sha_resolved" == "$PREVIEW_DIGEST" ]] ||
