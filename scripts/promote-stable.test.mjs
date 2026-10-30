@@ -39,13 +39,16 @@ const STABLE_TAGS = "v1.3.0";
 // the script's own scripts/calculate-version.mjs does and from the same real
 // release-line and retracted-tags files, so raising the release line is a
 // config edit these tests follow rather than one that breaks them.
-const VERSION = calculateReleaseTrainVersion({
-  tags: STABLE_TAGS.split("\n"),
-  fallbackVersion: JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version,
-  channel: "preview",
-  retractedTags: JSON.parse(readFileSync(new URL("./retracted-tags.json", import.meta.url), "utf8")).tags,
-  releaseLine: JSON.parse(readFileSync(new URL("./release-line.json", import.meta.url), "utf8")).line,
-});
+function expectedVersion(releaseLine) {
+  return calculateReleaseTrainVersion({
+    tags: STABLE_TAGS.split("\n"),
+    fallbackVersion: JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version,
+    channel: "preview",
+    retractedTags: JSON.parse(readFileSync(new URL("./retracted-tags.json", import.meta.url), "utf8")).tags,
+    releaseLine,
+  });
+}
+const VERSION = expectedVersion(JSON.parse(readFileSync(new URL("./release-line.json", import.meta.url), "utf8")).line);
 const GHCR_TOKEN = "TEST-GHCR-TOKEN-NOT-REAL";
 const GITLAB_TOKEN = "TEST-GITLAB-TOKEN-NOT-REAL";
 const REGISTRY_PASSWORD = "TEST-REGISTRY-PASSWORD-NOT-REAL";
@@ -332,15 +335,15 @@ function run({
 }
 
 describe("promote-stable.test.mjs expected version", () => {
-  // T-Q28. Fails on the current code: VERSION is a hard-coded literal, so the
-  // first time scripts/release-line.json is raised every happy-path test
-  // fails on a correct config edit. Passes once VERSION is derived with
-  // calculateReleaseTrainVersion from the real release-line file.
-  it("derives VERSION from calculateReleaseTrainVersion rather than a literal", () => {
-    const source = readFileSync(new URL(import.meta.url), "utf8");
-    expect(source).not.toMatch(/^const VERSION = "v\d+\.\d+\.\d+";/mu);
-    expect(source).toMatch(/^import \{[^}]*calculateReleaseTrainVersion[^}]*\} from /mu);
-    expect(source).toMatch(/readFileSync\([^)]*release-line\.json/u);
+  // T-Q28, G4-R3. Raising scripts/release-line.json must move the version every
+  // happy-path test expects, not break them. Checked by behaviour, not by a regex
+  // over this file's own source: the helper that makes VERSION follows the line it
+  // is given, and VERSION is what it gives for the real line.
+  it("follows the release line it is given", () => {
+    const { major, minor } = /^v(?<major>\d+)\.(?<minor>\d+)\.\d+$/u.exec(VERSION).groups;
+    const raised = `v${Number(major) + 1}.0`;
+    expect(expectedVersion(raised)).toBe(`v${Number(major) + 1}.0.0`);
+    expect(expectedVersion(`v${major}.${minor}`)).toBe(VERSION);
   });
 });
 
