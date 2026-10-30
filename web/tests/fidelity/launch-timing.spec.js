@@ -83,8 +83,9 @@ const REPORT_DIR =
  * Runs inside the page, installed before its first script so it never misses
  * an early frame. Samples performance.now() — an ABSOLUTE clock, not
  * relative to page load — on every animation frame for up to 4s of that
- * page's own wall time (bounding memory and run length rather than trusting
- * a specific beat to end on time — the whole point is not assuming that).
+ * page's own wall time on the create page, and from /home until its window
+ * closes (bounding memory and run length rather than trusting a specific
+ * beat to end on time — the whole point is not assuming that).
  * Absolute, because the create page sits idle for a few real seconds while
  * the test navigates, waits for it to settle and fills the field before ever
  * clicking Create: only frames from the click onward are the 620ms hand-off,
@@ -106,8 +107,13 @@ function installFrameLog() {
   let flushed = false;
   /** @type {number | null} */
   let homeReadyAt = null;
-  const stopAt = performance.now() + 4000;
+  /* The create phase is bounded by its own 4s of wall time. The home phase
+     is bounded by its flush instead (G4-R2): it records until the window it
+     is timing has closed, 1.8s after home-ready however late that comes, and
+     the long cap is only the limit on a home that never becomes ready. */
+  const stopAt = performance.now() + (phase === "home" ? 60000 : 4000);
   function tick(/** @type {number} */ t) {
+    if (flushed) return;
     samples.push(t);
     if (t < stopAt) requestAnimationFrame(tick);
   }
@@ -155,6 +161,30 @@ function summarise(values) {
     over50: values.filter((v) => v > 50).length,
   };
 }
+
+/* G4-R2: the home window is 1.8s after home-ready, and the recorder has to
+   still be recording when a late home-ready opens it. A bare page at /home
+   whose home-ready comes after the create phase's 4s would have ended the
+   recording before the window opened. */
+test("the frame recorder keeps recording until the home window closes, however late home is ready", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.route(`${APP}/home`, (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>home</title><body></body>" }));
+  await page.addInitScript(installFrameLog);
+  await page.goto(`${APP}/home`, { waitUntil: "load" });
+  await page.waitForFunction(() => performance.now() > 5000);
+  await page.evaluate(() => { document.body.dataset.homeReady = "true"; });
+  await page.waitForFunction(
+    () => (JSON.parse(sessionStorage.getItem("orbit-launch-frame-log") ?? "[]")).some((/** @type {any} */ r) => r.phase === "home"),
+    undefined,
+    { timeout: 20_000 },
+  );
+  const home = (await page.evaluate(() => JSON.parse(sessionStorage.getItem("orbit-launch-frame-log") ?? "[]")))
+    .find((/** @type {any} */ r) => r.phase === "home");
+  expect(home.homeReadyAt, "expected the page to have noted body[data-home-ready]").not.toBeNull();
+  const windowMs = home.samples[home.samples.length - 1] - home.homeReadyAt;
+  expect(windowMs, "the recording ran on through the whole 1.8s after a late home-ready").toBeGreaterThanOrEqual(1800 - 500);
+});
 
 for (const pack of THEME_PACKS) {
   test(`launch hand-off frame timings — ${pack} pack`, async ({ page }) => {
@@ -223,8 +253,8 @@ for (const pack of THEME_PACKS) {
        does by more than a frame. Upper bound only. A loaded runner can
        leave a gap of a frame or more before the flush, so the last sample
        may come short of 1.8s on a correct build; and the recorder stops
-       itself 4s after the page loaded (installFrameLog's stopAt), so a slow
-       home-ready truncates the window outright (#1536). */
+       itself only when the window closes (installFrameLog), however late
+       home-ready comes; the test below this loop checks that (G4-R2). */
     expect(homePhase.homeReadyAt, "expected the page to have noted body[data-home-ready]").not.toBeNull();
     const lastHomeSample = homePhase.samples[homePhase.samples.length - 1];
     const homeWindowMs = lastHomeSample - homePhase.homeReadyAt;
