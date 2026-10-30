@@ -1,1 +1,4 @@
 tests/support/fixtures/*.pdf binary
+# drizzle-kit writes these; GitLab collapses them in diffs, and the audit
+# count leaves them out as tool-written lines.
+drizzle/meta/*.json linguist-generated
