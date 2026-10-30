@@ -260,6 +260,9 @@ recovery_bundle="$1"
 [[ -f "$recovery_bundle" && ! -L "$recovery_bundle" && "$recovery_bundle" != *:* ]] ||
   fail "Usage: bash scripts/import-recovery-bundle.sh <recovery.tar>"
 require_deployment health
+# A dangling document-key link is neither a key nor its absence: refuse it before Orbit is
+# touched (#1536 O-F2, X-F3), with require_live_key's own message.
+[[ ! -L "$secrets_directory/document-kek" || -e "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; the configured document key is missing.'
 engine_host_identity
 run_engine "$recovery_bundle" import-recovery-bundle --preflight /orbit-input/bundle.tar </dev/null || exit $?
 keep_stopped_message='Orbit recovery import: the inner restore evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.'
