@@ -85,6 +85,18 @@ function onOlderKey(column: AnyPgColumn, keys: RotationKeys): SQL {
   return sql`(${column} <> ${keys.currentKeyId} and ${column} <> ${keys.nextKeyId} and ${column} ~ ${DOCUMENT_KEY_ID_SHAPE})`;
 }
 
+/** Held rows this rotation moves: not yet on the next key, and not skipped on an older one (#1392). */
+function heldToRotate(column: AnyPgColumn, keys: RotationKeys): SQL | undefined {
+  return and(ne(column, keys.nextKeyId), not(onOlderKey(column, keys)));
+}
+
+/** A row the rotation selected must be on the current key; any other key id fails closed. */
+function requireCurrentKey(table: string, rowKeyId: string, keys: RotationKeys): void {
+  if (rowKeyId !== keys.currentKeyId) {
+    throw new Error(`${table} row is wrapped under neither the current nor the next key`);
+  }
+}
+
 /**
  * Finds every `document_crypto` row not already on the next key and gives it
  * a `document_jobs` row to be claimed and processed, reusing the resurrection
@@ -186,9 +198,7 @@ export async function processRewrapJob(job: ClaimedRewrapJob, keys: RotationKeys
       await completeJob(transaction, holdsJobLease(job));
       return "completed";
     }
-    if (crypto.keyId !== keys.currentKeyId) {
-      throw new Error("document_crypto row is wrapped under neither the current nor the next key");
-    }
+    requireCurrentKey("document_crypto", crypto.keyId, keys);
 
     const envelope = envelopeOf(crypto);
     const rewrapped = rewrapDocumentKey(job.documentId, envelope, keys.currentKek, keys.nextKek, keys.nextKeyId);
@@ -242,9 +252,7 @@ export async function runMetadataKeyRotationBatch(keys: RotationKeys, batchSize 
 
     let rewrapped = 0;
     for (const row of rows) {
-      if (row.keyId !== keys.currentKeyId) {
-        throw new Error("metadata_keys row is wrapped under neither the current nor the next key");
-      }
+      requireCurrentKey("metadata_keys", row.keyId, keys);
       const context: MetadataKeyContext = { scope: row.scope, householdId: row.householdId, keyId: row.keyId };
       const next = rewrapMetadataKey(row, keys.currentKek, keys.nextKek, context, keys.nextKeyId);
       const updated = await transaction.update(metadataKeys).set({
@@ -280,9 +288,7 @@ export async function runMailInSecretRotationBatch(keys: RotationKeys, batchSize
 
     let rewrapped = 0;
     for (const row of rows) {
-      if (row.keyId !== keys.currentKeyId) {
-        throw new Error("mail_in_secrets row is wrapped under neither the current nor the next key");
-      }
+      requireCurrentKey("mail_in_secrets", row.keyId, keys);
       const next = rewrapMailInSecret(row.id, row, keys.currentKek, keys.nextKek, keys.nextKeyId);
       const updated = await transaction.update(mailInSecrets).set({
         wrappedDek: next.wrappedDek,
@@ -318,15 +324,13 @@ export async function runImapAttachmentRotationBatch(keys: RotationKeys, batchSi
       wrapIv: imapIngestionAttachments.wrapIv,
       wrapAuthTag: imapIngestionAttachments.wrapAuthTag,
     }).from(imapIngestionAttachments)
-      .where(and(ne(imapIngestionAttachments.keyId, keys.nextKeyId), not(onOlderKey(imapIngestionAttachments.keyId, keys))))
+      .where(heldToRotate(imapIngestionAttachments.keyId, keys))
       .limit(batchSize)
       .for("update", { skipLocked: true });
 
     let rewrapped = 0;
     for (const row of rows) {
-      if (row.keyId !== keys.currentKeyId) {
-        throw new Error("imap_ingestion_attachments row is wrapped under neither the current nor the next key");
-      }
+      requireCurrentKey("imap_ingestion_attachments", row.keyId, keys);
       const next = rewrapDocumentKey(row.id, envelopeOf(row), keys.currentKek, keys.nextKek, keys.nextKeyId);
       const updated = await transaction.update(imapIngestionAttachments).set({
         wrappedDek: next.wrappedDek,
@@ -362,15 +366,13 @@ export async function runStagingObjectRotationBatch(keys: RotationKeys, batchSiz
       wrapIv: documentStagingObjects.wrapIv,
       wrapAuthTag: documentStagingObjects.wrapAuthTag,
     }).from(documentStagingObjects)
-      .where(and(ne(documentStagingObjects.keyId, keys.nextKeyId), not(onOlderKey(documentStagingObjects.keyId, keys))))
+      .where(heldToRotate(documentStagingObjects.keyId, keys))
       .limit(batchSize)
       .for("update", { skipLocked: true });
 
     let rewrapped = 0;
     for (const row of rows) {
-      if (row.keyId !== keys.currentKeyId) {
-        throw new Error("document_staging_objects row is wrapped under neither the current nor the next key");
-      }
+      requireCurrentKey("document_staging_objects", row.keyId, keys);
       const next = rewrapDocumentKey(row.documentId, envelopeOf(row), keys.currentKek, keys.nextKek, keys.nextKeyId, "scanner_recovery");
       const updated = await transaction.update(documentStagingObjects).set({
         wrappedDek: next.wrappedDek,
@@ -461,9 +463,9 @@ export async function rotationRemaining(keys: RotationKeys): Promise<RotationPro
     getDb().select({ count: sql<number>`count(*)::int` }).from(metadataKeys).where(ne(metadataKeys.keyId, keys.nextKeyId)),
     getDb().select({ count: sql<number>`count(*)::int` }).from(mailInSecrets).where(ne(mailInSecrets.keyId, keys.nextKeyId)),
     getDb().select({ count: sql<number>`count(*)::int` }).from(imapIngestionAttachments)
-      .where(and(ne(imapIngestionAttachments.keyId, keys.nextKeyId), not(onOlderKey(imapIngestionAttachments.keyId, keys)))),
+      .where(heldToRotate(imapIngestionAttachments.keyId, keys)),
     getDb().select({ count: sql<number>`count(*)::int` }).from(documentStagingObjects)
-      .where(and(ne(documentStagingObjects.keyId, keys.nextKeyId), not(onOlderKey(documentStagingObjects.keyId, keys)))),
+      .where(heldToRotate(documentStagingObjects.keyId, keys)),
     heldObjectsOnOlderKey(keys),
   ]);
   return {
