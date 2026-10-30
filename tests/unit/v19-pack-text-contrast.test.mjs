@@ -1,9 +1,8 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import { describe, expect, it } from "vitest";
 
 import { THEME_PACKS } from "../../web/src/lib/theme.js";
+
+import { BLOCKS } from "./v19-pack-contrast-lib.mjs";
 
 /*
  * #491 item 3: every "-text" companion (and --ink-quiet) is a promise that a
@@ -24,11 +23,6 @@ import { THEME_PACKS } from "../../web/src/lib/theme.js";
  * exists.
  */
 
-const PACKS_CSS = readFileSync(
-  resolve(import.meta.dirname, "../../web/src/lib/packs.css"),
-  "utf8",
-);
-
 const PACK_NAMES = ["starchart", "afterdark", "dawn", "clouds", "retrograde"];
 
 const GROUND_TOKEN = {
@@ -41,24 +35,6 @@ const GROUND_TOKEN = {
 
 const TEXT_TOKENS = ["--overdue-text", "--degraded-text", "--accent-text", "--ok-text", "--ink-quiet"];
 
-/** Extracts `prop: value;` pairs from a `[data-theme=x]{...}` block, raw (unresolved). */
-function blockOf(pack) {
-  const pattern = new RegExp(`\\[data-theme=${pack}\\]\\s*{([^}]*)}`);
-  const match = pattern.exec(PACKS_CSS);
-  if (!match) throw new Error(`No [data-theme=${pack}] block found in packs.css`);
-  const body = match[1];
-  const props = {};
-  // Declarations only — strips /* ... */ comments first so a token name
-  // mentioned in prose (there is plenty of it in this file) is never read
-  // as a declaration.
-  const withoutComments = body.replace(/\/\*[\s\S]*?\*\//g, "");
-  for (const decl of withoutComments.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
-    props[decl[1]] = decl[2].trim();
-  }
-  return props;
-}
-
-const BLOCKS = Object.fromEntries(PACK_NAMES.map((pack) => [pack, blockOf(pack)]));
 
 function hexToRgb(hex) {
   const clean = hex.replace("#", "");

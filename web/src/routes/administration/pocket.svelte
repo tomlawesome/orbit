@@ -1104,10 +1104,10 @@
   <Sheet bind:open={inviteOpen} size="callout" title="Invite someone">
     <form id="ad-invite-form" onsubmit={(event) => { event.preventDefault(); invite(); }}>
       <label class="ad-label" for="ad-inv-email">email</label>
-      <input id="ad-inv-email" class="ad-input p-input" type="email" inputmode="email" autocomplete="off" enterkeyhint="next"
+      <input id="ad-inv-email" class="p-input" type="email" inputmode="email" autocomplete="off" enterkeyhint="next"
              placeholder="newcomer@example.com" bind:value={draft.email} required>
       <label class="ad-label" for="ad-inv-name">display name</label>
-      <input id="ad-inv-name" class="ad-input p-input" autocomplete="off" enterkeyhint="done" placeholder="their name"
+      <input id="ad-inv-name" class="p-input" autocomplete="off" enterkeyhint="done" placeholder="their name"
              bind:value={draft.displayName} required>
       <p class="ad-label" id="ad-inv-days">link valid for</p>
       <div class="ad-stepper" role="group" aria-labelledby="ad-inv-days">
@@ -1119,7 +1119,7 @@
       </div>
       {#if inviteArmed && actorHasPassword}
         <label class="ad-label" for="ad-inv-current">your current password</label>
-        <input id="ad-inv-current" class="ad-input p-input" type="password" autocomplete="current-password" enterkeyhint="send"
+        <input id="ad-inv-current" class="p-input" type="password" autocomplete="current-password" enterkeyhint="send"
                bind:value={invitePassword} required>
       {/if}
       <p class="ad-note">Orbit mails them a link to choose their own password. The link is never shown here.</p>
@@ -1145,7 +1145,7 @@
         </div>
         {#if actorHasPassword}
           <label class="ad-label" for="ad-re-current">your current password</label>
-          <input id="ad-re-current" class="ad-input p-input" type="password" autocomplete="current-password" enterkeyhint="send"
+          <input id="ad-re-current" class="p-input" type="password" autocomplete="current-password" enterkeyhint="send"
                  bind:value={resendPassword} required>
         {/if}
         {#if resendProblem}<p class="p-error" role="alert">{resendProblem}</p>{/if}
@@ -1174,11 +1174,11 @@
        past a callout's fold, so it stays a list until the design says which. -->
   <Sheet bind:open={systemOpen} size="list" title="New system">
     <label class="ad-label" for="ad-sys-name">name</label>
-    <input id="ad-sys-name" class="ad-input p-input" autocomplete="off" enterkeyhint="next" placeholder="Seaside Cottage"
+    <input id="ad-sys-name" class="p-input" autocomplete="off" enterkeyhint="next" placeholder="Seaside Cottage"
            maxlength={NAME_LIMIT} bind:value={systemName}>
     {#if actorHasPassword}
       <label class="ad-label" for="ad-sys-current">your current password</label>
-      <input id="ad-sys-current" class="ad-input p-input" type="password" autocomplete="current-password" enterkeyhint="next"
+      <input id="ad-sys-current" class="p-input" type="password" autocomplete="current-password" enterkeyhint="next"
              bind:value={systemPassword}>
     {/if}
     <p class="ad-label" id="ad-sys-owner">who will own it · tap to make it</p>
@@ -1197,7 +1197,7 @@
   <Sheet bind:open={contactOpen} size="callout" title="Public contact">
     <form id="ad-contact-form" onsubmit={(event) => { event.preventDefault(); contactAction({ action: "set", address: contactDraft }); }}>
       <label class="ad-label" for="ad-contact-field">address</label>
-      <input id="ad-contact-field" class="ad-input p-input" type="email" inputmode="email" autocomplete="off" enterkeyhint="done"
+      <input id="ad-contact-field" class="p-input" type="email" inputmode="email" autocomplete="off" enterkeyhint="done"
              placeholder="ops@example.com" bind:value={contactDraft} required>
       <p class="ad-note">Shown on the sign-in door if it ever can’t open safely — never a real administrator’s own mailbox.
         Anyone can read it, signed in or not.</p>
@@ -1215,7 +1215,7 @@
     <form id="ad-uploads-form" onsubmit={(event) => { event.preventDefault();
       if (uploadLimitDraft !== null) uploadLimitAction({ action: "set", megabytes: uploadLimitDraft }); }}>
       <label class="ad-label" for="ad-uploads-field">limit in MB</label>
-      <input id="ad-uploads-field" class="ad-input p-input" type="number" inputmode="numeric" step="1" enterkeyhint="done"
+      <input id="ad-uploads-field" class="p-input" type="number" inputmode="numeric" step="1" enterkeyhint="done"
              min={view?.uploadLimit ? Math.round(view.uploadLimit.minBytes / 1048576) : 1}
              max={view?.uploadLimit ? Math.round(view.uploadLimit.ceilingBytes / 1048576) : 100}
              bind:value={uploadLimitDraft} required>
@@ -1238,7 +1238,7 @@
     <form id="ad-rotate-form" onsubmit={(event) => { event.preventDefault();
       if (view?.mailbox) mailAction("rotate", { action: "rotate", expectedVersion: view.mailbox.version, password: mailPassword }); }}>
       <label class="ad-label" for="ad-rot-pass">new password</label>
-      <input id="ad-rot-pass" class="ad-input p-input" type="password" autocomplete="new-password" enterkeyhint="done"
+      <input id="ad-rot-pass" class="p-input" type="password" autocomplete="new-password" enterkeyhint="done"
              bind:value={mailPassword} required>
       <p class="ad-note">It is proven against the provider before it’s kept; a refusal leaves the old one working.</p>
       {#if mailProblem}<p class="p-error" role="alert">{mailProblem}</p>{/if}
@@ -1253,26 +1253,26 @@
     <form id="ad-mailbox-form" class="ad-form" onsubmit={(event) => { event.preventDefault();
       if (view?.mailbox) mailAction("set", { action: "set", expectedVersion: view.mailbox.version, ...mailDraft, password: mailPassword }); }}>
       <label class="ad-label" for="ad-mb-host">host</label>
-      <input id="ad-mb-host" class="ad-input p-input" autocomplete="off" autocapitalize="off" bind:value={mailDraft.host} required>
+      <input id="ad-mb-host" class="p-input" autocomplete="off" autocapitalize="off" bind:value={mailDraft.host} required>
       <label class="ad-label" for="ad-mb-port">port</label>
-      <input id="ad-mb-port" class="ad-input p-input" type="number" inputmode="numeric" min="1" max="65535" bind:value={mailDraft.port} required>
+      <input id="ad-mb-port" class="p-input" type="number" inputmode="numeric" min="1" max="65535" bind:value={mailDraft.port} required>
       <label class="ad-label" for="ad-mb-user">account</label>
-      <input id="ad-mb-user" class="ad-input p-input" autocomplete="off" autocapitalize="off" placeholder="intake@example.com"
+      <input id="ad-mb-user" class="p-input" autocomplete="off" autocapitalize="off" placeholder="intake@example.com"
              bind:value={mailDraft.accountUser} required>
       <label class="ad-label" for="ad-mb-folder">folder</label>
-      <input id="ad-mb-folder" class="ad-input p-input" autocapitalize="off" bind:value={mailDraft.mailbox} required>
+      <input id="ad-mb-folder" class="p-input" autocapitalize="off" bind:value={mailDraft.mailbox} required>
       <label class="ad-label" for="ad-mb-tls">tls name</label>
-      <input id="ad-mb-tls" class="ad-input p-input" autocapitalize="off" placeholder="same as host" bind:value={mailDraft.tlsServerName}>
+      <input id="ad-mb-tls" class="p-input" autocapitalize="off" placeholder="same as host" bind:value={mailDraft.tlsServerName}>
       <label class="ad-label" for="ad-mb-provider">provider</label>
-      <select id="ad-mb-provider" class="ad-input p-input" bind:value={mailDraft.providerProfile}>
+      <select id="ad-mb-provider" class="p-input" bind:value={mailDraft.providerProfile}>
         {#each PROVIDER_PROFILES as profile (profile)}<option value={profile}>{profile}</option>{/each}
       </select>
       <label class="ad-label" for="ad-mb-header">envelope header</label>
-      <input id="ad-mb-header" class="ad-input p-input" autocapitalize="off" bind:value={mailDraft.trustedRecipientHeader} required>
+      <input id="ad-mb-header" class="p-input" autocapitalize="off" bind:value={mailDraft.trustedRecipientHeader} required>
       <label class="ad-label" for="ad-mb-poll">poll seconds</label>
-      <input id="ad-mb-poll" class="ad-input p-input" type="number" inputmode="numeric" min="30" max="3600" bind:value={mailDraft.pollSeconds} required>
+      <input id="ad-mb-poll" class="p-input" type="number" inputmode="numeric" min="30" max="3600" bind:value={mailDraft.pollSeconds} required>
       <label class="ad-label" for="ad-mb-pass">password</label>
-      <input id="ad-mb-pass" class="ad-input p-input" type="password" autocomplete="new-password" bind:value={mailPassword} required>
+      <input id="ad-mb-pass" class="p-input" type="password" autocomplete="new-password" bind:value={mailPassword} required>
       <p class="ad-note">Relay addresses are plus-addresses of this account, so it has to be one the provider delivers
         sub-addressed mail to. The password is stored encrypted and never shown again.</p>
       {#if mailProblem}<p class="p-error" role="alert">{mailProblem}</p>{/if}
@@ -1288,7 +1288,7 @@
       <p class="p-prose ad-sheet-say">Deleting now skips the {plural(daysLeft(doomed.deleteAfter), "day")}. Nothing comes back
         after this — not for you, not for anyone.</p>
       <label class="ad-label" for="ad-doom-name">type the system’s name exactly to wake the button</label>
-      <input id="ad-doom-name" class="ad-input p-input" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"
+      <input id="ad-doom-name" class="p-input" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"
              placeholder={doomed.name} bind:value={typedName}>
       {#if doomProblem}<p class="p-error" role="alert">{doomProblem}</p>{/if}
     {/if}
