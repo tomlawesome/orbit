@@ -3929,10 +3929,20 @@ publish_channel:
 # source of truth: an operator supplies the accepted PREVIEW_DIGEST (not a
 # typed version -- the version comes from the image itself, verified the same
 # way that workflow always verified it) and this job does the rest. Manual
-# only, and only reachable from a pipeline on `main` or a pipeline you start
-# yourself (`web`/`api`) carrying a `PREVIEW_DIGEST` variable -- there is no
-# automatic trigger, because accepting a release is a human decision this
-# pipeline cannot infer from a push.
+# only, and only reachable from a pipeline on `main` -- a push, or one you
+# start by hand on `main` (`web`/`api`) with a `PREVIEW_DIGEST` variable.
+# There is no automatic trigger, because accepting a release is a human
+# decision this pipeline cannot infer from a push.
+#
+# `main` only, however the pipeline was started (#1564). It used to have a
+# second route for any hand-started pipeline carrying `PREVIEW_DIGEST`, on any
+# branch. A manual job on protected `main` needs Maintainer rights, so the
+# assistant accounts, being Developers, cannot press it there; on `dev` or a
+# feature branch they could, and the role change would not have stopped them.
+# Nothing needed that route: a hand-started pipeline on `main` is covered by
+# the `main` rule below, the hotfix flow promotes from `main` too (the script
+# needs `main` and `preview` on one commit), and promote-stable.sh refuses a
+# branch other than `main` again, so a change to these rules cannot reopen it.
 #
 # GHCR stays the public image source; the GitLab registry keeps only
 # `:sha-*`/`:preview` (see record_image/publish_channel above). So this
@@ -3983,9 +3993,6 @@ promote_stable:
   rules:
     - *not_scheduled
     - if: $CI_COMMIT_BRANCH == "main"
-      when: manual
-      allow_failure: false
-    - if: ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $PREVIEW_DIGEST
       when: manual
       allow_failure: false
   script:

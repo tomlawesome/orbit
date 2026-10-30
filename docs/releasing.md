@@ -267,11 +267,12 @@ after a rotation.
 ## Stable promotion (on GitLab)
 
 Promotion is a manual GitLab CI job, `promote_stable` in `.gitlab-ci.yml`. It
-only appears, as a manual step, on a pipeline running on `main` (a push to
-`main` starts nothing else, #1546), or on a
-pipeline you start yourself against any ref by giving it a `PREVIEW_DIGEST`
-variable. Nothing runs it automatically: accepting a release is a human
-decision.
+only appears, as a manual step, on a pipeline running on `main`: the push to
+`main` (which starts nothing else, #1546) or one you start yourself on `main`
+with a `PREVIEW_DIGEST` variable. A pipeline on any other branch has no such
+job, and `promote-stable.sh` refuses to run off `main` as well (#1564), so
+only someone who can press a manual job on protected `main` can promote.
+Nothing runs it automatically: accepting a release is a human decision.
 
 The only input is `PREVIEW_DIGEST`, the accepted preview image's digest
 (`sha256:<64 hex>`). Find it either:
@@ -287,7 +288,7 @@ To run it:
 1. Deploy the accepted preview digest and complete release acceptance.
 2. Merge the `preview` -> `main` merge request once acceptance is done.
 3. Open `https://gitlab.tomlawson.io/ai/orbit/-/pipelines/new`, choose the
-   `main` branch (or the ref you are promoting), add a pipeline variable named
+   `main` branch, add a pipeline variable named
    `PREVIEW_DIGEST` set to the digest, e.g. `sha256:abcd...`, and start the
    pipeline.
 4. Find the `promote_stable` job in the pipeline and click Run.

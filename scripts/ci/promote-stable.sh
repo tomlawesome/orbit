@@ -26,6 +26,11 @@
 #   scripts/ci/promote-stable.sh
 #
 # Inputs (environment):
+#   CI_COMMIT_BRANCH       GitLab's predefined branch name. Must be `main`
+#                          (#1564): the job's `rules:` already say so, and
+#                          this refuses again so a later change to them cannot
+#                          reopen a release button on a branch a Developer can
+#                          push to.
 #   PREVIEW_DIGEST         The accepted preview digest, "sha256:<64 hex>". A
 #                          GitLab pipeline variable set by whoever runs the
 #                          job -- the same input promote-container.yml's
@@ -81,6 +86,12 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "${repo_root}"
 
 fail() { printf 'promote-stable: %s\n' "$1" >&2; exit 1; }
+
+# Promoting to stable is for protected `main` only (#1564), where a manual job
+# needs Maintainer rights. Before anything else, so nothing is read or called
+# from a pipeline on any other branch, however it was started.
+[[ "${CI_COMMIT_BRANCH:-}" == "main" ]] ||
+  fail "stable promotion runs only on main (CI_COMMIT_BRANCH is '${CI_COMMIT_BRANCH:-}')"
 
 : "${PREVIEW_DIGEST:?PREVIEW_DIGEST is required: the accepted preview digest, sha256:<64 hex>}"
 : "${CI_API_V4_URL:?CI_API_V4_URL is not set; this script must run inside a GitLab CI job}"

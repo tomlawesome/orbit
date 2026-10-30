@@ -295,6 +295,7 @@ function run({
       env: {
         PATH: `${stubs.dir}:${process.env.PATH}`,
         PREVIEW_DIGEST: previewDigestInput,
+        CI_COMMIT_BRANCH: "main",
         CI_API_V4_URL: "https://gitlab.tomlawson.io/api/v4",
         CI_PROJECT_ID: "49",
         GHCR_PUBLISH_TOKEN: GHCR_TOKEN,
@@ -348,6 +349,19 @@ describe("scripts/ci/promote-stable.sh", () => {
       expect(result.stderr, bad).toContain("PREVIEW_DIGEST");
       expect(calls().length, bad).toBe(0);
     }
+  });
+
+  it("refuses off main, however the pipeline was started, without calling docker or git (#1564)", () => {
+    for (const branch of ["dev", "preview", "hotfix/x", "feature/x", ""]) {
+      const { result, calls } = run({ env: { CI_COMMIT_BRANCH: branch } });
+      expect(result.status, branch).not.toBe(0);
+      expect(result.stderr, branch).toContain("only on main");
+      expect(calls().length, branch).toBe(0);
+    }
+    const unset = run({ env: { CI_COMMIT_BRANCH: undefined } });
+    expect(unset.result.status).not.toBe(0);
+    expect(unset.result.stderr).toContain("only on main");
+    expect(unset.calls().length).toBe(0);
   });
 
   it("refuses when main and preview are not the same commit", () => {
@@ -633,18 +647,67 @@ describe(".gitlab-ci.yml promote_stable job", () => {
     expect(job).toContain("allow_failure: false");
   });
 
-  it("is reachable only from a main pipeline or a web/api pipeline carrying PREVIEW_DIGEST", () => {
+  // #1564: the job is reachable from a pipeline on `main` and from nowhere
+  // else. The old second route (any web/api pipeline carrying PREVIEW_DIGEST,
+  // on any branch) let a Developer press it on `dev` or a feature branch,
+  // where the role change that stops them pressing it on protected `main`
+  // does not apply. The rules are evaluated here the way GitLab does, over
+  // the job's own `rules:` block, so a new route cannot hide behind a
+  // substring that still matches.
+  const rulesBlock = job.slice(job.indexOf("  rules:\n"), job.indexOf("  script:\n"));
+  const rules = rulesBlock
+    .split("\n")
+    .slice(1)
+    .join("\n")
+    .split(/^ {4}- /mu)
+    .filter(Boolean)
+    .map((text) => text.trim());
+
+  /** Does this rule's `if:` hold for a pipeline with these variables? */
+  function holds(rule, variables) {
+    const condition = rule.match(/^if: (.*)$/mu)?.[1];
+    if (condition === undefined) return true;
+    // Only the two shapes this job may use: `$CI_COMMIT_BRANCH == "main"` and
+    // a bare variable test. Anything else fails loudly, not silently true.
+    const equals = condition.match(/^\$(\w+) == "([^"]*)"$/u);
+    if (equals) return variables[equals[1]] === equals[2];
+    throw new Error(`promote_stable has a rule this test cannot evaluate: ${condition}`);
+  }
+
+  /** The `when:` GitLab would give the job in this pipeline, or "never". */
+  function whenFor(variables) {
+    for (const rule of rules) {
+      if (rule.startsWith("*")) continue; // the *not_scheduled alias
+      if (holds(rule, variables)) return rule.match(/^ *when: (\w+)$/mu)?.[1] ?? "on_success";
+    }
+    return "never";
+  }
+
+  it("is reachable only from a main pipeline (#1564)", () => {
     expect(job).toContain('$CI_COMMIT_BRANCH == "main"');
-    // D1-Q2 (#1151): pinned as one rule, not as four independent substrings.
-    // Splitting the web/api check and the PREVIEW_DIGEST check into two
-    // separate `if:` rules would satisfy every substring below while
-    // promoting on EITHER a bare web/api pipeline OR any pipeline carrying
-    // PREVIEW_DIGEST -- widening who can promote well past what this job's
-    // name promises.
-    expect(job).toContain(
-      'if: ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $PREVIEW_DIGEST',
-    );
+    // The one rule that can start it is the `main` rule, and it is manual.
+    expect(rules.filter((rule) => !rule.startsWith("*"))).toHaveLength(1);
+    expect(whenFor({ CI_COMMIT_BRANCH: "main", CI_PIPELINE_SOURCE: "push" })).toBe("manual");
+    // A hand-started pipeline on main is the same rule, not a second route.
+    expect(whenFor({ CI_COMMIT_BRANCH: "main", CI_PIPELINE_SOURCE: "web", PREVIEW_DIGEST: "x" })).toBe("manual");
     expect(job).not.toContain("$VERSION");
+  });
+
+  it("cannot be reached from a hand-started pipeline off main, digest or not (#1564)", () => {
+    for (const branch of ["dev", "preview", "hotfix/x", "feature/x", "primary"]) {
+      for (const source of ["web", "api", "push", "pipeline", "trigger"]) {
+        for (const digest of [undefined, `sha256:${"1".repeat(64)}`]) {
+          const variables = { CI_COMMIT_BRANCH: branch, CI_PIPELINE_SOURCE: source };
+          if (digest) variables.PREVIEW_DIGEST = digest;
+          expect(whenFor(variables), JSON.stringify(variables)).toBe("never");
+        }
+      }
+    }
+    // A merge request pipeline has no branch name at all.
+    expect(
+      whenFor({ CI_PIPELINE_SOURCE: "merge_request_event", PREVIEW_DIGEST: `sha256:${"1".repeat(64)}` }),
+    ).toBe("never");
+    expect(job).not.toContain("PREVIEW_DIGEST");
   });
 
   it("never authenticates with the job's own CI_JOB_TOKEN", () => {
