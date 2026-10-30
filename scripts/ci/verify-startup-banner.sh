@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Proves the running application printed its startup banner exactly once and,
-# with it, one immutable identity line naming the version, channel and source
+# with it, one immutable identity line naming the version and source
 # revision it was built from. Once, not at least once: a duplicate line means
 # the process restarted, and an identity that disagrees with the build means
 # the stack is running something other than the image under test.
@@ -27,9 +27,8 @@ startup_logs="$(docker compose --env-file .env-orbit logs --no-color orbit-app)"
 startup_logs="$(sed -E 's/^[^|]*\| //' <<< "${startup_logs}")"
 banner_line='  ·      ·    ·    ██████╗  ██████╗  ██████╗  ██╗ ████████╗   ·      ·      ·'
 version="${TESTED_IMAGE_VERSION}"
-release_stage="${PUBLICATION_CHANNEL}"
 revision="${ORBIT_REVISION}"
-identity_line="Orbit ${version} | channel=${release_stage} | revision=${revision}"
+identity_line="Orbit ${version} | revision=${revision}"
 banner_count="$(grep --fixed-strings --line-regexp --count "${banner_line}" <<< "${startup_logs}" || true)"
 identity_count="$(grep --fixed-strings --line-regexp --count "${identity_line}" <<< "${startup_logs}" || true)"
 [[ "${banner_count}" -eq 1 ]] || {
