@@ -307,14 +307,18 @@ describe("approve retry: the reclaim remembers the item (#1396)", () => {
     const fixture = await createIntegrationFixture("reviewed-retry-reclaim-item");
     const member = await fixture.session("member");
     const receiptId = await seedReceipt(fixture);
+    const attachmentId = await seedAttachment(receiptId, fixture.users.member.id, "retry-reclaim-item");
     const operationId = randomUUID();
     const before = await householdItemIds(fixture);
     try {
-      const sent = payloadFor(fixture, receiptId, operationId, { title: "Made before the crash" });
-      expect((await approve(member, sent)).status).toBe(200);
-      // Rewind to a request that died after the item was created.
+      const sent = payloadFor(fixture, receiptId, operationId, { title: "Made before the crash", attachmentIds: [attachmentId] });
+      // Completion clears the stored request, so take it while the approval is still open (partial).
+      await approveToPartial(member, sent);
+      const stored = await storedRequest(receiptId);
+      expect(stored).not.toBeNull();
+      // Rewind to a request that died after the item was created: it still holds its stored request.
       await db().update(imapIngestionMessages).set({
-        status: "approving", approvalResultId: null, failureCode: null, approvalStartedAt: abandoned(), updatedAt: abandoned(),
+        status: "approving", approvalResultId: null, failureCode: null, approvalRequestEnc: stored, approvalStartedAt: abandoned(), updatedAt: abandoned(),
       }).where(eq(imapIngestionMessages.id, receiptId));
       const bound = await receiptRow(receiptId);
       expect(bound).toMatchObject({ status: "approving", approvalOperationId: operationId, approvedItemId: operationId });
@@ -336,6 +340,7 @@ describe("approve retry: the reclaim remembers the item (#1396)", () => {
       expect((await householdItemIds(fixture)).filter((id) => !before.includes(id))).toEqual([operationId]);
       expect(await receiptRow(receiptId)).toMatchObject({ status: "completed", approvedItemId: operationId });
     } finally {
+      setImapHoldingPurgeImplementationForTests(undefined);
       await fixture.cleanup();
     }
   });
@@ -344,19 +349,24 @@ describe("approve retry: the reclaim remembers the item (#1396)", () => {
     const fixture = await createIntegrationFixture("reviewed-retry-reclaim-fresh-key");
     const member = await fixture.session("member");
     const receiptId = await seedReceipt(fixture);
+    const attachmentId = await seedAttachment(receiptId, fixture.users.member.id, "retry-reclaim-fresh");
     const operationId = randomUUID();
     const before = await householdItemIds(fixture);
     try {
-      expect((await approve(member, payloadFor(fixture, receiptId, operationId, { title: "Made before the crash" }))).status).toBe(200);
+      // Completion clears the stored request, so take it while the approval is still open (partial).
+      await approveToPartial(member, payloadFor(fixture, receiptId, operationId, { title: "Made before the crash", attachmentIds: [attachmentId] }));
+      const stored = await storedRequest(receiptId);
+      expect(stored).not.toBeNull();
       await db().update(imapIngestionMessages).set({
-        status: "approving", approvalResultId: null, failureCode: null, approvalStartedAt: abandoned(), updatedAt: abandoned(),
+        status: "approving", approvalResultId: null, failureCode: null, approvalRequestEnc: stored, approvalStartedAt: abandoned(), updatedAt: abandoned(),
       }).where(eq(imapIngestionMessages.id, receiptId));
 
-      const fresh = await approve(member, payloadFor(fixture, receiptId, randomUUID(), { title: "Made before the crash" }));
+      const fresh = await approve(member, payloadFor(fixture, receiptId, randomUUID(), { title: "Made before the crash", attachmentIds: [attachmentId] }));
       expect(fresh.status).toBe(409);
       expect((await fresh.json()).error).toEqual({ code: "reviewed_intake_conflict", message: "That approval identity was already used" });
       expect((await householdItemIds(fixture)).filter((id) => !before.includes(id))).toEqual([operationId]);
     } finally {
+      setImapHoldingPurgeImplementationForTests(undefined);
       await fixture.cleanup();
     }
   });
