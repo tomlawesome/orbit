@@ -209,7 +209,7 @@ describe("sidecar pins sync: never records an index that does not hold the pin (
       resolveTag: resolverFor({ "node:24-alpine": REBUILT_NODE }),
     });
 
-    expect(status).toBe(0);
+    expect(status).toBe(2); /* a skipped pin needs a manual re-pin (#1558) */
     expect(readFileSync(policyPath, "utf8")).toBe(before);
     expect(entryFor(policyPath, "node:24-alpine").indexDigest).toBe(NODE_INDEX);
   });
@@ -264,7 +264,7 @@ describe("sidecar pins sync: never records an index that does not hold the pin (
       }),
     });
 
-    expect(status).toBe(0);
+    expect(status).toBe(2); /* one skipped: exit 2 even though others synced (#1558) */
     const synced = entryFor(policyPath, "postgres:18-alpine");
     expect(synced.reference).toBe(`postgres:18-alpine@${POSTGRES_NEW_DIGEST}`);
     expect(synced.indexDigest).toBe(POSTGRES_NEW_INDEX);

@@ -528,7 +528,24 @@ export function refusesFile(error) {
  * provider's sign-on is still live it would sign the reader straight back in.
  * A failed sign-out puts it back, so a real expiry still bounces.
  */
-let endingThisSession = false;
+let sessionEnded = false;
+/** Own sign-outs still in flight: two can overlap (a double press, or
+    "everywhere" while "this device" is pending), and one failing must not
+    lift the hold the other still needs (#1558). */
+let endingsInFlight = 0;
+const holdingBounce = () => sessionEnded || endingsInFlight > 0;
+
+/**
+ * A 401 another read met while the bounce was held. If the sign-out then
+ * fails, that 401 was a real expiry after all, so the bounce it was owed
+ * happens then (#1558).
+ */
+let bounceHeld = false;
+
+/** Into the login flow and back to this exact page (#451). */
+function bounceToLogin() {
+  window.location.assign(`/api/auth/login?returnTo=${encodeURIComponent(window.location.pathname)}`);
+}
 
 /**
  * Runs the request that ends this browser's session with the 401 bounce held.
@@ -537,13 +554,43 @@ let endingThisSession = false;
  * @returns {Promise<T>}
  */
 async function whileEndingThisSession(request) {
-  endingThisSession = true;
+  if (!holdingBounce()) bounceHeld = false;
+  endingsInFlight += 1;
   try {
-    return await request();
-  } catch (error) {
-    endingThisSession = false;
-    throw error;
+    const result = await request();
+    sessionEnded = true;
+    return result;
+  } finally {
+    endingsInFlight -= 1;
+    /* Failed, and no other sign-out still holds the bounce: a 401 held
+       meanwhile was a real expiry, owed its bounce now. */
+    if (!holdingBounce() && bounceHeld) {
+      bounceHeld = false;
+      if (typeof window !== "undefined") bounceToLogin();
+    }
   }
+}
+
+/**
+ * Ends this browser's own session through `revoke`, where a 401 means the
+ * session had already expired: what the reader asked for is done, so it
+ * resolves as an ended session with no provider logout URL, rather than
+ * reading as "could not end the session" (#1558).
+ * @param {() => Promise<?string>} revoke
+ * @returns {Promise<?string>}
+ */
+function endOwnSession(revoke) {
+  return whileEndingThisSession(async () => {
+    try {
+      return await revoke();
+    } catch (error) {
+      if (error instanceof WorkspaceError && error.status === 401) {
+        sessionPromise = null;
+        return null;
+      }
+      throw error;
+    }
+  });
 }
 
 /**
@@ -570,10 +617,9 @@ export async function json(response) {
        into the login flow and back to this exact page (#451), unless this is
        the sign-out's own 401 (#1520). The throw below still happens so pending
        callers settle while the navigation takes over. */
-    if (response.status === 401 && typeof window !== "undefined" && !endingThisSession) {
-      window.location.assign(
-        `/api/auth/login?returnTo=${encodeURIComponent(window.location.pathname)}`,
-      );
+    if (response.status === 401 && typeof window !== "undefined") {
+      if (holdingBounce()) bounceHeld = true;
+      else bounceToLogin();
     }
     /* The household was closed by an import while this screen stood in it
        (#1316): its data is no longer served, so the screen has nothing truer
@@ -2702,7 +2748,7 @@ export async function revokeSession(sessionId, { own = false } = {}) {
     const body = await json(await csrfFetch(`/api/auth/sessions/${sessionId}/revoke`));
     return body?.redirectTo ?? null;
   };
-  return own ? whileEndingThisSession(revoke) : revoke();
+  return own ? endOwnSession(revoke) : revoke();
 }
 
 /**
@@ -2721,7 +2767,7 @@ export async function revokeSession(sessionId, { own = false } = {}) {
  *   browser, when it has one (#1439)
  */
 export async function signOutEverywhere() {
-  return whileEndingThisSession(async () => {
+  return endOwnSession(async () => {
     /** @type {?{ redirectTo?: ?string }} */
     const body = await json(await csrfFetch("/api/auth/sessions/revoke"));
     sessionPromise = null;              /* the cached session is a dead letter now */
