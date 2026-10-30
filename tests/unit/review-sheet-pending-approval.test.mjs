@@ -50,12 +50,15 @@ const PAIR = {
 
 /** Whether the review read for the receipt reports a pending pair. */
 let reported = false;
+/** Whether the review read for the receipt fails outright. */
+let readFails = false;
 
 function stubFetch() {
   vi.stubGlobal("fetch", vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ init) => {
     const href = String(url);
     if (href.includes("/api/auth/session")) return json({ user: { id: "u1" }, csrfToken: "t1" });
     if (href.includes("/api/imap-inbox/r-1") && (!init?.method || init.method === "GET")) {
+      if (readFails) return json({ error: { code: "unavailable", message: "not today" } }, 503);
       return json({
         receipt: { id: "r-1", draftVersion: 2, proposal: { title: "Boiler cover" } },
         sections: household.sections, attachments: [],
@@ -102,6 +105,7 @@ beforeEach(() => {
   vi.resetModules();
   vi.useFakeTimers();
   reported = false;
+  readFails = false;
   entryForm.mounts = 0;
   document.body.innerHTML = "";
   stubFetch();
@@ -115,7 +119,8 @@ afterEach(() => {
 
 const settle = async () => { await vi.advanceTimersByTimeAsync(400); };
 
-async function openSheet() {
+/** @param {boolean} passProp whether the pair is also given as the `approval` prop (no production caller does). */
+async function openSheet(passProp = reported) {
   const { mount, unmount } = await import(pathToFileURL(join(svelteSrc, "index-client.js")).href);
   const { default: ReviewSheet } = await import(/* @vite-ignore */ compiledSheet);
   const component = mount(ReviewSheet, {
@@ -127,7 +132,7 @@ async function openSheet() {
       householdId: "hh-1",
       households: [household],
       receiptId: "r-1",
-      ...(reported ? { approval: PAIR } : {}),
+      ...(passProp ? { approval: PAIR } : {}),
       onsave: async () => true,
     },
   });
@@ -148,6 +153,30 @@ describe("#1396: the review sheet while an earlier approval is pending", () => {
   it("with no pending approval it draws the amend fields and says nothing of the kind", async () => {
     reported = false;
     await openSheet();
+    expect(entryForm.mounts, "the amend fields are drawn").toBeGreaterThan(0);
+    expect(sheetText()).not.toContain("finishing your earlier approval");
+  });
+});
+
+describe("#1396: the sheet finds a pending pair by itself (no production caller passes the `approval` prop)", () => {
+  it("with no prop, a review read that reports the pair hides the amend fields and shows the message", async () => {
+    reported = true;
+    await openSheet(false);
+    expect(entryForm.mounts, "the amend fields are not drawn").toBe(0);
+    expect(sheetText()).toContain("finishing your earlier approval");
+  });
+
+  it("with no prop, a review read that reports no pair draws the amend fields (the control for the test above)", async () => {
+    reported = false;
+    await openSheet(false);
+    expect(entryForm.mounts, "the amend fields are drawn").toBeGreaterThan(0);
+    expect(sheetText()).not.toContain("finishing your earlier approval");
+  });
+
+  it("with no prop, a review read that fails leaves the form drawn and says nothing of an earlier approval", async () => {
+    reported = true; // the pair exists, but the read cannot say so
+    readFails = true;
+    await openSheet(false);
     expect(entryForm.mounts, "the amend fields are drawn").toBeGreaterThan(0);
     expect(sheetText()).not.toContain("finishing your earlier approval");
   });

@@ -96,6 +96,12 @@ async function receiptRow(receiptId: string) {
   return row;
 }
 
+/** Whether the receipt still holds its stored approval request (`approval_request_enc`). */
+async function storedRequest(receiptId: string): Promise<string | null> {
+  const [row] = await db().select({ enc: imapIngestionMessages.approvalRequestEnc }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receiptId));
+  return row.enc;
+}
+
 async function householdItemIds(fixture: Fixture): Promise<string[]> {
   return (await db().select({ id: items.id }).from(items).where(eq(items.householdId, fixture.household.id))).map((row) => row.id);
 }
@@ -370,6 +376,111 @@ describe("approve retry: the reclaim remembers the item (#1396)", () => {
       expect(await response.json()).toMatchObject({ outcome: "approved", itemId: freshKey });
       expect((await householdItemIds(fixture)).filter((id) => !before.includes(id))).toEqual([freshKey]);
       expect(await receiptRow(receiptId)).toMatchObject({ status: "completed", approvalOperationId: freshKey, approvedItemId: freshKey });
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+});
+
+describe("approve retry: completion clears the stored request (#1396)", () => {
+  it("a completed approval has no stored request, and the same key and body still answers as completed", async () => {
+    const fixture = await createIntegrationFixture("reviewed-retry-complete-clears");
+    const member = await fixture.session("member");
+    const receiptId = await seedReceipt(fixture);
+    const operationId = randomUUID();
+    const before = await householdItemIds(fixture);
+    try {
+      const sent = payloadFor(fixture, receiptId, operationId, { title: "Completed once" });
+      expect((await approve(member, sent)).status).toBe(200);
+      expect(await receiptRow(receiptId)).toMatchObject({ status: "completed", approvalOperationId: operationId, approvedItemId: operationId });
+      // The request held the amended values for the life of the approval only.
+      expect(await storedRequest(receiptId), "approval_request_enc after completion").toBeNull();
+
+      const replay = await approve(member, sent);
+      expect(replay.status).toBe(200);
+      expect(await replay.json()).toMatchObject({ outcome: "approved", itemId: operationId });
+      expect((await householdItemIds(fixture)).filter((id) => !before.includes(id))).toEqual([operationId]);
+      expect(await receiptRow(receiptId)).toMatchObject({ status: "completed", approvalOperationId: operationId, approvalRequestSha256: expect.any(String) });
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("a partial approval keeps its request until the retry completes it, then the request is gone", async () => {
+    const fixture = await createIntegrationFixture("reviewed-retry-partial-then-clears");
+    const member = await fixture.session("member");
+    const receiptId = await seedReceipt(fixture);
+    const attachmentId = await seedAttachment(receiptId, fixture.users.member.id, "retry-clears");
+    const operationId = randomUUID();
+    try {
+      const sent = payloadFor(fixture, receiptId, operationId, { title: "Finished on retry", attachmentIds: [attachmentId] });
+      await approveToPartial(member, sent);
+      // The positive control: the column is set while the approval can still be retried.
+      expect(await storedRequest(receiptId), "approval_request_enc while recoverable").not.toBeNull();
+
+      const retry = await approve(member, sent);
+      expect(retry.status).toBe(200);
+      expect(await retry.json()).toMatchObject({ outcome: "approved", itemId: operationId, pendingAttachmentIds: [] });
+      expect(await receiptRow(receiptId)).toMatchObject({ status: "completed" });
+      expect(await storedRequest(receiptId), "approval_request_enc after the retry completes").toBeNull();
+
+      const replay = await approve(member, sent);
+      expect(replay.status).toBe(200);
+      expect(await replay.json()).toMatchObject({ outcome: "approved", itemId: operationId });
+    } finally {
+      setImapHoldingPurgeImplementationForTests(undefined);
+      await fixture.cleanup();
+    }
+  });
+});
+
+describe("approve retry: receipts stored before this change keep the old reclaim (#1396)", () => {
+  const abandoned = () => new Date(Date.now() - 11 * 60_000);
+
+  /**
+   * An `approving` receipt past the bound that already made its item, as one
+   * written before #1396 was: it has a key, a hash and an item, but no stored
+   * request (`approval_request_enc` null).
+   */
+  async function seedPreChangeReceipt(fixture: Fixture, session: Session, operationId: string): Promise<string> {
+    const receiptId = await seedReceipt(fixture);
+    expect((await approve(session, payloadFor(fixture, receiptId, operationId, { title: "Made before the crash" }))).status).toBe(200);
+    await db().update(imapIngestionMessages).set({
+      status: "approving", approvalResultId: null, failureCode: null, approvalRequestEnc: null, approvalStartedAt: abandoned(), updatedAt: abandoned(),
+    }).where(eq(imapIngestionMessages.id, receiptId));
+    expect(await receiptRow(receiptId)).toMatchObject({ status: "approving", approvalOperationId: operationId, approvedItemId: operationId });
+    expect(await storedRequest(receiptId)).toBeNull();
+    return receiptId;
+  }
+
+  it("the review read does not move it to recoverable/approval_interrupted: it stays approving, as before, with no pair to report", async () => {
+    const fixture = await createIntegrationFixture("reviewed-retry-prechange-read");
+    const member = await fixture.session("member");
+    const operationId = randomUUID();
+    try {
+      const receiptId = await seedPreChangeReceipt(fixture, member, operationId);
+      const read = await readReview(member, fixture, receiptId);
+      expect(read.status).toBe(200);
+      expect(await read.json()).not.toHaveProperty("approval");
+      const row = await receiptRow(receiptId);
+      expect(row.failureCode).not.toBe("approval_interrupted");
+      expect(row).toMatchObject({ status: "approving", failureCode: null, approvalOperationId: operationId });
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("an approve with a fresh key takes the old path (reset to pending review, then claimed afresh), not a 409 over a pair that cannot be reported", async () => {
+    const fixture = await createIntegrationFixture("reviewed-retry-prechange-approve");
+    const member = await fixture.session("member");
+    const operationId = randomUUID();
+    const freshKey = randomUUID();
+    try {
+      const receiptId = await seedPreChangeReceipt(fixture, member, operationId);
+      const response = await approve(member, payloadFor(fixture, receiptId, freshKey, { title: "Made before the crash" }));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ outcome: "approved", itemId: freshKey });
+      expect(await receiptRow(receiptId)).toMatchObject({ status: "completed", failureCode: null, approvalOperationId: freshKey, approvedItemId: freshKey });
     } finally {
       await fixture.cleanup();
     }
