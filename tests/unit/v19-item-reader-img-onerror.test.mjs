@@ -26,13 +26,14 @@ describe("#1151 W1-R11: Reader's full-screen <img> has an onerror handler", () =
     const img = READER.slice(READER.indexOf("<img bind:this={img}"), READER.indexOf("<img bind:this={img}") + 900);
     expect(img).toMatch(/onload=\{/u);
     expect(img).toMatch(/onerror=\{\(\) => \{/u);
-    /* #1300: the same words now also answer a page fetch that fails, so
-       they live in one constant both paths set. */
-    expect(img).toMatch(/problem = UNDRAWN;/u);
+    /* #1501: a picture that will not draw marks itself broken, and the
+       failure shows in place of the picture (below), as a failed fetch does. */
+    expect(img).toMatch(/brokenSrc = shownSrc;/u);
     expect(READER).toMatch(/const UNDRAWN = "this page could not be drawn/u);
   });
 
-  it("the error renders through the component's existing alert pattern", () => {
+  it("the error renders through the component's existing alert pattern, in place of the picture", () => {
+    expect(READER).toMatch(/\{#if lost\}[\s\S]{0,300}<p class="p-error rd-lost" role="alert">\{UNDRAWN\}<\/p>\s*\{:else\}\s*<img bind:this=\{img\}/u);
     expect(READER).toMatch(/\{#if problem\}<p class="p-error" role="alert">\{problem\}<\/p>\{\/if\}/u);
   });
 });
