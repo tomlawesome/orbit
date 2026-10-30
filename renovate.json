@@ -93,6 +93,11 @@
       "groupName": "non-major updates"
     },
     {
+      "description": "Playwright is pinned in three places that must name one release: PLAYWRIGHT_IMAGE in .gitlab-ci.yml (the image ships the browser build for exactly that release and the runner inside it refuses any other), and @playwright/test in the root package.json and web/package.json, all exact versions (#1536 X-Q3; scripts/container-build-guards.test.mjs compares them). Grouped across every update type, major included, and listed after the non-major group so this group name wins, so the three move in one merge request instead of a version the image cannot run.",
+      "matchPackageNames": ["@playwright/test", "mcr.microsoft.com/playwright"],
+      "groupName": "playwright"
+    },
+    {
       "description": "The root Dockerfile's only FROM is the Orbit base image, whose digest comes from its own build pipeline at gitlab.tomlawson.io/ai/orbit-base-image rather than from re-resolving a registry tag here. #708 owns its freshness and scripts/sidecar-pins.mjs excludes it for exactly this reason, so Renovate must not re-pin it either.",
       "matchPackageNames": ["ghcr.io/tomlawesome/orbit-base-image"],
       "enabled": false
