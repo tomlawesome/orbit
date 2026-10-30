@@ -165,6 +165,31 @@ const CAPACITY_LINES: Record<LocalAiCapacity, string> = {
 };
 
 /**
+ * The local-AI step of a chosen ai or full profile, however it was chosen
+ * (the wizard, or a handed-in profile kept, #1536 G2-R2): the host capacity
+ * advisory, then the separate download confirmation (guarantee #20) where a
+ * terminal can answer it. With no terminal nothing confirms a download, so
+ * none is requested. Any other profile has no local-AI step. Cancel declines.
+ */
+export function prepareLocalAiModel(
+  profile: DeploymentProfile,
+  capacity: () => LocalAiCapacity,
+  write: (line: string) => void,
+  terminal: InstallTerminal | undefined,
+): boolean {
+  if (profile !== "ai" && profile !== "full") return false;
+  write(CAPACITY_LINES[capacity()]);
+  if (!terminal) return false;
+  const download = selectChoice(terminal, "Prepare the selected local model after Ollama becomes healthy? This can be a large download.", "skip", [
+    ["skip", "Save the model choice without downloading it now"],
+    ["pull", "Confirm the separate model download step"],
+    ["cancel", "Cancel without changing files or services"],
+  ]);
+  if (download === "cancel") throw declined();
+  return download === "pull";
+}
+
+/**
  * choose_deployment_profile: on an update, preserve the current profile
  * (the default) or choose another; otherwise a preset or one of the four
  * custom combinations, a local model for ai/full with the capacity advisory
@@ -224,14 +249,7 @@ export function chooseDeploymentProfile(terminal: InstallTerminal, context: Prof
     if (model === undefined) throw new InstallPromptStop(1, "The terminal closed before a local model was named; no deployment files or services were changed.");
     if (!isValidLocalModel(model)) throw new InstallPromptStop(2, "The local model identifier is not valid; no deployment files or services were changed.");
     selectedModel = model;
-    terminal.write(`${CAPACITY_LINES[context.capacity()]}\n`);
-    const download = selectChoice(terminal, "Prepare the selected local model after Ollama becomes healthy? This can be a large download.", "skip", [
-      ["skip", "Save the model choice without downloading it now"],
-      ["pull", "Confirm the separate model download step"],
-      ["cancel", "Cancel without changing files or services"],
-    ]);
-    if (download === "cancel") throw declined();
-    modelPullRequested = download === "pull";
+    modelPullRequested = prepareLocalAiModel(selectedProfile, context.capacity, (line) => terminal.write(`${line}\n`), terminal);
   }
 
   const review = selectChoice(
