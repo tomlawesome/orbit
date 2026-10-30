@@ -78,7 +78,7 @@ describe("launcher install compatibility gate", () => {
     // #1560: as the unprivileged orbit-ci, because launcher v0.4.3 refuses root.
     expect(job).toContain("useradd --create-home --shell /bin/bash --groups docker orbit-ci");
     expect(job).toContain(
-      "(cd .orbit-launcher-src && setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env -u CI_JOB_TOKEN -u CI_BUILD_TOKEN -u CI_REGISTRY_PASSWORD -u CI_DEPENDENCY_PROXY_PASSWORD -u CI_REPOSITORY_URL -u CI_DEPLOY_PASSWORD -u GITLAB_RELEASE_TOKEN -u GHCR_PUBLISH_TOKEN -u BASE_REPIN_TOKEN -u DOOR_IMPORT_TOKEN -u RENOVATE_TOKEN -u GITHUB_COM_TOKEN -u SIDECAR_ISSUE_TOKEN -u ORBIT_BASE_IMAGE_PULL_TOKEN -u ORBIT_REGISTRY_TOKEN -u ORBIT_READ_TOKEN HOME=/home/orbit-ci go test -tags live -count=1 -v -timeout 30m ./test/live/...)",
+      "(cd .orbit-launcher-src && setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env -u CI_JOB_TOKEN -u CI_BUILD_TOKEN -u CI_REGISTRY_PASSWORD -u CI_DEPENDENCY_PROXY_PASSWORD -u CI_REPOSITORY_URL -u CI_DEPLOY_PASSWORD -u GITLAB_RELEASE_TOKEN -u GHCR_PUBLISH_TOKEN -u BASE_REPIN_TOKEN -u DOOR_IMPORT_TOKEN -u RENOVATE_TOKEN -u GITHUB_COM_TOKEN -u SIDECAR_ISSUE_TOKEN -u ORBIT_REGISTRY_TOKEN -u ORBIT_READ_TOKEN HOME=/home/orbit-ci go test -tags live -count=1 -v -timeout 30m ./test/live/...)",
     );
   });
 
@@ -98,7 +98,8 @@ describe("launcher install compatibility gate", () => {
     expect(job).toContain('installer_base="http://127.0.0.1:');
     expect(job).toContain('ORBIT_LAUNCHER_INSTALL_SCRIPT_URL="$installer_base/scripts/install.sh"');
     expect(job).not.toContain("job_token");
-    expect(job).not.toContain("CI_JOB_TOKEN");
+    // Named only where the unprivileged run drops it (#1560), never used.
+    expect(job.replaceAll("-u CI_JOB_TOKEN ", "")).not.toContain("CI_JOB_TOKEN");
     // The job must outlive the suite's own 30-minute limit.
     expect(job).toMatch(/timeout: 35m/u);
     expect(job).toContain("-timeout 30m");
