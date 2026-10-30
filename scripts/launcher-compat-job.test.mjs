@@ -75,7 +75,11 @@ describe("launcher install compatibility gate", () => {
     expect(job).toContain("bash scripts/ci/checkout-launcher-source.sh .orbit-launcher-src");
     expect(job).not.toContain("git clone --quiet https://github.com/tomlawesome/orbit-launcher.git");
     expect(job).not.toContain('checkout --quiet "$launcher_tag"');
-    expect(job).toContain("(cd .orbit-launcher-src && go test -tags live -count=1 -v -timeout 30m ./test/live/...)");
+    // #1560: as the unprivileged orbit-ci, because launcher v0.4.3 refuses root.
+    expect(job).toContain("useradd --create-home --shell /bin/bash --groups docker orbit-ci");
+    expect(job).toContain(
+      "(cd .orbit-launcher-src && setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env HOME=/home/orbit-ci go test -tags live -count=1 -v -timeout 30m ./test/live/...)",
+    );
   });
 
   it("needs build_launcher's artifact, spelled out rather than through *needs_gated_image (ADR-0031 #2)", () => {
@@ -235,7 +239,7 @@ describe("launcher install compatibility gate", () => {
     expect(job).toContain(".orbit-launcher-diagnostics/");
     // The whole artifacts: block this after_script output belongs to must be
     // collected win or lose, the same way the raw log already is.
-    expect(job).toMatch(/artifacts:\s*\n\s*name: orbit-launcher-compat-live-raw-log\s*\n\s*paths:\s*\n\s*- \.orbit-launcher-live-raw\.log\*\s*\n\s*- \.orbit-launcher-diagnostics\/\s*\n(?:\s*- \S+\s*\n)*\s*expire_in: 7 days\s*\n\s*when: always/u);
+    expect(job).toMatch(/artifacts:\s*\n\s*name: orbit-launcher-compat-live-raw-log\s*\n\s*paths:\s*\n\s*(?:#[^\n]*\n\s*)?- \.orbit-launcher-live\/\s*\n\s*- \.orbit-launcher-diagnostics\/\s*\n(?:\s*- \S+\s*\n)*\s*expire_in: 7 days\s*\n\s*when: always/u);
   });
 
   it("classifies scripts/install.sh and its own job definition as launcher-compat scope", async () => {

@@ -3431,6 +3431,28 @@ launcher_install_compat:
     # Checks out launcher/pin.json's tag and refuses unless it resolves to the
     # pinned commit, as build_launcher does for the shipped binary.
     - bash scripts/ci/checkout-launcher-source.sh .orbit-launcher-src
+    # #1560: orbit-launcher v0.4.3 refuses to run as root (launcher #291, no
+    # override), and this job is root, so every live install stopped at once
+    # (pipeline 3208). The suite -- and so the launcher, install.sh and the
+    # image pulls it makes -- now runs as orbit-ci, a user in the docker group
+    # of the daemon .docker_in_job started, the way the launcher's own `live`
+    # job does it (launcher #292). No registry login is needed: the images
+    # come from the unauthenticated loopback registry above, so no credential
+    # is written for orbit-ci.
+    - |
+      set -eu
+      useradd --create-home --shell /bin/bash --groups docker orbit-ci
+      # #1560: the suite compiles and runs from this checkout of the launcher's
+      # source, which root cloned; orbit-ci owns it, as a developer owns theirs.
+      chown -R orbit-ci:orbit-ci .orbit-launcher-src
+      # #1560: the launcher writes its raw pty log (and .log.* beside it) here.
+      # A directory of its own, so orbit-ci can write nowhere else in the
+      # checkout; the artifacts: block below collects it.
+      install -d -m 0755 -o orbit-ci -g orbit-ci "$CI_PROJECT_DIR/.orbit-launcher-live"
+      # #1560: fail here, in seconds, if orbit-ci cannot reach the daemon,
+      # rather than after the suite has stopped on it.
+      setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env HOME=/home/orbit-ci docker info > /dev/null \
+        || { echo "orbit-ci cannot reach the job's Docker daemon (#1560)"; exit 1; }
     # go-version-file equivalent: read the toolchain orbit-launcher's own
     # go.mod asks for rather than pinning a copy of it here, so a launcher
     # bump cannot drift silently out of step with what this job's live suite
@@ -3455,6 +3477,11 @@ launcher_install_compat:
         --file "$CI_PROJECT_DIR/.orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz" \
         --directory "$CI_PROJECT_DIR/.orbit-launcher-bin"
       chmod +x "$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher"
+      # #1560: orbit-ci runs this binary, so it must be able to read and
+      # execute it, and to reach it through the checkout's directories.
+      chmod -R a+rX "$CI_PROJECT_DIR/.orbit-launcher-bin"
+      setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- test -x "$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher" \
+        || { echo "orbit-ci cannot execute $CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher: a directory above it is closed to it (#1560)"; exit 1; }
     # The candidate installer is this commit's own scripts/install.sh. The
     # GitHub workflow pointed the launcher at raw.githubusercontent.com; this
     # project is private and an MR commit is never mirrored, so the checkout
@@ -3462,7 +3489,9 @@ launcher_install_compat:
     - |
       set -eu
       export ORBIT_LAUNCHER_LIVE_BINARY="$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher"
-      export ORBIT_LAUNCHER_LIVE_RAW_LOG="$CI_PROJECT_DIR/.orbit-launcher-live-raw.log"
+      # #1560: inside .orbit-launcher-live/, the one place orbit-ci may write
+      # in the checkout (made above); it was $CI_PROJECT_DIR/.orbit-launcher-live-raw.log.
+      export ORBIT_LAUNCHER_LIVE_RAW_LOG="$CI_PROJECT_DIR/.orbit-launcher-live/live-raw.log"
       # The candidate configuration tree -- this commit's own install.sh plus
       # the configuration scripts and .env-orbit.example beside it -- served
       # from the checkout on loopback. Fetching it from the repository-files API
@@ -3563,7 +3592,9 @@ launcher_install_compat:
       ) &
       collector=$!
       status=0
-      (cd .orbit-launcher-src && go test -tags live -count=1 -v -timeout 30m ./test/live/...) || status=$?
+      # #1560: as orbit-ci, with its own home for the Go caches and Docker's
+      # client config. setpriv keeps the exports above, PATH included.
+      (cd .orbit-launcher-src && setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env HOME=/home/orbit-ci go test -tags live -count=1 -v -timeout 30m ./test/live/...) || status=$?
       kill "$collector" 2>/dev/null || :
       wait "$collector" 2>/dev/null || :
       # Not `exit "$status"`: the reuse evidence below is the job's last line
@@ -3610,7 +3641,8 @@ launcher_install_compat:
   artifacts:
     name: orbit-launcher-compat-live-raw-log
     paths:
-      - .orbit-launcher-live-raw.log*
+      # #1560: the raw log moved into a directory orbit-ci owns.
+      - .orbit-launcher-live/
       - .orbit-launcher-diagnostics/
       - ci-evidence/
     expire_in: 7 days
