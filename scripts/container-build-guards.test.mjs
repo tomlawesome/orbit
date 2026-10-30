@@ -19,6 +19,47 @@ function ciScript(name) {
 const dockerfile = read("../Dockerfile");
 const gitlabCi = read("../.gitlab-ci.yml");
 
+/*
+ * The disposable registry's image is pinned once, in .gitlab-ci.yml
+ * (ORBIT_INSTALLER_REGISTRY_IMAGE), which Renovate bumps. Tests read it from
+ * there and assert its shape and that every script default agrees with it;
+ * none spells the version or digest itself (#1536 T-Q30, T-Q5).
+ */
+const REGISTRY_PIN_SHAPE = /^registry:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$/u;
+const REGISTRY_REFERENCE = /(?<![\w./])(?<!\w-)registry:\d[^\s"'}]*/gu;
+const REGISTRY_PIN_COPIES = [
+  "ci/start-installer-registry.sh",
+  "test-repair-journeys.sh",
+  "test-backup-restore.sh",
+  "test-install-acceptance.sh",
+];
+
+function installerRegistryPin(ciText) {
+  return ciText.match(/^\s*ORBIT_INSTALLER_REGISTRY_IMAGE:[ \t]+(\S+)[ \t]*$/mu)?.[1];
+}
+
+// Every `registry:<tag>` reference in the copies' code (comments skipped)
+// that is not exactly the pin, or a copy that holds none: one line each,
+// naming the file.
+function registryPinDisagreements(pin, copies) {
+  const problems = [];
+  for (const [name, text] of Object.entries(copies)) {
+    const code = text
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .join("\n");
+    const references = code.match(REGISTRY_REFERENCE) ?? [];
+    if (references.length === 0) problems.push(`${name}: no disposable-registry image reference found`);
+    for (const reference of references) {
+      if (reference !== pin) problems.push(`${name}: ${reference} differs from the pipeline's ${pin}`);
+    }
+  }
+  return problems;
+}
+
+const registryPinCopies = () =>
+  Object.fromEntries(REGISTRY_PIN_COPIES.map((name) => [name, read(`./${name}`)]));
+
 describe("production image", () => {
   it("removes build-only package managers from the production image", () => {
     // Matches whichever image the runner stage starts from, so long as it is
@@ -59,17 +100,18 @@ describe("GitLab pipeline definition", () => {
     // pipeline must always override it with a digest-pinned image. A plain
     // Docker Hub name is right: the runners' image cache mirrors Docker Hub
     // (#1510), so no prefix is needed and none may reappear.
-    const registryDigest =
-      "registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0";
     const lines = gitlabCi.split(/\r?\n/u);
 
     const installerRegistryLine = lines.find((line) =>
       /^\s*ORBIT_INSTALLER_REGISTRY_IMAGE:/u.test(line),
     );
     expect(installerRegistryLine, "ORBIT_INSTALLER_REGISTRY_IMAGE must be set").toBeDefined();
-    expect(installerRegistryLine).toMatch(/:\s+registry:3\.1\.2@/u);
     expect(installerRegistryLine).not.toContain("$");
-    expect(installerRegistryLine).toContain(registryDigest);
+    const registryDigest = installerRegistryPin(gitlabCi);
+    expect(registryDigest, "ORBIT_INSTALLER_REGISTRY_IMAGE: no value").toBeDefined();
+    expect(registryDigest, "ORBIT_INSTALLER_REGISTRY_IMAGE must be registry:<version>@sha256:<digest>").toMatch(
+      REGISTRY_PIN_SHAPE,
+    );
 
     // repair_journeys keeps its own job-level variable; it must still resolve
     // to the same digest-pinned image, never a bare Docker Hub tag.
@@ -89,6 +131,36 @@ describe("GitLab pipeline definition", () => {
 });
 
 describe("pinned tool and image versions that must agree (#1536)", () => {
+  // T-Q5, T-Q30: the pin is copied by hand into the script defaults, which
+  // Renovate does not see; a bump in the pipeline alone leaves local runs on
+  // another registry image than CI.
+  it("keeps the disposable registry's image the same in the pipeline and in every script default (T-Q5, T-Q30)", () => {
+    const pin = installerRegistryPin(gitlabCi);
+    expect(pin, "ORBIT_INSTALLER_REGISTRY_IMAGE: no value in .gitlab-ci.yml").toMatch(REGISTRY_PIN_SHAPE);
+    expect(registryPinDisagreements(pin, registryPinCopies())).toEqual([]);
+  });
+
+  it("passes when the pin is bumped everywhere, and names the file that lags (T-Q5)", () => {
+    // Built from the real scripts with every reference rewritten, so this
+    // holds whatever the real pin is, and does not depend on them agreeing.
+    const bumped = `registry:9.9.9@sha256:${"c".repeat(64)}`;
+    const stale = `registry:1.0.0@sha256:${"a".repeat(64)}`;
+    const rewrite = (text, to) => text.replaceAll(REGISTRY_REFERENCE, to);
+    const copies = Object.fromEntries(
+      Object.entries(registryPinCopies()).map(([name, text]) => [name, rewrite(text, bumped)]),
+    );
+    expect(registryPinDisagreements(bumped, copies)).toEqual([]);
+
+    for (const lagging of REGISTRY_PIN_COPIES) {
+      const problems = registryPinDisagreements(bumped, {
+        ...copies,
+        [lagging]: rewrite(registryPinCopies()[lagging], stale),
+      });
+      expect(problems, `${lagging} lagging`).not.toEqual([]);
+      expect(problems.every((problem) => problem.startsWith(`${lagging}:`))).toBe(true);
+    }
+  });
+
   // X-Q3: the Playwright image ships the browser build for exactly one
   // Playwright release, and the test runner inside it refuses any other. The
   // version lives in three places that Renovate groups but nothing compares.
@@ -171,9 +243,11 @@ describe("container validation scripts", () => {
 describe("installer validation scripts", () => {
   it("pins the disposable registry and pushes the tested image rather than building one", () => {
     const registryStep = ciScript("start-installer-registry.sh");
-    expect(registryStep).toContain(
-      "registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0",
+    const pin = installerRegistryPin(gitlabCi);
+    expect(pin, "ORBIT_INSTALLER_REGISTRY_IMAGE must be registry:<version>@sha256:<digest>").toMatch(
+      REGISTRY_PIN_SHAPE,
     );
+    expect(registryStep).toContain(pin);
     expect(registryStep).toContain("--publish 127.0.0.1:5000:5000");
     expect(registryStep).toContain('local_tag="127.0.0.1:5000/${IMAGE_NAME}:${channel}"');
     expect(registryStep).toContain('[[ "${source_id}" == "${TESTED_IMAGE_ID}" ]]');
