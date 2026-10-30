@@ -949,16 +949,15 @@ describe("the WebKit docker run in a worktree with the shared node_modules (#155
     const git = (args, cwd) => {
       const r = spawnSync("git", args, {
         cwd,
-        env: {
-          ...process.env,
-          GIT_CONFIG_GLOBAL: "/dev/null",
-          GIT_CONFIG_SYSTEM: "/dev/null",
-        },
+        env: process.env,
         encoding: "utf8",
       });
       expect(r.status, r.stderr).toBe(0);
     };
-    git(["add", "pnpm-lock.yaml"], mainDir);
+    // The whole fixture, not just the lockfile: since #1526 makeFixture
+    // starts from an empty gated commit, so the worktree only holds what
+    // this commit adds. Committed through the host's gates, as #1526 asks.
+    git(["add", "-A"], mainDir);
     git(
       [
         "-c",
@@ -967,7 +966,6 @@ describe("the WebKit docker run in a worktree with the shared node_modules (#155
         "user.email=t@example.invalid",
         "commit",
         "--quiet",
-        "--no-verify",
         "-m",
         "lock",
       ],
