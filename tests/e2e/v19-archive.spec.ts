@@ -376,9 +376,15 @@ test(BOTH_LAYOUTS, async ({ page, browser }) => {
 
     /* The card being absent is not the lock: the API itself says no, and says
        why -- ahead of asking the member to prove anything. */
+    /* As the card sends it (#1566): the fields first, the archive file last. */
+    const form = new FormData();
+    form.append("householdId", household.id);
+    form.append("passphrase", "a passphrase long enough");
+    form.append("conflictItemIds", "[]");
+    form.append("archive", new File(["{}"], "orbit-archive.json", { type: "application/json" }));
     const refused = await member.request.post("/api/portable-archives/import", {
       headers: await sessionHeaders(member),
-      data: { householdId: household.id, archive: {}, passphrase: "a passphrase long enough", conflictItemIds: [] },
+      multipart: form,
     });
     expect(refused.status()).toBe(403);
     expect(((await refused.json()) as { error?: { code?: string } }).error?.code).toBe("owner_required");

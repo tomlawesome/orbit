@@ -9,10 +9,11 @@
  *
  *  - the document upload routes take the upload size limit an administrator
  *    sets (src/server/upload-limit.ts), read fresh on every request;
- *  - the portable-archive routes carry a whole household as JSON, document
- *    bytes included, so they get the largest archive the import accepts
- *    (src/server/portable-archive-limits.ts) plus room for the rest of the
- *    request (#1290);
+ *  - the portable-archive routes carry a whole household, document bytes
+ *    included, as an archive file in a multipart upload read in pieces
+ *    (#1566), so they get the largest archive the import accepts
+ *    (src/server/portable-archive-limits.ts) plus room for the fields that
+ *    come before it (#1290);
  *  - every other route gets `SMALL_BODY_LIMIT`, twice the 512 KB every route
  *    has run under until now.
  *

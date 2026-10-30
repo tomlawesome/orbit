@@ -13,6 +13,7 @@ import { createPortableArchive, importPortableArchive, openPortableArchiveDownlo
 import { openMetadataReader } from "@/server/metadata/fields";
 import { readWorkspace } from "@/server/workspace-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { archiveStream } from "./support/portable-archive-upload";
 
 // The export reads each document through readDocumentDownload. The real one
 // needs the stored, encrypted file; the size tests below only need bytes of
@@ -71,7 +72,7 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     await expect(importPortableArchive({
       userId: fixture.users.owner.id,
       householdId: fixture.household.id,
-      archive: encrypted,
+      archive: archiveStream(encrypted),
       passphrase,
       conflictItemIds: [],
     })).rejects.toMatchObject({ code: "archive_invalid", status: 422 });
@@ -91,7 +92,7 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     const result = await importPortableArchive({
       userId: fixture.users.owner.id,
       householdId: fixture.household.id,
-      archive: validEncrypted,
+      archive: archiveStream(validEncrypted),
       passphrase,
       conflictItemIds: [],
     });
@@ -116,7 +117,7 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     await expect(importPortableArchive({
       userId: fixture.users.owner.id,
       householdId: fixture.household.id,
-      archive: encryptedNegativeCost,
+      archive: archiveStream(encryptedNegativeCost),
       passphrase,
       conflictItemIds: [],
     })).rejects.toMatchObject({ code: "archive_invalid", status: 422 });
@@ -128,7 +129,7 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     await expect(importPortableArchive({
       userId: fixture.users.owner.id,
       householdId: fixture.household.id,
-      archive: encryptedRecurrence,
+      archive: archiveStream(encryptedRecurrence),
       passphrase,
       conflictItemIds: [],
     })).rejects.toMatchObject({ code: "archive_invalid", status: 422 });
@@ -165,7 +166,7 @@ describe("portable archive export access and document selection (#1049)", () => 
     await expect(importPortableArchive({
       userId: fixture.users.member.id,
       householdId: fixture.household.id,
-      archive: encrypted,
+      archive: archiveStream(encrypted),
       passphrase,
       conflictItemIds: [],
     })).rejects.toMatchObject({ code: "owner_required", status: 403 });
@@ -184,9 +185,9 @@ describe("portable archive export access and document selection (#1049)", () => 
       passphrase,
     );
 
-    await expect(previewPortableImport(fixture.users.member.id, fixture.household.id, encrypted, passphrase))
+    await expect(previewPortableImport(fixture.users.member.id, fixture.household.id, archiveStream(encrypted), passphrase))
       .rejects.toMatchObject({ code: "owner_required", status: 403 });
-    await expect(previewPortableImport(fixture.users.owner.id, fixture.household.id, encrypted, passphrase))
+    await expect(previewPortableImport(fixture.users.owner.id, fixture.household.id, archiveStream(encrypted), passphrase))
       .resolves.toMatchObject({ items: 1 });
   });
 
@@ -283,7 +284,7 @@ describe("portable archive export access and document selection (#1049)", () => 
       const result = await importPortableArchive({
         userId: target.users.owner.id,
         householdId: target.household.id,
-        archive: encrypted,
+        archive: archiveStream(encrypted),
         passphrase,
         conflictItemIds: [],
       });
@@ -369,7 +370,7 @@ describe("portable archive import whose closing write fails, and rollback of tou
       refusal = await importPortableArchive({
         userId: target.users.owner.id,
         householdId: target.household.id,
-        archive: encrypted,
+        archive: archiveStream(encrypted),
         passphrase,
         conflictItemIds: [],
       }).then(() => null, (error: unknown) => error);
@@ -433,7 +434,7 @@ describe("portable archive import whose closing write fails, and rollback of tou
       const result = await importPortableArchive({
         userId: fixture.users.owner.id,
         householdId: fixture.household.id,
-        archive,
+        archive: archiveStream(archive),
         passphrase,
         conflictItemIds: [],
       });
@@ -517,7 +518,7 @@ describe("portable archive import section bounds (#1316)", () => {
     const failure = await importPortableArchive({
       userId: fixture.users.owner.id,
       householdId: fixture.household.id,
-      archive: encrypted,
+      archive: archiveStream(encrypted),
       passphrase,
       conflictItemIds: [],
     }).then(() => null, (error: unknown) => error);
@@ -546,7 +547,7 @@ describe("portable archive import section bounds (#1316)", () => {
     await expect(importPortableArchive({
       userId: fixture.users.owner.id,
       householdId: fixture.household.id,
-      archive: encrypted,
+      archive: archiveStream(encrypted),
       passphrase,
       conflictItemIds: [],
     })).rejects.toMatchObject({ code: "archive_invalid", status: 422 });
@@ -562,7 +563,7 @@ describe("portable archive import section bounds (#1316)", () => {
     await expect(importPortableArchive({
       userId: fixture.users.owner.id,
       householdId: fixture.household.id,
-      archive: encrypted,
+      archive: archiveStream(encrypted),
       passphrase,
       conflictItemIds: [],
     })).rejects.toMatchObject({ code: "archive_invalid", status: 422 });
@@ -578,7 +579,7 @@ describe("portable archive import section bounds (#1316)", () => {
     const result = await importPortableArchive({
       userId: fixture.users.owner.id,
       householdId: fixture.household.id,
-      archive: encrypted,
+      archive: archiveStream(encrypted),
       passphrase,
       conflictItemIds: [],
     });

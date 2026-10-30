@@ -99,9 +99,14 @@ Worker invariants:
   followed by a lost database update, is explicit to administrators.
 
 One piece of state is deliberately in memory, not in PostgreSQL: the archive
-slot (#1316, `web/src/lib/server/archive-slot.js`). An archive preview, import
-or export can take over 1 GB of memory, so the process runs one at a time and
-answers any other with a 429 straight away. The slot belongs to the Node
+slot (#1316, `web/src/lib/server/archive-slot.js`). An archive preview or
+import reads the upload in pieces and never holds it whole (#1566): the memory
+test pins a preview's growth below the archive file's size, and an import's
+below eight times its largest document until #1567 removes the document path's
+copies. Before that it held about 1.45 GB (#1537). Each still decrypts the
+archive into a scratch tmpfs sized for one archive and restores its documents
+through the document path, so the process runs one at a time and answers any
+other with a 429 straight away. The slot belongs to the Node
 process, which is correct for the supported deployment of one app container
 running one process; two app containers, or a clustered process, would each
 get their own slot and between them run that many archives at once.
