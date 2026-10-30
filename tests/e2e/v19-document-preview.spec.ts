@@ -669,3 +669,55 @@ test.describe("a failed page turn in the reader", () => {
     }
   });
 });
+
+/* #1559 (the preview card's side of #1501): the owner ruled "we just show a
+   generic failed to load thing". When a turn's picture fails to load on the
+   preview card, the card says so in place of the picture, reusing its
+   existing failure wording. It never shows the new page's number ("2 of 3")
+   over the old page's picture. Same cure for the service worker as above. */
+test.describe("a failed page turn on the preview card", () => {
+  test.use({ serviceWorkers: "block" });
+
+  test("shows a load failure in place of the picture, never the new page number over the old picture", async ({ page }) => {
+    test.setTimeout(90_000);
+    await signInAsAdmin(page);
+    const { itemId, householdId } = await seedHouseholdWithItem(page);
+
+    try {
+      await uploadDocument(page, householdId, itemId, "card-fetch-fails.pdf", syntheticPdfWithNumberedPages(3));
+      await openPaper(page, itemId, "card-fetch-fails.pdf");
+      const pageButton = page.getByRole("button", { name: "Read card-fetch-fails.pdf" });
+      await expect(pageButton).toBeEnabled({ timeout: 20_000 });
+
+      const card = previewOf(page, "card-fetch-fails.pdf");
+      const number = card.locator(".pager .pgn");
+      /* The card's first page names its picture "Page one"; later ones "Page 2". */
+      const firstPicture = card.getByRole("img", { name: /^Page (1|one) of card-fetch-fails\.pdf$/ });
+      await expect(firstPicture).toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => firstPicture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: 20_000 })
+        .toBeGreaterThan(0);
+      await expect.poll(() => shownText(number)).toBe("1 of 3");
+
+      /* From here the server cannot draw page 2. */
+      await page.route(/\/api\/documents\/[^/]+\/preview\?page=2$/, (route) =>
+        route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { code: "document_preview_failed", message: "Orbit could not draw that document" } }),
+        }));
+      await card.getByRole("button", { name: "Next page" }).click();
+
+      /* A failure reads as one, inside the card... */
+      await expect(card.getByText(/could not (be )?draw|couldn.t (be )?(draw|load)|failed to load|could not load|unable to load/i))
+        .toBeVisible({ timeout: 20_000 });
+      /* ...and the old page's picture is gone: no "Page 1" image left under
+         a pager that says page 2. */
+      await expect(card.getByRole("img", { name: /^Page (1|one) of card-fetch-fails\.pdf$/ })).toHaveCount(0);
+      if ((await shownText(number)) === "2 of 3") {
+        await expect(card.getByRole("img", { name: /^Page \w+ of card-fetch-fails\.pdf$/ })).toHaveCount(0);
+      }
+    } finally {
+      await households.sweep(page);
+    }
+  });
+});

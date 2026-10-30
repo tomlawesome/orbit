@@ -2,9 +2,12 @@ import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
+  readlinkSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -138,13 +141,27 @@ function makeDeployment({ compose }) {
 // (see the header); everything else the diagnosis issues is a quiet success
 // with empty output (no containers, no volumes), and anything unknown fails
 // like real Docker rejecting it.
-function writeFakeDocker(binDir, { imageDir, logPath, imageReadable }) {
+//
+// #1558 hooks (all optional, the defaults keep every older case as it was):
+// `label` is what the image's io.orbit.deployment-assets label reads;
+// `labelAfterRun` replaces it once one `docker run` has happened (the
+// diagnosis read the file, then the label changed); `raceHook` is a bash
+// snippet run inside every `docker run`, with $n the 1-based run count, to
+// make something appear on disk at a chosen moment.
+function writeFakeDocker(
+  binDir,
+  { imageDir, logPath, imageReadable, label = DEPLOY_ROOT, labelAfterRun, raceHook = "" },
+) {
   const script = `#!/usr/bin/env bash
 set -u
 printf '%s\\n' "$*" >> '${logPath}'
 readable=${imageReadable ? 1 : 0}
 image_dir='${imageDir}'
 deploy_root='${DEPLOY_ROOT}'
+runs_file='${logPath}.runs'
+label='${label}'
+runs_so_far="$(cat "$runs_file" 2>/dev/null || echo 0)"
+${labelAfterRun === undefined ? "" : `if [[ "$runs_so_far" -ge 1 ]]; then label='${labelAfterRun}'; fi`}
 
 # Map a path inside the fake image to the host directory standing in for it.
 host_path() {
@@ -163,7 +180,7 @@ case "\${1:-}" in
     [[ "$readable" == 1 ]] || { echo "Error: No such image" >&2; exit 1; }
     joined="$*"
     if [[ "$joined" == *"io.orbit.deployment-assets"* ]]; then
-      printf '%s\\n' "$deploy_root"
+      printf '%s\\n' "$label"
     elif [[ "$joined" == *"Config.Labels"* ]]; then
       printf 'map[io.orbit.deployment-assets:%s]\\n' "$deploy_root"
     else
@@ -208,6 +225,11 @@ case "\${1:-}" in
     ;;
   run)
     [[ "$readable" == 1 ]] || { echo "Error: No such image" >&2; exit 1; }
+    n=$((runs_so_far + 1))
+    echo "$n" > "$runs_file"
+    # A run while the restore's temporary file exists in the folder is the restore's own read.
+    if compgen -G "$PWD/.docker-compose.yml.repair.*" >/dev/null; then echo restore-read >> '${logPath}.restore-reads'; fi
+    ${raceHook}
     # docker run [opts] [--entrypoint cat] IMAGE [cat] /opt/orbit/deploy/<file>
     for a in "$@"; do
       if [[ "$a" == "$deploy_root"/* ]]; then
@@ -229,13 +251,13 @@ exit 1
 
 // Runs repair.sh with the fake docker first on PATH and a hostile umask (077),
 // so a restored file only gets the installer's 0644 if repair.sh sets it.
-function runRepair(targetDir, args, { imageReadable = true, image = IMAGE_COMPOSE } = {}) {
+function runRepair(targetDir, args, { imageReadable = true, image = IMAGE_COMPOSE, ...dockerOptions } = {}) {
   const binDir = scratchDir("orbit-repair-compose-bin-");
   const imageDir = scratchDir("orbit-repair-compose-image-");
   if (image !== null) writeFileSync(join(imageDir, "docker-compose.yml"), image);
   const logPath = join(binDir, "docker-argv.log");
   writeFileSync(logPath, "");
-  writeFakeDocker(binDir, { imageDir, logPath, imageReadable });
+  writeFakeDocker(binDir, { imageDir, logPath, imageReadable, ...dockerOptions });
   const result = failOnProcessDeadline(
     spawnSync(
       "bash",
@@ -256,7 +278,9 @@ function runRepair(targetDir, args, { imageReadable = true, image = IMAGE_COMPOS
     ),
     { label: "runRepair" },
   );
-  return { ...result, dockerLog: readFileSync(logPath, "utf8"), combined: `${result.stdout}\n${result.stderr}` };
+  const restoreReadsPath = `${logPath}.restore-reads`;
+  const restoreReads = existsSync(restoreReadsPath) ? lines(readFileSync(restoreReadsPath, "utf8")).length : 0;
+  return { ...result, dockerLog: readFileSync(logPath, "utf8"), restoreReads, combined: `${result.stdout}\n${result.stderr}` };
 }
 
 function lines(text) {
@@ -556,5 +580,158 @@ describe("repair.sh --check drift report hides credentials and stays short (#148
 
     expect(result.combined).toContain("q".repeat(150));
     expect(result.combined).not.toContain("q".repeat(201));
+  });
+});
+
+// #1558 (review of #1484): repair.sh must not trust an image whose
+// io.orbit.deployment-assets label is wrong or empty, and a file or symlink
+// that appears where docker-compose.yml should go must never be overwritten.
+describe("repair.sh does not trust an image with a wrong or empty deployment-assets label (#1558)", () => {
+  // The fake image does hold the file under DEPLOY_ROOT, so a repair that
+  // ignored the label would restore it: only the label check stops that.
+  const BAD_LABELS = [
+    ["empty", ""],
+    ["blank", "   "],
+    ["names another directory", "/opt/orbit/other"],
+    ["names a lookalike directory", "/opt/orbit/deploy-evil"],
+    ["is a relative path", "opt/orbit/deploy"],
+    ["climbs out with ..", "/opt/orbit/deploy/../../etc"],
+    ["is not a path at all", "not a path; rm -rf /"],
+    ["is the unset-label placeholder", "<no value>"],
+  ];
+
+  function dockerRuns(log) {
+    return lines(log).filter((argv) => /^run(\s|$)/.test(argv));
+  }
+
+  it.each(BAD_LABELS)("a missing docker-compose.yml is not restored when the label %s", (_name, label) => {
+    const targetDir = makeDeployment({});
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { label });
+
+    expect(existsSync(join(targetDir, "docker-compose.yml")), result.combined).toBe(false);
+    expect(result.stdout).toContain("execute action=manual resolves=managed-file-missing result=skipped");
+    expect(result.stdout).not.toContain("compose-file-restorable");
+    expect(dockerRuns(result.dockerLog), "the image was read despite its label").toEqual([]);
+  });
+
+  it.each(BAD_LABELS)("a present docker-compose.yml is not compared with the image when the label %s", (_name, label) => {
+    const targetDir = makeDeployment({ compose: EDITED_COMPOSE });
+
+    const result = runRepair(targetDir, ["--check"], { label });
+
+    expect(composeFindings(result.stdout)).toEqual([]);
+    expect(dockerRuns(result.dockerLog), "the image was read despite its label").toEqual([]);
+    expect(readFileSync(join(targetDir, "docker-compose.yml")).equals(EDITED_COMPOSE)).toBe(true);
+  });
+
+  it("the restore itself refuses when the label turns wrong after the diagnosis read the image", () => {
+    const targetDir = makeDeployment({});
+
+    // Run 1 is the diagnosis reading the image; the label changes after it.
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { labelAfterRun: "/opt/orbit/other" });
+
+    expect(existsSync(join(targetDir, "docker-compose.yml")), result.combined).toBe(false);
+    expect(result.stdout).toContain("execute action=restore-compose-file resolves=compose-file-restorable result=failed");
+    expect(result.status).toBe(4);
+    expect(dockerRuns(result.dockerLog)).toHaveLength(1);
+    expect(readdirSync(targetDir).filter((name) => name.includes(".repair."))).toEqual([]);
+  });
+});
+
+describe("repair.sh never overwrites a file or symlink that appears before the restore (#1558)", () => {
+  const RACE_CONTENT = "# written by someone else while repair was deciding";
+  const leftovers = (targetDir) => readdirSync(targetDir).filter((name) => name.includes(".repair."));
+
+  // Each case: the shell that makes the thing appear, and how to check it afterwards.
+  function appearances(targetDir) {
+    const dest = join(targetDir, "docker-compose.yml");
+    const elsewhere = scratchDir("orbit-repair-compose-elsewhere-");
+    const realTarget = join(elsewhere, "real-target.yml");
+    writeFileSync(realTarget, RACE_CONTENT);
+    return [
+      {
+        name: "a regular file",
+        create: `printf '%s' '${RACE_CONTENT}' > '${dest}'`,
+        verify() {
+          expect(lstatSync(dest).isSymbolicLink()).toBe(false);
+          expect(readFileSync(dest, "utf8")).toBe(RACE_CONTENT);
+        },
+      },
+      {
+        name: "a symlink to an existing file",
+        create: `ln -s '${realTarget}' '${dest}'`,
+        verify() {
+          expect(lstatSync(dest).isSymbolicLink()).toBe(true);
+          expect(readlinkSync(dest)).toBe(realTarget);
+          expect(readFileSync(realTarget, "utf8")).toBe(RACE_CONTENT);
+        },
+      },
+      {
+        name: "a dangling symlink",
+        create: `ln -s '${join(elsewhere, "nowhere.yml")}' '${dest}'`,
+        verify() {
+          expect(lstatSync(dest).isSymbolicLink()).toBe(true);
+          expect(readlinkSync(dest)).toBe(join(elsewhere, "nowhere.yml"));
+          expect(existsSync(join(elsewhere, "nowhere.yml"))).toBe(false);
+        },
+      },
+    ];
+  }
+
+  const CASES = ["a regular file", "a symlink to an existing file", "a dangling symlink"];
+
+  describe("between the diagnosis and the restore", () => {
+    it.each(CASES)("%s is noticed by the re-check and left alone, with the image not read again", (name) => {
+      const targetDir = makeDeployment({});
+      const appearance = appearances(targetDir).find((a) => a.name === name);
+
+      // Run 1 is the diagnosis reading the image; the thing appears right after.
+      const result = runRepair(targetDir, ["--execute", "--safe-only"], {
+        raceHook: `if [[ "$n" == 1 ]]; then ${appearance.create}; fi`,
+      });
+
+      appearance.verify();
+      expect(result.stdout).toContain("execute action=restore-compose-file resolves=compose-file-restorable result=failed");
+      expect(result.stdout).not.toMatch(/execute action=restore-compose-file .*result=done/);
+      expect(result.status).toBe(4);
+      // Stopped at the re-check: the restore never went on to read the image.
+      expect(result.restoreReads).toBe(0);
+      expect(leftovers(targetDir)).toEqual([]);
+    });
+  });
+
+  describe("at the moment of the move (the refusing move)", () => {
+    it.each(CASES)("%s is kept, the move is refused, and repair reports failed", (name) => {
+      const targetDir = makeDeployment({});
+      const appearance = appearances(targetDir).find((a) => a.name === name);
+
+      // The restore's own read of the image writes into its temporary file in
+      // the folder; the thing appears while that read is under way, so the
+      // re-check at the top has already passed.
+      const result = runRepair(targetDir, ["--execute", "--safe-only"], {
+        raceHook: `if compgen -G '${targetDir}/.docker-compose.yml.repair.*' >/dev/null; then ${appearance.create}; fi`,
+      });
+
+      appearance.verify();
+      expect(result.stdout).toContain("execute action=restore-compose-file resolves=compose-file-restorable result=failed");
+      expect(result.stdout).not.toMatch(/execute action=restore-compose-file .*result=done/);
+      expect(result.status).toBe(4);
+      // The restore did read the image, so this is the move's refusal, not the re-check.
+      expect(result.restoreReads).toBe(1);
+      expect(leftovers(targetDir), "the temporary file was left behind").toEqual([]);
+    });
+
+    it("leaves the existing file's mode and bytes untouched (not the image's 0644 copy)", () => {
+      const targetDir = makeDeployment({});
+      const dest = join(targetDir, "docker-compose.yml");
+
+      runRepair(targetDir, ["--execute", "--safe-only"], {
+        raceHook: `if compgen -G '${targetDir}/.docker-compose.yml.repair.*' >/dev/null; then printf 'hand-made\\n' > '${dest}'; chmod 0600 '${dest}'; fi`,
+      });
+
+      expect(readFileSync(dest, "utf8")).toBe("hand-made\n");
+      expect(fileMode(dest)).toBe("600");
+    });
   });
 });

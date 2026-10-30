@@ -1075,13 +1075,16 @@ export async function runSidecarPins(argv, deps = {}) {
       for (const skip of skipped) {
         write(`sidecar pins: ${skip.tag} skipped: ${skip.reason}\n`);
       }
+      /* A skipped pin needs a manual re-pin: exit 2, the check's own "could
+         not look", so automation never reads it as "nothing to do" (#1558). */
+      const skippedExit = skipped.length > 0 ? 2 : 0;
       if (changes.length === 0) {
         write(
           skipped.length > 0
             ? "sidecar pins: nothing synced; every pin that could be synced already matches.\n"
             : "sidecar pins: nothing to sync; the policy already matches every file.\n",
         );
-        return 0;
+        return skippedExit;
       }
       for (const change of changes) {
         write(`sidecar pins: ${change.tag} synced from ${change.sourceLocation}\n`);
@@ -1097,7 +1100,7 @@ export async function runSidecarPins(argv, deps = {}) {
       write(
         `sidecar pins: ${changes.length} entry/entries updated. Review the diff before committing.\n`,
       );
-      return 0;
+      return skippedExit;
     } catch (error) {
       writeError(`sidecar pins: ${error.message}\n`);
       return 1;

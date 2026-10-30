@@ -143,6 +143,8 @@ const test: TestUserConfig = {
           "scripts/corpus/stages-rerun.test.mjs",
           // Same reason: uses node:test. Run by scripts/test-backend.sh.
           "scripts/read-environment-value.test.mjs",
+          // Same reason (#1557): uses node:test. Run by scripts/test-backend.sh.
+          "scripts/test-backend-build-path.test.mjs",
           // Same reason (#1099): uses node:test. Run by scripts/test-backend.sh.
           "scripts/ci/coverage-floor-check.test.mjs",
           // Same reason (#1408): uses node:test. Run by the `names_guard` CI job.

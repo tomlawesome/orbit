@@ -265,6 +265,7 @@ timeout on this one case rather than a global raise.
 ## settings-text-size-tab-stop.test.mjs:128 "settings, phone layout: the text size tab stop starts on the applied step > with standard applied, the one tab stop is the ticked tile"
 
 - 2026-10-22 · 2b120e89 (nothing near settings since the green bea1293c run) · local `scripts/test-backend.sh`, same 919 s run as preview.test.ts:760's second sighting · timed out at the 5 s default; the file alone passed at once. Wall-clock-under-load shape. First sighting.
+- 2026-10-30 · da507a67 (`fix/v033-fifth-batch`; its only settings change removes the unused `st-tabs` class) · local `scripts/test-backend.sh` from a worktree, 610 s run · timed out at the 5 s default; the file alone passed 3 of 3 (about 3 s each). Same wall-clock-under-load shape. Second sighting.
 
 ## build_image: Corepack could not download the pnpm binary from registry.npmjs.org
 
@@ -273,6 +274,7 @@ timeout on this one case rather than a global raise.
 ## mail-relay-sender-check-failures.test.ts "finding 1: a mailer that never answers > ends the request at the send deadline (shortened to 300 ms here) with a stable 503"
 
 - 2026-10-22 · 2f16facd (!1081; browser-test and flakes-log changes only since the green 39134f33 run, nothing near mail) · pipeline 2878 / `integration` job 38382 · `expected 429 to be 503`: the request met the rate limit instead of the send deadline. Retried as job 38407. First sighting.
+- 2026-10-30 · 38f86955 (!1117; the batch touches nothing near mail) · pipeline 3213 / `integration` job 42069 · `expected 429 to be 503` again: rate limit before the send deadline. Second sighting.
 
 ## v19-mail-sender-check.spec.ts:123 "a member sends the check email from the settings mail screen, opens the link, and the relay starts listening" — desktop-webkit
 

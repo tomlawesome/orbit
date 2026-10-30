@@ -495,7 +495,7 @@
     <section class="p-card" style:--i="3" aria-labelledby="st-reminders" data-st="reminders">
       <div class="st-cardhead">
         <h2 class="p-caps" id="st-reminders">Reminders</h2>
-        <div class="st-tabs p-tabs" role="tablist" aria-labelledby="st-reminders">
+        <div class="p-tabs" role="tablist" aria-labelledby="st-reminders">
           <button role="tab" id="st-tab-reminders" aria-selected={tab === "reminders"} aria-controls="st-panel-reminders"
                   tabindex={tab === "reminders" ? 0 : -1} onclick={() => (tab = "reminders")} onkeydown={tabKey}>reminders</button>
           <button role="tab" id="st-tab-sent" aria-selected={tab === "sent"} aria-controls="st-panel-sent"

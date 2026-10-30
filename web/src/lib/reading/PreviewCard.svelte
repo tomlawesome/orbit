@@ -425,7 +425,14 @@
         </div>
       {/if}
 
-      {#if st === "available"}
+      {#if st === "available" && turnLost}
+        <!-- #1559: a turn whose page could not be loaded says so in place of
+             the picture, as the reader does (#1501) — never the new number
+             over the old page. -->
+        <div class="focus">
+          <div class="focusline" role="alert">{UNDRAWN_PAGE}</div>
+        </div>
+      {:else if st === "available"}
         <div class="topsheet">
           <!-- §18: the page is a button; pressing it opens the reader over home. -->
           <button type="button" class="sheet" aria-label="Read {shown.name}"
@@ -440,7 +447,7 @@
 
     {#if paged}
       <Pager page={pageNo} count={pageCount} onturn={turn} />
-      {#if problem}<div class="problem" role="alert">{problem}</div>{/if}
+      {#if problem && !turnLost}<div class="problem" role="alert">{problem}</div>{/if}
       {#if shown.staged}<div class="rcfoot"><span class="rcnote">not yet in orbit · attached on acceptance</span></div>{/if}
     {:else if st === "available" && shown.staged}
       <!-- #1155: nothing can be done with a staged paper here; the foot says why -->

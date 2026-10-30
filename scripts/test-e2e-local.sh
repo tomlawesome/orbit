@@ -75,7 +75,7 @@
 #                    tests/e2e/v19-mail-review.spec.ts
 #   --project NAME  Playwright project from tests/e2e/playwright.config.ts:
 #                    desktop-chromium, mobile-chromium, desktop-firefox,
-#                    desktop-webkit or mobile-webkit. Default: all of them,
+#                    desktop-webkit or mobile-webkit; repeat it to run several (#1561). Default: all of them,
 #                    plus the maintenance-* tail. A run that includes WebKit
 #                    (either WebKit project, or the default) runs Playwright
 #                    inside CI's Playwright image, because WebKit cannot
@@ -193,7 +193,10 @@ cd "$repo_dir"
 node scripts/check-quarantine.mjs >&2 || exit 1
 
 spec=""
-playwright_project=""
+# Every --project given runs (#1561); a second one used to replace the first
+# silently. playwright_project is their names joined by spaces, for the WebKit
+# decision and the log line below.
+playwright_projects=()
 profile="oidc"
 keep=0
 ci_cap=0
@@ -236,7 +239,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --project)
       [[ $# -ge 2 ]] || { printf 'test-e2e-local: --project requires a value.\n' >&2; exit 2; }
-      playwright_project="$2"
+      playwright_projects+=("$2")
       shift 2
       ;;
     -h | --help)
@@ -255,8 +258,9 @@ done
 # `--project=NAME` instead keeps the value tied to the flag regardless of
 # argument order or which flags are present, and does not depend on
 # Playwright's variadic parsing staying as it is today.
+playwright_project="${playwright_projects[*]}"
 playwright_args=()
-[[ -z "$playwright_project" ]] || playwright_args+=("--project=${playwright_project}")
+for project in "${playwright_projects[@]}"; do playwright_args+=("--project=${project}"); done
 if [[ -n "$spec" ]]; then
   playwright_args+=("$spec")
 elif [[ "$profile" == "local-only" ]]; then
