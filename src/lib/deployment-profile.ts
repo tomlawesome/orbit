@@ -75,7 +75,7 @@ const REQUESTABLE_INSTALL_PROFILES: readonly DeploymentProfile[] = ["standard", 
  * the only branch reached when `terminal_fd` was never opened): preserve the
  * existing profile on `update` (`profile_change` stays 0); on `install`
  * (`profile_change=1`), the launcher's ORBIT_INSTALL_PROFILE if it names
- * standard or processing, a refusal for any other value, and "standard" when
+ * one of REQUESTABLE_INSTALL_PROFILES, a refusal for any other value, and "standard" when
  * unset (#1504). The request is ignored on `update`. See the module comment
  * above for why this is the only branch install-orchestrator.ts drives.
  */
@@ -92,7 +92,7 @@ export function resolveNonInteractiveProfileSelection(
   }
   const requested = REQUESTABLE_INSTALL_PROFILES.find((profile) => profile === requestedProfile);
   if (requested === undefined) {
-    return { refused: true, message: "ORBIT_INSTALL_PROFILE must be standard or processing." };
+    return { refused: true, message: `ORBIT_INSTALL_PROFILE must be ${REQUESTABLE_INSTALL_PROFILES.join(" or ")}.` };
   }
   return { selectedProfile: requested, profileChange: true };
 }

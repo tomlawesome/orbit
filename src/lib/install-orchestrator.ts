@@ -90,7 +90,7 @@ export interface InstallContext {
   channel: string;
   /** COMPOSE_PROJECT_NAME from the shell's environment, if any. */
   requestedComposeProjectName?: string;
-  /** ORBIT_INSTALL_PROFILE from the launcher; read only on a non-interactive install (#1504). */
+  /** ORBIT_INSTALL_PROFILE from the launcher (#1504); read on a fresh install whenever the profile wizard is not shown (no terminal, --plain, or an action named on the command line). */
   requestedProfile?: string;
   facts: HostFacts;
   /** Where this image keeps its deployment assets (/opt/orbit/deploy, ADR-0019). */
