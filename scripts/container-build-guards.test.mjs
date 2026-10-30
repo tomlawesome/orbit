@@ -88,6 +88,50 @@ describe("GitLab pipeline definition", () => {
   });
 });
 
+describe("pinned tool and image versions that must agree (#1536)", () => {
+  // X-Q3: the Playwright image ships the browser build for exactly one
+  // Playwright release, and the test runner inside it refuses any other. The
+  // version lives in three places that Renovate groups but nothing compares.
+  it("pins Playwright to the same exact version in the CI image, package.json and web/package.json (X-Q3)", () => {
+    const image = gitlabCi.match(/^\s*PLAYWRIGHT_IMAGE:\s+\S*\/playwright:v(\d+\.\d+\.\d+)\S*@sha256:[0-9a-f]{64}/mu);
+    expect(image, "PLAYWRIGHT_IMAGE: no playwright:v<version>@sha256 pin").not.toBeNull();
+    const imageVersion = image[1];
+
+    const specifiers = {
+      "package.json": JSON.parse(read("../package.json")).devDependencies?.["@playwright/test"],
+      "web/package.json": JSON.parse(read("../web/package.json")).devDependencies?.["@playwright/test"],
+    };
+    for (const [file, specifier] of Object.entries(specifiers)) {
+      expect(specifier, `${file}: no @playwright/test devDependency`).toBeDefined();
+      // A range ("^1.63.0") lets an install resolve a release the image does
+      // not ship browsers for; the image tag is exact, so these are too.
+      expect(specifier, `${file}: @playwright/test must be an exact version, not a range`).toMatch(/^\d+\.\d+\.\d+$/u);
+      expect(specifier, `${file}: @playwright/test differs from the CI image's v${imageVersion}`).toBe(imageVersion);
+    }
+    expect(specifiers["package.json"]).toBe(specifiers["web/package.json"]);
+  });
+
+  // D-SEC3: the canary container the hostile-value journey starts is pulled
+  // from Docker Hub. "Nothing here needs a digest" is not the rule (#1111,
+  // supply-chain policy): every pull is by digest, however disposable.
+  it("pulls the repair journeys' busybox canary by digest, not by tag (D-SEC3)", () => {
+    const script = read("./test-repair-journeys.sh");
+    const fallback = script.match(/\$\{ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE:-([^}]+)\}/u);
+    expect(fallback, "test-repair-journeys.sh: no ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE default").not.toBeNull();
+    expect(fallback[1], "the default canary image must be busybox pinned by digest").toMatch(
+      /^busybox(?::[^@\s]+)?@sha256:[0-9a-f]{64}$/u,
+    );
+    expect(script, "a tag-only busybox pull remains in the script").not.toMatch(/busybox:(?!\S*@sha256:)[A-Za-z0-9._-]+/u);
+
+    // CI overrides the default; the override must not undo the pin.
+    const ciLine = gitlabCi.split("\n").find((line) => /^\s*ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE:/u.test(line));
+    expect(ciLine, "ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE must be set in the repair_journeys job").toBeDefined();
+    expect(ciLine, "CI overrides the canary with a tag-only busybox").toMatch(
+      /:\s+busybox(?::[^@\s]+)?@sha256:[0-9a-f]{64}\s*$/u,
+    );
+  });
+});
+
 describe("container validation scripts", () => {
   it("requires the database-backed ready contract before smoke acceptance continues", () => {
     const health = ciScript("verify-health-endpoint.sh");
