@@ -103,6 +103,8 @@ const itemShapeOf = (rules: FieldRules) => z.object({
   metadataStatus: itemMetadataStatusSchema.optional(),
   /** Read-only; count of the item's listable documents, added by the read path (#1091). */
   documentCount: z.number().int().min(0).optional(),
+  /** Read-only; the engine's reading of the item (item-kind.ts), so no client infers it (#1346). The write path ignores whatever a client sends here. */
+  kind: z.enum(itemKinds).nullable().optional(),
   status: z.enum(itemStatuses),
   version: z.number().int().positive().optional(),
   updatedAt: z.iso.datetime().optional(),

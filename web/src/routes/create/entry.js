@@ -53,22 +53,6 @@ export function reminderPairOf(reminders) {
   return typeof first === "number" && typeof final === "number" ? [first, final] : [...REMINDER_DEFAULT];
 }
 
-/**
- * The kind a stored item reads as, so the form lights the right chip: its
- * subtype when that is one of the five, otherwise what its schedule says.
- * Presentation only — it reads what the engine stored and never decides it.
- * @param {{ subtype?: string | null, scheduleKind?: string | null }} item
- * @returns {Kind | null}
- */
-export function kindOf(item) {
-  const named = KINDS.find((kind) => kind.id === item.subtype);
-  if (named) return named.id;
-  if (item.scheduleKind === "renewal") return "renewal";
-  if (item.scheduleKind === "service") return "service";
-  if (item.scheduleKind === "expiry") return "document";
-  return null;
-}
-
 /** Whether the form asks for a date for a kind (a suggestion schedules nothing). */
 export const kindHasDate = (/** @type {Kind | null} */ kind) => kind !== "suggestion";
 /** Whether the form offers a repeat for a kind (a document's expiry happens once). */
@@ -163,7 +147,7 @@ export function blankEntry({ name = "", householdId = null } = {}) {
 
 /**
  * An existing item, as the form holds it for editing.
- * @param {{ title?: string, subtype?: string | null, scheduleKind?: string | null, householdId?: string,
+ * @param {{ title?: string, kind?: string | null, householdId?: string,
  *   sectionId?: string | null, provider?: string | null, reference?: string | null, dueDate?: string | null,
  *   recurrenceMonths?: number | null, costMinor?: number | null, reminderDays?: number[] | null,
  *   notes?: string | null }} item
@@ -171,7 +155,7 @@ export function blankEntry({ name = "", householdId = null } = {}) {
  */
 export function entryOf(item) {
   return {
-    kind: kindOf(item),
+    kind: /** @type {Kind | null} */ (item.kind ?? null),
     name: item.title ?? "",
     householdId: item.householdId ?? null,
     sectionId: item.sectionId ?? null,
@@ -247,8 +231,7 @@ export function entryOfProposal(proposal = {}, { householdId = null } = {}) {
   return {
     ...entryOf({
       title: proposal.title ?? "",
-      subtype: proposal.subtype ?? null,
-      scheduleKind: proposal.scheduleKind ?? null,
+      kind: proposal.kind ?? null,
       provider: proposal.provider ?? null,
       reference: proposal.reference ?? null,
       dueDate: proposal.dueDate ?? null,

@@ -9,6 +9,7 @@ import { flagStagingPurgeFailed, purgeHeldImapAttachment } from "./imap-attachme
 import { requestDocumentDeletion } from "@/server/document-repository";
 import { clearedReviewDraftMetadata, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
+import { kindOfItem } from "@/lib/item-kind";
 import { validUuid } from "@/lib/uuid";
 import {
   reviewInboxState,
@@ -27,6 +28,19 @@ import {
 // src/server/mail-in/core/review-state.ts for the implementations.
 export { reviewInboxState, failureReasonOf, findReviewedIntakeCandidateReason, reviewAttachmentDisplayName, reviewAttachmentMediaType, reviewAttachmentScanState };
 export type { FailureReason, ReviewAttachmentMediaType, ReviewInboxClassification, ReviewInboxStateContext };
+
+/**
+ * The kind the proposal reads as (item-kind.ts), sent beside it so the review
+ * form lights the right chip without the browser inferring it (#1346). Absent
+ * when the proposal says no kind.
+ */
+function withProposalKind<T extends { proposal: Record<string, unknown> }>(draft: T): T {
+  const kind = kindOfItem({
+    subtype: typeof draft.proposal.subtype === "string" ? draft.proposal.subtype : undefined,
+    scheduleKind: typeof draft.proposal.scheduleKind === "string" ? draft.proposal.scheduleKind : undefined,
+  });
+  return kind ? { ...draft, proposal: { ...draft.proposal, kind } } : draft;
+}
 
 /**
  * Decrypts one receipt's Tier 1 draft (ADR-0024). A value that will not
@@ -251,7 +265,7 @@ export async function listImapInbox(userId: string) {
       });
       const decrypted = readReceiptDraft(metadataReaders.get(receipt.householdId)!, receipt);
       const metadata = state.classification === "ready" || state.classification === "retry"
-        ? { ...sanitizeReviewDraftMetadata(decrypted), metadataStatus: decrypted.metadataStatus }
+        ? { ...withProposalKind(sanitizeReviewDraftMetadata(decrypted)), metadataStatus: decrypted.metadataStatus }
         : { proposal: {}, fieldEvidence: {}, metadataStatus: decrypted.metadataStatus };
       return {
         id: receipt.id,
@@ -323,7 +337,7 @@ export async function getImapReview(userId: string, receiptId: string, household
   });
   const decrypted = readReceiptDraft(await openMetadataReader(receipt.householdId), receipt);
   const metadata = state.classification === "ready" || state.classification === "retry"
-    ? { ...sanitizeReviewDraftMetadata(decrypted), metadataStatus: decrypted.metadataStatus }
+    ? { ...withProposalKind(sanitizeReviewDraftMetadata(decrypted)), metadataStatus: decrypted.metadataStatus }
     : { proposal: {}, fieldEvidence: {}, metadataStatus: decrypted.metadataStatus };
   if (!state.canApprove) return { receipt: { id: receipt.id, status: receipt.status, householdId, draftVersion: receipt.draftVersion, expiresAt: receipt.expiresAt, receivedAt: receipt.receivedAt, ...state, ...metadata }, sections: [], candidates: [], attachments: [] };
 

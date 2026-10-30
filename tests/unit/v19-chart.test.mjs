@@ -191,10 +191,10 @@ const HOUSEHOLD = {
     { id: "s-vehicles", name: "Vehicles" },
   ],
   items: [
-    { id: "i-a", title: "Overdue thing", sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", dueDate: "2026-07-28", costMinor: 15000, costIsEstimate: true, currency: "GBP", recurrenceMonths: 12 },
-    { id: "i-b", title: "Inspection", sectionId: "s-vehicles", status: "active", subtype: "inspection", scheduleKind: "service", dueDate: "2026-08-29", costMinor: 5485, currency: "GBP", recurrenceMonths: 12 },
-    { id: "i-c", title: "Far out", sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", dueDate: "2027-01-21", costMinor: 30000, costIsEstimate: true, currency: "GBP", recurrenceMonths: 12 },
-    { id: "i-d", title: "Archived", sectionId: "s-home", status: "archived", subtype: "service", scheduleKind: "service", dueDate: "2026-08-20", costMinor: 1000, currency: "GBP", recurrenceMonths: 12 },
+    { id: "i-a", title: "Overdue thing", sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", kind: "service", dueDate: "2026-07-28", costMinor: 15000, costIsEstimate: true, currency: "GBP", recurrenceMonths: 12 },
+    { id: "i-b", title: "Inspection", sectionId: "s-vehicles", status: "active", subtype: "inspection", scheduleKind: "service", kind: "inspection", dueDate: "2026-08-29", costMinor: 5485, currency: "GBP", recurrenceMonths: 12 },
+    { id: "i-c", title: "Far out", sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", kind: "service", dueDate: "2027-01-21", costMinor: 30000, costIsEstimate: true, currency: "GBP", recurrenceMonths: 12 },
+    { id: "i-d", title: "Archived", sectionId: "s-home", status: "archived", subtype: "service", scheduleKind: "service", kind: "service", dueDate: "2026-08-20", costMinor: 1000, currency: "GBP", recurrenceMonths: 12 },
   ],
 };
 const SUGGESTION = { id: "sug-1", title: "Insurance", renewsOn: "2026-10-03", costMinor: 40000, currency: "GBP" };
@@ -320,7 +320,7 @@ describe("corridorOf with an undated item", () => {
   const [harlow] = WORKSPACE_FIXTURE.households;
   const undatedItem = {
     id: "i-warranty", title: "Washing machine warranty", sectionId: "s-home",
-    status: "active", dueDate: null, scheduleKind: "expiry",
+    status: "active", dueDate: null, scheduleKind: "expiry", kind: "document",
   };
   const plain = corridorOf({ households: [harlow], activeHouseholdId: harlow.id }, TODAY);
   const corridor = corridorOf(
