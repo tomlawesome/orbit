@@ -129,6 +129,54 @@ describe("household workspace", () => {
       expect(workspaceCommandSchema.safeParse(command).success).toBe(false);
     });
 
+    describe("a client never decides the item's kind (#1346)", () => {
+      const at = "2026-07-25T10:00:00.000Z";
+      const renewal = (item: Record<string, unknown> = {}) => ({
+        type: "item.upsert",
+        householdId: "our-home",
+        kind: "renewal",
+        item: { id: "boiler", sectionId: "home", title: "Boiler", currency: "GBP", dueDate: "2026-11-02", recurrenceMonths: 12, ...item },
+        activity: { id: `act-${String(item.version ?? 1)}`, itemId: "boiler", occurredAt: at },
+      });
+      const kindOnItem = (state: ReturnType<typeof createTestWorkspace>) =>
+        (activeHousehold(state).items.find((entry) => entry.id === "boiler") as { kind?: unknown } | undefined)?.kind ?? null;
+      const apply = (state: ReturnType<typeof createTestWorkspace>, input: unknown) => {
+        try {
+          return reduceWorkspace(state, parseWorkspaceCommand(input));
+        } catch {
+          return null; // refused as invalid input, which is allowed
+        }
+      };
+
+      it.each(["document", "suggestion", "inspection", "service", "nonsense", null])(
+        "a create that sends kind %j on the item is refused or the kind is dropped",
+        (sent) => {
+          const clean = reduceWorkspace(createTestWorkspace(), parseWorkspaceCommand(renewal()));
+          const result = apply(createTestWorkspace(), renewal({ kind: sent }));
+          if (result === null) return;
+          if (sent !== null) expect(kindOnItem(result)).not.toBe(sent);
+          expect(activeHousehold(result).items).toEqual(activeHousehold(clean).items);
+        },
+      );
+
+      it("an update that sends a disagreeing kind never changes the stored kind", () => {
+        const created = reduceWorkspace(createTestWorkspace(), parseWorkspaceCommand(renewal()));
+        const before = kindOnItem(created);
+        const clean = reduceWorkspace(created, parseWorkspaceCommand(renewal({ version: 2, title: "Boiler plan" })));
+        const result = apply(created, renewal({ version: 2, title: "Boiler plan", kind: "document" }));
+        if (result === null) return;
+        expect(kindOnItem(result)).not.toBe("document");
+        expect(kindOnItem(result)).toBe(before);
+        expect(activeHousehold(result).items).toEqual(activeHousehold(clean).items);
+      });
+
+      it("the command schema does not pass a client's kind through on the item", () => {
+        const parsed = workspaceCommandSchema.safeParse(renewal({ kind: "document" }));
+        if (!parsed.success) return;
+        expect((parsed.data as { item: { kind?: unknown } }).item.kind).toBeUndefined();
+      });
+    });
+
     it("refuses a kind sent on a completion or a status change", () => {
       expect(() => parseWorkspaceCommand(status("cancelled", { kind: "cancelled" }))).toThrow(/does not send its activity's kind/);
       expect(() => parseWorkspaceCommand({

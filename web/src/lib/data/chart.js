@@ -39,6 +39,7 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
  * @property {?string} [provider]
  * @property {?string} [subtype]
  * @property {?string} [scheduleKind]
+ * @property {?string} [kind]            the engine's reading of the item (item-kind.ts)
  * @property {?number} [recurrenceMonths]
  * @property {?number} [costMinor]
  * @property {boolean} [costIsEstimate]
@@ -217,18 +218,24 @@ export function constellationPlanetsOf(items, today) {
 const PAINTS = { overdue: "ruby", "due-soon": "amber", upcoming: "sky", ok: "jade", unscheduled: "jade", ended: "ended" };
 
 /**
- * The body's kind in the chart key's vocabulary. An expiry (#1005) is read off
- * the schedule kind before the subtype, because a one-off ending is what the
- * body IS. It is the item's field only: no body is drawn with a type face
- * (#1322), so the kind never reaches the picture.
+ * The chart key's word for each kind the engine sends (#1346). The engine
+ * decides an item's kind (src/lib/item-kind.ts) and the workspace payload
+ * carries it; the chart only words it. A document is an "expiry" here (#1005):
+ * a one-off ending is what the body IS. A suggestion, or an item that is no
+ * kind, is drawn as a service, as it always was. No body is drawn with a type
+ * face (#1322), so the kind never reaches the picture.
+ *
+ * @type {Record<string, string>}
+ */
+const CHART_WORDS = { service: "service", renewal: "renewal", inspection: "inspection", document: "expiry" };
+
+/**
+ * The body's kind in the chart key's vocabulary, from the payload's `kind`.
  *
  * @param {ChartItem} item
  * @returns {string}
  */
-export function kindOfItem(item) {
-  if (item.scheduleKind === "expiry") return "expiry";
-  return item.subtype === "inspection" ? "inspection" : item.scheduleKind === "renewal" ? "renewal" : "service";
-}
+const chartWordOf = (item) => CHART_WORDS[item.kind ?? ""] ?? "service";
 
 /**
  * The urgency band, with the one exception the design rules (#1005): nothing is
@@ -264,7 +271,7 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
     if (item.status !== "active") continue;
     const days = daysUntil(item.dueDate, today);
     if (days === null) continue;
-    const kind = kindOfItem(item);
+    const kind = chartWordOf(item);
     bodies.push({
       id: item.id,
       title: item.title,
@@ -382,13 +389,13 @@ export function manifestRowOf(household, item, today) {
     section: section?.name ?? null,
     days,
     dueDate: item.dueDate ?? null,
-    band: item.status === "active" ? bandOfKind(kindOfItem(item), days) : "ended",
+    band: item.status === "active" ? bandOfKind(chartWordOf(item), days) : "ended",
     provider: item.provider ?? null,
     recurrenceMonths: item.recurrenceMonths ?? null,
     costMinor: item.costMinor ?? null,
     costIsEstimate: Boolean(item.costIsEstimate),
     currency: item.currency ?? "GBP",
-    kind: kindOfItem(item),
+    kind: chartWordOf(item),
     state: state?.word ?? null,
     restorable: Boolean(state?.restorable),
   };
@@ -554,12 +561,12 @@ export function corridorOf(workspace, today, options = {}) {
            does below; no date is invented. */
         days: days ?? Number.MAX_SAFE_INTEGER,
         dueDate: item.dueDate ?? null,
-        band: item.status === "active" ? bandOfKind(kindOfItem(item), days) : "ended",
+        band: item.status === "active" ? bandOfKind(chartWordOf(item), days) : "ended",
         provider: item.provider ?? null,
         costMinor: item.costMinor ?? null,
         costIsEstimate: Boolean(item.costIsEstimate),
         currency: item.currency ?? "GBP",
-        kind: kindOfItem(item),
+        kind: chartWordOf(item),
         state: state?.word ?? null,
         restorable: Boolean(state?.restorable),
       });

@@ -167,6 +167,47 @@ describe("authenticated mailbox review read boundary", () => {
     await fixture.cleanup();
   });
 
+  /* #1346: the engine reads a proposal's kind (subtype and schedule) and puts it
+     on the proposal, so the review form lights its type chip without the
+     browser inferring it. A receipt with nothing to read keeps its empty
+     proposal. */
+  it("puts the engine's kind on a renewal receipt's proposal, and leaves an empty proposal empty (#1346)", async () => {
+    const fixture = await createIntegrationFixture("imap-review-proposal-kind");
+    try {
+      const member = await fixture.session("member");
+      const renewalId = randomUUID();
+      const emptyId = randomUUID();
+      const shared = { mailbox: "private", userId: member.userId, householdId: fixture.household.id, status: "pending_review" as const, receiptStatus: "pending" as const };
+      await getDb().insert(imapIngestionMessages).values([
+        {
+          ...shared, id: renewalId, mailboxUidValidity: "proposal-kind-1", mailboxUid: 301,
+          contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "proposal-kind-1",
+          expiresAt: new Date(Date.now() + 86_400_000),
+          ...await encryptedReceiptDraft(fixture.household.id, renewalId, {
+            proposal: { title: "Home insurance", subtype: "renewal", scheduleKind: "renewal", dueDate: "2026-12-01", recurrenceMonths: 12 },
+          }),
+        },
+        {
+          ...shared, id: emptyId, mailboxUidValidity: "proposal-kind-2", mailboxUid: 302,
+          contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "proposal-kind-2",
+          expiresAt: new Date(Date.now() + 86_400_000),
+        },
+      ]);
+
+      const review = await getImapReview(member.userId, renewalId, fixture.household.id);
+      expect(review.receipt.proposal).toMatchObject({ title: "Home insurance", subtype: "renewal", kind: "renewal" });
+
+      const listed = (await listImapInbox(member.userId)).receipts as Array<{ id: string; proposal?: Record<string, unknown> }>;
+      expect(listed.find((receipt) => receipt.id === renewalId)?.proposal).toMatchObject({ kind: "renewal" });
+
+      const empty = await getImapReview(member.userId, emptyId, fixture.household.id);
+      expect(empty.receipt.proposal).toEqual({});
+      expect(listed.find((receipt) => receipt.id === emptyId)?.proposal ?? {}).toEqual({});
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   it("conceals assigned receipts and household choices scheduled for deletion", async () => {
     const fixture = await createIntegrationFixture("imap-review-deletion-boundary");
     try {

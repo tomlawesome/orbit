@@ -7,7 +7,6 @@
  * (workspace.js). This module only says what each document row and its
  * preview card read.
  */
-import { kindOfItem } from "./chart.js";
 /* Relative, like chart.js's own imports: this module is pure and is exercised
    straight from node by the unit suite, which knows no SvelteKit aliases. */
 import { longDate, sizeLabel } from "../format.js";
@@ -29,13 +28,6 @@ const kindOfFile = (mediaType) => {
   const short = String(mediaType ?? "").split("/").pop()?.toUpperCase() || "FILE";
   return { plate: short, type: mediaType ? `${short} (${mediaType})` : short };
 };
-
-/**
- * chart.js's own kind reading (dialBodiesOf/corridorOf), unchanged.
- * @param {import('./workspace.js').WorkspaceItem} item
- * @returns {string}
- */
-export const kindOf = (item) => kindOfItem(/** @type {any} */ (item));
 
 /**
  * The three media types the preview endpoint (#476) can actually turn into a

@@ -28,6 +28,7 @@
  * @property {?string} [currency]
  * @property {?string} [dueDate]
  * @property {?string} [scheduleKind]
+ * @property {?string} [kind]            the engine's reading of the item (read-only; item-kind.ts)
  * @property {?number} [recurrenceMonths]
  * @property {?number[]} [reminderDays]
  * @property {?string} [snoozedUntil]
@@ -41,8 +42,8 @@
  * What an edit sends for an item (ADR-0034, #1325): any of its typed fields,
  * the cost as typed (`cost`, which the engine reads into `costMinor`), and
  * the kind the member chose. Never the schedule kind, subtype or status.
- * @typedef {Partial<Omit<CommandItem, "scheduleKind" | "subtype" | "status">> & {
- *   kind?: string, cost?: string,
+ * @typedef {Partial<Omit<CommandItem, "scheduleKind" | "subtype" | "status" | "kind">> & {
+ *   kind?: ?string, cost?: string,
  * }} ItemEdits
  */
 

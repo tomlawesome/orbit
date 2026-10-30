@@ -103,6 +103,8 @@ const itemShapeOf = (rules: FieldRules) => z.object({
   metadataStatus: itemMetadataStatusSchema.optional(),
   /** Read-only; count of the item's listable documents, added by the read path (#1091). */
   documentCount: z.number().int().min(0).optional(),
+  /** Read-only; the engine's reading of the item (item-kind.ts), so no client infers it (#1346). The write path ignores whatever a client sends here. */
+  kind: z.enum(itemKinds).nullable().optional(),
   status: z.enum(itemStatuses),
   version: z.number().int().positive().optional(),
   updatedAt: z.iso.datetime().optional(),
@@ -321,7 +323,7 @@ export const householdCreateSchema = householdWorkspaceSchema
  * ("once"); the engine keeps it only where a schedule comes round.
  */
 export const itemIntentSchema = workspaceItemShape
-  .omit({ scheduleKind: true, subtype: true, status: true, recurrenceMonths: true })
+  .omit({ scheduleKind: true, subtype: true, status: true, recurrenceMonths: true, kind: true })
   .extend({
     /* 0 is the member clearing a repeat ("once"); the stored item's schema
        starts at 1, and the engine keeps a repeat only where a schedule comes
@@ -330,6 +332,9 @@ export const itemIntentSchema = workspaceItemShape
     scheduleKind: z.never().optional(),
     subtype: z.never().optional(),
     status: z.never().optional(),
+    /* #1346: the engine names an item's kind on the way out; a client's is the
+       command's `kind`, never one on the item. */
+    kind: z.never().optional(),
   });
 
 /** An item command's activity as a client sends it: the identity, the
