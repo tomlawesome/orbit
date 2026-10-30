@@ -29,7 +29,6 @@ import { acquireDeployLock as acquireSharedDeployLock } from "./deploy-lock";
 import { HostOwnershipError, applyHostOwnership } from "./host-ownership";
 import { NOT_UTF8_FAILURE_MESSAGE, isNotUtf8Failure, preflightEnvironmentFile } from "./configuration-migration";
 import { decodeUtf8Strict } from "./env-orbit-file";
-import { checkOidcIssuerAgainstDiscovery, type VerifyOidcDiscoveryOptions } from "./oidc-discovery";
 import { ensureVapidKeys } from "./vapid-keys";
 
 // The write side of scripts/configure.sh, ported to the TypeScript engine
@@ -973,11 +972,7 @@ export type ConfigureMachineReason =
   | "not-https"
   | "not-absolute-url"
   | "forbidden-host"
-  | "too-large"
-  // #1454: the issuer was checked against the provider's own discovery document.
-  | "trailing-slash-mismatch"
-  | "issuer-mismatch"
-  | "provider-unreachable";
+  | "too-large";
 
 /** Mirrors src/lib/recovery-prompts.ts's MachinePromptDriver shape exactly — the same write/readLine seam, scoped to configure.sh's own field vocabulary. */
 export interface ConfigureMachinePromptDriver {
@@ -1011,19 +1006,13 @@ function configureMachineFieldKind(field: ConfigureMachineField): ConfigureMachi
 
 const CONFIGURE_MACHINE_MAX_ATTEMPTS = 3;
 
-/** What checking one machine-prompt answer decided: the accepted value, or the reason token to reject it with. */
-type MachineFieldCheck<T> = { value: T } | { reason: ConfigureMachineReason };
-
-/**
- * machine_prompt_collect (configure.sh:654-676). `check` runs once per
- * attempt and may be asynchronous (the issuer is checked against the
- * provider's discovery document, #1454); `readLine` stays synchronous.
- */
-async function collectCheckedConfigureMachineField<T>(
+/** machine_prompt_collect (configure.sh:654-676). */
+function collectConfigureMachineField<T>(
   field: ConfigureMachineField,
   driver: ConfigureMachinePromptDriver,
-  check: (input: string) => MachineFieldCheck<T> | Promise<MachineFieldCheck<T>>,
-): Promise<T> {
+  validate: (input: string) => T | undefined,
+  classifyRejection: (input: string) => ConfigureMachineReason,
+): T {
   const kind = configureMachineFieldKind(field);
   for (let attempt = 1; attempt <= CONFIGURE_MACHINE_MAX_ATTEMPTS; attempt += 1) {
     driver.write(`prompt field=${field} kind=${kind} required=true attempt=${attempt}`);
@@ -1032,29 +1021,15 @@ async function collectCheckedConfigureMachineField<T>(
       driver.write(`prompt-abort field=${field}`);
       throw new ConfigureMachinePromptAbortedError(field);
     }
-    const checked = await check(input);
-    if ("value" in checked) {
+    const value = validate(input);
+    if (value !== undefined) {
       driver.write(`prompt-accept field=${field}`);
-      return checked.value;
+      return value;
     }
-    driver.write(`prompt-reject field=${field} reason=${checked.reason}`);
+    driver.write(`prompt-reject field=${field} reason=${classifyRejection(input)}`);
   }
   driver.write(`prompt-abort field=${field}`);
   throw new ConfigureMachinePromptAbortedError(field);
-}
-
-/** The ordinary field: a validator that accepts or not, and a diagnostic-only classifier for a refusal. */
-async function collectConfigureMachineField<T>(
-  field: ConfigureMachineField,
-  driver: ConfigureMachinePromptDriver,
-  validate: (input: string) => T | undefined | Promise<T | undefined>,
-  classifyRejection: (input: string) => ConfigureMachineReason,
-): Promise<T> {
-  return collectCheckedConfigureMachineField(field, driver, (input) => {
-    const toCheck = (value: T | undefined): MachineFieldCheck<T> => (value !== undefined ? { value } : { reason: classifyRejection(input) });
-    const validated = validate(input);
-    return validated instanceof Promise ? validated.then(toCheck) : toCheck(validated);
-  });
 }
 
 /** classify_url_rejection (configure.sh:540-596): a diagnostic-only second pass, never itself deciding acceptance. */
@@ -1089,17 +1064,8 @@ function validateAppUrlAnswer(value: string): string | undefined {
   return normalizePublicOrigin(value) ?? undefined;
 }
 
-/**
- * #1454: the issuer answer, checked against the provider's discovery document
- * once per attempt. A badly shaped answer keeps classifyUrlRejection's words;
- * a discovery failure carries the checker's reason token and nothing else:
- * the exact published issuer is never on a prompt line (the launcher derives
- * it from the answer it holds).
- */
-async function checkOidcIssuerAnswer(value: string, options: VerifyOidcDiscoveryOptions): Promise<MachineFieldCheck<string>> {
-  const outcome = await checkOidcIssuerAgainstDiscovery(value, options);
-  if (outcome.status === "ok") return { value };
-  return { reason: outcome.reason === "invalid-issuer" ? classifyUrlRejection(value, true) : outcome.reason };
+function validateOidcIssuerAnswer(value: string): string | undefined {
+  return isValidOidcIssuer(value) ? value : undefined;
 }
 
 function validateClientIdAnswer(value: string): string | undefined {
@@ -1129,20 +1095,16 @@ export interface CollectedGuidedInitAnswers {
  * no local-only path at all, so a local-only machine-prompt init always
  * demanded OIDC values the operator never intended to supply).
  */
-export async function collectMachineGuidedInit(
-  driver: ConfigureMachinePromptDriver,
-  authMode: "local" | "oidc" = "oidc",
-  discoveryOptions: VerifyOidcDiscoveryOptions = {},
-): Promise<CollectedGuidedInitAnswers> {
-  const appUrl = await collectConfigureMachineField("APP_URL", driver, validateAppUrlAnswer, (value) => classifyUrlRejection(value, false));
+export function collectMachineGuidedInit(driver: ConfigureMachinePromptDriver, authMode: "local" | "oidc" = "oidc"): CollectedGuidedInitAnswers {
+  const appUrl = collectConfigureMachineField("APP_URL", driver, validateAppUrlAnswer, (value) => classifyUrlRejection(value, false));
   if (authMode === "local") return { appUrl };
-  const issuer = await collectCheckedConfigureMachineField("OIDC_ISSUER", driver, (value) => checkOidcIssuerAnswer(value, discoveryOptions));
-  const clientId = await collectConfigureMachineField("OIDC_CLIENT_ID", driver, validateClientIdAnswer, classifyClientIdRejection);
+  const issuer = collectConfigureMachineField("OIDC_ISSUER", driver, validateOidcIssuerAnswer, (value) => classifyUrlRejection(value, true));
+  const clientId = collectConfigureMachineField("OIDC_CLIENT_ID", driver, validateClientIdAnswer, classifyClientIdRejection);
   return { appUrl, issuer, clientId };
 }
 
 /** The machine-prompt-driven collection set_oidc_secret performs when `ORBIT_CONFIGURE_PROMPTS=machine` (configure.sh:825-828). */
-export function collectMachineOidcSecret(driver: ConfigureMachinePromptDriver): Promise<string> {
+export function collectMachineOidcSecret(driver: ConfigureMachinePromptDriver): string {
   return collectConfigureMachineField("OIDC_CLIENT_SECRET", driver, validateOidcSecretAnswer, classifyOidcSecretRejection);
 }
 

@@ -470,9 +470,6 @@ not-https
 not-absolute-url
 forbidden-host
 too-large
-trailing-slash-mismatch
-issuer-mismatch
-provider-unreachable
 ```
 
 These are exactly the refusal classes the existing validators in
@@ -492,23 +489,6 @@ These are exactly the refusal classes the existing validators in
   documented `example.com` placeholder.
 - `too-large` — the `OIDC_CLIENT_SECRET` answer exceeds the existing
   65,536-byte maximum.
-- `trailing-slash-mismatch` — (`OIDC_ISSUER` only) the provider's discovery
-  document publishes the issuer entered, except that its trailing slash is
-  present where the answer has none or the reverse.
-- `issuer-mismatch` — (`OIDC_ISSUER` only) the provider's discovery document
-  publishes a different issuer, in some way other than the trailing slash.
-- `provider-unreachable` — (`OIDC_ISSUER` only) the discovery document could
-  not be read: no answer in time, a non-2xx status, an oversized body, or no
-  usable `issuer` in it.
-
-An `OIDC_ISSUER` answer that passes the shape rules is checked against the
-provider's own discovery document (`<issuer>/.well-known/openid-configuration`,
-https only, 10 seconds, 1 MiB) while the prompt is open, once per attempt, so
-a mismatch is caught there and not after every other question has been
-answered. The reject line carries only the token: the issuer the provider
-publishes is a value from the provider, so it never appears on a prompt line.
-A consumer that knows the answer it sent can show the published issuer for
-`trailing-slash-mismatch` by toggling that answer's trailing slash.
 
 ### Security
 

@@ -107,8 +107,7 @@ function makeFixtureDir(envOrbitContent) {
 // `docker run` (scripts/engine-docker-shim.mjs); no daemon is reached.
 function engineDockerBin() {
   const binDir = mkdtempSync(join(tmpdir(), "orbit-engine-prompts-fakebin-"));
-  // The issuer is checked against the provider (#1454): this one answers.
-  writeEngineDockerShim(binDir, { oidcDiscoveryStub: true });
+  writeEngineDockerShim(binDir);
   return binDir;
 }
 

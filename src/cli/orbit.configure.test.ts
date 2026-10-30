@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
-import { envWithOidcDiscoveryStub } from "../lib/__fixtures__/oidc-discovery-stub";
 
 // `orbit configure` end-to-end (issue #294): the write side of
 // scripts/configure.sh, ported onto src/lib/configure-engine.ts and wired
@@ -115,7 +114,7 @@ describe("orbit configure --init", () => {
     const transcript = ["https://orbit.cli-machine-test.invalid", "https://auth.cli-machine-test.invalid/", "cli-machine-client", ""].join("\n");
     const result = runCli(["configure", "--init", "--dir", sandbox], {
       input: transcript,
-      env: envWithOidcDiscoveryStub({ ...process.env, ORBIT_CONFIGURE_PROMPTS: "machine" }),
+      env: { ...process.env, ORBIT_CONFIGURE_PROMPTS: "machine" },
     });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("prompt field=APP_URL kind=url required=true attempt=1");

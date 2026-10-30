@@ -35,8 +35,7 @@ beforeEach(() => {
   writeFileSync(join(targetDir, ".env-orbit.example"), readFileSync(join(repoRoot, ".env-orbit.example")));
   writeFileSync(join(targetDir, ".env-orbit"), "ORBIT_CONFIG_SCHEMA_VERSION=1\nPOSTGRES_DB=keep-me\n", { mode: 0o600 });
   binDir = mkdtempSync(join(tmpdir(), "orbit-configure-sh-terminal-bin-"));
-  // The issuer is checked against the provider (#1454): this one answers.
-  writeEngineDockerShim(binDir, { oidcDiscoveryStub: true });
+  writeEngineDockerShim(binDir);
 });
 
 afterEach(() => {

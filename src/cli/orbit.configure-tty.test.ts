@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PTY_TEST_TIMEOUT_MS, ptyWatchdog } from "../../scripts/pty-deadline.mjs";
-import { envWithOidcDiscoveryStub } from "../lib/__fixtures__/oidc-discovery-stub";
 
 // #1210 D3: `orbit configure --init` and `--set-oidc-secret` prompt on the
 // operator's terminal themselves (configure.sh passes one through with
@@ -26,7 +25,7 @@ function runOnPty(args: string[], deployDir: string, steps: Step[], env: NodeJS.
   return new Promise((resolve, reject) => {
     const command = ["node", tsx, cli, "configure", ...args, "--dir", deployDir].map((part) => `'${part}'`).join(" ");
     const child = spawn("script", ["-qeE", "never", "-c", command, "/dev/null"], {
-      env: envWithOidcDiscoveryStub({ ...process.env, TERM: "xterm", ...env }),
+      env: { ...process.env, TERM: "xterm", ...env },
     });
     let output = "";
     let consumed = 0;
@@ -84,27 +83,6 @@ describe("orbit configure --init on a terminal", () => {
     expect(envFile()).toContain("APP_URL=https://orbit.tty.invalid\n");
     expect(envFile()).toContain("OIDC_CLIENT_ID=tty-client\n");
     expect(envFile()).toContain("OIDC_CALLBACK_URL=https://orbit.tty.invalid/api/auth/callback\n");
-  });
-
-  it("refuses an issuer that differs from the provider's only by its trailing slash, naming the published one (#1454)", async () => {
-    const published = "https://sso.tty.invalid/application/o/orbit/";
-    const issuerPrompt = "OIDC issuer URL (e.g. https://sso.your-domain.tld/application/o/orbit/): ";
-    const result = await runOnPty(
-      ["--init"],
-      deployDir,
-      [
-        ["[local/oidc] (default: local): ", "oidc\r"],
-        ["Public Orbit origin (e.g. https://orbit.your-domain.tld): ", "https://orbit.tty.invalid\r"],
-        [issuerPrompt, "https://sso.tty.invalid/application/o/orbit\r"],
-        ["the trailing slash differs); enter it exactly as published.", ""],
-        [issuerPrompt, `${published}\r`],
-        ["OIDC client ID: ", "tty-client\r"],
-      ],
-      { ORBIT_TEST_OIDC_PUBLISHED_ISSUER: published },
-    );
-    expect(result.status).toBe(0);
-    expect(result.output).toContain(`The provider publishes its issuer as ${published} (the trailing slash differs)`);
-    expect(envFile()).toContain(`OIDC_ISSUER=${published}\n`);
   });
 
   it("defaults to local accounts and asks for APP_URL alone", async () => {

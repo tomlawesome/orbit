@@ -7,7 +7,6 @@ import { createInterface } from "node:readline";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { readGolden } from "./__fixtures__/golden";
-import { envWithOidcDiscoveryStub } from "./__fixtures__/oidc-discovery-stub";
 import { PROCESS_TEST_TIMEOUT_MS, processWatchdog } from "../../scripts/process-budget.mjs";
 import {
   missingConfigurationFields,
@@ -194,7 +193,7 @@ function fixedAnswers(values: Record<string, string | string[]>): MachinePromptA
 describe("real ORBIT_CONFIGURE_PROMPTS=machine --init parity", () => {
   it("completes a guided init end-to-end, writing the expected .env-orbit content", async () => {
     const sandbox = makeConfigureSandbox();
-    const env = envWithOidcDiscoveryStub({ ...process.env, ORBIT_CONFIGURE_PROMPTS: "machine" }, "https://issuer.parity.test");
+    const env = { ...process.env, ORBIT_CONFIGURE_PROMPTS: "machine" };
     const result = await runMachinePromptSession(
       ["--init"],
       sandbox,
@@ -229,7 +228,7 @@ describe("real ORBIT_CONFIGURE_PROMPTS=machine --init parity", () => {
 
   it("rejects an invalid answer, reports the exact reason class, then accepts the retry (attempt=2)", async () => {
     const sandbox = makeConfigureSandbox();
-    const env = envWithOidcDiscoveryStub({ ...process.env, ORBIT_CONFIGURE_PROMPTS: "machine" }, "https://issuer.parity.test");
+    const env = { ...process.env, ORBIT_CONFIGURE_PROMPTS: "machine" };
     const result = await runMachinePromptSession(
       ["--init"],
       sandbox,
