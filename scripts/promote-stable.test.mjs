@@ -297,6 +297,8 @@ function run({
         // null leaves PREVIEW_DIGEST out of the environment altogether.
         PREVIEW_DIGEST: previewDigestInput ?? undefined,
         CI_COMMIT_BRANCH: "main",
+        // The pipeline's own commit; by default main's head, as on a fresh pipeline.
+        CI_COMMIT_SHA: mainHead,
         CI_API_V4_URL: "https://gitlab.tomlawson.io/api/v4",
         CI_PROJECT_ID: "49",
         GHCR_PUBLISH_TOKEN: GHCR_TOKEN,
@@ -407,6 +409,32 @@ describe("scripts/ci/promote-stable.sh", () => {
       const log = `${result.stdout}\n${result.stderr}`;
       expect(log).toContain(`${IMAGE}:sha-${GOOD_SHA}`);
       expect(log).toContain(PREVIEW_DIGEST);
+    });
+
+    // #1482 review: with no digest given, only the pipeline for main's current
+    // head may promote; a button on an older main pipeline must not.
+    it("refuses when the pipeline's commit is not main's head, naming both, before pulling, tagging or curl", () => {
+      const olderSha = "c".repeat(40);
+      const { result, calls } = run({ previewDigestInput: null, env: { CI_COMMIT_SHA: olderSha } });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(olderSha);
+      expect(result.stderr).toContain(GOOD_SHA);
+      const recordedCalls = calls();
+      expect(recordedCalls.some((call) => call[0] === "docker" && call[1].startsWith("pull "))).toBe(false);
+      expect(
+        recordedCalls.some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),
+      ).toBe(false);
+      expect(recordedCalls.some((call) => call[0] === "curl")).toBe(false);
+    });
+
+    it("treats an empty PREVIEW_DIGEST as unset: takes :sha-<commit> and promotes it", () => {
+      const { result, calls } = run({ previewDigestInput: "" });
+      expect(result.status, result.stderr).toBe(0);
+      const createCall = calls().find(
+        (call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create"),
+      );
+      expect(createCall).toBeDefined();
+      expect(createCall[1]).toContain(`${IMAGE}@${PREVIEW_DIGEST}`);
     });
   });
 
