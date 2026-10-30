@@ -189,7 +189,7 @@ describe("runInstall: success", () => {
 
     expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "standard", modelPullRequested: false, databaseVolume: undefined });
     for (const asset of DEPLOYMENT_ASSETS) {
-      expect(readFileSync(join(target, asset))).toEqual(readFileSync(join(repoRoot, asset)));
+      expect(readFileSync(join(target, asset)).equals(readFileSync(join(repoRoot, asset))), `${asset} is not byte-identical to the image copy`).toBe(true);
       expect(statSync(join(target, asset)).mode & 0o777).toBe(0o644);
     }
     expect(existsSync(join(target, "not-on-the-allowlist.txt"))).toBe(false);
