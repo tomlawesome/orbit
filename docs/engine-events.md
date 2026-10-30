@@ -310,8 +310,9 @@ before it on stdout is a `recovery-command:` line ("Recovery command (v0)").
   margin before it kills the installer outright. On a fresh install the
   rollback follows once `compose up` has ended. An up that reaches the bound ends
   as a failed start (`reason=docker-host`, above), and stderr says it was
-  stopped at the bound. `ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS`
-  (1-900) lowers or raises it.
+  stopped at the bound and names the setting. `ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS`
+  (1-900) lowers or raises it; these two figures are install.sh's
+  `compose_up_timeout_default` and `compose_up_timeout_ceiling`.
 - A failed image pull (`compose pull`, or the release image's
   `docker pull`) carries Docker's words on the same `Docker said:` line.
 - A required service's wait that ends on a fresh install (#1456 decision):

@@ -1127,7 +1127,7 @@ docker_reporting_whole() {
   fi
   installer_failure_detail="$(printf '%s' "$output" | docker_output_excerpt)"
   if ((status == 124 || status == 137)); then
-    installer_failure_notes+=("Docker Compose did not finish within ${bound} s, so it was stopped.")
+    installer_failure_notes+=("Docker Compose did not finish within ${bound} s, so it was stopped; ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS sets this bound (1-${compose_up_timeout_ceiling}).")
   fi
   return 1
 }
