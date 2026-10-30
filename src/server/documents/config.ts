@@ -83,6 +83,12 @@ export interface DocumentConfig {
   nextKeyId: string | null;
 }
 
+/** Hex characters in a document key id: the one place the length is stated. */
+const DOCUMENT_KEY_ID_LENGTH = 24;
+
+/** The shape every id `deriveDocumentKeyId` returns has, as a Postgres/JS regex source. */
+export const DOCUMENT_KEY_ID_SHAPE = `^[0-9a-f]{${DOCUMENT_KEY_ID_LENGTH}}$`;
+
 /**
  * The one place a document KEK's id is derived, so a rewrap operation (#932)
  * computing the id of a candidate "next" key it was only just handed agrees,
@@ -90,11 +96,8 @@ export interface DocumentConfig {
  * bytes once they became `DOCUMENT_KEK`.
  */
 export function deriveDocumentKeyId(keyEncryptionKey: Buffer): string {
-  return createHash("sha256").update("orbit-document-kek-v1\0").update(keyEncryptionKey).digest("hex").slice(0, 24);
+  return createHash("sha256").update("orbit-document-kek-v1\0").update(keyEncryptionKey).digest("hex").slice(0, DOCUMENT_KEY_ID_LENGTH);
 }
-
-/** The shape every id `deriveDocumentKeyId` returns has, as a Postgres/JS regex source. */
-export const DOCUMENT_KEY_ID_SHAPE = "^[0-9a-f]{24}$";
 
 let cachedDocumentConfig: DocumentConfig | undefined;
 
