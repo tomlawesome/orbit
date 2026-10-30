@@ -1,6 +1,6 @@
 #!/bin/sh
 # Source: agent-infra scripts/flake-check/flake-check.sh
-# agent-infra commit: d3d8e06 (a later change is a new copy with a new commit)
+# agent-infra commit: 632f146 (a later change is a new copy with a new commit)
 # Reads a project's flake log (docs/flakes.md) and fails the pipeline when the
 # flake rule is broken: a flake with three sightings needs an issue and has to
 # leave the merge gate for quarantine. Source of truth lives in agent-infra
@@ -21,8 +21,12 @@
 # single spaces: a dated one is a sighting (four " · " fields), an undated one
 # containing " · " is unparsed, any other is a note and ignored.
 #
+# A heading containing "(host)" is a host flake: exempt from not-quarantined,
+# but at threshold it must link an agent-infra issue (host-needs-infra-issue).
+#
 # Prints one finding per line, tab-separated: LEVEL, rule, heading (or -),
-# detail. ERROR rules: unparsed, needs-issue, not-quarantined. WARN rules:
+# detail. ERROR rules: unparsed, needs-issue, not-quarantined,
+# host-needs-infra-issue. WARN rules:
 # stale, quarantined-unlogged. NOTE: quarantine-unchecked, then summary last.
 # Exit 1 if any ERROR was printed, else 0. A missing or unreadable log, or an
 # unknown option, is exit 2 with a message on stderr.
@@ -178,11 +182,15 @@ END {
         h = head[i]
         sightings += count[i]
         hasissue = (h ~ /#[0-9]+/ || h ~ /\/issues\/[0-9]+/ || h ~ /\/work_items\/[0-9]+/)
+        host = (index(h, "(host)") > 0)
+        hasinfra = (h ~ /agent-infra#[0-9]+/ || h ~ /\/agent-infra\/-\/issues\/[0-9]+/ || h ~ /\/agent-infra\/-\/work_items\/[0-9]+/)
         if (count[i] >= threshold) {
             atthr++
             if (!hasissue)
                 finding("ERROR", "needs-issue", h, count[i] " sightings, no issue link in the heading")
-            if (quar != "") {
+            if (host && !hasinfra)
+                finding("ERROR", "host-needs-infra-issue", h, count[i] " sightings, host flake with no agent-infra issue link in the heading")
+            if (quar != "" && !host) {
                 inq = 0
                 for (j = 1; j <= nq; j++) if (index(h, q[j]) > 0) { inq = 1; break }
                 if (!inq)
