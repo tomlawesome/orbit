@@ -223,7 +223,7 @@ test("the manifest row approves in two taps, idempotently under partial success"
       householdId,
       sectionId,
       action: "create_separate",
-      item: { title: "Reviewed intake 1786823446152", provider: "Reviewed Cover", costMinor: 12550, currency: "GBP", dueDate: "2031-01-10", scheduleKind: "renewal", kind: "renewal", recurrenceMonths: 12 },
+      item: { title: "Reviewed intake 1786823446152", provider: "Reviewed Cover", costMinor: 12550, currency: "GBP", dueDate: "2031-01-10", scheduleKind: "renewal", recurrenceMonths: 12 },
       attachmentIds: [attachmentId],
     });
     // Approved: the suggestion leaves the manifest.
