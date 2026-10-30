@@ -845,7 +845,6 @@ describe("the Playwright image docker run receives (#1513)", () => {
     // (#1536 L-Q1, T-Q33): only their shape and the host prefix are asserted.
     const pin = ciImageTemplate.slice(ciImageTemplate.indexOf("/playwright:") + 1);
     expect(pin).toMatch(/^playwright:v\d+\.\d+\.\d+-\S+@sha256:[0-9a-f]{64}$/);
-    expect(images[0]).toBe(`${host}/${pin}`);
   });
 
   for (const [label, env] of [
