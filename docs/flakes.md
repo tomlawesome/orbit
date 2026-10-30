@@ -198,6 +198,7 @@ page's URL at failure, which this one has to infer.
 
 - 2026-10-16 · 6f768016 (`dev` merge of !1069; same tree as a08de7a1, whose pipeline 2650 passed this job) · pipeline 2655 / smoke_webkit (job 36622), desktop-webkit, now at :450 · failed on the first attempt AND on retry #1: after the sign-out press the page never reached `/logout`; it stayed on `/settings`, then went to `/api/auth/login?returnTo=%2Fsettings` and on to the provider's sign-in, as if /settings reloaded without a session before the goodbye took over. A different symptom from the first sighting. The settings sign-out changed in !1069 (#1439), so on the next sighting check whether /settings reloads before it navigates to /logout. Job retried as 36630.
 - 2026-10-25 · 9dba0fd1 (dev, !1092 merged; hand-started for browser evidence) · pipeline 2981 / smoke (job 39403), mobile-chromium · the sign-out stopped at the provider's authorize page instead of reaching /logout; passed on the in-job retry.
+- Cause found (second and third sightings): a 401 after the sign-out was answered by `json()` (`workspace.js`) with a trip through `/api/auth/login`, which the test provider answers with its authorize page. Both traces show the same address sequence, `/settings` then `/api/auth/login?returnTo=%2Fsettings` then the authorize page, and never `/logout`: the descent had not reached its farewell, which is what moves the address to `/logout`, so the page was taken before it. Settings reads its cards one after another in `onMount` (screen, sessions, sign-in methods, sent lately), and the test presses sign out as soon as `goto` has loaded the page, so on a loaded runner or WebKit the later reads are issued after the session is revoked and answer 401. Fixed on `fix/flake-1520-sign-out-screen`: from the moment a sign-out of this browser's session begins (`signOut`, `signOutEverywhere`, and `revokeSession` for the current row) `json()` no longer bounces a 401, and a failed sign-out puts the bounce back. Closes the same path for any spec that signs out of a page that is still reading (`sign-out-descent.spec.ts` from /settings, the phone hatch); that spec's own sightings (#1505) fail differently (`Load failed` in cleanup, a descent that did not keep time), so they are not this cause. Not covered: the first sighting's invisible `.account .signout` (a different symptom), and `v19-keyboard.spec.ts:313`'s authorize landing, whose session is dropped by the test's `clearCookies()` while `signIn` leaves /home still reading; that needs the test to settle /home first. Proof (local `scripts/test-e2e-local.sh`, mobile-chromium and desktop-webkit, `--repeat-each=3`): with a 4 s delay injected in the sessions GET handler and the fix reverted, 5 of 6 failed on the authorize URL (exit 1); with the fix and the same delay, 6 of 6 passed (exit 0); with the fix and no delay, 6 of 6 passed (exit 0).
 
 ## v19-keyboard-pocket.spec.ts:570 "inbox (pocket): fully reachable by keyboard" — mobile-chromium
 
@@ -273,6 +274,8 @@ page's URL at failure, which this one has to infer.
 - 2026-10-05 · dac67650 (!1017) · pipeline 2131 / smoke_webkit (job 31782) · `page.evaluate: TypeError: Load failed` (WebKit's words for a fetch that did not complete) inside `createHousehold`'s in-page `fetch` at line 35, 7.2s in, straight after sign-in; the in-job retry passed (11.8s). Only the passing retry was traced, so the failing attempt's network is not recorded. Suspected, not established: the arrival at `/` navigating on to `/home` while the in-page fetch was out (support/arrival.ts describes that #840 race; this file's sign-in does not wait for it), made likelier on WebKit by the multi-second sky rasterising stall measured on #1219. First sighting; an issue on the third.
 - 2026-10-08 · 89ca8357 (`fix/door-site-whole`, the door batch; nothing in it touches administration) · local `scripts/test-e2e-local.sh --project desktop-webkit`, the whole suite inside the CI Playwright image, with other sessions using the host · `page.evaluate: TypeError: Load failed` in the spec's seeding fetch; green on the rerun of the file alone against a fresh stack on 64a4ad67 (same administration code). Second sighting (the first is above, same words, in CI).
 - 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit_mobile (job 36592), mobile-webkit · failed once, passed on retry.
+- 2026-10-28/29 · quarantine step, smoke_webkit jobs 40519 and 40540 (desktop-webkit) and smoke_webkit_mobile job 41285 · the same `page.evaluate: TypeError: Load failed` in `createHousehold`, at the second household made; job 41285 failed both attempts. Reproduced locally (desktop-webkit, `--ci-cap`, `--repeat-each=3`): one of three failed the same way, in the file's other test that shares the helper.
+- Cause found: the spec signed in and seeded straight away, but an administrator with no household lands on the arrival at `/` (#840), which is still deciding. The first household made turns its decision onward and it calls `location.replace("/home")`; WebKit fails the unfinished in-page `fetch` of the document being left with "Load failed". The same race could abort the later `goto`, or make `sessionHeaders` read the provider's origin. Under `--repeat-each` a second fault showed: the households were named from `Date.now()` alone, so two workers starting in one millisecond owned two rows of one name and the row locator matched twice. Fixed by waiting for the arrival to settle (`settleArrival`), making households through `page.request` (no document to cancel), and putting the worker index in the names. The `@quarantine` tag and its `tests/quarantine.txt` line are removed in the same commit, so the test is back in the gate.
 
 ## settings-notification-history.spec.ts:137 "a member sees their own last sent reminders, plainly, on both dialects" — desktop-firefox
 
@@ -283,7 +286,6 @@ page's URL at failure, which this one has to infer.
 - 2026-10-06 · 4bb20449 (dev, !1035 merged) · local full suite, both WebKit projects, inside CI's Playwright image (#1235), local worker count · `page.waitForResponse: Timeout 30000ms exceeded` on the slow POST; the same test passed in a five-file targeted run minutes earlier and in a second full desktop-webkit run an hour later. Error context lost to a later run clearing `test-results/`.
 - 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_firefox`, desktop-firefox · failed once, passed on retry: the same test on a second browser.
 - 2026-10-08 · 91df467a (door batch, !1044) · CI pipeline 2254 `smoke_webkit` · failed once, passed on retry.
-- 2026-10-15 · a6168fe6 (!1069, v0.3 security batch) · pipeline 2640 / smoke_webkit (job 36460) · `#1253: the menu is still open after sign-out started` at line 303 (the menu layer still visible after 2 s); passed on the in-job retry. Second sighting.
 - 2026-10-10 · a318e11b (#1342 batch) · pipeline 2382 `smoke_firefox` (job 34367) · failed both attempts, and once in three local desktop-firefox runs after the worker fix. Cause found: the sign-in-again challenge opened on the busy screen, then moved to the form once GET /api/auth/methods answered, rebuilding its password field under Playwright's fill (the trace shows the field empty and the button disabled). Fixed with tests/unit/archive-challenge-opens-once.test.mjs; four local runs green after.
 
 ## web/tests/fidelity screens.spec.js "household"
@@ -294,20 +296,16 @@ page's URL at failure, which this one has to infer.
 
 - 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_webkit` · failed once (49.6s), passed on retry. First sighting.
 
-## sign-out-descent.spec.ts:196 "sign out from home's menu reaches the dusk (phone-narrow, as the browser is)" on desktop-webkit — #1505
-
-- 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_webkit` · failed once (10.4s), passed on retry. First sighting.
-- 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / smoke_webkit (job 36178) · "(phone-narrow, world forced)" at line 193, desktop-webkit, failed once and passed on retry.
-- 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_webkit (job 38686) · failed once, passed on retry. Third sighting: filed as #1505.
-
 ## bootstrap-protection.spec.ts:387 "once the instance is claimed the code is spent, cookie or no cookie" — [unclaimed]
 
 - 2026-10-08 · 059878f1 (#1325, which touches no sign-in code) · local `scripts/test-e2e-local.sh --spec 'tests/e2e/v19-(home-drawer|create|item-actions|mail-review)\.spec\.ts'` · `expect(session.ok()).toBe(true)` at `tests/e2e/support/bootstrap.ts:112` (`claimInstanceAsAdministrator`): `/api/auth/session` was not OK straight after the claim's sign-in. Every project depends on `[unclaimed]`, so 141 tests did not run. The next run of the same command on the same commit passed it. Traces: `~/projects/.backups/orbit/e2e-orbit-e2e-local-ecd11949-2436667-20261008-222859`. First sighting.
 
-## v19-keyboard.spec.ts:313 "arrive: the sign-in door opens by Tab and Enter alone" on desktop-chromium
+## v19-keyboard.spec.ts:313 "arrive: the sign-in door opens by Tab and Enter alone" — desktop-chromium, `net::ERR_ABORTED` on /home or a landing on the provider's /authorize (the #1096 symptom, after its fix) — #1554
 
 - 2026-10-09 · 79c68846 (#1319 stage 3b; this test unchanged on the branch) · local `scripts/test-e2e-local.sh --keep --project desktop-chromium`, whole suite, with the fidelity suite running alongside · `page.goto: net::ERR_ABORTED` on `/home` at line 328. Passed on a rerun of the file against the same stack. Traces: `~/projects/.backups/orbit/e2e-1319-stage3b-79c68846-desktop-chromium`. First sighting.
 - 2026-10-16 · 7264f015 (`dev` after !1073, which touches test tooling and scripts only; this test now at line 315) · pipeline 2674 / smoke (job 36868, !1072) · first attempt: signed out, `/home` landed on the test identity provider's `/authorize` page instead of Orbit's `/login?returnTo=%2Fhome` (`toHaveURL` at line 331); retry #1: `page.goto: net::ERR_ABORTED` on `/home` at line 330, as the first sighting. 392 others passed. Job retried as 36881. Second sighting.
+- 2026-10-14 · 0c6e60bf · local `scripts/test-e2e-local.sh` full run, 2 workers, stopped at 681/1413 under host load · `page.goto: net::ERR_ABORTED at http://127.0.0.1:<port>/home` after 1.9s. Passed alone on the same code and a fresh stack (`--reuse … --project desktop-chromium --spec tests/e2e/v19-keyboard.spec.ts:314`, 3.7s). #1096's fix reasoned from `workers: 1`; this run had 2. First sighting.
+- Cause found (#1554, 2026-10-29): the test signed in, seeded, then cleared the cookies under the live page. An administrator's sign-in lands on `/home` instead of the arrival whenever ANY live household exists on the instance (`hasOnwardHousehold`, hooks.server.js), and with two workers the other worker's seed is enough, so `settleArrival` returned on the `/home` URL with home's reads still out. A read answered after the cookies were gone got 401, and the seam's 401 journey (`workspace.js` `json()`, `location.assign` to the login flow) cancelled the test's `page.goto("/home")` (`ERR_ABORTED`) or left the page on the provider's `/authorize`. Reproduced on demand: a decoy household so the sign-in lands on `/home`, `/api/workspace` held until the cookies were cleared and `/home` navigations slowed 600 ms: 3 of 3 failed with `net::ERR_ABORTED`. Fixed by `dropSession` (`support/arrival.ts`): the test leaves for `about:blank`, which replaces the signed-in document and cancels its requests, and only then clears the cookies. The same injection passes 3 of 3 with it. Single-worker runs always land on the arrival, which is why they never showed it.
 
 ## v19-home-drawer.spec.ts:212 "on the desk › the dial's documents chip opens the item's drawer at its real documents" (desktop-webkit)
 
@@ -335,6 +333,7 @@ page's URL at failure, which this one has to infer.
 - 2026-10-09 · 73481e5e (#1345) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
 - 2026-10-09 · 3d6d7c20 (#1349) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
 - Third sighting: filed as #1365 (unattended-install case times out under host load).
+- Cause found: the test compared each installed asset to its source with `expect(Buffer).toEqual(Buffer)`, which Vitest walks byte by byte; for `scripts/repair.sh` (226 KB) that is about 1 s of CPU alone and about 2.4 s for the whole case, against the 5 s default budget, so any load that slows the CPU by 2x or more tipped it over (the install itself takes about 70 ms). Fixed by comparing with `Buffer.equals` (case now about 70 ms; 8 parallel runs went from about 2.9 s to under 0.4 s) in the commit on `fix/flake-1365-install-orchestrator`. The same `toEqual` on file buffers remains in `launcher-config-tree.test.ts` and `backup-restore-cli.test.ts`.
 
 ## v19-tour-chapter-add.test.mjs
 
@@ -373,12 +372,13 @@ page's URL at failure, which this one has to infer.
 - 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit_mobile (job 36492), mobile-webkit · `Error: home (pocket) with the item drawer open`: `Tab reached a control the screen does not show as visible` for the drawer's Snooze, Complete, Attach, Retire, Edit and Copy link buttons (`support/keyboard.ts:322`); passed on the in-job retry. Still #1381.
 - 2026-10-16 · 6f768016 (!1070, `dev` -> `preview`) · pipeline 2657 / smoke (job 36648), mobile-chromium · failed once, passed on retry.
 
-## v19-document-preview.spec.ts:401 "the preview's pager turns a multi-page document in place, and the reader opens on its page" — mobile-webkit, desktop-webkit — #1501
+## v19-document-preview.spec.ts:409 "the preview's pager turns a multi-page document in place, and the reader opens on its page" — mobile-webkit, desktop-webkit — #1501
 
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934) · failed its first attempt (9.0 s), passed on the in-job retry (13.5 s). First sighting.
 - 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit (job 36591), desktop-webkit · now at :401: failed once, passed on retry.
 - 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed every attempt: at :423 the image stayed "Page one of pager-proving.pdf" where "Page 2" was expected (20 s). Third sighting: filed as #1501. Job retried as 38651.
 - 2026-10-25 · 9dba0fd1 (dev, !1092 merged; hand-started for browser evidence) · pipeline 2981 / smoke (job 39403), desktop-chromium · page 3 never reached: `Page 2 of pager-proving.pdf` after 20 s; passed on the in-job retry. First sighting on Chromium.
+- Reproduced 2026-10-29 (local `--ci-cap`, desktop-webkit, one run): a temporary 22 s hold on every `?page=2`+ preview response (removed afterwards) fails this test with CI's exact message at the first turn (`Expected: "Page 2 of pager-proving.pdf"`, `Received: "Page one of pager-proving.pdf"`, 20 s), while the pager number already says "2 of 3". So the signature is a page fetch that takes about 20 s or more (or is refused) on a loaded server, not a wrong wait. Unfixed; the fix is in the app (one fetch per turn, the reader reusing the preview's page), see #1501. This heading is :409 now (:401 before the 24a7a62b edit).
 
 ## v19-upload-limit.spec.ts:76 "an administrator lowers the upload limit, an over-limit upload is refused, and the default comes back" — desktop-chromium
 
@@ -402,10 +402,6 @@ page's URL at failure, which this one has to infer.
 
 - 2026-10-13 · 5e852f6f (!1064; the same app code passed this job on pipeline 2559, where the test failed as expected) · pipeline 2560 / smoke_webkit_mobile (job 36017, the first re-run) · "Expected to fail, but passed", on the first attempt and the in-job retry: the #1196 driver fault it is marked for does not happen every run. First sighting.
 
-## v19-keyboard.spec.ts:314 "arrive: the sign-in door opens by Tab and Enter alone" — desktop-chromium, `net::ERR_ABORTED` on /home (the #1096 symptom, after its fix)
-
-- 2026-10-14 · 0c6e60bf · local `scripts/test-e2e-local.sh` full run, 2 workers, stopped at 681/1413 under host load · `page.goto: net::ERR_ABORTED at http://127.0.0.1:<port>/home` after 1.9s. Passed alone on the same code and a fresh stack (`--reuse … --project desktop-chromium --spec tests/e2e/v19-keyboard.spec.ts:314`, 3.7s). #1096's fix reasoned from `workers: 1`; this run had 2. First sighting.
-
 ## v19-create.spec.ts:399 "the quick add's box takes a document by click or by drop, and opens the full form with it" — desktop-firefox, `socket hang up`
 
 - 2026-10-14 · 0c6e60bf · local `scripts/test-e2e-local.sh` full run, 2 workers, stopped at 681/1413 under host load · `apiRequestContext.get: socket hang up` on `GET /api/auth/session` from the household-cleanup helper, after 9.9s. Passed alone on the same code and a fresh stack (`--reuse … --project desktop-firefox --spec tests/e2e/v19-create.spec.ts:399`, 9.7s). First sighting.
@@ -421,6 +417,7 @@ page's URL at failure, which this one has to infer.
 - 2026-10-22 · 5635d9f3 (!1084, `dev` -> `preview` for v0.3.1; same product code as a98c6f88, whose pipeline 2889 passed this job) · pipeline 2901 / smoke_webkit (job 38636), desktop-webkit · failed once, passed on retry. Third sighting: filed as #1503.
 - 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke (job 38684), desktop-chromium · failed once, passed on retry. Now seen on Chromium too.
 - 2026-10-25 · 9dba0fd1 (dev, !1092 merged; hand-started for browser evidence) · pipeline 2981 / smoke_firefox (job 39404), desktop-firefox · the reader's page count empty after 5 s (`"one page"` expected); passed on the in-job retry.
+- Cause found (not yet run in a browser; see the commit): the test waited for the reader's picture to be "visible", but the reader's `<img>` has its alt from the moment it opens, before its own render of the page has arrived, so that wait passed at once and the page count (which arrives with the render) then had only the 5 s default. Fixed by waiting for the drawn picture first, as :299 already does, on this branch.
 
 ## v19-create.spec.ts:207 "a document picked on the create form is attached to the saved item" — desktop-webkit
 
@@ -449,6 +446,7 @@ page's URL at failure, which this one has to infer.
 
 ## preview.test.ts:760 "renderDocumentPagePreview > the page is drawn in the sandbox, never on the server's own thread (#1427) > draws a 300 dpi A4 scan to a PNG of the page's shape" (#1549)
 
+- Cause found: the 10 s render budget against a ~7 s CPU-bound JPEG decode of a 300 dpi scan; budget raised to 30 s (ADR-0038 amendment) and the test injects its own budget. Fixed on fix/flake-1549-preview-render.
 - 2026-10-20 · 0469e455 (the accepted v0.3.0 commit, unchanged since preview pipeline 2677 passed every job first time) · pipeline 2774 / fast (job 37576), the stable-promotion run on `main`, with the !1078 pipeline and five local agent stacks on the same host · `Orbit could not draw a picture of this document` from the sandboxed renderer, in a 449 s `fast` run. Retried as job 37634. First sighting.
 - 2026-10-22 · 2b120e89 (signing-image re-pin and cosign bump only since the green bea1293c run; nothing near documents) · local `scripts/test-backend.sh`, worktree `v031-parts`, while a base-image rebuild ran on the same host · same message, in a 919 s run; the file alone passed at once (40.9 s with the test below). Second sighting.
 - 2026-10-28 · 6565ed47 (!1109, CI config only; the same app passed `fast` in pipeline 3116) · pipeline 3123 / `fast` (job 41139), another project's jobs filling both shared runners · same message. Third sighting: #1549.
@@ -456,10 +454,6 @@ page's URL at failure, which this one has to infer.
 ## validation.test.ts "structural document classification > classifies unsupported %PDF-1.7 ... as unsupported_structure"
 
 - 2026-10-20 · 0469e455 · pipeline 2774 / fast (job 37576), same run as the sighting above · timed out at the 5 s default. Wall-clock-under-load shape. First sighting.
-
-## sign-out-descent.spec.ts:196 "sign out from home's menu reaches the dusk (narrow desk, as the browser is)" and "(wide desk, as the browser is)" on desktop-webkit
-
-- 2026-10-21 · 8a841e3c (!1074) · pipeline 2833 / `smoke_webkit` job 38057 · both cases failed first and passed on Playwright's retry in the same run ("2 flaky"), which fails the job; green on pipeline 2834 (b331397f, installer-only change, nothing under `web/`). First sighting.
 
 ## settings-text-size-tab-stop.test.mjs:128 "settings, phone layout: the text size tab stop starts on the applied step > with standard applied, the one tab stop is the ticked tile"
 

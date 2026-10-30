@@ -1305,10 +1305,14 @@ journey_unsafe_permissions() {
   result_line unsafe-permissions pass
 }
 
-# managed-file-missing routes to `manual` by design — repair never
-# fabricates a managed file's content — so this journey is read-only like
-# retained-volume-new-target: it proves the diagnosis and the routing, and
-# proves repair left the gap for the operator rather than papering over it.
+# A missing Compose file is routed either to `restore-compose-file` (#1484:
+# the pinned image carries the exact file for its version, so putting it back
+# is a restore, not fabrication) or, when the image cannot supply it, to
+# `manual` (managed-file-missing) — repair never invents a managed file's
+# content. This journey is read-only like retained-volume-new-target: it
+# proves the diagnosis and the routing, and proves --check and --plan leave
+# the gap alone. (scripts/repair-compose-from-image.test.mjs covers the
+# restore itself against a stubbed docker.)
 journey_missing_files() {
   local before output plan status=0
   before="$(deployment_manifest)"
@@ -1318,17 +1322,21 @@ journey_missing_files() {
 
   output="$(repair --check 2>&1)" || status=$?
   [[ "$status" == 4 ]] || { printf '%s\n' "$output" >&2; fail "missing-files: --check exited $status, expected 4"; }
-  grep -q 'finding class=managed-file-missing target=compose-file severity=fail' <<<"$output" ||
-    { printf '%s\n' "$output" >&2; fail 'missing-files: --check did not report managed-file-missing'; }
+  grep -Eq 'finding class=(managed-file-missing|compose-file-restorable) target=compose-file severity=fail' <<<"$output" ||
+    { printf '%s\n' "$output" >&2; fail 'missing-files: --check did not report the missing Compose file'; }
 
   status=0
   plan="$(repair --plan 2>&1)" || status=$?
-  grep -q 'plan action=manual resolves=managed-file-missing' <<<"$plan" ||
-    { printf '%s\n' "$plan" >&2; fail 'missing-files: the missing file was not routed to manual'; }
-  grep -q 'manual step: recreate the missing managed file' <<<"$plan" ||
-    { printf '%s\n' "$plan" >&2; fail 'missing-files: no manual guidance was printed for the missing file'; }
+  if grep -q 'plan action=restore-compose-file resolves=compose-file-restorable' <<<"$plan"; then
+    :
+  else
+    grep -q 'plan action=manual resolves=managed-file-missing' <<<"$plan" ||
+      { printf '%s\n' "$plan" >&2; fail 'missing-files: the missing file was routed neither to a restore nor to manual'; }
+    grep -q 'manual step: recreate the missing managed file' <<<"$plan" ||
+      { printf '%s\n' "$plan" >&2; fail 'missing-files: no manual guidance was printed for the missing file'; }
+  fi
   [[ ! -e "$target/docker-compose.yml" ]] ||
-    fail 'missing-files: something recreated the managed file; repair must never fabricate one'
+    fail 'missing-files: --check or --plan recreated the managed file; only --execute may'
 
   cp -a -- "$workdir/docker-compose.yml.orig" "$target/docker-compose.yml"
 

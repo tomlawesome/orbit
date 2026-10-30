@@ -15,6 +15,7 @@
     doorModeOf, nextDoorState, phaseOf, readinessOf,
   } from "./door-state.js";
   import "$lib/ringcard.css";
+  import { prefersReducedMotion } from "$lib/motion.js";
   import "./flight.css";
   import "./door-phone.css";
 
@@ -80,8 +81,7 @@
   /** @type {import('./Dawn.svelte').default | null} */
   let dawnView = $state(null);
 
-  const reduced = () =>
-    typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduced = () => prefersReducedMotion();
 
   /*
    * THE THREE STATES WHERE THE DOOR CANNOT OPEN (#788, design/v19/

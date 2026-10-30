@@ -50,3 +50,26 @@ export function positionDemoBody(group, days, dotClass) {
   dot.setAttribute("cx", String(x));
   dot.setAttribute("cy", String(y));
 }
+
+/**
+ * The walk (#1356, web-28; chapters 5, 9 and 12 each wrote it out): moves a
+ * drawn demo body from `from` days to `to` over `ms`, eased as the mockup's
+ * own `walk` is, and lights `ring` again on every frame so the ring travels
+ * with the body. Moves nothing in a dry run, or when no body was drawn.
+ * @param {Pick<import("../vocabulary.js").FilmContext, "tween" | "light" | "dry">} ctx
+ * @param {object} walk
+ * @param {?Element} walk.group  the body drawDemoBody returned, if any
+ * @param {(group: Element, days: number) => void} walk.position  the chapter's own
+ *   positioner (positionDemoBody with its dot class)
+ * @param {Parameters<import("../vocabulary.js").FilmContext["light"]>[0]} walk.ring  the control lit on the body
+ * @param {number} walk.from
+ * @param {number} walk.to
+ * @param {number} walk.ms
+ */
+export function walkDemoBody({ tween, light, dry }, { group, position, ring, from, to, ms }) {
+  return tween(ms, (t) => {
+    if (dry() || !group) return;
+    position(group, Math.round(from + (to - from) * ease(t)));
+    light(ring);
+  });
+}

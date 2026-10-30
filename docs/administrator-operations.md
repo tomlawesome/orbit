@@ -1058,6 +1058,33 @@ hand, once you have confirmed the rotation succeeded (or that you have
 recovered the original password from it). Keep the passphrase only until then;
 Orbit never stores it.
 
+## Repair and the Compose file
+
+`bash scripts/repair.sh` treats `docker-compose.yml` according to what the
+deployment's own image says it should be. The image named by `ORBIT_IMAGE` in
+`.env-orbit` carries the exact Compose file for that version, so Repair reads
+it from there; it never downloads anything for this, and it needs that image
+to be on this host already.
+
+- **Missing:** if `docker-compose.yml` is gone, Repair restores it from the
+  image, byte for byte, with the permissions the installer gives it and the
+  same owner as the deployment folder. This is one of the safe actions that
+  `--execute --safe-only` runs after you confirm it, and `--plan` lists it as
+  `restore-compose-file`. `.env-orbit` is never touched.
+- **Different from the image's copy:** if the file exists but differs, Repair
+  reports it as `compose-file-drift` and prints the lines that differ (`<` is
+  your file, `>` is the image's). It never overwrites or replaces the file,
+  because the difference may be a deliberate edit. Lines that look like they
+  carry a password, secret or token, or a web address with a user name and
+  password in it, are hidden in that report. The report is
+  information only; it does not make the deployment count as unhealthy. If you
+  want the image's version back, copy it out of the image yourself.
+- **Identical:** nothing is reported and nothing is written.
+- **Image cannot be read** (not pulled, or an older image without the
+  deployment files): a missing file is still reported as `managed-file-missing`
+  with the manual step to recreate it from your install source, and an existing
+  file is not compared.
+
 ## Hostile document processor operation
 
 The default stack leaves `TIKA_URL` empty and does not start the `processing`

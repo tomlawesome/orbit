@@ -1081,7 +1081,7 @@ describe("runExportRecoveryBundle (export-recovery-bundle.sh's orchestration)", 
     expect(recoveredHex).toBe(LIVE_KEK);
     expect(isValidDocumentKekHex(recoveredHex)).toBe(true);
     // The inner bundle is a byte-identical copy of the source.
-    expect(readFileSync(join(extractedDir, "orbit-backup.tar"))).toEqual(readFileSync(sourceBundlePath));
+    expect(readFileSync(join(extractedDir, "orbit-backup.tar")).equals(readFileSync(sourceBundlePath)), "the inner bundle is not byte-identical to the source").toBe(true);
   });
 
   // #1316: a hard link and an unlink only reach the disk once the file's data

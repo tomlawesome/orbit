@@ -40,6 +40,7 @@
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
   import NorthStarMark from "$lib/NorthStarMark.svelte";
   import { watchTour } from "$lib/tour/watch.js";
+  import { prefersReducedMotion } from "$lib/motion.js";
   import "./home.css";
 
   /**
@@ -153,7 +154,7 @@
     document.body.classList.add("launching");
     /* Reduced motion keeps every state change and drops the flight, so it
        never puts the dawn up — there would be nothing to take it away. */
-    if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (!prefersReducedMotion()) {
       document.body.classList.add("showdawn");
     }
   }

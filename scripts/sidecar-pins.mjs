@@ -35,6 +35,13 @@
 //      differently-suffixed tag (`-rc*`, `-SNAPSHOT`, `-rocm`, `-slim`, ...)
 //      is never offered as the upgrade.
 //
+// `sync` order (#1551): move the pin first, then sync. `sync` records the tag's
+// current index digest and today's date only when the pinned digest is that
+// index's linux/amd64 manifest. A pin whose manifest is not in the current
+// index is skipped with a line saying so, and its policy entry is left alone.
+// `check` flags the opposite mistake: a pin that names the multi-platform index
+// rather than the linux/amd64 manifest.
+//
 // Nothing is committed automatically. This reports, and a person acts.
 //
 // The Orbit base image is deliberately out of scope. Its digest comes from its
@@ -425,6 +432,16 @@ async function checkTag(entry, resolveTag) {
       summary: `${entry.tag} has no linux/amd64 entry to compare; the moved-tag check is skipped`,
     };
   }
+  if (pinnedDigest === currentIndexDigest && pinnedDigest !== currentDigest) {
+    // The pin names the multi-platform index, not the linux/amd64 manifest
+    // inside it (#1551). The policy contract is the manifest: an index pin
+    // makes every later `sync` record the index as if it held the pin.
+    return {
+      ...shared,
+      status: "index-pin",
+      summary: `the pin for ${entry.tag} names the index: it is a multi-platform index digest, not the linux/amd64 manifest`,
+    };
+  }
   const manifestMoved = currentDigest !== pinnedDigest;
   const indexMoved = currentIndexDigest !== null && currentIndexDigest !== entry.indexDigest;
   if (!manifestMoved && !indexMoved) {
@@ -564,7 +581,7 @@ async function checkRelease(entry, listTags) {
 
 // --- The check ---------------------------------------------------------------
 
-const BEHIND_STATUSES = new Set(["drifted", "moved", "stale", "behind"]);
+const BEHIND_STATUSES = new Set(["drifted", "moved", "index-pin", "stale", "behind"]);
 const BLIND_STATUSES = new Set(["unreachable", "no-package-manager"]);
 
 const SKIPPED_TAG_AXIS = {
@@ -698,6 +715,14 @@ export function renderReport(result) {
       );
     }
 
+    if (image.axes.tag.status === "index-pin") {
+      lines.push(`  - pinned digest: \`${image.axes.tag.pinnedDigest}\` (the index)`);
+      lines.push(`  - linux/amd64 manifest: \`${image.axes.tag.currentDigest}\``);
+      lines.push(
+        "  - Remedy: pin the linux/amd64 manifest digest instead of the index digest in every location, then run `node scripts/sidecar-pins.mjs sync`.",
+      );
+    }
+
     lines.push(`- **Upstream release**: ${image.axes.release.summary}`);
     if (image.axes.release.status === "behind") {
       lines.push(`  - pinned release: \`${image.axes.release.pinnedVersion}\``);
@@ -762,6 +787,7 @@ export async function syncPins({
 }) {
   const policy = readPolicy(policyPath);
   const changes = [];
+  const skipped = [];
   for (const entry of sidecarEntries(policy, only)) {
     const pattern = pinPattern(entry.tag);
     const sourceLocation = entry.locations[0];
@@ -781,6 +807,31 @@ export async function syncPins({
     const reference = match[0];
     const resolution = await resolveTag(entry.tag);
     const indexDigest = resolution?.indexDigest ?? entry.indexDigest;
+
+    // #1551: record the tag's current index only when the pin is its
+    // linux/amd64 child. Otherwise the policy would claim an index that does
+    // not hold the pinned image. Leave the entry (and the other files) alone.
+    // A tag that cannot be resolved, or whose index has no linux/amd64 entry,
+    // gives nothing to check the pin against, so it is skipped too: syncing it
+    // would stamp a record nobody verified.
+    const pinDigest = digestOf(reference);
+    const platformDigest = resolution?.platformDigest ?? null;
+    if (platformDigest === null) {
+      skipped.push({
+        tag: entry.tag,
+        reason: resolution
+          ? `the tag's current index has no linux/amd64 image to check the pin against`
+          : `the tag could not be resolved, so the pin cannot be checked`,
+      });
+      continue;
+    }
+    if (pinDigest !== platformDigest) {
+      skipped.push({
+        tag: entry.tag,
+        reason: `the pinned manifest is not in the tag's current index; move the pin first, then sync`,
+      });
+      continue;
+    }
 
     const rewritten = [];
     for (const location of entry.locations.slice(1)) {
@@ -825,7 +876,7 @@ export async function syncPins({
     // file is already written; only the changed fields move.
     writeFileSync(policyPath, `${JSON.stringify(policy, null, 2)}\n`, "utf8");
   }
-  return { changes };
+  return { changes, skipped };
 }
 
 // --- CLI ---------------------------------------------------------------------
@@ -1014,15 +1065,22 @@ export async function runSidecarPins(argv, deps = {}) {
 
   if (command === "sync") {
     try {
-      const { changes } = await syncPins({
+      const { changes, skipped } = await syncPins({
         policyPath,
         repoDir,
         resolveTag,
         only: options.only,
         today,
       });
+      for (const skip of skipped) {
+        write(`sidecar pins: ${skip.tag} skipped: ${skip.reason}\n`);
+      }
       if (changes.length === 0) {
-        write("sidecar pins: nothing to sync; the policy already matches every file.\n");
+        write(
+          skipped.length > 0
+            ? "sidecar pins: nothing synced; every pin that could be synced already matches.\n"
+            : "sidecar pins: nothing to sync; the policy already matches every file.\n",
+        );
         return 0;
       }
       for (const change of changes) {

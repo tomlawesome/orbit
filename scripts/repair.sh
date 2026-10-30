@@ -134,6 +134,25 @@ set -Eeuo pipefail
 #   managed-file-missing         — .env-orbit or docker-compose.yml absent
 #                                   (or present as the wrong type).
 #   managed-file-symlink         — .env-orbit or docker-compose.yml is a symlink.
+#   compose-file-restorable      — docker-compose.yml is absent AND the
+#                                   deployment's own pinned image (the
+#                                   ORBIT_IMAGE digest in .env-orbit, already
+#                                   present locally) carries its deployment
+#                                   assets (label io.orbit.deployment-assets)
+#                                   including that file (#1484). Replaces
+#                                   managed-file-missing for the Compose file
+#                                   only; severity fail. When the image cannot
+#                                   be read (not pulled, label or file absent,
+#                                   Docker unavailable) the finding stays
+#                                   managed-file-missing and the manual step
+#                                   is unchanged.
+#   compose-file-drift           — docker-compose.yml exists but differs from
+#                                   the image's copy (#1484). Always info
+#                                   severity: a deliberate edit is not an
+#                                   unhealthy deployment, and nothing here
+#                                   ever replaces the file. The differing
+#                                   lines go to stderr, never to stdout or an
+#                                   export.
 #   managed-file-permissions     — .env-orbit exists but is not mode 600.
 #   secrets-directory-invalid    — .orbit-secrets missing, symlinked, the
 #                                   wrong type, or not mode 700 (any one
@@ -361,6 +380,17 @@ set -Eeuo pipefail
 #     (chmod back to 600/700) never rewrites file content, so there is
 #     nothing to lose and nothing to back up; the change is trivially its
 #     own inverse.
+#
+#   restore-compose-file        <- compose-file-restorable
+#     mutation=reversible backup=not-required. Puts back a MISSING
+#     docker-compose.yml from the deployment's own pinned image: the image is
+#     the exact file for that version (the installer extracts the same file
+#     from the same assets), so this is a restore, not fabricated content.
+#     Written byte for byte (the image's file streamed to a temporary file
+#     beside the target, then an atomic no-clobber rename), mode 0644 as the installer leaves it,
+#     owned like the folder. Nothing existed, so there is nothing to back up;
+#     the undo is removing the file. A present file is never touched, whether
+#     or not it matches the image (compose-file-drift only reports).
 #
 #   regenerate-secret           <- secret-missing, ONLY for a generated
 #                                   non-user secret whose regeneration
@@ -1347,6 +1377,8 @@ cd "$repo_dir"
 cleanup() {
   local exit_status=$?
 
+  [[ -z "${compose_image_tmp:-}" ]] || rm -f -- "$compose_image_tmp" 2>/dev/null || true
+
   if [[ -n "${recovery_dir:-}" ]]; then
     printf 'Orbit repair: interrupted before completion; this run left a private recovery copy in place, now removed. Re-run "repair.sh --plan" to see current state, then "--execute" again if repairs are still needed.\n' >&2
     cleanup_recovery_dir
@@ -1392,6 +1424,13 @@ readonly -a secret_names=(session-secret postgres-password document-kek oidc-cli
 readonly -a known_orbit_services=(orbit-app orbit-db orbit-clamav orbit-tika orbit-ollama)
 readonly total_checks=18
 readonly docker_probe_timeout=5s
+# Reading one file out of the pinned image (#1484) runs a throwaway container,
+# which is slower than a probe.
+readonly docker_image_read_timeout=30s
+# Where an image keeps the deployment assets it was built from; the image's
+# io.orbit.deployment-assets label must name exactly this (scripts/install.sh
+# reads the same label and refuses anything else).
+readonly deployment_assets_root="/opt/orbit/deploy"
 readonly docker_restart_timeout=30s
 readonly docker_rotate_timeout=30s
 readonly docker_checkpoint_timeout=30s
@@ -1406,7 +1445,7 @@ readonly staged_postgres_password_path="$secrets_directory/.repair-staged-postgr
 # Stage-one safe set (issue #261, owner decision 2026-08-13). See "Safe set
 # is a fixed allowlist" above for why this is not derived from the plan's
 # own mutation= classification.
-readonly -a safe_action_classes=(fix-permissions restore-transaction restart-services)
+readonly -a safe_action_classes=(fix-permissions restore-transaction restart-services restore-compose-file)
 
 # Stage-two dangerous set (issue #261, owner decision 2026-08-13; joined by
 # regenerate-secret in the #530 slice, ADR-0014 decision 5) — only ever
@@ -1451,6 +1490,7 @@ readonly -a restore_transaction_paths=(
 readonly -a class_order=(
   not-orbit-directory
   managed-file-missing
+  compose-file-restorable
   managed-file-symlink
   managed-file-permissions
   secrets-directory-invalid
@@ -1462,6 +1502,7 @@ readonly -a class_order=(
   deployment-version-unsupported
   staging-evidence-present
   compose-interpolation-failed
+  compose-file-drift
   docker-unavailable
   container-foreign-owner
   volume-retained-without-credentials
@@ -1484,6 +1525,10 @@ readonly -a class_order=(
 # is also present — see resolve_secret_missing_action below.
 readonly -A action_for_class=(
   [managed-file-permissions]=fix-permissions
+  # #1484: a missing Compose file the pinned image can supply. Restoring the
+  # image's own copy is not fabrication; the finding only exists when that
+  # copy was actually read (see compose-file-restorable in the header).
+  [compose-file-restorable]=restore-compose-file
   [secrets-directory-invalid]=fix-permissions
   [secret-permissions]=fix-permissions
   [configuration-incomplete]=rerun-configuration
@@ -1532,6 +1577,7 @@ readonly -A action_for_class=(
   [managed-file-missing]=manual
   [managed-file-symlink]=manual
   [compose-interpolation-failed]=manual
+  [compose-file-drift]=manual
   [container-foreign-owner]=manual
   [docker-unavailable]=manual
   [unrelated-resource-present]=manual
@@ -1542,6 +1588,7 @@ readonly -A action_for_class=(
 readonly -A mutation_for_action=(
   [restore-transaction]=reversible
   [fix-permissions]=reversible
+  [restore-compose-file]=reversible
   [regenerate-secret]=reversible
   [rotate-database-credential]=credential-rotation
   [restart-services]=service-restart
@@ -1560,6 +1607,7 @@ readonly -A mutation_for_action=(
 readonly -A backup_for_action=(
   [restore-transaction]=required
   [fix-permissions]=not-required
+  [restore-compose-file]=not-required
   [regenerate-secret]=not-required
   [rotate-database-credential]=required
   [restart-services]=not-required
@@ -1583,6 +1631,7 @@ readonly -A backup_for_action=(
 readonly -A rollback_for_action=(
   [restore-transaction]=recovery-directory
   [fix-permissions]=prior-mode
+  [restore-compose-file]=not-required
   [regenerate-secret]=not-required
   [rotate-database-credential]=credential-checkpoint
   [restart-services]=not-required
@@ -1595,6 +1644,7 @@ readonly -A rollback_for_action=(
 readonly -A expected_for_action=(
   [restore-transaction]=files-restored
   [fix-permissions]=permissions-safe
+  [restore-compose-file]=compose-file-restored
   [regenerate-secret]=secret-recreated
   [rotate-database-credential]=authentication-restored
   [restart-services]=services-healthy
@@ -1608,6 +1658,7 @@ readonly -A manual_guidance=(
   [not-orbit-directory]="confirm this is really the intended Orbit installation directory before doing anything else here"
   [managed-file-missing]="recreate the missing managed file from your install source; repair never fabricates a managed file's content"
   [managed-file-symlink]="replace the symlinked managed file with a real regular file; repair never follows an unproven symlink"
+  [compose-file-drift]="docker-compose.yml differs from the copy in your pinned image; if the edit is deliberate nothing is needed, otherwise copy the image's file back yourself; repair never replaces a Compose file that exists"
   [compose-interpolation-failed]="run docker compose config yourself to see the interpolation error, then correct the referenced managed-file field"
   [container-foreign-owner]="inspect the flagged container's labels and confirm its Orbit ownership before anything touches this project"
   [docker-unavailable]="ensure the docker CLI is installed and the daemon is reachable, then re-run diagnosis"
@@ -1810,6 +1861,98 @@ engine_image_present() {
   timeout "$docker_probe_timeout" docker image inspect "$image" >/dev/null 2>&1
 }
 
+# --- docker-compose.yml from the pinned image (#1484) ------------------------
+#
+# The deployment's own image carries the deployment assets it was built from
+# (label io.orbit.deployment-assets, /opt/orbit/deploy), docker-compose.yml
+# among them: the exact file for this version, which is what install.sh
+# extracts. So a missing Compose file is put back from there (a restore, not
+# a made-up file), and a present one is compared with it and only ever
+# reported. Everything here reads the image already pinned in .env-orbit and
+# present locally; nothing pulls.
+
+# Prints the digest-pinned (or locally built) ORBIT_IMAGE from .env-orbit and
+# returns 0, or returns 1 when .env-orbit cannot be trusted or names no valid
+# image. Same shape as configure.sh's is_valid_orbit_image.
+pinned_orbit_image() {
+  local image
+  is_regular_non_symlink_file "$environment_file" || return 1
+  image="$(read_environment_value ORBIT_IMAGE 2>/dev/null)" || return 1
+  [[ "$image" =~ ^orbit-local:[0-9a-f]{12}$ || "$image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || return 1
+  printf '%s' "$image"
+}
+
+# read_image_deployment_asset <image> <asset-name> <destination-file>
+#
+# Copies one file out of <image>'s deployment assets into <destination-file>
+# (an existing file) byte for byte: a throwaway `docker run --rm` of the
+# image with `cat` as its entrypoint, no network, stdout straight into the
+# file (never through a shell variable, which would change trailing newlines).
+# Returns 1 when the image is not present locally, lacks the label or the
+# file, or the copy is empty. The image is never pulled: the label read needs
+# it local, and `--pull never` refuses to fetch it.
+read_image_deployment_asset() {
+  local image="$1" asset="$2" destination="$3" assets_root
+  assets_root="$(timeout "$docker_probe_timeout" docker image inspect \
+    --format '{{index .Config.Labels "io.orbit.deployment-assets"}}' "$image" 2>/dev/null)" || return 1
+  [[ "$assets_root" == "$deployment_assets_root" ]] || return 1
+  timeout "$docker_image_read_timeout" docker run --rm --pull never --network none --entrypoint cat \
+    "$image" "${deployment_assets_root}/${asset}" >"$destination" 2>/dev/null || return 1
+  [[ -f "$destination" && ! -L "$destination" && -s "$destination" ]]
+}
+
+# compose_image_tmp is the one temporary file this feature owns at a time;
+# the EXIT trap removes it if the run is interrupted.
+compose_image_tmp=""
+compose_drift_detail=""
+
+# Reads the pinned image's docker-compose.yml into a temporary file named by
+# $compose_image_tmp. Returns 1 (and leaves no temporary file) when it cannot.
+fetch_image_compose() {
+  local image
+  image="$(pinned_orbit_image)" || return 1
+  compose_image_tmp="$(mktemp "${TMPDIR:-/tmp}/orbit-repair-compose-image.XXXXXX")" || { compose_image_tmp=""; return 1; }
+  if ! read_image_deployment_asset "$image" "$compose_file" "$compose_image_tmp"; then
+    rm -f -- "$compose_image_tmp"
+    compose_image_tmp=""
+    return 1
+  fi
+}
+
+discard_image_compose() {
+  [[ -z "$compose_image_tmp" ]] || rm -f -- "$compose_image_tmp"
+  compose_image_tmp=""
+}
+
+# Removes the managed-file-missing finding for the Compose file; the caller
+# adds compose-file-restorable in its place.
+drop_compose_missing_finding() {
+  local entry
+  local -a kept=()
+  for entry in "${findings[@]:-}"; do
+    [[ -n "$entry" && "$entry" != "managed-file-missing|compose-file|fail" ]] && kept+=("$entry")
+  done
+  findings=()
+  [[ ${#kept[@]} -eq 0 ]] || findings=("${kept[@]}")
+}
+
+# Sets $compose_drift_detail to the differing lines between the folder's
+# docker-compose.yml and the image's copy in $compose_image_tmp: at most 20,
+# each cut to 200 bytes, '<' for the folder's file and '>' for the image's.
+# A line that looks like it carries a credential (a keyword, or a URL with
+# user details before an '@') is hidden, not shown: an operator may have put
+# one inline, and this text reaches a terminal or log.
+describe_compose_drift() {
+  local all
+  all="$(diff -- "$compose_file" "$compose_image_tmp" 2>/dev/null | grep -E '^[<>] ' | cut -c1-200 |
+    sed -E -e '/(password|secret|token|passphrase|api[_-]?key|private[_-]?key)/I s/^(.).*/\1 (line hidden: it looks like a credential)/' \
+      -e '/:\/\/[^/@[:space:]]+@/ s/^(.).*/\1 (line hidden: it looks like a credential)/' || true)"
+  compose_drift_detail="$(printf '%s\n' "$all" | head -n 20)"
+  if [[ "$(printf '%s\n' "$all" | wc -l)" -gt 20 ]]; then
+    compose_drift_detail+=$'\n(more differences not shown)'
+  fi
+}
+
 # --- configuration-migration-interrupted (ADR-0014 decision 7) -------------
 #
 # repair.sh validates the live .env-orbit by running `bash scripts/
@@ -1867,6 +2010,12 @@ print_check_lines() {
       IFS='|' read -r fclass ftarget fseverity <<< "$entry"
       [[ "$fclass" == "$class" ]] || continue
       printf 'finding class=%s target=%s severity=%s\n' "$fclass" "$ftarget" "$fseverity"
+      if [[ "$fclass" == compose-file-drift && -n "$compose_drift_detail" ]]; then
+        # stderr only: file content never goes on the stdout contract or into
+        # an export. '<' is the folder's file, '>' the image's.
+        printf 'Orbit repair: docker-compose.yml differs from the copy in the pinned image (< this folder, > the image); repair never replaces it:\n%s\n' \
+          "$compose_drift_detail" >&2
+      fi
       if [[ "$fseverity" == fail ]]; then
         worst=failed
       elif [[ "$fseverity" == warn && "$worst" != failed ]]; then
@@ -2259,6 +2408,33 @@ run_diagnosis() {
   if command -v docker >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1 &&
     timeout "$docker_probe_timeout" docker ps -a >/dev/null 2>&1; then
     docker_available=1
+  fi
+
+  # --- Step 4b: docker-compose.yml against the pinned image (#1484) ----------
+  #
+  # Missing: when the pinned image can supply it, the finding becomes
+  # compose-file-restorable (a safe restore) instead of managed-file-missing
+  # (a manual step). Present: compared with the image's copy; a difference is
+  # an info finding with the differing lines, never an action. If the image
+  # cannot be read (not pulled, no label, no file, Docker down) this adds
+  # nothing and a missing file stays managed-file-missing. Not counted in
+  # $checked: it refines the Step 1 check rather than being one of its own.
+  compose_drift_detail=""
+  if [[ "$env_status" == ok && "$docker_available" == 1 ]]; then
+    if [[ "$compose_status" == missing && ! -e "$compose_file" && ! -L "$compose_file" ]]; then
+      if fetch_image_compose; then
+        drop_compose_missing_finding
+        add_finding compose-file-restorable compose-file fail
+      fi
+    elif [[ "$compose_status" == ok ]]; then
+      if fetch_image_compose; then
+        if ! cmp -s -- "$compose_file" "$compose_image_tmp"; then
+          describe_compose_drift
+          add_finding compose-file-drift compose-file info
+        fi
+      fi
+    fi
+    discard_image_compose
   fi
 
   # --- Step 5: configuration syntax/schema/secret readiness (delegated) ------
@@ -3075,6 +3251,36 @@ do_fix_permissions() {
   esac
 
   chmod "$mode" -- "$path"
+}
+
+# --- restore-compose-file (#1484) -------------------------------------------
+#
+# Puts back a MISSING docker-compose.yml from the pinned image. Re-checks
+# immediately before acting that nothing exists at the path (a file, a
+# symlink, anything): a present file is never replaced. The image's bytes go
+# to a temporary file in the deployment folder (streamed, no shell text
+# handling, so trailing blank lines, trailing spaces and non-ASCII survive),
+# then take the installer's mode 0644 and the folder's owner, then an atomic
+# rename that refuses to overwrite. Returns 1 with nothing left behind when
+# any step fails; the caller reports `failed`.
+do_restore_compose_file() {
+  local image
+  [[ ! -e "$compose_file" && ! -L "$compose_file" ]] || return 1
+  image="$(pinned_orbit_image)" || return 1
+  compose_image_tmp="$(mktemp "./.${compose_file}.repair.XXXXXX")" || { compose_image_tmp=""; return 1; }
+  if ! read_image_deployment_asset "$image" "$compose_file" "$compose_image_tmp" ||
+    ! chmod 0644 -- "$compose_image_tmp" ||
+    ! { [[ "$(id -u)" != 0 ]] || chown --reference=. -- "$compose_image_tmp"; }; then
+    discard_image_compose
+    return 1
+  fi
+  mv -n -- "$compose_image_tmp" "$compose_file" || { discard_image_compose; return 1; }
+  # mv -n leaves the source in place when the target appeared in the meantime.
+  if [[ -e "$compose_image_tmp" ]]; then
+    discard_image_compose
+    return 1
+  fi
+  compose_image_tmp=""
 }
 
 # --- restore-transaction ----------------------------------------------------
@@ -4176,6 +4382,7 @@ run_safe_batch() {
     status=0
     case "$action" in
       fix-permissions) do_fix_permissions "$fclass" "$ftarget" || status=$? ;;
+      restore-compose-file) do_restore_compose_file || status=$? ;;
       restore-transaction)
         # Two independent boundaries share the restore-transaction action
         # class (ADR-0014 decision 7); $fclass tells them apart. See

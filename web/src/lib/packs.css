@@ -104,14 +104,11 @@
      scoped to one screen is not shareable with a second (#491 precedent). */
   --sec-sage:#8fbf9f; --sec-blue:#8fb8ff; --sec-sand:#d8b45a;
   --sec-plum:#b79ae0; --sec-coral:#f0907a;
-  /* #1319: a colour per section and per type, and its text-grade twin (round 8, m-colour-per-option) */
-  --c-home:#d96a03; --c-home-text:var(--c-home);
-  --c-vehicles:#05ab96; --c-vehicles-text:var(--c-vehicles);
-  --c-devices:#807bec; --c-devices-text:var(--c-devices);
-  --c-services:#c131c1; --c-services-text:#d244d2;
-  --c-service:#809024; --c-service-text:var(--c-service);
-  --c-renewal:#bf2352; --c-renewal-text:#e3496e;
-  --c-inspection:#0390a6; --c-inspection-text:var(--c-inspection);
+  /* #1319: the dark packs' colour per section and per type is shared, in
+     the group after the retrograde block; these two text twins are tuned
+     per pack for contrast. */
+  --c-services-text:#d244d2;
+  --c-renewal-text:#e3496e;
 }
 [data-theme=afterdark]{
   --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
@@ -191,14 +188,11 @@
   /* #867: moved in from household.css, see the starchart block's note. */
   --sec-sage:#7fb79a; --sec-blue:#7dd3fc; --sec-sand:#d9bd83;
   --sec-plum:#a99ae0; --sec-coral:#ef9b86;
-  /* #1319: a colour per section and per type, and its text-grade twin (round 8, m-colour-per-option) */
-  --c-home:#d96a03; --c-home-text:var(--c-home);
-  --c-vehicles:#05ab96; --c-vehicles-text:var(--c-vehicles);
-  --c-devices:#807bec; --c-devices-text:var(--c-devices);
-  --c-services:#c131c1; --c-services-text:#cb3dcb;
-  --c-service:#809024; --c-service-text:var(--c-service);
-  --c-renewal:#bf2352; --c-renewal-text:#dc4269;
-  --c-inspection:#0390a6; --c-inspection-text:var(--c-inspection);
+  /* #1319: the dark packs' colour per section and per type is shared, in
+     the group after the retrograde block; these two text twins are tuned
+     per pack for contrast. */
+  --c-services-text:#cb3dcb;
+  --c-renewal-text:#dc4269;
 }
 /*
  * dawn — AND DAWN IS THE TERMINATOR (owner, §15: "'dawn' the pack means the
@@ -300,18 +294,8 @@
   --warm-text:color-mix(in srgb, var(--warm) 70%, black 30%);
   /* #855: --upcoming is --accent here, so its text grade is --accent's. */
   --upcoming-text:var(--accent-text);
-  /* #867: moved in from household.css, see the starchart block's note. */
-  --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
-  --sec-plum:#71499a; --sec-coral:#bd4f36;
-  /* #1319: a colour per section and per type, and its text-grade twin (round 8, m-colour-per-option) */
-  --c-home:#904607; --c-home-text:#763500;
-  --c-vehicles:#1fb3a4; --c-vehicles-text:#065149;
-  --c-devices:#503dd5; --c-devices-text:#4226c0;
-  --c-services:#961e96; --c-services-text:#800781;
-  --c-service:#495f03; --c-service-text:#3d5000;
-  --c-renewal:#8b2448; --c-renewal-text:#882145;
-  --c-inspection:#0095a1; --c-inspection-text:#074f56;
-  --opt-ink:#f4f7fb;   /* the chosen tile's word: the light packs' ground darkens on descent, so not --bg */
+  /* #867, #1319: the section accents and option colours are shared with
+     clouds, in the group after the retrograde block. */
 }
 /*
  * clouds — THE CLOUD SEA, and one of Orbit's MAIN LIGHTER THEMES (owner, §15:
@@ -369,18 +353,10 @@
   --warm-text:color-mix(in srgb, var(--warm) 70%, black 30%);
   /* #855: --upcoming is --accent here, so its text grade is --accent's. */
   --upcoming-text:var(--accent-text);
-  /* #867: clouds takes dawn's section accents, same as its ink family (#491) — the two packs stand on one light and answer it the same way. */
-  --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
-  --sec-plum:#71499a; --sec-coral:#bd4f36;
-  /* #1319: a colour per section and per type, and its text-grade twin (round 8, m-colour-per-option) */
-  --c-home:#904607; --c-home-text:#763500;
-  --c-vehicles:#1fb3a4; --c-vehicles-text:#065149;
-  --c-devices:#503dd5; --c-devices-text:#4226c0;
-  --c-services:#961e96; --c-services-text:#800781;
-  --c-service:#495f03; --c-service-text:#3d5000;
-  --c-renewal:#8b2448; --c-renewal-text:#882145;
-  --c-inspection:#0095a1; --c-inspection-text:#074f56;
-  --opt-ink:#f4f7fb;   /* the chosen tile's word: the light packs' ground darkens on descent, so not --bg */
+  /* #867, #1319: clouds takes dawn's section accents and option colours,
+     same as its ink family (#491) — the two packs stand on one light and
+     answer it the same way. They are in the group after the retrograde
+     block. */
 }
 /*
  * retrograde — the fifth pack (owner, 2026-08-14). A planet in retrograde is
@@ -461,14 +437,45 @@
   /* #867: moved in from household.css, see the starchart block's note. */
   --sec-sage:#3ef2a0; --sec-blue:#2de2e6; --sec-sand:#ffd23f;
   --sec-plum:#ff4fd8; --sec-coral:#ff9f1c;
-  /* #1319: a colour per section and per type, and its text-grade twin (round 8, m-colour-per-option) */
+  /* #1319: the dark packs' colour per section and per type is shared, in
+     the group after the retrograde block; these two text twins are tuned
+     per pack for contrast. */
+  --c-services-text:#cf41ce;
+  --c-renewal-text:#e3496e;
+}
+
+/*
+ * WHAT A FAMILY OF PACKS HOLDS IN COMMON (#1356, web-24). Each pack's own
+ * block above keeps everything that is its own; a value two or three packs
+ * share is said once here. These stand after all five blocks because the
+ * contrast tests (tests/unit/v19-pack-*) read each pack's first block.
+ */
+/* The three dark packs: one colour per section and per type, and its
+   text-grade twin (#1319, round 8, m-colour-per-option). --c-services-text
+   and --c-renewal-text are tuned per pack and stay in each pack's block. */
+[data-theme=starchart],[data-theme=afterdark],[data-theme=retrograde]{
   --c-home:#d96a03; --c-home-text:var(--c-home);
   --c-vehicles:#05ab96; --c-vehicles-text:var(--c-vehicles);
   --c-devices:#807bec; --c-devices-text:var(--c-devices);
-  --c-services:#c131c1; --c-services-text:#cf41ce;
+  --c-services:#c131c1;
   --c-service:#809024; --c-service-text:var(--c-service);
-  --c-renewal:#bf2352; --c-renewal-text:#e3496e;
+  --c-renewal:#bf2352;
   --c-inspection:#0390a6; --c-inspection-text:var(--c-inspection);
+}
+/* The two light packs: the section accents (#867, moved in from
+   household.css) and the colour per section and per type (#1319). */
+[data-theme=dawn],[data-theme=clouds]{
+  --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
+  --sec-plum:#71499a; --sec-coral:#bd4f36;
+  /* #1319: a colour per section and per type, and its text-grade twin (round 8, m-colour-per-option) */
+  --c-home:#904607; --c-home-text:#763500;
+  --c-vehicles:#1fb3a4; --c-vehicles-text:#065149;
+  --c-devices:#503dd5; --c-devices-text:#4226c0;
+  --c-services:#961e96; --c-services-text:#800781;
+  --c-service:#495f03; --c-service-text:#3d5000;
+  --c-renewal:#8b2448; --c-renewal-text:#882145;
+  --c-inspection:#0095a1; --c-inspection-text:#074f56;
+  --opt-ink:#f4f7fb;   /* the chosen tile's word: the light packs' ground darkens on descent, so not --bg */
 }
 
 /*

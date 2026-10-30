@@ -41,7 +41,7 @@ async function leave(redirectTo, descendFrom) {
  * @returns {Promise<boolean>} true when this device left, false when another device's session ended
  */
 export async function signOutOfDevice(row, descendFrom) {
-  const redirectTo = await revokeSession(row.id);
+  const redirectTo = await revokeSession(row.id, { own: row.current });
   if (!row.current) return false;
   await leave(redirectTo, descendFrom);
   return true;

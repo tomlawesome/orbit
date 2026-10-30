@@ -6,6 +6,7 @@
   import { resolve } from "$app/paths";
   import { createSky, paintCopy, renewCopy } from "./gravity-well.js";
   import { rasteriseSvg } from "$lib/raster.js";
+  import { onResizeSettled } from "$lib/resize.js";
 
   /**
    * Not found — the gravity well (CON-14). The black hole *is* the 0, with the
@@ -275,8 +276,6 @@
     sky.mountArcs();
 
     let cancelled = false;
-    /** @type {ReturnType<typeof setTimeout> | undefined} */
-    let timer;
 
     /* The canvases, painted one per task behind the still sky (#798: six at
        once was the first thing a visitor waited on) at the density the
@@ -396,11 +395,6 @@
       lit = true;
     }
 
-    function onResize() {
-      clearTimeout(timer);
-      timer = setTimeout(() => { paint(); build(); }, 120);
-    }
-
     /* The well first, then the sky: the still stars are already on screen
        and lose nothing by falling a little later, while the halo is the one
        thing the first frame is missing (owner, 2026-09-04). build() marks
@@ -409,11 +403,10 @@
        notfound-motion.spec.js) waits on `.world[data-rasterised]`, and an
        element it cannot see yet is one it will not wait for. */
     build().then(paint);
-    window.addEventListener("resize", onResize);
+    const stopResize = onResizeSettled(() => { paint(); build(); }, 120);
     return () => {
       cancelled = true;
-      clearTimeout(timer);
-      window.removeEventListener("resize", onResize);
+      stopResize();
       infall?.removeEventListener("animationiteration", onWrap);
     };
   });

@@ -3,6 +3,7 @@
   import { door, UP, PROPS_UP, compilesAside, hurryChores, openChores } from "$lib/door-host.js";
   import { passingHomes, paintedHomes } from "./homes.js";
   import { mayReadyWorld, readyWorldAtLeisure } from "./ready-gate.js";
+  import { prefersReducedMotion } from "$lib/motion.js";
   import "$lib/door/door.css";
   import "./flight.css";
 
@@ -72,8 +73,7 @@
   let journey = null;
 
   const body = () => document.body;
-  const reduced = () =>
-    typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduced = () => prefersReducedMotion();
 
   /*
    * THE NEWCOMER'S COUNT (#1222; the count sealed in the §15 third pass and

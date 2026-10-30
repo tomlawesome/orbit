@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
 import { signInAsWorkerAdministrator } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { settleArrival } from "./support/arrival";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
@@ -30,30 +31,47 @@ resetDatabaseBetweenSpecFiles();
 
 const households = householdRegister();
 
-/** A household the current session owns outright, through the real command. */
+/**
+ * A household the current session owns outright, through the real command.
+ *
+ * #1448: through the browser context's own request channel, not an in-page
+ * `fetch`. A fetch belongs to the document that issued it, and the arrival at
+ * `/` (an administrator with no household of their own lands there, #840) is
+ * still deciding when a spec signs in: the first household made here turns
+ * its decision ONWARD, it calls `location.replace("/home")`, and WebKit
+ * answers the unfinished fetch of the document being left with `TypeError:
+ * Load failed` (CI jobs 40519, 40540, 41285). A request made through
+ * `page.request` shares the page's cookies but not its document, so no
+ * navigation can cancel it. Callers still `settleArrival` first: that is what
+ * makes `sessionHeaders` read the app's origin rather than the provider's, and
+ * what stops the later `goto` being aborted by the same redirect.
+ */
 async function createHousehold(page: Page, name: string) {
-  const created = await page.evaluate(async (householdName) => {
-    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
-    const householdId = crypto.randomUUID();
-    const response = await fetch("/api/workspace/commands", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
-      body: JSON.stringify({
-        type: "household.create",
-        household: {
-          id: householdId, name: householdName, timezone: "Europe/London", currency: "GBP",
-          memberCount: 1, canManage: true, onboardingComplete: true,
-          sections: [{ id: crypto.randomUUID(), name: "Home", icon: "home", accent: "sage", visible: true }],
-          items: [],
-        },
-      }),
-    });
-    if (!response.ok) throw new Error(`household.create failed: ${response.status}`);
-    return { id: householdId, name: householdName };
-  }, name);
+  const householdId = crypto.randomUUID();
+  const response = await page.request.post("/api/workspace/commands", {
+    headers: await sessionHeaders(page),
+    data: {
+      type: "household.create",
+      household: {
+        id: householdId, name, timezone: "Europe/London", currency: "GBP",
+        memberCount: 1, canManage: true, onboardingComplete: true,
+        sections: [{ id: crypto.randomUUID(), name: "Home", icon: "home", accent: "sage", visible: true }],
+        items: [],
+      },
+    },
+  });
+  expect(response.ok(), `household.create for "${name}" (${response.status()})`).toBeTruthy();
+  const created = { id: householdId, name };
   households.track(created);
   return created;
+}
+
+/** A name no other worker's copy of this test can share. The administration
+ * roster lists every household on the instance, so two workers that read
+ * `Date.now()` in the same millisecond (`--repeat-each` starts them together)
+ * would otherwise own two rows of one name and make a row locator ambiguous. */
+function uniqueName(prefix: string) {
+  return `${prefix} w${process.env.TEST_PARALLEL_INDEX ?? "x"} ${Date.now()}`;
 }
 
 /** Schedules a household's deletion through the real lifecycle endpoint
@@ -73,13 +91,13 @@ test.afterEach(async ({ page }) => {
 });
 
 test.describe("household recovery on the clock (#1001)", () => {
-  /* #1448: quarantined 2026-10-16 (agent-infra#30) -- runs outside the merge gate. */
-  test("restores a household within its window, then hard-deletes another by the two-tap protocol", { tag: ["@quarantine"] }, async ({ page }, testInfo) => {
+  test("restores a household within its window, then hard-deletes another by the two-tap protocol", async ({ page }, testInfo) => {
     const mobile = testInfo.project.name.startsWith("mobile");
     await signInAsWorkerAdministrator(page, "/administration");
+    await settleArrival(page, 20_000, "/administration");
 
-    const toRestore = await createHousehold(page, `Recovery restore ${Date.now()}`);
-    const toDelete = await createHousehold(page, `Recovery delete ${Date.now()}`);
+    const toRestore = await createHousehold(page, uniqueName("Recovery restore"));
+    const toDelete = await createHousehold(page, uniqueName("Recovery delete"));
     await scheduleDeletion(page, toRestore);
     await scheduleDeletion(page, toDelete);
 
@@ -148,6 +166,7 @@ test.describe("document jobs and the two mail tests (#1071)", () => {
     test.skip(testInfo.project.name.startsWith("mobile"), "#1071's server-side persistence was built for the desk half only");
 
     await signInAsWorkerAdministrator(page, "/administration");
+    await settleArrival(page, 20_000, "/administration");
     // #840: a worker with no household anywhere in the instance yet is sent
     // to "/" by the first-run door, not /administration -- v19-mail-review.
     // spec.ts's own comment on the same gate says why household.create is
@@ -155,7 +174,7 @@ test.describe("document jobs and the two mail tests (#1071)", () => {
     // activeHouseholdId, which the door's own fast path trusts. This test's
     // own subject (the mail machinery card) needs no household at all; this
     // one exists only to open the door.
-    await createHousehold(page, `Mail test door opener ${Date.now()}`);
+    await createHousehold(page, uniqueName("Mail test door opener"));
     await page.goto("/administration");
 
     const relayRow = page.locator(".person").filter({ has: page.getByText("relay test", { exact: true }) });

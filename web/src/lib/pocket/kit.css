@@ -156,6 +156,36 @@
   background:none;border:0;padding:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .p-quiet:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
 
+/* FORM CONTROLS (#1356, web-28): the text field, the two-tab strip and the
+   switch, which the administration, household, archive and settings screens
+   each carried a scoped copy of. A screen keeps only what is its own: where the switch's focus ring
+   sits, a switch that is saving or disabled. */
+.p-input{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;border-radius:12px;
+  border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);color:var(--ink);
+  font:var(--p-type-body)/1.2 var(--ui)}
+.p-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
+.p-input::placeholder{color:var(--ink-quiet)}
+.p-tabs{display:flex;border:1px solid var(--line);border-radius:calc(var(--p-hit) / 2);overflow:hidden;flex:1 1 100%}
+.p-tabs button{appearance:none;flex:1;min-height:var(--p-hit);padding:0 6px;white-space:nowrap;border:0;background:none;
+  font:var(--p-type-meta)/1.2 var(--mono);color:var(--ink-mid);cursor:pointer;
+  transition:background-color var(--p-arm),color var(--p-arm)}
+.p-tabs button + button{border-left:1px solid var(--line)}
+.p-tabs button[aria-selected=true]{background:var(--accent);color:var(--bg);font-weight:600}
+:is([data-theme=dawn],[data-theme=clouds]) .p-tabs button[aria-selected=true]{color:#fff}
+[data-theme=retrograde] .p-tabs button[aria-selected=true]{box-shadow:0 0 12px -2px var(--bloom)}
+.p-tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:-4px}
+/* The switch: 52x32 drawn, 44 tall hit (§1.7). */
+.p-switch{appearance:none;box-sizing:border-box;width:56px;height:var(--p-hit);padding:0;border:0;background:none;
+  display:grid;place-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent;margin-right:-6px}
+.p-switch i{position:relative;box-sizing:border-box;width:46px;height:28px;border-radius:14px;
+  border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 60%, transparent);
+  transition:background-color var(--p-spring),border-color var(--p-spring)}
+.p-switch i::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;
+  background:var(--ink-quiet);transition:transform var(--p-spring) var(--p-ease),background-color var(--p-spring)}
+.p-switch[aria-checked=true] i{background:color-mix(in srgb, var(--accent) 30%, transparent);border-color:var(--accent)}
+.p-switch[aria-checked=true] i::after{transform:translateX(18px);background:var(--accent)}
+[data-theme=retrograde] .p-switch[aria-checked=true] i::after{box-shadow:0 0 8px var(--bloom)}
+
 /* Loading (§1.13, §5.2): three unlit rows at row height instead of a
    spinner, their mark a hollow body where the lit row's sits. */
 .p-unlit{height:var(--p-row-min);display:flex;align-items:center;gap:var(--p-row-gap)}

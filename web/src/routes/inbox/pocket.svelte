@@ -16,6 +16,7 @@
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
+  import { prefersReducedMotion } from "$lib/motion.js";
   import { T_CLASS } from "$lib/data/bands.js";
 
   /**
@@ -180,7 +181,7 @@
   }
 
   /* ---- motion ---------------------------------------------------------- */
-  const still = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const still = () => prefersReducedMotion();
   /**
    * How a card or row leaves. Filed: the dashed pen turns solid, the mark
    * fills, and it sinks toward FILED. Burnt: a warm edge, and it lifts away.

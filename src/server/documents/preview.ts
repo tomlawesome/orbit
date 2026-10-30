@@ -28,8 +28,14 @@ import {
 
 /** Longest edge, in pixels, of a rendered preview. */
 export const DOCUMENT_PREVIEW_MAX_EDGE = 1_200;
-/** Wall-clock budget for a single page render, mirroring the inspection budget. */
-export const DOCUMENT_PREVIEW_RENDER_BUDGET_MS = 10_000;
+/**
+ * Wall-clock budget for a single page render: 30 s (ADR-0038 amendment,
+ * 2026-10-29). A 300 dpi A4 scan costs about 7 s in pdf.js's JavaScript JPEG
+ * decoder, so 10 s left too little headroom on a busy home server. Looser than
+ * the upload-time structure check's own 5 s. The child's CPU limit follows from
+ * it (start-up + this + 5 s).
+ */
+export const DOCUMENT_PREVIEW_RENDER_BUDGET_MS = 30_000;
 
 const JPEG_QUALITY = 82;
 
@@ -99,7 +105,7 @@ function boundedCanvasSize(width: number, height: number, allowUpscale: boolean)
 
 let renderBudgetMsOverride: number | undefined;
 
-/** Lets a test force the render budget to expire deterministically, rather than racing 10 real seconds against a real render. */
+/** Lets a test force the render budget to expire deterministically, rather than racing the real budget against a real render. */
 export function setDocumentPreviewRenderBudgetForTests(ms: number | undefined): void {
   renderBudgetMsOverride = ms;
 }

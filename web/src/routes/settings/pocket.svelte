@@ -25,6 +25,7 @@
   import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
   import { PACKS, intentOf, issuerHost, methodWords, on } from "./helm.js";
   import { signOutOfDevice, signOutOfEveryDevice } from "./sign-out.js";
+  import { tabArrows } from "$lib/tabs.js";
 
   /*
    * SETTINGS ON A PHONE (#1125, proposal §2.7-§2.8). Rendered beside the
@@ -198,13 +199,9 @@
   const bothOff = $derived(view !== null && !emailOn && !browserAlerts);
 
   /* §22's keyboard: one tab in the Tab order, ← → between them. */
-  /** @param {KeyboardEvent} event */
-  function tabKey(event) {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    tab = tab === "reminders" ? "sent" : "reminders";
-    queueMicrotask(() => document.getElementById(`st-tab-${tab}`)?.focus());
-  }
+  const tabKey = tabArrows(["reminders", "sent"], {
+    get: () => tab, set: (key) => (tab = key), id: (key) => `st-tab-${key}`,
+  });
 
   /* ── your sky ─────────────────────────────────────────────────────────── */
   /** @param {string} id */
@@ -498,7 +495,7 @@
     <section class="p-card" style:--i="3" aria-labelledby="st-reminders" data-st="reminders">
       <div class="st-cardhead">
         <h2 class="p-caps" id="st-reminders">Reminders</h2>
-        <div class="st-tabs" role="tablist" aria-labelledby="st-reminders">
+        <div class="st-tabs p-tabs" role="tablist" aria-labelledby="st-reminders">
           <button role="tab" id="st-tab-reminders" aria-selected={tab === "reminders"} aria-controls="st-panel-reminders"
                   tabindex={tab === "reminders" ? 0 : -1} onclick={() => (tab = "reminders")} onkeydown={tabKey}>reminders</button>
           <button role="tab" id="st-tab-sent" aria-selected={tab === "sent"} aria-controls="st-panel-sent"
@@ -512,7 +509,7 @@
             <Row title="email reminders" meta={emailSaving ? "saving…" : emailOn ? "on · to " + (view.user?.email ?? "you") : "off"}>
               {#snippet mark()}<span class="st-glyph" class:off={!emailOn}>✉</span>{/snippet}
               {#snippet end()}
-                <button class="st-switch" role="switch" aria-checked={emailOn} aria-busy={emailSaving}
+                <button class="st-switch p-switch" role="switch" aria-checked={emailOn} aria-busy={emailSaving}
                         aria-label="Email reminders" onclick={toggleEmail}><i></i></button>
               {/snippet}
             </Row>
@@ -520,7 +517,7 @@
                  meta={!alertsAvailable ? "not available in this browser" : alertsBusy ? "waiting for your browser…" : browserAlerts ? "on" : "off"}>
               {#snippet mark()}<span class="st-glyph" class:off={!browserAlerts}><svg class="st-icon" width="16" height="17" viewBox="0 0 16 17" aria-hidden="true"><path d="M3 12V7.5a5 5 0 0 1 10 0V12l1.5 1.8h-13z"/><path d="M6.3 15.6a1.8 1.8 0 0 0 3.4 0"/></svg></span>{/snippet}
               {#snippet end()}
-                <button class="st-switch" role="switch" aria-checked={browserAlerts} aria-busy={alertsBusy}
+                <button class="st-switch p-switch" role="switch" aria-checked={browserAlerts} aria-busy={alertsBusy}
                         aria-label="Browser alerts on this device" disabled={!alertsAvailable} onclick={toggleAlerts}><i></i></button>
               {/snippet}
             </Row>
@@ -770,32 +767,14 @@
   /* REMINDERS' head: §22 under 560px, the pair wraps under the heading. */
   .st-cardhead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;margin:0 0 8px}
   .st-cardhead .p-caps{margin:0}
-  .st-tabs{display:flex;border:1px solid var(--line);border-radius:calc(var(--p-hit) / 2);overflow:hidden;flex:1 1 100%}
-  .st-tabs button{appearance:none;flex:1;min-height:var(--p-hit);padding:0 6px;white-space:nowrap;border:0;background:none;
-    font:var(--p-type-meta)/1.2 var(--mono);color:var(--ink-mid);cursor:pointer;
-    transition:background-color var(--p-arm),color var(--p-arm)}
-  .st-tabs button + button{border-left:1px solid var(--line)}
-  .st-tabs button[aria-selected=true]{background:var(--accent);color:var(--bg);font-weight:600}
-  :global(:is([data-theme=dawn],[data-theme=clouds])) .st-tabs button[aria-selected=true]{color:#fff}
-  :global([data-theme=retrograde]) .st-tabs button[aria-selected=true]{box-shadow:0 0 12px -2px var(--bloom)}
-  .st-tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:-4px}
   [role=tabpanel]{animation:st-panel 240ms var(--p-ease) both}
   @keyframes st-panel{from{opacity:0;transform:translateY(4px)}}
 
-  /* The switch: 52x32 drawn, 44 tall hit (§1.7), the household's own. */
-  .st-switch{appearance:none;box-sizing:border-box;width:56px;height:var(--p-hit);padding:0;border:0;background:none;
-    display:grid;place-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent;margin-right:-6px}
-  .st-switch i{position:relative;box-sizing:border-box;width:46px;height:28px;border-radius:14px;
-    border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 60%, transparent);
-    transition:background-color var(--p-spring),border-color var(--p-spring)}
-  .st-switch i::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;
-    background:var(--ink-quiet);transition:transform var(--p-spring) var(--p-ease),background-color var(--p-spring)}
-  .st-switch[aria-checked=true] i{background:color-mix(in srgb, var(--accent) 30%, transparent);border-color:var(--accent)}
-  .st-switch[aria-checked=true] i::after{transform:translateX(18px);background:var(--accent)}
+  /* The switch is kit.css's .p-switch, the household's own; saving,
+     disabled and the focus ring are this screen's. */
   /* Saving: the knob breathes while the answer is out. */
   .st-switch[aria-busy=true] i::after{animation:p-breathe 1.2s ease-in-out infinite}
   .st-switch:disabled{cursor:default;opacity:.45}
-  :global([data-theme=retrograde]) .st-switch[aria-checked=true] i::after{box-shadow:0 0 8px var(--bloom)}
   /* The ring on the button itself, round the drawn track. */
   .st-switch{border-radius:18px}
   .st-switch:focus-visible{outline:2px solid var(--accent);outline-offset:-5px}

@@ -9,6 +9,8 @@
  * @typedef {{ label: string, name: string, onact?: () => unknown, href?: string, danger?: boolean, arms?: boolean, tone?: "ok" | "up" | "warm" | "accent" | "danger" | "filled" }} RowAct
  */
 
+import { prefersReducedMotion } from "$lib/motion.js";
+
 /** The unfold's close, in ms: the panel stays in the page until it is shut. */
 export const CLOSE_MS = 200;
 
@@ -50,7 +52,7 @@ export function mountRow(row, { closeMs, onchange } = {}) {
   const panel = /** @type {HTMLElement | null} */ (row.querySelector("[data-row-panel]"));
   const doc = row.ownerDocument;
   const win = /** @type {Window} */ (doc.defaultView);
-  const still = () => typeof win.matchMedia === "function" && win.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const still = () => prefersReducedMotion(win);
   const group = () => row.closest("[data-row-group]") ?? doc;
 
   let isOpen = false;

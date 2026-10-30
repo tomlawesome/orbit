@@ -314,3 +314,124 @@ describe("json() on a 409 from a household an import has closed (#1316)", () => 
     });
   });
 });
+
+/*
+ * #1520: once the reader has pressed sign out, a screen read that answers 401
+ * is the sign-out's own doing. `json()` used to answer every 401 by sending
+ * the page through /api/auth/login, so a read still in flight when the
+ * session was revoked (or only issued afterwards: settings reads its cards one
+ * after another) took the page to the identity provider's sign-in instead of
+ * letting the goodbye reach /logout.
+ *
+ * The hold starts with the sign-out request, stays once it has succeeded, and
+ * is put back if it fails, so a session that really expired still bounces.
+ * Each test imports a fresh copy of the module, which keeps the hold at module
+ * level.
+ */
+describe("a 401 after the reader signed out (#1520)", () => {
+  /** @type {import("vitest").Mock} */
+  let assign;
+
+  /** @param {number} status @param {unknown} body */
+  function reply(status, body) {
+    return { ok: status >= 200 && status < 300, status, json: async () => body };
+  }
+  const unauthenticated = () => reply(401, { error: { message: "Sign in required", code: "unauthenticated" } });
+  const LOGIN = "/api/auth/login?returnTo=%2Fsettings";
+
+  /** @param {Record<string, () => unknown>} routes */
+  function serve(routes) {
+    vi.stubGlobal("fetch", vi.fn(async (url) => {
+      const route = routes[url];
+      if (!route) throw new Error(`unexpected fetch ${url}`);
+      return route();
+    }));
+  }
+  const session = () => reply(200, { csrfToken: "token" });
+
+  beforeEach(() => {
+    vi.resetModules();
+    assign = vi.fn();
+    vi.stubGlobal("window", { location: { assign, pathname: "/settings" } });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("still sends a 401 through the login flow when nobody is signing out", async () => {
+    serve({ "/api/auth/sessions": unauthenticated });
+    const { readSessions } = await import("../../web/src/lib/data/workspace.js");
+
+    await expect(readSessions()).rejects.toMatchObject({ status: 401 });
+    expect(assign).toHaveBeenCalledWith(LOGIN);
+  });
+
+  it("does not bounce a read that answers 401 while the sign-out request is out, or after it", async () => {
+    /** @type {(value: unknown) => void} */
+    let release = () => {};
+    const held = new Promise((resolve) => { release = resolve; });
+    serve({
+      "/api/auth/session": session,
+      "/api/auth/logout": () => held.then(() => reply(200, { redirectTo: null })),
+      "/api/auth/sessions": unauthenticated,
+    });
+    const { signOut, readSessions } = await import("../../web/src/lib/data/workspace.js");
+
+    const leaving = signOut();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/auth/logout", expect.anything()));
+    await expect(readSessions()).rejects.toMatchObject({ status: 401 });
+    release(undefined);
+    await expect(leaving).resolves.toBeNull();
+    await expect(readSessions()).rejects.toMatchObject({ status: 401 });
+
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("holds the bounce after 'sign out of every device' too", async () => {
+    serve({
+      "/api/auth/session": session,
+      "/api/auth/sessions/revoke": () => reply(200, { redirectTo: null }),
+      "/api/auth/sessions": unauthenticated,
+    });
+    const { signOutEverywhere, readSessions } = await import("../../web/src/lib/data/workspace.js");
+
+    await signOutEverywhere();
+    await expect(readSessions()).rejects.toMatchObject({ status: 401 });
+
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("holds the bounce after signing out of this device from settings, but not another device", async () => {
+    serve({
+      "/api/auth/session": session,
+      "/api/auth/sessions/other/revoke": () => reply(200, { redirectTo: null }),
+      "/api/auth/sessions/mine/revoke": () => reply(200, { redirectTo: null }),
+      "/api/auth/sessions": unauthenticated,
+    });
+    const { revokeSession, readSessions } = await import("../../web/src/lib/data/workspace.js");
+
+    await revokeSession("other", { own: false });
+    await expect(readSessions()).rejects.toMatchObject({ status: 401 });
+    expect(assign).toHaveBeenCalledTimes(1);
+
+    assign.mockClear();
+    await revokeSession("mine", { own: true });
+    await expect(readSessions()).rejects.toMatchObject({ status: 401 });
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("puts the bounce back when the sign-out fails, so an expired session still signs in again", async () => {
+    serve({
+      "/api/auth/session": session,
+      "/api/auth/logout": () => reply(500, null),
+      "/api/auth/sessions": unauthenticated,
+    });
+    const { signOut, readSessions } = await import("../../web/src/lib/data/workspace.js");
+
+    await expect(signOut()).rejects.toMatchObject({ message: "The session could not be ended" });
+    await expect(readSessions()).rejects.toMatchObject({ status: 401 });
+
+    expect(assign).toHaveBeenCalledWith(LOGIN);
+  });
+});

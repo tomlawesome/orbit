@@ -81,7 +81,7 @@ describe("handOverLauncherConfigTree (#1225)", () => {
     expect(readdirSync(tree).sort()).toEqual([".env-orbit.example", ".orbit-image", "scripts"]);
     expect(readdirSync(join(tree, "scripts")).sort()).toEqual(["configure.sh", "installer-ui.sh"]);
     for (const asset of LAUNCHER_CONFIG_TREE_ASSETS) {
-      expect(readFileSync(join(tree, asset))).toEqual(readFileSync(join(root, asset)));
+      expect(readFileSync(join(tree, asset)).equals(readFileSync(join(root, asset))), `${asset} is not byte-identical to the source`).toBe(true);
       expect(statSync(join(tree, asset)).mode & 0o777).toBe(0o600);
     }
     expect(readFileSync(join(tree, ".orbit-image"), "utf8")).toBe(`${REFERENCE}\n`);

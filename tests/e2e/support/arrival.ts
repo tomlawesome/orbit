@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { BrowserContext, Page } from "@playwright/test";
 
 /**
  * #840: wait for the arrival at `/` to finish deciding before doing anything
@@ -34,6 +34,34 @@ export async function settleArrival(page: Page, timeout = 20_000, returnTo?: str
     page.locator("#gobtn").waitFor({ state: "visible", timeout }),
     page.getByRole("heading", { name: "where do you belong?" }).waitFor({ state: "visible", timeout }),
   ]);
+}
+
+/**
+ * #1554: sign the reader out from the TEST's side without the page the reader
+ * was signed in on answering for it.
+ *
+ * A spec that signs in, seeds a household and then clears the cookies to start
+ * "signed out" is clearing them under a live document. That document is still
+ * reading: an administrator's sign-in lands on `/home` rather than the arrival
+ * whenever ANY live household exists on the instance (hooks.server.js,
+ * `hasOnwardHousehold` -- the other worker's seed counts), and
+ * `settleArrival` returns the moment that URL is up, with home's workspace,
+ * session, inbox and tour reads still out. One that is answered after the
+ * cookies are gone gets a 401, and the seam's 401 journey
+ * (workspace.js `json()`) does `location.assign` to the login flow: it cancels
+ * the spec's next `page.goto` (`net::ERR_ABORTED`) or lands the page on the
+ * identity provider's `/authorize` instead of Orbit's `/login`. The arrival
+ * has the sibling fault (its `location.replace("/home")` after a seed turns
+ * its decision onward, #1096).
+ *
+ * Both are the old document acting after the spec has moved on, so the cure
+ * is to let nothing of it be left: leaving for `about:blank` resolves once
+ * that document has been replaced, which cancels its requests and its timers,
+ * and only then are the cookies cleared. Nothing is waited on by time.
+ */
+export async function dropSession(page: Page, context: BrowserContext) {
+  await page.goto("about:blank");
+  await context.clearCookies();
 }
 
 /**

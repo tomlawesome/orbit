@@ -46,20 +46,9 @@
  * the design. The screen that mounts this owns nothing but the element to
  * draw into, the seed to draw it from, and the real facts to caption it with.
  */
-import { streamFactory } from "$lib/sky.js";
+import { prefersReducedMotion } from "$lib/motion.js";
+import { runBackdropClock, streamFactory, svgEl } from "$lib/sky.js";
 
-const NS = "http://www.w3.org/2000/svg";
-
-/**
- * @param {string} name
- * @param {Record<string, string>} [attrs]
- * @returns {SVGElement}
- */
-function svgEl(name, attrs) {
-  const e = document.createElementNS(NS, name);
-  if (attrs) for (const key in attrs) e.setAttribute(key, attrs[key]);
-  return e;
-}
 
 const MONO = "ui-monospace,SFMono-Regular,Menlo,monospace";
 const VIEW = 1600; /* the viewBox is always 1600 wide, and xMidYMid slice never shows more */
@@ -547,7 +536,7 @@ export function mountStation(root, { seed, galaxy, primary, facts }) {
     for (const L of layers) L.update(T);
     /* the station breathes on its attitude the way a real one does, and its
        resupply craft closes the last of the corridor while it is out */
-    const sway = still() ? 0 : Math.sin(T / 26) * 1.15 + Math.sin(T / 41) * 0.55;
+    const sway = prefersReducedMotion() ? 0 : Math.sin(T / 26) * 1.15 + Math.sin(T / 41) * 0.55;
     for (const g of layers[3].live.values()) {
       const att = /** @type {?SVGGElement} */ (g.querySelector(".att"));
       if (!att) continue;
@@ -561,43 +550,13 @@ export function mountStation(root, { seed, galaxy, primary, facts }) {
     }
   }
 
-  /* --- the clock: honours prefers-reduced-motion the way satellites.js and
-     constellations.js do — `still()` is read every frame rather than cached,
-     so an OS-level change mid-session freezes or resumes the drift without a
-     remount. */
-  const motion = matchMedia("(prefers-reduced-motion: reduce)");
-  const still = () => motion.matches;
-  let clock = 0, lastTs = /** @type {?number} */ (null), lastDrawn = -1;
-  let raf = /** @type {?number} */ (null);
-  function tick(/** @type {number} */ ts) {
-    if (lastTs === null) lastTs = ts;
-    const dt = Math.min(0.2, (ts - lastTs) / 1000);
-    lastTs = ts;
-    if (!still()) clock += dt;
-    if (clock !== lastDrawn) { place(clock); lastDrawn = clock; }
-    raf = requestAnimationFrame(tick);
-  }
-
-  /* Built once the faces are in, as satellites.js and constellations.js are:
-     the truss segment identities and the caption both carry the mono face,
-     and a face only starts loading once something laid out has asked for it,
-     so the layout is forced first; `fonts.ready` then settles once those
-     loads land, and at once when nothing is loading. Test DOMs have no
-     `document.fonts` and build synchronously. */
-  let torn = false;
-  const boot = () => {
-    if (torn) return;
-    place(clock);
-    if (!still()) raf = requestAnimationFrame(tick);
-  };
-  if (document.fonts) {
-    void document.documentElement.getBoundingClientRect();
-    document.fonts.ready.then(boot);
-  } else boot();
+  /* The clock and the font-gated boot are $lib/sky.js's, shared with
+     constellations.js and satellites.js (#1356): the truss segment
+     identities and the caption both carry the mono face. */
+  const sky = runBackdropClock({ build: place, draw: place });
 
   return () => {
-    torn = true;
-    if (raf !== null) cancelAnimationFrame(raf);
+    sky.stop();
     root.textContent = "";
   };
 }

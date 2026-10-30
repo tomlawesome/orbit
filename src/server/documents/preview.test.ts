@@ -17,6 +17,7 @@ import {
 } from "./pdf-structure-sandbox";
 import {
   DOCUMENT_PREVIEW_MAX_EDGE,
+  DOCUMENT_PREVIEW_RENDER_BUDGET_MS,
   renderDocumentPagePreview,
   setDocumentPreviewRenderBudgetForTests,
 } from "./preview";
@@ -433,6 +434,12 @@ afterEach(() => {
   scratch.restore();
 });
 
+describe("the page-render budget (#1549, ADR-0038 amendment)", () => {
+  it("is 30 s in production: a 300 dpi A4 scan costs about 7 s to decode, which 10 s left too little room for", () => {
+    expect(DOCUMENT_PREVIEW_RENDER_BUDGET_MS).toBe(30_000);
+  });
+});
+
 describe("renderDocumentPagePreview", () => {
   it("renders page one of a PDF to a bounded PNG without writing anything to disk", async () => {
     const preview = await renderDocumentPagePreview(syntheticPdf("Preview fixture"), "application/pdf");
@@ -751,13 +758,25 @@ describe("renderDocumentPagePreview", () => {
         }
         expect(ticks).toBeGreaterThanOrEqual(Math.floor((elapsed / 50) * 0.6));
         expect(peakRss - rssBefore).toBeLessThan(150 * MB);
-      }, 30_000);
+        /* Longer than the 30 s render budget it runs under, so a bomb that
+           runs to the budget on a loaded host reaches the 422 branch rather
+           than the test's own timeout (#1549). */
+      }, 45_000);
     });
 
     it("draws a 300 dpi A4 scan to a PNG of the page's shape with the scan's pixels in it", async () => {
       const scan = scannedA4Pdf(300);
 
-      const preview = await renderDocumentPagePreview(scan, "application/pdf");
+      /* The scan costs about 7 s of CPU to decode and far more on a loaded
+         host, so this test brings its own generous budget rather than racing
+         the production clock (#1549); the test timeout is the bound. */
+      setDocumentPreviewRenderBudgetForTests(60_000);
+      let preview: Awaited<ReturnType<typeof renderDocumentPagePreview>>;
+      try {
+        preview = await renderDocumentPagePreview(scan, "application/pdf");
+      } finally {
+        setDocumentPreviewRenderBudgetForTests(undefined);
+      }
 
       expect(preview.mediaType).toBe("image/png");
       expect(preview.pageCount).toBe(1);
@@ -779,7 +798,7 @@ describe("renderDocumentPagePreview", () => {
       // The scan's paper is off-white and its lines are dark: a blank page has neither.
       expect(nonWhite).toBeGreaterThan(image.width * image.height * 0.5);
       expect(dark).toBeGreaterThan(100);
-    }, 30_000);
+    }, 75_000);
 
     it("keeps the render budget, the page-not-found answer and the structure check's reason", async () => {
       setDocumentPreviewRenderBudgetForTests(0);
