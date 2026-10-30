@@ -381,7 +381,15 @@ test("a one-page document's reader says \"one page\" and has no arrows", async (
 
     const reader = page.getByRole("dialog", { name: "one-page-proving.pdf, Preview proving item" });
     await expect(reader).toBeVisible();
-    await expect(reader.getByRole("img", { name: "Page 1 of one-page-proving.pdf" })).toBeVisible({ timeout: 20_000 });
+    /* The reader's <img> carries its alt ("Page 1 of ...") from the moment it
+       opens, before the reader's own render of the page has arrived, so it is
+       "visible" at once and says nothing about the page. The count ("one page")
+       arrives with that render, in the same step as the picture's source: wait
+       for the drawn picture, as the multi-page test does, then read the words
+       (pipelines 2643, 2657, 2901: the words still empty at the 5 s default). */
+    const picture = reader.getByRole("img", { name: "Page 1 of one-page-proving.pdf" });
+    await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: 20_000 })
+      .toBeGreaterThan(0);
     await expect(reader.locator(".rd-page")).toHaveText("one page");
     await expect(reader.locator(".rd-name .rd-of")).toHaveText("· one page");
     await expect(reader.getByRole("button", { name: /previous page|next page/i })).toHaveCount(0);
