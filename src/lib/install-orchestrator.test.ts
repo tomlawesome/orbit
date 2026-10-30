@@ -2,7 +2,7 @@ import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { NOT_UTF8_FAILURE_MESSAGE } from "./configuration-migration";
 import { DEPLOYMENT_ASSETS } from "./deployment-assets";
@@ -841,6 +841,162 @@ describe("runInstall: the launcher's configuration goes through the install tran
       expect(outcome).toMatchObject({ status: "ok", fresh: true, selectedProfile: "standard" });
       expect(readFileSync(join(target, ".env-orbit"), "utf8")).not.toContain("COMPOSE_PROFILES=processing");
       expect(said).not.toContain(REPLACE_LINE);
+    });
+  });
+
+  // G2-R2 (#1536): a handed-in profile kept because ORBIT_INSTALL_PROFILE is
+  // unset is a chosen profile all the same, so a local-AI one gets the capacity
+  // check the wizard gives it. A non-interactive run has no download
+  // confirmation to ask, so nothing here expects a model pull to be requested.
+  describe("capacity check for a kept handed-in local-AI profile (G2-R2)", () => {
+    const withProfile = (...lines: string[]) => [TREE_ENV.trimEnd(), ...lines, ""].join("\n");
+    const AI_ENV = withProfile("COMPOSE_PROFILES=ai", "OLLAMA_MODEL=llama3.2:3b");
+    const FULL_ENV = withProfile("COMPOSE_PROFILES=processing,ai", "TIKA_URL=http://orbit-tika:9998", "OLLAMA_MODEL=llama3.2:3b");
+    const PROCESSING_ENV = withProfile("COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998");
+    const capacityLines = (lines: string[]) => lines.filter((line) => line.startsWith("Host capacity check:"));
+
+    it.each([
+      ["ai", AI_ENV],
+      ["full", FULL_ENV],
+    ])("checks the host's capacity once and reports it for a kept %s profile, as the wizard does for a chosen one", async (profileName, env) => {
+      const target = sandbox("orbit-install-target-");
+      const tree = launcherTree({ env, secrets: TREE_SECRETS });
+      let checks = 0;
+      const { outcome, said, notices } = await runWithTree(target, tree, { requestedProfile: undefined }, {
+        capacity: () => {
+          checks += 1;
+          return "below";
+        },
+      });
+      expect(outcome).toMatchObject({ status: "ok", fresh: true, selectedProfile: profileName });
+      expect(checks).toBe(1);
+      const lines = capacityLines([...said, ...notices]);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(/below/);
+    });
+
+    // Passes today and must keep passing: only the local-AI profiles ask about capacity.
+    it("does not check capacity for a kept processing profile", async () => {
+      const target = sandbox("orbit-install-target-");
+      const tree = launcherTree({ env: PROCESSING_ENV, secrets: TREE_SECRETS });
+      let checks = 0;
+      const { outcome, said, notices } = await runWithTree(target, tree, { requestedProfile: undefined }, {
+        capacity: () => {
+          checks += 1;
+          return "sufficient";
+        },
+      });
+      expect(outcome).toMatchObject({ status: "ok", selectedProfile: "processing" });
+      expect(checks).toBe(0);
+      expect(capacityLines([...said, ...notices])).toEqual([]);
+    });
+  });
+
+  // RG-R5 (#1536): the handed-in file's profile lines match no known profile
+  // and ORBIT_INSTALL_PROFILE is unset. Running the same command again cannot
+  // succeed, so the outcome must not say "retry" (docs/engine-events.md: the
+  // only other action is "abort", for a failure no retry can clear), and it
+  // must name the edit.
+  describe("a handed-in configuration whose profile cannot be read (RG-R5)", () => {
+    const BAD_PROFILE_ENV = [TREE_ENV.trimEnd(), "COMPOSE_PROFILES=ai", "TIKA_URL=http://orbit-tika:9998", ""].join("\n");
+
+    it("fails with action abort, not retry, and names the lines to edit", async () => {
+      const target = sandbox("orbit-install-target-");
+      const tree = launcherTree({ env: BAD_PROFILE_ENV, secrets: TREE_SECRETS });
+      const { outcome } = await runWithTree(target, tree, { requestedProfile: undefined });
+      expect(outcome).toMatchObject({ status: "failed", phase: "configuration", reason: "configuration-failure" });
+      if (outcome.status !== "failed") return;
+      expect(outcome.action).toBe("abort");
+      const text = [outcome.message, ...(outcome.guidance ?? [])].join("\n");
+      expect(text).toContain("COMPOSE_PROFILES");
+      expect(readdirSync(target)).toEqual([]);
+    });
+  });
+
+  // D-F5 (#1536): the tree holds a .orbit-secrets and no .env-orbit. The
+  // secrets are not taken in (there is no configuration to go with them), and
+  // the operator must be told so rather than get fresh secrets in silence.
+  describe("a tree that holds only a .orbit-secrets (D-F5)", () => {
+    const told = (lines: string[]) => lines.some((line) => line.includes("ORBIT_LAUNCHER_CONFIG_TREE") && line.includes(".orbit-secrets"));
+
+    it("tells the operator it was not used, on a guided install at a terminal", async () => {
+      const target = sandbox("orbit-install-target-");
+      const tree = launcherTree({ secrets: TREE_SECRETS });
+      const treeBefore = snapshot(tree);
+      const terminal = scriptedTerminal(["install", "standard", "apply", "apply"]);
+      const answers: ConfigurationAnswers = {
+        guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "local" }),
+        oidcSecret: () => {
+          throw new Error("local-only: no secret is asked");
+        },
+      };
+      const { outcome, said, notices } = await runWithTree(target, tree, { interactive: true }, { terminal, answers });
+      const shown = terminal.output().split("\n");
+      const outcomeText = outcome.status === "failed" ? [outcome.message, ...(outcome.guidance ?? [])] : [];
+      expect(told([...notices, ...said, ...shown, ...outcomeText]), `nothing told the operator; notices=${JSON.stringify(notices)}`).toBe(true);
+      expect(snapshot(tree)).toEqual(treeBefore);
+    });
+
+    it("tells the operator it was not used, with no terminal", async () => {
+      const target = sandbox("orbit-install-target-");
+      const tree = launcherTree({ secrets: TREE_SECRETS });
+      const { outcome, said, notices } = await runWithTree(target, tree);
+      const outcomeText = outcome.status === "failed" ? [outcome.message, ...(outcome.guidance ?? [])] : [];
+      expect(told([...notices, ...said, ...outcomeText]), `nothing told the operator; notices=${JSON.stringify(notices)}`).toBe(true);
+    });
+  });
+
+  // O-R2 (#1536): copying the launcher's configuration into the install's
+  // scratch directory fails (a full /tmp in the engine). It must come back as
+  // the normal configuration failure, with the launcher's tree handed back,
+  // not as an error thrown out of runInstall. The failure is real, not mocked:
+  // the test makes a directory of the name the copy creates, once the assets
+  // are staged and the scratch directory is known.
+  describe("a write failure while copying the handed-in configuration into scratch (O-R2)", () => {
+    it("is a configuration failure, hands the tree back once, and leaves the target and scratch clean", async () => {
+      const target = sandbox("orbit-install-target-");
+      const tree = launcherTree({ env: TREE_ENV, secrets: TREE_SECRETS });
+      const treeBefore = snapshot(tree);
+      const scratchRoot = sandbox("orbit-install-scratch-root-");
+      const context: InstallContext = {
+        targetDir: target,
+        requestedAction: undefined,
+        plainMode: false,
+        interactive: false,
+        resolvedReference: REFERENCE,
+        channel: "latest",
+        facts: facts(),
+        assetsRoot: assetsRoot(),
+        launcherConfigTree: tree,
+      };
+      let handedBack = 0;
+      vi.stubEnv("TMPDIR", scratchRoot);
+      try {
+        const outcome = await runInstall(
+          context,
+          {
+            answers: noAnswers,
+            fetchImpl: discoveryFetch(),
+            capacity: () => "sufficient",
+            onConfigurationFailure: () => {
+              handedBack += 1;
+            },
+          },
+          (event) => {
+            if (event.phase !== "assets" || event.state !== "completed") return;
+            for (const name of readdirSync(scratchRoot)) {
+              if (name.startsWith("orbit-install-scratch-")) mkdirSync(join(scratchRoot, name, ".env-orbit"));
+            }
+          },
+        );
+        expect(outcome).toMatchObject({ status: "failed", phase: "configuration", reason: "configuration-failure" });
+      } finally {
+        vi.unstubAllEnvs();
+      }
+      expect(handedBack).toBe(1);
+      expect(readdirSync(target)).toEqual([]);
+      expect(readdirSync(scratchRoot)).toEqual([]);
+      expect(snapshot(tree)).toEqual(treeBefore);
     });
   });
 
