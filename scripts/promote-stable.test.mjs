@@ -285,7 +285,7 @@ function run({
 } = {}) {
   const stubs = makeStubs();
   stubs.seedDigest(`${IMAGE}:preview`, previewTagDigest);
-  stubs.seedDigest(`${IMAGE}:sha-${mainHead}`, shaTagDigest);
+  if (shaTagDigest) stubs.seedDigest(`${IMAGE}:sha-${mainHead}`, shaTagDigest);
   if (versionTagDigest) stubs.seedDigest(`${IMAGE}:${labelVersion}`, versionTagDigest);
   if (latestTagDigest) stubs.seedDigest(`${IMAGE}:latest`, latestTagDigest);
 
@@ -294,7 +294,8 @@ function run({
       encoding: "utf8",
       env: {
         PATH: `${stubs.dir}:${process.env.PATH}`,
-        PREVIEW_DIGEST: previewDigestInput,
+        // null leaves PREVIEW_DIGEST out of the environment altogether.
+        PREVIEW_DIGEST: previewDigestInput ?? undefined,
         CI_COMMIT_BRANCH: "main",
         CI_API_V4_URL: "https://gitlab.tomlawson.io/api/v4",
         CI_PROJECT_ID: "49",
@@ -342,13 +343,79 @@ describe("promote-stable.test.mjs expected version", () => {
 });
 
 describe("scripts/ci/promote-stable.sh", () => {
-  it("refuses a missing or malformed PREVIEW_DIGEST, without calling docker or git", () => {
-    for (const bad of ["", "not-a-digest", `sha256:${"1".repeat(63)}`, `sha1:${"1".repeat(64)}`]) {
+  it("refuses a malformed PREVIEW_DIGEST, without calling docker or git", () => {
+    // An unset variable is no longer refused (#1482); see the tests below.
+    for (const bad of ["not-a-digest", `sha256:${"1".repeat(63)}`, `sha1:${"1".repeat(64)}`]) {
       const { result, calls } = run({ previewDigestInput: bad });
       expect(result.status, bad).not.toBe(0);
       expect(result.stderr, bad).toContain("PREVIEW_DIGEST");
       expect(calls().length, bad).toBe(0);
     }
+  });
+
+  // #1482: PREVIEW_DIGEST is optional. Unset, the script takes the digest that
+  // :sha-<main's commit> resolves to, and :preview must agree with it.
+  describe("with PREVIEW_DIGEST unset (#1482)", () => {
+    it("promotes the digest :sha-<commit> resolves to when :preview resolves to the same", () => {
+      const { result, calls } = run({ previewDigestInput: null });
+      expect(result.status, result.stderr).toBe(0);
+      const recordedCalls = calls();
+      const createCall = recordedCalls.find(
+        (call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create"),
+      );
+      expect(createCall).toBeDefined();
+      expect(createCall[1]).toContain(`--tag ${IMAGE}:${VERSION}`);
+      expect(createCall[1]).toContain(`--tag ${IMAGE}:latest`);
+      expect(createCall[1]).toContain(`${IMAGE}@${PREVIEW_DIGEST}`);
+      // The evidence gate is asked about the digest the script chose.
+      const verifyCall = recordedCalls.find((call) => call[0] === "verify");
+      expect(verifyCall).toBeDefined();
+      expect(verifyCall[2]).toBe(PREVIEW_DIGEST);
+      expect(verifyCall[3]).toBe(GOOD_SHA);
+      const curlCall = recordedCalls.find((call) => call[0] === "curl");
+      expect(curlCall).toBeDefined();
+      expect(curlCall.join(" ")).toContain(`Container digest: ${PREVIEW_DIGEST}`);
+    });
+
+    it("refuses when :preview resolves to a different digest, without promoting", () => {
+      const { result, calls } = run({ previewDigestInput: null, previewTagDigest: OTHER_DIGEST });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(`${IMAGE}:preview`);
+      const recordedCalls = calls();
+      expect(recordedCalls.some((call) => call[0] === "docker" && call[1].startsWith("pull "))).toBe(false);
+      expect(
+        recordedCalls.some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),
+      ).toBe(false);
+      expect(recordedCalls.some((call) => call[0] === "curl")).toBe(false);
+    });
+
+    it("refuses and names the tag when :sha-<commit> resolves to nothing, without promoting", () => {
+      const { result, calls } = run({ previewDigestInput: null, shaTagDigest: null });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(`${IMAGE}:sha-${GOOD_SHA}`);
+      const recordedCalls = calls();
+      expect(recordedCalls.some((call) => call[0] === "docker" && call[1].startsWith("pull "))).toBe(false);
+      expect(
+        recordedCalls.some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),
+      ).toBe(false);
+      expect(recordedCalls.some((call) => call[0] === "curl")).toBe(false);
+    });
+
+    it("logs that the digest was read from :sha-<commit>, and prints it", () => {
+      const { result } = run({ previewDigestInput: null });
+      expect(result.status, result.stderr).toBe(0);
+      const log = `${result.stdout}\n${result.stderr}`;
+      expect(log).toContain(`${IMAGE}:sha-${GOOD_SHA}`);
+      expect(log).toContain(PREVIEW_DIGEST);
+    });
+  });
+
+  it("logs that the digest came from PREVIEW_DIGEST when it is set, and prints it (#1482)", () => {
+    const { result } = run();
+    expect(result.status, result.stderr).toBe(0);
+    const log = `${result.stdout}\n${result.stderr}`;
+    expect(log).toContain("PREVIEW_DIGEST");
+    expect(log).toContain(PREVIEW_DIGEST);
   });
 
   it("refuses off main, however the pipeline was started, without calling docker or git (#1564)", () => {
