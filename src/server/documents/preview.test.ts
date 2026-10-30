@@ -758,7 +758,10 @@ describe("renderDocumentPagePreview", () => {
         }
         expect(ticks).toBeGreaterThanOrEqual(Math.floor((elapsed / 50) * 0.6));
         expect(peakRss - rssBefore).toBeLessThan(150 * MB);
-      }, 30_000);
+        /* Longer than the 30 s render budget it runs under, so a bomb that
+           runs to the budget on a loaded host reaches the 422 branch rather
+           than the test's own timeout (#1549). */
+      }, 45_000);
     });
 
     it("draws a 300 dpi A4 scan to a PNG of the page's shape with the scan's pixels in it", async () => {
