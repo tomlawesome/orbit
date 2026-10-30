@@ -274,6 +274,7 @@ timeout on this one case rather than a global raise.
 ## mail-relay-sender-check-failures.test.ts "finding 1: a mailer that never answers > ends the request at the send deadline (shortened to 300 ms here) with a stable 503"
 
 - 2026-10-22 · 2f16facd (!1081; browser-test and flakes-log changes only since the green 39134f33 run, nothing near mail) · pipeline 2878 / `integration` job 38382 · `expected 429 to be 503`: the request met the rate limit instead of the send deadline. Retried as job 38407. First sighting.
+- 2026-10-30 · 38f86955 (!1117; the batch touches nothing near mail) · pipeline 3213 / `integration` job 42069 · `expected 429 to be 503` again: rate limit before the send deadline. Second sighting.
 
 ## v19-mail-sender-check.spec.ts:123 "a member sends the check email from the settings mail screen, opens the link, and the relay starts listening" — desktop-webkit
 
