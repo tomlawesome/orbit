@@ -79,6 +79,21 @@
       "packageNameTemplate": "gitleaks/gitleaks",
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "The throwaway registry:<version>@sha256:<digest> pin the installer tests push to is written out in scripts/test-repair-journeys.sh, scripts/test-backup-restore.sh, scripts/test-install-acceptance.sh, scripts/ci/start-installer-registry.sh and .gitlab-ci.yml (#1536 T-Q5). No manager reads a pin inside a shell script's default, so the four scripts drifted by hand while the CI copy moved. This reads the tag and digest in every one of the five files, so they are proposed together and a bump cannot leave one behind; scripts/container-build-guards.test.mjs and scripts/supply-chain-policy.test.mjs fail if the copies disagree. The same pattern reads the repair journeys' busybox canary default (D-SEC3). RE2 has no lookbehind, so the character before the name is matched instead of asserted (#1218); the CI file is also read by the _IMAGE: manager above, and finds the same value.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^scripts/test-repair-journeys\\.sh$/",
+        "/^scripts/test-backup-restore\\.sh$/",
+        "/^scripts/test-install-acceptance\\.sh$/",
+        "/^scripts/ci/start-installer-registry\\.sh$/",
+        "/^\\.gitlab-ci\\.yml$/"
+      ],
+      "matchStrings": [
+        "[\\s\"'{-](?<depName>registry|busybox):(?<currentValue>[0-9][^\\s@}\"']*)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker"
     }
   ],
   "vulnerabilityAlerts": {

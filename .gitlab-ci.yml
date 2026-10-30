@@ -3263,7 +3263,7 @@ repair_journeys:
     # The hostile-value journey's disposable label vector (ai/orbit#1111):
     # same reasoning as the registry image above, but no digest -- see
     # scripts/test-repair-journeys.sh.
-    ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE: busybox:stable
+    ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE: busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4
   rules:
     - *not_on_main_push
     - *not_scheduled
