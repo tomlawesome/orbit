@@ -2514,9 +2514,10 @@ smoke:
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
     # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
     # the job's exit code list for this rule, so a failed suite in a manually
-    # started job showed as a warning. Left unset, the job-level list decides. Cost: GitLab treats a `when: manual` rule without `allow_failure`
-    # as blocking, so a pipeline that reaches it (a branch with no merge request)
-    # shows "blocked" until the job is played or the pipeline is left alone.
+    # started job showed as a warning. Left unset, the job-level list decides.
+    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
+    # pipeline started by hand on a working branch (the only one that reaches
+    # this rule) shows "blocked" until the job is played.
     - when: manual
   script:
     - *reach_helpers
@@ -2631,9 +2632,10 @@ smoke_firefox:
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
     # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
     # the job's exit code list for this rule, so a failed suite in a manually
-    # started job showed as a warning. Left unset, the job-level list decides. Cost: GitLab treats a `when: manual` rule without `allow_failure`
-    # as blocking, so a pipeline that reaches it (a branch with no merge request)
-    # shows "blocked" until the job is played or the pipeline is left alone.
+    # started job showed as a warning. Left unset, the job-level list decides.
+    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
+    # pipeline started by hand on a working branch (the only one that reaches
+    # this rule) shows "blocked" until the job is played.
     - when: manual
   script:
     - *reach_helpers
@@ -2776,9 +2778,10 @@ smoke_webkit:
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
     # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
     # the job's exit code list for this rule, so a failed suite in a manually
-    # started job showed as a warning. Left unset, the job-level list decides. Cost: GitLab treats a `when: manual` rule without `allow_failure`
-    # as blocking, so a pipeline that reaches it (a branch with no merge request)
-    # shows "blocked" until the job is played or the pipeline is left alone.
+    # started job showed as a warning. Left unset, the job-level list decides.
+    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
+    # pipeline started by hand on a working branch (the only one that reaches
+    # this rule) shows "blocked" until the job is played.
     - when: manual
   script:
     - *reach_helpers
@@ -2891,9 +2894,10 @@ smoke_webkit_mobile:
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
     # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
     # the job's exit code list for this rule, so a failed suite in a manually
-    # started job showed as a warning. Left unset, the job-level list decides. Cost: GitLab treats a `when: manual` rule without `allow_failure`
-    # as blocking, so a pipeline that reaches it (a branch with no merge request)
-    # shows "blocked" until the job is played or the pipeline is left alone.
+    # started job showed as a warning. Left unset, the job-level list decides.
+    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
+    # pipeline started by hand on a working branch (the only one that reaches
+    # this rule) shows "blocked" until the job is played.
     - when: manual
   script:
     - *reach_helpers
