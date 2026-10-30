@@ -160,6 +160,12 @@ describe("refuses anything else with request_malformed (#1566)", () => {
     ["no file part", rawMultipart(BOUNDARY, [field("householdId", wellFormedFields.householdId), field("passphrase", wellFormedFields.passphrase)])],
     ["an opening delimiter with another boundary", rawMultipart(BOUNDARY, [field("householdId", wellFormedFields.householdId), filePart()], { opening: "--some-other-boundary" })],
     ["a body that ends without its closing delimiter", rawMultipart(BOUNDARY, [field("householdId", wellFormedFields.householdId), filePart()], { closing: false })],
+    ["a field named twice", rawMultipart(BOUNDARY, [field("householdId", wellFormedFields.householdId), field("householdId", wellFormedFields.householdId), field("passphrase", wellFormedFields.passphrase), filePart()])],
+    ["bytes after the closing delimiter", Buffer.concat([rawMultipart(BOUNDARY, [field("householdId", wellFormedFields.householdId), filePart()]), Buffer.from("trailing junk")])],
+    ["two bytes that are not a CRLF in place of the final CRLF", (() => { const body = rawMultipart(BOUNDARY, [field("householdId", wellFormedFields.householdId), filePart()]); return Buffer.concat([body.subarray(0, body.length - 2), Buffer.from("XY")]); })()],
+    ["more than one CRLF after the closing delimiter", Buffer.concat([rawMultipart(BOUNDARY, [field("householdId", wellFormedFields.householdId), filePart()]), Buffer.from("\r\n")])],
+    ["a file part's header block over 16 KiB", rawMultipart(BOUNDARY, [field("householdId", wellFormedFields.householdId), { ...filePart(), filename: "a".repeat(17 * 1024) }])],
+    ["a text field's header block over 16 KiB", rawMultipart(BOUNDARY, [field("n".repeat(17 * 1024), "x"), field("householdId", wellFormedFields.householdId), filePart()])],
     ["a body that is not multipart at all", Buffer.from(JSON.stringify({ householdId: wellFormedFields.householdId, archive: {} }))],
   ];
 
@@ -182,6 +188,20 @@ describe("refuses anything else with request_malformed (#1566)", () => {
 
     expect(stats.done).toBe(true);
     expect(stats.pulledBytes).toBe(body.length);
+  });
+});
+
+describe("the strictness has a limit, not a ban (#1566)", () => {
+  it("accepts one CRLF after the closing delimiter, none, and a header block just under 16 KiB (the controls for the refusals above)", async () => {
+    const fields = [{ name: "householdId", value: wellFormedFields.householdId }];
+    const file = { name: "archive", filename: "a".repeat(15 * 1024), value: trickyContent };
+    const withCrlf = rawMultipart(BOUNDARY, [...fields, file]);
+    expect(withCrlf.subarray(-2).toString("latin1"), "fixture: ends in one CRLF").toBe("\r\n");
+    for (const body of [withCrlf, withCrlf.subarray(0, withCrlf.length - 2)]) {
+      const read = await readAll(chunkedStream(body, [4_096]), BOUNDARY);
+      expect(read.fields).toEqual({ householdId: wellFormedFields.householdId });
+      expect(read.bytes.equals(trickyContent)).toBe(true);
+    }
   });
 });
 

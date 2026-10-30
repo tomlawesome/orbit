@@ -21,7 +21,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { items } from "@/db/schema";
 import { encryptPortableArchive } from "@/server/portable-archive";
-import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, sessionHeaders, type IntegrationFixture } from "./support/fixtures";
 import {
   archiveFileBytes,
   archiveForm,
@@ -32,10 +32,15 @@ import {
   type ArchiveUploadFields,
 } from "./support/portable-archive-upload";
 import { errorOf, postForm, postUpload, proofCookie } from "./support/portable-archive-routes";
-import { loadRoute, type RouteHandler } from "./support/request-event";
+import { createRequestEvent, loadRoute, type RouteHandler } from "./support/request-event";
 
 const { POST: previewRoute } = await loadRoute("portable-archives/preview");
 const { POST: importRoute } = await loadRoute("portable-archives/import");
+
+/** The archive slot hooks.server.js puts in front of both routes: the body under its 408 watchdog. */
+const slot = (await import(/* @vite-ignore */ new URL("../../web/src/lib/server/archive-slot.js", import.meta.url).href)) as {
+  holdArchiveSlot(routeId: string, request: Request, options?: { stallMs?: number; deadlineMs?: number }): null | Response | { request: Request; release(): void };
+};
 
 const PREVIEW = "/api/portable-archives/preview";
 const IMPORT = "/api/portable-archives/import";
@@ -153,6 +158,13 @@ describe("a body that is not the client's shape is refused with 400 request_malf
       ["no file part", multipart, rawMultipart(BOUNDARY, fields)],
       ["a broken delimiter", multipart, rawMultipart(BOUNDARY, [...fields, filePart], { opening: "--not-the-boundary" })],
       ["no closing delimiter", multipart, rawMultipart(BOUNDARY, [...fields, filePart], { closing: false })],
+      ["a field named twice", multipart, rawMultipart(BOUNDARY, [fields[0], fields[0], ...fields.slice(1), filePart])],
+      ["bytes after the closing delimiter", multipart, Buffer.concat([rawMultipart(BOUNDARY, [...fields, filePart]), Buffer.from("trailing junk")])],
+      ["two bytes that are not a CRLF in place of the final CRLF", multipart, Buffer.concat([rawMultipart(BOUNDARY, [...fields, filePart]).subarray(0, -2), Buffer.from("XY")])],
+      ["more than one CRLF after the closing delimiter", multipart, Buffer.concat([rawMultipart(BOUNDARY, [...fields, filePart]), Buffer.from("\r\n")])],
+      ["a file part's header block over 16 KiB", multipart, rawMultipart(BOUNDARY, [...fields, { ...filePart, filename: "a".repeat(17 * 1024) }])],
+      ["a text field's header block over 16 KiB", multipart, rawMultipart(BOUNDARY, [{ name: "n".repeat(17 * 1024), value: "x" }, ...fields, filePart])],
+      ["a file part with the wrong name", multipart, rawMultipart(BOUNDARY, [...fields, { ...filePart, name: "upload" }])],
       ["today's JSON body (not multipart)", "application/json", Buffer.from(JSON.stringify({
         householdId: fixture.household.id, archive: JSON.parse(file.toString("utf8")), passphrase: PASSPHRASE, ...(withConflicts ? { conflictItemIds: [] } : {}),
       }))],
@@ -291,4 +303,158 @@ describe("refusals before the file is read (#1566)", () => {
     expect(response.status, JSON.stringify(await errorOf(response).catch(() => ({})))).toBe(200);
     expect(((await response.json()) as { preview: { items: number } }).preview.items).toBe(1);
   });
+});
+
+describe("a missing field is 422 validation_failed, as before the upload was multipart (#1566)", () => {
+  const BOUNDARY = "----orbit-1566-missing-boundary";
+  const multipart = `multipart/form-data; boundary=${BOUNDARY}`;
+  type Field = "householdId" | "passphrase" | "conflictItemIds";
+  const cases: Array<["preview" | "import", Field]> = [
+    ["preview", "passphrase"],
+    ["preview", "householdId"],
+    ["import", "passphrase"],
+    ["import", "householdId"],
+    ["import", "conflictItemIds"],
+  ];
+
+  it.each(cases)("%s: a body with no %s answers 422 with that field in the issues, not 400", async (route, missing) => {
+    // Catches: "a bad field is still validation_failed 422" (plan, note 46292) lost to a malformed-body check on absent fields.
+    const fixture = await createIntegrationFixture(`arch1566-missing-${route}-${missing}`);
+    const owner = await fixture.session("owner");
+    const before = await itemCount(fixture.household.id);
+    const fields = [
+      { name: "householdId", value: fixture.household.id },
+      { name: "passphrase", value: PASSPHRASE },
+      ...(route === "import" ? [{ name: "conflictItemIds", value: "[]" }] : []),
+    ].filter((field) => field.name !== missing);
+    const bytes = rawMultipart(BOUNDARY, [...fields, { name: "archive", filename: "household.orbit-archive.json", value: archiveFor(fixture) }]);
+
+    const response = await postUpload(route === "preview" ? previewRoute : importRoute, {
+      path: route === "preview" ? PREVIEW : IMPORT,
+      session: owner,
+      body: new Uint8Array(bytes),
+      contentType: multipart,
+      cookie: route === "import" ? await proofCookie(owner, "archive_import") : undefined,
+    });
+
+    expect(response.status, JSON.stringify(await errorOf(response).catch(() => ({})))).toBe(422);
+    const error = await errorOf(response);
+    expect(error.code).toBe("validation_failed");
+    expect(error.issues).toEqual(expect.arrayContaining([expect.objectContaining({ path: [missing] })]));
+    expect(await itemCount(fixture.household.id), "nothing was imported").toBe(before);
+    expect(await scratchFiles(), "no scratch file left").toEqual([]);
+  });
+});
+
+describe("a wrong name on the file part is refused before the step-up proof is spent (#1566)", () => {
+  const BOUNDARY = "----orbit-1566-name-boundary";
+  const multipart = `multipart/form-data; boundary=${BOUNDARY}`;
+
+  it("import: the proof that met a mis-named file part still works for a good body", async () => {
+    // Catches: the part's name checked only once the file is taken, after the proof was spent (the person would be asked to prove themselves again for a request the client never makes).
+    const fixture = await createIntegrationFixture("arch1566-name-before-proof");
+    const owner = await fixture.session("owner");
+    const before = await itemCount(fixture.household.id);
+    const cookie = await proofCookie(owner, "archive_import");
+    const file = archiveFor(fixture);
+    const fields = [
+      { name: "householdId", value: fixture.household.id },
+      { name: "passphrase", value: PASSPHRASE },
+      { name: "conflictItemIds", value: "[]" },
+    ];
+
+    const refused = await postUpload(importRoute, {
+      path: IMPORT,
+      session: owner,
+      body: new Uint8Array(rawMultipart(BOUNDARY, [...fields, { name: "upload", filename: "household.orbit-archive.json", value: file }])),
+      contentType: multipart,
+      cookie,
+    });
+    expect(refused.status).toBe(400);
+    expect(await errorOf(refused)).toMatchObject({ code: "request_malformed" });
+    expect(await itemCount(fixture.household.id), "nothing was imported").toBe(before);
+
+    // The same proof, on a body the client would really send.
+    const accepted = await postForm(importRoute, IMPORT, owner, archiveForm({ householdId: fixture.household.id, passphrase: PASSPHRASE, conflictItemIds: [] }, file), cookie);
+    expect(accepted.status, JSON.stringify(await errorOf(accepted).catch(() => ({})))).toBe(200);
+    expect(await itemCount(fixture.household.id)).toBe(before + 1);
+  });
+});
+
+describe("a body that stops in the middle of the file leaves no scratch file (#1566)", () => {
+  /**
+   * The upload's bytes in pieces up to a point inside the archive's
+   * ciphertext, by which time the scratch file exists; then either the source
+   * fails ("abort": a client that went away) or it goes quiet until `resume`
+   * ("stall": a client that stopped sending).
+   */
+  function stoppingBody(bytes: Buffer, stopAt: number, how: "abort" | "stall") {
+    let offset = 0;
+    let stopped = false;
+    let resume!: () => void;
+    const resumed = new Promise<void>((done) => { resume = done; });
+    const seen = { scratchAtStop: [] as string[] };
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        if (offset < stopAt || stopped) {
+          const end = Math.min(offset + 16 * 1024, stopped ? bytes.length : stopAt);
+          if (end <= offset) { controller.close(); return; }
+          controller.enqueue(bytes.slice(offset, end));
+          offset = end;
+          return;
+        }
+        stopped = true;
+        await vi.waitFor(async () => {
+          seen.scratchAtStop = await scratchFiles();
+          expect(seen.scratchAtStop, "the scratch file exists when the body stops: the stop is mid-file").toHaveLength(1);
+        }, { timeout: 5_000, interval: 10 });
+        if (how === "abort") controller.error(new Error("aborted"));
+        else await resumed;
+      },
+    }, { highWaterMark: 0 });
+    return { body, seen, resume };
+  }
+
+  for (const route of ["preview", "import"] as const) {
+    for (const how of ["abort", "stall"] as const) {
+      it(`${route}: ${how === "abort" ? "the client going away" : "the 408 watchdog cutting a stalled body"} mid-file removes the scratch file`, async () => {
+        // Catches: a scratch file left in the 320m tmpfs by a body that stops after the file part began.
+        const fixture = await createIntegrationFixture(`arch1566-stop-${route}-${how}`);
+        const owner = await fixture.session("owner");
+        const before = await itemCount(fixture.household.id);
+        const file = archiveFor(fixture);
+        const fields = { householdId: fixture.household.id, passphrase: PASSPHRASE, ...(route === "import" ? { conflictItemIds: [] } : {}) };
+        const upload = await encodeForm(archiveForm(fields, file));
+        const stopAt = fileContentOffset(upload.bytes) + file.indexOf('"ciphertext":"') + '"ciphertext":"'.length + 40;
+        const { body, seen, resume } = stoppingBody(upload.bytes, stopAt, how);
+        const cookie = route === "import" ? await proofCookie(owner, "archive_import") : undefined;
+        const { event, applyTo } = createRequestEvent({
+          url: `http://127.0.0.1:3000${route === "preview" ? PREVIEW : IMPORT}`,
+          method: "POST",
+          headers: sessionHeaders(owner, { "content-type": upload.contentType, ...(cookie ? { cookie } : {}) }),
+          body,
+        });
+        // As hooks.server.js does for the archive routes: the slot, and the body under the watchdog.
+        const held = slot.holdArchiveSlot(route === "preview" ? PREVIEW : IMPORT, event.request, { stallMs: 300, deadlineMs: 60_000 });
+        if (held === null || held instanceof Response) throw new Error("the archive slot should have been free");
+        event.request = held.request;
+
+        try {
+          const outcome = await Promise.resolve((route === "preview" ? previewRoute : importRoute)(event)).then((response) => applyTo(response), (error: unknown) => error);
+
+          expect(seen.scratchAtStop, "the scratch file existed when the body stopped").toHaveLength(1);
+          if (how === "stall") {
+            expect(outcome).toBeInstanceOf(Response);
+            expect((outcome as Response).status).toBe(408);
+            expect(await errorOf(outcome as Response)).toMatchObject({ code: "request_timeout" });
+          }
+          expect(await scratchFiles(), "no scratch file left").toEqual([]);
+          expect(await itemCount(fixture.household.id), "nothing was imported").toBe(before);
+        } finally {
+          held.release();
+          resume();
+        }
+      }, 60_000);
+    }
+  }
 });

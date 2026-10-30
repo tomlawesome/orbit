@@ -661,3 +661,62 @@ describe("the upload decrypts to the same bytes however it is split (#1566)", ()
     }
   }, 300_000);
 });
+
+describe("everything outside the ciphertext is capped, so a stuffed envelope is refused unread (#1566)", () => {
+  // The cap is MAX_ARCHIVE_FILE_BYTES - MAX_ARCHIVE_CIPHERTEXT_CHARACTERS (64 KiB): the envelope Orbit writes is well under a KiB.
+  const STUFFING_BYTES = 64 * MIB;
+
+  /**
+   * A real archive file with a huge run of `fill` (produced lazily, never
+   * held) put between `before` and `after`, with how many bytes of the file
+   * the reader pulled. `offset` is where the stuffing begins.
+   */
+  function stuffedFile(shape: (envelope: { head: string; ciphertext: string; tail: string }) => { before: string; after: string }, fill: string) {
+    const block = Buffer.alloc(65_536, fill);
+    const archive = encryptPortableArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(5_000)))), passphrase);
+    const { before, after } = shape({
+      head: `{"version":1,"algorithm":"aes-256-gcm","kdf":"scrypt","salt":"${archive.salt}","iv":"${archive.iv}",`,
+      ciphertext: `"ciphertext":"${archive.ciphertext}"`,
+      tail: `"authTag":"${archive.authTag}"`,
+    });
+    const head = Buffer.from(before);
+    const tail = Buffer.from(after);
+    const stats = { pulledBytes: 0 };
+    let sent = 0;
+    let step: "head" | "stuffing" | "tail" | "done" = "head";
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        let chunk: Buffer;
+        if (step === "head") { step = "stuffing"; chunk = head; }
+        else if (step === "stuffing" && sent < STUFFING_BYTES) { sent += block.length; chunk = block; }
+        else if (step === "stuffing") { step = "done"; chunk = tail; }
+        else { controller.close(); return; }
+        stats.pulledBytes += chunk.length;
+        controller.enqueue(new Uint8Array(chunk));
+      },
+    }, { highWaterMark: 0 });
+    return { stream, stats, offset: head.length };
+  }
+
+  const shapes: Array<[string, Parameters<typeof stuffedFile>[0], string]> = [
+    ["an authTag after the ciphertext that is huge", (e) => ({ before: `${e.head}${e.ciphertext},"authTag":"`, after: `"}` }), "A"],
+    ["an authTag before the ciphertext that is huge", (e) => ({ before: `${e.head}"authTag":"`, after: `",${e.ciphertext}}` }), "A"],
+    ["an extra key with a huge value ahead of the ciphertext", (e) => ({ before: `${e.head}"extra":"`, after: `",${e.ciphertext},${e.tail}}` }), "A"],
+    ["an extra key with a huge value after the ciphertext", (e) => ({ before: `${e.head}${e.ciphertext},${e.tail},"extra":"`, after: `"}` }), "A"],
+    ["a huge run of whitespace after the ciphertext", (e) => ({ before: `${e.head}${e.ciphertext},${e.tail}}`, after: "" }), " "],
+  ];
+
+  it.each(shapes)("refuses %s as archive_invalid, long before the end of the file, leaving no file", async (_label, shape, fill) => {
+    // Catches: an envelope read with no cap on what is not ciphertext (the process would hold the stuffing, a string at a time, to the end of the file).
+    const stuffed = stuffedFile(shape, fill);
+    seedEmptyHousehold();
+    const watcher = observe();
+
+    await expect(previewPortableImport(userId, householdId, stuffed.stream, passphrase)).rejects.toMatchObject({ code: "archive_invalid", status: 422 });
+
+    const result = watcher.stop();
+    expect(result.remaining, "no scratch file left").toEqual([]);
+    // The cap is 64 KiB past the ciphertext; the reader reads a piece at a time, so allow a few pieces, not the stuffing's 64 MiB.
+    expect(stuffed.stats.pulledBytes, "bytes of the file pulled before the refusal").toBeLessThan(stuffed.offset + 1 * MIB);
+  }, 120_000);
+});
