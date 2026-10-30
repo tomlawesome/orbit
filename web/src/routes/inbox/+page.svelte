@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { approveWithOperation, dismissReceipt, readInboxScreen, wordsOf } from "$lib/data/workspace.js";
+  import { readInboxScreen } from "$lib/data/workspace.js";
   import { ago, agoLong, dayMonth, dayMonthYear } from "$lib/format.js";
   import { daysWords } from "$lib/data/engine-limits.js";
   import { LOCKED, fieldState, receiptWords } from "$lib/data/metadata-status.js";
@@ -14,6 +14,7 @@
   import { resolve } from "$app/paths";
   import { SvelteMap } from "svelte/reactivity";
   import Pocket from "./pocket.svelte";
+  import { createReceiptActs } from "./acts.js";
   import "./inbox.css";
 
   /**
@@ -47,7 +48,18 @@
   let busy = $state(null);
   /** @type {string | null} */
   let problem = $state(null);
-  const operationIds = new SvelteMap();
+  /* The decision itself is acts.js's, the phone's too: here, the arm and
+     where the busy receipt and its problem show. */
+  const receiptActs = createReceiptActs({
+    view: need,
+    operationIds: new SvelteMap(),
+    reload: async () => { view = await readInboxScreen(); },
+    say: (id, words) => {
+      problem = words;
+      if (words) problemId = id;
+    },
+    busy: (id) => { busy = id; },
+  });
 
   /**
    * Only `id` is ever read here, so this takes anything with one -- a review
@@ -59,29 +71,7 @@
   async function tap(receipt, act, button) {
     problem = null;
     if (!arm.tap(`${receipt.id}:${act}`, button)) return;
-    busy = receipt.id;
-    try {
-      if (act === "approve") {
-        const found = need().suggestions.find((one) => one.receiptId === receipt.id);
-        /* The review lane's own receipts are exactly receiptSuggestionsOf's
-           input, so a receipt armed to approve is always found here. */
-        const suggestion = /** @type {import('$lib/data/workspace.js').ReceiptSuggestion} */ (found);
-        const result = await approveWithOperation(suggestion, operationIds, need().primary);
-        if ("partial" in result) {
-          problem = result.message;
-          problemId = receipt.id;
-          return;
-        }
-      } else {
-        await dismissReceipt(receipt.id);
-      }
-      view = await readInboxScreen();
-    } catch (error) {
-      problem = wordsOf(error);
-      problemId = receipt.id;
-    } finally {
-      busy = null;
-    }
+    await receiptActs.decide(receipt, act);
   }
 
   /* Filed dates carry their year only once it stops being obvious. */

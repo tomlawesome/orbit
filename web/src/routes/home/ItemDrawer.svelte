@@ -34,7 +34,7 @@
    *   problem?: string | null,
    *   showingPaper?: string | null,
    *   onopenpaper?: (paper: Paper, from: HTMLElement) => void,
-   *   acts?: import('./drawer-acts.js').DrawerActs,
+   *   acts?: import('./drawer-acts.svelte.js').DrawerActs,
    * }} */
   let {
     one, raw = undefined, papers, reading = false, problem = null, showingPaper = null, onopenpaper = undefined,
