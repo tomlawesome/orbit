@@ -52,8 +52,8 @@ print_banner() {
          ✦             ·              ·                ○          ·
 ─────────────────────────────────────────────────────────────────────────────
 ORBIT_BANNER
-  printf 'Orbit %s | channel=%s | revision=%s\n' \
-    "$orbit_version" "$orbit_channel" "$orbit_revision"
+  printf 'Orbit %s | revision=%s\n' \
+    "$orbit_version" "$orbit_revision"
 }
 
 if [ "${1:-}" = "--version" ]; then
