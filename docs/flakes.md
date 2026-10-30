@@ -283,7 +283,6 @@ page's URL at failure, which this one has to infer.
 - 2026-10-06 · 4bb20449 (dev, !1035 merged) · local full suite, both WebKit projects, inside CI's Playwright image (#1235), local worker count · `page.waitForResponse: Timeout 30000ms exceeded` on the slow POST; the same test passed in a five-file targeted run minutes earlier and in a second full desktop-webkit run an hour later. Error context lost to a later run clearing `test-results/`.
 - 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_firefox`, desktop-firefox · failed once, passed on retry: the same test on a second browser.
 - 2026-10-08 · 91df467a (door batch, !1044) · CI pipeline 2254 `smoke_webkit` · failed once, passed on retry.
-- 2026-10-15 · a6168fe6 (!1069, v0.3 security batch) · pipeline 2640 / smoke_webkit (job 36460) · `#1253: the menu is still open after sign-out started` at line 303 (the menu layer still visible after 2 s); passed on the in-job retry. Second sighting.
 - 2026-10-10 · a318e11b (#1342 batch) · pipeline 2382 `smoke_firefox` (job 34367) · failed both attempts, and once in three local desktop-firefox runs after the worker fix. Cause found: the sign-in-again challenge opened on the busy screen, then moved to the form once GET /api/auth/methods answered, rebuilding its password field under Playwright's fill (the trace shows the field empty and the button disabled). Fixed with tests/unit/archive-challenge-opens-once.test.mjs; four local runs green after.
 
 ## web/tests/fidelity screens.spec.js "household"
@@ -293,12 +292,6 @@ page's URL at failure, which this one has to infer.
 ## v19-archive.spec.ts:192 "write an archive, then bring it into a second household — a clash stays out" on desktop-webkit
 
 - 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_webkit` · failed once (49.6s), passed on retry. First sighting.
-
-## sign-out-descent.spec.ts:196 "sign out from home's menu reaches the dusk (phone-narrow, as the browser is)" on desktop-webkit — #1505
-
-- 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_webkit` · failed once (10.4s), passed on retry. First sighting.
-- 2026-10-14 · 465eca6b (door branch, !1066) · pipeline 2588 / smoke_webkit (job 36178) · "(phone-narrow, world forced)" at line 193, desktop-webkit, failed once and passed on retry.
-- 2026-10-22 · 77ffcabb (`preview` push of v0.3.1, same tree as 5635d9f3) · pipeline 2908 / smoke_webkit (job 38686) · failed once, passed on retry. Third sighting: filed as #1505.
 
 ## bootstrap-protection.spec.ts:387 "once the instance is claimed the code is spent, cookie or no cookie" — [unclaimed]
 
@@ -457,10 +450,6 @@ page's URL at failure, which this one has to infer.
 ## validation.test.ts "structural document classification > classifies unsupported %PDF-1.7 ... as unsupported_structure"
 
 - 2026-10-20 · 0469e455 · pipeline 2774 / fast (job 37576), same run as the sighting above · timed out at the 5 s default. Wall-clock-under-load shape. First sighting.
-
-## sign-out-descent.spec.ts:196 "sign out from home's menu reaches the dusk (narrow desk, as the browser is)" and "(wide desk, as the browser is)" on desktop-webkit
-
-- 2026-10-21 · 8a841e3c (!1074) · pipeline 2833 / `smoke_webkit` job 38057 · both cases failed first and passed on Playwright's retry in the same run ("2 flaky"), which fails the job; green on pipeline 2834 (b331397f, installer-only change, nothing under `web/`). First sighting.
 
 ## settings-text-size-tab-stop.test.mjs:128 "settings, phone layout: the text size tab stop starts on the applied step > with standard applied, the one tab stop is the ticked tile"
 
