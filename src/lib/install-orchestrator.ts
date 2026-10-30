@@ -34,7 +34,7 @@ import { missingConfigurationFields, missingGuidedFields, missingRequiredFields,
 import { type HostFacts, hostFactsVolumeAdapter } from "./host-facts";
 import { type InstallTerminal, InstallPromptStop, declined, selectChoice } from "./install-terminal";
 import { InstallTransaction, InstallTransactionRefusal } from "./install-transaction";
-import { LAUNCHER_CONFIG_TREE_ENV, takeHandedInConfiguration, treeHoldsConfiguration } from "./launcher-config-tree";
+import { LAUNCHER_CONFIG_TREE_ENV, takeHandedInConfiguration, treeHoldsConfiguration, treeHoldsOnlySecrets } from "./launcher-config-tree";
 import { verifyOidcDiscovery } from "./oidc-discovery";
 import {
   COMPOSE_FILE,
@@ -494,6 +494,11 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
     // keeps its own.
     let guidedStaged = false;
     const targetConfigured = pathExists(join(context.targetDir, ENVIRONMENT_FILE)) || pathExists(join(context.targetDir, SECRETS_DIRECTORY));
+    if (treeHoldsOnlySecrets(context.launcherConfigTree)) {
+      dependencies.notice?.(
+        `Orbit installer: the .orbit-secrets in ${LAUNCHER_CONFIG_TREE_ENV} was ignored: there is no .env-orbit beside it, so no handed-in configuration was used.`,
+      );
+    }
     if (treeHoldsConfiguration(context.launcherConfigTree) && (targetConfigured || action !== "install")) {
       dependencies.notice?.(`Orbit installer: the configuration in ${LAUNCHER_CONFIG_TREE_ENV} was ignored: this folder already has one, and it is used.`);
     } else if (action === "install") {
