@@ -402,6 +402,12 @@ describe("reviewInboxState — status/failure to UI classification mapping", () 
     expect(failureReasonOf("some_unmapped_code")).toBe("unknown");
   });
 
+  it("names an interrupted approval 'interrupted', not 'unknown' (#1568)", () => {
+    expect(failureReasonOf("approval_interrupted")).toBe("interrupted");
+    expect(failureReasonOf("attachment_transfer_failed")).toBe("unknown");
+    expect(failureReasonOf("some_unmapped_code")).toBe("unknown");
+  });
+
   it("keeps every scanner outcome a member can meet as 'scanner unavailable', not 'not kept' (engine-7)", () => {
     for (const code of ["scanner_unavailable", "scanner_timeout", "scanner_protocol", "scanner_failed"]) {
       expect(failureReasonOf(code)).toBe("scanner_off");

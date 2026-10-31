@@ -63,6 +63,34 @@ describe("private mailbox review mapping", () => {
     });
   });
 
+  // #1568: an interrupted approval has its own line, keyed on the code (not on
+  // a document count): the item is recorded and one more try finishes it.
+  const INTERRUPTED_MESSAGE = "Your earlier approval was cut short after the item was recorded. Try once more to finish it.";
+  const retryContext = { hasApprovalOperation: true, hasApprovedItem: true, expiresAt, now };
+
+  it("gives an interrupted approval its own retry line and reason (#1568)", () => {
+    expect(reviewInboxState("recoverable", "approval_interrupted", retryContext)).toMatchObject({
+      classification: "retry",
+      canApprove: true,
+      canDiscard: true,
+      message: INTERRUPTED_MESSAGE,
+      reason: "interrupted",
+    });
+  });
+
+  it("keeps the cleanup line for an interrupted approval whose receipt has expired (#1568)", () => {
+    const expired = reviewInboxState("recoverable", "approval_interrupted", { ...retryContext, expiresAt: now });
+    expect(expired).toMatchObject({ canApprove: false, canDiscard: true });
+    expect(expired.message).toContain("Private cleanup is waiting to finish");
+  });
+
+  it("keeps the attaching-documents line for attachment_transfer_failed (#1568)", () => {
+    const state = reviewInboxState("recoverable", "attachment_transfer_failed", retryContext);
+    expect(state).toMatchObject({ classification: "retry", canApprove: true });
+    expect(state.message).toContain("attaching the selected documents");
+    expect(state.message).not.toBe(INTERRUPTED_MESSAGE);
+  });
+
   it("derives bounded coarse duplicate reasons from server-owned proposal values", () => {
     expect(findReviewedIntakeCandidateReason(
       { title: "Annual cover", provider: "Orbit Cover", reference: "POL-123" },

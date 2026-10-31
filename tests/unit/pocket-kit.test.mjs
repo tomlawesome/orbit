@@ -83,6 +83,14 @@ describe("a failed receipt's reason, in plain words (#1143)", () => {
   });
 });
 
+describe("an interrupted approval, in plain words (#1568)", () => {
+  it("has its own reason words, and its message rests as one clause", () => {
+    expect(reasonWords("interrupted")).toBe("approval cut short");
+    expect(firstClause("Your earlier approval was cut short after the item was recorded. Try once more to finish it."))
+      .toBe("Your earlier approval was cut short after the item was recorded");
+  });
+});
+
 describe("arm, then fire", () => {
   beforeEach(() => vi.useFakeTimers());
   it("arms on the first tap and fires on the second", () => {

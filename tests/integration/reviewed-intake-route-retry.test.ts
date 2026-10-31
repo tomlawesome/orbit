@@ -4,6 +4,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, items } from "@/db/schema";
 import { scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
+import { discardImapReviewItem } from "@/server/mail-in/imap-inbox";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { canonicalReviewedIntakeHash } from "@/server/reviewed-intake";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
@@ -492,6 +493,121 @@ describe("approve retry: receipts stored before this change keep the old reclaim
       expect(await response.json()).toMatchObject({ outcome: "approved", itemId: freshKey });
       expect(await receiptRow(receiptId)).toMatchObject({ status: "completed", failureCode: null, approvalOperationId: freshKey, approvedItemId: freshKey });
     } finally {
+      await fixture.cleanup();
+    }
+  });
+});
+
+/*
+ * #1568 part 2: a replay of a stored approval request must not outlive the
+ * receipt. Once the receipt is discarded (or a discard is under way) the
+ * matching-identity branch refuses, as the fresh-claim path already does:
+ * 409 `reviewed_intake_not_approvable`, before any item is made or any
+ * attachment transferred.
+ */
+describe("approve retry: a replay after discard is refused (#1568)", () => {
+  const abandoned = () => new Date(Date.now() - 11 * 60_000);
+
+  async function attachmentStatuses(receiptId: string): Promise<string[]> {
+    return (await db().select({ status: imapIngestionAttachments.status }).from(imapIngestionAttachments)
+      .where(eq(imapIngestionAttachments.messageId, receiptId))).map((row) => row.status);
+  }
+
+  /** An approval that made its item, then sat in `approving` past the reclaim timeout and was reclaimed by a read. */
+  async function interrupted(fixture: Fixture, member: Session, label: string) {
+    const receiptId = await seedReceipt(fixture);
+    const attachmentId = await seedAttachment(receiptId, fixture.users.member.id, label);
+    const operationId = randomUUID();
+    const sent = payloadFor(fixture, receiptId, operationId, { title: `Made before the crash ${label}`, attachmentIds: [attachmentId] });
+    await approveToPartial(member, sent);
+    const stored = await storedRequest(receiptId);
+    expect(stored).not.toBeNull();
+    await db().update(imapIngestionMessages).set({
+      status: "approving", approvalResultId: null, failureCode: null, approvalRequestEnc: stored, approvalStartedAt: abandoned(), updatedAt: abandoned(),
+    }).where(eq(imapIngestionMessages.id, receiptId));
+    expect((await readReview(member, fixture, receiptId)).status).toBe(200);
+    expect(await receiptRow(receiptId)).toMatchObject({ status: "recoverable", failureCode: "approval_interrupted", approvedItemId: operationId });
+    return { receiptId, attachmentId, operationId, sent };
+  }
+
+  async function expectRefused(response: Response) {
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toMatchObject({ code: "reviewed_intake_not_approvable" });
+  }
+
+  it("interrupted, discarded, then replayed: 409, no second item, the attachments stay rejected", async () => {
+    const fixture = await createIntegrationFixture("reviewed-retry-discard-replay");
+    const member = await fixture.session("member");
+    const before = await householdItemIds(fixture);
+    try {
+      const { receiptId, operationId, sent } = await interrupted(fixture, member, "discard-replay");
+      await discardImapReviewItem(fixture.users.member.id, receiptId);
+      expect(await receiptRow(receiptId)).toMatchObject({ status: "discarded" });
+      expect(await attachmentStatuses(receiptId)).toEqual(["rejected"]);
+
+      await expectRefused(await approve(member, sent));
+      expect(await receiptRow(receiptId)).toMatchObject({ status: "discarded" });
+      expect(await attachmentStatuses(receiptId)).toEqual(["rejected"]);
+      expect((await householdItemIds(fixture)).filter((id) => !before.includes(id))).toEqual([operationId]);
+    } finally {
+      setImapHoldingPurgeImplementationForTests(undefined);
+      await fixture.cleanup();
+    }
+  });
+
+  it.each(["staging_purge_pending", "staging_purge_failed"])("a replay while a discard is under way (%s) is refused the same way", async (failureCode) => {
+    const fixture = await createIntegrationFixture(`reviewed-retry-discarding-${failureCode.slice(14)}`);
+    const member = await fixture.session("member");
+    const before = await householdItemIds(fixture);
+    try {
+      const { receiptId, operationId, sent } = await interrupted(fixture, member, `discarding-${failureCode}`);
+      await db().update(imapIngestionMessages).set({ status: "recoverable", failureCode }).where(eq(imapIngestionMessages.id, receiptId));
+
+      await expectRefused(await approve(member, sent));
+      expect(await receiptRow(receiptId)).toMatchObject({ status: "recoverable", failureCode });
+      expect(await attachmentStatuses(receiptId)).toEqual(["stored"]);
+      expect((await householdItemIds(fixture)).filter((id) => !before.includes(id))).toEqual([operationId]);
+    } finally {
+      setImapHoldingPurgeImplementationForTests(undefined);
+      await fixture.cleanup();
+    }
+  });
+
+  it("a replay of an interrupted approval that was not discarded still finishes it", async () => {
+    const fixture = await createIntegrationFixture("reviewed-retry-interrupted-replay");
+    const member = await fixture.session("member");
+    const before = await householdItemIds(fixture);
+    try {
+      const { receiptId, operationId, sent } = await interrupted(fixture, member, "interrupted-replay");
+      const finished = await approve(member, sent);
+      expect(finished.status).toBe(200);
+      expect(await finished.json()).toMatchObject({ outcome: "approved", itemId: operationId, pendingAttachmentIds: [] });
+      expect(await receiptRow(receiptId)).toMatchObject({ status: "completed" });
+      expect((await householdItemIds(fixture)).filter((id) => !before.includes(id))).toEqual([operationId]);
+    } finally {
+      setImapHoldingPurgeImplementationForTests(undefined);
+      await fixture.cleanup();
+    }
+  });
+
+  it("a replay of a partial transfer still retries and finishes it", async () => {
+    const fixture = await createIntegrationFixture("reviewed-retry-partial-replay");
+    const member = await fixture.session("member");
+    const receiptId = await seedReceipt(fixture);
+    const attachmentId = await seedAttachment(receiptId, fixture.users.member.id, "partial-replay");
+    const operationId = randomUUID();
+    const before = await householdItemIds(fixture);
+    try {
+      const sent = payloadFor(fixture, receiptId, operationId, { title: "Partial then retried", attachmentIds: [attachmentId] });
+      await approveToPartial(member, sent);
+      expect(await receiptRow(receiptId)).toMatchObject({ status: "recoverable" });
+      const retry = await approve(member, sent);
+      expect(retry.status).toBe(200);
+      expect(await retry.json()).toMatchObject({ outcome: "approved", itemId: operationId, pendingAttachmentIds: [] });
+      expect(await receiptRow(receiptId)).toMatchObject({ status: "completed" });
+      expect((await householdItemIds(fixture)).filter((id) => !before.includes(id))).toEqual([operationId]);
+    } finally {
+      setImapHoldingPurgeImplementationForTests(undefined);
       await fixture.cleanup();
     }
   });
