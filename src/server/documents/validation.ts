@@ -553,7 +553,12 @@ export function detectDocumentMediaType(bytes: Buffer): SupportedDocumentMediaTy
   throw new AppError("document_type_unsupported", "Choose a PDF, JPEG, or PNG document", 415);
 }
 
-export type DocumentStructureReason = "supported_structure" | "unsupported_structure" | "password_required";
+export type DocumentStructureReason =
+  | "supported_structure"
+  | "unsupported_structure"
+  | "password_required"
+  /** The check reached no verdict: the sandbox stopped its child, could not start it, or could not open the file; the file is neither accepted nor refused. */
+  | "structure_check_unavailable";
 
 /** Whether the file is one Orbit can open and show: the renderer opens it and finds a page (ADR-0033). Call only after the malware scan has passed. */
 export async function classifyDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType, file?: DocumentFileOnDisk): Promise<DocumentStructureReason> {

@@ -140,7 +140,7 @@ vi.mock("@/server/documents/crypto", async (importActual) => ({
   }),
 }));
 
-vi.mock("@/server/documents/storage", () => {
+vi.mock("@/server/documents/storage", async (importActual) => {
   class LocalDocumentStorage {
     async receive() {
       return { quarantinePath: "/tmp/q", sizeBytes: 5, contentSha256: "hash", leadingBytes: Buffer.from("%PDF") };
@@ -162,6 +162,8 @@ vi.mock("@/server/documents/storage", () => {
   return {
     LocalDocumentStorage,
     openDocumentStorage: () => new LocalDocumentStorage(),
+    // The upload releases its check buffer through this helper (A-Q1, A-Q4).
+    releaseBuffer: (await importActual<typeof import("@/server/documents/storage")>()).releaseBuffer,
   };
 });
 

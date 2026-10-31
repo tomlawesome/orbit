@@ -81,6 +81,8 @@ const failureReasonByCode: Record<string, FailureReason> = {
   staging_expiry_pending: "not_kept",
   // The item exists; only finishing it was cut short (#1568).
   approval_interrupted: "interrupted",
+  // The scanner answered clean; the step that did not finish is the open check.
+  structure_check_unavailable: "interrupted",
   recipient_mismatch: "wrong_recipient",
   account_disabled: "account_disabled",
 };

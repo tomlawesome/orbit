@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 // Records the FileHandles the sandbox opens on a given path, as
@@ -33,6 +34,7 @@ import {
   peakRssGrowth,
   setSandboxLimits,
   withCapturedLogs,
+  withLogRecords,
 } from "../../../tests/support/sandbox-test-helpers";
 import {
   inspectImageInSandbox,
@@ -59,6 +61,8 @@ let directory: string;
 let progressive: Buffer;
 let baselineJpeg: Buffer;
 let baselinePng: Buffer;
+/** File URL of a canvas module whose load throws, standing in for an addon that cannot load (the `canvasUrl` seam). */
+let throwingCanvasUrl: string;
 const files = new Map<string, { path: string; sizeBytes: number }>();
 
 function stash(name: string, bytes: Buffer): void {
@@ -91,6 +95,7 @@ beforeAll(async () => {
   progressive = progressive40Mpx();
   baselineJpeg = solidRaster("image/jpeg", AT_CAP_EDGE, AT_CAP_EDGE);
   baselinePng = solidRaster("image/png", AT_CAP_EDGE, AT_CAP_EDGE);
+  throwingCanvasUrl = pathToFileURL(writeFixtureFile(directory, "throwing-canvas.mjs", Buffer.from('throw new Error("no addon");\n'))).href;
   stash("small.jpg", syntheticJpeg());
   stash("small.png", syntheticPng());
   stash("progressive.jpg", progressive);
@@ -242,13 +247,13 @@ describe("the open check decodes in the sandbox child (#1572)", () => {
   });
 
   describe("the render job's ceiling and the check's clock bound the decode", () => {
-    it("refuses the progressive fixture as unsupported_structure at a 64 MiB ceiling, saying memory under document.inspection", async () => {
+    it("answers structure_check_unavailable for the progressive fixture at a 64 MiB ceiling, still saying memory under document.inspection", async () => {
       setSandboxLimits({ wallMs: 60_000, renderMemoryMb: 64 });
       const before = lastPdfSandboxChildPidForTests();
 
       const captured = await withCapturedLogs(() => classifyDocumentStructure(progressive, "image/jpeg"));
 
-      expect(captured.result).toBe("unsupported_structure");
+      expect(captured.result).toBe("structure_check_unavailable");
       expect(captured.calls).toBeGreaterThan(0);
       expect(captured.logged).toMatch(/memory/i);
       expect(captured.logged).toContain("document.inspection");
@@ -265,11 +270,11 @@ describe("the open check decodes in the sandbox child (#1572)", () => {
 
       const { result, growthBytes } = await peakRssGrowth(() => classifyDocumentStructure(progressive, "image/jpeg"));
 
-      expect(result).toBe("unsupported_structure");
+      expect(result).toBe("structure_check_unavailable");
       expect(growthBytes).toBeLessThan(100 * MB);
     }, TEST_TIMEOUT_MS);
 
-    it("refuses the progressive fixture as unsupported_structure, without a crash record, when the wall clock is 1 ms, and frees the slot", async () => {
+    it("answers structure_check_unavailable for the progressive fixture, without a crash record, when the wall clock is 1 ms, and frees the slot", async () => {
       const unhandled: unknown[] = [];
       const onUnhandled = (reason: unknown): void => {
         unhandled.push(reason);
@@ -281,7 +286,7 @@ describe("the open check decodes in the sandbox child (#1572)", () => {
 
         const captured = await withCapturedLogs(() => classifyDocumentStructure(progressive, "image/jpeg"));
 
-        expect(captured.result).toBe("unsupported_structure");
+        expect(captured.result).toBe("structure_check_unavailable");
         expect(lastPdfSandboxChildPidForTests(), "the decode ran in a child").not.toBe(before);
         expect(captured.logged).not.toMatch(/crash/i);
         expect(pdfStructureSandboxInFlightForTests()).toBe(0);
@@ -370,12 +375,12 @@ describe("the image check given a file (#1567 pattern, #1572)", () => {
   it.each([
     ["larger", 1],
     ["smaller", -1],
-  ] as const)("answers unsupported_structure, and the child is gone, when the stated size is %s than the file", async (_which, delta) => {
+  ] as const)("answers structure_check_unavailable (the child could not open its input), and the child is gone, when the stated size is %s than the file", async (_which, delta) => {
     const small = fileOf("small.jpg");
     const before = lastPdfSandboxChildPidForTests();
 
     await expect(inspectImageInSandbox(readFileSync(small.path), "image/jpeg", { width: 1, height: 1 }, { path: small.path, sizeBytes: small.sizeBytes + delta }))
-      .resolves.toBe("unsupported_structure");
+      .resolves.toBe("structure_check_unavailable");
 
     expect(pdfStructureSandboxInFlightForTests()).toBe(0);
     await expectChildGone(before);
@@ -539,5 +544,167 @@ describe("renderImageInSandbox: one child draws the bounded preview after the ga
 
     expect(rendered).toEqual({ outcome: "failed", stop: "timeout" });
     expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+  }, TEST_TIMEOUT_MS);
+});
+
+describe("the image child loads the canvas backend before it says it is ready (D-Q1)", () => {
+  it("answers structure_check_unavailable, quickly, with one crash warn under document.inspection, when the backend cannot load, and leaves no child", async () => {
+    // A long clock, so a fast answer can only come from handling the crash, not from the timeout.
+    setSandboxLimits({ wallMs: 8_000, canvasUrl: throwingCanvasUrl });
+    const before = lastPdfSandboxChildPidForTests();
+    const started = Date.now();
+
+    const { result, records } = await withLogRecords(() => inspectImageInSandbox(syntheticJpeg(), "image/jpeg", { width: 1, height: 1 }));
+
+    expect(result).toBe("structure_check_unavailable");
+    expect(Date.now() - started, "the crash is handled, not the clock").toBeLessThan(2_000);
+    const warns = records.filter((record) => record.level === "warn" && record.fields.event === "document.inspection");
+    expect(warns).toHaveLength(1);
+    expect(String(warns[0]!.fields.detail)).toMatch(/crash/);
+    expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+    await expectChildGone(before);
+  }, TEST_TIMEOUT_MS);
+
+  it("answers a 1x1 render as failed with stop crash when the backend cannot load", async () => {
+    setSandboxLimits({ wallMs: 8_000, canvasUrl: throwingCanvasUrl });
+
+    const rendered = await renderImageInSandbox(syntheticJpeg(), {
+      mediaType: "image/jpeg",
+      declared: { width: 1, height: 1 },
+      width: 1,
+      height: 1,
+      wallMs: 8_000,
+    });
+
+    expect(rendered).toEqual({ outcome: "failed", stop: "crash" });
+    expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+  }, TEST_TIMEOUT_MS);
+});
+
+describe("a sandbox stop is no verdict; a decoder's refusal is one (D-S1)", () => {
+  it("answers structure_check_unavailable, with a crash warn, when the backend cannot load, through classifyDocumentStructure", async () => {
+    setSandboxLimits({ wallMs: 8_000, canvasUrl: throwingCanvasUrl });
+
+    const { result, records } = await withLogRecords(() => classifyDocumentStructure(syntheticJpeg(), "image/jpeg"));
+
+    expect(result).toBe("structure_check_unavailable");
+    expect(records.some((record) => record.level === "warn" && /crash/.test(String(record.fields.detail)))).toBe(true);
+    expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+  }, TEST_TIMEOUT_MS);
+
+  it.each([
+    ["image/jpeg", "image/jpeg" as const],
+    ["image/png", "image/png" as const],
+  ])("answers structure_check_unavailable for a %s quarantine file that cannot be opened", async (_name, mediaType) => {
+    const missing = { path: join(directory, `no-such-quarantine-file.${mediaType === "image/png" ? "png" : "jpg"}`), sizeBytes: 100 };
+
+    // A real image header, so the header check passes and the sandbox is what runs
+    // (an empty buffer is refused by the header check before any child starts).
+    const header = mediaType === "image/png" ? syntheticPng() : syntheticJpeg();
+
+    await expect(classifyDocumentStructure(header, mediaType, missing)).resolves.toBe("structure_check_unavailable");
+
+    await expect(inspectImageInSandbox(header, mediaType, { width: 1, height: 1 }, missing)).resolves.toBe("structure_check_unavailable");
+    expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+  }, TEST_TIMEOUT_MS);
+
+  it("keeps a decoder's refusal a verdict: a PNG cut short, bytes that are not an image, and a size mismatch are unsupported_structure", async () => {
+    const cutShort = Buffer.concat([syntheticPng().subarray(0, 24), Buffer.from([0, 0, 0, 0])]);
+    await expect(classifyDocumentStructure(cutShort, "image/png")).resolves.toBe("unsupported_structure");
+    await expect(inspectImageInSandbox(Buffer.from("not an image at all"), "image/png", { width: 1, height: 1 })).resolves.toBe("unsupported_structure");
+    await expect(inspectImageInSandbox(syntheticJpeg(), "image/jpeg", { width: 2, height: 1 })).resolves.toBe("unsupported_structure");
+    expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+  }, TEST_TIMEOUT_MS);
+});
+
+describe("the sandbox stop record names the job that stopped (D-F2, W-F1)", () => {
+  const decodeMemoryStop = () => {
+    setSandboxLimits({ wallMs: 60_000, renderMemoryMb: 64 });
+    return withLogRecords(() => classifyDocumentStructure(progressive, "image/jpeg"));
+  };
+
+  it("says the image sandbox stopped the decode, and memory, and never PDF, for an image memory stop", async () => {
+    const { records } = await decodeMemoryStop();
+
+    const inspection = records.filter((record) => record.fields.event === "document.inspection");
+    expect(inspection).toHaveLength(1);
+    expect(String(inspection[0]!.fields.detail)).toContain("Image sandbox stopped the decode");
+    expect(String(inspection[0]!.fields.detail)).toMatch(/memory/);
+    expect(JSON.stringify(records)).not.toContain("PDF");
+  }, TEST_TIMEOUT_MS);
+
+  it("logs an image crash as a warn 'Image sandbox stopped the decode: crash' with action check_parser and impact document_upload_blocked", async () => {
+    setSandboxLimits({ wallMs: 8_000, canvasUrl: throwingCanvasUrl });
+
+    const { records } = await withLogRecords(() => inspectImageInSandbox(syntheticJpeg(), "image/jpeg", { width: 1, height: 1 }));
+
+    const warns = records.filter((record) => record.level === "warn" && record.fields.event === "document.inspection");
+    expect(warns).toHaveLength(1);
+    expect(warns[0]!.fields).toMatchObject({
+      detail: "Image sandbox stopped the decode: crash",
+      action: "check_parser",
+      impact: "document_upload_blocked",
+    });
+  }, TEST_TIMEOUT_MS);
+
+  it("says the image sandbox stopped the preview, under document.preview, for an image render memory stop", async () => {
+    setSandboxLimits({ wallMs: 60_000, renderMemoryMb: 64 });
+
+    const { result, records } = await withLogRecords(() => renderImageInSandbox(progressive, {
+      mediaType: "image/jpeg",
+      declared: { width: AT_CAP_EDGE, height: AT_CAP_EDGE },
+      width: 1_200,
+      height: 1_200,
+      wallMs: 60_000,
+    }));
+
+    expect(result).toEqual({ outcome: "failed", stop: "memory" });
+    const preview = records.filter((record) => record.fields.event === "document.preview");
+    expect(preview).toHaveLength(1);
+    expect(String(preview[0]!.fields.detail)).toContain("Image sandbox stopped the preview");
+  }, TEST_TIMEOUT_MS);
+
+  it("keeps the render-body record's reason, action and impact for an image render memory stop (guard)", async () => {
+    setSandboxLimits({ wallMs: 60_000, renderMemoryMb: 64 });
+
+    const { records } = await withLogRecords(() => renderImageInSandbox(progressive, {
+      mediaType: "image/jpeg",
+      declared: { width: AT_CAP_EDGE, height: AT_CAP_EDGE },
+      width: 1_200,
+      height: 1_200,
+      wallMs: 60_000,
+    }));
+
+    const preview = records.filter((record) => record.fields.event === "document.preview");
+    expect(preview).toHaveLength(1);
+    expect(preview[0]!.fields).toMatchObject({ state: "blocked", reason: "unsupported_structure", action: "none", impact: "none" });
+  }, TEST_TIMEOUT_MS);
+
+  it("says it could not open the file to check, with the error code, as processing_interrupted, and not a crash, for an image file that does not exist", async () => {
+    const missing = { path: join(directory, "no-such-quarantine-image.jpg"), sizeBytes: 100 };
+
+    const { records } = await withLogRecords(() => classifyDocumentStructure(syntheticJpeg(), "image/jpeg", missing));
+
+    const inspection = records.filter((record) => record.fields.event === "document.inspection");
+    expect(inspection).toHaveLength(1);
+    expect(inspection[0]!.level).toBe("warn");
+    expect(String(inspection[0]!.fields.detail)).toContain("could not open the file to check");
+    expect(String(inspection[0]!.fields.detail)).toContain("ENOENT");
+    expect(inspection[0]!.fields).toMatchObject({ reason: "processing_interrupted", action: "inspect_admin_diagnostics" });
+    expect(JSON.stringify(records)).not.toMatch(/crash/i);
+  }, TEST_TIMEOUT_MS);
+
+  it.each([
+    ["a memory stop", () => ({ wallMs: 60_000, renderMemoryMb: 64 })],
+    ["a timeout", () => ({ wallMs: 1 })],
+    ["a crash", () => ({ wallMs: 8_000, canvasUrl: throwingCanvasUrl })],
+  ] as const)("records %s of the check with reason processing_interrupted, not unsupported_structure", async (_name, limitsFor) => {
+    setSandboxLimits(limitsFor());
+
+    const { records } = await withLogRecords(() => classifyDocumentStructure(progressive, "image/jpeg"));
+
+    const inspection = records.filter((record) => record.fields.event === "document.inspection");
+    expect(inspection.length).toBeGreaterThanOrEqual(1);
+    for (const record of inspection) expect(record.fields.reason).toBe("processing_interrupted");
   }, TEST_TIMEOUT_MS);
 });

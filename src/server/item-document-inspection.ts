@@ -60,7 +60,8 @@ export interface ItemDocumentInspectionResult {
   suggestions: ItemDocumentSuggestion[];
   message?: string;
   attachmentDisposition: "attachable" | "rejected";
-  reason: DocumentStructureReason;
+  /** The API's three values: a check that reached no verdict answers as `unsupported_structure`; the log keeps the real reason. */
+  reason: Exclude<DocumentStructureReason, "structure_check_unavailable">;
 }
 
 const allowedSuggestionFields = new Set<ItemDocumentSuggestionField>(itemDocumentSuggestionFields);
@@ -190,7 +191,7 @@ export async function inspectItemDocument(input: {
           message: structureReason === "password_required" ? passwordRequiredMessage : unsupportedStructureMessage,
           suggestions: [],
           attachmentDisposition: "rejected",
-          reason: structureReason,
+          reason: structureReason === "password_required" ? structureReason : "unsupported_structure",
         };
       }
       log.info({ event: "document.inspection", state: "ready", reason: "supported_structure", action: "none" });

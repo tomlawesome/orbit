@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
-import { validateSupportedDocumentStructure } from "@/server/documents/validation";
+import { classifyDocumentStructure } from "@/server/documents/validation";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { syntheticPdf } from "../../../tests/support/synthetic-documents";
 import { PgDialect } from "drizzle-orm/pg-core";
@@ -28,9 +28,17 @@ vi.mock("@/server/documents/scanner", async (importOriginal) => ({
 
 // ADR-0033: the structure check is where pdf.js and the image decoders first
 // open the bytes, so it is spied on (still real) to prove the scan comes first.
+// The boolean form answers through the spied classification, so a stub of the
+// classification reaches whichever of the two the holding step calls.
 vi.mock("@/server/documents/validation", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/documents/validation")>();
-  return { ...actual, validateSupportedDocumentStructure: vi.fn(actual.validateSupportedDocumentStructure) };
+  const classify = vi.fn(actual.classifyDocumentStructure);
+  return {
+    ...actual,
+    classifyDocumentStructure: classify,
+    validateSupportedDocumentStructure: async (...args: Parameters<typeof actual.classifyDocumentStructure>) =>
+      (await classify(...args)) === "supported_structure",
+  };
 });
 
 // #1571: a held attachment is sealed in pieces from its quarantine file, so
@@ -59,7 +67,7 @@ afterEach(async () => {
   resetDocumentConfigForTests();
   limit.effective = null;
   vi.mocked(scanFileWithClamAv).mockReset();
-  vi.mocked(validateSupportedDocumentStructure).mockClear();
+  vi.mocked(classifyDocumentStructure).mockClear();
   vi.mocked(encryptDocument).mockClear();
   vi.restoreAllMocks();
   if (root) await rm(root, { recursive: true, force: true });
@@ -249,9 +257,9 @@ describe("private IMAP attachment holding", () => {
       order.push("scan");
       return { status: "clean" };
     });
-    vi.mocked(validateSupportedDocumentStructure).mockImplementationOnce(async () => {
+    vi.mocked(classifyDocumentStructure).mockImplementationOnce(async () => {
       order.push("open");
-      return true;
+      return "supported_structure";
     });
     await scanAndHoldImapAttachment({
       bytes: syntheticPdf("scan first"),
@@ -284,7 +292,42 @@ describe("private IMAP attachment holding", () => {
       receiptId: "20000000-0000-4000-8000-000000000002",
       mailboxIngestion: true,
     })).rejects.toThrow(message);
-    expect(validateSupportedDocumentStructure).not.toHaveBeenCalled();
+    expect(classifyDocumentStructure).not.toHaveBeenCalled();
+  });
+
+  describe("a structure check that could not run is no verdict (D-S1)", () => {
+    const held = (name: string) => scanAndHoldImapAttachment({
+      bytes: syntheticPdf(name),
+      filename: `${name}.pdf`,
+      declaredMediaType: "application/pdf",
+      recipientUserId: "10000000-0000-4000-8000-000000000001",
+      receiptId: "20000000-0000-4000-8000-000000000002",
+      mailboxIngestion: true,
+    });
+
+    it("rejects with structure_check_unavailable, not mime_structure_invalid, and holds no object and leaves no quarantine file", async () => {
+      root = await mkdtemp(join(tmpdir(), "orbit-imap-unavailable-"));
+      configure("required");
+      vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+      vi.mocked(classifyDocumentStructure).mockResolvedValueOnce("structure_check_unavailable" as never);
+
+      await expect(held("check unavailable")).rejects.toMatchObject({ message: "structure_check_unavailable" });
+
+      const files = (await readdir(root, { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile());
+      expect(files).toEqual([]);
+    });
+
+    it("still rejects with mime_structure_invalid when the check refuses the file", async () => {
+      root = await mkdtemp(join(tmpdir(), "orbit-imap-refused-"));
+      configure("required");
+      vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+      vi.mocked(classifyDocumentStructure).mockResolvedValueOnce("unsupported_structure");
+
+      await expect(held("check refuses")).rejects.toMatchObject({ message: "mime_structure_invalid" });
+
+      const files = (await readdir(root, { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile());
+      expect(files).toEqual([]);
+    });
   });
 
   it("allocates the storage key before writing and removes it when registration fails", async () => {

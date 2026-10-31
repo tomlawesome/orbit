@@ -286,7 +286,11 @@ export function encryptDocument(
   return { ciphertext: tail.length === 0 ? body : Buffer.concat([body, tail]), envelope };
 }
 
-/** A document's ciphertext failed its tag, or is not the length that was sealed. */
+/**
+ * A document's ciphertext failed its tag, its wrapped key or envelope does not
+ * open under the key the row names, or the stored object is not the length
+ * that was sealed.
+ */
 export class DocumentIntegrityError extends Error {
   constructor() {
     super("Document failed its integrity check");
@@ -316,16 +320,24 @@ export function createDocumentUnsealer(
   envelope: CryptoEnvelope,
   keyEncryptionKey: Buffer,
 ): DocumentUnsealer {
-  const documentKey = unwrapDocumentKey(context.documentId, envelope, keyEncryptionKey, context.purpose);
+  requireKey(keyEncryptionKey, "Key-encryption key");
   let decipher: DecipherGCM;
+  // A wrapped key, IV, tag or version that does not open under the row's key
+  // is the row damaged: nothing here can tell tamper from corruption, and
+  // neither is a passing fault (ADR-0024).
   try {
-    const contentIv = decodeFixed(envelope.contentIv, IV_BYTES, "Content IV");
-    const contentTag = decodeFixed(envelope.contentAuthTag, AUTH_TAG_BYTES, "Content authentication tag");
-    decipher = createDecipheriv(ALGORITHM, documentKey, contentIv, { authTagLength: AUTH_TAG_BYTES });
-    decipher.setAAD(contentAdditionalData(context));
-    decipher.setAuthTag(contentTag);
-  } finally {
-    documentKey.fill(0);
+    const documentKey = unwrapDocumentKey(context.documentId, envelope, keyEncryptionKey, context.purpose);
+    try {
+      const contentIv = decodeFixed(envelope.contentIv, IV_BYTES, "Content IV");
+      const contentTag = decodeFixed(envelope.contentAuthTag, AUTH_TAG_BYTES, "Content authentication tag");
+      decipher = createDecipheriv(ALGORITHM, documentKey, contentIv, { authTagLength: AUTH_TAG_BYTES });
+      decipher.setAAD(contentAdditionalData(context));
+      decipher.setAuthTag(contentTag);
+    } finally {
+      documentKey.fill(0);
+    }
+  } catch {
+    throw new DocumentIntegrityError();
   }
 
   let fed = 0;

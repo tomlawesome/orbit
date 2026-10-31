@@ -109,6 +109,7 @@ export const JOB_REASONS = /** @type {Record<string, string>} */ ({
   stage_purge_failed: "staging copy not removed",
   scan_recovery_expired: "scan not recovered in time",
   staging_object_invalid: "upload couldn’t be read",
+  structure_check_unavailable: "document check didn’t run",
   unknown: "reason not named",
 });
 

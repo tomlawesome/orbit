@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
+  DocumentIntegrityError,
   decryptDocument,
   encryptDocument,
   envelopeOf,
@@ -72,11 +73,12 @@ describe("envelopeOf (engine-21)", () => {
     ]);
   });
 
-  it("keeps a stored version as the number it is, so decryption refuses one it does not know", () => {
+  it("keeps a stored version as the number it is, so decryption refuses one it does not know as an integrity failure", () => {
     const encrypted = encryptDocument(plaintext, context, kek, "key-1");
     const future = envelopeOf({ ...encrypted.envelope, envelopeVersion: 2 });
     expect(future.envelopeVersion).toBe(2);
-    expect(() => decryptDocument(encrypted.ciphertext, context, future, kek)).toThrow("Unsupported document encryption envelope");
+    // A version this build does not know is a damaged or foreign row, not a passing fault (A-F1, X-F2).
+    expect(() => decryptDocument(encrypted.ciphertext, context, future, kek)).toThrow(DocumentIntegrityError);
     expect(decryptDocument(encrypted.ciphertext, context, envelopeOf(encrypted.envelope), kek)).toEqual(plaintext);
   });
 });

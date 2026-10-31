@@ -41,7 +41,9 @@ of categories:
 - documents: the existing controlled codes such as `key_unavailable` and
   `purge_failed`, plus `scanner_unavailable`, `scanner_timeout`,
   `scanner_protocol`, `scanner_failed`, `staging_object_invalid`,
-  `scan_recovery_expired`, and `stage_purge_failed`.
+  `scan_recovery_expired`, `stage_purge_failed`, and
+  `structure_check_unavailable` (the open check's sandbox reached no verdict;
+  the staged copy is kept and the job retried).
 
 Raw notification errors recorded in the past stay internal and are never
 returned.

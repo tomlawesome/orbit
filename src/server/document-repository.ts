@@ -15,7 +15,7 @@ import { createDocumentSealer, createDocumentUnsealer, DocumentIntegrityError, e
 import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
-import { type LocalDocumentStorage, openDocumentStorage, type ReceivedDocument } from "@/server/documents/storage";
+import { type LocalDocumentStorage, openDocumentStorage, type ReceivedDocument, releaseBuffer } from "@/server/documents/storage";
 import {
   detectDocumentMediaType,
   normalizedDocumentFilename,
@@ -382,10 +382,10 @@ async function reserveDocumentMetadata(input: {
 
 /**
  * The open check's one read of the quarantine file (#1567). The buffer lives
- * only in this function's frame: it is zeroed when the check answers and is
- * unreachable once this returns, so the encrypt stage that follows never runs
- * with it still held. Kept in the upload's own frame, a suspended async
- * function keeps it reachable across the later awaits.
+ * only in this function's frame: it is zeroed and freed when the check
+ * answers, so the encrypt stage that follows never runs with it still held.
+ * Kept in the upload's own frame, a suspended async function keeps it
+ * reachable across the later awaits.
  */
 async function checkQuarantinedStructure(
   storage: LocalDocumentStorage,
@@ -397,9 +397,9 @@ async function checkQuarantinedStructure(
   try {
     return await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
   } finally {
-    // Nothing keeps this buffer past the check, so it is zeroed here
-    // whatever the answer (#1151 F13).
-    bytes.fill(0);
+    // Zeroed and freed the moment the check answers, as the recovery and
+    // mail-in checks do, so the seal never runs beside it (#1151 F13).
+    releaseBuffer(bytes);
   }
 }
 
@@ -861,7 +861,11 @@ async function resolveDocumentContent(userId: string, documentId: string) {
   return { record, crypto, documentKek, envelope, context };
 }
 
-/** A failed tag is an integrity failure; any other storage error is the document being unavailable. */
+/**
+ * A failed tag, a key or envelope that does not open, or an object not the
+ * length that was sealed is an integrity failure; a missing or unreadable
+ * object is the document being unavailable.
+ */
 function documentReadError(error: unknown): AppError {
   if (error instanceof DocumentIntegrityError) {
     return new AppError("document_integrity_failed", "That document failed its integrity check", 503);
