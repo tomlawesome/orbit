@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { AppError } from "@/lib/app-error";
 import { validUuid } from "@/lib/uuid";
 import { getDocumentConfig, type DocumentConfig } from "@/server/documents/config";
-import type { CryptoEnvelope, DocumentSealer, DocumentUnsealer } from "@/server/documents/crypto";
+import { type CryptoEnvelope, DocumentIntegrityError, type DocumentSealer, type DocumentUnsealer } from "@/server/documents/crypto";
 
 /** A storage key's own shape: 32 bytes of hex. Exported so any caller that
  * must validate a storage key outside this module (purge-jobs.ts's claim
@@ -262,7 +262,9 @@ export class LocalDocumentStorage {
     while (position < ciphertextSize) {
       const wanted = Math.min(buffer.length, ciphertextSize - position);
       const { bytesRead } = await source.read(buffer, 0, wanted, position);
-      if (bytesRead === 0) throw new Error("Encrypted document storage object is invalid");
+      // Shorter than what was sealed is an integrity failure, the same verdict
+      // as a failed tag.
+      if (bytesRead === 0) throw new DocumentIntegrityError();
       position += bytesRead;
       const piece = unsealer.update(buffer.subarray(0, bytesRead));
       try {
@@ -294,7 +296,8 @@ export class LocalDocumentStorage {
     let output: FileHandle | undefined;
     try {
       const details = await input.stat();
-      if (!details.isFile() || details.size !== expected.ciphertextSize) throw new Error("Encrypted staging object is invalid");
+      if (!details.isFile()) throw new Error("Encrypted staging object is invalid");
+      if (details.size !== expected.ciphertextSize) throw new DocumentIntegrityError();
       await this.initialize();
       quarantinePath = join(this.quarantineRoot, `${documentId}.${randomBytes(16).toString("hex")}.recovery`);
       const target = await open(quarantinePath, "wx", 0o600).catch((error: unknown) => {
@@ -336,7 +339,7 @@ export class LocalDocumentStorage {
     try {
       let offset = 0;
       await this.unsealPass(source, expected.ciphertextSize, unsealer, buffer, (piece) => {
-        if (offset + piece.length > plaintext.length) throw new Error("Decrypted document size does not match metadata");
+        if (offset + piece.length > plaintext.length) throw new DocumentIntegrityError();
         piece.copy(plaintext, offset);
         offset += piece.length;
       });
@@ -393,7 +396,7 @@ export class LocalDocumentStorage {
               const wanted = Math.min(buffer.length, expected.ciphertextSize - position);
               const { bytesRead } = await source.read(buffer, 0, wanted, position);
               if (released) return;
-              if (bytesRead === 0) throw new Error("Encrypted document storage object is invalid");
+              if (bytesRead === 0) throw new DocumentIntegrityError();
               position += bytesRead;
               controller.enqueue(second.update(buffer.subarray(0, bytesRead)));
             }

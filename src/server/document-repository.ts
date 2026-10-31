@@ -861,7 +861,11 @@ async function resolveDocumentContent(userId: string, documentId: string) {
   return { record, crypto, documentKek, envelope, context };
 }
 
-/** A failed tag is an integrity failure; any other storage error is the document being unavailable. */
+/**
+ * A failed tag, a key or envelope that does not open, or an object not the
+ * length that was sealed is an integrity failure; a missing or unreadable
+ * object is the document being unavailable.
+ */
 function documentReadError(error: unknown): AppError {
   if (error instanceof DocumentIntegrityError) {
     return new AppError("document_integrity_failed", "That document failed its integrity check", 503);
