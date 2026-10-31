@@ -112,7 +112,7 @@ export function evaluateVolumeOwnership(
   candidateVolume: string,
   expectedImage: string,
   adapter: VolumeOwnershipAdapter,
-  updateFolder?: string,
+  updateFolder?: string | readonly string[],
 ): VolumeOwnershipOutcome {
   const volumeLabels = adapter.inspectVolumeLabels(candidateVolume);
   if (volumeLabels === null) return { status: "verify-error" };
@@ -136,8 +136,12 @@ export function evaluateVolumeOwnership(
   // field), when it is not the one the update runs in. It is the first
   // reason given: containers of another folder explain every other proof
   // failing, and the operator's one step is to run the update there.
+  // The update folder may be given as several spellings of one folder (its
+  // physical and its logical path); another folder is one that matches none.
+  const folderSpellings = updateFolder === undefined ? [] : typeof updateFolder === "string" ? [updateFolder] : updateFolder;
+  const ownFolders = folderSpellings.length === 0 ? undefined : folderSpellings.map(trimTrailingSlashes);
   const otherFolder = (workingDir: string): string | undefined =>
-    updateFolder !== undefined && workingDir !== "" && trimTrailingSlashes(workingDir) !== trimTrailingSlashes(updateFolder) ? workingDir : undefined;
+    ownFolders !== undefined && workingDir !== "" && !ownFolders.includes(trimTrailingSlashes(workingDir)) ? workingDir : undefined;
   const inOtherFolder = (folder: string): VolumeOwnershipOutcome => ({ status: "not-proven", reason: "other-folder", folder });
 
   const dbContainers = adapter.listContainersByVolume(candidateVolume);
@@ -146,7 +150,7 @@ export function evaluateVolumeOwnership(
   let appContainers: string | null | undefined;
   /** A failed proof, unless another folder's container explains it; reads what has not been read yet, and only on this failure path. */
   const notProven = (reason: VolumeNotProvenReason, service?: string): VolumeOwnershipOutcome => {
-    if (updateFolder !== undefined) {
+    if (ownFolders !== undefined) {
       if (appContainers === undefined) appContainers = adapter.listContainersByProject(volumeProject);
       for (const [listing, onlyService] of [[dbContainers, undefined], [appContainers, "orbit-app"]] as const) {
         for (const line of (listing ?? "").split("\n")) {
@@ -255,12 +259,12 @@ const NOT_PROVEN_ACTION = "abort";
 function notProvenMessage(
   outcome: Extract<VolumeOwnershipOutcome, { status: "not-proven" }>,
   volume: string,
-  updateFolder: string | undefined,
+  updateFolder: string | readonly string[] | undefined,
 ): string {
   const refusing = "refusing to start Compose.";
   switch (outcome.reason) {
     case "other-folder":
-      return `The running Orbit containers for the database volume ${volume} were created from another folder, ${outcome.folder}, not from ${updateFolder ?? "the folder this update runs in"}; ${refusing} Run the update in ${outcome.folder}, the folder that owns them.`;
+      return `The running Orbit containers for the database volume ${volume} were created from another folder, ${outcome.folder}, not from ${typeof updateFolder === "string" ? updateFolder : (updateFolder?.at(-1) ?? "the folder this update runs in")}; ${refusing} Run the update in ${outcome.folder}, the folder that owns them.`;
     case "foreign-container":
       return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: a container of service "${outcome.service}" mounts it, and only orbit-db may; ${refusing} Check which container that is (docker ps -a --filter volume=${volume}) and stop or remove it if it is not part of this deployment, then run the update again.`;
     case "no-database-container":
@@ -329,7 +333,7 @@ export function verifyDatabaseVolumeSafety(
   state: DatabaseVolumeSafetyState,
   postgresPasswordFacts: PostgresPasswordFacts,
   adapter: DatabaseVolumeSafetyAdapter,
-  updateFolder?: string,
+  updateFolder?: string | readonly string[],
 ): DatabaseVolumeSafetyState {
   if (state.databaseVolumeChecked) {
     if (!state.databaseVolumeSeen) return state;

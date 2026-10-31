@@ -793,7 +793,7 @@ gather_host_facts() {
 
   local cosign_json=false
   [[ "$cosign_usable" == 1 ]] && cosign_json=true
-  ORBIT_INSTALL_HOST_FACTS="{\"targetBasename\":$(base64_string "$(basename -- "$target_dir")"),\"targetFolder\":$(base64_string "$target_dir")"
+  ORBIT_INSTALL_HOST_FACTS="{\"targetBasename\":$(base64_string "$(basename -- "$target_dir")"),\"targetFolder\":$(base64_string "$target_dir"),\"targetFolderLogical\":$(base64_string "$(pwd -L)")"
   ORBIT_INSTALL_HOST_FACTS+=",\"cosignUsable\":${cosign_json},\"imageVersion\":\"${image_version}\""
   ORBIT_INSTALL_HOST_FACTS+=",\"imageRevision\":\"${revision}\",\"appliedDigest\":\"${applied_digest}\""
   ORBIT_INSTALL_HOST_FACTS+=",\"volumeList\":${volume_list_json}"

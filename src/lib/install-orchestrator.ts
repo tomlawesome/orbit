@@ -417,7 +417,7 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       volumeState,
       readPostgresPasswordFacts(context.targetDir),
       hostFactsVolumeAdapter(context.facts),
-      context.facts.targetFolder,
+      [context.facts.targetFolder, context.facts.targetFolderLogical].filter((folder): folder is string => folder !== undefined),
     );
   } catch (error) {
     if (!(error instanceof DatabaseVolumeSafetyRefusal) && !(error instanceof ComposeProjectNameRefusal)) throw error;

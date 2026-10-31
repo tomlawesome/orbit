@@ -30,6 +30,7 @@ const hostFactsSchema = z
   .object({
     targetBasename: encoded.min(1),
     targetFolder: encoded.optional(),
+    targetFolderLogical: encoded.optional(),
     cosignUsable: z.boolean(),
     imageVersion: z.string().regex(/^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/),
     imageRevision: z.string().regex(/^[0-9a-f]{40}$/),
@@ -46,6 +47,8 @@ export interface HostFacts {
   targetBasename: string;
   /** The deployment directory's full host path (`pwd -P`), what the containers' `com.docker.compose.project.working_dir` label is compared with (#1570); absent when the shell did not send it. */
   targetFolder?: string;
+  /** The same folder as the shell's `pwd -L` spells it: Compose's working_dir label may hold this form instead (#1570). */
+  targetFolderLogical?: string;
   cosignUsable: boolean;
   imageVersion: string;
   imageRevision: string;
@@ -90,6 +93,7 @@ export function parseHostFacts(raw: string | undefined): HostFacts {
   return {
     targetBasename,
     targetFolder: facts.targetFolder === undefined ? undefined : decode(facts.targetFolder) || undefined,
+    targetFolderLogical: facts.targetFolderLogical === undefined ? undefined : decode(facts.targetFolderLogical) || undefined,
     cosignUsable: facts.cosignUsable,
     imageVersion: facts.imageVersion,
     imageRevision: facts.imageRevision,
