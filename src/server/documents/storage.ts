@@ -350,6 +350,71 @@ export class LocalDocumentStorage {
     }
   }
 
+  /**
+   * Authenticate, then decrypt and stream (two passes, one descriptor): pass
+   * 1 reads the whole object through `unsealer()`, discards its output and
+   * takes `final()`'s verdict, so a tampered object rejects here, before any
+   * stream exists. Pass 2 reads the same open handle, one 1 MiB piece per
+   * `pull`, and enqueues each decrypted piece; it runs its own `final()`, and a
+   * failure there errors the stream, never closes it, so an object changed
+   * under an open request cannot complete as a success. Plaintext exists only
+   * as pieces in flight: pass 1's are freed by `unsealPass`; pass 2's belong to
+   * the stream's consumer and are not released here. `cancel`, and every exit,
+   * close the handle and zero the read buffer.
+   */
+  async streamVerifiedPlaintext(
+    storageKey: string,
+    expected: { ciphertextSize: number },
+    unsealer: () => DocumentUnsealer,
+  ): Promise<ReadableStream<Uint8Array>> {
+    const source = await open(this.objectPath(storageKey), "r");
+    const buffer = Buffer.alloc(PASS_READ_BYTES);
+    let released = false;
+    const release = async (): Promise<void> => {
+      if (released) return;
+      released = true;
+      buffer.fill(0);
+      await source.close().catch(() => undefined);
+    };
+    try {
+      await this.unsealPass(source, expected.ciphertextSize, unsealer(), buffer, () => undefined);
+    } catch (error) {
+      await release();
+      throw error;
+    }
+    const second = unsealer();
+    let position = 0;
+    return new ReadableStream<Uint8Array>(
+      {
+        pull: async (controller) => {
+          try {
+            if (released) return;
+            if (position < expected.ciphertextSize) {
+              const wanted = Math.min(buffer.length, expected.ciphertextSize - position);
+              const { bytesRead } = await source.read(buffer, 0, wanted, position);
+              if (released) return;
+              if (bytesRead === 0) throw new Error("Encrypted document storage object is invalid");
+              position += bytesRead;
+              controller.enqueue(second.update(buffer.subarray(0, bytesRead)));
+            }
+            if (position >= expected.ciphertextSize) {
+              second.final();
+              await release();
+              controller.close();
+            }
+          } catch (error) {
+            await release();
+            controller.error(error);
+          }
+        },
+        cancel: async () => {
+          await release();
+        },
+      },
+      { highWaterMark: 1 },
+    );
+  }
+
   async discardQuarantine(path: string): Promise<void> {
     await rm(path, { force: true });
   }

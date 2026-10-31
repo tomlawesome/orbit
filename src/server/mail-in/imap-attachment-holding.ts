@@ -4,7 +4,7 @@ import type { getDb } from "@/db";
 import { imapIngestionAttachments } from "@/db/schema";
 import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
-import { createDocumentSealer, decryptDocument, type CryptoEnvelope } from "@/server/documents/crypto";
+import { createDocumentSealer, createDocumentUnsealer, type CryptoEnvelope } from "@/server/documents/crypto";
 import { openDocumentStorage, releaseBuffer, type ReceivedDocument } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
@@ -151,26 +151,46 @@ export async function scanAndHoldImapAttachment(input: {
   }
 }
 
-/** Opens holding bytes for re-encryption into an explicitly selected household,
- * and (#1155) for a page-one render that never leaves memory: both callers
- * decrypt the same ciphertext under the same recipient/receipt-bound context
- * and the plaintext never reaches disk either way. */
+/** The holding key for an attachment, picked by the envelope's own key_id (#954):
+ * held attachments are short-lived, but not so short-lived that a rotation in
+ * progress can be assumed never to span one. */
+function holdingKekOf(attachment: Pick<HeldImapAttachment, "envelope">): Buffer {
+  const holdingKek = keyEncryptionKeyFor(getDocumentConfig(), attachment.envelope.keyId);
+  if (!holdingKek) throw new Error("held attachment is wrapped under a key this instance does not hold");
+  return holdingKek;
+}
+
+/** Opens a held attachment for a page-one render that never leaves memory
+ * (#1155): the held object is decrypted under the same recipient/receipt-bound
+ * context acceptance uses, straight into one buffer, and the buffer is
+ * returned only once the tag has verified (#1571). */
 export async function readHeldImapAttachment(
   attachment: Pick<HeldImapAttachment, "id" | "mediaType" | "sizeBytes" | "storageKey" | "envelope">,
   owner: { recipientUserId: string; receiptId: string },
 ): Promise<Buffer> {
-  const config = getDocumentConfig();
-  // Picks by the envelope's own key_id (#954): held attachments are
-  // short-lived, but not so short-lived that a rotation in progress can be
-  // assumed never to span one.
-  const holdingKek = keyEncryptionKeyFor(config, attachment.envelope.keyId);
-  if (!holdingKek) throw new Error("held attachment is wrapped under a key this instance does not hold");
-  const ciphertext = await openDocumentStorage().readCiphertext(attachment.storageKey, attachment.sizeBytes + 64);
-  try {
-    return decryptDocument(ciphertext, stagingContext(attachment.id, owner.recipientUserId, owner.receiptId, attachment.mediaType, attachment.sizeBytes), attachment.envelope, holdingKek);
-  } finally {
-    ciphertext.fill(0);
-  }
+  const holdingKek = holdingKekOf(attachment);
+  return openDocumentStorage().unsealIntoBuffer(
+    attachment.storageKey,
+    { ciphertextSize: attachment.sizeBytes, plaintextSize: attachment.sizeBytes },
+    createDocumentUnsealer(stagingContext(attachment.id, owner.recipientUserId, owner.receiptId, attachment.mediaType, attachment.sizeBytes), attachment.envelope, holdingKek),
+  );
+}
+
+/** Opens a held attachment for re-encryption into an explicitly selected
+ * household (#1571): decrypted into a `.recovery` quarantine file whose tag
+ * has verified before the path is returned. The caller streams the file into
+ * the upload and discards it. */
+export async function readHeldImapAttachmentToQuarantine(
+  attachment: Pick<HeldImapAttachment, "id" | "mediaType" | "sizeBytes" | "storageKey" | "envelope">,
+  owner: { recipientUserId: string; receiptId: string },
+): Promise<{ quarantinePath: string; contentSha256: string }> {
+  const holdingKek = holdingKekOf(attachment);
+  return openDocumentStorage().unsealToQuarantine(
+    { kind: "object", storageKey: attachment.storageKey },
+    attachment.id,
+    { ciphertextSize: attachment.sizeBytes, plaintextSize: attachment.sizeBytes },
+    createDocumentUnsealer(stagingContext(attachment.id, owner.recipientUserId, owner.receiptId, attachment.mediaType, attachment.sizeBytes), attachment.envelope, holdingKek),
+  );
 }
 
 /** Idempotently removes private holding ciphertext after durable transfer or discard. */

@@ -318,7 +318,10 @@ recoverable state.
   and `Content-Disposition: attachment` with a safely encoded filename.
 - Range requests are not supported in the first release.
 - Authentication-tag verification must complete successfully; corrupt content
-  is not partially returned as a successful download.
+  is not partially returned as a successful download. The tag is verified in
+  one pass over the stored ciphertext before the first plaintext byte is sent;
+  the plaintext is then decrypted again in pieces into the response, never
+  written to disk and never held whole (#1571).
 
 ### Page preview safety
 
@@ -342,7 +345,8 @@ recoverable state.
   pdf.js worker, and no scripting layer to run a document's scripts. No
   plaintext temporary file is written, so there
   is nothing to unlink; the decrypted buffer is zeroed on every exit, including
-  failures.
+  failures. The plaintext is decrypted from the stored object straight into that
+  one buffer, with the tag verified before it is used (#1571).
 - Bytes are re-identified and re-inspected before rendering rather than trusted
   from the stored media type. Anything the open check refuses answers
   `document_preview_unsupported`; a render that fails or exceeds its wall-clock

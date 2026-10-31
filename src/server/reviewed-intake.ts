@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { Readable } from "node:stream";
 import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -35,7 +37,8 @@ import { workspaceItemSchema } from "@/lib/workspace";
 import type { AdjudicatedField } from "@/server/documents/adjudication";
 import { safeDocumentPlainText, scheduleKinds, type DocumentProposal } from "@/server/documents/suggestions";
 import { envelopeOf } from "@/server/documents/crypto";
-import { flagStagingPurgeFailed, readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
+import { openDocumentStorage } from "@/server/documents/storage";
+import { flagStagingPurgeFailed, readHeldImapAttachmentToQuarantine, purgeHeldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
 import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { applyWorkspaceCommand } from "@/server/workspace-repository";
@@ -562,26 +565,23 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
       failureCode ??= "attachment_transfer_in_progress";
       continue;
     }
-    let bytes: Buffer | undefined;
+    let quarantinePath: string | undefined;
     try {
-      bytes = await readHeldImapAttachment({
+      // Decrypted into a `.recovery` file whose tag has verified; the file is
+      // streamed into the upload and discarded below, whatever the outcome (#1571).
+      ({ quarantinePath } = await readHeldImapAttachmentToQuarantine({
         id: attachment.id,
         mediaType: attachment.mediaType,
         sizeBytes: attachment.sizeBytes,
         storageKey: attachment.storageKey,
         envelope: envelopeOf(attachment),
-      }, { recipientUserId: userId, receiptId });
-      // A fresh const so the stream callback below closes over a binding
-      // TypeScript can narrow to `Buffer` on its own — narrowing a `let`
-      // through a nested closure is not reliable, and `bytes` itself must
-      // stay a `let` for the finally block's unconditional zeroing.
-      const heldBytes = bytes;
+      }, { recipientUserId: userId, receiptId }));
       const document = await uploadItemDocument({
         userId,
         householdId,
         itemId,
         filename: attachment.displayName,
-        body: new ReadableStream({ start(controller) { controller.enqueue(heldBytes); controller.close(); } }),
+        body: Readable.toWeb(createReadStream(quarantinePath)) as ReadableStream<Uint8Array>,
         declaredBytes: attachment.sizeBytes,
         documentId: attachment.id,
       });
@@ -636,7 +636,7 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
       pending.push(attachment.id);
       failureCode ??= "attachment_transfer_failed";
     } finally {
-      bytes?.fill(0);
+      if (quarantinePath) await openDocumentStorage().discardQuarantine(quarantinePath).catch(() => undefined);
     }
   }
   return { attached, pending, failureCode };
