@@ -6,7 +6,6 @@
   import Sheet from "$lib/pocket/Sheet.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
-  import { chooseTheme, chooseTextSize } from "$lib/pick.js";
   import { TEXT_SIZE_CHOICES } from "$lib/text-size.js";
   import Tiles from "$lib/editing/Tiles.svelte";
   import { agoLong, clockOf, dayMonth, localZone, plural } from "$lib/format.js";
@@ -14,16 +13,11 @@
   import { alertsSupported, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
   import {
     readSentLately,
-    readSignInMethods,
-    removeLocalPassword,
-    startProviderLink,
-    startStepUp,
-    unlinkProviderIdentity,
-    writeLocalPassword,
     writeReminders,
   } from "$lib/data/workspace.js";
   import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
-  import { PACKS, intentOf, issuerHost, methodWords, on } from "./helm.js";
+  import { PACKS, issuerHost, on } from "./helm.js";
+  import { card, changeMethod, proveAtProvider } from "./sign-in-methods.svelte.js";
   import { signOutOfDevice, signOutOfEveryDevice } from "./sign-out.js";
   import { tabArrows } from "$lib/tabs.js";
 
@@ -52,7 +46,7 @@
    */
 
   /** @typedef {Awaited<ReturnType<typeof import('$lib/data/workspace.js').readSettingsScreen>>} SettingsView */
-  /** @typedef {Awaited<ReturnType<typeof readSignInMethods>>} Methods */
+  /** @typedef {Awaited<ReturnType<typeof import('$lib/data/workspace.js').readSignInMethods>>} Methods */
   /** @typedef {Awaited<ReturnType<typeof import('$lib/data/workspace.js').readSessions>>} Sessions */
   /** @typedef {import('$lib/data/fixtures/settings.js').SentRow} SentRow */
 
@@ -63,6 +57,8 @@
    *   sessions: Sessions,
    *   active: string,
    *   textSize: string,
+   *   onpickpack: (name: string) => void,
+   *   onpicktextsize: (id: string) => void,
    *   initials: string,
    *   providerOffered: boolean,
    *   emailApproval: boolean,
@@ -79,8 +75,11 @@
     view = $bindable(),
     methods = $bindable(),
     sessions = $bindable(),
-    active = $bindable(),
-    textSize = $bindable(),
+    /* The pack and the text size are the desk page's, picked through it (#1353). */
+    active,
+    textSize,
+    onpickpack,
+    onpicktextsize,
     initials,
     providerOffered,
     emailApproval,
@@ -204,19 +203,8 @@
   });
 
   /* ── your sky ─────────────────────────────────────────────────────────── */
-  /** @param {string} id */
-  function pickPack(id) {
-    active = id;
-    chooseTheme(id);
-  }
-
   /* Text size (#1180): four tiles across, two by two under 430px (four 16px words do not fit across at 390). */
   let width = $state(1024);
-  /** @param {string} id */
-  function pickTextSize(id) {
-    textSize = id;
-    chooseTextSize(id);
-  }
 
   /* ── your relay: the address copies ───────────────────────────────────── */
   async function copyAddress() {
@@ -237,8 +225,7 @@
   let methodOpen = $state(false);
   let currentPassword = $state("");
   let newPassword = $state("");
-  let methodBusy = $state(false);
-  let methodProblem = $state(/** @type {string | null} */ (null));
+  const methodCard = $state(card());
   /** Whether this visit is standing on a step-up proof for `action`. */
   let proven = $state(false);
 
@@ -263,7 +250,7 @@
     action = next;
     currentPassword = "";
     newPassword = "";
-    methodProblem = null;
+    methodCard.problem = null;
     proven = false;
     methodOpen = true;
   }
@@ -280,48 +267,16 @@
 
   async function toProvider() {
     if (!action) return;
-    methodProblem = null;
-    const identity = action.startsWith("unlink:") ? `&identity=${encodeURIComponent(action.slice(7))}` : "";
-    try {
-      await startStepUp({ intent: intentOf(action), returnTo: `/settings?stepup=${encodeURIComponent(action)}${identity}` });
-    } catch (error) {
-      methodProblem = methodWords(error);
-    }
+    await proveAtProvider(action, methodCard);
   }
 
-  async function confirmMethod() {
-    if (!action || methodBusy) return;
-    methodBusy = true;
-    methodProblem = null;
-    /* A step-up proof travels as a cookie, a password in the body: exactly
-       one of them is in play. */
-    const challenge = hasPassword ? { currentPassword } : {};
-    try {
-      /** @type {string} */
-      let outcome = "";
-      if (action === "link_oidc") {
-        await startProviderLink({ returnTo: "/settings", ...challenge });
-        return;
-      }
-      if (action === "password_set" || action === "password_change") {
-        const result = await writeLocalPassword({ password: newPassword, ...challenge });
-        outcome = result.changed ? "password changed · every other device was signed out" : "password set";
-      } else if (action === "password_remove") {
-        await removeLocalPassword(challenge);
-        outcome = "password removed";
-      } else if (action.startsWith("unlink:")) {
-        await unlinkProviderIdentity(action.slice(7), challenge);
-        outcome = "identity provider unlinked";
-      }
-      methodOpen = false;
-      wake(outcome);
-      methods = await readSignInMethods();
-    } catch (error) {
-      methodProblem = methodWords(error);
-    } finally {
-      methodBusy = false;
-    }
-  }
+  /* The change itself (./sign-in-methods.svelte.js); the callout closes and the wake says it. */
+  const confirmCallout = () => changeMethod(action, { hasPassword, currentPassword, newPassword }, {
+    card: methodCard,
+    landed: () => (methodOpen = false),
+    wake,
+    keep: (fresh) => (methods = fresh),
+  });
 
   /* ── where you're signed in ───────────────────────────────────────────── */
   let sessionProblem = $state(/** @type {string | null} */ (null));
@@ -473,7 +428,7 @@
       <h2 class="p-caps" id="st-sky">Your sky</h2>
       <div class="st-packs" role="group" aria-labelledby="st-sky">
         {#each PACKS as [name, title, line, ground, [sun, warm, ok, upcoming]] (name)}
-          <button class="st-pack" aria-pressed={active === name} aria-label="{title} — {line}" onclick={() => pickPack(name)}>
+          <button class="st-pack" aria-pressed={active === name} aria-label="{title} — {line}" onclick={() => onpickpack(name)}>
             <span class="st-swatch" style:background={ground} aria-hidden="true">
               <i class="st-sun" style:background={sun}></i>
               <i style="left:58px;top:30px;width:7px;height:7px;background:{warm}"></i>
@@ -486,7 +441,7 @@
       </div>
       <h3 class="p-caps st-textsize" id="st-textsize">Text size</h3>
       <!-- #1180, owner 2026-10-21: one column on a phone, so "extra large" at its own size fits a 360px screen. -->
-      <Tiles choices={[...TEXT_SIZE_CHOICES]} value={textSize} label="Text size" cols={width < 430 ? 1 : 4} onpick={pickTextSize} />
+      <Tiles choices={[...TEXT_SIZE_CHOICES]} value={textSize} label="Text size" cols={width < 430 ? 1 : 4} onpick={onpicktextsize} />
       <!-- Under the packs, where the desk card has it (#1189). -->
       <button class="st-watch" onclick={watchTour}>↻ watch the tour</button>
     </section>
@@ -671,7 +626,7 @@
       <p class="st-say p-prose">Orbit asks you to confirm it’s you before a way in changes.</p>
     {/if}
     {#if hasPassword || proven}
-      <form id="st-method-form" class="st-form" onsubmit={(event) => { event.preventDefault(); confirmMethod(); }}>
+      <form id="st-method-form" class="st-form" onsubmit={(event) => { event.preventDefault(); confirmCallout(); }}>
         {#if hasPassword}
           <label class="st-label" for="st-current">your current password</label>
           <input id="st-current" class="st-input" type="password" autocomplete="current-password"
@@ -686,12 +641,12 @@
         {/if}
       </form>
     {/if}
-    {#if methodProblem}<p class="p-error" role="alert">{methodProblem}</p>{/if}
+    {#if methodCard.problem}<p class="p-error" role="alert">{methodCard.problem}</p>{/if}
     {#snippet foot()}
       {#if hasPassword || proven}
         <button class="p-pill filled" type="submit" form="st-method-form"
-                disabled={methodBusy || (hasPassword && !currentPassword) || (wantsNew && !newPassword)}>
-          {methodBusy ? "saving…" : confirmLabel}</button>
+                disabled={methodCard.busy || (hasPassword && !currentPassword) || (wantsNew && !newPassword)}>
+          {methodCard.busy ? "saving…" : confirmLabel}</button>
       {:else}
         <button class="p-pill filled" onclick={toProvider}>confirm with your identity provider →</button>
       {/if}

@@ -44,7 +44,12 @@ function blockAfter(src, marker) {
 }
 
 describe("administration: the tells (#1344, web-8)", () => {
-  const desk = () => blockAfter(route("administration/+page.svelte"), "const tells = $derived.by(");
+  // #1353: both layouts' tells are words.js's tellsOf now; the desk calls it.
+  const desk = () => blockAfter(route("administration/words.js"), "export function tellsOf(view, jobs, { services = false } = {})");
+
+  it("the desk builds its tells from the shared tellsOf", () => {
+    expect(route("administration/+page.svelte")).toMatch(/const tells = \$derived\.by\(\(\) => tellsOf\(view, jobs\)/);
+  });
 
   it("the desk falls back to the mailbox's own verificationState when there is no probe, as the phone does", () => {
     // phone: pocket.svelte -- mailProbes.mailbox ? probe verdict : view.mailbox?.verificationState === "failed"
@@ -58,16 +63,22 @@ describe("administration: the tells (#1344, web-8)", () => {
 });
 
 describe("administration: contactAction's re-entry guard (#1344, web-9)", () => {
+  // #1353: both layouts send the contact through acts.svelte.js's setContact.
+  const act = () => blockAfter(route("administration/acts.svelte.js"), "export async function setContact(current, partial, { card, reread, landed = quiet, settled = quiet, wake = quiet })");
+
+  it("the desk sends its contact through the shared setContact", () => {
+    expect(route("administration/+page.svelte")).toMatch(/const saveContact = \(partial\) =>\s*setContact\(/);
+  });
+
   it("the desk refuses a second contact write while one is in flight, as the phone does", () => {
-    const body = blockAfter(route("administration/+page.svelte"), "async function contactAction(partial)");
     // phone: `if (!current || contactBusy) return;`
-    expect(body).toMatch(/if\s*\([^)]*\bcontactBusy\b[^)]*\)\s*return/);
+    expect(act()).toMatch(/if\s*\([^)]*\bcard\.busy\b[^)]*\)\s*return/);
   });
 
   it("the guard comes before the busy flag is raised", () => {
-    const body = blockAfter(route("administration/+page.svelte"), "async function contactAction(partial)");
-    const guard = body.search(/if\s*\([^)]*\bcontactBusy\b[^)]*\)\s*return/);
-    const raise = body.indexOf("contactBusy = true");
+    const body = act();
+    const guard = body.search(/if\s*\([^)]*\bcard\.busy\b[^)]*\)\s*return/);
+    const raise = body.indexOf("card.busy = true");
     expect(guard).toBeGreaterThanOrEqual(0);
     expect(raise).toBeGreaterThan(guard);
   });
@@ -150,14 +161,18 @@ describe("settings: toggleEmailReminders' saving guard (#1344, web-13)", () => {
 describe("settings: the password-changed words (#1344, web-13)", () => {
   const PHONE_WORDS = "password changed · every other device was signed out";
 
-  it("the phone's words are the reference", () => {
-    expect(route("settings/pocket.svelte")).toContain(PHONE_WORDS);
+  // #1353: both layouts change a method through sign-in-methods.svelte.js's changeMethod.
+  it("the phone's words are the reference, said once for both layouts", () => {
+    expect(route("settings/sign-in-methods.svelte.js")).toContain(PHONE_WORDS);
   });
 
   it("the desk says them too, not the dashed variant", () => {
     const src = route("settings/+page.svelte");
-    expect(src).toContain(PHONE_WORDS);
-    expect(src).not.toContain("password changed — every other device was signed out");
+    expect(src).toMatch(/\bchangeMethod\(/);
+    expect(route("settings/pocket.svelte")).toMatch(/\bchangeMethod\(/);
+    for (const text of [src, route("settings/pocket.svelte"), route("settings/sign-in-methods.svelte.js")]) {
+      expect(text).not.toContain("password changed — every other device was signed out");
+    }
   });
 });
 

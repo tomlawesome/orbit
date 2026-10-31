@@ -7,11 +7,6 @@
     readSessions,
     readSettingsScreen,
     readSignInMethods,
-    removeLocalPassword,
-    startProviderLink,
-    startStepUp,
-    unlinkProviderIdentity,
-    writeLocalPassword,
     writeReminders,
   } from "$lib/data/workspace.js";
   import { SIGN_IN_METHODS_FIXTURES } from "$lib/data/fixtures/admin.js";
@@ -27,7 +22,8 @@
   import Chrome from "$lib/Chrome.svelte";
   import { createArm } from "$lib/arm.js";
   import SignInChallenge from "./SignInChallenge.svelte";
-  import { PACKS, intentOf, issuerHost, methodWords, on } from "./helm.js";
+  import { PACKS, issuerHost, on } from "./helm.js";
+  import { card, changeMethod, proveAtProvider } from "./sign-in-methods.svelte.js";
   import { signOutOfDevice, signOutOfEveryDevice } from "./sign-out.js";
   import Pocket from "./pocket.svelte";
   import "./settings.css";
@@ -51,7 +47,8 @@
   /** @type {string | null} */
   let screenProblem = $state(null);
 
-  /* The roster and its offer live in helm.js, shared with the phone layout. */
+  /* The roster and its offer live in helm.js, shared with the phone layout,
+     which picks through these two (#1353). */
   let active = $state(DEFAULT_THEME);
   /** @param {string} name */
   function pickPack(name) {
@@ -253,11 +250,9 @@
   let armedMethod = $state(null);
   let currentPassword = $state("");
   let newPassword = $state("");
-  let methodBusy = $state(false);
+  const methodCard = $state(card());
   /** @type {string | null} */
   let methodOutcome = $state(null);
-  /** @type {string | null} */
-  let methodProblem = $state(null);
   /* There is deliberately no "am I standing on a step-up proof" flag. A reader
      with no password can only reach an armed action by coming back from one —
      `tapMethod` sends them there rather than opening a field — so `hasPassword`
@@ -273,7 +268,7 @@
    * @param {string} action
    */
   async function tapMethod(action) {
-    methodProblem = null;
+    methodCard.problem = null;
     methodOutcome = null;
     currentPassword = "";
     newPassword = "";
@@ -281,12 +276,7 @@
     if (hasPassword) { armedMethod = action; return; }
     /* No password: the challenge is a fresh authentication at the provider.
        `returnTo` carries the action so this block can pick it up again. */
-    const identity = action.startsWith("unlink:") ? `&identity=${encodeURIComponent(action.slice(7))}` : "";
-    try {
-      await startStepUp({ intent: intentOf(action), returnTo: `/settings?stepup=${encodeURIComponent(action)}${identity}` });
-    } catch (error) {
-      methodProblem = methodWords(error);
-    }
+    await proveAtProvider(action, methodCard);
   }
 
   /** Disarms whatever is armed, leaving the block as this reader found it. */
@@ -296,42 +286,17 @@
     newPassword = "";
   }
 
-  /** The second tap: the change itself, carrying whichever proof applies. */
-  async function confirmMethod() {
-    if (!armedMethod || methodBusy) return;
-    methodBusy = true;
-    methodProblem = null;
-    /* A step-up proof is a cookie the browser carries; a password travels in
-       the body. Exactly one of them is in play, never both. */
-    const challenge = hasPassword ? { currentPassword } : {};
-    const action = armedMethod;
-    try {
-      if (action === "link_oidc") {
-        await startProviderLink({ returnTo: "/settings", ...challenge });
-        return;
-      }
-      if (action === "password_set" || action === "password_change") {
-        const outcome = await writeLocalPassword({ password: newPassword, ...challenge });
-        methodOutcome = outcome.changed
-          ? "password changed · every other device was signed out"
-          : "password set";
-      } else if (action === "password_remove") {
-        await removeLocalPassword(challenge);
-        methodOutcome = "password removed";
-      } else if (action.startsWith("unlink:")) {
-        await unlinkProviderIdentity(action.slice(7), challenge);
-        methodOutcome = "identity provider unlinked";
-      }
+  /** The second tap: the change itself (./sign-in-methods.svelte.js), said under the card. */
+  const confirmMethod = () => changeMethod(armedMethod, { hasPassword, currentPassword, newPassword }, {
+    card: methodCard,
+    say: (outcome) => (methodOutcome = outcome || null),
+    landed: () => {
       armedMethod = null;
       currentPassword = "";
       newPassword = "";
-      methods = await readSignInMethods();
-    } catch (error) {
-      methodProblem = methodWords(error);
-    } finally {
-      methodBusy = false;
-    }
-  }
+    },
+    keep: (fresh) => (methods = fresh),
+  });
 
   /**
    * "Where you're signed in" (#482): every session the caller holds, loaded
@@ -504,7 +469,7 @@
      household's is. It shares what this page loads rather than reading it
      twice, and hides this page's sky and cards below the switch; the chrome
      stays, because on a phone Chrome.svelte draws the kit's top chrome. -->
-<Pocket bind:view bind:methods bind:sessions bind:active bind:textSize {initials} {providerOffered} {emailApproval} {screenProblem} onretry={loadScreen}
+<Pocket bind:view bind:methods bind:sessions {active} {textSize} onpickpack={pickPack} onpicktextsize={pickTextSize} {initials} {providerOffered} {emailApproval} {screenProblem} onretry={loadScreen}
         {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} onsignedout={descendFrom} />
 
 <div class="helm-page">
@@ -569,7 +534,7 @@
         {#if armedMethod === "password_set" || armedMethod === "password_change" || armedMethod === "password_remove"}
           <SignInChallenge wantsNewPassword={armedMethod !== "password_remove"}
                            confirmLabel={armedMethod === "password_remove" ? "remove it" : "save it"}
-                           hasPassword={hasPassword} busy={methodBusy} problem={methodProblem}
+                           hasPassword={hasPassword} busy={methodCard.busy} problem={methodCard.problem}
                            bind:currentPassword bind:newPassword
                            onconfirm={confirmMethod} oncancel={cancelMethod} />
         {/if}
@@ -586,7 +551,7 @@
           </div>
           {#if armedMethod === `unlink:${identity.id}`}
             <SignInChallenge confirmLabel="unlink it"
-                             hasPassword={hasPassword} busy={methodBusy} problem={methodProblem}
+                             hasPassword={hasPassword} busy={methodCard.busy} problem={methodCard.problem}
                              bind:currentPassword bind:newPassword
                              onconfirm={confirmMethod} oncancel={cancelMethod} />
           {/if}
@@ -605,7 +570,7 @@
           </div>
           {#if armedMethod === "link_oidc"}
             <SignInChallenge confirmLabel="continue to your provider"
-                             hasPassword={hasPassword} busy={methodBusy} problem={methodProblem}
+                             hasPassword={hasPassword} busy={methodCard.busy} problem={methodCard.problem}
                              bind:currentPassword bind:newPassword
                              onconfirm={confirmMethod} oncancel={cancelMethod} />
           {/if}

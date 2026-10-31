@@ -66,6 +66,17 @@ export const on = (iso) => (iso ? dayMonthYear(iso) : "");
 export const intentOf = (action) =>
   action.startsWith("unlink:") ? "unlink_method" : action === "password_remove" ? "unlink_method" : action;
 
+/**
+ * Where the provider sends a reader back to after a step-up (ADR-0023 §5):
+ * `?stepup=` names the action they left to do, and an unlink names the
+ * identity too, so the screen can re-arm it on the way back in.
+ * @param {string} action
+ */
+export const stepUpReturnOf = (action) => {
+  const identity = action.startsWith("unlink:") ? `&identity=${encodeURIComponent(action.slice(7))}` : "";
+  return `/settings?stepup=${encodeURIComponent(action)}${identity}`;
+};
+
 /** What a sign-in method refusal means in the block's own words, from the bounded code. */
 /** @param {unknown} error */
 export function methodWords(error) {
