@@ -15,12 +15,13 @@ import { createDocumentSealer, decryptDocument, envelopeOf } from "@/server/docu
 import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
-import { openDocumentStorage } from "@/server/documents/storage";
+import { type LocalDocumentStorage, openDocumentStorage, type ReceivedDocument } from "@/server/documents/storage";
 import {
   detectDocumentMediaType,
   normalizedDocumentFilename,
   classifyDocumentStructure,
   type DocumentStructureReason,
+  type SupportedDocumentMediaType,
 } from "@/server/documents/validation";
 import { canAccessHouseholdDocuments, canManageDocumentDeletion } from "@/server/documents/authorization";
 import { scannerRecoveryDelayMs } from "@/server/documents/staging";
@@ -379,6 +380,29 @@ async function reserveDocumentMetadata(input: {
   });
 }
 
+/**
+ * The open check's one read of the quarantine file (#1567). The buffer lives
+ * only in this function's frame: it is zeroed when the check answers and is
+ * unreachable once this returns, so the encrypt stage that follows never runs
+ * with it still held. Kept in the upload's own frame, a suspended async
+ * function keeps it reachable across the later awaits.
+ */
+async function checkQuarantinedStructure(
+  storage: LocalDocumentStorage,
+  received: ReceivedDocument,
+  mediaType: SupportedDocumentMediaType,
+  maxBytes: number,
+): Promise<DocumentStructureReason> {
+  const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
+  try {
+    return await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
+  } finally {
+    // Nothing keeps this buffer past the check, so it is zeroed here
+    // whatever the answer (#1151 F13).
+    bytes.fill(0);
+  }
+}
+
 export async function uploadItemDocument(input: {
   userId: string;
   householdId: string;
@@ -509,15 +533,7 @@ export async function uploadItemDocument(input: {
       scanMs = Math.max(0, Date.now() - scanStartedAt);
     }
     if (!scan || scan.status === "clean") {
-      const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
-      let structure: DocumentStructureReason = "unsupported_structure";
-      try {
-        structure = await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
-      } finally {
-        // Nothing keeps this buffer past the check, so it is zeroed here
-        // whatever the answer (#1151 F13).
-        bytes.fill(0);
-      }
+      const structure = await checkQuarantinedStructure(storage, received, mediaType, maxBytes);
       if (structure === "password_required") {
         throw new AppError(
           "document_password_required",

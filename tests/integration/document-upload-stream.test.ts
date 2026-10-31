@@ -17,6 +17,8 @@ import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -173,6 +175,50 @@ describe("a file the open check refuses leaves nothing, and the check's buffer i
     const buffer = await reads.mock.results[0]!.value as Buffer;
     expect(buffer.length).toBe(bytes.length);
     expect(buffer.every((byte) => byte === 0)).toBe(true);
+  }, 60_000);
+
+  it("lets go of the buffer the check read before the seal starts, so the encrypt stage never runs beside it", async () => {
+    const fixture = await createIntegrationFixture("doc-upload-stream-dropped");
+    const bytes = paddedPdfOfSize(2 * MIB + 5);
+    setFlagsFromString("--expose-gc");
+    const collect = runInNewContext("gc") as () => void;
+
+    // Wrapped by hand: a vi.spyOn would keep the returned buffer alive in mock.results.
+    const originalRead = LocalDocumentStorage.prototype.readQuarantine;
+    const originalSeal = LocalDocumentStorage.prototype.sealQuarantine;
+    let reads = 0;
+    let readLength = -1;
+    let heldBuffer: WeakRef<Buffer> | undefined;
+    let seals = 0;
+    let bufferCleared: boolean | undefined;
+    let readBeforeSeal = false;
+    LocalDocumentStorage.prototype.readQuarantine = async function (this: LocalDocumentStorage, ...args: Parameters<typeof originalRead>) {
+      reads += 1;
+      const buffer = await originalRead.apply(this, args);
+      readLength = buffer.length;
+      heldBuffer = new WeakRef(buffer);
+      return buffer;
+    };
+    LocalDocumentStorage.prototype.sealQuarantine = function (this: LocalDocumentStorage, ...args: Parameters<typeof originalSeal>) {
+      seals += 1;
+      readBeforeSeal = heldBuffer !== undefined;
+      collect();
+      collect();
+      bufferCleared = heldBuffer?.deref() === undefined;
+      return originalSeal.apply(this, args);
+    } as typeof originalSeal;
+    try {
+      await expect(upload(fixture, bytes)).resolves.toMatchObject({ lifecycle: "available" });
+    } finally {
+      LocalDocumentStorage.prototype.readQuarantine = originalRead;
+      LocalDocumentStorage.prototype.sealQuarantine = originalSeal;
+    }
+
+    expect(reads).toBe(1);
+    expect(readLength).toBe(bytes.length);
+    expect(seals).toBe(1);
+    expect(readBeforeSeal, "the check read the quarantine file before the seal started").toBe(true);
+    expect(bufferCleared, "the open check's buffer is still reachable when the seal starts").toBe(true);
   }, 60_000);
 });
 
