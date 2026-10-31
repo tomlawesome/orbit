@@ -1848,7 +1848,7 @@ private-details:
     - checkout=$(mktemp -d)
     - git clone --quiet --depth 1 --branch "$PRIVATE_DETAILS_REF" "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.tomlawson.io/ai/agent-infra.git" "$checkout"
     - got=$(git -C "$checkout" rev-parse HEAD)
-    - if [ "$got" != "$PRIVATE_DETAILS_COMMIT" ]; then echo "private-details: $PRIVATE_DETAILS_REF is at $got, not the pinned $PRIVATE_DETAILS_COMMIT; move the include ref and PRIVATE_DETAILS_COMMIT together" >&2; exit 1; fi
+    - if [ "$got" != "$PRIVATE_DETAILS_COMMIT" ]; then echo "private-details tag $PRIVATE_DETAILS_REF is at $got, not the pinned $PRIVATE_DETAILS_COMMIT; move the include ref and PRIVATE_DETAILS_COMMIT together" >&2; exit 1; fi
     - sh "$checkout/scripts/private-details/scan.sh" history
 
 # The flake log acts (#1553, agent-infra#30): a flake at three sightings with no
