@@ -1,13 +1,14 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { getDatabaseClient, getDb } from "@/db";
 import { documentCrypto, documents, documentStagingObjects, households, imapIngestionAttachments, imapIngestionMessages, mailInSecrets, metadataKeys } from "@/db/schema";
 import { deriveDocumentKeyId, getDocumentConfig } from "@/server/documents/config";
 import { decryptDocument, encryptDocument, rewrapDocumentKey, type CryptoEnvelope, type DocumentEncryptionContext } from "@/server/documents/crypto";
 import { createWrappedMetadataKey } from "@/server/metadata/crypto";
 import { encryptMailInSecret, type MailInSecretContext } from "@/server/mail-in/core/secret-crypto";
 import {
+  heldObjectsOnOlderKey,
   rotationComplete,
   rotationRemaining,
   runKekRotationCycle,
@@ -25,13 +26,18 @@ import { cleanupIntegrationEnvironment } from "./support/fixtures";
  * populations, so a rotation A -> B left them on A, and B -> C then met them).
  * Ratified plan: skip and report such objects in the rewrap batches, leave
  * them out of the remaining count, and prove it with a seeded upgrade test.
- * The tests do not name the report's fields (the spec does not): they only
- * require that SOME field of the worker's results mentions the skip.
+ *
+ * The report's fields are a public interface (the CLI reads them), so these
+ * tests name them (ruling on #1536, T-Q11/T-Q24): `RotationProgress` carries
+ * the counts (`heldAttachmentsSkipped`, `stagingObjectsSkipped`);
+ * `RotationCycleResult` carries no skip report; the ids are loaded once, at
+ * completion, by `heldObjectsOnOlderKey`, for the operator's report.
  */
 
 const cleanups: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   while (cleanups.length > 0) await cleanups.pop()!();
 });
 
@@ -187,28 +193,31 @@ async function documentRow(documentId: string) {
   return row;
 }
 
-/** Sum of every numeric field, without naming them. */
-function totalRemaining(progress: object): number {
-  return Object.values(progress).reduce<number>((sum, value) => sum + (typeof value === "number" ? value : 0), 0);
+/** The "still to move" counters, read from the worker's own progress object
+ * (every field it names `...Remaining`), so a counter the worker adds is
+ * included without a hand-kept list. The skipped counts are not among them. */
+function remainingCounters(progress: object): Array<[string, number]> {
+  const counters = Object.entries(progress).filter(([name]) => name.endsWith("Remaining")) as Array<[string, number]>;
+  expect(counters.length, "the progress object names its remaining counters").toBeGreaterThan(0);
+  return counters;
 }
 
-const KNOWN_PROGRESS_FIELDS = new Set([
-  "documentsRemaining", "metadataKeysRemaining", "mailInSecretsRemaining", "heldAttachmentsRemaining", "stagingObjectsRemaining",
-  "documentsEnqueued", "documentJobsProcessed", "metadataKeysRewrapped", "mailInSecretsRewrapped", "heldAttachmentsRewrapped", "stagingObjectsRewrapped",
-]);
+function expectNothingRemaining(progress: object): void {
+  for (const [name, count] of remainingCounters(progress)) expect(count, name).toBe(0);
+}
 
-/** True when a result carries a field the worker has today that is not one of
- * its existing counts, and that field reports something (a count of 1 or more,
- * a non-empty list, or a non-empty string/object): the skip report. The spec
- * fixes no field names, so none is assumed. */
-function reportsSkip(result: object): boolean {
-  return Object.entries(result).some(([name, value]) => {
-    if (KNOWN_PROGRESS_FIELDS.has(name)) return false;
-    if (typeof value === "number") return value >= 1;
-    if (Array.isArray(value)) return value.length > 0;
-    if (typeof value === "string") return value.length > 0;
-    return typeof value === "object" && value !== null && Object.keys(value).length > 0;
-  });
+/** Records every statement sent through the shared database client, outside a
+ * transaction, and counts the ones that load the ids of held objects: a
+ * select of the id column alone from either held-object table. Counting
+ * statements is the seam; no worker function is replaced. */
+function watchIdLoads() {
+  const spy = vi.spyOn(getDatabaseClient(), "unsafe");
+  const idLoad = /^\s*select\s+"(?:id|document_id)"\s+from\s+"(imap_ingestion_attachments|document_staging_objects)"/i;
+  return {
+    count(table: "imap_ingestion_attachments" | "document_staging_objects"): number {
+      return spy.mock.calls.filter(([query]) => typeof query === "string" && idLoad.exec(query)?.[1] === table).length;
+    },
+  };
 }
 
 describe("a rotation finishes while held objects carry a key older than the one being rotated from (#1392)", () => {
@@ -222,8 +231,11 @@ describe("a rotation finishes while held objects carry a key older than the one 
 
     // The rotation reached done: nothing remains, and it says so.
     expect(rotationComplete(after)).toBe(true);
-    expect(totalRemaining(after)).toBe(0);
-    expect(reportsSkip(after) || reportsSkip(await rotationRemaining(keys))).toBe(true);
+    expectNothingRemaining(after);
+    expect(after.heldAttachmentsSkipped).toBe(1);
+    expect(after.stagingObjectsSkipped).toBe(0);
+    // The ids the operator's report names: exactly the seeded one.
+    expect(await heldObjectsOnOlderKey(keys)).toEqual({ heldAttachmentIds: [held.id], stagingObjectIds: [] });
 
     // Skipped, not rewrapped and not destroyed: the row is byte-for-byte as it
     // was, and its DEK still unwraps under its own (older) key.
@@ -246,8 +258,10 @@ describe("a rotation finishes while held objects carry a key older than the one 
     const after = await runKekRotationToCompletion(keys);
 
     expect(rotationComplete(after)).toBe(true);
-    expect(totalRemaining(after)).toBe(0);
-    expect(reportsSkip(after) || reportsSkip(await rotationRemaining(keys))).toBe(true);
+    expectNothingRemaining(after);
+    expect(after.heldAttachmentsSkipped).toBe(0);
+    expect(after.stagingObjectsSkipped).toBe(1);
+    expect(await heldObjectsOnOlderKey(keys)).toEqual({ heldAttachmentIds: [], stagingObjectIds: [staged.documentId] });
 
     const row = await stagedRow(staged.documentId);
     expect(row).toBeDefined();
@@ -262,19 +276,26 @@ describe("a rotation finishes while held objects carry a key older than the one 
   it("does not count skipped objects as remaining, and a single batch pass reports them instead of stalling or throwing", async () => {
     const { oldKek, oldKeyId, keys } = eras();
     const household = await plantHousehold();
-    await plantHeldAttachment({ kek: oldKek, keyId: oldKeyId });
-    await plantStagedObject(household, oldKek, oldKeyId);
+    const { held } = await plantHeldAttachment({ kek: oldKek, keyId: oldKeyId });
+    const staged = await plantStagedObject(household, oldKek, oldKeyId);
 
-    // Before any batch has run, the remaining count already leaves them out.
+    // Before any batch has run, the remaining count already leaves them out,
+    // and the progress counts them as skipped.
     const remaining = await rotationRemaining(keys);
-    expect(totalRemaining(remaining)).toBe(0);
+    expectNothingRemaining(remaining);
     expect(rotationComplete(remaining)).toBe(true);
+    expect(remaining.heldAttachmentsSkipped).toBe(1);
+    expect(remaining.stagingObjectsSkipped).toBe(1);
 
-    // A batch pass does not throw on them, rewraps none, and reports them.
+    // A batch pass does not throw on them, rewraps none, and carries no skip
+    // report of its own (A-Q3: nothing read the per-cycle copy).
     const cycle = await runKekRotationCycle(keys);
     expect(cycle.heldAttachmentsRewrapped).toBe(0);
     expect(cycle.stagingObjectsRewrapped).toBe(0);
-    expect(reportsSkip(cycle)).toBe(true);
+    expect(cycle).not.toHaveProperty("skippedOnOlderKey");
+
+    // The ids stay available for the report.
+    expect(await heldObjectsOnOlderKey(keys)).toEqual({ heldAttachmentIds: [held.id], stagingObjectIds: [staged.documentId] });
   });
 
   it("still rewraps held objects on the rotate-from key while skipping those on an older key (seeded upgrade)", async () => {
@@ -302,7 +323,7 @@ describe("a rotation finishes while held objects carry a key older than the one 
 
     // Done, with the rows on the rotate-from key all moved to the next key...
     expect(rotationComplete(after)).toBe(true);
-    expect(totalRemaining(after)).toBe(0);
+    expectNothingRemaining(after);
     expect((await documentRow(documentId)).keyId).toBe(keys.nextKeyId);
     const [metadata] = await getDb().select().from(metadataKeys).where(eq(metadataKeys.householdId, household));
     expect(metadata.keyId).toBe(keys.nextKeyId);
@@ -316,6 +337,80 @@ describe("a rotation finishes while held objects carry a key older than the one 
     expect((await heldRow(heldOld.held.id)).wrappedDek).toBe(heldOldBefore.wrappedDek);
     expect((await stagedRow(stagedOld.documentId)).keyId).toBe(oldKeyId);
     expect((await stagedRow(stagedOld.documentId)).wrappedDek).toBe(stagedOldBefore.wrappedDek);
-    expect(reportsSkip(after) || reportsSkip(await rotationRemaining(keys))).toBe(true);
+    expect(after.heldAttachmentsSkipped).toBe(1);
+    expect(after.stagingObjectsSkipped).toBe(1);
+    expect(await heldObjectsOnOlderKey(keys)).toEqual({
+      heldAttachmentIds: [heldOld.held.id],
+      stagingObjectIds: [stagedOld.documentId],
+    });
+  });
+
+  it("reports no skipped object, and loads no ids, when none is on an older key", async () => {
+    const { keys } = eras();
+    await plantHeldAttachment();
+
+    const after = await runKekRotationToCompletion(keys);
+
+    expect(rotationComplete(after)).toBe(true);
+    expect(after.heldAttachmentsSkipped).toBe(0);
+    expect(after.stagingObjectsSkipped).toBe(0);
+    expect(await heldObjectsOnOlderKey(keys)).toEqual({ heldAttachmentIds: [], stagingObjectIds: [] });
+  });
+});
+
+describe("skipped ids are loaded once per rotation, not twice per cycle (#1536 D-F2)", () => {
+  async function seedOlderKeyObjects() {
+    const { oldKek, oldKeyId, keys } = eras();
+    const household = await plantHousehold();
+    await plantHeldAttachment({ kek: oldKek, keyId: oldKeyId });
+    await plantStagedObject(household, oldKek, oldKeyId);
+    return { household, keys };
+  }
+
+  it("a single cycle loads no ids", async () => {
+    const { keys } = await seedOlderKeyObjects();
+    const loads = watchIdLoads();
+
+    await runKekRotationCycle(keys);
+
+    expect(loads.count("imap_ingestion_attachments")).toBe(0);
+    expect(loads.count("document_staging_objects")).toBe(0);
+  });
+
+  it("the remaining count loads no ids, only counts", async () => {
+    const { keys } = await seedOlderKeyObjects();
+    const loads = watchIdLoads();
+
+    const progress = await rotationRemaining(keys);
+
+    expect(loads.count("imap_ingestion_attachments")).toBe(0);
+    expect(loads.count("document_staging_objects")).toBe(0);
+    expect(progress.heldAttachmentsSkipped).toBe(1);
+    expect(progress.stagingObjectsSkipped).toBe(1);
+  });
+
+  it("the report's own load counts exactly one id load per table (the counter sees real loads)", async () => {
+    const { keys } = await seedOlderKeyObjects();
+    const loads = watchIdLoads();
+
+    await heldObjectsOnOlderKey(keys);
+
+    expect(loads.count("imap_ingestion_attachments")).toBe(1);
+    expect(loads.count("document_staging_objects")).toBe(1);
+  });
+
+  it("a rotation that takes many cycles loads no ids (the report loads them, once, afterwards)", async () => {
+    const { household, keys } = await seedOlderKeyObjects();
+    const current = getDocumentConfig();
+    // Four documents at one per cycle: at least four cycles, so a per-cycle
+    // load would show as four or more.
+    for (let index = 0; index < 4; index += 1) await plantDocument(household, current.keyEncryptionKey, current.keyId);
+    const loads = watchIdLoads();
+
+    const after = await runKekRotationToCompletion(keys, 1);
+
+    expect(rotationComplete(after)).toBe(true);
+    expect(loads.count("imap_ingestion_attachments")).toBe(0);
+    expect(loads.count("document_staging_objects")).toBe(0);
   });
 });

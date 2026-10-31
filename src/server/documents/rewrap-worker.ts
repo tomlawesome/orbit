@@ -85,6 +85,18 @@ function onOlderKey(column: AnyPgColumn, keys: RotationKeys): SQL {
   return sql`(${column} <> ${keys.currentKeyId} and ${column} <> ${keys.nextKeyId} and ${column} ~ ${DOCUMENT_KEY_ID_SHAPE})`;
 }
 
+/** Held rows this rotation moves: not yet on the next key, and not skipped on an older one (#1392). */
+function heldToRotate(column: AnyPgColumn, keys: RotationKeys): SQL | undefined {
+  return and(ne(column, keys.nextKeyId), not(onOlderKey(column, keys)));
+}
+
+/** A row the rotation selected must be on the current key; any other key id fails closed. */
+function requireCurrentKey(table: string, rowKeyId: string, keys: RotationKeys): void {
+  if (rowKeyId !== keys.currentKeyId) {
+    throw new Error(`${table} row is wrapped under neither the current nor the next key`);
+  }
+}
+
 /**
  * Finds every `document_crypto` row not already on the next key and gives it
  * a `document_jobs` row to be claimed and processed, reusing the resurrection
@@ -186,9 +198,7 @@ export async function processRewrapJob(job: ClaimedRewrapJob, keys: RotationKeys
       await completeJob(transaction, holdsJobLease(job));
       return "completed";
     }
-    if (crypto.keyId !== keys.currentKeyId) {
-      throw new Error("document_crypto row is wrapped under neither the current nor the next key");
-    }
+    requireCurrentKey("document_crypto", crypto.keyId, keys);
 
     const envelope = envelopeOf(crypto);
     const rewrapped = rewrapDocumentKey(job.documentId, envelope, keys.currentKek, keys.nextKek, keys.nextKeyId);
@@ -242,9 +252,7 @@ export async function runMetadataKeyRotationBatch(keys: RotationKeys, batchSize 
 
     let rewrapped = 0;
     for (const row of rows) {
-      if (row.keyId !== keys.currentKeyId) {
-        throw new Error("metadata_keys row is wrapped under neither the current nor the next key");
-      }
+      requireCurrentKey("metadata_keys", row.keyId, keys);
       const context: MetadataKeyContext = { scope: row.scope, householdId: row.householdId, keyId: row.keyId };
       const next = rewrapMetadataKey(row, keys.currentKek, keys.nextKek, context, keys.nextKeyId);
       const updated = await transaction.update(metadataKeys).set({
@@ -280,9 +288,7 @@ export async function runMailInSecretRotationBatch(keys: RotationKeys, batchSize
 
     let rewrapped = 0;
     for (const row of rows) {
-      if (row.keyId !== keys.currentKeyId) {
-        throw new Error("mail_in_secrets row is wrapped under neither the current nor the next key");
-      }
+      requireCurrentKey("mail_in_secrets", row.keyId, keys);
       const next = rewrapMailInSecret(row.id, row, keys.currentKek, keys.nextKek, keys.nextKeyId);
       const updated = await transaction.update(mailInSecrets).set({
         wrappedDek: next.wrappedDek,
@@ -318,15 +324,13 @@ export async function runImapAttachmentRotationBatch(keys: RotationKeys, batchSi
       wrapIv: imapIngestionAttachments.wrapIv,
       wrapAuthTag: imapIngestionAttachments.wrapAuthTag,
     }).from(imapIngestionAttachments)
-      .where(and(ne(imapIngestionAttachments.keyId, keys.nextKeyId), not(onOlderKey(imapIngestionAttachments.keyId, keys))))
+      .where(heldToRotate(imapIngestionAttachments.keyId, keys))
       .limit(batchSize)
       .for("update", { skipLocked: true });
 
     let rewrapped = 0;
     for (const row of rows) {
-      if (row.keyId !== keys.currentKeyId) {
-        throw new Error("imap_ingestion_attachments row is wrapped under neither the current nor the next key");
-      }
+      requireCurrentKey("imap_ingestion_attachments", row.keyId, keys);
       const next = rewrapDocumentKey(row.id, envelopeOf(row), keys.currentKek, keys.nextKek, keys.nextKeyId);
       const updated = await transaction.update(imapIngestionAttachments).set({
         wrappedDek: next.wrappedDek,
@@ -362,15 +366,13 @@ export async function runStagingObjectRotationBatch(keys: RotationKeys, batchSiz
       wrapIv: documentStagingObjects.wrapIv,
       wrapAuthTag: documentStagingObjects.wrapAuthTag,
     }).from(documentStagingObjects)
-      .where(and(ne(documentStagingObjects.keyId, keys.nextKeyId), not(onOlderKey(documentStagingObjects.keyId, keys))))
+      .where(heldToRotate(documentStagingObjects.keyId, keys))
       .limit(batchSize)
       .for("update", { skipLocked: true });
 
     let rewrapped = 0;
     for (const row of rows) {
-      if (row.keyId !== keys.currentKeyId) {
-        throw new Error("document_staging_objects row is wrapped under neither the current nor the next key");
-      }
+      requireCurrentKey("document_staging_objects", row.keyId, keys);
       const next = rewrapDocumentKey(row.documentId, envelopeOf(row), keys.currentKek, keys.nextKek, keys.nextKeyId, "scanner_recovery");
       const updated = await transaction.update(documentStagingObjects).set({
         wrappedDek: next.wrappedDek,
@@ -402,8 +404,8 @@ export async function heldObjectsOnOlderKey(keys: RotationKeys): Promise<Skipped
   return { heldAttachmentIds: attachments.map((row) => row.id), stagingObjectIds: staged.map((row) => row.id) };
 }
 
-export function skippedCount(skipped: SkippedOnOlderKey): number {
-  return skipped.heldAttachmentIds.length + skipped.stagingObjectIds.length;
+export function skippedCount(skipped: Pick<RotationProgress, "heldAttachmentsSkipped" | "stagingObjectsSkipped">): number {
+  return skipped.heldAttachmentsSkipped + skipped.stagingObjectsSkipped;
 }
 
 export interface RotationCycleResult {
@@ -413,7 +415,6 @@ export interface RotationCycleResult {
   mailInSecretsRewrapped: number;
   heldAttachmentsRewrapped: number;
   stagingObjectsRewrapped: number;
-  skippedOnOlderKey: SkippedOnOlderKey;
 }
 
 /** One pass over all five populations: enqueue, claim and process a batch of each. */
@@ -433,7 +434,6 @@ export async function runKekRotationCycle(keys: RotationKeys, batchSize = DOCUME
   const mailInSecretsRewrapped = await runMailInSecretRotationBatch(keys, batchSize);
   const heldAttachmentsRewrapped = await runImapAttachmentRotationBatch(keys, batchSize);
   const stagingObjectsRewrapped = await runStagingObjectRotationBatch(keys, batchSize);
-  const skippedOnOlderKey = await heldObjectsOnOlderKey(keys);
   return {
     documentsEnqueued,
     documentJobsProcessed,
@@ -441,7 +441,6 @@ export async function runKekRotationCycle(keys: RotationKeys, batchSize = DOCUME
     mailInSecretsRewrapped,
     heldAttachmentsRewrapped,
     stagingObjectsRewrapped,
-    skippedOnOlderKey,
   };
 }
 
@@ -451,20 +450,23 @@ export interface RotationProgress {
   mailInSecretsRemaining: number;
   heldAttachmentsRemaining: number;
   stagingObjectsRemaining: number;
-  skippedOnOlderKey: SkippedOnOlderKey;
+  /** Held objects left on an older key (#1392): counted, never loaded. `heldObjectsOnOlderKey` names them. */
+  heldAttachmentsSkipped: number;
+  stagingObjectsSkipped: number;
 }
 
-/** How many rows, in each population, are not yet wrapped under the next key, leaving out held objects skipped on an older key. */
+/** How many rows, in each population, are not yet wrapped under the next key, leaving out held objects skipped on an older key, which are counted apart. */
 export async function rotationRemaining(keys: RotationKeys): Promise<RotationProgress> {
-  const [[documentsRow], [metadataRow], [secretsRow], [attachmentsRow], [stagingRow], skippedOnOlderKey] = await Promise.all([
+  const [[documentsRow], [metadataRow], [secretsRow], [attachmentsRow], [stagingRow], [attachmentsSkippedRow], [stagingSkippedRow]] = await Promise.all([
     getDb().select({ count: sql<number>`count(*)::int` }).from(documentCrypto).where(ne(documentCrypto.keyId, keys.nextKeyId)),
     getDb().select({ count: sql<number>`count(*)::int` }).from(metadataKeys).where(ne(metadataKeys.keyId, keys.nextKeyId)),
     getDb().select({ count: sql<number>`count(*)::int` }).from(mailInSecrets).where(ne(mailInSecrets.keyId, keys.nextKeyId)),
     getDb().select({ count: sql<number>`count(*)::int` }).from(imapIngestionAttachments)
-      .where(and(ne(imapIngestionAttachments.keyId, keys.nextKeyId), not(onOlderKey(imapIngestionAttachments.keyId, keys)))),
+      .where(heldToRotate(imapIngestionAttachments.keyId, keys)),
     getDb().select({ count: sql<number>`count(*)::int` }).from(documentStagingObjects)
-      .where(and(ne(documentStagingObjects.keyId, keys.nextKeyId), not(onOlderKey(documentStagingObjects.keyId, keys)))),
-    heldObjectsOnOlderKey(keys),
+      .where(heldToRotate(documentStagingObjects.keyId, keys)),
+    getDb().select({ count: sql<number>`count(*)::int` }).from(imapIngestionAttachments).where(onOlderKey(imapIngestionAttachments.keyId, keys)),
+    getDb().select({ count: sql<number>`count(*)::int` }).from(documentStagingObjects).where(onOlderKey(documentStagingObjects.keyId, keys)),
   ]);
   return {
     documentsRemaining: documentsRow.count,
@@ -472,7 +474,8 @@ export async function rotationRemaining(keys: RotationKeys): Promise<RotationPro
     mailInSecretsRemaining: secretsRow.count,
     heldAttachmentsRemaining: attachmentsRow.count,
     stagingObjectsRemaining: stagingRow.count,
-    skippedOnOlderKey,
+    heldAttachmentsSkipped: attachmentsSkippedRow.count,
+    stagingObjectsSkipped: stagingSkippedRow.count,
   };
 }
 
@@ -487,9 +490,14 @@ export function rotationComplete(progress: RotationProgress): boolean {
 
 /**
  * Drives `runKekRotationCycle` until every population reports zero remaining.
- * Guards against a row this rotation cannot resolve (wrapped under some third
- * key, for instance) by failing loudly once a full cycle makes no progress at
- * all, rather than spinning forever.
+ * A held object on an older key (#1392) is skipped and counted in the returned
+ * progress, not waited on; the caller names the skipped ids once, from
+ * `heldObjectsOnOlderKey`, after completion. A row this rotation cannot
+ * resolve and cannot skip (wrapped under a key of no recognisable shape, or a
+ * third key in any other population) is not retried forever: a metadata,
+ * mail-in or held-object batch throws out of the cycle, and a document the
+ * job queue keeps failing ends in a stall error once a full cycle makes no
+ * progress at all.
  */
 export async function runKekRotationToCompletion(keys: RotationKeys, batchSize = DOCUMENT_REWRAP_CLAIM_LIMIT): Promise<RotationProgress> {
   let previousRemaining: number | undefined;
@@ -497,7 +505,7 @@ export async function runKekRotationToCompletion(keys: RotationKeys, batchSize =
     const cycle = await runKekRotationCycle(keys, batchSize);
     const progress = await rotationRemaining(keys);
     if (rotationComplete(progress)) {
-      const skipped = skippedCount(progress.skippedOnOlderKey);
+      const skipped = skippedCount(progress);
       if (skipped > 0) {
         log.warn({
           event: "document.kek_rotation",
