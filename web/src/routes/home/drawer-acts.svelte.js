@@ -227,9 +227,11 @@ export function createDrawerActs({
        as amended here, and the wake says that instead of "added". */
     if (problem && "replayed" in problem) landedNote = problem.message;
     /* The item is filed. Home is read again here, as after every act that
-       landed (landed.js), so a read that fails is said under the suggestion's
-       row as done-but-unread and the add is never read back as "not added". */
-    await rereadAfterLanded(() => reread({ leaves: true }), (words) => say(suggestion.id, words, "suggestion"));
+       landed (landed.js), so a read that fails is said under the row and,
+       once the rows close, woken as done-but-unread in place of "added", as
+       after every act that leaves; the add is never read back as "not added". */
+    await rereadAfterLanded(() => reread({ leaves: true }),
+      (words) => { say(suggestion.id, words, "suggestion"); landedUnread = words; });
   }
   /* Set by addSuggestion when the add landed partly: addAmended then leaves
      the recorded-but-pending sentence standing instead of "added". */
@@ -237,14 +239,19 @@ export function createDrawerActs({
   /** Set by addSuggestion when the add replayed an earlier approval: the
       wake says the seam's words instead of "added". @type {string | null} */
   let landedNote = null;
+  /** Set by addSuggestion when the add landed but the read after it failed:
+      the wake says done-but-unread, as landed() does for a leaving act,
+      instead of "added". @type {string | null} */
+  let landedUnread = null;
   async function addAmended() {
     landedPartial = false;
     landedNote = null;
+    landedUnread = null;
     const id = modes.edit.id;
     const title = modes.edit.draft?.title.trim() ?? "";
     if (await modes.edit.commit() && !landedPartial) {
       if (id) leave(id);
-      wake(landedNote ?? `added to your orbit · ${title}`);
+      wake(landedUnread ?? landedNote ?? `added to your orbit · ${title}`);
     }
   }
 
