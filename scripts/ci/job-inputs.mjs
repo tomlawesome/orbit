@@ -239,14 +239,31 @@ export function checkoutEntries(config, job, entries) {
 
 /* ---- The per-job definition (#1546) ------------------------------------ */
 
-// A path ends on a name character: never on the dot that ends a sentence,
-// nor on the slash that makes it a directory (`scripts/ci/**` in a rule names
-// no file).
+// A path ends on a name character, never on the dot that ends a sentence.
 const SCRIPT_PATH = /scripts\/ci\/[A-Za-z0-9_./-]*[A-Za-z0-9_-]/gu;
 // What the walk opens to find more ci scripts: the scripts, the compose
 // files and the Dockerfiles a job's text names. Only scripts/ci paths are
 // hashed here; the rest sit in the checkout axis.
 const REFERENCE_PATH = /(?:scripts\/[A-Za-z0-9_./-]*[A-Za-z0-9_-]|compose\/[A-Za-z0-9_./-]*[A-Za-z0-9_-]|docker-compose[A-Za-z0-9_.-]*\.ya?ml|Dockerfile[A-Za-z0-9_.-]*)/gu;
+// The character after a token decides whether it is a file name. The
+// regexes above stop at the last name character, so `scripts/ci/lib/`
+// matches as `scripts/ci/lib` and `scripts/ci/verify-*.sh` as
+// `scripts/ci/verify-`: a directory and a glob stem, each then hashed as a
+// `missing` file whose arrival would move every key that reaches it. A
+// token that runs on into a `/` is a directory; into `*`, `?`, `[`, `{`
+// or `$` (directly or after a dot) a pattern or a template that names no
+// one file. A dependency scan records literal file names only; the rest
+// is the shell's to expand at run time.
+const NOT_A_FILE_AFTER = /^\.?[/*?[{$]/u;
+function pathTokens(text, pattern) {
+  const source = String(text);
+  return [...source.matchAll(pattern)]
+    .filter((match) => {
+      const end = match.index + match[0].length;
+      return !NOT_A_FILE_AFTER.test(source.slice(end, end + 2));
+    })
+    .map((match) => match[0]);
+}
 // A whole-line comment is prose, not a call. The pipeline file's comments
 // are dropped before its paths are read (topLevelBlocks); a followed
 // script's are dropped here for the same reason -- one header that spelt
@@ -355,8 +372,8 @@ export function jobDefinition(ciText, job) {
     }
   }
   const text = `${[...included].sort((left, right) => left - right).map((index) => blocks[index].text).join("\n")}\n`;
-  const scripts = [...new Set(text.match(SCRIPT_PATH) ?? [])].sort();
-  const references = [...new Set(text.match(REFERENCE_PATH) ?? [])].sort();
+  const scripts = [...new Set(pathTokens(text, SCRIPT_PATH))].sort();
+  const references = [...new Set(pathTokens(text, REFERENCE_PATH))].sort();
   return { text, scripts, references };
 }
 
@@ -383,7 +400,7 @@ export function definitionScripts(paths, readFile) {
       continue;
     }
     if (typeof text !== "string") continue;
-    for (const found of codeLines(text).match(REFERENCE_PATH) ?? []) if (!seen.has(found)) queue.push(found);
+    for (const found of pathTokens(codeLines(text), REFERENCE_PATH)) if (!seen.has(found)) queue.push(found);
   }
   return [...seen].filter((path) => /^scripts\/ci\//u.test(path)).sort();
 }
