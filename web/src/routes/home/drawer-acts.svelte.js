@@ -86,11 +86,11 @@ import { readSearchDocuments } from "./pocket-search.js";
  * Completes an item today (the strip's and the phone's quick complete),
  * through the one command. Never throws: a refusal is answered as `problem`
  * in the engine's words. Sends nothing without the raw item and a household.
- * @param {{ raw: any, primary: string | null | undefined, today: string }} how
+ * @param {{ raw: any, primary: string | null | undefined, today: string | null | undefined }} how
  * @returns {Promise<{ done: boolean, problem: string | null }>}
  */
 export async function completeToday({ raw, primary, today }) {
-  if (!raw || !primary) return { done: false, problem: null };
+  if (!raw || !primary || !today) return { done: false, problem: null };
   try {
     await applyCommand(completeCommand({ ...raw, householdId: primary }, { completedDate: today }));
     return { done: true, problem: null };

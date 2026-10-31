@@ -35,7 +35,8 @@
   import { pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { createReceiptActs } from "../inbox/acts.js";
   import { completeToday, createDrawerActs } from "./drawer-acts.svelte.js";
-  import { DONE_UNREAD } from "$lib/data/landed.js";
+  import { rereadAfterLanded } from "$lib/data/landed.js";
+  import { commandItemOf } from "./command-item.js";
   import { WIDE_QUERY, cardWidthOf, pairOf, trackOf } from "./preview-pair.js";
   import { isPocket } from "$lib/pocket/media.js";
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
@@ -420,7 +421,11 @@
   });
 
   /** Reads the open row's record again after something changed it from the
-      drawer (#1319): a paper attached, removed or restored, a snooze. */
+      drawer (#1319): a paper attached, removed or restored, a snooze. Rejects
+      when that item is still open and could not be read: the act that asked
+      says done-but-unread (landed.js) and, for an attach, keeps its id; a
+      drawer that has moved on has nothing stale to say (#1584 fix review,
+      web-home-2). */
   async function rereadDetail() {
     const id = detailFor;
     if (!id) return;
@@ -428,7 +433,7 @@
       const found = await readItem(id);
       if (detailFor === id && found) detail = found;
     } catch (error) {
-      if (detailFor === id) detailProblem = wordsOf(error);
+      if (detailFor === id) throw error;
     }
   }
 
@@ -620,7 +625,7 @@
   /** @type {string | null} */
   let footProblem = $state(null);
   /** The item of `id` (the open one when none is given) as a command addresses it. @param {string | null | undefined} [id] @returns {any} */
-  const commandItem = (id = detail?.id) => (detail?.householdId && !detail.suggestion && detail.id === id ? detail : null);
+  const commandItem = (id = detail?.id) => commandItemOf(detail, id);
   async function rereadAll() {
     view = await readHome();
     await rereadDetail();
@@ -677,7 +682,7 @@
     },
     focus: (_id, selector) => focusInDrawer(selector),
     open: () => expanded,
-    itemOf: (id) => commandItem(id),
+    itemOf: (id) => commandItemOf(detail, id),
     amend: (suggestion, item, sectionId) => amendReceipt(suggestion, item, sectionId),
     leave: () => collapseRow(),
     attached: (file, title) => `${file} attached to ${title}`,
@@ -1008,12 +1013,15 @@
   async function fireCompleteAct(target) {
     stripProblem = null;
     if (!completeArm.tap()) return; // first tap only arms it
-    const { done, problem } = await completeToday({ raw: rawItems.get(target.id), primary: view?.primary, today: asView(view).today });
+    const { done, problem } = await completeToday({ raw: rawItems.get(target.id), primary: view?.primary, today: view?.today });
     stripProblem = problem;
     if (!done) return;
     stripOpen = false;
-    /* Completed: a failed read of home after it is done-but-unread, not a refusal. */
-    try { view = await readHome(); } catch { stripProblem = DONE_UNREAD; }
+    /* Completed, and the strip is shut: a failed read of home after it is
+       done-but-unread (landed.js), said in the wake — the strip's own line
+       is hidden with the strip and cleared by the next focus, so a word put
+       there is never seen (#1584 fix review, web-home-1). */
+    await rereadAfterLanded(async () => { view = await readHome(); }, wake);
   }
 
   /** @param {string} name */
@@ -1440,6 +1448,11 @@
             homeLoadProblem = null;
           } catch (error) {
             homeLoadProblem = wordsOf(error);
+            /* The banner is this screen's; the act that asked still needs to
+               know the read failed, or it reads a landed command back as
+               refreshed and, for an attach, drops the id a re-pick must
+               re-send (#1584 fix review, web-home-2). */
+            throw error;
           }
         }} />
 
