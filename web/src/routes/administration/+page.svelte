@@ -523,7 +523,7 @@
      reader, `retry` on FAILED rows only. Retrying flips the row to QUEUED at
      once, the same optimistic update the phone's own retry makes — the next
      screen re-read (any other admin act) settles it against the server. */
-  /** @type {Record<string, { status: string, at: string }>} */
+  /** @type {import("./words.js").Retried} */
   let retriedJobs = $state({});
   const jobs = $derived.by(() => jobsOf(view?.operations?.documentJobs ?? [], retriedJobs));
   const jobCounts = $derived(jobCountsOf(jobs));

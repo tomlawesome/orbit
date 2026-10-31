@@ -422,7 +422,7 @@
   const graceStep = (by) => (graceDays = Math.min(90, Math.max(0, graceDays + by)));
 
   /* ── document jobs (#1071) ───────────────────────────────────────────── */
-  /** @type {Record<string, { status: string, at: string }>} */
+  /** @type {import("./words.js").Retried} */
   let retried = $state({});
   const jobs = $derived(jobsOf(view?.operations?.documentJobs ?? [], retried));
   const jobCounts = $derived(jobCountsOf(jobs));

@@ -294,13 +294,13 @@ export async function runMailTest(which, { card, reread }) {
  * Retries a failed document job. The row shows queued at once (`retried`,
  * read by words.js's jobsOf); the next re-read settles it against the server.
  * @param {import("./words.js").DocumentJob} job
- * @param {{ card: Card, retried: Record<string, { status: string, at: string }>, wake?: Wake }} on
+ * @param {{ card: Card, retried: Record<string, { status: string, at: string, was: string }>, wake?: Wake }} on
  */
 export async function retryJob(job, { card, retried, wake = quiet }) {
   card.problem = null;
   try {
     await retryDocumentJob(job.id, job.status);
-    retried[job.id] = { status: "pending", at: new Date().toISOString() };
+    retried[job.id] = { status: "pending", at: new Date().toISOString(), was: job.updatedAt };
     wake(`${JOB_KINDS[job.kind] ?? job.kind} is queued to try again`);
   } catch (error) {
     card.problem = wordsOf(error);
