@@ -15,6 +15,11 @@ export type ReviewInboxClassification = "ready" | "waiting" | "retry" | "unavail
 export type ReviewInboxStateContext = {
   hasApprovalOperation?: boolean;
   hasApprovedItem?: boolean;
+  /**
+   * Whether the stored request the review read would hand back exists;
+   * without it a retry has no body to send and is not offered.
+   */
+  hasApprovalRequest?: boolean;
   expiresAt?: Date;
   now?: Date;
 };
@@ -100,7 +105,16 @@ export function reviewInboxState(status: string, failureCode: string | null | un
   const canRetryAttachmentTransfer = status === "recoverable"
     && Boolean(context.hasApprovalOperation)
     && Boolean(context.hasApprovedItem)
+    && Boolean(context.hasApprovalRequest)
     && hasUnexpiredReceipt
+    && attachmentTransferFailureCodes.has(failureCode ?? "");
+  // Made its item but holds no stored request (claimed before the request
+  // was kept, #1396): nothing can finish it, so it is not offered. The item
+  // is in the filed lane; discarding clears the receipt.
+  const madeItemWithoutRequest = status === "recoverable"
+    && Boolean(context.hasApprovalOperation)
+    && Boolean(context.hasApprovedItem)
+    && !context.hasApprovalRequest
     && attachmentTransferFailureCodes.has(failureCode ?? "");
   const reason = failureReasonOf(failureCode);
   if (status === "pending_review") return { classification: "ready", canApprove: true, canDiscard: true, message: "Ready for your review.", reason };
@@ -110,6 +124,7 @@ export function reviewInboxState(status: string, failureCode: string | null | un
      message that looked "unavailable" would read as something going wrong. */
   if (status === "held") return { classification: "waiting", canApprove: false, canDiscard: false, message: "Collection is paused. This will be prepared when you turn it back on.", reason };
   if (canRetryAttachmentTransfer) return { classification: "retry", canApprove: true, canDiscard: true, message: "The item was created; retry to finish attaching the selected documents.", reason };
+  if (madeItemWithoutRequest) return { classification: "unavailable", canApprove: false, canDiscard: true, message: "The item was added, but Orbit could not finish attaching its documents, and this one cannot be retried. Remove the message to clear it.", reason };
   if (status === "recoverable") return { classification: "retry", canApprove: false, canDiscard: true, message: "Private cleanup is waiting to finish. You can retry discard.", reason };
   return { classification: "unavailable", canApprove: false, canDiscard: false, message: "This incoming document is no longer available for review.", reason };
 }
