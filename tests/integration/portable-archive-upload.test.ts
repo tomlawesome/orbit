@@ -153,7 +153,9 @@ describe("a body that is not the client's shape is refused with 400 request_malf
     ];
     const filePart = { name: "archive", filename: "household.orbit-archive.json", value: file };
     return [
-      ["a text field after the file part", multipart, rawMultipart(BOUNDARY, [...fields.slice(0, 1), filePart, ...fields.slice(1)])],
+      // Every required field comes first: a required field sent after the file is, until the
+      // file has been read, a missing field, and that is 422 validation_failed before any of it is.
+      ["a text field after the file part", multipart, rawMultipart(BOUNDARY, [...fields, filePart, { name: "trailing", value: "x" }])],
       ["two file parts", multipart, rawMultipart(BOUNDARY, [...fields, filePart, filePart])],
       ["no file part", multipart, rawMultipart(BOUNDARY, fields)],
       ["a broken delimiter", multipart, rawMultipart(BOUNDARY, [...fields, filePart], { opening: "--not-the-boundary" })],
