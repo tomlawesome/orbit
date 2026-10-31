@@ -41,7 +41,6 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 import {
-  createDocumentSealer,
   createDocumentUnsealer,
   DocumentIntegrityError,
   encryptDocument,

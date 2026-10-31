@@ -38,7 +38,10 @@ describe("hooks.server init: warm-up (#1575)", () => {
 
   afterEach(() => {
     exitSpy.mockRestore();
-    for (const k of KEYS) saved[k] === undefined ? delete process.env[k] : (process.env[k] = saved[k]);
+    for (const k of KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
   });
 
   async function runInit(env = {}) {
