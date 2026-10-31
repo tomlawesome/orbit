@@ -757,3 +757,275 @@ describe("moved folder versus another folder (#1570)", () => {
     });
   });
 });
+
+// A deployment taken down keeps its volume and loses both containers: the
+// refusal that follows must name the way back, in words and never as a
+// Compose command (the standing #1570 rule).
+describe("a refusal after the containers were taken down names the way back", () => {
+  const COMPOSE_COMMAND = /docker[ -]compose|compose (?:up|down|rm|stop|start|restart|pull)/i;
+  let targetDir: string;
+
+  beforeEach(() => {
+    targetDir = mkdtempSync(join(tmpdir(), "orbit-taken-down-"));
+    writeFileSync(join(targetDir, ".env-orbit"), `ORBIT_IMAGE=${EXPECTED_IMAGE}\n`, { mode: 0o600 });
+  });
+
+  afterEach(() => {
+    rmSync(targetDir, { recursive: true, force: true });
+  });
+
+  function refusalFor(overrides: Partial<DatabaseVolumeSafetyAdapter>): DatabaseVolumeSafetyRefusal {
+    try {
+      verifyDatabaseVolumeSafety(targetDir, undefined, "fallback", freshState(), readyPassword, makeFullAdapter(overrides));
+    } catch (error) {
+      expect(error).toBeInstanceOf(DatabaseVolumeSafetyRefusal);
+      return error as DatabaseVolumeSafetyRefusal;
+    }
+    throw new Error("no refusal");
+  }
+
+  it("says, when no orbit-db container uses the volume, to start the deployment again from its own folder", () => {
+    const refusal = refusalFor({ listContainersByVolume: () => "" });
+    expect(refusal.reason).toBe("no-database-container");
+    expect(refusal.action).toBeTruthy();
+    expect(refusal.action).not.toBe("retry");
+    expect(refusal.message).toMatch(/start (?:the|this) deployment again/i);
+    expect(refusal.message).toMatch(/folder it was installed in/i);
+    expect(refusal.message).not.toMatch(COMPOSE_COMMAND);
+    expect(refusal.message).not.toMatch(/docker volume rm/);
+    expect(refusal.message).toMatch(/orbit-db/);
+    expect(refusal.message).toContain(CANDIDATE_VOLUME);
+  });
+
+  it.each([
+    ["has no containers at all", ""],
+    ["has only the database container", `${DB_CONTAINER_ID}|${PROJECT}|orbit-db`],
+  ])("says, when the project %s, to start the deployment again from its own folder", (_name, projectLines) => {
+    const refusal = refusalFor({ listContainersByProject: () => projectLines });
+    expect(refusal.reason).toBe("no-app-container");
+    expect(refusal.action).toBeTruthy();
+    expect(refusal.action).not.toBe("retry");
+    expect(refusal.message).toMatch(/start (?:the|this) deployment again/i);
+    expect(refusal.message).toMatch(/folder it was installed in/i);
+    expect(refusal.message).not.toMatch(COMPOSE_COMMAND);
+    expect(refusal.message).not.toMatch(/docker volume rm/);
+    expect(refusal.message).toMatch(/orbit-app/);
+  });
+
+  it("keeps the two messages distinct, each still saying it refuses to start Compose", () => {
+    const noDatabase = refusalFor({ listContainersByVolume: () => "" });
+    const noApp = refusalFor({ listContainersByProject: () => "" });
+    expect(noDatabase.message).not.toBe(noApp.message);
+    expect(noDatabase.message).toMatch(/refusing to start Compose/);
+    expect(noApp.message).toMatch(/refusing to start Compose/);
+  });
+});
+
+// A plain `docker run` container has no Compose service label; its id is the
+// only name the operator can use to find it.
+describe("a foreign container on the volume is named by what it has", () => {
+  const SERVICELESS_ID = "e".repeat(12);
+  let targetDir: string;
+
+  beforeEach(() => {
+    targetDir = mkdtempSync(join(tmpdir(), "orbit-foreign-container-"));
+    writeFileSync(join(targetDir, ".env-orbit"), `ORBIT_IMAGE=${EXPECTED_IMAGE}\n`, { mode: 0o600 });
+  });
+
+  afterEach(() => {
+    rmSync(targetDir, { recursive: true, force: true });
+  });
+
+  function messageFor(lines: string): string {
+    try {
+      verifyDatabaseVolumeSafety(targetDir, undefined, "fallback", freshState(), readyPassword, makeFullAdapter({ listContainersByVolume: () => lines }));
+    } catch (error) {
+      expect(error).toBeInstanceOf(DatabaseVolumeSafetyRefusal);
+      expect((error as DatabaseVolumeSafetyRefusal).reason).toBe("foreign-container");
+      return (error as DatabaseVolumeSafetyRefusal).message;
+    }
+    throw new Error("no refusal");
+  }
+
+  it("carries the container id in the outcome when the container has no service label", () => {
+    const adapter = makeAdapter({ listContainersByVolume: () => `${SERVICELESS_ID}|${PROJECT}||` });
+    expect(evaluateVolumeOwnership(CANDIDATE_VOLUME, EXPECTED_IMAGE, adapter)).toEqual({
+      status: "not-proven",
+      reason: "foreign-container",
+      service: "",
+      container: SERVICELESS_ID,
+    });
+  });
+
+  it("renders the id, not an empty service name, in the refusal", () => {
+    const message = messageFor(`${SERVICELESS_ID}|${PROJECT}||`);
+    expect(message).toContain(SERVICELESS_ID);
+    expect(message).not.toContain('""');
+    expect(message).toMatch(/orbit-db/);
+    expect(message).toContain("docker ps -a --filter volume=");
+  });
+
+  it("still renders the service of a labelled foreign container, and now carries its id too", () => {
+    const adapter = makeAdapter({ listContainersByVolume: () => `${DB_CONTAINER_ID}|${PROJECT}|some-other-service` });
+    expect(evaluateVolumeOwnership(CANDIDATE_VOLUME, EXPECTED_IMAGE, adapter)).toMatchObject({
+      status: "not-proven",
+      reason: "foreign-container",
+      service: "some-other-service",
+      container: DB_CONTAINER_ID,
+    });
+    expect(messageFor(`${DB_CONTAINER_ID}|${PROJECT}|some-other-service`)).toContain('a container of service "some-other-service"');
+  });
+
+  it("keeps the unlabelled and the labelled foreign messages distinct", () => {
+    expect(messageFor(`${SERVICELESS_ID}|${PROJECT}||`)).not.toBe(messageFor(`${DB_CONTAINER_ID}|${PROJECT}|some-other-service`));
+  });
+});
+
+// An update that committed (the saved image now names the new build) and then
+// stopped before the containers were replaced leaves the saved image ahead of
+// the running one. Its retry is proven on the image recorded beside the saved
+// one, not refused.
+describe("the proof accepts the image the last committed update replaced", () => {
+  const COMPOSE_COMMAND = /docker[ -]compose|compose (?:up|down|rm|stop|start|restart|pull)/i;
+  const IMAGE_A = "ghcr.io/tomlawesome/orbit@sha256:" + "1".repeat(64);
+  const IMAGE_B = "ghcr.io/tomlawesome/orbit@sha256:" + "2".repeat(64);
+  const IMAGE_C = "ghcr.io/tomlawesome/orbit@sha256:" + "3".repeat(64);
+  let targetDir: string;
+
+  beforeEach(() => {
+    targetDir = mkdtempSync(join(tmpdir(), "orbit-previous-image-"));
+  });
+
+  afterEach(() => {
+    rmSync(targetDir, { recursive: true, force: true });
+  });
+
+  const writeEnvironment = (...lines: string[]) => writeFileSync(join(targetDir, ".env-orbit"), `${lines.join("\n")}\n`, { mode: 0o600 });
+  const appRunning = (image: string) => makeFullAdapter({ inspectContainerImage: () => image });
+  const verify = (adapter: DatabaseVolumeSafetyAdapter) =>
+    verifyDatabaseVolumeSafety(targetDir, undefined, "fallback", freshState(), readyPassword, adapter);
+  function refusalFrom(adapter: DatabaseVolumeSafetyAdapter): DatabaseVolumeSafetyRefusal {
+    try {
+      verify(adapter);
+    } catch (error) {
+      expect(error).toBeInstanceOf(DatabaseVolumeSafetyRefusal);
+      return error as DatabaseVolumeSafetyRefusal;
+    }
+    throw new Error("no refusal");
+  }
+
+  it("attaches when the app runs the recorded previous image, and reports the image it accepted", () => {
+    writeEnvironment(`ORBIT_IMAGE=${IMAGE_B}`, `ORBIT_PREVIOUS_IMAGE=${IMAGE_A}`);
+    const result = verify(appRunning(IMAGE_A));
+    expect(result.databaseVolumeSeen).toBe(true);
+    expect(result.databaseVolumeName).toBe(CANDIDATE_VOLUME);
+    expect(result).toMatchObject({ attachedAppImage: IMAGE_A });
+  });
+
+  it("still attaches when the app runs the saved image, and reports that one", () => {
+    writeEnvironment(`ORBIT_IMAGE=${IMAGE_B}`, `ORBIT_PREVIOUS_IMAGE=${IMAGE_A}`);
+    const result = verify(appRunning(IMAGE_B));
+    expect(result.databaseVolumeSeen).toBe(true);
+    expect(result).toMatchObject({ attachedAppImage: IMAGE_B });
+  });
+
+  it("still refuses a third image, as an image mismatch whose next action is not retry", () => {
+    writeEnvironment(`ORBIT_IMAGE=${IMAGE_B}`, `ORBIT_PREVIOUS_IMAGE=${IMAGE_A}`);
+    const refusal = refusalFrom(appRunning(IMAGE_C));
+    expect(refusal.reason).toBe("image-mismatch");
+    expect(refusal.action).not.toBe("retry");
+  });
+
+  it("refuses the previous build when nothing recorded it: no record means the earlier behaviour", () => {
+    writeEnvironment(`ORBIT_IMAGE=${IMAGE_B}`);
+    const refusal = refusalFrom(appRunning(IMAGE_A));
+    expect(refusal.reason).toBe("image-mismatch");
+    expect(refusal.action).not.toBe("retry");
+  });
+
+  it("ignores a record that is not digest-pinned: neither trusted nor a refusal of its own", () => {
+    writeEnvironment(`ORBIT_IMAGE=${IMAGE_B}`);
+    const withoutRecord = refusalFrom(appRunning(IMAGE_A));
+    writeEnvironment(`ORBIT_IMAGE=${IMAGE_B}`, "ORBIT_PREVIOUS_IMAGE=ghcr.io/tomlawesome/orbit:latest");
+    const withMalformedRecord = refusalFrom(appRunning(IMAGE_A));
+    expect(withMalformedRecord.reason).toBe("image-mismatch");
+    expect(withMalformedRecord.message).toBe(withoutRecord.message);
+    expect(verify(appRunning(IMAGE_B)).databaseVolumeSeen).toBe(true);
+  });
+
+  it("names the interrupted-update cause and the step in the image-mismatch message, without a Compose command", () => {
+    writeEnvironment(`ORBIT_IMAGE=${IMAGE_B}`);
+    const { message } = refusalFrom(appRunning(IMAGE_A));
+    expect(message).toMatch(/earlier update|update that stopped|did not finish/i);
+    // "set ORBIT_IMAGE in .env-orbit back to ..." -- the file name carries a dot.
+    expect(message).toMatch(/set ORBIT_IMAGE[\s\S]{0,60}?back/i);
+    expect(message).toMatch(/compare[^.]*image[^.]*ORBIT_IMAGE[^.]*\.env-orbit/i);
+    expect(message).not.toMatch(COMPOSE_COMMAND);
+    expect(message).not.toMatch(/recreat/i);
+  });
+
+  describe("evaluateVolumeOwnership with a list of accepted images", () => {
+    const adapterOn = (image: string) => makeAdapter({ inspectContainerImage: () => image });
+
+    it.each([
+      ["the first", IMAGE_A],
+      ["the second", IMAGE_B],
+    ])("proves the volume, reporting the image that matched, when the app runs %s", (_name, image) => {
+      expect(evaluateVolumeOwnership(CANDIDATE_VOLUME, [IMAGE_A, IMAGE_B], adapterOn(image))).toEqual({
+        status: "proven",
+        project: PROJECT,
+        appImage: image,
+      });
+    });
+
+    it("is not-proven as an image mismatch when the app runs neither", () => {
+      expect(evaluateVolumeOwnership(CANDIDATE_VOLUME, [IMAGE_A, IMAGE_B], adapterOn(IMAGE_C))).toMatchObject({
+        status: "not-proven",
+        reason: "image-mismatch",
+      });
+    });
+
+    it("behaves as before for a single image given as a string", () => {
+      expect(evaluateVolumeOwnership(CANDIDATE_VOLUME, IMAGE_B, adapterOn(IMAGE_B))).toMatchObject({ status: "proven", project: PROJECT });
+      expect(evaluateVolumeOwnership(CANDIDATE_VOLUME, IMAGE_B, adapterOn(IMAGE_A))).toMatchObject({
+        status: "not-proven",
+        reason: "image-mismatch",
+      });
+    });
+  });
+
+  describe("beside another stack's volume (the unrelated-volume skip agrees on what this deployment's image is)", () => {
+    const OTHER_PROJECT = "orbit-e2e-local-4242";
+    const OTHER_VOLUME = `${OTHER_PROJECT}_orbit-db-data`;
+    const OTHER_DB = "d".repeat(12);
+    const OTHER_APP = "e".repeat(12);
+
+    function twoStacks(otherAppImage: string, ownAppImage: string): DatabaseVolumeSafetyAdapter {
+      return makeFullAdapter({
+        listVolumesByKeySubstring: () => `${OTHER_VOLUME}\n${CANDIDATE_VOLUME}`,
+        inspectVolumeLabels: (volume) => (volume === OTHER_VOLUME ? `${OTHER_PROJECT}|orbit-db-data` : `${PROJECT}|orbit-db-data`),
+        listContainersByVolume: (volume) =>
+          volume === OTHER_VOLUME ? `${OTHER_DB}|${OTHER_PROJECT}|orbit-db` : `${DB_CONTAINER_ID}|${PROJECT}|orbit-db`,
+        listContainersByProject: (project) =>
+          project === OTHER_PROJECT ? `${OTHER_APP}|${OTHER_PROJECT}|orbit-app` : `${APP_CONTAINER_ID}|${PROJECT}|orbit-app`,
+        inspectContainerImage: (container) => (container === OTHER_APP ? otherAppImage : ownAppImage),
+        inspectVolumeProjectLabel: (volume) => (volume === OTHER_VOLUME ? OTHER_PROJECT : PROJECT),
+      });
+    }
+
+    beforeEach(() => {
+      writeEnvironment(`ORBIT_IMAGE=${IMAGE_B}`, `ORBIT_PREVIOUS_IMAGE=${IMAGE_A}`, `COMPOSE_PROJECT_NAME=${PROJECT}`);
+    });
+
+    it("still refuses a genuinely ambiguous pair: the other project's app runs this deployment's previous image", () => {
+      expect(() => verify(twoStacks(IMAGE_A, IMAGE_A))).toThrow(/Multiple Orbit database volumes/);
+    });
+
+    it("skips the other project's volume when its app runs another image, and attaches to its own on the previous image", () => {
+      const result = verify(twoStacks(IMAGE_C, IMAGE_A));
+      expect(result.databaseVolumeSeen).toBe(true);
+      expect(result.databaseVolumeName).toBe(CANDIDATE_VOLUME);
+      expect(result).toMatchObject({ attachedAppImage: IMAGE_A });
+    });
+  });
+});
