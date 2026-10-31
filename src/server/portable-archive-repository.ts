@@ -15,12 +15,12 @@ import { getDocumentConfig } from "@/server/documents/config";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { readDocumentDownload, uploadItemDocument } from "@/server/document-repository";
 import { decryptPortableArchive, isEncryptedPortableArchive, PortableArchiveOpener, PortableArchiveSealer, type EncryptedPortableArchive } from "@/server/portable-archive";
-import { Base64Text, PayloadScratch, PayloadSyntaxError, readPayload, sweepPayloadScratch } from "@/server/portable-archive-payload";
+import { Base64Decoder, Base64Text, PayloadScratch, PayloadSyntaxError, readEnvelope, readPayload, streamSource, sweepPayloadScratch, type Base64Sink } from "@/server/portable-archive-payload";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 import { normalizeComparableMetadata } from "@/server/metadata/crypto";
 import { MetadataCipher, openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
 import { loadMetadataKey, metadataCryptoAvailable, MetadataKeyLockedError, receiptKeyScope } from "@/server/metadata/keys";
-import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS, MAX_ARCHIVE_DOCUMENT_MIB, PORTABLE_IMPORT_LEASE_MS } from "@/server/portable-archive-limits";
+import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS, MAX_ARCHIVE_DOCUMENT_MIB, MAX_ARCHIVE_FILE_BYTES, PORTABLE_IMPORT_LEASE_MS } from "@/server/portable-archive-limits";
 import { acquireActiveHouseholdLock, requireHouseholdAccess } from "@/server/workspace-access";
 
 const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -430,31 +430,94 @@ function passphraseInvalidError(): AppError {
 type ImportedArchive = z.infer<typeof importedArchiveSchema>;
 type DocumentBody = (text: Base64Text) => ReadableStream<Uint8Array>;
 
+function archiveInvalidError(): AppError {
+  return new AppError("archive_invalid", "That export has an invalid format", 422);
+}
+
+function archiveTooLargeError(): AppError {
+  return new AppError("archive_too_large", "That export is too large", 413);
+}
+
+/** Everything in an archive file but its ciphertext: the envelope Orbit writes is well under a KiB. */
+const MAX_ENVELOPE_OTHER_BYTES = MAX_ARCHIVE_FILE_BYTES - MAX_ARCHIVE_CIPHERTEXT_CHARACTERS;
+
 /**
- * Opens an archive for preview or import without holding its plaintext
- * (#1521). Standard pattern: decrypt to a private temporary file in pieces,
- * verify the GCM tag before anything decrypted is used, then read the
- * verified JSON from the file in pieces, each document's base64 left there to
- * be streamed into document storage. `use` gets the validated payload and a
- * way to stream a document's bytes; the file is removed once `use` settles,
- * on every path.
+ * Opens an archive for preview or import without holding it or its
+ * plaintext (#1521, #1566). Standard pattern: a streaming file upload,
+ * decrypted to a private temporary file in pieces, the GCM tag verified
+ * before anything decrypted is used, then the verified JSON read from the
+ * file in pieces, each document's base64 left there to be streamed into
+ * document storage.
+ *
+ * The archive file is read from `file` as it arrives: its envelope fields
+ * are kept, and its ciphertext's base64 is counted (refused the moment it
+ * passes MAX_ARCHIVE_CIPHERTEXT_CHARACTERS), decoded, decrypted and written
+ * to the file a piece at a time. `salt` and `iv` must come before the
+ * ciphertext; `authTag` may come before or after it. `use` gets the validated
+ * payload and a way to stream a document's bytes; the file is removed once
+ * `use` settles, on every path.
  */
-async function withImportArchive<T>(serialized: unknown, passphrase: string, use: (archive: ImportedArchive, documentBody: DocumentBody) => Promise<T>): Promise<T> {
-  if (!isEncryptedPortableArchive(serialized)) throw new AppError("archive_invalid", "That export has an invalid format", 422);
-  rejectOversizedCiphertext(serialized);
-  let opener: PortableArchiveOpener;
-  try { opener = new PortableArchiveOpener(serialized, passphrase); } catch { throw passphraseInvalidError(); }
-  const scratch = await PayloadScratch.create().catch((error: unknown) => { throw scratchFullError(error); });
+async function withImportArchive<T>(file: ReadableStream<Uint8Array>, passphrase: string, use: (archive: ImportedArchive, documentBody: DocumentBody) => Promise<T>): Promise<T> {
+  const reader = file.getReader();
+  let readToEnd = false;
+  let scratch: PayloadScratch | null = null;
+  let opener: PortableArchiveOpener | null = null;
+  let keyMaterial: { salt: string; iv: string } | null = null;
+  let characters = 0;
+  const decoder = new Base64Decoder();
+  /** What stands in the envelope for the ciphertext once it has been read. */
+  const ciphertextRead = Object.freeze({});
+
+  const append = async (encrypted: Buffer) => {
+    if (encrypted.length === 0) return;
+    const piece = opener!.push(encrypted);
+    try { await scratch!.append(piece); } catch (error) { throw scratchFullError(error); } finally { piece.fill(0); }
+  };
+  const ciphertextSink = async (envelope: Record<string, unknown>): Promise<Base64Sink> => {
+    const { salt, iv } = envelope;
+    // A second ciphertext, or one before the key material it needs.
+    if (opener || typeof salt !== "string" || salt.length === 0 || typeof iv !== "string" || iv.length === 0) throw archiveInvalidError();
+    try { opener = new PortableArchiveOpener(salt, iv, passphrase); } catch { throw passphraseInvalidError(); }
+    keyMaterial = { salt, iv };
+    scratch = await PayloadScratch.create().catch((error: unknown) => { throw scratchFullError(error); });
+    return {
+      write: async (piece) => {
+        characters += piece.length;
+        if (characters > MAX_ARCHIVE_CIPHERTEXT_CHARACTERS) throw archiveTooLargeError();
+        await append(decoder.push(piece));
+      },
+      end: async () => {
+        await append(decoder.end());
+        return ciphertextRead;
+      },
+    };
+  };
+
   try {
-    for (let piece = opener.next(); piece; piece = opener.next()) {
-      try { await scratch.append(piece); } catch (error) { throw scratchFullError(error); } finally { piece.fill(0); }
+    let envelope: Record<string, unknown>;
+    try {
+      envelope = await readEnvelope(streamSource(reader), ciphertextSink, MAX_ENVELOPE_OTHER_BYTES);
+    } catch (error) {
+      if (error instanceof PayloadSyntaxError) throw archiveInvalidError();
+      throw error;
     }
-    try { opener.finish(); } catch { throw passphraseInvalidError(); }
-    if (scratch.sizeBytes > MAX_ARCHIVE_BYTES) throw new AppError("archive_too_large", "That export is too large", 413);
-    const archive = await readImportPayload(scratch);
-    return await use(archive, (text) => scratch.documentBody(text));
+    readToEnd = true;
+    // Checked as isEncryptedPortableArchive checks a held archive, the ciphertext standing in by its length.
+    const opened = opener as PortableArchiveOpener | null;
+    const material = keyMaterial as { salt: string; iv: string } | null;
+    if (!opened || !scratch || envelope.ciphertext !== ciphertextRead || !material
+      || envelope.salt !== material.salt || envelope.iv !== material.iv
+      || !isEncryptedPortableArchive({ ...envelope, ciphertext: characters > 0 ? "read" : "" })) throw archiveInvalidError();
+    try { opened.finish(envelope.authTag as string); } catch { throw passphraseInvalidError(); }
+    const verified: PayloadScratch = scratch;
+    if (verified.sizeBytes > MAX_ARCHIVE_BYTES) throw archiveTooLargeError();
+    const archive = await readImportPayload(verified);
+    return await use(archive, (text) => verified.documentBody(text));
   } finally {
-    await scratch.dispose();
+    // Stopped part-way: the caller reads the rest of the upload away (MultipartReader.dispose).
+    if (readToEnd) reader.releaseLock();
+    else await reader.cancel().catch(() => undefined);
+    await (scratch as PayloadScratch | null)?.dispose();
   }
 }
 
@@ -557,9 +620,10 @@ async function existingItemTitles(
   });
 }
 
-export async function previewPortableImport(userId: string, householdId: string, serialized: unknown, passphrase: string) {
+/** What an archive would bring in. `file` is the archive file as uploaded, read once, in pieces (#1566). */
+export async function previewPortableImport(userId: string, householdId: string, file: ReadableStream<Uint8Array>, passphrase: string) {
   await requireHouseholdAccess(userId, householdId, true);
-  const archive = await withImportArchive(serialized, passphrase, async (opened) => opened);
+  const archive = await withImportArchive(file, passphrase, async (opened) => opened);
   const existing = await existingItemTitles(getDb(), householdId);
   const duplicateReferences = await existingReferenceMatches(getDb(), householdId, archive.items.map((item) => item.reference));
   const conflicts = archive.items.filter((item) => duplicatesExistingItem(item, existing, duplicateReferences)).map((item) => ({ id: item.id, title: item.title }));
@@ -731,7 +795,8 @@ async function rollBackStaleUnfinishedPortableImport(householdId: string): Promi
  * owner rejected that, because a retry must either finish the whole import or
  * leave nothing behind to retry against).
  */
-export async function importPortableArchive(input: { userId: string; householdId: string; archive: unknown; passphrase: string; conflictItemIds: string[] }) {
+/** Brings an archive in. `input.archive` is the archive file as uploaded, read once, in pieces (#1566). */
+export async function importPortableArchive(input: { userId: string; householdId: string; archive: ReadableStream<Uint8Array>; passphrase: string; conflictItemIds: string[] }) {
   await requireHouseholdAccess(input.userId, input.householdId, true);
   await rollBackStaleUnfinishedPortableImport(input.householdId);
   // The temporary payload file lives until the last document is restored,

@@ -6,13 +6,18 @@
  * never counts.
  *
  * Arguments: <preview|import> <userId> <householdId> <archiveFile>.
- * The archive file is the exported file as it comes from the download. The
- * child parses it, which is what the route hands the repository, drops the
- * file's own bytes, collects garbage and resets the kernel's peak counter, so
- * the figure is what the operation adds on top of holding the parsed archive.
+ * The archive file is the exported file as it comes from the download.
+ *
+ * #1566: the baseline is taken BEFORE anything of the file is read (garbage
+ * collected, the kernel's peak counter reset), and the file is then streamed
+ * from disk into the repository's stream-taking preview or import, as the
+ * route hands it the upload's file part. So the figure counts everything the
+ * operation holds of the archive, the request body included; #1521's child
+ * parsed the file first and so never counted it.
  * Prints one line: `MEMORY_RESULT {"beforeKiB":..,"afterKiB":..,"result":..}`.
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { createReadStream, readFileSync, writeFileSync } from "node:fs";
+import { Readable } from "node:stream";
 import { runInNewContext } from "node:vm";
 import { setFlagsFromString } from "node:v8";
 import { closeDatabase } from "@/db";
@@ -38,11 +43,11 @@ function peakKiB(): number {
 async function main(): Promise<void> {
   setFlagsFromString("--expose-gc");
   const collect = runInNewContext("gc") as () => void;
-  let archive: unknown = JSON.parse(readFileSync(archiveFile, "utf8"));
+  const passphrase = "correct-horse-battery-staple";
   collect();
   writeFileSync("/proc/self/clear_refs", "5");
   const beforeKiB = peakKiB();
-  const passphrase = "correct-horse-battery-staple";
+  let archive: ReadableStream<Uint8Array> | undefined = Readable.toWeb(createReadStream(archiveFile)) as unknown as ReadableStream<Uint8Array>;
   const result = mode === "preview"
     ? await previewPortableImport(userId, householdId, archive, passphrase)
     : await importPortableArchive({ userId, householdId, archive, passphrase, conflictItemIds: [] });

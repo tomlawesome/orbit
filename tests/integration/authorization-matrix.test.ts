@@ -11,6 +11,7 @@ import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
 } from "./support/fixtures";
+import { archiveForm, encodeForm } from "./support/portable-archive-upload";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 
 const { GET: readWorkspace } = await loadRoute("workspace");
@@ -396,21 +397,24 @@ describe("portable archive and administrator authorization", () => {
       documents: [],
     };
     const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archivePayload)), "integration-passphrase");
+    // #1566: the archive goes as the client's multipart upload, the file last.
+    const previewUpload = await encodeForm(archiveForm({ householdId, passphrase: "integration-passphrase" }, encrypted));
     const preview = await callRouteForSession(previewImport, owner, {
       url: "http://127.0.0.1:3000/api/archives/preview",
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ householdId, archive: encrypted, passphrase: "integration-passphrase" }),
+      headers: { "content-type": previewUpload.contentType },
+      body: new Uint8Array(previewUpload.bytes),
     });
     expect(preview.status).toBe(200);
     expect(preview.headers.get("cache-control")).toBe("no-store");
     expect((await json(preview)).preview).toEqual(expect.objectContaining({ householdName: fixture.household.name, items: 1 }));
 
+    const importUpload = await encodeForm(archiveForm({ householdId, passphrase: "integration-passphrase", conflictItemIds: [] }, encrypted));
     const imported = await callRouteForSession(importArchive, owner, {
       url: "http://127.0.0.1:3000/api/archives/import",
       method: "POST",
-      headers: { "content-type": "application/json", cookie: await withProof("archive_import") },
-      body: JSON.stringify({ householdId, archive: encrypted, passphrase: "integration-passphrase", conflictItemIds: [] }),
+      headers: { "content-type": importUpload.contentType, cookie: await withProof("archive_import") },
+      body: new Uint8Array(importUpload.bytes),
     });
     expect(imported.status).toBe(200);
     expect(imported.headers.get("cache-control")).toBe("no-store");

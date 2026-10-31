@@ -886,14 +886,17 @@ import { STAGED_PAGE_TIMEOUT_MS } from "./staged-page.js";
  */
 async function csrfFetch(path, { method = "POST", body } = {}) {
   const { csrfToken } = await readSession();
+  /* A FormData goes as it is (#1566): the browser streams it, a File part
+     straight from disk, and sets the multipart type with its boundary. */
+  const form = body instanceof FormData;
   return fetch(path, {
     method,
     credentials: "same-origin",
     headers: {
-      ...(body !== undefined ? { "content-type": "application/json" } : {}),
+      ...(body !== undefined && !form ? { "content-type": "application/json" } : {}),
       "x-csrf-token": csrfToken,
     },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    ...(body !== undefined ? { body: form ? body : JSON.stringify(body) } : {}),
   });
 }
 
@@ -3454,28 +3457,53 @@ export async function writePortableArchive(householdId, { passphrase, currentPas
 }
 
 /**
+ * The archive upload (#1566): the small fields first, in the order the
+ * routes read them, and the chosen file last, unread; the browser sends it
+ * from disk as it streams the body.
+ * @param {File} file
+ * @param {Array<[string, string]>} fields
+ */
+function archiveUpload(file, fields) {
+  const form = new FormData();
+  for (const [name, value] of fields) form.append(name, value);
+  form.append("archive", file);
+  return form;
+}
+
+/**
  * What an archive would bring in, without writing anything
- * (POST /api/portable-archives/preview). `archive` is the chosen file, parsed.
+ * (POST /api/portable-archives/preview). `file` is the chosen file, sent as
+ * it is: the page never reads it.
  * @param {string} householdId
- * @param {{ archive: unknown, passphrase: string, currentPassword?: string }} request
+ * @param {{ file: File, passphrase: string, currentPassword?: string }} request
  * @returns {Promise<ArchivePreview>}
  */
-export async function previewPortableArchive(householdId, { archive, passphrase, currentPassword }) {
+export async function previewPortableArchive(householdId, { file, passphrase, currentPassword }) {
   const body = await json(await csrfFetch("/api/portable-archives/preview", {
-    body: { householdId, archive, passphrase, ...(currentPassword ? { currentPassword } : {}) },
+    body: archiveUpload(file, [
+      ["householdId", householdId],
+      ["passphrase", passphrase],
+      ...(currentPassword ? [/** @type {[string, string]} */ (["currentPassword", currentPassword])] : []),
+    ]),
   }));
   return body.preview;
 }
 
 /**
  * Bring an archive in (POST /api/portable-archives/import). Every entry the
- * preview found already here is named in `skip`, so it stays out.
+ * preview found already here is named in `skip`, so it stays out; it goes
+ * as one field holding a JSON array.
  * @param {string} householdId
- * @param {{ archive: unknown, passphrase: string, skip: string[], currentPassword?: string }} request
+ * @param {{ file: File, passphrase: string, skip: string[], currentPassword?: string }} request
  * @returns {Promise<{ importedItems: number, documentsExcluded: number }>}
  */
-export async function importPortableArchive(householdId, { archive, passphrase, skip, currentPassword }) {
+export async function importPortableArchive(householdId, { file, passphrase, skip, currentPassword }) {
   return json(await csrfFetch("/api/portable-archives/import", {
-    body: { householdId, archive, passphrase, conflictItemIds: skip, ...(currentPassword ? { currentPassword } : {}) },
+    body: archiveUpload(file, [
+      ["householdId", householdId],
+      ["passphrase", passphrase],
+      ...(currentPassword ? [/** @type {[string, string]} */ (["currentPassword", currentPassword])] : []),
+      ["conflictItemIds", JSON.stringify(skip)],
+    ]),
   }));
 }

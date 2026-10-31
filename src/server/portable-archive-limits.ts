@@ -8,9 +8,10 @@ import { MIN_PASSWORD_LENGTH } from "@/lib/password-length";
 
 /**
  * The largest archive plaintext: the most Orbit encrypts on export, and the
- * most it will decrypt on import. The whole archive is held as one JavaScript
- * string, and V8's longest string is about 512M characters, which caps the
- * plaintext near 380 MiB; 256 MiB leaves room below that.
+ * most it will decrypt on import. Nothing holds the archive whole any more
+ * (#1506, #1521, #1566); the bound is the scratch space a preview or import
+ * decrypts into before the tag is verified, the 320m tmpfs in
+ * docker-compose.yml, sized for one archive of this size.
  */
 export const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
 

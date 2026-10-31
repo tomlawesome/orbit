@@ -417,4 +417,38 @@ describe("hooks.server handle and the one-archive-at-a-time slot (#1316)", () =>
       await running;
     });
   });
+
+  /* #1566: the archive routes take a multipart upload. The slot and the body
+     limit sit in front of the route unchanged, so the client's real upload
+     meets them exactly as the JSON body did. */
+  describe("the client's multipart upload (#1566)", () => {
+    const MULTIPART = "multipart/form-data; boundary=----orbit-1566-hooks";
+
+    it("is refused at once with 429 archive_busy while another archive request is in progress", async () => {
+      const first = gatedResolver();
+      const running = begin(eventFor(PREVIEW), first.resolve);
+      await entered(first.resolve);
+
+      for (const route of [PREVIEW, IMPORT]) {
+        const { body } = countingUpload(256 * 1024);
+        const second = vi.fn(async () => new Response("ran"));
+        const refused = await handle({ event: eventFor(route, { body, headers: { "content-type": MULTIPART } }), resolve: second });
+        await expectBusy(refused);
+        expect(second).not.toHaveBeenCalled();
+      }
+      first.open();
+      await running;
+    });
+
+    it.each([PREVIEW, IMPORT])("answers 413 request_too_large to a declared Content-Length over ARCHIVE_BODY_LIMIT on %s", async (route) => {
+      const { ARCHIVE_BODY_LIMIT } = await import("../../web/src/lib/server/body-limit.js");
+      const resolve = vi.fn(async () => new Response("ran"));
+      const event = eventFor(route, { headers: { "content-type": MULTIPART, "content-length": String(ARCHIVE_BODY_LIMIT + 1) } });
+      const response = await handle({ event, resolve });
+      expect(response.status).toBe(413);
+      expect((await response.json()).error.code).toBe("request_too_large");
+      expect(resolve).not.toHaveBeenCalled();
+      expect(slot.archiveSlotHeld()).toBe(false);
+    });
+  });
 });

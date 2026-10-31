@@ -29,8 +29,8 @@ services:
     image: "${ORBIT_IMAGE:?Set ORBIT_IMAGE to an immutable registry digest or a local build tag}"
     restart: unless-stopped
     # Bounded like the other services (#1429): a runaway request cannot take
-    # the host with it. Keep it above about 1.45 GB, the peak of previewing a
-    # maximum-size archive (#1537).
+    # the host with it. Keep it above about 700 MB, the memory that cannot be
+    # reclaimed while importing a maximum-size archive (#1566).
     mem_limit: ${ORBIT_MEMORY_LIMIT:-2g}
     env_file: .env-orbit
     environment:
@@ -44,7 +44,7 @@ services:
       VAPID_PRIVATE_KEY_FILE: /run/orbit-secrets/orbit-vapid-private-key
       MIGRATE_ON_START: "true"
       WORKER_ENABLED: "true"
-      # Archive preview and import decrypt into the tmpfs below, not the
+      # The archive import check and import decrypt into the tmpfs below, not the
       # container's writable layer on the host disk.
       ORBIT_ARCHIVE_SCRATCH_DIR: /tmp/orbit-archive-scratch
     volumes:

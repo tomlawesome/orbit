@@ -130,11 +130,15 @@ function createCookieJar(header: string | null): CookieJar {
 
 /** Builds the event without invoking anything, for the rare direct assertion. */
 export function createRequestEvent(call: RouteCall): { event: MinimalRequestEvent; applyTo: (response: Response) => Response } {
+  /* A stream body (an upload read in pieces, #1566) needs `duplex: "half"`,
+     as the platform's Request requires of any streamed request body. */
+  const streamed = typeof ReadableStream !== "undefined" && call.body instanceof ReadableStream;
   const request = new Request(call.url, {
     method: call.method ?? "GET",
     headers: call.headers,
     body: call.body ?? null,
-  });
+    ...(streamed ? { duplex: "half" } : {}),
+  } as RequestInit);
   const jar = createCookieJar(request.headers.get("cookie"));
   return {
     event: { request, cookies: jar.cookies, params: call.params ?? {}, url: new URL(call.url) },
