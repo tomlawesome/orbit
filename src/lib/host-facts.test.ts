@@ -119,6 +119,51 @@ describe("parseHostFacts: container lines with the working_dir label (#1570)", (
   });
 });
 
+// #1570: for each distinct `com.docker.compose.project.working_dir` label among
+// the project's containers the shell reports whether that folder exists and its
+// physical path (`cd` into it, `pwd -P`):
+//   "workingDirs": [{ "label": b64, "exists": boolean, "physical": b64 | null }]
+// `physical` is null when the folder does not exist. The engine reads it as
+// facts.workingDirs (a Map from label to { exists, physical }) and the adapter
+// answers inspectWorkingDir(label) with that entry, or null for an unknown label.
+describe("parseHostFacts: working_dir folders (#1570)", () => {
+  const entry = (label: string, exists: boolean, physical: string | null) => ({ label: b64(label), exists, physical: physical === null ? null : b64(physical) });
+
+  it("decodes each folder's existence and physical path, keyed by the label", () => {
+    const facts = parseHostFacts(
+      validFacts({ workingDirs: [entry("/srv/link", true, "/mnt/data/orbit"), entry("/srv/gone", false, null)] }),
+    );
+    expect(facts.workingDirs.get("/srv/link")).toEqual({ exists: true, physical: "/mnt/data/orbit" });
+    expect(facts.workingDirs.get("/srv/gone")).toEqual({ exists: false, physical: null });
+    expect(facts.workingDirs.size).toBe(2);
+  });
+
+  it("has no folders when the shell sent none", () => {
+    expect(parseHostFacts(validFacts()).workingDirs.size).toBe(0);
+    expect(parseHostFacts(validFacts({ workingDirs: [] })).workingDirs.size).toBe(0);
+  });
+
+  it.each([
+    ["a label that is not base64", [{ label: "not base64!", exists: false, physical: null }]],
+    ["a physical path that is not base64", [{ label: b64("/srv/x"), exists: true, physical: "not base64!" }]],
+    ["an exists that is not a boolean", [{ label: b64("/srv/x"), exists: "yes", physical: null }]],
+    ["a missing exists", [{ label: b64("/srv/x"), physical: null }]],
+    ["an extra key", [{ label: b64("/srv/x"), exists: false, physical: null, x: 1 }]],
+    ["an entry that is not an object", ["/srv/x"]],
+  ])("refuses malformed folders: %s", (_name, workingDirs) => {
+    expect(() => parseHostFacts(validFacts({ workingDirs }))).toThrow(HostFactsRefusal);
+  });
+
+  it("answers the adapter's inspectWorkingDir from the folders, and null for a label it was not told about", () => {
+    const adapter = hostFactsVolumeAdapter(
+      parseHostFacts(validFacts({ workingDirs: [entry("/srv/link", true, "/mnt/data/orbit"), entry("/srv/gone", false, null)] })),
+    ) as unknown as { inspectWorkingDir(label: string): { exists: boolean; physical: string | null } | null };
+    expect(adapter.inspectWorkingDir("/srv/link")).toEqual({ exists: true, physical: "/mnt/data/orbit" });
+    expect(adapter.inspectWorkingDir("/srv/gone")).toEqual({ exists: false, physical: null });
+    expect(adapter.inspectWorkingDir("/srv/unknown")).toBeNull();
+  });
+});
+
 describe("hostFactsVolumeAdapter", () => {
   const adapter = hostFactsVolumeAdapter(parseHostFacts(validFacts()));
 
