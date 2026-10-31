@@ -514,6 +514,25 @@ describe("repair.sh's read-only contract says what diagnosis actually runs (#158
   it("no longer claims that every docker invocation is an inspect-class read", () => {
     expect(contract).not.toMatch(/Every\s+`?docker`?\s+invocation is one of/);
   });
+
+  // The configuration check's container sees the whole deployment directory (secrets
+  // included), read-only; the paragraph must say so rather than claim no deployment file is touched.
+  it("does not claim the containers touch no deployment file, and says the secrets are mounted read-only", () => {
+    expect(contract).not.toContain("touch no volume and no deployment file");
+    const sentences = contract.split(/(?<=[.:;])\s+/);
+    const mountSentence = sentences.some(
+      (sentence) => /read-only|:ro\b/.test(sentence) && /mount/.test(sentence) && /\.orbit-secrets|secrets/.test(sentence),
+    );
+    expect(mountSentence, "no sentence names the read-only mount of the deployment directory and its secrets").toBe(true);
+  });
+
+  it("names the .orbit-image pin that configure.sh resolves first, as the image source the never-pull guard checks", () => {
+    expect(contract).toContain(".orbit-image");
+  });
+
+  it("lists docker info among the reads", () => {
+    expect(contract).toContain("docker info");
+  });
 });
 
 // The behavioural half of the same contract. This fixture has no scripts/configure.sh, so
