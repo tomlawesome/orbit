@@ -381,7 +381,7 @@ describe("reviewInboxState — status/failure to UI classification mapping", () 
   it("gates attachment-transfer retry on every one of: recoverable status, prior approval, prior item, and an unexpired receipt", () => {
     const now = new Date("2030-01-02T00:00:00.000Z");
     const expiresAt = new Date("2030-01-03T00:00:00.000Z");
-    const fullContext = { hasApprovalOperation: true, hasApprovedItem: true, expiresAt, now };
+    const fullContext = { hasApprovalOperation: true, hasApprovedItem: true, hasApprovalRequest: true, expiresAt, now };
     expect(reviewInboxState("recoverable", "attachment_transfer_failed", fullContext)).toMatchObject({ classification: "retry", canApprove: true });
     expect(reviewInboxState("recoverable", "attachment_transfer_failed", { ...fullContext, hasApprovalOperation: false })).toMatchObject({ canApprove: false, classification: "retry" });
     // An unrecognized failure code on an otherwise-eligible row does not
