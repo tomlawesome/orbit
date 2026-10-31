@@ -70,8 +70,8 @@ set -Eeuo pipefail
 # configure.sh --check stderr capture and the image's Compose copy, live in
 # $TMPDIR and are removed before the run ends). What it asks Docker for:
 #   - two throwaway containers, each `docker run --rm --network none` of an
-#     image already present locally, removed on exit, given no volume, and
-#     visible in `docker events`:
+#     image already present locally, removed on exit and visible in
+#     `docker events`, each with its own mounts:
 #       the configuration check, `bash scripts/configure.sh --check`
 #       (Step 5), which runs the engine inside the image configure.sh
 #       resolves (a `.orbit-image` pin at the deployment root, else the
