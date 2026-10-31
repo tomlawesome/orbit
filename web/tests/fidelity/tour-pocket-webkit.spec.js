@@ -645,6 +645,9 @@ test.describe("the pocket film in WebKit (#1174)", () => {
       let done = false;
       let samples = 0;
       let barSeen = false;
+      /** Where the clock last moved, for the log: the only use of the wall clock
+       *  besides the bound, which ends a film that never finishes (T-Q13). */
+      let lastMove = { at: Date.now(), cursor: -1, total: 0, url: "", chapter: -1 };
       const started = Date.now();
       /* A bound on a film that never ends; the test's own limit is derived above it. */
       const bound = FILM_BOUND[phone.through];
@@ -670,6 +673,7 @@ test.describe("the pocket film in WebKit (#1174)", () => {
         if (s) {
           samples++;
           barSeen = true;
+          if (s.cursor !== lastMove.cursor) lastMove = { at: Date.now(), cursor: s.cursor, total: s.total, url: s.url, chapter: s.chapter };
           /* The pill's own move between places is a fade out and in
              (owner's call, round 8); a pill fault is judged once it has
              arrived and the page is at rest. Faint, or painted over, then,
@@ -732,18 +736,24 @@ test.describe("the pocket film in WebKit (#1174)", () => {
            finished, then two painted frames), not a length of time. */
         await settled(page);
       }
-      const elapsed = (Date.now() - started) / 1000;
+      const stoppedAt = Date.now();
+      const elapsed = (stoppedAt - started) / 1000;
       const frames = await page.evaluate(() => /** @type {any} */ (window).__frames);
       console.log(`${phone.width}x${phone.height}: ${samples} samples, ${elapsed.toFixed(0)}s to ${done ? "the end" : "the bound"}, the page painted ${(frames / elapsed).toFixed(1)} frames a second`);
       const waitedOut = await page.evaluate(waitsRunOut);
       await context.close();
+      /* A film the bound ended names where its clock stood and for how long,
+         rather than leaving a chapter mismatch to be read backwards (T-Q13). */
+      const stalled = !done && stoppedAt - started >= bound
+        ? `the clock stood at ${mmssOf(lastMove.cursor)} of ${mmssOf(lastMove.total)} for ${Math.round((stoppedAt - lastMove.at) / 1000)} s on ${lastMove.url || "(no play bar was ever seen)"}, chapter ${lastMove.chapter + 1}`
+        : null;
 
       const unreadable = contrast.filter((one) => one.ratio < 4.5).map((one) => `${one.ratio.toFixed(1)}:1 at ${one.at} on ${one.url}`);
       const expected = chapterIds.map((/** @type {string} */ _, /** @type {number} */ k) => k).filter((/** @type {number} */ k) => k <= last + (phone.through === "yours" ? 0 : 1));
       expect.soft(errors, "no error in the console — a film that stopped itself says so there").toEqual([]);
       expect.soft(waitedOut, "no wait for the page ran out — the clock stood still for something that never came").toEqual([]);
-      expect.soft(done, "the film plays as far as this phone watches it").toBe(true);
-      expect.soft(chapters, "every chapter, in order, none skipped").toEqual(expected);
+      expect.soft(done, stalled ?? "the film plays as far as this phone watches it").toBe(true);
+      if (!stalled) expect.soft(chapters, "every chapter, in order, none skipped").toEqual(expected);
       expect.soft(tapped, "the reader's tap on the form was made").toBe(true);
       expect.soft(tapTook, "the reader's tap on the form landed on the film, not the form").toBe(false);
       expect.soft(faults, "the pill in front and never faint; the callouts and rings where the design puts them").toEqual({});
