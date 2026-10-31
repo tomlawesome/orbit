@@ -212,14 +212,15 @@ describe("a tampered archive reaches neither the database nor the document store
 
 // ---------------------------------------------------------------------------
 
-type Measured = { beforeKiB: number; afterKiB: number; result: Record<string, unknown> };
+type Measured = { beforeKiB: number; afterKiB: number; result: Record<string, unknown>; first?: { beforeKiB: number; afterKiB: number } };
 
 /** Runs one preview or import in a child process and reads back its peak-memory growth. */
-async function measure(mode: "preview" | "import", fixture: Fixture, archiveFile: string): Promise<Measured> {
+async function measure(mode: "preview" | "import", fixture: Fixture, archiveFile: string, warmUp?: Fixture): Promise<Measured> {
   const tsx = fileURLToPath(new URL("../../node_modules/tsx/dist/cli.mjs", import.meta.url));
   const child = fileURLToPath(new URL("./support/archive-import-memory-child.ts", import.meta.url));
   const run = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const proc = spawn(process.execPath, [tsx, child, mode, fixture.users.owner.id, fixture.household.id, archiveFile], {
+    const proc = spawn(process.execPath, [tsx, child, mode, fixture.users.owner.id, fixture.household.id, archiveFile,
+      ...(warmUp ? [warmUp.users.owner.id, warmUp.household.id] : [])], {
       env: { ...process.env },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -293,8 +294,11 @@ describe("one large document: the upload is never held whole (#1566)", () => {
   // Note 46292: one 50 MiB document. Preview must grow by less than the
   // archive FILE's size (about 89 MiB with this one document): holding the
   // body even once breaks it. Import must grow by less than the archive's
-  // plaintext size: one copy of the document for the open check (about 1.34
-  // times its bytes), plus the archive's JSON.
+  // plaintext size for a second import in the same process: one copy of the
+  // document for the open check (about 1.34 times its bytes) plus the
+  // archive's JSON. The first import after start also pays a working set of
+  // freed stream chunks glibc keeps resident, so it is pinned under that bound
+  // plus one copy (#1567).
   const documentBytes = 50 * MIB;
   let source: Fixture;
   let content: Buffer;
@@ -326,11 +330,19 @@ describe("one large document: the upload is never held whole (#1566)", () => {
     expectGrowthBelow(measured, archiveFileKiB, "preview", "the archive file's size");
   }, 600_000);
 
-  it("raises the importing process's peak memory by less than the archive's plaintext size, and the document round-trips byte for byte", async () => {
+  it("raises a warmed importing process's peak memory by less than the archive's plaintext size, and the document round-trips byte for byte", async () => {
+    const warmUp = await createIntegrationFixture("arch1566-large-warmup");
     const target = await createIntegrationFixture("arch1566-large-import");
-    const measured = await measure("import", target, archiveFile);
+    const measured = await measure("import", target, archiveFile, warmUp);
     expect(measured.result).toEqual({ importedItems: 1, documentsExcluded: 0 });
-    expectGrowthBelow(measured, archivePlaintextKiB, "import", "the archive's plaintext");
+    console.info(`#1566 import memory: warm ${((measured.afterKiB - measured.beforeKiB) / 1024).toFixed(1)} MiB, first ${((measured.first!.afterKiB - measured.first!.beforeKiB) / 1024).toFixed(1)} MiB, bound ${(archivePlaintextKiB / 1024).toFixed(1)} MiB`);
+    expectGrowthBelow(measured, archivePlaintextKiB, "import (warm)", "the archive's plaintext");
+    expectGrowthBelow(
+      { beforeKiB: measured.first!.beforeKiB, afterKiB: measured.first!.afterKiB, result: {} },
+      archivePlaintextKiB + documentBytes / 1024,
+      "import (first after start)",
+      "the archive's plaintext plus one copy of the document",
+    );
 
     const restored = (await getDb().select({ id: documents.id, displayName: documents.displayName, sizeBytes: documents.sizeBytes }).from(documents)
       .where(eq(documents.householdId, target.household.id))).find((row) => row.displayName === "stored-0.pdf")!;

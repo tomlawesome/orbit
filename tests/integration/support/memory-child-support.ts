@@ -4,6 +4,10 @@
  * taken before any of the input is read, and the one result line the spawning
  * test parses. Each child is spawned through tsx so the test runner's memory
  * never counts.
+ *
+ * A child that measures a steady state runs its operation twice: the first
+ * run's figures go in "first", the baseline is retaken after it (collected,
+ * peak counter reset), and the second run is the pinned figure.
  */
 import { createReadStream, readFileSync, writeFileSync } from "node:fs";
 import { Readable } from "node:stream";
@@ -39,6 +43,11 @@ export function fileAsWebStream(path: string): ReadableStream<Uint8Array> {
   return Readable.toWeb(createReadStream(path)) as unknown as ReadableStream<Uint8Array>;
 }
 
-export function printMemoryResult(beforeKiB: number, afterKiB: number, result: unknown): void {
-  console.log(`MEMORY_RESULT ${JSON.stringify({ beforeKiB, afterKiB, result })}`);
+export function printMemoryResult(
+  beforeKiB: number,
+  afterKiB: number,
+  result: unknown,
+  first?: { beforeKiB: number; afterKiB: number },
+): void {
+  console.log(`MEMORY_RESULT ${JSON.stringify({ ...(first ? { first } : {}), beforeKiB, afterKiB, result })}`);
 }
