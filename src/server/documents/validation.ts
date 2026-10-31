@@ -313,6 +313,26 @@ function findPdfEnd(bytes: Buffer, from: number, kind: typeof PDF_OBJECT_END | t
   return null;
 }
 
+/** `^word(?:\s|$)` over the token `bytes[start, end)`. */
+function tokenIsKeyword(bytes: Buffer, start: number, end: number, word: string): boolean {
+  const after = start + word.length;
+  if (after > end) return false;
+  for (let i = 0; i < word.length; i += 1) if (bytes[start + i] !== word.charCodeAt(i)) return false;
+  return after === end || isPdfRegexSpace(bytes[after]);
+}
+
+/** `^\d+\s+\d+\s+obj\b` over the token `bytes[start, end)`; digits and spaces are disjoint, so no backtracking. */
+function tokenIsObjectHeader(bytes: Buffer, start: number, end: number): boolean {
+  let i = start;
+  for (const run of [isPdfRegexDigit, isPdfRegexSpace, isPdfRegexDigit, isPdfRegexSpace]) {
+    const from = i;
+    while (i < end && run(bytes[i])) i += 1;
+    if (i === from) return false;
+  }
+  if (i + 3 > end || bytes[i] !== 0x6f || bytes[i + 1] !== 0x62 || bytes[i + 2] !== 0x6a) return false;
+  return i + 3 === end || !isPdfRegexWord(bytes[i + 3]);
+}
+
 /**
  * Where pdf.js's recovery scan (its XRef.indexObjects) reads a
  * cross-reference stream: the start of every object whose text, up to the
@@ -341,16 +361,14 @@ function recoveryXrefOffsets(bytes: Buffer): number[] | null {
     // A token runs to a line end or "<"; pdf.js's readToken never takes the file's last byte.
     let end = position;
     while (end < bytes.length - 1 && !isLineEnd(bytes[end]) && bytes[end] !== 0x3c) end += 1;
-    // Only a token starting x, t or a digit can be one the scan acts on.
-    const token = byte === 0x78 || byte === 0x74 || (byte >= 0x30 && byte <= 0x39) ? bytes.toString("latin1", position, end) : "";
-    if (!token) {
-      position = end + 1;
-    } else if (/^xref(?:\s|$)/u.test(token)) {
+    // The token is matched in place: a token can run to the end of a long line,
+    // so a string of it per object would copy most of the file each time.
+    if (tokenIsKeyword(bytes, position, end, "xref")) {
       const trailer = bytes.indexOf("trailer", position);
       position = trailer < 0 ? bytes.length : trailer;
       const startxref = bytes.indexOf("startxref", position);
       position = startxref < 0 ? bytes.length : startxref;
-    } else if (/^\d+\s+\d+\s+obj\b/u.test(token)) {
+    } else if (tokenIsObjectHeader(bytes, position, end)) {
       const match = findPdfEnd(bytes, end, PDF_OBJECT_END);
       const contentEnd = Math.min(bytes.length, !match ? bytes.length : match.endobj ? match.end + 1 : match.index);
       // Positions only grow, so the next "/XRef" is searched for again only once passed.
@@ -363,7 +381,7 @@ function recoveryXrefOffsets(bytes: Buffer): number[] | null {
         if (offsets.length > MAX_PDF_XREF_SECTIONS) return null;
       }
       position = Math.max(contentEnd, end + 1);
-    } else if (/^trailer(?:\s|$)/u.test(token)) {
+    } else if (tokenIsKeyword(bytes, position, end, "trailer")) {
       const match = findPdfEnd(bytes, end, PDF_TRAILER_END);
       position = !match ? bytes.length : match.endobj ? match.end + 1 : match.index;
     } else {
