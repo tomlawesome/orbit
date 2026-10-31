@@ -18,6 +18,7 @@
  * @typedef {"approve" | "dismiss"} ReceiptAct
  */
 import { approveWithOperation, dismissReceipt, wordsOf } from "$lib/data/workspace.js";
+import { rereadAfterLanded } from "$lib/data/landed.js";
 
 /**
  * @param {{
@@ -58,7 +59,9 @@ export function createReceiptActs({ view, operationIds, reload, say, busy, lande
         await dismissReceipt(receipt.id);
       }
       landed(receipt, act, amended);
-      await reload();
+      /* The receipt has left review; a failed read of the inbox after that
+         is said under the row as done-but-unread, and the answer stays true. */
+      await rereadAfterLanded(reload, (words) => say(receipt.id, words));
       return true;
     } catch (error) {
       say(receipt.id, wordsOf(error));
