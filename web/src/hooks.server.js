@@ -77,10 +77,13 @@ let shutdownRegistered = false;
  * exit. adapter-node does the first two on SIGTERM and then emits
  * `sveltekit:shutdown` on `process`; it never exits itself. The Postgres
  * pool's open sockets then kept the event loop alive until Docker's 10 s grace
- * period ended in SIGKILL (exit 137). Closing the pool is the last step; the
- * process leaves on its own once the loop empties, so this does not call
- * `process.exit`. A failed close is logged by code and swallowed: the error's
- * own text can name the database host.
+ * period ended in SIGKILL (exit 137). Closing the pool is the last step. It is
+ * the terminal close, `shutDownDatabase`, not `closeDatabase`: a worker cycle
+ * still running when the pool closes would otherwise reopen it on its next
+ * query, and the new pool's sockets would hold the process open until Docker
+ * kills it. The process leaves on its own once the loop empties, so this does
+ * not call `process.exit`. A failed close is logged by code and swallowed: the
+ * error's own text can name the database host.
  */
 async function closePoolOnShutdown() {
   const { log } = await import("orbit/lib/logger");
@@ -92,8 +95,8 @@ async function closePoolOnShutdown() {
     impact: "none",
   });
   try {
-    const { closeDatabase } = await import("orbit/db");
-    await closeDatabase();
+    const { shutDownDatabase } = await import("orbit/db");
+    await shutDownDatabase();
   } catch {
     log.warn({
       event: "database.connection",

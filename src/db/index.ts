@@ -8,8 +8,11 @@ type Database = ReturnType<typeof drizzle<typeof schema>>;
 
 let client: ReturnType<typeof postgres> | undefined;
 let database: Database | undefined;
+let shutDown = false;
 
 export function getDatabaseClient(): ReturnType<typeof postgres> {
+  // Refused, never rebuilt, once the process is shutting down: see shutDownDatabase.
+  if (shutDown) throw new Error("database_closed");
   if (!client) {
     log.info({ event: "database.connection", state: "starting", action: "check_database" });
     client = postgres(databaseConnectionString(), {
@@ -55,4 +58,18 @@ export async function closeDatabase(): Promise<void> {
   await client?.end({ timeout: 5 });
   client = undefined;
   database = undefined;
+}
+
+/**
+ * Closes the pool for the rest of this process's life. `closeDatabase()`
+ * alone lets the next `getDb()` build a new pool, and a worker cycle still
+ * running when the process is stopping does exactly that on its next
+ * statement; the new pool's sockets then hold the event loop until Docker's
+ * grace period ends in SIGKILL. From here on a read is refused instead, the
+ * same terminal close a `pg` pool has after `end()`. `closeDatabase()` stays
+ * reopenable for the CLI, migrations and the tests that simulate a restart.
+ */
+export async function shutDownDatabase(): Promise<void> {
+  shutDown = true;
+  await closeDatabase();
 }
