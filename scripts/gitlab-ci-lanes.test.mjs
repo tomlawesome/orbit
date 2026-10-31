@@ -369,8 +369,11 @@ describe("pipeline lanes", () => {
     for (const name of ["fidelity", "fidelity_webkit", "smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       expect(block, `${name}: only exit 3 is allowed to fail`).toMatch(/\n  allow_failure:\n    exit_codes:\n      - 3\n/u);
-      expect(block, `${name}: the quarantine run marks its failure`).toMatch(/--quarantine|:quarantine/u);
-      expect(block, name).toMatch(/\|\| \{ echo "[a-z_]+: a quarantined test failed[^"]*"; touch \.quarantine-failed; \}/u);
+      // Commented-out lines do not run (T-Q37): look for the quarantine run in the
+      // job's commands only, so deleting or commenting it out cannot hide behind the word.
+      const commands = block.split("\n").filter((line) => !/^\s*#/u.test(line)).join("\n");
+      expect(commands, `${name}: the quarantine run marks its failure`).toMatch(/--quarantine|:quarantine/u);
+      expect(commands, name).toMatch(/\|\| \{ echo "[a-z_]+: a quarantined test failed[^"]*"; touch \.quarantine-failed; \}/u);
       expect(block, `${name}: the warning exit comes straight after the evidence`)
         .toMatch(/\n {4}- \*reuse_evidence\n(?: {4}#[^\n]*\n)* {4}- if \[ -f \.quarantine-failed \]; then exit 3; fi\n/u);
     }

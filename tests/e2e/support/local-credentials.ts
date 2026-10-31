@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import { sessionHeaders } from "./households";
+import { SETTLE } from "./settle";
 
 /**
  * THE ONE PASSWORD an account ever gets from a spec. Once an account holds a
@@ -64,7 +65,7 @@ export async function ensureLocalPassword(page: Page, account: string, password:
   await page.goto(provider);
   await page.getByRole("link", { name: account }).click();
   /* The callback mints the proof and sends the browser back to `returnTo`. */
-  await page.waitForURL(/\/settings/, { timeout: 20_000 });
+  await page.waitForURL(/\/settings/, { timeout: SETTLE });
   /* #1192: WebKit only -- this round trip is a cross-origin navigate away to
      the provider and back, and WebKit swaps the main frame's internal id on
      that kind of navigation. A caller whose very next step is its own

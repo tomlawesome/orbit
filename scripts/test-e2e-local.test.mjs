@@ -431,12 +431,16 @@ if (process.env.FAKE_SUITE_HANG) {
   writeFileSync(composePlugin, "#!/usr/bin/env bash\nexit 0\n");
   chmodSync(composePlugin, 0o755);
   const socket = join(dir, "docker.sock"); // binding leaves a real socket file behind
+  // Node itself, as the tests already run on it (L-Q2). The child exits without
+  // closing the server, so the socket file stays; bound by a relative name from
+  // `dir`, so a long temp path cannot overflow the socket-address limit.
   const bound = spawnSync(
-    "python3",
-    ["-c", "import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])", socket],
-    { encoding: "utf8" },
+    process.execPath,
+    ["-e", 'require("net").createServer().listen("docker.sock", () => process.exit(0))'],
+    { cwd: dir, encoding: "utf8" },
   );
   expect(bound.status, bound.stderr).toBe(0);
+  expect(lstatSync(socket).isSocket(), "the fixture left a real socket file").toBe(true);
   const env = {
     PATH: `${bin}:${process.env.PATH}`,
     HOME: process.env.HOME,

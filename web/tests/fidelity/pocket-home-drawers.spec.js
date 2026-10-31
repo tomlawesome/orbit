@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { APP, openRow, settle } from "./pocket-states.js";
+import { finiteMotionDone } from "./finite-motion.js";
 
 /*
  * HOME'S DRAWERS ON A PHONE (#1120, review round §2.1): a manifest row
@@ -236,9 +237,7 @@ test("the dial arrives on a forward arrival, never on Back", async ({ page }) =>
     .filter((/** @type {string} */ kind, /** @type {number} */ i, /** @type {string[]} */ all) => kind !== all[i - 1]);
   const forget = () => page.evaluate(() => { /** @type {any} */ (window).__dialLog.length = 0; });
   /** Every finite animation finished, then two frames with nothing new to run. */
-  const quiet = () => page.waitForFunction(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() =>
-    resolve(document.getAnimations().every((a) => !Number.isFinite(Number(a.effect?.getComputedTiming().endTime)) || a.playState === "finished"))))),
-    undefined, { timeout: 20_000 });
+  const quiet = () => finiteMotionDone(page, { quietFrames: 2 });
 
   const dial = page.locator(".pocket .mdial");
   await page.goto(`${APP}/home`, { waitUntil: "load" });
