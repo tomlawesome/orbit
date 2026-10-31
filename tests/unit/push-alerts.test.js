@@ -569,7 +569,8 @@ describe("the signed-out surface", () => {
 
     /* One screen, two dialects: the helm's desk cards and its phone layout
        (#1125), both rendered by the /settings route and chosen by CSS. */
-    expect(callers.sort()).toEqual(["settings/+page.svelte", "settings/pocket.svelte"]);
+    /* #1353: the toggle itself is the helm's shared sign-in-methods.svelte.js. */
+    expect(callers.sort()).toEqual(["settings/+page.svelte", "settings/pocket.svelte", "settings/sign-in-methods.svelte.js"]);
   });
 
   it("registers a service worker nowhere else, and never on the sign-in surface", () => {

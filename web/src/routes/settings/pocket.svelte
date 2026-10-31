@@ -6,25 +6,17 @@
   import Sheet from "$lib/pocket/Sheet.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
-  import { chooseTheme, chooseTextSize } from "$lib/pick.js";
   import { TEXT_SIZE_CHOICES } from "$lib/text-size.js";
   import Tiles from "$lib/editing/Tiles.svelte";
-  import { agoLong, clockOf, dayMonth, localZone, plural } from "$lib/format.js";
+  import { agoLong, plural } from "$lib/format.js";
   import { watchTour } from "$lib/tour/watch.js";
-  import { alertsSupported, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
-  import {
-    readSentLately,
-    readSignInMethods,
-    removeLocalPassword,
-    startProviderLink,
-    startStepUp,
-    unlinkProviderIdentity,
-    writeLocalPassword,
-    writeReminders,
-  } from "$lib/data/workspace.js";
+  import { alertsSupported, syncAlerts } from "$lib/push/alerts.js";
+  import { readSentLately } from "$lib/data/workspace.js";
   import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
-  import { PACKS, intentOf, issuerHost, methodWords, on } from "./helm.js";
-  import { signOutOfDevice, signOutOfEveryDevice } from "./sign-out.js";
+  import { PACKS, issuerHost, on, sentWhenOf } from "./helm.js";
+  import {
+    card, changeMethod, leaving, proveAtProvider, signOutAll, signOutDevice, toggleBrowserAlerts, toggleEmailReminders,
+  } from "./sign-in-methods.svelte.js";
   import { tabArrows } from "$lib/tabs.js";
 
   /*
@@ -52,7 +44,7 @@
    */
 
   /** @typedef {Awaited<ReturnType<typeof import('$lib/data/workspace.js').readSettingsScreen>>} SettingsView */
-  /** @typedef {Awaited<ReturnType<typeof readSignInMethods>>} Methods */
+  /** @typedef {Awaited<ReturnType<typeof import('$lib/data/workspace.js').readSignInMethods>>} Methods */
   /** @typedef {Awaited<ReturnType<typeof import('$lib/data/workspace.js').readSessions>>} Sessions */
   /** @typedef {import('$lib/data/fixtures/settings.js').SentRow} SentRow */
 
@@ -63,6 +55,8 @@
    *   sessions: Sessions,
    *   active: string,
    *   textSize: string,
+   *   onpickpack: (name: string) => void,
+   *   onpicktextsize: (id: string) => void,
    *   initials: string,
    *   providerOffered: boolean,
    *   emailApproval: boolean,
@@ -79,8 +73,11 @@
     view = $bindable(),
     methods = $bindable(),
     sessions = $bindable(),
-    active = $bindable(),
-    textSize = $bindable(),
+    /* The pack and the text size are the desk page's, picked through it (#1353). */
+    active,
+    textSize,
+    onpickpack,
+    onpicktextsize,
     initials,
     providerOffered,
     emailApproval,
@@ -100,71 +97,31 @@
 
   /* ── reminders ────────────────────────────────────────────────────────── */
   let tab = $state(/** @type {"reminders" | "sent"} */ ("reminders"));
-  let emailSaving = $state(false);
-  let reminderProblem = $state(/** @type {string | null} */ (null));
+  const reminderCard = $state(card());
   const emailOn = $derived(view?.reminders.emailEnabled ?? false);
 
-  async function toggleEmail() {
-    if (!view || emailSaving) return;
+  /* Optimistic, as the desk's (./sign-in-methods.svelte.js). */
+  const toggleEmail = () => {
+    if (!view) return;
     const reminders = view.reminders;
-    const next = !reminders.emailEnabled;
-    /* Optimistic, as the desk's: a switch that waits for a round trip reads
-       as dead. The revert in the catch is what keeps it honest. */
-    view = { ...view, reminders: { ...reminders, emailEnabled: next } };
-    emailSaving = true;
-    reminderProblem = null;
-    try {
-      const saved = await writeReminders({
-        emailEnabled: next,
-        firstWarningDays: reminders.firstWarningDays,
-        finalWarningDays: reminders.finalWarningDays,
-      });
-      if (view) view = { ...view, reminders: saved };
-      wake(`saved · email reminders ${saved.emailEnabled ? "on" : "off"}`);
-    } catch {
-      if (view) view = { ...view, reminders };
-      reminderProblem = "not saved — Orbit could not reach your reminder settings";
-    } finally {
-      emailSaving = false;
-    }
-  }
+    return toggleEmailReminders(reminders, {
+      card: reminderCard,
+      shown: (enabled) => { if (view) view = { ...view, reminders: { ...reminders, emailEnabled: enabled } }; },
+      landed: (saved) => { if (view) view = { ...view, reminders: saved }; },
+      wake,
+    });
+  };
 
   /* Browser alerts belong to this browser alone (#763), so the row says
      "this device" and reads its state here, never from the account. */
   let alertsAvailable = $state(true);
   let browserAlerts = $state(false);
-  let alertsBusy = $state(false);
-  let alertsProblem = $state(/** @type {string | null} */ (null));
+  const alertsCard = $state(card());
 
-  async function toggleAlerts() {
-    if (alertsBusy || !alertsAvailable) return;
-    /* Not optimistic: switching on opens the browser's own prompt, and the
-       switch must not claim to be on while that is still being answered. */
-    alertsBusy = true;
-    alertsProblem = null;
-    try {
-      if (browserAlerts) { await disableAlerts(); browserAlerts = false; }
-      else { await enableAlerts(); browserAlerts = true; }
-      wake(`saved · browser alerts ${browserAlerts ? "on" : "off"} on this device`);
-    } catch (error) {
-      /* #1151 RANGE-F9: reconcile against the server the same way the
-         onMount read below does. currentSubscription() only reports
-         whether the browser still holds a subscription object, which
-         stays true even after the server has refused it (e.g. it belongs
-         to another account on a shared device) — exactly the case
-         syncAlerts() exists to catch, so falling back to the raw browser
-         read here undid it. */
-      browserAlerts = Boolean(await syncAlerts());
-      const reason = /** @type {{ code?: string }} */ (error)?.code;
-      alertsProblem = reason === "permission_denied"
-        ? "your browser is refusing alerts. allow notifications for Orbit, then try again"
-        : reason === "unconfigured"
-          ? "not switched on — this Orbit has no push keys yet, which is your administrator’s to set"
-          : "not switched on — Orbit could not reach your alert settings";
-    } finally {
-      alertsBusy = false;
-    }
-  }
+  const toggleAlerts = () => {
+    if (!alertsAvailable) return;
+    return toggleBrowserAlerts(browserAlerts, { card: alertsCard, set: (on) => (browserAlerts = on), wake, curly: true });
+  };
 
   /* The two warnings (#468): VALUES only, same as the desk. #1151 W2-Q6 —
      this layout used to carry its own picker sheet letting a reader change
@@ -186,10 +143,7 @@
   let scene = $state("some");
 
   /** @param {string} iso */
-  function when(iso) {
-    const zone = fixtures ? "UTC" : localZone();
-    return `${dayMonth(iso, zone)} ${clockOf(iso, zone)}`;
-  }
+  const when = (iso) => sentWhenOf(iso, fixtures, " ");
   /** @param {SentRow} row */
   const sentMeta = (row) =>
     /* Round 3 §8: `alert · 14 days` beside the date; `before` is the reminders
@@ -204,19 +158,8 @@
   });
 
   /* ── your sky ─────────────────────────────────────────────────────────── */
-  /** @param {string} id */
-  function pickPack(id) {
-    active = id;
-    chooseTheme(id);
-  }
-
   /* Text size (#1180): four tiles across, two by two under 430px (four 16px words do not fit across at 390). */
   let width = $state(1024);
-  /** @param {string} id */
-  function pickTextSize(id) {
-    textSize = id;
-    chooseTextSize(id);
-  }
 
   /* ── your relay: the address copies ───────────────────────────────────── */
   async function copyAddress() {
@@ -237,8 +180,7 @@
   let methodOpen = $state(false);
   let currentPassword = $state("");
   let newPassword = $state("");
-  let methodBusy = $state(false);
-  let methodProblem = $state(/** @type {string | null} */ (null));
+  const methodCard = $state(card());
   /** Whether this visit is standing on a step-up proof for `action`. */
   let proven = $state(false);
 
@@ -263,7 +205,7 @@
     action = next;
     currentPassword = "";
     newPassword = "";
-    methodProblem = null;
+    methodCard.problem = null;
     proven = false;
     methodOpen = true;
   }
@@ -280,48 +222,16 @@
 
   async function toProvider() {
     if (!action) return;
-    methodProblem = null;
-    const identity = action.startsWith("unlink:") ? `&identity=${encodeURIComponent(action.slice(7))}` : "";
-    try {
-      await startStepUp({ intent: intentOf(action), returnTo: `/settings?stepup=${encodeURIComponent(action)}${identity}` });
-    } catch (error) {
-      methodProblem = methodWords(error);
-    }
+    await proveAtProvider(action, methodCard);
   }
 
-  async function confirmMethod() {
-    if (!action || methodBusy) return;
-    methodBusy = true;
-    methodProblem = null;
-    /* A step-up proof travels as a cookie, a password in the body: exactly
-       one of them is in play. */
-    const challenge = hasPassword ? { currentPassword } : {};
-    try {
-      /** @type {string} */
-      let outcome = "";
-      if (action === "link_oidc") {
-        await startProviderLink({ returnTo: "/settings", ...challenge });
-        return;
-      }
-      if (action === "password_set" || action === "password_change") {
-        const result = await writeLocalPassword({ password: newPassword, ...challenge });
-        outcome = result.changed ? "password changed · every other device was signed out" : "password set";
-      } else if (action === "password_remove") {
-        await removeLocalPassword(challenge);
-        outcome = "password removed";
-      } else if (action.startsWith("unlink:")) {
-        await unlinkProviderIdentity(action.slice(7), challenge);
-        outcome = "identity provider unlinked";
-      }
-      methodOpen = false;
-      wake(outcome);
-      methods = await readSignInMethods();
-    } catch (error) {
-      methodProblem = methodWords(error);
-    } finally {
-      methodBusy = false;
-    }
-  }
+  /* The change itself (./sign-in-methods.svelte.js); the callout closes and the wake says it. */
+  const confirmCallout = () => changeMethod(action, { hasPassword, currentPassword, newPassword }, {
+    card: methodCard,
+    landed: () => (methodOpen = false),
+    wake,
+    keep: (fresh) => (methods = fresh),
+  });
 
   /* ── where you're signed in ───────────────────────────────────────────── */
   let sessionProblem = $state(/** @type {string | null} */ (null));
@@ -332,35 +242,22 @@
      a second press then sends nothing, and after this session has ended any
      request would answer 401 and sign the reader straight back in through
      the provider (#1439). */
-  let signingOut = false;
+  const signing = leaving();
 
   /** @param {Sessions[number]} row */
-  async function signOutOf(row) {
-    if (signingOut) return;
-    signingOut = true;
-    sessionProblem = null;
-    try {
-      /* This device's own session plays the goodbye (./sign-out.js). */
-      if (await signOutOfDevice(row, onsignedout)) return;
-      sessions = sessions.filter((one) => one.id !== row.id);
-      wake(`signed out of ${row.device}`);
-    } catch {
-      sessionProblem = `still signed in on ${row.device} — try again`;
-    }
-    signingOut = false;
-  }
+  const signOutOf = (row) => signOutDevice(row, {
+    leaving: signing, descendFrom: onsignedout,
+    begun: () => (sessionProblem = null),
+    dropped: () => (sessions = sessions.filter((one) => one.id !== row.id)),
+    failed: () => (sessionProblem = `still signed in on ${row.device} — try again`),
+    wake,
+  });
 
-  async function signOutEverywhereNow() {
-    if (signingOut) return;
-    signingOut = true;
-    everywhereProblem = null;
-    try {
-      await signOutOfEveryDevice(onsignedout);
-    } catch {
-      everywhereProblem = "still signed in — try again";
-      signingOut = false;
-    }
-  }
+  const signOutEverywhereNow = () => signOutAll({
+    leaving: signing, descendFrom: onsignedout,
+    begun: () => (everywhereProblem = null),
+    failed: () => (everywhereProblem = "still signed in — try again"),
+  });
 
   /** @param {string} device */
   const onPhone = (device) => /iphone|android|ipad|phone/i.test(device);
@@ -473,7 +370,7 @@
       <h2 class="p-caps" id="st-sky">Your sky</h2>
       <div class="st-packs" role="group" aria-labelledby="st-sky">
         {#each PACKS as [name, title, line, ground, [sun, warm, ok, upcoming]] (name)}
-          <button class="st-pack" aria-pressed={active === name} aria-label="{title} — {line}" onclick={() => pickPack(name)}>
+          <button class="st-pack" aria-pressed={active === name} aria-label="{title} — {line}" onclick={() => onpickpack(name)}>
             <span class="st-swatch" style:background={ground} aria-hidden="true">
               <i class="st-sun" style:background={sun}></i>
               <i style="left:58px;top:30px;width:7px;height:7px;background:{warm}"></i>
@@ -486,7 +383,7 @@
       </div>
       <h3 class="p-caps st-textsize" id="st-textsize">Text size</h3>
       <!-- #1180, owner 2026-10-21: one column on a phone, so "extra large" at its own size fits a 360px screen. -->
-      <Tiles choices={[...TEXT_SIZE_CHOICES]} value={textSize} label="Text size" cols={width < 430 ? 1 : 4} onpick={pickTextSize} />
+      <Tiles choices={[...TEXT_SIZE_CHOICES]} value={textSize} label="Text size" cols={width < 430 ? 1 : 4} onpick={onpicktextsize} />
       <!-- Under the packs, where the desk card has it (#1189). -->
       <button class="st-watch" onclick={watchTour}>↻ watch the tour</button>
     </section>
@@ -506,18 +403,18 @@
       <div role="tabpanel" id="st-panel-reminders" aria-labelledby="st-tab-reminders" hidden={tab !== "reminders"}>
         {#if view}
           <div class="st-rows">
-            <Row title="email reminders" meta={emailSaving ? "saving…" : emailOn ? "on · to " + (view.user?.email ?? "you") : "off"}>
+            <Row title="email reminders" meta={reminderCard.busy ? "saving…" : emailOn ? "on · to " + (view.user?.email ?? "you") : "off"}>
               {#snippet mark()}<span class="st-glyph" class:off={!emailOn}>✉</span>{/snippet}
               {#snippet end()}
-                <button class="st-switch p-switch" role="switch" aria-checked={emailOn} aria-busy={emailSaving}
+                <button class="st-switch p-switch" role="switch" aria-checked={emailOn} aria-busy={reminderCard.busy}
                         aria-label="Email reminders" onclick={toggleEmail}><i></i></button>
               {/snippet}
             </Row>
             <Row title="browser alerts · this device" metaFace="ui"
-                 meta={!alertsAvailable ? "not available in this browser" : alertsBusy ? "waiting for your browser…" : browserAlerts ? "on" : "off"}>
+                 meta={!alertsAvailable ? "not available in this browser" : alertsCard.busy ? "waiting for your browser…" : browserAlerts ? "on" : "off"}>
               {#snippet mark()}<span class="st-glyph" class:off={!browserAlerts}><svg class="st-icon" width="16" height="17" viewBox="0 0 16 17" aria-hidden="true"><path d="M3 12V7.5a5 5 0 0 1 10 0V12l1.5 1.8h-13z"/><path d="M6.3 15.6a1.8 1.8 0 0 0 3.4 0"/></svg></span>{/snippet}
               {#snippet end()}
-                <button class="st-switch p-switch" role="switch" aria-checked={browserAlerts} aria-busy={alertsBusy}
+                <button class="st-switch p-switch" role="switch" aria-checked={browserAlerts} aria-busy={alertsCard.busy}
                         aria-label="Browser alerts on this device" disabled={!alertsAvailable} onclick={toggleAlerts}><i></i></button>
               {/snippet}
             </Row>
@@ -536,8 +433,8 @@
               {#snippet mark()}<span class="st-glyph">↗</span>{/snippet}
             </Row>
           </div>
-          {#if reminderProblem}<p class="p-error" role="alert">{reminderProblem}</p>{/if}
-          {#if alertsProblem}<p class="p-error" role="alert">{alertsProblem}</p>{/if}
+          {#if reminderCard.problem}<p class="p-error" role="alert">{reminderCard.problem}</p>{/if}
+          {#if alertsCard.problem}<p class="p-error" role="alert">{alertsCard.problem}</p>{/if}
         {:else}
           <div class="p-unlit"></div><div class="p-unlit"></div><div class="p-unlit"></div>
         {/if}
@@ -671,7 +568,7 @@
       <p class="st-say p-prose">Orbit asks you to confirm it’s you before a way in changes.</p>
     {/if}
     {#if hasPassword || proven}
-      <form id="st-method-form" class="st-form" onsubmit={(event) => { event.preventDefault(); confirmMethod(); }}>
+      <form id="st-method-form" class="st-form" onsubmit={(event) => { event.preventDefault(); confirmCallout(); }}>
         {#if hasPassword}
           <label class="st-label" for="st-current">your current password</label>
           <input id="st-current" class="st-input" type="password" autocomplete="current-password"
@@ -686,12 +583,12 @@
         {/if}
       </form>
     {/if}
-    {#if methodProblem}<p class="p-error" role="alert">{methodProblem}</p>{/if}
+    {#if methodCard.problem}<p class="p-error" role="alert">{methodCard.problem}</p>{/if}
     {#snippet foot()}
       {#if hasPassword || proven}
         <button class="p-pill filled" type="submit" form="st-method-form"
-                disabled={methodBusy || (hasPassword && !currentPassword) || (wantsNew && !newPassword)}>
-          {methodBusy ? "saving…" : confirmLabel}</button>
+                disabled={methodCard.busy || (hasPassword && !currentPassword) || (wantsNew && !newPassword)}>
+          {methodCard.busy ? "saving…" : confirmLabel}</button>
       {:else}
         <button class="p-pill filled" onclick={toProvider}>confirm with your identity provider →</button>
       {/if}

@@ -214,6 +214,28 @@ export function constellationPlanetsOf(items, today) {
   });
 }
 
+/* A ring dot's tone is the planet's own, where it is one a ring draws. */
+/** @type {Record<string, string>} */
+const RING_TONES = { "--warm": "--warm", "--ok": "--ok", "--upcoming": "--upcoming", "--overdue": "--overdue" };
+
+/**
+ * constellationPlanetsOf's planets as the dots on a small household ring
+ * (#1353, web-27): the far sky's placement re-centred on the ring. `spread`
+ * divides a planet's offset down to the ring's scale, and a dot's radius is
+ * `rMin` plus the body's size times `rScale`.
+ *
+ * @param {Array<[number, number, number, string]>} planets
+ * @param {{ centre: number, spread: number, rMin: number, rScale: number }} scale
+ * @returns {{ cx: number, cy: number, r: number, tone: string }[]}
+ */
+export const ringDotsOf = (planets, { centre, spread, rMin, rScale }) =>
+  planets.map(([x, y, r, tone]) => ({
+    cx: centre + x / spread,
+    cy: centre + y / spread,
+    r: rMin + r * rScale,
+    tone: RING_TONES[tone] ?? "--ok",
+  }));
+
 /** @type {Record<string, string>} */
 const PAINTS = { overdue: "ruby", "due-soon": "amber", upcoming: "sky", ok: "jade", unscheduled: "jade", ended: "ended" };
 

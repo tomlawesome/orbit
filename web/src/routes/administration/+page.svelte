@@ -1,10 +1,10 @@
 <script>
   import { onMount } from "svelte";
-  import { addMember, commandContact, commandMailbox, commandUploadLimit, createLocalUser, createSystem, hardDeleteHousehold, readAdminScreen, readSignInMethods, restoreHousehold, retryDocumentJob, sendSetupLink, startStepUp, testMail, wordsOf } from "$lib/data/workspace.js";
+  import { hardDeleteHousehold, readAdminScreen, readSignInMethods, startStepUp, wordsOf } from "$lib/data/workspace.js";
   import { createArm } from "$lib/arm.js";
   import { deletionNameMatches } from "$lib/data/household.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
-  import { constellationPlanetsOf, galaxyOf } from "$lib/data/chart.js";
+  import { galaxyOf } from "$lib/data/chart.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { mountStation } from "$lib/backdrops/station.js";
@@ -13,9 +13,14 @@
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
   import {
-    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, lapses, megabytes,
-    openFor, plainly, sendWords, setupWords, stamp, testVerdict,
+    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, blankMailDraft, daysLeft, expired,
+    freshInvite, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, openFor, plainly,
+    sendWords, setupWords, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict,
   } from "./words.js";
+  import {
+    card, commandMail, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
+    runMailTest, retryJob, setContact, setUploadLimit,
+  } from "./acts.svelte.js";
   import "./administration.css";
 
   /**
@@ -68,8 +73,10 @@
   /* §11 (#453): direct placement — it lands on the real route and refreshes
      the screen with the server's answer. Deciding join requests is NOT an
      admin-screen function (§15-2g). */
-  /** @type {string | null} */
-  let busy = $state(null);
+  /* `busy` is the person being placed. */
+  const peopleCard = $state({ busy: /** @type {string | null} */ (null), problem: /** @type {string | null} */ (null) });
+  /** The whole screen, read again after an act (./acts.svelte.js); the phone's acts use it too. */
+  const reread = async () => { view = await readAdminScreen(); };
   /**
    * A panel whose read failed says so with a "try again" (#1442), the way
    * settings recovers from its own failed read (#1195): the whole screen is
@@ -139,26 +146,13 @@
     }
   }
   /** @type {string | null} */
-  let problem = $state(null);
-  /** @type {string | null} */
   let placing = $state(null); // user id whose system picker is open
   /**
-   * @param {string} userId
-   * @param {string} householdId
+   * @param {{ id: string, displayName: string }} person
+   * @param {{ id: string, name: string }} household
    */
-  async function place(userId, householdId) {
-    busy = userId;
-    problem = null;
-    try {
-      await addMember(householdId, userId);
-      placing = null;
-      view = await readAdminScreen();
-    } catch (error) {
-      problem = wordsOf(error);
-    } finally {
-      busy = null;
-    }
-  }
+  const placeNow = (person, household) =>
+    placePerson(person, household, { card: peopleCard, reread, landed: () => (placing = null) });
 
   /* A NEW SYSTEM, MADE FOR SOMEBODY ELSE (#1052, Fable's decision of
      2026-09-19). The Systems card's head button was drawn from the mockup and
@@ -180,48 +174,34 @@
   let creatingSystem = $state(false);
   let systemName = $state("");
   let systemPassword = $state("");
-  let systemBusy = $state(false);
-  /** @type {string | null} */
-  let systemProblem = $state(null);
+  const systemCard = $state(card());
 
   /** Opens or closes the form, challenging first where a challenge is owed. */
   function toggleNewSystem() {
     if (creatingSystem) { creatingSystem = false; systemPassword = ""; return; }
-    systemProblem = null;
+    systemCard.problem = null;
     challengeThen("system_create", () => {
       creatingSystem = true;
       systemName = "";
       systemPassword = "";
-    }, (message) => (systemProblem = message));
+    }, (message) => (systemCard.problem = message));
   }
 
   /**
    * Pressing an owner button is the submit: the name is already typed, and the
    * person pressed is who the system belongs to.
    *
-   * @param {string} ownerId
+   * @param {{ id: string }} owner
    */
-  async function createSystemNow(ownerId) {
-    if (systemBusy) return;
-    systemBusy = true;
-    systemProblem = null;
-    try {
-      await createSystem({
-        name: systemName,
-        ownerId,
-        ...(actorHasPassword ? { currentPassword: systemPassword } : {}),
-      });
+  const createSystemNow = (owner) => makeSystem(systemName, owner, systemPassword, {
+    card: systemCard, actorHasPassword, reread,
+    landed: () => {
       creatingSystem = false;
       systemName = "";
       systemPassword = "";
       provenIntent = "";
-      view = await readAdminScreen();
-    } catch (error) {
-      systemProblem = setupWords(error);
-    } finally {
-      systemBusy = false;
-    }
-  }
+    },
+  });
 
   /* HOUSEHOLD RECOVERY ON THE CLOCK (#1001, design/v19/household-recovery/
      round-1/b-the-row-on-the-clock.html, owner-decisions §19). A household
@@ -232,25 +212,9 @@
      only": restore is drawn on administration only, never on the household
      page, whatever the server allows). */
   const recoverable = $derived.by(() => view?.recoverable ?? []);
-  /** @param {string} iso */
-  const daysLeft = (iso) => Math.max(0, Math.ceil(
-    (Date.parse(iso) - Date.parse(view?.now ?? new Date().toISOString())) / 86_400_000,
-  ));
-  /** @param {{ deleteAfter: string }} row */
-  const expired = (row) => Date.parse(row.deleteAfter) <= Date.parse(view?.now ?? new Date().toISOString());
 
   /** What was said on a row after restoring it, keyed by household id. @type {Record<string, { ok: boolean, text: string }>} */
   let clockSaid = $state({});
-  /** @param {{ id: string, name: string }} row */
-  async function restoreRow(row) {
-    try {
-      await restoreHousehold(row.id);
-      clockSaid[row.id] = { ok: true, text: `restored · ${row.name} is back exactly as it was` };
-      view = await readAdminScreen();
-    } catch (error) {
-      clockSaid[row.id] = { ok: false, text: `not restored — ${wordsOf(error)}` };
-    }
-  }
 
   /** Which row's "delete now" confirm is open, and what has been typed into each. @type {Record<string, boolean>} */
   let doomConfirming = $state({});
@@ -311,15 +275,13 @@
          somebody with a password answers with it here; somebody with only a
          provider identity is sent back to that provider first and returns with
          the proof in a cookie. `?stepup=` names what they left to do. */
-  let localDraft = $state({ email: "", displayName: "", expiresInDays: SETUP_LINK_DAYS.fallback });
+  let localDraft = $state(freshInvite());
   /** True once Create has been tapped and the challenge under it is open. */
   let localArmed = $state(false);
   let localPassword = $state("");
-  let localBusy = $state(false);
-  /** @type {?(Awaited<ReturnType<typeof sendSetupLink>> & { userId?: string })} */
+  const localCard = $state(card());
+  /** @type {?(import("./acts.svelte.js").Delivery & { userId?: string })} */
   let localDelivery = $state(null);
-  /** @type {string | null} */
-  let localProblem = $state(null);
   /**
    * Whether the acting administrator has a password of their own. It decides
    * which challenge every action on this screen asks for, so it is read once
@@ -408,11 +370,9 @@
   let resendFor = $state(null);
   let resendDays = $state(SETUP_LINK_DAYS.fallback);
   let resendPassword = $state("");
-  let resendBusy = $state(false);
-  /** @type {Awaited<ReturnType<typeof sendSetupLink>> | null} */
+  const resendCard = $state(card());
+  /** @type {import("./acts.svelte.js").Delivery | null} */
   let resendDelivery = $state(null);
-  /** @type {string | null} */
-  let resendProblem = $state(null);
 
   /**
    * The first tap on a challenged action. An administrator with a password
@@ -420,7 +380,7 @@
    * back here with the proof.
    *
    * A handover that never left says so on the card the action belongs to, not
-   * on whichever card happens to own `localProblem` — #1052 added a third
+   * on whichever card happens to own `localCard.problem` — #1052 added a third
    * caller on a second card, so `report` names the line rather than assuming.
    *
    * @param {string} intent
@@ -428,9 +388,9 @@
    * @param {(message: string) => void} [report]
    * @param {{ resend?: { personId: string, days: number } | null }} [about] what the tap is opening, for stashDraft
    */
-  async function challengeThen(intent, openField, report = (message) => (localProblem = message), about = {}) {
-    localProblem = null;
-    resendProblem = null;
+  async function challengeThen(intent, openField, report = (message) => (localCard.problem = message), about = {}) {
+    localCard.problem = null;
+    resendCard.problem = null;
     if (actorHasPassword || provenIntent === intent) { openField(); return; }
     try {
       stashDraft(intent, about);
@@ -443,34 +403,19 @@
   }
 
   /** Creates the account and mails its link (ADR-0023 §3). */
-  async function createLocalUserNow() {
-    if (localBusy) return;
-    localBusy = true;
-    localProblem = null;
-    localDelivery = null;
-    try {
-      const answer = await createLocalUser({
-        email: localDraft.email,
-        displayName: localDraft.displayName,
-        expiresInDays: Number(localDraft.expiresInDays),
-        ...(actorHasPassword ? { currentPassword: localPassword } : {}),
-      });
-      localDelivery = { ...answer, userId: answer.user?.id };
+  const createLocalUserNow = () => inviteLocalUser(localDraft, localPassword, {
+    card: localCard, actorHasPassword, reread,
+    begun: () => (localDelivery = null),
+    landed: (delivery) => {
+      localDelivery = delivery;
       localArmed = false;
       localPassword = "";
       provenIntent = "";
       /* Only a send that got out clears the form: a failure keeps what was
          typed so the administrator can read it back against the Retry. */
-      if (!answer.sendError) {
-        localDraft = { email: "", displayName: "", expiresInDays: SETUP_LINK_DAYS.fallback };
-      }
-      view = await readAdminScreen();
-    } catch (error) {
-      localProblem = setupWords(error);
-    } finally {
-      localBusy = false;
-    }
-  }
+      if (!delivery.sendError) localDraft = freshInvite();
+    },
+  });
 
   /**
    * Sends a fresh link — the Retry under a failed send, and the per-row
@@ -481,28 +426,16 @@
    * @param {number} days
    * @param {string} password
    */
-  async function sendSetupLinkNow(userId, days, password) {
-    if (resendBusy || localBusy) return;
-    resendBusy = true;
-    localBusy = true;
-    resendProblem = null;
-    try {
-      const answer = await sendSetupLink(userId, {
-        expiresInDays: Number(days),
-        ...(actorHasPassword ? { currentPassword: password } : {}),
-      });
+  const sendSetupLinkNow = (userId, days, password) => issueSetupLink(userId, days, password, {
+    card: resendCard, lock: localCard, actorHasPassword,
+    landed: (answer) => {
       resendDelivery = answer;
       if (localDelivery?.userId === userId) localDelivery = { ...answer, userId };
       resendFor = null;
       resendPassword = "";
       provenIntent = "";
-    } catch (error) {
-      resendProblem = setupWords(error);
-    } finally {
-      resendBusy = false;
-      localBusy = false;
-    }
-  }
+    },
+  });
 
   /* §15 mail machinery, made real (#743, ADR-0017 slice 2). The instance has
      ONE admin-owned mailbox; this is where it is set, checked, rotated,
@@ -519,21 +452,20 @@
      Where the route cannot answer — under fixtures, or for a non-admin — the
      screen keeps the mockup's relay rows, so the ratified §13 sheet is what
      the fidelity gate still photographs. */
-  /** @type {string | null} */
-  let mailboxOutcome = $state(null);
-  /** @type {string | null} */
-  let mailboxProblem = $state(null);
-  /** @type {string | null} */
-  let mailboxBusy = $state(null);
+  /* `busy` names the button that is out. */
+  const mailCard = $state({
+    busy: /** @type {string | null} */ (null),
+    problem: /** @type {string | null} */ (null),
+    outcome: /** @type {string | null} */ (null),
+  });
   let editing = $state(false);
   let rotating = $state(false);
   let password = $state("");
   /* ROTATE EVERY ADDRESS (#1151 A1-F3): the phone layout's own `aliasOpen`
      sheet, built here for the desk — the only mailbox act the desk card was
-     missing. Same default grace period as the phone's STANDARD_GRACE_DAYS. */
-  const ALIAS_STANDARD_GRACE_DAYS = 14;
+     missing. Same default grace period as the phone's (words.js). */
   let aliasRotating = $state(false);
-  let aliasGraceDays = $state(ALIAS_STANDARD_GRACE_DAYS);
+  let aliasGraceDays = $state(ALIAS_GRACE_DAYS);
   /* Two-tap for this card's destructive single-click acts (#1151 A1-S2):
      "remove credential" fired on one click here while the phone already
      armed it first; "rotate every address" gets the same protocol from the
@@ -547,75 +479,37 @@
     if (mailboxArm.tap(key, button)) fire();
   }
   /** @type {{ host: string, port: number, accountUser: string, mailbox: string, tlsServerName: string, providerProfile: string, trustedRecipientHeader: string, pollSeconds: number }} */
-  let draft = $state({
-    host: "", port: 993, accountUser: "", mailbox: "INBOX", tlsServerName: "",
-    providerProfile: "other", trustedRecipientHeader: "X-Original-To", pollSeconds: 300,
-  });
+  let draft = $state(blankMailDraft());
 
-  const PROVIDER_PROFILES = ["mailcow", "gmail", "outlook", "other"];
   function openMailboxEditor() {
     const current = need().mailbox;
-    if (current) {
-      draft = {
-        host: current.host, port: current.port, accountUser: current.accountUser,
-        mailbox: current.mailbox, tlsServerName: current.tlsServerName,
-        providerProfile: current.providerProfile,
-        trustedRecipientHeader: current.trustedRecipientHeader || "X-Original-To",
-        pollSeconds: current.pollSeconds,
-      };
-    }
+    if (current) draft = mailDraftOf(current);
     password = "";
-    mailboxOutcome = null;
-    mailboxProblem = null;
+    mailCard.outcome = null;
+    mailCard.problem = null;
     editing = true;
   }
 
   /**
-   * Runs one mailbox action and folds the answer straight back into the
-   * screen, so what is shown is always the server's own account of the state
-   * rather than an optimistic guess.
+   * One mailbox action (./acts.svelte.js). Only a verified credential closes
+   * the form; a refused one leaves it open with what was typed, minus the
+   * password. A failed re-read after a landed command is never read back as
+   * "not done" (#1151 A1-R5).
    *
    * @param {string} label  which button is busy
    * @param {object} command
    */
-  async function mailboxAction(label, command) {
-    mailboxBusy = label;
-    mailboxProblem = null;
-    mailboxOutcome = null;
-    /** @type {Awaited<ReturnType<typeof commandMailbox>> | undefined} */
-    let answer;
-    try {
-      answer = await commandMailbox(command);
-    } catch (error) {
-      /* The command itself refused — nothing changed server-side, so this
-         really is "not done". */
-      mailboxProblem = wordsOf(error);
-      mailboxBusy = null;
-      return;
-    }
-    mailboxOutcome = answer.outcome ?? null;
-    /* Only a verified credential closes the form; a refused one leaves it
-       open with what was typed, minus the password, so the administrator
-       can correct a host or a port without retyping everything. */
-    if (!answer.outcome || answer.outcome === "verified") {
-      editing = false;
-      rotating = false;
-      aliasRotating = false;
-    }
-    password = "";
-    try {
-      /* The whole screen is re-read rather than patched, the same way placing
-         a person does: the machinery rows are derived from the mailbox, so a
-         patch would leave them describing the previous state. A failure HERE
-         is a second, separate thing from the command above: that one already
-         landed, so this is never read back as "not done" with the version
-         left stale until a reload (#1151 A1-R5). */
-      view = await readAdminScreen();
-    } catch {
-      mailboxProblem = "done — Orbit could not refresh this screen, so reload to see the new version";
-    }
-    mailboxBusy = null;
-  }
+  const mailboxAction = (label, command) => commandMail(label, command, {
+    card: mailCard, reread,
+    landed: (closes) => {
+      if (closes) {
+        editing = false;
+        rotating = false;
+        aliasRotating = false;
+      }
+      password = "";
+    },
+  });
 
   /* DOCUMENT JOBS AND THE TWO MAIL TESTS (#1071, design/v19/administration-ops/
      round-2/f-the-screens-grammar.html, owner 2026-09-19 "much better, good
@@ -631,49 +525,10 @@
      screen re-read (any other admin act) settles it against the server. */
   /** @type {Record<string, { status: string, at: string }>} */
   let retriedJobs = $state({});
-  const jobs = $derived.by(() => {
-    const list = (view?.operations?.documentJobs ?? []).map((job) => retriedJobs[job.id]
-      ? { ...job, status: /** @type {typeof job.status} */ (retriedJobs[job.id].status), attempts: 0, updatedAt: retriedJobs[job.id].at }
-      : job);
-    return list.sort((a, b) => (JOB_STATES[a.status]?.rank ?? 9) - (JOB_STATES[b.status]?.rank ?? 9)
-      || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-  });
-  const jobCounts = $derived.by(() => {
-    /** @type {Record<string, number>} */
-    const by = {};
-    for (const job of jobs) by[job.status] = (by[job.status] ?? 0) + 1;
-    return ["failed", "retry", "processing", "pending", "completed"].filter((status) => by[status])
-      .map((status) => `${by[status]} ${JOB_STATES[status].word}`).join(" · ");
-  });
+  const jobs = $derived.by(() => jobsOf(view?.operations?.documentJobs ?? [], retriedJobs));
+  const jobCounts = $derived(jobCountsOf(jobs));
   const jobsClock = $derived.by(() => view?.now ?? new Date().toISOString());
-  /** @param {(typeof jobs)[number]} job */
-  const jobMeta = (job) => {
-    /* The failed row's reason lives in its subtext permanently, with the
-       tries and when it was last tried alongside it (the issue's own
-       example: "couldn't reach the virus scanner · 5 of 5 tries · last
-       tried 6m ago"). The client has no per-kind maximum to print "of N"
-       against, so only the count travels, as the phone's own detail panel
-       already shows it. */
-    if (job.status === "failed") {
-      return `${JOB_REASONS[job.lastErrorCode ?? "unknown"] ?? JOB_REASONS.unknown} · ${plural(job.attempts, "try", "tries")} · last tried ${ago(job.updatedAt, jobsClock)}`;
-    }
-    if (job.status === "retry") return job.lastErrorCode ? JOB_REASONS[job.lastErrorCode] ?? JOB_REASONS.unknown : `last tried ${ago(job.updatedAt, jobsClock)}`;
-    if (job.status === "pending") return retriedJobs[job.id] ? "attempt 1 · queued just now" : `queued ${ago(job.createdAt, jobsClock)}`;
-    if (job.status === "processing") return `started ${ago(job.updatedAt, jobsClock)}`;
-    return `${JOB_STATES[job.status]?.word ?? job.status} ${ago(job.updatedAt, jobsClock)}`;
-  };
-  /** @type {string | null} */
-  let jobsProblem = $state(null);
-  /** @param {(typeof jobs)[number]} job */
-  async function retryJob(job) {
-    jobsProblem = null;
-    try {
-      await retryDocumentJob(job.id, job.status);
-      retriedJobs[job.id] = { status: "pending", at: new Date().toISOString() };
-    } catch (error) {
-      jobsProblem = wordsOf(error);
-    }
-  }
+  const jobsCard = $state(card());
 
   /* The two live mail tests: "test this mailbox" (the IMAP verify and the
      relay half together — it replaces "check connection") and "test the
@@ -683,57 +538,22 @@
      re-read rather than kept in local state. */
   const mailProbes = $derived.by(() => view?.operations?.mailProbes ?? { mailbox: null, relay: null });
   const TEST_KINDS = /** @type {const} */ (["mailbox", "relay"]);
-  /** @type {"mailbox" | "relay" | null} */
-  let testingWhich = $state(null);
-  /** @type {string | null} */
-  let testProblem = $state(null);
-  /** @param {"mailbox" | "relay"} which */
-  async function runMailTest(which) {
-    if (testingWhich) return;
-    testingWhich = which;
-    testProblem = null;
-    try {
-      await testMail(which);
-      view = await readAdminScreen();
-    } catch (error) {
-      testProblem = wordsOf(error);
-    } finally {
-      testingWhich = null;
-    }
-  }
+  /* `busy` names the test that is out. */
+  const testCard = $state({ busy: /** @type {"mailbox" | "relay" | null} */ (null), problem: /** @type {string | null} */ (null) });
   /** @param {"mailbox" | "relay"} which */
   const testPill = (which) => {
-    if (testingWhich === which) return { word: "checking…", tone: "quiet" };
+    if (testCard.busy === which) return { word: "checking…", tone: "quiet" };
     const probe = mailProbes[which];
     if (!probe) return null;
     const verdict = testVerdict(probe.result);
     return { word: `${verdict.word} · ${ago(probe.at, jobsClock)}`, tone: ROLE_TONE[verdict.tone] ?? "" };
   };
-  /** @param {"mailbox" | "relay"} which */
-  const testSubtext = (which) => {
-    if (testingWhich === which) return "checking now";
-    const probe = mailProbes[which];
-    if (!probe) return "not tested yet";
-    const verdict = testVerdict(probe.result);
-    return verdict.reason || plainly(probe.result);
-  };
 
   /* The tell (page-head pills, under the subline): one per thing that needs
      the reader, each a link down to its card — so a failure is visible from
-     the top of the page without scrolling. */
-  const tells = $derived.by(() => {
-    /** @type {{ href: string, text: string }[]} */
-    const items = [];
-    const failedJobs = jobs.filter((job) => job.status === "failed").length;
-    if (failedJobs) items.push({ href: "#jobs-card", text: `${plural(failedJobs, "job")} failed` });
-    if (mailProbes.relay && testVerdict(mailProbes.relay.result).tone === "over") items.push({ href: "#mail-card", text: "relay failed" });
-    /* no probe yet: the mailbox's own last verdict, as the phone says it */
-    const mailboxFailed = mailProbes.mailbox
-      ? testVerdict(mailProbes.mailbox.result).tone === "over"
-      : view?.mailbox?.verificationState === "failed";
-    if (mailboxFailed) items.push({ href: "#mail-card", text: "mailbox failed" });
-    return items;
-  });
+     the top of the page without scrolling (words.js's tellsOf). */
+  const TELL_HREF = /** @type {Record<string, string>} */ ({ jobs: "#jobs-card", mail: "#mail-card" });
+  const tells = $derived.by(() => tellsOf(view, jobs).map(({ card: at, text }) => ({ href: TELL_HREF[at], text })));
 
   /* The public contact address (#860): one field an administrator sets,
      changes or clears, never defaulted from any account's own email. Named
@@ -742,32 +562,17 @@
      string, not a credential, and Orbit never talks to it. */
   let editingContact = $state(false);
   let contactDraft = $state("");
-  /** @type {string | null} */
-  let contactProblem = $state(null);
-  let contactBusy = $state(false);
+  const contactCard = $state(card());
 
   function openContactEditor() {
     contactDraft = need().contact?.address ?? "";
-    contactProblem = null;
+    contactCard.problem = null;
     editingContact = true;
   }
 
-  /** @param {{ action: "set", address: string } | { action: "clear" }} partial */
-  async function contactAction(partial) {
-    const current = need().contact;
-    if (!current || contactBusy) return;
-    contactBusy = true;
-    contactProblem = null;
-    try {
-      await commandContact({ ...partial, expectedVersion: current.version });
-      view = await readAdminScreen();
-      editingContact = false;
-    } catch (error) {
-      contactProblem = wordsOf(error);
-    } finally {
-      contactBusy = false;
-    }
-  }
+  /** The editor closes once the re-read is back. @param {{ action: "set", address: string } | { action: "clear" }} partial */
+  const saveContact = (partial) =>
+    setContact(need().contact, partial, { card: contactCard, reread, settled: () => (editingContact = false) });
 
   /* The upload size limit (#1285): the configured default until an
      administrator sets their own, in whole MB inside the hard bounds. The
@@ -776,59 +581,18 @@
   let editingUploadLimit = $state(false);
   /** @type {number | null} */
   let uploadLimitDraft = $state(null);
-  /** @type {string | null} */
-  let uploadLimitProblem = $state(null);
-  let uploadLimitBusy = $state(false);
+  const uploadLimitCard = $state(card());
 
   function openUploadLimitEditor() {
     const current = need().uploadLimit;
     uploadLimitDraft = current ? Math.round(current.maxBytes / 1048576) : null;
-    uploadLimitProblem = null;
+    uploadLimitCard.problem = null;
     editingUploadLimit = true;
   }
 
-  /** @param {{ action: "set", megabytes: number } | { action: "default" }} partial */
-  async function uploadLimitAction(partial) {
-    const current = need().uploadLimit;
-    if (!current) return;
-    uploadLimitBusy = true;
-    uploadLimitProblem = null;
-    try {
-      await commandUploadLimit({ ...partial, expectedVersion: current.version });
-    } catch (error) {
-      uploadLimitProblem = wordsOf(error);
-      uploadLimitBusy = false;
-      return;
-    }
-    editingUploadLimit = false;
-    // The command landed; a failed re-read must not read back as a failed command.
-    try {
-      view = await readAdminScreen();
-    } catch {
-      uploadLimitProblem = "done — Orbit could not refresh this screen, so reload to see the new version";
-    } finally {
-      uploadLimitBusy = false;
-    }
-  }
-
-  /** @type {Record<string, string>} */
-  const TONE = { "--warm": "--warm", "--ok": "--ok", "--upcoming": "--upcoming", "--overdue": "--overdue" };
-  /* The sheet's five hand-placed rings (design/v19/administration-iss.html,
-     §Systems) turn out to be constellationPlanetsOf's own far-sky placement
-     (CON-13), just re-centred on the roster's small r13 ring instead of the
-     backdrop's distant one: the same orbit distance (18..30) and body size
-     (2.0..2.8) divided by 6 and 4 respectively lands exactly on the sheet's
-     hand-measured coordinates for all five fixture households (#775). */
-  /** @param {[number, number, number, string]} planet */
-  const ringDot = ([x, y, r, tone]) => ({
-    cx: 17 + x / 6,
-    cy: 17 + y / 6,
-    r: 1 + r / 4,
-    tone: TONE[tone] ?? "--ok",
-  });
-  /** @param {import('$lib/data/workspace.js').Household} household */
-  const ringDots = (household) =>
-    constellationPlanetsOf(household.items ?? [], need().today).map(ringDot);
+  /** The editor closes once the command lands. @param {{ action: "set", megabytes: number } | { action: "default" }} partial */
+  const saveUploadLimit = (partial) =>
+    setUploadLimit(need().uploadLimit, partial, { card: uploadLimitCard, reread, landed: () => (editingUploadLimit = false) });
 
   onMount(() => {
     /* The backdrop mounts once the screen's own data has loaded — its
@@ -881,7 +645,7 @@
      shares this page's state and acts (the step-up challenge, the re-read),
      so both dialects answer the server the same way. -->
 <Pocket {view} fixtures={Boolean(data?.fixtures)} {actorHasPassword} {provenIntent} {resumedResendPersonId} bind:draft={localDraft}
-        challenge={challengeThen} reread={async () => { view = await readAdminScreen(); }}
+        challenge={challengeThen} {reread}
         spent={() => (provenIntent = "")} {screenProblem} onretry={loadScreen} />
 
 <div class="page" role={pocket ? undefined : "main"}>
@@ -1055,7 +819,7 @@
                    bind:value={localPassword} required />
           {/if}
           <div class="placerow localuserrow">
-            <button type="submit" disabled={localBusy}>{localArmed ? "create and send the link" : "create"}</button>
+            <button type="submit" disabled={localCard.busy}>{localArmed ? "create and send the link" : "create"}</button>
             {#if localArmed}
               <button type="button" onclick={() => { localArmed = false; localPassword = ""; }}>cancel</button>
             {/if}
@@ -1065,7 +829,7 @@
           {#if localDelivery.sendError}
             <div class="adminproblem">
               {localDelivery.sentTo} was created, but {sendWords(localDelivery.sendError)}
-              <button class="retry" disabled={localBusy}
+              <button class="retry" disabled={localCard.busy}
                       onclick={() => sendSetupLinkNow(
                         /** @type {string} */ (localDelivery?.userId),
                         localDraft.expiresInDays,
@@ -1076,7 +840,7 @@
             <div class="adminproblem ok">Setup link sent to {localDelivery.sentTo}, valid until {lapses(localDelivery.expiresAt)}</div>
           {/if}
         {/if}
-        {#if localProblem}<div class="adminproblem">{localProblem}</div>{/if}
+        {#if localCard.problem}<div class="adminproblem">{localCard.problem}</div>{/if}
 
         {#if view.failed.session}
           <!-- Not knowing who is signed in is not "signed out": say so, and
@@ -1125,7 +889,7 @@
           {#if placing === person.id}
             <div class="placerow">
               {#each view.households as household (household.id)}
-                <button disabled={busy === person.id} onclick={() => place(person.id, household.id)}>{household.name}</button>
+                <button disabled={peopleCard.busy === person.id} onclick={() => placeNow(person, household)}>{household.name}</button>
               {/each}
             </div>
           {/if}
@@ -1143,7 +907,7 @@
                        bind:value={resendPassword} required />
               {/if}
               <div class="placerow localuserrow">
-                <button type="submit" disabled={resendBusy}>send it</button>
+                <button type="submit" disabled={resendCard.busy}>send it</button>
                 <button type="button" onclick={() => (resendFor = null)}>cancel</button>
               </div>
             </form>
@@ -1156,8 +920,8 @@
             <div class="adminproblem ok">Setup link sent to {resendDelivery.sentTo}, valid until {lapses(resendDelivery.expiresAt)}</div>
           {/if}
         {/if}
-        {#if resendProblem}<div class="adminproblem">{resendProblem}</div>{/if}
-        {#if problem}<div class="adminproblem">{problem}</div>{/if}
+        {#if resendCard.problem}<div class="adminproblem">{resendCard.problem}</div>{/if}
+        {#if peopleCard.problem}<div class="adminproblem">{peopleCard.problem}</div>{/if}
       </div>
 
       <div class="card">
@@ -1188,20 +952,20 @@
             <div class="placerow localuserrow" role="group"
                  aria-label="choose who will own the new system">
               {#each view.users ?? [] as person (person.id)}
-                <button disabled={systemBusy || systemName.trim().length === 0}
-                        onclick={() => createSystemNow(person.id)}>{person.displayName}</button>
+                <button disabled={systemCard.busy || systemName.trim().length === 0}
+                        onclick={() => createSystemNow(person)}>{person.displayName}</button>
               {/each}
             </div>
           </div>
         {/if}
-        {#if systemProblem}<div class="adminproblem">{systemProblem}</div>{/if}
+        {#if systemCard.problem}<div class="adminproblem">{systemCard.problem}</div>{/if}
 
         {#each view.households as household (household.id)}
           <div class="system">
             <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
               <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
               <circle cx="17" cy="17" r="2.6" style="fill:var({household.id === view.primary ? "--sun" : "--ink-mid"})"/>
-              {#each ringDots(household) as dot (dot.cx + "-" + dot.cy)}
+              {#each systemDotsOf(household, need().today) as dot (dot.cx + "-" + dot.cy)}
                 <circle cx={dot.cx} cy={dot.cy} r={dot.r} style="fill:var({dot.tone})" opacity=".8"/>
               {/each}
             </svg>
@@ -1229,7 +993,7 @@
              only), so its ring is plain -- no ringDots here either, exactly
              as pocket.svelte draws it. -->
         {#each recoverable.filter((doom) => !doomGone.some((line) => line.id === doom.id)) as doom (doom.id)}
-          {@const rowExpired = expired(doom)}
+          {@const rowExpired = expired(doom, view?.now)}
           <div class="system" class:doomed={!rowExpired}>
             <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
               {#if rowExpired}
@@ -1243,11 +1007,11 @@
             <div class="who">
               <b>{doom.name}</b>
               <span>{rowExpired ? "past its window · removing"
-                : `on the clock · ${plural(daysLeft(doom.deleteAfter), "day")} left · gone for good ${dayMonth(doom.deleteAfter)}`}</span>
+                : `on the clock · ${plural(daysLeft(doom.deleteAfter, view?.now), "day")} left · gone for good ${dayMonth(doom.deleteAfter)}`}</span>
             </div>
             {#if !rowExpired}
               <div class="acts">
-                <button class="rebtn" onclick={() => restoreRow(doom)}>restore</button>
+                <button class="rebtn" onclick={() => restoreSystem(doom, clockSaid, reread)}>restore</button>
                 {#if !doomConfirming[doom.id]}
                   <button class="dangerbtn" onclick={() => openDoomConfirm(doom)}>delete now →</button>
                 {:else}
@@ -1258,7 +1022,7 @@
               </div>
               {#if doomConfirming[doom.id]}
                 <div class="confirm">
-                  <p class="stake">Deleting now skips the {plural(daysLeft(doom.deleteAfter), "day")}. Nothing comes
+                  <p class="stake">Deleting now skips the {plural(daysLeft(doom.deleteAfter, view?.now), "day")}. Nothing comes
                     back after this — not for you, not for anyone.</p>
                   <div class="field">
                     <label for="doomname-{doom.id}">type the system’s name exactly to wake the button</label>
@@ -1297,21 +1061,21 @@
           {#if editingContact}
             <form class="mailboxform" onsubmit={(event) => {
               event.preventDefault();
-              contactAction({ action: "set", address: contactDraft });
+              saveContact({ action: "set", address: contactDraft });
             }}>
               <label>address <input type="email" bind:value={contactDraft} placeholder="ops@example.com" required /></label>
               <p class="mailboxnote">Shown on the sign-in door if it ever cannot open safely — never
                 a real administrator's own mailbox. Anyone can read it, signed in or not.</p>
               <div class="placerow mailboxrow">
-                <button type="submit" disabled={contactBusy}>save</button>
+                <button type="submit" disabled={contactCard.busy}>save</button>
                 {#if view.contact.address}
-                  <button type="button" disabled={contactBusy} onclick={() => contactAction({ action: "clear" })}>clear</button>
+                  <button type="button" disabled={contactCard.busy} onclick={() => saveContact({ action: "clear" })}>clear</button>
                 {/if}
                 <button type="button" onclick={() => (editingContact = false)}>cancel</button>
               </div>
             </form>
           {/if}
-          {#if contactProblem}<div class="adminproblem">{contactProblem}</div>{/if}
+          {#if contactCard.problem}<div class="adminproblem">{contactCard.problem}</div>{/if}
         {/if}
       </div>
 
@@ -1327,17 +1091,17 @@
         {/if}
         {#each jobs as job (job.id)}
           <div class="person">
-            <div class="who"><b>{JOB_KINDS[job.kind] ?? job.kind}</b><span>{jobMeta(job)}</span></div>
+            <div class="who"><b>{JOB_KINDS[job.kind] ?? job.kind}</b><span>{jobMetaOf(job, jobsClock, retriedJobs, { tries: true })}</span></div>
             <span class="role {ROLE_TONE[JOB_STATES[job.status]?.tone ?? ''] ?? ''}">{JOB_STATES[job.status]?.word ?? job.status}</span>
             {#if job.status === "failed"}
-              <button class="place" onclick={() => retryJob(job)}>retry</button>
+              <button class="place" onclick={() => retryJob(job, { card: jobsCard, retried: retriedJobs })}>retry</button>
             {/if}
           </div>
         {:else}
           {#if !view.failed.operations}<p class="jobfoot">no document jobs yet</p>{/if}
         {/each}
         {#if !view.failed.operations}<div class="jobfoot">the 25 most recently touched jobs are kept; older ones are not</div>{/if}
-        {#if jobsProblem}<div class="adminproblem">{jobsProblem}</div>{/if}
+        {#if jobsCard.problem}<div class="adminproblem">{jobsCard.problem}</div>{/if}
       </div>
 
       <!-- #1285: the document upload size limit — the configured default
@@ -1362,7 +1126,7 @@
           {#if editingUploadLimit}
             <form class="mailboxform" onsubmit={(event) => {
               event.preventDefault();
-              if (uploadLimitDraft !== null) uploadLimitAction({ action: "set", megabytes: uploadLimitDraft });
+              if (uploadLimitDraft !== null) saveUploadLimit({ action: "set", megabytes: uploadLimitDraft });
             }}>
               <label>limit in MB <input type="number" inputmode="numeric" step="1"
                 min={Math.round(limit.minBytes / 1048576)} max={Math.round(limit.ceilingBytes / 1048576)}
@@ -1371,10 +1135,10 @@
                 next upload from the create form or an item; mail-in keeps its own fixed cap of 25 MiB per message,
                 so a higher limit here does not raise what mail accepts. Documents already kept are unaffected.</p>
               <div class="placerow mailboxrow">
-                <button type="submit" disabled={uploadLimitBusy}>save</button>
+                <button type="submit" disabled={uploadLimitCard.busy}>save</button>
                 {#if limit.overrideBytes !== null}
-                  <button type="button" disabled={uploadLimitBusy}
-                          onclick={() => uploadLimitAction({ action: "default" })}>use the default ({megabytes(limit.defaultBytes)})</button>
+                  <button type="button" disabled={uploadLimitCard.busy}
+                          onclick={() => saveUploadLimit({ action: "default" })}>use the default ({megabytes(limit.defaultBytes)})</button>
                 {/if}
                 <button type="button" onclick={() => (editingUploadLimit = false)}>cancel</button>
               </div>
@@ -1382,7 +1146,7 @@
           {/if}
           <p class="jobfoot">A reverse proxy in front of Orbit must allow uploads at least this large —
             <a href="https://github.com/tomlawesome/orbit/blob/main/docs/installing.md#what-you-need" target="_blank" rel="noopener noreferrer">see the install guide</a>.</p>
-          {#if uploadLimitProblem}<div class="adminproblem">{uploadLimitProblem}</div>{/if}
+          {#if uploadLimitCard.problem}<div class="adminproblem">{uploadLimitCard.problem}</div>{/if}
         </div>
       {/if}
 
@@ -1391,10 +1155,10 @@
         <div class="half">
           <div class="cardhead">
             <h2>Mail machinery</h2>
-            <button disabled={testingWhich !== null} class:busy={testingWhich === "mailbox"}
-                    onclick={() => runMailTest("mailbox")}>test this mailbox</button>
-            <button disabled={testingWhich !== null} class:busy={testingWhich === "relay"}
-                    onclick={() => runMailTest("relay")}>test the relay</button>
+            <button disabled={testCard.busy !== null} class:busy={testCard.busy === "mailbox"}
+                    onclick={() => runMailTest("mailbox", { card: testCard, reread })}>test this mailbox</button>
+            <button disabled={testCard.busy !== null} class:busy={testCard.busy === "relay"}
+                    onclick={() => runMailTest("relay", { card: testCard, reread })}>test the relay</button>
             {#if view.mailbox && !editing}
               <button onclick={openMailboxEditor}>{view.mailbox.configured ? "change mailbox…" : "set up mailbox…"}</button>
             {/if}
@@ -1420,12 +1184,12 @@
             <div class="person">
               <div class="who">
                 <b>{which === "mailbox" ? "mailbox test" : "relay test"}</b>
-                <span>{testSubtext(which)}</span>
+                <span>{testMetaOf(which, testCard.busy, mailProbes)}</span>
               </div>
               {#if pill}<span class="role {pill.tone}">{pill.word}</span>{/if}
             </div>
           {/each}
-          {#if testProblem}<div class="adminproblem">{testProblem}</div>{/if}
+          {#if testCard.problem}<div class="adminproblem">{testCard.problem}</div>{/if}
 
           {#if view.mailbox}
             {@const mailbox = view.mailbox}
@@ -1446,24 +1210,24 @@
               <!-- "check connection" is gone (#1071): "test this mailbox"
                    above runs the same IMAP verify, plus the relay half. -->
               <div class="placerow mailboxrow">
-                <button disabled={mailboxBusy !== null}
+                <button disabled={mailCard.busy !== null}
                         onclick={() => mailboxAction("probe", { action: "probe" })}>run setup probe</button>
-                <button disabled={mailboxBusy !== null}
+                <button disabled={mailCard.busy !== null}
                         onclick={() => mailboxAction("enabled", {
                           action: mailbox.enabled ? "disable" : "enable",
                           expectedVersion: mailbox.version,
                         })}>{mailbox.enabled ? "pause ingest" : "resume ingest"}</button>
-                <button disabled={mailboxBusy !== null} onclick={() => { rotating = true; password = ""; }}>
+                <button disabled={mailCard.busy !== null} onclick={() => { rotating = true; password = ""; }}>
                   rotate password…</button>
                 <!-- #1151 A1-F3: the phone layout's own "rotate every address",
                      missing here until now. -->
-                <button disabled={mailboxBusy !== null}
-                        onclick={() => { aliasRotating = true; aliasGraceDays = ALIAS_STANDARD_GRACE_DAYS; }}>
+                <button disabled={mailCard.busy !== null}
+                        onclick={() => { aliasRotating = true; aliasGraceDays = ALIAS_GRACE_DAYS; }}>
                   rotate every address…</button>
                 <!-- #1151 A1-S2: armed first, same two-tap as the phone's own
                      remove-credential ArmButton — this used to fire on one
                      unconfirmed click. -->
-                <button class="dangerbtn" class:armed={mailboxArmed === "remove"} disabled={mailboxBusy !== null}
+                <button class="dangerbtn" class:armed={mailboxArmed === "remove"} disabled={mailCard.busy !== null}
                         onclick={(event) => twoTapMailbox("remove",
                           () => mailboxAction("remove", { action: "remove", expectedVersion: mailbox.version }),
                           event.currentTarget)}>
@@ -1487,7 +1251,7 @@
                 <label>old addresses keep working for (days)
                   <input type="number" min="0" max="90" bind:value={aliasGraceDays} required /></label>
                 <div class="placerow mailboxrow">
-                  <button type="submit" class="dangerbtn" class:armed={mailboxArmed === "alias"} disabled={mailboxBusy !== null}>
+                  <button type="submit" class="dangerbtn" class:armed={mailboxArmed === "alias"} disabled={mailCard.busy !== null}>
                     {mailboxArmed === "alias" ? "tap again to rotate every address" : "rotate every address"}</button>
                   <button type="button" onclick={() => { aliasRotating = false; mailboxArm.disarm(); }}>cancel</button>
                 </div>
@@ -1504,7 +1268,7 @@
                 <label>new password
                   <input type="password" autocomplete="new-password" bind:value={password} required /></label>
                 <div class="placerow mailboxrow">
-                  <button type="submit" disabled={mailboxBusy !== null}>verify and rotate</button>
+                  <button type="submit" disabled={mailCard.busy !== null}>verify and rotate</button>
                   <button type="button" onclick={() => { rotating = false; password = ""; }}>cancel</button>
                 </div>
               </form>
@@ -1532,14 +1296,14 @@
                 <p class="mailboxnote">Relay addresses are plus-addresses of this account, so it has to be one the
                   provider delivers sub-addressed mail to. The password is stored encrypted and never shown again.</p>
                 <div class="placerow mailboxrow">
-                  <button type="submit" disabled={mailboxBusy !== null}>verify and save</button>
+                  <button type="submit" disabled={mailCard.busy !== null}>verify and save</button>
                   <button type="button" onclick={() => { editing = false; password = ""; }}>cancel</button>
                 </div>
               </form>
             {/if}
 
-            {#if mailboxOutcome}<div class="adminproblem" class:ok={mailboxOutcome === "verified" || mailboxOutcome === "delivered"}>{plainly(mailboxOutcome)}</div>{/if}
-            {#if mailboxProblem}<div class="adminproblem">{mailboxProblem}</div>{/if}
+            {#if mailCard.outcome}<div class="adminproblem" class:ok={mailCard.outcome === "verified" || mailCard.outcome === "delivered"}>{plainly(mailCard.outcome)}</div>{/if}
+            {#if mailCard.problem}<div class="adminproblem">{mailCard.problem}</div>{/if}
           {/if}
         </div>
 
