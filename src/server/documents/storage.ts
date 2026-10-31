@@ -112,7 +112,8 @@ export class LocalDocumentStorage {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        const chunk = Buffer.from(value);
+        // A view, not a copy: the chunk is hashed and written in this iteration and never kept.
+        const chunk = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
         sizeBytes += chunk.length;
         if (sizeBytes > maximumBytes) {
           throw new AppError("document_too_large", "That document exceeds the configured size limit", 413);
@@ -120,7 +121,8 @@ export class LocalDocumentStorage {
         digest.update(chunk);
         if (leadingLength < 512) {
           const prefix = chunk.subarray(0, 512 - leadingLength);
-          leadingChunks.push(prefix);
+          // The only bytes retained past the iteration, so this one is a copy.
+          leadingChunks.push(Buffer.from(prefix));
           leadingLength += prefix.length;
         }
         await handle.write(chunk);

@@ -101,9 +101,10 @@ Worker invariants:
 One piece of state is deliberately in memory, not in PostgreSQL: the archive
 slot (#1316, `web/src/lib/server/archive-slot.js`). The archive import check or
 import reads the upload in pieces and never holds it whole (#1566): the memory
-test pins the import check's growth below the archive file's size, and an import's
-below the archive's plaintext size, since the document path holds one copy of each
-document (#1567). Before that it held about 1.45 GB (#1537). Each still decrypts the
+test pins the import check's growth below the archive file's size, and a warmed process's
+import below the archive's plaintext size, since the document path holds one copy of each
+document; the first import after start also pays a working set of about 50 MiB that glibc
+keeps from the stream's freed chunks and later imports reuse (#1567). Before that it held about 1.45 GB (#1537). Each still decrypts the
 archive into a scratch tmpfs sized for one archive and restores its documents
 through the document path, so the process runs one at a time and answers any
 other with a 429 straight away. The slot belongs to the Node
