@@ -3,16 +3,15 @@ import { describe, expect, it } from "vitest";
 import { serverParseError } from "./check-svelte-server-parse.mjs";
 
 describe("serverParseError (#1138)", () => {
-  it("flags a JSDoc-typed arrow parameter in the script", () => {
-    expect(serverParseError("<script>const f = (/** @type {string} */ t) => t;</script>")).toMatch(/destructuring|binding/i);
+  // svelte 5.57.1 fixed #1138 upstream: the sources that used to compile to
+  // unparseable output now give no error.
+  it("passes a JSDoc-typed arrow parameter in the script", () => {
+    expect(serverParseError("<script>const f = (/** @type {string} */ t) => t;</script>")).toBeNull();
   });
 
-  it("flags one inside a nested function", () => {
-    // X-Q6 (#1151): a bare .not.toBeNull() passes for any non-null string,
-    // including an unrelated parse failure -- pin the same message the
-    // top-level case asserts, so this actually proves the nested case hits
-    // #1138's bug and not some other syntax error.
-    expect(serverParseError("<script>function g(a) { return a.map((/** @type {string} */ p) => p); }</script>")).toMatch(/destructuring|binding/i);
+  it("passes one inside a nested function", () => {
+    // Fixed upstream in svelte 5.57.1, like the top-level case above.
+    expect(serverParseError("<script>function g(a) { return a.map((/** @type {string} */ p) => p); }</script>")).toBeNull();
   });
 
   it("passes the same function typed on its variable", () => {
