@@ -52,8 +52,11 @@ print_banner() {
          ✦             ·              ·                ○          ·
 ─────────────────────────────────────────────────────────────────────────────
 ORBIT_BANNER
-  printf 'Orbit %s | channel=%s | revision=%s\n' \
-    "$orbit_version" "$orbit_channel" "$orbit_revision"
+  # The channel cannot come from the image: a stable release is the preview
+  # image promoted unchanged. Until #1577 reads it from the verified release
+  # manifest, say so rather than leave it out (#1574).
+  printf 'Orbit %s | channel=unknown | revision=%s\n' \
+    "$orbit_version" "$orbit_revision"
 }
 
 if [ "${1:-}" = "--version" ]; then
