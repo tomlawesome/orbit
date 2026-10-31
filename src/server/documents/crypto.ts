@@ -1,4 +1,5 @@
 import {
+  type CipherGCM,
   createCipheriv,
   createDecipheriv,
   randomBytes,
@@ -202,6 +203,74 @@ function unwrapDocumentKey(
   return unwrapKeyWithAad(envelope, keyEncryptionKey, keyAdditionalData(documentId, envelope.keyId, purpose));
 }
 
+/**
+ * The document cipher fed in pieces (#1567). `update` returns the ciphertext
+ * for one chunk; `final` returns the last bytes and the envelope, the content
+ * tag included. It is the construction `encryptDocument` has always used
+ * (ADR-0017), called more than once: AES-GCM is a counter mode, so the stored
+ * bytes are the same however the plaintext is cut.
+ */
+export interface DocumentSealer {
+  update(chunk: Buffer): Buffer;
+  final(): { tail: Buffer; envelope: CryptoEnvelope };
+}
+
+/**
+ * Draws a random DEK, wraps it at once under the key-encryption key (the same
+ * AAD as ever), starts the content cipher with the document's AAD and zeroes
+ * the DEK: the cipher keeps its own copy. `context.plaintextSize` is known up
+ * front, so the caller must feed exactly that many bytes; `final` refuses
+ * anything else, because the size is bound into the content AAD and a
+ * document sealed under the wrong size could never be opened.
+ */
+export function createDocumentSealer(
+  context: DocumentEncryptionContext,
+  keyEncryptionKey: Buffer,
+  keyId: string,
+): DocumentSealer {
+  requireKey(keyEncryptionKey, "Key-encryption key");
+
+  const documentKey = randomBytes(KEY_BYTES);
+  let cipher: CipherGCM;
+  let contentIv: Buffer;
+  let wrapped: Pick<CryptoEnvelope, "wrappedDek" | "wrapIv" | "wrapAuthTag">;
+  try {
+    wrapped = wrapDocumentKey(documentKey, context.documentId, keyEncryptionKey, keyId, context.purpose);
+    contentIv = randomBytes(IV_BYTES);
+    cipher = createCipheriv(ALGORITHM, documentKey, contentIv, { authTagLength: AUTH_TAG_BYTES });
+    cipher.setAAD(contentAdditionalData(context));
+  } finally {
+    documentKey.fill(0);
+  }
+
+  let fed = 0;
+  let finished = false;
+  return {
+    update(chunk: Buffer): Buffer {
+      if (finished) throw new Error("Document sealer is already finished");
+      fed += chunk.length;
+      return cipher.update(chunk);
+    },
+    final(): { tail: Buffer; envelope: CryptoEnvelope } {
+      if (finished) throw new Error("Document sealer is already finished");
+      finished = true;
+      if (fed !== context.plaintextSize) throw new Error("Plaintext size does not match encryption context");
+      const tail = cipher.final();
+      return {
+        tail,
+        envelope: {
+          envelopeVersion: ENVELOPE_VERSION,
+          algorithm: ALGORITHM,
+          keyId,
+          contentIv: contentIv.toString("base64url"),
+          contentAuthTag: cipher.getAuthTag().toString("base64url"),
+          ...wrapped,
+        },
+      };
+    },
+  };
+}
+
 /** Encrypts validated document bytes and independently wraps their random DEK. */
 export function encryptDocument(
   plaintext: Buffer,
@@ -210,26 +279,10 @@ export function encryptDocument(
   keyId: string,
 ): EncryptedDocument {
   if (plaintext.length !== context.plaintextSize) throw new Error("Plaintext size does not match encryption context");
-  requireKey(keyEncryptionKey, "Key-encryption key");
-
-  const documentKey = randomBytes(KEY_BYTES);
-  try {
-    const encrypted = encryptWithAad(plaintext, documentKey, contentAdditionalData(context));
-    const wrapped = wrapDocumentKey(documentKey, context.documentId, keyEncryptionKey, keyId, context.purpose);
-    return {
-      ciphertext: encrypted.ciphertext,
-      envelope: {
-        envelopeVersion: ENVELOPE_VERSION,
-        algorithm: ALGORITHM,
-        keyId,
-        contentIv: encrypted.contentIv,
-        contentAuthTag: encrypted.contentAuthTag,
-        ...wrapped,
-      },
-    };
-  } finally {
-    documentKey.fill(0);
-  }
+  const sealer = createDocumentSealer(context, keyEncryptionKey, keyId);
+  const body = sealer.update(plaintext);
+  const { tail, envelope } = sealer.final();
+  return { ciphertext: tail.length === 0 ? body : Buffer.concat([body, tail]), envelope };
 }
 
 /** Authenticates the complete ciphertext before returning any plaintext bytes. */

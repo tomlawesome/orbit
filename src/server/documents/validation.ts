@@ -1,7 +1,7 @@
 import { basename } from "node:path";
 import { AppError } from "@/lib/app-error";
 import type { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
-import { inspectPdfStructureInSandbox } from "@/server/documents/pdf-structure-sandbox";
+import { type DocumentFileOnDisk, inspectPdfStructureInSandbox } from "@/server/documents/pdf-structure-sandbox";
 
 export type SupportedDocumentMediaType =
   | "application/pdf"
@@ -113,8 +113,11 @@ async function classifyImageStructure(bytes: Buffer, mediaType: "image/jpeg" | "
   }
 }
 
-const PDF_DELIMITERS = new Set([..."()<>[]{}/%"]);
-const PDF_WHITESPACE = new Set([..."\0\t\n\f\r "]);
+/* The check reads the file as bytes: a latin1 string maps byte for byte, so
+   every rule below is the byte the string's character stood for. */
+const isPdfWhitespace = (byte: number): boolean => byte === 0x00 || byte === 0x09 || byte === 0x0a || byte === 0x0c || byte === 0x0d || byte === 0x20;
+const isPdfDelimiter = (byte: number): boolean =>
+  byte === 0x28 || byte === 0x29 || byte === 0x3c || byte === 0x3e || byte === 0x5b || byte === 0x5d || byte === 0x7b || byte === 0x7d || byte === 0x2f || byte === 0x25;
 const PDF_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)$/u;
 /* #1397: each incremental save (a form filled in, a signature added) appends
    one cross-reference section, and 32 refused real household PDFs that pdf.js
@@ -135,36 +138,36 @@ class PdfSyntaxError extends Error {}
  * comments skipped so a `<<` inside them does not count.
  */
 class PdfLexer {
-  constructor(private readonly text: string, public position: number) {}
+  constructor(private readonly bytes: Buffer, public position: number) {}
 
   next(): string | undefined {
-    const { text } = this;
-    while (this.position < text.length) {
-      const char = text[this.position]!;
-      if (PDF_WHITESPACE.has(char)) this.position += 1;
-      else if (char === "%") while (this.position < text.length && text[this.position] !== "\n" && text[this.position] !== "\r") this.position += 1;
+    const { bytes } = this;
+    while (this.position < bytes.length) {
+      const byte = bytes[this.position]!;
+      if (isPdfWhitespace(byte)) this.position += 1;
+      else if (byte === 0x25) while (this.position < bytes.length && bytes[this.position] !== 0x0a && bytes[this.position] !== 0x0d) this.position += 1;
       else break;
     }
-    if (this.position >= text.length) return undefined;
+    if (this.position >= bytes.length) return undefined;
     const start = this.position;
-    const char = text[start]!;
-    if ((char === "<" || char === ">") && text[start + 1] === char) {
+    const byte = bytes[start]!;
+    if ((byte === 0x3c || byte === 0x3e) && bytes[start + 1] === byte) {
       this.position += 2;
-      return char + char;
+      return String.fromCharCode(byte, byte);
     }
-    if (char === "<") {
-      const end = text.indexOf(">", start);
+    if (byte === 0x3c) {
+      const end = bytes.indexOf(0x3e, start);
       if (end < 0) throw new PdfSyntaxError("unterminated hex string");
       this.position = end + 1;
       return "<>";
     }
-    if (char === "(") {
+    if (byte === 0x28) {
       let depth = 0;
-      for (; this.position < text.length; this.position += 1) {
-        const current = text[this.position];
-        if (current === "\\") this.position += 1;
-        else if (current === "(") depth += 1;
-        else if (current === ")" && --depth === 0) {
+      for (; this.position < bytes.length; this.position += 1) {
+        const current = bytes[this.position];
+        if (current === 0x5c) this.position += 1;
+        else if (current === 0x28) depth += 1;
+        else if (current === 0x29 && --depth === 0) {
           this.position += 1;
           return "()";
         }
@@ -172,10 +175,11 @@ class PdfLexer {
       throw new PdfSyntaxError("unterminated string");
     }
     this.position += 1;
-    if (char !== "/" && PDF_DELIMITERS.has(char)) return char;
-    while (this.position < text.length && !PDF_WHITESPACE.has(text[this.position]!) && !PDF_DELIMITERS.has(text[this.position]!)) this.position += 1;
-    const word = text.slice(start, this.position);
-    return char === "/" ? word.replace(/#([0-9A-Fa-f]{2})/gu, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16))) : word;
+    if (byte !== 0x2f && isPdfDelimiter(byte)) return String.fromCharCode(byte);
+    while (this.position < bytes.length && !isPdfWhitespace(bytes[this.position]!) && !isPdfDelimiter(bytes[this.position]!)) this.position += 1;
+    // Only this one token is decoded; the file never is.
+    const word = bytes.toString("latin1", start, this.position);
+    return byte === 0x2f ? word.replace(/#([0-9A-Fa-f]{2})/gu, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16))) : word;
   }
 }
 
@@ -226,9 +230,9 @@ function isPdfInteger(token: string | undefined): boolean {
  * pdf.js also requires are not checked: they only narrow its rule. Anything
  * this cannot read means no extra root, so the check never refuses by itself.
  */
-function linearizedXrefOffset(bytes: Buffer, text: string): number | undefined {
+function linearizedXrefOffset(bytes: Buffer): number | undefined {
   try {
-    const lexer = new PdfLexer(text, 0);
+    const lexer = new PdfLexer(bytes, 0);
     if (!PDF_NUMBER.test(lexer.next() ?? "") || !PDF_NUMBER.test(lexer.next() ?? "") || lexer.next() !== "obj" || lexer.next() !== "<<") return undefined;
     const dictionary = readPdfDictionary(lexer, 1);
     const linearized = dictionary.get("/Linearized");
@@ -240,8 +244,93 @@ function linearizedXrefOffset(bytes: Buffer, text: string): number | undefined {
   const endobj = bytes.subarray(0, 1024).indexOf("endobj");
   if (endobj < 0) return 0;
   let offset = endobj + "endobj".length;
-  while (offset < text.length && " \t\n\r".includes(text[offset]!)) offset += 1;
+  while (offset < bytes.length && (bytes[offset] === 0x20 || bytes[offset] === 0x09 || bytes[offset] === 0x0a || bytes[offset] === 0x0d)) offset += 1;
   return offset;
+}
+
+const isPdfRegexDigit = (byte: number | undefined): boolean => byte !== undefined && byte >= 0x30 && byte <= 0x39;
+/** The regex `\s` over latin1: tab to carriage return, space, and U+00A0. */
+const isPdfRegexSpace = (byte: number | undefined): boolean => byte !== undefined && ((byte >= 0x09 && byte <= 0x0d) || byte === 0x20 || byte === 0xa0);
+/** The regex `\w`: ASCII letters, digits and `_`; every byte from 0x80 up is a non-word byte. */
+const isPdfRegexWord = (byte: number | undefined): boolean =>
+  byte !== undefined && ((byte >= 0x30 && byte <= 0x39) || (byte >= 0x41 && byte <= 0x5a) || (byte >= 0x61 && byte <= 0x7a) || byte === 0x5f);
+
+const PDF_OBJECT_END = 0;
+const PDF_TRAILER_END = 1;
+
+/** Whether `word` (ASCII) sits at `at`. */
+function pdfWordAt(bytes: Buffer, at: number, word: string): boolean {
+  if (at + word.length > bytes.length) return false;
+  for (let index = 0; index < word.length; index += 1) if (bytes[at + index] !== word.charCodeAt(index)) return false;
+  return true;
+}
+
+/** The end of `\d+\s+\d+\s+obj` starting at `at`, or -1. Digits and whitespace are disjoint, so there is nothing to backtrack over. */
+function pdfObjectHeaderEnd(bytes: Buffer, at: number): number {
+  let position = at;
+  for (let part = 0; part < 2; part += 1) {
+    const digits = position;
+    while (isPdfRegexDigit(bytes[position])) position += 1;
+    if (position === digits) return -1;
+    const space = position;
+    while (isPdfRegexSpace(bytes[position])) position += 1;
+    if (position === space) return -1;
+  }
+  return pdfWordAt(bytes, position, "obj") ? position + 3 : -1;
+}
+
+/**
+ * The byte-level form of pdf.js's end patterns, matching exactly what these
+ * latin1 regexes (the `u` flag, no `i`) matched, searched forward from `from`:
+ *   object  /\b(?:endobj|\d+\s+\d+\s+obj|xref|trailer\s*<<)\b/gu
+ *   trailer /\b(?:startxref|\d+\s+\d+\s+obj)\b/gu
+ * Both `\b` apply to every alternative, so `trailer<<` ends the object only
+ * where a word byte follows the `<<`, as the regex's own trailing boundary
+ * demands. `endobj` is true for the alternative the caller steps past (`endobj`
+ * or `startxref`).
+ */
+function findPdfEnd(bytes: Buffer, from: number, kind: typeof PDF_OBJECT_END | typeof PDF_TRAILER_END): { index: number; end: number; endobj: boolean } | null {
+  const keyword = kind === PDF_OBJECT_END ? "endobj" : "startxref";
+  for (let index = from; index < bytes.length; index += 1) {
+    const byte = bytes[index]!;
+    // Every alternative starts on a word byte, so a boundary before it means the byte before is not one.
+    if (isPdfRegexWord(bytes[index - 1])) continue;
+    let end = -1;
+    let endobj = false;
+    if (isPdfRegexDigit(byte)) end = pdfObjectHeaderEnd(bytes, index);
+    else if (byte === keyword.charCodeAt(0) && pdfWordAt(bytes, index, keyword)) {
+      end = index + keyword.length;
+      endobj = true;
+    } else if (kind === PDF_OBJECT_END && byte === 0x78 && pdfWordAt(bytes, index, "xref")) end = index + 4;
+    else if (kind === PDF_OBJECT_END && byte === 0x74 && pdfWordAt(bytes, index, "trailer")) {
+      let position = index + 7;
+      while (isPdfRegexSpace(bytes[position])) position += 1;
+      end = bytes[position] === 0x3c && bytes[position + 1] === 0x3c ? position + 2 : -1;
+    }
+    // The closing \b: the last byte matched is a word byte or `<`, and the next must differ in kind.
+    if (end >= 0 && isPdfRegexWord(bytes[end - 1]) !== isPdfRegexWord(bytes[end])) return { index, end, endobj };
+  }
+  return null;
+}
+
+/** `^word(?:\s|$)` over the token `bytes[start, end)`. */
+function tokenIsKeyword(bytes: Buffer, start: number, end: number, word: string): boolean {
+  const after = start + word.length;
+  if (after > end) return false;
+  for (let i = 0; i < word.length; i += 1) if (bytes[start + i] !== word.charCodeAt(i)) return false;
+  return after === end || isPdfRegexSpace(bytes[after]);
+}
+
+/** `^\d+\s+\d+\s+obj\b` over the token `bytes[start, end)`; digits and spaces are disjoint, so no backtracking. */
+function tokenIsObjectHeader(bytes: Buffer, start: number, end: number): boolean {
+  let i = start;
+  for (const run of [isPdfRegexDigit, isPdfRegexSpace, isPdfRegexDigit, isPdfRegexSpace]) {
+    const from = i;
+    while (i < end && run(bytes[i])) i += 1;
+    if (i === from) return false;
+  }
+  if (i + 3 > end || bytes[i] !== 0x6f || bytes[i + 1] !== 0x62 || bytes[i + 2] !== 0x6a) return false;
+  return i + 3 === end || !isPdfRegexWord(bytes[i + 3]);
 }
 
 /**
@@ -254,11 +343,8 @@ function linearizedXrefOffset(bytes: Buffer, text: string): number | undefined {
  * as that scan does, once and in order, so it stays linear in the file's
  * length. More starts than the section cap is null: the caller refuses.
  */
-function recoveryXrefOffsets(bytes: Buffer, text: string): number[] | null {
+function recoveryXrefOffsets(bytes: Buffer): number[] | null {
   const offsets: number[] = [];
-  // pdf.js's own patterns for where an object's text, or a trailer's, ends.
-  const objectEnd = /\b(?:endobj|\d+\s+\d+\s+obj|xref|trailer\s*<<)\b/gu;
-  const trailerEnd = /\b(?:startxref|\d+\s+\d+\s+obj)\b/gu;
   const isLineEnd = (byte: number | undefined): boolean => byte === 0x0a || byte === 0x0d;
   let position = 0;
   let tag = -1;
@@ -275,19 +361,16 @@ function recoveryXrefOffsets(bytes: Buffer, text: string): number[] | null {
     // A token runs to a line end or "<"; pdf.js's readToken never takes the file's last byte.
     let end = position;
     while (end < bytes.length - 1 && !isLineEnd(bytes[end]) && bytes[end] !== 0x3c) end += 1;
-    // Only a token starting x, t or a digit can be one the scan acts on.
-    const token = byte === 0x78 || byte === 0x74 || (byte >= 0x30 && byte <= 0x39) ? text.slice(position, end) : "";
-    if (!token) {
-      position = end + 1;
-    } else if (/^xref(?:\s|$)/u.test(token)) {
+    // The token is matched in place: a token can run to the end of a long line,
+    // so a string of it per object would copy most of the file each time.
+    if (tokenIsKeyword(bytes, position, end, "xref")) {
       const trailer = bytes.indexOf("trailer", position);
       position = trailer < 0 ? bytes.length : trailer;
       const startxref = bytes.indexOf("startxref", position);
       position = startxref < 0 ? bytes.length : startxref;
-    } else if (/^\d+\s+\d+\s+obj\b/u.test(token)) {
-      objectEnd.lastIndex = end;
-      const match = objectEnd.exec(text);
-      const contentEnd = Math.min(bytes.length, !match ? bytes.length : match[0] === "endobj" ? objectEnd.lastIndex + 1 : match.index);
+    } else if (tokenIsObjectHeader(bytes, position, end)) {
+      const match = findPdfEnd(bytes, end, PDF_OBJECT_END);
+      const contentEnd = Math.min(bytes.length, !match ? bytes.length : match.endobj ? match.end + 1 : match.index);
       // Positions only grow, so the next "/XRef" is searched for again only once passed.
       if (tag < position) {
         tag = bytes.indexOf("/XRef", position);
@@ -298,10 +381,9 @@ function recoveryXrefOffsets(bytes: Buffer, text: string): number[] | null {
         if (offsets.length > MAX_PDF_XREF_SECTIONS) return null;
       }
       position = Math.max(contentEnd, end + 1);
-    } else if (/^trailer(?:\s|$)/u.test(token)) {
-      trailerEnd.lastIndex = end;
-      const match = trailerEnd.exec(text);
-      position = !match ? bytes.length : match[0] === "startxref" ? trailerEnd.lastIndex + 1 : match.index;
+    } else if (tokenIsKeyword(bytes, position, end, "trailer")) {
+      const match = findPdfEnd(bytes, end, PDF_TRAILER_END);
+      position = !match ? bytes.length : match.endobj ? match.end + 1 : match.index;
     } else {
       position = end + 1;
     }
@@ -326,8 +408,8 @@ interface PdfXrefSection {
  * undefined. Past that first token, anything this cannot read throws, and the
  * caller refuses the file.
  */
-function readPdfXrefSection(text: string, offset: number): PdfXrefSection | undefined {
-  const lexer = new PdfLexer(text, offset);
+function readPdfXrefSection(bytes: Buffer, offset: number): PdfXrefSection | undefined {
+  const lexer = new PdfLexer(bytes, offset);
   let first: string | undefined;
   try {
     first = lexer.next();
@@ -397,19 +479,19 @@ function readPdfXrefSection(text: string, offset: number): PdfXrefSection | unde
  * section any of these points at cannot be read: what this check cannot read
  * it cannot bound. Only an offset outside the file, or one whose first token
  * is neither xref nor a number, is skipped: pdf.js reads nothing there and
- * falls back to the scan, which is modelled.
+ * falls back to the scan, which is modelled. The check reads the bytes
+ * directly and makes no decoded copy of the file.
  */
 export function hasPdfIndexBudget(bytes: Buffer): boolean {
-  const text = bytes.toString("latin1");
-  const recovery = recoveryXrefOffsets(bytes, text);
+  const recovery = recoveryXrefOffsets(bytes);
   if (recovery === null) return false;
   const roots: number[] = [];
-  const linearized = linearizedXrefOffset(bytes, text);
+  const linearized = linearizedXrefOffset(bytes);
   if (linearized !== undefined) roots.push(linearized);
   // Otherwise pdf.js takes the last startxref anywhere in the file, %%EOF or
   // not; it is walked for a linearized file too, which costs one more section.
   const keyword = bytes.lastIndexOf("startxref");
-  if (keyword >= 0) roots.push(Number(text.slice(keyword + 9, keyword + 64).match(/^\s*(\d+)/u)?.[1]));
+  if (keyword >= 0) roots.push(Number(bytes.toString("latin1", keyword + 9, Math.min(keyword + 64, bytes.length)).match(/^\s*(\d+)/u)?.[1]));
   // Each place is read once, however many walks reach it; null is nothing to read.
   const sections = new Map<number, PdfXrefSection | null>();
   // pdf.js follows a given /XRefStm once per document, never one its scan found.
@@ -423,7 +505,7 @@ export function hasPdfIndexBudget(bytes: Buffer): boolean {
       let section = sections.get(offset);
       if (section === undefined) {
         if (sections.size >= MAX_PDF_XREF_SECTIONS) return false;
-        section = readPdfXrefSection(text, offset) ?? null;
+        section = readPdfXrefSection(bytes, offset) ?? null;
         sections.set(offset, section);
       }
       if (!section) continue;
@@ -458,11 +540,11 @@ export function hasPdfIndexBudget(bytes: Buffer): boolean {
  * killable child process (ADR-0038, pdf-structure-sandbox.ts), never in the
  * server's process.
  */
-async function classifyPdfStructure(bytes: Buffer): Promise<DocumentStructureReason> {
+async function classifyPdfStructure(bytes: Buffer, file?: DocumentFileOnDisk): Promise<DocumentStructureReason> {
   // A cheap first fence: a declared entry count pdf.js would loop over,
   // refused before any child starts (ADR-0033 item 3, as amended by ADR-0038).
   if (!hasPdfIndexBudget(bytes)) return "unsupported_structure";
-  return inspectPdfStructureInSandbox(bytes);
+  return inspectPdfStructureInSandbox(bytes, file);
 }
 
 /** Identifies the deliberately narrow initial document set from magic bytes. */
@@ -476,14 +558,14 @@ export function detectDocumentMediaType(bytes: Buffer): SupportedDocumentMediaTy
 export type DocumentStructureReason = "supported_structure" | "unsupported_structure" | "password_required";
 
 /** Whether the file is one Orbit can open and show: the renderer opens it and finds a page (ADR-0033). Call only after the malware scan has passed. */
-export async function classifyDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType): Promise<DocumentStructureReason> {
-  if (mediaType === "application/pdf") return classifyPdfStructure(bytes);
+export async function classifyDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType, file?: DocumentFileOnDisk): Promise<DocumentStructureReason> {
+  if (mediaType === "application/pdf") return classifyPdfStructure(bytes, file);
   return classifyImageStructure(bytes, mediaType);
 }
 
 /** True when `classifyDocumentStructure` finds a file Orbit can open and show. */
-export async function validateSupportedDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType): Promise<boolean> {
-  return (await classifyDocumentStructure(bytes, mediaType)) === "supported_structure";
+export async function validateSupportedDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType, file?: DocumentFileOnDisk): Promise<boolean> {
+  return (await classifyDocumentStructure(bytes, mediaType, file)) === "supported_structure";
 }
 
 export function normalizedDocumentFilename(input: string, mediaType: SupportedDocumentMediaType): string {

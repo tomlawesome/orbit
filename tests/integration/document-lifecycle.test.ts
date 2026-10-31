@@ -1222,7 +1222,7 @@ describe("authenticated encrypted document lifecycle", () => {
   it("lets the same bytes be uploaded again under the same id after the first attempt failed writing ciphertext (#1316)", async () => {
     const fixture = await createIntegrationFixture("document-upload-retry-after-write-failure");
     const documentId = randomUUID();
-    const writeFailure = vi.spyOn(LocalDocumentStorage.prototype, "writeCiphertext")
+    const writeFailure = vi.spyOn(LocalDocumentStorage.prototype, "sealQuarantine")
       .mockRejectedValueOnce(new Error("synthetic ciphertext write outage"));
     try {
       const { response: failed } = await uploadWithFilename(fixture, "policy.pdf", documentId);

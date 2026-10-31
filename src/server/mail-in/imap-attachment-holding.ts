@@ -135,7 +135,7 @@ export async function scanAndHoldImapAttachment(input: {
         if (outcome.status !== "clean") throw new Error(outcome.code);
       }
       // ADR-0033: the renderer opens it only once the scan has passed.
-      if (!await validateSupportedDocumentStructure(bytes, mediaType)) throw new Error("mime_structure_invalid");
+      if (!await validateSupportedDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes })) throw new Error("mime_structure_invalid");
       return await holdBytes(id, { bytes, displayName, mediaType }, input.recipientUserId, input.receiptId, input.onCiphertextAllocated);
     } finally { bytes.fill(0); }
   } finally {

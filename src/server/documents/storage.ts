@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
+  type FileHandle,
   mkdir,
   open,
   readdir,
@@ -11,6 +12,7 @@ import { dirname, join } from "node:path";
 import { AppError } from "@/lib/app-error";
 import { validUuid } from "@/lib/uuid";
 import { getDocumentConfig, type DocumentConfig } from "@/server/documents/config";
+import type { CryptoEnvelope, DocumentSealer } from "@/server/documents/crypto";
 
 /** A storage key's own shape: 32 bytes of hex. Exported so any caller that
  * must validate a storage key outside this module (purge-jobs.ts's claim
@@ -29,6 +31,29 @@ export interface ReceivedDocument {
   sizeBytes: number;
   contentSha256: string;
   leadingBytes: Buffer;
+}
+
+/** What `sealQuarantine` was told the quarantine file holds: the size and digest `receive` measured. */
+export interface ExpectedQuarantineContent {
+  sizeBytes: number;
+  contentSha256: string;
+}
+
+/** Where a sealed copy goes: `objects/aa/bb/<key>.bin` or `staging/<key>.bin`. */
+export interface SealDestination {
+  kind: "object" | "staging";
+  storageKey: string;
+}
+
+/** The size of the one reusable buffer a sealing pass reads the quarantine file through. */
+const SEAL_READ_BYTES = 1_048_576;
+
+async function writeAll(handle: FileHandle, bytes: Buffer): Promise<void> {
+  let written = 0;
+  while (written < bytes.length) {
+    const result = await handle.write(bytes, written, bytes.length - written);
+    written += result.bytesWritten;
+  }
 }
 
 export interface StoredCiphertextObject {
@@ -87,7 +112,8 @@ export class LocalDocumentStorage {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        const chunk = Buffer.from(value);
+        // A view, not a copy: the chunk is hashed and written in this iteration and never kept.
+        const chunk = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
         sizeBytes += chunk.length;
         if (sizeBytes > maximumBytes) {
           throw new AppError("document_too_large", "That document exceeds the configured size limit", 413);
@@ -95,7 +121,8 @@ export class LocalDocumentStorage {
         digest.update(chunk);
         if (leadingLength < 512) {
           const prefix = chunk.subarray(0, 512 - leadingLength);
-          leadingChunks.push(prefix);
+          // The only bytes retained past the iteration, so this one is a copy.
+          leadingChunks.push(Buffer.from(prefix));
           leadingLength += prefix.length;
         }
         await handle.write(chunk);
@@ -130,6 +157,74 @@ export class LocalDocumentStorage {
       return await handle.readFile();
     } finally {
       await handle.close();
+    }
+  }
+
+  /**
+   * Encrypts the quarantine file into `destination` in pieces: one reusable
+   * 1 MiB buffer, each piece hashed, fed to the sealer and appended to a
+   * temporary file that is fsynced and renamed into place (stage, then
+   * switch). The digest must equal what `receive` measured, else the document
+   * is refused as `readQuarantine` refuses an invalid file, so the bytes that
+   * were encrypted are the bytes the scanner and the open check saw. Nothing is
+   * left behind on a refusal or failure, and the read buffer is zeroed when the
+   * pass ends either way (#1151 F13). The caller discards the quarantine file.
+   */
+  async sealQuarantine(
+    path: string,
+    expected: ExpectedQuarantineContent,
+    sealer: DocumentSealer,
+    destination: SealDestination,
+  ): Promise<{ ciphertextSize: number; envelope: CryptoEnvelope }> {
+    const finalPath = destination.kind === "object"
+      ? this.objectPath(destination.storageKey)
+      : this.stagingPath(destination.storageKey);
+    const invalid = () => new AppError("document_quarantine_invalid", "The quarantined document is invalid", 422);
+
+    const source = await open(path, "r");
+    const buffer = Buffer.alloc(SEAL_READ_BYTES);
+    let temporary: string | undefined;
+    let output: FileHandle | undefined;
+    try {
+      const details = await source.stat();
+      if (!details.isFile() || details.size !== expected.sizeBytes) throw invalid();
+
+      await mkdir(dirname(finalPath), { recursive: true, mode: 0o700 });
+      temporary = `${finalPath}.${randomBytes(8).toString("hex")}.tmp`;
+      output = await open(temporary, "wx", 0o600);
+
+      const digest = createHash("sha256");
+      let position = 0;
+      let ciphertextSize = 0;
+      while (position < expected.sizeBytes) {
+        const wanted = Math.min(buffer.length, expected.sizeBytes - position);
+        const { bytesRead } = await source.read(buffer, 0, wanted, position);
+        if (bytesRead === 0) throw invalid();
+        const piece = buffer.subarray(0, bytesRead);
+        position += bytesRead;
+        digest.update(piece);
+        const sealed = sealer.update(piece);
+        await writeAll(output, sealed);
+        ciphertextSize += sealed.length;
+      }
+      if (digest.digest("hex") !== expected.contentSha256) throw invalid();
+
+      const { tail, envelope } = sealer.final();
+      await writeAll(output, tail);
+      ciphertextSize += tail.length;
+      await output.sync();
+      await output.close();
+      output = undefined;
+      await rename(temporary, finalPath);
+      temporary = undefined;
+      return { ciphertextSize, envelope };
+    } catch (error) {
+      await output?.close().catch(() => undefined);
+      if (temporary) await rm(temporary, { force: true }).catch(() => undefined);
+      throw error;
+    } finally {
+      buffer.fill(0);
+      await source.close().catch(() => undefined);
     }
   }
 
