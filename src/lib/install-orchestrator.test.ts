@@ -331,6 +331,47 @@ describe("runInstall: database volume safety from the shell's facts (#13-18, F3)
     expect(outcome).toMatchObject({ status: "failed", message: "Could not verify the existing Orbit database volume ownership; refusing to start Compose." });
     expect(snapshot(target)).toEqual(before);
   });
+
+  // #1570: an update refused because the volume's ownership was not proven says
+  // which proof failed and what to do, and its next action is not "retry".
+  const DB_LINE = `${"c".repeat(12)}|orbit|orbit-db`;
+  const APP_LINE = `${"d".repeat(12)}|orbit|orbit-app`;
+  const SECOND_DB_LINE = `${"e".repeat(12)}|orbit|orbit-db`;
+  const SECOND_APP_LINE = `${"f".repeat(12)}|orbit|orbit-app`;
+  const OTHER_IMAGE = `ghcr.io/tomlawesome/orbit@sha256:${"7".repeat(64)}`;
+
+  function ownershipFacts(options: { dbLines?: string; projectLines?: string; image?: string }): HostFacts {
+    return facts({
+      volumes: [{ name: "orbit_orbit-db-data", labels: "orbit|orbit-db-data", containers: options.dbLines ?? DB_LINE }],
+      projects: [["orbit", options.projectLines ?? `${DB_LINE}\n${APP_LINE}`]],
+      images: [["d".repeat(12), options.image ?? OLD_REFERENCE]],
+    });
+  }
+
+  it.each([
+    ["a container that is not the database mounts the volume", ownershipFacts({ dbLines: `${"c".repeat(12)}|orbit|some-other-service` }), /some-other-service/],
+    ["no orbit-db container uses the volume", ownershipFacts({ dbLines: "" }), /orbit-db/],
+    ["two orbit-db containers use the volume", ownershipFacts({ dbLines: `${DB_LINE}\n${SECOND_DB_LINE}` }), /orbit-db/],
+    ["the project has no orbit-app container", ownershipFacts({ projectLines: DB_LINE }), /orbit-app/],
+    ["the project has two orbit-app containers", ownershipFacts({ projectLines: `${DB_LINE}\n${APP_LINE}\n${SECOND_APP_LINE}` }), /orbit-app/],
+    ["the app container runs another image than ORBIT_IMAGE", ownershipFacts({ image: OTHER_IMAGE }), /ORBIT_IMAGE/],
+  ])("an update refuses with its own message and a next action that is not retry when %s (#1570)", async (_name, hostFacts, fact) => {
+    const target = recognised();
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: hostFacts });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
+    if (outcome.status === "failed") {
+      expect(outcome.message).toMatch(fact);
+      expect(outcome.message).not.toContain("Could not prove that the existing Orbit database volume belongs to this Orbit deployment");
+      expect(outcome.action).not.toBe("retry");
+    }
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("an update with a fully matching volume is still proven (#1570)", async () => {
+    const { outcome } = await run(recognised(), { facts: ownershipFacts({}) });
+    expect(outcome.status).toBe("ok");
+  });
 });
 
 describe("runInstall: deployment assets from the image (F2, #42, #45)", () => {
