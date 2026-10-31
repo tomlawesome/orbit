@@ -16,6 +16,7 @@ const DEADLINE_MS = 20_000;
 const WARM_PATHS = ["/__data.json", "/", "/api/auth/session"];
 const HEADERS = { "user-agent": "orbit-warm-up" };
 
+/** @param {number} ms */
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -35,6 +36,7 @@ export async function warmUp({ port, host, loaders, fetch = globalThis.fetch, lo
   let stopped = false;
   let timer;
 
+  /** @param {Response | undefined} response */
   const discard = (response) => response?.body?.cancel().catch(() => {});
   const skipped = () => {
     log.debug({
