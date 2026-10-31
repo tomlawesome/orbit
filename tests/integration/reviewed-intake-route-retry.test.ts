@@ -555,8 +555,8 @@ describe("approve retry: a replay after discard is refused (#1568)", () => {
     }
   });
 
-  it.each(["staging_purge_pending", "staging_purge_failed"])("a replay while a discard is under way (%s) is refused the same way", async (failureCode) => {
-    const fixture = await createIntegrationFixture(`reviewed-retry-discarding-${failureCode.slice(14)}`);
+  it.each(["staging_purge_pending", "discard_purge_failed"])("a replay while a discard is under way (%s) is refused the same way", async (failureCode) => {
+    const fixture = await createIntegrationFixture(`reviewed-retry-discarding-${failureCode.replaceAll("_", "-")}`);
     const member = await fixture.session("member");
     const before = await householdItemIds(fixture);
     try {
@@ -565,7 +565,7 @@ describe("approve retry: a replay after discard is refused (#1568)", () => {
 
       await expectRefused(await approve(member, sent));
       expect(await receiptRow(receiptId)).toMatchObject({ status: "recoverable", failureCode });
-      expect(await attachmentStatuses(receiptId)).toEqual(["stored"]);
+      expect(await attachmentStatuses(receiptId)).toEqual(["assigned"]);
       expect((await householdItemIds(fixture)).filter((id) => !before.includes(id))).toEqual([operationId]);
     } finally {
       setImapHoldingPurgeImplementationForTests(undefined);
