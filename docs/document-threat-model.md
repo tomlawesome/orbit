@@ -55,6 +55,9 @@ quota never bypasses per-request limits.
    private `staging/` namespace; its purpose is bound into the envelope and it
    is never downloadable, draftable, parseable or actionable. Plaintext is
    removed after the synchronous attempt or worker recovery.
+   The recovery worker decrypts a staging object into a quarantine file and
+   verifies its authentication tag before the scanner or anything else reads
+   it; the recovered bytes must match the upload's recorded digest.
 6. **Persistent storage:** the document volume contains ciphertext only.
    PostgreSQL contains metadata and wrapped per-document keys, not plaintext
    document keys or document bytes.

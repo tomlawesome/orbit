@@ -1,5 +1,6 @@
 import {
   type CipherGCM,
+  type DecipherGCM,
   createCipheriv,
   createDecipheriv,
   randomBytes,
@@ -285,6 +286,69 @@ export function encryptDocument(
   return { ciphertext: tail.length === 0 ? body : Buffer.concat([body, tail]), envelope };
 }
 
+/** A document's ciphertext failed its tag, or is not the length that was sealed. */
+export class DocumentIntegrityError extends Error {
+  constructor() {
+    super("Document failed its integrity check");
+    this.name = "DocumentIntegrityError";
+  }
+}
+
+/**
+ * The document decipher fed in pieces (#1571), the mirror of `DocumentSealer`
+ * over the same `createDecipheriv` call. `update` returns the plaintext of one
+ * chunk, which is NOT yet authenticated: `final` is GCM's tag check, and
+ * nothing may release plaintext to anyone before it has returned.
+ */
+export interface DocumentUnsealer {
+  update(chunk: Buffer): Buffer;
+  final(): void;
+}
+
+/**
+ * Unwraps the DEK, starts the content decipher with the document's AAD and
+ * tag, and zeroes the DEK: the decipher keeps its own copy. `final` throws
+ * `DocumentIntegrityError` unless the bytes fed total `plaintextSize` (GCM
+ * ciphertext is as long as its plaintext) and the tag authenticates.
+ */
+export function createDocumentUnsealer(
+  context: DocumentEncryptionContext,
+  envelope: CryptoEnvelope,
+  keyEncryptionKey: Buffer,
+): DocumentUnsealer {
+  const documentKey = unwrapDocumentKey(context.documentId, envelope, keyEncryptionKey, context.purpose);
+  let decipher: DecipherGCM;
+  try {
+    const contentIv = decodeFixed(envelope.contentIv, IV_BYTES, "Content IV");
+    const contentTag = decodeFixed(envelope.contentAuthTag, AUTH_TAG_BYTES, "Content authentication tag");
+    decipher = createDecipheriv(ALGORITHM, documentKey, contentIv, { authTagLength: AUTH_TAG_BYTES });
+    decipher.setAAD(contentAdditionalData(context));
+    decipher.setAuthTag(contentTag);
+  } finally {
+    documentKey.fill(0);
+  }
+
+  let fed = 0;
+  let finished = false;
+  return {
+    update(chunk: Buffer): Buffer {
+      if (finished) throw new Error("Document unsealer is already finished");
+      fed += chunk.length;
+      return decipher.update(chunk);
+    },
+    final(): void {
+      if (finished) throw new Error("Document unsealer is already finished");
+      finished = true;
+      if (fed !== context.plaintextSize) throw new DocumentIntegrityError();
+      try {
+        decipher.final();
+      } catch {
+        throw new DocumentIntegrityError();
+      }
+    },
+  };
+}
+
 /** Authenticates the complete ciphertext before returning any plaintext bytes. */
 export function decryptDocument(
   ciphertext: Buffer,
@@ -292,14 +356,10 @@ export function decryptDocument(
   envelope: CryptoEnvelope,
   keyEncryptionKey: Buffer,
 ): Buffer {
-  const documentKey = unwrapDocumentKey(context.documentId, envelope, keyEncryptionKey, context.purpose);
-  try {
-    const plaintext = decryptWithAad(ciphertext, envelope, documentKey, contentAdditionalData(context));
-    if (plaintext.length !== context.plaintextSize) throw new Error("Decrypted document size does not match metadata");
-    return plaintext;
-  } finally {
-    documentKey.fill(0);
-  }
+  const unsealer = createDocumentUnsealer(context, envelope, keyEncryptionKey);
+  const plaintext = unsealer.update(ciphertext);
+  unsealer.final();
+  return plaintext;
 }
 
 /** Rewraps a DEK without decrypting or rewriting document ciphertext. The
