@@ -15,13 +15,13 @@
 
 import {
   addMember, commandContact, commandMailbox, commandUploadLimit, createLocalUser, createSystem,
-  restoreHousehold, retryDocumentJob, sendSetupLink, testMail, wordsOf,
+  hardDeleteHousehold, restoreHousehold, retryDocumentJob, sendSetupLink, setUserDisabled, testMail, wordsOf,
 } from "$lib/data/workspace.js";
 import { DONE_UNREAD, rereadAfterLanded } from "$lib/data/landed.js";
 import { JOB_KINDS, lapsesShort, megabytes, sendWords, setupWords } from "./words.js";
 
 /** @typedef {{ busy: boolean, problem: string | null }} Card */
-/** @typedef {(message: string, options?: { failure?: boolean }) => unknown} Wake */
+/** @typedef {(message: string, options?: { failure?: boolean, undo?: () => void }) => unknown} Wake */
 /** @typedef {() => Promise<void>} Reread */
 /** @typedef {Awaited<ReturnType<typeof sendSetupLink>>} Delivery */
 
@@ -171,6 +171,52 @@ export async function restoreSystem(row, said, reread) {
   }
   said[row.id] = { ok: true, text: `restored · ${row.name} is back exactly as it was` };
   await rereadAfterLanded(reread, (words) => { said[row.id] = { ok: true, text: `restored · ${row.name} is back · ${words}` }; });
+}
+
+/**
+ * Disables a person, or lets them sign in again (§2.6). The phone's act
+ * alone (the desk has none); the row's own arm is its guard, so no `busy`.
+ * @param {{ id: string, displayName: string }} person @param {boolean} off
+ * @param {{ card: { problem: string | null }, reread: Reread, wake?: Wake }} on
+ * @returns {Promise<void>}
+ */
+export async function setDisabled(person, off, on) {
+  const { card, reread, wake = quiet } = on;
+  card.problem = null;
+  try {
+    await setUserDisabled(person.id, off);
+  } catch (error) {
+    card.problem = wordsOf(error);
+    wake(card.problem, { failure: true });
+    return;
+  }
+  if (off) wake(`${person.displayName} is disabled · they can’t sign in`, { undo: () => setDisabled(person, false, on) });
+  else wake(`${person.displayName} can sign in again`);
+  /* On the card alone, whose line is on show: a second wake would take the
+     undo away. */
+  await rereadAfterLanded(reread, unreadOn(card));
+}
+
+/**
+ * Deletes a system on the clock now, for good (§19 "57 admin only"), the
+ * name typed as its confirmation. `gone[row.id]` is the line that replaces
+ * its row, as restoreSystem's `said`; `landed` closes the confirm; a refusal
+ * goes to `refused` in the server's words, for each layout's confirm to say.
+ * @param {{ id: string, name: string }} row @param {string} typedName
+ * @param {{ gone: Record<string, string>, reread: Reread, landed: () => void, refused: (words: string) => void, wake?: Wake }} on
+ */
+export async function deleteSystemNow(row, typedName, { gone, reread, landed, refused, wake = quiet }) {
+  try {
+    await hardDeleteHousehold(row.id, typedName);
+  } catch (error) {
+    refused(wordsOf(error));
+    return;
+  }
+  landed();
+  gone[row.id] = `deleted · ${row.name} is gone for good · its members keep their accounts`;
+  /* The row is gone whatever the read did: its line keeps saying so, and
+     only its tail says the screen was not refreshed. */
+  await rereadAfterLanded(reread, (words) => { gone[row.id] = `deleted · ${row.name} is gone for good · ${words}`; wake(words); });
 }
 
 /**
