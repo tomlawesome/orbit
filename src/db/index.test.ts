@@ -80,7 +80,7 @@ describe("closing the database", () => {
   });
 
   it("refuses a read after the terminal close and builds no new pool", async () => {
-    const database = (await freshModule()) as Record<string, any>;
+    const database = await freshModule();
     database.getDb();
     expect(postgresMock).toHaveBeenCalledTimes(1);
 
@@ -113,7 +113,7 @@ describe("closing the database", () => {
   });
 
   it("refuses later reads when the terminal close came before any client existed", async () => {
-    const database = (await freshModule()) as Record<string, any>;
+    const database = await freshModule();
 
     await expect(database.shutDownDatabase()).resolves.toBeUndefined();
     expect(postgresMock).not.toHaveBeenCalled();
@@ -133,7 +133,7 @@ describe("closing the database", () => {
   });
 
   it("is safe to call the terminal close twice", async () => {
-    const database = (await freshModule()) as Record<string, any>;
+    const database = await freshModule();
     database.getDb();
 
     await database.shutDownDatabase();
