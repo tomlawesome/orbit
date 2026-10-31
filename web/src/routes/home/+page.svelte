@@ -1,6 +1,6 @@
 <script>
   import { onMount, tick, untrack } from "svelte";
-  import { browser } from "$app/environment";
+  import { browser } from "$app/env";
   import { afterNavigate, beforeNavigate, goto, pushState, replaceState } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
