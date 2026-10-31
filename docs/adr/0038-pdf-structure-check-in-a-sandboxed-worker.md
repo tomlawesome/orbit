@@ -334,3 +334,9 @@ first amendment (and the ten-second budget its last sentence mentions).
    `setDocumentPreviewRenderBudgetForTests`, as the bomb tests do, so it no
    longer races the production clock; a separate test pins the production
    default at 30 s.
+
+## Amendment, 2026-10-30: the structure check's file arrives as a read-only descriptor (#1567)
+
+The second amendment's item 1 sent the file to the child over the IPC channel, which copies it once in the server (the serialised message) and once in the child. For the structure check, the file is on disk in quarantine, so the server now opens it read-only and the child inherits that descriptor at spawn (`stdio` position 4); the child checks it is a regular file of the size the job states, reads it from position 0 before saying it is ready, and closes it. The server closes its own handle as soon as the child is started. The server holds no copy for the hand-over; the child holds one, as before. The render job is unchanged: its plaintext exists only in memory, and no plaintext temporary file is written for a preview. The fence is unchanged: process-memory watchdog, heap flags, `RLIMIT_DATA`, `RLIMIT_CPU`, wall clock, empty environment, one child per job. The child already ran as the server's user with no isolation from its files; a read-only descriptor gives it less than a path would, and keeps working if the child is ever confined. Item 6's "about 3 ms per MB of file to hand over" becomes a read from the page cache, still before the clock starts. The ceilings and `FILE_COPIES` are not moved; the child's peak is lower by about one copy, and re-measuring them stays with #1436.
+
+No other ADR changes: ADR-0033's order (type, scan, open, encrypt) and item 3's bound are as they were; the encryption construction is ADR-0017's, called in pieces.

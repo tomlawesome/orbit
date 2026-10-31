@@ -42,7 +42,9 @@ quota never bypasses per-request limits.
 3. **Quarantine:** untrusted plaintext exists temporarily while Orbit types it
    by magic bytes, scans it and then opens it to find a page. It is never
    served to users from this state, and nothing opens it until the scan has
-   passed ([ADR-0033](adr/0033-document-safety-standard-patterns.md)).
+   passed ([ADR-0033](adr/0033-document-safety-standard-patterns.md)). The
+   server holds one copy of the file for the open check, and encrypts it from
+   the quarantine file in pieces, verifying its digest as it goes (#1567).
 4. **ClamAV:** Orbit sends bounded plaintext over an internal-only Compose
    network using `clamd`'s streaming protocol. ClamAV receives no filesystem
    mount containing Orbit documents, database credentials, application

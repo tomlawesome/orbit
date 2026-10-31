@@ -130,7 +130,9 @@ get their own slot and between them run that many archives at once.
 
 1. Authorize the user, household, item, quota, and declared size.
 2. Stream bounded plaintext into private quarantine while hashing and
-   identifying content from bytes.
+   identifying content from bytes; the server holds one copy of the file for
+   the open check, and encrypts it from the quarantine file in pieces,
+   verifying its digest as it goes (#1567).
 3. Validate the complete supported structure before scanning. Clean scanning
    continues synchronously and encrypts with a per-document DEK before
    returning `201` and `available`; explicit scan-disabled operation records
