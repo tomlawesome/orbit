@@ -675,21 +675,28 @@ test.describe("the pocket film in WebKit (#1174)", () => {
           barSeen = true;
           if (s.cursor !== lastMove.cursor) lastMove = { at: Date.now(), cursor: s.cursor, total: s.total, url: s.url, chapter: s.chapter };
           /* The pill's own move between places is a fade out and in
-             (owner's call, round 8); a pill fault is judged once it has
-             arrived and the page is at rest. Faint, or painted over, then,
-             is a fault; so is a move that never arrives (20s). #1190: once
+             (owner's call, round 8); a faint pill is judged once it has
+             arrived and the page is at rest, and is a fault then; so is a
+             move that never arrives (20s). A pill painted over is a fault
+             at any sample (below). #1190: once
              the film has ended, the pill holds then fades out and is gone
              — that is the ruling now, not a fault to sample. */
+          /* Painted over is a stacking fault that holds at every instant, so
+             it is counted at the sample, with no settling (owner, #1536
+             T-Q26, 13a). Faint is the pill's own fade and is judged at rest. */
+          const isOver = (/** @type {string} */ f) => f.includes("painted over the pill");
+          const over = s.ended ? [] : s.faults.filter(isOver);
           /** @type {string[]} */
           let pillFaults = [];
-          if (!s.ended && s.faults.length) {
+          if (!s.ended && s.faults.some((f) => !isOver(f))) {
             for (let round = 0; round < 3; round++) {
               await pillSettled(page);
               const rested = await page.evaluate(sampleTransport);
-              pillFaults = rested && !rested.ended ? rested.faults : [];
+              pillFaults = rested && !rested.ended ? rested.faults.filter((f) => !isOver(f)) : [];
               if (!pillFaults.some((f) => f.startsWith("pill moving"))) break;
             }
           }
+          pillFaults = [...over, ...pillFaults];
           const seen = [...pillFaults, ...(m?.faults ?? [])];
           for (const f of seen) {
             /* the pill's faults are keyed without their opacity figure, so
