@@ -29,8 +29,9 @@ services:
     image: "${ORBIT_IMAGE:?Set ORBIT_IMAGE to an immutable registry digest or a local build tag}"
     restart: unless-stopped
     # Bounded like the other services (#1429): a runaway request cannot take
-    # the host with it. Keep it above about 700 MB, the memory that cannot be
-    # reclaimed while importing a maximum-size archive (#1566).
+    # the host with it. Keep it at 1 GB or more (the readiness check warns
+    # below that): importing a maximum-size archive holds about 700 MB that
+    # cannot be reclaimed (#1566).
     mem_limit: ${ORBIT_MEMORY_LIMIT:-2g}
     env_file: .env-orbit
     environment:
