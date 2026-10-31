@@ -6,6 +6,13 @@
  * is pinned as the growth in the process's peak resident memory over a
  * baseline taken after garbage collection, n being the document's size.
  *
+ * - download: `openDocumentDownload` twice, each drained by a reader that
+ *   keeps nothing. Warm under n / 2; the first under n (a whole copy fails
+ *   both): the plaintext is only ever in flight in 1 MiB pieces.
+ * - preview-read: `readDocumentDownload` twice, each buffer zeroed and
+ *   dropped as a page preview does. Warm under ceil(n / 3) * 4 (one plaintext
+ *   copy and a little: the ciphertext is no longer read whole beside it); the
+ *   first under that plus n.
  * - recovery: the scanner-recovery worker processes two staged uploads of a
  *   PDF at the size limit. Warm under ceil(n / 3) * 4 (the document's base64
  *   size, one copy and a little); the first under that plus n.
@@ -96,6 +103,51 @@ describe("reading a stored document back holds one copy at most (#1571)", () => 
   afterAll(async () => {
     if (scratch) await rm(scratch, { recursive: true, force: true });
   });
+
+  /** Uploads the limit-sized PDF the way a user would (the scanner mock answers clean) and returns the stored document's id. */
+  async function storeLimitDocument(name: string): Promise<{ userId: string; documentId: string }> {
+    const fixture = await createIntegrationFixture(name);
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+    const stored = await uploadItemDocument({
+      userId: fixture.users.member.id,
+      householdId: fixture.household.id,
+      itemId: fixture.item.id,
+      filename: "policy.pdf",
+      body: Readable.toWeb(createReadStream(file)) as unknown as ReadableStream<Uint8Array>,
+      declaredBytes: size,
+    });
+    expect(stored).toMatchObject({ lifecycle: "available", sizeBytes: size });
+    return { userId: fixture.users.member.id, documentId: stored.id };
+  }
+
+  it("download: the second of two streamed downloads of a PDF at the size limit holds under n / 2 bytes, the first under n, and each delivers the whole document", async () => {
+    const { userId, documentId } = await storeLimitDocument("doc-read-memory-download");
+
+    const measured = await measure<{ sizeBytes: number; received: number }>(["download", userId, documentId]);
+
+    expect(measured.result).toEqual({ sizeBytes: size, received: size });
+    const warmKiB = size / 2 / 1024;
+    const firstKiB = size / 1024;
+    const growthKiB = measured.afterKiB - measured.beforeKiB;
+    const firstGrowthKiB = measured.first!.afterKiB - measured.first!.beforeKiB;
+    console.info(`#1571 download memory: warm ${mib(growthKiB)} MiB, first ${mib(firstGrowthKiB)} MiB, bounds ${mib(warmKiB)} / ${mib(firstKiB)} MiB`);
+    expect(growthKiB, `download (warm): peak RSS grew ${mib(growthKiB)} MiB; bound is ${mib(warmKiB)} MiB (n / 2)`).toBeLessThan(warmKiB);
+    expect(firstGrowthKiB, `download (first): peak RSS grew ${mib(firstGrowthKiB)} MiB; bound is ${mib(firstKiB)} MiB (n)`).toBeLessThan(firstKiB);
+  }, 600_000);
+
+  it("preview-read: the second of two reads of a PDF at the size limit holds under ceil(n / 3) * 4 bytes, the first under that plus n", async () => {
+    const { userId, documentId } = await storeLimitDocument("doc-read-memory-preview");
+
+    const measured = await measure<{ sizeBytes: number }>(["preview-read", userId, documentId]);
+
+    expect(measured.result).toEqual({ sizeBytes: size });
+    const { warmKiB, firstKiB } = bounds(size);
+    const growthKiB = measured.afterKiB - measured.beforeKiB;
+    const firstGrowthKiB = measured.first!.afterKiB - measured.first!.beforeKiB;
+    console.info(`#1571 preview-read memory: warm ${mib(growthKiB)} MiB, first ${mib(firstGrowthKiB)} MiB, bounds ${mib(warmKiB)} / ${mib(firstKiB)} MiB`);
+    expect(growthKiB, `preview-read (warm): peak RSS grew ${mib(growthKiB)} MiB; bound is ${mib(warmKiB)} MiB (the base64 size)`).toBeLessThan(warmKiB);
+    expect(firstGrowthKiB, `preview-read (first): peak RSS grew ${mib(firstGrowthKiB)} MiB; bound is ${mib(firstKiB)} MiB (the base64 size plus one copy)`).toBeLessThan(firstKiB);
+  }, 600_000);
 
   it("recovery: the second of two scanner-recovery runs of a PDF at the size limit holds under ceil(n / 3) * 4 bytes, the first under that plus n, and both documents are published whole", async () => {
     const fixture = await createIntegrationFixture("doc-read-memory-recovery");

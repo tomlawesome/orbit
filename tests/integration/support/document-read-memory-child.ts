@@ -18,7 +18,11 @@
  *   the file's bytes, which are read into memory BEFORE the baseline, as the
  *   mail parser's buffer already is when the attachment reaches the holding
  *   function.
- * (`download` and `preview-read` arrive with the download lane.)
+ * - `download <userId> <documentId>`: two `openDocumentDownload` runs of a
+ *   stored document, each drained with a reader that keeps nothing (a
+ *   response body's consumer); the result is the bytes each run delivered.
+ * - `preview-read <userId> <documentId>`: two `readDocumentDownload` runs of
+ *   it, each buffer zeroed and dropped as the page preview does.
  *
  * The baseline is taken after garbage collection with the kernel's peak
  * counter reset, before the first run, and again after it; the first run's
@@ -33,15 +37,17 @@ import { inArray } from "drizzle-orm";
 import { closeDatabase, getDb } from "@/db";
 import { documents } from "@/db/schema";
 import { claimScannerRecoveryJobs, processScannerRecoveryJob } from "@/server/document-maintenance/scan-recovery";
+// A namespace import: a mode this module does not export yet fails its own run, not every mode's.
+import * as documentRepository from "@/server/document-repository";
 import { scanAndHoldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
 import { releaseBuffer } from "@/server/documents/storage";
 import { baselinePeakKiB, peakKiB, prepareKeyState, printMemoryResult } from "./memory-child-support";
 
 const [mode, ...rest] = process.argv.slice(2);
-const usage = "usage: document-read-memory-child recovery <documentIdOne> <documentIdTwo> | hold <file> <userId> <receiptId>";
-if (mode !== "recovery" && mode !== "hold") throw new Error(`unsupported mode ${String(mode)}; ${usage}`);
-if (mode === "recovery" && (rest.length !== 2 || rest.some((value) => !value))) throw new Error(usage);
-if (mode === "hold" && (rest.length !== 3 || rest.some((value) => !value))) throw new Error(usage);
+const usage = "usage: document-read-memory-child recovery <documentIdOne> <documentIdTwo> | hold <file> <userId> <receiptId> | download|preview-read <userId> <documentId>";
+const argumentCounts = { recovery: 2, hold: 3, download: 2, "preview-read": 2 } as const;
+if (mode !== "recovery" && mode !== "hold" && mode !== "download" && mode !== "preview-read") throw new Error(`unsupported mode ${String(mode)}; ${usage}`);
+if (rest.length !== argumentCounts[mode] || rest.some((value) => !value)) throw new Error(usage);
 
 /** A clamd that answers `stream: OK` to every INSTREAM and reports how many bytes each scan was given. */
 async function startFakeClamd(): Promise<{ port: number; scannedBytes: number[]; close(): Promise<void> }> {
@@ -145,9 +151,47 @@ async function hold(file: string, userId: string, receiptId: string): Promise<vo
   printMemoryResult(beforeKiB, afterKiB, { sizeBytes: held.sizeBytes, ciphertextSize: held.ciphertextSize, contentLength: bytes.length }, first);
 }
 
+/** Runs `operation` twice around retaken baselines and prints the first run's figures and the second's. */
+async function twice(operation: () => Promise<unknown>): Promise<void> {
+  prepareKeyState();
+  const firstBeforeKiB = baselinePeakKiB();
+  await operation();
+  const first = { beforeKiB: firstBeforeKiB, afterKiB: peakKiB() };
+  const beforeKiB = baselinePeakKiB();
+  const result = await operation();
+  const afterKiB = peakKiB();
+  await closeDatabase();
+  printMemoryResult(beforeKiB, afterKiB, result, first);
+}
+
+async function download(userId: string, documentId: string): Promise<void> {
+  await twice(async () => {
+    const opened = await documentRepository.openDocumentDownload(userId, documentId);
+    const reader = opened.body.getReader();
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+    }
+    return { sizeBytes: opened.sizeBytes, received };
+  });
+}
+
+async function previewRead(userId: string, documentId: string): Promise<void> {
+  await twice(async () => {
+    const read = await documentRepository.readDocumentDownload(userId, documentId, "document_previewed");
+    const sizeBytes = read.bytes.length;
+    read.bytes.fill(0);
+    return { sizeBytes };
+  });
+}
+
 async function main(): Promise<void> {
   if (mode === "recovery") await recovery(rest);
-  else await hold(rest[0]!, rest[1]!, rest[2]!);
+  else if (mode === "hold") await hold(rest[0]!, rest[1]!, rest[2]!);
+  else if (mode === "download") await download(rest[0]!, rest[1]!);
+  else await previewRead(rest[0]!, rest[1]!);
 }
 
 main().catch((error: unknown) => {

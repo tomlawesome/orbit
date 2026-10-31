@@ -1,15 +1,19 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { readdirSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// Watches the reads (to see the read buffer), and the order of fsync and the
+// Watches the reads (to see the read buffer, and to count them), the handles
+// opened, and the order of fsync and the
 // unsealer's final step on the way to a quarantine file; everything passes
 // through.
 const watched = vi.hoisted(() => ({
   readBuffers: [] as Uint8Array[],
   events: [] as string[],
+  handles: [] as FileHandle[],
+  reads: 0,
 }));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
@@ -18,7 +22,9 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     open: vi.fn(async (...args: Parameters<typeof actual.open>) => {
       const handle = await actual.open(...args);
       const read = handle.read.bind(handle) as (...readArgs: unknown[]) => Promise<unknown>;
+      watched.handles.push(handle);
       (handle as unknown as { read: unknown }).read = (...readArgs: unknown[]) => {
+        watched.reads += 1;
         const first = readArgs[0];
         const buffer = first instanceof Uint8Array ? first : (first as { buffer?: Uint8Array } | undefined)?.buffer;
         if (buffer && !watched.readBuffers.includes(buffer)) watched.readBuffers.push(buffer);
@@ -67,6 +73,8 @@ function watchBufferAlloc(): void {
 afterEach(async () => {
   watched.readBuffers.length = 0;
   watched.events.length = 0;
+  watched.handles.length = 0;
+  watched.reads = 0;
   vi.clearAllMocks();
   for (const spy of spies.splice(0)) spy.mockRestore();
   await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -602,5 +610,120 @@ describe("every plaintext piece is freed once the sink has used it (#1571)", () 
     await expect(storage.unsealIntoBuffer(stored.storageKey, expected(stored), unsealer)).rejects.toBeInstanceOf(DocumentIntegrityError);
 
     expectAllDetached(unsealer.pieces);
+  }, 30_000);
+});
+
+const openDescriptors = (): number => readdirSync("/proc/self/fd").length;
+
+/** Reads a stream to its end, keeping every chunk the consumer was handed. */
+async function drain(stream: ReadableStream<Uint8Array>): Promise<Uint8Array[]> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return chunks;
+    chunks.push(value);
+  }
+}
+
+describe("streamVerifiedPlaintext (#1571)", () => {
+  /** Calls it with a recording unsealer per pass; `unsealers[0]` is pass 1's, `unsealers[1]` pass 2's. */
+  function openStream(storage: LocalDocumentStorage, stored: Stored) {
+    const unsealers: Array<ReturnType<typeof recording>> = [];
+    const stream = storage.streamVerifiedPlaintext(stored.storageKey, { ciphertextSize: stored.ciphertextSize }, () => {
+      const unsealer = recording(unsealerFor(stored));
+      unsealers.push(unsealer);
+      return unsealer;
+    });
+    return { stream, unsealers };
+  }
+
+  it.each([1, MIB, 3 * MIB + 7])("streams a good %i-byte object byte for byte, in pieces of at most 1 MiB, and closes the handle at the end", async (size) => {
+    const { storage } = await createStorage();
+    const stored = await store(storage, randomBytes(size), "object");
+    const before = openDescriptors();
+    const handlesBefore = watched.handles.length;
+
+    const { stream, unsealers } = openStream(storage, stored);
+    const chunks = await drain(await stream);
+
+    expect(Buffer.concat(chunks).equals(stored.plaintext)).toBe(true);
+    expect(Math.max(...chunks.map((chunk) => chunk.byteLength))).toBeLessThanOrEqual(MIB);
+    expect(unsealers.map((unsealer) => unsealer.events), "one final() per pass").toEqual([["final"], ["final"]]);
+    expect(watched.handles.length - handlesBefore, "one handle for both passes").toBe(1);
+    expect(watched.handles[handlesBefore]!.fd).toBe(-1);
+    expect(openDescriptors()).toBe(before);
+    // Pass 1's pieces are freed through unsealPass; pass 2's belong to the consumer, so storage must not free them.
+    expectAllDetached(unsealers[0]!.pieces);
+    for (const chunk of chunks) expect(chunk.byteLength, "a consumer's chunk is not freed").toBeGreaterThan(0);
+  }, 30_000);
+
+  it.each([
+    ["the first piece", 17],
+    ["a later piece", MIB + 3],
+    ["the last byte", 3 * MIB + 6],
+  ])("rejects an object with a flipped byte in %s before any stream exists, and leaves no descriptor open", async (_label, position) => {
+    const { storageRoot, storage } = await createStorage();
+    const stored = await store(storage, randomBytes(3 * MIB + 7), "object");
+    await flipByte(objectFile(storageRoot, stored.storageKey), position);
+    const before = openDescriptors();
+
+    const { stream, unsealers } = openStream(storage, stored);
+    const failure = await stream.then(() => undefined, (error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(DocumentIntegrityError);
+    expect(unsealers, "only pass 1 ran").toHaveLength(1);
+    expect(openDescriptors()).toBe(before);
+    expectAllDetached(unsealers[0]!.pieces);
+  }, 30_000);
+
+  it("reads at most two more pieces for a stream nobody reads", async () => {
+    const { storage } = await createStorage();
+    const stored = await store(storage, randomBytes(5 * MIB + 7), "object");
+
+    const stream = await openStream(storage, stored).stream;
+    const afterPassOne = watched.reads;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(watched.reads - afterPassOne).toBeLessThanOrEqual(2);
+    await stream.cancel();
+  }, 30_000);
+
+  it("closes the handle when the stream is cancelled, and reads no more", async () => {
+    const { storage } = await createStorage();
+    const stored = await store(storage, randomBytes(3 * MIB + 7), "object");
+    const before = openDescriptors();
+    const handlesBefore = watched.handles.length;
+
+    const stream = await openStream(storage, stored).stream;
+    const reader = stream.getReader();
+    await reader.read();
+    expect(watched.handles[handlesBefore]!.fd, "open while the stream is live").toBeGreaterThan(2);
+    expect(openDescriptors()).toBeGreaterThan(before);
+    await reader.cancel();
+    const readsAtCancel = watched.reads;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(watched.handles[handlesBefore]!.fd).toBe(-1);
+    expect(openDescriptors()).toBe(before);
+    expect(watched.reads).toBe(readsAtCancel);
+  }, 30_000);
+
+  it("errors the stream, and never closes it, when the object is overwritten in place after the promise resolved", async () => {
+    const { storageRoot, storage } = await createStorage();
+    const stored = await store(storage, randomBytes(3 * MIB + 7), "object");
+    const before = openDescriptors();
+    const handlesBefore = watched.handles.length;
+    const { stream, unsealers } = openStream(storage, stored);
+    const body = await stream;
+
+    // Same inode, same length, one byte changed: the open descriptor sees it.
+    await flipByte(objectFile(storageRoot, stored.storageKey), MIB + 11);
+    const failure = await drain(body).then(() => undefined, (error: unknown) => error);
+
+    expect(failure, "the stream must error, not close").toBeInstanceOf(DocumentIntegrityError);
+    expect(unsealers[1]!.events, "pass 2's final() ran and failed").toEqual(["final"]);
+    expect(watched.handles[handlesBefore]!.fd).toBe(-1);
+    expect(openDescriptors()).toBe(before);
   }, 30_000);
 });

@@ -1,11 +1,20 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
+import { access, readFile, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { imapIngestionMessages, items } from "@/db/schema";
+import { documents, imapIngestionAttachments, imapIngestionMessages, items } from "@/db/schema";
+import { readDocumentDownload } from "@/server/document-repository";
+import { getDocumentConfig } from "@/server/documents/config";
+import { DocumentIntegrityError } from "@/server/documents/crypto";
+import { LocalDocumentStorage, openDocumentStorage } from "@/server/documents/storage";
+import { scanAndHoldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { assignImapReceiptHousehold, listImapInbox } from "@/server/mail-in/imap-inbox";
-import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
+import { paddedPdfOfSize } from "../support/large-pdf";
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -108,4 +117,125 @@ describe("private reviewed intake approval boundary", () => {
     expect(await getDb().select({ titleEnc: items.titleEnc, providerEnc: items.providerEnc, referenceEnc: items.referenceEnc, sectionId: items.sectionId })
       .from(items).where(eq(items.id, fixture.item.id))).toEqual(before);
   });
+});
+
+/**
+ * #1571 lane 3: approving a mailbox draft decrypts the held attachment into a
+ * `.recovery` quarantine file, verifies its tag, streams the file into the
+ * upload and discards it, whatever the outcome.
+ */
+describe("approving a mailbox draft with a held attachment reads it through a verified quarantine file (#1571)", () => {
+  const MIB = 1_048_576;
+
+  async function seedHeldDraft(fixture: IntegrationFixture, bytes: Buffer) {
+    const receiptId = randomUUID();
+    const held = await scanAndHoldImapAttachment({
+      bytes,
+      filename: "held-policy.pdf",
+      declaredMediaType: "application/pdf",
+      recipientUserId: fixture.users.member.id,
+      receiptId,
+    });
+    await getDb().insert(imapIngestionMessages).values({
+      id: receiptId, mailbox: "private", mailboxUidValidity: `held-${receiptId.slice(0, 8)}`, mailboxUid: 1, contentSha256: randomUUID().replaceAll("-", ""),
+      recipientAliasSha256: `held-${receiptId.slice(0, 8)}`, userId: fixture.users.member.id, householdId: fixture.household.id,
+      status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
+    });
+    await getDb().insert(imapIngestionAttachments).values({
+      id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes,
+      contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
+    });
+    const input = {
+      operationId: randomUUID(),
+      source: { kind: "mailbox_draft" as const, receiptId, draftVersion: 1 },
+      householdId: fixture.household.id,
+      sectionId: fixture.section.id,
+      action: "create_separate" as const,
+      item: { kind: "service", title: "Held attachment value", currency: "GBP", status: "active" },
+      attachmentIds: [held.id],
+    };
+    return { held, input };
+  }
+
+  async function recoveryFilesOf(attachmentId: string): Promise<string[]> {
+    return (await openDocumentStorage().listQuarantineFiles()).map((file) => basename(file.path))
+      .filter((name) => name.startsWith(`${attachmentId}.`) && name.endsWith(".recovery"));
+  }
+
+  async function expectGone(path: string): Promise<void> {
+    await expect(access(path)).rejects.toMatchObject({ code: "ENOENT" });
+  }
+
+  const stagedRow = async (attachmentId: string) => (await getDb().select({ status: imapIngestionAttachments.status, assignedDocumentId: imapIngestionAttachments.assignedDocumentId })
+    .from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, attachmentId)))[0]!;
+
+  it("attaches a multi-piece PDF byte for byte, and the .recovery file is gone afterwards", async () => {
+    const fixture = await createIntegrationFixture("reviewed-held-attach");
+    const bytes = paddedPdfOfSize(2 * MIB + 5);
+    const { held, input } = await seedHeldDraft(fixture, bytes);
+    const unseal = vi.spyOn(LocalDocumentStorage.prototype, "unsealToQuarantine");
+    try {
+      const result = await approveReviewedIntake(fixture.users.member.id, input);
+
+      expect(result.outcome).toBe("approved");
+      expect(result.attachedAttachmentIds).toContain(held.id);
+      const documentId = (await stagedRow(held.id)).assignedDocumentId!;
+      expect((await readDocumentDownload(fixture.users.member.id, documentId)).bytes.equals(bytes)).toBe(true);
+      expect(unseal).toHaveBeenCalledTimes(1);
+      expect(unseal.mock.calls[0]![0]).toEqual({ kind: "object", storageKey: held.storageKey });
+      const { quarantinePath } = await unseal.mock.results[0]!.value as { quarantinePath: string };
+      expect(quarantinePath).toMatch(/\.recovery$/u);
+      await expectGone(quarantinePath);
+      expect(await recoveryFilesOf(held.id)).toEqual([]);
+    } finally {
+      unseal.mockRestore();
+    }
+  }, 60_000);
+
+  it("removes the .recovery file when the upload fails after it was written", async () => {
+    const fixture = await createIntegrationFixture("reviewed-held-forced-failure");
+    const { held, input } = await seedHeldDraft(fixture, paddedPdfOfSize(MIB + 5));
+    const unseal = vi.spyOn(LocalDocumentStorage.prototype, "unsealToQuarantine");
+    const seal = vi.spyOn(LocalDocumentStorage.prototype, "sealQuarantine").mockRejectedValueOnce(new Error("synthetic ciphertext write outage"));
+    try {
+      await approveReviewedIntake(fixture.users.member.id, input).then(() => undefined, () => undefined);
+
+      expect(seal).toHaveBeenCalledTimes(1);
+      expect(unseal).toHaveBeenCalledTimes(1);
+      const { quarantinePath } = await unseal.mock.results[0]!.value as { quarantinePath: string };
+      await expectGone(quarantinePath);
+      expect(await recoveryFilesOf(held.id)).toEqual([]);
+      expect((await stagedRow(held.id)).status).toBe("stored");
+    } finally {
+      seal.mockRestore();
+      unseal.mockRestore();
+    }
+  }, 60_000);
+
+  it.each([["first byte", 3], ["last byte", "last"]] as const)("fails the approval of a tampered held object (%s), leaves the attachment stored, uploads nothing and leaves no .recovery file", async (_label, position) => {
+    const fixture = await createIntegrationFixture("reviewed-held-tampered");
+    const { held, input } = await seedHeldDraft(fixture, paddedPdfOfSize(MIB + 5));
+    const key = held.storageKey;
+    const path = join(getDocumentConfig().storageRoot, "objects", key.slice(0, 2), key.slice(2, 4), `${key}.bin`);
+    const object = await readFile(path);
+    object[position === "last" ? object.length - 1 : position] ^= 0xff;
+    await writeFile(path, object);
+    const before = await getDb().select({ id: documents.id }).from(documents).where(eq(documents.householdId, fixture.household.id));
+    const unseal = vi.spyOn(LocalDocumentStorage.prototype, "unsealToQuarantine");
+    const seal = vi.spyOn(LocalDocumentStorage.prototype, "sealQuarantine");
+    try {
+      const outcome = await approveReviewedIntake(fixture.users.member.id, input).then((result) => result, (error: unknown) => error);
+
+      if (!(outcome instanceof Error)) expect((outcome as { outcome: string }).outcome).not.toBe("approved");
+      expect(unseal).toHaveBeenCalledTimes(1);
+      await expect(unseal.mock.results[0]!.value).rejects.toBeInstanceOf(DocumentIntegrityError);
+      expect(seal, "nothing was uploaded").not.toHaveBeenCalled();
+      expect(await getDb().select({ id: documents.id }).from(documents).where(eq(documents.householdId, fixture.household.id))).toEqual(before);
+      expect(await stagedRow(held.id)).toEqual({ status: "stored", assignedDocumentId: null });
+      expect(await recoveryFilesOf(held.id)).toEqual([]);
+    } finally {
+      seal.mockRestore();
+      unseal.mockRestore();
+    }
+  }, 60_000);
 });
