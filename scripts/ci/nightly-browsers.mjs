@@ -7,7 +7,9 @@
  *            or `main` is running or pending (#1546: a promotion and a nightly
  *            on the same runner double each other's time, and the promotion
  *            is the one that matters); `idle` when the last nightly pipeline
- *            ran on this very commit; otherwise `run`. Any doubt prints `run`:
+ *            that ran the browsers did so on this very commit (a night that
+ *            yielded or sat idle is not counted); otherwise `run`. Any doubt
+ *            prints `run`:
  *            a night that tests twice costs minutes, a night that wrongly
  *            skips costs a day's coverage.
  *   report   File the failure: one issue in the nearest open milestone, or a
@@ -18,7 +20,8 @@
  * no other schedule starts one. The other schedules on `dev` (Renovate, base
  * image re-pin, door import) are skipped by that test.
  *
- * Credentials. Reading the pipelines API uses ORBIT_REUSE_TOKEN alone (read_api,
+ * Credentials. Reading the pipelines API and classify's log uses
+ * ORBIT_REUSE_TOKEN alone (read_api,
  * unprotected), as the reuse lookup does; nothing else is tried. Filing needs
  * SIDECAR_ISSUE_TOKEN (an `api` project token) and fails clearly without it. The token travels in a header and is never printed.
  */
@@ -87,9 +90,36 @@ export async function nightlyPipelines({ base, projectId, options, sha, skipId, 
       log(`  pipeline ${pipeline.id}: its jobs could not be listed (${error.message})`);
       continue;
     }
-    if (Array.isArray(jobs) && jobs.some((job) => job.name === "classify")) found.push(pipeline);
+    const classify = Array.isArray(jobs) ? jobs.find((job) => job.name === "classify") : undefined;
+    if (!classify) continue;
+    let trace;
+    try {
+      trace = await request(`${project(base, projectId)}/jobs/${classify.id}/trace`, { ...options, raw: true });
+    } catch (error) {
+      log(`  pipeline ${pipeline.id}: classify's log could not be read (${error.message}): not counted`);
+      continue;
+    }
+    const verdict = nightlyVerdict(trace);
+    if (verdict === "idle" || verdict === "yield") {
+      log(`  pipeline ${pipeline.id} tested nothing (${verdict}): not counted`);
+      continue;
+    }
+    found.push(pipeline);
   }
   return found;
+}
+
+const plainLog = (trace) => String(trace).replace(/\u001b\[[0-9;]*[A-Za-z]/gu, "").replace(/\r/gu, "");
+
+/* The verdict classify prints. The next night reads it back: a night that
+ * yielded to a promotion, or sat idle, ran classify and nothing else yet
+ * finished green, and counted as the last run it would hide the commit
+ * from every later night until dev moved. The source line in the log,
+ * `echo "nightly browser run: ${verdict}"`, does not match. */
+export const VERDICT_LINE = /^nightly browser run: (run|idle|yield)$/mu;
+export function nightlyVerdict(trace) {
+  const match = VERDICT_LINE.exec(plainLog(trace).split("\n").map((line) => line.trim()).join("\n"));
+  return match ? match[1] : null;
 }
 
 /*
@@ -162,8 +192,7 @@ export async function moved({ base, projectId, pipelineId, sha, token, fetchImpl
 /* Failing test titles out of a job log: Playwright's `  1) [project] › ...`
  * and Vitest's ` FAIL  file > test` lines, ANSI colour removed. */
 export function failingTests(trace) {
-  const plain = String(trace).replace(/\u001b\[[0-9;]*[A-Za-z]/gu, "").replace(/\r/gu, "");
-  const lines = plain
+  const lines = plainLog(trace)
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => /^\d+\) \[[^\]]+\] › /u.test(line) || /^FAIL {1,2}\S/u.test(line));

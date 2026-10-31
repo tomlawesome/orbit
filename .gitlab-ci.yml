@@ -1172,7 +1172,9 @@ classify:
     # running (#1546). The verdict is the lane: `nightly_idle` and
     # `nightly_yield` are stopped on by every job the nightly starts, in
     # `orbit_lane_admits`. Any doubt (no token, API down) leaves the lane
-    # alone and the nightly runs.
+    # alone and the nightly runs. The `nightly browser run:` line this step
+    # prints is read back by the next night's `moved`, which does not count a
+    # night that yielded or sat idle as a run.
     - |
       set -eu
       if [ "${CI_PIPELINE_SOURCE:-}" = "schedule" ] && [ "${ORBIT_NIGHTLY_BROWSERS:-}" = "true" ]; then
