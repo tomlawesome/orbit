@@ -69,15 +69,24 @@ set -Eeuo pipefail
 # inside the installation directory (its two scratch files, the
 # configure.sh --check stderr capture and the image's Compose copy, live in
 # $TMPDIR and are removed before the run ends). What it asks Docker for:
-#   - two throwaway containers, each `docker run --rm` with `--network none`
-#     and the image already present locally (nothing is ever pulled): the
-#     configuration check, `bash scripts/configure.sh --check`, which runs
-#     the engine inside the pinned image (Step 5), and the Compose-file
-#     read, `docker run --rm --pull never --network none --entrypoint cat
-#     <pinned image> /opt/orbit/deploy/docker-compose.yml` (Step 4b). Both
-#     create a container that is removed on exit, touch no volume and no
-#     deployment file, and show up in `docker events`;
-#   - reads: `docker inspect`, `docker image inspect`, `docker ps`,
+#   - two throwaway containers, each `docker run --rm --network none` of an
+#     image already present locally, removed on exit, given no volume, and
+#     visible in `docker events`:
+#       the configuration check, `bash scripts/configure.sh --check`
+#       (Step 5), which runs the engine inside the image configure.sh
+#       resolves (a `.orbit-image` pin at the deployment root, else the
+#       exported ORBIT_IMAGE, else `.env-orbit`) with the deployment
+#       directory bind-mounted read-only at /orbit-deploy — `.env-orbit`
+#       and `.orbit-secrets` included, readable, not writable. configure.sh
+#       pulls a digest it cannot find locally, so this script first checks
+#       the image it will resolve, read from the same places in the same
+#       order (engine_image_present), and skips the check as
+#       docker-unavailable when it is absent;
+#       the Compose-file read, `docker run --rm --pull never --network none
+#       --entrypoint cat <pinned image> /opt/orbit/deploy/docker-compose.yml`
+#       (Step 4b), which mounts nothing;
+#   - reads: `docker inspect`, `docker image inspect`, `docker info` (from
+#     configure.sh, to tell rootless from rootful), `docker ps`,
 #     `docker volume ls`/`inspect`, `docker logs`, `docker compose config`,
 #     and the `docker exec` probes of this deployment's own containers
 #     described below.
@@ -1863,23 +1872,30 @@ read_compose_project_name() {
 # engine_image_present <env-file>...
 #
 # Succeeds when configure.sh's engine can run without pulling: Docker
-# answered the availability probe and the ORBIT_IMAGE named in the first
-# <env-file> that names one (configure.sh's own lookup order) is already
-# present locally. Naming no image also succeeds, because configure.sh then
-# refuses on its own before it touches Docker; that refusal is a
-# configuration finding, not a Docker one. An exported ORBIT_IMAGE wins, as
-# it does in configure.sh. A malformed image also succeeds: configure.sh
-# refuses it before Docker, so it is reported as configuration-invalid
-# rather than as a missing image.
+# answered the availability probe and the image configure.sh will resolve is
+# already present locally. The image is read from the same places in the
+# same order as configure.sh's resolve_engine_image, because configure.sh
+# pulls an absent digest and a read-only diagnosis never pulls: a
+# .orbit-image pin at the deployment root (a launcher config tree; a normal
+# deployment has none) beats everything; else the exported ORBIT_IMAGE; else
+# the ORBIT_IMAGE line of the first <env-file> that names one. Naming no
+# image, a linked or invalid pin, and a malformed image all succeed too:
+# configure.sh refuses each before it touches Docker, and that refusal is a
+# configuration finding, not a Docker one.
 engine_image_present() {
   local image="${ORBIT_IMAGE:-}" file
   [[ "$docker_available" == 1 ]] || return 1
-  for file in "$@"; do
-    [[ -z "$image" ]] || break
-    is_regular_non_symlink_file "$file" || continue
-    image="$(sed -n 's/^ORBIT_IMAGE=//p' "$file" 2>/dev/null | tail -n 1)"
-    image="${image%$'\r'}"
-  done
+  if [[ -e .orbit-image || -L .orbit-image ]]; then
+    is_regular_non_symlink_file .orbit-image || return 0
+    image="$(head -n 1 .orbit-image)"
+  else
+    for file in "$@"; do
+      [[ -z "$image" ]] || break
+      is_regular_non_symlink_file "$file" || continue
+      image="$(sed -n 's/^ORBIT_IMAGE=//p' "$file" 2>/dev/null | tail -n 1)"
+      image="${image%$'\r'}"
+    done
+  fi
   [[ -n "$image" ]] || return 0
   # Same shape as configure.sh's is_valid_orbit_image.
   [[ "$image" =~ ^orbit-local:[0-9a-f]{12}$ || "$image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || return 0
