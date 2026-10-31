@@ -379,7 +379,7 @@ describe("runInstall: database volume safety from the shell's facts (#13-18, F3)
     const target = recognised();
     const before = snapshot(target);
     const { outcome } = await run(target, { facts: ownershipFacts({ dbLines: `${"e".repeat(12)}|||` }) });
-    expect(outcome).toMatchObject({ status: "failed", phase: "host", reason: "foreign-container", action: "abort" });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host", reason: "docker-host", action: "abort" });
     if (outcome.status === "failed") {
       expect(outcome.message).toContain("eeeeeeeeeeee");
       expect(outcome.message).not.toContain('""');

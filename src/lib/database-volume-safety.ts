@@ -191,9 +191,11 @@ export function evaluateVolumeOwnership(
   for (const line of dbContainers.split("\n")) {
     const [dbId, dbProject, dbService, workingDir] = splitPipeFields(line, 4);
     if (dbId === "" && dbProject === "" && dbService === "" && workingDir === "") continue;
-    if (!(CONTAINER_ID_PATTERN.test(dbId) && dbProject === volumeProject && workingDir.length <= MAXIMUM_WORKING_DIR_LENGTH)) {
+    if (!(CONTAINER_ID_PATTERN.test(dbId) && (dbProject === volumeProject || dbProject === "") && workingDir.length <= MAXIMUM_WORKING_DIR_LENGTH)) {
       return { status: "verify-error" };
     }
+    // No Compose labels at all is a plain docker-run container: foreign, and named by its id. Another project's labels on this volume stay malformed output.
+    if (dbProject === "") return notProven("foreign-container", "", dbId);
     const folder = otherFolder(workingDir);
     if (folder !== undefined) return inOtherFolder(folder);
     if (dbService !== "orbit-db") return notProven("foreign-container", dbService, dbId);
