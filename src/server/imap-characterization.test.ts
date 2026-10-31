@@ -418,6 +418,16 @@ describe("reviewInboxState — status/failure to UI classification mapping", () 
     expect(safeAttachmentFailure(new Error("some_unlisted_code"))).toBe("attachment_processing_failed");
   });
 
+  it("keeps a structure check that could not run as its own failure code (D-S1)", () => {
+    expect(safeAttachmentFailure(new Error("structure_check_unavailable"))).toBe("structure_check_unavailable");
+    // A refused file keeps its own code.
+    expect(safeAttachmentFailure(new Error("mime_structure_invalid"))).toBe("mime_structure_invalid");
+  });
+
+  it("shows the member 'interrupted' for a structure check that could not run (D-S1)", () => {
+    expect(failureReasonOf("structure_check_unavailable")).toBe("interrupted");
+  });
+
   it("carries the derived reason on reviewInboxState's return alongside message", () => {
     expect(reviewInboxState("failed", "message_too_large")).toMatchObject({ classification: "unavailable", reason: "too_large" });
     expect(reviewInboxState("failed", "some_unmapped_code")).toMatchObject({ classification: "unavailable", reason: "unknown" });

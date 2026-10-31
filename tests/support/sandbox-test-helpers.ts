@@ -23,6 +23,8 @@ export type SandboxLimits = {
   structureMemoryMb?: number;
   renderMemoryMb?: number;
   pdfjsUrl?: string;
+  /** File URL of the canvas backend the image child imports; tests point it at a module that throws, to force a crash. */
+  canvasUrl?: string;
 };
 
 export function setSandboxLimits(limits: SandboxLimits | undefined): void {
@@ -37,6 +39,24 @@ export async function withCapturedLogs<T>(run: () => Promise<T>): Promise<{ resu
     const result = await run();
     const recorded = spies.flatMap((spy) => spy.mock.calls);
     return { result, logged: JSON.stringify(recorded), calls: recorded.length };
+  } finally {
+    for (const spy of spies) spy.mockRestore();
+  }
+}
+
+/** One log record the sandbox wrote: its level and the fields it passed. */
+export type LoggedRecord = { level: "error" | "warn" | "info" | "debug"; fields: Record<string, unknown> };
+
+/** Every record logged at any level while `run` executes, in order, with its level; the result of the run too. */
+export async function withLogRecords<T>(run: () => Promise<T>): Promise<{ result: T; records: LoggedRecord[] }> {
+  const records: LoggedRecord[] = [];
+  const spies = (["error", "warn", "info", "debug"] as const).map((level) =>
+    vi.spyOn(log, level).mockImplementation(((fields: unknown) => {
+      records.push({ level, fields: (fields ?? {}) as Record<string, unknown> });
+    }) as never));
+  try {
+    const result = await run();
+    return { result, records };
   } finally {
     for (const spy of spies) spy.mockRestore();
   }

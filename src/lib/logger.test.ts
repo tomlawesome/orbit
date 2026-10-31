@@ -397,6 +397,10 @@ describe("asOperationalReason (engine-28)", () => {
     expect(asOperationalReason("a code nobody listed")).toBe("unexpected_failure");
     expect(asOperationalReason("")).toBe("unexpected_failure");
   });
+
+  it("lists a structure check that reached no verdict, so its log record keeps the real reason (D-S1)", () => {
+    expect(asOperationalReason("structure_check_unavailable")).toBe("structure_check_unavailable");
+  });
 });
 
 

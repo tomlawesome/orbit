@@ -17,6 +17,7 @@ import {
   peakRssGrowth,
   setSandboxLimits,
   withCapturedLogs,
+  withLogRecords,
 } from "../../../tests/support/sandbox-test-helpers";
 import {
   inspectPdfStructureInSandbox,
@@ -150,7 +151,7 @@ describe("the PDF structure sandbox", () => {
           withCapturedLogs(() => classifyDocumentStructure(bomb, "application/pdf")));
         const elapsedMs = Date.now() - started;
 
-        expect(captured.result).toBe("unsupported_structure");
+        expect(captured.result).toBe("structure_check_unavailable");
         expect(elapsedMs).toBeLessThan(10_000);
         expect(captured.calls).toBeGreaterThan(0);
         expect(captured.logged).toMatch(/memory/i);
@@ -163,7 +164,7 @@ describe("the PDF structure sandbox", () => {
         setSandboxLimits({ wallMs: 60_000, structureMemoryMb: 192 });
         const before = lastPdfSandboxChildPidForTests();
 
-        await expect(classifyDocumentStructure(objectStreamBomb(128), "application/pdf")).resolves.toBe("unsupported_structure");
+        await expect(classifyDocumentStructure(objectStreamBomb(128), "application/pdf")).resolves.toBe("structure_check_unavailable");
 
         await expectChildGone(before);
       }, 30_000);
@@ -178,7 +179,7 @@ describe("the PDF structure sandbox", () => {
             classifyDocumentStructure(bomb, "application/pdf"),
           ]));
 
-        expect(result).toEqual(["unsupported_structure", "unsupported_structure"]);
+        expect(result).toEqual(["structure_check_unavailable", "structure_check_unavailable"]);
         expect(growthBytes).toBeLessThan(150 * MB);
         expect(pdfStructureSandboxInFlightForTests()).toBe(0);
       }, 30_000);
@@ -189,7 +190,7 @@ describe("the PDF structure sandbox", () => {
 
         const captured = await withCapturedLogs(() => classifyDocumentStructure(hostilePdf("\f", "%%EOF"), "application/pdf"));
 
-        expect(captured.result).toBe("unsupported_structure");
+        expect(captured.result).toBe("structure_check_unavailable");
         expect(Date.now() - started).toBeLessThan(10_000);
         expect(captured.calls).toBeGreaterThan(0);
         expect(captured.logged).toMatch(/memory/i);
@@ -248,7 +249,7 @@ export default { getDocument, GlobalWorkerOptions };
     }
   }, TEST_TIMEOUT_MS);
 
-  it("refuses a legitimate file as unsupported_structure when the wall-clock limit is 1 ms, and frees the worker", async () => {
+  it("answers structure_check_unavailable, not a verdict, for a legitimate file when the wall-clock limit is 1 ms, and frees the worker", async () => {
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown): void => {
       unhandled.push(reason);
@@ -257,7 +258,7 @@ export default { getDocument, GlobalWorkerOptions };
     try {
       setSandboxLimits({ ...TEST_LIMITS, wallMs: 1 });
 
-      await expect(inspectPdfStructureInSandbox(syntheticPdf())).resolves.toBe("unsupported_structure");
+      await expect(inspectPdfStructureInSandbox(syntheticPdf())).resolves.toBe("structure_check_unavailable");
       expect(pdfStructureSandboxInFlightForTests()).toBe(0);
 
       // Give any stray rejection from the killed worker a chance to surface.
@@ -273,7 +274,7 @@ export default { getDocument, GlobalWorkerOptions };
 
     const { result, logged } = await withCapturedLogs(() => classifyDocumentStructure(syntheticPdf(), "application/pdf"));
 
-    expect(result).toBe("unsupported_structure");
+    expect(result).toBe("structure_check_unavailable");
     expect(logged).toMatch(/crash/i);
     expect(pdfStructureSandboxInFlightForTests()).toBe(0);
   }, TEST_TIMEOUT_MS);
@@ -282,7 +283,7 @@ export default { getDocument, GlobalWorkerOptions };
     setSandboxLimits({ ...TEST_LIMITS, startupMs: 1 });
     const before = lastPdfSandboxChildPidForTests();
 
-    await expect(classifyDocumentStructure(syntheticPdf(), "application/pdf")).resolves.toBe("unsupported_structure");
+    await expect(classifyDocumentStructure(syntheticPdf(), "application/pdf")).resolves.toBe("structure_check_unavailable");
 
     await expectChildGone(before);
   }, TEST_TIMEOUT_MS);
@@ -309,7 +310,7 @@ export default { getDocument, GlobalWorkerOptions };
     await expect(pdfSandboxSelfCheck()).resolves.toBeUndefined();
   }, TEST_TIMEOUT_MS);
 
-  it("refuses as unsupported_structure, quickly, when the worker cannot load the parser and crashes", async () => {
+  it("answers structure_check_unavailable, quickly, when the worker cannot load the parser and crashes", async () => {
     // A long wall limit, so a fast answer can only come from handling the crash,
     // not from the timeout.
     setSandboxLimits({
@@ -319,10 +320,40 @@ export default { getDocument, GlobalWorkerOptions };
     });
     const started = Date.now();
 
-    await expect(inspectPdfStructureInSandbox(syntheticPdf())).resolves.toBe("unsupported_structure");
+    await expect(inspectPdfStructureInSandbox(syntheticPdf())).resolves.toBe("structure_check_unavailable");
 
     expect(Date.now() - started).toBeLessThan(2000);
     expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+  }, TEST_TIMEOUT_MS);
+
+  it("keeps a child's answer outside the known reasons as unsupported_structure: a child cannot claim structure_check_unavailable (D-S1)", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "orbit-unknown-answer-"));
+    // A parser that opens every file, but whose child then reports a reason
+    // nobody listed (including the one only the sandbox itself may give).
+    const modulePath = join(directory, "lying-pdfjs.mjs");
+    writeFileSync(modulePath, `
+const send = process.send.bind(process);
+process.send = (message, callback) => send(typeof message === "string" ? "structure_check_unavailable" : message, callback);
+const page = { cleanup: () => undefined, destroy: () => undefined };
+function getDocument() {
+  const document = { numPages: 1, getPage: async () => page, cleanup: async () => undefined, destroy: async () => undefined };
+  return { promise: Promise.resolve(document), onPassword: undefined, destroy: async () => undefined };
+}
+export { getDocument };
+export const GlobalWorkerOptions = {};
+export default { getDocument, GlobalWorkerOptions };
+`);
+    try {
+      setSandboxLimits({ ...TEST_LIMITS, wallMs: 5000, pdfjsUrl: pathToFileURL(modulePath).href });
+
+      const { result, records } = await withLogRecords(() => inspectPdfStructureInSandbox(syntheticPdf()));
+
+      expect(result).toBe("unsupported_structure");
+      // The child answered; it was not stopped, so this is a verdict, not a stop.
+      expect(records.filter((record) => record.fields.event === "document.inspection")).toEqual([]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   }, TEST_TIMEOUT_MS);
 
   it("runs at most two checks at once, and answers all of six", async () => {
@@ -410,4 +441,39 @@ export default { getDocument, GlobalWorkerOptions };
       expect(pdfStructureSandboxInFlightForTests()).toBe(0);
     }, TEST_TIMEOUT_MS);
   });
+});
+
+describe("the PDF sandbox stop record names the job that stopped (D-F2, W-F1)", () => {
+  afterEach(() => {
+    setSandboxLimits(undefined);
+  });
+
+  it("still says 'PDF structure sandbox stopped the check: crash' as a warn for a start-up crash, with action check_parser and impact document_upload_blocked", async () => {
+    setSandboxLimits({ ...TEST_LIMITS, startupMs: 1 });
+
+    const { records } = await withLogRecords(() => classifyDocumentStructure(syntheticPdf(), "application/pdf"));
+
+    const inspection = records.filter((record) => record.fields.event === "document.inspection");
+    expect(inspection).toHaveLength(1);
+    expect(inspection[0]!.level).toBe("warn");
+    expect(inspection[0]!.fields).toMatchObject({
+      detail: "PDF structure sandbox stopped the check: crash",
+      action: "check_parser",
+      impact: "document_upload_blocked",
+    });
+  }, TEST_TIMEOUT_MS);
+
+  it.each([
+    ["a memory stop", () => ({ wallMs: 60_000, heapMb: 32 }), () => hostilePdf("\f", "%%EOF")],
+    ["a timeout", () => ({ wallMs: 1 }), () => syntheticPdf()],
+    ["a crash", () => ({ startupMs: 1 }), () => syntheticPdf()],
+  ] as const)("records %s of the check with reason processing_interrupted, not unsupported_structure", async (_name, limitsFor, build) => {
+    setSandboxLimits({ ...TEST_LIMITS, ...limitsFor() });
+
+    const { records } = await withLogRecords(() => classifyDocumentStructure(build(), "application/pdf"));
+
+    const inspection = records.filter((record) => record.fields.event === "document.inspection");
+    expect(inspection.length).toBeGreaterThanOrEqual(1);
+    for (const record of inspection) expect(record.fields.reason).toBe("processing_interrupted");
+  }, TEST_TIMEOUT_MS);
 });

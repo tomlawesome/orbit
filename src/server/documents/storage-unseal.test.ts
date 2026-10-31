@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { readdirSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, truncate, writeFile, type FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -291,12 +291,18 @@ describe("unsealToQuarantine (#1571)", () => {
     it.each([
       ["smaller", 1],
       ["larger", -1],
-    ] as const)("refuses a file %s than the recorded ciphertextSize with a message containing 'invalid', leaving no quarantine file", async (_which, delta) => {
+    ] as const)("refuses a file %s than the recorded ciphertextSize as a DocumentIntegrityError, leaving no quarantine file (A-F1, X-F2)", async (_which, delta) => {
       const { quarantineRoot, storage } = await createStorage();
       const stored = await store(storage, randomBytes(MIB + 100), "staging");
 
-      await expectInvalid(storage, stored, stored.ciphertextSize + delta);
+      const failure = await storage.unsealToQuarantine(
+        { kind: stored.kind, storageKey: stored.storageKey },
+        stored.context.documentId,
+        { ciphertextSize: stored.ciphertextSize + delta, plaintextSize: stored.plaintext.length },
+        unsealerFor(stored),
+      ).then(() => undefined, (error: unknown) => error);
 
+      expect(failure).toBeInstanceOf(DocumentIntegrityError);
       expect(await filesUnder(quarantineRoot)).toEqual([]);
     });
 
@@ -465,7 +471,7 @@ describe("unsealIntoBuffer (#1571)", () => {
       expect(bytes.some((byte) => byte !== 0)).toBe(true);
     }, 30_000);
 
-    it("an unsealer that hands back more plaintext than plaintextSize is refused, not written past the buffer", async () => {
+    it("an unsealer that hands back more plaintext than plaintextSize is refused as a DocumentIntegrityError, not written past the buffer (A-F1, X-F2)", async () => {
       const { storage } = await createStorage();
       const size = MIB + 1_000_003;
       const stored = await store(storage, randomBytes(size), "object");
@@ -475,7 +481,7 @@ describe("unsealIntoBuffer (#1571)", () => {
         final: () => undefined,
       };
 
-      await expect(storage.unsealIntoBuffer(stored.storageKey, expected(stored), generous)).rejects.toThrow();
+      await expect(storage.unsealIntoBuffer(stored.storageKey, expected(stored), generous)).rejects.toBeInstanceOf(DocumentIntegrityError);
 
       const buffers = plaintextBuffers(size);
       expect(buffers).toHaveLength(1);
@@ -499,7 +505,7 @@ describe("unsealIntoBuffer (#1571)", () => {
       expect(buffers[0]!.every((byte) => byte === 0)).toBe(true);
     }, 30_000);
 
-    it("an object shorter than ciphertextSize is refused as invalid, with the buffer zeroed", async () => {
+    it("an object shorter than ciphertextSize is refused as a DocumentIntegrityError, with the buffer zeroed (A-F1, X-F2)", async () => {
       const { storageRoot, storage } = await createStorage();
       const size = MIB + 1_000_011;
       const stored = await store(storage, randomBytes(size), "object");
@@ -509,8 +515,7 @@ describe("unsealIntoBuffer (#1571)", () => {
 
       const failure = await storage.unsealIntoBuffer(stored.storageKey, expected(stored), unsealerFor(stored)).then(() => undefined, (error: unknown) => error);
 
-      expect(failure).toBeInstanceOf(Error);
-      expect((failure as Error).message).toContain("invalid");
+      expect(failure).toBeInstanceOf(DocumentIntegrityError);
       const buffers = plaintextBuffers(size);
       expect(buffers).toHaveLength(1);
       expect(buffers[0]!.every((byte) => byte === 0)).toBe(true);
@@ -676,6 +681,20 @@ describe("streamVerifiedPlaintext (#1571)", () => {
     expectAllDetached(unsealers[0]!.pieces);
   }, 30_000);
 
+  it("rejects an object truncated below ciphertextSize with a DocumentIntegrityError, before any stream exists (A-F1, X-F2)", async () => {
+    const { storageRoot, storage } = await createStorage();
+    const stored = await store(storage, randomBytes(3 * MIB + 7), "object");
+    const path = objectFile(storageRoot, stored.storageKey);
+    await writeFile(path, (await readFile(path)).subarray(0, MIB + 10));
+    const before = openDescriptors();
+
+    const { stream } = openStream(storage, stored);
+    const failure = await stream.then(() => undefined, (error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(DocumentIntegrityError);
+    expect(openDescriptors()).toBe(before);
+  }, 30_000);
+
   it("reads at most two more pieces for a stream nobody reads", async () => {
     const { storage } = await createStorage();
     const stored = await store(storage, randomBytes(5 * MIB + 7), "object");
@@ -722,6 +741,23 @@ describe("streamVerifiedPlaintext (#1571)", () => {
 
     expect(failure, "the stream must error, not close").toBeInstanceOf(DocumentIntegrityError);
     expect(unsealers[1]!.events, "pass 2's final() ran and failed").toEqual(["final"]);
+    expect(watched.handles[handlesBefore]!.fd).toBe(-1);
+    expect(openDescriptors()).toBe(before);
+  }, 30_000);
+
+  it("errors the stream, and never closes it, when the object is truncated in place after the promise resolved (A-F1, X-F2)", async () => {
+    const { storageRoot, storage } = await createStorage();
+    const stored = await store(storage, randomBytes(3 * MIB + 7), "object");
+    const before = openDescriptors();
+    const handlesBefore = watched.handles.length;
+    const { stream } = openStream(storage, stored);
+    const body = await stream;
+
+    // Same inode, shorter file: the open descriptor sees it.
+    await truncate(objectFile(storageRoot, stored.storageKey), MIB + 11);
+    const failure = await drain(body).then(() => undefined, (error: unknown) => error);
+
+    expect(failure, "the stream must error, not close").toBeInstanceOf(DocumentIntegrityError);
     expect(watched.handles[handlesBefore]!.fd).toBe(-1);
     expect(openDescriptors()).toBe(before);
   }, 30_000);

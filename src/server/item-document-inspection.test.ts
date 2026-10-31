@@ -436,6 +436,33 @@ describe("item document inspection", () => {
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received(bytes).quarantinePath);
   });
 
+  it("answers a structure check that reached no verdict as the same rejected, unsupported_structure disposition, and logs the real reason (D-S1)", async () => {
+    const bytes = validPdf();
+    mocks.receive.mockResolvedValue(received(bytes));
+    mocks.readQuarantine.mockResolvedValue(bytes);
+    mocks.classifyStructure.mockResolvedValue("structure_check_unavailable");
+    const infoSpy = vi.spyOn(log, "info");
+
+    const result = await inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: "manual-review.pdf",
+      body: new ReadableStream<Uint8Array>(),
+    });
+
+    // The API enum is not widened: the client sees the refusal it already knows.
+    expect(result).toEqual({
+      extracted: false,
+      message: "Orbit could not open this document. Choose another PDF, JPEG, or PNG.",
+      suggestions: [],
+      attachmentDisposition: "rejected",
+      reason: "unsupported_structure",
+    });
+    expect(infoSpy).toHaveBeenCalledWith(expect.objectContaining({ event: "document.inspection", state: "exhausted", reason: "structure_check_unavailable" }));
+    expect(mocks.extract).not.toHaveBeenCalled();
+    expect(mocks.discardQuarantine).toHaveBeenCalledWith(received(bytes).quarantinePath);
+  });
+
   describe("document reading is off when TIKA_URL is unset (#1459)", () => {
     const off = () => mocks.config.mockReturnValue({ ...config, tika: { url: null, timeoutMs: 30_000 } });
     const upload = (filename = "manual-policy.pdf") => inspectItemDocument({

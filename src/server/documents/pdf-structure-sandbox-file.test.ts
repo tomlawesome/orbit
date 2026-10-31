@@ -28,6 +28,7 @@ import {
   peakRssGrowth,
   setSandboxLimits as setLimits,
   withCapturedLogs,
+  withLogRecords,
 } from "../../../tests/support/sandbox-test-helpers";
 import {
   largeFixtureDirectory,
@@ -155,7 +156,7 @@ describe("the structure check given a file (#1567)", () => {
 
       const captured = await withCapturedLogs(() => classifyFile("heap-bomb.pdf"));
 
-      expect(captured.result).toBe("unsupported_structure");
+      expect(captured.result).toBe("structure_check_unavailable");
       expect(captured.logged).toMatch(/memory/i);
       expect(captured.logged).not.toMatch(/crash/i);
       expect(captured.logged).not.toMatch(/timeout|timed.?out/i);
@@ -169,7 +170,7 @@ describe("the structure check given a file (#1567)", () => {
 
       const captured = await withCapturedLogs(() => classifyFile("object-stream-bomb.pdf"));
 
-      expect(captured.result).toBe("unsupported_structure");
+      expect(captured.result).toBe("structure_check_unavailable");
       expect(captured.calls).toBeGreaterThan(0);
       expect(captured.logged).toMatch(/memory/i);
       expect(captured.logged).not.toMatch(/timeout|timed.?out/i);
@@ -249,7 +250,7 @@ describe("the structure check given a file (#1567)", () => {
       await expect(inspectPdfStructureInSandbox(Buffer.alloc(0), small)).resolves.toBe("supported_structure");
       expect(await settledCount(pidBefore)).toBe(before);
       const pidAfterAccepted = lastPdfSandboxChildPidForTests();
-      await expect(inspectPdfStructureInSandbox(Buffer.alloc(0), bad)).resolves.toBe("unsupported_structure");
+      await expect(inspectPdfStructureInSandbox(Buffer.alloc(0), bad)).resolves.toBe("structure_check_unavailable");
       expect(await settledCount(pidAfterAccepted)).toBe(before);
     }, TEST_TIMEOUT_MS);
   });
@@ -258,15 +259,33 @@ describe("the structure check given a file (#1567)", () => {
     it.each([
       ["larger", 1],
       ["smaller", -1],
-    ] as const)("answers unsupported_structure, and the child is gone, when the stated size is %s than the file", async (_which, delta) => {
+    ] as const)("answers structure_check_unavailable (the child could not open its input), and the child is gone, when the stated size is %s than the file", async (_which, delta) => {
       const small = fileOf("small.pdf");
       const before = lastPdfSandboxChildPidForTests();
 
       await expect(inspectPdfStructureInSandbox(readFileSync(small.path), { path: small.path, sizeBytes: small.sizeBytes + delta }))
-        .resolves.toBe("unsupported_structure");
+        .resolves.toBe("structure_check_unavailable");
 
       expect(pdfStructureSandboxInFlightForTests()).toBe(0);
       await expectChildGone(before);
+    }, TEST_TIMEOUT_MS);
+  });
+
+  describe("a quarantine file that cannot be opened is no verdict (D-S1, W-F1)", () => {
+    it("answers structure_check_unavailable for a PDF whose file does not exist, with a warn saying it could not open the file to check, not a crash", async () => {
+      const missing = { path: join(directory, "no-such-quarantine-file.pdf"), sizeBytes: 100 };
+
+      const { result, records } = await withLogRecords(() => classifyDocumentStructure(Buffer.alloc(0), "application/pdf", missing));
+
+      expect(result).toBe("structure_check_unavailable");
+      const inspection = records.filter((record) => record.fields.event === "document.inspection");
+      expect(inspection).toHaveLength(1);
+      expect(inspection[0]!.level).toBe("warn");
+      expect(String(inspection[0]!.fields.detail)).toContain("could not open the file to check");
+      expect(String(inspection[0]!.fields.detail)).toContain("ENOENT");
+      expect(inspection[0]!.fields).toMatchObject({ reason: "processing_interrupted", action: "inspect_admin_diagnostics" });
+      expect(JSON.stringify(records)).not.toMatch(/crash/i);
+      expect(pdfStructureSandboxInFlightForTests()).toBe(0);
     }, TEST_TIMEOUT_MS);
   });
 

@@ -254,12 +254,49 @@ describe("createDocumentUnsealer (#1571)", () => {
     expect(() => createDocumentUnsealer(context, envelope, randomBytes(16))).toThrow(/32 bytes/);
   });
 
-  it("refuses an envelope version it does not know, as decryptDocument always did", () => {
+  describe("a stored record that does not open under its key is an integrity failure, at construction (A-F1, X-F2)", () => {
+    function sealed() {
+      const plaintext = randomBytes(100);
+      const context = contextFor(plaintext);
+      const { envelope } = seal(plaintext, context, kek);
+      return { context, envelope };
+    }
+
+    function flipped(value: string): string {
+      const bytes = Buffer.from(value, "base64url");
+      bytes[0] ^= 0x01;
+      return bytes.toString("base64url");
+    }
+
+    const damages: Array<[string, (envelope: CryptoEnvelope) => CryptoEnvelope, Buffer?]> = [
+      ["one byte flipped in wrappedDek", (envelope) => ({ ...envelope, wrappedDek: flipped(envelope.wrappedDek) })],
+      ["a wrapIv of 11 bytes", (envelope) => ({ ...envelope, wrapIv: randomBytes(11).toString("base64url") })],
+      ["one byte flipped in wrapAuthTag", (envelope) => ({ ...envelope, wrapAuthTag: flipped(envelope.wrapAuthTag) })],
+      ["a contentIv of 13 bytes", (envelope) => ({ ...envelope, contentIv: randomBytes(13).toString("base64url") })],
+      ["a contentAuthTag of 15 bytes", (envelope) => ({ ...envelope, contentAuthTag: randomBytes(15).toString("base64url") })],
+      ["a different 32-byte key-encryption key", (envelope) => envelope, randomBytes(32)],
+      ["envelopeVersion 2", (envelope) => ({ ...envelope, envelopeVersion: 2 })],
+    ];
+
+    it.each(damages)("%s throws DocumentIntegrityError before any update", (_name, damage, otherKek) => {
+      const { context, envelope } = sealed();
+
+      const error = thrownBy(() => createDocumentUnsealer(context, damage(envelope), otherKek ?? kek));
+
+      expect(error).toBeInstanceOf(DocumentIntegrityError);
+    });
+  });
+
+  it("a key-encryption key that is not 32 bytes stays a plain configuration error, not an integrity failure", () => {
     const plaintext = randomBytes(100);
     const context = contextFor(plaintext);
     const { envelope } = seal(plaintext, context, kek);
 
-    expect(() => createDocumentUnsealer(context, { ...envelope, envelopeVersion: 2 }, kek)).toThrow("Unsupported document encryption envelope");
+    const error = thrownBy(() => createDocumentUnsealer(context, envelope, randomBytes(16)));
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(DocumentIntegrityError);
+    expect((error as Error).message).toMatch(/32 bytes/);
   });
 
   describe("an unsealer that is finished stays finished", () => {
@@ -344,6 +381,16 @@ describe("decryptDocument, now built on the unsealer (#1571)", () => {
 
     expect(thrownBy(() => decryptDocument(changed, context, encrypted.envelope, kek))).toBeInstanceOf(DocumentIntegrityError);
     expect(thrownBy(() => decryptDocument(encrypted.ciphertext, { ...context, itemId: randomUUID() }, encrypted.envelope, kek))).toBeInstanceOf(DocumentIntegrityError);
+  });
+
+  it("refuses a flipped wrappedDek byte as an integrity failure (A-F1)", () => {
+    const plaintext = randomBytes(1_000);
+    const context = contextFor(plaintext);
+    const encrypted = encryptDocument(plaintext, context, kek, "key-1");
+    const wrapped = Buffer.from(encrypted.envelope.wrappedDek, "base64url");
+    wrapped[0] ^= 0x01;
+
+    expect(thrownBy(() => decryptDocument(encrypted.ciphertext, context, { ...encrypted.envelope, wrappedDek: wrapped.toString("base64url") }, kek))).toBeInstanceOf(DocumentIntegrityError);
   });
 
   it("refuses a ciphertext of the wrong length, either way", () => {

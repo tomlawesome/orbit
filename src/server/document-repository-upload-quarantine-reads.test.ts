@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   updateReturningQueues: new Map<string, unknown[][]>(),
   readQuarantineCalls: 0,
   scanStatus: "clean" as "clean" | "infected",
-  structureValid: true,
+  structureValid: true as boolean | "no_verdict",
   lastQuarantineBuffer: null as Buffer | null,
   order: [] as string[],
   inserts: [] as string[],
@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   sealerContexts: [] as unknown[],
   sealCalls: [] as unknown[][],
   bufferWasZeroWhenSealing: null as boolean | null,
+  bufferLengthWhenSealing: null as number | null,
   sealFailure: null as Error | null,
   discarded: [] as string[],
   encryptCalls: 0,
@@ -121,6 +122,7 @@ vi.mock("@/server/documents/validation", () => ({
   classifyDocumentStructure: async (...args: unknown[]) => {
     mocks.order.push("open");
     mocks.classifyCalls.push(args);
+    if (mocks.structureValid === "no_verdict") return "structure_check_unavailable";
     return mocks.structureValid ? "supported_structure" : "unsupported_structure";
   },
 }));
@@ -159,14 +161,16 @@ vi.mock("@/server/documents/scanner", () => ({
   },
 }));
 
-vi.mock("@/server/documents/storage", () => {
+vi.mock("@/server/documents/storage", async (importActual) => {
   class LocalDocumentStorage {
     async receive() {
       return { quarantinePath: "/tmp/q", sizeBytes: 5, contentSha256: "hash", leadingBytes: Buffer.from("%PDF") };
     }
     async readQuarantine() {
       mocks.readQuarantineCalls += 1;
-      const buffer = Buffer.from("plaintext");
+      // Not from Node's shared pool, as a real read of a file is not: the whole
+      // ArrayBuffer is this buffer's, so it can be detached.
+      const buffer = Buffer.alloc(9, "plaintext");
       mocks.lastQuarantineBuffer = buffer;
       return buffer;
     }
@@ -177,6 +181,7 @@ vi.mock("@/server/documents/storage", () => {
       mocks.sealCalls.push(args);
       // The check's buffer must already be wiped before the sealing pass starts.
       mocks.bufferWasZeroWhenSealing = mocks.lastQuarantineBuffer?.every((byte) => byte === 0) ?? null;
+      mocks.bufferLengthWhenSealing = mocks.lastQuarantineBuffer?.byteLength ?? null;
       if (mocks.sealFailure) throw mocks.sealFailure;
       return { ciphertextSize: 10, envelope: SEALED_ENVELOPE };
     }
@@ -190,6 +195,8 @@ vi.mock("@/server/documents/storage", () => {
   return {
     LocalDocumentStorage,
     openDocumentStorage: () => new LocalDocumentStorage(),
+    // The real one: freeing the buffer is what the upload is being held to.
+    releaseBuffer: (await importActual<typeof import("@/server/documents/storage")>()).releaseBuffer,
   };
 });
 
@@ -228,6 +235,7 @@ beforeEach(() => {
   mocks.sealerContexts = [];
   mocks.sealCalls = [];
   mocks.bufferWasZeroWhenSealing = null;
+  mocks.bufferLengthWhenSealing = null;
   mocks.sealFailure = null;
   mocks.discarded = [];
   mocks.encryptCalls = 0;
@@ -269,6 +277,20 @@ describe("uploadItemDocument scans before anything opens the file (ADR-0033)", (
 
     expect(mocks.order).toEqual(["scan", "open"]);
     expect(mocks.inserts).toEqual([]);
+  });
+
+  it("still refuses with the 422 when the structure check reached no verdict, writing no metadata (D-S1)", async () => {
+    configState.scanMode = "required";
+    mocks.structureValid = "no_verdict";
+    seedUploadHappyPath();
+
+    await expect(uploadItemDocument({
+      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
+    })).rejects.toMatchObject({ code: "document_structure_invalid", status: 422 });
+
+    expect(mocks.order).toEqual(["scan", "open"]);
+    expect(mocks.inserts).toEqual([]);
+    expect(mocks.discarded).toEqual(["/tmp/q"]);
   });
 });
 
@@ -374,5 +396,32 @@ describe("uploadItemDocument seals from quarantine in pieces (#1567)", () => {
 
     expect(mocks.lastQuarantineBuffer!.every((byte) => byte === 0)).toBe(true);
     expect(mocks.discarded).toContain("/tmp/q");
+  });
+});
+
+describe("the upload's check buffer is freed, not only zeroed (A-Q1, A-Q4)", () => {
+  it("hands the sealing pass a check buffer that is already detached, and leaves it detached after a clean upload", async () => {
+    configState.scanMode = "disabled";
+    seedUploadHappyPath();
+
+    await uploadItemDocument({ userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5 });
+
+    expect(mocks.bufferLengthWhenSealing, "detached by the time sealQuarantine is called").toBe(0);
+    expect(mocks.lastQuarantineBuffer!.byteLength, "still detached after the upload returns").toBe(0);
+    expect(mocks.lastQuarantineBuffer!.buffer.byteLength).toBe(0);
+  });
+
+  it("detaches the check buffer when the structure check refuses the upload with a 422", async () => {
+    configState.scanMode = "disabled";
+    mocks.structureValid = false;
+    seedUploadHappyPath();
+
+    await expect(uploadItemDocument({
+      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
+    })).rejects.toMatchObject({ code: "document_structure_invalid", status: 422 });
+
+    expect(mocks.lastQuarantineBuffer).not.toBeNull();
+    expect(mocks.lastQuarantineBuffer!.byteLength).toBe(0);
+    expect(mocks.lastQuarantineBuffer!.buffer.byteLength).toBe(0);
   });
 });

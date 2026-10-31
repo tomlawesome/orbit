@@ -49,11 +49,11 @@ describe("bounded PDF inspection", () => {
     expect(pdfStructureSandboxInFlightForTests()).toBe(0);
   });
 
-  it("maps an expired sandbox wall-clock budget to unsupported_structure and leaves no worker running", async () => {
+  it("maps an expired sandbox wall-clock budget to structure_check_unavailable and leaves no worker running", async () => {
     setPdfStructureSandboxLimitsForTests({ wallMs: 1 });
 
     await expect(classifyDocumentStructure(syntheticPdf(), "application/pdf"))
-      .resolves.toBe("unsupported_structure");
+      .resolves.toBe("structure_check_unavailable");
     expect(pdfStructureSandboxInFlightForTests()).toBe(0);
   });
 

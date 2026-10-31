@@ -6,7 +6,8 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { documents, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects } from "@/db/schema";
 import { reconcileDocumentStorage } from "@/server/document-maintenance/storage-reconciliation";
-import { getDocumentConfig } from "@/server/documents/config";
+import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
+import { setPdfStructureSandboxLimitsForTests } from "@/server/documents/pdf-structure-sandbox";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import {
   cleanupImapStagingAttempt,
@@ -23,6 +24,13 @@ import { discardImapReviewItem, purgeExpiredImapStaging } from "@/server/mail-in
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { attributedHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor } from "./support/mail-in";
 import { syntheticPdf } from "../support/synthetic-documents";
+
+// The mailbox path only runs with the scanner required; the verdict is not
+// what these tests are about, so it answers clean.
+vi.mock("@/server/documents/scanner", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/server/documents/scanner")>(),
+  scanFileWithClamAv: vi.fn(async () => ({ status: "clean" as const })),
+}));
 
 afterAll(async () => {
   setImapClientFactoryForTests(undefined);
@@ -188,6 +196,44 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       expect(mismatch).toMatchObject({ status: "quarantined", failureCode: "recipient_mismatch" });
       expect(mismatchProvider.downloads).toEqual([]);
     } finally {
+      setImapClientFactoryForTests(undefined);
+      await fixture.cleanup();
+    }
+  });
+
+  it("reschedules, not fails, a receipt whose attachment's structure check could not run (D-S1)", async () => {
+    const fixture = await createIntegrationFixture("imap-structure-check-unavailable");
+    const previousScanMode = process.env.DOCUMENT_SCAN_MODE;
+    try {
+      const config = attributedConfig();
+      const memberSender = await verifiedSenderFor(fixture.users.member.id);
+      const alias = imapRecipientAlias(fixture.users.member.id, config);
+      const header = attributedHeaders(memberSender, alias);
+      await getDb().insert(imapIngestionMessages).values({
+        mailbox: config.mailbox, mailboxUidValidity: "77", mailboxUid: 820, contentSha256: randomUUID().replaceAll("-", ""),
+        recipientAliasSha256: "check-unavailable", userId: fixture.users.member.id, status: "processing",
+        expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingNextAttemptAt: new Date(0),
+      });
+      const provider = fakeClient([{ uid: 820, headers: header, bodyStructure: pdfBodyStructure(), source: Buffer.from("check unavailable"), size: 17 }]);
+      setImapClientFactoryForTests(() => provider.client as never);
+      process.env.DOCUMENT_SCAN_MODE = "required";
+      resetDocumentConfigForTests();
+      // The sandbox cannot start its parser: a stop, which gives no verdict on the file.
+      setPdfStructureSandboxLimitsForTests({ pdfjsUrl: "file:///nonexistent/orbit-missing-pdfjs-module.mjs" });
+
+      await runImapIngestionCycle(config);
+
+      const [receipt] = await getDb().select().from(imapIngestionMessages).where(and(eq(imapIngestionMessages.mailboxUid, 820), eq(imapIngestionMessages.mailboxUidValidity, "77")));
+      expect(provider.downloads, "the attachment was downloaded and checked").toEqual(["820:1"]);
+      expect(receipt).toMatchObject({ status: "processing", attachmentProcessingAttempts: 1, attachmentProcessingFailureCode: "structure_check_unavailable" });
+      expect(receipt!.attachmentProcessingNextAttemptAt, "a retry is scheduled").not.toBeNull();
+      expect(receipt!.attachmentProcessingNextAttemptAt!.getTime()).toBeGreaterThan(Date.now());
+      expect(await getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments).where(eq(imapIngestionAttachments.messageId, receipt!.id))).toHaveLength(0);
+    } finally {
+      setPdfStructureSandboxLimitsForTests(undefined);
+      if (previousScanMode === undefined) delete process.env.DOCUMENT_SCAN_MODE;
+      else process.env.DOCUMENT_SCAN_MODE = previousScanMode;
+      resetDocumentConfigForTests();
       setImapClientFactoryForTests(undefined);
       await fixture.cleanup();
     }

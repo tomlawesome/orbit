@@ -62,7 +62,7 @@ const mocks = vi.hoisted(() => ({
   createDocumentUnsealer: vi.fn(),
   createDocumentSealer: vi.fn(),
   scanFile: vi.fn(),
-  validateStructure: vi.fn(),
+  classifyStructure: vi.fn(),
   unsealToQuarantine: vi.fn(),
   readQuarantine: vi.fn(),
   sealQuarantine: vi.fn(),
@@ -261,7 +261,9 @@ vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scanFil
 
 vi.mock("@/server/documents/validation", async (importActual) => ({
   ...await importActual<typeof import("@/server/documents/validation")>(),
-  validateSupportedDocumentStructure: mocks.validateStructure,
+  classifyDocumentStructure: mocks.classifyStructure,
+  validateSupportedDocumentStructure: async (...args: unknown[]) =>
+    (await (mocks.classifyStructure as (...a: unknown[]) => Promise<string>)(...args)) === "supported_structure",
 }));
 
 vi.mock("@/server/documents/storage", async (importActual) => {
@@ -431,9 +433,9 @@ beforeEach(() => {
     mocks.steps.push("scanner.scan");
     return { status: "clean" };
   });
-  mocks.validateStructure.mockImplementation(async () => {
+  mocks.classifyStructure.mockImplementation(async () => {
     mocks.steps.push("validation.structure");
-    return true;
+    return "supported_structure";
   });
   // The staged object is decrypted into a quarantine file, its tag verified
   // before the path is returned; the digest is the one the upload recorded.
@@ -719,10 +721,10 @@ describe("scanner recovery — the clean path publishes only after a clean scan"
 
     expect(mocks.readQuarantine).toHaveBeenCalledTimes(1);
     expect(mocks.readQuarantine).toHaveBeenCalledWith(QUARANTINE_PATH, DOCUMENT_MAX_BYTES_CEILING);
-    expect(mocks.validateStructure).toHaveBeenCalledTimes(1);
-    expect(mocks.validateStructure.mock.calls[0]![0]).toBe(copy);
-    expect(mocks.validateStructure.mock.calls[0]![1]).toBe("application/pdf");
-    expect(mocks.validateStructure.mock.calls[0]![2]).toEqual({ path: QUARANTINE_PATH, sizeBytes: 8 });
+    expect(mocks.classifyStructure).toHaveBeenCalledTimes(1);
+    expect(mocks.classifyStructure.mock.calls[0]![0]).toBe(copy);
+    expect(mocks.classifyStructure.mock.calls[0]![1]).toBe("application/pdf");
+    expect(mocks.classifyStructure.mock.calls[0]![2]).toEqual({ path: QUARANTINE_PATH, sizeBytes: 8 });
     expect(copy.byteLength === 0 || copy.every((byte) => byte === 0), "the check's copy is wiped or freed").toBe(true);
   });
 
@@ -880,15 +882,15 @@ describe("scanner recovery — fail-closed scanning order", () => {
       expect.objectContaining({ lifecycle: "rejected", scanStatus: "infected", failureCode: "malware_detected" }),
     ]);
     expect(mocks.readQuarantine).not.toHaveBeenCalled();
-    expect(mocks.validateStructure).not.toHaveBeenCalled();
+    expect(mocks.classifyStructure).not.toHaveBeenCalled();
     expectNoPublish();
   });
 
   it("rejects a clean file the renderer cannot open, after the scan and never before it (ADR-0033)", async () => {
     armScanJob();
-    mocks.validateStructure.mockImplementation(async () => {
+    mocks.classifyStructure.mockImplementation(async () => {
       mocks.steps.push("validation.structure");
-      return false;
+      return "unsupported_structure";
     });
 
     await runDocumentMaintenanceCycle();
@@ -907,6 +909,75 @@ describe("scanner recovery — fail-closed scanning order", () => {
     expect(mocks.sealQuarantine).not.toHaveBeenCalled();
     expect(mocks.writeCiphertext).not.toHaveBeenCalled();
     expect(mocks.steps).not.toContain("insert:document_crypto");
+  });
+
+  it("rejects a clean file whose check answers password_required as unsupported_structure, as the boolean always did", async () => {
+    armScanJob();
+    mocks.classifyStructure.mockImplementation(async () => {
+      mocks.steps.push("validation.structure");
+      return "password_required";
+    });
+
+    await runDocumentMaintenanceCycle();
+
+    expect(documentTransitions()).toEqual([
+      expect.objectContaining({ lifecycle: "rejected", scanStatus: "clean", failureCode: "unsupported_structure" }),
+    ]);
+    expect(mocks.discardQuarantine).toHaveBeenCalledWith(QUARANTINE_PATH);
+    expect(mocks.createDocumentSealer).not.toHaveBeenCalled();
+    expect(mocks.sealQuarantine).not.toHaveBeenCalled();
+  });
+
+  describe("a check that could not run is no verdict: the only staged copy is kept (D-S1)", () => {
+    function unavailable(): void {
+      mocks.classifyStructure.mockImplementation(async () => {
+        mocks.steps.push("validation.structure");
+        return "structure_check_unavailable";
+      });
+    }
+
+    it("retries the job with a future next attempt, keeps the stage, discards the quarantine file and seals nothing", async () => {
+      armScanJob();
+      unavailable();
+
+      await runDocumentMaintenanceCycle();
+
+      const after = traceAfter("scanner.scan");
+      expect(after.slice(0, 2), "the check runs on the file's one copy, after the scan").toEqual(["storage.readQuarantine", "validation.structure"]);
+      expect(after).toContain("update:document_jobs");
+      expect(after.indexOf("update:document_jobs"), "the job update comes before the file is discarded").toBeLessThan(after.indexOf("storage.discardQuarantine"));
+
+      // Nothing purged: no document rejected, no staging row touched, no staged ciphertext deleted.
+      expect(documentTransitions()).toEqual([]);
+      expect(mocks.writes.some((write) => write.table === "document_staging_objects")).toBe(false);
+      expect(mocks.deleteStagingCiphertext).not.toHaveBeenCalled();
+      expect(mocks.steps).not.toContain("storage.deleteStagingCiphertext");
+      // Nothing sealed or published.
+      expect(mocks.createDocumentSealer).not.toHaveBeenCalled();
+      expect(mocks.sealQuarantine).not.toHaveBeenCalled();
+      expect(mocks.steps).not.toContain("insert:document_crypto");
+
+      const jobWrite = mocks.writes.find((write) => write.table === "document_jobs" && write.operation === "update");
+      expect(jobWrite?.values).toMatchObject({ status: "retry", lastError: "structure_check_unavailable", leaseToken: null });
+      expect((jobWrite?.values?.nextAttemptAt as Date).getTime(), "a future next attempt").toBeGreaterThan(Date.now());
+      expect(mocks.discardQuarantine).toHaveBeenCalledTimes(1);
+      expect(mocks.discardQuarantine).toHaveBeenCalledWith(QUARANTINE_PATH);
+    });
+
+    it("fails the job, and still keeps the stage pending, once the automatic attempt ceiling is reached", async () => {
+      armScanJob();
+      world.jobAttempts = 5;
+      unavailable();
+
+      await runDocumentMaintenanceCycle();
+
+      const jobWrite = mocks.writes.find((write) => write.table === "document_jobs" && write.operation === "update");
+      expect(jobWrite?.values).toMatchObject({ status: "failed", lastError: "structure_check_unavailable" });
+      expect(documentTransitions()).toEqual([]);
+      expect(mocks.writes.some((write) => write.table === "document_staging_objects")).toBe(false);
+      expect(mocks.deleteStagingCiphertext).not.toHaveBeenCalled();
+      expect(mocks.sealQuarantine).not.toHaveBeenCalled();
+    });
   });
 
   it("treats a non-retryable scanner error as terminal scanner_failed, not as a retry", async () => {
@@ -983,7 +1054,7 @@ describe("scanner recovery — fail-closed scanning order", () => {
 
     expect(mocks.scanFile).not.toHaveBeenCalled();
     expect(mocks.readQuarantine).not.toHaveBeenCalled();
-    expect(mocks.validateStructure).not.toHaveBeenCalled();
+    expect(mocks.classifyStructure).not.toHaveBeenCalled();
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(QUARANTINE_PATH);
     expect(documentTransitions()).toEqual([
       expect.objectContaining({ lifecycle: "rejected", failureCode: "staging_object_invalid" }),
