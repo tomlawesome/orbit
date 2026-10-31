@@ -79,13 +79,15 @@ export type VolumeNotProvenReason =
   | "image-mismatch";
 
 export type VolumeOwnershipOutcome =
-  | { status: "proven"; project: string }
+  /** `appImage` is the running orbit-app's image, the accepted image it matched. */
+  | { status: "proven"; project: string; appImage: string }
   /**
    * bash `return 1`: a docker fact was cleanly obtained but ownership could
    * not be proven. `folder` names the other folder (other-folder); `service`
-   * the service that mounts the volume without being orbit-db (foreign-container).
+   * the service that mounts the volume without being orbit-db, and `container`
+   * that container's id (foreign-container).
    */
-  | { status: "not-proven"; reason: VolumeNotProvenReason; folder?: string; service?: string }
+  | { status: "not-proven"; reason: VolumeNotProvenReason; folder?: string; service?: string; container?: string }
   /** bash `return 2`: a docker call failed, or its output failed format/bounds validation — untrusted, not just unproven. */
   | { status: "verify-error" };
 
@@ -110,18 +112,19 @@ function splitPipeFields(line: string, fieldCount: number): string[] {
  * independent checks before trusting it — exact Compose project/volume-name
  * label match, exactly one `orbit-db` container attached to the volume in
  * that project, exactly one `orbit-app` container in that project, and that
- * container's image must be digest-pinned and match the expected image
- * exactly. All consumed docker output is bounds-checked (length caps,
+ * container's image must be digest-pinned and match one of the expected
+ * images exactly (a single image may be given as a string). All consumed docker output is bounds-checked (length caps,
  * single-line, strict field regexes) before being trusted; any ambiguity,
  * extra container, mismatched image, or malformed docker output fails
  * closed rather than being assumed safe.
  */
 export function evaluateVolumeOwnership(
   candidateVolume: string,
-  expectedImage: string,
+  expectedImage: string | readonly string[],
   adapter: VolumeOwnershipAdapter,
   updateFolder?: string | readonly string[],
 ): VolumeOwnershipOutcome {
+  const acceptedImages: readonly string[] = typeof expectedImage === "string" ? [expectedImage] : expectedImage;
   const volumeLabels = adapter.inspectVolumeLabels(candidateVolume);
   if (volumeLabels === null) return { status: "verify-error" };
   if (volumeLabels.length > 256) return { status: "verify-error" };
@@ -164,7 +167,7 @@ export function evaluateVolumeOwnership(
   if (dbContainers.length > 65536) return { status: "verify-error" };
   let appContainers: string | null | undefined;
   /** A failed proof, unless another folder's container explains it; reads what has not been read yet, and only on this failure path. */
-  const notProven = (reason: VolumeNotProvenReason, service?: string): VolumeOwnershipOutcome => {
+  const notProven = (reason: VolumeNotProvenReason, service?: string, container?: string): VolumeOwnershipOutcome => {
     if (ownFolders !== undefined) {
       if (appContainers === undefined) appContainers = adapter.listContainersByProject(volumeProject);
       for (const [listing, onlyService] of [[dbContainers, undefined], [appContainers, "orbit-app"]] as const) {
@@ -177,18 +180,25 @@ export function evaluateVolumeOwnership(
         }
       }
     }
-    return service === undefined ? { status: "not-proven", reason } : { status: "not-proven", reason, service };
+    return {
+      status: "not-proven",
+      reason,
+      ...(service === undefined ? {} : { service }),
+      ...(container === undefined ? {} : { container }),
+    };
   };
   let dbCount = 0;
   for (const line of dbContainers.split("\n")) {
     const [dbId, dbProject, dbService, workingDir] = splitPipeFields(line, 4);
     if (dbId === "" && dbProject === "" && dbService === "" && workingDir === "") continue;
-    if (!(CONTAINER_ID_PATTERN.test(dbId) && dbProject === volumeProject && workingDir.length <= MAXIMUM_WORKING_DIR_LENGTH)) {
+    if (!(CONTAINER_ID_PATTERN.test(dbId) && (dbProject === volumeProject || dbProject === "") && workingDir.length <= MAXIMUM_WORKING_DIR_LENGTH)) {
       return { status: "verify-error" };
     }
+    // No Compose labels at all is a plain docker-run container: foreign, and named by its id. Another project's labels on this volume stay malformed output.
+    if (dbProject === "") return notProven("foreign-container", "", dbId);
     const folder = otherFolder(workingDir);
     if (folder !== undefined) return inOtherFolder(folder);
-    if (dbService !== "orbit-db") return notProven("foreign-container", dbService);
+    if (dbService !== "orbit-db") return notProven("foreign-container", dbService, dbId);
     dbCount += 1;
   }
   if (dbCount === 0) return notProven("no-database-container");
@@ -198,6 +208,7 @@ export function evaluateVolumeOwnership(
   if (appContainers === null) return { status: "verify-error" };
   if (appContainers.length > 65536) return { status: "verify-error" };
   let appCount = 0;
+  let acceptedAppImage = "";
   for (const line of appContainers.split("\n")) {
     const [appId, appProject, appService, workingDir] = splitPipeFields(line, 4);
     if (appId === "" && appProject === "" && appService === "" && workingDir === "") continue;
@@ -213,11 +224,13 @@ export function evaluateVolumeOwnership(
     if (appImage === null) return { status: "verify-error" };
     if (appImage.length > 4096) return { status: "verify-error" };
     if (!IMMUTABLE_IMAGE_PATTERN.test(appImage)) return { status: "verify-error" };
-    if (appImage !== expectedImage) return notProven("image-mismatch");
+    // The saved image, and the image the last committed update replaced: an update that committed and then failed before compose up left the saved image ahead of the running one, and its retry must be proven, not refused.
+    if (!acceptedImages.includes(appImage)) return notProven("image-mismatch");
+    acceptedAppImage = appImage;
   }
   if (appCount !== 1) return notProven("no-app-container");
 
-  return { status: "proven", project: volumeProject };
+  return { status: "proven", project: volumeProject, appImage: acceptedAppImage };
 }
 
 /** The additional docker calls verify_database_volume_safety itself makes, beyond volume ownership. */
@@ -280,18 +293,23 @@ function notProvenMessage(
   switch (outcome.reason) {
     case "other-folder":
       return `The running Orbit containers for the database volume ${volume} were created from another folder, ${outcome.folder}, not from ${typeof updateFolder === "string" ? updateFolder : (updateFolder?.at(-1) ?? "the folder this update runs in")}; ${refusing} Run the update in ${outcome.folder}, the folder that owns them.`;
-    case "foreign-container":
-      return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: a container of service "${outcome.service}" mounts it, and only orbit-db may; ${refusing} Check which container that is (docker ps -a --filter volume=${volume}) and stop or remove it if it is not part of this deployment, then run the update again.`;
+    case "foreign-container": {
+      // A plain docker-run container has no service label; its id is the only name it has.
+      const mounter = outcome.service === "" ? `container ${outcome.container}, which has no Compose service label,` : `a container of service "${outcome.service}"`;
+      return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: ${mounter} mounts it, and only orbit-db may; ${refusing} Check which container that is (docker ps -a --filter volume=${volume}) and stop or remove it if it is not part of this deployment, then run the update again.`;
+    }
+    // A deployment taken down keeps its volume and loses both containers: the one step back is to start it again from its own folder, in words, never as a Compose command.
     case "no-database-container":
-      return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: no orbit-db container uses it; ${refusing} Check that this deployment's orbit-db container exists and mounts this volume, or that the volume is not left over from a deployment you have removed, then run the update again.`;
+      return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: no orbit-db container uses it; ${refusing} If you took this deployment's containers down, start the deployment again from the folder it was installed in, so that its orbit-db container mounts the volume, then run the update again. If the volume is left over from a deployment you removed, this folder cannot update onto it; do not remove the volume until you are sure its database is not needed.`;
     case "several-database-containers":
       return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: more than one orbit-db container uses it; ${refusing} Check which orbit-db container is the live one (docker ps -a --filter volume=${volume}), remove the others, then run the update again.`;
     case "no-app-container":
-      return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: its Compose project has no orbit-app container; ${refusing} Check that this deployment's orbit-app container exists (it may have been removed), restore it, then run the update again.`;
+      return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: its Compose project has no orbit-app container; ${refusing} If you took this deployment's containers down, or removed the application container, start the deployment again from the folder it was installed in, then run the update again.`;
     case "several-app-containers":
       return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: its Compose project has more than one orbit-app container; ${refusing} Check which orbit-app container is the live one, remove the others, then run the update again.`;
+    // The way back after a commit that stopped before compose up is to finish the switch from the deployment's own folder; setting the saved image back by hand breaks the provenance stamp written beside it.
     case "image-mismatch":
-      return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: the running orbit-app was started from a different build than the ORBIT_IMAGE that .env-orbit names; ${refusing} Compare the running orbit-app container's image with ORBIT_IMAGE in .env-orbit, then run the update again once they name the same build.`;
+      return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: the running orbit-app was started from a different build than the ORBIT_IMAGE that .env-orbit names; ${refusing} Compare the running orbit-app container's image with ORBIT_IMAGE in .env-orbit, then run the update again once they name the same build. If an earlier update stopped after saving ORBIT_IMAGE but before the containers were replaced, start the deployment again from the folder it was installed in, so that its containers run the build ORBIT_IMAGE names, then run the update again. Do not set ORBIT_IMAGE back by hand: the installer's record of the build that checked .env-orbit would no longer match it, and the next run would refuse the file.`;
   }
 }
 
@@ -310,6 +328,12 @@ export interface DatabaseVolumeSafetyState {
   composeProjectName: string;
   /** install.sh `compose_project_name_provisional` (#999) */
   composeProjectNameProvisional: boolean;
+  /**
+   * Not an install.sh global: the running orbit-app's image the proof
+   * accepted when a volume was attached, which the commit records as
+   * ORBIT_PREVIOUS_IMAGE.
+   */
+  attachedAppImage?: string;
 }
 
 export interface PostgresPasswordFacts {
@@ -423,7 +447,9 @@ export function verifyDatabaseVolumeSafety(
   // whose labels cannot be read, one the proof does tie to this deployment's
   // image (a genuinely ambiguous pair refuses as before), and every volume
   // while the project name is only a guess, when a renamed project is
-  // provable by its labels alone.
+  // provable by its labels alone. The recorded previous image is not used
+  // here: a second stack still on it says nothing about this deployment, and
+  // would otherwise make every update ambiguous until it caught up.
   const expectedImage = readEnvironmentValue(targetDir, "ORBIT_IMAGE");
   if (!nextState.targetWasEmpty && nextState.composeProjectNameExplicit && expectedImage !== undefined && IMMUTABLE_IMAGE_PATTERN.test(expectedImage)) {
     const ownProject = nextState.composeProjectName;
@@ -463,8 +489,13 @@ export function verifyDatabaseVolumeSafety(
     );
   }
 
+  // The image the last committed update recorded as running; a value that is
+  // not digest-pinned is ignored, never trusted and never a refusal.
+  const recordedPreviousImage = readEnvironmentValue(targetDir, "ORBIT_PREVIOUS_IMAGE");
+  const acceptedImages = recordedPreviousImage !== undefined && IMMUTABLE_IMAGE_PATTERN.test(recordedPreviousImage) ? [oldImage, recordedPreviousImage] : [oldImage];
+
   const candidateVolume = candidates[0];
-  const ownership = evaluateVolumeOwnership(candidateVolume, oldImage, adapter, updateFolder);
+  const ownership = evaluateVolumeOwnership(candidateVolume, acceptedImages, adapter, updateFolder);
 
   if (ownership.status === "not-proven") {
     throw new DatabaseVolumeSafetyRefusal(
@@ -516,5 +547,6 @@ export function verifyDatabaseVolumeSafety(
     databaseVolumeChecked: true,
     databaseVolumeSeen: true,
     databaseVolumeName: candidateVolume,
+    attachedAppImage: ownership.appImage,
   };
 }
