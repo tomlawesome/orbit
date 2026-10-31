@@ -2233,6 +2233,58 @@ runImportRecoveryBundle({
       expect(existsSync(rollbackFile)).toBe(false);
       expect(existsSync(deriveRestorePaths(backupDirectory, liveDocumentKekFile).journalPath)).toBe(false);
     }, 40_000);
+
+    // #1536 A-R1: the marker names the key it is about to write (sha256), so a key
+    // an operator put back by hand after the kill is not mistaken for that run's.
+    it("A-R1: after a kill, a rerun keeps a live key that differs from the one the interrupted import wrote, and clears the marker", async () => {
+      const passphrase = "correct horse battery staple";
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+      const liveDocumentsRoot = join(sandbox, "live-docs-import-nokey-handkey");
+      buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+      const liveDocumentKekFile = join(sandbox, "live-document-kek-nokey-handkey");
+      const backupDirectory = join(sandbox, "import-target-backups-nokey-handkey");
+      mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+
+      const { stdout, stderr, closeSignal } = await importKilledAt("confirm", "SIGKILL", {
+        recoveryBundlePath,
+        passphrase,
+        liveDocumentsRoot,
+        liveDocumentKekFile,
+        backupDirectory,
+      });
+      expect(stdout, `the child never reached the restore confirmation (stderr: ${stderr})`).toContain("paused");
+      expect(closeSignal).toBe("SIGKILL");
+      expect(existsSync(`${liveDocumentKekFile}.import-no-key`)).toBe(true);
+
+      // The operator puts their own key back by hand.
+      writeFileSync(liveDocumentKekFile, `${ORIGINAL_KEY}\n`, { mode: 0o600 });
+
+      const written: string[] = [];
+      const spy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: string | Uint8Array) => {
+        written.push(String(chunk));
+        return true;
+      }) as typeof process.stderr.write);
+      try {
+        expect(() =>
+          runImportRecoveryBundle({
+            recoveryBundlePath,
+            passphrase,
+            liveDocumentKekFile,
+            backupDirectory,
+            adapter: new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10),
+            importConfirmed: true,
+            confirmRestore: () => false,
+          }),
+        ).toThrow();
+      } finally {
+        spy.mockRestore();
+      }
+
+      expect(readFileSync(liveDocumentKekFile, "utf8").trim(), "the operator's key was removed").toBe(ORIGINAL_KEY);
+      expect(existsSync(`${liveDocumentKekFile}.import-no-key`)).toBe(false);
+      expect(existsSync(`${liveDocumentKekFile}.import-rollback`)).toBe(false);
+      expect(written.join("")).toContain("is not the one an interrupted import wrote; it was kept.");
+    }, 40_000);
   });
 
   // #1420: an operator who lost .orbit-secrets/document-kek can import the

@@ -20,6 +20,7 @@ import {
   writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 
 import { applyHostOwnership } from "./host-ownership";
@@ -958,25 +959,58 @@ function importRecoveryBundleUnlocked(options: RunImportRecoveryBundleOptions): 
  * #1536 A-R1: with the lock held and no journal, an intent marker beside the
  * live key means a key-less import (#1420) was killed after it began writing
  * its recovered key and before its checkpoint recorded "no previous key". The
- * deployment had no key, so the key at the live path is that run's: remove it
- * (and only then the marker, so a failure here leaves the marker to try again)
- * rather than let this run read it as the deployment's previous key.
+ * marker holds the sha256 of the key that run was about to write (write-ahead
+ * intent): the live key is removed only when it is that key. A different key
+ * is the operator's (put back by hand after the kill) and is kept; only the
+ * marker goes. The key is removed before the marker, so a failure here leaves
+ * the marker to try again.
  */
 function removeInterruptedKeylessImportKey(liveDocumentKekFile: string): void {
   const markerFile = noKeyImportMarkerPath(liveDocumentKekFile);
   if (!existsSync(markerFile) && !isSymlinkPath(markerFile)) return;
-  rmSync(liveDocumentKekFile, { force: true });
-  fsyncPath(dirname(liveDocumentKekFile));
+  if (!isAbsentPath(liveDocumentKekFile)) {
+    const intended = readNoKeyImportMarkerDigest(markerFile);
+    if (intended !== undefined && intended === sha256OfFile(liveDocumentKekFile)) {
+      rmSync(liveDocumentKekFile, { force: true });
+      fsyncPath(dirname(liveDocumentKekFile));
+    } else {
+      process.stderr.write(`Orbit recovery import: the key at ${liveDocumentKekFile} is not the one an interrupted import wrote; it was kept.\n`);
+    }
+  }
   clearNoKeyImportMarker(markerFile);
+}
+
+const NO_KEY_IMPORT_MARKER_PREFIX = "key_sha256=";
+
+function readNoKeyImportMarkerDigest(markerFile: string): string | undefined {
+  try {
+    if (isSymlinkPath(markerFile)) return undefined;
+    const match = new RegExp(`^${NO_KEY_IMPORT_MARKER_PREFIX}([0-9a-f]{64})\\n$`).exec(readFileSync(markerFile, "utf8"));
+    return match?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+/** sha256 (hex) of a regular file's bytes, or undefined when it cannot be read as one. */
+function sha256OfFile(path: string): string | undefined {
+  try {
+    if (isSymlinkPath(path)) return undefined;
+    return createHash("sha256").update(readFileSync(path)).digest("hex");
+  } catch {
+    return undefined;
+  }
 }
 
 /**
  * Durably records, before the recovered key is written, that this run is
- * installing a key where there was none: write the marker, fsync it, fsync its
- * directory (the shape of writeRestoreJournal's temp-then-publish durability).
+ * installing a key where there was none, and which key (its sha256, never the
+ * key): write the marker, fsync it, fsync its directory (the shape of
+ * writeRestoreJournal's temp-then-publish durability).
  */
-function writeNoKeyImportMarker(markerFile: string): void {
-  writeSecretFile(markerFile, "a key-less recovery import is installing the document key at the live path\n", SECURE_FILE_MODE);
+function writeNoKeyImportMarker(markerFile: string, keyFileContent: string): void {
+  const digest = createHash("sha256").update(keyFileContent).digest("hex");
+  writeSecretFile(markerFile, `${NO_KEY_IMPORT_MARKER_PREFIX}${digest}\n`, SECURE_FILE_MODE);
   fsyncPath(markerFile);
   fsyncPath(dirname(markerFile));
 }
@@ -1034,7 +1068,7 @@ function swapKeyAndRestore(
   const restoreWorkDir = mkdtempSync(join(workDir, "restore-"));
   try {
     if (!noPreviousKek) renameSecretFileAcrossDevices(options.liveDocumentKekFile, previousKekPath);
-    else writeNoKeyImportMarker(markerFile);
+    else writeNoKeyImportMarker(markerFile, `${recoveredKekHex}\n`);
     writeSecretFile(options.liveDocumentKekFile, `${recoveredKekHex}\n`, SECURE_FILE_MODE);
 
     runRestore({
