@@ -182,6 +182,11 @@
             {#if unreadable(receipt)}
               <div class="twotap" style="margin-top:10px">{unreadable(receipt)}</div>
             {/if}
+            <!-- #1568: a retryable suggestion (an interrupted approval) says
+                 what happened and what to do, in the server's own words. -->
+            {#if receipt.classification === "retry"}
+              <div class="twotap" style="margin-top:10px">{receipt.message}</div>
+            {/if}
             <div class="actions">
               <button class="yes" disabled={busy === receipt.id || locked(receipt)} onclick={(event) => tap(receipt, "approve", event.currentTarget)}>
                 {isArmed(receipt, "approve") ? "tap again to approve" : "Add to orbit"}

@@ -30,6 +30,7 @@ export const REASON_WORDS = /** @type {Record<string, string>} */ ({
   malware: "scanner refused it",
   scanner_off: "scanner unavailable",
   not_kept: "couldn’t be kept",
+  interrupted: "approval cut short",
   wrong_recipient: "not addressed to you",
   account_disabled: "account disabled",
   unknown: "reason not named",

@@ -745,6 +745,21 @@ async function finishMailboxApproval(
         await transaction.update(imapIngestionMessages).set({ status: "expired", expiredAt: new Date(), updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
         return { receipt, claimed: false, expired: true, result: undefined };
       }
+      // A replay after the receipt was discarded, or while a discard is under
+      // way, is refused as a fresh claim is (#1568): its attachments are
+      // rejected or going, so a transfer would only answer 404 every time.
+      // Before any item or transfer; an interrupted or partial approval still
+      // retries. `staging_purge_failed` is not refused: a transfer whose purge
+      // failed leaves that code too, and its replay must finish; a failed
+      // discard leaves `discard_purge_failed` instead.
+      if (
+        receipt.status === "discarded"
+        || receipt.status === "expired"
+        || (receipt.status === "recoverable"
+          && (receipt.failureCode === "staging_purge_pending" || receipt.failureCode === "discard_purge_failed"))
+      ) {
+        throw new AppError("reviewed_intake_not_approvable", "That reviewed intake is no longer available", 409);
+      }
       return { receipt, claimed: false, result: undefined };
     }
     if (receipt.status !== "pending_review") throw new AppError("reviewed_intake_not_approvable", "That reviewed intake is no longer available", 409);
