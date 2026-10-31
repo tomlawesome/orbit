@@ -821,8 +821,10 @@ describe("a refusal after the containers were taken down names the way back", ()
   });
 });
 
-// A plain `docker run` container has no Compose service label; its id is the
-// only name the operator can use to find it.
+// A plain `docker run` container has no Compose labels at all (docker prints
+// `<id>|||`); its id is the only name the operator can use to find it. A line
+// carrying another project's labels is not something Compose creates and stays
+// malformed output.
 describe("a foreign container on the volume is named by what it has", () => {
   const SERVICELESS_ID = "e".repeat(12);
   let targetDir: string;
@@ -848,7 +850,7 @@ describe("a foreign container on the volume is named by what it has", () => {
   }
 
   it("carries the container id in the outcome when the container has no service label", () => {
-    const adapter = makeAdapter({ listContainersByVolume: () => `${SERVICELESS_ID}|${PROJECT}||` });
+    const adapter = makeAdapter({ listContainersByVolume: () => `${SERVICELESS_ID}|||` });
     expect(evaluateVolumeOwnership(CANDIDATE_VOLUME, EXPECTED_IMAGE, adapter)).toEqual({
       status: "not-proven",
       reason: "foreign-container",
@@ -857,8 +859,34 @@ describe("a foreign container on the volume is named by what it has", () => {
     });
   });
 
+  it("keeps a line carrying another project's labels as malformed output, not a foreign container", () => {
+    const adapter = makeAdapter({ listContainersByVolume: () => `${SERVICELESS_ID}|other||` });
+    expect(evaluateVolumeOwnership(CANDIDATE_VOLUME, EXPECTED_IMAGE, adapter)).toEqual({ status: "verify-error" });
+  });
+
+  it("reports the other folder, not the label-less container, when an orbit-db from another folder is also on the volume (#1570 order)", () => {
+    const UPDATE_FOLDER = "/srv/orbit";
+    const lines = `${SERVICELESS_ID}|||\n${DB_CONTAINER_ID}|${PROJECT}|orbit-db|/elsewhere`;
+    let refusal: DatabaseVolumeSafetyRefusal | undefined;
+    try {
+      verifyDatabaseVolumeSafety(
+        targetDir,
+        undefined,
+        "fallback",
+        freshState(),
+        readyPassword,
+        makeFullAdapter({ listContainersByVolume: () => lines }),
+        UPDATE_FOLDER,
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(DatabaseVolumeSafetyRefusal);
+      refusal = error as DatabaseVolumeSafetyRefusal;
+    }
+    expect(refusal?.reason).toBe("other-folder");
+  });
+
   it("renders the id, not an empty service name, in the refusal", () => {
-    const message = messageFor(`${SERVICELESS_ID}|${PROJECT}||`);
+    const message = messageFor(`${SERVICELESS_ID}|||`);
     expect(message).toContain(SERVICELESS_ID);
     expect(message).not.toContain('""');
     expect(message).toMatch(/orbit-db/);
@@ -877,7 +905,7 @@ describe("a foreign container on the volume is named by what it has", () => {
   });
 
   it("keeps the unlabelled and the labelled foreign messages distinct", () => {
-    expect(messageFor(`${SERVICELESS_ID}|${PROJECT}||`)).not.toBe(messageFor(`${DB_CONTAINER_ID}|${PROJECT}|some-other-service`));
+    expect(messageFor(`${SERVICELESS_ID}|||`)).not.toBe(messageFor(`${DB_CONTAINER_ID}|${PROJECT}|some-other-service`));
   });
 });
 
@@ -957,8 +985,12 @@ describe("the proof accepts the image the last committed update replaced", () =>
     writeEnvironment(`ORBIT_IMAGE=${IMAGE_B}`);
     const { message } = refusalFrom(appRunning(IMAGE_A));
     expect(message).toMatch(/earlier update|update that stopped|did not finish/i);
-    // "set ORBIT_IMAGE in .env-orbit back to ..." -- the file name carries a dot.
-    expect(message).toMatch(/set ORBIT_IMAGE[\s\S]{0,60}?back/i);
+    // The way back is to finish the switch from the deployment's own folder;
+    // a hand edit of ORBIT_IMAGE breaks the provenance stamp written beside it.
+    expect(message).toMatch(/start (?:the|this) deployment again/i);
+    expect(message).toMatch(/folder it was installed in/i);
+    expect(message).toMatch(/do not set ORBIT_IMAGE back by hand/i);
+    expect(message.match(/set ORBIT_IMAGE/gi)).toHaveLength(1);
     expect(message).toMatch(/compare[^.]*image[^.]*ORBIT_IMAGE[^.]*\.env-orbit/i);
     expect(message).not.toMatch(COMPOSE_COMMAND);
     expect(message).not.toMatch(/recreat/i);
@@ -994,7 +1026,7 @@ describe("the proof accepts the image the last committed update replaced", () =>
     });
   });
 
-  describe("beside another stack's volume (the unrelated-volume skip agrees on what this deployment's image is)", () => {
+  describe("beside another stack's volume (the unrelated-volume skip uses only the saved image)", () => {
     const OTHER_PROJECT = "orbit-e2e-local-4242";
     const OTHER_VOLUME = `${OTHER_PROJECT}_orbit-db-data`;
     const OTHER_DB = "d".repeat(12);
@@ -1017,8 +1049,22 @@ describe("the proof accepts the image the last committed update replaced", () =>
       writeEnvironment(`ORBIT_IMAGE=${IMAGE_B}`, `ORBIT_PREVIOUS_IMAGE=${IMAGE_A}`, `COMPOSE_PROJECT_NAME=${PROJECT}`);
     });
 
-    it("still refuses a genuinely ambiguous pair: the other project's app runs this deployment's previous image", () => {
-      expect(() => verify(twoStacks(IMAGE_A, IMAGE_A))).toThrow(/Multiple Orbit database volumes/);
+    it("attaches when the other project's app lags on this deployment's previous image: that image is evidence about the neighbour, not about this deployment", () => {
+      const result = verify(twoStacks(IMAGE_A, IMAGE_A));
+      expect(result.databaseVolumeSeen).toBe(true);
+      expect(result.databaseVolumeName).toBe(CANDIDATE_VOLUME);
+      expect(result).toMatchObject({ attachedAppImage: IMAGE_A, composeProjectName: PROJECT });
+    });
+
+    it("still refuses a genuinely ambiguous pair: the other project's app runs the saved image, with the previous image recorded", () => {
+      expect(() => verify(twoStacks(IMAGE_B, IMAGE_A))).toThrow(/Multiple Orbit database volumes/);
+    });
+
+    it("attaches when this deployment's update finished and the other project's app still lags on the previous image", () => {
+      const result = verify(twoStacks(IMAGE_A, IMAGE_B));
+      expect(result.databaseVolumeSeen).toBe(true);
+      expect(result.databaseVolumeName).toBe(CANDIDATE_VOLUME);
+      expect(result).toMatchObject({ attachedAppImage: IMAGE_B });
     });
 
     it("skips the other project's volume when its app runs another image, and attaches to its own on the previous image", () => {
