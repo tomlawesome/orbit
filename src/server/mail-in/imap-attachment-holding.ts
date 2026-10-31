@@ -9,7 +9,7 @@ import { openDocumentStorage, releaseBuffer, type ReceivedDocument } from "@/ser
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
 import { identifyImapAttachmentBytes, normalizeImapAttachmentName } from "./core/imap-attachment-validation";
-import { validateSupportedDocumentStructure, type SupportedDocumentMediaType } from "@/server/documents/validation";
+import { classifyDocumentStructure, type SupportedDocumentMediaType } from "@/server/documents/validation";
 
 /** A database or a transaction: anything that can run an UPDATE. */
 type DbWriter = Pick<ReturnType<typeof getDb>, "update">;
@@ -119,7 +119,10 @@ async function checkReceivedAttachment(
       if (outcome.status !== "clean") throw new Error(outcome.code);
     }
     // ADR-0033: the renderer opens it only once the scan has passed.
-    if (!await validateSupportedDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes })) throw new Error("mime_structure_invalid");
+    const structure = await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
+    // No verdict is not a refusal: a retryable attachment failure, not a permanent one.
+    if (structure === "structure_check_unavailable") throw new Error("structure_check_unavailable");
+    if (structure !== "supported_structure") throw new Error("mime_structure_invalid");
     return { mediaType, displayName };
   } finally {
     releaseBuffer(bytes);

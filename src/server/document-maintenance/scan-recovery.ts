@@ -10,8 +10,8 @@
  * Only a `clean` result reaches the structure check (ADR-0033: nothing
  * opened the staged bytes before this scan), and only a file that passes it
  * is sealed from that file and reaches the publish transaction; a
- * retryable outage reschedules the job, and every other outcome ends the
- * recovery terminally with the stage purged.
+ * retryable outage of the scanner or of the open check reschedules the job,
+ * and every other outcome ends the recovery terminally with the stage purged.
  */
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -22,7 +22,7 @@ import { openDocumentStorage, releaseBuffer } from "@/server/documents/storage";
 import { createDocumentSealer, createDocumentUnsealer, DocumentIntegrityError, envelopeOf } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
-import { validateSupportedDocumentStructure, type SupportedDocumentMediaType } from "@/server/documents/validation";
+import { classifyDocumentStructure, type DocumentStructureReason, type SupportedDocumentMediaType } from "@/server/documents/validation";
 import {
   isScannerRecoveryExpired,
   scannerRecoveryDelayMs,
@@ -164,10 +164,10 @@ async function checkRecoveredStructure(
   quarantinePath: string,
   sizeBytes: number,
   mediaType: SupportedDocumentMediaType,
-): Promise<boolean> {
+): Promise<DocumentStructureReason> {
   const bytes = await storage.readQuarantine(quarantinePath, DOCUMENT_MAX_BYTES_CEILING);
   try {
-    return await validateSupportedDocumentStructure(bytes, mediaType, { path: quarantinePath, sizeBytes });
+    return await classifyDocumentStructure(bytes, mediaType, { path: quarantinePath, sizeBytes });
   } finally {
     releaseBuffer(bytes);
   }
@@ -232,7 +232,15 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
     // ADR-0033: a staged upload was held before anything opened it, so the
     // renderer's structure check runs here, after the recovery scan passed,
     // exactly where the upload path would have run it.
-    if (!await checkRecoveredStructure(storage, quarantinePath, record.sizeBytes, record.mediaType as SupportedDocumentMediaType)) {
+    const structure = await checkRecoveredStructure(storage, quarantinePath, record.sizeBytes, record.mediaType as SupportedDocumentMediaType);
+    if (structure === "structure_check_unavailable") {
+      // No verdict, so no purge: the staged copy is the member's only one. The
+      // job is retried under its attempt cap and the stage's recovery expiry,
+      // as a scanner outage is; expiry remains the terminal end.
+      await failScannerRecoveryJob(job, "structure_check_unavailable");
+      return;
+    }
+    if (structure !== "supported_structure") {
       await purgeScannerStage(job, record, "unsupported_structure");
       return;
     }

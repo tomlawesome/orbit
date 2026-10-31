@@ -17,9 +17,12 @@ import {
  * the standard way to handle hostile input, one process per untrusted
  * document under a supervisor that kills, as browsers run a renderer and a
  * cgroup `memory.max` bounds a service. A file that makes pdf.js run out of
- * memory, loop or crash costs one child, which is killed and the file
- * refused as `unsupported_structure`; the server never runs the parser, so it
- * stays responsive and its own memory does not grow.
+ * memory, loop or crash costs one child, which is killed; the check then
+ * answers that it reached no verdict (`structure_check_unavailable`). At
+ * upload that refuses the file as before; a staged copy awaiting its recovery
+ * scan is checked again rather than purged (ADR-0038 amendment). The server
+ * never runs the parser, so it stays responsive and its own memory does not
+ * grow.
  *
  * The cheap pre-parse bound in validation.ts still runs first; this is the
  * fence behind it, for every entry path that bound does not model.
@@ -702,7 +705,9 @@ async function inSlot(input: ChildInput, run: ChildRun): Promise<ChildOutcome> {
  * Opens the PDF in a sandboxed child: no password, within the page cap, and
  * finds page one. With `file` the child reads that file through an inherited
  * read-only descriptor and `bytes` goes unused; without it the bytes travel
- * over the IPC channel.
+ * over the IPC channel. A child that is stopped (memory, clock or crash),
+ * cannot be started or cannot be handed its file reaches no verdict:
+ * `structure_check_unavailable`. Only the child's own answer is a verdict.
  */
 export async function inspectPdfStructureInSandbox(bytes: Buffer, file?: DocumentFileOnDisk): Promise<DocumentStructureReason> {
   if (testInspector) return testInspector(bytes);
@@ -711,7 +716,7 @@ export async function inspectPdfStructureInSandbox(bytes: Buffer, file?: Documen
     args = [pdfjsUrl()];
   } catch {
     logStop("structure", "crash", 0);
-    return "unsupported_structure";
+    return "structure_check_unavailable";
   }
   const outcome = await inSlot(file ? { file } : { bytes }, {
     job: "structure",
@@ -721,7 +726,8 @@ export async function inspectPdfStructureInSandbox(bytes: Buffer, file?: Documen
     wallMs: limits.wallMs,
     memoryMb: limits.structureMemoryMb,
   });
-  const message = "message" in outcome ? outcome.message : undefined;
+  if ("stop" in outcome) return "structure_check_unavailable";
+  const message = outcome.message;
   return typeof message === "string" && REASONS.has(message) ? message as DocumentStructureReason : "unsupported_structure";
 }
 
@@ -791,9 +797,11 @@ export async function renderPdfPageInSandbox(
  * Decodes an image in a sandboxed child, under the render job's memory
  * ceiling and the check's clock: the decoder never runs in this process
  * (#1572, ADR-0038). `declared` is what the header said; a decoded size that
- * differs, a decode that fails and any stop are `unsupported_structure`. With
- * `file` the child reads that file through the inherited descriptor and
- * `bytes` goes unused. Run the header fence (validation.ts) first.
+ * differs and a decode that fails are `unsupported_structure`; a stop, or a
+ * child that could not start or open its file, is
+ * `structure_check_unavailable`. With `file` the child reads that file through
+ * the inherited descriptor and `bytes` goes unused. Run the header fence
+ * (validation.ts) first.
  */
 export async function inspectImageInSandbox(
   bytes: Buffer,
@@ -806,7 +814,7 @@ export async function inspectImageInSandbox(
     args = [canvasUrl()];
   } catch {
     logStop("structure", "crash", 0);
-    return "unsupported_structure";
+    return "structure_check_unavailable";
   }
   const outcome = await inSlot(file ? { file } : { bytes }, {
     job: "image",
@@ -816,7 +824,8 @@ export async function inspectImageInSandbox(
     wallMs: limits.wallMs,
     memoryMb: limits.renderMemoryMb,
   });
-  const message = "message" in outcome ? outcome.message : undefined;
+  if ("stop" in outcome) return "structure_check_unavailable";
+  const message = outcome.message;
   return isRenderAnswer(message) && message.outcome === "opened" ? "supported_structure" : "unsupported_structure";
 }
 

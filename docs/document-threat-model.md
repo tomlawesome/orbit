@@ -159,8 +159,10 @@ recoverable state.
   process-memory ceiling of 320 MB plus five times the file's size (resident plus swapped) that the server reads
   from `/proc` every 25 ms and kills it past, a five-second wall-clock limit
   that kills it, an empty environment, and at most two run at once; running
-  out of memory, timing out or crashing refuses the file as
-  `unsupported_structure`, logs one record with no file detail, and leaves
+  out of memory, timing out or crashing is no verdict
+  (`structure_check_unavailable`), which refuses an upload as
+  `unsupported_structure` but has scan recovery check a staged copy again
+  rather than purge it, logs one record with no file detail, and leaves
   the server answering. The bound stays as a cheap first fence. The child
   still shares the server's files and network. Boot warns if `/bin/sh`,
   `ulimit -d` or `/proc`, which the sandbox relies on, is missing.
