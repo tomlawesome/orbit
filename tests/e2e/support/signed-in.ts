@@ -185,3 +185,28 @@ export async function focusedElement(page: Page): Promise<string> {
     return `${el.tagName.toLowerCase()} "${name}"`;
   });
 }
+
+/**
+ * Where focus STAYS (T-Q2): what has focus, described as `focusedElement`
+ * does, but read on `frames` painted frames in a row (a count, not a time).
+ * "body" if focus was on the page at any of them, so a focus that only
+ * passed through an element does not count; "moving" if it was on one
+ * element and then another; otherwise the one element it held throughout.
+ */
+export async function focusHeld(page: Page, frames = 30): Promise<string> {
+  return page.evaluate(async (count) => {
+    const describe = () => {
+      const el = document.activeElement;
+      if (!el || el === document.body || el === document.documentElement) return "body";
+      const name = el.getAttribute("aria-label") ?? (el.textContent ?? "").trim().slice(0, 40);
+      return `${el.tagName.toLowerCase()} "${name}"`;
+    };
+    const seen = new Set<string>();
+    for (let frame = 0; frame < count; frame += 1) {
+      seen.add(describe());
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    if (seen.has("body")) return "body";
+    return seen.size === 1 ? [...seen][0] : "moving";
+  }, frames);
+}

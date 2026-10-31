@@ -4,7 +4,7 @@ import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { gotoCreate, tabTo } from "./support/keyboard";
 import {
   cleanup,
-  focusedElement,
+  focusHeld,
   liveRegionFor,
   seedHousehold,
   signIn,
@@ -423,10 +423,13 @@ for (const journey of JOURNEYS) {
       await journey.fire(page, household);
       await expect(shownText(page, journey.words), `${journey.name}: the failure is shown`).toBeVisible({ timeout: SETTLE });
       /* The end state, not a single read the instant the failure shows: focus
-         may take a moment to settle, and what matters is where it stays. */
+         may take a moment to settle, and what matters is where it STAYS -- so
+         it has to hold one element for a run of painted frames, and a focus
+         that only passed through an element on its way to the page (T-Q2) is
+         not that. */
       await expect
-        .poll(() => focusedElement(page), { message: `${journey.name}: focus is not dropped to the page`, timeout: SETTLE })
-        .not.toBe("body");
+        .poll(() => focusHeld(page), { message: `${journey.name}: focus is held on an element, not dropped to the page`, timeout: SETTLE })
+        .not.toMatch(/^(body|moving)$/);
     } finally {
       await page.unrouteAll({ behavior: "ignoreErrors" });
       await cleanup(page, household);
