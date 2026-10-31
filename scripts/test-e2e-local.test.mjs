@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:net";
 import {
   chmodSync,
   copyFileSync,
@@ -331,6 +332,12 @@ case "$1" in
         [[ -z "\${DOCKER_STUB_UP_FAIL:-}" ]] || exit 1
         exit 0 ;;
       *" logs "*) echo "stub compose logs for project"; exit 0 ;;
+      *" down "*)
+        if [[ -n "\${DOCKER_STUB_DOWN_FAIL:-}" ]]; then
+          echo "stub-compose-down-error: network has active endpoints" >&2
+          exit 1
+        fi
+        exit 0 ;;
     esac
     exit 0 ;;
 esac
@@ -1160,5 +1167,102 @@ describe("the WebKit docker run in a worktree with the shared node_modules (#155
     ]);
     expect(result.status, result.stderr).toBe(0);
     expect(dockerCalls(fx).filter((l) => /^run /.test(l))).toHaveLength(0);
+  });
+});
+
+/*
+ * #1423: the EXIT trap used to send `compose down`'s output, errors included,
+ * to /dev/null, so a teardown that failed said only that it "needed more
+ * than compose down". Its error text must reach the person running the script.
+ */
+describe("a failed `compose down` in the exit trap is visible (#1423)", () => {
+  it("shows the error text `compose down` printed", async () => {
+    const fx = makeFixture();
+    const result = await runToEnd(fx, chromium, { DOCKER_STUB_DOWN_FAIL: "1" });
+    expect(downCalls(fx)).toHaveLength(1);
+    expect(result.stderr + result.stdout).toContain("stub-compose-down-error: network has active endpoints");
+  });
+
+  it("shows nothing of the kind when `compose down` succeeds", async () => {
+    const fx = makeFixture();
+    const result = await runToEnd(fx, chromium);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr + result.stdout).not.toContain("stub-compose-down-error");
+  });
+});
+
+/*
+ * #1445: the WebKit run forwards 127.0.0.1:4443 to the sign-in provider's
+ * random host port (CI's issuer URL is fixed at https://orbit-oidc:4443/). If
+ * something already holds 4443 (the test bed used to), the forward's claim
+ * failed late and obscurely. The script now checks first, and stops with a
+ * message naming the port. These tests hold 4443 themselves with a listener on
+ * 127.0.0.1; they never touch a process they did not start, and fail with a
+ * message saying so if the port is already taken on this host.
+ */
+describe("the WebKit run checks port 4443 before forwarding it (#1445)", () => {
+  function holdPort4443() {
+    return new Promise((resolve, reject) => {
+      const server = createServer((socket) => socket.destroy());
+      server.once("error", (error) =>
+        reject(
+          new Error(
+            `127.0.0.1:4443 is already held on this host (${error.code}); this test must hold it itself and will not stop another process. Free the port and rerun.`,
+          ),
+        ),
+      );
+      server.listen(4443, "127.0.0.1", () => resolve(server));
+    });
+  }
+  const release = (server) => new Promise((resolve) => server.close(resolve));
+  const webkitSpec = ["--spec", "tests/e2e/x.spec.ts", ...webkit];
+  const dockerRuns = (fx) => dockerCalls(fx).filter((l) => /^run /.test(l));
+
+  it("stops with a non-zero exit and a message naming 4443 when the port is taken, and starts no WebKit container", async () => {
+    const fx = makeFixture();
+    writeFileSync(`${fx.dockerLog}.up`, ""); // the stub's stack is already up
+    const server = await holdPort4443();
+    try {
+      const result = await runToEnd(fx, ["--reuse", fx.project, ...webkitSpec]);
+      expect(result.status).not.toBe(0);
+      expect(result.status).not.toBeNull();
+      expect(result.stderr).toContain("4443");
+      expect(dockerRuns(fx)).toEqual([]);
+    } finally {
+      await release(server);
+    }
+  });
+
+  it("stops the same way for a run that starts its own stack, and still tears that stack down", async () => {
+    const fx = makeFixture();
+    const server = await holdPort4443();
+    try {
+      const result = await runToEnd(fx, webkitSpec);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("4443");
+      expect(dockerRuns(fx)).toEqual([]);
+      expect(downCalls(fx)).toHaveLength(1);
+    } finally {
+      await release(server);
+    }
+  });
+
+  it("runs the WebKit container as before when 4443 is free", async () => {
+    const fx = makeFixture();
+    writeFileSync(`${fx.dockerLog}.up`, ""); // the stub's stack is already up
+    const result = await runToEnd(fx, ["--reuse", fx.project, ...webkitSpec]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(dockerRuns(fx)).not.toHaveLength(0);
+  });
+
+  it("does not mind 4443 being taken for a run with no WebKit forward", async () => {
+    const fx = makeFixture();
+    const server = await holdPort4443();
+    try {
+      const result = await runToEnd(fx, chromium);
+      expect(result.status, result.stderr).toBe(0);
+    } finally {
+      await release(server);
+    }
   });
 });

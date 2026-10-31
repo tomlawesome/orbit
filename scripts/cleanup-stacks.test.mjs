@@ -75,13 +75,13 @@ afterEach(() => {
   while (scratchDirs.length > 0) rmSync(scratchDirs.pop(), { recursive: true, force: true });
 });
 
-function fakeDocker({ failOn = [], psRows = containers } = {}) {
+function fakeDocker({ failOn = [], psRows = containers, imageRows = images } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "orbit-cleanup-stacks-"));
   scratchDirs.push(dir);
   writeFileSync(join(dir, "ps.txt"), `${psRows.join("\n")}\n`);
   writeFileSync(join(dir, "volumes.txt"), `${volumes.join("\n")}\n`);
   writeFileSync(join(dir, "networks.txt"), `${networks.join("\n")}\n`);
-  writeFileSync(join(dir, "images.txt"), `${images.join("\n")}\n`);
+  writeFileSync(join(dir, "images.txt"), `${imageRows.join("\n")}\n`);
   writeFileSync(join(dir, "imageids.txt"), `${containerImages.join("\n")}\n`);
   writeFileSync(join(dir, "fail.txt"), `${failOn.join("\n")}\n`);
   writeFileSync(join(dir, "calls.log"), "");
@@ -354,6 +354,73 @@ describe("cleanup-stacks.sh", () => {
       expect(r.stderr).toContain("Could not tell which locally built images are in use");
       // the project teardown still happened
       expect(r.removed.containers).toEqual(["c10"]);
+    });
+  });
+
+  // #1423: a killed local e2e run (SIGKILL skips its EXIT trap) leaves the
+  // per-run sign-in image, orbit-e2e-local-<run>-orbit-oidc, behind. The
+  // sweep treats one as orphaned when its Compose project has no container
+  // left, and keeps the "recent" guard the other image repositories have.
+  describe("orphaned per-run sign-in images (#1423)", () => {
+    const orphanOld = "orbit-e2e-local-1a2b3c4d-111-orbit-oidc";
+    const projectLive = "orbit-e2e-local-5e6f7a8b-222";
+    const liveOidc = `${projectLive}-orbit-oidc`;
+    const orphanRecent = "orbit-e2e-local-9c0d1e2f-333-orbit-oidc";
+    const otherService = "orbit-e2e-local-3a4b5c6d-444-orbit-tika";
+    const notOurs = "someone-else-orbit-oidc";
+    const imageRows = [
+      ...images,
+      `${orphanOld}|latest|sha256:a1|2 days ago|90MB|${createdAt(48)}`,
+      `${liveOidc}|latest|sha256:a2|2 days ago|90MB|${createdAt(48)}`,
+      `${orphanRecent}|latest|sha256:a3|2 hours ago|90MB|${createdAt(2)}`,
+      `${otherService}|latest|sha256:a4|3 days ago|90MB|${createdAt(72)}`,
+      `${notOurs}|latest|sha256:a5|3 days ago|90MB|${createdAt(72)}`,
+    ];
+    const psRows = [
+      ...containers,
+      // The live run's own containers: its sign-in container is gone, the app and database are not.
+      `${projectLive}|c30|${projectLive}-app|Up 5 minutes|orbit-local:live|orbit-app|${projectLive}_default`,
+      `${projectLive}|c31|${projectLive}-db|Up 5 minutes|postgres:18-alpine|orbit-db|${projectLive}_default`,
+    ];
+    const options = { imageRows, psRows };
+    const removedNames = (r) => r.removed.images.filter((i) => /orbit-e2e-local|someone-else/.test(i));
+
+    it("lists the orphaned, the live and the recent sign-in images and removes nothing without --remove", () => {
+      const r = run([], options);
+      expect(r.status).toBe(0);
+      expect(r.calls.some(mutating)).toBe(false);
+      for (const name of [orphanOld, liveOidc, orphanRecent]) expect(r.stdout).toContain(name);
+    });
+
+    it("--remove removes an orphaned sign-in image older than a day, by name", () => {
+      const r = run(["--remove"], options);
+      expect(r.status).toBe(0);
+      expect(removedNames(r).some((i) => i.startsWith(`${orphanOld}:`) || i === orphanOld)).toBe(true);
+      expect(r.stdout).toContain(orphanOld);
+    });
+
+    it("--remove keeps and lists the sign-in image of a project that still has a container", () => {
+      const r = run(["--remove"], options);
+      expect(removedNames(r).some((i) => i.includes(liveOidc))).toBe(false);
+      expect(r.stdout).toContain(liveOidc);
+    });
+
+    it("--remove keeps and lists a sign-in image under a day old, even when no container is left", () => {
+      for (const args of [["--remove"], ["--remove", "--all"]]) {
+        const r = run(args, options);
+        expect(removedNames(r).some((i) => i.includes(orphanRecent))).toBe(false);
+        expect(r.stdout).toContain(orphanRecent);
+      }
+    });
+
+    it("removes only per-run sign-in images: not another service's image, not another repository's", () => {
+      const r = run(["--remove"], options);
+      // The orphan is the one thing that does go, so this cannot pass by removing nothing.
+      expect(removedNames(r).some((i) => i.includes(orphanOld))).toBe(true);
+      expect(removedNames(r).some((i) => i.includes(otherService))).toBe(false);
+      expect(removedNames(r).some((i) => i.includes(notOurs))).toBe(false);
+      expect(r.calls.filter((c) => c.startsWith("image rm")).every((c) => !c.includes("-f"))).toBe(true);
+      expect(r.calls.some((c) => c.includes("prune"))).toBe(false);
     });
   });
 

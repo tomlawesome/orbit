@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,7 +41,7 @@ function lines(text) {
   return text.split("\n").filter(Boolean);
 }
 
-function setup({ containers = [], volumes = [], networks = [], failOn = [], keep = false, stopped = false, appEnv = [`APP_URL=https://${host}:3443`] } = {}) {
+function setup({ containers = [], volumes = [], networks = [], failOn = [], keep = false, stopped = false, appEnv = [`APP_URL=https://${host}:3443`], secrets = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "orbit-test-bed-"));
   scratchDirs.push(dir);
   const bin = join(dir, "bin");
@@ -50,6 +50,23 @@ function setup({ containers = [], volumes = [], networks = [], failOn = [], keep
   for (const d of [bin, state, join(tree, "scripts/dev"), join(tree, "demo-tls")]) mkdirSync(d, { recursive: true });
   copyFileSync(realScript, join(tree, "scripts/dev/test-bed.sh"));
   writeFileSync(join(tree, ".env-orbit"), "ORBIT_TEST_ONLY=fixture\n");
+  // #1507: the stand-in for scripts/dev-greenmail-cert.sh behaves like the real
+  // one where it matters here: it needs .orbit-secrets to exist, and writes the
+  // three certificate files the mail sidecar reads.
+  writeFileSync(
+    join(tree, "scripts/dev-greenmail-cert.sh"),
+    `#!/usr/bin/env bash
+cd "$(dirname -- "\${BASH_SOURCE[0]}")/.."
+[[ -d .orbit-secrets ]] || { echo "run configure first: .orbit-secrets missing" >&2; exit 1; }
+echo "dev-greenmail-cert.sh" >> "${state}/calls.log"
+for f in greenmail-key.pem greenmail-ca.pem greenmail.p12; do echo "fake $f" > ".orbit-secrets/$f"; done
+`,
+  );
+  chmodSync(join(tree, "scripts/dev-greenmail-cert.sh"), 0o755);
+  if (secrets !== null) {
+    mkdirSync(join(tree, ".orbit-secrets"), { recursive: true });
+    for (const [name, content] of Object.entries(secrets)) writeFileSync(join(tree, ".orbit-secrets", name), content);
+  }
   writeFileSync(join(tree, "scripts/build-container.sh"), `#!/usr/bin/env bash\necho "build-container.sh" >> "${state}/calls.log"\n`);
   writeFileSync(join(state, "containers.txt"), containers.map((l) => `${l}\n`).join(""));
   writeFileSync(join(state, "volumes.txt"), volumes.map((l) => `${l}\n`).join(""));
@@ -91,7 +108,17 @@ case "$1 $2" in
 esac
 `,
   );
-  writeFileSync(join(bin, "openssl"), `#!/usr/bin/env bash\necho "openssl $*" >> "${state}/calls.log"\n: > demo-tls/demo.key\n: > demo-tls/demo.crt\n`);
+  // `openssl rand` must still give random bytes (#1507: the bed's SMTP password);
+  // every other call is the certificate the bed makes for its HTTPS front.
+  writeFileSync(
+    join(bin, "openssl"),
+    `#!/usr/bin/env bash
+if [[ "$1" == rand ]]; then node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex") + "\\n")'; exit 0; fi
+echo "openssl $*" >> "${state}/calls.log"
+: > demo-tls/demo.key
+: > demo-tls/demo.crt
+`,
+  );
   writeFileSync(join(bin, "git"), `#!/usr/bin/env bash\necho abc123def456\n`);
   for (const f of ["docker", "openssl", "git"]) chmodSync(join(bin, f), 0o755);
   chmodSync(join(tree, "scripts/build-container.sh"), 0o755);
@@ -126,7 +153,8 @@ describe("test-bed.sh up", () => {
     expect(r.envs.at(-1)).toBe(`ORBIT_IMAGE=${digest} DEMO_HOST=${host} ORBIT_BIND_ADDRESS=127.0.0.1 ORBIT_PORT=3001`);
     expect(readFileSync(join(r.tree, ".env-orbit"), "utf8")).toBe("ORBIT_TEST_ONLY=fixture\n");
     expect(r.stdout).toContain(`https://${host}:3443/`);
-    expect(r.stdout).toContain(`https://${host}:4443/`);
+    expect(r.stdout).toContain(`https://${host}:4444/`);
+    expect(r.stdout).not.toContain(":4443");
     expect(r.stdout).toContain("browser warns once");
     expect(r.stdout).not.toContain("COMPOSE_PROJECT_NAME");
     expect(r.stdout).toContain("Operator scripts against the bed: bash scripts/dev/test-bed.sh run -- bash scripts/backup.sh");
@@ -333,5 +361,126 @@ describe("test-bed.sh as a script", () => {
     expect(readFileSync(join(root, "Dockerfile"), "utf8")).not.toContain("scripts/dev");
     const source = readFileSync(realScript, "utf8");
     expect(source).not.toMatch(/>>?\s*"?\$?\{?env_file/);
+  });
+});
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
+const nginxConf = readFileSync(join(repoRoot, "demo-tls/nginx.conf"), "utf8");
+const scriptHeader = readFileSync(realScript, "utf8").split(/^set -Eeuo/m)[0];
+
+describe("the bed's HTTPS front, demo-tls/nginx.conf", () => {
+  it("accepts uploads up to Orbit's own limit, 343m, and its comment says so (#1507)", () => {
+    expect(nginxConf).toMatch(/^\s*client_max_body_size\s+343m\s*;/m);
+    expect(nginxConf).not.toMatch(/client_max_body_size\s+(?!343m\b)\S+;/);
+    // The Dockerfile's BODY_SIZE_LIMIT is what the figure matches.
+    expect(readFileSync(join(repoRoot, "Dockerfile"), "utf8")).toContain("BODY_SIZE_LIMIT=343M");
+    const comment = nginxConf.slice(0, nginxConf.search(/client_max_body_size/)).split("\n").filter((l) => l.trim().startsWith("#")).join("\n");
+    expect(comment).toContain("BODY_SIZE_LIMIT");
+    expect(comment).toContain("343");
+  });
+
+  it("proxies to the app by its Compose service name, not a fixed container name (#1158)", () => {
+    const upstreams = [...nginxConf.matchAll(/http:\/\/([A-Za-z0-9_.-]+):3000/g)].map((m) => m[1]);
+    expect(upstreams.length).toBeGreaterThan(0);
+    for (const name of upstreams) expect(name).toBe("orbit-app");
+    // and that service exists in the file the bed names
+    expect(readFileSync(join(repoRoot, "docker-compose.yml"), "utf8")).toMatch(/^ {2}orbit-app:$/m);
+  });
+});
+
+describe("test-bed.sh header (#1158, #1445, #1507)", () => {
+  it("says only one bed can run at a time because of its fixed host ports, no longer because of container names (#1158)", () => {
+    expect(scriptHeader).toMatch(/host ports?/i);
+    expect(scriptHeader).toMatch(/one bed|two beds|second bed/i);
+    expect(scriptHeader).not.toMatch(/docker-compose\.yml fixes container names/);
+  });
+
+  it("names the identity provider's port as 4444 everywhere, never 4443 (#1445)", () => {
+    expect(scriptHeader).toContain("4444");
+    expect(scriptHeader).not.toContain("4443");
+  });
+
+  it("lists the secret files up creates, and says which --host values work (#1507)", () => {
+    expect(scriptHeader).toContain("smtp-password");
+    expect(scriptHeader).toMatch(/greenmail/i);
+    expect(scriptHeader).toMatch(/loopback|localhost/i);
+    expect(scriptHeader).toMatch(/LAN/);
+  });
+});
+
+describe("test-bed.sh up creates the bed's test-only secret files (#1507)", () => {
+  const certFiles = ["greenmail-key.pem", "greenmail-ca.pem", "greenmail.p12"];
+  const read = (r, name) => {
+    const path = join(r.tree, ".orbit-secrets", name);
+    expect(existsSync(path), `.orbit-secrets/${name} was not created`).toBe(true);
+    return readFileSync(path, "utf8");
+  };
+
+  it("makes .orbit-secrets/smtp-password, with random content, and the GreenMail certificate files when missing", () => {
+    const r = run(["up", "--image", digest, "--host", host]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(r, "smtp-password").trim().length).toBeGreaterThanOrEqual(16);
+    expect(r.calls.filter((c) => c === "dev-greenmail-cert.sh")).toHaveLength(1);
+    for (const name of certFiles) expect(read(r, name)).toContain("fake");
+    // before Compose reads them
+    expect(r.calls.indexOf("dev-greenmail-cert.sh")).toBeLessThan(r.calls.findIndex((c) => / up /.test(c)));
+  });
+
+  it("gives each bed its own password, not a fixed one", () => {
+    const first = read(run(["up", "--image", digest, "--host", host]), "smtp-password");
+    const second = read(run(["up", "--image", digest, "--host", host]), "smtp-password");
+    expect(first.trim()).not.toBe(second.trim());
+  });
+
+  it("never touches .env-orbit", () => {
+    const r = run(["up", "--image", digest, "--host", host]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(join(r.tree, ".env-orbit"), "utf8")).toBe("ORBIT_TEST_ONLY=fixture\n");
+  });
+
+  it("leaves files that already exist alone, and does not remake the certificate", () => {
+    const secrets = { "smtp-password": "keep-this-password\n" };
+    for (const name of certFiles) secrets[name] = `existing ${name}\n`;
+    const r = run(["up", "--image", digest, "--host", host], { secrets });
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(r, "smtp-password")).toBe("keep-this-password\n");
+    for (const name of certFiles) expect(read(r, name)).toBe(`existing ${name}\n`);
+    expect(r.calls).not.toContain("dev-greenmail-cert.sh");
+  });
+
+  it("makes only what is missing", () => {
+    const r = run(["up", "--image", digest, "--host", host], { secrets: { "smtp-password": "keep-this-password\n" } });
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(r, "smtp-password")).toBe("keep-this-password\n");
+    for (const name of certFiles) expect(read(r, name)).toContain("fake");
+  });
+});
+
+describe("test-bed.sh --host refuses a loopback address (#1507)", () => {
+  for (const loopback of ["127.0.0.1", "::1", "localhost"]) {
+    it(`up --host ${loopback} exits non-zero, says why and asks for a LAN address, and starts nothing`, () => {
+      const r = run(["up", "--image", digest, "--host", loopback]);
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain(loopback === "localhost" ? "localhost" : loopback);
+      expect(r.stderr).toMatch(/container/i);
+      expect(r.stderr).toContain("LAN");
+      expect(r.compose).toEqual([]);
+      expect(r.calls).not.toContain("dev-greenmail-cert.sh");
+    });
+  }
+
+  it("restart --host 127.0.0.1 is refused the same way", () => {
+    const r = run(["restart", "--host", "127.0.0.1"], { containers: appRows });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/container/i);
+    expect(r.stderr).toContain("LAN");
+    expect(r.compose).toEqual([]);
+  });
+
+  it("still accepts a LAN address and a host name", () => {
+    for (const ok of [host, "bed.example.test"]) {
+      const r = run(["up", "--image", digest, "--host", ok]);
+      expect(r.status, r.stderr).toBe(0);
+    }
   });
 });
