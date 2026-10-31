@@ -68,6 +68,42 @@ const OPEN_ROUTES = new Set([
  */
 const DOORS = new Set(["/login", "/logout", "/approve/[token]", "/setup/[token]"]);
 
+/** Whether `init` has already registered the shutdown listener in this process. */
+let shutdownRegistered = false;
+
+/**
+ * Graceful shutdown on SIGTERM (#1583): stop accepting, drain, close the pool,
+ * exit. adapter-node does the first two on SIGTERM and then emits
+ * `sveltekit:shutdown` on `process`; it never exits itself. The Postgres
+ * pool's open sockets then kept the event loop alive until Docker's 10 s grace
+ * period ended in SIGKILL (exit 137). Closing the pool is the last step; the
+ * process leaves on its own once the loop empties, so this does not call
+ * `process.exit`. A failed close is logged by code and swallowed: the error's
+ * own text can name the database host.
+ */
+async function closePoolOnShutdown() {
+  const { log } = await import("orbit/lib/logger");
+  log.info({
+    event: "shutdown.signal",
+    state: "stopping",
+    reason: "signal_received",
+    action: "none",
+    impact: "none",
+  });
+  try {
+    const { closeDatabase } = await import("orbit/db");
+    await closeDatabase();
+  } catch {
+    log.warn({
+      event: "database.connection",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "none",
+      impact: "none",
+    });
+  }
+}
+
 /**
  * Orbit's boot sequence, moved off Next's instrumentation hook (#735).
  *
@@ -108,6 +144,12 @@ export async function init() {
        container actually stop, so the orchestrator and repair.sh's own
        diagnosis (scripts/repair.sh) have something to see. */
     process.exit(1);
+    return;
+  }
+
+  if (!shutdownRegistered) {
+    shutdownRegistered = true;
+    process.on("sveltekit:shutdown", closePoolOnShutdown);
   }
 
   /* Ask the database and the scanners their versions in the background, so
