@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { THEME_PACKS } from "../../src/lib/theme.js";
+import { installFilmEnded } from "./film-ended.js";
 import { finiteMotionSettled } from "./finite-motion.js";
 
 const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
@@ -252,7 +253,7 @@ function sample() {
   return {
     faults,
     chapter: reading?.chapter ?? -1,
-    ended: Boolean(reading && reading.total > 0 && reading.cursor >= reading.total),
+    ended: /** @type {any} */ (window).__readingEnded(reading),
     pill: pill.className,
     url: location.pathname,
   };
@@ -324,6 +325,7 @@ async function openFilm(page) {
   const errors = [];
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   page.on("pageerror", (error) => errors.push(error.message));
+  await installFilmEnded(page);
   await page.route("**/api/settings/tour", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: '{"tour":{"tourSeenAt":null}}' }));
   await page.goto(`${APP}/home`, { waitUntil: "load" });
@@ -440,7 +442,7 @@ function sampleTransport() {
     cursor: reading.cursor,
     total: reading.total,
     chapter: reading.chapter,
-    ended: reading.total > 0 && reading.cursor >= reading.total,
+    ended: /** @type {any} */ (window).__readingEnded(reading),
     url: location.pathname,
     readout: clock ? { x: clock.left, y: clock.top, w: clock.width, h: clock.height } : null,
     flicker: /** @type {any} */ (window).__flicker?.splice(0) ?? [],
@@ -613,7 +615,7 @@ test.describe("the pocket film in WebKit (#1174)", () => {
         const count = () => {
           w.__frames++;
           const r = w.__reading?.();
-          if (r && r.total > 0 && r.cursor >= r.total) w.__filmEnded = true;
+          if (w.__readingEnded(r)) w.__filmEnded = true;
           requestAnimationFrame(count);
         };
         requestAnimationFrame(count);
