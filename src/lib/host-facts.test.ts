@@ -66,6 +66,59 @@ describe("parseHostFacts", () => {
   });
 });
 
+describe("parseHostFacts: the target folder (#1570)", () => {
+  it("decodes the physical and the logical path of the deployment folder", () => {
+    const facts = parseHostFacts(validFacts({ targetFolder: b64("/mnt/data/orbit"), targetFolderLogical: b64("/srv/orbit") }));
+    expect(facts.targetFolder).toBe("/mnt/data/orbit");
+    expect(facts.targetFolderLogical).toBe("/srv/orbit");
+  });
+
+  it("leaves the folders undefined when the shell sent neither", () => {
+    const facts = parseHostFacts(validFacts());
+    expect(facts.targetFolder).toBeUndefined();
+    expect(facts.targetFolderLogical).toBeUndefined();
+  });
+
+  it("accepts the physical path alone", () => {
+    const facts = parseHostFacts(validFacts({ targetFolder: b64("/srv/orbit") }));
+    expect(facts.targetFolder).toBe("/srv/orbit");
+    expect(facts.targetFolderLogical).toBeUndefined();
+  });
+
+  it("refuses a folder that is not base64", () => {
+    expect(() => parseHostFacts(validFacts({ targetFolder: "not base64!" }))).toThrow(HostFactsRefusal);
+    expect(() => parseHostFacts(validFacts({ targetFolderLogical: "not base64!" }))).toThrow(HostFactsRefusal);
+  });
+});
+
+describe("parseHostFacts: container lines with the working_dir label (#1570)", () => {
+  const withFolders = (volumeLine: string, projectLine: string) =>
+    hostFactsVolumeAdapter(
+      parseHostFacts(
+        validFacts({
+          volumes: [{ name: b64("orbit_orbit-db-data"), labels: b64("orbit|orbit-db-data"), containers: b64(volumeLine) }],
+          projects: [{ name: b64("orbit"), containers: b64(projectLine) }],
+        }),
+      ),
+    );
+
+  it("hands four-field lines to the proof as the shell sent them", () => {
+    const dbLine = `${"c".repeat(12)}|orbit|orbit-db|/srv/orbit`;
+    const appLine = `${"d".repeat(12)}|orbit|orbit-app|/srv/orbit`;
+    const adapter = withFolders(dbLine, appLine);
+    expect(adapter.listContainersByVolume("orbit_orbit-db-data")).toBe(dbLine);
+    expect(adapter.listContainersByProject("orbit")).toBe(appLine);
+  });
+
+  it("still parses three-field lines", () => {
+    const dbLine = `${"c".repeat(12)}|orbit|orbit-db`;
+    const appLine = `${"d".repeat(12)}|orbit|orbit-app`;
+    const adapter = withFolders(dbLine, appLine);
+    expect(adapter.listContainersByVolume("orbit_orbit-db-data")).toBe(dbLine);
+    expect(adapter.listContainersByProject("orbit")).toBe(appLine);
+  });
+});
+
 describe("hostFactsVolumeAdapter", () => {
   const adapter = hostFactsVolumeAdapter(parseHostFacts(validFacts()));
 

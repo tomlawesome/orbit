@@ -61,11 +61,13 @@ interface VolumeFacts {
   containers: string | null;
 }
 
-function facts(options: { basename?: string; volumes?: VolumeFacts[]; projects?: Array<[string, string | null]>; images?: Array<[string, string | null]> } = {}): HostFacts {
+function facts(options: { basename?: string; targetFolder?: string; targetFolderLogical?: string; volumes?: VolumeFacts[]; projects?: Array<[string, string | null]>; images?: Array<[string, string | null]> } = {}): HostFacts {
   const volumes = options.volumes ?? [];
   return parseHostFacts(
     JSON.stringify({
       targetBasename: b64(options.basename ?? "household"),
+      ...(options.targetFolder === undefined ? {} : { targetFolder: b64(options.targetFolder) }),
+      ...(options.targetFolderLogical === undefined ? {} : { targetFolderLogical: b64(options.targetFolderLogical) }),
       cosignUsable: false,
       imageVersion: "v1.2.3",
       imageRevision: "b".repeat(40),
@@ -366,6 +368,49 @@ describe("runInstall: database volume safety from the shell's facts (#13-18, F3)
       expect(outcome.action).not.toBe("retry");
     }
     expect(snapshot(target)).toEqual(before);
+  });
+
+  // The containers' working_dir label rides on the container lines; the
+  // folders the update runs in ride on the facts (physical, and logical).
+  function folderFacts(label: string, folders: { targetFolder: string; targetFolderLogical?: string }): HostFacts {
+    return facts({
+      ...folders,
+      volumes: [{ name: "orbit_orbit-db-data", labels: "orbit|orbit-db-data", containers: `${DB_LINE}|${label}` }],
+      projects: [["orbit", `${DB_LINE}|${label}\n${APP_LINE}|${label}`]],
+      images: [["d".repeat(12), OLD_REFERENCE]],
+    });
+  }
+
+  it("an update refuses, naming the other folder and sending the operator there, when the containers belong to another folder (#1570)", async () => {
+    const target = recognised();
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: folderFacts("/srv/old-orbit", { targetFolder: "/srv/orbit" }) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
+    if (outcome.status === "failed") {
+      expect(outcome.message).toContain("/srv/old-orbit");
+      expect(outcome.message).toMatch(/run the update (?:there|in)/i);
+      expect(outcome.message).not.toMatch(/docker[ -]compose/i);
+      expect(outcome.action).not.toBe("retry");
+    }
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it.each([
+    ["the logical path while the physical one differs", "/srv/orbit"],
+    ["the physical path", "/mnt/data/orbit"],
+    ["the logical path with a trailing slash", "/srv/orbit/"],
+  ])("an update in a symlinked folder is proven when the label is %s (#1570)", async (_name, label) => {
+    const { outcome } = await run(recognised(), { facts: folderFacts(label, { targetFolder: "/mnt/data/orbit", targetFolderLogical: "/srv/orbit" }) });
+    expect(outcome.status).toBe("ok");
+  });
+
+  it("an update in a symlinked folder is refused as another folder when the label matches neither path (#1570)", async () => {
+    const { outcome } = await run(recognised(), { facts: folderFacts("/srv/old-orbit", { targetFolder: "/mnt/data/orbit", targetFolderLogical: "/srv/orbit" }) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
+    if (outcome.status === "failed") {
+      expect(outcome.message).toContain("/srv/old-orbit");
+      expect(outcome.action).not.toBe("retry");
+    }
   });
 
   it("an update with a fully matching volume is still proven (#1570)", async () => {

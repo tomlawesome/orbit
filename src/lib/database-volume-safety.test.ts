@@ -130,6 +130,34 @@ describe("evaluateVolumeOwnership (guarantees #13, #14)", () => {
     expect(evaluateVolumeOwnership(CANDIDATE_VOLUME, EXPECTED_IMAGE, adapter, UPDATE_FOLDER)).toEqual({ status: "proven", project: PROJECT });
   });
 
+  // #1570: Compose's working_dir label may hold the path as the operator typed
+  // it (logical) while the installer's `pwd -P` is the physical path, so the
+  // update folder is one string or a list of acceptable spellings.
+  const PHYSICAL_FOLDER = "/mnt/data/orbit";
+  const LOGICAL_FOLDER = "/srv/orbit";
+  const labelled = (folder: string) =>
+    makeAdapter({
+      listContainersByVolume: () => `${DB_CONTAINER_ID}|${PROJECT}|orbit-db|${folder}`,
+      listContainersByProject: () => `${APP_CONTAINER_ID}|${PROJECT}|orbit-app|${folder}`,
+    });
+
+  it.each([
+    ["the logical path while the physical one differs", LOGICAL_FOLDER, [PHYSICAL_FOLDER, LOGICAL_FOLDER]],
+    ["the physical path", PHYSICAL_FOLDER, [PHYSICAL_FOLDER, LOGICAL_FOLDER]],
+    ["the logical path, listed first", LOGICAL_FOLDER, [LOGICAL_FOLDER, PHYSICAL_FOLDER]],
+    ["the folder with a trailing slash on the label", `${LOGICAL_FOLDER}/`, [PHYSICAL_FOLDER, LOGICAL_FOLDER]],
+    ["the folder with a trailing slash on the update folder", LOGICAL_FOLDER, [PHYSICAL_FOLDER, `${LOGICAL_FOLDER}/`]],
+    ["the single update folder with a trailing slash on the label", `${UPDATE_FOLDER}/`, UPDATE_FOLDER],
+    ["the single update folder with a trailing slash on it", UPDATE_FOLDER, `${UPDATE_FOLDER}/`],
+  ])("is proven when the label is %s (#1570)", (_name, label, folders) => {
+    expect(evaluateVolumeOwnership(CANDIDATE_VOLUME, EXPECTED_IMAGE, labelled(label), folders)).toEqual({ status: "proven", project: PROJECT });
+  });
+
+  it("is not-proven as another folder when the label matches none of the acceptable paths (#1570)", () => {
+    const result = evaluateVolumeOwnership(CANDIDATE_VOLUME, EXPECTED_IMAGE, labelled(OLD_FOLDER), [PHYSICAL_FOLDER, LOGICAL_FOLDER]);
+    expect(result).toMatchObject({ status: "not-proven", reason: "other-folder", folder: OLD_FOLDER });
+  });
+
   it.each([
     ["database", { listContainersByVolume: () => `${DB_CONTAINER_ID}|${PROJECT}|orbit-db|${OLD_FOLDER}` }],
     ["application", { listContainersByProject: () => `${APP_CONTAINER_ID}|${PROJECT}|orbit-app|${OLD_FOLDER}` }],

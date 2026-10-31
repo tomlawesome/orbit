@@ -113,6 +113,12 @@ describe("install.sh: what it holds by its source", () => {
     }
   });
 
+  it("sends the install folder's physical and logical paths with the host facts (#1570)", () => {
+    const source = readFileSync(installScript, "utf8");
+    expect(source).toMatch(/\\"targetFolder\\":\$\(base64_string "\$target_dir"\)/u);
+    expect(source).toMatch(/\\"targetFolderLogical\\":\$\(base64_string "[^"]*\$\(pwd -L\)[^"]*"\)/u);
+  });
+
   it("uses literal delimiters for every Docker template it parses, the formats the engine's volume check documents", () => {
     const source = readFileSync(installScript, "utf8");
     const engineSide = readFileSync(join(repositoryRoot, "src", "lib", "database-volume-safety.ts"), "utf8");
