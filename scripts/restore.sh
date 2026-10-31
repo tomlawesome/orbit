@@ -286,6 +286,9 @@ fi
 
 require_deployment health
 [[ "$recover" == true ]] || require_live_key
+# A dangling document-key link is neither a key nor its absence: refuse it before Orbit is
+# touched, naming the link and what to do (#1536 O-F2, X-F3).
+[[ ! -L "$secrets_directory/document-kek" || -e "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist. Remove the link and run again.'
 engine_host_identity
 [[ "$recover" == true ]] || run_engine "$backup_file" restore --preflight /orbit-input/bundle.tar </dev/null || exit $?
 keep_stopped_message='Orbit restore: recovery evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.'
