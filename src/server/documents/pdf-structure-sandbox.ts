@@ -19,7 +19,8 @@ import {
  * cgroup `memory.max` bounds a service. A file that makes pdf.js run out of
  * memory, loop or crash costs one child, which is killed; the check then
  * answers that it reached no verdict (`structure_check_unavailable`). At
- * upload that refuses the file as before; a staged copy awaiting its recovery
+ * upload that answers "please try again" (503 `document_check_unavailable`,
+ * #1593); a staged copy awaiting its recovery
  * scan is checked again rather than purged (ADR-0038 amendment). The server
  * never runs the parser, so it stays responsive and its own memory does not
  * grow.
