@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { THEME_PACKS } from "../../src/lib/theme.js";
+import { finiteMotionSettled } from "./finite-motion.js";
 
 const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 
@@ -342,15 +343,7 @@ async function openFilm(page) {
  * @param {import("@playwright/test").Page} page
  */
 async function settled(page) {
-  await page.evaluate(async () => {
-    const finite = document.getAnimations().filter((a) => a.playState === "running"
-      && Number.isFinite(Number(a.effect?.getComputedTiming().endTime)));
-    await Promise.race([
-      Promise.all(finite.map((a) => a.finished.catch(() => {}))),
-      new Promise((done) => setTimeout(done, 20_000)),
-    ]);
-    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(undefined))));
-  });
+  await finiteMotionSettled(page);
 }
 
 /** The pill at rest: not between places (20s at most for a move that never

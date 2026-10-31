@@ -10,6 +10,8 @@
  * `reach` only has to wait for its own state to exist.
  */
 
+import { finiteMotionSettled } from "./finite-motion.js";
+
 /* Same app the fidelity gate photographs (playwright.config.js webServer). */
 export const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 
@@ -35,16 +37,7 @@ export async function settle(page) {
   await page.evaluate(() => document.fonts.ready);
   for (let round = 0; round < 6; round++) {
     await page.waitForTimeout(120);
-    const running = await page.evaluate(async () => {
-      const finite = document.getAnimations().filter((a) => a.playState === "running"
-        && Number.isFinite(Number(a.effect?.getComputedTiming().endTime)));
-      await Promise.race([
-        Promise.all(finite.map((a) => a.finished.catch(() => {}))),
-        new Promise((done) => setTimeout(done, 20_000)),
-      ]);
-      return finite.length;
-    });
-    if (!running) break;
+    if (!(await finiteMotionSettled(page))) break;
   }
 }
 

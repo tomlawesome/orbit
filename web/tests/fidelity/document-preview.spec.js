@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { APP, SIGNED_IN } from "./pocket-states.js";
+import { finiteMotionDone } from "./finite-motion.js";
 
 /*
  * #1141: with ORBIT_FIXTURES=1, `GET /api/documents/<id>/preview` had no
@@ -91,12 +92,7 @@ test(`the desk preview stands beside the drawer, its top level with the item car
   await expect(paper).toHaveAttribute("aria-current", "true");
   /* The card's own entrance has to finish before its box is the one it
      lands on. */
-  await page.waitForFunction(
-    () => document.getAnimations().every((a) => a.playState !== "running"
-      || !Number.isFinite(Number(a.effect?.getComputedTiming().endTime))),
-    null,
-    { timeout: 20_000 },
-  ).catch(() => {});
+  await finiteMotionDone(page).catch(() => {});
   const [rowBox, cardBox, drawerBox] = await Promise.all([
     page.locator('a.item[id="i-mot"]').boundingBox(), card.boundingBox(), drawer.boundingBox(),
   ]);
