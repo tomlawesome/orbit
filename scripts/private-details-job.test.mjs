@@ -1,6 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 // #1562: the shared personal-details check runs in this pipeline, blocking,
 // pinned to a commit. The rules live on the runner host, so nothing here can
@@ -80,5 +83,162 @@ describe("the shared private-details check (#1562)", () => {
         expect(path[1], "unanchored allowlist path").toMatch(/^\^/u);
       }
     }
+  });
+});
+
+// D-SEC1 (#1584): the include is pinned to a commit because a tag can be moved
+// onto other code, but the template's own script clones agent-infra by the tag
+// in PRIVATE_DETAILS_REF and runs whatever it finds. The job therefore carries
+// its own script, which refuses to run the scanner unless the clone is at the
+// pinned commit, written once here as PRIVATE_DETAILS_COMMIT and checked below
+// to equal the include's ref.
+const includeRef = gitlabCi.match(/^include:\n( {2}-.*\n(?: {4}.*\n)+)/mu)?.[1].match(/ref: ([0-9a-f]{40})\s+#/u)?.[1];
+
+function stripQuotes(value) {
+  return value.trim().replace(/^(["'])(.*)\1$/u, "$2");
+}
+
+/** The `variables:` mapping of a job block (plain `KEY: value` lines). */
+function jobVariables(job) {
+  const block = job.match(/^ {2}variables:\n((?: {4}\S.*\n?)+)/mu)?.[1] ?? "";
+  const vars = {};
+  for (const line of block.split("\n")) {
+    const pair = line.match(/^ {4}([A-Za-z_][A-Za-z0-9_]*): (.*?)(?:\s+#.*)?$/u);
+    if (pair) vars[pair[1]] = stripQuotes(pair[2]);
+  }
+  return vars;
+}
+
+/**
+ * The job's own `script:` as one shell text. Reads plain or quoted one-line
+ * items and `- |` literal blocks; anything else is refused, not guessed at.
+ */
+function jobScript(job) {
+  const start = job.search(/^ {2}script:\n/mu);
+  expect(start, "the private-details job has no script: of its own").toBeGreaterThan(-1);
+  const lines = job.slice(start).split("\n").slice(1);
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line.trim() === "") continue;
+    if (!/^ {4}- /u.test(line)) {
+      if (/^ {0,3}\S/u.test(line)) break;
+      throw new Error(`script item not understood: ${line}`);
+    }
+    const item = line.slice(6);
+    if (item === "|") {
+      const body = [];
+      while (i + 1 < lines.length && (lines[i + 1].trim() === "" || /^ {6}/u.test(lines[i + 1]))) {
+        i += 1;
+        body.push(lines[i].slice(6));
+      }
+      out.push(body.join("\n").trim());
+    } else {
+      out.push(stripQuotes(item));
+    }
+  }
+  return out.join("\n");
+}
+
+describe("the private-details job runs only the scanner commit it pins (#1584, D-SEC1)", () => {
+  it("names the commit in PRIVATE_DETAILS_COMMIT, equal to the include's ref", () => {
+    expect(includeRef, "no commit ref in the include").toBeDefined();
+    const vars = jobVariables(jobBlock("private-details"));
+    expect(vars.PRIVATE_DETAILS_COMMIT).toBe(includeRef);
+  });
+
+  it("clones, then compares the clone's HEAD with PRIVATE_DETAILS_COMMIT, then runs scan.sh history", () => {
+    const script = jobScript(jobBlock("private-details"));
+    const clone = script.search(/git clone\b/u);
+    const compare = script.search(/rev-parse HEAD[^\n]*|[^\n]*rev-parse HEAD/u);
+    const check = script.indexOf("$PRIVATE_DETAILS_COMMIT");
+    const scan = script.search(/scan\.sh" history/u);
+    expect(clone, "no git clone").toBeGreaterThan(-1);
+    expect(compare, "no rev-parse HEAD").toBeGreaterThan(clone);
+    expect(check, "no comparison against $PRIVATE_DETAILS_COMMIT").toBeGreaterThan(-1);
+    expect(script).toMatch(/\$\{?PRIVATE_DETAILS_COMMIT\}?/u);
+    expect(scan, 'no scan.sh" history').toBeGreaterThan(compare);
+    expect(scan).toBeGreaterThan(check);
+    // The scanner is called once, and only after the check.
+    expect(script.match(/scan\.sh/gu)).toHaveLength(1);
+  });
+
+  it("keeps the scan itself: the rules path and a full-depth clone", () => {
+    const job = jobBlock("private-details");
+    const vars = jobVariables(job);
+    // The template sets these; restating them is fine, losing them is not.
+    const inherited = { GIT_DEPTH: "0", PRIVATE_DETAILS_RULES: "/etc/private-details/rules.toml" };
+    for (const [name, value] of Object.entries(inherited)) {
+      if (name in vars) expect(vars[name]).toBe(value);
+    }
+  });
+
+  describe("run with a stub git", () => {
+    const dirs = [];
+    afterEach(() => {
+      for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+    });
+
+    const OTHER = "0123456789abcdef0123456789abcdef01234567";
+
+    function run(headId) {
+      const job = jobBlock("private-details");
+      const vars = jobVariables(job);
+      const script = jobScript(job);
+      const dir = mkdtempSync(join(tmpdir(), "private-details-job-"));
+      dirs.push(dir);
+      const bin = join(dir, "bin");
+      const marker = join(dir, "scan-ran");
+      mkdirSync(bin);
+      // `git clone ... <dir>` makes <dir>/scripts/private-details/scan.sh,
+      // which leaves a marker; `git rev-parse HEAD` prints the chosen id.
+      const stub = [
+        "#!/bin/sh",
+        'for a in "$@"; do last="$a"; done',
+        'for a in "$@"; do',
+        '  case "$a" in',
+        "    clone)",
+        '      mkdir -p "$last/scripts/private-details"',
+        `      echo 'touch ${marker}' > "$last/scripts/private-details/scan.sh"`,
+        "      exit 0 ;;",
+        '    rev-parse) echo "$STUB_HEAD"; exit 0 ;;',
+        "  esac",
+        "done",
+        "exit 0",
+        "",
+      ].join("\n");
+      writeFileSync(join(bin, "git"), stub);
+      chmodSync(join(bin, "git"), 0o755);
+      const result = spawnSync("sh", ["-e", "-c", script], {
+        encoding: "utf8",
+        env: {
+          PATH: `${bin}:/usr/bin:/bin`,
+          TMPDIR: dir,
+          HOME: dir,
+          CI_JOB_TOKEN: "fake-job-token-placeholder",
+          PRIVATE_DETAILS_REF: "private-details/v3",
+          PRIVATE_DETAILS_RULES: "/etc/private-details/rules.toml",
+          ...vars,
+          STUB_HEAD: headId,
+        },
+      });
+      return { result, output: `${result.stdout}${result.stderr}`, ran: existsSync(marker), pinned: vars.PRIVATE_DETAILS_COMMIT };
+    }
+
+    it("stops before the scanner, naming both ids, when the clone is at another commit", () => {
+      const { result, output, ran, pinned } = run(OTHER);
+      expect(pinned).toMatch(/^[0-9a-f]{40}$/u);
+      expect(result.status).not.toBe(0);
+      expect(output).toContain(OTHER);
+      expect(output).toContain(pinned);
+      expect(ran, "scan.sh ran from an unpinned commit").toBe(false);
+    });
+
+    it("runs the scanner when the clone is at the pinned commit", () => {
+      const { result, output, ran, pinned } = run(includeRef);
+      expect(pinned).toBe(includeRef);
+      expect(result.status, output).toBe(0);
+      expect(ran, "scan.sh did not run").toBe(true);
+    });
   });
 });
