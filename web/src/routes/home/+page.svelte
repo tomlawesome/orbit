@@ -35,6 +35,8 @@
   import { pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { createReceiptActs } from "../inbox/acts.js";
   import { completeToday, createDrawerActs } from "./drawer-acts.svelte.js";
+  import { rereadAfterLanded } from "$lib/data/landed.js";
+  import { commandItemOf } from "./command-item.js";
   import { WIDE_QUERY, cardWidthOf, pairOf, trackOf } from "./preview-pair.js";
   import { isPocket } from "$lib/pocket/media.js";
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
@@ -419,7 +421,10 @@
   });
 
   /** Reads the open row's record again after something changed it from the
-      drawer (#1319): a paper attached, removed or restored, a snooze. */
+      drawer (#1319): a paper attached, removed or restored, a snooze. Rejects
+      when that item is still open and could not be read: the act that asked
+      says done-but-unread (landed.js) and, for an attach, keeps its id; a
+      drawer that has moved on has nothing stale to say (#1584). */
   async function rereadDetail() {
     const id = detailFor;
     if (!id) return;
@@ -427,7 +432,7 @@
       const found = await readItem(id);
       if (detailFor === id && found) detail = found;
     } catch (error) {
-      if (detailFor === id) detailProblem = wordsOf(error);
+      if (detailFor === id) throw error;
     }
   }
 
@@ -619,7 +624,7 @@
   /** @type {string | null} */
   let footProblem = $state(null);
   /** The item of `id` (the open one when none is given) as a command addresses it. @param {string | null | undefined} [id] @returns {any} */
-  const commandItem = (id = detail?.id) => (detail?.householdId && !detail.suggestion && detail.id === id ? detail : null);
+  const commandItem = (id = detail?.id) => commandItemOf(detail, id);
   async function rereadAll() {
     view = await readHome();
     await rereadDetail();
@@ -642,9 +647,11 @@
     return () => removeEventListener("pagehide", flush);
   });
   /* A completion a previous visit held and never saw confirmed (#1151
-     W1-S3). The pocket picks it up itself when it is the dialect showing. */
+     W1-S3). The pocket picks it up itself when it is the dialect showing;
+     the two guards are one query, `isPocket()`, so no window width
+     satisfies both. */
   onMount(() => {
-    if (!matchMedia(DESK).matches) return;
+    if (isPocket()) return;
     held.retryStashed((error) => error instanceof WorkspaceError && error.code === "version_conflict");
   });
 
@@ -674,7 +681,7 @@
     },
     focus: (_id, selector) => focusInDrawer(selector),
     open: () => expanded,
-    itemOf: (id) => commandItem(id),
+    itemOf: (id) => commandItemOf(detail, id),
     amend: (suggestion, item, sectionId) => amendReceipt(suggestion, item, sectionId),
     leave: () => collapseRow(),
     attached: (file, title) => `${file} attached to ${title}`,
@@ -865,20 +872,26 @@
   /**
    * @param {any} suggestion
    * @param {"approve" | "dismiss"} act
+   * @returns {Promise<boolean>} whether the receipt left review (decide's answer)
    */
   async function tapReceipt(suggestion, act) {
     mailProblem = null;
-    if (!suggestion.receiptId) return; // a #454 fixture suggestion has no mail behind it yet
+    if (!suggestion.receiptId) return false; // a #454 fixture suggestion has no mail behind it yet
     if (armed.id !== suggestion.id || armed.act !== act) {
       armed = { id: suggestion.id, act };
-      return;
+      return false;
     }
     /* approve and dismiss are the inbox's one act (inbox/acts.js); arming is this screen's */
-    await createReceiptActs({
+    return createReceiptActs({
       view: () => /** @type {any} */ (asView(view)),
       operationIds,
       reload: async () => { view = await readHome(); },
-      say: (_id, words) => { mailProblem = words; },
+      /* The line is the suggestion's, not the armed act's: SuggestionView
+         shows mailProblem on the row whose id is armed, and landed() has
+         put the arm down by the time a failed re-read says done-but-unread
+         (inbox/acts.js). Re-key the row, act at rest, as the drawer's say
+         above does for a problem on a suggestion. */
+      say: (_id, words) => { mailProblem = words; if (words && !armed.id) armed = { id: suggestion.id, act: null }; },
       busy: (id) => { busyReceipt = id ? suggestion.id : null; },
       landed: () => { armed = { id: null, act: null }; },
     }).decide({ id: suggestion.receiptId }, act);
@@ -888,11 +901,13 @@
    * The pocket's review sheet, raised in place from a suggestion's row or
    * its hollow body on the dial (round 3 §4): approves what the reader
    * amended into the section they chose, on the same idempotent protocol
-   * and operation id as the two-tap decision. Answers the problem, if any.
+   * and operation id as the two-tap decision. Answers the problem, if any,
+   * or the replayed answer; the home read after an add that landed is
+   * drawer-acts'.
    * @param {import('$lib/data/workspace.js').ReceiptSuggestion} suggestion
    * @param {import('$lib/data/workspace.js').ItemProposal} item
    * @param {string | null} sectionId
-   * @returns {Promise<string | { partial: true, message: string } | null>}
+   * @returns {Promise<string | { partial: true, message: string } | { replayed: true, message: string } | null>}
    */
   async function amendReceipt(suggestion, item, sectionId) {
     if (!suggestion.receiptId) return "not added — try again";
@@ -905,8 +920,11 @@
         view = await readHome().catch(() => view);
         return result;
       }
-      view = await readHome();
-      return null;
+      /* Filed. The read after it is the drawer acts' (rereadAfterLanded,
+         as after every act that landed), so a read that fails is said under
+         the row as done-but-unread and never turns the add into "not added".
+         A replay is handed back so the wake can say what went in. */
+      return "replayed" in result ? result : null;
     } catch (error) {
       return wordsOf(error);
     } finally {
@@ -997,11 +1015,15 @@
   async function fireCompleteAct(target) {
     stripProblem = null;
     if (!completeArm.tap()) return; // first tap only arms it
-    const { done, problem } = await completeToday({ raw: rawItems.get(target.id), primary: view?.primary, today: asView(view).today });
+    const { done, problem } = await completeToday({ raw: rawItems.get(target.id), primary: view?.primary, today: view?.today });
     stripProblem = problem;
     if (!done) return;
     stripOpen = false;
-    try { view = await readHome(); } catch (error) { stripProblem = wordsOf(error, "couldn't complete it — try again"); }
+    /* Completed, and the strip is shut: a failed read of home after it is
+       done-but-unread (landed.js), said in the wake — the strip's own line
+       is hidden with the strip and cleared by the next focus, so a word put
+       there is never seen (#1584). */
+    await rereadAfterLanded(async () => { view = await readHome(); }, wake);
   }
 
   /** @param {string} name */
@@ -1411,10 +1433,11 @@
 
 <!-- #466/#1120: the pocket's two-tap decisions land on the same idempotent
      approve protocol the desk rows use (one operation id per receipt), and
-     answer with the problem, if any, for the sheet to show. -->
+     answer whether it landed and the line to show, if any: a refusal's
+     words, or done-but-unread when only the read after it failed. -->
 <Pocket {view} {arrive} onsignedout={(redirectTo) => leave?.descendFrom(redirectTo)} onmenu={readyDescent}
-        onapprove={async (suggestion) => { armed = { id: suggestion.id, act: "approve" }; await tapReceipt(suggestion, "approve"); return mailProblem; }}
-        ondismiss={async (suggestion) => { armed = { id: suggestion.id, act: "dismiss" }; await tapReceipt(suggestion, "dismiss"); return mailProblem; }}
+        onapprove={async (suggestion) => { armed = { id: suggestion.id, act: "approve" }; const done = await tapReceipt(suggestion, "approve"); return { done, problem: mailProblem }; }}
+        ondismiss={async (suggestion) => { armed = { id: suggestion.id, act: "dismiss" }; const done = await tapReceipt(suggestion, "dismiss"); return { done, problem: mailProblem }; }}
         onamend={amendReceipt}
         onchanged={async () => {
           /* #1151 W1-R4: the same unguarded read as the onMount one above —
@@ -1427,6 +1450,11 @@
             homeLoadProblem = null;
           } catch (error) {
             homeLoadProblem = wordsOf(error);
+            /* The banner is this screen's; the act that asked still needs to
+               know the read failed, or it reads a landed command back as
+               refreshed and, for an attach, drops the id a re-pick must
+               re-send (#1584). */
+            throw error;
           }
         }} />
 

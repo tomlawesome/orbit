@@ -162,7 +162,8 @@
    sits, a switch that is saving or disabled. */
 .p-input{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;border-radius:12px;
   border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);color:var(--ink);
-  font:var(--p-type-body)/1.2 var(--ui)}
+  /* --p-type-input, not body: 16px however small the text size, so iOS never zooms a focused field (#1180). */
+  font:var(--p-type-input)/1.2 var(--ui)}
 .p-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
 select.p-input:focus-visible{outline-offset:1px}
 .p-input::placeholder{color:var(--ink-quiet)}

@@ -148,3 +148,39 @@ describe("#1316 W2-S1: a replayed completion refused with a version conflict is 
     expect(readHeldCompletionStash(storage)).toEqual([]);
   });
 });
+
+/*
+ * One owner for the stash. The pocket and the desk both mount on home and CSS
+ * shows one of them, over the same stash in localStorage. Each replays it, so
+ * the two guards must be one query and its negation (`isPocket()`, the query
+ * the stylesheets switch on): any window that satisfied both would send the
+ * completion twice, and the second send is refused as a version conflict and
+ * reported as not recorded. `DESK` (min-width: 901px) is not that negation: a
+ * wide, short window is in both. Text pins, as the file does for wiring a
+ * unit test cannot mount.
+ */
+describe("the stash is replayed by one dialect only", () => {
+  /** The code of a block, comments removed. @param {string} text */
+  const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+  it("the pocket's retryStashed sits in an effect whose first statement tests isPocket()", () => {
+    const src = read("web/src/routes/home/pocket.svelte");
+    const at = src.indexOf("held.retryStashed(");
+    expect(at, "pocket.svelte calls held.retryStashed").toBeGreaterThan(-1);
+    const open = src.lastIndexOf("$effect(() => {", at);
+    expect(open, "the call sits in an $effect").toBeGreaterThan(-1);
+    const body = code(src.slice(open + "$effect(() => {".length, at)).trim();
+    expect(body).toMatch(/^if\s*\(\s*!\s*isPocket\(\)\s*\)\s*return\s*;?$/);
+  });
+
+  it("the desk's onMount tests isPocket() before retryStashed, and not matchMedia(DESK)", () => {
+    const src = read("web/src/routes/home/+page.svelte");
+    const at = src.indexOf("held.retryStashed(");
+    expect(at, "+page.svelte calls held.retryStashed").toBeGreaterThan(-1);
+    const open = src.lastIndexOf("onMount(() => {", at);
+    expect(open, "the call sits in an onMount").toBeGreaterThan(-1);
+    const body = code(src.slice(open + "onMount(() => {".length, at)).trim();
+    expect(body).toMatch(/^if\s*\(\s*isPocket\(\)\s*\)\s*return\s*;?$/);
+    expect(body).not.toContain("matchMedia(DESK)");
+  });
+});

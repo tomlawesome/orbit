@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { readSearchDocuments, SEARCH_DOC_CONCURRENCY } from "../../web/src/routes/home/pocket-search.js";
 
@@ -56,6 +56,33 @@ describe("#1151 W1-R9/W1-Q8: readSearchDocuments caps concurrent reads", () => {
   });
 
   it("drops only the failing item's own papers, not the whole search", async () => {
+    const carrying = [{ id: "ok", title: "OK" }, { id: "bad", title: "Bad" }];
+    const read = async (/** @type {string} */ hh, /** @type {string} */ id) => {
+      if (id === "bad") throw new Error("boom");
+      return [{ id: `${id}-doc`, name: "paper", itemId: id }];
+    };
+    const found = await readSearchDocuments(carrying, read, "hh1", () => false);
+    expect(found).toHaveLength(1);
+    expect(found[0].itemId).toBe("ok");
+  });
+
+  /* #1584 fix review r2-web-home-1: the read names the items it could not
+     read, so the one caller that must know (the phone's papers re-read after
+     an act) can tell. Optional: every other caller is untouched. */
+  it("U1. names the failing item to its fifth argument, once, and still resolves with the readable papers", async () => {
+    const carrying = [{ id: "ok", title: "OK" }, { id: "bad", title: "Bad" }, { id: "alsoOk", title: "Also OK" }];
+    const read = async (/** @type {string} */ hh, /** @type {string} */ id) => {
+      if (id === "bad") throw new Error("boom");
+      return [{ id: `${id}-doc`, name: "paper", itemId: id }];
+    };
+    const onfailed = vi.fn();
+    const found = await readSearchDocuments(carrying, read, "hh1", () => false, onfailed);
+    expect(found.map((doc) => doc.itemId).sort()).toEqual(["alsoOk", "ok"]);
+    expect(onfailed).toHaveBeenCalledTimes(1);
+    expect(onfailed).toHaveBeenCalledWith("bad");
+  });
+
+  it("U2. guard: with no fifth argument the call resolves and drops only the failing item's papers", async () => {
     const carrying = [{ id: "ok", title: "OK" }, { id: "bad", title: "Bad" }];
     const read = async (/** @type {string} */ hh, /** @type {string} */ id) => {
       if (id === "bad") throw new Error("boom");

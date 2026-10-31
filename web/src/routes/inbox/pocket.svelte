@@ -16,6 +16,7 @@
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
+  import { rereadAfterLanded } from "$lib/data/landed.js";
   import { prefersReducedMotion } from "$lib/motion.js";
   import { T_CLASS } from "$lib/data/bands.js";
   import { createReceiptActs } from "./acts.js";
@@ -92,11 +93,11 @@
       else problems.delete(id);
     },
     busy: (id, act) => { busy = id; busyAct = act; },
-    landed: (receipt, act, amended) => {
+    landed: (receipt, act, amended, note) => {
       const card = /** @type {Receipt} */ (receipt);
       if (act === "approve") {
         exits.set(card.id, "filed");
-        wake(`added to your orbit · ${amended?.title ?? titleOf(card)}`);
+        wake(note ?? `added to your orbit · ${amended?.title ?? titleOf(card)}`);
       } else {
         exits.set(card.id, "burn");
         wake(`dismissed · ${titleOf(card)}`);
@@ -121,11 +122,16 @@
   async function removeFailed(failure) {
     try {
       await dismissReceipt(failure.id);
-      exits.set(failure.id, "burn");
-      await reload();
     } catch (error) {
       wake(`not removed — ${wordsOf(error)}`, { failure: true });
+      return;
     }
+    exits.set(failure.id, "burn");
+    /* Removed, whatever the read did: a failed read of the inbox after it
+       is woken as done-but-unread ($lib/data/landed.js), never as "not
+       removed", so nobody removes a gone message twice. A wake, not a row
+       line: FailedRow has no line and the row folds on its act. */
+    await rereadAfterLanded(reload, (words) => wake(words));
   }
 
   /* ---- review & amend: create's form in review mode (§2.5, §2.6), the
@@ -143,7 +149,7 @@
     reviewOpen = true;
   }
   /**
-   * @param {import('$lib/data/workspace.js').ItemProposal} item
+   * @param {import('$lib/data/workspace.js').ItemProposal | null} item
    * @param {string | null} sectionId
    */
   async function saveReview(item, sectionId) {

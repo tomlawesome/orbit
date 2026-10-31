@@ -15,6 +15,7 @@ import {
   readSignInMethods, removeLocalPassword, startProviderLink, startStepUp, unlinkProviderIdentity, writeLocalPassword,
   writeReminders,
 } from "$lib/data/workspace.js";
+import { rereadAfterLanded } from "$lib/data/landed.js";
 import { disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
 import { alertsWords, intentOf, methodWords, stepUpReturnOf } from "./helm.js";
 import { signOutOfDevice, signOutOfEveryDevice } from "./sign-out.js";
@@ -58,6 +59,7 @@ export async function changeMethod(action, { hasPassword, currentPassword, newPa
     let outcome = "";
     if (action === "link_oidc") {
       await startProviderLink({ returnTo: "/settings", ...challenge });
+      card.busy = false;
       return;
     }
     if (action === "password_set" || action === "password_change") {
@@ -73,9 +75,15 @@ export async function changeMethod(action, { hasPassword, currentPassword, newPa
     say(outcome);
     landed();
     wake(outcome);
-    keep(await readSignInMethods());
   } catch (error) {
     card.problem = methodWords(error);
+    card.busy = false;
+    return;
+  }
+  /* The change is made; a failed read of the methods afterwards is said as
+     done-but-unread where each layout speaks, never as "not changed". */
+  try {
+    await rereadAfterLanded(async () => keep(await readSignInMethods()), (words) => { say(words); wake(words); });
   } finally {
     card.busy = false;
   }

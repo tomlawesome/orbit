@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { hardDeleteHousehold, readAdminScreen, readSignInMethods, startStepUp, wordsOf } from "$lib/data/workspace.js";
+  import { readAdminScreen, readSignInMethods, startStepUp } from "$lib/data/workspace.js";
   import { createArm } from "$lib/arm.js";
   import { deletionNameMatches } from "$lib/data/household.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
@@ -18,7 +18,7 @@
     sendWords, setupWords, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict,
   } from "./words.js";
   import {
-    card, commandMail, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
+    card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
     runMailTest, retryJob, setContact, setUploadLimit,
   } from "./acts.svelte.js";
   import "./administration.css";
@@ -222,8 +222,8 @@
   let doomTypedName = $state({});
   /** @type {Record<string, string | null>} */
   let doomProblem = $state({});
-  /** Rows replaced by their said-line after a hard delete. @type {{ id: string, text: string }[]} */
-  let doomGone = $state([]);
+  /** Rows replaced by their said-line after a hard delete, keyed by the system's id. */
+  let doomGone = $state(/** @type {Record<string, string>} */ ({}));
   /** @param {{ id: string, name: string }} row */
   const openDoomConfirm = (row) => {
     doomConfirming[row.id] = true;
@@ -244,16 +244,11 @@
     if (doomArm.tap(row.id, button)) fireDoom(row);
   }
   /** @param {{ id: string, name: string }} row */
-  async function fireDoom(row) {
-    try {
-      await hardDeleteHousehold(row.id, doomTypedName[row.id] ?? "");
-      doomConfirming[row.id] = false;
-      doomGone = [...doomGone, { id: row.id, text: `deleted · ${row.name} is gone for good · its members keep their accounts` }];
-      view = await readAdminScreen();
-    } catch (error) {
-      doomProblem[row.id] = wordsOf(error);
-    }
-  }
+  const fireDoom = (row) => deleteSystemNow(row, doomTypedName[row.id] ?? "", {
+    gone: doomGone, reread,
+    landed: () => (doomConfirming[row.id] = false),
+    refused: (words) => (doomProblem[row.id] = words),
+  });
 
   /* ADD A LOCAL USER, AND SEND A NEW SETUP LINK (#915, ADR-0023 §3, §5;
      composition ruled in docs/plans/m7-local-accounts.md §2.7).
@@ -523,7 +518,7 @@
      reader, `retry` on FAILED rows only. Retrying flips the row to QUEUED at
      once, the same optimistic update the phone's own retry makes — the next
      screen re-read (any other admin act) settles it against the server. */
-  /** @type {Record<string, { status: string, at: string }>} */
+  /** @type {import("./words.js").Retried} */
   let retriedJobs = $state({});
   const jobs = $derived.by(() => jobsOf(view?.operations?.documentJobs ?? [], retriedJobs));
   const jobCounts = $derived(jobCountsOf(jobs));
@@ -992,7 +987,7 @@
              row already uses. It carries no items (id, name, deleteAfter
              only), so its ring is plain -- no ringDots here either, exactly
              as pocket.svelte draws it. -->
-        {#each recoverable.filter((doom) => !doomGone.some((line) => line.id === doom.id)) as doom (doom.id)}
+        {#each recoverable.filter((doom) => !doomGone[doom.id]) as doom (doom.id)}
           {@const rowExpired = expired(doom, view?.now)}
           <div class="system" class:doomed={!rowExpired}>
             <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
@@ -1038,8 +1033,8 @@
             {/if}
           </div>
         {/each}
-        {#each doomGone as line (line.id)}
-          <div class="system settled"><div class="adminproblem gone">{line.text}</div></div>
+        {#each Object.entries(doomGone) as [id, text] (id)}
+          <div class="system settled"><div class="adminproblem gone">{text}</div></div>
         {/each}
       </div>
 
