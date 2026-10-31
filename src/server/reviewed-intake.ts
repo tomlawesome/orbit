@@ -214,11 +214,15 @@ export function reviewDraftMetadataFromProposal(
  * approved, discarded or expired. The rejected reading is only ever kept
  * for the life of the pending review (ADR-0025 section 4), and it rides
  * inside this same blob, so nothing extra is needed to make it go with
- * everything else the review held.
+ * everything else the review held. The approval request the claim stored
+ * (#1396) rides with it: it is Tier 1 content and lives only as long as the
+ * review it belongs to; the key and hash stay so a replay still answers as
+ * the approval did.
  */
 export const clearedReviewDraftMetadata = {
   proposalEnc: null,
   fieldEvidenceEnc: null,
+  approvalRequestEnc: null,
 } as const;
 
 /**
@@ -821,7 +825,7 @@ async function finishMailboxApproval(
       updatedAt: new Date(),
       // The review is only actually over once this reaches "completed"; a
       // partial success is still retryable and keeps its draft meanwhile.
-      ...(partial ? {} : { ...clearedReviewDraftMetadata, approvalRequestEnc: null }),
+      ...(partial ? {} : clearedReviewDraftMetadata),
     }).where(and(
       eq(imapIngestionMessages.id, input.source.receiptId),
       eq(imapIngestionMessages.approvalOperationId, input.operationId),
