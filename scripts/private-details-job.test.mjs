@@ -109,6 +109,8 @@ function jobVariables(job) {
   return vars;
 }
 
+// YAML validity of the script items is covered by the "plain scalar" test below;
+// this extractor only recovers the shell text for the stub-git runs.
 /**
  * The job's own `script:` as one shell text. Reads plain or quoted one-line
  * items and `- |` literal blocks; anything else is refused, not guessed at.
@@ -140,11 +142,36 @@ function jobScript(job) {
   return out.join("\n");
 }
 
+/** The raw text after `- ` of each item of the job's `script:` list. */
+function scriptItemLines(job) {
+  const start = job.search(/^ {2}script:\n/mu);
+  expect(start, "the private-details job has no script: of its own").toBeGreaterThan(-1);
+  const items = [];
+  for (const line of job.slice(start).split("\n").slice(1)) {
+    if (/^ {4}- /u.test(line)) items.push(line.slice(6));
+    else if (/^ {0,3}\S/u.test(line)) break;
+  }
+  return items;
+}
+
 describe("the private-details job runs only the scanner commit it pins (#1584, D-SEC1)", () => {
   it("names the commit in PRIVATE_DETAILS_COMMIT, equal to the include's ref", () => {
     expect(includeRef, "no commit ref in the include").toBeDefined();
     const vars = jobVariables(jobBlock("private-details"));
     expect(vars.PRIVATE_DETAILS_COMMIT).toBe(includeRef);
+  });
+
+  // The repo carries no YAML parser, so this stands in for one: a plain
+  // (unquoted, non-block) scalar holding ": " is read as a mapping, and one
+  // holding " #" is cut at a comment, and GitLab would reject or mangle the job.
+  it("has script items that are strings: no plain scalar holds ': ' or ' #'", () => {
+    const items = scriptItemLines(jobBlock("private-details"));
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) {
+      if (/^["'|>]/u.test(item)) continue;
+      expect(item, `plain scalar read as a mapping: ${item}`).not.toContain(": ");
+      expect(item, `plain scalar cut at a comment: ${item}`).not.toContain(" #");
+    }
   });
 
   it("clones, then compares the clone's HEAD with PRIVATE_DETAILS_COMMIT, then runs scan.sh history", () => {
@@ -166,11 +193,14 @@ describe("the private-details job runs only the scanner commit it pins (#1584, D
   it("keeps the scan itself: the rules path and a full-depth clone", () => {
     const job = jobBlock("private-details");
     const vars = jobVariables(job);
-    // The template sets these; restating them is fine, losing them is not.
+    // The template sets these; restating them is fine, overriding them is not.
     const inherited = { GIT_DEPTH: "0", PRIVATE_DETAILS_RULES: "/etc/private-details/rules.toml" };
     for (const [name, value] of Object.entries(inherited)) {
-      if (name in vars) expect(vars[name]).toBe(value);
+      if (name in vars) expect(vars[name], `${name} overridden`).toBe(value);
     }
+    // The template's tag is inherited, never set here; the commit check above
+    // is what pins it.
+    expect(vars).not.toHaveProperty("PRIVATE_DETAILS_REF");
   });
 
   describe("run with a stub git", () => {
