@@ -29,6 +29,7 @@ const server = vi.hoisted(() => {
   return {
     commandMailbox: ok, commandUploadLimit: ok, addMember: ok, commandContact: ok,
     createLocalUser: ok, createSystem: ok, restoreHousehold: ok, testMail: ok,
+    setUserDisabled: ok, hardDeleteHousehold: ok,
   };
 });
 vi.mock("$lib/data/workspace.js", () => ({
@@ -39,12 +40,15 @@ vi.mock("$lib/data/workspace.js", () => ({
   createSystem: (/** @type {unknown} */ body) => server.createSystem(body),
   restoreHousehold: (/** @type {unknown} */ id) => server.restoreHousehold(id),
   testMail: (/** @type {unknown} */ which) => server.testMail(which),
+  setUserDisabled: (/** @type {unknown[]} */ ...a) => server.setUserDisabled(...a),
+  hardDeleteHousehold: (/** @type {unknown[]} */ ...a) => server.hardDeleteHousehold(...a),
   commandMailbox: (/** @type {unknown} */ command) => server.commandMailbox(command),
   commandUploadLimit: (/** @type {unknown} */ command) => server.commandUploadLimit(command),
   wordsOf: (/** @type {unknown} */ error) => (error instanceof Error ? error.message : String(error)),
 }));
 const {
-  commandMail, inviteLocalUser, makeSystem, placePerson, restoreSystem, runMailTest, setContact, setUploadLimit,
+  commandMail, deleteSystemNow, inviteLocalUser, makeSystem, placePerson, restoreSystem, runMailTest, setContact,
+  setDisabled, setUploadLimit,
 } = await import("../../web/src/routes/administration/acts.svelte.js");
 
 /** @param {string} path @returns {string} */
@@ -141,6 +145,7 @@ beforeEach(() => {
   Object.assign(server, {
     commandMailbox: ok, commandUploadLimit: ok, addMember: ok, commandContact: ok,
     createLocalUser: ok, createSystem: ok, restoreHousehold: ok, testMail: ok,
+    setUserDisabled: ok, hardDeleteHousehold: ok,
   });
 });
 
@@ -307,5 +312,154 @@ describe("the phone passes what the acts need (source check on pocket.svelte, #1
 
   it("makeSystem is handed `wake`, as an option beside `landed` (not only called inside it)", () => {
     expect(callAfter(read(POCKET_PATH), "await makeSystem(")).toMatch(/(?:^|[\s{,])wake\s*(?:,|\}|:)/);
+  });
+});
+
+/*
+ * #1584 web-admin-1: disable/enable and the hard delete, whose command lands
+ * and whose re-read then fails. The disable says done on the people card
+ * alone (its success wake carries the undo, which a second wake would take
+ * away). The hard delete rewrites the tail of its row's `gone` line; the phone
+ * also wakes it, the desk (no `wake`) does not. Neither says "not deleted" or
+ * wakes a failure once the command has landed.
+ */
+describe("disable and hard delete: a failed re-read after a landed command is said as done (#1584 web-admin-1)", () => {
+  const person = { id: "p1", displayName: "Ada" };
+  const row = { id: "s1", name: "Home" };
+  const newCard = () => ({ busy: /** @type {string | null} */ (null), problem: /** @type {string | null} */ (null) });
+  const GONE = "deleted · Home is gone for good";
+
+  it("setDisabled, disabling, read fails: one wake with the undo standing; the card says done; the undo re-enables", async () => {
+    const calls = /** @type {unknown[][]} */ ([]);
+    server.setUserDisabled = async (/** @type {unknown[]} */ ...args) => { calls.push(args); return {}; };
+    const wake = vi.fn();
+    const card = newCard();
+    await setDisabled(person, true, { card, reread: failedRead, wake });
+
+    expect(calls).toEqual([["p1", true]]);
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake.mock.calls[0][0]).toBe("Ada is disabled · they can’t sign in");
+    expect(typeof wake.mock.calls[0][1]?.undo).toBe("function");
+    expect(wake.mock.calls[0][1]?.failure).toBeFalsy();
+    expect(card.problem).toMatch(DONE);
+    expect(card.busy).toBeNull();
+
+    wake.mock.calls[0][1].undo();
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1]).toEqual(["p1", false]);
+  });
+
+  it("setDisabled, enabling, read fails: one plain wake (no undo, no failure); the card says done", async () => {
+    const wake = vi.fn();
+    const card = newCard();
+    await setDisabled(person, false, { card, reread: failedRead, wake });
+
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake.mock.calls[0][0]).toBe("Ada can sign in again");
+    expect(wake.mock.calls[0][1]?.undo).toBeUndefined();
+    expect(wake.mock.calls[0][1]?.failure).toBeFalsy();
+    expect(card.problem).toMatch(DONE);
+  });
+
+  it("setDisabled, read lands: the card is clear and the disabled line is woken once", async () => {
+    const wake = vi.fn();
+    const card = newCard();
+    await setDisabled(person, true, { card, reread: goodRead, wake });
+
+    expect(card.problem).toBeNull();
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake.mock.calls[0][0]).toBe("Ada is disabled · they can’t sign in");
+  });
+
+  it("setDisabled refused: the refusal on the card and as one failure wake; nothing re-read", async () => {
+    server.setUserDisabled = refuses;
+    const wake = vi.fn();
+    const card = newCard();
+    await setDisabled(person, true, { card, reread: goodRead, wake });
+
+    expect(card.problem).toBe("no");
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake).toHaveBeenCalledWith("no", { failure: true });
+    expect(goodRead).not.toHaveBeenCalled();
+  });
+
+  it("deleteSystemNow, phone shape, read fails: the sheet closes, the gone line says reload, and the phone wakes done", async () => {
+    const calls = /** @type {unknown[][]} */ ([]);
+    server.hardDeleteHousehold = async (/** @type {unknown[]} */ ...args) => { calls.push(args); return {}; };
+    const gone = /** @type {Record<string, string>} */ ({});
+    const landed = vi.fn();
+    const refused = vi.fn();
+    const wake = vi.fn();
+    await deleteSystemNow(row, "Home", { gone, reread: failedRead, landed, refused, wake });
+
+    expect(calls).toEqual([["s1", "Home"]]);
+    expect(landed).toHaveBeenCalledTimes(1);
+    expect(refused).not.toHaveBeenCalled();
+    expect(gone.s1.startsWith(GONE)).toBe(true);
+    expect(gone.s1).toMatch(/reload/i);
+    expect(gone.s1).not.toMatch(/not deleted/);
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake.mock.calls[0][0]).toMatch(DONE);
+    expect(wake.mock.calls[0][1]?.failure).toBeFalsy();
+  });
+
+  it("deleteSystemNow, desk shape (no wake), read fails: resolves; the gone line says reload; landed once", async () => {
+    const gone = /** @type {Record<string, string>} */ ({});
+    const landed = vi.fn();
+    const refused = vi.fn();
+    await deleteSystemNow(row, "Home", { gone, reread: failedRead, landed, refused });
+
+    expect(landed).toHaveBeenCalledTimes(1);
+    expect(refused).not.toHaveBeenCalled();
+    expect(gone.s1.startsWith(GONE)).toBe(true);
+    expect(gone.s1).toMatch(/reload/i);
+    expect(gone.s1).not.toMatch(/not deleted/);
+  });
+
+  it("deleteSystemNow, read lands: the gone line keeps its members' words and nothing is woken", async () => {
+    const gone = /** @type {Record<string, string>} */ ({});
+    const landed = vi.fn();
+    const wake = vi.fn();
+    await deleteSystemNow(row, "Home", { gone, reread: goodRead, landed, refused: vi.fn(), wake });
+
+    expect(gone.s1).toBe("deleted · Home is gone for good · its members keep their accounts");
+    expect(wake).not.toHaveBeenCalled();
+    expect(landed).toHaveBeenCalledTimes(1);
+  });
+
+  it("deleteSystemNow refused: the server's words to `refused`; nothing landed, said, re-read or woken", async () => {
+    server.hardDeleteHousehold = refuses;
+    const gone = /** @type {Record<string, string>} */ ({});
+    const landed = vi.fn();
+    const refused = vi.fn();
+    const wake = vi.fn();
+    await deleteSystemNow(row, "Home", { gone, reread: goodRead, landed, refused, wake });
+
+    expect(refused).toHaveBeenCalledTimes(1);
+    expect(refused).toHaveBeenCalledWith("no");
+    expect(landed).not.toHaveBeenCalled();
+    expect(gone).not.toHaveProperty("s1");
+    expect(goodRead).not.toHaveBeenCalled();
+    expect(wake).not.toHaveBeenCalled();
+  });
+
+  it("the layouts send these through the acts (import lines of pocket.svelte and +page.svelte)", () => {
+    /**
+     * Every named import from `from`, across all its import statements.
+     * @param {string} src @param {RegExp} from @returns {string[]}
+     */
+    const names = (src, from) => [...src.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)]
+      .filter((m) => from.test(m[2]))
+      .flatMap((m) => m[1].split(",").map((n) => n.trim().split(/\s+as\s+/)[0]).filter(Boolean));
+    const workspace = /\/data\/workspace\.js$/;
+    const acts = /acts\.svelte\.js$/;
+    const pocket = read(POCKET_PATH);
+    const desk = read(DESK_PATH);
+
+    expect(names(pocket, workspace)).not.toContain("setUserDisabled");
+    expect(names(pocket, workspace)).not.toContain("hardDeleteHousehold");
+    expect(names(pocket, acts)).toEqual(expect.arrayContaining(["setDisabled", "deleteSystemNow"]));
+    expect(names(desk, workspace)).not.toContain("hardDeleteHousehold");
+    expect(names(desk, acts)).toContain("deleteSystemNow");
   });
 });

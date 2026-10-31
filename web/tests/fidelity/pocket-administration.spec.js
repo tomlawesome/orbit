@@ -100,6 +100,55 @@ test("a system on the clock keeps restore on show; delete now sits in its opened
   await expect(sheet.getByRole("button", { name: "delete for good" })).toBeEnabled();
 });
 
+/*
+ * #1584 web-admin-1: the command lands and only the re-read after it fails
+ * (/api/workspace aborted once the first load is in). The act is done and
+ * must be said so, never as a refusal.
+ */
+test("a disable whose re-read fails still says disabled, keeps its undo, and says done on the card", async ({ page }) => {
+  await page.route(`${APP}/api/admin/users`, (route) =>
+    route.request().method() === "PATCH" ? route.fulfill({ json: { ok: true } }) : route.fallback());
+  await open(page);
+  /* Registered later, so it runs before open's handler: the re-read fails. */
+  await page.route(`${APP}/api/workspace`, (route) => route.abort("failed"));
+  const emma = row(page, "[data-ad=people]", "Emma Harlow");
+  await openRow(page, emma);
+  await emma.getByRole("button", { name: "Disable Emma Harlow" }).click();
+  await emma.getByRole("button", { name: "tap again to disable Emma Harlow" }).click();
+  const card = page.locator("[data-ad=people] .p-error");
+  await expect(card).toContainText("done —");
+  await expect(card).toContainText("reload");
+  const wake = page.locator(".p-wake-host .p-wake");
+  await expect(wake).toContainText("Emma Harlow is disabled");
+  await expect(wake.locator("button.undo")).toBeVisible();
+  await expect(page.locator(".p-wake.failure")).toHaveCount(0);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
+test("a delete-now whose re-read fails closes the sheet, replaces the row and says done", async ({ page }) => {
+  await page.route(`${APP}/api/households/hh-gone-1/lifecycle`, (route) => route.fulfill({ json: { ok: true } }));
+  await open(page);
+  await page.route(`${APP}/api/workspace`, (route) => route.abort("failed"));
+  const clock = row(page, "[data-ad=systems]", "Aunt May");
+  await openRow(page, clock);
+  await clock.getByRole("button", { name: "Delete Aunt May’s Cottage now, for good" }).click();
+  await clock.getByRole("button", { name: "tap again to delete Aunt May’s Cottage now, for good" }).click();
+  const sheet = page.getByRole("dialog", { name: /Delete Aunt May’s Cottage now/ });
+  await expect(sheet).toBeVisible();
+  await sheet.getByLabel(/type the system’s name exactly/i).fill("Aunt May’s Cottage");
+  await sheet.getByRole("button", { name: "delete for good" }).click();
+  await sheet.getByRole("button", { name: "tap again to delete for good" }).click();
+
+  await expect(page.getByRole("dialog", { name: /Delete Aunt May’s Cottage now/ })).toBeHidden();
+  const said = page.locator("[data-ad=systems] .ad-said.ok");
+  await expect(said).toContainText("Aunt May’s Cottage is gone for good");
+  await expect(said).toContainText("reload");
+  await expect(page.getByRole("button", { name: "Restore Aunt May’s Cottage" })).toHaveCount(0);
+  await expect(page.locator(".p-wake")).toContainText("done —");
+  await expect(page.getByText("not deleted")).toHaveCount(0);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
 test("a failed document job says why and offers retry, with no interaction", async ({ page }) => {
   await open(page);
   const card = page.locator(".ad-pocket [data-ad=documents]");
