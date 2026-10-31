@@ -64,18 +64,36 @@ set -Eeuo pipefail
 #
 # READ-ONLY BY CONSTRUCTION (--check / --plan only)
 # --------------------------------------------------
-# Under `--check` and `--plan` this script must never write, create, chmod,
-# start, stop, or delete anything. It never uses mktemp inside the
-# installation directory. Every `docker` invocation is one of: `docker
-# inspect`, `docker image inspect`, `docker ps`, `docker volume ls`/
-# `inspect`, `docker compose config` — never a command that mutates
-# containers, volumes, or images.
+# Under `--check` and `--plan` this script never writes, creates, chmods,
+# starts, stops, or deletes anything in the deployment. It never uses mktemp
+# inside the installation directory (its two scratch files, the
+# configure.sh --check stderr capture and the image's Compose copy, live in
+# $TMPDIR and are removed before the run ends). What it asks Docker for:
+#   - two throwaway containers, each `docker run --rm` with `--network none`
+#     and the image already present locally (nothing is ever pulled): the
+#     configuration check, `bash scripts/configure.sh --check`, which runs
+#     the engine inside the pinned image (Step 5), and the Compose-file
+#     read, `docker run --rm --pull never --network none --entrypoint cat
+#     <pinned image> /opt/orbit/deploy/docker-compose.yml` (Step 4b). Both
+#     create a container that is removed on exit, touch no volume and no
+#     deployment file, and show up in `docker events`;
+#   - reads: `docker inspect`, `docker image inspect`, `docker ps`,
+#     `docker volume ls`/`inspect`, `docker logs`, `docker compose config`,
+#     and the `docker exec` probes of this deployment's own containers
+#     described below.
+# Nothing else: never create/cp/rm, start, stop, kill, pull, compose up or
+# down. A Docker endpoint that refuses `run` (a verb-restricted socket proxy)
+# loses only those two: the configuration check is reported as a
+# configuration finding (configuration-invalid, since Docker's refusal
+# reaches stderr), and the Compose-file read adds nothing, so a missing
+# docker-compose.yml stays managed-file-missing (a manual step) and drift
+# is not reported.
 # Each docker read is optional: if the `docker` CLI is unavailable or the
 # daemon cannot be reached, the affected checks are reported as
 # `class=docker-unavailable` and diagnosis continues with everything else
-# that can still be checked read-only. `--execute` (this slice) is the one
-# and only invocation that ever mutates anything, and even then only the
-# fixed safe action set documented below — see "EXECUTE MODE" further down.
+# that can still be checked read-only. `--execute` is the one and only
+# invocation that ever mutates the deployment, and even then only the fixed
+# safe action set documented below — see "EXECUTE MODE" further down.
 #
 # This slice adds exactly two more read-only primitives, both narrowly
 # scoped: `docker exec <this deployment's orbit-db container> pg_isready`
@@ -283,9 +301,9 @@ set -Eeuo pipefail
 #
 # PLAN MODE (--plan) — issue #261 third slice, STILL ZERO MUTATION
 # --------------------------------------------------------------------------
-# `--plan` runs exactly the same read-only diagnosis as `--check` above (the
-# same 26 reason classes, the same optional docker probes, the same
-# read-only-by-construction guarantees) and then, instead of printing
+# `--plan` runs exactly the same read-only diagnosis as `--check` above
+# (every reason class in `class_order`, the same optional docker probes,
+# the same read-only-by-construction guarantees) and then, instead of printing
 # `finding`/`diagnosis` lines, prints a PROPOSED, CLASSIFIED plan derived
 # from the findings and exits. It performs no filesystem write, no chmod, no
 # docker mutation, and no confirmation prompt — approval and execution are
