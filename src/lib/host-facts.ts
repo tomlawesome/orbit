@@ -29,6 +29,7 @@ const encodedOrFailed = encoded.nullable();
 const hostFactsSchema = z
   .object({
     targetBasename: encoded.min(1),
+    targetFolder: encoded.optional(),
     cosignUsable: z.boolean(),
     imageVersion: z.string().regex(/^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/),
     imageRevision: z.string().regex(/^[0-9a-f]{40}$/),
@@ -43,6 +44,8 @@ const hostFactsSchema = z
 export interface HostFacts {
   /** The deployment directory's own name on the host (`basename "$(pwd -P)"`), the Compose project name's last fallback. Inside the engine the directory is always /orbit-deploy. */
   targetBasename: string;
+  /** The deployment directory's full host path (`pwd -P`), what the containers' `com.docker.compose.project.working_dir` label is compared with (#1570); absent when the shell did not send it. */
+  targetFolder?: string;
   cosignUsable: boolean;
   imageVersion: string;
   imageRevision: string;
@@ -86,6 +89,7 @@ export function parseHostFacts(raw: string | undefined): HostFacts {
   if (targetBasename === "") throw new HostFactsRefusal();
   return {
     targetBasename,
+    targetFolder: facts.targetFolder === undefined ? undefined : decode(facts.targetFolder) || undefined,
     cosignUsable: facts.cosignUsable,
     imageVersion: facts.imageVersion,
     imageRevision: facts.imageRevision,

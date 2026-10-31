@@ -118,7 +118,7 @@ describe("install.sh: what it holds by its source", () => {
     const engineSide = readFileSync(join(repositoryRoot, "src", "lib", "database-volume-safety.ts"), "utf8");
     for (const format of [
       '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}',
-      '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}',
+      '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}|{{.Label "com.docker.compose.project.working_dir"}}',
       "{{.Config.Image}}",
     ]) {
       expect(source).toContain(`--format '${format}'`);

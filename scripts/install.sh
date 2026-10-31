@@ -763,7 +763,7 @@ gather_host_facts() {
     else
       volumes_json+=",\"labels\":null"
     fi
-    volumes_json+=",\"containers\":$(encoded_fact docker ps -a --filter "volume=$volume" --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}')}"
+    volumes_json+=",\"containers\":$(encoded_fact docker ps -a --filter "volume=$volume" --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}|{{.Label "com.docker.compose.project.working_dir"}}')}"
     if [[ "$project" =~ ^[a-z0-9][a-z0-9_-]*$ && -z "${project_seen[$project]:-}" ]]; then
       project_seen["$project"]=1
       project_names+=("$project")
@@ -774,7 +774,7 @@ gather_host_facts() {
     local containers=""
     [[ -z "$projects_json" ]] || projects_json+=","
     if containers="$(docker ps -a --filter "label=com.docker.compose.project=$project" \
-      --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}' 2>/dev/null)"; then
+      --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}|{{.Label "com.docker.compose.project.working_dir"}}' 2>/dev/null)"; then
       projects_json+="{\"name\":$(base64_string "$project"),\"containers\":$(base64_string "$containers")}"
       while IFS='|' read -r container_id _ service _ || [[ -n "$container_id" ]]; do
         [[ "$service" == orbit-app && "$container_id" =~ ^[0-9a-f]{12,64}$ && -z "${container_seen[$container_id]:-}" ]] || continue
@@ -793,7 +793,7 @@ gather_host_facts() {
 
   local cosign_json=false
   [[ "$cosign_usable" == 1 ]] && cosign_json=true
-  ORBIT_INSTALL_HOST_FACTS="{\"targetBasename\":$(base64_string "$(basename -- "$target_dir")")"
+  ORBIT_INSTALL_HOST_FACTS="{\"targetBasename\":$(base64_string "$(basename -- "$target_dir")"),\"targetFolder\":$(base64_string "$target_dir")"
   ORBIT_INSTALL_HOST_FACTS+=",\"cosignUsable\":${cosign_json},\"imageVersion\":\"${image_version}\""
   ORBIT_INSTALL_HOST_FACTS+=",\"imageRevision\":\"${revision}\",\"appliedDigest\":\"${applied_digest}\""
   ORBIT_INSTALL_HOST_FACTS+=",\"volumeList\":${volume_list_json}"
