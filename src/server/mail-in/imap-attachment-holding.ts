@@ -5,7 +5,7 @@ import { imapIngestionAttachments } from "@/db/schema";
 import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { createDocumentSealer, decryptDocument, type CryptoEnvelope } from "@/server/documents/crypto";
-import { openDocumentStorage, releaseCheckCopy, type ReceivedDocument } from "@/server/documents/storage";
+import { openDocumentStorage, releaseBuffer, type ReceivedDocument } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
 import { identifyImapAttachmentBytes, normalizeImapAttachmentName } from "./core/imap-attachment-validation";
@@ -122,7 +122,7 @@ async function checkReceivedAttachment(
     if (!await validateSupportedDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes })) throw new Error("mime_structure_invalid");
     return { mediaType, displayName };
   } finally {
-    releaseCheckCopy(bytes);
+    releaseBuffer(bytes);
   }
 }
 

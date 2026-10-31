@@ -12,10 +12,11 @@
  * - hold: a mailed attachment already in memory (the parser's buffer, outside
  *   the baseline) is scanned and held twice. Warm under ceil(n / 3) * 4.
  *
- * Today's recovery holds the staging ciphertext, the plaintext and the check's
- * copy (3n), and mail-in holding the quarantine read and the ciphertext (2n),
- * so a whole extra copy fails both bounds. A figure within 8 MiB of a bound is
- * posted, never loosened (#1567's rule); every run logs its figures.
+ * Recovery holds the check's one copy; every 1 MiB piece a pass produces is
+ * zeroed and freed when it has been used, so the warm peak is that copy plus
+ * the scan's chunks. A whole extra copy fails both bounds. A figure within
+ * 8 MiB of a bound is posted, never loosened (#1567's rule); every run logs
+ * its figures.
  */
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";

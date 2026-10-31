@@ -70,12 +70,12 @@ function requireStorageKey(storageKey: string): void {
 }
 
 /**
- * Zeroes the structure check's copy of a file and frees its memory now, not at
- * the next garbage collection, so the seal that follows never runs on top of
- * it (#1571). Only a buffer that owns its whole allocation is freed: a slice of
- * Node's shared pool is zeroed and left.
+ * Zeroes a buffer and frees its memory now, not at the next garbage
+ * collection: the structure check's copy, and every piece a sealing or
+ * unsealing pass produces (#1571). A slice of Node's shared pool is only
+ * zeroed.
  */
-export function releaseCheckCopy(bytes: Buffer): void {
+export function releaseBuffer(bytes: Buffer): void {
   bytes.fill(0);
   if (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength && bytes.buffer instanceof ArrayBuffer) bytes.buffer.transfer(0);
 }
@@ -215,8 +215,12 @@ export class LocalDocumentStorage {
         position += bytesRead;
         digest.update(piece);
         const sealed = sealer.update(piece);
-        await writeAll(output, sealed);
-        ciphertextSize += sealed.length;
+        try {
+          await writeAll(output, sealed);
+          ciphertextSize += sealed.length;
+        } finally {
+          releaseBuffer(sealed);
+        }
       }
       if (digest.digest("hex") !== expected.contentSha256) throw invalid();
 
@@ -243,7 +247,9 @@ export class LocalDocumentStorage {
    * Reads `source` through `buffer` in pieces, feeds each to `unsealer` and
    * hands the plaintext piece to `sink`, then calls `final()`. The sink gets
    * pieces BEFORE the tag is checked, so every public caller's sink is
-   * private to this class: a file it opened, or a buffer it owns.
+   * private to this class: a file it opened, or a buffer it owns. Each
+   * plaintext piece is zeroed and freed as soon as the sink has used it; a
+   * sink must not keep a reference to it.
    */
   private async unsealPass(
     source: FileHandle,
@@ -258,7 +264,12 @@ export class LocalDocumentStorage {
       const { bytesRead } = await source.read(buffer, 0, wanted, position);
       if (bytesRead === 0) throw new Error("Encrypted document storage object is invalid");
       position += bytesRead;
-      await sink(unsealer.update(buffer.subarray(0, bytesRead)));
+      const piece = unsealer.update(buffer.subarray(0, bytesRead));
+      try {
+        await sink(piece);
+      } finally {
+        releaseBuffer(piece);
+      }
     }
     unsealer.final();
   }

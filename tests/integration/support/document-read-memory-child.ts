@@ -11,7 +11,9 @@
  *   other. A fake clamd on a loopback port answers `stream: OK` (it reads
  *   `zINSTREAM\0` and the length-prefixed chunks and keeps none of them), and
  *   the child's configuration points at it in `required` scan mode. Both jobs
- *   are claimed before any baseline is taken.
+ *   are claimed before any baseline is taken. The fake clamd's received socket
+ *   chunks count against the figure; production's clamd is a separate
+ *   container, so the figure overstates and never understates.
  * - `hold <file> <userId> <receiptId>`: two `scanAndHoldImapAttachment` runs of
  *   the file's bytes, which are read into memory BEFORE the baseline, as the
  *   mail parser's buffer already is when the attachment reaches the holding

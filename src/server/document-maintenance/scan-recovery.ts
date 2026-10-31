@@ -18,7 +18,7 @@ import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
-import { openDocumentStorage, releaseCheckCopy } from "@/server/documents/storage";
+import { openDocumentStorage, releaseBuffer } from "@/server/documents/storage";
 import { createDocumentSealer, createDocumentUnsealer, DocumentIntegrityError, envelopeOf } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
@@ -169,7 +169,7 @@ async function checkRecoveredStructure(
   try {
     return await validateSupportedDocumentStructure(bytes, mediaType, { path: quarantinePath, sizeBytes });
   } finally {
-    releaseCheckCopy(bytes);
+    releaseBuffer(bytes);
   }
 }
 
