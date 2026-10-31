@@ -943,7 +943,24 @@ describe("definitionScripts: comment lines are prose", () => {
   });
 });
 
-describe("a directory or a glob is not a script", () => {
+// A token is a file name only when the text after it does not run on into a
+// directory, a glob or a template. The stems below are what a regex that stops
+// at the last name character leaves behind (`scripts/ci/lib/` as
+// `scripts/ci/lib`, `scripts/ci/verify-*.sh` as `scripts/ci/verify-`).
+describe("a directory, a glob or a template is not a script", () => {
+  const sorted = (paths) => [...paths].sort();
+
+  it("follows no directory or glob out of a script", () => {
+    const files = {
+      "scripts/ci/a.sh": 'ls scripts/ci/lib/ && for f in scripts/ci/verify-*.sh; do "$f"; done && scripts/ci/real.sh\n',
+      "scripts/ci/real.sh": "echo real\n",
+    };
+    const result = definitionScripts(["scripts/ci/a.sh"], reader(files));
+    expect(result).not.toContain("scripts/ci/lib");
+    expect(result).not.toContain("scripts/ci/verify-");
+    expect(result).toEqual(["scripts/ci/a.sh", "scripts/ci/real.sh"]);
+  });
+
   it("records neither a directory nor a glob from the pipeline text", () => {
     const yaml = [
       "stages:",
@@ -953,25 +970,104 @@ describe("a directory or a glob is not a script", () => {
       "  stage: test",
       "  rules:",
       "    - changes:",
-      "        - scripts/ci/**",
+      "        - scripts/ci/lib/**",
       "  script:",
-      "    - ls scripts/ci/",
+      "    - ls scripts/ci/lib/",
+      "    - scripts/ci/verify-*.sh",
       "    - scripts/ci/real.sh",
       "",
     ].join("\n");
     // `scripts` and `references` are both what the walk starts from.
     const { scripts, references } = jobDefinition(yaml, "fast");
-    for (const [name, paths] of [["scripts", scripts], ["references", references]]) {
-      expect(paths.filter((path) => path.endsWith("/")), `${name} recorded a directory`).toEqual([]);
-      expect(paths, `${name} lost the real script`).toContain("scripts/ci/real.sh");
-    }
+    expect(scripts).toEqual(["scripts/ci/real.sh"]);
+    expect(references.filter((path) => path.startsWith("scripts/ci/"))).toEqual(["scripts/ci/real.sh"]);
   });
 
-  it("follows no directory or glob out of a script", () => {
+  it("records no stem of a template, a brace list or a pattern", () => {
     const files = {
-      "scripts/ci/a.sh": "ls scripts/ci/ && scripts/ci/real.sh\n",
+      "scripts/ci/a.sh": [
+        'scripts/ci/verify-${kind}.sh "$1"',
+        "scripts/ci/verify-{a,b}.sh",
+        "scripts/ci/verify-?.sh",
+        "scripts/ci/verify-[ab].sh",
+        'echo "scripts/ci/tool.${ext}"',
+        "scripts/ci/real.sh",
+        "",
+      ].join("\n"),
       "scripts/ci/real.sh": "echo real\n",
     };
-    expect(definitionScripts(["scripts/ci/a.sh"], reader(files))).toEqual(["scripts/ci/a.sh", "scripts/ci/real.sh"]);
+    const result = definitionScripts(["scripts/ci/a.sh"], reader(files));
+    expect(result).not.toContain("scripts/ci/verify-");
+    expect(result).not.toContain("scripts/ci/tool");
+    expect(result).toEqual(["scripts/ci/a.sh", "scripts/ci/real.sh"]);
+  });
+
+  it("keeps a whole path whatever follows it, and a directory segment inside a path", () => {
+    const files = {
+      "scripts/ci/a.sh": [
+        "echo see scripts/ci/dot.sh.",
+        'run "scripts/ci/quoted.sh"',
+        "scripts/ci/semi.sh; scripts/ci/comma.sh, (scripts/ci/paren.sh) scripts/ci/colon.sh: scripts/ci/pipe.sh | cat",
+        'x="${V:-${root}/scripts/ci/brace.sh}"',
+        "scripts/ci/lib/deep.sh",
+        "scripts/ci/lib/.hidden.sh",
+        "run scripts/ci/eol.sh",
+      ].join("\n"),
+    };
+    const wanted = [
+      "dot.sh",
+      "quoted.sh",
+      "semi.sh",
+      "comma.sh",
+      "paren.sh",
+      "colon.sh",
+      "pipe.sh",
+      "brace.sh",
+      "lib/deep.sh",
+      "lib/.hidden.sh",
+      "eol.sh",
+    ].map((name) => `scripts/ci/${name}`);
+    const result = definitionScripts(["scripts/ci/a.sh"], reader(files));
+    expect(result).toEqual(sorted(["scripts/ci/a.sh", ...wanted]));
+    expect(result).not.toContain("scripts/ci/dot.sh.");
+  });
+
+  describe("in a job's key", () => {
+    const entry = (path, sha) => ({ type: "blob", path, sha });
+    const DENY = [".gitlab-ci.yml", "scripts/ci/**"];
+    const config = {
+      ...readConfig(),
+      definition: ["scripts/ci/job-inputs.json", "scripts/ci/reuse-gate.sh"],
+      jobs: { fast: { deny: DENY }, smoke: { deny: DENY }, acceptance: { deny: DENY } },
+    };
+    const JOBS = ["fast", "smoke", "acceptance"];
+    const tree = [
+      entry(".gitlab-ci.yml", "a0"),
+      entry("scripts/ci/job-inputs.json", "a2"),
+      entry("scripts/ci/reuse-gate.sh", "a3"),
+      entry("scripts/ci/common-setup.sh", "a4"),
+      entry("scripts/ci/setup-runner.sh", "a5"),
+      entry("scripts/ci/start-acceptance-stack.sh", "a6"),
+      entry("scripts/ci/lib/wait.sh", "a7"),
+      entry("scripts/ci/lib/probe.mjs", "a8"),
+    ];
+    // smoke reaches lib/wait.sh through start-acceptance-stack.sh.
+    const files = {
+      ...SCRIPT_FILES,
+      "scripts/ci/lib/wait.sh": "ls scripts/ci/lib/\nfor f in scripts/ci/verify-*.sh; do :; done\n",
+    };
+    const keys = (entries) => computeKeys(config, entries, { ciText: FIXTURE, readFile: reader(files) });
+
+    it("does not move when a blob named like the directory or the glob stem arrives", () => {
+      const before = keys(tree);
+      const after = keys([...tree, entry("scripts/ci/lib", "c1"), entry("scripts/ci/verify-", "c2")]);
+      for (const job of JOBS) expect(after.get(job).source, `${job} moved`).toBe(before.get(job).source);
+    });
+
+    it("does move smoke when a script it really reaches changes (the walk reaches it)", () => {
+      const before = keys(tree);
+      const after = keys(tree.map((file) => (file.path === "scripts/ci/lib/wait.sh" ? entry(file.path, "d7") : file)));
+      expect(after.get("smoke").source).not.toBe(before.get("smoke").source);
+    });
   });
 });

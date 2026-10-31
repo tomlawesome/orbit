@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -409,14 +409,27 @@ describe("a job's followed scripts on the real tree", () => {
     ]) {
       expect(names(paths), `smoke followed the prose mention ${prose || "scripts/ci/"}`).not.toContain(prose);
     }
-    // Not a phantom: every path a key carries is a file in the repository.
-    for (const path of paths) expect(existsSync(repoFile(path)), `${path} does not exist`).toBe(true);
   });
 
   it("carries a ci script in through a non-ci script's code (repair_journeys)", () => {
     const paths = followed("repair_journeys");
     expect(names(paths)).toContain("write-test-manifest.sh");
-    for (const path of paths) expect(existsSync(repoFile(path)), `${path} does not exist`).toBe(true);
+  });
+
+  it("carries only regular files, for every job (not a directory, a glob stem or a phantom)", () => {
+    // statSync().isFile(), not existsSync: existsSync is true for a directory.
+    for (const job of jobNames(config)) {
+      for (const path of followed(job)) {
+        const isFile = (() => {
+          try {
+            return statSync(repoFile(path)).isFile();
+          } catch {
+            return false;
+          }
+        })();
+        expect(isFile, `${job} carries ${path}, which is not a regular file`).toBe(true);
+      }
+    }
   });
 
   it("keeps the scripts classify's block names in every job's walk", () => {
