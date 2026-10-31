@@ -537,7 +537,7 @@ describe("refusals that never reach docker", () => {
     const before = secretsSnapshot(deployment);
     const result = run(deployment, script, args.map((arg) => (arg === "BUNDLE" ? bundle : arg)));
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("preflight/key failed; the configured document key is missing.");
+    expect(result.stderr).toContain("preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist. Remove the link and run again.");
     expect(verbs(result.calls)).toEqual([]);
     const link = join(deployment.deployDir, ".orbit-secrets", "document-kek");
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
