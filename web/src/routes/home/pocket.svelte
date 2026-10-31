@@ -66,7 +66,7 @@
    * sheet that used to rise here is gone.
    *
    * `onchanged` reads home again and rejects when home could not be read
-   * again; the host has said so itself (#1584 fix review, web-home-2).
+   * again; the host has said so itself (#1584).
    * @typedef {{
    *   view?: import('$lib/data/workspace.js').HomeView | null,
    *   arrive?: boolean,
@@ -292,9 +292,9 @@
      item that leaves the list keeps its asked row. */
   const acts = createDrawerActs({
     view: () => view,
-    reread: async ({ view: home = true, papers = false }) => {
+    reread: async ({ view: home = true, papers = false }, item) => {
       if (home) await onchanged?.();
-      if (papers) await rereadPapers();
+      if (papers) await rereadPapers(item);
     },
     say: (id, words, about = "item") => {
       if (about === "partial") { wake(/** @type {string} */ (words), { failure: true }); return; }
@@ -312,8 +312,10 @@
      (drawer-acts.svelte.js); the open row's item is read whatever its
      status, so a retired or expired item still shows its papers. */
   const loadSearchDocuments = () => acts.loadSearchDocuments(lit);
-  /** The papers again, after one was attached, removed or restored. */
-  const rereadPapers = () => acts.rereadSearchDocuments(lit);
+  /** The papers again, after one was attached, removed or restored; rejects
+      when `item`'s own papers could not be read (drawer-acts.svelte.js).
+      @param {string | null} [item] */
+  const rereadPapers = (item = null) => acts.rereadSearchDocuments(lit, item);
 
   const results = $derived(
     searchPocket(query, { items: rows, attention: groups?.attention ?? [], documents: acts.searchDocuments }),

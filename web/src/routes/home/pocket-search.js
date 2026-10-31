@@ -40,9 +40,10 @@ export const SEARCH_DOC_CONCURRENCY = 6;
  * @param {(householdId: string, itemId: string) => Promise<Omit<SearchDocument, "itemTitle">[]>} readItemDocuments
  * @param {string} householdId
  * @param {() => boolean} stale true once the caller's own household has moved on and this read should stop filling in
+ * @param {(itemId: string) => void} [onfailed] told each item whose papers could not be read (its papers drop out; the caller decides whether that matters)
  * @returns {Promise<SearchDocument[]>}
  */
-export async function readSearchDocuments(carrying, readItemDocuments, householdId, stale) {
+export async function readSearchDocuments(carrying, readItemDocuments, householdId, stale, onfailed = () => {}) {
   /** @type {SearchDocument[]} */
   const found = [];
   let cursor = 0;
@@ -52,7 +53,7 @@ export async function readSearchDocuments(carrying, readItemDocuments, household
       try {
         const papers = await readItemDocuments(householdId, item.id);
         found.push(...papers.map((doc) => ({ ...doc, itemTitle: item.title })));
-      } catch { /* this item's papers drop out, not the whole search */ }
+      } catch { onfailed(item.id); /* this item's papers drop out, not the whole search */ }
     }
   }
   await Promise.all(

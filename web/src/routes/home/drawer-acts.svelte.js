@@ -8,7 +8,9 @@
  *   view    home's view as the screen holds it
  *   reread  read again after an act landed: the desk reads home and the
  *           open drawer's record, the phone asks its host and reads the
- *           papers again when they changed
+ *           papers again when they changed; its second argument is the
+ *           item the act was for, and the read rejects when that item
+ *           could not be refreshed (#1584)
  *   say     put an act's problem where the screen shows it (the desk's
  *           drawer line or receipt line, the phone's row), or clear it
  *   focus   put focus on a control in an item's drawer once it is drawn
@@ -105,7 +107,7 @@ const PAPERS = { view: false, papers: true };
 /**
  * @param {{
  *   view: () => import('$lib/data/workspace.js').HomeView | null,
- *   reread: (change: Change) => Promise<unknown>,
+ *   reread: (change: Change, item?: string) => Promise<unknown>,
  *   say: (id: string, words: string | null, about?: About) => unknown,
  *   focus: (id: string, selector: string) => unknown,
  *   open: () => string | null,
@@ -152,7 +154,7 @@ export function createDrawerActs({
       @param {string} id @param {Change} change @param {string} words */
   async function landed(id, change, words) {
     if (wakeFirst) wake(words);
-    const read = await rereadAfterLanded(() => reread(change), (unread) => { say(id, unread); wake(unread); });
+    const read = await rereadAfterLanded(() => reread(change, id), (unread) => { say(id, unread); wake(unread); });
     if (read && !wakeFirst) wake(words);
     return read;
   }
@@ -280,13 +282,13 @@ export function createDrawerActs({
     const unread = (words) => { if (id) say(id, words); };
     /* The paper is gone whatever the read did: the undo is offered either
        way, and a failed read is said under the item as done-but-unread. */
-    await rereadAfterLanded(() => reread(PAPERS), unread);
+    await rereadAfterLanded(() => reread(PAPERS, id ?? undefined), unread);
     wake(`${paper.name} removed`, {
       // The removed wake is already gone by now, so a refused restore must
       // say so or the paper silently stays removed.
       undo: () => {
         restoreDocument(paper.id)
-          .then(() => rereadAfterLanded(() => reread(PAPERS), unread))
+          .then(() => rereadAfterLanded(() => reread(PAPERS, id ?? undefined), unread))
           .catch(() => wake(`couldn't restore ${paper.name} — try again`, { failure: true }));
       },
     });
@@ -296,7 +298,7 @@ export function createDrawerActs({
     await restoreDocument(paper.id);
     preview = null;
     const id = open();
-    await rereadAfterLanded(() => reread(PAPERS), (words) => { if (id) say(id, words); });
+    await rereadAfterLanded(() => reread(PAPERS, id ?? undefined), (words) => { if (id) say(id, words); });
   }
 
   /* The search's own read of every paper home holds (#1057), made once per
@@ -310,29 +312,40 @@ export function createDrawerActs({
   let searchDocumentsFor = null;
 
   /** #1151 W1-Q8: pocket-search.js's readSearchDocuments carries the
-   *  concurrency cap (#1151 W1-R9). @param {string | null} [also] */
+   *  concurrency cap (#1151 W1-R9). Answers the items whose papers could
+   *  not be read (empty when nothing was read). @param {string | null} [also]
+   *  @returns {Promise<Set<string>>} */
   async function loadSearchDocuments(also = null) {
+    /** @type {Set<string>} */
+    const failed = new Set();
     const current = view();
     const household = current?.household;
     const householdId = current?.primary;
-    if (!household || !householdId || searchDocumentsFor === household) return;
+    if (!household || !householdId || searchDocumentsFor === household) return failed;
     searchDocumentsFor = household;
     const carrying = (household.items ?? []).filter((item) => (item.status === "active" || item.id === also) && (item.documentCount ?? 0) > 0);
     // Additive: an item whose papers cannot be read loses its papers from the
-    // results, not the search.
+    // results, not the search. Which items those were is answered, for the
+    // one caller that must know (rereadSearchDocuments).
     const found = await readSearchDocuments(
-      carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household,
+      carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household, (id) => failed.add(id),
     );
     if (searchDocumentsFor === household) {
       searchDocuments = found;
       papersReady = true;
     }
+    return failed;
   }
-  /** The papers again, after one was attached, removed or restored. @param {string | null} [also] */
-  async function rereadSearchDocuments(also = null) {
+  /** The papers again, after one was attached, removed or restored. Rejects
+      when `mustRead`'s own papers could not be read: the drawer that acted on
+      that item would show it stale, so the act that asked says done-but-unread
+      (landed.js) and, for an attach, keeps its id for the re-pick (#1584).
+      Any other item's papers still drop out quietly: the search is additive. @param {string | null} [also] @param {string | null} [mustRead] */
+  async function rereadSearchDocuments(also = null, mustRead = null) {
     searchDocumentsFor = null;
     papersReady = false;
-    await loadSearchDocuments(also);
+    const failed = await loadSearchDocuments(also);
+    if (mustRead && failed.has(mustRead)) throw new Error(`the papers of ${mustRead} could not be read`);
   }
 
   /* ---- #1319: THE DRAWER'S FOOT ROW (FootRow.svelte) ---------------------

@@ -424,8 +424,7 @@
       drawer (#1319): a paper attached, removed or restored, a snooze. Rejects
       when that item is still open and could not be read: the act that asked
       says done-but-unread (landed.js) and, for an attach, keeps its id; a
-      drawer that has moved on has nothing stale to say (#1584 fix review,
-      web-home-2). */
+      drawer that has moved on has nothing stale to say (#1584). */
   async function rereadDetail() {
     const id = detailFor;
     if (!id) return;
@@ -1023,7 +1022,7 @@
     /* Completed, and the strip is shut: a failed read of home after it is
        done-but-unread (landed.js), said in the wake — the strip's own line
        is hidden with the strip and cleared by the next focus, so a word put
-       there is never seen (#1584 fix review, web-home-1). */
+       there is never seen (#1584). */
     await rereadAfterLanded(async () => { view = await readHome(); }, wake);
   }
 
@@ -1454,7 +1453,7 @@
             /* The banner is this screen's; the act that asked still needs to
                know the read failed, or it reads a landed command back as
                refreshed and, for an attach, drops the id a re-pick must
-               re-send (#1584 fix review, web-home-2). */
+               re-send (#1584). */
             throw error;
           }
         }} />
