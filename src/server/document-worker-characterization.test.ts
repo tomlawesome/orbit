@@ -723,7 +723,7 @@ describe("scanner recovery — the clean path publishes only after a clean scan"
     expect(mocks.validateStructure.mock.calls[0]![0]).toBe(copy);
     expect(mocks.validateStructure.mock.calls[0]![1]).toBe("application/pdf");
     expect(mocks.validateStructure.mock.calls[0]![2]).toEqual({ path: QUARANTINE_PATH, sizeBytes: 8 });
-    expect(copy.every((byte) => byte === 0), "the check's copy is wiped").toBe(true);
+    expect(copy.byteLength === 0 || copy.every((byte) => byte === 0), "the check's copy is wiped or freed").toBe(true);
   });
 
   it("zeroes the check's copy before the seal starts, so the two never coexist", async () => {
@@ -733,7 +733,7 @@ describe("scanner recovery — the clean path publishes only after a clean scan"
     let zeroAtSeal: boolean | undefined;
     mocks.sealQuarantine.mockImplementation(async () => {
       mocks.steps.push("storage.sealQuarantine");
-      zeroAtSeal = copy.every((byte) => byte === 0);
+      zeroAtSeal = copy.byteLength === 0 || copy.every((byte) => byte === 0);
       return { ciphertextSize: 64, envelope: SEALED_ENVELOPE };
     });
 

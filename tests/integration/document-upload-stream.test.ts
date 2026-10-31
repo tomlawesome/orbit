@@ -223,7 +223,7 @@ describe("the recovery worker decrypts into a quarantine file and verifies it be
       const [checked, mediaType, options] = vi.mocked(validateSupportedDocumentStructure).mock.calls[0]!;
       expect(mediaType).toBe("application/pdf");
       expect(options).toEqual({ path: seen.path, sizeBytes: bytes.length });
-      expect((checked as Buffer).every((byte) => byte === 0), "the check's copy is wiped").toBe(true);
+      expect((checked as Buffer).byteLength === 0 || (checked as Buffer).every((byte) => byte === 0), "the check's copy is wiped").toBe(true);
 
       expect(seals).toHaveBeenCalledTimes(1);
       const [sealedPath, expectedContent, , destination] = seals.mock.calls[0]!;

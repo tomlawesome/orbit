@@ -69,6 +69,17 @@ function requireStorageKey(storageKey: string): void {
   if (!STORAGE_KEY_PATTERN.test(storageKey)) throw new Error("Invalid document storage key");
 }
 
+/**
+ * Zeroes the structure check's copy of a file and frees its memory now, not at
+ * the next garbage collection, so the seal that follows never runs on top of
+ * it (#1571). Only a buffer that owns its whole allocation is freed: a slice of
+ * Node's shared pool is zeroed and left.
+ */
+export function releaseCheckCopy(bytes: Buffer): void {
+  bytes.fill(0);
+  if (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength && bytes.buffer instanceof ArrayBuffer) bytes.buffer.transfer(0);
+}
+
 export class LocalDocumentStorage {
   constructor(
     private readonly storageRoot: string,

@@ -178,7 +178,7 @@ describe("private IMAP attachment holding", () => {
 
       expect(reads).toHaveBeenCalledTimes(1);
       const copy = await reads.mock.results[0]!.value as Buffer;
-      expect(copy.every((byte) => byte === 0)).toBe(true);
+      expect(copy.byteLength === 0 || copy.every((byte) => byte === 0)).toBe(true);
     });
 
     it("leaves no object, no temporary file and no quarantine file when the seal fails", async () => {

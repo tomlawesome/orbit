@@ -5,7 +5,7 @@ import { imapIngestionAttachments } from "@/db/schema";
 import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { createDocumentSealer, decryptDocument, type CryptoEnvelope } from "@/server/documents/crypto";
-import { openDocumentStorage, type ReceivedDocument } from "@/server/documents/storage";
+import { openDocumentStorage, releaseCheckCopy, type ReceivedDocument } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
 import { identifyImapAttachmentBytes, normalizeImapAttachmentName } from "./core/imap-attachment-validation";
@@ -94,7 +94,7 @@ async function holdBytes(
 
 /**
  * Identifies, scans and structure-checks the received file. The check's one
- * copy of it lives in this frame only and is zeroed here, so the seal that
+ * copy of it lives in this frame only and is zeroed and freed here, so the seal that
  * follows never runs with it held (#1571, as the upload's own check does).
  */
 async function checkReceivedAttachment(
@@ -122,7 +122,7 @@ async function checkReceivedAttachment(
     if (!await validateSupportedDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes })) throw new Error("mime_structure_invalid");
     return { mediaType, displayName };
   } finally {
-    bytes.fill(0);
+    releaseCheckCopy(bytes);
   }
 }
 

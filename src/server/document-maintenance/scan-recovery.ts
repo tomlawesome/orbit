@@ -18,7 +18,7 @@ import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
-import { openDocumentStorage } from "@/server/documents/storage";
+import { openDocumentStorage, releaseCheckCopy } from "@/server/documents/storage";
 import { createDocumentSealer, createDocumentUnsealer, DocumentIntegrityError, envelopeOf } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
@@ -156,8 +156,8 @@ export async function failScannerRecoveryJob(job: ClaimedScanJob, failureCode: s
 
 /**
  * The structure check's one copy of the file, kept in this frame only: it is
- * zeroed when the check answers and unreachable once this returns, so the seal
- * that follows never runs with it held (as the upload's own check does).
+ * zeroed and freed when the check answers, so the seal that follows never runs
+ * with it held (as the upload's own check does).
  */
 async function checkRecoveredStructure(
   storage: ReturnType<typeof openDocumentStorage>,
@@ -169,7 +169,7 @@ async function checkRecoveredStructure(
   try {
     return await validateSupportedDocumentStructure(bytes, mediaType, { path: quarantinePath, sizeBytes });
   } finally {
-    bytes.fill(0);
+    releaseCheckCopy(bytes);
   }
 }
 
