@@ -23,7 +23,7 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  *
  *   docker run --rm --network=host -v "$PWD:$PWD:ro" -w "$PWD/web" \
  *     -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright -e FIDELITY_APP=http://127.0.0.1:4173 \
- *     mcr.microsoft.com/playwright:v1.63.0-noble \
+ *     mcr.microsoft.com/playwright:<tag and digest of PLAYWRIGHT_IMAGE in .gitlab-ci.yml> \
  *     node node_modules/@playwright/test/cli.js test --project=pocket-webkit
  *
  * against an app already serving the fixture build (`reuseExistingServer`).

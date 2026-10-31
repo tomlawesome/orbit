@@ -19,7 +19,7 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -31,6 +31,11 @@ const scriptPath = join(import.meta.dirname, "coverage-floor-check.mjs");
 const realFloorsPath = join(import.meta.dirname, "..", "..", "supply-chain", "coverage-floors.mjs");
 
 const METRICS = ["statements", "branches", "functions", "lines"];
+
+// #1536 D-F21: the documented switch that turns the HEADROOM rule off for a
+// local run whose summary includes the Docker suites. CI never sets it.
+const SKIP_HEADROOM_VARIABLE = "ORBIT_COVERAGE_SKIP_HEADROOM";
+const ciConfigPath = join(import.meta.dirname, "..", "..", ".gitlab-ci.yml");
 
 const scratchDirs = [];
 
@@ -90,19 +95,23 @@ function writeFloors(dir, floors, headroom = 5) {
 }
 
 /** Run the gate against `files` and `floors`; returns { status, stdout, stderr, lines }. */
-function runGate(files, floors) {
+function runGate(files, floors, env = {}) {
   const dir = scratchDir("coverage-floor-");
   const root = join(dir, "repo");
   mkdirSync(root, { recursive: true });
   const summary = writeSummary(dir, root, files);
   const floorsPath = writeFloors(dir, floors);
-  return spawn(["--summary", summary, "--floors", floorsPath, "--root", root]);
+  return spawn(["--summary", summary, "--floors", floorsPath, "--root", root], env);
 }
 
-function spawn(args) {
+// The skip switch is removed from the inherited environment first, so a
+// developer who has it set does not change what the other cases see.
+function spawn(args, env = {}) {
+  const { [SKIP_HEADROOM_VARIABLE]: _inherited, ...inherited } = process.env;
   const result = failOnProcessDeadline(
     spawnSync(process.execPath, [scriptPath, ...args], {
       encoding: "utf8",
+      env: { ...inherited, ...env },
       ...processGuard(),
     }),
     { label: "coverage-floor-check.mjs" },
@@ -249,6 +258,89 @@ describe("coverage-floor-check.mjs", () => {
     );
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.equal(findings(result, "BELOW").length, 0);
+  });
+
+  // #1536 D-F12 (= D-F20): `floors[key][metric]` was undefined, both comparisons
+  // were false, and a metric with no recorded floor was never checked.
+  it("fails a metric that has coverage but no recorded floor, naming the metric (#1536 D-F12)", () => {
+    const result = runGate(
+      { "src/cli/a.ts": uniform(50, 100) },
+      { "src/cli": { statements: 50, functions: 50, lines: 50 } },
+    );
+    assert.equal(result.status, 1, `a missing branches floor passed:\n${result.stdout}${result.stderr}`);
+    const named = result.lines.filter((line) => line.includes("src/cli") && line.includes("branches"));
+    assert.ok(named.length > 0, `no finding names src/cli and branches:\n${result.stdout}`);
+    // The metrics that do have a floor are not blamed.
+    for (const metricName of ["statements", "functions", "lines"]) {
+      assert.ok(
+        result.lines.every((line) => !line.includes(metricName)),
+        `${metricName} has a floor and is in range, but is named:\n${result.stdout}`,
+      );
+    }
+  });
+
+  it("still skips a metric with no floor when it has nothing to measure (total 0)", () => {
+    const result = runGate(
+      {
+        "src/cli/a.ts": {
+          statements: [50, 100],
+          functions: [50, 100],
+          lines: [50, 100],
+          branches: [0, 0],
+        },
+      },
+      { "src/cli": { statements: 50, functions: 50, lines: 50 } },
+    );
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  });
+
+  // #1536 D-F21: HEADROOM fails a local run that includes the Docker suites,
+  // whose coverage is higher than CI's. The switch is an environment variable.
+  it(`skips the HEADROOM rule when ${SKIP_HEADROOM_VARIABLE}=1 is set (#1536 D-F21)`, () => {
+    const files = { "src/cli/a.ts": uniform(6001, 10000) };
+    const without = runGate(files, { "src/cli": 50 });
+    assert.equal(without.status, 1, "without the switch the gate must still report HEADROOM");
+    assert.equal(findings(without, "HEADROOM").length, METRICS.length);
+
+    const result = runGate(files, { "src/cli": 50 }, { [SKIP_HEADROOM_VARIABLE]: "1" });
+    assert.equal(result.status, 0, `${SKIP_HEADROOM_VARIABLE}=1 did not skip HEADROOM:\n${result.stdout}${result.stderr}`);
+    assert.equal(findings(result, "HEADROOM").length, 0, result.stdout);
+  });
+
+  it(`keeps BELOW, NO FLOOR and NO FILES when ${SKIP_HEADROOM_VARIABLE}=1 is set`, () => {
+    const result = runGate(
+      {
+        "src/cli/a.ts": uniform(40, 100),
+        "src/newthing/c.ts": uniform(50, 100),
+      },
+      { "src/cli": 50, "src/gone": 50 },
+      { [SKIP_HEADROOM_VARIABLE]: "1" },
+    );
+    assert.equal(result.status, 1);
+    assert.ok(findings(result, "BELOW").some((line) => line.includes("src/cli")), result.stdout);
+    assert.ok(findings(result, "NO FLOOR").some((line) => line.includes("src/newthing")), result.stdout);
+    assert.ok(findings(result, "NO FILES").some((line) => line.includes("src/gone")), result.stdout);
+  });
+
+  it(`does not skip HEADROOM when ${SKIP_HEADROOM_VARIABLE} is empty or 0`, () => {
+    for (const value of ["", "0"]) {
+      const result = runGate(
+        { "src/cli/a.ts": uniform(6001, 10000) },
+        { "src/cli": 50 },
+        { [SKIP_HEADROOM_VARIABLE]: value },
+      );
+      assert.equal(result.status, 1, `${SKIP_HEADROOM_VARIABLE}=${JSON.stringify(value)} skipped HEADROOM`);
+      assert.equal(findings(result, "HEADROOM").length, METRICS.length);
+    }
+  });
+
+  it(`documents ${SKIP_HEADROOM_VARIABLE} in the script's header, and CI never sets it`, () => {
+    const header = readFileSync(scriptPath, "utf8").split("\n").filter((line) => line.startsWith("//")).join("\n");
+    assert.ok(header.includes(SKIP_HEADROOM_VARIABLE), `${SKIP_HEADROOM_VARIABLE} is not described in the header comment`);
+    assert.ok(
+      !readFileSync(ciConfigPath, "utf8").includes(SKIP_HEADROOM_VARIABLE),
+      `.gitlab-ci.yml must not set or mention ${SKIP_HEADROOM_VARIABLE}: CI keeps the HEADROOM rule`,
+    );
   });
 
   it("applies floors to the scripts directory key", () => {

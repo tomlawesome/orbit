@@ -687,6 +687,14 @@
       "reason": "Throwaway registry the installer tests push to; never part of a deployment. Its CI copy (ORBIT_INSTALLER_REGISTRY_IMAGE) is a `_IMAGE:` pin Renovate proposes updates for; the scripts' fallback defaults are not seen by Renovate and move by hand with it. Not in containerImages because sidecar-pins checks each file for the linux/amd64 digest while these files pin the multi-architecture index digest (#1490)."
     },
     {
+      "reference": "busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4",
+      "locations": [
+        ".gitlab-ci.yml",
+        "scripts/test-repair-journeys.sh"
+      ],
+      "reason": "Disposable labelled container the repair journeys' hostile-value journey starts; never part of a deployment. Its CI copy (ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE) is a `_IMAGE:` pin Renovate proposes updates for; the script's fallback default is not seen by Renovate and moves by hand with it. Pins the multi-architecture index digest (1.38.0 as of 2026-10-30)."
+    },
+    {
       "reference": "apache/tika:${TIKA_VERSION}-full@sha256:701ce79199164d9347914ebcce6585cbfbcde05553b99944479373612cf28d96",
       "locations": [
         "scripts/extract-bundle/cli.ts"

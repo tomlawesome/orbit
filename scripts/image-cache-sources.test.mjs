@@ -144,6 +144,94 @@ describe("forbidden registry hosts (#1510)", () => {
   });
 });
 
+describe("any other registry host is refused: default deny (#1536 D-F13)", () => {
+  // Docker's rule: the first path segment is a registry when it holds a dot or a :port.
+  const unknown = [
+    "lscr.io/x/y:1",
+    "registry.k8s.io/x:1",
+    `cgr.dev/x@${DIGEST}`,
+    "registry.example.com:5000/team/tool:2",
+    "registry-host:5000/tool:3",
+    "192.0.2.10:5000/tool:4",
+    "docker.elastic.co/elasticsearch/elasticsearch:8",
+    "registry.gitlab.com/group/tool@" + DIGEST,
+  ];
+
+  for (const reference of unknown) {
+    it(`finds ${reference.split("/")[0]} in a YAML image value, with its line`, () => {
+      const findings = ci(`stages:\n  - test\njob:\n  image: ${reference}\n`);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({ path: ".gitlab-ci.yml", line: 4, reference });
+      expect(findings[0].reason).toContain("not through the image cache");
+    });
+  }
+
+  it("finds an unknown host in shell docker pull and docker run lines", () => {
+    const text = "#!/bin/sh\ndocker pull lscr.io/x/y:1\ndocker run --rm registry.k8s.io/x:1 --help\n";
+    const findings = scan("scripts/ci/pull.sh", text);
+    expect(findings.map((f) => [f.line, f.reference])).toEqual([
+      [2, "lscr.io/x/y:1"],
+      [3, "registry.k8s.io/x:1"],
+    ]);
+  });
+
+  it("finds an unknown host after a Dockerfile FROM", () => {
+    const findings = scan("Dockerfile", `FROM cgr.dev/chainguard/node@${DIGEST} AS build\n`);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ line: 1, reference: `cgr.dev/chainguard/node@${DIGEST}` });
+  });
+
+  it("finds an unknown host in a string literal in a .mjs file", () => {
+    const findings = scan("scripts/tool.mjs", 'const IMAGE = "registry.k8s.io/x:1";\n');
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ line: 1, reference: "registry.k8s.io/x:1" });
+  });
+
+  it("says the host and that the pull bypasses the cache", () => {
+    const [finding] = ci("job:\n  image: lscr.io/x/y:1\n");
+    expect(finding.reason).toContain("lscr.io");
+  });
+
+  it("does not flag a URL on a shell line", () => {
+    expect(scan("scripts/ci/fetch.sh", "curl -fsSL https://example.com/path\n")).toEqual([]);
+  });
+
+  it("does not flag a URL with a port or a version-like path", () => {
+    expect(scan("scripts/ci/fetch.sh", "curl -fsSL https://example.com:8443/v1/tool:1\n")).toEqual([]);
+  });
+
+  it("does not flag a dotted name with neither a tag nor a digest", () => {
+    expect(scan("scripts/ci/note.sh", "echo see example.com/docs/page\n")).toEqual([]);
+  });
+
+  it("allows the disposable local registry on 127.0.0.1 and localhost", () => {
+    const text = "a:\n  image: 127.0.0.1:5000/orbit:dev\nb:\n  image: localhost:5000/orbit:dev\nc:\n  image: localhost/orbit:dev\n";
+    expect(ci(text)).toEqual([]);
+  });
+
+  it("allows the cache prefixes and Orbit's own registry by name", () => {
+    const text = [
+      "a:",
+      "  image: $CI_IMAGE_CACHE_GHCR/x:1",
+      "b:",
+      "  image: ${CI_IMAGE_CACHE_MCR}/x:1",
+      "c:",
+      "  image: registry.tomlawson.io/ai/orbit/base@" + DIGEST,
+      "d:",
+      "  image: docker.io/library/redis:8",
+    ].join("\n");
+    expect(ci(text)).toEqual([]);
+  });
+
+  it("an exception still covers an unknown host, and goes stale when unused", () => {
+    const exception = { path: ".gitlab-ci.yml", reference: "lscr.io/x/y:1", reason: "No mirror carries it." };
+    expect(scan(".gitlab-ci.yml", "job:\n  image: lscr.io/x/y:1\n", [exception])).toEqual([]);
+    const stale = scan(".gitlab-ci.yml", "job:\n  image: node:22\n", [exception]);
+    expect(stale).toHaveLength(1);
+    expect(stale[0].reason).toContain("stale exception");
+  });
+});
+
 describe("the retired Dependency Proxy (#1510)", () => {
   const uses = [
     "$CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX/node:22",
@@ -445,6 +533,16 @@ describe("command line (#1510)", () => {
     const result = run(root);
     expect(result.status).toBe(1);
     expect(result.stdout).toMatch(/^\.gitlab-ci\.yml:2: ghcr\.io\/owner\/tool:1 — .*not through the image cache/m);
+  });
+
+  it("exits 1 for a registry host the old list did not name (#1536 D-F13)", () => {
+    const root = fixtureRepo({
+      ".gitlab-ci.yml": "job:\n  image: registry.k8s.io/x:1\n",
+      ".github/image-cache-exceptions.json": '{ "exceptions": [] }\n',
+    });
+    const result = run(root);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toMatch(/^\.gitlab-ci\.yml:2: registry\.k8s\.io\/x:1 — /m);
   });
 
   it("honours the exceptions file", () => {

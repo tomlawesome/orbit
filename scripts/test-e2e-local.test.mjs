@@ -841,7 +841,10 @@ describe("the Playwright image docker run receives (#1513)", () => {
     const { images } = await imagesDockerSaw({ CI_IMAGE_CACHE_MCR: host });
     expect(images).not.toHaveLength(0);
     for (const image of images) expect(image).toBe(expandImage(host));
-    expect(images[0]).toMatch(/^cache\.example\.invalid\/mcr\/playwright:v1\.63\.0-noble@sha256:/);
+    // The tag and digest come from the pipeline's line, never spelled here
+    // (#1536 L-Q1, T-Q33): only their shape and the host prefix are asserted.
+    const pin = ciImageTemplate.slice(ciImageTemplate.indexOf("/playwright:") + 1);
+    expect(pin).toMatch(/^playwright:v\d+\.\d+\.\d+-\S+@sha256:[0-9a-f]{64}$/);
   });
 
   for (const [label, env] of [
