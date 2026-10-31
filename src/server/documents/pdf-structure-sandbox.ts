@@ -438,14 +438,14 @@ function release(): void {
   else running -= 1;
 }
 
-/** An image job logs as the check's body, or as the render's when it drew (#1572): no new vocabulary. */
-function logJobOf(run: ChildRun): "structure" | "render" {
-  if (run.job === "image") return "draw" in run.message ? "render" : "structure";
-  return run.job;
-}
-
-function logStop(job: "structure" | "render", kind: StopKind, durationMs: number): void {
-  if (job === "render") {
+/**
+ * Records a stopped job under the body of what it was doing: a render's (a
+ * page render, or an image job that draws) or the check's (#1572: no new
+ * vocabulary), naming the job, PDF or image, in the detail.
+ */
+function logStop(run: Pick<ChildRun, "job" | "message">, kind: StopKind, durationMs: number): void {
+  const image = run.job === "image";
+  if (run.job === "render" || (image && "draw" in run.message)) {
     // preview.ts records the refusal itself; a timeout is already named
     // there (processing_interrupted), so only memory and crash say more.
     if (kind === "timeout") return;
@@ -456,20 +456,26 @@ function logStop(job: "structure" | "render", kind: StopKind, durationMs: number
       action: kind === "crash" ? "check_parser" : "none",
       impact: kind === "crash" ? "application_degraded" : "none",
       durationMs,
-      detail: operationalDetail`PDF sandbox stopped the page render: ${kind}`,
+      detail: image
+        ? operationalDetail`Image sandbox stopped the preview: ${kind}`
+        : operationalDetail`PDF sandbox stopped the page render: ${kind}`,
     });
     return;
   }
-  // A crash would refuse every PDF, so the operator is told; a timeout or
-  // memory stop is a refused file. No file detail is ever recorded.
+  // A crash would stop every check of that kind, every PDF or every image, so
+  // the operator is told; a timeout or memory stop is one job stopped, and the
+  // caller decides whether that refuses the file or retries it. No file detail
+  // is ever recorded.
   log[kind === "crash" ? "warn" : "info"]({
     event: "document.inspection",
     state: "blocked",
-    reason: "unsupported_structure",
+    reason: "processing_interrupted",
     action: kind === "crash" ? "check_parser" : "none",
     impact: kind === "crash" ? "document_upload_blocked" : "none",
     durationMs,
-    detail: operationalDetail`PDF structure sandbox stopped the check: ${kind}`,
+    detail: image
+      ? operationalDetail`Image sandbox stopped the decode: ${kind}`
+      : operationalDetail`PDF structure sandbox stopped the check: ${kind}`,
   });
 }
 
@@ -561,9 +567,19 @@ async function runChild(input: ChildInput, run: ChildRun): Promise<ChildOutcome>
   let handle: FileHandle;
   try {
     handle = await open(input.file.path, "r");
-  } catch {
-    // The quarantine file cannot be opened: the file cannot be checked.
-    logStop(logJobOf(run), "crash", 0);
+  } catch (error) {
+    // The quarantine file cannot be opened: the file cannot be checked. That
+    // is the host's disk, not the parser, so it is not logged as a crash. The
+    // code is Node's fixed one, never the path.
+    const code = (error as NodeJS.ErrnoException | null)?.code ?? "error";
+    log.warn({
+      event: "document.inspection",
+      state: "blocked",
+      reason: "processing_interrupted",
+      action: "inspect_admin_diagnostics",
+      impact: "document_upload_blocked",
+      detail: operationalDetail`Sandbox could not open the file to check: ${code}`,
+    });
     return { stop: "crash" };
   }
   return launchChild(input, run, handle);
@@ -585,8 +601,8 @@ function launchChild(input: ChildInput, run: ChildRun, handle: FileHandle | unde
     if (handle) closing = handle.close().catch(() => undefined);
   } catch {
     if (handle) void handle.close().catch(() => undefined);
-    // No process could be started: every PDF would fail.
-    logStop(logJobOf(run), "crash", Date.now() - started);
+    // No process could be started: every job of this kind would fail.
+    logStop(run, "crash", Date.now() - started);
     return Promise.resolve({ stop: "crash" });
   }
   lastChildPid = child.pid;
@@ -612,7 +628,7 @@ function launchChild(input: ChildInput, run: ChildRun, handle: FileHandle | unde
       clearTimeout(startup);
       clearTimeout(timer);
       clearInterval(watchdog);
-      if ("stop" in outcome) logStop(logJobOf(run), outcome.stop, Date.now() - started);
+      if ("stop" in outcome) logStop(run, outcome.stop, Date.now() - started);
       // Always killed, answer or not, and waited for, so the slot and the
       // count mean what they say; a kill that hangs is given up on after a second.
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
@@ -715,7 +731,7 @@ export async function inspectPdfStructureInSandbox(bytes: Buffer, file?: Documen
   try {
     args = [pdfjsUrl()];
   } catch {
-    logStop("structure", "crash", 0);
+    logStop({ job: "structure", message: {} }, "crash", 0);
     return "structure_check_unavailable";
   }
   const outcome = await inSlot(file ? { file } : { bytes }, {
@@ -763,7 +779,7 @@ export async function renderPdfPageInSandbox(
   try {
     args = [pdfjsUrl(), canvasUrl(), standardFontDirectory() ?? ""];
   } catch {
-    logStop("render", "crash", 0);
+    logStop({ job: "render", message: {} }, "crash", 0);
     return { outcome: "failed", stop: "crash" };
   }
   const outcome = await inSlot({ bytes }, {
@@ -813,7 +829,7 @@ export async function inspectImageInSandbox(
   try {
     args = [canvasUrl()];
   } catch {
-    logStop("structure", "crash", 0);
+    logStop({ job: "image", message: {} }, "crash", 0);
     return "structure_check_unavailable";
   }
   const outcome = await inSlot(file ? { file } : { bytes }, {
@@ -847,7 +863,7 @@ export async function renderImageInSandbox(
   try {
     args = [canvasUrl()];
   } catch {
-    logStop("render", "crash", 0);
+    logStop({ job: "image", message: { draw: {} } }, "crash", 0);
     return { outcome: "failed", stop: "crash" };
   }
   const outcome = await inSlot({ bytes }, {
