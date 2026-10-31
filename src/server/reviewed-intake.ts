@@ -760,7 +760,14 @@ async function finishMailboxApproval(
         } };
       }
       if (receipt.expiresAt <= new Date()) {
-        await transaction.update(imapIngestionMessages).set({ status: "expired", expiredAt: new Date(), updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
+        // Lapsing is the review ending (ADR-0025 section 4), the same as the sweep
+        // reaching it: the draft and the stored request go with the status, here
+        // and in the pre-claim write below. The key and hash stay so a replay still
+        // answers "expired". They are cleared here rather than after the purge that
+        // follows, because nothing hands the pair back or shows the draft once
+        // expires_at has passed, and the row the purge failure reverts to
+        // `recoverable` is retried by the sweep, which clears the same set again.
+        await transaction.update(imapIngestionMessages).set({ status: "expired", expiredAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata }).where(eq(imapIngestionMessages.id, receipt.id));
         return { receipt, claimed: false, expired: true, result: undefined };
       }
       return { receipt, claimed: false, result: undefined };
@@ -771,7 +778,8 @@ async function finishMailboxApproval(
       throw new AppError("reviewed_intake_stale", "That reviewed intake changed; refresh and try again", 409);
     }
     if (receipt.expiresAt <= new Date()) {
-      await transaction.update(imapIngestionMessages).set({ status: "expired", expiredAt: new Date(), updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
+      // The review ends here as above: the draft goes with the status.
+      await transaction.update(imapIngestionMessages).set({ status: "expired", expiredAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata }).where(eq(imapIngestionMessages.id, receipt.id));
       return { receipt, claimed: false, expired: true, result: undefined };
     }
     // Validation precedes the claim (ADR-0005, #1396): a stale or unknown
