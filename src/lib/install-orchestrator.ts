@@ -418,10 +418,12 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       volumeState,
       readPostgresPasswordFacts(context.targetDir),
       hostFactsVolumeAdapter(context.facts),
+      [context.facts.targetFolder, context.facts.targetFolderLogical].filter((folder): folder is string => folder !== undefined),
     );
   } catch (error) {
     if (!(error instanceof DatabaseVolumeSafetyRefusal) && !(error instanceof ComposeProjectNameRefusal)) throw error;
-    return fail("host", "host", error.message);
+    // #1570: a refusal whose cause no retry can change carries its own next action.
+    return fail("host", "host", error.message, undefined, error instanceof DatabaseVolumeSafetyRefusal ? error.action : undefined);
   }
 
   // The existing optional-service profile (guarantee #23), then the wizard
