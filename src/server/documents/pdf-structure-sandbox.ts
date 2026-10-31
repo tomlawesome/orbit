@@ -74,6 +74,8 @@ export type PdfStructureSandboxLimits = {
   concurrency: number;
   /** File URL of the parser module; tests point it elsewhere to force a crash. */
   pdfjsUrl?: string;
+  /** File URL of the canvas backend; tests point it elsewhere to force a crash. */
+  canvasUrl?: string;
 };
 
 export const PDF_STRUCTURE_SANDBOX_LIMITS: Readonly<PdfStructureSandboxLimits> = Object.freeze({
@@ -311,17 +313,20 @@ const received = new Promise((resolve) => process.on("message", resolve));
  * The image decoder's child body (#1572): the canvas backend is imported here
  * and nowhere in the server. It decodes the image and checks the header's size
  * against the decoded one; for a preview it also draws the bounded picture and
- * encodes it, so a preview is one child run with the gate inside.
+ * encodes it, so a preview is one child run with the gate inside. The backend
+ * is imported before the child says it is ready, as the PDF children import
+ * pdf.js: one that cannot load ends the child before ready, which the server
+ * counts and logs as a crash, rather than answering `failed` for every image.
  */
 const IMAGE_SOURCE = `
 const received = new Promise((resolve) => process.on("message", resolve));
 (async () => {
+  const { loadImage, createCanvas } = await import(process.argv[1]);
   const job = await received;
 ${JOB_DATA_SOURCE}
   await new Promise((resolve) => process.send({ ready: true }, resolve));
   let result = { outcome: "failed" };
   try {
-    const { loadImage, createCanvas } = await import(process.argv[1]);
     const decoded = await loadImage(data);
     if (decoded.width !== job.width || decoded.height !== job.height) {
       result = { outcome: "refused", reason: "unsupported_structure" };
@@ -369,6 +374,7 @@ function pdfjsUrl(): string {
 
 /** The canvas backend's entry, resolved like pdf.js: the copy the server itself ships. */
 function canvasUrl(): string {
+  if (limits.canvasUrl) return limits.canvasUrl;
   defaultCanvasUrl ??= pathToFileURL(createRequire(import.meta.url).resolve("@napi-rs/canvas")).href;
   return defaultCanvasUrl;
 }
