@@ -139,11 +139,11 @@ describe("immutable container version identity", () => {
         ...processGuard(),
       }), { label: "banner and immutable identity for default server startup" });
       expect(result.stdout).toBe(
-        `${banner}Orbit v1.2.3 | revision=${"a".repeat(40)}\n`,
+        `${banner}Orbit v1.2.3 | channel=unknown | revision=${"a".repeat(40)}\n`,
       );
       expect(result.stdout.match(/██████╗  ██████╗/gu)).toHaveLength(1);
-      expect(result.stdout.match(/Orbit v1\.2\.3 \| revision=/gu)).toHaveLength(1);
-      expect(result.stdout).not.toContain("channel=");
+      expect(result.stdout.match(/Orbit v1\.2\.3 \| channel=unknown \| revision=/gu)).toHaveLength(1);
+      expect(result.stdout).not.toContain("channel=preview");
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -185,9 +185,9 @@ describe("immutable container version identity", () => {
       }), { label: "canonical banner as a quiet one-off image command" });
       expect(result.status).toBe(0);
       expect(result.stdout).toBe(
-        `${banner}Orbit v1.2.3 | revision=${"a".repeat(40)}\n`,
+        `${banner}Orbit v1.2.3 | channel=unknown | revision=${"a".repeat(40)}\n`,
       );
-      expect(result.stdout).not.toContain("channel=");
+      expect(result.stdout).not.toContain("channel=preview");
       expect(result.stderr).toBe("");
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
