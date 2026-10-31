@@ -82,7 +82,6 @@ function stubFetch() {
 }
 
 const ofKind = (kind) => calls.filter((one) => one.kind === kind);
-const header = (call, name) => /** @type {Record<string, string>} */ (call.init.headers)[name];
 const pdf = (name) => new File([new Uint8Array([37, 80, 68, 70])], name, { type: "application/pdf" });
 
 /** Let promises and the dry run's 300 ms timer settle. */
