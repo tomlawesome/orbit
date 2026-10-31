@@ -2,12 +2,12 @@
   "schemaVersion": 1,
   "scanner": {
     "name": "Trivy",
-    "version": "0.72.0",
-    "image": "aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada",
+    "version": "0.76.1",
+    "image": "aquasec/trivy@sha256:2e6c00d711ab4ae41d8a30c2c1fd3bd3b62704c177bb120f95012e939edfb3df",
     "license": "Apache-2.0",
-    "source": "https://github.com/aquasecurity/trivy/releases/tag/v0.72.0",
+    "source": "https://github.com/aquasecurity/trivy/releases/tag/v0.76.1",
     "updateOwner": "Orbit maintainers",
-    "reviewBy": "2026-10-30"
+    "reviewBy": "2027-01-31"
   },
   "attestationActions": [
     {
@@ -17,7 +17,7 @@
       "license": "MIT",
       "source": "https://github.com/actions/attest/releases/tag/v4.2.2",
       "updateOwner": "Orbit maintainers",
-      "reviewBy": "2026-10-30"
+      "reviewBy": "2027-01-31"
     }
   ],
   "signingTools": [
@@ -29,7 +29,7 @@
       "license": "Apache-2.0",
       "source": "https://github.com/sigstore/cosign/releases/tag/v3.1.4",
       "updateOwner": "Orbit maintainers",
-      "reviewBy": "2026-10-30"
+      "reviewBy": "2027-01-31"
     }
   ],
   "thresholds": {
@@ -524,7 +524,7 @@
       "licenseSource": "https://github.com/nodejs/docker-node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
       "resolvedOn": "2026-10-22",
-      "reviewBy": "2026-10-30"
+      "reviewBy": "2026-11-07"
     },
     {
       "name": "PostgreSQL database",
@@ -543,7 +543,7 @@
       "licenseSource": "https://github.com/docker-library/postgres/blob/master/LICENSE",
       "updateOwner": "Orbit maintainers",
       "resolvedOn": "2026-10-27",
-      "reviewBy": "2026-10-30"
+      "reviewBy": "2027-01-31"
     },
     {
       "name": "ClamAV malware scanner",
@@ -560,7 +560,7 @@
       "licenseSource": "https://github.com/Cisco-Talos/clamav/blob/main/COPYING.txt",
       "updateOwner": "Orbit maintainers",
       "resolvedOn": "2026-10-27",
-      "reviewBy": "2026-10-30"
+      "reviewBy": "2027-01-31"
     },
     {
       "name": "Apache Tika parser",
@@ -577,7 +577,7 @@
       "licenseSource": "https://github.com/apache/tika-docker/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
       "resolvedOn": "2026-10-29",
-      "reviewBy": "2026-10-30"
+      "reviewBy": "2027-01-31"
     },
     {
       "name": "Ollama optional local AI service",
@@ -594,7 +594,7 @@
       "licenseSource": "https://github.com/ollama/ollama/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
       "resolvedOn": "2026-10-27",
-      "reviewBy": "2026-10-30"
+      "reviewBy": "2026-11-07"
     }
   ],
   "unwatchedImages": [
