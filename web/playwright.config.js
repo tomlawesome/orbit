@@ -6,6 +6,16 @@ import { defineConfig } from "@playwright/test";
  */
 const APP_PORT = process.env.FIDELITY_PORT ?? "4173";
 const MOCKUP_PORT = process.env.FIDELITY_MOCKUP_PORT ?? "5174";
+/* A server already on a port is used only when FIDELITY_REUSE=1 says so, and
+   never in CI (#1280). Otherwise a busy port fails the run, and Playwright's
+   message names its URL. Workers load this file too, so only the main process
+   says which ports it reuses. */
+const REUSE = !process.env.CI && process.env.FIDELITY_REUSE === "1";
+if (REUSE && process.env.TEST_WORKER_INDEX === undefined) {
+  for (const port of [APP_PORT, MOCKUP_PORT]) {
+    console.log(`fidelity: reusing any server already on port ${port} (FIDELITY_REUSE=1); it may not be this checkout's.`);
+  }
+}
 
 export default defineConfig({
   testDir: "./tests/fidelity",
@@ -168,7 +178,7 @@ export default defineConfig({
       },
       url: `http://127.0.0.1:${APP_PORT}/login`,
       timeout: 120_000,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: REUSE,
       stdout: "ignore",
     },
     {
@@ -176,7 +186,7 @@ export default defineConfig({
          against its design before it earns a baseline. */
       command: `node tests/fidelity/serve.mjs ${MOCKUP_PORT}`,
       url: `http://127.0.0.1:${MOCKUP_PORT}/design/family/family.css`,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: REUSE,
       stdout: "ignore",
     },
   ],

@@ -475,7 +475,12 @@ cleanup() {
   # `--profile '*'` is every profile, so the processing parser (orbit-tika) is
   # part of the project whatever COMPOSE_PROFILES says.
   local down_ok=1
-  compose --profile '*' down --volumes --remove-orphans --rmi local > /dev/null 2>&1 || down_ok=0
+  # Its output is shown only when it fails, so a failed teardown says why (#1423).
+  local down_output
+  down_output="$(compose --profile '*' down --volumes --remove-orphans --rmi local 2>&1)" || {
+    down_ok=0
+    printf '%s\n' "$down_output" >&2
+  }
   if [[ "$orbit_image_built" == 1 ]]; then
     docker image rm "$orbit_image" > /dev/null 2>&1 || true
   fi
@@ -1008,6 +1013,14 @@ if [[ "$in_image" == 1 ]]; then
   oidc_forward=""
   if [[ "$profile" == "oidc" ]]; then
     image_env+=(-e TEST_OIDC_PORT=4443)
+    # The forward below claims 127.0.0.1:4443; say so now if something holds it (#1445).
+    if (exec 3<>/dev/tcp/127.0.0.1/4443) 2> /dev/null; then
+      holder=""
+      if command -v ss > /dev/null 2>&1; then
+        holder="$(ss -H -ltnp 'sport = :4443' 2> /dev/null | sed -n '1s/.*users:(\(.*\))$/\1/p')"
+      fi
+      fail "port 4443 on 127.0.0.1 is already in use${holder:+ (held by ${holder})}; the WebKit run forwards it to the sign-in provider. Free it and rerun."
+    fi
     oidc_forward="node -e 'const n=require(\"net\");n.createServer(s=>{const c=n.connect(${TEST_OIDC_PORT},\"127.0.0.1\");s.pipe(c).pipe(s);s.on(\"error\",()=>c.destroy());c.on(\"error\",()=>s.destroy())}).listen(4443,\"127.0.0.1\")' & sleep 1;"
   fi
   log "running Playwright inside ${playwright_image} (WebKit needs it; #1235)"

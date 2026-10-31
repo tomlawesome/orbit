@@ -27,7 +27,9 @@
 # Also lists the locally built images (orbit-local, orbit-vapid-bootstrap,
 # orbit-acceptance-local) that no container uses; plain --remove or --all
 # removes those by name, never with -f and never by pruning. They belong to no
-# project, so --project leaves them alone.
+# project, so --project leaves them alone. A killed scripts/test-e2e-local.sh
+# run leaves its orbit-e2e-local-<run>-orbit-oidc image behind (#1423): that one
+# counts as unused when its Compose project has no container left.
 # Output is plain text, never coloured.
 set -uo pipefail
 
@@ -37,7 +39,7 @@ OLLAMA_SERVICE='orbit-ollama'
 IMAGE_REPOS='orbit-local orbit-vapid-bootstrap orbit-acceptance-local'
 
 usage() {
-  sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 remove=false
@@ -141,13 +143,14 @@ selected_for_removal() {
 
 # Sets $images to one row per locally built image:
 #   repository|tag|id|age|size|used     (used is "yes" when any container, in any
-# state and any project, was created from it, and "recent" when the image is
+# state and any project, was created from it, "project" for a per-run sign-in
+# image whose Compose project still has a container, and "recent" when the image is
 # under a day old: another session may have just built it and not yet started
 # a container from it). Returns non-zero when Docker cannot say, so nothing is
 # ever removed on a guess.
 images=""
 fetch_images() {
-  local listed ids used_ids="" repo tag id age size created created_epoch row keep r now
+  local listed ids used_ids="" repo tag id age size created created_epoch row keep r now run_project
   listed="$(docker image ls --no-trunc --format '{{.Repository}}|{{.Tag}}|{{.ID}}|{{.CreatedSince}}|{{.Size}}|{{.CreatedAt}}')" || return 1
   now="$(date +%s)"
   ids="$(docker ps -a -q)" || return 1
@@ -160,9 +163,13 @@ fetch_images() {
   while IFS='|' read -r repo tag id age size created; do
     [ -n "$repo" ] || continue
     keep=false
+    run_project=""
     for r in $IMAGE_REPOS; do
       [ "$repo" = "$r" ] && keep=true
     done
+    case "$repo" in
+      orbit-e2e-local-*-orbit-oidc) keep=true; run_project="${repo%-orbit-oidc}" ;;
+    esac
     [ "$keep" = true ] || continue
     row="$repo|$tag|$id|$age|$size|no"
     # CreatedAt ends in a zone name date(1) may not know; the offset before it
@@ -172,6 +179,8 @@ fetch_images() {
       row="$repo|$tag|$id|$age|$size|yes"
     elif [ $((now - created_epoch)) -lt 86400 ]; then
       row="$repo|$tag|$id|$age|$size|recent"
+    elif [ -n "$run_project" ] && printf '%s\n' "$containers" | cut -d'|' -f1 | grep -qxF -- "$run_project"; then
+      row="$repo|$tag|$id|$age|$size|project"
     fi
     images="${images:+$images$'\n'}$row"
   done <<<"$listed"
@@ -277,6 +286,8 @@ if [ "$images_ok" = true ] && [ -n "$images" ]; then
       echo "    $repo:$tag ($age, $size) in use, kept"
     elif [ "$used" = recent ]; then
       echo "    $repo:$tag ($age, $size) under a day old, kept"
+    elif [ "$used" = project ]; then
+      echo "    $repo:$tag ($age, $size) its project still has a container, kept"
     else
       echo "    $repo:$tag ($age, $size) unused"
       unused_images=$((unused_images + 1))

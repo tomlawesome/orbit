@@ -14,6 +14,13 @@
  * expression, or inside `$derived(...)`, comes out clean), so this does not
  * guess from the text: it compiles every component the way the dev server
  * does and parses the result.
+ *
+ * #1267: the client output has its own shape of the same fault. A typed
+ * `$props()` line that ends a component's script comes out as
+ * `var /** @type {T} *\/ (p) = root();`, which is not JavaScript either. The
+ * server output of that component is clean, so the client output is checked
+ * too, for that one shape (a JSDoc comment between `var` and `(`), by pattern:
+ * a legitimate parenthesised arrow parameter must keep passing.
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -47,6 +54,18 @@ export function serverParseError(source, filename = "Component.svelte") {
   }
 }
 
+/**
+ * The fault the client output of one component carries, or null.
+ * @param {string} source
+ * @param {string} [filename]
+ * @returns {string | null}
+ */
+export function clientParseError(source, filename = "Component.svelte") {
+  const code = compile(source, { generate: "client", filename }).js.code;
+  const match = /\bvar\s+\/\*\*(?:(?!\*\/)[\s\S])*\*\/\s*\(/.exec(code);
+  return match ? `a JSDoc-typed binding wrapped in parentheses in the client output (${match[0].slice(0, 60)})` : null;
+}
+
 /** @param {string} dir @returns {string[]} */
 const componentsUnder = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
   const full = path.join(dir, entry.name);
@@ -57,15 +76,17 @@ const componentsUnder = (dir) => readdirSync(dir, { withFileTypes: true }).flatM
 function main() {
   const files = componentsUnder(path.join(webRoot, "src"));
   const failures = files.flatMap((file) => {
-    const problem = serverParseError(readFileSync(file, "utf8"), file);
+    const source = readFileSync(file, "utf8");
+    const problem = serverParseError(source, file) ?? clientParseError(source, file);
     return problem ? [`${path.relative(repositoryRoot, file)}: ${problem}`] : [];
   });
   if (failures.length === 0) {
     console.log(`svelte server-output parse check: clean across ${files.length} components.`);
     return;
   }
-  console.error("svelte server-output parse check: these compile to code vite dev cannot run (#1138).");
-  console.error("Drop the parameter's JSDoc comment, or type the variable the function is assigned to instead.\n");
+  console.error("svelte server-output parse check: these compile to code vite dev cannot run (#1138, #1267).");
+  console.error("Drop the parameter's JSDoc comment, or type the variable the function is assigned to instead.");
+  console.error("A typed $props() line must not end the script: put a statement after it.\n");
   for (const failure of failures) console.error(`  ${failure}`);
   process.exitCode = 1;
 }
