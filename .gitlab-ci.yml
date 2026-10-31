@@ -277,7 +277,7 @@ variables:
   GOLANG_IMAGE: golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5
   # Same scanner build as the old workflow, so a finding here and a finding there
   # mean the same thing.
-  TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
+  TRIVY_IMAGE: aquasec/trivy@sha256:2e6c00d711ab4ae41d8a30c2c1fd3bd3b62704c177bb120f95012e939edfb3df
   # The digest scripts/test-integration.mjs pins for its disposable database.
   POSTGRES_IMAGE: postgres:18-alpine@sha256:3b0ef735388b2cb097fc29b8bb421d86d57d0ddbe7aa1fbd6493e06d65028503
   # scripts/ci/start-installer-registry.sh's disposable loopback registry
