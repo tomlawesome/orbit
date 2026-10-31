@@ -1,10 +1,13 @@
+import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 import { applyHostOwnership } from "./host-ownership";
-import { LAUNCHER_CONFIG_TREE_ASSETS, handOverLauncherConfigTree } from "./launcher-config-tree";
+import { LAUNCHER_CONFIG_TREE_ASSETS, handOverLauncherConfigTree, takeHandedInConfiguration } from "./launcher-config-tree";
 
 // Wraps the real function, so ownership is still applied; the spy only records
 // which paths the tree writer handed over.
@@ -410,5 +413,129 @@ describe("handOverLauncherConfigTree over its own earlier hand-over", () => {
     expect(result).toBe("refused");
     expect(notices).toEqual(["Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because it holds something that is not ours."]);
     expect(readFileSync(join(elsewhere, "keep"), "utf8")).toBe("OUTSIDE\n");
+  });
+});
+
+// The reader of what the launcher left in its tree (#1519), in the hands of a
+// stray or hostile entry (#1536 A-S1, X-R2). Nothing is copied unless every
+// entry passes, and the tree is never changed.
+describe("takeHandedInConfiguration: entries that cannot be taken in (#1536)", () => {
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const CONFIG_ENV = "APP_URL=https://tree.example.invalid\nORBIT_AUTH_OIDC=false\n";
+
+  /** A tree with a good .env-orbit, and a .orbit-secrets directory when `secrets` is true. */
+  function handedInTree(secrets = false): string {
+    const tree = emptyTree();
+    writeFileSync(join(tree, ".env-orbit"), CONFIG_ENV, { mode: 0o600 });
+    if (secrets) mkdirSync(join(tree, ".orbit-secrets"), { mode: 0o700 });
+    return tree;
+  }
+
+  /** A path the reader is told to take, per case: the .env-orbit itself, or one entry under .orbit-secrets. */
+  const targets: Array<[string, string, (tree: string) => string]> = [
+    [".env-orbit", ".env-orbit", (tree) => join(tree, ".env-orbit")],
+    [".orbit-secrets/session-secret", ".orbit-secrets/session-secret", (tree) => join(tree, ".orbit-secrets", "session-secret")],
+  ];
+  const treeFor = (name: string) => handedInTree(name.startsWith(".orbit-secrets"));
+
+  // A-S1: the refusal for a file that cannot be opened named a symlink, so the
+  // person looked for a link that was not there before trying permissions. The
+  // check needs an unprivileged run: root opens a mode-000 file.
+  describe.skipIf(process.getuid?.() === 0)("a file that cannot be opened (A-S1)", () => {
+    it.each(targets)("reports %s as unreadable, not as a symlink", (name, _label, locate) => {
+      const tree = treeFor(name);
+      const file = locate(tree);
+      if (name === ".env-orbit") chmodSync(file, 0o000);
+      else {
+        writeFileSync(file, "x\n", { mode: 0o600 });
+        chmodSync(file, 0o000);
+      }
+      const scratch = sandbox();
+      const result = takeHandedInConfiguration(tree, scratch);
+      expect(result.kind).toBe("refused");
+      if (result.kind !== "refused") return;
+      expect(result.problem).toContain(name);
+      expect(result.problem).not.toMatch(/symlink/i);
+      expect(result.problem).toMatch(/cannot be (read|opened)|not readable|unreadable/i);
+      expect(readdirSync(scratch)).toEqual([]);
+    });
+  });
+
+  // Passes today and must keep passing: a real symlink is still called one.
+  it("still reports a symlinked .env-orbit as a symlink", () => {
+    const tree = emptyTree();
+    const elsewhere = join(sandbox(), "config");
+    writeFileSync(elsewhere, CONFIG_ENV, { mode: 0o600 });
+    symlinkSync(elsewhere, join(tree, ".env-orbit"));
+    const result = takeHandedInConfiguration(tree, sandbox());
+    expect(result).toMatchObject({ kind: "refused" });
+    if (result.kind === "refused") expect(result.problem).toMatch(/symlink/i);
+  });
+
+  // X-R2, hang: a blocking open() of a FIFO with no writer never returns, and
+  // the process cannot be interrupted. It runs in a child, so a regression is a
+  // named deadline failure and not a stuck test worker.
+  describe("a FIFO where a file should be (X-R2)", () => {
+    it.each(targets)(
+      "refuses %s without waiting for a writer",
+      (name, _label, locate) => {
+        const tree = treeFor(name);
+        const fifo = locate(tree);
+        rmSync(fifo, { force: true });
+        execFileSync("mkfifo", ["-m", "600", fifo]);
+        const scratch = sandbox();
+        const script = join(sandbox(), "take-handed-in.mts");
+        writeFileSync(
+          script,
+          `import { takeHandedInConfiguration } from ${JSON.stringify(join(import.meta.dirname, "launcher-config-tree.ts"))};
+console.log(JSON.stringify(takeHandedInConfiguration(process.argv[2], process.argv[3])));
+`,
+        );
+        const child = failOnProcessDeadline(spawnSync("node", ["--import", "tsx", script, tree, scratch], { cwd: repoRoot, encoding: "utf8", ...processGuard() }), {
+          label: `takeHandedInConfiguration over a FIFO at ${name}`,
+        });
+        expect(child.status, child.stderr).toBe(0);
+        const result = JSON.parse(child.stdout.trim().split("\n").at(-1) ?? "{}");
+        expect(result.kind).toBe("refused");
+        expect(result.problem).toContain(name);
+        expect(readdirSync(scratch)).toEqual([]);
+      },
+      PROCESS_TEST_TIMEOUT_MS,
+    );
+  });
+
+  // X-R2, size: the reader took a whole file into memory whatever its size.
+  // The limit is the implementer's to pick between the two sizes below: a real
+  // .env-orbit is a few KiB (about sixty lines), a secret is a key or token of
+  // under a KiB, so 32 KiB is far past honest use and still must be taken in,
+  // while a 1 MiB file can only be a mistake or an attack and must be refused.
+  describe("a file over the size limit (X-R2)", () => {
+    const KIB = 1024;
+
+    it.each(targets)("refuses a 1 MiB %s, naming it, and copies nothing", (name, _label, locate) => {
+      const tree = treeFor(name);
+      const file = locate(tree);
+      writeFileSync(file, `${"A".repeat(KIB * KIB)}\n`, { mode: 0o600 });
+      const scratch = sandbox();
+      const result = takeHandedInConfiguration(tree, scratch);
+      expect(result.kind).toBe("refused");
+      if (result.kind !== "refused") return;
+      expect(result.problem).toContain(name);
+      expect(result.problem).toMatch(/too large|larger than|over the limit|exceeds/i);
+      expect(readdirSync(scratch)).toEqual([]);
+    });
+
+    // Passes today and must keep passing: the limit is not set below real use.
+    it("still takes in a 32 KiB .env-orbit", () => {
+      const tree = emptyTree();
+      const comments = `${"# a long explanatory comment line in the launcher's configuration\n".repeat(480)}`;
+      const content = `${comments}${CONFIG_ENV}`;
+      expect(content.length).toBeGreaterThan(30 * KIB);
+      expect(content.length).toBeLessThanOrEqual(32 * KIB);
+      writeFileSync(join(tree, ".env-orbit"), content, { mode: 0o600 });
+      const scratch = sandbox();
+      expect(takeHandedInConfiguration(tree, scratch)).toEqual({ kind: "taken" });
+      expect(readFileSync(join(scratch, ".env-orbit"), "utf8")).toBe(content);
+    });
   });
 });

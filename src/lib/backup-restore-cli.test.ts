@@ -1973,10 +1973,12 @@ describe("runImportRecoveryBundle (import-recovery-bundle.sh's orchestration, li
      * with `signal`, and reports how it closed. "staging" pauses the inner
      * restore's staged-database step, with the recovered key already swapped
      * in and no checkpoint yet; "checkpoint" pauses straight after the
-     * checkpoint is verified.
+     * checkpoint is verified; "confirm" pauses in the restore confirmation,
+     * which runs after the recovered key is written and before the
+     * checkpoint, and works with no live key to swap (#1536 A-R1).
      */
     async function importKilledAt(
-      pauseAt: "staging" | "checkpoint",
+      pauseAt: "staging" | "checkpoint" | "confirm",
       signal: NodeJS.Signals,
       names: { recoveryBundlePath: string; passphrase: string; liveDocumentsRoot: string; liveDocumentKekFile: string; backupDirectory: string },
     ): Promise<{ stdout: string; stderr: string; killedOnDeadline: boolean; status: number | null; closeSignal: NodeJS.Signals | null }> {
@@ -2048,7 +2050,13 @@ runImportRecoveryBundle({
   backupDirectory: config.backupDirectory,
   adapter,
   importConfirmed: true,
-  confirmRestore: () => true,
+  confirmRestore: () => {
+    if (config.pauseAt === "confirm") {
+      writeSync(1, "paused\\n");
+      spawnSync("sleep", ["30"]);
+    }
+    return true;
+  },
   testHooks: {
     afterCheckpoint: () => {
       if (config.pauseAt !== "checkpoint") return;
@@ -2174,6 +2182,109 @@ runImportRecoveryBundle({
       expect(existsSync(rollbackFile)).toBe(false);
       expect(existsSync(paths.journalPath)).toBe(false);
     });
+
+    // #1536 A-R1: a key-less import (#1420) writes the recovered key to the live
+    // path before the checkpoint, and the only trace of "there was no key" is in
+    // that run's memory. A SIGKILL there leaves the recovered key in place with no
+    // journal and no rollback file; the rerun must not read it as the deployment's
+    // previous key, or its own rollback "restores" a key that was never there.
+    it("A-R1: a key-less import killed after the key is written and before the checkpoint is not mistaken for a previous key by the rerun", async () => {
+      const passphrase = "correct horse battery staple";
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+      const liveDocumentsRoot = join(sandbox, "live-docs-import-nokey-killed");
+      buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+      const liveDocumentKekFile = join(sandbox, "live-document-kek-nokey-killed");
+      const rollbackFile = `${liveDocumentKekFile}.import-rollback`;
+      const backupDirectory = join(sandbox, "import-target-backups-nokey-killed");
+      mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+      expect(existsSync(liveDocumentKekFile)).toBe(false);
+
+      const { stdout, stderr, killedOnDeadline, closeSignal } = await importKilledAt("confirm", "SIGKILL", {
+        recoveryBundlePath,
+        passphrase,
+        liveDocumentsRoot,
+        liveDocumentKekFile,
+        backupDirectory,
+      });
+
+      expect(stdout, `the child never reached the restore confirmation (stderr: ${stderr})`).toContain("paused");
+      expect(killedOnDeadline).toBe(false);
+      expect(closeSignal).toBe("SIGKILL");
+      // Where the kill leaves things: the recovered key is live, and no checkpoint was taken.
+      expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(UPDATED_KEY);
+      expect(existsSync(deriveRestorePaths(backupDirectory, liveDocumentKekFile).journalPath)).toBe(false);
+
+      // The rerun: same bundle, same absent-key story from the operator's side, failing before its own checkpoint.
+      const adapter = new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+      expect(() =>
+        runImportRecoveryBundle({
+          recoveryBundlePath,
+          passphrase,
+          liveDocumentKekFile,
+          backupDirectory,
+          adapter,
+          importConfirmed: true,
+          confirmRestore: () => false,
+        }),
+      ).toThrow();
+
+      // The deployment had no key before either run; a failed rerun must not leave one behind.
+      expect(existsSync(liveDocumentKekFile), "the killed run's key was kept as the previous key").toBe(false);
+      expect(existsSync(rollbackFile)).toBe(false);
+      expect(existsSync(deriveRestorePaths(backupDirectory, liveDocumentKekFile).journalPath)).toBe(false);
+    }, 40_000);
+
+    // #1536 A-R1: the marker names the key it is about to write (sha256), so a key
+    // an operator put back by hand after the kill is not mistaken for that run's.
+    it("A-R1: after a kill, a rerun keeps a live key that differs from the one the interrupted import wrote, and clears the marker", async () => {
+      const passphrase = "correct horse battery staple";
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+      const liveDocumentsRoot = join(sandbox, "live-docs-import-nokey-handkey");
+      buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+      const liveDocumentKekFile = join(sandbox, "live-document-kek-nokey-handkey");
+      const backupDirectory = join(sandbox, "import-target-backups-nokey-handkey");
+      mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+
+      const { stdout, stderr, closeSignal } = await importKilledAt("confirm", "SIGKILL", {
+        recoveryBundlePath,
+        passphrase,
+        liveDocumentsRoot,
+        liveDocumentKekFile,
+        backupDirectory,
+      });
+      expect(stdout, `the child never reached the restore confirmation (stderr: ${stderr})`).toContain("paused");
+      expect(closeSignal).toBe("SIGKILL");
+      expect(existsSync(`${liveDocumentKekFile}.import-no-key`)).toBe(true);
+
+      // The operator puts their own key back by hand.
+      writeFileSync(liveDocumentKekFile, `${ORIGINAL_KEY}\n`, { mode: 0o600 });
+
+      const written: string[] = [];
+      const spy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: string | Uint8Array) => {
+        written.push(String(chunk));
+        return true;
+      }) as typeof process.stderr.write);
+      try {
+        expect(() =>
+          runImportRecoveryBundle({
+            recoveryBundlePath,
+            passphrase,
+            liveDocumentKekFile,
+            backupDirectory,
+            adapter: new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10),
+            importConfirmed: true,
+            confirmRestore: () => false,
+          }),
+        ).toThrow();
+      } finally {
+        spy.mockRestore();
+      }
+
+      expect(readFileSync(liveDocumentKekFile, "utf8").trim(), "the operator's key was removed").toBe(ORIGINAL_KEY);
+      expect(existsSync(`${liveDocumentKekFile}.import-no-key`)).toBe(false);
+      expect(existsSync(`${liveDocumentKekFile}.import-rollback`)).toBe(false);
+      expect(written.join("")).toContain("is not the one an interrupted import wrote; it was kept.");
+    }, 40_000);
   });
 
   // #1420: an operator who lost .orbit-secrets/document-kek can import the
@@ -2220,6 +2331,45 @@ runImportRecoveryBundle({
       expect(existsSync(rollbackFile)).toBe(false);
       expect(existsSync(objectPath(liveDocumentsRoot, UPDATED_KEY))).toBe(true);
       expect(adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toBe(reportsFor(UPDATED_KEY, 22).crypto);
+    });
+
+    // #1536 A-R1: the intent marker exists while the key is live and no checkpoint
+    // does, and neither a completed run nor a run that fails first leaves it.
+    it("a key-less import marks its key while it is live, and leaves no marker behind once it completes or fails", () => {
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+      const marker = (liveDocumentKekFile: string): string => `${liveDocumentKekFile}.import-no-key`;
+
+      const done = missingKeyTarget("marker-ok");
+      let markedAtConfirm = false;
+      runImportRecoveryBundle({
+        recoveryBundlePath,
+        passphrase,
+        liveDocumentKekFile: done.liveDocumentKekFile,
+        backupDirectory: done.backupDirectory,
+        adapter: done.adapter,
+        importConfirmed: true,
+        confirmRestore: () => {
+          markedAtConfirm = existsSync(marker(done.liveDocumentKekFile)) && existsSync(done.liveDocumentKekFile);
+          return true;
+        },
+      });
+      expect(markedAtConfirm, "the key was live before the marker was").toBe(true);
+      expect(existsSync(marker(done.liveDocumentKekFile))).toBe(false);
+
+      const failed = missingKeyTarget("marker-fail");
+      expect(() =>
+        runImportRecoveryBundle({
+          recoveryBundlePath,
+          passphrase,
+          liveDocumentKekFile: failed.liveDocumentKekFile,
+          backupDirectory: failed.backupDirectory,
+          adapter: failed.adapter,
+          importConfirmed: true,
+          confirmRestore: () => false,
+        }),
+      ).toThrow();
+      expect(existsSync(failed.liveDocumentKekFile)).toBe(false);
+      expect(existsSync(marker(failed.liveDocumentKekFile))).toBe(false);
     });
 
     it("declining the import confirmation changes nothing: still no key, app never stopped", () => {

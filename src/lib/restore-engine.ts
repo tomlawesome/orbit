@@ -180,7 +180,7 @@ function regularFileSizeNoFollow(path: string): number | undefined {
 }
 
 /** `sync -d <path> || sync <path>` — data-sync a file/directory's fd, falling back to a full sync (restore.sh:415-428,442-452). */
-function fsyncPath(path: string, hook?: () => void): void {
+export function fsyncPath(path: string, hook?: () => void): void {
   if (hook) hook();
   const descriptor = openSync(path, constants.O_RDONLY);
   try {
@@ -479,6 +479,29 @@ export function syncCheckpointArtifacts(checkpointDirectory: string, hooks: Rest
     fsyncPath(checkpointDirectory, hooks.beforeCheckpointDirectorySync);
   } catch {
     refuse("checkpoint-integrity-failed", "checkpoint/integrity failed; checkpoint artifacts could not be durably synchronized.");
+  }
+}
+
+/**
+ * #1536 A-R1: the durable intent marker a key-less recovery import (#1420)
+ * writes beside the live key file before it writes the recovered key there.
+ * Its existence says "the key at the live path was put there by an
+ * interrupted key-less import; the deployment had none". The checkpoint
+ * clears it once the journal durably records "no previous key"
+ * (RestoreRunOptions.noKeyImportMarkerFile); a rerun that finds it removes
+ * that key instead of treating it as the deployment's previous one.
+ */
+export function noKeyImportMarkerPath(documentKekFile: string): string {
+  return `${documentKekFile}.import-no-key`;
+}
+
+/** Removes the key-less import marker and syncs its directory, so the removal is as durable as its creation. Best effort: a marker left behind is cleared by recovery or the next import. */
+export function clearNoKeyImportMarker(markerFile: string): void {
+  rmSafely(markerFile);
+  try {
+    fsyncPath(dirname(markerFile));
+  } catch {
+    // The marker is already gone from the namespace; only its durability is in doubt.
   }
 }
 
@@ -1024,6 +1047,8 @@ export interface RestoreRunOptions {
   rollbackDocumentKekFile?: string;
   /** #1420: the deployment had no live key file before this run (the recovery import decides it once); the checkpoint records that, and putting it back removes the key. */
   noPreviousDocumentKek?: boolean;
+  /** #1536 A-R1: the key-less import's intent marker (noKeyImportMarkerPath); createCheckpoint clears it right after the journal durably records the "no key" checkpoint. */
+  noKeyImportMarkerFile?: string;
   hooks?: RestoreDurabilityHooks;
 }
 
@@ -1107,6 +1132,7 @@ export class RestoreRun {
     private readonly workDir: string,
     private readonly rollbackDocumentKekFile: string | undefined,
     private readonly noPreviousDocumentKek: boolean,
+    private readonly noKeyImportMarkerFile: string | undefined,
     private readonly hooks: RestoreDurabilityHooks,
     checkpointDirectory: string,
     restoreId: string,
@@ -1144,6 +1170,7 @@ export class RestoreRun {
       options.workDir,
       options.rollbackDocumentKekFile,
       options.noPreviousDocumentKek ?? false,
+      options.noKeyImportMarkerFile,
       options.hooks ?? {},
       checkpointDirectory,
       restoreId,
@@ -1164,12 +1191,12 @@ export class RestoreRun {
    * `recover_mode != true` cleanup guard.
    */
   static resume(
-    options: Omit<RestoreRunOptions, "rollbackDocumentKekFile" | "noPreviousDocumentKek">,
+    options: Omit<RestoreRunOptions, "rollbackDocumentKekFile" | "noPreviousDocumentKek" | "noKeyImportMarkerFile">,
     checkpointDirectory: string,
     restoreId: string,
     digests: RestoreCheckpointDigests,
   ): RestoreRun {
-    const run = new RestoreRun(options.adapter, options.paths, options.workDir, undefined, false, options.hooks ?? {}, checkpointDirectory, restoreId);
+    const run = new RestoreRun(options.adapter, options.paths, options.workDir, undefined, false, undefined, options.hooks ?? {}, checkpointDirectory, restoreId);
     run.recoverMode = true;
     run.checkpointDigests = digests;
     return run;
@@ -1239,6 +1266,9 @@ export class RestoreRun {
     // The journal now durably references this checkpoint directory by its
     // restoreId — it is no longer an orphan (O2-R10).
     rmSafely(join(this.checkpointDirectory, CHECKPOINT_PREPARING_MARKER));
+    // #1536 A-R1: the journal now records "no previous key", so a rollback
+    // removes the imported key; the marker's job is done.
+    if (this.noKeyImportMarkerFile) clearNoKeyImportMarker(this.noKeyImportMarkerFile);
 
     this.checkpointVerified = true;
   }

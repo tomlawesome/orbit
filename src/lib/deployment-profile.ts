@@ -75,7 +75,7 @@ const REQUESTABLE_INSTALL_PROFILES: readonly DeploymentProfile[] = ["standard", 
  * the only branch reached when `terminal_fd` was never opened): preserve the
  * existing profile on `update` (`profile_change` stays 0); on `install`
  * (`profile_change=1`), the launcher's ORBIT_INSTALL_PROFILE if it names
- * standard or processing, a refusal for any other value, and "standard" when
+ * one of REQUESTABLE_INSTALL_PROFILES, a refusal for any other value, and "standard" when
  * unset (#1504). The request is ignored on `update`. See the module comment
  * above for why this is the only branch install-orchestrator.ts drives.
  */
@@ -92,7 +92,7 @@ export function resolveNonInteractiveProfileSelection(
   }
   const requested = REQUESTABLE_INSTALL_PROFILES.find((profile) => profile === requestedProfile);
   if (requested === undefined) {
-    return { refused: true, message: "ORBIT_INSTALL_PROFILE must be standard or processing." };
+    return { refused: true, message: `ORBIT_INSTALL_PROFILE must be ${REQUESTABLE_INSTALL_PROFILES.join(" or ")}.` };
   }
   return { selectedProfile: requested, profileChange: true };
 }
@@ -165,6 +165,31 @@ const CAPACITY_LINES: Record<LocalAiCapacity, string> = {
 };
 
 /**
+ * The local-AI step of a chosen ai or full profile, however it was chosen
+ * (the wizard, or a handed-in profile kept, #1536 G2-R2): the host capacity
+ * advisory, then the separate download confirmation (guarantee #20) where a
+ * terminal can answer it. With no terminal nothing confirms a download, so
+ * none is requested. Any other profile has no local-AI step. Cancel declines.
+ */
+export function prepareLocalAiModel(
+  profile: DeploymentProfile,
+  capacity: () => LocalAiCapacity,
+  write: (line: string) => void,
+  terminal: InstallTerminal | undefined,
+): boolean {
+  if (profile !== "ai" && profile !== "full") return false;
+  write(CAPACITY_LINES[capacity()]);
+  if (!terminal) return false;
+  const download = selectChoice(terminal, "Prepare the selected local model after Ollama becomes healthy? This can be a large download.", "skip", [
+    ["skip", "Save the model choice without downloading it now"],
+    ["pull", "Confirm the separate model download step"],
+    ["cancel", "Cancel without changing files or services"],
+  ]);
+  if (download === "cancel") throw declined();
+  return download === "pull";
+}
+
+/**
  * choose_deployment_profile: on an update, preserve the current profile
  * (the default) or choose another; otherwise a preset or one of the four
  * custom combinations, a local model for ai/full with the capacity advisory
@@ -224,14 +249,7 @@ export function chooseDeploymentProfile(terminal: InstallTerminal, context: Prof
     if (model === undefined) throw new InstallPromptStop(1, "The terminal closed before a local model was named; no deployment files or services were changed.");
     if (!isValidLocalModel(model)) throw new InstallPromptStop(2, "The local model identifier is not valid; no deployment files or services were changed.");
     selectedModel = model;
-    terminal.write(`${CAPACITY_LINES[context.capacity()]}\n`);
-    const download = selectChoice(terminal, "Prepare the selected local model after Ollama becomes healthy? This can be a large download.", "skip", [
-      ["skip", "Save the model choice without downloading it now"],
-      ["pull", "Confirm the separate model download step"],
-      ["cancel", "Cancel without changing files or services"],
-    ]);
-    if (download === "cancel") throw declined();
-    modelPullRequested = download === "pull";
+    modelPullRequested = prepareLocalAiModel(selectedProfile, context.capacity, (line) => terminal.write(`${line}\n`), terminal);
   }
 
   const review = selectChoice(
