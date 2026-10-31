@@ -524,7 +524,7 @@
       "licenseSource": "https://github.com/nodejs/docker-node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
       "resolvedOn": "2026-10-22",
-      "reviewBy": "2026-10-30"
+      "reviewBy": "2026-11-07"
     },
     {
       "name": "PostgreSQL database",
@@ -594,7 +594,7 @@
       "licenseSource": "https://github.com/ollama/ollama/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
       "resolvedOn": "2026-10-27",
-      "reviewBy": "2026-10-30"
+      "reviewBy": "2026-11-07"
     }
   ],
   "unwatchedImages": [
