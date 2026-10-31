@@ -41,7 +41,7 @@ function makeAdapter(overrides: AdapterFixture = {}): VolumeOwnershipAdapter {
 describe("evaluateVolumeOwnership (guarantees #13, #14)", () => {
   it("proves ownership when every independent check passes", () => {
     const result = evaluateVolumeOwnership(CANDIDATE_VOLUME, EXPECTED_IMAGE, makeAdapter());
-    expect(result).toEqual({ status: "proven", project: PROJECT });
+    expect(result).toEqual({ status: "proven", project: PROJECT, appImage: EXPECTED_IMAGE });
   });
 
   it("is a verify-error when the volume-inspect docker call itself fails (#14)", () => {
@@ -127,7 +127,7 @@ describe("evaluateVolumeOwnership (guarantees #13, #14)", () => {
       listContainersByVolume: () => `${DB_CONTAINER_ID}|${PROJECT}|orbit-db|${UPDATE_FOLDER}`,
       listContainersByProject: () => `${APP_CONTAINER_ID}|${PROJECT}|orbit-app|${UPDATE_FOLDER}`,
     });
-    expect(evaluateVolumeOwnership(CANDIDATE_VOLUME, EXPECTED_IMAGE, adapter, UPDATE_FOLDER)).toEqual({ status: "proven", project: PROJECT });
+    expect(evaluateVolumeOwnership(CANDIDATE_VOLUME, EXPECTED_IMAGE, adapter, UPDATE_FOLDER)).toEqual({ status: "proven", project: PROJECT, appImage: EXPECTED_IMAGE });
   });
 
   // #1570: Compose's working_dir label may hold the path as the operator typed
@@ -150,7 +150,7 @@ describe("evaluateVolumeOwnership (guarantees #13, #14)", () => {
     ["the single update folder with a trailing slash on the label", `${UPDATE_FOLDER}/`, UPDATE_FOLDER],
     ["the single update folder with a trailing slash on it", UPDATE_FOLDER, `${UPDATE_FOLDER}/`],
   ])("is proven when the label is %s (#1570)", (_name, label, folders) => {
-    expect(evaluateVolumeOwnership(CANDIDATE_VOLUME, EXPECTED_IMAGE, labelled(label), folders)).toEqual({ status: "proven", project: PROJECT });
+    expect(evaluateVolumeOwnership(CANDIDATE_VOLUME, EXPECTED_IMAGE, labelled(label), folders)).toEqual({ status: "proven", project: PROJECT, appImage: EXPECTED_IMAGE });
   });
 
   it("is not-proven as another folder when the label matches none of the acceptable paths (#1570)", () => {
@@ -489,6 +489,8 @@ describe("verifyDatabaseVolumeSafety fresh-check path (guarantees #15, #16, #18)
       // deployment's real identity, so #999's later re-derivation must never
       // replace it -- it is never provisional, however it was derived.
       composeProjectNameProvisional: false,
+      // The running orbit-app's image the proof accepted, which the commit records.
+      attachedAppImage: EXPECTED_IMAGE,
     });
   });
 
@@ -609,12 +611,12 @@ describe("moved folder versus another folder (#1570)", () => {
 
   describe("a label naming a folder that no longer exists", () => {
     it("does not refuse when the other proofs pass", () => {
-      expect(evaluate(inFolder(GONE, { [GONE]: missing }))).toEqual({ status: "proven", project: PROJECT });
+      expect(evaluate(inFolder(GONE, { [GONE]: missing }))).toEqual({ status: "proven", project: PROJECT, appImage: EXPECTED_IMAGE });
     });
 
     it("does not refuse when only the application container carries the missing label", () => {
       const adapter = inFolder(GONE, { [GONE]: missing }, { listContainersByVolume: () => `${DB_CONTAINER_ID}|${PROJECT}|orbit-db|${PHYSICAL}` });
-      expect(evaluate(adapter)).toEqual({ status: "proven", project: PROJECT });
+      expect(evaluate(adapter)).toEqual({ status: "proven", project: PROJECT, appImage: EXPECTED_IMAGE });
     });
 
     it.each([
@@ -648,24 +650,24 @@ describe("moved folder versus another folder (#1570)", () => {
   describe("a label whose physical path is the update folder's physical path", () => {
     it("is this folder, though it is a different symlink to it than the update folder's own spelling", () => {
       const adapter = inFolder(LINK_B, { [LINK_B]: exists(PHYSICAL) });
-      expect(evaluate(adapter)).toEqual({ status: "proven", project: PROJECT });
+      expect(evaluate(adapter)).toEqual({ status: "proven", project: PROJECT, appImage: EXPECTED_IMAGE });
     });
 
     it("is this folder when only the physical path is known for the update", () => {
       const adapter = inFolder(LINK_B, { [LINK_B]: exists(PHYSICAL) });
-      expect(evaluate(adapter, [PHYSICAL])).toEqual({ status: "proven", project: PROJECT });
+      expect(evaluate(adapter, [PHYSICAL])).toEqual({ status: "proven", project: PROJECT, appImage: EXPECTED_IMAGE });
     });
 
     it("is this folder when the label has a trailing slash and the physical path matches", () => {
       const adapter = inFolder(`${LINK_B}/`, { [`${LINK_B}/`]: exists(PHYSICAL) });
-      expect(evaluate(adapter)).toEqual({ status: "proven", project: PROJECT });
+      expect(evaluate(adapter)).toEqual({ status: "proven", project: PROJECT, appImage: EXPECTED_IMAGE });
     });
 
     it.each([
       ["the physical spelling", PHYSICAL],
       ["the logical spelling", LINK_A],
     ])("is this folder, as before, when the label equals %s", (_name, label) => {
-      expect(evaluate(inFolder(label, { [label]: exists(PHYSICAL) }))).toEqual({ status: "proven", project: PROJECT });
+      expect(evaluate(inFolder(label, { [label]: exists(PHYSICAL) }))).toEqual({ status: "proven", project: PROJECT, appImage: EXPECTED_IMAGE });
     });
 
     it("is not this folder when its physical path differs", () => {

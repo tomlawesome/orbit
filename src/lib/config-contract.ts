@@ -22,6 +22,7 @@ export const ALLOWED_KEYS = [
   "OIDC_CLIENT_SECRET_FILE",
   "OIDC_CALLBACK_URL",
   "ORBIT_IMAGE",
+  "ORBIT_PREVIOUS_IMAGE",
   "ORBIT_CONFIG_APPLIED_VERSION",
   "ORBIT_CONFIG_APPLIED_DIGEST",
   "COMPOSE_PROJECT_NAME",
@@ -336,6 +337,13 @@ export const envOrbitSchema = z
       .string()
       .refine((v) => v === "" || isValidOrbitImage(v), {
         message: "ORBIT_IMAGE must be digest-pinned or an installer-local tag",
+      })
+      .optional(),
+    // Written by the installer at an update: the build orbit-app ran before it.
+    ORBIT_PREVIOUS_IMAGE: z
+      .string()
+      .refine((v) => v === "" || isValidOrbitImage(v), {
+        message: "ORBIT_PREVIOUS_IMAGE must be digest-pinned or an installer-local tag",
       })
       .optional(),
     ORBIT_CONFIG_APPLIED_VERSION: z

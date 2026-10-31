@@ -118,6 +118,12 @@ function seedTarget(dir: string, target: VerifyGolden["target"]): PostgresPasswo
   return { isRegularNonSymlinkFile: true, mode: lstatSync(passwordPath).mode & 0o777 };
 }
 
+/** The state without `attachedAppImage`: bash had no such global, so the goldens cannot carry it. */
+function withoutAttachedAppImage(state: DatabaseVolumeSafetyState): Omit<DatabaseVolumeSafetyState, "attachedAppImage"> {
+  const { attachedAppImage: _attachedAppImage, ...rest } = state;
+  return rest;
+}
+
 function freshState(overrides: Partial<DatabaseVolumeSafetyState> = {}): DatabaseVolumeSafetyState {
   return {
     databaseVolumeChecked: false,
@@ -197,7 +203,7 @@ describe("verify_database_volume_safety parity — fresh check (golden)", () => 
         return;
       }
       const globals = parseGlobals(golden.bash.stdout);
-      expect(run()).toEqual({
+      expect(withoutAttachedAppImage(run())).toEqual({
         databaseVolumeChecked: globals.database_volume_checked === "1",
         databaseVolumeSeen: globals.database_volume_seen === "1",
         databaseVolumeName: globals.database_volume_name,
@@ -229,7 +235,7 @@ describe("verify_database_volume_safety parity — re-check, guarantee #17 TOCTO
         return;
       }
       const globals = parseGlobals(golden.bash.stdout);
-      expect(run()).toEqual({
+      expect(withoutAttachedAppImage(run())).toEqual({
         ...state,
         databaseVolumeChecked: globals.database_volume_checked === "1",
         databaseVolumeSeen: globals.database_volume_seen === "1",
