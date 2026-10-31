@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -2331,6 +2332,9 @@ runImportRecoveryBundle({
       expect(existsSync(rollbackFile)).toBe(false);
       expect(existsSync(objectPath(liveDocumentsRoot, UPDATED_KEY))).toBe(true);
       expect(adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toBe(reportsFor(UPDATED_KEY, 22).crypto);
+      // The key and the marker are published by rename: no temp file outlives the import.
+      expect(existsSync(`${liveDocumentKekFile}.tmp`)).toBe(false);
+      expect(existsSync(`${liveDocumentKekFile}.import-no-key.tmp`)).toBe(false);
     });
 
     // #1536 A-R1: the intent marker exists while the key is live and no checkpoint
@@ -2507,6 +2511,292 @@ runImportRecoveryBundle({
       expect(readFileSync(realKey, "utf8").trim()).toBe(LIVE_KEK);
       expect(existsSync(rollbackFile)).toBe(false);
       expect(adapter.stopCalls).toBe(0);
+    });
+
+    // Shared by the key-less marker cases below. The marker names the key an
+    // interrupted key-less import was going to write: `key_sha256=<sha256 of "<key>\n">`.
+    const markerPathOf = (liveDocumentKekFile: string): string => `${liveDocumentKekFile}.import-no-key`;
+    const markerContentFor = (key: string): string => `key_sha256=${createHash("sha256").update(`${key}\n`).digest("hex")}\n`;
+
+    function captureStderr(run: () => void): { error: unknown; stderr: string } {
+      const written: string[] = [];
+      const spy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: string | Uint8Array) => {
+        written.push(String(chunk));
+        return true;
+      }) as typeof process.stderr.write);
+      let error: unknown;
+      try {
+        run();
+      } catch (caught) {
+        error = caught;
+      } finally {
+        spy.mockRestore();
+      }
+      return { error, stderr: written.join("") };
+    }
+
+    describe("the recovered key and the marker are published whole, and an incomplete key under a marker is the interrupted import's", () => {
+      function leftoverTarget(suffix: string, leftover: string | undefined): ReturnType<typeof missingKeyTarget> {
+        const target = missingKeyTarget(suffix);
+        writeFileSync(markerPathOf(target.liveDocumentKekFile), markerContentFor(UPDATED_KEY), { mode: 0o600 });
+        if (leftover !== undefined) writeFileSync(target.liveDocumentKekFile, leftover, { mode: 0o600 });
+        return target;
+      }
+
+      it("T1.4: the live key is written through a sibling temp file: a directory at that path stops the import before the swap", () => {
+        const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+        const { liveDocumentsRoot, liveDocumentKekFile, rollbackFile, backupDirectory, adapter } = missingKeyTarget("tmp-blocked");
+        mkdirSync(`${liveDocumentKekFile}.tmp`);
+
+        expect(() =>
+          runImportRecoveryBundle({
+            recoveryBundlePath,
+            passphrase,
+            liveDocumentKekFile,
+            backupDirectory,
+            adapter,
+            importConfirmed: true,
+            confirmRestore: () => true,
+          }),
+        ).toThrow();
+
+        expect(existsSync(liveDocumentKekFile)).toBe(false);
+        expect(existsSync(markerPathOf(liveDocumentKekFile))).toBe(false);
+        expect(existsSync(rollbackFile)).toBe(false);
+        expect(adapter.appRunning).toBe(true);
+        expect(existsSync(objectPath(liveDocumentsRoot, ORIGINAL_KEY))).toBe(true);
+        expect(existsSync(objectPath(liveDocumentsRoot, UPDATED_KEY))).toBe(false);
+      });
+
+      it.each([
+        ["T1.5: a zero-length file", "empty", ""],
+        ["T1.6: a file that is not a key", "not-a-key", "not-a-key\n"],
+      ])("%s under a marker is removed as the interrupted import's, and the declined import leaves no key", (_name, suffix, leftover) => {
+        const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+        const { liveDocumentKekFile, rollbackFile, backupDirectory, adapter } = leftoverTarget(`incomplete-${suffix}`, leftover);
+
+        const { error, stderr } = captureStderr(() =>
+          runImportRecoveryBundle({
+            recoveryBundlePath,
+            passphrase,
+            liveDocumentKekFile,
+            backupDirectory,
+            adapter,
+            importConfirmed: true,
+            confirmRestore: () => false,
+          }),
+        );
+
+        expect(error).toBeDefined();
+        expect(existsSync(liveDocumentKekFile)).toBe(false);
+        expect(existsSync(markerPathOf(liveDocumentKekFile))).toBe(false);
+        expect(existsSync(rollbackFile)).toBe(false);
+        expect(adapter.stopCalls).toBe(1);
+        expect(adapter.appRunning).toBe(true);
+        expect(stderr).toContain("was left incomplete by an interrupted import; it was removed");
+      });
+
+      it("T1.7: an empty file under a marker does not stop a confirmed import: it completes with the bundle's key", () => {
+        const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+        const { liveDocumentsRoot, liveDocumentKekFile, rollbackFile, backupDirectory, adapter } = leftoverTarget("incomplete-confirmed", "");
+
+        const result = runImportRecoveryBundle({
+          recoveryBundlePath,
+          passphrase,
+          liveDocumentKekFile,
+          backupDirectory,
+          adapter,
+          importConfirmed: true,
+          confirmRestore: () => true,
+        });
+
+        expect(result.outcome).toBe("completed");
+        expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(UPDATED_KEY);
+        expect(statSync(liveDocumentKekFile).mode & 0o777).toBe(0o600);
+        expect(existsSync(markerPathOf(liveDocumentKekFile))).toBe(false);
+        expect(existsSync(rollbackFile)).toBe(false);
+        expect(existsSync(objectPath(liveDocumentsRoot, UPDATED_KEY))).toBe(true);
+        expect(adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toBe(reportsFor(UPDATED_KEY, 22).crypto);
+      });
+
+      it("T1.8: a valid key that is not the one the marker names is kept, however the marker came to be there", () => {
+        const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+        const { liveDocumentKekFile, backupDirectory, adapter } = leftoverTarget("valid-other-key", `${ORIGINAL_KEY}\n`);
+
+        const { error, stderr } = captureStderr(() =>
+          runImportRecoveryBundle({
+            recoveryBundlePath,
+            passphrase,
+            liveDocumentKekFile,
+            backupDirectory,
+            adapter,
+            importConfirmed: true,
+            confirmRestore: () => false,
+          }),
+        );
+
+        expect(error).toBeDefined();
+        expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(ORIGINAL_KEY);
+        expect(existsSync(markerPathOf(liveDocumentKekFile))).toBe(false);
+        expect(stderr).toContain("is not the one an interrupted import wrote; it was kept");
+      });
+    });
+
+    describe("an interrupted import's key is removed only once the run is committed, and a marker that cannot be cleared fails the import", () => {
+      /** The state import-recovery-bundle.sh leaves after a kill at the restore confirmation and its restart of Orbit. */
+      function markedTarget(suffix: string): ReturnType<typeof missingKeyTarget> {
+        const target = missingKeyTarget(suffix);
+        writeFileSync(target.liveDocumentKekFile, `${UPDATED_KEY}\n`, { mode: 0o600 });
+        writeFileSync(markerPathOf(target.liveDocumentKekFile), markerContentFor(UPDATED_KEY), { mode: 0o600 });
+        return target;
+      }
+
+      function expectUntouched(target: ReturnType<typeof missingKeyTarget>, stopCalls = 0): void {
+        expect(readFileSync(target.liveDocumentKekFile, "utf8").trim(), "the recovered key was removed").toBe(UPDATED_KEY);
+        expect(readFileSync(markerPathOf(target.liveDocumentKekFile), "utf8"), "the marker was changed").toBe(markerContentFor(UPDATED_KEY));
+        expect(existsSync(target.rollbackFile)).toBe(false);
+        expect(target.adapter.stopCalls).toBe(stopCalls);
+      }
+
+      function importMarked(target: ReturnType<typeof missingKeyTarget>, recoveryBundlePath: string, overrides: Partial<Parameters<typeof runImportRecoveryBundle>[0]> = {}): { error: unknown; stderr: string } {
+        return captureStderr(() =>
+          runImportRecoveryBundle({
+            recoveryBundlePath,
+            passphrase,
+            liveDocumentKekFile: target.liveDocumentKekFile,
+            backupDirectory: target.backupDirectory,
+            adapter: target.adapter,
+            importConfirmed: true,
+            confirmRestore: () => true,
+            ...overrides,
+          }),
+        );
+      }
+
+      function expectRefusal(error: unknown, code: string): BackupRestoreCliRefusal {
+        expect(error).toBeInstanceOf(BackupRestoreCliRefusal);
+        expect((error as BackupRestoreCliRefusal).code).toBe(code);
+        return error as BackupRestoreCliRefusal;
+      }
+
+      it("T2.1: an archive that is refused leaves the key and the marker alone", () => {
+        const target = markedTarget("marked-bad-archive");
+        const notATar = join(sandbox, "not-a-tar-marked.bin");
+        writeFileSync(notATar, randomBytes(4096));
+
+        const { error, stderr } = importMarked(target, notATar);
+
+        expectRefusal(error, "import-preflight-failed");
+        expectUntouched(target);
+        expect(stderr).not.toContain("interrupted import");
+      });
+
+      it("T2.2: a wrong passphrase leaves the key and the marker alone", () => {
+        const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+        const target = markedTarget("marked-wrong-passphrase");
+
+        const { error, stderr } = importMarked(target, recoveryBundlePath, { passphrase: "not the passphrase at all" });
+
+        expectRefusal(error, "import-preflight-failed");
+        expectUntouched(target);
+        expect(stderr).not.toContain("interrupted import");
+      });
+
+      it("T2.3: a declined import leaves the key and the marker alone", () => {
+        const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+        const target = markedTarget("marked-declined");
+
+        const { error, stderr } = importMarked(target, recoveryBundlePath, { importConfirmed: false });
+
+        expectRefusal(error, "import-not-confirmed");
+        expectUntouched(target);
+        expect(stderr).not.toContain("interrupted import");
+      });
+
+      it("T2.4: an app that will not stop leaves the key and the marker alone, says the key was not changed, and keeps Orbit running", () => {
+        const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+        const target = markedTarget("marked-stop-fails");
+        target.adapter.stopOk = false;
+
+        const { error } = importMarked(target, recoveryBundlePath);
+
+        const refusal = expectRefusal(error, "app-stop-failed");
+        expect(refusal.message).toContain("was not changed");
+        expectUntouched(target, 1);
+        expect(target.adapter.appRunning).toBe(true);
+      });
+
+      it("T2.5: a beforeRestore that throws leaves the key and the marker alone", () => {
+        const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+        const target = markedTarget("marked-before-restore");
+
+        const { error } = importMarked(target, recoveryBundlePath, {
+          beforeRestore: () => {
+            throw new Error("stop before the swap");
+          },
+        });
+
+        expect((error as Error).message).toContain("stop before the swap");
+        expectUntouched(target);
+      });
+
+      it("T2.6: a committed, completed rerun still ends with the bundle's key, no marker and no rollback file", () => {
+        const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+        const target = markedTarget("marked-completes");
+
+        const { error } = importMarked(target, recoveryBundlePath);
+
+        expect(error).toBeUndefined();
+        expect(readFileSync(target.liveDocumentKekFile, "utf8").trim()).toBe(UPDATED_KEY);
+        expect(existsSync(markerPathOf(target.liveDocumentKekFile))).toBe(false);
+        expect(existsSync(target.rollbackFile)).toBe(false);
+        // The import stops the app, and so does the restore it runs: the count is not the point, that it stopped is.
+        expect(target.adapter.stopCalls).toBeGreaterThan(0);
+        expect(existsSync(objectPath(target.liveDocumentsRoot, UPDATED_KEY))).toBe(true);
+        expect(target.adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toBe(reportsFor(UPDATED_KEY, 22).crypto);
+      });
+
+      it("T2.7: a rerun that stops Orbit and is then declined at the restore prompt ends with no key and no marker", () => {
+        const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+        const target = markedTarget("marked-declined-late");
+
+        const { error } = importMarked(target, recoveryBundlePath, { confirmRestore: () => false });
+
+        expect(error).toBeDefined();
+        expect(existsSync(target.liveDocumentKekFile)).toBe(false);
+        expect(existsSync(markerPathOf(target.liveDocumentKekFile))).toBe(false);
+        expect(existsSync(target.rollbackFile)).toBe(false);
+        expect(target.adapter.stopCalls).toBe(1);
+        expect(target.adapter.appRunning).toBe(true);
+      });
+
+      it("T2.8: a marker that cannot be removed fails the import, rolls it back and restarts Orbit", () => {
+        const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+        const target = missingKeyTarget("marker-stuck");
+        const marker = markerPathOf(target.liveDocumentKekFile);
+
+        const { error } = importMarked(target, recoveryBundlePath, {
+          confirmRestore: () => {
+            // A directory with a file in it: a non-recursive remove cannot clear it.
+            rmSync(marker, { force: true });
+            mkdirSync(marker);
+            writeFileSync(join(marker, "x"), "");
+            return true;
+          },
+        });
+
+        expect(error).toBeDefined();
+        expect((error as Error).message).toContain(marker);
+        expect((error as Error).message).toContain("could not be removed");
+        expect(existsSync(target.liveDocumentKekFile)).toBe(false);
+        expect(existsSync(target.rollbackFile)).toBe(false);
+        expect(existsSync(deriveRestorePaths(target.backupDirectory, target.liveDocumentKekFile).journalPath)).toBe(false);
+        expect(target.adapter.appRunning).toBe(true);
+        expect(existsSync(objectPath(target.liveDocumentsRoot, ORIGINAL_KEY))).toBe(true);
+        expect(existsSync(objectPath(target.liveDocumentsRoot, UPDATED_KEY))).toBe(false);
+        expect(target.adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toBe(reportsFor(ORIGINAL_KEY, 10).crypto);
+        expect(lstatSync(marker).isDirectory()).toBe(true);
+      });
     });
   });
 
