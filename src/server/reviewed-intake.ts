@@ -217,11 +217,15 @@ export function reviewDraftMetadataFromProposal(
  * approved, discarded or expired. The rejected reading is only ever kept
  * for the life of the pending review (ADR-0025 section 4), and it rides
  * inside this same blob, so nothing extra is needed to make it go with
- * everything else the review held.
+ * everything else the review held. The approval request the claim stored
+ * (#1396) rides with it: it is Tier 1 content and lives only as long as the
+ * review it belongs to; the key and hash stay so a replay still answers as
+ * the approval did.
  */
 export const clearedReviewDraftMetadata = {
   proposalEnc: null,
   fieldEvidenceEnc: null,
+  approvalRequestEnc: null,
 } as const;
 
 /**
@@ -678,27 +682,41 @@ async function assignedReceiptAttachmentIds(receiptId: string): Promise<string[]
 const APPROVAL_RECLAIM_TIMEOUT_MS = 10 * 60_000;
 
 /**
- * Reclaims an abandoned `approving` receipt (ADR-0005, #1396). One that already
- * created its item keeps its key, hash and stored request and becomes
- * `recoverable` (`approval_interrupted`), so the review read hands the pair
- * back and the same pair finishes it: a fresh key would be a second item. One
- * with no item yet is reset to `pending_review` and forgets its key, as before.
- * Run by the approval under its row lock and by the owner's review read.
+ * Reclaims abandoned `approving` receipts (ADR-0005, #1396). One that already
+ * created its item keeps its key, hash and stored request (when it has one)
+ * and becomes `recoverable` (`approval_interrupted`): with the request the
+ * review read hands the pair back and the same pair finishes it; without one
+ * the read reports it as not retryable and its owner may discard it. Only a
+ * receipt with no item is reset. Run by the approval under its row lock and
+ * by the owner's review or inbox read; returns the reclaimed rows.
  */
-export async function reclaimAbandonedMailboxApproval(executor: MetadataExecutor, receiptId: string) {
+export async function reclaimAbandonedMailboxApproval(
+  executor: MetadataExecutor,
+  scope: { receiptId: string } | { userId: string },
+) {
   const abandoned = and(
-    eq(imapIngestionMessages.id, receiptId),
+    "receiptId" in scope ? eq(imapIngestionMessages.id, scope.receiptId) : eq(imapIngestionMessages.userId, scope.userId),
     eq(imapIngestionMessages.status, "approving"),
     lt(imapIngestionMessages.approvalStartedAt, new Date(Date.now() - APPROVAL_RECLAIM_TIMEOUT_MS)),
   );
-  const [interrupted] = await executor.update(imapIngestionMessages).set({
+  // A kill between making the item and recording it leaves a key whose item
+  // exists: the item's id is the key (ADR-0005), so it is recorded here before
+  // the branches below decide, or the reset would forget an item that exists
+  // and the next key would make a second.
+  await executor.update(imapIngestionMessages).set({
+    approvedItemId: sql`${imapIngestionMessages.approvalOperationId}`,
+    updatedAt: new Date(),
+  }).where(and(abandoned, isNull(imapIngestionMessages.approvedItemId), sql`exists (
+    select 1 from ${items}
+    where ${items.id} = ${imapIngestionMessages.approvalOperationId}
+      and ${items.householdId} = ${imapIngestionMessages.householdId})`));
+  const interrupted = await executor.update(imapIngestionMessages).set({
     status: "recoverable",
     failureCode: "approval_interrupted",
     approvalResultId: sql`coalesce(${imapIngestionMessages.approvalResultId}, ${randomUUID()}::uuid)`,
     updatedAt: new Date(),
-  }).where(and(abandoned, isNotNull(imapIngestionMessages.approvedItemId), isNotNull(imapIngestionMessages.approvalRequestEnc))).returning();
-  if (interrupted) return interrupted;
-  const [reset] = await executor.update(imapIngestionMessages).set({
+  }).where(and(abandoned, isNotNull(imapIngestionMessages.approvedItemId))).returning();
+  const reset = await executor.update(imapIngestionMessages).set({
     status: "pending_review",
     approvalOperationId: null,
     approvalResultId: null,
@@ -706,8 +724,8 @@ export async function reclaimAbandonedMailboxApproval(executor: MetadataExecutor
     approvalRequestEnc: null,
     approvalStartedAt: null,
     updatedAt: new Date(),
-  }).where(and(abandoned, or(isNull(imapIngestionMessages.approvedItemId), isNull(imapIngestionMessages.approvalRequestEnc)))).returning();
-  return reset;
+  }).where(and(abandoned, isNull(imapIngestionMessages.approvedItemId))).returning();
+  return [...interrupted, ...reset];
 }
 
 async function finishMailboxApproval(
@@ -724,7 +742,7 @@ async function finishMailboxApproval(
       && receipt.approvalStartedAt
       && receipt.approvalStartedAt.getTime() < Date.now() - APPROVAL_RECLAIM_TIMEOUT_MS
     ) {
-      const reclaimed = await reclaimAbandonedMailboxApproval(transaction, receipt.id);
+      const [reclaimed] = await reclaimAbandonedMailboxApproval(transaction, { receiptId: receipt.id });
       if (reclaimed) receipt = reclaimed;
     }
     if (receipt.approvalOperationId) {
@@ -742,7 +760,14 @@ async function finishMailboxApproval(
         } };
       }
       if (receipt.expiresAt <= new Date()) {
-        await transaction.update(imapIngestionMessages).set({ status: "expired", expiredAt: new Date(), updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
+        // Lapsing is the review ending (ADR-0025 section 4), the same as the sweep
+        // reaching it: the draft and the stored request go with the status, here
+        // and in the pre-claim write below. The key and hash stay so a replay still
+        // answers "expired". They are cleared here rather than after the purge that
+        // follows, because nothing hands the pair back or shows the draft once
+        // expires_at has passed, and the row the purge failure reverts to
+        // `recoverable` is retried by the sweep, which clears the same set again.
+        await transaction.update(imapIngestionMessages).set({ status: "expired", expiredAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata }).where(eq(imapIngestionMessages.id, receipt.id));
         return { receipt, claimed: false, expired: true, result: undefined };
       }
       // A replay after the receipt was discarded, or while a discard is under
@@ -768,7 +793,8 @@ async function finishMailboxApproval(
       throw new AppError("reviewed_intake_stale", "That reviewed intake changed; refresh and try again", 409);
     }
     if (receipt.expiresAt <= new Date()) {
-      await transaction.update(imapIngestionMessages).set({ status: "expired", expiredAt: new Date(), updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
+      // The review ends here as above: the draft goes with the status.
+      await transaction.update(imapIngestionMessages).set({ status: "expired", expiredAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata }).where(eq(imapIngestionMessages.id, receipt.id));
       return { receipt, claimed: false, expired: true, result: undefined };
     }
     // Validation precedes the claim (ADR-0005, #1396): a stale or unknown
@@ -822,7 +848,7 @@ async function finishMailboxApproval(
       updatedAt: new Date(),
       // The review is only actually over once this reaches "completed"; a
       // partial success is still retryable and keeps its draft meanwhile.
-      ...(partial ? {} : { ...clearedReviewDraftMetadata, approvalRequestEnc: null }),
+      ...(partial ? {} : clearedReviewDraftMetadata),
     }).where(and(
       eq(imapIngestionMessages.id, input.source.receiptId),
       eq(imapIngestionMessages.approvalOperationId, input.operationId),

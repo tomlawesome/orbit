@@ -191,11 +191,14 @@ decision 7a).
 
 **The reclaim remembers the item.** An `approving` receipt abandoned for more
 than 10 minutes is reclaimed by the next approval or by its owner's review
-read. If its item was already created, it becomes `recoverable` with the
+or inbox read. If its item was already created, it becomes `recoverable` with the
 retryable failure code `approval_interrupted` and keeps its key, hash and
 request, so the review reports the pair and a tap finishes it; a fresh key
 would be a second item. Only a receipt with no item yet is reset to
-`pending_review` and forgets its key, as before.
+`pending_review` and forgets its key, as before. A receipt that made its item
+but holds no stored request (claimed before this amendment) is reported as
+not retryable with discard as the way out; a fresh key is still refused,
+since its item exists.
 
 **Not taken.** Keeping the pair in browser storage (ADR-0006, and another
 device cannot see it); accepting a changed request under the same key (it

@@ -888,8 +888,9 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   /**
    * Tier 1 metadata (ADR-0024), keyed as `proposalEnc` is: the approval
    * request the claim accepted, beside its hash, so the review read can hand
-   * the pending pair back to its owner (ADR-0005, #1396). Cleared where the
-   * hash is cleared.
+   * the pending pair back to its owner (ADR-0005, #1396). Cleared wherever
+   * the pending review ends (`clearedReviewDraftMetadata`); the key and hash
+   * stay so a replay still answers.
    */
   approvalRequestEnc: text("approval_request_enc"),
   approvedItemId: uuid("approved_item_id").references(() => items.id, { onDelete: "set null" }),
