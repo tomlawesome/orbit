@@ -160,8 +160,8 @@ recoverable state.
   from `/proc` every 25 ms and kills it past, a five-second wall-clock limit
   that kills it, an empty environment, and at most two run at once; running
   out of memory, timing out or crashing is no verdict
-  (`structure_check_unavailable`), which refuses an upload as
-  `unsupported_structure` but has scan recovery check a staged copy again
+  (`structure_check_unavailable`), which answers an upload 503
+  `document_check_unavailable` ("please try again", #1593) but has scan recovery check a staged copy again
   rather than purge it, logs one record with no file detail, and leaves
   the server answering. The bound stays as a cheap first fence. The child
   still shares the server's files and network. Boot warns if `/bin/sh`,

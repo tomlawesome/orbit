@@ -60,7 +60,7 @@ export interface ItemDocumentInspectionResult {
   suggestions: ItemDocumentSuggestion[];
   message?: string;
   attachmentDisposition: "attachable" | "rejected";
-  /** The API's three values: a check that reached no verdict answers as `unsupported_structure`; the log keeps the real reason. */
+  /** The API's three values. A check that reached no verdict is not one of them: it throws 503 `document_check_unavailable` (#1593). */
   reason: Exclude<DocumentStructureReason, "structure_check_unavailable">;
 }
 
@@ -178,6 +178,18 @@ export async function inspectItemDocument(input: {
     const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
     try {
       const structureReason = await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
+      if (structureReason === "structure_check_unavailable") {
+        // The sandbox reached no verdict (#1593): a busy host, not a bad file.
+        // The member is told only to try again; the real reason is logged.
+        log.warn({
+          event: "document.inspection",
+          state: "degraded",
+          reason: structureReason,
+          action: "inspect_admin_diagnostics",
+          impact: "document_processing_blocked",
+        });
+        throw new AppError("document_check_unavailable", "The file couldn't be uploaded. Please try again.", 503);
+      }
       if (structureReason !== "supported_structure") {
         log.info({
           event: "document.inspection",

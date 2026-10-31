@@ -541,6 +541,19 @@ export async function uploadItemDocument(input: {
           422,
         );
       }
+      if (structure === "structure_check_unavailable") {
+        // The sandbox reached no verdict (#1593): a busy host, not a bad file.
+        // The member is told only to try again; the real reason is for the
+        // administrator's log. Nothing is stored, as for any refusal.
+        log.warn({
+          event: "document.inspection",
+          state: "degraded",
+          reason: "structure_check_unavailable",
+          action: "inspect_admin_diagnostics",
+          impact: "document_upload_blocked",
+        });
+        throw new AppError("document_check_unavailable", "The file couldn't be uploaded. Please try again.", 503);
+      }
       if (structure !== "supported_structure") {
         throw new AppError(
           "document_structure_invalid",
