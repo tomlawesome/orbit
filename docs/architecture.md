@@ -147,12 +147,12 @@ moment, however many downloads are in flight and whatever their size (#1571).
    `available`.
 4. Malware, invalid structure, and the scanner-reported `scanner` error are
    terminal fail-closed outcomes. Only adapter `unavailable`, `timeout`, and
-   `protocol` errors encrypt the validated bytes for the separate opaque
-   `staging/` namespace, record a `scanning`/`error` document and PostgreSQL
-   scan job, and return `202` with no-store headers.
+   `protocol` errors encrypt the received bytes, not yet structure-checked,
+   for the separate opaque `staging/` namespace, record a `scanning`/`error`
+   document and PostgreSQL scan job, and return `202` with no-store headers.
 5. A leased worker reclaims the staged object with generation/token fencing,
-   re-scans it, and atomically publishes ordinary ciphertext only after a
-   clean result. Stage expiry, malware, invalid staging, and purge failures
+   re-scans it, checks its structure after a clean result, and atomically
+   publishes ordinary ciphertext only once both pass. Stage expiry, malware, invalid staging, and purge failures
    remain inaccessible and are represented by bounded metadata.
 6. Parse only through an optional private adapter after the document is
    available. Validate and bound any suggested fields, then require user
