@@ -292,16 +292,16 @@ describe("preview and import hold about one document in memory, not the archive 
 describe("one large document: the upload is never held whole (#1566)", () => {
   // Note 46292: one 50 MiB document. Preview must grow by less than the
   // archive FILE's size (about 89 MiB with this one document): holding the
-  // body even once breaks it. Import must grow by less than eight times the
-  // document's bytes (400 MiB), the allowance for the per-document copies of
-  // the ordinary upload path; this bound drops to the archive's plaintext
-  // when #1567 (document path holds each document whole) lands.
+  // body even once breaks it. Import must grow by less than the archive's
+  // plaintext size: one copy of the document for the open check (about 1.34
+  // times its bytes), plus the archive's JSON.
   const documentBytes = 50 * MIB;
   let source: Fixture;
   let content: Buffer;
   let scratch: string;
   let archiveFile: string;
   let archiveFileKiB: number;
+  let archivePlaintextKiB: number;
 
   beforeAll(async () => {
     source = await createIntegrationFixture("arch1566-large-source");
@@ -309,8 +309,10 @@ describe("one large document: the upload is never held whole (#1566)", () => {
     await seedStoredDocuments(source, [content]);
     scratch = await mkdtemp(join(tmpdir(), "orbit-1566-memory-"));
     archiveFile = join(scratch, "archive.json");
-    await writeFile(archiveFile, await exportFile(source, true), { mode: 0o600 });
+    const exported = await exportFile(source, true);
+    await writeFile(archiveFile, exported, { mode: 0o600 });
     archiveFileKiB = (await stat(archiveFile)).size / 1024;
+    archivePlaintextKiB = decryptPortableArchive(JSON.parse(exported.toString("utf8")) as never, passphrase).length / 1024;
   }, 600_000);
 
   afterAll(async () => {
@@ -324,11 +326,11 @@ describe("one large document: the upload is never held whole (#1566)", () => {
     expectGrowthBelow(measured, archiveFileKiB, "preview", "the archive file's size");
   }, 600_000);
 
-  it("raises the importing process's peak memory by less than eight times the document, and the document round-trips byte for byte", async () => {
+  it("raises the importing process's peak memory by less than the archive's plaintext size, and the document round-trips byte for byte", async () => {
     const target = await createIntegrationFixture("arch1566-large-import");
     const measured = await measure("import", target, archiveFile);
     expect(measured.result).toEqual({ importedItems: 1, documentsExcluded: 0 });
-    expectGrowthBelow(measured, (8 * documentBytes) / 1024, "import", "eight times the document, until #1567");
+    expectGrowthBelow(measured, archivePlaintextKiB, "import", "the archive's plaintext");
 
     const restored = (await getDb().select({ id: documents.id, displayName: documents.displayName, sizeBytes: documents.sizeBytes }).from(documents)
       .where(eq(documents.householdId, target.household.id))).find((row) => row.displayName === "stored-0.pdf")!;
