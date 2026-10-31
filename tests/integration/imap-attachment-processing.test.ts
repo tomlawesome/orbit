@@ -17,7 +17,8 @@ import {
 } from "@/server/mail-in/imap-ingestion";
 import { testImapConfig } from "../support/imap-config";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
-import { holdImapAttachment, readHeldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
+import { readHeldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
+import { holdAttachmentBytes } from "../support/imap-holding";
 import { discardImapReviewItem, purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { attributedHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor } from "./support/mail-in";
@@ -197,14 +198,14 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
     try {
       const insertedReceiptId = randomUUID();
       const insertedToken = randomUUID();
-      const insertedHeld = await holdImapAttachment({ bytes: Buffer.from("missing inserted ledger"), displayName: "inserted.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: insertedReceiptId });
+      const insertedHeld = await holdAttachmentBytes({ bytes: Buffer.from("missing inserted ledger"), displayName: "inserted.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: insertedReceiptId });
       await getDb().insert(imapIngestionMessages).values({ id: insertedReceiptId, mailbox: "ledger-transition", mailboxUidValidity: "77", mailboxUid: 912, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "inserted", userId: fixture.users.member.id, status: "processing", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingLeaseToken: insertedToken, attachmentProcessingLockedAt: new Date() });
       await expect(commitStagedAttachment(insertedReceiptId, insertedToken, insertedHeld)).rejects.toThrow("staging_lease_lost");
       expect(await getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments).where(eq(imapIngestionAttachments.storageKey, insertedHeld.storageKey))).toHaveLength(0);
 
       const duplicateReceiptId = randomUUID();
       const duplicateToken = randomUUID();
-      const duplicateHeld = await holdImapAttachment({ bytes: Buffer.from("missing duplicate ledger"), displayName: "duplicate.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: duplicateReceiptId });
+      const duplicateHeld = await holdAttachmentBytes({ bytes: Buffer.from("missing duplicate ledger"), displayName: "duplicate.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: duplicateReceiptId });
       await getDb().insert(imapIngestionMessages).values({ id: duplicateReceiptId, mailbox: "ledger-transition", mailboxUidValidity: "77", mailboxUid: 913, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "duplicate", userId: fixture.users.member.id, status: "processing", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingLeaseToken: duplicateToken, attachmentProcessingLockedAt: new Date() });
       await getDb().insert(imapIngestionAttachments).values({ id: randomUUID(), messageId: duplicateReceiptId, displayName: duplicateHeld.displayName, mediaType: duplicateHeld.mediaType, sizeBytes: duplicateHeld.sizeBytes, contentSha256: duplicateHeld.contentSha256, storageKey: "a".repeat(64), ciphertextSize: duplicateHeld.ciphertextSize, ...duplicateHeld.envelope, status: "stored" });
       await expect(commitStagedAttachment(duplicateReceiptId, duplicateToken, duplicateHeld)).rejects.toThrow("staging_lease_lost");
@@ -220,7 +221,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
     try {
       const receiptId = randomUUID();
       const leaseToken = randomUUID();
-      const held = await holdImapAttachment({ bytes: Buffer.from("expired worker ciphertext"), displayName: "expired.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+      const held = await holdAttachmentBytes({ bytes: Buffer.from("expired worker ciphertext"), displayName: "expired.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
       const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
       await storage.deleteCiphertext(held.storageKey);
       await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: "ledger-expired", mailboxUidValidity: "77", mailboxUid: 914, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "expired", userId: fixture.users.member.id, status: "processing", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingLeaseToken: leaseToken, attachmentProcessingLockedAt: new Date(Date.now() - 11 * 60_000) });
@@ -241,7 +242,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
     try {
       const receiptId = randomUUID();
       const leaseToken = randomUUID();
-      const held = await holdImapAttachment({ bytes: Buffer.from("paused worker ciphertext"), displayName: "paused.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+      const held = await holdAttachmentBytes({ bytes: Buffer.from("paused worker ciphertext"), displayName: "paused.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
       const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
       await storage.deleteCiphertext(held.storageKey);
       await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: "ledger-late-failure", mailboxUidValidity: "77", mailboxUid: 916, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "late-failure", userId: fixture.users.member.id, status: "processing", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingLeaseToken: leaseToken, attachmentProcessingLockedAt: new Date(Date.now() - 11 * 60_000) });
@@ -268,7 +269,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
     const fixture = await createIntegrationFixture("imap-discard-completed-state");
     try {
       const receiptId = randomUUID();
-      const held = await holdImapAttachment({ bytes: Buffer.from("published attachment"), displayName: "published.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+      const held = await holdAttachmentBytes({ bytes: Buffer.from("published attachment"), displayName: "published.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
       const documentId = randomUUID();
       await getDb().insert(documents).values({ id: documentId, householdId: fixture.household.id, uploadedByUserId: fixture.users.member.id, displayName: "published.pdf", mediaType: "application/pdf", sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, lifecycle: "available", scanStatus: "skipped", availableAt: new Date() });
       await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: "discard-completed", mailboxUidValidity: "77", mailboxUid: 915, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "completed", userId: fixture.users.member.id, householdId: fixture.household.id, status: "completed", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "sent", approvedAt: new Date() });
@@ -290,7 +291,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       await storage.writeCiphertext(ordinaryKey, Buffer.from("ordinary document ciphertext"));
       const receiptId = randomUUID();
       const leaseToken = randomUUID();
-      const held = await holdImapAttachment({ bytes: Buffer.from("staging orphan"), displayName: "orphan.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+      const held = await holdAttachmentBytes({ bytes: Buffer.from("staging orphan"), displayName: "orphan.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
       await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: "reconcile", mailboxUidValidity: "77", mailboxUid: 901, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "reconcile", userId: fixture.users.member.id, status: "processing", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingLeaseToken: leaseToken });
       await getDb().insert(imapIngestionStagingObjects).values({ messageId: receiptId, leaseToken, storageKey: held.storageKey, status: "pending" });
       const { reconcileImapStagingObjects } = await import("@/server/mail-in/imap-ingestion");
@@ -309,16 +310,16 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
       const liveReceiptId = randomUUID();
       const liveLeaseToken = randomUUID();
-      const liveHeld = await holdImapAttachment({ bytes: Buffer.from("live staged"), displayName: "live.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: liveReceiptId });
+      const liveHeld = await holdAttachmentBytes({ bytes: Buffer.from("live staged"), displayName: "live.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: liveReceiptId });
       await getDb().insert(imapIngestionMessages).values({ id: liveReceiptId, mailbox: "reconcile-live", mailboxUidValidity: "77", mailboxUid: 906, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "live", userId: fixture.users.member.id, status: "processing", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingLockedAt: new Date(), attachmentProcessingLeaseToken: liveLeaseToken });
       await getDb().insert(imapIngestionStagingObjects).values({ messageId: liveReceiptId, leaseToken: liveLeaseToken, storageKey: liveHeld.storageKey, status: "pending" });
-      const liveCommittedHeld = await holdImapAttachment({ bytes: Buffer.from("live committed"), displayName: "committed.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: liveReceiptId });
+      const liveCommittedHeld = await holdAttachmentBytes({ bytes: Buffer.from("live committed"), displayName: "committed.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: liveReceiptId });
       await getDb().insert(imapIngestionAttachments).values({ id: liveCommittedHeld.id, messageId: liveReceiptId, displayName: liveCommittedHeld.displayName, mediaType: liveCommittedHeld.mediaType, sizeBytes: liveCommittedHeld.sizeBytes, contentSha256: liveCommittedHeld.contentSha256, storageKey: liveCommittedHeld.storageKey, ciphertextSize: liveCommittedHeld.ciphertextSize, ...liveCommittedHeld.envelope, status: "stored" });
       await getDb().insert(imapIngestionStagingObjects).values({ messageId: liveReceiptId, leaseToken: liveLeaseToken, storageKey: liveCommittedHeld.storageKey, status: "committed" });
 
       const staleReceiptId = randomUUID();
       const staleLeaseToken = randomUUID();
-      const staleHeld = await holdImapAttachment({ bytes: Buffer.from("stale staged"), displayName: "stale.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: staleReceiptId });
+      const staleHeld = await holdAttachmentBytes({ bytes: Buffer.from("stale staged"), displayName: "stale.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: staleReceiptId });
       await getDb().insert(imapIngestionMessages).values({ id: staleReceiptId, mailbox: "reconcile-stale", mailboxUidValidity: "77", mailboxUid: 907, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "stale", userId: fixture.users.member.id, status: "processing", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingLockedAt: new Date(Date.now() - 11 * 60_000), attachmentProcessingLeaseToken: staleLeaseToken });
       await getDb().insert(imapIngestionStagingObjects).values({ messageId: staleReceiptId, leaseToken: staleLeaseToken, storageKey: staleHeld.storageKey, status: "pending" });
 
@@ -341,7 +342,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       const receiptId = randomUUID();
       const successorToken = randomUUID();
       const staleToken = randomUUID();
-      const held = await holdImapAttachment({ bytes: Buffer.from("successor ciphertext"), displayName: "successor.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+      const held = await holdAttachmentBytes({ bytes: Buffer.from("successor ciphertext"), displayName: "successor.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
       await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: "cleanup-race", mailboxUidValidity: "77", mailboxUid: 908, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "cleanup", userId: fixture.users.member.id, status: "processing", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingLockedAt: new Date(), attachmentProcessingLeaseToken: successorToken });
       await getDb().insert(imapIngestionAttachments).values({ id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored" });
       await getDb().insert(imapIngestionStagingObjects).values({ messageId: receiptId, leaseToken: successorToken, storageKey: held.storageKey, status: "committed" });
@@ -365,7 +366,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       expect((await getDb().select({ status: imapIngestionMessages.status }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, liveReceiptId)))[0].status).toBe("processing");
 
       const liveRecoverableReceiptId = randomUUID();
-      const liveRecoverableHeld = await holdImapAttachment({ bytes: Buffer.from("live recoverable"), displayName: "recoverable.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: liveRecoverableReceiptId });
+      const liveRecoverableHeld = await holdAttachmentBytes({ bytes: Buffer.from("live recoverable"), displayName: "recoverable.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: liveRecoverableReceiptId });
       await getDb().insert(imapIngestionMessages).values({ id: liveRecoverableReceiptId, mailbox: "expiry", mailboxUidValidity: "77", mailboxUid: 909, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "recoverable-live", userId: fixture.users.member.id, status: "recoverable", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending", attachmentProcessingLockedAt: new Date(), attachmentProcessingLeaseToken: randomUUID() });
       await getDb().insert(imapIngestionAttachments).values({ id: liveRecoverableHeld.id, messageId: liveRecoverableReceiptId, displayName: liveRecoverableHeld.displayName, mediaType: liveRecoverableHeld.mediaType, sizeBytes: liveRecoverableHeld.sizeBytes, contentSha256: liveRecoverableHeld.contentSha256, storageKey: liveRecoverableHeld.storageKey, ciphertextSize: liveRecoverableHeld.ciphertextSize, ...liveRecoverableHeld.envelope, status: "stored" });
       await purgeExpiredImapStaging(new Date());
@@ -373,7 +374,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       expect(await new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot).ciphertextExists(liveRecoverableHeld.storageKey)).toBe(true);
 
       const staleReceiptId = randomUUID();
-      const held = await holdImapAttachment({ bytes: Buffer.from("stale staged"), displayName: "stale.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: staleReceiptId });
+      const held = await holdAttachmentBytes({ bytes: Buffer.from("stale staged"), displayName: "stale.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: staleReceiptId });
       await getDb().insert(imapIngestionMessages).values({ id: staleReceiptId, mailbox: "expiry", mailboxUidValidity: "77", mailboxUid: 903, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "stale", userId: fixture.users.member.id, status: "processing", expiresAt: future, receiptStatus: "processing", attachmentProcessingLockedAt: new Date(Date.now() - 11 * 60_000), attachmentProcessingLeaseToken: randomUUID() });
       await getDb().insert(imapIngestionAttachments).values({ id: held.id, messageId: staleReceiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored" });
       await purgeExpiredImapStaging(new Date());
@@ -382,7 +383,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
 
       await fixture.disableUser("disabled");
       const disabledReceiptId = randomUUID();
-      const disabledHeld = await holdImapAttachment({ bytes: Buffer.from("disabled staged"), displayName: "disabled.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.disabled.id, receiptId: disabledReceiptId });
+      const disabledHeld = await holdAttachmentBytes({ bytes: Buffer.from("disabled staged"), displayName: "disabled.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.disabled.id, receiptId: disabledReceiptId });
       await getDb().insert(imapIngestionMessages).values({ id: disabledReceiptId, mailbox: "expiry", mailboxUidValidity: "77", mailboxUid: 904, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "disabled", userId: fixture.users.disabled.id, status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending" });
       await getDb().insert(imapIngestionAttachments).values({ id: disabledHeld.id, messageId: disabledReceiptId, displayName: disabledHeld.displayName, mediaType: disabledHeld.mediaType, sizeBytes: disabledHeld.sizeBytes, contentSha256: disabledHeld.contentSha256, storageKey: disabledHeld.storageKey, ciphertextSize: disabledHeld.ciphertextSize, ...disabledHeld.envelope, status: "stored" });
       await purgeExpiredImapStaging(new Date());
@@ -390,7 +391,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       expect((await getDb().select({ failureCode: imapIngestionMessages.failureCode }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, disabledReceiptId)))[0].failureCode).toBe("account_disabled");
 
       const retryReceiptId = randomUUID();
-      const retryHeld = await holdImapAttachment({ bytes: Buffer.from("retry staged"), displayName: "retry.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: retryReceiptId });
+      const retryHeld = await holdAttachmentBytes({ bytes: Buffer.from("retry staged"), displayName: "retry.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: retryReceiptId });
       await getDb().insert(imapIngestionMessages).values({ id: retryReceiptId, mailbox: "expiry", mailboxUidValidity: "77", mailboxUid: 905, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "retry", userId: fixture.users.member.id, status: "pending_review", expiresAt: future, receiptStatus: "pending" });
       await getDb().insert(imapIngestionAttachments).values({ id: retryHeld.id, messageId: retryReceiptId, displayName: retryHeld.displayName, mediaType: retryHeld.mediaType, sizeBytes: retryHeld.sizeBytes, contentSha256: retryHeld.contentSha256, storageKey: retryHeld.storageKey, ciphertextSize: retryHeld.ciphertextSize, ...retryHeld.envelope, status: "stored" });
       let purgeFailures = 1;
@@ -426,7 +427,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       const alias = imapRecipientAlias(fixture.users.member.id, config);
       const receiptId = randomUUID();
       const leaseToken = randomUUID();
-      const held = await holdImapAttachment({ bytes: Buffer.from("prior attempt ciphertext"), displayName: "prior.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+      const held = await holdAttachmentBytes({ bytes: Buffer.from("prior attempt ciphertext"), displayName: "prior.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
       await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: config.mailbox, mailboxUidValidity: "77", mailboxUid: 910, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "terminal", userId: fixture.users.member.id, status: "processing", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingAttempts: 5, attachmentProcessingLockedAt: new Date(Date.now() - 11 * 60_000), attachmentProcessingLeaseToken: leaseToken, attachmentProcessingNextAttemptAt: new Date(0) });
       await getDb().insert(imapIngestionAttachments).values({ id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored" });
       await getDb().insert(imapIngestionStagingObjects).values({ messageId: receiptId, leaseToken, storageKey: held.storageKey, status: "committed" });
@@ -456,7 +457,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
     try {
       const receiptId = randomUUID();
       const leaseToken = randomUUID();
-      const held = await holdImapAttachment({ bytes: Buffer.from("discard ciphertext"), displayName: "discard.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+      const held = await holdAttachmentBytes({ bytes: Buffer.from("discard ciphertext"), displayName: "discard.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
       await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: "discard", mailboxUidValidity: "77", mailboxUid: 911, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "discard", userId: fixture.users.member.id, status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending" });
       await getDb().insert(imapIngestionAttachments).values({ id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored" });
       await getDb().insert(imapIngestionStagingObjects).values({ messageId: receiptId, leaseToken, storageKey: held.storageKey, status: "committed" });
@@ -493,7 +494,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
 
       const plaintext = Buffer.from("held attachment awaiting review for more than a day");
       const receiptId = randomUUID();
-      const held = await holdImapAttachment({ bytes: plaintext, displayName: "held.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+      const held = await holdAttachmentBytes({ bytes: plaintext, displayName: "held.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
       await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: "held-sweep", mailboxUidValidity: "77", mailboxUid: 960, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "held-sweep", userId: fixture.users.member.id, status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "sent" });
       await getDb().insert(imapIngestionAttachments).values({ id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored" });
 
@@ -518,7 +519,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
     const fixture = await createIntegrationFixture("imap-attachment-retry-after-transfer-failure");
     try {
       const receiptId = randomUUID();
-      const held = await holdImapAttachment({ bytes: syntheticPdf("mailbox transfer retry"), displayName: "retry.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+      const held = await holdAttachmentBytes({ bytes: syntheticPdf("mailbox transfer retry"), displayName: "retry.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
       await getDb().insert(imapIngestionMessages).values({
         id: receiptId, mailbox: "private", mailboxUidValidity: "transfer-retry", mailboxUid: 970, contentSha256: randomUUID().replaceAll("-", ""),
         recipientAliasSha256: "transfer-retry", userId: fixture.users.member.id, householdId: fixture.household.id,
@@ -539,8 +540,10 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       };
 
       // The held copy is already written; only the transfer into a document
-      // fails, so the next write of ciphertext is the document's.
-      const writeFailure = vi.spyOn(LocalDocumentStorage.prototype, "writeCiphertext")
+      // fails, so the next seal into an object is the document's. (This spied
+      // on writeCiphertext until #1567 moved the upload to sealQuarantine, after
+      // which the spy never fired and the test failed on its own count.)
+      const writeFailure = vi.spyOn(LocalDocumentStorage.prototype, "sealQuarantine")
         .mockRejectedValueOnce(new Error("synthetic ciphertext write outage"));
       try {
         const first = await approveReviewedIntake(fixture.users.member.id, input).then((result) => result, (error: unknown) => error);

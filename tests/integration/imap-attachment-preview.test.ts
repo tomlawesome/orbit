@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import { documents, imapIngestionAttachments, imapIngestionMessages } from "@/db/schema";
 import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
-import { holdImapAttachment } from "@/server/mail-in/imap-attachment-holding";
+import { scanAndHoldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
 import { discardImapReviewItem, purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
@@ -18,7 +18,7 @@ import { syntheticPdf } from "../support/synthetic-documents";
  * which would tell another user the attachment exists. Mirrors the pattern
  * `imap-inbox-review.test.ts` uses for `getImapReview`'s own boundary.
  *
- * A real PDF is held through `holdImapAttachment` (not a stub), so decryption
+ * A real PDF is held through `scanAndHoldImapAttachment` (not a stub), so decryption
  * and rendering are both exercised for real, the way
  * `document-lifecycle.test.ts`'s "document page-one preview over HTTP" block
  * proves the accepted-document route.
@@ -43,10 +43,10 @@ async function seedStagedReceipt(fixture: IntegrationFixture, options: {
 } = {}) {
   const receiptId = randomUUID();
   const recipientUserId = options.recipientUserId ?? fixture.users.member.id;
-  const held = await holdImapAttachment({
+  const held = await scanAndHoldImapAttachment({
     bytes: syntheticPdf("staged preview fixture"),
-    displayName: "policy-schedule.pdf",
-    mediaType: "application/pdf",
+    filename: "policy-schedule.pdf",
+    declaredMediaType: "application/pdf",
     recipientUserId,
     receiptId,
   });

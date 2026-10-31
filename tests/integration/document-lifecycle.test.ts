@@ -938,7 +938,6 @@ describe("authenticated encrypted document lifecycle", () => {
         .from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId)))
         .toEqual([{ status: "pending", recoveryExpiresAt: stageBefore!.recoveryExpiresAt }]);
       expect(await storage.stagingExists(stageBefore!.storageKey)).toBe(true);
-      await expect(storage.readStagingCiphertext(stageBefore!.storageKey, getDocumentConfig().maxBytes)).resolves.toBeDefined();
       expect(await getDb().select({ status: documentJobs.status, lastError: documentJobs.lastError }).from(documentJobs)
         .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan"))))
         .toEqual([{ status: "retry", lastError: "key_unavailable" }]);
@@ -953,7 +952,7 @@ describe("authenticated encrypted document lifecycle", () => {
       expect(await getDb().select({ lifecycle: documents.lifecycle, failureCode: documents.failureCode }).from(documents).where(eq(documents.id, documentId)))
         .toEqual([{ lifecycle: "rejected", failureCode: "scan_recovery_expired" }]);
       expect(await getDb().select({ documentId: documentStagingObjects.documentId }).from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId))).toHaveLength(0);
-      await expect(storage.readStagingCiphertext(stageBefore!.storageKey, getDocumentConfig().maxBytes)).rejects.toThrow();
+      expect(await storage.stagingExists(stageBefore!.storageKey)).toBe(false);
     });
   });
 

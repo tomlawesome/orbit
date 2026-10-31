@@ -1,4 +1,5 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +11,8 @@ import { syntheticPdf } from "../../../tests/support/synthetic-documents";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { eq } from "drizzle-orm";
 import { imapIngestionAttachments } from "@/db/schema";
-import { flagStagingPurgeFailed, readHeldImapAttachment, holdImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
+import { flagStagingPurgeFailed, readHeldImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
+import { encryptDocument } from "@/server/documents/crypto";
 
 // #726: this is the only place that proves the mailbox path calls the real
 // ClamAV client (scanner.ts's live TCP scanner) at all, rather than a stub or
@@ -29,6 +31,14 @@ vi.mock("@/server/documents/scanner", async (importOriginal) => ({
 vi.mock("@/server/documents/validation", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/documents/validation")>();
   return { ...actual, validateSupportedDocumentStructure: vi.fn(actual.validateSupportedDocumentStructure) };
+});
+
+// #1571: a held attachment is sealed in pieces from its quarantine file, so
+// the whole-buffer `encryptDocument` must never be called on this path. Spied
+// on (still real), like the structure check above.
+vi.mock("@/server/documents/crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/documents/crypto")>();
+  return { ...actual, encryptDocument: vi.fn(actual.encryptDocument) };
 });
 
 // The administrator's upload limit (#1285) is proven in
@@ -50,6 +60,8 @@ afterEach(async () => {
   limit.effective = null;
   vi.mocked(scanFileWithClamAv).mockReset();
   vi.mocked(validateSupportedDocumentStructure).mockClear();
+  vi.mocked(encryptDocument).mockClear();
+  vi.restoreAllMocks();
   if (root) await rm(root, { recursive: true, force: true });
 });
 
@@ -83,7 +95,7 @@ describe("private IMAP attachment holding", () => {
     root = await mkdtemp(join(tmpdir(), "orbit-imap-holding-"));
     configure();
     const bytes = syntheticPdf("private staging");
-    const held = await holdImapAttachment({ bytes, displayName: "receipt.pdf", mediaType: "application/pdf", recipientUserId: "10000000-0000-4000-8000-000000000001", receiptId: "20000000-0000-4000-8000-000000000002" });
+    const held = await scanAndHoldImapAttachment({ bytes, filename: "receipt.pdf", declaredMediaType: "application/pdf", recipientUserId: "10000000-0000-4000-8000-000000000001", receiptId: "20000000-0000-4000-8000-000000000002" });
     const object = join(root, "objects");
     const files = await readdir(object, { recursive: true });
     expect(files.some((file) => String(file).endsWith(".bin"))).toBe(true);
@@ -92,6 +104,93 @@ describe("private IMAP attachment holding", () => {
     await expect(readHeldImapAttachment(held, { recipientUserId: "10000000-0000-4000-8000-000000000003", receiptId: held.receiptId })).rejects.toThrow();
     await expect(readHeldImapAttachment(held, { recipientUserId: held.recipientUserId, receiptId: "20000000-0000-4000-8000-000000000003" })).rejects.toThrow();
     await expect(readHeldImapAttachment(held, { recipientUserId: held.recipientUserId, receiptId: held.receiptId })).resolves.toEqual(bytes);
+  });
+
+  describe("sealed in pieces from the quarantine file (#1571)", () => {
+    const recipientUserId = "10000000-0000-4000-8000-000000000001";
+    const receiptId = "20000000-0000-4000-8000-000000000002";
+
+    it("leaves no temporary file, a ciphertextSize equal to the object file, and the digest of the input", async () => {
+      root = await mkdtemp(join(tmpdir(), "orbit-imap-sealed-"));
+      configure();
+      const bytes = syntheticPdf("sealed in pieces");
+
+      const held = await scanAndHoldImapAttachment({ bytes, filename: "sealed.pdf", declaredMediaType: "application/pdf", recipientUserId, receiptId });
+
+      const everything = (await readdir(root, { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile());
+      expect(everything.filter((entry) => entry.name.endsWith(".tmp")), "no .tmp file anywhere").toEqual([]);
+      expect(everything.filter((entry) => entry.parentPath.startsWith(join(root, "quarantine"))), "no quarantine file").toEqual([]);
+      const objectFile = join(root, "objects", "objects", held.storageKey.slice(0, 2), held.storageKey.slice(2, 4), `${held.storageKey}.bin`);
+      expect((await stat(objectFile)).size).toBe(held.ciphertextSize);
+      expect(held.ciphertextSize).toBe(bytes.length);
+      expect(held.sizeBytes).toBe(bytes.length);
+      expect(held.contentSha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+      expect(held.envelope).toMatchObject({ envelopeVersion: 1, algorithm: "aes-256-gcm" });
+    });
+
+    it("never calls encryptDocument, and round-trips through readHeldImapAttachment", async () => {
+      root = await mkdtemp(join(tmpdir(), "orbit-imap-sealed-"));
+      configure();
+      const bytes = Buffer.concat([syntheticPdf("round trip"), Buffer.alloc(2_500_000, 0x20)]);
+
+      const held = await scanAndHoldImapAttachment({ bytes, filename: "round-trip.pdf", declaredMediaType: "application/pdf", recipientUserId, receiptId });
+
+      expect(encryptDocument).not.toHaveBeenCalled();
+      const opened = await readHeldImapAttachment(held, { recipientUserId, receiptId });
+      expect(opened.length).toBe(bytes.length);
+      expect(opened.equals(bytes)).toBe(true);
+    }, 30_000);
+
+    it("seals from the quarantine file `receive` made, with the size and digest it measured, into an object", async () => {
+      root = await mkdtemp(join(tmpdir(), "orbit-imap-sealed-"));
+      configure();
+      const bytes = syntheticPdf("seal arguments");
+      const seals = vi.spyOn(LocalDocumentStorage.prototype, "sealQuarantine");
+      const receives = vi.spyOn(LocalDocumentStorage.prototype, "receive");
+
+      const held = await scanAndHoldImapAttachment({ bytes, filename: "seal.pdf", declaredMediaType: "application/pdf", recipientUserId, receiptId });
+
+      expect(seals).toHaveBeenCalledTimes(1);
+      const received = await receives.mock.results[0]!.value as { quarantinePath: string };
+      const [path, expected, , destination] = seals.mock.calls[0]!;
+      expect(path).toBe(received.quarantinePath);
+      expect(expected).toEqual({ sizeBytes: bytes.length, contentSha256: createHash("sha256").update(bytes).digest("hex") });
+      expect(destination).toEqual({ kind: "object", storageKey: held.storageKey });
+    });
+
+    it("hands the quarantine file to the scanner and seals that same file, in required mode", async () => {
+      root = await mkdtemp(join(tmpdir(), "orbit-imap-sealed-"));
+      configure("required");
+      const seals = vi.spyOn(LocalDocumentStorage.prototype, "sealQuarantine");
+      vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+
+      await scanAndHoldImapAttachment({ bytes: syntheticPdf("scanned then sealed"), filename: "scanned.pdf", declaredMediaType: "application/pdf", recipientUserId, receiptId, mailboxIngestion: true });
+
+      expect(vi.mocked(scanFileWithClamAv).mock.calls[0]![0]).toBe(seals.mock.calls[0]![0]);
+    });
+
+    it("reads the quarantine file once for the check, and zeroes that copy by the time the hold returns", async () => {
+      root = await mkdtemp(join(tmpdir(), "orbit-imap-sealed-"));
+      configure();
+      const reads = vi.spyOn(LocalDocumentStorage.prototype, "readQuarantine");
+
+      await scanAndHoldImapAttachment({ bytes: syntheticPdf("wiped after the hold"), filename: "wiped.pdf", declaredMediaType: "application/pdf", recipientUserId, receiptId });
+
+      expect(reads).toHaveBeenCalledTimes(1);
+      const copy = await reads.mock.results[0]!.value as Buffer;
+      expect(copy.every((byte) => byte === 0)).toBe(true);
+    });
+
+    it("leaves no object, no temporary file and no quarantine file when the seal fails", async () => {
+      root = await mkdtemp(join(tmpdir(), "orbit-imap-sealed-"));
+      configure();
+      vi.spyOn(LocalDocumentStorage.prototype, "sealQuarantine").mockRejectedValueOnce(new Error("synthetic seal failure"));
+
+      await expect(scanAndHoldImapAttachment({ bytes: syntheticPdf("seal fails"), filename: "fails.pdf", declaredMediaType: "application/pdf", recipientUserId, receiptId })).rejects.toThrow("synthetic seal failure");
+
+      const files = (await readdir(root, { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile());
+      expect(files).toEqual([]);
+    });
   });
 
   it("fails closed for disabled scanner on the mailbox path and leaves no quarantine", async () => {
@@ -193,8 +292,8 @@ describe("private IMAP attachment holding", () => {
     configure();
     const storage = new LocalDocumentStorage(join(root, "objects"), join(root, "quarantine"));
     let allocatedKey = "";
-    const held = await holdImapAttachment({
-      bytes: Buffer.from("allocated before write"), displayName: "allocated.pdf", mediaType: "application/pdf",
+    const held = await scanAndHoldImapAttachment({
+      bytes: syntheticPdf("allocated before write"), filename: "allocated.pdf", declaredMediaType: "application/pdf",
       recipientUserId: "10000000-0000-4000-8000-000000000001", receiptId: "20000000-0000-4000-8000-000000000002",
       onCiphertextAllocated: async ({ storageKey }) => {
         allocatedKey = storageKey;
@@ -202,13 +301,16 @@ describe("private IMAP attachment holding", () => {
       },
     });
     expect(await storage.ciphertextExists(held.storageKey)).toBe(true);
+    expect(held.storageKey).toBe(allocatedKey);
     await storage.deleteCiphertext(held.storageKey);
-    await expect(holdImapAttachment({
-      bytes: Buffer.from("registration failed"), displayName: "failed.pdf", mediaType: "application/pdf",
+    await expect(scanAndHoldImapAttachment({
+      bytes: syntheticPdf("registration failed"), filename: "failed.pdf", declaredMediaType: "application/pdf",
       recipientUserId: "10000000-0000-4000-8000-000000000001", receiptId: "20000000-0000-4000-8000-000000000002",
       onCiphertextAllocated: async ({ storageKey }) => { allocatedKey = storageKey; throw new Error("registration failed"); },
     })).rejects.toThrow("registration failed");
     expect(await storage.ciphertextExists(allocatedKey)).toBe(false);
+    const files = (await readdir(root, { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile());
+    expect(files, "no object, temporary file or quarantine file").toEqual([]);
   });
 });
 
