@@ -263,20 +263,6 @@ function pdfWordAt(bytes: Buffer, at: number, word: string): boolean {
   return true;
 }
 
-/** The end of `\d+\s+\d+\s+obj` starting at `at`, or -1. Digits and whitespace are disjoint, so there is nothing to backtrack over. */
-function pdfObjectHeaderEnd(bytes: Buffer, at: number): number {
-  let position = at;
-  for (let part = 0; part < 2; part += 1) {
-    const digits = position;
-    while (isPdfRegexDigit(bytes[position])) position += 1;
-    if (position === digits) return -1;
-    const space = position;
-    while (isPdfRegexSpace(bytes[position])) position += 1;
-    if (position === space) return -1;
-  }
-  return pdfWordAt(bytes, position, "obj") ? position + 3 : -1;
-}
-
 /**
  * The bytes searched per native pass of findPdfEnd. A window is decoded to a
  * string for the regex below and dropped, so memory stays this size however
@@ -284,15 +270,33 @@ function pdfObjectHeaderEnd(bytes: Buffer, at: number): number {
  * long (the test for #1567) still holds.
  */
 const PDF_SEARCH_WINDOW = 1000;
-/** A keyword longer than this never starts in the last bytes of a window without the next window seeing it whole (`startxref` is 9). */
+/** A keyword of at most 9 bytes (`startxref` is the longest) that starts before `windowEnd - 9` lies wholly in the window. */
 const PDF_SEARCH_OVERLAP = 9;
 /**
- * Where an end pattern can start: a digit (an `N G obj` header) or a keyword,
- * not preceded by a word byte (`\b` before a word byte). Only the start is
- * found here; findPdfEnd checks the rest on the bytes themselves.
+ * Where an end pattern can be found: the `obj` that ends an `N G obj` header,
+ * or a keyword not preceded by a word byte (`\b` before a word byte). A header
+ * is found from its `obj` and not from its first digit, because a run of
+ * numbers has a digit start at every number but an `obj` only where a header
+ * can end, so the regex skips the rest natively. Only the place is found here;
+ * findPdfEnd reads the header back from the bytes and checks the rest there, so
+ * a place can be refused but a true match is never missed.
  */
-const PDF_OBJECT_END_START = /(?<![A-Za-z0-9_])(?:[0-9]|endobj|xref|trailer)/gu;
-const PDF_TRAILER_END_START = /(?<![A-Za-z0-9_])(?:[0-9]|startxref)/gu;
+const PDF_OBJECT_END_PLACE = /obj|(?<![A-Za-z0-9_])(?:endobj|xref|trailer)/gu;
+const PDF_TRAILER_END_PLACE = /obj|(?<![A-Za-z0-9_])startxref/gu;
+
+/** The first digit of the `\d+\s+\d+\s+` that ends at `at`, or -1: read back over the bytes, run by run. */
+function pdfObjectHeaderStart(bytes: Buffer, at: number): number {
+  let position = at;
+  for (let part = 0; part < 2; part += 1) {
+    const space = position;
+    while (isPdfRegexSpace(bytes[position - 1])) position -= 1;
+    if (position === space) return -1;
+    const digits = position;
+    while (isPdfRegexDigit(bytes[position - 1])) position -= 1;
+    if (position === digits) return -1;
+  }
+  return position;
+}
 
 /**
  * The byte-level form of pdf.js's end patterns, matching exactly what these
@@ -304,32 +308,40 @@ const PDF_TRAILER_END_START = /(?<![A-Za-z0-9_])(?:[0-9]|startxref)/gu;
  * demands. `endobj` is true for the alternative the caller steps past (`endobj`
  * or `startxref`).
  *
- * The positions where a match can start are found by a native regex over a
- * bounded window of the file, so a long run of bytes that start nothing (spaces
- * in a stream, say) costs no JavaScript step per byte, and no copy of the
- * whole file is made. Each start is then checked on the bytes, as the regex
- * would. The window begins one byte early so the lookbehind sees the byte
- * before its first start, and stops short of its end so a keyword is never cut
- * by it: those bytes begin the next window.
+ * The places a match can end or start are found by a native regex over a
+ * bounded window of the file, so a long run of bytes that hold none (spaces in
+ * a stream, say) costs no JavaScript step per byte, and no copy of the whole
+ * file is made. Each is then checked on the bytes, as the regex would. A header
+ * starts at the first digit of its run, the only digit with no word byte before
+ * it, so each `obj` has at most one header, and a header holds no letter, so
+ * none can start between an earlier place and its own `obj`: the places come in
+ * the order the starts do. The window begins one byte early so the lookbehind
+ * sees the byte before its first start, and stops short of its end so a keyword
+ * is never cut by it: those bytes begin the next window.
  */
 function findPdfEnd(bytes: Buffer, from: number, kind: typeof PDF_OBJECT_END | typeof PDF_TRAILER_END): { index: number; end: number; endobj: boolean } | null {
   const keyword = kind === PDF_OBJECT_END ? "endobj" : "startxref";
-  const starts = kind === PDF_OBJECT_END ? PDF_OBJECT_END_START : PDF_TRAILER_END_START;
+  const places = kind === PDF_OBJECT_END ? PDF_OBJECT_END_PLACE : PDF_TRAILER_END_PLACE;
   let windowStart = from;
   while (windowStart < bytes.length) {
     const base = Math.max(0, windowStart - 1);
     const windowEnd = Math.min(bytes.length, windowStart + PDF_SEARCH_WINDOW);
-    // Starts at or past `limit` wait for the next window, unless this one reaches the end of the file.
+    // Places at or past `limit` wait for the next window, unless this one reaches the end of the file.
     const limit = windowEnd === bytes.length ? windowEnd : windowEnd - PDF_SEARCH_OVERLAP;
     const window = bytes.toString("latin1", base, windowEnd);
-    starts.lastIndex = windowStart - base;
-    for (let found = starts.exec(window); found !== null && base + found.index < limit; found = starts.exec(window)) {
-      const index = base + found.index;
+    places.lastIndex = windowStart - base;
+    for (let found = places.exec(window); found !== null && base + found.index < limit; found = places.exec(window)) {
+      let index = base + found.index;
       const byte = bytes[index]!;
       let end = -1;
       let endobj = false;
-      if (isPdfRegexDigit(byte)) end = pdfObjectHeaderEnd(bytes, index);
-      else if (byte === keyword.charCodeAt(0) && pdfWordAt(bytes, index, keyword)) {
+      if (byte === 0x6f) {
+        // An `obj`: the header ends here if numbers and gaps lead back to a start the search has not passed.
+        const start = pdfObjectHeaderStart(bytes, index);
+        if (start < from || isPdfRegexWord(bytes[start - 1])) continue;
+        index = start;
+        end = found.index + base + 3;
+      } else if (byte === keyword.charCodeAt(0) && pdfWordAt(bytes, index, keyword)) {
         end = index + keyword.length;
         endobj = true;
       } else if (kind === PDF_OBJECT_END && byte === 0x78 && pdfWordAt(bytes, index, "xref")) end = index + 4;
