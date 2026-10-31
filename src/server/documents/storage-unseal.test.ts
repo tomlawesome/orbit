@@ -155,15 +155,19 @@ function expectOneZeroedMebibyteBuffer(): void {
 }
 
 /** An unsealer that records the pieces it is fed and what it returned, around a real one. */
-function recording(real: DocumentUnsealer): DocumentUnsealer & { fed: number[]; events: string[] } {
+function recording(real: DocumentUnsealer): DocumentUnsealer & { fed: number[]; events: string[]; pieces: Buffer[] } {
   const fed: number[] = [];
   const events: string[] = [];
+  const pieces: Buffer[] = [];
   return {
     fed,
     events,
+    pieces,
     update(chunk: Buffer): Buffer {
       fed.push(chunk.length);
-      return real.update(chunk);
+      const piece = real.update(chunk);
+      pieces.push(piece);
+      return piece;
     },
     final(): void {
       events.push("final");
@@ -543,4 +547,60 @@ describe("unsealIntoBuffer (#1571)", () => {
 
     await expect(storage.unsealIntoBuffer(stored.storageKey, expected(stored), unsealerFor(stored))).rejects.toMatchObject({ code: "ENOENT" });
   });
+});
+
+/** A piece is detached once its own ArrayBuffer has been transferred away (#1571). */
+function expectAllDetached(pieces: Buffer[]): void {
+  expect(pieces.length, "the unsealer returned at least one piece").toBeGreaterThan(0);
+  for (const [index, piece] of pieces.entries()) {
+    expect({ index, byteLength: piece.byteLength, bufferByteLength: piece.buffer.byteLength }, "piece not detached").toEqual({ index, byteLength: 0, bufferByteLength: 0 });
+  }
+}
+
+describe("every plaintext piece is freed once the sink has used it (#1571)", () => {
+  it.each([1, MIB + 1, 2 * MIB + 5])("unsealToQuarantine, %i bytes: all pieces are detached and the file is still byte for byte the plaintext", async (size) => {
+    const { storage } = await createStorage();
+    const stored = await store(storage, randomBytes(size), "staging");
+    const unsealer = recording(unsealerFor(stored));
+
+    const result = await storage.unsealToQuarantine({ kind: "staging", storageKey: stored.storageKey }, stored.context.documentId, expected(stored), unsealer);
+
+    expectAllDetached(unsealer.pieces);
+    expect((await readFile(result.quarantinePath)).equals(stored.plaintext)).toBe(true);
+    expect(result.contentSha256).toBe(sha256(stored.plaintext));
+  }, 30_000);
+
+  it.each([1, MIB + 1, 2 * MIB + 5])("unsealIntoBuffer, %i bytes: all pieces are detached and the returned plaintext is still byte for byte the input", async (size) => {
+    const { storage } = await createStorage();
+    const stored = await store(storage, randomBytes(size), "object");
+    const unsealer = recording(unsealerFor(stored));
+
+    const bytes = await storage.unsealIntoBuffer(stored.storageKey, expected(stored), unsealer);
+
+    expectAllDetached(unsealer.pieces);
+    expect(bytes.equals(stored.plaintext)).toBe(true);
+  }, 30_000);
+
+  it("bad tag: the pieces fed before final() are detached after unsealToQuarantine rejects", async () => {
+    const { storageRoot, storage } = await createStorage();
+    const stored = await store(storage, randomBytes(2 * MIB + 5), "staging");
+    await flipByte(fileOf(storageRoot, stored), MIB + 3);
+    const unsealer = recording(unsealerFor(stored));
+
+    await expect(storage.unsealToQuarantine({ kind: "staging", storageKey: stored.storageKey }, stored.context.documentId, expected(stored), unsealer))
+      .rejects.toBeInstanceOf(DocumentIntegrityError);
+
+    expectAllDetached(unsealer.pieces);
+  }, 30_000);
+
+  it("bad tag: the pieces fed before final() are detached after unsealIntoBuffer rejects", async () => {
+    const { storageRoot, storage } = await createStorage();
+    const stored = await store(storage, randomBytes(2 * MIB + 5), "object");
+    await flipByte(fileOf(storageRoot, stored), MIB + 3);
+    const unsealer = recording(unsealerFor(stored));
+
+    await expect(storage.unsealIntoBuffer(stored.storageKey, expected(stored), unsealer)).rejects.toBeInstanceOf(DocumentIntegrityError);
+
+    expectAllDetached(unsealer.pieces);
+  }, 30_000);
 });

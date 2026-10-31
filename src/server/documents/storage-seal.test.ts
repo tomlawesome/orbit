@@ -337,3 +337,57 @@ describe("sealQuarantine (#1567)", () => {
     });
   });
 });
+
+/** A sealer that records every piece `update` returns, around a real one. */
+function recordingSealer(real: DocumentSealer): DocumentSealer & { pieces: Buffer[]; envelope?: ReturnType<DocumentSealer["final"]>["envelope"] } {
+  const wrapper: DocumentSealer & { pieces: Buffer[]; envelope?: ReturnType<DocumentSealer["final"]>["envelope"] } = {
+    pieces: [],
+    update(chunk: Buffer): Buffer {
+      const piece = real.update(chunk);
+      wrapper.pieces.push(piece);
+      return piece;
+    },
+    final() {
+      const done = real.final();
+      wrapper.envelope = done.envelope;
+      return done;
+    },
+  };
+  return wrapper;
+}
+
+function expectAllDetached(pieces: Buffer[]): void {
+  expect(pieces.length, "the sealer returned at least one piece").toBeGreaterThan(0);
+  for (const [index, piece] of pieces.entries()) {
+    expect({ index, byteLength: piece.byteLength, bufferByteLength: piece.buffer.byteLength }, "piece not detached").toEqual({ index, byteLength: 0, bufferByteLength: 0 });
+  }
+}
+
+describe("every ciphertext piece is freed once it is written (#1571)", () => {
+  it.each([1, MIB + 1, 2 * MIB + 5])("%i bytes: all pieces are detached and the object still decrypts byte for byte", async (size) => {
+    const { storage } = await createStorage();
+    const plaintext = randomBytes(size);
+    const context = contextFor(plaintext);
+    const { path, expected } = await quarantineFile(storage, plaintext);
+    const key = storage.createStorageKey();
+    const sealer = recordingSealer(createDocumentSealer(context, kek, "key-1"));
+
+    await storage.sealQuarantine(path, expected, sealer, { kind: "object", storageKey: key });
+
+    expectAllDetached(sealer.pieces);
+    expect(decryptDocument(await storage.readCiphertext(key, 10 * MIB), context, sealer.envelope!, kek).equals(plaintext)).toBe(true);
+  }, 30_000);
+
+  it("the pieces are detached when the pass is refused for a digest mismatch", async () => {
+    const { storage } = await createStorage();
+    const plaintext = randomBytes(2 * MIB + 3);
+    const { expected } = await quarantineFile(storage, plaintext);
+    const changed = Buffer.from(plaintext);
+    changed[MIB + 11] ^= 0x01;
+    const sealer = recordingSealer(createDocumentSealer(contextFor(plaintext), kek, "key-1"));
+
+    await expectInvalidQuarantine(storage.sealQuarantine(await writeQuarantineFile(storage, changed), expected, sealer, { kind: "object", storageKey: storage.createStorageKey() }));
+
+    expectAllDetached(sealer.pieces);
+  }, 30_000);
+});
