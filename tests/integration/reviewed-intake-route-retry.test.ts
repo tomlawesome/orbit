@@ -635,6 +635,142 @@ describe("approve retry: the stored request ends with the review (L-F2, D-F4, D-
   });
 });
 
+describe("approve retry: the approval's own expiry writes end the review (mailin-1)", () => {
+  const pastExpiry = () => new Date(Date.now() - 60_000);
+
+  async function lapse(receiptId: string): Promise<void> {
+    await db().update(imapIngestionMessages).set({ expiresAt: pastExpiry() }).where(eq(imapIngestionMessages.id, receiptId));
+  }
+
+  async function expiredAtOf(receiptId: string): Promise<Date | null> {
+    const [row] = await db().select({ expiredAt: imapIngestionMessages.expiredAt }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receiptId));
+    return row.expiredAt;
+  }
+
+  async function expectExpiredAnswer(response: Response): Promise<void> {
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "reviewed_intake_expired" } });
+  }
+
+  it("replaying the pair past expiry answers expired and clears the draft and the stored request, keeping the key and hash", async () => {
+    const fixture = await createIntegrationFixture("reviewed-retry-replay-expiry-clears");
+    const member = await fixture.session("member");
+    try {
+      const { receiptId, sent } = await seedPartialApproval(fixture, member, fixture.users.member.id, "replay-expiry");
+      const before = await reviewColumns(receiptId);
+      // Positive control: the review holds all three ciphertexts while it is open.
+      expect(before.status).toBe("recoverable");
+      expect(before.approvalRequestEnc, "approval_request_enc while open").not.toBeNull();
+      expect(before.proposalEnc, "proposal_enc while open").not.toBeNull();
+      expect(before.fieldEvidenceEnc, "field_evidence_enc while open").not.toBeNull();
+      expect(before.approvedItemId).not.toBeNull();
+      await lapse(receiptId);
+
+      await expectExpiredAnswer(await approve(member, sent));
+      const after = await reviewColumns(receiptId);
+      expect(after.status).toBe("expired");
+      expect(await expiredAtOf(receiptId), "expired_at").not.toBeNull();
+      expect(after.approvalRequestEnc, "approval_request_enc after the replay expires the review").toBeNull();
+      expect(after.proposalEnc, "proposal_enc after the replay expires the review").toBeNull();
+      expect(after.fieldEvidenceEnc, "field_evidence_enc after the replay expires the review").toBeNull();
+      expect(after.approvalOperationId).toBe(before.approvalOperationId);
+      expect(after.approvalRequestSha256).toBe(before.approvalRequestSha256);
+      expect(after.approvedItemId).toBe(before.approvedItemId);
+    } finally {
+      setImapHoldingPurgeImplementationForTests(undefined);
+      await fixture.cleanup();
+    }
+  });
+
+  it("approving a lapsed unclaimed review answers expired and clears its draft, with no claim made", async () => {
+    const fixture = await createIntegrationFixture("reviewed-retry-preclaim-expiry-clears");
+    const member = await fixture.session("member");
+    try {
+      const receiptId = randomUUID();
+      await seedReceipt(fixture, {
+        id: receiptId, userId: fixture.users.member.id, householdId: fixture.household.id,
+        ...await encryptedReceiptDraft(fixture.household.id, receiptId, { proposal: { title: "Draft preclaim" }, fieldEvidence: { title: { source: "subject" } } }),
+      });
+      const attachmentId = await seedAttachment(receiptId, fixture.users.member.id, "preclaim-expiry");
+      const before = await reviewColumns(receiptId);
+      // Positive control: the draft is held while the review is open.
+      expect(before.status).toBe("pending_review");
+      expect(before.proposalEnc, "proposal_enc while open").not.toBeNull();
+      expect(before.fieldEvidenceEnc, "field_evidence_enc while open").not.toBeNull();
+      await lapse(receiptId);
+
+      await expectExpiredAnswer(await approve(member, payloadFor(fixture, receiptId, randomUUID(), { title: "Too late", attachmentIds: [attachmentId] })));
+      const after = await reviewColumns(receiptId);
+      expect(after.status).toBe("expired");
+      expect(after.proposalEnc, "proposal_enc after the approve finds the review lapsed").toBeNull();
+      expect(after.fieldEvidenceEnc, "field_evidence_enc after the approve finds the review lapsed").toBeNull();
+      expect(after.approvalRequestEnc).toBeNull();
+      expect(after.approvalOperationId).toBeNull();
+      expect(after.approvalRequestSha256).toBeNull();
+      expect(after.approvedItemId).toBeNull();
+    } finally {
+      setImapHoldingPurgeImplementationForTests(undefined);
+      await fixture.cleanup();
+    }
+  });
+
+  it("a purge failure after the expiry write does not bring the review back: the sweep finishes it and the pair still answers expired", async () => {
+    const fixture = await createIntegrationFixture("reviewed-retry-expiry-purge-failure");
+    const member = await fixture.session("member");
+    try {
+      const { receiptId, sent } = await seedPartialApproval(fixture, member, fixture.users.member.id, "expiry-purge-failure");
+      const before = await reviewColumns(receiptId);
+      expect(before.approvalRequestEnc, "approval_request_enc while open").not.toBeNull();
+      expect(before.proposalEnc, "proposal_enc while open").not.toBeNull();
+      expect(before.fieldEvidenceEnc, "field_evidence_enc while open").not.toBeNull();
+      await lapse(receiptId);
+
+      setImapHoldingPurgeImplementationForTests(async () => { throw new Error("synthetic purge failure"); });
+      const failed = await approve(member, sent);
+      expect(failed.status).toBe(503);
+      expect(await failed.json()).toMatchObject({ error: { code: "staging_purge_failed" } });
+      const reverted = await reviewColumns(receiptId);
+      expect(reverted).toMatchObject({ status: "recoverable", failureCode: "staging_purge_failed" });
+      // The review ended when expires_at passed: the purge is retried, the review is not reopened.
+      expect(reverted.approvalRequestEnc, "approval_request_enc after the 503").toBeNull();
+      expect(reverted.proposalEnc, "proposal_enc after the 503").toBeNull();
+      expect(reverted.fieldEvidenceEnc, "field_evidence_enc after the 503").toBeNull();
+
+      setImapHoldingPurgeImplementationForTests(undefined);
+      await purgeExpiredImapStaging(new Date(), 100);
+      const swept = await reviewColumns(receiptId);
+      expect(swept.status).toBe("expired");
+      expect(swept.approvalRequestEnc).toBeNull();
+      expect(swept.proposalEnc).toBeNull();
+      expect(swept.fieldEvidenceEnc).toBeNull();
+
+      // The key and hash still answer without the stored request.
+      await expectExpiredAnswer(await approve(member, sent));
+    } finally {
+      setImapHoldingPurgeImplementationForTests(undefined);
+      await fixture.cleanup();
+    }
+  });
+
+  it("document health stops counting a receipt whose approval replay found it lapsed", async () => {
+    const fixture = await createIntegrationFixture("reviewed-retry-expiry-health-count");
+    const member = await fixture.session("member");
+    try {
+      const { receiptId, sent } = await seedPartialApproval(fixture, member, fixture.users.member.id, "expiry-health");
+      const lockedBefore = await lockedReceiptCount();
+      expect(lockedBefore).toBeGreaterThanOrEqual(1);
+      await lapse(receiptId);
+
+      await expectExpiredAnswer(await approve(member, sent));
+      expect((await reviewColumns(receiptId)).status).toBe("expired");
+      expect(await lockedReceiptCount()).toBe(lockedBefore - 1);
+    } finally {
+      setImapHoldingPurgeImplementationForTests(undefined);
+      await fixture.cleanup();
+    }
+  });
+});
+
 describe("approve retry: the inbox list reclaims an abandoned approval (L-R1)", () => {
   it("an abandoned approving receipt that made its item comes back retryable", async () => {
     const fixture = await createIntegrationFixture("reviewed-retry-list-reclaims-item");
