@@ -1,11 +1,11 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { sql, type SQL } from "drizzle-orm";
 import type { getDb } from "@/db";
 import { imapIngestionAttachments } from "@/db/schema";
 import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
-import { decryptDocument, encryptDocument, type CryptoEnvelope } from "@/server/documents/crypto";
-import { openDocumentStorage } from "@/server/documents/storage";
+import { createDocumentSealer, createDocumentUnsealer, type CryptoEnvelope } from "@/server/documents/crypto";
+import { openDocumentStorage, releaseBuffer, type ReceivedDocument } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
 import { identifyImapAttachmentBytes, normalizeImapAttachmentName } from "./core/imap-attachment-validation";
@@ -51,18 +51,6 @@ export type HeldImapAttachment = {
   envelope: CryptoEnvelope;
 };
 
-/** Encrypts already-scanned attachment bytes under a holding-only AAD context. */
-export async function holdImapAttachment(input: {
-  bytes: Buffer;
-  displayName: string;
-  mediaType: SupportedDocumentMediaType;
-  recipientUserId: string;
-  receiptId: string;
-  onCiphertextAllocated?: (object: { id: string; storageKey: string }) => Promise<void>;
-}): Promise<HeldImapAttachment> {
-  return holdBytes(randomUUID(), input, input.recipientUserId, input.receiptId, input.onCiphertextAllocated);
-}
-
 function stagingContext(id: string, userId: string, receiptId: string, mediaType: string, plaintextSize: number) {
   if (!userId || !receiptId) throw new Error("IMAP staging owner is required");
   return {
@@ -79,27 +67,63 @@ function stagingContext(id: string, userId: string, receiptId: string, mediaType
 
 async function holdBytes(
   id: string,
-  input: { bytes: Buffer; displayName: string; mediaType: SupportedDocumentMediaType },
+  input: { quarantinePath: string; sizeBytes: number; contentSha256: string; displayName: string; mediaType: SupportedDocumentMediaType },
   recipientUserId: string,
   receiptId: string,
   onCiphertextAllocated?: (object: { id: string; storageKey: string }) => Promise<void>,
 ): Promise<HeldImapAttachment> {
   const config = getDocumentConfig();
-  const contentSha256 = createHash("sha256").update(input.bytes).digest("hex");
   // The next key while a rotation is in progress, the current key otherwise (#955).
   const wrap = wrappingKey(config);
-  const encrypted = encryptDocument(input.bytes, stagingContext(id, recipientUserId, receiptId, input.mediaType, input.bytes.length), wrap.keyEncryptionKey, wrap.keyId);
+  const sealer = createDocumentSealer(stagingContext(id, recipientUserId, receiptId, input.mediaType, input.sizeBytes), wrap.keyEncryptionKey, wrap.keyId);
   const storageKey = openDocumentStorage().createStorageKey();
   try {
     await onCiphertextAllocated?.({ id, storageKey });
-    await openDocumentStorage().writeCiphertext(storageKey, encrypted.ciphertext);
+    const sealed = await openDocumentStorage().sealQuarantine(
+      input.quarantinePath,
+      { sizeBytes: input.sizeBytes, contentSha256: input.contentSha256 },
+      sealer,
+      { kind: "object", storageKey },
+    );
+    return { id, recipientUserId, receiptId, displayName: input.displayName, mediaType: input.mediaType, sizeBytes: input.sizeBytes, contentSha256: input.contentSha256, storageKey, ciphertextSize: sealed.ciphertextSize, envelope: sealed.envelope };
   } catch (error) {
     await openDocumentStorage().deleteCiphertext(storageKey).catch(() => undefined);
     throw error;
-  } finally {
-    encrypted.ciphertext.fill(0);
   }
-  return { id, recipientUserId, receiptId, displayName: input.displayName, mediaType: input.mediaType, sizeBytes: input.bytes.length, contentSha256, storageKey, ciphertextSize: encrypted.ciphertext.length, envelope: encrypted.envelope };
+}
+
+/**
+ * Identifies, scans and structure-checks the received file. The check's one
+ * copy of it lives in this frame only and is zeroed and freed here, so the seal that
+ * follows never runs with it held (#1571, as the upload's own check does).
+ */
+async function checkReceivedAttachment(
+  received: ReceivedDocument,
+  input: { filename?: string; declaredMediaType?: string; mailboxIngestion?: boolean },
+  maxBytes: number,
+): Promise<{ mediaType: SupportedDocumentMediaType; displayName: string }> {
+  const config = getDocumentConfig();
+  const bytes = await openDocumentStorage().readQuarantine(received.quarantinePath, maxBytes);
+  try {
+    // Size, magic bytes and declared type only: nothing opens the file yet.
+    const identified = identifyImapAttachmentBytes(bytes, input.declaredMediaType, { maximumDocumentBytes: maxBytes, pdfOnly: input.mailboxIngestion === true });
+    if (!identified.ok) throw new Error(identified.code);
+    const mediaType = identified.mediaType;
+    const displayName = normalizeImapAttachmentName(input.filename ?? "email-attachment", mediaType);
+    if (input.mailboxIngestion && config.scanMode !== "required") throw new Error("scanner_disabled");
+    if (config.scanMode === "required") {
+      const outcome = classifyScan(await scanFileWithClamAv(received.quarantinePath, config.clamAv), documentScanCodes);
+      // The shared mapping, so a protocol error is recorded as one rather
+      // than folded into "unavailable" (engine-7). Anything but a clean scan
+      // stops here: nothing is opened or held.
+      if (outcome.status !== "clean") throw new Error(outcome.code);
+    }
+    // ADR-0033: the renderer opens it only once the scan has passed.
+    if (!await validateSupportedDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes })) throw new Error("mime_structure_invalid");
+    return { mediaType, displayName };
+  } finally {
+    releaseBuffer(bytes);
+  }
 }
 
 /** Streams an inbound attachment through the existing bounded scanner before holding it encrypted. */
@@ -119,51 +143,54 @@ export async function scanAndHoldImapAttachment(input: {
   const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(input.bytes); controller.close(); } });
   const received = await openDocumentStorage().receive(body, id, maxBytes, input.bytes.length);
   try {
-    const bytes = await openDocumentStorage().readQuarantine(received.quarantinePath, maxBytes);
-    try {
-      // Size, magic bytes and declared type only: nothing opens the file yet.
-      const identified = identifyImapAttachmentBytes(bytes, input.declaredMediaType, { maximumDocumentBytes: maxBytes, pdfOnly: input.mailboxIngestion === true });
-      if (!identified.ok) throw new Error(identified.code);
-      const mediaType = identified.mediaType;
-      const displayName = normalizeImapAttachmentName(input.filename ?? "email-attachment", mediaType);
-      if (input.mailboxIngestion && config.scanMode !== "required") throw new Error("scanner_disabled");
-      if (config.scanMode === "required") {
-        const outcome = classifyScan(await scanFileWithClamAv(received.quarantinePath, config.clamAv), documentScanCodes);
-        // The shared mapping, so a protocol error is recorded as one rather
-        // than folded into "unavailable" (engine-7). Anything but a clean scan
-        // stops here: nothing is opened or held.
-        if (outcome.status !== "clean") throw new Error(outcome.code);
-      }
-      // ADR-0033: the renderer opens it only once the scan has passed.
-      if (!await validateSupportedDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes })) throw new Error("mime_structure_invalid");
-      return await holdBytes(id, { bytes, displayName, mediaType }, input.recipientUserId, input.receiptId, input.onCiphertextAllocated);
-    } finally { bytes.fill(0); }
+    const { mediaType, displayName } = await checkReceivedAttachment(received, input, maxBytes);
+    return await holdBytes(id, { quarantinePath: received.quarantinePath, sizeBytes: received.sizeBytes, contentSha256: received.contentSha256, displayName, mediaType }, input.recipientUserId, input.receiptId, input.onCiphertextAllocated);
   } finally {
     received.leadingBytes.fill(0);
     await openDocumentStorage().discardQuarantine(received.quarantinePath).catch(() => undefined);
   }
 }
 
-/** Opens holding bytes for re-encryption into an explicitly selected household,
- * and (#1155) for a page-one render that never leaves memory: both callers
- * decrypt the same ciphertext under the same recipient/receipt-bound context
- * and the plaintext never reaches disk either way. */
+/** The holding key for an attachment, picked by the envelope's own key_id (#954):
+ * held attachments are short-lived, but not so short-lived that a rotation in
+ * progress can be assumed never to span one. */
+function holdingKekOf(attachment: Pick<HeldImapAttachment, "envelope">): Buffer {
+  const holdingKek = keyEncryptionKeyFor(getDocumentConfig(), attachment.envelope.keyId);
+  if (!holdingKek) throw new Error("held attachment is wrapped under a key this instance does not hold");
+  return holdingKek;
+}
+
+/** Opens a held attachment for a page-one render that never leaves memory
+ * (#1155): the held object is decrypted under the same recipient/receipt-bound
+ * context acceptance uses, straight into one buffer, and the buffer is
+ * returned only once the tag has verified (#1571). */
 export async function readHeldImapAttachment(
   attachment: Pick<HeldImapAttachment, "id" | "mediaType" | "sizeBytes" | "storageKey" | "envelope">,
   owner: { recipientUserId: string; receiptId: string },
 ): Promise<Buffer> {
-  const config = getDocumentConfig();
-  // Picks by the envelope's own key_id (#954): held attachments are
-  // short-lived, but not so short-lived that a rotation in progress can be
-  // assumed never to span one.
-  const holdingKek = keyEncryptionKeyFor(config, attachment.envelope.keyId);
-  if (!holdingKek) throw new Error("held attachment is wrapped under a key this instance does not hold");
-  const ciphertext = await openDocumentStorage().readCiphertext(attachment.storageKey, attachment.sizeBytes + 64);
-  try {
-    return decryptDocument(ciphertext, stagingContext(attachment.id, owner.recipientUserId, owner.receiptId, attachment.mediaType, attachment.sizeBytes), attachment.envelope, holdingKek);
-  } finally {
-    ciphertext.fill(0);
-  }
+  const holdingKek = holdingKekOf(attachment);
+  return openDocumentStorage().unsealIntoBuffer(
+    attachment.storageKey,
+    { ciphertextSize: attachment.sizeBytes, plaintextSize: attachment.sizeBytes },
+    createDocumentUnsealer(stagingContext(attachment.id, owner.recipientUserId, owner.receiptId, attachment.mediaType, attachment.sizeBytes), attachment.envelope, holdingKek),
+  );
+}
+
+/** Opens a held attachment for re-encryption into an explicitly selected
+ * household (#1571): decrypted into a `.recovery` quarantine file whose tag
+ * has verified before the path is returned. The caller streams the file into
+ * the upload and discards it. */
+export async function readHeldImapAttachmentToQuarantine(
+  attachment: Pick<HeldImapAttachment, "id" | "mediaType" | "sizeBytes" | "storageKey" | "envelope">,
+  owner: { recipientUserId: string; receiptId: string },
+): Promise<{ quarantinePath: string; contentSha256: string }> {
+  const holdingKek = holdingKekOf(attachment);
+  return openDocumentStorage().unsealToQuarantine(
+    { kind: "object", storageKey: attachment.storageKey },
+    attachment.id,
+    { ciphertextSize: attachment.sizeBytes, plaintextSize: attachment.sizeBytes },
+    createDocumentUnsealer(stagingContext(attachment.id, owner.recipientUserId, owner.receiptId, attachment.mediaType, attachment.sizeBytes), attachment.envelope, holdingKek),
+  );
 }
 
 /** Idempotently removes private holding ciphertext after durable transfer or discard. */

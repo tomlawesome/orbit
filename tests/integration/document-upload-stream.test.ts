@@ -13,8 +13,8 @@
  * whole.
  */
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { copyFile, mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { copyFile, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,7 @@ import { runDocumentMaintenanceCycle } from "@/server/document-worker";
 import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { decryptDocument, envelopeOf } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
+import { validateSupportedDocumentStructure } from "@/server/documents/validation";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { progressive40Mpx, writePaddedImageFile } from "../support/image-fixtures";
@@ -39,6 +40,13 @@ vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/server/documents/scanner")>(),
   scanFileWithClamAv: vi.fn(),
 }));
+
+// #1571: the recovery worker's open check is spied on (still real) to see the
+// file it is handed.
+vi.mock("@/server/documents/validation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/documents/validation")>();
+  return { ...actual, validateSupportedDocumentStructure: vi.fn(actual.validateSupportedDocumentStructure) };
+});
 
 const MIB = 1_048_576;
 
@@ -118,7 +126,7 @@ describe("the scanner-recovery stage seals from the quarantine file (#1567)", ()
 
       const [stage] = await getDb().select().from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId));
       expect(stage).toMatchObject({ status: "pending", purpose: "scanner_recovery" });
-      const staging = await storage().readStagingCiphertext(stage!.storageKey, bytes.length + MIB);
+      const staging = await readFile(join(getDocumentConfig().storageRoot, "staging", `${stage!.storageKey}.bin`));
       expect(stage!.ciphertextSize).toBe(staging.length);
       expect(staging.length).toBe(bytes.length);
       const opened = decryptDocument(staging, {
@@ -143,6 +151,189 @@ describe("the scanner-recovery stage seals from the quarantine file (#1567)", ()
       expect(await getDb().select({ id: documentStagingObjects.documentId }).from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId))).toHaveLength(0);
       const downloaded = await readDocumentDownload(fixture.users.member.id, documentId);
       expect(downloaded.bytes.equals(bytes)).toBe(true);
+    });
+  }, 300_000);
+});
+
+function sha256(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/** Stages `bytes` as an upload the scanner could not reach, and returns the staging row. */
+async function stageForRecovery(fixture: Fixture, bytes: Buffer, documentId: string) {
+  vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
+  expect(await upload(fixture, bytes, documentId)).toMatchObject({ lifecycle: "scanning" });
+  const [stage] = await getDb().select().from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId));
+  expect(stage).toMatchObject({ status: "pending", purpose: "scanner_recovery" });
+  return stage!;
+}
+
+async function makeScanJobDue(documentId: string): Promise<void> {
+  await getDb().update(documentJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) })
+    .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+}
+
+function stagingFile(storageKey: string): string {
+  return join(getDocumentConfig().storageRoot, "staging", `${storageKey}.bin`);
+}
+
+/** The worker's end state for a stage it gave up on: rejected, stage row and file gone, nothing in quarantine, the scanner never asked. */
+async function expectRejectedAsInvalidStage(documentId: string, storageKey: string): Promise<void> {
+  expect(await getDb().select({ lifecycle: documents.lifecycle, failureCode: documents.failureCode }).from(documents).where(eq(documents.id, documentId)))
+    .toEqual([{ lifecycle: "rejected", failureCode: "staging_object_invalid" }]);
+  expect(await getDb().select({ id: documentStagingObjects.documentId }).from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId)), "the stage is purged").toHaveLength(0);
+  expect(await storage().stagingExists(storageKey), "the staging file is gone").toBe(false);
+  expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
+  expect(await storage().listQuarantineFiles(), "no quarantine file remains").toHaveLength(0);
+  expect(vi.mocked(scanFileWithClamAv), "the scanner never saw the bytes").not.toHaveBeenCalled();
+}
+
+describe("the recovery worker decrypts into a quarantine file and verifies it before anything reads it (#1571)", () => {
+  it("hands the scanner a .recovery file holding the plaintext, runs the check with its path and size, seals from that same file, and the published document round-trips byte for byte", async () => {
+    const fixture = await createIntegrationFixture("doc-recovery-quarantine-file");
+    const documentId = randomUUID();
+    const bytes = paddedPdfOfSize(2 * MIB + 5);
+    await withRequiredScanMode(async () => {
+      const stage = await stageForRecovery(fixture, bytes, documentId);
+      const seen: { path?: string; content?: Buffer; mode?: number } = {};
+      vi.mocked(scanFileWithClamAv).mockReset();
+      vi.mocked(scanFileWithClamAv).mockImplementation(async (path) => {
+        seen.path = path;
+        seen.content = await readFile(path);
+        seen.mode = (await stat(path)).mode & 0o777;
+        return { status: "clean" };
+      });
+      vi.mocked(validateSupportedDocumentStructure).mockClear();
+      const unseals = vi.spyOn(LocalDocumentStorage.prototype, "unsealToQuarantine");
+      const seals = vi.spyOn(LocalDocumentStorage.prototype, "sealQuarantine");
+      await makeScanJobDue(documentId);
+
+      await runDocumentMaintenanceCycle();
+
+      expect(vi.mocked(scanFileWithClamAv)).toHaveBeenCalledTimes(1);
+      expect(seen.path).toMatch(new RegExp(`${documentId}\\.[a-f0-9]{32}\\.recovery$`));
+      expect(seen.content!.equals(bytes), "the scanner is handed the plaintext").toBe(true);
+      expect(seen.mode).toBe(0o600);
+
+      expect(unseals).toHaveBeenCalledTimes(1);
+      expect(unseals.mock.calls[0]![0]).toEqual({ kind: "staging", storageKey: stage.storageKey });
+      expect(unseals.mock.calls[0]![1]).toBe(documentId);
+      expect(unseals.mock.calls[0]![2]).toEqual({ ciphertextSize: stage.ciphertextSize, plaintextSize: bytes.length });
+
+      expect(vi.mocked(validateSupportedDocumentStructure)).toHaveBeenCalledTimes(1);
+      const [checked, mediaType, options] = vi.mocked(validateSupportedDocumentStructure).mock.calls[0]!;
+      expect(mediaType).toBe("application/pdf");
+      expect(options).toEqual({ path: seen.path, sizeBytes: bytes.length });
+      expect((checked as Buffer).byteLength === 0 || (checked as Buffer).every((byte) => byte === 0), "the check's copy is wiped").toBe(true);
+
+      expect(seals).toHaveBeenCalledTimes(1);
+      const [sealedPath, expectedContent, , destination] = seals.mock.calls[0]!;
+      expect(sealedPath).toBe(seen.path);
+      expect(expectedContent).toEqual({ sizeBytes: bytes.length, contentSha256: sha256(bytes) });
+      expect(destination).toMatchObject({ kind: "object" });
+
+      const [document] = await getDb().select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus }).from(documents).where(eq(documents.id, documentId));
+      expect(document).toEqual({ lifecycle: "available", scanStatus: "clean" });
+      const [crypto] = await getDb().select().from(documentCrypto).where(eq(documentCrypto.documentId, documentId));
+      expect(crypto!.storageKey).toBe((destination as { storageKey: string }).storageKey);
+      expect(crypto!.ciphertextSize).toBe((await stat(join(getDocumentConfig().storageRoot, "objects", crypto!.storageKey.slice(0, 2), crypto!.storageKey.slice(2, 4), `${crypto!.storageKey}.bin`))).size);
+      expect(await storage().stagingExists(stage.storageKey)).toBe(false);
+      expect(await storage().listQuarantineFiles(), "the .recovery file is discarded once the seal is done").toHaveLength(0);
+      const downloaded = await readDocumentDownload(fixture.users.member.id, documentId);
+      expect(downloaded.bytes.equals(bytes)).toBe(true);
+    });
+  }, 300_000);
+
+  it.each([
+    ["near the start", 100],
+    ["in the middle", 2 * MIB + 5 - 1_000_000],
+    ["in the last byte", 2 * MIB + 5 - 1],
+  ])("a flipped byte %s of the staging object ends in staging_object_invalid, with the stage purged, no quarantine file, and the scanner never called", async (_where, position) => {
+    const fixture = await createIntegrationFixture("doc-recovery-tampered");
+    const documentId = randomUUID();
+    const bytes = paddedPdfOfSize(2 * MIB + 5);
+    await withRequiredScanMode(async () => {
+      const stage = await stageForRecovery(fixture, bytes, documentId);
+      const stored = await readFile(stagingFile(stage.storageKey));
+      expect(stored.length).toBe(bytes.length);
+      stored[position] ^= 0xff;
+      await writeFile(stagingFile(stage.storageKey), stored);
+      vi.mocked(scanFileWithClamAv).mockReset();
+      vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+      vi.mocked(validateSupportedDocumentStructure).mockClear();
+      await makeScanJobDue(documentId);
+
+      await runDocumentMaintenanceCycle();
+
+      await expectRejectedAsInvalidStage(documentId, stage.storageKey);
+      expect(vi.mocked(validateSupportedDocumentStructure)).not.toHaveBeenCalled();
+    });
+  }, 300_000);
+
+  it("a stage whose plaintext digest differs from documents.content_sha256 ends the same way, though its tag is good", async () => {
+    const fixture = await createIntegrationFixture("doc-recovery-digest-mismatch");
+    const documentId = randomUUID();
+    const bytes = paddedPdfOfSize(2 * MIB + 5);
+    await withRequiredScanMode(async () => {
+      const stage = await stageForRecovery(fixture, bytes, documentId);
+      // Built by hand: the staged ciphertext is untouched and authenticates,
+      // but the digest the upload recorded is that of other bytes.
+      await getDb().update(documents).set({ contentSha256: sha256(Buffer.from("not this document")) }).where(eq(documents.id, documentId));
+      vi.mocked(scanFileWithClamAv).mockReset();
+      vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+      vi.mocked(validateSupportedDocumentStructure).mockClear();
+      const unseals = vi.spyOn(LocalDocumentStorage.prototype, "unsealToQuarantine");
+      await makeScanJobDue(documentId);
+
+      await runDocumentMaintenanceCycle();
+
+      expect(unseals, "the tag passed: the unseal itself succeeded").toHaveBeenCalledTimes(1);
+      await expect(unseals.mock.results[0]!.value).resolves.toMatchObject({ contentSha256: sha256(bytes) });
+      await expectRejectedAsInvalidStage(documentId, stage.storageKey);
+      expect(vi.mocked(validateSupportedDocumentStructure)).not.toHaveBeenCalled();
+    });
+  }, 300_000);
+
+  it("a retryable scanner outage still reschedules the job, keeps the stage, and leaves no quarantine file", async () => {
+    const fixture = await createIntegrationFixture("doc-recovery-outage");
+    const documentId = randomUUID();
+    const bytes = paddedPdfOfSize(MIB + 5);
+    await withRequiredScanMode(async () => {
+      const stage = await stageForRecovery(fixture, bytes, documentId);
+      vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
+      await makeScanJobDue(documentId);
+
+      await runDocumentMaintenanceCycle();
+
+      expect(vi.mocked(scanFileWithClamAv)).toHaveBeenCalled();
+      expect(await getDb().select({ status: documentJobs.status, lastError: documentJobs.lastError }).from(documentJobs)
+        .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan"))))
+        .toEqual([{ status: "retry", lastError: "scanner_unavailable" }]);
+      expect(await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId))).toEqual([{ lifecycle: "scanning" }]);
+      expect(await storage().stagingExists(stage.storageKey)).toBe(true);
+      expect(await storage().listQuarantineFiles()).toHaveLength(0);
+    });
+  }, 300_000);
+
+  it("a stage under a key this instance does not hold is still retried as key_unavailable, and leaves no quarantine file", async () => {
+    const fixture = await createIntegrationFixture("doc-recovery-unheld-key");
+    const documentId = randomUUID();
+    const bytes = paddedPdfOfSize(MIB + 5);
+    await withRequiredScanMode(async () => {
+      const stage = await stageForRecovery(fixture, bytes, documentId);
+      await getDb().update(documentStagingObjects).set({ keyId: "key-this-instance-never-held" }).where(eq(documentStagingObjects.documentId, documentId));
+      vi.mocked(scanFileWithClamAv).mockReset();
+      vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+      await makeScanJobDue(documentId);
+
+      await runDocumentMaintenanceCycle();
+
+      expect(vi.mocked(scanFileWithClamAv)).not.toHaveBeenCalled();
+      expect(await getDb().select({ status: documentJobs.status, lastError: documentJobs.lastError }).from(documentJobs)
+        .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan"))))
+        .toEqual([{ status: "retry", lastError: "key_unavailable" }]);
+      expect(await storage().stagingExists(stage.storageKey)).toBe(true);
+      expect(await storage().listQuarantineFiles()).toHaveLength(0);
     });
   }, 300_000);
 });

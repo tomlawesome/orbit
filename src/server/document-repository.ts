@@ -11,8 +11,8 @@ import {
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { asOperationalReason, log } from "@/lib/logger";
-import { createDocumentSealer, decryptDocument, envelopeOf } from "@/server/documents/crypto";
-import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
+import { createDocumentSealer, createDocumentUnsealer, DocumentIntegrityError, envelopeOf } from "@/server/documents/crypto";
+import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { type LocalDocumentStorage, openDocumentStorage, type ReceivedDocument } from "@/server/documents/storage";
@@ -829,17 +829,12 @@ export async function uploadItemDocument(input: {
 export type DocumentContentAuditAction = "document_downloaded" | "document_previewed";
 
 /**
- * Decrypts a document's plaintext for an authorized reader.
- *
- * Every caller that needs plaintext goes through here so that authorization,
- * readiness and audit stay one path; only the recorded action varies, so a
- * page-one preview (#476) is never logged as a whole-document download.
+ * What a plaintext read needs, once authorization and readiness have passed:
+ * the document's record, its crypto row, the key-encryption key for that row,
+ * its envelope, and the encryption context its unsealer is built over. Shared
+ * by the whole-buffer read and the streamed download so both stay one path.
  */
-export async function readDocumentDownload(
-  userId: string,
-  documentId: string,
-  auditAction: DocumentContentAuditAction = "document_downloaded",
-): Promise<{ bytes: Buffer; displayName: string; mediaType: string }> {
+async function resolveDocumentContent(userId: string, documentId: string) {
   const record = await requireDocumentAccess(userId, documentId);
   const config = getDocumentConfig();
   if (!record.itemId || !isDocumentContentReady(record, config.scanMode, "download")) {
@@ -855,30 +850,85 @@ export async function readDocumentDownload(
   if (!documentKek) {
     throw new AppError("document_key_unavailable", "Document encryption keys require administrator attention", 503);
   }
-  let ciphertext: Buffer;
-  try {
-    // A stored document was accepted under whatever limit applied then, so it
-    // is read against the hard ceiling: lowering the limit (#1285) must never
-    // make an existing document unreadable.
-    ciphertext = await openDocumentStorage().readCiphertext(crypto.storageKey, DOCUMENT_MAX_BYTES_CEILING + 64);
-  } catch {
-    throw new AppError("document_unavailable", "That document cannot currently be opened", 503);
-  }
   const envelope = envelopeOf(crypto);
+  const context = {
+    documentId,
+    householdId: record.householdId,
+    itemId: sealedItemIdOf(record)!,
+    mediaType: record.mediaType,
+    plaintextSize: record.sizeBytes,
+  };
+  return { record, crypto, documentKek, envelope, context };
+}
+
+/** A failed tag is an integrity failure; any other storage error is the document being unavailable. */
+function documentReadError(error: unknown): AppError {
+  if (error instanceof DocumentIntegrityError) {
+    return new AppError("document_integrity_failed", "That document failed its integrity check", 503);
+  }
+  return new AppError("document_unavailable", "That document cannot currently be opened", 503);
+}
+
+/**
+ * Decrypts a document's plaintext for an authorized reader.
+ *
+ * Every caller that needs plaintext goes through here so that authorization,
+ * readiness and audit stay one path; only the recorded action varies, so a
+ * page-one preview (#476) is never logged as a whole-document download.
+ * The stored object is decrypted straight into one buffer, and that buffer is
+ * returned only once the tag has verified (#1571).
+ */
+export async function readDocumentDownload(
+  userId: string,
+  documentId: string,
+  auditAction: DocumentContentAuditAction = "document_downloaded",
+): Promise<{ bytes: Buffer; displayName: string; mediaType: string }> {
+  const { record, crypto, documentKek, envelope, context } = await resolveDocumentContent(userId, documentId);
   let bytes: Buffer;
   try {
-    bytes = decryptDocument(ciphertext, {
-      documentId,
-      householdId: record.householdId,
-      itemId: sealedItemIdOf(record)!,
-      mediaType: record.mediaType,
-      plaintextSize: record.sizeBytes,
-    }, envelope, documentKek);
-  } catch {
-    throw new AppError("document_integrity_failed", "That document failed its integrity check", 503);
+    bytes = await openDocumentStorage().unsealIntoBuffer(
+      crypto.storageKey,
+      { ciphertextSize: crypto.ciphertextSize, plaintextSize: record.sizeBytes },
+      createDocumentUnsealer(context, envelope, documentKek),
+    );
+  } catch (error) {
+    throw documentReadError(error);
   }
   await recordDocumentAudit(record.householdId, documentId, userId, auditAction, { itemId: record.itemId });
   return { bytes, displayName: record.displayName, mediaType: record.mediaType };
+}
+
+/**
+ * Opens a document's plaintext as a stream for an authorized reader (#1571).
+ *
+ * The tag is verified in one pass over the stored ciphertext before this
+ * returns; the body then decrypts the same object again in pieces, so the
+ * plaintext is never held whole. A tampered object fails here with
+ * `document_integrity_failed`, before any body exists. The download is audited
+ * after that first pass, before the body is returned.
+ */
+export async function openDocumentDownload(
+  userId: string,
+  documentId: string,
+): Promise<{ body: ReadableStream<Uint8Array>; sizeBytes: number; displayName: string; mediaType: string }> {
+  const { record, crypto, documentKek, envelope, context } = await resolveDocumentContent(userId, documentId);
+  let body: ReadableStream<Uint8Array>;
+  try {
+    body = await openDocumentStorage().streamVerifiedPlaintext(
+      crypto.storageKey,
+      { ciphertextSize: crypto.ciphertextSize },
+      () => createDocumentUnsealer(context, envelope, documentKek),
+    );
+  } catch (error) {
+    throw documentReadError(error);
+  }
+  try {
+    await recordDocumentAudit(record.householdId, documentId, userId, "document_downloaded", { itemId: record.itemId });
+  } catch (error) {
+    await body.cancel().catch(() => undefined);
+    throw error;
+  }
+  return { body, sizeBytes: record.sizeBytes, displayName: record.displayName, mediaType: record.mediaType };
 }
 
 export async function requestDocumentDeletion(userId: string, documentId: string): Promise<DocumentSummary> {

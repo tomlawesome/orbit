@@ -112,6 +112,11 @@ process, which is correct for the supported deployment of one app container
 running one process; two app containers, or a clustered process, would each
 get their own slot and between them run that many archives at once.
 
+A streamed download hands its 1 MiB pieces to the HTTP response, which drops
+them; V8 frees such pieces at a fixed external-memory trigger (about 33 MiB on
+Node 22), so a serving process carries up to that much dead plaintext at any
+moment, however many downloads are in flight and whatever their size (#1571).
+
 ## Core data flows
 
 ### Authenticated command

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, open, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -157,12 +157,12 @@ describe("local document storage", () => {
   });
 
   it("keeps staging ciphertext in a separate opaque namespace", async () => {
-    const { storage } = await createStorage();
+    const { root, storage } = await createStorage();
     const key = storage.createStorageKey();
     const ciphertext = Buffer.from("authenticated staging ciphertext");
 
     await storage.writeStagingCiphertext(key, ciphertext);
-    expect(await storage.readStagingCiphertext(key, 1_024)).toEqual(ciphertext);
+    expect(await readFile(join(root, "objects-root", "staging", `${key}.bin`))).toEqual(ciphertext);
     expect(await storage.stagingExists(key)).toBe(true);
     expect(await storage.listCiphertextObjects()).toHaveLength(0);
     expect((await storage.listStagingObjects()).map((entry) => entry.storageKey)).toEqual([key]);
@@ -199,7 +199,9 @@ describe("sweeping abandoned temporary files (#1316 PR1-10)", () => {
     await storage.writeCiphertext(objectKey, Buffer.from("real object"));
     await storage.writeStagingCiphertext(stagingKey, Buffer.from("real staging"));
     const documentId = randomUUID();
-    const recoveryPath = await storage.writeQuarantineBytes(documentId, Buffer.from("real recovery"));
+    // A recovery file as `unsealToQuarantine` names it (#1571).
+    const recoveryPath = join(root, "quarantine", `${documentId}.${randomBytes(16).toString("hex")}.recovery`);
+    await writeFile(recoveryPath, "real recovery", { mode: 0o600 });
     const objectDir = join(root, "objects-root", "objects", objectKey.slice(0, 2), objectKey.slice(2, 4));
     const stagingDir = join(root, "objects-root", "staging");
     const quarantineDir = join(root, "quarantine");
@@ -225,7 +227,7 @@ describe("sweeping abandoned temporary files (#1316 PR1-10)", () => {
     expect(await exists(staleRecovery)).toBe(false);
     // Real content is never touched, however old.
     expect(await s.storage.readCiphertext(s.objectKey, 1_024)).toEqual(Buffer.from("real object"));
-    expect(await s.storage.readStagingCiphertext(s.stagingKey, 1_024)).toEqual(Buffer.from("real staging"));
+    expect(await readFile(join(s.stagingDir, `${s.stagingKey}.bin`))).toEqual(Buffer.from("real staging"));
     expect(await exists(s.recoveryPath)).toBe(true);
     expect(await exists(realUpload)).toBe(true);
   });

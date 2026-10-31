@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { and, desc, eq, notInArray, sql } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -17,6 +19,7 @@ import {
 } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf as createSyntheticPdf } from "../support/synthetic-documents";
+import { paddedPdfOfSize } from "../support/large-pdf";
 import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../support/generated-pdf-documents";
 
 const { GET: downloadDocument } = await loadRoute("documents/[documentId]/download");
@@ -938,7 +941,6 @@ describe("authenticated encrypted document lifecycle", () => {
         .from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId)))
         .toEqual([{ status: "pending", recoveryExpiresAt: stageBefore!.recoveryExpiresAt }]);
       expect(await storage.stagingExists(stageBefore!.storageKey)).toBe(true);
-      await expect(storage.readStagingCiphertext(stageBefore!.storageKey, getDocumentConfig().maxBytes)).resolves.toBeDefined();
       expect(await getDb().select({ status: documentJobs.status, lastError: documentJobs.lastError }).from(documentJobs)
         .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan"))))
         .toEqual([{ status: "retry", lastError: "key_unavailable" }]);
@@ -953,7 +955,7 @@ describe("authenticated encrypted document lifecycle", () => {
       expect(await getDb().select({ lifecycle: documents.lifecycle, failureCode: documents.failureCode }).from(documents).where(eq(documents.id, documentId)))
         .toEqual([{ lifecycle: "rejected", failureCode: "scan_recovery_expired" }]);
       expect(await getDb().select({ documentId: documentStagingObjects.documentId }).from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId))).toHaveLength(0);
-      await expect(storage.readStagingCiphertext(stageBefore!.storageKey, getDocumentConfig().maxBytes)).rejects.toThrow();
+      expect(await storage.stagingExists(stageBefore!.storageKey)).toBe(false);
     });
   });
 
@@ -1486,5 +1488,99 @@ describe("document page-one preview over HTTP", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+});
+
+describe("document download and preview over HTTP verify the stored object (#1571)", () => {
+  const downloadUrlOf = (documentId: string) => `http://127.0.0.1:3000/api/documents/${documentId}/download`;
+
+  async function objectFileOf(documentId: string): Promise<string> {
+    const [crypto] = await getDb().select({ storageKey: documentCrypto.storageKey }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId));
+    const key = crypto!.storageKey;
+    return join(getDocumentConfig().storageRoot, "objects", key.slice(0, 2), key.slice(2, 4), `${key}.bin`);
+  }
+
+  async function flipStoredByte(documentId: string, position: number | "last"): Promise<void> {
+    const path = await objectFileOf(documentId);
+    const bytes = await readFile(path);
+    bytes[position === "last" ? bytes.length - 1 : position] ^= 0xff;
+    await writeFile(path, bytes);
+  }
+
+  async function downloadAudits(documentId: string): Promise<number> {
+    return (await getDb().select({ id: auditLog.id }).from(auditLog)
+      .where(and(eq(auditLog.entityId, documentId), eq(auditLog.action, "document_downloaded")))).length;
+  }
+
+  it("downloads a PDF at the size limit byte for byte, with today's headers and Content-Length, auditing it once before the body is read", async () => {
+    const fixture = await createIntegrationFixture("document-download-limit");
+    const bytes = paddedPdfOfSize(getDocumentConfig().maxBytes);
+    const { session, documentId } = await uploadSyntheticDocument(fixture, bytes);
+
+    const response = await callRouteForSession(downloadDocument, session, { url: downloadUrlOf(documentId), params: documentContext(documentId) });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-length")).toBe(String(bytes.length));
+    expect(response.headers.get("content-type")).toBe("application/octet-stream");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("content-disposition")).toContain("attachment;");
+    expect(response.headers.get("content-disposition")).toContain("synthetic-policy.pdf");
+    expect(response.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(await downloadAudits(documentId), "audited after the check, before the body is read").toBe(1);
+
+    expect(Buffer.from(await response.arrayBuffer()).equals(bytes)).toBe(true);
+    expect(await downloadAudits(documentId)).toBe(1);
+  }, 120_000);
+
+  it("serves the download through the two-pass stream, never unsealing the plaintext into one buffer, and still delivers it whole", async () => {
+    const fixture = await createIntegrationFixture("document-download-streamed");
+    const { session, documentId } = await uploadSyntheticDocument(fixture, paddedPdfOfSize(3 * 1_048_576 + 5));
+    const streamed = vi.spyOn(LocalDocumentStorage.prototype, "streamVerifiedPlaintext");
+    const whole = vi.spyOn(LocalDocumentStorage.prototype, "unsealIntoBuffer");
+    try {
+      const response = await callRouteForSession(downloadDocument, session, { url: downloadUrlOf(documentId), params: documentContext(documentId) });
+
+      expect(response.status).toBe(200);
+      expect(Buffer.from(await response.arrayBuffer()).equals(paddedPdfOfSize(3 * 1_048_576 + 5))).toBe(true);
+      expect(streamed).toHaveBeenCalledTimes(1);
+      expect(whole).not.toHaveBeenCalled();
+    } finally {
+      streamed.mockRestore();
+      whole.mockRestore();
+    }
+  });
+
+  it.each([["the first byte", 0], ["the last byte", "last"]] as const)("answers a tampered object (%s) with 503 document_integrity_failed, an error body that carries none of the document, and no download audit", async (_label, position) => {
+    const fixture = await createIntegrationFixture("document-download-tampered");
+    const { session, documentId } = await uploadSyntheticDocument(fixture);
+    await flipStoredByte(documentId, position);
+
+    const response = await callRouteForSession(downloadDocument, session, { url: downloadUrlOf(documentId), params: documentContext(documentId) });
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(response.headers.get("content-disposition")).toBeNull();
+    const text = await response.text();
+    expect(JSON.parse(text)).toMatchObject({ error: { code: "document_integrity_failed" } });
+    expect(text).not.toContain("%PDF");
+    expect(text.length).toBeLessThan(500);
+    expect(await downloadAudits(documentId)).toBe(0);
+  });
+
+  it("answers a tampered stored object's page-one preview with 503 document_integrity_failed, not a picture, and still previews an intact one", async () => {
+    const fixture = await createIntegrationFixture("document-preview-tampered");
+    const intact = await uploadSyntheticDocument(fixture);
+    const tampered = await uploadSyntheticDocument(fixture);
+    await flipStoredByte(tampered.documentId, 5);
+    const preview = (documentId: string) => callRouteForSession(previewDocument, intact.session, {
+      url: `http://127.0.0.1:3000/api/documents/${documentId}/preview`,
+      params: documentContext(documentId),
+    });
+
+    const refused = await preview(tampered.documentId);
+    expect(refused.status).toBe(503);
+    expect(JSON.parse(await refused.text())).toMatchObject({ error: { code: "document_integrity_failed" } });
+    expect((await preview(intact.documentId)).status).toBe(200);
   });
 });

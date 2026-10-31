@@ -7,7 +7,8 @@ import { syntheticPdfWithNumberedPages } from "../../tests/support/generated-pdf
  * The page-one preview's authorization and plaintext boundary (#476).
  *
  * Only the database, the document configuration, object storage and the
- * decryption primitive are stubbed. Authorization, the readiness gate, the
+ * unsealer are stubbed (#1571: the page is read straight into one buffer
+ * through `unsealIntoBuffer`, which is the stub standing in for storage). Authorization, the readiness gate, the
  * audit write and the real renderer all run, so these tests pin the endpoint's
  * own behaviour: a preview must be reachable exactly where a download is, and
  * the decrypted bytes must not survive the call in memory or on disk.
@@ -18,8 +19,8 @@ const mocks = vi.hoisted(() => ({
   audits: [] as Record<string, unknown>[],
   rows: {} as Record<string, unknown[]>,
   config: vi.fn(),
-  readCiphertext: vi.fn(),
-  decryptDocument: vi.fn(),
+  unsealIntoBuffer: vi.fn(),
+  createDocumentUnsealer: vi.fn(() => ({ update: vi.fn(), final: vi.fn() })),
 }));
 
 vi.mock("@/db", async () => {
@@ -62,13 +63,12 @@ vi.mock("@/server/documents/config", async (importActual) => ({
   getDocumentConfig: mocks.config,
 }));
 vi.mock("@/server/documents/crypto", async (importActual) => ({
-  envelopeOf: (await importActual<typeof import("@/server/documents/crypto")>()).envelopeOf,
-  decryptDocument: mocks.decryptDocument,
-  encryptDocument: vi.fn(),
+  ...await importActual<typeof import("@/server/documents/crypto")>(),
+  createDocumentUnsealer: mocks.createDocumentUnsealer,
 }));
 vi.mock("@/server/documents/storage", () => {
   class LocalDocumentStorage {
-    readCiphertext = mocks.readCiphertext;
+    unsealIntoBuffer = mocks.unsealIntoBuffer;
     ciphertextExists = vi.fn();
   }
   return {
@@ -126,6 +126,7 @@ function cryptoRow() {
     envelopeVersion: 1,
     keyId: config.keyId,
     storageKey: "a".repeat(64),
+    ciphertextSize: 1024,
     contentIv: Buffer.alloc(12),
     contentAuthTag: Buffer.alloc(16),
     wrappedDek: Buffer.alloc(32),
@@ -144,8 +145,7 @@ function seedAccess(row: { administrator: boolean; membershipUserId: unknown }):
 function arrangeReadable(plaintext: Buffer, rowOverrides: Record<string, unknown> = {}): Buffer {
   seedAccess(accessRow(rowOverrides));
   mocks.rows.document_crypto = [cryptoRow()];
-  mocks.readCiphertext.mockResolvedValue(Buffer.alloc(plaintext.length + 64));
-  mocks.decryptDocument.mockReturnValue(plaintext);
+  mocks.unsealIntoBuffer.mockResolvedValue(plaintext);
   return plaintext;
 }
 
@@ -189,8 +189,7 @@ describe("readDocumentPagePreview", () => {
     // gate): the crypto row was never read, so nothing reached storage,
     // decryption or the renderer.
     expect(mocks.fromNames).toEqual(["documents", "users"]);
-    expect(mocks.readCiphertext).not.toHaveBeenCalled();
-    expect(mocks.decryptDocument).not.toHaveBeenCalled();
+    expect(mocks.unsealIntoBuffer).not.toHaveBeenCalled();
     expect(mocks.audits).toEqual([]);
   });
 
@@ -222,9 +221,34 @@ describe("readDocumentPagePreview", () => {
         code: "document_not_found",
         status: 404,
       });
-      expect(mocks.decryptDocument).not.toHaveBeenCalled();
+      expect(mocks.unsealIntoBuffer).not.toHaveBeenCalled();
     },
   );
+
+  it("reads the stored object straight into one buffer, handing storage the key, both sizes and an unsealer for this document", async () => {
+    arrangeReadable(syntheticPdf("One buffer"));
+
+    await readDocumentPagePreview(READER, DOCUMENT);
+
+    expect(mocks.unsealIntoBuffer).toHaveBeenCalledTimes(1);
+    expect(mocks.unsealIntoBuffer).toHaveBeenCalledWith("a".repeat(64), { ciphertextSize: 1024, plaintextSize: 1024 }, mocks.createDocumentUnsealer.mock.results[0]!.value);
+    expect(mocks.createDocumentUnsealer).toHaveBeenCalledWith(
+      expect.objectContaining({ documentId: DOCUMENT, householdId: HOUSEHOLD, itemId: ITEM, mediaType: "application/pdf", plaintextSize: 1024 }),
+      expect.anything(),
+      config.keyEncryptionKey,
+    );
+  });
+
+  it("answers a failed integrity check as 503 document_integrity_failed, and any other storage failure as document_unavailable, auditing neither", async () => {
+    arrangeReadable(syntheticPdf("Tampered"));
+    const { DocumentIntegrityError } = await import("@/server/documents/crypto");
+    mocks.unsealIntoBuffer.mockRejectedValueOnce(new DocumentIntegrityError());
+    await expect(readDocumentPagePreview(READER, DOCUMENT)).rejects.toMatchObject({ code: "document_integrity_failed", status: 503 });
+
+    mocks.unsealIntoBuffer.mockRejectedValueOnce(Object.assign(new Error("gone"), { code: "ENOENT" }));
+    await expect(readDocumentPagePreview(READER, DOCUMENT)).rejects.toMatchObject({ code: "document_unavailable", status: 503 });
+    expect(mocks.audits).toEqual([]);
+  });
 
   it("records the read as a preview rather than as a whole-document download", async () => {
     arrangeReadable(syntheticPdf("Audited preview"));
