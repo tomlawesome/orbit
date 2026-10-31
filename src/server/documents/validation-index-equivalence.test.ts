@@ -502,3 +502,180 @@ describe("a candidate-skipping search for the end of an object or trailer answer
     }
   });
 });
+
+/**
+ * #1590, digit-dense text and window edges. An `N G obj` header is the end of
+ * an object's text (and of a trailer's), and it is the pattern a native search
+ * has most ways to get wrong: it starts on a digit, it can fail from one digit
+ * and succeed from the next (`5 6 7 obj` ends at `6`), and its parts can be any
+ * length. Each case below slides the header over the first 3,072 bytes of the
+ * searched text, the part under test starting at every offset in turn, so a
+ * search that reads in windows meets the header split at every point of every
+ * part. The searched text starts where pdf.js's does: just after the first
+ * line's token (`1 0 obj`, or `trailer`), which is 16 bytes into the file.
+ *
+ * The header sits before ` xref /XRef 0`, so, as in the tables above, a header
+ * that is found makes a new object that holds the tag (false) and one that is
+ * not found leaves `xref` as the end (true). For the trailer kind a `startxref`
+ * follows the tag, and plays the same part. A header with a line end inside it
+ * is not one the scan acts on (it reads a line's first token), so it answers
+ * true whichever way the regex goes; those cases are checked against the
+ * oracle and for not crashing.
+ */
+const WINDOW = 3_072;
+const SEARCH_START_LINE = 7; // "1 0 obj" and "trailer" are both seven bytes
+
+interface HeaderShape {
+  /** First number, gap, second number, gap, keyword: the pieces of the header. */
+  readonly parts: readonly [string, string, string, string, string];
+  /** Text just before the header, glued to it (`5 ` before `6 7 obj` is a failed start overlapping the true one). */
+  readonly before?: string;
+  /** What fills the window before the header: spaces, or `1 1 1 ` so the digits run right up to it. */
+  readonly filler: "spaces" | "digits";
+  /** Whether the scan acts on this header: true for a plain `N G obj`, false for a near miss or a line end inside. */
+  readonly found: boolean;
+  /** Checked at every offset for the object kind, and every fifth for the trailer kind; the rest are sampled (see STRIDE). */
+  readonly core?: true;
+}
+
+const cycle = (unit: readonly string[], length: number): string => {
+  let out = "";
+  for (let at = 0; out.length < length; at += 1) out += unit[at % unit.length]!;
+  return out.slice(0, length);
+};
+
+/** `1 1 1 ` ending in a space, exactly `length` bytes. */
+function digitFiller(length: number): string {
+  let out = "";
+  for (let at = 0; at < length; at += 1) out += at === length - 1 || at % 2 === 1 ? " " : "1";
+  return out;
+}
+
+const SHAPES: ReadonlyArray<readonly [string, HeaderShape]> = [
+  ["one digit each, one space", { parts: ["5", " ", "6", " ", "obj"], filler: "spaces", found: true, core: true }],
+  ["one digit each, one space, digits running up to it", { parts: ["5", " ", "6", " ", "obj"], filler: "digits", found: true }],
+  ["a failed start overlapping the true one (`5 6 7 obj`, true match at `6`)", { parts: ["6", " ", "7", " ", "obj"], before: "5 ", filler: "spaces", found: true, core: true }],
+  ["a failed start overlapping the true one, digits running up to it", { parts: ["6", " ", "7", " ", "obj"], before: "5 ", filler: "digits", found: true }],
+  ["a failed start overlapping the true one, 1,500 spaces in each gap", { parts: ["6", " ".repeat(1_500), "7", " ".repeat(1_500), "obj"], before: "5 ", filler: "spaces", found: true }],
+  ["tab, form feed and no-break space gaps", { parts: ["5", "\t\f\xa0", "6", "\xa0 \t", "obj"], filler: "spaces", found: true }],
+  ["gaps of 1,500 spaces", { parts: ["5", " ".repeat(1_500), "6", " ".repeat(1_500), "obj"], filler: "spaces", found: true }],
+  ["gaps of 1,500 mixed spaces (space, tab, FF, 0xA0)", { parts: ["5", cycle([" ", "\t", "\f", "\xa0"], 1_500), "6", cycle(["\xa0", "\f", " ", "\t"], 1_500), "obj"], filler: "spaces", found: true }],
+  ["numbers of 1,200 digits", { parts: ["7".repeat(1_200), " ", "8".repeat(1_200), " ", "obj"], filler: "spaces", found: true }],
+  ["numbers of 1,200 digits, digits running up to it", { parts: ["7".repeat(1_200), " ", "8".repeat(1_200), " ", "obj"], filler: "digits", found: true }],
+  ["numbers of 1,200 digits and gaps of 1,500 spaces", { parts: ["7".repeat(1_200), " ".repeat(1_500), "8".repeat(1_200), " ".repeat(1_500), "obj"], filler: "spaces", found: true }],
+  ["a LF between the numbers", { parts: ["5", "\n", "6", " ", "obj"], filler: "spaces", found: false }],
+  ["a CR between the numbers and a CRLF before obj", { parts: ["5", "\r", "6", "\r\n", "obj"], filler: "spaces", found: false }],
+  ["1,500 mixed spaces with a LF and a CR among them", { parts: ["5", cycle([" ", "\t", "\n", "\xa0"], 1_500), "6", cycle(["\f", "\r", " "], 1_500), "obj"], filler: "spaces", found: false }],
+  ["a near miss, `5 6 objx`", { parts: ["5", " ", "6", " ", "objx"], filler: "spaces", found: false }],
+  ["a near miss, `5 6 obj_`", { parts: ["5", " ", "6", " ", "obj_"], filler: "digits", found: false }],
+  ["a near miss, `5 6 obj9` with 1,500 spaces in each gap", { parts: ["5", " ".repeat(1_500), "6", " ".repeat(1_500), "obj9"], filler: "spaces", found: false }],
+  ["a near miss, `5 6 ob`", { parts: ["5", " ", "6", " ", "ob"], filler: "spaces", found: false }],
+  ["a near miss, no gap before obj", { parts: ["5", " ", "6", "", "obj"], filler: "digits", found: false }],
+  ["a near miss, a letter before the first number", { parts: ["5", " ", "6", " ", "obj"], before: "a", filler: "spaces", found: false }],
+];
+
+function windowFile(kind: "object" | "trailer", shape: HeaderShape, partIndex: number, at: number): Buffer | undefined {
+  const { parts, before = "", filler } = shape;
+  const partOffset = before.length + parts.slice(0, partIndex).reduce((sum, part) => sum + part.length, 0);
+  // The header starts `start` bytes into the searched text; byte 0 of it is the line's own newline.
+  const start = at - partOffset;
+  if (start < 1) return undefined;
+  const fillLength = start - 1;
+  const fill = filler === "spaces" ? " ".repeat(fillLength) : digitFiller(fillLength);
+  const header = `${before}${parts.join("")}`;
+  const lead = `${PDF_LINE}${kind === "object" ? "1 0 obj" : "trailer"}\n${fill}`;
+  return latin1(kind === "object" ? `${lead}${header} xref ${TAG}` : `${lead}${header} xref ${TAG}startxref\n`);
+}
+
+/**
+ * STRIDE: checking every offset 0..3,071 for all 5 parts of all 20 shapes in
+ * both kinds is about 600,000 pairs of runs, over a minute, so most shapes are
+ * sampled: every 11th offset (11 is coprime with any window size, so each part
+ * meets every residue of a power-of-two window across the 3,072 bytes), plus
+ * the first 64 and last 64 offsets of the window. The two `core` shapes are
+ * checked at every offset for the object kind and every fifth for the trailer.
+ */
+const SAMPLE_STRIDE = 11;
+const strideFor = (kind: "object" | "trailer", shape: HeaderShape): number => (shape.core ? (kind === "object" ? 1 : 5) : SAMPLE_STRIDE);
+
+describe("the end of an object or trailer, with an `N G obj` header slid across the first 3,072 bytes (#1590)", () => {
+  for (const kind of ["object", "trailer"] as const) {
+    describe(`${kind} kind`, () => {
+      it.each(SHAPES.map((entry) => [entry[0], entry[1]] as const))("%s", (name, shape) => {
+        const stride = strideFor(kind, shape);
+        const mismatches: string[] = [];
+        const unpinned: string[] = [];
+        const answers = new Set<string>();
+        let checked = 0;
+        for (let partIndex = 0; partIndex < shape.parts.length; partIndex += 1) {
+          if (shape.parts[partIndex]!.length === 0) continue;
+          for (let at = 0; at < WINDOW; at += 1) {
+            if (at >= 64 && at < WINDOW - 64 && at % stride !== 0) continue;
+            const bytes = windowFile(kind, shape, partIndex, at);
+            if (!bytes) continue;
+            checked += 1;
+            const expected = answerOf(hasPdfIndexBudgetOracle, bytes);
+            answers.add(expected);
+            const label = `${name}: part ${partIndex} at ${at}`;
+            if (answerOf(hasPdfIndexBudget, bytes) !== expected && mismatches.length < 5) mismatches.push(`${label} answered ${answerOf(hasPdfIndexBudget, bytes)}, the oracle ${expected}`);
+            if (expected !== String(!shape.found) && unpinned.length < 5) unpinned.push(`${label}: the oracle answered ${expected}`);
+          }
+        }
+        expect(checked, "offsets checked").toBeGreaterThan(100);
+        expect(unpinned, "the oracle's own answers").toEqual([]);
+        expect(mismatches).toEqual([]);
+        expect(answers.size).toBe(1);
+      }, 30_000);
+
+      it("answers as the oracle does when the file ends inside or right after the header, at every length up to 3,072 (digit-filled: every 11th)", () => {
+        const mismatches: string[] = [];
+        for (const tail of ["1 0 ob", "1 0 objx", "1 0 obj"]) {
+          for (let fillLength = 0; fillLength < WINDOW; fillLength += 1) {
+            for (const filler of ["spaces", "digits"] as const) {
+              if (filler === "digits" && fillLength % SAMPLE_STRIDE !== 0) continue;
+              const fill = filler === "spaces" ? " ".repeat(fillLength) : digitFiller(fillLength);
+              const bytes = latin1(`${PDF_LINE}${kind === "object" ? "1 0 obj" : "trailer"}\n${fill}${tail}`);
+              const expected = answerOf(hasPdfIndexBudgetOracle, bytes);
+              if (answerOf(hasPdfIndexBudget, bytes) !== expected && mismatches.length < 5) mismatches.push(`${JSON.stringify(tail)} after ${fillLength} ${filler} bytes: oracle ${expected}`);
+            }
+          }
+        }
+        expect(mismatches).toEqual([]);
+      }, 30_000);
+    });
+  }
+});
+
+/**
+ * A 98 MB file that is one object of `1 1 1 1 ...`: a digit at every other
+ * byte, each a place a pattern that starts on a digit has to look at. The
+ * answer is the oracle's, on a 1 MiB file and on the 98 MB one.
+ */
+function digitDensePdf(totalBytes: number): Buffer {
+  const head = latin1(`${PDF_LINE}1 0 obj\n`);
+  const tail = (xrefOffset: number): Buffer => latin1(`\nendobj\nxref\n0 1\n0000000000 65535 f \ntrailer\n<< /Size 1 >>\nstartxref\n${xrefOffset}\n%%EOF\n`);
+  const tailLength = tail(0).length + String(totalBytes).length;
+  const bodyLength = totalBytes - head.length - tailLength;
+  const body = Buffer.alloc(bodyLength, 0x20);
+  for (let at = 0; at < bodyLength; at += 2) body[at] = 0x31;
+  return Buffer.concat([head, body, tail(head.length + bodyLength + "\nendobj\n".length)]);
+}
+
+describe("a digit-dense object takes no step per byte (#1590)", () => {
+  it("answers a 1 MiB object of `1 1 1 ...` as the oracle does", () => {
+    const bytes = digitDensePdf(MIB);
+    expect(bytes.length).toBeGreaterThan(MIB - 64);
+    expectSameAnswer(bytes, "1 MiB of `1 `");
+  });
+
+  it("checks a 98 MB PDF whose one object is `1 1 1 ...` within 2 s, and answers as the oracle does", () => {
+    const bytes = digitDensePdf(98 * MIB);
+    const started = performance.now();
+    const answer = answerOf(hasPdfIndexBudget, bytes);
+    const elapsedMs = performance.now() - started;
+    console.log(`hasPdfIndexBudget on 98 MiB of \`1 \`: ${Math.round(elapsedMs)} ms`);
+    // The oracle takes about a second on the same bytes, so the answer is compared on the 98 MB file itself.
+    expect(answer).toBe(answerOf(hasPdfIndexBudgetOracle, bytes));
+    expect(elapsedMs).toBeLessThan(2_000);
+  }, 60_000);
+});
