@@ -1,7 +1,7 @@
 import { basename } from "node:path";
 import { AppError } from "@/lib/app-error";
 import type { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
-import { type DocumentFileOnDisk, inspectPdfStructureInSandbox } from "@/server/documents/pdf-structure-sandbox";
+import { type DocumentFileOnDisk, inspectImageInSandbox, inspectPdfStructureInSandbox } from "@/server/documents/pdf-structure-sandbox";
 
 export type SupportedDocumentMediaType =
   | "application/pdf"
@@ -98,19 +98,17 @@ function declaredImageDimensions(bytes: Buffer, mediaType: "image/jpeg" | "image
   return undefined;
 }
 
-/** Pattern E for images: the header is within the cap and the preview renderer's own decoder reads the image. */
-async function classifyImageStructure(bytes: Buffer, mediaType: "image/jpeg" | "image/png"): Promise<DocumentStructureReason> {
+/** The header's dimensions when they are within the pixel and edge caps, else undefined: the cheap first fence, and the size the child must find (pattern D). */
+export function declaredImageDimensionsWithinCap(bytes: Buffer, mediaType: "image/jpeg" | "image/png"): { width: number; height: number } | undefined {
   const declared = declaredImageDimensions(bytes, mediaType);
-  if (!declared || !safeImageDimensions(declared.width, declared.height)) return "unsupported_structure";
-  try {
-    // Loaded here rather than at the top: the native canvas backend stays off
-    // every module that imports this one until an image actually arrives.
-    const { loadImage } = await import("@napi-rs/canvas");
-    const image = await loadImage(bytes);
-    return image.width === declared.width && image.height === declared.height ? "supported_structure" : "unsupported_structure";
-  } catch {
-    return "unsupported_structure";
-  }
+  return declared && safeImageDimensions(declared.width, declared.height) ? declared : undefined;
+}
+
+/** Pattern E for images: the header is within the cap and the decoder, in the sandbox child, reads the image at that size (#1572). */
+async function classifyImageStructure(bytes: Buffer, mediaType: "image/jpeg" | "image/png", file?: DocumentFileOnDisk): Promise<DocumentStructureReason> {
+  const declared = declaredImageDimensionsWithinCap(bytes, mediaType);
+  if (!declared) return "unsupported_structure";
+  return inspectImageInSandbox(bytes, mediaType, declared, file);
 }
 
 /* The check reads the file as bytes: a latin1 string maps byte for byte, so
@@ -560,7 +558,7 @@ export type DocumentStructureReason = "supported_structure" | "unsupported_struc
 /** Whether the file is one Orbit can open and show: the renderer opens it and finds a page (ADR-0033). Call only after the malware scan has passed. */
 export async function classifyDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType, file?: DocumentFileOnDisk): Promise<DocumentStructureReason> {
   if (mediaType === "application/pdf") return classifyPdfStructure(bytes, file);
-  return classifyImageStructure(bytes, mediaType);
+  return classifyImageStructure(bytes, mediaType, file);
 }
 
 /** True when `classifyDocumentStructure` finds a file Orbit can open and show. */

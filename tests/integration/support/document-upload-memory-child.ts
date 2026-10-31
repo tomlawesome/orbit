@@ -5,7 +5,8 @@
  * tests/integration/document-upload-stream.test.ts through tsx, so the test
  * runner's memory never counts. Modelled on archive-import-memory-child.ts.
  *
- * Arguments: <userId> <householdId> <itemId> <file>.
+ * Arguments: <userId> <householdId> <itemId> <file>. The upload's filename takes
+ * the file's extension (#1572: the same child measures an image).
  * The baseline is taken BEFORE any of the body is read (garbage collected, the
  * kernel's peak counter reset), and the file is then streamed from disk into
  * `uploadItemDocument` as a web stream, as the route hands it the request
@@ -19,6 +20,7 @@
  * `MEMORY_RESULT {"first":{"beforeKiB":..,"afterKiB":..},"beforeKiB":..,"afterKiB":..,"result":..}`.
  */
 import { statSync } from "node:fs";
+import { extname } from "node:path";
 import { closeDatabase } from "@/db";
 import { uploadItemDocument } from "@/server/document-repository";
 import { baselinePeakKiB, fileAsWebStream, peakKiB, prepareKeyState, printMemoryResult } from "./memory-child-support";
@@ -30,6 +32,9 @@ if (!userId || !householdId || !itemId || !file) {
 
 prepareKeyState();
 
+/** The upload's name carries the file's own extension (.pdf, .jpg), as a real client's would. */
+const extension = extname(file) || ".pdf";
+
 async function main(): Promise<void> {
   const sizeBytes = statSync(file).size;
   const firstBeforeKiB = baselinePeakKiB();
@@ -38,7 +43,7 @@ async function main(): Promise<void> {
     userId,
     householdId,
     itemId,
-    filename: "warm-up.pdf",
+    filename: `warm-up${extension}`,
     body,
     declaredBytes: sizeBytes,
   });
@@ -50,7 +55,7 @@ async function main(): Promise<void> {
     userId,
     householdId,
     itemId,
-    filename: "memory-child.pdf",
+    filename: `memory-child${extension}`,
     body,
     declaredBytes: sizeBytes,
   });
