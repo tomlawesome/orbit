@@ -66,8 +66,8 @@
    * @typedef {{
    *   view?: import('$lib/data/workspace.js').HomeView | null,
    *   arrive?: boolean,
-   *   onapprove?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
-   *   ondismiss?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
+   *   onapprove?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<{ done: boolean, problem: string | null }>,
+   *   ondismiss?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<{ done: boolean, problem: string | null }>,
    *   onamend?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion,
    *     item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<string | { partial: true, message: string } | { replayed: true, message: string } | null>,
    *   onchanged?: () => Promise<unknown>,
@@ -241,9 +241,14 @@
     busy = true;
     delete rowProblem[target.id];
     try {
-      const failed = await handler(target);
-      /* false: the row stays open with the refusal under it (Row.svelte run) */
-      if (failed) { rowProblem[target.id] = failed; return false; }
+      const { done, problem } = await handler(target);
+      /* The line is said whatever the answer: a refusal's words, or the
+         done-but-unread line when only the read after a landed decision
+         failed (inbox/acts.js). Only a refusal is answered false, which
+         keeps the row open as refused (Row.svelte run); a landed decision
+         is woken as done, line or no line. */
+      if (problem) rowProblem[target.id] = problem;
+      if (!done) return false;
       wake(act === "approve" ? `${target.title} added to your orbit` : `${target.title} dismissed`);
     } finally {
       busy = false;

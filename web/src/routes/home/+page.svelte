@@ -868,20 +868,26 @@
   /**
    * @param {any} suggestion
    * @param {"approve" | "dismiss"} act
+   * @returns {Promise<boolean>} whether the receipt left review (decide's answer)
    */
   async function tapReceipt(suggestion, act) {
     mailProblem = null;
-    if (!suggestion.receiptId) return; // a #454 fixture suggestion has no mail behind it yet
+    if (!suggestion.receiptId) return false; // a #454 fixture suggestion has no mail behind it yet
     if (armed.id !== suggestion.id || armed.act !== act) {
       armed = { id: suggestion.id, act };
-      return;
+      return false;
     }
     /* approve and dismiss are the inbox's one act (inbox/acts.js); arming is this screen's */
-    await createReceiptActs({
+    return createReceiptActs({
       view: () => /** @type {any} */ (asView(view)),
       operationIds,
       reload: async () => { view = await readHome(); },
-      say: (_id, words) => { mailProblem = words; },
+      /* The line is the suggestion's, not the armed act's: SuggestionView
+         shows mailProblem on the row whose id is armed, and landed() has
+         put the arm down by the time a failed re-read says done-but-unread
+         (inbox/acts.js). Re-key the row, act at rest, as the drawer's say
+         above does for a problem on a suggestion. */
+      say: (_id, words) => { mailProblem = words; if (words && !armed.id) armed = { id: suggestion.id, act: null }; },
       busy: (id) => { busyReceipt = id ? suggestion.id : null; },
       landed: () => { armed = { id: null, act: null }; },
     }).decide({ id: suggestion.receiptId }, act);
@@ -1417,10 +1423,11 @@
 
 <!-- #466/#1120: the pocket's two-tap decisions land on the same idempotent
      approve protocol the desk rows use (one operation id per receipt), and
-     answer with the problem, if any, for the sheet to show. -->
+     answer whether it landed and the line to show, if any: a refusal's
+     words, or done-but-unread when only the read after it failed. -->
 <Pocket {view} {arrive} onsignedout={(redirectTo) => leave?.descendFrom(redirectTo)} onmenu={readyDescent}
-        onapprove={async (suggestion) => { armed = { id: suggestion.id, act: "approve" }; await tapReceipt(suggestion, "approve"); return mailProblem; }}
-        ondismiss={async (suggestion) => { armed = { id: suggestion.id, act: "dismiss" }; await tapReceipt(suggestion, "dismiss"); return mailProblem; }}
+        onapprove={async (suggestion) => { armed = { id: suggestion.id, act: "approve" }; const done = await tapReceipt(suggestion, "approve"); return { done, problem: mailProblem }; }}
+        ondismiss={async (suggestion) => { armed = { id: suggestion.id, act: "dismiss" }; const done = await tapReceipt(suggestion, "dismiss"); return { done, problem: mailProblem }; }}
         onamend={amendReceipt}
         onchanged={async () => {
           /* #1151 W1-R4: the same unguarded read as the onMount one above —

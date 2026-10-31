@@ -228,6 +228,11 @@
             <div class="body">
               <b>A message from {dayMonth(failure.receivedAt)}</b>
               <span>{unreadable(failure) ?? `${reasonWords(failure.reason)} · ${failure.message}`}</span>
+              <!-- decide()'s line for this entry: a refused remove, or done-but-unread
+                   when only the read after a landed remove failed (inbox/acts.js). -->
+              {#if problem && problemId === failure.id}
+                <div class="mail-problem">{problem}</div>
+              {/if}
             </div>
             {#if failure.canDiscard}
               <button disabled={busy === failure.id} onclick={(event) => tap(failure, "dismiss", event.currentTarget)}>
