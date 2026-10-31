@@ -7,9 +7,9 @@ import { afterAll, describe, expect, it } from "vitest";
 // #1429 (owner decision 8a): the application container has a memory limit,
 // 2 GB by default, that an operator can change from .env-orbit through its own
 // variable, the same way CLAMAV_MEMORY_LIMIT, TIKA_MEMORY_LIMIT and
-// OLLAMA_MEMORY_LIMIT work. A maximum-size archive preview peaks near 1.45 GB,
-// an import near 1.2 GB and an export near 0.25 GB (measured, #1537), which the
-// 2 GB default fits. The limit must also be documented where the others are.
+// OLLAMA_MEMORY_LIMIT work. A maximum-size archive import check needs about 350 MB and an
+// import about 700 MB that cannot be reclaimed, and an export peaks near
+// 0.25 GB (measured, #1566, #1537), which the 2 GB default fits. The limit must also be documented where the others are.
 
 const repoRoot = join(import.meta.dirname, "..");
 const read = (path) => readFileSync(join(repoRoot, path), "utf8").replaceAll("\r\n", "\n");
@@ -110,7 +110,8 @@ describe("ORBIT_MEMORY_LIMIT is documented where the other limits are (#1429)", 
     const index = lines.findIndex((line) => /^#?\s*ORBIT_MEMORY_LIMIT=2g\s*$/u.test(line));
     expect(index).toBeGreaterThan(0);
     const comment = lines.slice(Math.max(0, index - 8), index).join("\n");
-    expect(comment).toContain("1.45 GB");
+    expect(comment).toContain("350 MB");
+    expect(comment).toContain("700 MB");
     expect(comment).not.toContain("1.9 GB");
     expect(comment).toMatch(/quarantine/iu);
     expect(comment).toContain("256 MiB");
@@ -123,7 +124,8 @@ describe("ORBIT_MEMORY_LIMIT is documented where the other limits are (#1429)", 
   it("the administrator operations guide row says the same: import peak, quarantine space, 70% heap unless NODE_OPTIONS sets it (#1429 B1)", () => {
     const row = operationsGuide.split("\n").find((line) => line.startsWith("| `ORBIT_MEMORY_LIMIT`"));
     expect(row, "no ORBIT_MEMORY_LIMIT row in docs/administrator-operations.md").toBeDefined();
-    expect(row).toContain("1.45 GB");
+    expect(row).toContain("350 MB");
+    expect(row).toContain("700 MB");
     expect(row).not.toContain("1.9 GB");
     expect(row).toMatch(/quarantine/iu);
     expect(row).toContain("256 MiB");
@@ -135,12 +137,12 @@ describe("ORBIT_MEMORY_LIMIT is documented where the other limits are (#1429)", 
 });
 
 describe("the measured archive memory peak is stated everywhere, and the stale figure is gone (#1537)", () => {
-  it("the compose mem_limit comment states 1.45 GB, not a 1 GB import peak", () => {
+  it("the compose mem_limit comment states 700 MB, not a 1 GB import peak", () => {
     const lines = serviceBlock("orbit-app").split("\n");
     const index = lines.findIndex((line) => line.includes("mem_limit: ${ORBIT_MEMORY_LIMIT:-2g}"));
     expect(index).toBeGreaterThan(0);
     const comment = lines.slice(Math.max(0, index - 5), index).join("\n");
-    expect(comment).toContain("1.45 GB");
+    expect(comment).toContain("700 MB");
     expect(comment).not.toMatch(/about 1 GB, the peak/iu);
   });
 
@@ -152,11 +154,11 @@ describe("the measured archive memory peak is stated everywhere, and the stale f
     expect(text()).not.toContain("1.9 GB");
   });
 
-  it("the administrator guide row gives preview 1.45 GB, import 1.2 GB, export 0.25 GB and keeps the 3g advice", () => {
+  it("the administrator guide row gives import check 350 MB, import 700 MB, export 0.25 GB and keeps the 3g advice", () => {
     const row = operationsGuide.split("\n").find((line) => line.startsWith("| `ORBIT_MEMORY_LIMIT`"));
     expect(row).toBeDefined();
-    expect(row).toContain("1.45 GB");
-    expect(row).toContain("1.2 GB");
+    expect(row).toContain("350 MB");
+    expect(row).toContain("700 MB");
     expect(row).toContain("0.25 GB");
     expect(row).toContain("`3g`");
   });
