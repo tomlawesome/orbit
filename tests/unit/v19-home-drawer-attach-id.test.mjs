@@ -45,7 +45,7 @@ vi.hoisted(() => {
 vi.mock("$lib/data/workspace.js", () => ws);
 vi.mock("$lib/pocket/wake.js", () => ({ wake: vi.fn() }));
 const { attachIdFor: attachIdOf } = await import("../../web/src/routes/home/attach-id.js");
-const driveAttach = async ({ reread }, itemId) => {
+const driveAttach = async ({ reread }) => {
   ws.attachItemDocument.mockReset();
   ws.attachItemDocument.mockResolvedValue({});
   const drawer = await import("../../web/src/routes/home/drawer-acts.svelte.js");
@@ -170,7 +170,7 @@ describe("#1316 W1-R2, #1584 X-R1: the shared attach forgets the attach id only 
      the read failed, the id is kept, so a re-pick sends it again and the
      server does not store a second copy. */
   it("keeps the id when the attach landed but the read failed, and sends it again on a re-pick", async () => {
-    const { acts, sent } = await driveAttach({ reread: vi.fn().mockRejectedValueOnce(new Error("home would not load")) }, "item-reread-fails");
+    const { acts, sent } = await driveAttach({ reread: vi.fn().mockRejectedValueOnce(new Error("home would not load")) });
     await acts.attach("item-reread-fails", file("reread.pdf"));
     const first = sent()[0];
     expect(first).toMatch(UUID);
@@ -180,7 +180,7 @@ describe("#1316 W1-R2, #1584 X-R1: the shared attach forgets the attach id only 
   });
 
   it("forgets the id once the read has landed, so the next attach of the same file mints a new one", async () => {
-    const { acts, sent } = await driveAttach({ reread: vi.fn().mockResolvedValue(undefined) }, "item-reread-lands");
+    const { acts, sent } = await driveAttach({ reread: vi.fn().mockResolvedValue(undefined) });
     await acts.attach("item-reread-lands", file("lands.pdf"));
     const first = sent()[0];
     expect(attachIdOf("item-reread-lands", file("lands.pdf"))).not.toBe(first);
