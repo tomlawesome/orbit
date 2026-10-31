@@ -230,11 +230,15 @@ describe("reviewed intake contract", () => {
     expect(reviewDraftMetadataFromProposal(proposal).fieldEvidence.provider).toEqual({ source: "document_text", confidence: "medium" });
   });
 
-  it("clears every column a mail-in draft's rejected reading could ride in, and nothing else", () => {
+  it("clears the draft, its field evidence and the stored approval request when a review ends, and keeps the key and hash", () => {
     expect(clearedReviewDraftMetadata).toEqual({
       proposalEnc: null,
       fieldEvidenceEnc: null,
+      approvalRequestEnc: null,
     });
+    // The operation key and request hash stay so a replay still answers as the approval did.
+    expect(clearedReviewDraftMetadata).not.toHaveProperty("approvalOperationId");
+    expect(clearedReviewDraftMetadata).not.toHaveProperty("approvalRequestSha256");
   });
 
   it("requires an explicit, validated operation identity to complete a direct document upload", () => {
