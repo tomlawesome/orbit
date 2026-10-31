@@ -210,12 +210,14 @@ describe("the open check decodes in the sandbox child (#1572)", () => {
       await expectChildGone(before);
     }, TEST_TIMEOUT_MS);
 
-    it("refuses a truncated progressive JPEG whose header is within the cap", async () => {
+    // The decoder accepts a truncated JPEG, as it did in the server before
+    // #1572; the note refuses no new category of photo, so it stays accepted.
+    it("decodes a truncated progressive JPEG whose header is within the cap in a child, accepted as before", async () => {
       setSandboxLimits({ wallMs: 30_000 });
       const truncated = progressive.subarray(0, 2_000);
       const before = lastPdfSandboxChildPidForTests();
 
-      await expect(classifyDocumentStructure(truncated, "image/jpeg")).resolves.toBe("unsupported_structure");
+      await expect(classifyDocumentStructure(truncated, "image/jpeg")).resolves.toBe("supported_structure");
 
       expect(lastPdfSandboxChildPidForTests(), "the decode was tried in a child").not.toBe(before);
       expect(pdfStructureSandboxInFlightForTests()).toBe(0);

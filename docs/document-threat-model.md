@@ -202,7 +202,7 @@ recoverable state.
   Running out of memory, timing out or crashing answers
   `document_preview_failed` and logs one record with no file detail. A
   source check (`tests/unit/pdf-no-in-process-reader.test.mjs`) fails if
-  anything else on the server loads PDF.js or the canvas backend. Keeping it patched is the
+  anything else on the server loads PDF.js or the canvas backend. Keeping them patched is the
   standing cost. The optional Tika service
   remains the separately isolated parser/OCR boundary described
   below.
