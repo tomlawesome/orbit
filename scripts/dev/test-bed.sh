@@ -35,7 +35,8 @@
 #                        scripts/backup.sh and scripts/restore.sh address)
 #
 # .env-orbit (made by scripts/configure.sh) is read, never changed. `up` creates
-# the bed's test-only secret files in .orbit-secrets when they are missing, and
+# the bed's test-only secret files in .orbit-secrets when they are missing (the
+# certificate also when it expires within a day), and
 # leaves existing ones alone: smtp-password (random) and the GreenMail
 # certificate files greenmail-key.pem, greenmail-ca.pem and greenmail.p12
 # (scripts/dev-greenmail-cert.sh). A bed that
@@ -48,7 +49,7 @@
 # alone, which has no image or demo address, so `run` exports ORBIT_IMAGE (read
 # from the running orbit-app container), DEMO_HOST, ORBIT_BIND_ADDRESS,
 # ORBIT_PORT and COMPOSE_PROJECT_NAME for CMD, then execs it unchanged.
-# Only one bed can run at a time: it publishes fixed host ports (3443, 3000,
+# Only one bed can run at a time: it publishes fixed host ports (3443, 3001,
 # 4444 and the mail sidecar's). The default project, orbit, is what backup.sh
 # and restore.sh address, so it shares names with a main-checkout stack; to run
 # next to another Orbit stack, pass --project <name>.
@@ -263,7 +264,10 @@ make_secrets() {
     (umask 077; openssl rand -hex 32 >.orbit-secrets/smtp-password) \
       || die "could not make .orbit-secrets/smtp-password."
   fi
-  if [[ ! -f .orbit-secrets/greenmail-key.pem || ! -f .orbit-secrets/greenmail-ca.pem || ! -f .orbit-secrets/greenmail.p12 ]]; then
+  # dev-greenmail-cert.sh signs for 30 days; an expired or nearly expired CA
+  # is regenerated the same as a missing one, as test-e2e-local.sh does (#1236).
+  if [[ ! -f .orbit-secrets/greenmail-key.pem || ! -f .orbit-secrets/greenmail-ca.pem || ! -f .orbit-secrets/greenmail.p12 ]] \
+    || ! openssl x509 -in .orbit-secrets/greenmail-ca.pem -noout -checkend 86400 >/dev/null 2>&1; then
     bash scripts/dev-greenmail-cert.sh >/dev/null || die "could not make the GreenMail certificate files."
   fi
 }
