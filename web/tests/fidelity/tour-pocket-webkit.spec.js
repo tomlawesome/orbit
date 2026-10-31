@@ -577,12 +577,21 @@ function waitsRunOut() {
  *  from the start through chapter 3's arrival home — the hatch, the veil,
  *  the walk to /create, the reader's tap, the form and the walk back,
  *  where the owner's film stuck — which is every place the pill docks and
- *  every kind of beat, at a third of the time. */
+ *  every kind of beat, at a third of the time.
+ *  @type {{ width: number, height: number, through: "yours" | "lands" }[]} */
 const PHONES = [
   { width: 430, height: 932, through: "yours" },
   { width: 390, height: 844, through: "lands" },
   { width: 360, height: 780, through: "lands" },
 ];
+
+/** How long a film that never ends is watched, by how far a phone plays it:
+ *  far past a loaded host's pace (a quiet one plays the whole film in ~3
+ *  minutes). The test's own limit is derived from it, FILM_TAIL above it for
+ *  the checks that follow the loop, so the two cannot cross and leave a bare
+ *  "Test timeout" where the named failure should be (T-Q21). */
+const FILM_BOUND = { yours: 840_000, lands: 380_000 };
+const FILM_TAIL = 60_000;
 
 test.describe("the pocket film in WebKit (#1174)", () => {
   test.use({ reducedMotion: "reduce" });
@@ -595,7 +604,7 @@ test.describe("the pocket film in WebKit (#1174)", () => {
        clocks are the generous bounds that end a film that never finishes.
        Speed is logged, not asserted. */
     test(`plays ${phone.through === "yours" ? "end to end" : "through chapter 3"} at ${phone.width}x${phone.height} under normal motion: the clock keeps moving through a reader's tap, the pill stays in front and readable, nothing flashes, and every mark is where it belongs`, async ({ browser }) => {
-      test.setTimeout(phone.through === "yours" ? 900_000 : 420_000);
+      test.setTimeout(FILM_BOUND[phone.through] + FILM_TAIL);
       const size = { width: phone.width, height: phone.height };
       const context = await browser.newContext({
         viewport: size, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
@@ -637,9 +646,8 @@ test.describe("the pocket film in WebKit (#1174)", () => {
       let samples = 0;
       let barSeen = false;
       const started = Date.now();
-      /* A bound on a film that never ends, far past a loaded host's pace
-         (a quiet one plays it in ~3 minutes); the test's own limit is above it. */
-      const bound = phone.through === "yours" ? 840_000 : 380_000;
+      /* A bound on a film that never ends; the test's own limit is derived above it. */
+      const bound = FILM_BOUND[phone.through];
       while (!done && Date.now() - started < bound) {
         const [s, first] = await Promise.all([page.evaluate(sampleTransport), page.evaluate(sample)]);
         /* A callout or ring fault is judged once the page has come to rest:
