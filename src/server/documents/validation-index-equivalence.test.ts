@@ -523,7 +523,6 @@ describe("a candidate-skipping search for the end of an object or trailer answer
  * oracle and for not crashing.
  */
 const WINDOW = 3_072;
-const SEARCH_START_LINE = 7; // "1 0 obj" and "trailer" are both seven bytes
 
 interface HeaderShape {
   /** First number, gap, second number, gap, keyword: the pieces of the header. */
