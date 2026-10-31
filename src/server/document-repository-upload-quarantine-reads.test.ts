@@ -116,19 +116,22 @@ vi.mock("@/server/documents/validation", () => ({
   },
 }));
 
+const SEALED_ENVELOPE = {
+  algorithm: "aes-256-gcm",
+  keyId: "key-1",
+  iv: Buffer.alloc(12, 2),
+  authTag: Buffer.alloc(16, 3),
+  wrappedKey: Buffer.alloc(32, 4),
+  wrappedKeyIv: Buffer.alloc(12, 5),
+  wrappedKeyAuthTag: Buffer.alloc(16, 6),
+};
+
 vi.mock("@/server/documents/crypto", async (importActual) => ({
   envelopeOf: (await importActual<typeof import("@/server/documents/crypto")>()).envelopeOf,
-  encryptDocument: () => ({
-    ciphertext: Buffer.from("ciphertext"),
-    envelope: {
-      algorithm: "aes-256-gcm",
-      keyId: "key-1",
-      iv: Buffer.alloc(12, 2),
-      authTag: Buffer.alloc(16, 3),
-      wrappedKey: Buffer.alloc(32, 4),
-      wrappedKeyIv: Buffer.alloc(12, 5),
-      wrappedKeyAuthTag: Buffer.alloc(16, 6),
-    },
+  // The sealer is a stand-in: the bytes are sealed inside the mocked storage below.
+  createDocumentSealer: () => ({
+    update: () => Buffer.alloc(0),
+    final: () => ({ tail: Buffer.alloc(0), envelope: SEALED_ENVELOPE }),
   }),
 }));
 
@@ -152,6 +155,9 @@ vi.mock("@/server/documents/storage", () => {
     }
     createStorageKey() {
       return "a".repeat(64);
+    }
+    async sealQuarantine() {
+      return { ciphertextSize: 10, envelope: SEALED_ENVELOPE };
     }
     async writeCiphertext() {}
     async deleteCiphertext() {}
