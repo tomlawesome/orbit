@@ -459,9 +459,10 @@ set -Eeuo pipefail
 #     NOTE (stage two, since this slice): despite being classified
 #     mutation=reversible above, regenerate-secret is NOT in stage one's
 #     executable safe set — see "EXECUTE MODE (--execute --safe-only)" below.
-#     The owner's 2026-08-13 slice 4 decision names the stage-one safe set
-#     explicitly by action class (fix-permissions, restore-transaction,
-#     restart-services); that enumerated list, not this table's own
+#     The stage-one safe set is named explicitly by action class: the three
+#     the owner ratified on 2026-08-13 (fix-permissions, restore-transaction,
+#     restart-services) plus restore-compose-file (#1484, owner confirmed
+#     2026-10-31); that enumerated list, not this table's own
 #     mutation=reversible tag, is authoritative for what
 #     `--execute --safe-only` may act on. A newly minted secret is live
 #     credential material other processes may already be holding open, which
@@ -552,10 +553,14 @@ set -Eeuo pipefail
 # EXECUTE MODE (--execute --safe-only) — issue #261 SLICE 4, STAGE ONE
 # --------------------------------------------------------------------------
 # `--execute --safe-only` runs the identical diagnosis and planning above
-# and then EXECUTES only the actions in the fixed stage-one safe set named
-# by the owner's 2026-08-13 slice 4 decision:
+# and then EXECUTES only the actions in the fixed stage-one safe set: the
+# three named by the owner's 2026-08-13 slice 4 decision plus
+# restore-compose-file (#1484, owner confirmed 2026-10-31), which only puts
+# back a MISSING docker-compose.yml from the pinned image and never replaces
+# one that exists:
 #
 #   fix-permissions       restore-transaction       restart-services
+#   restore-compose-file
 #
 # Every other action class the plan can produce (`regenerate-secret`,
 # `rerun-configuration`, `manual`) is always reported and never executed —
@@ -572,9 +577,10 @@ set -Eeuo pipefail
 # --------------------------------------------------------------------------
 # `regenerate-secret` is classified mutation=reversible in the table above,
 # but it is deliberately NOT in stage one's safe set (see the NOTE inside
-# that table entry). The three action classes actually executed here are
-# exactly the three the owner named; nothing is inferred from the plan's
-# own backup=/mutation= columns.
+# that table entry). The four action classes actually executed here, and
+# no others, are the three the owner named on 2026-08-13 plus
+# restore-compose-file (#1484, confirmed 2026-10-31); nothing is inferred
+# from the plan's own backup=/mutation= columns.
 #
 # Action implementations
 # --------------------------------------------------------------------------
@@ -1295,7 +1301,7 @@ usage() {
   printf 'Usage: %s (--check|--plan|--execute (--safe-only|--dangerous|--safe-only --dangerous)|--export-diagnostics) [--plain]\n' "$0" >&2
   printf 'Orbit repair: --execute requires --safe-only and/or --dangerous.\n' >&2
   printf 'Orbit repair: --safe-only executes the stage-one safe/reversible action set\n' >&2
-  printf 'Orbit repair: (fix-permissions, restore-transaction, restart-services).\n' >&2
+  printf 'Orbit repair: (fix-permissions, restore-transaction, restart-services, restore-compose-file).\n' >&2
   printf 'Orbit repair: --dangerous executes the stage-two rotate-database-credential and\n' >&2
   printf 'Orbit repair: regenerate-secret actions, which always require interactive or\n' >&2
   printf 'Orbit repair: machine-prompt approval — there is no flag that runs either unattended.\n' >&2
@@ -1460,7 +1466,8 @@ readonly min_recovery_passphrase_length=12
 # name) is deliberate: it is nameable in step-failure recovery guidance.
 readonly staged_postgres_password_path="$secrets_directory/.repair-staged-postgres-password"
 
-# Stage-one safe set (issue #261, owner decision 2026-08-13). See "Safe set
+# Stage-one safe set (issue #261, owner decision 2026-08-13; joined by
+# restore-compose-file under #1484, owner confirmed 2026-10-31). See "Safe set
 # is a fixed allowlist" above for why this is not derived from the plan's
 # own mutation= classification.
 readonly -a safe_action_classes=(fix-permissions restore-transaction restart-services restore-compose-file)
