@@ -19,7 +19,7 @@
     "it reaches through `*anchor` references and `extends:`, the global `default`,",
     "`variables`, `workflow`, `stages` and `include` blocks (comments and blank",
     "lines dropped), the scripts/ci/** files that text names (followed through",
-    "the scripts themselves), and the `definition` list below: the reuse",
+    "the scripts' code lines; a comment is prose), and the `definition` list below: the reuse",
     "machinery, in every key, so a change to it invalidates all evidence at once.",
     "`pipelineOwned` names the paths that axis owns. A job marked",
     "`definitionCoversPipeline` reaches them only through its own definition, so",

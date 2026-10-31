@@ -23,7 +23,7 @@
  *     through `*anchor` references and `extends:`, the global `default`,
  *     `variables`, `workflow`, `stages` and `include` blocks, comments and
  *     blank lines dropped; the `scripts/ci/**` files that text names,
- *     followed through the scripts themselves; and the reuse machinery
+ *     followed through the scripts' code lines (a comment is prose); and the reuse machinery
  *     (`definition` in job-inputs.json). A change to one job's YAML reruns
  *     that job and nothing else. ADR-0028 first hashed the whole file and
  *     rejected "only the job's own YAML" because anchors make the block
@@ -239,12 +239,24 @@ export function checkoutEntries(config, job, entries) {
 
 /* ---- The per-job definition (#1546) ------------------------------------ */
 
-// A path ends on a name character, never on the dot that ends a sentence.
-const SCRIPT_PATH = /scripts\/ci\/[A-Za-z0-9_./-]*[A-Za-z0-9_/-]/gu;
+// A path ends on a name character: never on the dot that ends a sentence,
+// nor on the slash that makes it a directory (`scripts/ci/**` in a rule names
+// no file).
+const SCRIPT_PATH = /scripts\/ci\/[A-Za-z0-9_./-]*[A-Za-z0-9_-]/gu;
 // What the walk opens to find more ci scripts: the scripts, the compose
 // files and the Dockerfiles a job's text names. Only scripts/ci paths are
 // hashed here; the rest sit in the checkout axis.
-const REFERENCE_PATH = /(?:scripts\/[A-Za-z0-9_./-]*[A-Za-z0-9_/-]|compose\/[A-Za-z0-9_./-]*[A-Za-z0-9_/-]|docker-compose[A-Za-z0-9_.-]*\.ya?ml|Dockerfile[A-Za-z0-9_.-]*)/gu;
+const REFERENCE_PATH = /(?:scripts\/[A-Za-z0-9_./-]*[A-Za-z0-9_-]|compose\/[A-Za-z0-9_./-]*[A-Za-z0-9_-]|docker-compose[A-Za-z0-9_.-]*\.ya?ml|Dockerfile[A-Za-z0-9_.-]*)/gu;
+// A whole-line comment is prose, not a call. The pipeline file's comments
+// are dropped before its paths are read (topLevelBlocks); a followed
+// script's are dropped here for the same reason -- one header that spelt
+// out the path shapes it matches once carried half of scripts/ci into
+// every key. A `# shellcheck source=` directive stays: it names the file
+// the next line sources through a variable.
+const PROSE_LINE = /^\s*(?:#(?!\s*shellcheck\s+source=)|\/\/|\/\*|\*(?:\s|$))/u;
+function codeLines(text) {
+  return String(text).split("\n").filter((line) => !PROSE_LINE.test(line)).join("\n");
+}
 // An anchor or alias follows whitespace or a flow-collection bracket or comma.
 const ANCHOR_DEFINITION = /(?<=[\s[{,])&([A-Za-z0-9_-]+)(?![\w-])/gu;
 const ANCHOR_REFERENCE = /(?<=[\s[{,])\*([A-Za-z0-9_-]+)(?![\w-])/gu;
@@ -371,7 +383,7 @@ export function definitionScripts(paths, readFile) {
       continue;
     }
     if (typeof text !== "string") continue;
-    for (const found of text.match(REFERENCE_PATH) ?? []) if (!seen.has(found)) queue.push(found);
+    for (const found of codeLines(text).match(REFERENCE_PATH) ?? []) if (!seen.has(found)) queue.push(found);
   }
   return [...seen].filter((path) => /^scripts\/ci\//u.test(path)).sort();
 }
