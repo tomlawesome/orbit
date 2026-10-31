@@ -526,6 +526,23 @@ describe("repair.sh's read-only contract says what diagnosis actually runs (#158
     expect(mountSentence, "no sentence names the read-only mount of the deployment directory and its secrets").toBe(true);
   });
 
+  // The two containers differ: the Compose-file read mounts nothing, the configuration check
+  // bind-mounts the deployment directory read-only. A line that covers both must not say "no
+  // volume" / "no mount"; each container's mounts are stated on its own.
+  it("the shared line about both throwaway containers names no mount for both", () => {
+    const start = contract.indexOf("two throwaway containers");
+    expect(start, "the contract no longer introduces the two throwaway containers").toBeGreaterThan(-1);
+    const first = contract.indexOf("the configuration check", start);
+    expect(first, "the contract no longer describes the configuration check container").toBeGreaterThan(start);
+    const shared = contract.slice(start, first);
+    expect(shared, "the shared line says both containers get no volume or mount").not.toMatch(/no (volume|mount)/i);
+
+    const composeStart = contract.indexOf("the Compose-file read,", first);
+    expect(composeStart, "the contract no longer describes the Compose-file read container on its own").toBeGreaterThan(first);
+    const composeRead = contract.slice(composeStart, composeStart + 400);
+    expect(composeRead, "the Compose-file read's own description does not say it mounts nothing").toMatch(/mounts nothing/i);
+  });
+
   it("names the .orbit-image pin that configure.sh resolves first, as the image source the never-pull guard checks", () => {
     expect(contract).toContain(".orbit-image");
   });
