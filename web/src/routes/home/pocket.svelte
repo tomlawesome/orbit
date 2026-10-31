@@ -512,6 +512,9 @@
   });
   /* Runs once, on mount: nothing it reads is reactive state. */
   $effect(() => {
+    /* Only the dialect CSS is showing replays the stash; the desk's onMount
+       takes the other side of the same query, so it is sent once. */
+    if (!isPocket()) return;
     held.retryStashed((error) => error instanceof WorkspaceError && error.code === "version_conflict");
   });
 

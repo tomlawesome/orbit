@@ -643,9 +643,11 @@
     return () => removeEventListener("pagehide", flush);
   });
   /* A completion a previous visit held and never saw confirmed (#1151
-     W1-S3). The pocket picks it up itself when it is the dialect showing. */
+     W1-S3). The pocket picks it up itself when it is the dialect showing;
+     the two guards are one query, `isPocket()`, so no window width
+     satisfies both. */
   onMount(() => {
-    if (!matchMedia(DESK).matches) return;
+    if (isPocket()) return;
     held.retryStashed((error) => error instanceof WorkspaceError && error.code === "version_conflict");
   });
 
