@@ -35,6 +35,7 @@
   import { pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { createReceiptActs } from "../inbox/acts.js";
   import { completeToday, createDrawerActs } from "./drawer-acts.svelte.js";
+  import { DONE_UNREAD } from "$lib/data/landed.js";
   import { WIDE_QUERY, cardWidthOf, pairOf, trackOf } from "./preview-pair.js";
   import { isPocket } from "$lib/pocket/media.js";
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
@@ -1001,7 +1002,8 @@
     stripProblem = problem;
     if (!done) return;
     stripOpen = false;
-    try { view = await readHome(); } catch (error) { stripProblem = wordsOf(error, "couldn't complete it — try again"); }
+    /* Completed: a failed read of home after it is done-but-unread, not a refusal. */
+    try { view = await readHome(); } catch { stripProblem = DONE_UNREAD; }
   }
 
   /** @param {string} name */

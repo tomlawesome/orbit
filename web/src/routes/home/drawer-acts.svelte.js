@@ -73,6 +73,7 @@
  */
 import { applyCommand, attachItemDocument, dueDateIn, readItemDocuments, readReminders, removeDocument, restoreDocument, wordsOf } from "$lib/data/workspace.js";
 import { completeCommand, snoozeCommand, upsertCommand } from "$lib/data/commands.js";
+import { rereadAfterLanded } from "$lib/data/landed.js";
 import { amendedOf, proposedItemOf } from "$lib/editing/item-draft.js";
 import { dayMonth } from "$lib/format.js";
 import { reviewLockedOf } from "$lib/pocket/review.js";
@@ -137,17 +138,23 @@ export function createDrawerActs({
     save: async (item, edits) => {
       if (item.status === "suggested") { await addSuggestion(item, edits); return; }
       await applyCommand(upsertCommand(item, edits));
-      await reread({});
+      /* Saved: a failed read after it is said under the item, not as "not
+         saved". No wake: save() wakes "saved" once the rows close. */
+      await rereadAfterLanded(() => reread({}), (words) => say(item.id, words));
     },
     /* one card at a time: a chooser puts a paper's preview away */
     onchoose: () => { preview = null; },
   });
 
-  /** An act landed: read again and say so, in the screen's order. @param {Change} change @param {string} words */
-  async function landed(change, words) {
+  /** An act landed: read again and say so, in the screen's order. A read
+      that fails is said under the item and in the wake as done-but-unread,
+      never as the act refused; answers whether the read landed.
+      @param {string} id @param {Change} change @param {string} words */
+  async function landed(id, change, words) {
     if (wakeFirst) wake(words);
-    await reread(change);
-    if (!wakeFirst) wake(words);
+    const read = await rereadAfterLanded(() => reread(change), (unread) => { say(id, unread); wake(unread); });
+    if (read && !wakeFirst) wake(words);
+    return read;
   }
 
   /* ---- #1319: A SUGGESTION AMENDED IN ITS DRAWER'S OWN ROWS --------------
@@ -250,18 +257,28 @@ export function createDrawerActs({
   async function removePaper(paper) {
     await removeDocument(paper.id);
     preview = null;
-    await reread(PAPERS);
+    const id = open();
+    /** @param {string} words */
+    const unread = (words) => { if (id) say(id, words); };
+    /* The paper is gone whatever the read did: the undo is offered either
+       way, and a failed read is said under the item as done-but-unread. */
+    await rereadAfterLanded(() => reread(PAPERS), unread);
     wake(`${paper.name} removed`, {
       // The removed wake is already gone by now, so a refused restore must
       // say so or the paper silently stays removed.
-      undo: () => { restoreDocument(paper.id).then(() => reread(PAPERS)).catch(() => wake(`couldn't restore ${paper.name} — try again`, { failure: true })); },
+      undo: () => {
+        restoreDocument(paper.id)
+          .then(() => rereadAfterLanded(() => reread(PAPERS), unread))
+          .catch(() => wake(`couldn't restore ${paper.name} — try again`, { failure: true }));
+      },
     });
   }
   /** @param {{ id: string }} paper */
   async function restorePaper(paper) {
     await restoreDocument(paper.id);
     preview = null;
-    await reread(PAPERS);
+    const id = open();
+    await rereadAfterLanded(() => reread(PAPERS), (words) => { if (id) say(id, words); });
   }
 
   /* The search's own read of every paper home holds (#1057), made once per
@@ -331,11 +348,14 @@ export function createDrawerActs({
     busy = { id, kind };
     say(id, null);
     try {
-      await applyCommand(build(item));
+      try {
+        await applyCommand(build(item));
+      } catch (error) {
+        say(id, wordsOf(error, `couldn't ${kind} it — try again`));
+        return;
+      }
       if (leaves) leave(id);
-      await landed({ leaves }, words);
-    } catch (error) {
-      say(id, wordsOf(error, `couldn't ${kind} it — try again`));
+      await landed(id, { leaves }, words);
     } finally {
       busy = null;
     }
@@ -350,8 +370,9 @@ export function createDrawerActs({
       await attachItemDocument(item.householdId, id, file, attachIdFor(id, file));
       forgetAttachId(id, file);
       // The papers are read after the view: the refreshed view lists the
-      // item as now carrying one (a first paper was left out).
-      await landed({ papers: true }, attached(file.name, item.title));
+      // item as now carrying one (a first paper was left out). A failed read
+      // is said by `landed`, which never throws.
+      await landed(id, { papers: true }, attached(file.name, item.title));
     } catch (error) {
       say(id, wordsOf(error, "couldn't attach it — try again"));
     } finally {
@@ -392,14 +413,19 @@ export function createDrawerActs({
     modes.completeProblem = null;
     modes.recording = true;
     try {
-      const nextDate = dueDateIn(await applyCommand(completeCommand(item, fields)), item.householdId, item.id);
+      let answer;
+      try {
+        answer = await applyCommand(completeCommand(item, fields));
+      } catch (error) {
+        modes.completeProblem = wordsOf(error, "couldn't complete it — try again");
+        return null;
+      }
+      const nextDate = dueDateIn(answer, item.householdId, item.id);
       modes.cancelComplete();
       if (!nextDate) leave(id);
-      await landed({ leaves: !nextDate }, `Completed${nextDate ? ` · next due ${dayMonth(nextDate)}` : ""} · ${item.title}`);
+      /* The next date is answered whatever the read did: it is recorded. */
+      await landed(id, { leaves: !nextDate }, `Completed${nextDate ? ` · next due ${dayMonth(nextDate)}` : ""} · ${item.title}`);
       return nextDate;
-    } catch (error) {
-      modes.completeProblem = wordsOf(error, "couldn't complete it — try again");
-      return null;
     } finally {
       busy = null;
       modes.recording = false;
