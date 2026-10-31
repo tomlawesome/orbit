@@ -31,7 +31,7 @@ const attachmentTransferFailureCodes = new Set([
 ]);
 
 /**
- * The eight reasons a member can be given for a failed mail-in receipt,
+ * The nine reasons a member can be given for a failed mail-in receipt,
  * folded from the ~25 stored `failure_code` values (#1143). The member
  * needs "what kind of thing went wrong", not the worker's step; the raw
  * `failure_code` stays on the row for support.
@@ -42,6 +42,7 @@ export type FailureReason =
   | "malware"
   | "scanner_off"
   | "not_kept"
+  | "interrupted"
   | "wrong_recipient"
   | "account_disabled"
   | "unknown";
@@ -73,6 +74,8 @@ const failureReasonByCode: Record<string, FailureReason> = {
   discard_purge_failed: "not_kept",
   staging_purge_pending: "not_kept",
   staging_expiry_pending: "not_kept",
+  // The item exists; only finishing it was cut short (#1568).
+  approval_interrupted: "interrupted",
   recipient_mismatch: "wrong_recipient",
   account_disabled: "account_disabled",
 };
@@ -109,6 +112,9 @@ export function reviewInboxState(status: string, failureCode: string | null | un
      arrived and was deliberately left alone. Saying so is the point — a held
      message that looked "unavailable" would read as something going wrong. */
   if (status === "held") return { classification: "waiting", canApprove: false, canDiscard: false, message: "Collection is paused. This will be prepared when you turn it back on.", reason };
+  /* #1568: an interrupted approval says so in its own words, whether or not
+     documents remain to attach (the worker's step is not the member's business). */
+  if (canRetryAttachmentTransfer && failureCode === "approval_interrupted") return { classification: "retry", canApprove: true, canDiscard: true, message: "Your earlier approval was cut short after the item was recorded. Try once more to finish it.", reason };
   if (canRetryAttachmentTransfer) return { classification: "retry", canApprove: true, canDiscard: true, message: "The item was created; retry to finish attaching the selected documents.", reason };
   if (status === "recoverable") return { classification: "retry", canApprove: false, canDiscard: true, message: "Private cleanup is waiting to finish. You can retry discard.", reason };
   return { classification: "unavailable", canApprove: false, canDiscard: false, message: "This incoming document is no longer available for review.", reason };
