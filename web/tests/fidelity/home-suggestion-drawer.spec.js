@@ -230,3 +230,97 @@ test("cancel, asked twice over a change, puts the readings back and sends nothin
   await expect(drawer.getByRole("button", { name: "review & amend →" })).toBeFocused();
   expect(seen.approvals).toHaveLength(0);
 });
+
+/*
+ * #1584 web-wr9: a receipt with an earlier approval still pending. The review
+ * read reports the pair (#1396), so the approval is that pair sent verbatim.
+ * Specs match the replayed wake on the fragment `earlier approval`, never on
+ * the whole sentence: the words belong to the seam alone.
+ */
+const PAIR = {
+  operationId: "7a7a7a7a-7a7a-47a7-87a7-7a7a7a7a7a7a",
+  request: {
+    source: { kind: "mailbox_draft", receiptId: "r-insurance", draftVersion: 3 },
+    householdId: "hh-harlow-1",
+    sectionId: "s-home",
+    action: "create_separate",
+    item: { kind: "renewal", title: "Home insurance renewal", currency: "GBP" },
+    attachmentIds: ["a-1"],
+  },
+};
+const REPLAY_BODY = { ...PAIR.request, operationId: PAIR.operationId };
+
+/**
+ * Makes the review read answer the pair. Registered after answerApproval's
+ * routes, so it is asked first; every other call falls back to them.
+ * @param {import("@playwright/test").Page} page
+ * @param {(call: number) => boolean} [reports]  whether the nth review GET reports it (default: all)
+ */
+async function reportPair(page, reports = () => true) {
+  let call = 0;
+  await page.route("**/api/imap-inbox/r-*", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const id = new URL(route.request().url()).pathname.split("/").pop() ?? "";
+    call += 1;
+    return route.fulfill({
+      json: {
+        receipt: { id, draftVersion: 3, proposal: { title: "Home insurance renewal" } },
+        sections: [{ id: "s-home" }, { id: "s-dates" }],
+        attachments: [{ id: "a-1" }],
+        ...(reports(call) ? { approval: PAIR } : {}),
+      },
+    });
+  });
+}
+
+/** Opens the rows on the suggestion and types the corrected title. @param {import("@playwright/test").Page} page */
+async function amendTitle(page) {
+  await openHome(page);
+  await page.locator(ROW, { hasText: "Home insurance renewal" }).click();
+  const drawer = page.locator(DRAWER);
+  await drawer.getByRole("button", { name: "review & amend →" }).click();
+  await page.locator('[id="r-insurance"] [data-ed="title"]').fill("Home insurance, corrected");
+  return drawer;
+}
+
+test("#1584 web-wr9-3: an amend over a pending pair is replayed, and the wake says so", async ({ page }) => {
+  const seen = await answerApproval(page);
+  await reportPair(page);
+  const drawer = await amendTitle(page);
+  await drawer.getByRole("button", { name: "add to orbit", exact: true }).click();
+  await expect.poll(() => seen.approvals.length).toBe(1);
+  /* the pair verbatim, not the corrected title */
+  expect(seen.approvals[0]).toEqual(REPLAY_BODY);
+  expect(seen.approvals[0].item.title).toBe("Home insurance renewal");
+  await expect(page.locator(DRAWER)).toHaveCount(0);
+  const wake = page.getByRole("status").filter({ hasText: "earlier approval" });
+  await expect(wake).toBeVisible();
+  await expect(wake).not.toContainText("added to your orbit");
+  await expect(page.getByText(/not added/i)).toHaveCount(0);
+});
+
+test("#1584 web-wr9-2: a failed re-read after an amended add is done, not 'not added'", async ({ page }) => {
+  const seen = await answerApproval(page);
+  /* answer the approval, then sink the one home read that follows it */
+  await page.route("**/api/reviewed-intake/approve", async (route) => {
+    seen.approvals.push(route.request().postDataJSON());
+    let sunk = false;
+    await page.route("**/api/workspace", (read) => {
+      if (sunk) return read.fallback();
+      sunk = true;
+      return read.abort();
+    });
+    await route.fulfill({ json: { outcome: "approved", itemId: "i-new" } });
+  });
+  const drawer = await amendTitle(page);
+  await drawer.getByRole("button", { name: "add to orbit", exact: true }).click();
+  await expect.poll(() => seen.approvals.length).toBe(1);
+  await expect(page.locator(DRAWER)).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "added to your orbit" }))
+    .toHaveText("added to your orbit · Home insurance, corrected");
+  /* The done-but-unread line is said under the row (U1 pins the `say`), but
+     the desk draws a row's `.mail-problem` only inside the open drawer
+     (SuggestionView), and the drawer has just left: nothing is drawn to
+     assert. The redesign expected the line to stand under the stale row. */
+  await expect(page.getByText(/not added/i)).toHaveCount(0);
+});

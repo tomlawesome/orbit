@@ -61,4 +61,26 @@ describe("W-R9: a replayed approval lands with its note", () => {
     expect(await acts.decide(receipt, "approve", { amended, sectionId: "s1" })).toBe(true);
     expect(landed).toEqual([[receipt, "approve", amended]]);
   });
+
+  /* #1584 web-wr9-1: the link the pending sheet's (null, null) relies on. */
+  it("A1. a pair with no amendment lands plain: landed(receipt, 'approve', null), nothing said", async () => {
+    ws.approveWithOperation.mockResolvedValue({ ok: true });
+    /** @type {unknown[][]} */
+    const landed = [];
+    /** @type {Array<string | null>} */
+    const said = [];
+    const acts = createReceiptActs({
+      view: () => /** @type {any} */ ({ suggestions: [suggestion], primary: "h1" }),
+      operationIds: new Map(),
+      reload: async () => {},
+      say: (_id, words) => { said.push(words); },
+      busy: () => {},
+      landed: /** @type {any} */ ((...args) => { landed.push(args); }),
+    });
+    const receipt = { id: "r1" };
+    expect(await acts.decide(receipt, "approve", { amended: null, sectionId: null })).toBe(true);
+    expect(landed).toEqual([[receipt, "approve", null]]);
+    expect(landed[0], "no fourth argument").toHaveLength(3);
+    expect(said.filter((words) => words !== null)).toEqual([]);
+  });
 });

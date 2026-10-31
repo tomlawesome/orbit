@@ -49,13 +49,18 @@ const itemOf = (/** @type {string} */ id) => ({
   kind: "task", version: 2, currency: "GBP",
 });
 
-/** @param {{ reread: any, wakeFirst?: boolean }} how */
-function make({ reread, wakeFirst = false }) {
+/** The home view an amended add looks its suggestion up in. */
+const suggestionView = () => /** @type {any} */ ({
+  suggestions: [{ id: "s1", receiptId: "r1", householdId: "h1" }], primary: "h1", households: [],
+});
+
+/** @param {{ reread: any, wakeFirst?: boolean, amend?: any, view?: any }} how */
+function make({ reread, wakeFirst = false, amend = () => null, view = () => null }) {
   const say = vi.fn();
   const leave = vi.fn();
   const acts = drawer.createDrawerActs({
-    view: () => null, reread, say, focus: () => {}, open: () => "open",
-    itemOf: (id) => itemOf(id), amend: () => null, leave, wakeFirst,
+    view, reread, say, focus: () => {}, open: () => "open",
+    itemOf: (id) => itemOf(id), amend, leave, wakeFirst,
   });
   return { acts, say, leave, wake: wakeSpy.wake };
 }
@@ -259,5 +264,104 @@ describe("a paper removed or restored from the reader is not read back as refuse
 
     expect(order).toEqual(["reread", "wake"]);
     expect(say).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * #1584 web-wr9-2: the rows' amended add of a suggestion. The approval has
+ * landed when the seam answers; the home read after it is the drawer acts'
+ * (rereadAfterLanded, `{ leaves: true }`), so a read that fails is said under
+ * the suggestion's row as done-but-unread and never turns the add into
+ * "not added". The done line is said, not woken: the "added" or replayed
+ * wake follows at once.
+ */
+describe("an amended add that landed is not read back as refused (#1584 web-wr9-2)", () => {
+  const NOTE = "It went in with the values from your earlier approval; your changes were not applied.";
+
+  /** Rows open on a suggestion, its dry run stood in as "it will do". @param {{ amend: any, reread: any }} how */
+  function openRows({ amend, reread }) {
+    const made = make({ reread, amend, view: suggestionView });
+    made.acts.modes.startEdit(/** @type {any} */ ({ ...itemOf("s1"), status: "suggested" }));
+    made.acts.modes.edit.answered = true;
+    made.acts.modes.edit.refusal = null;
+    return made;
+  }
+  const noNotAdded = (/** @type {any} */ spy) =>
+    expect(spy.mock.calls.flat().some((/** @type {unknown} */ arg) => /not added/i.test(String(arg)))).toBe(false);
+
+  it("U1. an amended add whose re-read fails is done, not 'not added'", async () => {
+    const reread = failedRead();
+    const { acts, say, leave, wake } = openRows({ amend: vi.fn().mockResolvedValue(null), reread });
+    await acts.addAmended();
+
+    expect(reread).toHaveBeenCalledTimes(1);
+    expect(reread).toHaveBeenCalledWith({ leaves: true });
+    expect(acts.modes.edit.id).toBeNull();
+    expect(acts.modes.edit.problem).toBeNull();
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(leave).toHaveBeenCalledWith("s1");
+    expect(say).toHaveBeenLastCalledWith("s1", expect.stringMatching(DONE), "suggestion");
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake).toHaveBeenCalledWith("added to your orbit · Boiler");
+    noNotAdded(say);
+    noNotAdded(wake);
+  });
+
+  it("U2. a replayed add lands with the seam's words", async () => {
+    const reread = goodRead();
+    const { acts, say, leave, wake } = openRows({ amend: vi.fn().mockResolvedValue({ replayed: true, message: NOTE }), reread });
+    await acts.addAmended();
+
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(leave).toHaveBeenCalledWith("s1");
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake).toHaveBeenCalledWith(NOTE);
+    expect(say.mock.calls.some((/** @type {unknown[]} */ c) => c[1] === NOTE), "the note is not said under the row").toBe(false);
+    expect(acts.modes.edit.id).toBeNull();
+  });
+
+  it("U2b. a replayed add reads home once, as every landed act does", async () => {
+    const reread = goodRead();
+    const { acts } = openRows({ amend: vi.fn().mockResolvedValue({ replayed: true, message: NOTE }), reread });
+    await acts.addAmended();
+
+    expect(reread).toHaveBeenCalledTimes(1);
+    expect(reread).toHaveBeenCalledWith({ leaves: true });
+  });
+
+  it("U3. a replayed add whose re-read fails keeps the note and says done", async () => {
+    const reread = failedRead();
+    const { acts, say, leave, wake } = openRows({ amend: vi.fn().mockResolvedValue({ replayed: true, message: NOTE }), reread });
+    await acts.addAmended();
+
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake).toHaveBeenCalledWith(NOTE);
+    expect(say).toHaveBeenLastCalledWith("s1", expect.stringMatching(DONE), "suggestion");
+    expect(leave).toHaveBeenCalledWith("s1");
+    noNotAdded(say);
+    noNotAdded(wake);
+  });
+
+  it("U4. guard: a refused amend keeps its words and reads nothing", async () => {
+    const reread = goodRead();
+    const { acts, leave, wake } = openRows({ amend: vi.fn().mockResolvedValue("offline"), reread });
+    await acts.addAmended();
+
+    expect(acts.modes.edit.id).toBe("s1");
+    expect(acts.modes.edit.problem).toBe("not added — offline");
+    expect(reread).not.toHaveBeenCalled();
+    expect(leave).not.toHaveBeenCalled();
+    expect(wake).not.toHaveBeenCalled();
+  });
+
+  it("U5. guard: a partial amend is said under the row and reads nothing here", async () => {
+    const reread = goodRead();
+    const { acts, say, leave, wake } = openRows({ amend: vi.fn().mockResolvedValue({ partial: true, message: "documents pending" }), reread });
+    await acts.addAmended();
+
+    expect(say).toHaveBeenCalledWith("s1", "documents pending", "partial");
+    expect(reread).not.toHaveBeenCalled();
+    expect(leave).not.toHaveBeenCalled();
+    expect(wake).not.toHaveBeenCalled();
   });
 });

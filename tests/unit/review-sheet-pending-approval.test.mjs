@@ -318,3 +318,44 @@ describe("W-R9, X-F3: the sheet is closed until the review read answers", () => 
     expect(sheetText()).not.toContain("finishing your earlier approval");
   });
 });
+
+/*
+ * #1584 web-wr9-1: while a pair is pending the sheet offers no form, so what
+ * it hands the approval is not an amendment. It hands (null, null): the seam
+ * then answers a plain approval, not "the changes made here were not applied".
+ * A drawn form hands what the reader set.
+ */
+describe("#1584 web-wr9-1: what the sheet hands onsave", () => {
+  /** One press of the sheet's save: its submit button, once. */
+  const pressSave = async () => { go()?.click(); await settle(); };
+
+  it("T1. the pending sheet (pair from the review read) saves no amendment: onsave(null, null)", async () => {
+    reported = true;
+    const onsave = vi.fn(async () => true);
+    await openSheet(false, onsave);
+    expect(entryForm.mounts, "no form is drawn").toBe(0);
+    await pressSave();
+    expect(onsave).toHaveBeenCalledTimes(1);
+    expect(onsave.mock.calls[0]).toEqual([null, null]);
+  });
+
+  it("T2. the same with the pair given as the `approval` prop", async () => {
+    reported = true;
+    const onsave = vi.fn(async () => true);
+    await openSheet(true, onsave);
+    expect(entryForm.mounts, "no form is drawn").toBe(0);
+    await pressSave();
+    expect(onsave).toHaveBeenCalledTimes(1);
+    expect(onsave.mock.calls[0]).toEqual([null, null]);
+  });
+
+  it("T3. control: a drawn form hands its values", async () => {
+    reported = false;
+    const onsave = vi.fn(async () => true);
+    await openSheet(false, onsave);
+    expect(entryForm.mounts, "the form is drawn").toBeGreaterThan(0);
+    await pressSave();
+    expect(onsave).toHaveBeenCalledTimes(1);
+    expect(/** @type {any} */ (onsave.mock.calls[0])[0]).toMatchObject({ title: "Boiler cover", currency: "GBP" });
+  });
+});
