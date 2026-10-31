@@ -7,10 +7,13 @@
  * baseline taken after garbage collection, n being the document's size.
  *
  * - download: `openDocumentDownload` twice, each drained by a reader that
- *   keeps nothing. Warm under n / 2; the first under n (a whole copy fails
- *   both): the plaintext is only ever in flight in 1 MiB pieces.
+ *   frees each piece as it counts it. Warm under n / 2; the first under n (a
+ *   whole copy fails both): the path holds its 1 MiB read buffer and the piece
+ *   in flight. A consumer that drops pieces, as the HTTP response does, leaves
+ *   up to about 33 MiB to V8's collector, per process and independent of file
+ *   size; that is recorded in docs/architecture.md, not pinned here.
  * - preview-read: `readDocumentDownload` twice, each buffer zeroed and
- *   dropped as a page preview does. Warm under ceil(n / 3) * 4 (one plaintext
+ *   freed. Warm under ceil(n / 3) * 4 (one plaintext
  *   copy and a little: the ciphertext is no longer read whole beside it); the
  *   first under that plus n.
  * - recovery: the scanner-recovery worker processes two staged uploads of a

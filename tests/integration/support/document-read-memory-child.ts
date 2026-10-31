@@ -19,10 +19,15 @@
  *   mail parser's buffer already is when the attachment reaches the holding
  *   function.
  * - `download <userId> <documentId>`: two `openDocumentDownload` runs of a
- *   stored document, each drained with a reader that keeps nothing (a
- *   response body's consumer); the result is the bytes each run delivered.
+ *   stored document; the result is the bytes each run delivered. The reader
+ *   frees each piece as it counts it, so the figure is what the download path
+ *   holds: its read buffer and the piece in flight. Node's HTTP response does
+ *   not free pieces; behind it, up to about 33 MiB of dead pieces wait for
+ *   V8's external-memory trigger, per process and independent of file size
+ *   (measured 11-32 MiB warm with a dropping reader, five runs).
  * - `preview-read <userId> <documentId>`: two `readDocumentDownload` runs of
- *   it, each buffer zeroed and dropped as the page preview does.
+ *   it; the buffer is zeroed and freed, so the second run's figure is the
+ *   buffer alone.
  *
  * The baseline is taken after garbage collection with the kernel's peak
  * counter reset, before the first run, and again after it; the first run's
@@ -173,6 +178,7 @@ async function download(userId: string, documentId: string): Promise<void> {
       const { done, value } = await reader.read();
       if (done) break;
       received += value.byteLength;
+      releaseBuffer(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
     }
     return { sizeBytes: opened.sizeBytes, received };
   });
@@ -182,7 +188,7 @@ async function previewRead(userId: string, documentId: string): Promise<void> {
   await twice(async () => {
     const read = await documentRepository.readDocumentDownload(userId, documentId, "document_previewed");
     const sizeBytes = read.bytes.length;
-    read.bytes.fill(0);
+    releaseBuffer(read.bytes);
     return { sizeBytes };
   });
 }
