@@ -1097,6 +1097,49 @@ test.describe("on the phone", () => {
       expect(await storedNames(page, path), "the server holds one copy").toEqual(["chromium-synthetic.pdf"]);
     });
 
+    /* #1584 fix review r2-web-home-1, the phone: the host's read of home
+       goes through, but the item's own documents GET fails. The phone's
+       papers read is additive (a search over every carrying item), so it
+       swallowed that failure: the attach read as refreshed, its id was
+       forgotten, the drawer showed no paper, and a re-pick stored a second
+       copy. Only the documents GET is aborted; the upload POST and home's
+       read go through. The pick is by PATH, as above. */
+    test("an attach whose papers read fails says the done line and keeps its id, so a re-pick stores one copy", async ({ page }) => {
+      test.setTimeout(90_000);
+      await signIn(page);
+      const { itemId, householdId } = await seedHouseholdWithItem(page);
+      const path = documentsPathOf(householdId, itemId);
+      const uploads = watchUploads(page, path);
+
+      await page.goto(`/home?item=${itemId}`);
+      const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
+      await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
+      const paperButton = row.getByRole("button", { name: "Open chromium-synthetic.pdf" });
+
+      const documentsRead = (url: URL) => url.pathname === path;
+      await page.route(documentsRead, (route) =>
+        route.request().method() === "GET" ? route.abort("connectionfailed") : route.continue());
+      try {
+        await row.locator('input[type="file"]').setInputFiles(FIXTURE_PATH);
+        /* soft, so the run goes on to show what the re-pick does as well */
+        await expect.soft(row.locator("p.p-error"), "the row's own line says done").toHaveText(DONE_LINE, { timeout: 10_000 });
+        /* the phone wakes "attached" first, so that is not asserted away */
+        await expect.soft(wakeStatus(page), "the wake says the done line").toHaveText(DONE_LINE, { timeout: 10_000 });
+        await expect.soft(row, "the row stays open").toHaveAttribute("data-open", "");
+        await expect.soft(row, "the papers are not left 'reading'").not.toContainText(/reading/i, { timeout: 3_000 });
+        await expect.soft(paperButton, "the paper is unread, so not shown").toHaveCount(0);
+      } finally {
+        await page.unroute(documentsRead);
+      }
+
+      await row.locator('input[type="file"]').setInputFiles(FIXTURE_PATH);
+      await expect(wakeStatus(page)).toHaveText("chromium-synthetic.pdf attached", { timeout: SETTLE });
+      await expect.soft(paperButton, "the papers read landed, and shows one paper").toHaveCount(1, { timeout: SETTLE });
+      expect.soft(uploads, "two picks, two uploads").toHaveLength(2);
+      expect.soft(uploads[1], "the re-pick re-sends the first pick's id").toBe(uploads[0]);
+      expect.soft(await storedNames(page, path), "the server holds one copy").toEqual(["chromium-synthetic.pdf"]);
+    });
+
     /* #1584 web-home-2 (guards Change 1 against the W-F2 regression it could
        cause): the search sheet's own quick complete. Once the host's read
        rejects, a complete that treated that rejection as the command failing

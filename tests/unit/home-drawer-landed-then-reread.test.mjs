@@ -54,12 +54,12 @@ const suggestionView = () => /** @type {any} */ ({
   suggestions: [{ id: "s1", receiptId: "r1", householdId: "h1" }], primary: "h1", households: [],
 });
 
-/** @param {{ reread: any, wakeFirst?: boolean, amend?: any, view?: any }} how */
-function make({ reread, wakeFirst = false, amend = () => null, view = () => null }) {
+/** @param {{ reread: any, wakeFirst?: boolean, amend?: any, view?: any, open?: () => string | null }} how */
+function make({ reread, wakeFirst = false, amend = () => null, view = () => null, open = () => "open" }) {
   const say = vi.fn();
   const leave = vi.fn();
   const acts = drawer.createDrawerActs({
-    view, reread, say, focus: () => {}, open: () => "open",
+    view, reread, say, focus: () => {}, open,
     itemOf: (id) => itemOf(id), amend, leave, wakeFirst,
   });
   return { acts, say, leave, wake: wakeSpy.wake };
@@ -425,5 +425,124 @@ describe("an amended add that landed is not read back as refused (#1584 web-wr9-
     expect(wake.mock.calls[1][0]).toBe("added to your orbit · Boiler");
     expect(wake.mock.calls[1][0]).not.toMatch(DONE);
     expect(say.mock.calls.some((/** @type {unknown[]} */ c) => c[0] === "s2" && DONE.test(String(c[1])))).toBe(false);
+  });
+});
+
+/*
+ * #1584 fix review r2-web-home-1: the phone's papers re-read is additive (a
+ * search over every carrying item), so it swallowed a failed read of the item
+ * just acted on: the attach read as refreshed, its id was forgotten, and a
+ * re-pick stored a second copy. The re-read now rejects when the item it was
+ * asked for could not be read (the act hands `reread` its item as a second
+ * argument); another item's unreadable papers still drop out quietly.
+ */
+describe("the phone's papers re-read fails for the item just acted on (#1584 fix review r2-web-home-1)", () => {
+  const twoCarrying = () => /** @type {any} */ ({
+    primary: "h1",
+    household: { items: [
+      { id: "i1", status: "active", documentCount: 1 },
+      { id: "i2", status: "active", documentCount: 1 },
+    ] },
+  });
+  const paperOf = (/** @type {string} */ id) => ({ id: `${id}-doc`, name: "paper.pdf", itemId: id });
+  const file = () => new File(["a"], "paper.pdf", { lastModified: 1_700_000_000_000 });
+
+  /** The documents read: `unreadable` rejects, every other item answers its one paper. @param {string | null} unreadable */
+  const readsExcept = (unreadable) => ws.readItemDocuments.mockImplementation(async (/** @type {string} */ _hh, /** @type {string} */ id) => {
+    if (id === unreadable) throw new Error(`${id} would not load`);
+    return [paperOf(id)];
+  });
+
+  /** The phone's wiring as `reread`, built on the acts it drives. @param {{ open?: () => string | null }} [how] */
+  function phone({ open } = {}) {
+    /** @type {ReturnType<typeof make>} */
+    let made;
+    const phoneReread = async (/** @type {any} */ change, /** @type {string | undefined} */ item) => {
+      if (change.papers) await made.acts.rereadSearchDocuments("i1", item ?? null);
+    };
+    made = make({ reread: phoneReread, view: twoCarrying, wakeFirst: true, open });
+    return made;
+  }
+  const wakeWords = (/** @type {any} */ wake) => wake.mock.calls.map((/** @type {unknown[]} */ c) => String(c[0]));
+  const papersOf = (/** @type {any} */ acts) => acts.searchDocuments.map((/** @type {any} */ doc) => doc.itemId).sort();
+
+  it("U3. attach, the acted item's papers unreadable: says done, keeps the id, keeps the other item's papers; a re-pick re-sends the id", async () => {
+    ws.attachItemDocument.mockResolvedValue({});
+    readsExcept("i1");
+    const made = phone();
+    await made.acts.attach("i1", file());
+
+    expect(made.say).toHaveBeenLastCalledWith("i1", expect.stringMatching(DONE));
+    expect(wakeWords(made.wake)).toEqual(["paper.pdf attached", expect.stringMatching(DONE)]);
+    expect(sayLog(made.say).some(([, words]) => /couldn't attach/.test(String(words)))).toBe(false);
+    expect(wakeWords(made.wake).some((words) => /couldn't attach/.test(words))).toBe(false);
+    const sent = ws.attachItemDocument.mock.calls[0][3];
+    expect(attachIdFor("i1", file()), "the id is kept").toBe(sent);
+    expect(papersOf(made.acts), "the other item's papers are kept").toEqual(["i2"]);
+    expect(made.acts.papersReady).toBe(true);
+    expect(made.acts.busy).toBeNull();
+
+    readsExcept(null);
+    await made.acts.attach("i1", file());
+    expect(ws.attachItemDocument.mock.calls[1][3], "the re-pick re-sends the id").toBe(sent);
+    expect(attachIdFor("i1", file()), "dropped after a good read").not.toBe(sent);
+    expect(papersOf(made.acts)).toEqual(["i1", "i2"]);
+  });
+
+  it("U4. guard: another item's papers unreadable is quiet: no done line, the id is dropped, the acted item's paper is shown", async () => {
+    ws.attachItemDocument.mockResolvedValue({});
+    readsExcept("i2");
+    const made = phone();
+    await made.acts.attach("i1", file());
+
+    expect(sayLog(made.say)).toEqual([["i1", null]]);
+    expect(wakeWords(made.wake)).toEqual(["paper.pdf attached"]);
+    expect(wakeWords(made.wake).some((words) => DONE.test(words))).toBe(false);
+    expect(attachIdFor("i1", file()), "the id was dropped").not.toBe(ws.attachItemDocument.mock.calls[0][3]);
+    expect(papersOf(made.acts)).toEqual(["i1"]);
+  });
+
+  it("U5. guard: a re-read asked for no item never rejects (the row toggle's path); the other item's papers are kept", async () => {
+    readsExcept("i1");
+    const made = phone();
+    await expect(made.acts.rereadSearchDocuments("i1")).resolves.toBeUndefined();
+
+    expect(made.acts.papersReady).toBe(true);
+    expect(papersOf(made.acts)).toEqual(["i2"]);
+  });
+
+  it("U6. removePaper on the phone, the open item's papers unreadable: the line says done, and the removed wake carries its undo", async () => {
+    ws.removeDocument.mockResolvedValue(undefined);
+    readsExcept("i1");
+    const { acts, say, wake } = phone({ open: () => "i1" });
+    acts.preview = { id: "i1-doc", name: "paper.pdf" };
+    await acts.removePaper({ id: "i1-doc", name: "paper.pdf" });
+
+    expect(say).toHaveBeenCalledWith("i1", expect.stringMatching(DONE));
+    const removed = wake.mock.calls.find((c) => c[0] === "paper.pdf removed");
+    expect(removed, "the removed wake is raised").toBeDefined();
+    expect(typeof removed?.[1]?.undo).toBe("function");
+    expect(acts.preview).toBeNull();
+  });
+
+  it("U7a. a row act hands reread its item as the second argument", async () => {
+    ws.applyCommand.mockResolvedValue({});
+    const reread = goodRead();
+    await make({ reread }).acts.runRowAct("i1", "retire", () => ({ type: "x" }), "retired");
+    expect(reread).toHaveBeenCalledWith({ leaves: false }, "i1");
+  });
+
+  it("U7b. attach hands reread its item as the second argument", async () => {
+    ws.attachItemDocument.mockResolvedValue({});
+    const reread = goodRead();
+    await make({ reread }).acts.attach("i1", file());
+    expect(reread).toHaveBeenCalledWith({ papers: true }, "i1");
+  });
+
+  it("U7c. restorePaper hands reread the open item as the second argument", async () => {
+    ws.restoreDocument.mockResolvedValue(undefined);
+    const reread = goodRead();
+    await make({ reread, open: () => "i1" }).acts.restorePaper({ id: "d1" });
+    expect(reread).toHaveBeenCalledWith({ view: false, papers: true }, "i1");
   });
 });
