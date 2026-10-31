@@ -50,7 +50,7 @@
    *   onCopyAddress: () => void,
    *   showingDoc: string | null,
    *   onOpenDoc: (doc: DrawerDocument, from: HTMLElement) => void,
-   *   acts: import('./drawer-acts.js').DrawerActs,
+   *   acts: import('./drawer-acts.svelte.js').DrawerActs,
    * }} */
   let {
     row, suggestion, busyReceipt, armed, mailProblem, today, onReceiptTap, copied, onCopyAddress,

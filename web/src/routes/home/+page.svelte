@@ -15,8 +15,8 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { applyCommand, approveWithOperation, attachItemDocument, dismissReceipt, dueDateIn, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, readReminders, removeDocument, requestToJoin, restoreDocument, signOut, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
-  import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
+  import { applyCommand, approveWithOperation, dismissReceipt, householdElsewhereFor, readHome, readHomeIn, readItem, requestToJoin, signOut, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
+  import { archiveCommand, completeCommand, statusCommand } from "$lib/data/commands.js";
   import { createHeldCompletion, droppedCompletionWords, isRefused } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
@@ -24,8 +24,7 @@
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
   import HouseholdClosed from "$lib/HouseholdClosed.svelte";
-  import { attachIdFor, forget as forgetAttachId } from "./attach-id.js";
-  import { costLabel, listedItems, readSearchDocuments, searchPocket } from "./pocket-search.js";
+  import { costLabel, listedItems, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "$lib/data/bands.js";
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
@@ -33,8 +32,8 @@
   import CorridorRow from "./CorridorRow.svelte";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
-  import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
-  import { amendedOf, proposedItemOf } from "$lib/editing/item-draft.js";
+  import { pressKeepsChooser } from "./drawer-modes.svelte.js";
+  import { createDrawerActs } from "./drawer-acts.svelte.js";
   import { WIDE_QUERY, cardWidthOf, pairOf, trackOf } from "./preview-pair.js";
   import { isPocket } from "$lib/pocket/media.js";
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
@@ -338,8 +337,6 @@
    * expanded row survives scrolling and closes only on Back, Escape, a click
    * outside it, or a second click on its own row. Noted for ratification.
    */
-  /** @type {(id: string) => string} */
-  const addressOf = (id) => `/home?item=${encodeURIComponent(id)}`;
   const expanded = $derived(/** @type {any} */ (page.state).orbitItem ?? null);
   /* True only while the open row owns a history entry we pushed ourselves —
      the difference between closing by going back and closing by rewriting the
@@ -376,13 +373,13 @@
       detailFor = null;
       detail = null;
       detailProblem = null;
-      previewDoc = null;
+      acts.preview = null;
       modes.end();
       return;
     }
     if (detailFor === id) return;
     if (holdRows()) return;
-    previewDoc = null;
+    acts.preview = null;
     modes.end();
     footProblem = null;
     /* Everything Orbit holds, read through the same seam the item view reads
@@ -440,11 +437,8 @@
      level with the item card's, riding the page with it and sticky beside a
      card taller than the window; under 1200px the phone's bottom sheet. A
      press anywhere off it, or Escape, removes it at once and leaves the
-     drawer open: that press is swallowed by the drawer once. */
-  /** @type {import('$lib/data/workspace.js').DrawerDocument | null} */
-  let previewDoc = $state(null);
-  /** The document row that opened the card, for focus to return to. @type {HTMLElement | null} */
-  let previewFrom = null;
+     drawer open: that press is swallowed by the drawer once. The card and
+     its acts are drawer-acts.svelte.js's, the phone's too. */
   /* A press that only closed the card must not also close the drawer. Every
      press starts with it down (the capture listener below), so it swallows
      one click, never a later one. */
@@ -458,37 +452,10 @@
   /** @type {{ maxWidth: number, shift: number } | null} */
   let pair = $state(null);
 
-  /** @param {import('$lib/data/workspace.js').DrawerDocument} doc @param {HTMLElement} from */
-  function openDoc(doc, from) {
-    /* one card beside at a time: a document's preview puts a chooser away */
-    modes.closeChooser(false);
-    previewFrom = from;
-    if (previewDoc?.id !== doc.id) previewDoc = doc;
-  }
   /** @param {{ refocus: boolean, press: boolean }} how */
   function closeDoc({ refocus, press }) {
-    previewDoc = null;
     if (press) swallowClick = true;
-    if (refocus && previewFrom?.isConnected) previewFrom.focus({ preventScroll: true });
-  }
-  /* The reader's remove (#1054): the paper goes, the card and the reader
-     close onto the drawer, and the wake offers it back. */
-  /** @param {import('$lib/data/belt.js').BeltDocumentRow} doc */
-  async function removeDoc(doc) {
-    await removeDocument(doc.id);
-    previewDoc = null;
-    await rereadDetail();
-    wake(`${doc.name} removed`, {
-      // The removed wake is already gone by now, so a refused restore must
-      // say so or the paper silently stays removed.
-      undo: () => { restoreDocument(doc.id).then(rereadDetail).catch(() => wake(`couldn't restore ${doc.name} — try again`, { failure: true })); },
-    });
-  }
-  /** @param {import('$lib/data/belt.js').BeltDocumentRow} doc */
-  async function restoreDoc(doc) {
-    await restoreDocument(doc.id);
-    previewDoc = null;
-    await rereadDetail();
+    acts.closePreview({ refocus });
   }
 
   /* The column beside the open drawer, and the pair centred together, kept
@@ -496,7 +463,7 @@
   $effect(() => {
     const id = expanded;
     /* the preview, or the chooser card: whichever stands beside (#1319) */
-    const paper = previewDoc ?? chooserAsk;
+    const paper = acts.preview ?? chooserAsk;
     const manifest = manifestEl;
     if (!id || !paper || !manifest) { pair = null; return; }
     const media = matchMedia(WIDE_QUERY);
@@ -637,14 +604,7 @@
 
   /** @returns {Promise<boolean>} whether the address reached the clipboard */
   async function copyAddress() {
-    try {
-      await navigator.clipboard.writeText(new URL(addressOf(expanded), location.origin).href);
-      copied = true;
-    } catch {
-      /* A refused clipboard is not an error worth a dialogue: the address is
-         already in the browser's own bar, which is where it lives. */
-      copied = false;
-    }
+    copied = await acts.copyLink(expanded);
     return copied;
   }
 
@@ -652,11 +612,9 @@
      Every act the belt had, from the open drawer, through the belt's own
      commands (commands.js): snooze, complete, attach a document, retire, and
      copy link. Since stage 2, complete asks for its date, cost and notes in
-     the rows and records them at once (recordCompletion, below); `held`
+     the rows and records them at once (drawer-acts.svelte.js's record); `held`
      still sends what an earlier visit held and never saw confirmed
      (held-completion.js). */
-  /** @type {"snooze" | "complete" | "attach" | "retire" | "restore" | null} */
-  let footBusy = $state(null);
   /** @type {string | null} */
   let footProblem = $state(null);
   /** The open item as a command addresses it. @returns {any} */
@@ -689,30 +647,6 @@
     held.retryStashed((error) => error instanceof WorkspaceError && error.code === "version_conflict");
   });
 
-  /**
-   * One act that changes the item and then reads it again.
-   * @param {"snooze" | "retire" | "restore"} kind
-   * @param {() => object} build
-   * @param {string} words  what the wake says once it has landed
-   * @param {{ leave?: boolean }} [options]  the item leaves the manifest: put the drawer away
-   */
-  async function runFoot(kind, build, words, { leave = false } = {}) {
-    if (footBusy) return;
-    footBusy = kind;
-    footProblem = null;
-    try {
-      await applyCommand(build());
-      if (leave) collapseRow();
-      view = await readHome();
-      if (!leave) await rereadDetail();
-      wake(words);
-    } catch (error) {
-      footProblem = wordsOf(error, `couldn't ${kind} it — try again`);
-    } finally {
-      footBusy = null;
-    }
-  }
-
   /* ---- #1319 stage 2: EDITING IN THE ROWS, AND THE CHOOSER BESIDE --------
      design/v19/belt-purpose/round-8/m-colour-per-option.html (approved
      2026-10-08). The pencil puts the drawer's own rows into edit mode; due
@@ -720,15 +654,31 @@
      drawer, in the preview's column (one card beside at a time), or as the
      bottom sheet under 1200px. Snooze opens the same calendar ("snooze
      until"); complete asks for its date, cost and notes in the rows
-     (owner, 2026-10-08). Escape takes the chooser, then the edit. */
-  const modes = new DrawerModes({
-    save: async (item, edits) => {
-      if (item.status === "suggested") { await addSuggestion(item, edits); return; }
-      await applyCommand(upsertCommand(item, edits));
-      await rereadAll();
+     (owner, 2026-10-08). Escape takes the chooser, then the edit.
+
+     The acts are the phone's too (drawer-acts.svelte.js); what the desk does
+     with them is here: one drawer, so one problem line (a suggestion's is
+     its receipt's, armed as tapReceipt arms it), the read before the wake,
+     and an item that leaves the list puts its drawer away. */
+  const acts = createDrawerActs({
+    view: () => view,
+    reread: async ({ view: home = true, leaves = false }) => {
+      if (home) view = await readHome();
+      if (!leaves) await rereadDetail();
     },
-    onchoose: () => { previewDoc = null; },
+    say: (id, words, about = "item") => {
+      if (about === "item") { footProblem = words; return; }
+      armed = { id: words ? id : null, act: about === "partial" ? "approve" : null };
+      mailProblem = words;
+    },
+    focus: (_id, selector) => focusInDrawer(selector),
+    open: () => expanded,
+    itemOf: () => commandItem(),
+    amend: (suggestion, item, sectionId) => amendReceipt(suggestion, item, sectionId),
+    leave: () => collapseRow(),
+    attached: (file, title) => `${file} attached to ${title}`,
   });
+  const modes = acts.modes;
   /** The open item's household's sections, for the section's name, colour and tiles.
       A suggestion not yet given a household files into the account's primary one. */
   const detailSections = $derived.by(() => {
@@ -767,56 +717,6 @@
     if (el?.isContentEditable) getSelection()?.collapse(el, el.childNodes.length);
   }
 
-  /** The chooser card's pick: the row takes it, or the snooze is sent. @param {string} value */
-  function pickChoice(value) {
-    const snooze = modes.pick(value);
-    if (!snooze || !detail) return;
-    const { item, until } = snooze;
-    /* Whether the day will do is the engine's (#1325): its refusal lands
-       in footProblem, in its words. */
-    /* #1319: every pill is disabled while the snooze is sent, which drops
-       the focus the calendar handed back to the snooze pill; put it back
-       once the pills are live again, as complete does. */
-    runFoot("snooze", () => snoozeCommand(item, until), `${item.title} snoozed until ${dayMonth(until)}`)
-      .then(() => { if (expanded === item.id) focusInDrawer('[aria-label^="Snooze "]'); });
-  }
-
-  async function saveEdit() {
-    const title = modes.edit.draft?.title.trim() ?? "";
-    if (await modes.edit.commit()) {
-      wake(`saved · ${title}`);
-      focusInDrawer(".ivedit");
-    }
-  }
-
-  /* Complete records what the rows hold: the date, the cost, the notes.
-     The next due date is the engine's (#1324), read back from its reply.
-     Sent on `record`, not held for an undo: the rows were the chance to
-     change it. */
-  async function recordCompletion() {
-    const out = modes.completion();
-    if ("refusal" in out) { modes.completeProblem = out.refusal; return; }
-    if (footBusy) return;
-    const { item, fields } = out;
-    footBusy = "complete";
-    modes.completeProblem = null;
-    modes.recording = true;
-    try {
-      const nextDate = dueDateIn(await applyCommand(completeCommand(item, fields)), item.householdId, item.id);
-      modes.cancelComplete();
-      if (!nextDate) collapseRow();
-      view = await readHome();
-      if (nextDate) await rereadDetail();
-      wake(`Completed${nextDate ? ` · next due ${dayMonth(nextDate)}` : ""} · ${item.title}`);
-      if (nextDate) focusInDrawer('[aria-label^="Complete "]');
-    } catch (error) {
-      modes.completeProblem = wordsOf(error, "couldn't complete it — try again");
-    } finally {
-      footBusy = null;
-      modes.recording = false;
-    }
-  }
-
   /* Escape: the chooser first (focus back to its value; the card hears it
      itself too, and whichever hears it first marks it handled), then the
      edit or the completion (focus back to the pencil or the pill). Ahead of
@@ -826,7 +726,7 @@
     if (!modes.id) return;
     /** @param {KeyboardEvent} event */
     const onKey = (event) => {
-      if (event.key !== "Escape" || event.defaultPrevented || previewDoc) return;
+      if (event.key !== "Escape" || event.defaultPrevented || acts.preview) return;
       const chooser = modes.choosing;
       const editing = Boolean(modes.edit.id);
       if (!modes.escape()) return;
@@ -853,9 +753,9 @@
     return () => window.removeEventListener("pointerdown", onPress, true);
   });
 
-  /** @type {import('./drawer-acts.js').DrawerActs} */
+  /** @type {import('./drawer-acts.svelte.js').DrawerActs} */
   const drawerActs = $derived({
-    busy: footBusy ?? (modes.edit.busy ? "save" : null),
+    busy: acts.busy?.kind ?? (modes.edit.busy ? "save" : null),
     problem: modes.edit.problem ?? modes.edit.refusal ?? modes.completeProblem ?? footProblem,
     modes,
     sections: detailSections,
@@ -878,39 +778,33 @@
       modes.startEdit(item);
       focusInDrawer('[data-ed="title"]');
     },
-    onsave: saveEdit,
-    onrecord: recordCompletion,
+    onsave: () => acts.save(/** @type {string} */ (expanded)),
+    onrecord: async () => {
+      /* the item comes round again: focus back on its complete pill */
+      if (await acts.record(/** @type {string} */ (expanded))) focusInDrawer('[aria-label^="Complete "]');
+    },
     oncancel: () => {
       const editing = Boolean(modes.edit.id);
       /* rows holding changes: the first press arms "discard changes?" */
       if (!modes.cancel()) return;
       focusInDrawer(editing ? EDIT_HOME : '[aria-label^="Complete "]');
     },
-    onamend: startAmend,
-    onaccept: addAmended,
-    onattach: async (file) => {
+    onamend: () => {
+      const suggestion = view?.suggestions.find((one) => one.id === expanded);
+      if (suggestion) acts.startAmend(suggestion);
+    },
+    onaccept: acts.addAmended,
+    onattach: (file) => {
       const item = commandItem();
-      if (!item || footBusy) return;
-      footBusy = "attach";
-      footProblem = null;
-      try {
-        await attachItemDocument(item.householdId, item.id, file, attachIdFor(item.id, file));
-        forgetAttachId(item.id, file);
-        await rereadAll();
-        wake(`${file.name} attached to ${item.title}`);
-      } catch (error) {
-        footProblem = wordsOf(error, "couldn't attach it — try again");
-      } finally {
-        footBusy = null;
-      }
+      if (item) acts.attach(item.id, file);
     },
     onretire: () => {
       const item = commandItem();
-      if (item) runFoot("retire", () => archiveCommand(item), `${item.title} retired`, { leave: true });
+      if (item) acts.runRowAct(item.id, "retire", (one) => archiveCommand(one), `${item.title} retired`, { leaves: true });
     },
     onrestore: () => {
       const item = commandItem();
-      if (item) runFoot("restore", () => statusCommand(item, "active"), `${item.title} restored`);
+      if (item) acts.runRowAct(item.id, "restore", (one) => statusCommand(one, "active"), `${item.title} restored`);
     },
     oncopy: copyAddress,
   });
@@ -963,78 +857,8 @@
      choosers stand beside it as a filed item's do. `add to orbit` sends the
      rows as the amended item on the two-tap decision's own operation id
      (amendReceipt), into the section the rows chose. */
-  /* #1316: the latest review & amend press still waiting on the reminder
-     read; an earlier press, or one the screen has moved on from, opens
-     nothing when its answer lands. */
-  /** @type {object | null} */
-  let amendAsk = null;
-  async function startAmend() {
-    const suggestion = asView(view).suggestions.find((one) => one.id === expanded);
-    if (!suggestion?.receiptId) return;
-    /* Already amending this one: keep what was typed (#1316). */
-    if (modes.id === suggestion.id) return;
-    const householdId = suggestion.householdId ?? asView(view).primary;
-    if (!householdId) {
-      armed = { id: suggestion.id, act: null };
-      mailProblem = "This account has no household yet";
-      return;
-    }
-    const sections = asView(view).households.find((one) => one.id === householdId)?.sections
-      ?? asView(view).household?.sections ?? [];
-    const sectionId = (sections.find((one) => one.visible !== false) ?? sections[0])?.id ?? null;
-    mailProblem = null;
-    armed = { id: null, act: null };
-    previewDoc = null;
-    /* The rows start the reminders at the member's own pair from Settings,
-       read before they open so no late answer has to be reconciled with an
-       edit; a failed read, or one past 1.5 s (#1316), falls back to the
-       default pair. */
-    const ask = {};
-    amendAsk = ask;
-    const reminders = await readReminders({ within: 1500 }).catch(() => null);
-    if (amendAsk !== ask) return;
-    amendAsk = null;
-    /* #1316: the drawer may have closed, moved to another row or begun
-       another item's edit while the read was out: then the rows stay shut. */
-    if (expanded !== suggestion.id || (modes.id != null && modes.id !== suggestion.id)
-      || !asView(view).suggestions.some((one) => one.id === suggestion.id)) return;
-    modes.startEdit(proposedItemOf(suggestion, { householdId, sectionId }, { reminders }));
-    focusInDrawer('[data-ed="title"]');
-  }
-  /**
-   * The rows' save for a suggestion: approved as amended, or refused in the
-   * rows' own words (EditSession says it under the rows).
-   * @param {import('$lib/data/commands.js').CommandItem} item
-   * @param {Partial<import('$lib/data/commands.js').CommandItem>} edits
-   */
-  async function addSuggestion(item, edits) {
-    const suggestion = asView(view).suggestions.find((one) => one.id === item.id);
-    if (!suggestion) throw new Error("not added — this suggestion has gone");
-    const { item: amended, sectionId } = amendedOf(item, edits);
-    const problem = await amendReceipt(suggestion, amended, sectionId);
-    if (problem && typeof problem === "object") {
-      /* A partial approval has filed the item: the rows close, or a corrected
-         re-send under the same operation id is refused for good. The drawer
-         says what tapReceipt says of a partial, armed for the plain retry. */
-      armed = { id: suggestion.id, act: "approve" };
-      mailProblem = problem.message;
-      landedPartial = true;
-      return;
-    }
-    if (problem) throw new Error(`not added — ${problem}`);
-  }
-  /* Set by addSuggestion when the add landed partly: addAmended then leaves
-     the drawer open on the recorded-but-pending sentence instead. */
-  let landedPartial = false;
-  async function addAmended() {
-    landedPartial = false;
-    const title = modes.edit.draft?.title.trim() ?? "";
-    if (await modes.edit.commit()) {
-      if (landedPartial) return;
-      collapseRow();
-      wake(`added to your orbit · ${title}`);
-    }
-  }
+  /* drawer-acts.svelte.js holds the amend itself (startAmend, the rows'
+     save for a suggestion, addAmended), the phone's too. */
 
   const operationIds = new SvelteMap();
   /**
@@ -1150,31 +974,13 @@
 
   let stripOpen = $state(false);
   let searchQuery = $state("");
-  /** @type {import('./pocket-search.js').SearchDocument[]} */
-  let searchDocuments = $state([]);
-  /** @type {object | null} */
-  let searchDocumentsFor = null;
-
-  /** #1151 W1-Q8: shared with the pocket's own copy (home/pocket.svelte)
-   *  via pocket-search.js's readSearchDocuments, which also carries the
-   *  concurrency cap (#1151 W1-R9) this copy never had. */
-  async function loadSearchDocuments() {
-    const household = view?.household;
-    const householdId = view?.primary;
-    if (!household || !householdId || searchDocumentsFor === household) return;
-    searchDocumentsFor = household;
-    const carrying = (household.items ?? []).filter((item) => item.status === "active" && (item.documentCount ?? 0) > 0);
-    // Additive: an item whose papers cannot be read loses its papers from the
-    // results, not the search.
-    const found = await readSearchDocuments(
-      carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household,
-    );
-    if (searchDocumentsFor === household) searchDocuments = found;
-  }
+  /* The papers the search finds by name: drawer-acts.svelte.js's one read
+     (#1151 W1-Q8, W1-R9), active items only on the desk, whose drawer reads
+     its own papers with the record. */
 
   const searchRows = $derived(groups ? [...groups.attention, ...groups.later] : []);
   const searchResults = $derived(
-    searchPocket(searchQuery, { items: searchRows, attention: groups?.attention ?? [], documents: searchDocuments }),
+    searchPocket(searchQuery, { items: searchRows, attention: groups?.attention ?? [], documents: acts.searchDocuments }),
   );
 
   /* The raw item behind a manifest/search row, for the one command the strip
@@ -1229,7 +1035,7 @@
   function onExploreFocus() {
     stripOpen = true;
     stripProblem = null;
-    loadSearchDocuments();
+    acts.loadSearchDocuments();
   }
   function onExploreBlur() {
     setTimeout(() => { stripOpen = false; completeArm.disarm(); }, 150);
@@ -2190,7 +1996,7 @@
             {#each corridor.overdue as row (row.id)}
               <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
                 onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-                onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} acts={drawerActs} />
+                onCopyAddress={copyAddress} showingDoc={acts.preview?.id ?? null} onOpenDoc={acts.openPreview} acts={drawerActs} />
             {/each}
           </div>
         {/if}
@@ -2198,14 +2004,14 @@
         {#each corridor.current as row (row.id)}
           <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-            onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} acts={drawerActs} />
+            onCopyAddress={copyAddress} showingDoc={acts.preview?.id ?? null} onOpenDoc={acts.openPreview} acts={drawerActs} />
         {/each}
         {#each corridor.months as month (month.key)}
           <div class="month"><span>{month.label}</span><div class="rule"></div><small>{month.rows.length} approaching</small></div>
           {#each month.rows as row (row.id)}
             <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
               onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-              onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} acts={drawerActs} />
+              onCopyAddress={copyAddress} showingDoc={acts.preview?.id ?? null} onOpenDoc={acts.openPreview} acts={drawerActs} />
           {/each}
         {/each}
         <!-- #1281: what is kept without a date rides at the foot under its
@@ -2216,7 +2022,7 @@
         {#each corridor.undated as row (row.id)}
           <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-            onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} acts={drawerActs} />
+            onCopyAddress={copyAddress} showingDoc={acts.preview?.id ?? null} onOpenDoc={acts.openPreview} acts={drawerActs} />
         {/each}
       </div>
       {#if corridor.total === 0}
@@ -2227,13 +2033,13 @@
     {/if}
     <!-- #1319, round 3 (F): the preview's column beside the open drawer. -->
     <div class="pvtrack" bind:this={trackEl} style:--pv-y="{track.top}px" style:--pv-h="{track.height}px" style:--readw="{readw}px">
-      <PreviewCard doc={previewDoc} itemTitle={detail?.title ?? ""} documentDays={view?.retention?.documentDays} onclose={closeDoc}
-                   onremove={removeDoc} onrestore={restoreDoc} />
+      <PreviewCard doc={acts.preview} itemTitle={detail?.title ?? ""} documentDays={view?.retention?.documentDays} onclose={closeDoc}
+                   onremove={acts.removePaper} onrestore={acts.restorePaper} />
       <!-- #1319 stage 2 (round 8): the chooser card, in the preview's seat;
            under 1200px it is the bottom sheet -->
       {#if chooserAsk}
         <div class="chseat" class:sheet={!wide} data-chooser-card>
-          <ChooserCard ask={chooserAsk} layout={wide ? "beside" : "sheet"} onpick={pickChoice}
+          <ChooserCard ask={chooserAsk} layout={wide ? "beside" : "sheet"} onpick={acts.pickChoice}
                        onclose={() => modes.closeChooser(true)} />
         </div>
       {/if}

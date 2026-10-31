@@ -85,14 +85,16 @@ describe("administration: contactAction's re-entry guard (#1344, web-9)", () => 
 });
 
 describe("home: startAmend's section fallback (#1344, web-11)", () => {
+  /* #1352: the desk and the phone now share one startAmend, the phone's, in
+     home/drawer-acts.svelte.js. */
   it("the desk falls back to the view's own household sections, as the phone does", () => {
-    const body = blockAfter(route("home/+page.svelte"), "function startAmend()");
+    const body = blockAfter(route("home/drawer-acts.svelte.js"), "async function startAmend(s)");
     // phone: (view.households ?? []).find(...)?.sections ?? view.household?.sections ?? []
     expect(body).toMatch(/\bhousehold\?\.sections/);
   });
 
   it("the households lookup still comes first, so a named household wins", () => {
-    const body = blockAfter(route("home/+page.svelte"), "function startAmend()");
+    const body = blockAfter(route("home/drawer-acts.svelte.js"), "async function startAmend(s)");
     const lookup = body.search(/households\b[^;]*\.find\([^;]*\?\.sections/);
     const fallback = body.search(/\bhousehold\?\.sections/);
     expect(lookup).toBeGreaterThanOrEqual(0);
