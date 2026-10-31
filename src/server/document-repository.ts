@@ -512,8 +512,7 @@ export async function uploadItemDocument(input: {
       const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
       let structure: DocumentStructureReason = "unsupported_structure";
       try {
-        // #1567: pass file once classifyDocumentStructure takes it ({ path: received.quarantinePath, sizeBytes: received.sizeBytes })
-        structure = await classifyDocumentStructure(bytes, mediaType);
+        structure = await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
       } finally {
         // Nothing keeps this buffer past the check, so it is zeroed here
         // whatever the answer (#1151 F13).

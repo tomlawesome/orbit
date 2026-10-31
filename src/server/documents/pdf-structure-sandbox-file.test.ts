@@ -50,7 +50,7 @@ const MB = 1024 * 1024;
 const TEST_TIMEOUT_MS = 10_000;
 
 type Limits = Parameters<typeof setPdfStructureSandboxLimitsForTests>[0] & { pdfjsUrl?: string };
-function setLimits(limits: Limits): void {
+function setLimits(limits: Limits | undefined): void {
   setPdfStructureSandboxLimitsForTests(limits as Parameters<typeof setPdfStructureSandboxLimitsForTests>[0]);
 }
 
