@@ -27,7 +27,7 @@ vi.mock("../../web/src/routes/create/EntryForm.svelte", () => ({
   default: () => { entryForm.mounts++; },
 }));
 vi.mock("../../web/src/lib/pocket/Sheet.svelte", () => ({
-  default: (/** @type {unknown} */ anchor, /** @type {any} */ props) => { props.children?.(anchor); },
+  default: (/** @type {unknown} */ anchor, /** @type {any} */ props) => { props.children?.(anchor); props.foot?.(anchor); },
 }));
 
 const household = {
@@ -52,12 +52,16 @@ const PAIR = {
 let reported = false;
 /** Whether the review read for the receipt fails outright. */
 let readFails = false;
+/** When set, answers the review read for the receipt instead of the flags above (W-R9, X-F3).
+ *  @type {((init: RequestInit) => Promise<Response>) | null} */
+let readOverride = null;
 
 function stubFetch() {
   vi.stubGlobal("fetch", vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ init) => {
     const href = String(url);
     if (href.includes("/api/auth/session")) return json({ user: { id: "u1" }, csrfToken: "t1" });
     if (href.includes("/api/imap-inbox/r-1") && (!init?.method || init.method === "GET")) {
+      if (readOverride) return readOverride(init);
       if (readFails) return json({ error: { code: "unavailable", message: "not today" } }, 503);
       return json({
         receipt: { id: "r-1", draftVersion: 2, proposal: { title: "Boiler cover" } },
@@ -106,6 +110,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   reported = false;
   readFails = false;
+  readOverride = null;
   entryForm.mounts = 0;
   document.body.innerHTML = "";
   stubFetch();
@@ -119,23 +124,24 @@ afterEach(() => {
 
 const settle = async () => { await vi.advanceTimersByTimeAsync(400); };
 
-/** @param {boolean} passProp whether the pair is also given as the `approval` prop (no production caller does). */
-async function openSheet(passProp = reported) {
+/**
+ * @param {boolean} passProp whether the pair is also given as the `approval` prop (no production caller does).
+ * @param {() => Promise<boolean>} onsave
+ * @param {Record<string, unknown>} [props] the props themselves; pass a reactive proxy to change them after mounting
+ */
+async function openSheet(passProp = reported, onsave = async () => true, props = { open: true }) {
   const { mount, unmount } = await import(pathToFileURL(join(svelteSrc, "index-client.js")).href);
   const { default: ReviewSheet } = await import(/* @vite-ignore */ compiledSheet);
-  const component = mount(ReviewSheet, {
-    target: document.body,
-    props: {
-      open: true,
-      title: "Boiler cover",
-      proposal: { title: "Boiler cover" },
-      householdId: "hh-1",
-      households: [household],
-      receiptId: "r-1",
-      ...(passProp ? { approval: PAIR } : {}),
-      onsave: async () => true,
-    },
+  Object.assign(props, {
+    title: "Boiler cover",
+    proposal: { title: "Boiler cover" },
+    householdId: "hh-1",
+    households: [household],
+    receiptId: "r-1",
+    ...(passProp ? { approval: PAIR } : {}),
+    onsave,
   });
+  const component = mount(ReviewSheet, { target: document.body, props });
   unmountSheet = () => unmount(component);
   await settle();
 }
@@ -173,11 +179,142 @@ describe("#1396: the sheet finds a pending pair by itself (no production caller 
     expect(sheetText()).not.toContain("finishing your earlier approval");
   });
 
-  it("with no prop, a review read that fails leaves the form drawn and says nothing of an earlier approval", async () => {
+  it("with no prop, a review read that fails does not draw the amend fields (W-R9: fail closed) and says nothing of an earlier approval", async () => {
     reported = true; // the pair exists, but the read cannot say so
     readFails = true;
     await openSheet(false);
-    expect(entryForm.mounts, "the amend fields are drawn").toBeGreaterThan(0);
+    expect(entryForm.mounts, "the amend fields are not drawn").toBe(0);
+    expect(sheetText()).not.toContain("finishing your earlier approval");
+  });
+});
+
+/*
+ * W-R9 / X-F3 (design-mailin fix 5): the sheet does not offer the form until
+ * the review read has answered. While it is unanswered it says so; when it
+ * fails (or times out) it refuses, with a way to try again; it never guesses
+ * "no pending approval". Both are reached through the sheet's own `.rv-go`
+ * submit in the foot and the form it names.
+ */
+const go = () => /** @type {HTMLElement | null} */ (document.querySelector(".rv-go"));
+const status = () => document.querySelector('[role="status"]');
+const alertEl = () => document.querySelector('[role="alert"]');
+const againControl = () => /** @type {HTMLElement | undefined} */ (
+  [...document.querySelectorAll("button, a, [role=button]")].find((el) => /try again/iu.test(el.textContent ?? "")));
+const NEVER = () => new Promise(() => {});
+const noPair = () => json({
+  receipt: { id: "r-1", draftVersion: 2, proposal: { title: "Boiler cover" } },
+  sections: household.sections, attachments: [],
+});
+const withPair = () => json({
+  receipt: { id: "r-1", draftVersion: 2, proposal: { title: "Boiler cover" } },
+  sections: household.sections, attachments: [], approval: PAIR,
+});
+/** The submit event of the form the foot's button names, as pressing it would fire. */
+function submitForm() {
+  const id = go()?.getAttribute("form");
+  const form = id ? document.getElementById(id) : null;
+  form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  go()?.click();
+}
+
+describe("W-R9, X-F3: the sheet is closed until the review read answers", () => {
+  it("1. while the read is in flight it says it is checking, draws no form and holds the button", async () => {
+    readOverride = NEVER;
+    await openSheet(false);
+    expect(status()?.textContent?.toLowerCase() ?? "", "a status line").toContain("checking for an earlier approval");
+    expect(entryForm.mounts, "the entry form is not mounted").toBe(0);
+    expect(go()?.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("2. a read that fails is closed, with an alert and a try-again control", async () => {
+    readOverride = async () => json({ error: { code: "unavailable", message: "not today" } }, 503);
+    await openSheet(false);
+    expect(alertEl()?.textContent?.toLowerCase() ?? "", "an alert").toContain("could not check for an earlier approval");
+    expect(againControl(), "a try-again control").toBeTruthy();
+    expect(entryForm.mounts, "the entry form is not mounted").toBe(0);
+    expect(go()?.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("3. try again, answered with no pair, draws the form with no alert and an enabled button", async () => {
+    readOverride = async () => json({ error: { code: "unavailable", message: "not today" } }, 503);
+    await openSheet(false);
+    expect(againControl(), "a try-again control to activate").toBeTruthy();
+    readOverride = async () => noPair();
+    againControl()?.click();
+    await settle();
+    expect(entryForm.mounts, "the entry form is mounted").toBeGreaterThan(0);
+    expect(alertEl(), "no alert").toBeNull();
+    expect(go()?.getAttribute("aria-disabled")).toBeNull();
+  });
+
+  it("4. try again, answered with a pair, says it is finishing the earlier approval and draws no form", async () => {
+    readOverride = async () => json({ error: { code: "unavailable", message: "not today" } }, 503);
+    await openSheet(false);
+    expect(againControl(), "a try-again control to activate").toBeTruthy();
+    readOverride = async () => withPair();
+    againControl()?.click();
+    await settle();
+    expect(sheetText()).toContain("finishing your earlier approval");
+    expect(entryForm.mounts, "the entry form is not mounted").toBe(0);
+  });
+
+  it("5. a timed-out read is a failed read", async () => {
+    readOverride = async () => { throw new DOMException("The operation timed out.", "TimeoutError"); };
+    await openSheet(false);
+    expect(alertEl()?.textContent?.toLowerCase() ?? "", "an alert").toContain("could not check for an earlier approval");
+    expect(againControl(), "a try-again control").toBeTruthy();
+    expect(entryForm.mounts, "the entry form is not mounted").toBe(0);
+    expect(go()?.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("6a. save is refused while the read is unanswered", async () => {
+    readOverride = NEVER;
+    const onsave = vi.fn(async () => true);
+    await openSheet(false, onsave);
+    submitForm();
+    await settle();
+    expect(onsave).not.toHaveBeenCalled();
+  });
+
+  it("6b. save is refused after the read failed", async () => {
+    readOverride = async () => json({ error: { code: "unavailable", message: "not today" } }, 503);
+    const onsave = vi.fn(async () => true);
+    await openSheet(false, onsave);
+    submitForm();
+    await settle();
+    expect(onsave, "an unchecked sheet saves nothing").not.toHaveBeenCalled();
+  });
+
+  it("6c. control: once the read answers with no pair, save goes through", async () => {
+    readOverride = async () => noPair();
+    const onsave = vi.fn(async () => true);
+    await openSheet(false, onsave);
+    submitForm();
+    await settle();
+    expect(onsave).toHaveBeenCalled();
+  });
+
+  it("7. a stale answer is ignored: close and reopen before the first read answers", async () => {
+    const { proxy } = await import(pathToFileURL(join(svelteSrc, "internal/client/index.js")).href);
+    /** @type {Array<(r: Response) => void>} */
+    const answers = [];
+    readOverride = () => new Promise((resolveRead) => { answers.push(resolveRead); });
+    const props = proxy({ open: true });
+    await openSheet(false, async () => true, props);
+    expect(answers).toHaveLength(1);
+    props.open = false;
+    await settle();
+    props.open = true;
+    await settle();
+    expect(answers).toHaveLength(2);
+    // The first opening's answer reports a pair; it must not touch the second opening.
+    answers[0](withPair());
+    await settle();
+    expect(sheetText(), "the stale answer is dropped").not.toContain("finishing your earlier approval");
+    expect(entryForm.mounts, "the second opening is still waiting").toBe(0);
+    answers[1](noPair());
+    await settle();
+    expect(entryForm.mounts, "the second opening's own answer opens the form").toBeGreaterThan(0);
     expect(sheetText()).not.toContain("finishing your earlier approval");
   });
 });
