@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { CI_LANE, CI_RISK, pathRisk } from "./classify-changed-paths.mjs";
+// A namespace import: a missing export fails the one test that reads it, not the file.
+import * as nightlyBrowsers from "./ci/nightly-browsers.mjs";
 
 // #889: `classify` hands the pipeline a lane, and each job decides for itself
 // whether that lane runs it. Nothing else checks the two halves agree -- a
@@ -878,6 +880,42 @@ describe("browser jobs by event (#1412)", () => {
     expect(run("run", nightly)).toBe("ORBIT_WEB=true\nORBIT_LANE=full\n");
     // Not the nightly: even an `idle` answer changes nothing.
     expect(run("idle", { CI_PIPELINE_SOURCE: "merge_request_event" })).toBe("ORBIT_WEB=true\nORBIT_LANE=full\n");
+  });
+});
+
+// L-S1 (#1584): the next night's `moved` reads classify's log back for the
+// verdict, so the line classify prints and the pattern that reads it are one
+// contract split across two files.
+describe("the nightly verdict line classify prints (L-S1)", () => {
+  it("is a line VERDICT_LINE reads back, with the verdict as its first group", () => {
+    const classify = allBlocks.get("classify");
+    const start = classify.indexOf('      if [ "${CI_PIPELINE_SOURCE:-}" = "schedule" ] && [ "${ORBIT_NIGHTLY_BROWSERS:-}" = "true" ]; then\n        verdict=');
+    expect(start, "the nightly idle step moved").toBeGreaterThan(-1);
+    const end = classify.indexOf("\n  artifacts:", start);
+    const step = `set -eu\n${classify
+      .slice(start, end)
+      .split("\n")
+      .map((line) => line.replace(/^ {6}/u, ""))
+      .join("\n")}`;
+    const { VERDICT_LINE } = nightlyBrowsers;
+    expect(VERDICT_LINE, "nightly-browsers.mjs exports no VERDICT_LINE").toBeInstanceOf(RegExp);
+    for (const verdict of ["run", "idle", "yield"]) {
+      const directory = mkdtempSync(join(tmpdir(), "orbit-nightly-verdict-"));
+      try {
+        writeFileSync(join(directory, "classify.env"), "ORBIT_WEB=true\nORBIT_LANE=full\n", "utf8");
+        writeFileSync(join(directory, "node"), `#!/bin/sh\necho ${verdict}\n`, { mode: 0o755 });
+        const stdout = execFileSync("sh", ["-c", step], {
+          cwd: directory,
+          encoding: "utf8",
+          env: { PATH: `${directory}:${process.env.PATH}`, CI_PIPELINE_SOURCE: "schedule", ORBIT_NIGHTLY_BROWSERS: "true" },
+        });
+        const match = new RegExp(VERDICT_LINE.source, VERDICT_LINE.flags.replace("g", "")).exec(stdout);
+        expect(match, `no line for ${verdict} in: ${stdout}`).not.toBeNull();
+        expect(match[1]).toBe(verdict);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
   });
 });
 

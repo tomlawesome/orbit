@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -22,6 +22,8 @@ import {
   sourceKey,
   sourceVariable,
   definitionCoversPipeline,
+  definitionScripts,
+  jobDefinition,
   pipelineOwnedGlobs,
 } from "./job-inputs.mjs";
 
@@ -376,5 +378,50 @@ describe("what classify publishes", () => {
       { type: "blob", sha: "aaa", path: "Dockerfile" },
       { type: "blob", sha: "bbb", path: "web/src/app.html" },
     ]);
+  });
+});
+
+/*
+ * D-F12 (#1584): on the real tree a job's walk follows its scripts through
+ * their code, not their prose. Before the fix a comment that named a path
+ * carried 44 scripts/ci paths, release scripts and phantoms among them, into
+ * smoke's key, so an edit to a release script reran every image-keyed job.
+ */
+describe("a job's followed scripts on the real tree", () => {
+  const repoFile = (path) => new URL(`../../${path}`, import.meta.url);
+  const readFile = (path) => readFileSync(repoFile(path), "utf8");
+  const followed = (job) => definitionScripts(jobDefinition(pipeline, job).references, readFile);
+  const names = (paths) => paths.map((path) => path.replace(/^scripts\/ci\//u, ""));
+
+  it("follows smoke's scripts through code and not prose", () => {
+    const paths = followed("smoke");
+    for (const wanted of ["start-acceptance-stack.sh", "create-test-configuration.sh", "reuse-gate.sh", "job-inputs.mjs"]) {
+      expect(names(paths), `smoke lost ${wanted}`).toContain(wanted);
+    }
+    for (const prose of [
+      "promote-stable.sh",
+      "publish-channel.sh",
+      "write-release-manifest.sh",
+      "coverage-floor-check.mjs",
+      "a.test.mjs",
+      "licence-",
+      "",
+    ]) {
+      expect(names(paths), `smoke followed the prose mention ${prose || "scripts/ci/"}`).not.toContain(prose);
+    }
+    // Not a phantom: every path a key carries is a file in the repository.
+    for (const path of paths) expect(existsSync(repoFile(path)), `${path} does not exist`).toBe(true);
+  });
+
+  it("carries a ci script in through a non-ci script's code (repair_journeys)", () => {
+    const paths = followed("repair_journeys");
+    expect(names(paths)).toContain("write-test-manifest.sh");
+    for (const path of paths) expect(existsSync(repoFile(path)), `${path} does not exist`).toBe(true);
+  });
+
+  it("keeps the scripts classify's block names in every job's walk", () => {
+    // #1546 puts the classify block in every job's definition, so the scripts it
+    // names come with it. This pins that decision.
+    expect(names(followed("smoke"))).toContain("nightly-browsers.mjs");
   });
 });
