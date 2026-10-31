@@ -374,14 +374,19 @@ export function createDrawerActs({
     busy = { id, kind: "attach" };
     say(id, null);
     try {
-      await attachItemDocument(item.householdId, id, file, attachIdFor(id, file));
-      forgetAttachId(id, file);
+      try {
+        await attachItemDocument(item.householdId, id, file, attachIdFor(id, file));
+      } catch (error) {
+        say(id, wordsOf(error, "couldn't attach it — try again"));
+        return;
+      }
       // The papers are read after the view: the refreshed view lists the
       // item as now carrying one (a first paper was left out). A failed read
       // is said by `landed`, which never throws.
-      await landed(id, { papers: true }, attached(file.name, item.title));
-    } catch (error) {
-      say(id, wordsOf(error, "couldn't attach it — try again"));
+      // The id is kept until the papers are read back: a re-pick after a
+      // failed read re-sends it, and the server hands back the copy it
+      // already holds instead of storing a second one.
+      if (await landed(id, { papers: true }, attached(file.name, item.title))) forgetAttachId(id, file);
     } finally {
       busy = null;
     }
