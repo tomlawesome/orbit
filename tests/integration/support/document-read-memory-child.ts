@@ -12,8 +12,8 @@
  *   `zINSTREAM\0` and the length-prefixed chunks and keeps none of them), and
  *   the child's configuration points at it in `required` scan mode. Both jobs
  *   are claimed before any baseline is taken. The fake clamd's received socket
- *   chunks count against the figure; production's clamd is a separate
- *   container, so the figure overstates and never understates.
+ *   chunks are freed as they are counted, so the figure measures the server's
+ *   own scan, with no collector-timed share from the receiver.
  * - `hold <file> <userId> <receiptId>`: two `scanAndHoldImapAttachment` runs of
  *   the file's bytes, which are read into memory BEFORE the baseline, as the
  *   mail parser's buffer already is when the attachment reaches the holding
@@ -34,6 +34,7 @@ import { closeDatabase, getDb } from "@/db";
 import { documents } from "@/db/schema";
 import { claimScannerRecoveryJobs, processScannerRecoveryJob } from "@/server/document-maintenance/scan-recovery";
 import { scanAndHoldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
+import { releaseBuffer } from "@/server/documents/storage";
 import { baselinePeakKiB, peakKiB, prepareKeyState, printMemoryResult } from "./memory-child-support";
 
 const [mode, ...rest] = process.argv.slice(2);
@@ -53,37 +54,41 @@ async function startFakeClamd(): Promise<{ port: number; scannedBytes: number[];
     let scanned = 0;
     socket.on("error", () => undefined);
     socket.on("data", (chunk: Buffer) => {
-      let offset = 0;
-      while (offset < chunk.length) {
-        if (!commandDone) {
-          const end = chunk.indexOf(0, offset);
-          command = Buffer.concat([command, chunk.subarray(offset, end < 0 ? chunk.length : end)]);
-          if (end < 0) return;
-          if (command.toString("ascii") !== "zINSTREAM") {
-            socket.destroy();
-            return;
-          }
-          commandDone = true;
-          offset = end + 1;
-        } else if (remaining > 0) {
-          const take = Math.min(remaining, chunk.length - offset);
-          remaining -= take;
-          scanned += take;
-          offset += take;
-        } else {
-          const take = Math.min(4 - header.length, chunk.length - offset);
-          header = Buffer.concat([header, chunk.subarray(offset, offset + take)]);
-          offset += take;
-          if (header.length === 4) {
-            remaining = header.readUInt32BE(0);
-            header = Buffer.alloc(0);
-            if (remaining === 0) {
-              scannedBytes.push(scanned);
-              socket.end(Buffer.from("stream: OK\0", "ascii"));
+      try {
+        let offset = 0;
+        while (offset < chunk.length) {
+          if (!commandDone) {
+            const end = chunk.indexOf(0, offset);
+            command = Buffer.concat([command, chunk.subarray(offset, end < 0 ? chunk.length : end)]);
+            if (end < 0) return;
+            if (command.toString("ascii") !== "zINSTREAM") {
+              socket.destroy();
               return;
+            }
+            commandDone = true;
+            offset = end + 1;
+          } else if (remaining > 0) {
+            const take = Math.min(remaining, chunk.length - offset);
+            remaining -= take;
+            scanned += take;
+            offset += take;
+          } else {
+            const take = Math.min(4 - header.length, chunk.length - offset);
+            header = Buffer.concat([header, chunk.subarray(offset, offset + take)]);
+            offset += take;
+            if (header.length === 4) {
+              remaining = header.readUInt32BE(0);
+              header = Buffer.alloc(0);
+              if (remaining === 0) {
+                scannedBytes.push(scanned);
+                socket.end(Buffer.from("stream: OK\0", "ascii"));
+                return;
+              }
             }
           }
         }
+      } finally {
+        releaseBuffer(chunk);
       }
     });
   });

@@ -13,8 +13,9 @@
  *   the baseline) is scanned and held twice. Warm under ceil(n / 3) * 4.
  *
  * Recovery holds the check's one copy; every 1 MiB piece a pass produces is
- * zeroed and freed when it has been used, so the warm peak is that copy plus
- * the scan's chunks. A whole extra copy fails both bounds. A figure within
+ * zeroed and freed when it has been used, so the warm peak is that copy; the
+ * scanner frees each chunk once the socket has written it, so the scan leaves
+ * nothing for the collector. A whole extra copy fails both bounds. A figure within
  * 8 MiB of a bound is posted, never loosened (#1567's rule); every run logs
  * its figures.
  */
