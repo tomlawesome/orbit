@@ -278,6 +278,23 @@ function pdfObjectHeaderEnd(bytes: Buffer, at: number): number {
 }
 
 /**
+ * The bytes searched per native pass of findPdfEnd. A window is decoded to a
+ * string for the regex below and dropped, so memory stays this size however
+ * long the file is; it stays under 1 KiB so a check that sees no string that
+ * long (the test for #1567) still holds.
+ */
+const PDF_SEARCH_WINDOW = 1000;
+/** A keyword longer than this never starts in the last bytes of a window without the next window seeing it whole (`startxref` is 9). */
+const PDF_SEARCH_OVERLAP = 9;
+/**
+ * Where an end pattern can start: a digit (an `N G obj` header) or a keyword,
+ * not preceded by a word byte (`\b` before a word byte). Only the start is
+ * found here; findPdfEnd checks the rest on the bytes themselves.
+ */
+const PDF_OBJECT_END_START = /(?<![A-Za-z0-9_])(?:[0-9]|endobj|xref|trailer)/gu;
+const PDF_TRAILER_END_START = /(?<![A-Za-z0-9_])(?:[0-9]|startxref)/gu;
+
+/**
  * The byte-level form of pdf.js's end patterns, matching exactly what these
  * latin1 regexes (the `u` flag, no `i`) matched, searched forward from `from`:
  *   object  /\b(?:endobj|\d+\s+\d+\s+obj|xref|trailer\s*<<)\b/gu
@@ -286,27 +303,45 @@ function pdfObjectHeaderEnd(bytes: Buffer, at: number): number {
  * where a word byte follows the `<<`, as the regex's own trailing boundary
  * demands. `endobj` is true for the alternative the caller steps past (`endobj`
  * or `startxref`).
+ *
+ * The positions where a match can start are found by a native regex over a
+ * bounded window of the file, so a long run of bytes that start nothing (spaces
+ * in a stream, say) costs no JavaScript step per byte, and no copy of the
+ * whole file is made. Each start is then checked on the bytes, as the regex
+ * would. The window begins one byte early so the lookbehind sees the byte
+ * before its first start, and stops short of its end so a keyword is never cut
+ * by it: those bytes begin the next window.
  */
 function findPdfEnd(bytes: Buffer, from: number, kind: typeof PDF_OBJECT_END | typeof PDF_TRAILER_END): { index: number; end: number; endobj: boolean } | null {
   const keyword = kind === PDF_OBJECT_END ? "endobj" : "startxref";
-  for (let index = from; index < bytes.length; index += 1) {
-    const byte = bytes[index]!;
-    // Every alternative starts on a word byte, so a boundary before it means the byte before is not one.
-    if (isPdfRegexWord(bytes[index - 1])) continue;
-    let end = -1;
-    let endobj = false;
-    if (isPdfRegexDigit(byte)) end = pdfObjectHeaderEnd(bytes, index);
-    else if (byte === keyword.charCodeAt(0) && pdfWordAt(bytes, index, keyword)) {
-      end = index + keyword.length;
-      endobj = true;
-    } else if (kind === PDF_OBJECT_END && byte === 0x78 && pdfWordAt(bytes, index, "xref")) end = index + 4;
-    else if (kind === PDF_OBJECT_END && byte === 0x74 && pdfWordAt(bytes, index, "trailer")) {
-      let position = index + 7;
-      while (isPdfRegexSpace(bytes[position])) position += 1;
-      end = bytes[position] === 0x3c && bytes[position + 1] === 0x3c ? position + 2 : -1;
+  const starts = kind === PDF_OBJECT_END ? PDF_OBJECT_END_START : PDF_TRAILER_END_START;
+  let windowStart = from;
+  while (windowStart < bytes.length) {
+    const base = Math.max(0, windowStart - 1);
+    const windowEnd = Math.min(bytes.length, windowStart + PDF_SEARCH_WINDOW);
+    // Starts at or past `limit` wait for the next window, unless this one reaches the end of the file.
+    const limit = windowEnd === bytes.length ? windowEnd : windowEnd - PDF_SEARCH_OVERLAP;
+    const window = bytes.toString("latin1", base, windowEnd);
+    starts.lastIndex = windowStart - base;
+    for (let found = starts.exec(window); found !== null && base + found.index < limit; found = starts.exec(window)) {
+      const index = base + found.index;
+      const byte = bytes[index]!;
+      let end = -1;
+      let endobj = false;
+      if (isPdfRegexDigit(byte)) end = pdfObjectHeaderEnd(bytes, index);
+      else if (byte === keyword.charCodeAt(0) && pdfWordAt(bytes, index, keyword)) {
+        end = index + keyword.length;
+        endobj = true;
+      } else if (kind === PDF_OBJECT_END && byte === 0x78 && pdfWordAt(bytes, index, "xref")) end = index + 4;
+      else if (kind === PDF_OBJECT_END && byte === 0x74 && pdfWordAt(bytes, index, "trailer")) {
+        let position = index + 7;
+        while (isPdfRegexSpace(bytes[position])) position += 1;
+        end = bytes[position] === 0x3c && bytes[position + 1] === 0x3c ? position + 2 : -1;
+      }
+      // The closing \b: the last byte matched is a word byte or `<`, and the next must differ in kind.
+      if (end >= 0 && isPdfRegexWord(bytes[end - 1]) !== isPdfRegexWord(bytes[end])) return { index, end, endobj };
     }
-    // The closing \b: the last byte matched is a word byte or `<`, and the next must differ in kind.
-    if (end >= 0 && isPdfRegexWord(bytes[end - 1]) !== isPdfRegexWord(bytes[end])) return { index, end, endobj };
+    windowStart = limit;
   }
   return null;
 }
