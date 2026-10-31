@@ -149,7 +149,7 @@
     reviewOpen = true;
   }
   /**
-   * @param {import('$lib/data/workspace.js').ItemProposal} item
+   * @param {import('$lib/data/workspace.js').ItemProposal | null} item
    * @param {string | null} sectionId
    */
   async function saveReview(item, sectionId) {

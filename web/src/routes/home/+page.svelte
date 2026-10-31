@@ -902,7 +902,9 @@
    * The pocket's review sheet, raised in place from a suggestion's row or
    * its hollow body on the dial (round 3 §4): approves what the reader
    * amended into the section they chose, on the same idempotent protocol
-   * and operation id as the two-tap decision. Answers the problem, if any.
+   * and operation id as the two-tap decision. Answers the problem, if any,
+   * or the replayed answer; the home read after an add that landed is
+   * drawer-acts'.
    * @param {import('$lib/data/workspace.js').ReceiptSuggestion} suggestion
    * @param {import('$lib/data/workspace.js').ItemProposal} item
    * @param {string | null} sectionId
@@ -919,10 +921,11 @@
         view = await readHome().catch(() => view);
         return result;
       }
-      /* went in, but as the earlier approval had it: the caller says so */
-      if ("replayed" in result) { view = await readHome(); return result; }
-      view = await readHome();
-      return null;
+      /* Filed. The read after it is the drawer acts' (rereadAfterLanded,
+         as after every act that landed), so a read that fails is said under
+         the row as done-but-unread and never turns the add into "not added".
+         A replay is handed back so the wake can say what went in. */
+      return "replayed" in result ? result : null;
     } catch (error) {
       return wordsOf(error);
     } finally {

@@ -215,17 +215,21 @@ export function createDrawerActs({
     const sent = suggestion ? amend(suggestion, amended, sectionId) : null;
     if (!suggestion || !sent) throw new Error("not added — this suggestion has gone");
     const problem = await sent;
-    if (problem && typeof problem === "object") {
-      /* The engine finished an earlier approval: the item went in, but not
-         as amended here, and the wake says that instead of "added". */
-      if ("replayed" in problem) { landedNote = problem.message; return; }
+    if (problem && typeof problem === "object" && "partial" in problem) {
       /* A partial approval has filed the item: the rows close, or a corrected
          re-send under the same operation id is refused for good. */
       say(suggestion.id, problem.message, "partial");
       landedPartial = true;
       return;
     }
-    if (problem) throw new Error(`not added — ${problem}`);
+    if (typeof problem === "string") throw new Error(`not added — ${problem}`);
+    /* The engine finished an earlier approval: the item went in, but not
+       as amended here, and the wake says that instead of "added". */
+    if (problem && "replayed" in problem) landedNote = problem.message;
+    /* The item is filed. Home is read again here, as after every act that
+       landed (landed.js), so a read that fails is said under the suggestion's
+       row as done-but-unread and the add is never read back as "not added". */
+    await rereadAfterLanded(() => reread({ leaves: true }), (words) => say(suggestion.id, words, "suggestion"));
   }
   /* Set by addSuggestion when the add landed partly: addAmended then leaves
      the recorded-but-pending sentence standing instead of "added". */

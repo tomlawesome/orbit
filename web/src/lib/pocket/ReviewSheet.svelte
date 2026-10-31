@@ -32,7 +32,7 @@
    *   busy?: boolean,
    *   problem?: string | null,
    *   approval?: import('$lib/data/workspace.js').PendingApproval | null,
-   *   onsave: (item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<boolean>,
+   *   onsave: (item: import('$lib/data/workspace.js').ItemProposal | null, sectionId: string | null) => Promise<boolean>,
    * }} Props
    */
   /** @type {Props} */
@@ -131,7 +131,11 @@
     if (!entry || busy || !checked) return;
     if (!pending && refusal !== null) return;
     const currency = proposal?.currency ?? household?.currency ?? "GBP";
-    if (await onsave(reviewItemOf(entry, currency, proposal ?? {}), entry.sectionId)) open = false;
+    /* While a pair is pending no form is offered, so nothing here is an
+       amendment: the approval finishes the earlier one and must not be told
+       it dropped changes the reader had no field to make. */
+    const amended = pending ? null : reviewItemOf(entry, currency, proposal ?? {});
+    if (await onsave(amended, pending ? null : entry.sectionId)) open = false;
   }
 </script>
 
