@@ -4,6 +4,7 @@ import { redirect } from "@sveltejs/kit";
 
 import { ARCHIVE_SLOT_ROUTES, holdArchiveSlot } from "$lib/server/archive-slot.js";
 import { bodyLimitFor, discardBody, limitRequestBody } from "$lib/server/body-limit.js";
+import { warmUp } from "$lib/server/warm-up.js";
 
 /**
  * The screens a reader may open without a session (#789).
@@ -115,6 +116,27 @@ export async function init() {
      awaited: start-up does not wait on a sidecar, and a failure here costs
      nothing but the first visit probing for itself. */
   void import("orbit/server/about").then(({ warmAboutFacts }) => warmAboutFacts()).catch(() => {});
+
+  /* Once the server listens, load every route module and send it three
+     requests of its own, so the first reader after a restart does not pay for
+     the once-per-process work (#1575). Not awaited and never waited on by
+     readiness. Skipped without a numeric PORT, and on a socket, where there is
+     no port to dial (dev, tests). The glob is the route modules by their
+     public path, so the build shares their chunks with the route nodes. */
+  const port = env.PORT ? Number(env.PORT) : Number.NaN;
+  if (Number.isInteger(port) && !env.SOCKET_PATH) {
+    const host = !env.HOST || env.HOST === "0.0.0.0" || env.HOST === "::" ? "127.0.0.1" : env.HOST;
+    const loaders = Object.values(
+      import.meta.glob([
+        "/src/routes/**/+page.server.js",
+        "/src/routes/**/+layout.server.js",
+        "/src/routes/**/+page.svelte",
+        "/src/routes/**/+layout.svelte",
+      ]),
+    );
+    const { log } = await import("orbit/lib/logger");
+    void warmUp({ port, host, loaders, fetch, log }).catch(() => {});
+  }
 }
 
 /**
