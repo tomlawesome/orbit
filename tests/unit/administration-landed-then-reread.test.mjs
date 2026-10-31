@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
  * #1316 A1-R1: a landed command is never read back as not done.
@@ -24,15 +24,28 @@ import { describe, expect, it, vi } from "vitest";
 const POCKET_PATH = "web/src/routes/administration/pocket.svelte";
 const DESK_PATH = "web/src/routes/administration/+page.svelte";
 
-const server = vi.hoisted(() => ({ commandMailbox: async () => ({}), commandUploadLimit: async () => ({}) }));
+const server = vi.hoisted(() => {
+  const ok = async () => ({});
+  return {
+    commandMailbox: ok, commandUploadLimit: ok, addMember: ok, commandContact: ok,
+    createLocalUser: ok, createSystem: ok, restoreHousehold: ok, testMail: ok,
+  };
+});
 vi.mock("$lib/data/workspace.js", () => ({
-  addMember: vi.fn(), commandContact: vi.fn(), createLocalUser: vi.fn(), createSystem: vi.fn(),
-  restoreHousehold: vi.fn(), retryDocumentJob: vi.fn(), sendSetupLink: vi.fn(), testMail: vi.fn(),
+  retryDocumentJob: vi.fn(), sendSetupLink: vi.fn(),
+  addMember: (/** @type {unknown[]} */ ...a) => server.addMember(...a),
+  commandContact: (/** @type {unknown} */ command) => server.commandContact(command),
+  createLocalUser: (/** @type {unknown} */ body) => server.createLocalUser(body),
+  createSystem: (/** @type {unknown} */ body) => server.createSystem(body),
+  restoreHousehold: (/** @type {unknown} */ id) => server.restoreHousehold(id),
+  testMail: (/** @type {unknown} */ which) => server.testMail(which),
   commandMailbox: (/** @type {unknown} */ command) => server.commandMailbox(command),
   commandUploadLimit: (/** @type {unknown} */ command) => server.commandUploadLimit(command),
   wordsOf: (/** @type {unknown} */ error) => (error instanceof Error ? error.message : String(error)),
 }));
-const { commandMail, setUploadLimit } = await import("../../web/src/routes/administration/acts.svelte.js");
+const {
+  commandMail, inviteLocalUser, makeSystem, placePerson, restoreSystem, runMailTest, setContact, setUploadLimit,
+} = await import("../../web/src/routes/administration/acts.svelte.js");
 
 /** @param {string} path @returns {string} */
 function read(path) {
@@ -104,5 +117,195 @@ describe("a landed command is never read back as not done (#1316 A1-R1)", () => 
     expect(scope.editingUploadLimit, "the editor should be closed").toBe(false);
     expect(scope.uploadLimitCard.problem).toMatch(/^done —/);
     expect(scope.uploadLimitCard.busy).toBe(false);
+  });
+});
+
+/*
+ * The rule for every act in acts.svelte.js (#1584 W-F2, W-F5): the command is
+ * acknowledged by its own answer; the re-read after it is a separate step
+ * whose failure is said as done-but-unread (`done — ... reload ...`), never
+ * as the command refused. A refused command still says its own words and
+ * reads nothing again. Each act is called for real with the server's
+ * commands stood in above.
+ */
+const DONE = /^done —.*reload/i;
+const READ_FAILS = "the screen would not load";
+const failedRead = vi.fn(async () => { throw new Error(READ_FAILS); });
+const goodRead = vi.fn(async () => {});
+const ok = async () => ({});
+const refuses = async () => { throw new Error("no"); };
+
+beforeEach(() => {
+  failedRead.mockClear();
+  goodRead.mockClear();
+  Object.assign(server, {
+    commandMailbox: ok, commandUploadLimit: ok, addMember: ok, commandContact: ok,
+    createLocalUser: ok, createSystem: ok, restoreHousehold: ok, testMail: ok,
+  });
+});
+
+describe("a re-read that fails after a landed command is said as done, not as the command refused (#1584 W-F2, W-F5)", () => {
+  const person = { id: "p1", displayName: "Ada" };
+  const system = { id: "s1", name: "Home" };
+
+  it("placePerson: wakes the placement, then the done line (no failure wake); the card says done", async () => {
+    const landed = vi.fn();
+    const wake = vi.fn();
+    const card = { busy: /** @type {string | null} */ (null), problem: /** @type {string | null} */ (null) };
+    await placePerson(person, system, { card, reread: failedRead, landed, wake });
+
+    expect(landed).toHaveBeenCalledTimes(1);
+    expect(wake).toHaveBeenCalledTimes(2);
+    expect(wake.mock.calls[0][0]).toBe("Ada is in Home");
+    expect(wake.mock.calls[1][0]).toMatch(DONE);
+    for (const call of wake.mock.calls) expect(call[1]?.failure, "no failure wake after a landed command").toBeFalsy();
+    expect(card.problem).toMatch(DONE);
+    expect(card.busy).toBeNull();
+  });
+
+  it("inviteLocalUser: lands with the new user's id; the card says done, not setupWords' text", async () => {
+    server.createLocalUser = async () => ({ user: { id: "u1" }, sentTo: "a@b", expiresAt: "2026-11-30T00:00:00Z" });
+    const landed = vi.fn();
+    const card = { busy: false, problem: /** @type {string | null} */ (null) };
+    await inviteLocalUser(
+      { email: "a@b", displayName: "A", expiresInDays: 7 }, "",
+      { card, actorHasPassword: false, reread: failedRead, landed },
+    );
+
+    expect(landed).toHaveBeenCalledTimes(1);
+    expect(landed.mock.calls[0][0].userId).toBe("u1");
+    expect(card.problem).toMatch(/^done —/);
+    expect(card.problem).not.toBe(READ_FAILS);
+    expect(card.busy).toBe(false);
+  });
+
+  it("makeSystem: lands; the card says done and so does the wake it is given", async () => {
+    const landed = vi.fn();
+    const wake = vi.fn();
+    const card = { busy: false, problem: /** @type {string | null} */ (null) };
+    await makeSystem("Flat", { id: "u1" }, "", { card, actorHasPassword: false, reread: failedRead, landed, wake });
+
+    expect(landed).toHaveBeenCalledTimes(1);
+    expect(card.problem).toMatch(/^done —/);
+    expect(wake).toHaveBeenCalledWith(card.problem);
+    expect(card.busy).toBe(false);
+  });
+
+  it("setContact: lands and settles (the editor closes), and the card says done", async () => {
+    const landed = vi.fn();
+    const settled = vi.fn();
+    const card = { busy: false, problem: /** @type {string | null} */ (null) };
+    await setContact({ version: 2 }, { action: "set", address: "hello@example.test" }, { card, reread: failedRead, landed, settled });
+
+    expect(landed).toHaveBeenCalledTimes(1);
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(card.problem).toMatch(/^done —/);
+    expect(card.busy).toBe(false);
+  });
+
+  it("runMailTest: the card says done and is no longer busy", async () => {
+    const card = { busy: /** @type {"mailbox" | "relay" | null} */ (null), problem: /** @type {string | null} */ (null) };
+    await runMailTest("mailbox", { card, reread: failedRead });
+
+    expect(card.problem).toMatch(/^done —/);
+    expect(card.busy).toBeNull();
+  });
+
+  it("restoreSystem: the row stays green (ok), says it is back and to reload, never 'not restored'", async () => {
+    const said = /** @type {Record<string, { ok: boolean, text: string }>} */ ({});
+    await restoreSystem({ id: "s1", name: "Home" }, said, failedRead);
+
+    expect(said.s1.ok).toBe(true);
+    expect(said.s1.text.startsWith("restored · Home")).toBe(true);
+    expect(said.s1.text).toMatch(/reload/i);
+    expect(said.s1.text).not.toMatch(/not restored/);
+  });
+});
+
+describe("a refused command says its own words and reads nothing again (guards, #1584 W-F2)", () => {
+  it("placePerson: the refusal and a failure wake; nothing landed", async () => {
+    server.addMember = refuses;
+    const landed = vi.fn();
+    const wake = vi.fn();
+    const card = { busy: /** @type {string | null} */ (null), problem: /** @type {string | null} */ (null) };
+    await placePerson({ id: "p1", displayName: "Ada" }, { id: "s1", name: "Home" }, { card, reread: goodRead, landed, wake });
+
+    expect(card.problem).toBe("no");
+    expect(wake).toHaveBeenCalledWith("no", { failure: true });
+    expect(landed).not.toHaveBeenCalled();
+    expect(goodRead).not.toHaveBeenCalled();
+    expect(card.busy).toBeNull();
+  });
+
+  it("inviteLocalUser and makeSystem: the refusal in setupWords' text; nothing landed", async () => {
+    server.createLocalUser = refuses;
+    server.createSystem = refuses;
+    const landed = vi.fn();
+    const invite = { busy: false, problem: /** @type {string | null} */ (null) };
+    await inviteLocalUser({ email: "a@b", displayName: "A", expiresInDays: 7 }, "", { card: invite, actorHasPassword: false, reread: goodRead, landed });
+    const system = { busy: false, problem: /** @type {string | null} */ (null) };
+    await makeSystem("Flat", { id: "u1" }, "", { card: system, actorHasPassword: false, reread: goodRead, landed });
+
+    expect(invite.problem).toBe("no");
+    expect(system.problem).toBe("no");
+    expect(landed).not.toHaveBeenCalled();
+    expect(goodRead).not.toHaveBeenCalled();
+    expect(invite.busy).toBe(false);
+    expect(system.busy).toBe(false);
+  });
+
+  it("setContact and runMailTest: the refusal; nothing landed or settled", async () => {
+    server.commandContact = refuses;
+    server.testMail = refuses;
+    const landed = vi.fn();
+    const settled = vi.fn();
+    const contact = { busy: false, problem: /** @type {string | null} */ (null) };
+    await setContact({ version: 2 }, { action: "clear" }, { card: contact, reread: goodRead, landed, settled });
+    const test = { busy: /** @type {"mailbox" | "relay" | null} */ (null), problem: /** @type {string | null} */ (null) };
+    await runMailTest("relay", { card: test, reread: goodRead });
+
+    expect(contact.problem).toBe("no");
+    expect(test.problem).toBe("no");
+    expect(landed).not.toHaveBeenCalled();
+    expect(settled).not.toHaveBeenCalled();
+    expect(goodRead).not.toHaveBeenCalled();
+    expect(contact.busy).toBe(false);
+    expect(test.busy).toBeNull();
+  });
+
+  it("restoreSystem: 'not restored — no', not ok, and no re-read", async () => {
+    server.restoreHousehold = refuses;
+    const said = /** @type {Record<string, { ok: boolean, text: string }>} */ ({});
+    await restoreSystem({ id: "s1", name: "Home" }, said, goodRead);
+
+    expect(said.s1).toEqual({ ok: false, text: "not restored — no" });
+    expect(goodRead).not.toHaveBeenCalled();
+  });
+});
+
+describe("the phone passes what the acts need (source check on pocket.svelte, #1584 W-F2)", () => {
+  /**
+   * The text of the call that follows `marker`: from its first `(` to the
+   * matching `)`.
+   * @param {string} src @param {string} marker
+   */
+  function callAfter(src, marker) {
+    const start = src.indexOf(marker);
+    expect(start, `pocket.svelte has no \`${marker}\``).toBeGreaterThan(-1);
+    const open = src.indexOf("(", start);
+    let depth = 0;
+    for (let end = open; end < src.length; end++) {
+      if (src[end] === "(") depth++;
+      else if (src[end] === ")" && --depth === 0) return src.slice(open, end + 1);
+    }
+    throw new Error(`unbalanced call after ${marker}`);
+  }
+
+  it("the upload limit is sent without its own `unread:` override, so the phone wakes the done line like every act", () => {
+    expect(callAfter(read(POCKET_PATH), "setUploadLimit(view")).not.toMatch(/\bunread\s*:/);
+  });
+
+  it("makeSystem is handed `wake`, as an option beside `landed` (not only called inside it)", () => {
+    expect(callAfter(read(POCKET_PATH), "await makeSystem(")).toMatch(/(?:^|[\s{,])wake\s*(?:,|\}|:)/);
   });
 });
