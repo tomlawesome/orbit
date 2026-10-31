@@ -299,7 +299,7 @@ test("#1584 web-wr9-3: an amend over a pending pair is replayed, and the wake sa
   await expect(page.getByText(/not added/i)).toHaveCount(0);
 });
 
-test("#1584 web-wr9-2: a failed re-read after an amended add is done, not 'not added'", async ({ page }) => {
+test("#1584 web-wr9-2: a failed re-read after an amended add is done, not 'not added', and the desk says so", async ({ page }) => {
   const seen = await answerApproval(page);
   /* answer the approval, then sink the one home read that follows it */
   await page.route("**/api/reviewed-intake/approve", async (route) => {
@@ -316,11 +316,18 @@ test("#1584 web-wr9-2: a failed re-read after an amended add is done, not 'not a
   await drawer.getByRole("button", { name: "add to orbit", exact: true }).click();
   await expect.poll(() => seen.approvals.length).toBe(1);
   await expect(page.locator(DRAWER)).toHaveCount(0);
-  await expect(page.getByRole("status").filter({ hasText: "added to your orbit" }))
-    .toHaveText("added to your orbit · Home insurance, corrected");
-  /* The done-but-unread line is said under the row (U1 pins the `say`), but
-     the desk draws a row's `.mail-problem` only inside the open drawer
-     (SuggestionView), and the drawer has just left: nothing is drawn to
-     assert. The redesign expected the line to stand under the stale row. */
+  /* The done line is the wake, in place of "added to your orbit": the line
+     under the row is drawn only inside the open drawer, which has just left. */
+  const wake = page.getByRole("status").filter({ hasText: /^done — / });
+  await expect(wake).toHaveText(/^done — .*reload/);
+  await expect(page.getByRole("status").filter({ hasText: "added to your orbit" })).toHaveCount(0);
+  await expect(page.getByRole("alert").filter({ hasText: "added to your orbit" })).toHaveCount(0);
+  /* a plain wake, not a failure */
+  await expect(page.getByRole("alert")).toHaveText("");
   await expect(page.getByText(/not added/i)).toHaveCount(0);
+  /* The stale row kept its line for a reader who opens it before reloading. */
+  await page.locator(ROW, { hasText: "Home insurance renewal" }).click();
+  const problem = page.locator(DRAWER).locator(".mail-problem");
+  await expect(problem).toBeVisible();
+  await expect(problem).toHaveText(/^done — .*reload/);
 });

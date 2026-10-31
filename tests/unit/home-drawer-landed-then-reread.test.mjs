@@ -270,10 +270,12 @@ describe("a paper removed or restored from the reader is not read back as refuse
 /*
  * #1584 web-wr9-2: the rows' amended add of a suggestion. The approval has
  * landed when the seam answers; the home read after it is the drawer acts'
- * (rereadAfterLanded, `{ leaves: true }`), so a read that fails is said under
- * the suggestion's row as done-but-unread and never turns the add into
- * "not added". The done line is said, not woken: the "added" or replayed
- * wake follows at once.
+ * (rereadAfterLanded, `{ leaves: true }`), so a read that fails never turns
+ * the add into "not added". The done line is said under the suggestion's row
+ * (a reopened stale row still shows it) and, once the rows close, it is the
+ * one wake, in place of "added" or the replayed note, as after every act
+ * that leaves (landed()). A good read wakes "added" or the note, never the
+ * done line.
  */
 describe("an amended add that landed is not read back as refused (#1584 web-wr9-2)", () => {
   const NOTE = "It went in with the values from your earlier approval; your changes were not applied.";
@@ -289,7 +291,10 @@ describe("an amended add that landed is not read back as refused (#1584 web-wr9-
   const noNotAdded = (/** @type {any} */ spy) =>
     expect(spy.mock.calls.flat().some((/** @type {unknown} */ arg) => /not added/i.test(String(arg)))).toBe(false);
 
-  it("U1. an amended add whose re-read fails is done, not 'not added'", async () => {
+  /** Every wake's first argument. @param {any} wake */
+  const wakeWords = (wake) => wake.mock.calls.map((/** @type {unknown[]} */ c) => String(c[0]));
+
+  it("U1. an amended add whose re-read fails is done, not 'not added', and the done line is the wake", async () => {
     const reread = failedRead();
     const { acts, say, leave, wake } = openRows({ amend: vi.fn().mockResolvedValue(null), reread });
     await acts.addAmended();
@@ -302,9 +307,23 @@ describe("an amended add that landed is not read back as refused (#1584 web-wr9-
     expect(leave).toHaveBeenCalledWith("s1");
     expect(say).toHaveBeenLastCalledWith("s1", expect.stringMatching(DONE), "suggestion");
     expect(wake).toHaveBeenCalledTimes(1);
-    expect(wake).toHaveBeenCalledWith("added to your orbit · Boiler");
+    expect(wake.mock.calls[0][0]).toMatch(DONE);
+    expect(wake.mock.calls[0][1]?.failure, "a plain wake, not a failure").not.toBe(true);
+    expect(wakeWords(wake).some((w) => /added to your orbit/.test(w))).toBe(false);
     noNotAdded(say);
     noNotAdded(wake);
+  });
+
+  it("U1b. order: the home read runs, then the row leaves, then the done wake", async () => {
+    /** @type {string[]} */
+    const order = [];
+    const reread = vi.fn(async () => { order.push("reread"); throw new Error(UNLOADED); });
+    const { acts, leave, wake } = openRows({ amend: vi.fn().mockResolvedValue(null), reread });
+    leave.mockImplementation(() => { order.push("leave"); });
+    wake.mockImplementation(() => { order.push("wake"); });
+    await acts.addAmended();
+
+    expect(order).toEqual(["reread", "leave", "wake"]);
   });
 
   it("U2. a replayed add lands with the seam's words", async () => {
@@ -316,6 +335,7 @@ describe("an amended add that landed is not read back as refused (#1584 web-wr9-
     expect(leave).toHaveBeenCalledWith("s1");
     expect(wake).toHaveBeenCalledTimes(1);
     expect(wake).toHaveBeenCalledWith(NOTE);
+    expect(wakeWords(wake).some((w) => DONE.test(w)), "a good read never wakes the done line").toBe(false);
     expect(say.mock.calls.some((/** @type {unknown[]} */ c) => c[1] === NOTE), "the note is not said under the row").toBe(false);
     expect(acts.modes.edit.id).toBeNull();
   });
@@ -329,14 +349,18 @@ describe("an amended add that landed is not read back as refused (#1584 web-wr9-
     expect(reread).toHaveBeenCalledWith({ leaves: true });
   });
 
-  it("U3. a replayed add whose re-read fails keeps the note and says done", async () => {
+  it("U3. a replayed add whose re-read fails says done, in place of the note", async () => {
     const reread = failedRead();
     const { acts, say, leave, wake } = openRows({ amend: vi.fn().mockResolvedValue({ replayed: true, message: NOTE }), reread });
     await acts.addAmended();
 
     expect(wake).toHaveBeenCalledTimes(1);
-    expect(wake).toHaveBeenCalledWith(NOTE);
+    expect(wake.mock.calls[0][0]).toMatch(DONE);
+    expect(wake.mock.calls[0][0]).not.toBe(NOTE);
+    expect(wake.mock.calls[0][1]?.failure, "a plain wake, not a failure").not.toBe(true);
     expect(say).toHaveBeenLastCalledWith("s1", expect.stringMatching(DONE), "suggestion");
+    expect(say.mock.calls.some((/** @type {unknown[]} */ c) => c[1] === NOTE)).toBe(false);
+    expect(leave).toHaveBeenCalledTimes(1);
     expect(leave).toHaveBeenCalledWith("s1");
     noNotAdded(say);
     noNotAdded(wake);
@@ -363,5 +387,43 @@ describe("an amended add that landed is not read back as refused (#1584 web-wr9-
     expect(reread).not.toHaveBeenCalled();
     expect(leave).not.toHaveBeenCalled();
     expect(wake).not.toHaveBeenCalled();
+  });
+
+  it("U6. guard: a good read after a plain add wakes 'added' only, and the done line does not carry over", async () => {
+    const reread = goodRead();
+    const { acts, say, wake } = openRows({ amend: vi.fn().mockResolvedValue(null), reread });
+    await acts.addAmended();
+
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake).toHaveBeenCalledWith("added to your orbit · Boiler");
+    expect(say.mock.calls.some((/** @type {unknown[]} */ c) => DONE.test(String(c[1])))).toBe(false);
+  });
+
+  it("U6b. the done line is reset on each add: a failed read on s1, then a good read on s2, wakes 'added' for s2", async () => {
+    const reread = vi.fn().mockRejectedValueOnce(new Error(UNLOADED)).mockResolvedValue(undefined);
+    const view = () => /** @type {any} */ ({
+      suggestions: [{ id: "s1", receiptId: "r1", householdId: "h1" }, { id: "s2", receiptId: "r2", householdId: "h1" }],
+      primary: "h1", households: [],
+    });
+    const { acts, say, leave, wake } = make({ reread, amend: vi.fn().mockResolvedValue(null), view });
+    const open = (/** @type {string} */ id) => {
+      acts.modes.startEdit(/** @type {any} */ ({ ...itemOf(id), status: "suggested" }));
+      acts.modes.edit.answered = true;
+      acts.modes.edit.refusal = null;
+    };
+
+    open("s1");
+    await acts.addAmended();
+    expect(reread).toHaveBeenCalledTimes(1);
+    expect(leave).toHaveBeenLastCalledWith("s1");
+
+    open("s2");
+    await acts.addAmended();
+    expect(reread).toHaveBeenCalledTimes(2);
+    expect(leave).toHaveBeenLastCalledWith("s2");
+    expect(wake).toHaveBeenCalledTimes(2);
+    expect(wake.mock.calls[1][0]).toBe("added to your orbit · Boiler");
+    expect(wake.mock.calls[1][0]).not.toMatch(DONE);
+    expect(say.mock.calls.some((/** @type {unknown[]} */ c) => c[0] === "s2" && DONE.test(String(c[1])))).toBe(false);
   });
 });
