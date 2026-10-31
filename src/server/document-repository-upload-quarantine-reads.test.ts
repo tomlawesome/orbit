@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { log } from "@/lib/logger";
 
 /**
  * A2-Q1: `uploadItemDocument` read the quarantine file twice on every upload
@@ -14,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   updateReturningQueues: new Map<string, unknown[][]>(),
   readQuarantineCalls: 0,
   scanStatus: "clean" as "clean" | "infected",
-  structureValid: true as boolean | "no_verdict",
+  structureValid: true as boolean | "no_verdict" | "password_required",
   lastQuarantineBuffer: null as Buffer | null,
   order: [] as string[],
   inserts: [] as string[],
@@ -122,6 +123,7 @@ vi.mock("@/server/documents/validation", () => ({
     mocks.order.push("open");
     mocks.classifyCalls.push(args);
     if (mocks.structureValid === "no_verdict") return "structure_check_unavailable";
+    if (mocks.structureValid === "password_required") return "password_required";
     return mocks.structureValid ? "supported_structure" : "unsupported_structure";
   },
 }));
@@ -276,18 +278,92 @@ describe("uploadItemDocument scans before anything opens the file (ADR-0033)", (
     expect(mocks.inserts).toEqual([]);
   });
 
-  it("still refuses with the 422 when the structure check reached no verdict, writing no metadata (D-S1)", async () => {
+  it("answers 503 document_check_unavailable, 'please try again', when the structure check reached no verdict, writing no metadata (D-S1, #1593)", async () => {
     configState.scanMode = "required";
+    mocks.structureValid = "no_verdict";
+    seedUploadHappyPath();
+
+    const error = await uploadItemDocument({
+      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
+    }).then(() => null, (caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      code: "document_check_unavailable",
+      status: 503,
+      message: "The file couldn't be uploaded. Please try again.",
+    });
+    expect((error as Error).message).not.toMatch(/choose another/iu);
+    expect(mocks.order).toEqual(["scan", "open"]);
+    // Nothing is stored: no row, no seal, and the quarantine copy goes.
+    expect(mocks.inserts).toEqual([]);
+    expect(mocks.sealCalls).toEqual([]);
+    expect(mocks.discarded).toEqual(["/tmp/q"]);
+  });
+
+  it("answers the same 503 with scanning disabled", async () => {
+    configState.scanMode = "disabled";
     mocks.structureValid = "no_verdict";
     seedUploadHappyPath();
 
     await expect(uploadItemDocument({
       userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
-    })).rejects.toMatchObject({ code: "document_structure_invalid", status: 422 });
+    })).rejects.toMatchObject({ code: "document_check_unavailable", status: 503 });
 
-    expect(mocks.order).toEqual(["scan", "open"]);
     expect(mocks.inserts).toEqual([]);
-    expect(mocks.discarded).toEqual(["/tmp/q"]);
+    expect(mocks.sealCalls).toEqual([]);
+  });
+
+  it("writes one warn-level line with the real reason and the 'look at the host' action (inspect_admin_diagnostics), carrying none of the member's words (#1593)", async () => {
+    configState.scanMode = "required";
+    mocks.structureValid = "no_verdict";
+    seedUploadHappyPath();
+    const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+
+    await expect(uploadItemDocument({
+      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
+    })).rejects.toMatchObject({ code: "document_check_unavailable" });
+
+    const lines = warnSpy.mock.calls.filter(([line]) => line.reason === "structure_check_unavailable");
+    expect(lines).toHaveLength(1);
+    expect(lines[0][0]).toMatchObject({ reason: "structure_check_unavailable", action: "inspect_admin_diagnostics" });
+    const everything = JSON.stringify(warnSpy.mock.calls);
+    expect(everything).not.toContain("bill.pdf");
+    expect(everything).not.toContain("try again");
+  });
+
+  it("keeps the 422 and its message for a password-protected document, and logs no structure_check_unavailable (#1593)", async () => {
+    configState.scanMode = "required";
+    mocks.structureValid = "password_required";
+    seedUploadHappyPath();
+    const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+
+    await expect(uploadItemDocument({
+      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
+    })).rejects.toMatchObject({
+      code: "document_password_required",
+      status: 422,
+      message: "This document needs a password to open. Choose a copy without a password.",
+    });
+
+    expect(mocks.inserts).toEqual([]);
+    expect(warnSpy.mock.calls.filter(([line]) => line.reason === "structure_check_unavailable")).toEqual([]);
+  });
+
+  it("keeps the 422 and its message for an invalid structure, and logs no structure_check_unavailable (#1593)", async () => {
+    configState.scanMode = "required";
+    mocks.structureValid = false;
+    seedUploadHappyPath();
+    const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+
+    await expect(uploadItemDocument({
+      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
+    })).rejects.toMatchObject({
+      code: "document_structure_invalid",
+      status: 422,
+      message: "Orbit could not open this document. Choose another PDF, JPEG, or PNG.",
+    });
+
+    expect(warnSpy.mock.calls.filter(([line]) => line.reason === "structure_check_unavailable")).toEqual([]);
   });
 });
 
@@ -409,6 +485,19 @@ describe("the upload's check buffer is freed, not only zeroed (A-Q1, A-Q4)", () 
     expect(mocks.bufferLengthWhenSealing, "detached by the time sealQuarantine is called").toBe(0);
     expect(mocks.lastQuarantineBuffer!.byteLength, "still detached after the upload returns").toBe(0);
     expect(mocks.lastQuarantineBuffer!.buffer.byteLength).toBe(0);
+  });
+
+  it("detaches the check buffer when the structure check reached no verdict and the upload answers 503 (#1593)", async () => {
+    configState.scanMode = "disabled";
+    mocks.structureValid = "no_verdict";
+    seedUploadHappyPath();
+
+    await expect(uploadItemDocument({
+      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
+    })).rejects.toMatchObject({ code: "document_check_unavailable", status: 503 });
+
+    expect(mocks.lastQuarantineBuffer).not.toBeNull();
+    expect(mocks.lastQuarantineBuffer!.byteLength).toBe(0);
   });
 
   it("detaches the check buffer when the structure check refuses the upload with a 422", async () => {
