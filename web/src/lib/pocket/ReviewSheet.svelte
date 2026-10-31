@@ -42,12 +42,15 @@
   } = $props();
 
   /* The review read's word on a pending approval, asked each time the sheet
-     rises; the form waits for it, so nothing can be amended that would not
-     apply. A read that fails leaves the form as it was: the approval reads
-     the review again anyway. */
+     rises. The form is not offered until the read answers: an amendment made
+     while a pair is pending would be dropped by the replay, so an unanswered
+     check refuses, with a retry, rather than guesses. */
   /** @type {import('$lib/data/workspace.js').PendingApproval | null} */
   let reported = $state(null);
   let checked = $state(false);
+  let checkFailed = $state(false);
+  /** @type {{ receiptId: string, householdId: string } | null} */
+  let query = null;
   const pending = $derived(Boolean(approval ?? reported));
 
   /** @type {import('../../routes/create/entry.js').Entry | null} */
@@ -80,17 +83,25 @@
         start = { ...start, reminderDays: [...pair] };
       });
       reported = null;
-      const query = !approval && receiptId && householdId ? { receiptId, householdId } : null;
+      query = !approval && receiptId && householdId ? { receiptId, householdId } : null;
       checked = !query;
-      if (query) {
-        readPendingApproval(query.receiptId, query.householdId).catch(() => null).then((pair) => {
-          if (opening !== openings) return;
-          reported = pair;
-          checked = true;
-        });
-      }
+      checkFailed = false;
+      if (query) check(opening);
     });
   });
+  /** @param {number} opening */
+  function check(opening) {
+    if (!query) return;
+    readPendingApproval(query.receiptId, query.householdId).then((pair) => {
+      if (opening !== openings) return;
+      reported = pair;
+      checked = true;
+      checkFailed = false;
+    }, () => {
+      if (opening === openings) checkFailed = true;
+    });
+  }
+  const recheck = () => { checkFailed = false; check(openings); };
   $effect(() => {
     if (entry && start && JSON.stringify(entry.reminderDays) !== JSON.stringify(start.reminderDays)) reminderChosen = true;
   });
@@ -137,6 +148,15 @@
     </form>
     {#if problem}<p class="p-error" role="alert">{problem}</p>
     {:else if refusal}<p class="rv-refusal" id="{uid}-refusal">{refusal}</p>{/if}
+  {:else if entry}
+    <form id="{uid}-form" aria-label="Review {title}" onsubmit={(event) => { event.preventDefault(); save(); }}>
+      {#if checkFailed}
+        <p class="p-error" role="alert">Orbit could not check for an earlier approval. Nothing was added.</p>
+        <button type="button" class="p-pill rv-again" onclick={recheck}>try again</button>
+      {:else}
+        <p class="rv-pending" role="status">checking for an earlier approval…</p>
+      {/if}
+    </form>
   {/if}
   {#snippet foot()}
     {@const held = busy || !checked || (!pending && refusal !== null)}

@@ -69,7 +69,7 @@
  *   documents need another try)
  * @typedef {import('$lib/data/workspace.js').ReceiptSuggestion} ReceiptSuggestion
  * @typedef {(suggestion: ReceiptSuggestion, item: import('$lib/data/workspace.js').ItemProposal,
- *   sectionId: string | null) => Promise<string | { partial: true, message: string } | null> | null} Amend
+ *   sectionId: string | null) => Promise<string | { partial: true, message: string } | { replayed: true, message: string } | null> | null} Amend
  */
 import { applyCommand, attachItemDocument, dueDateIn, readItemDocuments, readReminders, removeDocument, restoreDocument, wordsOf } from "$lib/data/workspace.js";
 import { completeCommand, snoozeCommand, upsertCommand } from "$lib/data/commands.js";
@@ -216,6 +216,9 @@ export function createDrawerActs({
     if (!suggestion || !sent) throw new Error("not added — this suggestion has gone");
     const problem = await sent;
     if (problem && typeof problem === "object") {
+      /* The engine finished an earlier approval: the item went in, but not
+         as amended here, and the wake says that instead of "added". */
+      if ("replayed" in problem) { landedNote = problem.message; return; }
       /* A partial approval has filed the item: the rows close, or a corrected
          re-send under the same operation id is refused for good. */
       say(suggestion.id, problem.message, "partial");
@@ -227,13 +230,17 @@ export function createDrawerActs({
   /* Set by addSuggestion when the add landed partly: addAmended then leaves
      the recorded-but-pending sentence standing instead of "added". */
   let landedPartial = false;
+  /** Set by addSuggestion when the add replayed an earlier approval: the
+      wake says the seam's words instead of "added". @type {string | null} */
+  let landedNote = null;
   async function addAmended() {
     landedPartial = false;
+    landedNote = null;
     const id = modes.edit.id;
     const title = modes.edit.draft?.title.trim() ?? "";
     if (await modes.edit.commit() && !landedPartial) {
       if (id) leave(id);
-      wake(`added to your orbit · ${title}`);
+      wake(landedNote ?? `added to your orbit · ${title}`);
     }
   }
 

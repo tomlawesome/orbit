@@ -895,7 +895,7 @@
    * @param {import('$lib/data/workspace.js').ReceiptSuggestion} suggestion
    * @param {import('$lib/data/workspace.js').ItemProposal} item
    * @param {string | null} sectionId
-   * @returns {Promise<string | { partial: true, message: string } | null>}
+   * @returns {Promise<string | { partial: true, message: string } | { replayed: true, message: string } | null>}
    */
   async function amendReceipt(suggestion, item, sectionId) {
     if (!suggestion.receiptId) return "not added — try again";
@@ -908,6 +908,8 @@
         view = await readHome().catch(() => view);
         return result;
       }
+      /* went in, but as the earlier approval had it: the caller says so */
+      if ("replayed" in result) { view = await readHome(); return result; }
       view = await readHome();
       return null;
     } catch (error) {

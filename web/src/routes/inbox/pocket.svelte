@@ -92,11 +92,11 @@
       else problems.delete(id);
     },
     busy: (id, act) => { busy = id; busyAct = act; },
-    landed: (receipt, act, amended) => {
+    landed: (receipt, act, amended, note) => {
       const card = /** @type {Receipt} */ (receipt);
       if (act === "approve") {
         exits.set(card.id, "filed");
-        wake(`added to your orbit · ${amended?.title ?? titleOf(card)}`);
+        wake(note ?? `added to your orbit · ${amended?.title ?? titleOf(card)}`);
       } else {
         exits.set(card.id, "burn");
         wake(`dismissed · ${titleOf(card)}`);

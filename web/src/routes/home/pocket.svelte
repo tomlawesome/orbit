@@ -69,7 +69,7 @@
    *   onapprove?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
    *   ondismiss?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
    *   onamend?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion,
-   *     item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<string | { partial: true, message: string } | null>,
+   *     item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<string | { partial: true, message: string } | { replayed: true, message: string } | null>,
    *   onchanged?: () => Promise<unknown>,
    *   onsignedout?: (redirectTo: string | null) => unknown,
    *   onmenu?: () => unknown,

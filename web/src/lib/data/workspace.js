@@ -1055,6 +1055,10 @@ export async function approveReceipt(suggestion, fallbackHouseholdId, operationI
     : approvalBodyOf(suggestion, householdId, review, operationId, amendedItem, sectionId));
 }
 
+/* A stalled read must end in the sheet's "could not check" state, not a
+   blank sheet. */
+const PENDING_APPROVAL_READ_TIMEOUT_MS = 20_000;
+
 /**
  * Whether the server holds a pending approval for this receipt (#1396): the
  * pair its review read reports, or null. The review sheet asks, so it can say
@@ -1067,14 +1071,16 @@ export async function approveReceipt(suggestion, fallbackHouseholdId, operationI
  */
 export async function readPendingApproval(receiptId, householdId) {
   /** @type {{ approval?: PendingApproval }} */
-  const review = await json(
-    await fetch(`/api/imap-inbox/${receiptId}?householdId=${householdId}`, { credentials: "same-origin" }),
-  );
+  const review = await json(await fetch(`/api/imap-inbox/${receiptId}?householdId=${householdId}`, {
+    credentials: "same-origin", signal: AbortSignal.timeout(PENDING_APPROVAL_READ_TIMEOUT_MS),
+  }));
   return review.approval ?? null;
 }
 
 /** The one sentence for a receipt that is recorded but whose documents failed. */
 const PARTIAL_APPROVAL_MESSAGE = "The item is recorded, but its documents need another try — try once more to finish.";
+/** The one sentence for an amendment the replay of an earlier approval dropped. */
+const REPLAYED_APPROVAL_MESSAGE = "Added with the values from your earlier approval — the changes made here were not applied.";
 
 /**
  * Approve a mail receipt's suggestion under its per-receipt operation id —
@@ -1083,7 +1089,9 @@ const PARTIAL_APPROVAL_MESSAGE = "The item is recorded, but its documents need a
  * retry sends the same one; it is dropped once the item is fully approved.
  * `partial_success` (the item is recorded, its documents failed) answers
  * `{ partial: true, message }`, the id kept; callers branch on that shape,
- * never on the words. A plain refusal throws, as approveReceipt does.
+ * never on the words. A plain refusal throws, as approveReceipt does. An
+ * amendment given beside a reported pair is not what went in, so that
+ * approval answers `{ replayed: true, message }` instead of `{ ok: true }`.
  *
  * The server is the authority on what it accepted (ADR-0005, #1396): a pair
  * the review reports is sent verbatim, whatever this tab holds or was given.
@@ -1098,7 +1106,7 @@ const PARTIAL_APPROVAL_MESSAGE = "The item is recorded, but its documents need a
  * @param {?string} fallbackHouseholdId
  * @param {?ItemProposal} [amendedItem]
  * @param {?string} [sectionId]
- * @returns {Promise<{ ok: true } | { partial: true, message: string }>}
+ * @returns {Promise<{ ok: true } | { partial: true, message: string } | { replayed: true, message: string }>}
  */
 export function approveWithOperation(suggestion, operationIds, fallbackHouseholdId, amendedItem = null, sectionId = null) {
   const id = suggestion.receiptId;
@@ -1118,7 +1126,7 @@ export function approveWithOperation(suggestion, operationIds, fallbackHousehold
  * @param {?string} fallbackHouseholdId
  * @param {?ItemProposal} amendedItem
  * @param {?string} sectionId
- * @returns {Promise<{ ok: true } | { partial: true, message: string }>}
+ * @returns {Promise<{ ok: true } | { partial: true, message: string } | { replayed: true, message: string }>}
  */
 async function approveOnce(suggestion, operationIds, fallbackHouseholdId, amendedItem, sectionId) {
   const minted = operationIds.get(suggestion.receiptId) ?? crypto.randomUUID();
@@ -1126,6 +1134,7 @@ async function approveOnce(suggestion, operationIds, fallbackHouseholdId, amende
   const { householdId, review } = await readApprovalReview(suggestion, fallbackHouseholdId);
   /** @type {Record<string, unknown> & { operationId: string }} */
   let body;
+  const replayed = Boolean(review.approval) && amendedItem !== null;
   if (review.approval) {
     body = replayOf(review.approval);
     if (minted !== body.operationId) pinnedApprovals.delete(minted);
@@ -1154,6 +1163,7 @@ async function approveOnce(suggestion, operationIds, fallbackHouseholdId, amende
   if (result.outcome === "partial_success") return { partial: true, message: PARTIAL_APPROVAL_MESSAGE };
   operationIds.delete(suggestion.receiptId);
   pinnedApprovals.delete(body.operationId);
+  if (replayed) return { replayed: true, message: REPLAYED_APPROVAL_MESSAGE };
   return { ok: true };
 }
 
