@@ -17,6 +17,7 @@ import {
   addMember, commandContact, commandMailbox, commandUploadLimit, createLocalUser, createSystem,
   restoreHousehold, retryDocumentJob, sendSetupLink, testMail, wordsOf,
 } from "$lib/data/workspace.js";
+import { DONE_UNREAD, rereadAfterLanded } from "$lib/data/landed.js";
 import { JOB_KINDS, lapsesShort, megabytes, sendWords, setupWords } from "./words.js";
 
 /** @typedef {{ busy: boolean, problem: string | null }} Card */
@@ -29,11 +30,12 @@ const quiet = () => {};
 /** A card's own state, for the screen to hold as `$state`. */
 export const card = () => ({ busy: false, problem: /** @type {string | null} */ (null) });
 
-/**
- * A command that landed is never read back as not done when only the re-read
- * after it failed (#1316 A1-R1).
- */
-export const DONE_UNREAD = "done — Orbit could not refresh this screen, so reload to see the new version";
+/* Each act sends its command in one try and reads again in another
+   ($lib/data/landed.js): a re-read that fails after the command landed is
+   said as done-but-unread, never as the command refused, so nobody sends a
+   landed command twice. */
+/** Where an act says a re-read failed: its card's line, and the phone's wake. @param {{ problem: string | null }} card @param {Wake} [wake] */
+const unreadOn = (card, wake = quiet) => (/** @type {string} */ words) => { card.problem = words; wake(words); };
 
 /**
  * Places a person in a system (§11, #453). `busy` holds the person's id
@@ -46,12 +48,16 @@ export async function placePerson(person, system, { card, reread, landed = quiet
   card.problem = null;
   try {
     await addMember(system.id, person.id);
-    landed();
-    wake(`${person.displayName} is in ${system.name}`);
-    await reread();
   } catch (error) {
     card.problem = wordsOf(error);
     wake(card.problem, { failure: true });
+    card.busy = null;
+    return;
+  }
+  try {
+    landed();
+    wake(`${person.displayName} is in ${system.name}`);
+    await rereadAfterLanded(reread, unreadOn(card, wake));
   } finally {
     card.busy = null;
   }
@@ -69,19 +75,25 @@ export async function inviteLocalUser(draft, password, { card, actorHasPassword,
   card.busy = true;
   card.problem = null;
   begun();
+  /** @type {Awaited<ReturnType<typeof createLocalUser>>} */
+  let answer;
   try {
-    const answer = await createLocalUser({
+    answer = await createLocalUser({
       email: draft.email,
       displayName: draft.displayName,
       expiresInDays: Number(draft.expiresInDays),
       ...(actorHasPassword ? { currentPassword: password } : {}),
     });
+  } catch (error) {
+    card.problem = setupWords(error);
+    card.busy = false;
+    return;
+  }
+  try {
     landed({ ...answer, userId: answer.user?.id });
     if (answer.sendError) wake(`${answer.sentTo} was created, but ${sendWords(answer.sendError)}`, { failure: true });
     else wake(`setup link sent · lapses ${lapsesShort(answer.expiresAt)}`);
-    await reread();
-  } catch (error) {
-    card.problem = setupWords(error);
+    await rereadAfterLanded(reread, unreadOn(card, wake));
   } finally {
     card.busy = false;
   }
@@ -119,9 +131,9 @@ export async function issueSetupLink(userId, days, password, { card, lock, actor
  * A new system, made for somebody else (#1052): pressing the owner is the
  * submit, so `owner` is who it belongs to and `name` is what was typed.
  * @param {string} name @param {{ id: string }} owner @param {string} password
- * @param {{ card: Card, actorHasPassword: boolean, reread: Reread, landed: () => void }} on
+ * @param {{ card: Card, actorHasPassword: boolean, reread: Reread, landed: () => void, wake?: Wake }} on
  */
-export async function makeSystem(name, owner, password, { card, actorHasPassword, reread, landed }) {
+export async function makeSystem(name, owner, password, { card, actorHasPassword, reread, landed, wake = quiet }) {
   if (card.busy) return;
   card.busy = true;
   card.problem = null;
@@ -131,10 +143,14 @@ export async function makeSystem(name, owner, password, { card, actorHasPassword
       ownerId: owner.id,
       ...(actorHasPassword ? { currentPassword: password } : {}),
     });
-    landed();
-    await reread();
   } catch (error) {
     card.problem = setupWords(error);
+    card.busy = false;
+    return;
+  }
+  try {
+    landed();
+    await rereadAfterLanded(reread, unreadOn(card, wake));
   } finally {
     card.busy = false;
   }
@@ -149,11 +165,12 @@ export async function makeSystem(name, owner, password, { card, actorHasPassword
 export async function restoreSystem(row, said, reread) {
   try {
     await restoreHousehold(row.id);
-    said[row.id] = { ok: true, text: `restored · ${row.name} is back exactly as it was` };
-    await reread();
   } catch (error) {
     said[row.id] = { ok: false, text: `not restored — ${wordsOf(error)}` };
+    return;
   }
+  said[row.id] = { ok: true, text: `restored · ${row.name} is back exactly as it was` };
+  await rereadAfterLanded(reread, (words) => { said[row.id] = { ok: true, text: `restored · ${row.name} is back · ${words}` }; });
 }
 
 /**
@@ -168,12 +185,18 @@ export async function setContact(current, partial, { card, reread, landed = quie
   card.problem = null;
   try {
     await commandContact({ ...partial, expectedVersion: current.version });
-    landed();
-    wake(partial.action === "clear" ? "the public contact is cleared" : `the public contact is ${partial.address}`);
-    await reread();
-    settled();
   } catch (error) {
     card.problem = wordsOf(error);
+    card.busy = false;
+    return;
+  }
+  try {
+    landed();
+    wake(partial.action === "clear" ? "the public contact is cleared" : `the public contact is ${partial.address}`);
+    await rereadAfterLanded(reread, unreadOn(card, wake));
+    /* Settled whether or not the read landed: the contact is saved, and an
+       open editor would invite a re-save its stale version refuses. */
+    settled();
   } finally {
     card.busy = false;
   }
@@ -204,9 +227,7 @@ export async function setUploadLimit(current, partial, { card, reread, landed, w
   try {
     landed();
     if (wake) wake(`the upload size limit is ${megabytes(/** @type {{ maxBytes: number }} */ (uploadLimit).maxBytes)}`);
-    await reread();
-  } catch (error) {
-    card.problem = unread(error);
+    await rereadAfterLanded(reread, (words) => { card.problem = unread(words); wake?.(card.problem); });
   } finally {
     card.busy = false;
   }
@@ -238,9 +259,7 @@ export async function commandMail(label, command, { card, reread, landed }) {
   card.outcome = answer.outcome ?? null;
   landed(!answer.outcome || answer.outcome === "verified");
   try {
-    await reread();
-  } catch {
-    card.problem = DONE_UNREAD;
+    await rereadAfterLanded(reread, unreadOn(card));
   } finally {
     card.busy = null;
   }
@@ -259,9 +278,13 @@ export async function runMailTest(which, { card, reread }) {
   card.problem = null;
   try {
     await testMail(which);
-    await reread();
   } catch (error) {
     card.problem = wordsOf(error);
+    card.busy = null;
+    return;
+  }
+  try {
+    await rereadAfterLanded(reread, unreadOn(card));
   } finally {
     card.busy = null;
   }

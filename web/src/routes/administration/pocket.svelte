@@ -285,7 +285,7 @@
     if (systemCard.busy) return;
     if (!systemName.trim()) { systemCard.problem = "name the system first"; return; }
     await makeSystem(systemName.trim(), owner, systemPassword, {
-      card: systemCard, actorHasPassword, reread,
+      card: systemCard, actorHasPassword, reread, wake,
       landed: () => {
         const named = systemName.trim();
         systemOpen = false;
@@ -360,12 +360,11 @@
     uploadLimitCard.problem = null;
     uploadLimitOpen = true;
   }
-  /* The sheet closes once the command lands. A failed re-read after it is
-     said in the refusal's own words here, where the desk says "done"
-     (./acts.svelte.js, DONE_UNREAD). */
+  /* The sheet closes once the command lands; a failed re-read after it is
+     woken as done-but-unread, as every act here does ($lib/data/landed.js). */
   /** @param {{ action: "set", megabytes: number } | { action: "default" }} partial */
   const sendUploadLimit = (partial) => setUploadLimit(view?.uploadLimit, partial, {
-    card: uploadLimitCard, reread, wake, unread: (error) => wordsOf(error),
+    card: uploadLimitCard, reread, wake,
     landed: () => (uploadLimitOpen = false),
   });
 
