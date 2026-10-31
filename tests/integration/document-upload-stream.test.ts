@@ -5,12 +5,11 @@
  * through the same path (#1566), so one fix covers both.
  *
  * Here, with the real database, the real document store and the real sandbox
- * (no test inspector): a PDF at the size limit round-trips byte for byte; the
- * stored envelope and ciphertext size match the file; the scanner-recovery
- * stage stores a staging object the recovery worker opens and publishes
- * unchanged; a refused file leaves nothing behind; and, measured the way
- * #1521's tests measure it, one upload raises the server process's peak
- * memory by less than the document's base64 size.
+ * (no test inspector): the scanner-recovery stage stores a staging object the
+ * recovery worker opens and publishes unchanged; a refused file leaves nothing
+ * behind; and, measured the way #1521's tests measure it, one upload of a PDF
+ * at the size limit raises the server process's peak memory by less than the
+ * document's base64 size, and the document is stored whole.
  */
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -26,7 +25,6 @@ import { readDocumentDownload, uploadItemDocument } from "@/server/document-repo
 import { runDocumentMaintenanceCycle } from "@/server/document-worker";
 import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { decryptDocument, envelopeOf } from "@/server/documents/crypto";
-import { lastPdfSandboxChildPidForTests } from "@/server/documents/pdf-structure-sandbox";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
@@ -103,50 +101,6 @@ async function withRequiredScanMode<T>(work: () => Promise<T>): Promise<T> {
     resetDocumentConfigForTests();
   }
 }
-
-describe("an upload at the size limit, with the real sandbox (#1567)", () => {
-  it("round-trips a PDF of getDocumentConfig().maxBytes byte for byte, and what is stored matches the file", async () => {
-    const fixture = await createIntegrationFixture("doc-upload-stream-limit");
-    const bytes = paddedPdfOfSize(getDocumentConfig().maxBytes);
-    expect(bytes.length).toBe(getDocumentConfig().maxBytes);
-    const childBefore = lastPdfSandboxChildPidForTests();
-
-    const summary = await upload(fixture, bytes);
-
-    expect(summary).toMatchObject({ lifecycle: "available", sizeBytes: bytes.length });
-    expect(lastPdfSandboxChildPidForTests(), "the real sandbox ran the check").toEqual(expect.any(Number));
-    expect(lastPdfSandboxChildPidForTests()).not.toBe(childBefore);
-    const downloaded = await readDocumentDownload(fixture.users.member.id, summary.id);
-    expect(downloaded.bytes.length).toBe(bytes.length);
-    expect(downloaded.bytes.equals(bytes)).toBe(true);
-
-    const [crypto] = await getDb().select().from(documentCrypto).where(eq(documentCrypto.documentId, summary.id));
-    const ciphertext = await storage().readCiphertext(crypto!.storageKey, bytes.length + MIB);
-    expect(crypto!.ciphertextSize).toBe(ciphertext.length);
-    expect(ciphertext.length).toBe(bytes.length);
-    expect((await storedFiles()).filter((file) => file.endsWith(".tmp")), "no temporary file").toEqual([]);
-    expect((await storage().listQuarantineFiles())).toHaveLength(0);
-  }, 300_000);
-
-  it("stores an envelope the row's columns describe, and a ciphertext that opens to the upload", async () => {
-    const fixture = await createIntegrationFixture("doc-upload-stream-envelope");
-    const bytes = paddedPdfOfSize(2 * MIB + 17);
-
-    const summary = await upload(fixture, bytes);
-
-    const [crypto] = await getDb().select().from(documentCrypto).where(eq(documentCrypto.documentId, summary.id));
-    const ciphertext = await storage().readCiphertext(crypto!.storageKey, 4 * MIB);
-    expect(crypto!.ciphertextSize).toBe(ciphertext.length);
-    const opened = decryptDocument(ciphertext, {
-      documentId: summary.id,
-      householdId: fixture.household.id,
-      itemId: fixture.item.id,
-      mediaType: "application/pdf",
-      plaintextSize: bytes.length,
-    }, envelopeOf(crypto!), getDocumentConfig().keyEncryptionKey);
-    expect(opened.equals(bytes)).toBe(true);
-  }, 120_000);
-});
 
 describe("the scanner-recovery stage seals from the quarantine file (#1567)", () => {
   it("stores a staging object whose size and envelope match its file, which the recovery worker opens and publishes unchanged", async () => {

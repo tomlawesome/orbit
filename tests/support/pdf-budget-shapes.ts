@@ -16,8 +16,8 @@ import { syntheticPdf, syntheticPdfWithXrefStream } from "./synthetic-documents"
  * equivalence test of #1567: the producer fixtures, the synthetic builders, and
  * the hostile and linearized shapes of
  * src/server/documents/validation-budget.test.ts and
- * src/server/documents/pdf-structure-sandbox.test.ts (whose builders are
- * local to those files, so they are repeated here, unchanged in content).
+ * src/server/documents/pdf-structure-sandbox.test.ts. Those two files import
+ * their builders from here: this is the one copy.
  */
 
 export interface NamedPdf {
@@ -37,7 +37,7 @@ export function fixtureFilePdfs(): NamedPdf[] {
 
 // ---- validation-budget.test.ts ------------------------------------------
 
-function pdfWithXrefStream(dictionaryTail: string): Buffer {
+export function pdfWithXrefStream(dictionaryTail: string): Buffer {
   let value = "%PDF-1.7\n";
   value += "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
   value += "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n";
@@ -50,7 +50,7 @@ function pdfWithXrefStream(dictionaryTail: string): Buffer {
   return Buffer.from(value);
 }
 
-function pdfWithClassicXref(subsectionHeaders: string[]): Buffer {
+export function pdfWithClassicXref(subsectionHeaders: string[]): Buffer {
   let value = "%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
   const xrefOffset = Buffer.byteLength(value);
   value += `xref\n${subsectionHeaders.join("\n")}\n0000000000 65535 f \n`;
@@ -68,10 +68,11 @@ function linearizationObject(total: number): string {
 function withMeasuredLength(build: (total: number) => string): Buffer {
   const total = Buffer.byteLength(build(0));
   const value = build(total);
+  if (Buffer.byteLength(value) !== total) throw new Error("the measured length changed the file's length");
   return Buffer.from(value);
 }
 
-function linearizedHidingOversizedSection(): Buffer {
+export function linearizedHidingOversizedSection(): Buffer {
   return withMeasuredLength((total) => {
     let value = "%PDF-1.7\n" + linearizationObject(total);
     value += "4 0 obj << /Type /XRef /W [0 0 0] /Index [0 2000000000] /Size 2000000000 /Root 1 0 R /Length 0 >>\n";
@@ -82,7 +83,7 @@ function linearizedHidingOversizedSection(): Buffer {
   });
 }
 
-function linearizedWithSmallSections(): Buffer {
+export function linearizedWithSmallSections(): Buffer {
   return withMeasuredLength((total) => {
     let value = "%PDF-1.7\n" + linearizationObject(total);
     const firstPageOffset = Buffer.byteLength(value);
@@ -95,23 +96,23 @@ function linearizedWithSmallSections(): Buffer {
   });
 }
 
-function smallPdfWithFirstObject(firstObject: string): Buffer {
+export function smallPdfWithFirstObject(firstObject: string): Buffer {
   let value = `%PDF-1.7\n${firstObject}`;
   const xrefOffset = Buffer.byteLength(value);
   value += `${TINY_XREF}trailer\n<< /Size 1 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
   return Buffer.from(value);
 }
 
-const BASE = "%PDF-1.7\n"
+export const BASE = "%PDF-1.7\n"
   + "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
   + "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
   + "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n";
 
-function hiddenXrefObject(index: string): string {
+export function hiddenXrefObject(index: string): string {
   return `4 0 obj << /Type /XRef /W [0 0 0] /Index ${index} /Size 3 /Length 0 >>\nstream\n\nendstream\nendobj\n`;
 }
 
-function classicTable(headerLine: string, extraObject = ""): Buffer {
+export function classicTable(headerLine: string, extraObject = ""): Buffer {
   let value = BASE + extraObject;
   const xrefOffset = Buffer.byteLength(value);
   value += `xref\n${headerLine}\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n`;
@@ -121,15 +122,15 @@ function classicTable(headerLine: string, extraObject = ""): Buffer {
 
 // ---- pdf-structure-sandbox.test.ts --------------------------------------
 
-function hugeXrefStreamObject(objectNumber: number): string {
+export function hugeXrefStreamObject(objectNumber: number): string {
   return `${objectNumber} 0 obj << /Type /XRef /W [0 0 0] /Index [0 2000000] /Size 5 /Length 0 >>\nstream\n\nendstream\nendobj\n`;
 }
 
-function hostilePdf(separator: string, tail: string): Buffer {
+export function hostilePdf(separator: string, tail: string): Buffer {
   return Buffer.from(`%PDF-1.7\n${separator}${hugeXrefStreamObject(1)}${tail}`, "latin1");
 }
 
-function hostilePdfWithSignedStartxref(): Buffer {
+export function hostilePdfWithSignedStartxref(): Buffer {
   const head = "%PDF-1.7\n2 0 obj\n<< /Type /Catalog >>\nendobj\n\f";
   const objectFourOffset = Buffer.byteLength(head, "latin1");
   return Buffer.from(`${head}${hugeXrefStreamObject(4)}startxref\n+${objectFourOffset}\n%%EOF`, "latin1");
@@ -183,7 +184,107 @@ export function objectStreamBomb(paddingMb: number): Buffer {
   return Buffer.concat(parts);
 }
 
-export { hostilePdf };
+
+/**
+ * Inputs that sit on the edge of a pattern in the recovery scan, where one
+ * byte decides whether an object's text ends early. A random byte flip almost
+ * never builds these, so they are written out. `expected` is what the
+ * string-based check answers (and so what the byte-level one must): `false`
+ * where an oversized cross-reference stream is found and the file is refused,
+ * `true` where the boundary hides it and the file is accepted.
+ *
+ * The scan ends an object at the first `\b(?:endobj|N M obj|xref|trailer\s*<<)\b`
+ * and a trailer at the first `\b(?:startxref|N M obj)\b`, over latin1 text with
+ * the `u` flag: `\s` includes 0xa0, and `\b` sees only ASCII letters, digits and
+ * `_` as word characters, so 0x80 and above are non-word bytes.
+ */
+export interface BoundaryCase {
+  name: string;
+  bytes: Buffer;
+  expected: boolean;
+}
+
+const HUGE_DICTIONARY = "/Type /XRef /W [0 0 0] /Index [0 2000000] /Size 3 /Length 0";
+const HUGE_STREAM_TAIL = `${HUGE_DICTIONARY} >>\nstream\n\nendstream\nendobj\n`;
+
+function latin1(value: string): Buffer {
+  return Buffer.from(value, "latin1");
+}
+
+export function boundaryCases(): BoundaryCase[] {
+  const cases: BoundaryCase[] = [];
+  const add = (name: string, value: string, expected: boolean): void => {
+    cases.push({ name, bytes: latin1(value), expected });
+  };
+
+  // One object whose text holds `marker`, then a huge /XRef stream dictionary.
+  // The object ends at the marker if the marker matches objectEnd, which hides
+  // the dictionary from it (accepted); if it does not, the object holds it
+  // (refused). An object header as marker also starts a new object, which
+  // holds the dictionary, so those answer refused either way.
+  const marked = (marker: string): string => `%PDF-1.7\n1 0 obj\n<< /Note (${marker}) ${HUGE_STREAM_TAIL}`;
+  const markers: Array<[string, string, boolean]> = [
+    ["endobj ends the object", "endobj ", true],
+    ["endobjx does not", "endobjx", false],
+    ["endobj_ does not", "endobj_", false],
+    ["endobj then 0xe9 does", "endobj\xe9", true],
+    ["xendobj does not", "xendobj", false],
+    ["0xe9 then endobj does", "\xe9endobj", true],
+    ["xref ends the object", "xref ", true],
+    ["xrefx does not", "xrefx", false],
+    ["xref then 0xe9 does", "xref\xe9", true],
+    ["trailer<<a ends the object", "trailer<<a", true],
+    ["trailer, NBSP, <<a ends it", "trailer\xa0<<a", true],
+    ["trailer<< then a non-word byte does not", "trailer<< ", false],
+    ["trailer, NBSP, << then a non-word byte does not", "trailer\xa0<< ", false],
+    ["1 0 obj ends it and starts one that holds the stream", "1 0 obj ", false],
+    ["1, NBSP, 0, NBSP, obj ends it and starts one that holds the stream", "1\xa00\xa0obj ", false],
+    ["1 0 objx does not", "1 0 objx", false],
+    ["x1 0 obj does not", "x1 0 obj", false],
+    ["0xe9 then 1 0 obj ends it and starts one that holds the stream", "\xe91 0 obj", false],
+    ["1 0 obj then 0xe9 ends it and starts one that holds the stream", "1 0 obj\xe9", false],
+  ];
+  for (const [what, marker, expected] of markers) add(`${what}, before a huge /XRef stream`, marked(marker), expected);
+
+  // endobj as the last bytes of the file, with the huge stream inside the object.
+  add("endobj at the very end of the file", `%PDF-1.7\n1 0 obj\n<< ${HUGE_DICTIONARY} >>\nstream\n\nendstream\nendobj`, false);
+
+  // After endobj (or startxref) the scan resumes one byte on, skipping a
+  // comment's % so that the text after it is read as an object.
+  add("endobj, then % and an object: the byte after endobj is skipped", `%PDF-1.7\n1 0 obj\n<< >>\nendobj%2 0 obj\n<< ${HUGE_STREAM_TAIL}`, false);
+  add("endobj, then two bytes and an object: only one is skipped", `%PDF-1.7\n1 0 obj\n<< >>\nendobj%x2 0 obj\n<< ${HUGE_STREAM_TAIL}`, true);
+  add("startxref, then % and an object: the byte after startxref is skipped", `%PDF-1.7\ntrailer\n<< >>\nstartxref%3 0 obj\n<< ${HUGE_STREAM_TAIL}`, false);
+  add("startxref, then two bytes and an object: only one is skipped", `%PDF-1.7\ntrailer\n<< >>\nstartxref%x3 0 obj\n<< ${HUGE_STREAM_TAIL}`, true);
+
+  // After a trailer the scan jumps to the next startxref or object header; an
+  // `xref` token after that landing point then skips a later object.
+  const afterTrailer = (landing: string): string =>
+    `%PDF-1.7\ntrailer\n<< >>\n${landing}\nendobj\nxref\n4 0 obj\n<< ${HUGE_STREAM_TAIL}trailer\nstartxref\n0\n%%EOF\n`;
+  const landings: Array<[string, string, boolean]> = [
+    ["3 0 obj", "3 0 obj", true],
+    ["3, NBSP, 0, NBSP, obj", "3\xa00\xa0obj", true],
+    ["3 0 objx", "3 0 objx", false],
+    ["x3 0 obj", "x3 0 obj", false],
+    ["0xe9 then 3 0 obj", "\xe93 0 obj", true],
+    ["startxref", "startxref", true],
+    ["startxrefx", "startxrefx", false],
+    ["xstartxref", "xstartxref", false],
+    ["0xe9 then startxref", "\xe9startxref", true],
+  ];
+  for (const [what, landing, expected] of landings) add(`after a trailer, a landing on ${what}`, afterTrailer(landing), expected);
+
+  // startxref followed directly by its offset, and by a no-break space first.
+  const head = "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n";
+  const huge = `4 0 obj\n<< ${HUGE_STREAM_TAIL}`;
+  const hugeAt = Buffer.byteLength(head + "\n");
+  add("startxref directly followed by the offset of a huge stream", `${head}\n${huge}startxref${hugeAt}\n%%EOF\n`, false);
+  add("startxref, NBSP, then the offset of a huge stream", `${head}\n${huge}startxref\xa0${hugeAt}\n%%EOF\n`, false);
+  add("startxref, a line end, then the offset of a huge stream", `${head}\n${huge}startxref\n${hugeAt}\n%%EOF\n`, false);
+
+  // One long single line of object headers: no line end to stop a token.
+  cases.push({ name: "4 MiB of `1 0 obj ` on one line", bytes: latin1(`%PDF-1.7\n${"1 0 obj ".repeat(Math.ceil((4 * 1024 * 1024) / 8))}`), expected: true });
+  return cases;
+}
 
 /** All of the above, named. */
 export function allBudgetShapes(): NamedPdf[] {
@@ -223,8 +324,8 @@ export function allBudgetShapes(): NamedPdf[] {
     { name: "hostile: NUL, bare %%EOF", bytes: hostilePdf("\0", "%%EOF") },
     { name: "hostile: form feed, startxref not a number", bytes: hostilePdf("\f", "startxref\nabc\n%%EOF") },
     { name: "hostile: signed startxref", bytes: hostilePdfWithSignedStartxref() },
-    { name: "hostile: no-break space before the object", bytes: hostilePdf("\xa0", "%%EOF") },
     { name: "object-stream bomb (1 MB)", bytes: objectStreamBomb(1) },
+    ...boundaryCases().map(({ name, bytes }) => ({ name: `boundary: ${name}`, bytes })),
     { name: "empty file", bytes: Buffer.alloc(0) },
     { name: "header only", bytes: Buffer.from("%PDF-1.7\n") },
     { name: "one long token", bytes: Buffer.from(`%PDF-1.7\n${"a".repeat(5000)}`) },

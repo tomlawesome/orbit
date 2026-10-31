@@ -103,7 +103,7 @@ async function expectInvalidQuarantine(promise: Promise<unknown>): Promise<void>
 
 describe("sealQuarantine (#1567)", () => {
   it.each([1, MIB, MIB + 1, 2 * MIB + 5])(
-    "writes objects/aa/bb/<key>.bin for a %i byte file, atomically, and it decrypts to the quarantined bytes",
+    "writes objects/aa/bb/<key>.bin for a %i byte file, atomically, with owner-only permissions and no temporary file left",
     async (size) => {
       const { storageRoot, storage } = await createStorage();
       const plaintext = randomBytes(size);

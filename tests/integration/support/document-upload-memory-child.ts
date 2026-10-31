@@ -11,38 +11,22 @@
  * body, so the figure counts everything the upload holds of the document.
  * Prints one line: `MEMORY_RESULT {"beforeKiB":..,"afterKiB":..,"result":..}`.
  */
-import { createReadStream, readFileSync, statSync, writeFileSync } from "node:fs";
-import { Readable } from "node:stream";
-import { runInNewContext } from "node:vm";
-import { setFlagsFromString } from "node:v8";
+import { statSync } from "node:fs";
 import { closeDatabase } from "@/db";
 import { uploadItemDocument } from "@/server/document-repository";
-import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
-import { setKeyStateForTests } from "@/server/key-state";
+import { baselinePeakKiB, fileAsWebStream, peakKiB, prepareKeyState, printMemoryResult } from "./memory-child-support";
 
 const [userId, householdId, itemId, file] = process.argv.slice(2);
 if (!userId || !householdId || !itemId || !file) {
   throw new Error("usage: document-upload-memory-child <userId> <householdId> <itemId> <file>");
 }
 
-resetDocumentConfigForTests();
-setKeyStateForTests({ verdict: "usable", heldKeyId: getDocumentConfig().keyId });
-
-/** Peak resident memory (KiB) since the last reset, from the kernel. */
-function peakKiB(): number {
-  const match = /VmHWM:\s+(\d+)/u.exec(readFileSync("/proc/self/status", "utf8"));
-  if (!match) throw new Error("VmHWM is not readable");
-  return Number(match[1]);
-}
+prepareKeyState();
 
 async function main(): Promise<void> {
   const sizeBytes = statSync(file).size;
-  setFlagsFromString("--expose-gc");
-  const collect = runInNewContext("gc") as () => void;
-  collect();
-  writeFileSync("/proc/self/clear_refs", "5");
-  const beforeKiB = peakKiB();
-  let body: ReadableStream<Uint8Array> | null = Readable.toWeb(createReadStream(file)) as unknown as ReadableStream<Uint8Array>;
+  const beforeKiB = baselinePeakKiB();
+  let body: ReadableStream<Uint8Array> | null = fileAsWebStream(file);
   const document = await uploadItemDocument({
     userId,
     householdId,
@@ -55,7 +39,7 @@ async function main(): Promise<void> {
   body = null;
   await closeDatabase();
   const result = { id: document.id, lifecycle: document.lifecycle, sizeBytes: document.sizeBytes };
-  console.log(`MEMORY_RESULT ${JSON.stringify({ beforeKiB, afterKiB, result })}`);
+  printMemoryResult(beforeKiB, afterKiB, result);
 }
 
 main().catch((error: unknown) => {

@@ -16,45 +16,28 @@
  * parsed the file first and so never counted it.
  * Prints one line: `MEMORY_RESULT {"beforeKiB":..,"afterKiB":..,"result":..}`.
  */
-import { createReadStream, readFileSync, writeFileSync } from "node:fs";
-import { Readable } from "node:stream";
-import { runInNewContext } from "node:vm";
-import { setFlagsFromString } from "node:v8";
 import { closeDatabase } from "@/db";
-import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
-import { setKeyStateForTests } from "@/server/key-state";
 import { importPortableArchive, previewPortableImport } from "@/server/portable-archive-repository";
+import { baselinePeakKiB, fileAsWebStream, peakKiB, prepareKeyState, printMemoryResult } from "./memory-child-support";
 
 const [mode, userId, householdId, archiveFile] = process.argv.slice(2);
 if ((mode !== "preview" && mode !== "import") || !userId || !householdId || !archiveFile) {
   throw new Error("usage: archive-import-memory-child <preview|import> <userId> <householdId> <archiveFile>");
 }
 
-resetDocumentConfigForTests();
-setKeyStateForTests({ verdict: "usable", heldKeyId: getDocumentConfig().keyId });
-
-/** Peak resident memory (KiB) since the last reset, from the kernel. */
-function peakKiB(): number {
-  const match = /VmHWM:\s+(\d+)/u.exec(readFileSync("/proc/self/status", "utf8"));
-  if (!match) throw new Error("VmHWM is not readable");
-  return Number(match[1]);
-}
+prepareKeyState();
 
 async function main(): Promise<void> {
-  setFlagsFromString("--expose-gc");
-  const collect = runInNewContext("gc") as () => void;
   const passphrase = "correct-horse-battery-staple";
-  collect();
-  writeFileSync("/proc/self/clear_refs", "5");
-  const beforeKiB = peakKiB();
-  let archive: ReadableStream<Uint8Array> | undefined = Readable.toWeb(createReadStream(archiveFile)) as unknown as ReadableStream<Uint8Array>;
+  const beforeKiB = baselinePeakKiB();
+  let archive: ReadableStream<Uint8Array> | undefined = fileAsWebStream(archiveFile);
   const result = mode === "preview"
     ? await previewPortableImport(userId, householdId, archive, passphrase)
     : await importPortableArchive({ userId, householdId, archive, passphrase, conflictItemIds: [] });
   const afterKiB = peakKiB();
   archive = undefined;
   await closeDatabase();
-  console.log(`MEMORY_RESULT ${JSON.stringify({ beforeKiB, afterKiB, result })}`);
+  printMemoryResult(beforeKiB, afterKiB, result);
 }
 
 main().catch((error: unknown) => {

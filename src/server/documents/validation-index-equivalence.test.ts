@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hasPdfIndexBudgetOracle } from "../../../tests/support/pdf-index-budget-oracle";
-import { allBudgetShapes, fixtureFilePdfs } from "../../../tests/support/pdf-budget-shapes";
+import { allBudgetShapes, boundaryCases, fixtureFilePdfs } from "../../../tests/support/pdf-budget-shapes";
 import { paddedPdfOfSize } from "../../../tests/support/large-pdf";
 import { hasPdfIndexBudget } from "./validation";
 
@@ -96,6 +96,14 @@ describe("the byte-level index-budget check answers as the string-based one does
     },
   );
 
+  it.each(boundaryCases().map((boundary) => [boundary.name, boundary] as const))(
+    "answers %s as the string-based check does, and as pinned",
+    (_name, boundary) => {
+      expect(String(hasPdfIndexBudgetOracle(boundary.bytes)), "the oracle's own answer").toBe(String(boundary.expected));
+      expect(hasPdfIndexBudget(boundary.bytes)).toBe(boundary.expected);
+    },
+  );
+
   it("covers both answers across the named shapes, so the comparison is not one-sided", () => {
     const answers = new Set(allBudgetShapes().map((shape) => answerOf(hasPdfIndexBudgetOracle, shape.bytes)));
     expect(answers).toContain("true");
@@ -126,8 +134,13 @@ describe("the check makes no decoded copy of the file (#1567)", () => {
     vi.restoreAllMocks();
   });
 
-  it("makes no string longer than 1 KiB while checking a 20 MiB PDF", () => {
-    const bytes = paddedPdfOfSize(20 * 1024 * 1024);
+  const longLine = boundaryCases().find((boundary) => boundary.name.startsWith("4 MiB of"))!.bytes;
+
+  it.each([
+    ["a 20 MiB PDF", () => paddedPdfOfSize(20 * 1024 * 1024), true],
+    ["4 MiB of `1 0 obj ` on one line", () => longLine, true],
+  ] as const)("makes no string longer than 1 KiB while checking %s", (_name, build, expected) => {
+    const bytes = build();
     const sliceNames = ["latin1Slice", "utf8Slice", "asciiSlice", "hexSlice", "base64Slice", "base64urlSlice", "ucs2Slice"] as const;
     const proto = Buffer.prototype as unknown as Record<string, (...args: unknown[]) => unknown>;
     const spies = [
@@ -145,7 +158,7 @@ describe("the check makes no decoded copy of the file (#1567)", () => {
       for (const spy of spies) spy.mockRestore();
     }
 
-    expect(answer).toBe(true);
+    expect(answer).toBe(expected);
     expect(Math.max(0, ...lengths)).toBeLessThan(1024);
   }, 30_000);
 });

@@ -57,6 +57,12 @@ function layoutOfSize(totalBytes: number): Layout & { paddingBytes: number } {
   throw new Error(`no PDF of ${totalBytes} bytes`);
 }
 
+/** A valid one-page classic PDF whose page content is one uncompressed stream of `paddingBytes` spaces. */
+export function paddedPdf(paddingBytes: number): Buffer {
+  const { head, tail } = layoutFor(paddingBytes);
+  return Buffer.concat([head, Buffer.alloc(paddingBytes, 0x20), tail]);
+}
+
 /** A valid PDF of exactly `totalBytes`, in memory. */
 export function paddedPdfOfSize(totalBytes: number): Buffer {
   const { head, tail, paddingBytes } = layoutOfSize(totalBytes);
