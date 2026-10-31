@@ -54,6 +54,14 @@ export interface VolumeOwnershipAdapter {
   listContainersByProject(project: string): string | null;
   /** docker inspect --format '{{.Config.Image}}' <containerId> */
   inspectContainerImage(containerId: string): string | null;
+  /**
+   * What the installer found out about a container's `working_dir` label folder
+   * (#1570): whether it exists, and its physical path (`cd` into it, `pwd -P`;
+   * null when it does not exist). Null when no fact was sent for the label,
+   * which is read as a folder that exists elsewhere. Optional: an adapter
+   * that cannot answer behaves as one that always answers null.
+   */
+  inspectWorkingDir?(label: string): { exists: boolean; physical: string | null } | null;
 }
 
 /**
@@ -140,8 +148,15 @@ export function evaluateVolumeOwnership(
   // physical and its logical path); another folder is one that matches none.
   const folderSpellings = updateFolder === undefined ? [] : typeof updateFolder === "string" ? [updateFolder] : updateFolder;
   const ownFolders = folderSpellings.length === 0 ? undefined : folderSpellings.map(trimTrailingSlashes);
-  const otherFolder = (workingDir: string): string | undefined =>
-    ownFolders !== undefined && workingDir !== "" && !ownFolders.includes(trimTrailingSlashes(workingDir)) ? workingDir : undefined;
+  // A label is also this folder when its physical path is one of them; a label
+  // naming a folder that no longer exists is a deployment that was moved or
+  // renamed, not another folder, and the other proofs decide.
+  const otherFolder = (workingDir: string): string | undefined => {
+    if (ownFolders === undefined || workingDir === "" || ownFolders.includes(trimTrailingSlashes(workingDir))) return undefined;
+    const folder = adapter.inspectWorkingDir?.(workingDir) ?? null;
+    if (folder !== null && (!folder.exists || (folder.physical !== null && ownFolders.includes(trimTrailingSlashes(folder.physical))))) return undefined;
+    return workingDir;
+  };
   const inOtherFolder = (folder: string): VolumeOwnershipOutcome => ({ status: "not-proven", reason: "other-folder", folder });
 
   const dbContainers = adapter.listContainersByVolume(candidateVolume);
@@ -276,7 +291,7 @@ function notProvenMessage(
     case "several-app-containers":
       return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: its Compose project has more than one orbit-app container; ${refusing} Check which orbit-app container is the live one, remove the others, then run the update again.`;
     case "image-mismatch":
-      return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: the running orbit-app was started from a different build than the ORBIT_IMAGE that .env-orbit names; ${refusing} Check which build the running orbit-app container was created from and set ORBIT_IMAGE in .env-orbit to match it (or stop that container so it is recreated from this configuration), then run the update again.`;
+      return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: the running orbit-app was started from a different build than the ORBIT_IMAGE that .env-orbit names; ${refusing} Compare the running orbit-app container's image with ORBIT_IMAGE in .env-orbit, then run the update again once they name the same build.`;
   }
 }
 

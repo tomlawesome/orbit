@@ -722,6 +722,34 @@ base64_string() {
   printf '"%s"' "$(printf '%s' "$1" | base64 | tr -d '\n')"
 }
 
+# note_working_dirs <docker ps lines>
+#
+# For each distinct `working_dir` label (the fourth field) among the lines,
+# appends to working_dirs_json whether that folder exists and its physical path
+# (`cd` into it, `pwd -P`, in a subshell; null when it cannot be entered), so
+# the engine can tell a deployment folder that was moved or renamed from
+# another folder (#1570). Only gather_host_facts calls it: it shares that
+# function's variables. A label it skips (not absolute, too long, or past the
+# cap) gets no fact, which the engine reads as a folder that exists elsewhere.
+note_working_dirs() {
+  local line label physical exists
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    IFS='|' read -r _ _ _ label <<< "$line"
+    [[ "$label" == /* && ${#label} -le 4096 && -z "${working_dir_seen[$label]:-}" ]] || continue
+    ((${#working_dir_seen[@]} < 1024)) || continue
+    working_dir_seen["$label"]=1
+    exists=false
+    [[ -d "$label" ]] && exists=true
+    [[ -z "$working_dirs_json" ]] || working_dirs_json+=","
+    working_dirs_json+="{\"label\":$(base64_string "$label"),\"exists\":${exists},\"physical\":"
+    if physical="$(cd -- "$label" 2>/dev/null && pwd -P)"; then
+      working_dirs_json+="$(base64_string "$physical")}"
+    else
+      working_dirs_json+="null}"
+    fi
+  done <<< "$1"
+}
+
 # gather_host_facts
 #
 # Runs the docker calls the engine's volume-safety check needs, with the
@@ -736,9 +764,9 @@ base64_string() {
 # shellcheck disable=SC2089,SC2090
 gather_host_facts() {
   local volume_list="" volume labels project container_id service
-  local volumes_json="" projects_json="" images_json="" volume_list_json
+  local volumes_json="" projects_json="" images_json="" volume_list_json working_dirs_json="" volume_containers
   local -a volume_names=() project_names=() app_containers=()
-  local -A project_seen=() container_seen=()
+  local -A project_seen=() container_seen=() working_dir_seen=()
 
   if volume_list="$(docker volume ls --filter "name=${database_volume_key}" --format '{{.Name}}' 2>/dev/null)"; then
     volume_list_json="$(base64_string "$volume_list")"
@@ -763,7 +791,12 @@ gather_host_facts() {
     else
       volumes_json+=",\"labels\":null"
     fi
-    volumes_json+=",\"containers\":$(encoded_fact docker ps -a --filter "volume=$volume" --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}|{{.Label "com.docker.compose.project.working_dir"}}')}"
+    if volume_containers="$(docker ps -a --filter "volume=$volume" --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}|{{.Label "com.docker.compose.project.working_dir"}}' 2>/dev/null)"; then
+      volumes_json+=",\"containers\":$(base64_string "$volume_containers")}"
+      note_working_dirs "$volume_containers"
+    else
+      volumes_json+=",\"containers\":null}"
+    fi
     if [[ "$project" =~ ^[a-z0-9][a-z0-9_-]*$ && -z "${project_seen[$project]:-}" ]]; then
       project_seen["$project"]=1
       project_names+=("$project")
@@ -776,6 +809,7 @@ gather_host_facts() {
     if containers="$(docker ps -a --filter "label=com.docker.compose.project=$project" \
       --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}|{{.Label "com.docker.compose.project.working_dir"}}' 2>/dev/null)"; then
       projects_json+="{\"name\":$(base64_string "$project"),\"containers\":$(base64_string "$containers")}"
+      note_working_dirs "$containers"
       while IFS='|' read -r container_id _ service _ || [[ -n "$container_id" ]]; do
         [[ "$service" == orbit-app && "$container_id" =~ ^[0-9a-f]{12,64}$ && -z "${container_seen[$container_id]:-}" ]] || continue
         container_seen["$container_id"]=1
@@ -794,6 +828,7 @@ gather_host_facts() {
   local cosign_json=false
   [[ "$cosign_usable" == 1 ]] && cosign_json=true
   ORBIT_INSTALL_HOST_FACTS="{\"targetBasename\":$(base64_string "$(basename -- "$target_dir")"),\"targetFolder\":$(base64_string "$target_dir"),\"targetFolderLogical\":$(base64_string "$(pwd -L)")"
+  ORBIT_INSTALL_HOST_FACTS+=",\"workingDirs\":[${working_dirs_json}]"
   ORBIT_INSTALL_HOST_FACTS+=",\"cosignUsable\":${cosign_json},\"imageVersion\":\"${image_version}\""
   ORBIT_INSTALL_HOST_FACTS+=",\"imageRevision\":\"${revision}\",\"appliedDigest\":\"${applied_digest}\""
   ORBIT_INSTALL_HOST_FACTS+=",\"volumeList\":${volume_list_json}"

@@ -31,6 +31,7 @@ const hostFactsSchema = z
     targetBasename: encoded.min(1),
     targetFolder: encoded.optional(),
     targetFolderLogical: encoded.optional(),
+    workingDirs: z.array(z.object({ label: encoded, exists: z.boolean(), physical: encodedOrFailed }).strict()).max(1024).optional(),
     cosignUsable: z.boolean(),
     imageVersion: z.string().regex(/^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/),
     imageRevision: z.string().regex(/^[0-9a-f]{40}$/),
@@ -49,6 +50,8 @@ export interface HostFacts {
   targetFolder?: string;
   /** The same folder as the shell's `pwd -L` spells it: Compose's working_dir label may hold this form instead (#1570). */
   targetFolderLogical?: string;
+  /** For each distinct `working_dir` label among the containers: whether that folder exists and its physical path (`cd` into it, `pwd -P`; null when it does not exist) (#1570). Empty when the shell sent none. */
+  workingDirs: ReadonlyMap<string, { exists: boolean; physical: string | null }>;
   cosignUsable: boolean;
   imageVersion: string;
   imageRevision: string;
@@ -94,6 +97,7 @@ export function parseHostFacts(raw: string | undefined): HostFacts {
     targetBasename,
     targetFolder: facts.targetFolder === undefined ? undefined : decode(facts.targetFolder) || undefined,
     targetFolderLogical: facts.targetFolderLogical === undefined ? undefined : decode(facts.targetFolderLogical) || undefined,
+    workingDirs: new Map((facts.workingDirs ?? []).map((folder) => [decode(folder.label), { exists: folder.exists, physical: decodeOrNull(folder.physical) }])),
     cosignUsable: facts.cosignUsable,
     imageVersion: facts.imageVersion,
     imageRevision: facts.imageRevision,
@@ -124,5 +128,6 @@ export function hostFactsVolumeAdapter(facts: HostFacts): DatabaseVolumeSafetyAd
     listContainersByVolume: (volume) => facts.volumes.get(volume)?.containers ?? null,
     listContainersByProject: (project) => facts.projects.get(project) ?? null,
     inspectContainerImage: (container) => facts.images.get(container) ?? null,
+    inspectWorkingDir: (label) => facts.workingDirs.get(label) ?? null,
   };
 }
