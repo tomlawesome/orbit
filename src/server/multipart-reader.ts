@@ -116,6 +116,13 @@ export class MultipartReader {
     return this.fieldsRead;
   }
 
+  /** The file part's field name, known once the fields are read, before any of its content is. */
+  async fileName(): Promise<string> {
+    await this.fields();
+    if (this.filePart === null) throw requestMalformed();
+    return this.filePart.name;
+  }
+
   /** The one file part: its field name, and its content as a stream that ends at the closing delimiter. */
   async file(): Promise<{ name: string; stream: ReadableStream<Uint8Array> }> {
     await this.fields();

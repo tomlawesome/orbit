@@ -22,28 +22,27 @@ const ARCHIVE_PART = "archive";
 
 /**
  * Reads the upload's fields and hands them to `handle`, with a way to take
- * the archive file as a stream once the route's checks have passed. Each
- * name in `required` is a field the client always sends: a body without one
- * is not the client's shape (a field sent after the file arrives too late to
- * be read first), so it is refused as malformed, not as invalid.
+ * the archive file as a stream once the route's checks have passed. A field
+ * the body leaves out is simply absent from `fields`, so the route's schema
+ * refuses it as it refuses any bad value (422 `validation_failed`); the
+ * body's structure (no file part, a file part named otherwise, a field after
+ * the file) is refused as malformed.
  *
  * @template T
  * @param {Request} request
- * @param {string[]} required
  * @param {(fields: Record<string, string>, archiveFile: () => Promise<ReadableStream<Uint8Array>>) => Promise<T>} handle
  * @returns {Promise<T>}
  */
-export async function readArchiveUpload(request, required, handle) {
+export async function readArchiveUpload(request, handle) {
   const boundary = multipartBoundary(request.headers.get("content-type")) ?? "";
   const upload = new MultipartReader(request.body, boundary, { maxFieldBytes: SMALL_BODY_LIMIT });
   try {
     const fields = await upload.fields();
-    if (required.some((name) => !Object.hasOwn(fields, name))) throw requestMalformed();
-    return await handle(fields, async () => {
-      const part = await upload.file();
-      if (part.name !== ARCHIVE_PART) throw requestMalformed();
-      return part.stream;
-    });
+    /* The part's name is in its headers, read with the fields: a wrong one is
+       refused here, before the route's checks (the import's step-up spends the
+       person's proof) run. */
+    if ((await upload.fileName()) !== ARCHIVE_PART) throw requestMalformed();
+    return await handle(fields, async () => (await upload.file()).stream);
   } finally {
     /* On the next turn, so the answer is on its way before any more of the
        body is pulled; on success there is nothing left to read. */

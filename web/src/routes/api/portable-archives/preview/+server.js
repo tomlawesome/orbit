@@ -28,7 +28,7 @@ const fieldsSchema = z.object({
  * Only an owner may bring an archive in (#1316), so anyone else is refused
  * here, before a byte of the archive file is read.
  */
-export const POST = write(async (event, session) => readArchiveUpload(event.request, ["householdId", "passphrase"], async (fields, archiveFile) => {
+export const POST = write(async (event, session) => readArchiveUpload(event.request, async (fields, archiveFile) => {
   const body = fieldsSchema.parse(fields);
   await requirePortableArchiveAccess(session.user.id, body.householdId, "import");
   return json(

@@ -34,7 +34,6 @@ const fieldsSchema = z.object({
  */
 export const POST = write(async (event, session) => readArchiveUpload(
   event.request,
-  ["householdId", "passphrase", "conflictItemIds"],
   async (fields, archiveFile) => {
     const { currentPassword, ...body } = fieldsSchema.parse({ ...fields, conflictItemIds: jsonField(fields.conflictItemIds) });
     await requirePortableArchiveAccess(session.user.id, body.householdId, "import");
