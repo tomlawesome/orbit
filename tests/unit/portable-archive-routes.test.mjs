@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { archiveForm, encodeForm, readStream } from "../integration/support/portable-archive-upload.ts";
 
 /*
  * The portable-archive routes' recent-authentication contract (#1132).
@@ -10,6 +11,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * tests/unit/admin-systems-route: every collaborator is mocked at its module
  * boundary and the route files run for real, so this proves the wiring and
  * the order of the gate.
+ *
+ * #1566: preview and import take a multipart upload (fields first, the
+ * archive file last as the part named `archive`) and hand the repository the
+ * file part as a stream. The cases are unchanged; what the engine is handed
+ * now includes that stream, whose bytes must be the uploaded file's.
  */
 const mocks = vi.hoisted(() => ({
   assertOutsideMaintenance: vi.fn(),
@@ -41,6 +47,12 @@ vi.mock("orbit/server/portable-archive-repository", () => ({
 
 const HOUSEHOLD = "22222222-2222-4222-8222-222222222222";
 const PASSPHRASE = "a-long-enough-passphrase";
+const CONFLICT = "33333333-3333-4333-8333-333333333333";
+const FILE = Buffer.from('{"version":1,"algorithm":"aes-256-gcm","kdf":"scrypt","salt":"c2FsdA","iv":"aXY","ciphertext":"eA","authTag":"dGFn"}');
+
+/** The bytes of the archive stream each engine call was handed, or null when it was handed no stream. */
+const received = { preview: /** @type {Buffer | null} */ (null), import: /** @type {Buffer | null} */ (null) };
+const bytesOf = async (archive) => (archive instanceof ReadableStream ? readStream(archive) : null);
 
 /** One request, as SvelteKit hands it to the handler. */
 function post(path, body, params = {}) {
@@ -75,9 +87,19 @@ async function routes() {
   };
 }
 
+/** A multipart upload, serialised exactly as the platform does. */
+async function upload(path, fields) {
+  const { contentType, bytes } = await encodeForm(archiveForm(fields, FILE));
+  return {
+    cookies: { get: () => undefined, set: () => {} },
+    params: {},
+    request: new Request(`http://localhost${path}`, { method: "POST", headers: { "content-type": contentType }, body: bytes }),
+  };
+}
+
 const exportRequest = (body) => post(`/api/households/${HOUSEHOLD}/portable-archives`, body, { householdId: HOUSEHOLD });
-const importRequest = (body) => post("/api/portable-archives/import", body);
-const importBody = { householdId: HOUSEHOLD, archive: { ciphertext: "x" }, passphrase: PASSPHRASE, conflictItemIds: [] };
+const importRequest = (fields) => upload("/api/portable-archives/import", fields);
+const importFields = { householdId: HOUSEHOLD, passphrase: PASSPHRASE, conflictItemIds: [CONFLICT] };
 
 describe("portable archive routes: recent authentication (#1132)", () => {
   beforeEach(() => {
@@ -96,8 +118,16 @@ describe("portable archive routes: recent authentication (#1132)", () => {
     mocks.createPortableArchive.mockReset().mockResolvedValue({
       id: "archive-1", expiresAt: "2026-09-27T00:00:00.000Z", includesDocuments: false,
     });
-    mocks.importPortableArchive.mockReset().mockResolvedValue({ importedItems: 1, documentsExcluded: 0 });
-    mocks.previewPortableImport.mockReset().mockResolvedValue({ householdName: "Home", items: 1 });
+    received.preview = null;
+    received.import = null;
+    mocks.importPortableArchive.mockReset().mockImplementation(async (input) => {
+      received.import = await bytesOf(input?.archive);
+      return { importedItems: 1, documentsExcluded: 0 };
+    });
+    mocks.previewPortableImport.mockReset().mockImplementation(async (_userId, _householdId, archive) => {
+      received.preview = await bytesOf(archive);
+      return { householdName: "Home", items: 1 };
+    });
   });
 
   afterEach(() => {
@@ -151,7 +181,7 @@ describe("portable archive routes: recent authentication (#1132)", () => {
 
   it("challenges an import for the archive_import intent, then brings it in", async () => {
     const { importArchive } = await routes();
-    const response = await importArchive(importRequest({ ...importBody, currentPassword: "s3cret" }));
+    const response = await importArchive(await importRequest({ ...importFields, currentPassword: "s3cret" }));
 
     expect(response.status).toBe(200);
     expect(mocks.requireRecentAuthentication).toHaveBeenCalledWith(
@@ -160,7 +190,11 @@ describe("portable archive routes: recent authentication (#1132)", () => {
       expect.objectContaining({ currentPassword: "s3cret" }),
       "archive_import",
     );
-    expect(mocks.importPortableArchive).toHaveBeenCalledWith({ userId: "owner-1", ...importBody });
+    /* The fields as parsed values (conflictItemIds from its JSON text), and the file part as a stream of the uploaded bytes. */
+    expect(mocks.importPortableArchive).toHaveBeenCalledWith({
+      userId: "owner-1", householdId: HOUSEHOLD, passphrase: PASSPHRASE, conflictItemIds: [CONFLICT], archive: expect.any(ReadableStream),
+    });
+    expect(received.import?.equals(FILE), "the engine read the uploaded file's bytes").toBe(true);
   });
 
   it("brings nothing in when the importer cannot prove it is them", async () => {
@@ -169,7 +203,7 @@ describe("portable archive routes: recent authentication (#1132)", () => {
       new AuthError("recent_authentication_required", "Confirm it is you before making this change", 403),
     );
 
-    const response = await importArchive(importRequest(importBody));
+    const response = await importArchive(await importRequest(importFields));
 
     expect(response.status).toBe(403);
     expect((await response.json()).error.code).toBe("recent_authentication_required");
@@ -182,7 +216,7 @@ describe("portable archive routes: recent authentication (#1132)", () => {
       new AppError("household_not_found", "That household is not available", 404),
     );
 
-    const response = await importArchive(importRequest(importBody));
+    const response = await importArchive(await importRequest(importFields));
 
     expect(response.status).toBe(404);
     expect(mocks.requirePortableArchiveAccess).toHaveBeenCalledWith("owner-1", HOUSEHOLD, "import");
@@ -192,11 +226,13 @@ describe("portable archive routes: recent authentication (#1132)", () => {
 
   it("does not challenge a preview, which only reads the uploaded file", async () => {
     const { previewArchive } = await routes();
-    const response = await previewArchive(post("/api/portable-archives/preview", {
-      householdId: HOUSEHOLD, archive: { ciphertext: "x" }, passphrase: PASSPHRASE,
+    const response = await previewArchive(await upload("/api/portable-archives/preview", {
+      householdId: HOUSEHOLD, passphrase: PASSPHRASE,
     }));
 
     expect(response.status).toBe(200);
     expect(mocks.requireRecentAuthentication).not.toHaveBeenCalled();
+    expect(mocks.previewPortableImport).toHaveBeenCalledWith("owner-1", HOUSEHOLD, expect.any(ReadableStream), PASSPHRASE);
+    expect(received.preview?.equals(FILE), "the engine read the uploaded file's bytes").toBe(true);
   });
 });

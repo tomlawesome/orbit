@@ -79,6 +79,21 @@
       "packageNameTemplate": "gitleaks/gitleaks",
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "The throwaway registry:<version>@sha256:<digest> pin the installer tests push to is written out in scripts/test-repair-journeys.sh, scripts/test-backup-restore.sh, scripts/test-install-acceptance.sh, scripts/ci/start-installer-registry.sh and .gitlab-ci.yml (#1536 T-Q5). No manager reads a pin inside a shell script's default, so the four scripts drifted by hand while the CI copy moved. This reads the tag and digest in every one of the five files, so they are proposed together and a bump cannot leave one behind; scripts/container-build-guards.test.mjs and scripts/supply-chain-policy.test.mjs fail if the copies disagree. The same pattern reads the repair journeys' busybox canary default (D-SEC3). RE2 has no lookbehind, so the character before the name is matched instead of asserted (#1218); the CI file is also read by the _IMAGE: manager above, and finds the same value.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^scripts/test-repair-journeys\\.sh$/",
+        "/^scripts/test-backup-restore\\.sh$/",
+        "/^scripts/test-install-acceptance\\.sh$/",
+        "/^scripts/ci/start-installer-registry\\.sh$/",
+        "/^\\.gitlab-ci\\.yml$/"
+      ],
+      "matchStrings": [
+        "[\\s\"'{-](?<depName>registry|busybox):(?<currentValue>[0-9][^\\s@}\"']*)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker"
     }
   ],
   "vulnerabilityAlerts": {
@@ -91,6 +106,11 @@
       "description": "Every non-major update, from every manager, lands as one merge request: npm (one pnpm workspace rooted here -- pnpm-workspace.yaml lists \".\" and \"web\" -- sharing one pnpm-lock.yaml), tests/oidc/Dockerfile, the compose sidecars, the pipeline's own images (gitlabci and the custom regex manager above) and GitHub Actions. Until 2026-09-08 each manager had its own group, five merge requests a week, each queueing a full pipeline on the single runner behind the work in flight; while the project is this young, one merge request is the budget (owner, 2026-09-08). Majors stay out of the group so a breaking change is reviewed on its own.",
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
       "groupName": "non-major updates"
+    },
+    {
+      "description": "Playwright is pinned in three places that must name one release: PLAYWRIGHT_IMAGE in .gitlab-ci.yml (the image ships the browser build for exactly that release and the runner inside it refuses any other), and @playwright/test in the root package.json and web/package.json, all exact versions (#1536 X-Q3; scripts/container-build-guards.test.mjs compares them). Grouped across every update type, major included, and listed after the non-major group so this group name wins, so the three move in one merge request instead of a version the image cannot run.",
+      "matchPackageNames": ["@playwright/test", "mcr.microsoft.com/playwright"],
+      "groupName": "playwright"
     },
     {
       "description": "The root Dockerfile's only FROM is the Orbit base image, whose digest comes from its own build pipeline at gitlab.tomlawson.io/ai/orbit-base-image rather than from re-resolving a registry tag here. #708 owns its freshness and scripts/sidecar-pins.mjs excludes it for exactly this reason, so Renovate must not re-pin it either.",

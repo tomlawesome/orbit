@@ -3,6 +3,7 @@ import { householdRegister, sessionHeaders } from "./support/households";
 import { signInAsWorkerAdministrator } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { settleArrival } from "./support/arrival";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
@@ -94,7 +95,7 @@ test.describe("household recovery on the clock (#1001)", () => {
   test("restores a household within its window, then hard-deletes another by the two-tap protocol", async ({ page }, testInfo) => {
     const mobile = testInfo.project.name.startsWith("mobile");
     await signInAsWorkerAdministrator(page, "/administration");
-    await settleArrival(page, 20_000, "/administration");
+    await settleArrival(page, SETTLE, "/administration");
 
     const toRestore = await createHousehold(page, uniqueName("Recovery restore"));
     const toDelete = await createHousehold(page, uniqueName("Recovery delete"));
@@ -166,7 +167,7 @@ test.describe("document jobs and the two mail tests (#1071)", () => {
     test.skip(testInfo.project.name.startsWith("mobile"), "#1071's server-side persistence was built for the desk half only");
 
     await signInAsWorkerAdministrator(page, "/administration");
-    await settleArrival(page, 20_000, "/administration");
+    await settleArrival(page, SETTLE, "/administration");
     // #840: a worker with no household anywhere in the instance yet is sent
     // to "/" by the first-run door, not /administration -- v19-mail-review.
     // spec.ts's own comment on the same gate says why household.create is
@@ -184,7 +185,7 @@ test.describe("document jobs and the two mail tests (#1071)", () => {
     // A live check against the stack's own configured relay: give it real
     // network time rather than a UI-speed timeout.
     const pill = relayRow.locator(".role");
-    await expect(pill).not.toHaveText(/checking/i, { timeout: 20_000 });
+    await expect(pill).not.toHaveText(/checking/i, { timeout: SETTLE });
     // Only the leading word ("passed"/"failed") is compared after the
     // reload below -- the pill's "· 0m ago" tail is time-of-read, not
     // persisted state, and would make this flaky on a slow, shared host.

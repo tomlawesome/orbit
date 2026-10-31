@@ -79,7 +79,9 @@ fail on a global percentage.
    floor needs more tests. To get numbers that match CI, run
    `ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh`
    and read `coverage/coverage-summary.json`, or download the `fast` job's
-   `coverage/` artifact. A local run with the Docker suites moves the numbers.
+   `coverage/` artifact. A local run with the Docker suites moves the numbers
+   up; set `ORBIT_COVERAGE_SKIP_HEADROOM=1` to skip only the "more than 5
+   points above" check for such a run (CI never sets it, #1536).
 5. Apply stronger expectations to security, authorization, lifecycle, and
    migration code than to declarative UI composition.
 

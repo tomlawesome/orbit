@@ -6,6 +6,7 @@ import { ensureWorkerAdministrator, workerAccount } from "./support/worker-ident
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { householdDateFromToday } from "./support/household-dates";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -120,9 +121,9 @@ async function openDrawer(page: Page, itemId: string) {
   await page.goto(`/home?item=${itemId}`);
   const drawer = drawerOf(page, itemId);
   if (test.info().project.name.startsWith("mobile")) {
-    await expect(drawer).toHaveAttribute("data-open", "", { timeout: 20_000 });
+    await expect(drawer).toHaveAttribute("data-open", "", { timeout: SETTLE });
   } else {
-    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    await expect(drawer).toBeVisible({ timeout: SETTLE });
   }
   return drawer;
 }

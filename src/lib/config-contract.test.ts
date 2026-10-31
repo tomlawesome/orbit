@@ -93,8 +93,8 @@ describe("evaluateReadiness and SESSION_TTL_SECONDS (SF2-F6)", () => {
 // `missing memory-limit` line when malformed, a warning (ok unchanged) when
 // well-formed but below 1 GiB, nothing when empty or absent.
 // #1537: the warning keeps its 1 GB floor but no longer calls that figure the
-// import peak; it names 1.45 GB as what previewing or importing a
-// maximum-size archive needs.
+// import peak; it names 350 MB and 700 MB as what checking before
+// import and importing a maximum-size archive need.
 const MEMORY_WARNING_PREFIX = "warning ORBIT_MEMORY_LIMIT is below about 1 GB";
 
 describe("isValidMemoryLimit (F2)", () => {
@@ -180,8 +180,9 @@ describe("evaluateReadiness and ORBIT_MEMORY_LIMIT (F2)", () => {
     expect(memoryLines).toHaveLength(1);
     const [line] = memoryLines;
     expect(line.startsWith(MEMORY_WARNING_PREFIX)).toBe(true);
-    expect(line).toContain("1.45 GB");
-    expect(line).toMatch(/preview/iu);
+    expect(line).toContain("350 MB");
+    expect(line).toContain("700 MB");
+    expect(line).toMatch(/checking .* before import/iu);
     expect(line).toMatch(/import/iu);
     expect(line).toContain("(docs/administrator-operations.md)");
     expect(line).not.toMatch(/about 1 GB, the peak/iu);

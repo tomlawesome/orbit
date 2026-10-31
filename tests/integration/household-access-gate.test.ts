@@ -10,6 +10,7 @@ import { importPortableArchive, requirePortableArchiveAccess, rollBackUnfinished
 import { readWorkspace } from "@/server/workspace-repository";
 import { requireHouseholdAccess } from "@/server/workspace-access";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { archiveStream } from "./support/portable-archive-upload";
 
 /**
  * The shared household access gate (#1334). A disabled account has no
@@ -294,7 +295,7 @@ describe("a household with an import in progress is closed to everyone but the i
       expect(await refusal(importPortableArchive({
         userId: fixture.users.member.id,
         householdId: fixture.household.id,
-        archive,
+        archive: archiveStream(archive),
         passphrase: archivePassphrase,
         conflictItemIds: [],
       }))).toEqual(CLOSED);

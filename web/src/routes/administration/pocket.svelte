@@ -4,18 +4,22 @@
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import { wake } from "$lib/pocket/wake.js";
-  import { addMember, commandContact, commandMailbox, commandUploadLimit, createLocalUser, createSystem, hardDeleteHousehold, restoreHousehold, retryDocumentJob, sendSetupLink, setUserDisabled, testMail, wordsOf } from "$lib/data/workspace.js";
+  import { hardDeleteHousehold, setUserDisabled, wordsOf } from "$lib/data/workspace.js";
   import { deletionNameMatches } from "$lib/data/household.js";
   import { ago, dayMonth, initials, plural } from "$lib/format.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
-  import { constellationPlanetsOf } from "$lib/data/chart.js";
   import { BAND_VAR } from "$lib/data/bands.js";
   import { prefersReducedMotion } from "$lib/motion.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
-    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, ingestShort, lapsesShort,
-    megabytes, openFor, plainly, sendWords, setupWords, shortDay, stamp, testVerdict, versionLine,
+    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, blankMailDraft, daysLeft,
+    expired, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, megabytes,
+    openFor, plainly, sendWords, shortDay, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict, versionLine,
   } from "./words.js";
+  import {
+    card, commandMail, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
+    runMailTest, retryJob, setContact, setUploadLimit,
+  } from "./acts.svelte.js";
 
   /*
    * ADMINISTRATION ON A PHONE (#1123, proposal §2.12 and §2.11; owner
@@ -114,33 +118,9 @@
   let readingOpen = $state(false);
 
   /* ── the tells: failures further down the page, said at the top (#1071) ─ */
-  const tells = $derived.by(() => {
-    /** @type {{ id: string, word: string }[]} */
-    const list = [];
-    if (!view) return list;
-    const failing = (view.services ?? []).filter(([tone]) => tone === "overdue" || tone === "warm");
-    /* The row's detail leads with the state's own word (#1296): the tell
-       repeats it rather than assuming every warm row is retrying. */
-    for (const [tone, name, detail] of failing.slice(0, 2)) {
-      list.push({ id: "ad-operations", word: `${name} ${tone === "overdue" ? "down" : detail.split(" · ")[0]}` });
-    }
-    if (failing.length > 2) list.push({ id: "ad-operations", word: `${failing.length - 2} more failing` });
-    const failedJobs = jobs.filter((job) => job.status === "failed").length;
-    if (failedJobs) list.unshift({ id: "ad-documents", word: `${plural(failedJobs, "job")} failed` });
-    /* #1151 A1-Q6: carried over from `tests` (#1071's throwaway,
-       reload-forgetting local copy), removed when A1-Q6 moved this screen
-       onto the server-backed `mailProbes` the desk layout already reads —
-       left unconverted here, so svelte-check's "Cannot find name 'tests'"
-       was a real dangling reference, not a false positive. */
-    if (mailProbes.relay && testVerdict(mailProbes.relay.result).tone === "over") {
-      list.push({ id: "ad-mail", word: "relay failed" });
-    }
-    const mailboxFailed = mailProbes.mailbox
-      ? testVerdict(mailProbes.mailbox.result).tone === "over"
-      : view.mailbox?.verificationState === "failed";
-    if (mailboxFailed) list.push({ id: "ad-mail", word: "mailbox failed" });
-    return list;
-  });
+  /* words.js's tellsOf, with the failing services the desk leaves to its grid. */
+  const TELL_ID = { jobs: "ad-documents", operations: "ad-operations", mail: "ad-mail" };
+  const tells = $derived.by(() => tellsOf(view, jobs, { services: true }).map(({ card: at, text }) => ({ id: TELL_ID[at], word: text })));
 
   /* ── the jump strip: anchors, so it works without script ──────────────── */
   const JUMPS = [
@@ -162,20 +142,18 @@
   }
 
   /* ── people ───────────────────────────────────────────────────────────── */
-  /** @type {string | null} */
-  let peopleProblem = $state(null);
-  /** @type {?(Awaited<ReturnType<typeof sendSetupLink>> & { userId?: string })} */
+  /* `busy` is the person being placed. */
+  const peopleCard = $state({ busy: /** @type {string | null} */ (null), problem: /** @type {string | null} */ (null) });
+  /** @type {?(import("./acts.svelte.js").Delivery & { userId?: string })} */
   let delivery = $state(null);
 
   let inviteOpen = $state(false);
   let inviteArmed = $state(false);
   let invitePassword = $state("");
-  let inviteBusy = $state(false);
-  /** @type {string | null} */
-  let inviteProblem = $state(null);
+  const inviteCard = $state(card());
 
   function openInvite() {
-    inviteProblem = null;
+    inviteCard.problem = null;
     inviteArmed = false;
     invitePassword = "";
     inviteOpen = true;
@@ -185,37 +163,22 @@
   const stepped = (days, by) => Math.min(SETUP_LINK_DAYS.max, Math.max(SETUP_LINK_DAYS.min, Number(days) + by));
 
   async function invite() {
-    if (inviteBusy) return;
+    if (inviteCard.busy) return;
     if (!inviteArmed && provenIntent !== "local_user_create") {
-      await challenge("local_user_create", () => (inviteArmed = true), (message) => (inviteProblem = message));
+      await challenge("local_user_create", () => (inviteArmed = true), (message) => (inviteCard.problem = message));
       return;
     }
-    inviteBusy = true;
-    inviteProblem = null;
-    try {
-      const answer = await createLocalUser({
-        email: draft.email,
-        displayName: draft.displayName,
-        expiresInDays: Number(draft.expiresInDays),
-        ...(actorHasPassword ? { currentPassword: invitePassword } : {}),
-      });
-      delivery = { ...answer, userId: answer.user?.id };
-      inviteArmed = false;
-      invitePassword = "";
-      spent();
-      inviteOpen = false;
-      if (answer.sendError) {
-        wake(`${answer.sentTo} was created, but ${sendWords(answer.sendError)}`, { failure: true });
-      } else {
-        wake(`setup link sent · lapses ${lapsesShort(answer.expiresAt)}`);
-        draft = { email: "", displayName: "", expiresInDays: SETUP_LINK_DAYS.fallback };
-      }
-      await reread();
-    } catch (error) {
-      inviteProblem = setupWords(error);
-    } finally {
-      inviteBusy = false;
-    }
+    await inviteLocalUser(draft, invitePassword, {
+      card: inviteCard, actorHasPassword, reread, wake,
+      landed: (made) => {
+        delivery = made;
+        inviteArmed = false;
+        invitePassword = "";
+        spent();
+        inviteOpen = false;
+        if (!made.sendError) draft = freshInvite();
+      },
+    });
   }
 
   /* A fresh setup link: the person's own act, and the Retry under a failed
@@ -225,43 +188,32 @@
   let resendOpen = $state(false);
   let resendDays = $state(SETUP_LINK_DAYS.fallback);
   let resendPassword = $state("");
-  let resendBusy = $state(false);
-  /** @type {string | null} */
-  let resendProblem = $state(null);
+  const resendCard = $state(card());
 
   /** @param {Person} person */
   function openResend(person) {
-    peopleProblem = null;
+    peopleCard.problem = null;
     challenge("setup_link_issue", () => {
       resendFor = person;
       resendDays = SETUP_LINK_DAYS.fallback;
       resendPassword = "";
-      resendProblem = null;
+      resendCard.problem = null;
       resendOpen = true;
-    }, (message) => (peopleProblem = message), { resend: { personId: person.id, days: SETUP_LINK_DAYS.fallback } });
+    }, (message) => (peopleCard.problem = message), { resend: { personId: person.id, days: SETUP_LINK_DAYS.fallback } });
   }
 
   async function resend() {
     const person = resendFor;
-    if (!person || resendBusy) return;
-    resendBusy = true;
-    resendProblem = null;
-    try {
-      const answer = await sendSetupLink(person.id, {
-        expiresInDays: Number(resendDays),
-        ...(actorHasPassword ? { currentPassword: resendPassword } : {}),
-      });
-      resendOpen = false;
-      resendPassword = "";
-      spent();
-      if (delivery?.userId === person.id) delivery = { ...answer, userId: person.id };
-      if (answer.sendError) wake(sendWords(answer.sendError), { failure: true });
-      else wake(`setup link sent · lapses ${lapsesShort(answer.expiresAt)}`);
-    } catch (error) {
-      resendProblem = setupWords(error);
-    } finally {
-      resendBusy = false;
-    }
+    if (!person) return;
+    await issueSetupLink(person.id, resendDays, resendPassword, {
+      card: resendCard, actorHasPassword, wake,
+      landed: (answer) => {
+        resendOpen = false;
+        resendPassword = "";
+        spent();
+        if (delivery?.userId === person.id) delivery = { ...answer, userId: person.id };
+      },
+    });
   }
 
   /* Placing a person in a system (§11, #453): the systems are the rows. */
@@ -269,19 +221,11 @@
   let placing = $state(null);
   let placeOpen = $state(false);
   /** @param {System} system */
-  async function place(system) {
+  async function placeIn(system) {
     const person = placing;
     if (!person) return;
     placeOpen = false;
-    peopleProblem = null;
-    try {
-      await addMember(system.id, person.id);
-      wake(`${person.displayName} is in ${system.name}`);
-      await reread();
-    } catch (error) {
-      peopleProblem = wordsOf(error);
-      wake(peopleProblem, { failure: true });
-    }
+    await placePerson(person, system, { card: peopleCard, reread, wake });
   }
 
   /**
@@ -306,15 +250,15 @@
 
   /** @param {Person} person @param {boolean} off */
   async function disable(person, off) {
-    peopleProblem = null;
+    peopleCard.problem = null;
     try {
       await setUserDisabled(person.id, off);
       if (off) wake(`${person.displayName} is disabled · they can’t sign in`, { undo: () => disable(person, false) });
       else wake(`${person.displayName} can sign in again`);
       await reread();
     } catch (error) {
-      peopleProblem = wordsOf(error);
-      wake(peopleProblem, { failure: true });
+      peopleCard.problem = wordsOf(error);
+      wake(peopleCard.problem, { failure: true });
     }
   }
 
@@ -322,9 +266,7 @@
   let systemOpen = $state(false);
   let systemName = $state("");
   let systemPassword = $state("");
-  let systemBusy = $state(false);
-  /** @type {string | null} */
-  let systemProblem = $state(null);
+  const systemCard = $state(card());
   /** @type {string | null} */
   let systemsProblem = $state(null);
 
@@ -333,45 +275,30 @@
     challenge("system_create", () => {
       systemName = "";
       systemPassword = "";
-      systemProblem = null;
+      systemCard.problem = null;
       systemOpen = true;
     }, (message) => (systemsProblem = message));
   }
 
   /** Choosing the owner is the submit, as on the desk (#1052). @param {Person} owner */
   async function createSystemFor(owner) {
-    if (systemBusy) return;
-    if (!systemName.trim()) { systemProblem = "name the system first"; return; }
-    systemBusy = true;
-    systemProblem = null;
-    try {
-      await createSystem({
-        name: systemName.trim(),
-        ownerId: owner.id,
-        ...(actorHasPassword ? { currentPassword: systemPassword } : {}),
-      });
-      const named = systemName.trim();
-      systemOpen = false;
-      systemPassword = "";
-      spent();
-      wake(`${named} is made · ${owner.displayName} owns it`);
-      await reread();
-    } catch (error) {
-      systemProblem = setupWords(error);
-    } finally {
-      systemBusy = false;
-    }
+    if (systemCard.busy) return;
+    if (!systemName.trim()) { systemCard.problem = "name the system first"; return; }
+    await makeSystem(systemName.trim(), owner, systemPassword, {
+      card: systemCard, actorHasPassword, reread,
+      landed: () => {
+        const named = systemName.trim();
+        systemOpen = false;
+        systemPassword = "";
+        spent();
+        wake(`${named} is made · ${owner.displayName} owns it`);
+      },
+    });
   }
 
-  /* A system's ring wears its real due-state dots, as on the desk. */
-  /** @type {Record<string, string>} */
-  const TONE = { "--warm": "--warm", "--ok": "--ok", "--upcoming": "--upcoming", "--overdue": "--overdue" };
+  /* A system's ring wears its real due-state dots, as on the desk (words.js). */
   /** @param {System} system */
-  const ringDots = (system) => view
-    ? constellationPlanetsOf(system.items ?? [], view.today).map(([x, y, r, tone]) => ({
-      cx: 17 + x / 6, cy: 17 + y / 6, r: 1 + r / 4, tone: TONE[tone] ?? "--ok",
-    }))
-    : [];
+  const dotsOf = (system) => (view ? systemDotsOf(system, view.today) : []);
   /* Round 3 §3.9: members and items at rest; the owner is the panel's. */
   /** @param {System} system */
   const systemMeta = (system) =>
@@ -379,22 +306,8 @@
 
   /* A system on the clock (§2.11, §19 "56 b the row", "57 admin only"). */
   const recoverable = $derived(view?.recoverable ?? []);
-  /** @param {string} iso */
-  const daysLeft = (iso) => Math.max(0, Math.ceil((Date.parse(iso) - Date.parse(view?.now ?? new Date().toISOString())) / 86_400_000));
-  /** @param {{ deleteAfter: string }} row */
-  const expired = (row) => Date.parse(row.deleteAfter) <= Date.parse(view?.now ?? new Date().toISOString());
   /** What was said on a row after its act, keyed by the system's id. @type {Record<string, { ok: boolean, text: string }>} */
   let clockSaid = $state({});
-  /** @param {{ id: string, name: string }} row */
-  async function restore(row) {
-    try {
-      await restoreHousehold(row.id);
-      clockSaid[row.id] = { ok: true, text: `restored · ${row.name} is back exactly as it was` };
-      await reread();
-    } catch (error) {
-      clockSaid[row.id] = { ok: false, text: `not restored — ${wordsOf(error)}` };
-    }
-  }
   /** @typedef {{ id: string, name: string, deleteAfter: string }} OnTheClock */
   let doomed = $state(/** @type {OnTheClock | null} */ (null));
   let doomOpen = $state(false);
@@ -426,125 +339,69 @@
   /* ── public contact (#860) ────────────────────────────────────────────── */
   let contactOpen = $state(false);
   let contactDraft = $state("");
-  let contactBusy = $state(false);
-  /** @type {string | null} */
-  let contactProblem = $state(null);
+  const contactCard = $state(card());
   function openContact() {
     contactDraft = view?.contact?.address ?? "";
-    contactProblem = null;
+    contactCard.problem = null;
     contactOpen = true;
   }
-  /** @param {{ action: "set", address: string } | { action: "clear" }} partial */
-  async function contactAction(partial) {
-    const current = view?.contact;
-    if (!current || contactBusy) return;
-    contactBusy = true;
-    contactProblem = null;
-    try {
-      await commandContact({ ...partial, expectedVersion: current.version });
-      contactOpen = false;
-      wake(partial.action === "clear" ? "the public contact is cleared" : `the public contact is ${partial.address}`);
-      await reread();
-    } catch (error) {
-      contactProblem = wordsOf(error);
-    } finally {
-      contactBusy = false;
-    }
-  }
+  /** The sheet closes once the command lands. @param {{ action: "set", address: string } | { action: "clear" }} partial */
+  const sendContact = (partial) =>
+    setContact(view?.contact, partial, { card: contactCard, reread, wake, landed: () => (contactOpen = false) });
 
   /* ── upload size limit (#1285) ───────────────────────────────────────── */
   let uploadLimitOpen = $state(false);
   /** @type {number | null} */
   let uploadLimitDraft = $state(null);
-  let uploadLimitBusy = $state(false);
-  /** @type {string | null} */
-  let uploadLimitProblem = $state(null);
+  const uploadLimitCard = $state(card());
   function openUploadLimit() {
     const current = view?.uploadLimit;
     uploadLimitDraft = current ? Math.round(current.maxBytes / 1048576) : null;
-    uploadLimitProblem = null;
+    uploadLimitCard.problem = null;
     uploadLimitOpen = true;
   }
+  /* The sheet closes once the command lands. A failed re-read after it is
+     said in the refusal's own words here, where the desk says "done"
+     (./acts.svelte.js, DONE_UNREAD). */
   /** @param {{ action: "set", megabytes: number } | { action: "default" }} partial */
-  async function uploadLimitAction(partial) {
-    const current = view?.uploadLimit;
-    if (!current || uploadLimitBusy) return;
-    uploadLimitBusy = true;
-    uploadLimitProblem = null;
-    try {
-      const { uploadLimit } = await commandUploadLimit({ ...partial, expectedVersion: current.version });
-      uploadLimitOpen = false;
-      wake(`the upload size limit is ${megabytes(uploadLimit.maxBytes)}`);
-      await reread();
-    } catch (error) {
-      uploadLimitProblem = wordsOf(error);
-    } finally {
-      uploadLimitBusy = false;
-    }
-  }
+  const sendUploadLimit = (partial) => setUploadLimit(view?.uploadLimit, partial, {
+    card: uploadLimitCard, reread, wake, unread: (error) => wordsOf(error),
+    landed: () => (uploadLimitOpen = false),
+  });
 
   /* ── mail machinery (#743) ────────────────────────────────────────────── */
-  /** @type {string | null} */
-  let mailBusy = $state(null);
-  /** @type {string | null} */
-  let mailOutcome = $state(null);
-  /** @type {string | null} */
-  let mailProblem = $state(null);
+  /* `busy` names the button that is out. */
+  const mailCard = $state({
+    busy: /** @type {string | null} */ (null),
+    problem: /** @type {string | null} */ (null),
+    outcome: /** @type {string | null} */ (null),
+  });
   let mailPassword = $state("");
   let rotateOpen = $state(false);
   let editOpen = $state(false);
-  const PROVIDER_PROFILES = ["mailcow", "gmail", "outlook", "other"];
-  let mailDraft = $state({
-    host: "", port: 993, accountUser: "", mailbox: "INBOX", tlsServerName: "",
-    providerProfile: "other", trustedRecipientHeader: "X-Original-To", pollSeconds: 300,
-  });
+  let mailDraft = $state(blankMailDraft());
 
   function openMailEditor() {
     const current = view?.mailbox;
-    if (current?.configured) {
-      mailDraft = {
-        host: current.host, port: current.port, accountUser: current.accountUser,
-        mailbox: current.mailbox, tlsServerName: current.tlsServerName,
-        providerProfile: current.providerProfile,
-        trustedRecipientHeader: current.trustedRecipientHeader || "X-Original-To",
-        pollSeconds: current.pollSeconds,
-      };
-    }
+    if (current?.configured) mailDraft = mailDraftOf(current);
     mailPassword = "";
-    mailProblem = null;
+    mailCard.problem = null;
     editOpen = true;
   }
 
   /**
-   * One mailbox action, folded back into the screen from the server's own
-   * account. A refused credential keeps its sheet open, minus the password.
+   * One mailbox action (./acts.svelte.js). A refused credential keeps its
+   * sheet open, minus the password.
    * @param {string} label @param {object} command
    */
-  async function mailAction(label, command) {
-    mailBusy = label;
-    mailProblem = null;
-    mailOutcome = null;
-    let answer;
-    try {
-      answer = await commandMailbox(command);
-    } catch (error) {
-      mailProblem = wordsOf(error);
-      mailBusy = null;
-      return;
-    }
-    mailOutcome = answer.outcome ?? null;
-    if (!answer.outcome || answer.outcome === "verified") { editOpen = false; rotateOpen = false; }
-    mailPassword = "";
-    // The command landed; a failed re-read must not read back as a failed command.
-    try {
-      await reread();
-    } catch {
-      mailProblem = "done — Orbit could not refresh this screen, so reload to see the new version";
-    } finally {
-      mailBusy = null;
-    }
-  }
-  const mailOk = $derived(mailOutcome === "verified" || mailOutcome === "delivered");
+  const mailAction = (label, command) => commandMail(label, command, {
+    card: mailCard, reread,
+    landed: (closes) => {
+      if (closes) { editOpen = false; rotateOpen = false; }
+      mailPassword = "";
+    },
+  });
+  const mailOk = $derived(mailCard.outcome === "verified" || mailCard.outcome === "delivered");
 
   /* The two tests (#1071): the server remembers each one's last answer
      (owner, 2026-09-19: "the server remembers the last mail-test result
@@ -553,86 +410,25 @@
      throwaway local copy this used to keep, which forgot everything on a
      reload (#1151 A1-Q6). */
   const mailProbes = $derived(view?.operations?.mailProbes ?? { mailbox: null, relay: null });
-  /** @type {"mailbox" | "relay" | null} */
-  let testing = $state(null);
-  /** @type {string | null} */
-  let testProblem = $state(null);
+  /* `busy` names the test that is out. */
+  const testCard = $state({ busy: /** @type {"mailbox" | "relay" | null} */ (null), problem: /** @type {string | null} */ (null) });
   const TESTS = /** @type {const} */ (["mailbox", "relay"]);
-  /** @param {"mailbox" | "relay"} which */
-  async function runTest(which) {
-    if (testing) return;
-    testing = which;
-    testProblem = null;
-    try {
-      await testMail(which);
-      await reread();
-    } catch (error) {
-      testProblem = wordsOf(error);
-    } finally {
-      testing = null;
-    }
-  }
-  /** @param {"mailbox" | "relay"} which */
-  const testMeta = (which) => {
-    if (testing === which) return "checking now";
-    const probe = mailProbes[which];
-    if (!probe) return "not tested yet";
-    const verdict = testVerdict(probe.result);
-    return verdict.reason || plainly(probe.result);
-  };
 
   /* Rotate every address (§2.12 7): the administrator chooses how long the
-     old addresses keep working, 0 to 90 days (mailbox-settings.ts). It starts
-     at the relay's own standard grace, RELAY_PREVIOUS_GRACE_MS (14 days,
-     src/server/mail-in/core/relay-generations.ts). */
-  const STANDARD_GRACE_DAYS = 14;
+     old addresses keep working, 0 to 90 days, starting at the relay's own
+     standard grace (words.js's ALIAS_GRACE_DAYS). */
   let aliasOpen = $state(false);
-  let graceDays = $state(STANDARD_GRACE_DAYS);
+  let graceDays = $state(ALIAS_GRACE_DAYS);
   /** @param {number} by */
   const graceStep = (by) => (graceDays = Math.min(90, Math.max(0, graceDays + by)));
 
   /* ── document jobs (#1071) ───────────────────────────────────────────── */
   /** @type {Record<string, { status: string, at: string }>} */
   let retried = $state({});
-  const jobs = $derived.by(() => {
-    const list = (view?.operations?.documentJobs ?? []).map((job) => retried[job.id]
-      ? { ...job, status: /** @type {typeof job.status} */ (retried[job.id].status), attempts: 0, updatedAt: retried[job.id].at }
-      : job);
-    return list.sort((a, b) => (JOB_STATES[a.status]?.rank ?? 9) - (JOB_STATES[b.status]?.rank ?? 9)
-      || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-  });
-  const jobCounts = $derived.by(() => {
-    /** @type {Record<string, number>} */
-    const by = {};
-    for (const job of jobs) by[job.status] = (by[job.status] ?? 0) + 1;
-    return ["failed", "retry", "processing", "pending", "completed"].filter((status) => by[status])
-      .map((status) => `${by[status]} ${JOB_STATES[status].word}`).join(" · ");
-  });
+  const jobs = $derived(jobsOf(view?.operations?.documentJobs ?? [], retried));
+  const jobCounts = $derived(jobCountsOf(jobs));
   const clock = $derived(view?.now ?? new Date().toISOString());
-  /** @param {(typeof jobs)[number]} job */
-  const jobMeta = (job) => {
-    /* Round 3 §3.9 and §8: the reason alone at rest (R6); when it was last
-       tried, and the tries, are the panel's — the state pill takes the room
-       the time needed. */
-    if (job.status === "failed") return JOB_REASONS[job.lastErrorCode ?? "unknown"] ?? JOB_REASONS.unknown;
-    if (job.status === "retry") return job.lastErrorCode ? JOB_REASONS[job.lastErrorCode] ?? JOB_REASONS.unknown : `last tried ${ago(job.updatedAt, clock)}`;
-    if (job.status === "pending") return retried[job.id] ? "attempt 1 · queued just now" : `queued ${ago(job.createdAt, clock)}`;
-    if (job.status === "processing") return `started ${ago(job.updatedAt, clock)}`;
-    return `${JOB_STATES[job.status]?.word ?? job.status} ${ago(job.updatedAt, clock)}`;
-  };
-  /** @type {string | null} */
-  let jobsProblem = $state(null);
-  /** @param {(typeof jobs)[number]} job */
-  async function retry(job) {
-    jobsProblem = null;
-    try {
-      await retryDocumentJob(job.id, job.status);
-      retried[job.id] = { status: "pending", at: new Date().toISOString() };
-      wake(`${JOB_KINDS[job.kind] ?? job.kind} is queued to try again`);
-    } catch (error) {
-      jobsProblem = wordsOf(error);
-    }
-  }
+  const jobsCard = $state(card());
 
   /* ── operations (#1000) ───────────────────────────────────────────────── */
   /** @type {Record<string, string>} */
@@ -806,7 +602,7 @@
         {:else}
           {#if people.length <= 1}<p class="p-empty ad-inset">only you so far</p>{/if}
         {/if}
-        {#if peopleProblem}<p class="p-error ad-inset ad-lastline" role="alert">{peopleProblem}</p>{/if}
+        {#if peopleCard.problem}<p class="p-error ad-inset ad-lastline" role="alert">{peopleCard.problem}</p>{/if}
       </section>
 
       <!-- SYSTEMS (§2.12 5). -->
@@ -824,7 +620,7 @@
               <svg class="ad-ring" width="30" height="30" viewBox="0 0 34 34" aria-hidden="true">
                 <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
                 <circle cx="17" cy="17" r="2.6" style="fill:var({system.id === view.primary ? '--sun' : '--ink-mid'})"/>
-                {#each ringDots(system) as dot (dot.cx + "-" + dot.cy)}
+                {#each dotsOf(system) as dot (dot.cx + "-" + dot.cy)}
                   <circle cx={dot.cx} cy={dot.cy} r={dot.r} style="fill:var({dot.tone})" opacity=".85"/>
                 {/each}
               </svg>
@@ -849,9 +645,9 @@
                the panel beside `delete now`. -->
           {#snippet clockDetail()}<div class="p-kv"><span>gone for good</span><b>{dayMonth(row.deleteAfter)}</b></div>{/snippet}
           <Row title={row.name} metaFace="ui"
-               meta={expired(row) ? "past its window · removing"
-                 : `deleted · ${plural(daysLeft(row.deleteAfter), "day")} left`}
-               acts={expired(row) ? [] : clockActs(row)} detail={expired(row) ? undefined : clockDetail}>
+               meta={expired(row, view?.now) ? "past its window · removing"
+                 : `deleted · ${plural(daysLeft(row.deleteAfter, view?.now), "day")} left`}
+               acts={expired(row, view?.now) ? [] : clockActs(row)} detail={expired(row, view?.now) ? undefined : clockDetail}>
             {#snippet mark()}
               <svg class="ad-ring ad-clockring" width="30" height="30" viewBox="0 0 34 34" aria-hidden="true">
                 <circle cx="17" cy="17" r="13" fill="none"/>
@@ -862,9 +658,9 @@
               {#if clockSaid[row.id]}
                 <p class="ad-clocksaid" class:bad={!clockSaid[row.id].ok} role="status">{clockSaid[row.id].text}</p>
               {/if}
-              {#if !expired(row)}
+              {#if !expired(row, view?.now)}
                 <ArmButton label="restore" armedLabel="tap again to restore {row.name}" name="Restore {row.name}"
-                           danger={false} class="act-accent" onfire={() => restore(row)} />
+                           danger={false} class="act-accent" onfire={() => restoreSystem(row, clockSaid, reread)} />
               {/if}
             {/snippet}
           </Row>
@@ -922,23 +718,23 @@
         <div class="ad-cardhead">
           <h2 class="p-caps" id="ad-mail-head">Mail machinery</h2>
           <div class="p-pills ad-headpills">
-            <button class="p-pill act-accent" disabled={testing !== null} onclick={() => runTest("mailbox")}>test this mailbox</button>
-            <button class="p-pill act-accent" disabled={testing !== null} onclick={() => runTest("relay")}>test the relay</button>
+            <button class="p-pill act-accent" disabled={testCard.busy !== null} onclick={() => runMailTest("mailbox", { card: testCard, reread })}>test this mailbox</button>
+            <button class="p-pill act-accent" disabled={testCard.busy !== null} onclick={() => runMailTest("relay", { card: testCard, reread })}>test the relay</button>
           </div>
         </div>
         {#each TESTS as which (which)}
           {@const probe = mailProbes[which]}
           {@const verdict = probe ? testVerdict(probe.result) : null}
-          {#if verdict || testing === which}
-            <Row title={which === "mailbox" ? "incoming mailbox" : "outgoing relay"} metaFace="ui" meta={testMeta(which)}>
-              {#snippet mark()}<span class="p-body {testing === which ? 'up breathing' : verdict?.tone ?? 'ended'}"></span>{/snippet}
+          {#if verdict || testCard.busy === which}
+            <Row title={which === "mailbox" ? "incoming mailbox" : "outgoing relay"} metaFace="ui" meta={testMetaOf(which, testCard.busy, mailProbes)}>
+              {#snippet mark()}<span class="p-body {testCard.busy === which ? 'up breathing' : verdict?.tone ?? 'ended'}"></span>{/snippet}
               {#snippet end()}
-                <span class="ad-state {testing === which ? 'up ad-checking' : verdict?.tone ?? ''}">{testing === which ? "checking…" : verdict?.word}</span>
+                <span class="ad-state {testCard.busy === which ? 'up ad-checking' : verdict?.tone ?? ''}">{testCard.busy === which ? "checking…" : verdict?.word}</span>
               {/snippet}
             </Row>
           {/if}
         {/each}
-        {#if testProblem}<p class="p-error ad-inset ad-lastline" role="alert">{testProblem}</p>{/if}
+        {#if testCard.problem}<p class="p-error ad-inset ad-lastline" role="alert">{testCard.problem}</p>{/if}
         {#if view.failed.relay}
           <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the mail settings{stillNoAnswer ? " (tried again, still no answer)" : ""}
             <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
@@ -951,7 +747,7 @@
         {#if view.mailbox?.configured}
           <Row title="every address"
                trail="rotate" trailTone="var(--warm-text)" trailName="rotate every address"
-               onactivate={() => { graceDays = STANDARD_GRACE_DAYS; mailProblem = null; aliasOpen = true; }}>
+               onactivate={() => { graceDays = ALIAS_GRACE_DAYS; mailCard.problem = null; aliasOpen = true; }}>
             {#snippet mark()}<span class="ad-kmark">↻</span>{/snippet}
           </Row>
         {/if}
@@ -977,13 +773,13 @@
             <div class="ad-foot">
               <div class="p-pills">
                 <button class="p-pill act-accent" onclick={openMailEditor}>change mailbox</button>
-                <button class="p-pill act-accent" disabled={mailBusy !== null}
-                        onclick={() => mailAction("probe", { action: "probe" })}>{mailBusy === "probe" ? "probing…" : "run setup probe"}</button>
-                <button class="p-pill act-warm" disabled={mailBusy !== null}
+                <button class="p-pill act-accent" disabled={mailCard.busy !== null}
+                        onclick={() => mailAction("probe", { action: "probe" })}>{mailCard.busy === "probe" ? "probing…" : "run setup probe"}</button>
+                <button class="p-pill act-warm" disabled={mailCard.busy !== null}
                         onclick={() => mailAction("enabled", { action: mailbox.enabled ? "disable" : "enable", expectedVersion: mailbox.version })}>
                   {mailbox.enabled ? "pause ingest" : "resume ingest"}</button>
-                <button class="p-pill" disabled={mailBusy !== null}
-                        onclick={() => { mailPassword = ""; mailProblem = null; rotateOpen = true; }}>rotate password</button>
+                <button class="p-pill" disabled={mailCard.busy !== null}
+                        onclick={() => { mailPassword = ""; mailCard.problem = null; rotateOpen = true; }}>rotate password</button>
               </div>
               <ArmButton label="remove credential" armedLabel="tap again to remove the credential" wide
                          onfire={() => mailAction("remove", { action: "remove", expectedVersion: mailbox.version })} />
@@ -992,8 +788,8 @@
             <div class="ad-foot"><button class="p-pill act-accent wide" onclick={openMailEditor}>set up mailbox</button></div>
           {/if}
         {/if}
-        {#if mailOutcome}<p class="ad-said {mailOk ? 'ok' : 'warn'} ad-lastline" role="status">{plainly(mailOutcome)}</p>{/if}
-        {#if mailProblem}<p class="p-error ad-inset ad-lastline" role="alert">{mailProblem}</p>{/if}
+        {#if mailCard.outcome}<p class="ad-said {mailOk ? 'ok' : 'warn'} ad-lastline" role="status">{plainly(mailCard.outcome)}</p>{/if}
+        {#if mailCard.problem}<p class="p-error ad-inset ad-lastline" role="alert">{mailCard.problem}</p>{/if}
       </section>
 
       <!-- OPERATIONS (§2.12 8, #1000): tap a row for its last check. -->
@@ -1036,21 +832,21 @@
               <div class="p-kv"><span>tries</span><b>{job.attempts}</b></div>
               <div class="p-kv"><span>last tried</span><b>{ago(job.updatedAt, clock)}</b></div>
             {/snippet}
-            <Row title={JOB_KINDS[job.kind] ?? job.kind} metaFace="ui" meta={jobMeta(job)}
+            <Row title={JOB_KINDS[job.kind] ?? job.kind} metaFace="ui" meta={jobMetaOf(job, clock, retried)}
                  detail={job.status === "failed" || job.status === "retry" ? jobDetail : undefined}>
               {#snippet mark()}<span class="p-body {state.tone || 'ended'}" class:failed={job.status === "failed"}></span>{/snippet}
               {#snippet end()}<span class="ad-state {state.tone}">{state.word}</span>{/snippet}
               {#snippet below()}
                 {#if job.status === "failed"}
                   <button class="p-pill act-accent" aria-label="Retry the {(JOB_KINDS[job.kind] ?? job.kind).toLowerCase()}"
-                          onclick={() => retry(job)}>retry</button>
+                          onclick={() => retryJob(job, { card: jobsCard, retried, wake })}>retry</button>
                 {/if}
               {/snippet}
             </Row>
           {:else}
             <p class="p-empty ad-inset">no document jobs yet</p>
           {/each}
-          {#if jobsProblem}<p class="p-error ad-inset" role="alert">{jobsProblem}</p>{/if}
+          {#if jobsCard.problem}<p class="p-error ad-inset" role="alert">{jobsCard.problem}</p>{/if}
         </section>
       {/if}
 
@@ -1123,11 +919,11 @@
                bind:value={invitePassword} required>
       {/if}
       <p class="ad-note">Orbit mails them a link to choose their own password. The link is never shown here.</p>
-      {#if inviteProblem}<p class="p-error" role="alert">{inviteProblem}</p>{/if}
+      {#if inviteCard.problem}<p class="p-error" role="alert">{inviteCard.problem}</p>{/if}
     </form>
     {#snippet foot()}
-      <button class="p-pill filled" type="submit" form="ad-invite-form" disabled={inviteBusy}>
-        {inviteBusy ? "creating…" : inviteArmed || provenIntent === "local_user_create" ? "create and send the link" : "create"}</button>
+      <button class="p-pill filled" type="submit" form="ad-invite-form" disabled={inviteCard.busy}>
+        {inviteCard.busy ? "creating…" : inviteArmed || provenIntent === "local_user_create" ? "create and send the link" : "create"}</button>
     {/snippet}
   </Sheet>
 
@@ -1148,12 +944,12 @@
           <input id="ad-re-current" class="p-input" type="password" autocomplete="current-password" enterkeyhint="send"
                  bind:value={resendPassword} required>
         {/if}
-        {#if resendProblem}<p class="p-error" role="alert">{resendProblem}</p>{/if}
+        {#if resendCard.problem}<p class="p-error" role="alert">{resendCard.problem}</p>{/if}
       </form>
     {/if}
     {#snippet foot()}
       {#if resendFor}
-        <button class="p-pill filled" type="submit" form="ad-resend-form" disabled={resendBusy}>{resendBusy ? "sending…" : "send it"}</button>
+        <button class="p-pill filled" type="submit" form="ad-resend-form" disabled={resendCard.busy}>{resendCard.busy ? "sending…" : "send it"}</button>
       {/if}
     {/snippet}
   </Sheet>
@@ -1162,7 +958,7 @@
     <div class="ad-flushrows">
       {#each systems as system (system.id)}
         <Row title={system.name} meta={systemMeta(system)} trail="place" trailTone="var(--accent-text)"
-             trailName="place {placing?.displayName ?? 'them'} in {system.name}" onactivate={() => place(system)}>
+             trailName="place {placing?.displayName ?? 'them'} in {system.name}" onactivate={() => placeIn(system)}>
           {#snippet mark()}<span class="ad-kmark">◯</span>{/snippet}
         </Row>
       {/each}
@@ -1191,29 +987,29 @@
         </Row>
       {/each}
     </div>
-    {#if systemProblem}<p class="p-error" role="alert">{systemProblem}</p>{/if}
+    {#if systemCard.problem}<p class="p-error" role="alert">{systemCard.problem}</p>{/if}
   </Sheet>
 
   <Sheet bind:open={contactOpen} size="callout" title="Public contact">
-    <form id="ad-contact-form" onsubmit={(event) => { event.preventDefault(); contactAction({ action: "set", address: contactDraft }); }}>
+    <form id="ad-contact-form" onsubmit={(event) => { event.preventDefault(); sendContact({ action: "set", address: contactDraft }); }}>
       <label class="ad-label" for="ad-contact-field">address</label>
       <input id="ad-contact-field" class="p-input" type="email" inputmode="email" autocomplete="off" enterkeyhint="done"
              placeholder="ops@example.com" bind:value={contactDraft} required>
       <p class="ad-note">Shown on the sign-in door if it ever can’t open safely — never a real administrator’s own mailbox.
         Anyone can read it, signed in or not.</p>
-      {#if contactProblem}<p class="p-error" role="alert">{contactProblem}</p>{/if}
+      {#if contactCard.problem}<p class="p-error" role="alert">{contactCard.problem}</p>{/if}
     </form>
     {#snippet foot()}
-      <button class="p-pill filled" type="submit" form="ad-contact-form" disabled={contactBusy}>{contactBusy ? "saving…" : "save"}</button>
+      <button class="p-pill filled" type="submit" form="ad-contact-form" disabled={contactCard.busy}>{contactCard.busy ? "saving…" : "save"}</button>
       {#if view?.contact?.address}
-        <button class="p-pill danger" type="button" disabled={contactBusy} onclick={() => contactAction({ action: "clear" })}>clear</button>
+        <button class="p-pill danger" type="button" disabled={contactCard.busy} onclick={() => sendContact({ action: "clear" })}>clear</button>
       {/if}
     {/snippet}
   </Sheet>
 
   <Sheet bind:open={uploadLimitOpen} size="callout" title="Upload size limit">
     <form id="ad-uploads-form" onsubmit={(event) => { event.preventDefault();
-      if (uploadLimitDraft !== null) uploadLimitAction({ action: "set", megabytes: uploadLimitDraft }); }}>
+      if (uploadLimitDraft !== null) sendUploadLimit({ action: "set", megabytes: uploadLimitDraft }); }}>
       <label class="ad-label" for="ad-uploads-field">limit in MB</label>
       <input id="ad-uploads-field" class="p-input" type="number" inputmode="numeric" step="1" enterkeyhint="done"
              min={view?.uploadLimit ? Math.round(view.uploadLimit.minBytes / 1048576) : 1}
@@ -1223,13 +1019,13 @@
         <p class="ad-note">From {megabytes(view.uploadLimit.minBytes)} to {megabytes(view.uploadLimit.ceilingBytes)}. It applies to
           the next upload; documents already kept are unaffected.</p>
       {/if}
-      {#if uploadLimitProblem}<p class="p-error" role="alert">{uploadLimitProblem}</p>{/if}
+      {#if uploadLimitCard.problem}<p class="p-error" role="alert">{uploadLimitCard.problem}</p>{/if}
     </form>
     {#snippet foot()}
-      <button class="p-pill filled" type="submit" form="ad-uploads-form" disabled={uploadLimitBusy}>{uploadLimitBusy ? "saving…" : "save"}</button>
+      <button class="p-pill filled" type="submit" form="ad-uploads-form" disabled={uploadLimitCard.busy}>{uploadLimitCard.busy ? "saving…" : "save"}</button>
       {#if view?.uploadLimit && view.uploadLimit.overrideBytes !== null}
-        <button class="p-pill" type="button" disabled={uploadLimitBusy}
-                onclick={() => uploadLimitAction({ action: "default" })}>use the default</button>
+        <button class="p-pill" type="button" disabled={uploadLimitCard.busy}
+                onclick={() => sendUploadLimit({ action: "default" })}>use the default</button>
       {/if}
     {/snippet}
   </Sheet>
@@ -1241,11 +1037,11 @@
       <input id="ad-rot-pass" class="p-input" type="password" autocomplete="new-password" enterkeyhint="done"
              bind:value={mailPassword} required>
       <p class="ad-note">It is proven against the provider before it’s kept; a refusal leaves the old one working.</p>
-      {#if mailProblem}<p class="p-error" role="alert">{mailProblem}</p>{/if}
+      {#if mailCard.problem}<p class="p-error" role="alert">{mailCard.problem}</p>{/if}
     </form>
     {#snippet foot()}
-      <button class="p-pill filled" type="submit" form="ad-rotate-form" disabled={mailBusy !== null}>
-        {mailBusy === "rotate" ? "verifying…" : "verify and rotate"}</button>
+      <button class="p-pill filled" type="submit" form="ad-rotate-form" disabled={mailCard.busy !== null}>
+        {mailCard.busy === "rotate" ? "verifying…" : "verify and rotate"}</button>
     {/snippet}
   </Sheet>
 
@@ -1275,17 +1071,17 @@
       <input id="ad-mb-pass" class="p-input" type="password" autocomplete="new-password" bind:value={mailPassword} required>
       <p class="ad-note">Relay addresses are plus-addresses of this account, so it has to be one the provider delivers
         sub-addressed mail to. The password is stored encrypted and never shown again.</p>
-      {#if mailProblem}<p class="p-error" role="alert">{mailProblem}</p>{/if}
+      {#if mailCard.problem}<p class="p-error" role="alert">{mailCard.problem}</p>{/if}
     </form>
     {#snippet foot()}
-      <button class="p-pill filled" type="submit" form="ad-mailbox-form" disabled={mailBusy !== null}>
-        {mailBusy === "set" ? "verifying…" : "verify and save"}</button>
+      <button class="p-pill filled" type="submit" form="ad-mailbox-form" disabled={mailCard.busy !== null}>
+        {mailCard.busy === "set" ? "verifying…" : "verify and save"}</button>
     {/snippet}
   </Sheet>
 
   <Sheet bind:open={doomOpen} size="callout" title="Delete {doomed?.name ?? 'it'} now?">
     {#if doomed}
-      <p class="p-prose ad-sheet-say">Deleting now skips the {plural(daysLeft(doomed.deleteAfter), "day")}. Nothing comes back
+      <p class="p-prose ad-sheet-say">Deleting now skips the {plural(daysLeft(doomed.deleteAfter, view?.now), "day")}. Nothing comes back
         after this — not for you, not for anyone.</p>
       <label class="ad-label" for="ad-doom-name">type the system’s name exactly to wake the button</label>
       <input id="ad-doom-name" class="p-input" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"
@@ -1312,10 +1108,10 @@
       <output aria-live="polite">{plural(graceDays, "day")}</output>
       <button type="button" class="p-pill" aria-label="Seven days more" disabled={graceDays >= 90} onclick={() => graceStep(7)}>+</button>
     </div>
-    {#if mailProblem}<p class="p-error" role="alert">{mailProblem}</p>{/if}
+    {#if mailCard.problem}<p class="p-error" role="alert">{mailCard.problem}</p>{/if}
     {#snippet foot()}
       <ArmButton label="rotate every address" armedLabel="tap again to rotate every address"
-                 onfire={() => { if (view?.mailbox) mailAction("alias", { action: "rotate_alias_key", expectedVersion: view.mailbox.version, graceDays }).then(() => { if (!mailProblem) { aliasOpen = false; wake("every address is new · the old ones keep working for " + plural(graceDays, "day")); } }); }} />
+                 onfire={() => { if (view?.mailbox) mailAction("alias", { action: "rotate_alias_key", expectedVersion: view.mailbox.version, graceDays }).then(() => { if (!mailCard.problem) { aliasOpen = false; wake("every address is new · the old ones keep working for " + plural(graceDays, "day")); } }); }} />
     {/snippet}
   </Sheet>
 

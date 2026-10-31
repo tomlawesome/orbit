@@ -1212,16 +1212,16 @@ journey_hostile_value_privacy_negatives() {
   printf 'ORBIT_PORT=%s\n' "$canary" >> "$target/.env-orbit"
 
   # ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE overrides the image (CI sets it to the
-  # same plain Docker Hub name, which the runner's image cache mirrors,
-  # ai/orbit#1510); a plain Docker Hub pull of the
-  # moving `busybox:stable` tag by default -- this container is a
-  # disposable label vector for the hostile-value journey, not a pin Orbit
-  # ships, so nothing here needs a digest.
+  # same digest-pinned plain Docker Hub name, which the runner's image cache
+  # mirrors, ai/orbit#1510). The default is busybox pinned by digest: the
+  # container is a disposable label vector for the hostile-value journey, but
+  # the supply-chain policy has no exemption for a throwaway pull (#1111,
+  # #1536 D-SEC3), so it is recorded in .github/supply-chain-policy.json.
   docker run -d --name "orbit-journeys-$canary" \
     --label "com.docker.compose.project=$project" \
     --label "com.docker.compose.service=$canary" \
     --label "com.docker.compose.container-number=1" \
-    "${ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE:-busybox:stable}" sleep 600 >/dev/null 2>&1 ||
+    "${ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE:-busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4}" sleep 600 >/dev/null 2>&1 ||
     fail 'hostile-value: could not start the labelled container vector'
 
   output="$(repair --check 2>&1)" || status=$?

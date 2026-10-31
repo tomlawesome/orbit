@@ -160,10 +160,11 @@ describe("both home screens use the words for a dropped completion (#1316)", () 
     expect(onfailed).toContain("droppedCompletionWords(");
   });
 
-  it("the phone's stash replay (pocket.svelte catch) names the refused item", () => {
-    const replay = block(read("web/src/routes/home/pocket.svelte"), "of readHeldCompletionStash()", ".catch(");
-    expect(replay).toMatch(/\brefused\s*\?/u);
-    expect(replay).toContain("rawItems.get(sent.itemId)");
-    expect(replay).toContain("droppedCompletionWords(");
+  /* #1352: the phone finishes a stash through retryStashed, as the desk does. */
+  it("the phone's stash replay (pocket.svelte onfailed) names the refused item", () => {
+    const onfailed = block(read("web/src/routes/home/pocket.svelte"), "createHeldCompletion({", "onfailed:");
+    expect(onfailed).toContain("isRefused(error)");
+    expect(onfailed).toMatch(/\bcommand\)?\??\.itemId\b/u);
+    expect(onfailed).toContain("droppedCompletionWords(");
   });
 });

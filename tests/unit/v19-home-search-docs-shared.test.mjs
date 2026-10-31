@@ -9,49 +9,49 @@ import { describe, expect, it } from "vitest";
  * diverging (only the phone set papersReady). A fix to the fetch pattern
  * (like the concurrency cap in W1-R9) would have had to be made twice.
  *
- * Both now call pocket-search.js's readSearchDocuments, keeping only the
- * per-screen bits (the searchDocumentsFor cache check, papersReady) local.
+ * Both now call pocket-search.js's readSearchDocuments. Since #1352 the
+ * caller itself is shared too: home/drawer-acts.svelte.js holds
+ * loadSearchDocuments (the searchDocumentsFor cache check, papersReady), and
+ * the phone passes its open row (`lit`) as the item to admit whatever its
+ * status.
  */
 
-const HOME_PAGE = readFileSync(
-  resolve(import.meta.dirname, "../../web/src/routes/home/+page.svelte"),
-  "utf8",
-);
-const POCKET = readFileSync(
-  resolve(import.meta.dirname, "../../web/src/routes/home/pocket.svelte"),
-  "utf8",
-);
+const read = (/** @type {string} */ p) => readFileSync(resolve(import.meta.dirname, "../..", p), "utf8");
+const HOME_PAGE = read("web/src/routes/home/+page.svelte");
+const POCKET = read("web/src/routes/home/pocket.svelte");
+const ACTS = read("web/src/routes/home/drawer-acts.svelte.js");
 
 describe("#1151 W1-Q8: one shared loadSearchDocuments helper", () => {
-  it("both screens import readSearchDocuments from pocket-search.js", () => {
-    expect(HOME_PAGE).toMatch(/import \{ costLabel, listedItems, readSearchDocuments, searchPocket \} from "\.\/pocket-search\.js";/u);
-    expect(POCKET).toMatch(/import \{ costLabel, listedItems, readSearchDocuments, searchPocket \} from "\.\/pocket-search\.js";/u);
+  it("the shared acts import readSearchDocuments from pocket-search.js; neither screen does", () => {
+    expect(ACTS).toMatch(/import \{ readSearchDocuments \} from "\.\/pocket-search\.js";/u);
+    expect(HOME_PAGE).not.toMatch(/\breadSearchDocuments\b/u);
+    expect(POCKET).not.toMatch(/\breadSearchDocuments\b/u);
   });
 
-  it("both call it instead of their own Promise.all/worker loop", () => {
-    const deskFn = HOME_PAGE.slice(HOME_PAGE.indexOf("async function loadSearchDocuments()"), HOME_PAGE.indexOf("async function loadSearchDocuments()") + 700);
-    expect(deskFn).toMatch(/await readSearchDocuments\(\s*\n\s*carrying, readItemDocuments, householdId, \(\) => searchDocumentsFor !== household,\s*\n\s*\);/u);
-    expect(deskFn).not.toMatch(/Promise\.all/u);
-
-    const pocketFn = POCKET.slice(POCKET.indexOf("async function loadSearchDocuments()"), POCKET.indexOf("async function loadSearchDocuments()") + 700);
-    expect(pocketFn).toMatch(/await readSearchDocuments\(\s*\n\s*carrying, readItemDocuments, householdId, \(\) => searchDocumentsFor !== household,\s*\n\s*\);/u);
-    expect(pocketFn).not.toMatch(/async function worker\(\)/u);
+  it("both screens load through acts.loadSearchDocuments, which calls it instead of its own Promise.all/worker loop", () => {
+    expect(HOME_PAGE).toMatch(/\bacts\.loadSearchDocuments\(/u);
+    expect(POCKET).toMatch(/\bacts\.loadSearchDocuments\(lit\)/u);
+    const start = ACTS.indexOf("async function loadSearchDocuments(");
+    const fn = ACTS.slice(start, start + 900);
+    expect(fn).toMatch(/await readSearchDocuments\(\s*\n\s*carrying, readItemDocuments, householdId, \(\) => searchDocumentsFor !== household,\s*\n\s*\);/u);
+    expect(fn).not.toMatch(/Promise\.all/u);
+    expect(fn).not.toMatch(/async function worker\(\)/u);
   });
 
-  it("only the pocket still sets its own papersReady", () => {
-    expect(POCKET).toMatch(/searchDocuments = found;\s*\n\s*papersReady = true;/u);
+  it("papersReady is set in the shared acts, and the desk does not read it", () => {
+    expect(ACTS).toMatch(/searchDocuments = found;\s*\n\s*papersReady = true;/u);
     expect(HOME_PAGE).not.toContain("papersReady");
   });
 
   /* #1316 W1-F7: the phone's filter admitted only active items, so an
      archived item's drawer (/home?item=<id>) lost its Documents section. */
-  it("the pocket's loadSearchDocuments filter admits the open row's item whatever its status", () => {
-    const start = POCKET.indexOf("async function loadSearchDocuments()");
-    const fn = POCKET.slice(start, POCKET.indexOf("readSearchDocuments(", start));
+  it("the shared loadSearchDocuments filter admits the open row's item whatever its status", () => {
+    const start = ACTS.indexOf("async function loadSearchDocuments(");
+    const fn = ACTS.slice(start, ACTS.indexOf("readSearchDocuments(", start));
     const filter = fn.slice(fn.indexOf("const carrying"), fn.indexOf(";", fn.indexOf("const carrying")));
     expect(filter).toMatch(/documentCount/u);
-    // not active-only: an alternative clause names the open (asked/lit) row
+    // not active-only: an alternative clause names the open row (`also`, the phone's lit)
     expect(filter).toMatch(/\|\|/u);
-    expect(filter).toMatch(/asked|lit\b|open/u);
+    expect(filter).toMatch(/\balso\b/u);
   });
 });

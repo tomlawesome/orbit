@@ -12,8 +12,9 @@
  * it already recorded as success, so a refusal there — a version conflict
  * included — means it was NOT recorded: it is reported once and dropped.
  *
- * Home's desk drawer (#1319) holds its completions through this; the belt
- * and the pocket keep their own copies of the same mechanism, pinned by
+ * Home's desk drawer (#1319) holds its completions through this; both of
+ * home's dialects finish an earlier visit's stash through `retryStashed`
+ * (the pocket's own copy went with #1352), pinned by
  * tests/unit/v19-held-completion-stash.test.mjs.
  */
 
@@ -33,8 +34,7 @@ const defaultStorage = () => {
 };
 
 /**
- * The held commands a previous visit stashed: a list, one per completion,
- * in the same shape the pocket writes.
+ * The held commands a previous visit stashed: a list, one per completion.
  * @param {StashStorage | null} [storage]
  * @returns {object[]}
  */

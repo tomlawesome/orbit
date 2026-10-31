@@ -55,7 +55,7 @@
    * @typedef {{
    *   title: string,
    *   pocket?: boolean,
-   *   busy?: import('./drawer-acts.js').DrawerBusy,
+   *   busy?: import('./drawer-acts.svelte.js').DrawerBusy,
    *   mode?: "read" | "edit" | "complete",
    *   snoozing?: boolean,
    *   held?: boolean,

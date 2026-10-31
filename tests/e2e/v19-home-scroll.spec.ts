@@ -6,6 +6,7 @@ import { ensureWorkerAdministrator, workerAccount } from "./support/worker-ident
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { householdDateFromToday } from "./support/household-dates";
+import { SETTLE } from "./support/settle";
 
 resetDatabaseBetweenSpecFiles();
 
@@ -106,7 +107,7 @@ test("after a save, the item's address and its drawer's way back return to a sky
   await page.goto(`/home?item=${id}`);
   await expect(page).toHaveURL(new RegExp(`/home\\?item=${id}$`));
   const drawer = page.locator(`[id="${id}-view"]`);
-  await expect(drawer).toBeVisible({ timeout: 20_000 });
+  await expect(drawer).toBeVisible({ timeout: SETTLE });
   await page.keyboard.press("Escape");
   await expect(drawer).toHaveCount(0);
   await expect(page).toHaveURL(/\/home$/);

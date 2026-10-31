@@ -19,6 +19,7 @@ import {
   chooseDeploymentProfile,
   checkLocalAiCapacity,
   currentDeploymentProfile,
+  prepareLocalAiModel,
   resolveNonInteractiveProfileSelection,
   updateIdentityLines,
 } from "./deployment-profile";
@@ -34,7 +35,7 @@ import { missingConfigurationFields, missingGuidedFields, missingRequiredFields,
 import { type HostFacts, hostFactsVolumeAdapter } from "./host-facts";
 import { type InstallTerminal, InstallPromptStop, declined, selectChoice } from "./install-terminal";
 import { InstallTransaction, InstallTransactionRefusal } from "./install-transaction";
-import { LAUNCHER_CONFIG_TREE_ENV, takeHandedInConfiguration, treeHoldsConfiguration } from "./launcher-config-tree";
+import { LAUNCHER_CONFIG_TREE_ENV, takeHandedInConfiguration, treeHoldsConfiguration, treeHoldsOnlySecrets } from "./launcher-config-tree";
 import { verifyOidcDiscovery } from "./oidc-discovery";
 import {
   COMPOSE_FILE,
@@ -89,7 +90,7 @@ export interface InstallContext {
   channel: string;
   /** COMPOSE_PROJECT_NAME from the shell's environment, if any. */
   requestedComposeProjectName?: string;
-  /** ORBIT_INSTALL_PROFILE from the launcher; read only on a non-interactive install (#1504). */
+  /** ORBIT_INSTALL_PROFILE from the launcher (#1504); read on a fresh install whenever the profile wizard is not shown (no terminal, --plain, or an action named on the command line). */
   requestedProfile?: string;
   facts: HostFacts;
   /** Where this image keeps its deployment assets (/opt/orbit/deploy, ADR-0019). */
@@ -430,12 +431,13 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
     return fail("host", "host", "The existing optional-service configuration is unsupported or ambiguous.");
   }
   let profile: ProfileWizardResult;
+  const capacity = () => (dependencies.capacity ?? checkLocalAiCapacity)(context.targetDir);
   if (menuShown && terminal) {
     try {
       profile = chooseDeploymentProfile(terminal, {
         installerAction: action,
         existingProfile: profileResult.profile,
-        capacity: () => (dependencies.capacity ?? checkLocalAiCapacity)(context.targetDir),
+        capacity,
         identityLines:
           action === "update"
             ? updateIdentityLines(context.targetDir, profileResult.profile, {
@@ -494,6 +496,11 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
     // keeps its own.
     let guidedStaged = false;
     const targetConfigured = pathExists(join(context.targetDir, ENVIRONMENT_FILE)) || pathExists(join(context.targetDir, SECRETS_DIRECTORY));
+    if (treeHoldsOnlySecrets(context.launcherConfigTree)) {
+      dependencies.notice?.(
+        `Orbit installer: the .orbit-secrets in ${LAUNCHER_CONFIG_TREE_ENV} was ignored: there is no .env-orbit beside it, so no handed-in configuration was used.`,
+      );
+    }
     if (treeHoldsConfiguration(context.launcherConfigTree) && (targetConfigured || action !== "install")) {
       dependencies.notice?.(`Orbit installer: the configuration in ${LAUNCHER_CONFIG_TREE_ENV} was ignored: this folder already has one, and it is used.`);
     } else if (action === "install") {
@@ -535,8 +542,31 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
         if (!(menuShown && terminal)) {
           const handedInProfile = currentDeploymentProfile(scratchDir, true);
           if (context.requestedProfile === undefined) {
-            if (!handedInProfile.ok) return unchanged(`The configuration in ${LAUNCHER_CONFIG_TREE_ENV} was refused: its optional-service configuration is unsupported or ambiguous`);
-            profile = { ...profile, selectedProfile: handedInProfile.profile, profileChange: false };
+            // Running the same command again reads the same file, so no retry
+            // can clear this: abort, and name the edit (#1536 RG-R5).
+            if (!handedInProfile.ok) {
+              return fail(
+                "configuration",
+                "configuration",
+                `The configuration in ${LAUNCHER_CONFIG_TREE_ENV} was refused: its optional-service configuration is unsupported or ambiguous; the target remains unchanged.`,
+                "configuration-failure",
+                "abort",
+                [
+                  "Orbit installer: edit COMPOSE_PROFILES, TIKA_URL and OLLAMA_MODEL in the handed-in .env-orbit so together they name one supported profile, as .env-orbit.example describes, or set ORBIT_INSTALL_PROFILE to replace them.",
+                ],
+              );
+            }
+            // A kept local-AI profile is a chosen one all the same: the
+            // wizard's capacity advisory and download step (#1536 G2-R2),
+            // the download asked only where a terminal can answer it.
+            let modelPullRequested: boolean;
+            try {
+              modelPullRequested = prepareLocalAiModel(handedInProfile.profile, capacity, (line) => say(dependencies, [line]), context.plainMode ? undefined : terminal);
+            } catch (error) {
+              if (error instanceof InstallPromptStop) return stopped(error);
+              throw error;
+            }
+            profile = { ...profile, selectedProfile: handedInProfile.profile, profileChange: false, modelPullRequested };
           } else if (handedInProfile.ok && handedInProfile.profile !== profile.selectedProfile) {
             say(dependencies, [`ORBIT_INSTALL_PROFILE=${profile.selectedProfile} replaces the ${handedInProfile.profile} profile in the handed-in configuration`]);
           }

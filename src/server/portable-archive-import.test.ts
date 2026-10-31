@@ -4,6 +4,7 @@ import { AppError } from "@/lib/app-error";
 import { COST_MINOR_MAX } from "@/lib/domain";
 import { encryptPortableArchive } from "@/server/portable-archive";
 import { KDF_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
+import { archiveStream } from "../../tests/integration/support/portable-archive-upload";
 
 /**
  * Covers three A2 audit findings in the portable-archive import path:
@@ -167,8 +168,9 @@ const doc2Id = "7112fcd4-6865-4bf4-a7c0-acb2e38edbd3";
 const doc3Id = "0b6c6f2b-6f0a-4b36-9f8b-3e9f9e0f9c2a";
 const orphanSectionId = "f71d534e-156f-414c-91cc-9c60f155f6e1";
 
+/** The archive file as preview and import take it since #1566: a stream, read once. */
 function encrypted(payload: unknown) {
-  return encryptPortableArchive(Buffer.from(JSON.stringify(payload)), passphrase);
+  return archiveStream(encryptPortableArchive(Buffer.from(JSON.stringify(payload)), passphrase));
 }
 
 function seedHouseholdAccess() {

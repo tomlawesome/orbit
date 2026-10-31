@@ -5,6 +5,7 @@ import { settleArrival } from "./support/arrival";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -410,7 +411,7 @@ test("the desk reads a staged paper's page one, from the suggestion's drawer and
     await drawer.getByRole("button", { name: "Open policy-schedule.pdf" }).click();
 
     const card = page.getByRole("dialog", { name: "policy-schedule.pdf" });
-    await expect(card).toHaveClass(/snap/, { timeout: 20_000 });
+    await expect(card).toHaveClass(/snap/, { timeout: SETTLE });
     await expect(card.getByRole("img")).toHaveAttribute("alt", "Page one of policy-schedule.pdf");
     await expect(card.locator(".rcfoot .rcnote")).toHaveText("not yet in orbit · attached on acceptance");
     // No download for a staged paper: the foot carries the note, never a link.

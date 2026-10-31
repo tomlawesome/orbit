@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -506,6 +506,63 @@ describe("refusals that never reach docker", () => {
     expect(result.status).toBe(0);
     expect(result.stderr).not.toContain("document key is missing");
     expect(verbs(result.calls).slice(0, 3)).toEqual(["run", "stop", "run"]);
+  });
+
+  // #1536 O-F2, X-F3: a document-kek that is a symbolic link to nothing is neither a key nor
+  // an absent key (which the overlay path covers). Both scripts refuse it before any engine
+  // run, stop or start, and leave the secrets directory exactly as found.
+  const secretsSnapshot = (deployment) => {
+    const dir = join(deployment.deployDir, ".orbit-secrets");
+    return readdirSync(dir).sort().map((name) => {
+      const stats = lstatSync(join(dir, name));
+      const detail = stats.isSymbolicLink() ? readlinkSync(join(dir, name)) : stats.isFile() ? readFileSync(join(dir, name), "utf8") : "";
+      return { name, link: stats.isSymbolicLink(), detail, mtimeMs: stats.mtimeMs };
+    });
+  };
+  const withDanglingKey = () => {
+    const deployment = makeDeployment({ key: false });
+    const target = join(deployment.deployDir, "no-such-key-target");
+    symlinkSync(target, join(deployment.deployDir, ".orbit-secrets", "document-kek"));
+    expect(existsSync(target)).toBe(false);
+    return { deployment, target };
+  };
+
+  it.each([
+    ["restore.sh", ["--recover"]],
+    ["import-recovery-bundle.sh", ["BUNDLE"]],
+  ])("%s %j refuses a dangling document-key link before touching anything (#1536)", (script, args) => {
+    const { deployment, target } = withDanglingKey();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const before = secretsSnapshot(deployment);
+    const result = run(deployment, script, args.map((arg) => (arg === "BUNDLE" ? bundle : arg)));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist. Remove the link and run again.");
+    expect(verbs(result.calls)).toEqual([]);
+    const link = join(deployment.deployDir, ".orbit-secrets", "document-kek");
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(link)).toBe(target);
+    expect(secretsSnapshot(deployment)).toEqual(before);
+  });
+
+  it("restore.sh --recover with no document key at all still runs: stop, engine, start", () => {
+    const deployment = makeDeployment({ key: false });
+    const result = run(deployment, "restore.sh", ["--recover"]);
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain("document key is missing");
+    expect(verbs(result.calls)).toEqual(["stop", "run", "start"]);
+    expect(existsSync(join(deployment.deployDir, ".orbit-secrets", "document-kek"))).toBe(false);
+  });
+
+  it("import-recovery-bundle.sh with no document key at all still runs: preflight, stop, engine", () => {
+    const deployment = makeDeployment({ key: false });
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const result = run(deployment, "import-recovery-bundle.sh", [bundle]);
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain("document key is missing");
+    expect(verbs(result.calls).slice(0, 3)).toEqual(["run", "stop", "run"]);
+    expect(existsSync(join(deployment.deployDir, ".orbit-secrets", "document-kek"))).toBe(false);
   });
 
   it.each(SCRIPTS)("%s refuses without .env-orbit", (script) => {

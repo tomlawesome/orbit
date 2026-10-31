@@ -29,7 +29,7 @@
    *   problem?: string | null,
    *   showingPaper?: string | null,
    *   onopenpaper?: (paper: StagedPaper, from: HTMLElement) => void,
-   *   acts?: Pick<import('./drawer-acts.js').DrawerActs, "modes" | "sections" | "onaccept" | "oncancel">,
+   *   acts?: Pick<import('./drawer-acts.svelte.js').DrawerActs, "modes" | "sections" | "onaccept" | "oncancel">,
    * }} */
   let { suggestion, problem = null, showingPaper = null, onopenpaper = undefined, acts = undefined } = $props();
 

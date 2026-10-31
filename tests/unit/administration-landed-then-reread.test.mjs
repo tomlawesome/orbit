@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 /*
  * #1316 A1-R1: a landed command is never read back as not done.
@@ -14,13 +14,25 @@ import { describe, expect, it } from "vitest";
  *
  * Evaluated rather than mounted: there is no component-mounting harness in
  * this suite (see administration-pocket-tells-scope.test.mjs), so each
- * function is lifted out of its source and run against stand-in state and
- * stand-in server calls. The stand-ins are the only names the function may
- * read or write; any other name it reaches for fails the test loudly.
+ * layout's action is lifted out of its source and run against stand-in state.
+ * Since #1353 both are thin calls into ./acts.svelte.js, which is handed in
+ * for real with the server calls stood in. The stand-ins are the only names
+ * the action may read or write; any other name it reaches for fails the test
+ * loudly.
  */
 
 const POCKET_PATH = "web/src/routes/administration/pocket.svelte";
 const DESK_PATH = "web/src/routes/administration/+page.svelte";
+
+const server = vi.hoisted(() => ({ commandMailbox: async () => ({}), commandUploadLimit: async () => ({}) }));
+vi.mock("$lib/data/workspace.js", () => ({
+  addMember: vi.fn(), commandContact: vi.fn(), createLocalUser: vi.fn(), createSystem: vi.fn(),
+  restoreHousehold: vi.fn(), retryDocumentJob: vi.fn(), sendSetupLink: vi.fn(), testMail: vi.fn(),
+  commandMailbox: (/** @type {unknown} */ command) => server.commandMailbox(command),
+  commandUploadLimit: (/** @type {unknown} */ command) => server.commandUploadLimit(command),
+  wordsOf: (/** @type {unknown} */ error) => (error instanceof Error ? error.message : String(error)),
+}));
+const { commandMail, setUploadLimit } = await import("../../web/src/routes/administration/acts.svelte.js");
 
 /** @param {string} path @returns {string} */
 function read(path) {
@@ -28,18 +40,26 @@ function read(path) {
 }
 
 /**
- * Lift `async function <name>(...) { ... }` out of a component and run it
- * with `scope` as the only names in reach. State the function assigns lands
- * back on `scope`.
+ * Lift `const <name> = <expression>;` out of a component (the statement ends
+ * at the first `;` outside brackets) and run it with `scope` as the only names
+ * in reach. State the action assigns lands back on `scope`.
  * @param {string} path @param {string} name @param {Record<string, unknown>} scope
  * @returns {Function}
  */
 function lift(path, name, scope) {
   const src = read(path);
-  const start = src.indexOf(`async function ${name}(`);
+  const marker = `const ${name} = `;
+  const start = src.indexOf(marker);
   expect(start, `${path} has no \`${name}\``).toBeGreaterThan(-1);
-  const end = src.indexOf("\n  }\n", start);
-  const body = src.slice(start, end + "\n  }".length);
+  let depth = 0;
+  let end = start + marker.length;
+  for (; end < src.length; end++) {
+    const c = src[end];
+    if ("([{".includes(c)) depth++;
+    else if (")]}".includes(c)) depth--;
+    else if (c === ";" && depth === 0) break;
+  }
+  const body = src.slice(start + marker.length, end);
   const sandbox = new Proxy(scope, {
     has: (target, key) => typeof key === "string" && key in target,
   });
@@ -49,44 +69,40 @@ function lift(path, name, scope) {
 
 describe("a landed command is never read back as not done (#1316 A1-R1)", () => {
   it("phone mailbox: a re-read failure after a verified rotate leaves the sheet closed, the password cleared, and says done", async () => {
+    server.commandMailbox = async () => ({ outcome: "verified" });
     const scope = {
-      mailBusy: null,
-      mailProblem: null,
-      mailOutcome: null,
+      mailCard: { busy: null, problem: null, outcome: null },
       editOpen: false,
       rotateOpen: true,
       mailPassword: "hunter2-not-real",
-      commandMailbox: async () => ({ outcome: "verified" }),
+      commandMail,
       reread: async () => { throw new Error("the screen would not load"); },
-      wordsOf: (/** @type {unknown} */ error) => (error instanceof Error ? error.message : String(error)),
     };
     const mailAction = lift(POCKET_PATH, "mailAction", scope);
     await mailAction("rotate", { action: "rotate", expectedVersion: 3, password: scope.mailPassword });
 
     expect(scope.rotateOpen, "the rotate sheet should be closed").toBe(false);
     expect(scope.mailPassword, "the password field should be empty").toBe("");
-    expect(scope.mailOutcome).toBe("verified");
-    expect(scope.mailProblem).toMatch(/^done —/);
-    expect(scope.mailProblem).toMatch(/reload/i);
-    expect(scope.mailBusy).toBeNull();
+    expect(scope.mailCard.outcome).toBe("verified");
+    expect(scope.mailCard.problem).toMatch(/^done —/);
+    expect(scope.mailCard.problem).toMatch(/reload/i);
+    expect(scope.mailCard.busy).toBeNull();
   });
 
   it("desk upload limit: a re-read failure after a landed set closes the editor and says done", async () => {
+    server.commandUploadLimit = async () => ({});
     const scope = {
-      uploadLimitBusy: false,
-      uploadLimitProblem: null,
+      uploadLimitCard: { busy: false, problem: null },
       editingUploadLimit: true,
-      view: { uploadLimit: { version: 7 } },
       need: () => ({ uploadLimit: { version: 7 } }),
-      commandUploadLimit: async () => ({}),
-      readAdminScreen: async () => { throw new Error("the screen would not load"); },
-      wordsOf: (/** @type {unknown} */ error) => (error instanceof Error ? error.message : String(error)),
+      setUploadLimit,
+      reread: async () => { throw new Error("the screen would not load"); },
     };
-    const uploadLimitAction = lift(DESK_PATH, "uploadLimitAction", scope);
-    await uploadLimitAction({ action: "set", megabytes: 20 });
+    const saveUploadLimit = lift(DESK_PATH, "saveUploadLimit", scope);
+    await saveUploadLimit({ action: "set", megabytes: 20 });
 
     expect(scope.editingUploadLimit, "the editor should be closed").toBe(false);
-    expect(scope.uploadLimitProblem).toMatch(/^done —/);
-    expect(scope.uploadLimitBusy).toBe(false);
+    expect(scope.uploadLimitCard.problem).toMatch(/^done —/);
+    expect(scope.uploadLimitCard.busy).toBe(false);
   });
 });

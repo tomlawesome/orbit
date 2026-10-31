@@ -7,17 +7,11 @@
     readSessions,
     readSettingsScreen,
     readSignInMethods,
-    removeLocalPassword,
-    startProviderLink,
-    startStepUp,
-    unlinkProviderIdentity,
-    writeLocalPassword,
-    writeReminders,
   } from "$lib/data/workspace.js";
   import { SIGN_IN_METHODS_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
-  import { agoLong, clockOf, dayMonth, initials as initialsOf, localZone, plural } from "$lib/format.js";
-  import { alertsSupported, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
+  import { agoLong, initials as initialsOf, plural } from "$lib/format.js";
+  import { alertsSupported, syncAlerts } from "$lib/push/alerts.js";
   import { watchTour } from "$lib/tour/watch.js";
   import { fillStarTiles } from "$lib/sky.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
@@ -27,8 +21,10 @@
   import Chrome from "$lib/Chrome.svelte";
   import { createArm } from "$lib/arm.js";
   import SignInChallenge from "./SignInChallenge.svelte";
-  import { PACKS, intentOf, issuerHost, methodWords, on } from "./helm.js";
-  import { signOutOfDevice, signOutOfEveryDevice } from "./sign-out.js";
+  import { PACKS, issuerHost, on, sentWhenOf } from "./helm.js";
+  import {
+    card, changeMethod, leaving, proveAtProvider, signOutAll, signOutDevice, toggleBrowserAlerts, toggleEmailReminders,
+  } from "./sign-in-methods.svelte.js";
   import Pocket from "./pocket.svelte";
   import "./settings.css";
   import { tabArrows } from "$lib/tabs.js";
@@ -51,7 +47,8 @@
   /** @type {string | null} */
   let screenProblem = $state(null);
 
-  /* The roster and its offer live in helm.js, shared with the phone layout. */
+  /* The roster and its offer live in helm.js, shared with the phone layout,
+     which picks through these two (#1353). */
   let active = $state(DEFAULT_THEME);
   /** @param {string} name */
   function pickPack(name) {
@@ -81,34 +78,20 @@
    * which is why it is read and handed straight back.
    */
   let emailReminders = $state(true);
-  /** @type {string | null} */
-  let reminderProblem = $state(null);
-
-  let emailSaving = $state(false);
-  async function toggleEmailReminders() {
-    if (!view || emailSaving) return;
-    emailSaving = true;
-    const previous = emailReminders;
-    /* Optimistic: a toggle that waits for a round trip reads as a dead
-       control. The revert below is what makes that honest. */
-    emailReminders = !previous;
-    reminderProblem = null;
-    try {
-      const reminders = await writeReminders({
-        emailEnabled: emailReminders,
-        firstWarningDays: view.reminders.firstWarningDays,
-        finalWarningDays: view.reminders.finalWarningDays,
-      });
-      /* The server's answer wins over the guess, sentences included. */
-      view = { ...view, reminders };
-      emailReminders = reminders.emailEnabled;
-    } catch {
-      emailReminders = previous;
-      reminderProblem = "not saved — Orbit could not reach your reminder settings";
-    } finally {
-      emailSaving = false;
-    }
-  }
+  const reminderCard = $state(card());
+  /** The switch (./sign-in-methods.svelte.js); the desk keeps its own flag, set from the screen. */
+  const tapEmailReminders = () => {
+    if (!view) return;
+    const current = view.reminders;
+    return toggleEmailReminders(current, {
+      card: reminderCard,
+      shown: (enabled) => (emailReminders = enabled),
+      landed: (saved) => {
+        if (view) view = { ...view, reminders: saved };
+        emailReminders = saved.emailEnabled;
+      },
+    });
+  };
 
   /**
    * Browser alerts (#763). The same reminder arriving on a phone that is not
@@ -129,9 +112,7 @@
    */
   let alertsAvailable = $state(false);
   let browserAlerts = $state(false);
-  /** @type {?string} */
-  let alertsProblem = $state(null);
-  let alertsBusy = $state(false);
+  const alertsCard = $state(card());
 
   onMount(async () => {
     /* The root layout may apply a different server value after this mounts. */
@@ -143,45 +124,12 @@
        screen's shape depend on a browser capability, which the pixel gate
        compares against one ratified mockup — and would give the reader a
        missing control rather than a held one. */
-    if (!alertsAvailable) alertsProblem = "this browser can't show alerts";
+    if (!alertsAvailable) alertsCard.problem = "this browser can't show alerts";
     else browserAlerts = Boolean(await syncAlerts());
   });
 
-  async function toggleBrowserAlerts() {
-    if (alertsBusy) return;
-    /* Not optimistic, unlike the email toggle above: turning these on opens a
-       browser permission prompt the reader has to answer, so the switch must
-       not claim to be on while that prompt is still on screen. */
-    alertsBusy = true;
-    alertsProblem = null;
-    try {
-      if (browserAlerts) {
-        await disableAlerts();
-        browserAlerts = false;
-      } else {
-        await enableAlerts();
-        browserAlerts = true;
-      }
-    } catch (error) {
-      /* #1151 F9: reconcile against the server the same way the onMount
-         read above does. currentSubscription() only reports whether the
-         browser still holds a subscription object, which stays true even
-         after the server has refused it (e.g. it belongs to another
-         account on a shared device) — exactly the case syncAlerts() exists
-         to catch, so falling back to the raw browser read here undid it. */
-      browserAlerts = Boolean(await syncAlerts());
-      /* alerts.js throws AlertsError, which carries the reason as a code so
-         this screen never has to match on a message. */
-      const reason = /** @type {{ code?: string }} */ (error)?.code;
-      alertsProblem = reason === "permission_denied"
-        ? "your browser is refusing alerts. allow notifications for Orbit, then try again"
-        : reason === "unconfigured"
-          ? "not switched on — this Orbit has no push keys yet, which is your administrator's to set"
-          : "not switched on — Orbit could not reach your alert settings";
-    } finally {
-      alertsBusy = false;
-    }
-  }
+  /* Not optimistic, unlike the email toggle above (./sign-in-methods.svelte.js). */
+  const tapBrowserAlerts = () => toggleBrowserAlerts(browserAlerts, { card: alertsCard, set: (on) => (browserAlerts = on) });
 
   /* SENT TO YOU LATELY (#1003, §20; the desk equivalent of pocket.svelte's
      own tab, #1125). The Reminders card's second tab: the signed-in user's
@@ -194,10 +142,7 @@
   const bothOff = $derived(view !== null && !emailReminders && !browserAlerts);
 
   /** @param {string} iso */
-  function whenSent(iso) {
-    const zone = data?.fixtures ? "UTC" : localZone();
-    return `${dayMonth(iso, zone)} · ${clockOf(iso, zone)}`;
-  }
+  const whenSent = (iso) => sentWhenOf(iso, Boolean(data?.fixtures), " · ");
 
   /** @param {import('$lib/data/fixtures/settings.js').SentRow} row */
   const warningWord = (row) => (row.warning === "first" ? "first warning" : "final warning");
@@ -253,11 +198,9 @@
   let armedMethod = $state(null);
   let currentPassword = $state("");
   let newPassword = $state("");
-  let methodBusy = $state(false);
+  const methodCard = $state(card());
   /** @type {string | null} */
   let methodOutcome = $state(null);
-  /** @type {string | null} */
-  let methodProblem = $state(null);
   /* There is deliberately no "am I standing on a step-up proof" flag. A reader
      with no password can only reach an armed action by coming back from one —
      `tapMethod` sends them there rather than opening a field — so `hasPassword`
@@ -273,7 +216,7 @@
    * @param {string} action
    */
   async function tapMethod(action) {
-    methodProblem = null;
+    methodCard.problem = null;
     methodOutcome = null;
     currentPassword = "";
     newPassword = "";
@@ -281,12 +224,7 @@
     if (hasPassword) { armedMethod = action; return; }
     /* No password: the challenge is a fresh authentication at the provider.
        `returnTo` carries the action so this block can pick it up again. */
-    const identity = action.startsWith("unlink:") ? `&identity=${encodeURIComponent(action.slice(7))}` : "";
-    try {
-      await startStepUp({ intent: intentOf(action), returnTo: `/settings?stepup=${encodeURIComponent(action)}${identity}` });
-    } catch (error) {
-      methodProblem = methodWords(error);
-    }
+    await proveAtProvider(action, methodCard);
   }
 
   /** Disarms whatever is armed, leaving the block as this reader found it. */
@@ -296,42 +234,17 @@
     newPassword = "";
   }
 
-  /** The second tap: the change itself, carrying whichever proof applies. */
-  async function confirmMethod() {
-    if (!armedMethod || methodBusy) return;
-    methodBusy = true;
-    methodProblem = null;
-    /* A step-up proof is a cookie the browser carries; a password travels in
-       the body. Exactly one of them is in play, never both. */
-    const challenge = hasPassword ? { currentPassword } : {};
-    const action = armedMethod;
-    try {
-      if (action === "link_oidc") {
-        await startProviderLink({ returnTo: "/settings", ...challenge });
-        return;
-      }
-      if (action === "password_set" || action === "password_change") {
-        const outcome = await writeLocalPassword({ password: newPassword, ...challenge });
-        methodOutcome = outcome.changed
-          ? "password changed · every other device was signed out"
-          : "password set";
-      } else if (action === "password_remove") {
-        await removeLocalPassword(challenge);
-        methodOutcome = "password removed";
-      } else if (action.startsWith("unlink:")) {
-        await unlinkProviderIdentity(action.slice(7), challenge);
-        methodOutcome = "identity provider unlinked";
-      }
+  /** The second tap: the change itself (./sign-in-methods.svelte.js), said under the card. */
+  const confirmMethod = () => changeMethod(armedMethod, { hasPassword, currentPassword, newPassword }, {
+    card: methodCard,
+    say: (outcome) => (methodOutcome = outcome || null),
+    landed: () => {
       armedMethod = null;
       currentPassword = "";
       newPassword = "";
-      methods = await readSignInMethods();
-    } catch (error) {
-      methodProblem = methodWords(error);
-    } finally {
-      methodBusy = false;
-    }
-  }
+    },
+    keep: (fresh) => (methods = fresh),
+  });
 
   /**
    * "Where you're signed in" (#482): every session the caller holds, loaded
@@ -369,7 +282,7 @@
      a second press then sends nothing, and after this session has ended any
      request would answer 401 and sign the reader straight back in through
      the provider (#1439). */
-  let signingOut = false;
+  const signing = leaving();
 
   /**
    * Sign out of one device — armed by a first tap, done by a second, same
@@ -381,17 +294,14 @@
    * @param {HTMLElement | null} button
    */
   async function tapRevokeSession(row, button) {
-    if (signingOut) return;
+    if (signing.out) return;
     revokeProblem = { ...revokeProblem, [row.id]: "" };
     if (!signOutArm.tap(`session:${row.id}`, button)) return;
-    signingOut = true;
-    try {
-      if (await signOutOfDevice(row, descendFrom)) return;
-      sessions = sessions.filter((session) => session.id !== row.id);
-    } catch {
-      revokeProblem = { ...revokeProblem, [row.id]: "still signed in — try again" };
-    }
-    signingOut = false;
+    await signOutDevice(row, {
+      leaving: signing, descendFrom,
+      dropped: () => (sessions = sessions.filter((session) => session.id !== row.id)),
+      failed: () => (revokeProblem = { ...revokeProblem, [row.id]: "still signed in — try again" }),
+    });
   }
 
   /**
@@ -405,16 +315,10 @@
 
   /** @param {HTMLElement | null} button */
   async function tapSignOutEverywhere(button) {
-    if (signingOut) return;
+    if (signing.out) return;
     signOutProblem = null;
     if (!signOutArm.tap("everywhere", button)) return;
-    signingOut = true;
-    try {
-      await signOutOfEveryDevice(descendFrom);
-    } catch {
-      signOutProblem = "still signed in — try again";
-      signingOut = false;
-    }
+    await signOutAll({ leaving: signing, descendFrom, failed: () => (signOutProblem = "still signed in — try again") });
   }
 
   /** The armed action a step-up came back for; the phone layout reopens its sheet (#1125). */
@@ -504,7 +408,7 @@
      household's is. It shares what this page loads rather than reading it
      twice, and hides this page's sky and cards below the switch; the chrome
      stays, because on a phone Chrome.svelte draws the kit's top chrome. -->
-<Pocket bind:view bind:methods bind:sessions bind:active bind:textSize {initials} {providerOffered} {emailApproval} {screenProblem} onretry={loadScreen}
+<Pocket bind:view bind:methods bind:sessions {active} {textSize} onpickpack={pickPack} onpicktextsize={pickTextSize} {initials} {providerOffered} {emailApproval} {screenProblem} onretry={loadScreen}
         {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} onsignedout={descendFrom} />
 
 <div class="helm-page">
@@ -569,7 +473,7 @@
         {#if armedMethod === "password_set" || armedMethod === "password_change" || armedMethod === "password_remove"}
           <SignInChallenge wantsNewPassword={armedMethod !== "password_remove"}
                            confirmLabel={armedMethod === "password_remove" ? "remove it" : "save it"}
-                           hasPassword={hasPassword} busy={methodBusy} problem={methodProblem}
+                           hasPassword={hasPassword} busy={methodCard.busy} problem={methodCard.problem}
                            bind:currentPassword bind:newPassword
                            onconfirm={confirmMethod} oncancel={cancelMethod} />
         {/if}
@@ -586,7 +490,7 @@
           </div>
           {#if armedMethod === `unlink:${identity.id}`}
             <SignInChallenge confirmLabel="unlink it"
-                             hasPassword={hasPassword} busy={methodBusy} problem={methodProblem}
+                             hasPassword={hasPassword} busy={methodCard.busy} problem={methodCard.problem}
                              bind:currentPassword bind:newPassword
                              onconfirm={confirmMethod} oncancel={cancelMethod} />
           {/if}
@@ -605,7 +509,7 @@
           </div>
           {#if armedMethod === "link_oidc"}
             <SignInChallenge confirmLabel="continue to your provider"
-                             hasPassword={hasPassword} busy={methodBusy} problem={methodProblem}
+                             hasPassword={hasPassword} busy={methodCard.busy} problem={methodCard.problem}
                              bind:currentPassword bind:newPassword
                              onconfirm={confirmMethod} oncancel={cancelMethod} />
           {/if}
@@ -622,7 +526,7 @@
 
              THE ROW IS THE WHOLE OF IT, and no paragraph under it (Fable's
              composition call, 2026-09-19). `.note` on this screen is the
-             problem-notice slot -- methodsProblem, reminderProblem,
+             problem-notice slot -- methodsProblem, reminderCard.problem,
              revokeProblem all land in one -- so prose in a `.note` here would
              read as something having gone wrong. The row states the fact; why
              it works the way it does is in docs/authentication.md and
@@ -680,16 +584,16 @@
       </div>
 
       <div role="tabpanel" id="rem-panel-reminders" aria-labelledby="rem-tab-reminders" hidden={tab !== "reminders"}>
-        <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-busy={emailSaving} aria-label="Email reminders" onclick={toggleEmailReminders}><i></i></button></div>
-        <div class="kv"><span>browser alerts · this device</span><button class="toggle" aria-pressed={browserAlerts} aria-label="Browser alerts on this device" disabled={alertsBusy || !alertsAvailable} onclick={toggleBrowserAlerts}><i></i></button></div>
+        <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-busy={reminderCard.busy} aria-label="Email reminders" onclick={tapEmailReminders}><i></i></button></div>
+        <div class="kv"><span>browser alerts · this device</span><button class="toggle" aria-pressed={browserAlerts} aria-label="Browser alerts on this device" disabled={alertsCard.busy || !alertsAvailable} onclick={tapBrowserAlerts}><i></i></button></div>
         <!-- #1151 W2-S4: this used to show only on the "sent" tab, downstream
              of the switches that actually cause it rather than beside them. -->
         {#if bothOff}<p class="sent-off">both switches are off · nothing more will be sent until one is on</p>{/if}
         <div class="kv"><span>first warning</span><b>{view.reminders.firstWarning}</b></div>
         <div class="kv"><span>final warning</span><b>{view.reminders.finalWarning}</b></div>
         <div class="kv"><span>outbound mail</span><span><b class="on">{view.reminders.outboundMail}</b> · by your administrator</span></div>
-        {#if reminderProblem}<div class="note">{reminderProblem}</div>{/if}
-        {#if alertsProblem}<div class="note">{alertsProblem}</div>{/if}
+        {#if reminderCard.problem}<div class="note">{reminderCard.problem}</div>{/if}
+        {#if alertsCard.problem}<div class="note">{alertsCard.problem}</div>{/if}
       </div>
 
       <!-- ROUND 1 (#1003): what Orbit has actually sent this person, read

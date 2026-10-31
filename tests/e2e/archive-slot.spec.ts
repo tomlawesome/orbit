@@ -40,6 +40,8 @@ const LARGE_BODY_BYTES = 25_000_000;
 
 const PASSPHRASE = "correct-horse-battery-staple";
 const PREVIEW_PATH = "/api/portable-archives/preview";
+/** The multipart boundary of the uploads this file sends from Node. */
+const HELD_BOUNDARY = "----orbit-archive-slot-e2e";
 const BUSY_SENTENCE = "Orbit\u2019s processing another request right now, please try again in a few minutes.";
 /** Browsers that must receive a refusal for a large body they are still sending. */
 const LARGE_BODY_PROJECTS = ["desktop-firefox", "desktop-chromium"];
@@ -84,9 +86,11 @@ function holdPreviewOpen(origin: string, headers: Record<string, string>) {
   const firstChunkTaken = new Promise<void>((resolve) => { taken = resolve; });
   let timer: ReturnType<typeof setInterval> | undefined;
   const encoder = new TextEncoder();
+  /* An archive upload as the card sends one (#1566), held in its first
+     field: the route is still reading the fields when the probes arrive. */
   const body = new ReadableStream<Uint8Array>({
     start(stream) {
-      stream.enqueue(encoder.encode("{"));
+      stream.enqueue(encoder.encode(`--${HELD_BOUNDARY}\r\nContent-Disposition: form-data; name="householdId"\r\n\r\n`));
       timer = setInterval(() => {
         try { stream.enqueue(encoder.encode(" ")); } catch { clearInterval(timer); }
       }, 5_000);
@@ -96,7 +100,7 @@ function holdPreviewOpen(origin: string, headers: Record<string, string>) {
   });
   const settled = fetch(`${origin}${PREVIEW_PATH}`, {
     method: "POST",
-    headers: { ...headers, "content-type": "application/json" },
+    headers: { ...headers, "content-type": `multipart/form-data; boundary=${HELD_BOUNDARY}` },
     body,
     /* Node's fetch needs `duplex` for a streamed request body. */
     duplex: "half",
@@ -120,8 +124,8 @@ function holdPreviewOpen(origin: string, headers: Record<string, string>) {
 function probePreview(origin: string, headers: Record<string, string>) {
   return fetch(`${origin}${PREVIEW_PATH}`, {
     method: "POST",
-    headers: { ...headers, "content-type": "application/json" },
-    body: "{}",
+    headers: { ...headers, "content-type": `multipart/form-data; boundary=${HELD_BOUNDARY}` },
+    body: `--${HELD_BOUNDARY}--\r\n`,
   });
 }
 

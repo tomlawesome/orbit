@@ -244,6 +244,7 @@ timeout on this one case rather than a global raise.
 ## GitLab outage during artifact transfer (502 / connection refused)
 
 - 2026-10-15 · a6168fe6 (!1069, v0.3 security batch) · pipeline 2640 / acceptance and repair_journeys (jobs 36463 and 36464), 20:46-20:54 UTC · both failed while moving artifacts, GitLab answering 502 or refusing connections; both passed on retry (jobs 36469 and 36470) with no change. First sighting.
+- 2026-10-31 · c17bfabd (!1122, policy dates and the Trivy pin only) · pipeline 3266 / `integration` job 42505 · 834 tests passed, then the artifact upload failed: `lookup gitlab.tomlawson.io: i/o timeout`. Retried as job 42514: passed. Second sighting.
 
 ## v19-create.spec.ts:207 "a document picked on the create form is attached to the saved item" — desktop-webkit
 
@@ -340,3 +341,23 @@ timeout on this one case rather than a global raise.
 ## settings-text-size-tab-stop.test.mjs — timed out at the 5 s default under load
 
 - 2026-10-30 · ee51542d (#1396's build on `fix/1396-approve-retry`; nothing near settings or text size) · local `scripts/test-backend.sh` unit tests in shard 1, worktree `1396-approve-retry`, other agents' Docker stacks running on the shared host · timed out at 5 s; passed alone in 1.7 s and on the shard's rerun. Wall-clock-under-load shape, as #869's sightings above. First sighting.
+
+## pdf-structure-sandbox.test.ts "refuses a signed startxref pointing at a form-feed-prefixed object as unsupported_structure while this thread keeps running"
+
+- 2026-10-31 · c17bfabd (!1122, policy dates and the Trivy pin only) · pipeline 3266 / `fast` job 42497 · `expected 3161 to be less than 3000` (`src/server/documents/pdf-structure-sandbox.test.ts:287`); retried as job 42512: passed. The runner was busy with another session's builds. Wall-clock-under-load shape (#1447). First sighting.
+
+## launcher TestLive_InstallPortConflictFailsCleanly (`launcher_install_compat`)
+
+- 2026-10-31 · c17bfabd (!1122, policy dates and the Trivy pin only) · pipeline 3266 / `launcher_install_compat` job 42511 · the install stopped at "OIDC provider is unavailable" before reaching the port clash, so `live_test.go:1528` never saw the compose-up reason; same minutes as the `integration` job's DNS timeout above. Retried as job 42513: passed. First sighting.
+
+## v19-mail-sender-check.spec.ts:123 "a member sends the check email from the settings mail screen, opens the link, and the relay starts listening" — desktop-chromium
+
+- 2026-10-31 · 88c445af (`chore/1353-admin-settings-twins`) · local `scripts/test-e2e-local.sh` from a worktree, other sessions' builds on the host · `page.goto: net::ERR_ABORTED` at `/api/auth/login?returnTo=/home`; the spec alone passed. First sighting for this browser (the desktop-webkit heading above is a different symptom).
+
+## cleanup-stacks.test.mjs:302 (the image list line "orbit-local:bbb222 (1 day ago, 419MB)")
+
+- 2026-10-31 · the v0.3.3 seventh batch dry run (dev 756aa2b6 + ten lanes) · local `npx vitest run`, loaded host, eleven other files timing out alongside it · wrong line; the file alone passed 23 of 23. First sighting.
+
+## home-suggestion-drawer.spec.js:156 "the staged paper opens the preview beside the drawer" (fidelity)
+
+- 2026-10-31 · a2f11fd5 (`chore/1352-home-inbox-twins`) · local fidelity run from a worktree, other sessions' builds on the host · the preview card wore "open still" without `snap`, then the preview server on 4173 was gone and the next three tests got `ERR_CONNECTION_REFUSED`; the spec alone passed 7 of 7, then 21 of 21 at `--repeat-each=3`. Why the server stopped is not known. First sighting.

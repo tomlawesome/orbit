@@ -75,7 +75,20 @@ function start({ pipelines = [], issues = [], milestones = [], failedJobs = [], 
         }
         const trace = path.match(/^\/jobs\/(\d+)\/trace$/u);
         if (trace) return send(200, traces[trace[1]] ?? "");
-        if (request.method === "GET" && path === "/issues") return send(200, issues);
+        if (request.method === "GET" && path === "/issues") {
+          // Honour the query as GitLab does (T-Q1): without state=opened a closed issue
+          // is listed, without the title search the page is just the newest per_page.
+          const state = url.searchParams.get("state");
+          const search = url.searchParams.get("search");
+          const perPage = Number(url.searchParams.get("per_page") ?? 20);
+          return send(
+            200,
+            issues
+              .filter((issue) => (state ? (issue.state ?? "opened") === state : true))
+              .filter((issue) => (search ? issue.title.toLowerCase().includes(search.toLowerCase()) : true))
+              .slice(0, perPage),
+          );
+        }
         if (request.method === "GET" && path === "/milestones") return send(200, milestones);
         const note = path.match(/^\/issues\/(\d+)\/notes$/u);
         if (note && request.method === "POST") {
@@ -363,6 +376,21 @@ describe("report", () => {
     expect(seen.created).toBeNull();
     expect(seen.noted.iid).toBe(6);
     expect(seen.noted.body).toContain("`smoke_webkit`");
+  });
+
+  it("files a new issue rather than commenting on a closed one with the same title", async () => {
+    const api = await start({ failedJobs, traces, issues: [{ iid: 4, title: ISSUE_TITLE, state: "closed" }] });
+    expect((await run(["report"], withIssueToken(api))).code).toBe(0);
+    expect(seen.noted).toBeNull();
+    expect(seen.created).not.toBeNull();
+  });
+
+  it("finds the open issue by title even when many newer issues come first", async () => {
+    const crowd = Array.from({ length: 30 }, (_, index) => ({ iid: 100 + index, title: `Unrelated ${index}` }));
+    const api = await start({ failedJobs, traces, issues: [...crowd, { iid: 6, title: ISSUE_TITLE }] });
+    expect((await run(["report"], withIssueToken(api))).code).toBe(0);
+    expect(seen.created).toBeNull();
+    expect(seen.noted.iid).toBe(6);
   });
 
   it("still files, without a milestone, when none is open", async () => {

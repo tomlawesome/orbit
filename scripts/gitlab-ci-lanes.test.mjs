@@ -369,10 +369,38 @@ describe("pipeline lanes", () => {
     for (const name of ["fidelity", "fidelity_webkit", "smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       expect(block, `${name}: only exit 3 is allowed to fail`).toMatch(/\n  allow_failure:\n    exit_codes:\n      - 3\n/u);
-      expect(block, `${name}: the quarantine run marks its failure`).toMatch(/--quarantine|:quarantine/u);
-      expect(block, name).toMatch(/\|\| \{ echo "[a-z_]+: a quarantined test failed[^"]*"; touch \.quarantine-failed; \}/u);
+      // Commented-out lines do not run (T-Q37): look for the quarantine run in the
+      // job's commands only, so deleting or commenting it out cannot hide behind the word.
+      const commands = block.split("\n").filter((line) => !/^\s*#/u.test(line)).join("\n");
+      expect(commands, `${name}: the quarantine run marks its failure`).toMatch(/--quarantine|:quarantine/u);
+      expect(commands, name).toMatch(/\|\| \{ echo "[a-z_]+: a quarantined test failed[^"]*"; touch \.quarantine-failed; \}/u);
       expect(block, `${name}: the warning exit comes straight after the evidence`)
         .toMatch(/\n {4}- \*reuse_evidence\n(?: {4}#[^\n]*\n)* {4}- if \[ -f \.quarantine-failed \]; then exit 3; fi\n/u);
+    }
+  });
+
+  /*
+   * #1536 G3-R2: `allow_failure: exit_codes: [3]` is the job's whole tolerance
+   * (a quarantined test failed). A rule-level `allow_failure: true` on the
+   * manual rule replaces it for the pipelines that rule matches, so a failed
+   * suite in a manually started smoke job showed as a warning. The rules a job
+   * names by anchor (`- *not_scheduled`) are read from their hidden key too.
+   */
+  it("lets no rule of a smoke job override its allow_failure exit code list (#1536 G3-R2)", () => {
+    for (const name of ["smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
+      const block = allBlocks.get(name);
+      expect(block, name).toBeDefined();
+      const rules = block.match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u);
+      expect(rules, `${name}: no rules block`).not.toBeNull();
+      const entries = rules[1].split(/\n(?= {4}- )/u);
+      for (const entry of entries) {
+        const reference = entry.match(/^ {4}- \*(\S+)\s*$/u);
+        const text = reference ? (allBlocks.get(`.${reference[1]}`) ?? entry) : entry;
+        expect(text, `${name}: rule ${entry.trim()} sets allow_failure: true, which overrides exit_codes: [3]`)
+          .not.toMatch(/allow_failure:\s*true\b/u);
+      }
+      // The job's own list is still what decides.
+      expect(block, name).toMatch(/\n {2}allow_failure:\n {4}exit_codes:\n {6}- 3\n/u);
     }
   });
 

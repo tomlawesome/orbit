@@ -1,7 +1,7 @@
 
 import { wordsOf } from "$lib/data/workspace.js";
 import { THEME_TABLE } from "$lib/theme.js";
-import { dayMonthYear } from "$lib/format.js";
+import { clockOf, dayMonth, dayMonthYear, localZone } from "$lib/format.js";
 
 /*
  * What settings' desk cards and its phone layout (pocket.svelte, #1125) both
@@ -66,6 +66,17 @@ export const on = (iso) => (iso ? dayMonthYear(iso) : "");
 export const intentOf = (action) =>
   action.startsWith("unlink:") ? "unlink_method" : action === "password_remove" ? "unlink_method" : action;
 
+/**
+ * Where the provider sends a reader back to after a step-up (ADR-0023 §5):
+ * `?stepup=` names the action they left to do, and an unlink names the
+ * identity too, so the screen can re-arm it on the way back in.
+ * @param {string} action
+ */
+export const stepUpReturnOf = (action) => {
+  const identity = action.startsWith("unlink:") ? `&identity=${encodeURIComponent(action.slice(7))}` : "";
+  return `/settings?stepup=${encodeURIComponent(action)}${identity}`;
+};
+
 /** What a sign-in method refusal means in the block's own words, from the bounded code. */
 /** @param {unknown} error */
 export function methodWords(error) {
@@ -80,4 +91,30 @@ export function methodWords(error) {
     return "not started — Orbit could not hand you to your identity provider";
   }
   return wordsOf(error, "not changed — Orbit could not reach your sign-in methods");
+}
+
+/**
+ * When a reminder was sent, as the sent list says it (#1003): the day and
+ * the time, in UTC under fixtures so the gate photographs one answer. The
+ * desk joins them with ` · `, the phone with a space (`between`).
+ * @param {string} iso @param {boolean} fixtures @param {string} between
+ */
+export function sentWhenOf(iso, fixtures, between) {
+  const zone = fixtures ? "UTC" : localZone();
+  return `${dayMonth(iso, zone)}${between}${clockOf(iso, zone)}`;
+}
+
+/**
+ * What a browser-alerts refusal means in words, from the code alerts.js
+ * throws (so no layout matches on a message). The desk writes an administrator's
+ * with a straight apostrophe, the phone with a curly one (`curly`).
+ * @param {unknown} error @param {{ curly?: boolean }} [options]
+ */
+export function alertsWords(error, { curly = false } = {}) {
+  const reason = /** @type {{ code?: string }} */ (error)?.code;
+  return reason === "permission_denied"
+    ? "your browser is refusing alerts. allow notifications for Orbit, then try again"
+    : reason === "unconfigured"
+      ? `not switched on — this Orbit has no push keys yet, which is your administrator${curly ? "’" : "'"}s to set`
+      : "not switched on — Orbit could not reach your alert settings";
 }

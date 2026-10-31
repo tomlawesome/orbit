@@ -42,7 +42,7 @@
    *   onCopyAddress: () => void,
    *   showingDoc: string | null,
    *   onOpenDoc: (doc: import('$lib/data/workspace.js').DrawerDocument, from: HTMLElement) => void,
-   *   acts: import('./drawer-acts.js').DrawerActs,
+   *   acts: import('./drawer-acts.svelte.js').DrawerActs,
    * }} */
   let {
     row, suggestions, busyReceipt, armed, mailProblem, today, expanded,

@@ -3,18 +3,34 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-// Fail CI on any container image pulled from outside the image cache (#1510).
-// Docker Hub names go through the pull-through mirror, other registries only
-// through the $CI_IMAGE_CACHE_* prefixes, and the GitLab Dependency Proxy is
+// Fail CI on any container image reference that skips the image cache (#1510,
+// #1536 D-F13). This is an allowlist: a reference whose first path segment is a
+// registry host (Docker's rule: it holds a dot or a :port) and which carries a
+// tag or digest fails, unless the host is Docker Hub (`docker.io`, which the
+// pull-through mirror covers), Orbit's own registry, or localhost / 127.0.0.1
+// (the disposable local registry). `$CI_IMAGE_CACHE_*` prefixes and Docker Hub
+// names with no host never look like a host, so they pass. ghcr.io, the
+// Microsoft, Quay and Google registries and Amazon's public ECR also fail
+// without a tag, to catch their case patterns. The GitLab Dependency Proxy is
 // retired. Reads tracked CI, Compose, Dockerfile, shell and script files.
 
 const EXCEPTIONS_FILE = ".github/image-cache-exceptions.json";
 
-// A literal registry host the cache does not cover, at the start of a name:
-// `ghcr.io/owner/tool:1`, `europe-docker.pkg.dev/p/r/t:4`. A `$CI_IMAGE_CACHE_*`
-// prefix or the project's own registry never matches.
-const FORBIDDEN_HOST_PATTERN =
-  /(?<![\w.\-/])((?:[A-Za-z0-9-]+\.)*(?:ghcr\.io|mcr\.microsoft\.com|quay\.io|gcr\.io|pkg\.dev|public\.ecr\.aws))\/[^\s"'`,;)\]<>|]+/gu;
+// A literal registry host at the start of a name: `ghcr.io/owner/tool:1`,
+// `registry.example.com:5000/t:2`, `registry-host:5000/t:3`. The negative
+// lookbehind skips anything after a `/`, so URLs do not match.
+const REGISTRY_HOST_PATTERN =
+  /(?<![\w.\-/])((?:[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?::\d+)?|[A-Za-z0-9-]+:\d+))(\/[^\s"'`,;)\]<>|]+)/gu;
+// Registries the cache has a prefix for, or a mirror for, and which are refused
+// even where the reference carries no tag (a `case` pattern, a `${x#host/}`).
+const CACHED_ELSEWHERE_HOST =
+  /(?:^|\.)(?:ghcr\.io|mcr\.microsoft\.com|quay\.io|gcr\.io|pkg\.dev|public\.ecr\.aws)$/u;
+// Hosts a pull may name directly: the pull-through mirror covers Docker Hub,
+// the rest are Orbit's own registry and the disposable local one.
+const ALLOWED_HOSTS = new Set(["docker.io", "registry.tomlawson.io", "localhost", "127.0.0.1"]);
+// A tag or digest needs something after the `:` or `@`: `tcp:` ending a
+// sentence (`0.0.0.0:3000/tcp: address in use`) is prose, not a tag.
+const TAG_OR_DIGEST_PATTERN = /:[\w$]|@\w/u;
 const DEPENDENCY_PROXY_PATTERN =
   /\$\{?CI_DEPENDENCY_PROXY_[A-Z0-9_]+\}?(?:\/[^\s"'`,;)\]<>|]+)?/gu;
 const DIND_IMAGE_PATTERN = /(?:^|\/)docker:[^\s"']*dind/u;
@@ -129,9 +145,11 @@ function trimTrailingPunctuation(value) {
 function hostFindings(lines) {
   const found = [];
   lines.forEach((line, index) => {
-    for (const match of line.matchAll(FORBIDDEN_HOST_PATTERN)) {
-      const host = match[1].split(".").slice(-3).join(".");
-      const known = Object.keys(CACHE_PREFIX).find((name) => match[1].endsWith(name));
+    for (const match of line.matchAll(REGISTRY_HOST_PATTERN)) {
+      const host = match[1].replace(/:\d+$/u, "").toLowerCase();
+      if (ALLOWED_HOSTS.has(host)) continue;
+      const known = Object.keys(CACHE_PREFIX).find((name) => host.endsWith(name));
+      if (!CACHED_ELSEWHERE_HOST.test(host) && !TAG_OR_DIGEST_PATTERN.test(match[2])) continue;
       const hint = known ? ` (use ${CACHE_PREFIX[known]})` : "";
       found.push({
         line: index + 1,

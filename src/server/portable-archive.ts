@@ -6,8 +6,6 @@ const SALT_BYTES = 16;
 const IV_BYTES = 12;
 /** The full GCM tag. Node accepts a shorter one unless told otherwise, and a short tag is easier to forge (#1524). */
 const TAG_BYTES = 16;
-/** Ciphertext characters decoded per piece when opening: a multiple of 4, so each piece decodes on its own. */
-const OPEN_PIECE_CHARACTERS = 4 * 65_536;
 
 export interface EncryptedPortableArchive {
   version: 1;
@@ -122,35 +120,37 @@ export function decryptPortableArchive(archive: EncryptedPortableArchive, passph
 
 /**
  * Streaming authenticated decryption for preview and import (#1521), the
- * reverse of `PortableArchiveSealer`: the ciphertext is decoded and decrypted
- * a piece at a time, so the plaintext is never held whole. Nothing `next`
- * returns may be used until `finish` has verified the authentication tag; a
- * caller writes the pieces somewhere private and reads them back only after.
- * A short tag or an unsupported archive throws here, in the constructor; a
- * wrong passphrase, a changed ciphertext or a changed tag can only show at
- * `finish`, when GCM checks the tag.
+ * reverse of `PortableArchiveSealer`, push-style since #1566: the archive's
+ * ciphertext is handed in a piece at a time as it is read from the upload,
+ * so neither it nor the plaintext is ever held whole. Nothing `push` returns
+ * may be used until `finish` has verified the authentication tag; a caller
+ * writes the pieces somewhere private and reads them back only after. The
+ * tag is needed only at `finish` (GCM's `setAuthTag` need only precede
+ * `final`), so it may come before or after the ciphertext in the file. A
+ * short tag, a wrong passphrase, a changed ciphertext or a changed tag all
+ * throw at `finish`.
  */
 export class PortableArchiveOpener {
   private readonly decipher: DecipherGCM;
-  private readonly encoded = Buffer.alloc((OPEN_PIECE_CHARACTERS / 4) * 3);
-  private offset = 0;
 
-  constructor(private readonly archive: EncryptedPortableArchive, passphrase: string) {
-    this.decipher = openDecipher(archive, passphrase);
+  constructor(salt: string, iv: string, passphrase: string) {
+    const key = keyFor(passphrase, Buffer.from(salt, "base64url"));
+    try {
+      this.decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"), { authTagLength: TAG_BYTES });
+    } finally { key.fill(0); }
+    this.decipher.setAAD(Buffer.from(`orbit-portable-archive:${ARCHIVE_VERSION}`));
   }
 
-  /** The next piece of unverified plaintext, or null once the ciphertext is used up. */
-  next(): Buffer | null {
-    const { ciphertext } = this.archive;
-    if (this.offset >= ciphertext.length) return null;
-    const end = Math.min(this.offset + OPEN_PIECE_CHARACTERS, ciphertext.length);
-    const length = this.encoded.write(ciphertext.slice(this.offset, end), "base64url");
-    this.offset = end;
-    return this.decipher.update(this.encoded.subarray(0, length));
+  /** Decrypts the next piece of ciphertext; the plaintext is unverified until `finish`. */
+  push(ciphertext: Buffer): Buffer {
+    return this.decipher.update(ciphertext);
   }
 
-  /** Verifies the authentication tag over everything `next` returned; throws if it does not match. */
-  finish(): void {
+  /** Verifies the authentication tag over everything `push` returned; throws if it is short or does not match. */
+  finish(authTag: string): void {
+    const tag = Buffer.from(authTag, "base64url");
+    if (tag.length !== TAG_BYTES) throw new Error("Portable archive authentication tag is not 16 bytes");
+    this.decipher.setAuthTag(tag);
     // GCM is a stream mode: `final` returns no further plaintext, only the verdict.
     this.decipher.final();
   }

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { installFilmEnded } from "./film-ended.js";
+
 const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 
 /*
@@ -99,6 +101,7 @@ for (const width of WIDTHS) {
   test(`the pocket transport never clashes at ${width.name}`, async ({ page }) => {
     test.setTimeout(300_000);
     await page.setViewportSize(width.viewport);
+    await installFilmEnded(page);
     await page.route("**/api/settings/tour", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: '{"tour":{"tourSeenAt":null}}' }));
     await page.goto(`${APP}/home`, { waitUntil: "load" });
@@ -117,8 +120,8 @@ for (const width of WIDTHS) {
     /* The end state: the film has read to its last chapter. 280 s covers the
        2:55 film with room to spare. */
     await page.waitForFunction(() => {
-      const reading = /** @type {any} */ (window).__reading?.();
-      return Boolean(reading && reading.total > 0 && reading.cursor >= reading.total);
+      const w = /** @type {any} */ (window);
+      return w.__readingEnded(w.__reading?.());
     }, null, { timeout: 280_000, polling: 1_000 });
     const { sawPill, counts } = await page.evaluate(() => {
       const recorded = /** @type {any} */ (window).__clashes;

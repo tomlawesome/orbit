@@ -9,6 +9,7 @@ import { ensureWorkerAdministrator, workerAccount } from "./support/worker-ident
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { householdDateFromToday } from "./support/household-dates";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -86,7 +87,7 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
       await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/);
       const itemId = new URL(page.url()).searchParams.get("item") as string;
       const opened = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-      await expect(opened).toHaveAttribute("data-open", "", { timeout: 20_000 });
+      await expect(opened).toHaveAttribute("data-open", "", { timeout: SETTLE });
       await expect(opened).toContainText("Gutter clearing proving");
       await expect(opened).toContainText("T−20d");
 
@@ -111,7 +112,7 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
       const row = page.locator(".item", { hasText: "Gutter clearing proving" });
       await expect(row).toBeVisible();
       await expect(row).toContainText("T−20d");
-      await expect(page.locator(`[id="${itemId}-view"]`)).toBeVisible({ timeout: 20_000 });
+      await expect(page.locator(`[id="${itemId}-view"]`)).toBeVisible({ timeout: SETTLE });
     }
   } finally {
     await households.sweep(page);
@@ -235,7 +236,7 @@ test("a document picked on the create form is attached to the saved item", async
     if (pocket) {
       expect(new URL(page.url()).searchParams.get("item")).toBe(itemId);
       const opened = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-      await expect(opened).toHaveAttribute("data-open", "", { timeout: 20_000 });
+      await expect(opened).toHaveAttribute("data-open", "", { timeout: SETTLE });
       await expect(opened).toContainText(name);
     }
     await expect.poll(async () => {
@@ -307,7 +308,7 @@ test.describe(() => {
 
       // Page one lands — a real picture, drawn from the file — within seconds,
       // and the heading says so.
-      await expect(page.locator("body")).toHaveClass(/\bsnap\b/, { timeout: 20_000 });
+      await expect(page.locator("body")).toHaveClass(/\bsnap\b/, { timeout: SETTLE });
       await expect(page.locator("#read-head")).toHaveText("Page one");
       const sheet = page.locator("#sheet-page");
       await expect(sheet).toBeVisible();
@@ -378,7 +379,7 @@ test.describe("the desk's create form reads a second picked document", () => {
         const field = page.locator("#field-provider");
 
         await picker.setInputFiles({ name: "invoice-a.pdf", mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
-        await expect(provider).toHaveValue("Aviva", { timeout: 20_000 });
+        await expect(provider).toHaveValue("Aviva", { timeout: SETTLE });
         await expect(field).toHaveClass(/\bsugg\b/);
 
         await picker.setInputFiles({ name: "invoice-b.pdf", mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
@@ -500,7 +501,7 @@ test.describe(() => {
       await expect(page.locator("body[data-home-ready]")).toHaveCount(0);
       await page.locator("#nstar").click();
       release();
-      await expect(page.locator("#createdrawer")).toHaveClass(/\bopen\b/, { timeout: 20_000 });
+      await expect(page.locator("#createdrawer")).toHaveClass(/\bopen\b/, { timeout: SETTLE });
       await expect(page.locator("#nstar")).toHaveAttribute("aria-expanded", "true");
     } finally {
       await page.unroute("**/api/workspace").catch(() => {});
@@ -578,7 +579,7 @@ test.describe("the phone's create form reads a picked document", () => {
 
       // Page one lands, a real picture drawn from the file, and the head says so.
       const sheet = card.getByRole("img", { name: `Page one of ${DOCUMENT}` });
-      await expect(sheet).toBeVisible({ timeout: 20_000 });
+      await expect(sheet).toBeVisible({ timeout: SETTLE });
       await expect.poll(() => sheet.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
       await expect(card.getByRole("heading")).toHaveText(/page one/i);
       await expect(card).toContainText("Page one of the file you added");
@@ -631,7 +632,7 @@ test.describe("the phone's create form reads a picked document", () => {
       await form.locator('input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
 
       const card = form.locator(".pc-reading");
-      await expect(card).toContainText("Orbit refused this file.", { timeout: 20_000 });
+      await expect(card).toContainText("Orbit refused this file.", { timeout: SETTLE });
       await expect(card).toContainText("That file is not a PDF or image we can keep");
       await expect(card).toContainText(DOCUMENT);
       await expect(card).toContainText(/KB · refused/);
@@ -683,14 +684,14 @@ test.describe("a photo with nothing to read says so, and still saves", () => {
       if (pocket) {
         const form = page.getByRole("form", { name: "New entry" });
         await form.locator('input[type="file"]').setInputFiles(file);
-        await expect(form.locator(".pc-reading .pc-honest")).toHaveText(NOTHING, { timeout: 20_000 });
+        await expect(form.locator(".pc-reading .pc-honest")).toHaveText(NOTHING, { timeout: SETTLE });
         await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
         await form.getByRole("button", { name: "document", exact: true }).click();
         await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
         await page.getByRole("button", { name: "Add to orbit" }).click();
       } else {
         await page.locator('#card input[type="file"]').setInputFiles(file);
-        await expect(page.locator("#rc-honest")).toHaveText(NOTHING, { timeout: 20_000 });
+        await expect(page.locator("#rc-honest")).toHaveText(NOTHING, { timeout: SETTLE });
         await page.locator("#f-name").fill(name);
         await page.locator('#types button[data-type="document"]').click();
         await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
@@ -816,12 +817,12 @@ test("add to orbit closes the form and lands on the saved item", async ({ page }
     if (pocket) {
       await expect(page.getByRole("form", { name: "New entry" })).toHaveCount(0);
       const opened = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-      await expect(opened).toHaveAttribute("data-open", "", { timeout: 20_000 });
+      await expect(opened).toHaveAttribute("data-open", "", { timeout: SETTLE });
       await expect(opened).toContainText(name);
     } else {
       await expect(page.locator("#save-note")).toHaveCount(0);
       await expect(page.locator(".item", { hasText: name })).toBeVisible();
-      await expect(page.locator(`[id="${itemId}-view"]`)).toBeVisible({ timeout: 20_000 });
+      await expect(page.locator(`[id="${itemId}-view"]`)).toBeVisible({ timeout: SETTLE });
     }
   } finally {
     await households.sweep(page);
@@ -1156,7 +1157,7 @@ test.describe(() => {
       await expect.poll(() => stage.posts(), { timeout: 30_000 }).toBe(1);
 
       const lane = page.locator("#readcard");
-      await expect(lane.getByRole("button", { name: "remove it" })).toBeVisible({ timeout: 20_000 });
+      await expect(lane.getByRole("button", { name: "remove it" })).toBeVisible({ timeout: SETTLE });
       await expect(lane).toContainText(DOCUMENT);
       await expect(lane).toContainText(SIZE_THEN_REFUSED);
       await expect(lane.getByRole("button", { name: "not this one" })).toHaveCount(0);
@@ -1186,7 +1187,7 @@ test.describe(() => {
       await expect(add).toHaveAttribute("aria-disabled", "true");
 
       const removeIt = page.locator("#readcard").getByRole("button", { name: "remove it" });
-      await expect(removeIt).toBeVisible({ timeout: 20_000 });
+      await expect(removeIt).toBeVisible({ timeout: SETTLE });
       await removeIt.click();
 
       // What the note reported is gone with the file.
@@ -1216,7 +1217,7 @@ test.describe(() => {
       await saveDeskEntryWithDocument(page, "Replace after refusal proving");
       await expect.poll(() => stage.posts(), { timeout: 30_000 }).toBe(1);
       const lane = page.locator("#readcard");
-      await expect(lane.getByRole("button", { name: "remove it" })).toBeVisible({ timeout: 20_000 });
+      await expect(lane.getByRole("button", { name: "remove it" })).toBeVisible({ timeout: SETTLE });
       await expect(lane).toContainText(SIZE_THEN_REFUSED);
 
       const files = await page.evaluateHandle(({ fileName, bytes }) => {
@@ -1229,7 +1230,7 @@ test.describe(() => {
       await zone.locator(".dz-main [data-when=rest]").dispatchEvent("drop", { dataTransfer: files });
 
       await expect(lane).toContainText("replacement-after-refusal.pdf");
-      await expect(lane.getByRole("button", { name: "not this one" })).toBeVisible({ timeout: 20_000 });
+      await expect(lane.getByRole("button", { name: "not this one" })).toBeVisible({ timeout: SETTLE });
       await expect(lane.getByRole("button", { name: "remove it" })).toHaveCount(0);
       await expect(lane).not.toContainText(/refused/i);
     } finally {
@@ -1314,7 +1315,7 @@ test.describe(() => {
         await page.locator(".btn-primary").click();
 
         // The item write is held: the form is mid-save.
-        await expect.poll(() => itemWriteSeen, { timeout: 20_000 }).toBe(true);
+        await expect.poll(() => itemWriteSeen, { timeout: SETTLE }).toBe(true);
         await expect(page.locator(".btn-primary")).toContainText("Adding…");
         // The file was staged before the item was sent: one POST, for the first file.
         expect(documentPosts).toHaveLength(1);
@@ -1463,7 +1464,7 @@ test.describe("#1425 review round 1", () => {
     await page.waitForFunction(
       (key) => ((window as unknown as { __answered?: Record<string, number> }).__answered?.[key] ?? 0) >= 1,
       route,
-      { timeout: 20_000 },
+      { timeout: SETTLE },
     );
     await renderedFrames(page);
   }
@@ -1554,7 +1555,7 @@ test.describe("#1425 review round 1", () => {
         await fillEntry(page, "Late page proving");
         await pickerOf(page).setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
         const lane = laneOf(page);
-        await expect(lane).toContainText("Orbit refused this file.", { timeout: 20_000 });
+        await expect(lane).toContainText("Orbit refused this file.", { timeout: SETTLE });
         await expect(lane).toContainText(REASON);
         // The held preview is released with a page that can be drawn.
         release();
@@ -1602,7 +1603,7 @@ test.describe("#1425 review round 1", () => {
       },
       after: async (page: Page) => {
         const lane = laneOf(page);
-        await expect(lane).toContainText("Orbit refused this file.", { timeout: 20_000 });
+        await expect(lane).toContainText("Orbit refused this file.", { timeout: SETTLE });
         // The page has taken the refusal in (and drawn the frames its handling needs) before it is judged.
         await pageHandled(page, "item-document-inspection");
         await expect(lane).toContainText("Orbit refused this file.");
@@ -1630,7 +1631,7 @@ test.describe("#1425 review round 1", () => {
         await gotoCreate(page);
         await fillEntry(page, "Refused then undrawable proving");
         await pickerOf(page).setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
-        await expect(laneOf(page)).toContainText("Orbit refused this file.", { timeout: 20_000 });
+        await expect(laneOf(page)).toContainText("Orbit refused this file.", { timeout: SETTLE });
         release();
         await previewAnswered;
         return () => release();
@@ -1726,7 +1727,7 @@ test.describe("#1425 review round 1", () => {
         if (layout === "desk") await saveDeskEntryWithDocument(page, "Replace clears note proving");
         else await savePocketEntryWithDocument(page, "Replace clears note proving");
         await expect.poll(() => posts(), { timeout: 30_000 }).toBe(1);
-        await expect(note).toContainText(REASON, { timeout: 20_000 });
+        await expect(note).toContainText(REASON, { timeout: SETTLE });
         await expect(add).toHaveAttribute("aria-disabled", "true");
 
         await pickerOf(page).setInputFiles({ name: "replacement-after-refusal.pdf", mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
@@ -1735,7 +1736,7 @@ test.describe("#1425 review round 1", () => {
         // The loud note goes with the file it was about, and Add is released.
         await expect(note.filter({ hasText: REASON })).toHaveCount(0);
         await expect(page.locator("body")).not.toContainText(REASON);
-        await expect(add).not.toHaveAttribute("aria-disabled", "true", { timeout: 20_000 });
+        await expect(add).not.toHaveAttribute("aria-disabled", "true", { timeout: SETTLE });
         expect(posts()).toBe(1);
       } finally {
         await page.unroute(/\/api\/households\/[^/]+\/documents$/).catch(() => {});
@@ -1756,7 +1757,7 @@ test.describe("#1425 review round 1", () => {
       await expect.poll(() => posts(), { timeout: 30_000 }).toBe(1);
       const note = page.locator(".pk-problem");
       const add = addOf(page);
-      await expect(note).toContainText(REASON, { timeout: 20_000 });
+      await expect(note).toContainText(REASON, { timeout: SETTLE });
       await expect(add).toHaveAttribute("aria-disabled", "true");
 
       await laneOf(page).getByRole("button", { name: /remove it|not this one/ }).click();

@@ -110,12 +110,25 @@ describe("#1316 W1-R2: the drawer's attach id is dropped once the attach is ackn
   });
 });
 
-describe("#1316 W1-R2: neither home screen passes crypto.randomUUID() straight to the attach", () => {
+/* #1352: both screens attach through the shared drawer acts
+   (home/drawer-acts.svelte.js `attach`), so the attach call, its id and the
+   forget are pinned there, and each screen is pinned to call it. */
+const ACTS = "web/src/routes/home/drawer-acts.svelte.js";
+
+describe("#1316 W1-R2: both home screens attach through the shared acts", () => {
   it.each([
     ["the desk (+page.svelte onattach)", "web/src/routes/home/+page.svelte"],
-    ["the phone (pocket.svelte attachTo)", "web/src/routes/home/pocket.svelte"],
-  ])("%s takes its id from the shared helper", (_name, path) => {
+    ["the phone (pocket.svelte onattach)", "web/src/routes/home/pocket.svelte"],
+  ])("%s calls acts.attach and no attachItemDocument of its own", (_name, path) => {
     const src = read(path);
+    expect(src).toMatch(/\bacts\.attach\(/u);
+    expect(src).not.toMatch(/attachItemDocument\(/u);
+  });
+});
+
+describe("#1316 W1-R2: the shared attach does not pass crypto.randomUUID() straight to the attach", () => {
+  it("takes its id from the shared helper", () => {
+    const src = read(ACTS);
     const calls = src.split("\n").filter((line) => line.includes("attachItemDocument(") && !line.includes("import "));
     expect(calls.length).toBeGreaterThan(0);
     for (const line of calls) expect(line).not.toMatch(/crypto\.randomUUID\(\)/u);
@@ -124,22 +137,20 @@ describe("#1316 W1-R2: neither home screen passes crypto.randomUUID() straight t
   });
 });
 
-describe("#1316 W1-R2: both home screens forget the attach id once the attach is acknowledged", () => {
-  /* forget() is proven above; this pins that each screen calls it after the
-     awaited attach succeeds (before the attempt's `catch`), so a later attach
-     of the same file mints a new id while a retry after a failure reuses it. */
-  it.each([
-    ["the desk (+page.svelte onattach)", "web/src/routes/home/+page.svelte"],
-    ["the phone (pocket.svelte attachTo)", "web/src/routes/home/pocket.svelte"],
-  ])("%s calls forgetAttachId after attachItemDocument, outside the catch", (_name, path) => {
-    const lines = read(path).split("\n");
+describe("#1316 W1-R2: the shared attach forgets the attach id once the attach is acknowledged", () => {
+  /* forget() is proven above; this pins that the shared attach calls it after
+     the awaited attach succeeds (before the attempt's `catch`), so a later
+     attach of the same file mints a new id while a retry after a failure
+     reuses it. */
+  it("calls forgetAttachId after attachItemDocument, outside the catch", () => {
+    const lines = read(ACTS).split("\n");
     const calls = lines.flatMap((line, at) => (line.includes("attachItemDocument(") && !line.includes("import ") ? [at] : []));
     expect(calls.length).toBeGreaterThan(0);
     for (const at of calls) {
       const rest = lines.slice(at + 1);
       const end = rest.findIndex((line) => /\bcatch\b/u.test(line));
       const tryTail = end === -1 ? rest : rest.slice(0, end);
-      expect(tryTail.some((line) => line.includes("forgetAttachId(")), `${path}:${at + 1}`).toBe(true);
+      expect(tryTail.some((line) => line.includes("forgetAttachId(")), `${ACTS}:${at + 1}`).toBe(true);
     }
   });
 });
