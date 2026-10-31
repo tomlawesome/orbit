@@ -41,7 +41,7 @@ function lines(text) {
   return text.split("\n").filter(Boolean);
 }
 
-function setup({ containers = [], volumes = [], networks = [], failOn = [], keep = false, stopped = false, appEnv = [`APP_URL=https://${host}:3443`], secrets = null } = {}) {
+function setup({ containers = [], volumes = [], networks = [], failOn = [], keep = false, stopped = false, appEnv = [`APP_URL=https://${host}:3443`], secrets = null, caExpiring = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "orbit-test-bed-"));
   scratchDirs.push(dir);
   const bin = join(dir, "bin");
@@ -63,6 +63,7 @@ for f in greenmail-key.pem greenmail-ca.pem greenmail.p12; do echo "fake $f" > "
 `,
   );
   chmodSync(join(tree, "scripts/dev-greenmail-cert.sh"), 0o755);
+  if (caExpiring) writeFileSync(join(state, "ca-expiring"), "");
   if (secrets !== null) {
     mkdirSync(join(tree, ".orbit-secrets"), { recursive: true });
     for (const [name, content] of Object.entries(secrets)) writeFileSync(join(tree, ".orbit-secrets", name), content);
@@ -109,10 +110,12 @@ esac
 `,
   );
   // `openssl rand` must still give random bytes (#1507: the bed's SMTP password);
-  // every other call is the certificate the bed makes for its HTTPS front.
+  // `openssl x509 -checkend` answers from the fixture (#1507: an expiring GreenMail
+  // CA); every other call is the certificate the bed makes for its HTTPS front.
   writeFileSync(
     join(bin, "openssl"),
     `#!/usr/bin/env bash
+if [[ "$1" == x509 ]]; then echo "openssl $*" >> "${state}/calls.log"; [[ -f "${state}/ca-expiring" ]] && exit 1; exit 0; fi
 if [[ "$1" == rand ]]; then node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex") + "\\n")'; exit 0; fi
 echo "openssl $*" >> "${state}/calls.log"
 : > demo-tls/demo.key
@@ -482,5 +485,39 @@ describe("test-bed.sh --host refuses a loopback address (#1507)", () => {
       const r = run(["up", "--image", digest, "--host", ok]);
       expect(r.status, r.stderr).toBe(0);
     }
+  });
+});
+
+describe("test-bed.sh up renews an expiring GreenMail certificate (#1507)", () => {
+  const certFiles = ["greenmail-key.pem", "greenmail-ca.pem", "greenmail.p12"];
+  const present = () => {
+    const secrets = { "smtp-password": "keep-this-password\n" };
+    for (const name of certFiles) secrets[name] = `existing ${name}\n`;
+    return secrets;
+  };
+  const read = (r, name) => readFileSync(join(r.tree, ".orbit-secrets", name), "utf8");
+  const checks = (r) => r.calls.filter((c) => /^openssl x509 /.test(c));
+
+  it("regenerates the certificate files when greenmail-ca.pem expires within a day, and keeps the password", () => {
+    const r = run(["up", "--image", digest, "--host", host], { secrets: present(), caExpiring: true });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.calls.filter((c) => c === "dev-greenmail-cert.sh")).toHaveLength(1);
+    for (const name of certFiles) expect(read(r, name)).toContain("fake");
+    expect(read(r, "smtp-password")).toBe("keep-this-password\n");
+    // before Compose reads them
+    expect(r.calls.indexOf("dev-greenmail-cert.sh")).toBeLessThan(r.calls.findIndex((c) => / up /.test(c)));
+  });
+
+  it("asks openssl whether greenmail-ca.pem lasts another day, the rule test-e2e-local.sh uses", () => {
+    const r = run(["up", "--image", digest, "--host", host], { secrets: present() });
+    expect(r.status, r.stderr).toBe(0);
+    expect(checks(r).some((c) => c.includes("greenmail-ca.pem") && /-checkend 86400\b/.test(c))).toBe(true);
+  });
+
+  it("leaves a valid certificate alone", () => {
+    const r = run(["up", "--image", digest, "--host", host], { secrets: present() });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.calls).not.toContain("dev-greenmail-cert.sh");
+    for (const name of certFiles) expect(read(r, name)).toBe(`existing ${name}\n`);
   });
 });
