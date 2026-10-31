@@ -194,6 +194,27 @@ export function fsyncPath(path: string, hook?: () => void): void {
   }
 }
 
+/**
+ * Publishes a secret file so its path never holds a partial copy: the content
+ * is written to a sibling temp file at its final mode, fsynced, renamed over
+ * the path, and the directory fsynced (writeRestoreJournal's shape). A kill or
+ * power loss mid-write leaves the path as it was and at most the temp, which
+ * the next write replaces.
+ */
+export function writeSecretFileDurably(path: string, content: string | Buffer, mode: number = SECURE_FILE_MODE): void {
+  const temporaryPath = `${path}.tmp`;
+  rmSync(temporaryPath, { force: true }); // a leftover (or a planted link) never becomes the key
+  writeSecretFile(temporaryPath, content, mode);
+  try {
+    fsyncPath(temporaryPath);
+    renameSync(temporaryPath, path);
+  } catch (error) {
+    rmSafely(temporaryPath);
+    throw error;
+  }
+  fsyncPath(dirname(path));
+}
+
 // ---------------------------------------------------------------------------
 // Restore journal (restore.sh:467-506 write_journal / :772-796 load_recovery_journal)
 // ---------------------------------------------------------------------------
