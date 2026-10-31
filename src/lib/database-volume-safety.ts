@@ -83,9 +83,10 @@ export type VolumeOwnershipOutcome =
   /**
    * bash `return 1`: a docker fact was cleanly obtained but ownership could
    * not be proven. `folder` names the other folder (other-folder); `service`
-   * the service that mounts the volume without being orbit-db (foreign-container).
+   * the service that mounts the volume without being orbit-db, and `container`
+   * that container's id (foreign-container).
    */
-  | { status: "not-proven"; reason: VolumeNotProvenReason; folder?: string; service?: string }
+  | { status: "not-proven"; reason: VolumeNotProvenReason; folder?: string; service?: string; container?: string }
   /** bash `return 2`: a docker call failed, or its output failed format/bounds validation — untrusted, not just unproven. */
   | { status: "verify-error" };
 
@@ -164,7 +165,7 @@ export function evaluateVolumeOwnership(
   if (dbContainers.length > 65536) return { status: "verify-error" };
   let appContainers: string | null | undefined;
   /** A failed proof, unless another folder's container explains it; reads what has not been read yet, and only on this failure path. */
-  const notProven = (reason: VolumeNotProvenReason, service?: string): VolumeOwnershipOutcome => {
+  const notProven = (reason: VolumeNotProvenReason, service?: string, container?: string): VolumeOwnershipOutcome => {
     if (ownFolders !== undefined) {
       if (appContainers === undefined) appContainers = adapter.listContainersByProject(volumeProject);
       for (const [listing, onlyService] of [[dbContainers, undefined], [appContainers, "orbit-app"]] as const) {
@@ -177,7 +178,12 @@ export function evaluateVolumeOwnership(
         }
       }
     }
-    return service === undefined ? { status: "not-proven", reason } : { status: "not-proven", reason, service };
+    return {
+      status: "not-proven",
+      reason,
+      ...(service === undefined ? {} : { service }),
+      ...(container === undefined ? {} : { container }),
+    };
   };
   let dbCount = 0;
   for (const line of dbContainers.split("\n")) {
@@ -188,7 +194,7 @@ export function evaluateVolumeOwnership(
     }
     const folder = otherFolder(workingDir);
     if (folder !== undefined) return inOtherFolder(folder);
-    if (dbService !== "orbit-db") return notProven("foreign-container", dbService);
+    if (dbService !== "orbit-db") return notProven("foreign-container", dbService, dbId);
     dbCount += 1;
   }
   if (dbCount === 0) return notProven("no-database-container");
@@ -280,14 +286,18 @@ function notProvenMessage(
   switch (outcome.reason) {
     case "other-folder":
       return `The running Orbit containers for the database volume ${volume} were created from another folder, ${outcome.folder}, not from ${typeof updateFolder === "string" ? updateFolder : (updateFolder?.at(-1) ?? "the folder this update runs in")}; ${refusing} Run the update in ${outcome.folder}, the folder that owns them.`;
-    case "foreign-container":
-      return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: a container of service "${outcome.service}" mounts it, and only orbit-db may; ${refusing} Check which container that is (docker ps -a --filter volume=${volume}) and stop or remove it if it is not part of this deployment, then run the update again.`;
+    case "foreign-container": {
+      // A plain docker-run container has no service label; its id is the only name it has.
+      const mounter = outcome.service === "" ? `container ${outcome.container}, which has no Compose service label,` : `a container of service "${outcome.service}"`;
+      return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: ${mounter} mounts it, and only orbit-db may; ${refusing} Check which container that is (docker ps -a --filter volume=${volume}) and stop or remove it if it is not part of this deployment, then run the update again.`;
+    }
+    // A deployment taken down keeps its volume and loses both containers: the one step back is to start it again from its own folder, in words, never as a Compose command.
     case "no-database-container":
-      return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: no orbit-db container uses it; ${refusing} Check that this deployment's orbit-db container exists and mounts this volume, or that the volume is not left over from a deployment you have removed, then run the update again.`;
+      return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: no orbit-db container uses it; ${refusing} If you took this deployment's containers down, start the deployment again from the folder it was installed in, so that its orbit-db container mounts the volume, then run the update again. If the volume is left over from a deployment you removed, this folder cannot update onto it; do not remove the volume until you are sure its database is not needed.`;
     case "several-database-containers":
       return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: more than one orbit-db container uses it; ${refusing} Check which orbit-db container is the live one (docker ps -a --filter volume=${volume}), remove the others, then run the update again.`;
     case "no-app-container":
-      return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: its Compose project has no orbit-app container; ${refusing} Check that this deployment's orbit-app container exists (it may have been removed), restore it, then run the update again.`;
+      return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: its Compose project has no orbit-app container; ${refusing} If you took this deployment's containers down, or removed the application container, start the deployment again from the folder it was installed in, then run the update again.`;
     case "several-app-containers":
       return `Could not prove that the Orbit database volume ${volume} belongs to this deployment: its Compose project has more than one orbit-app container; ${refusing} Check which orbit-app container is the live one, remove the others, then run the update again.`;
     case "image-mismatch":
