@@ -145,7 +145,7 @@ recoverable state.
   `unsupported_structure` for anything else it cannot open). For a JPEG or
   PNG, the dimensions declared in the header are read first and must be within
   20,000 pixels a side and 40 million in all, then the preview renderer's own
-  decoder must read the image. These limits are Orbit's own because no
+  decoder must read the image in the sandbox child. These limits are Orbit's own because no
   library sets them. Magic bytes alone are not proof that a file opens.
 - The PDF open check runs in a child process of its own, not in the server's
   process ([ADR-0038](adr/0038-pdf-structure-check-in-a-sandboxed-worker.md)).
@@ -185,9 +185,9 @@ recoverable state.
 - Parser responses must be content-type checked, strictly decoded, and bounded
   before allocation. Redirects and arbitrary request URLs or options are
   rejected. Parser errors expose no provider or document content.
-- PDF.js is the one parser of untrusted bytes in Orbit's own code, and it
-  opens only files ClamAV has passed. It never runs in the server's process:
-  the open check and the page renderer both run it in a sandbox child
+- PDF.js and the image decoder are the parsers of untrusted bytes in Orbit's own code, and they
+  open only files ClamAV has passed. Neither runs in the server's process:
+  the open check and the page renderer both run them in a sandbox child
   process, one per job (ADR-0038, as amended for #1427). Drawing a page decodes what the
   open check never touches (content streams, fonts, images), so a small
   emailed PDF whose page decodes to hundreds of megabytes used to stall or
@@ -202,7 +202,7 @@ recoverable state.
   Running out of memory, timing out or crashing answers
   `document_preview_failed` and logs one record with no file detail. A
   source check (`tests/unit/pdf-no-in-process-reader.test.mjs`) fails if
-  anything else on the server loads PDF.js. Keeping it patched is the
+  anything else on the server loads PDF.js or the canvas backend. Keeping it patched is the
   standing cost. The optional Tika service
   remains the separately isolated parser/OCR boundary described
   below.
@@ -333,7 +333,7 @@ recoverable state.
 - The read is audited as `document_previewed`, distinct from
   `document_downloaded`, so an image request is never recorded as a
   whole-document export.
-- Rendering is in memory and, for a PDF, in the sandbox child process
+- Rendering is in memory and, for a PDF or an image, in the sandbox child process
   described above: PDF.js parses into a Skia canvas with the same option set as the
   open check (`PDF_STRUCTURE_PARSER_OPTIONS`) — no XFA, no network, no
   pdf.js worker, and no scripting layer to run a document's scripts. No
