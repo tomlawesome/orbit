@@ -153,7 +153,7 @@ export const SIDECARS = [
   {
     name: "ClamAV",
     service: "orbit-clamav",
-    image: "clamav/clamav:1.5.4-debian",
+    image: "clamav/clamav:1.5.4",
     author: "Cisco Systems, Inc.",
     licence: "GNU General Public License 2.0",
     spdx: "GPL-2.0-only",
