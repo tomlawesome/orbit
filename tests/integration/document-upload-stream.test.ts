@@ -29,7 +29,7 @@ import { runDocumentMaintenanceCycle } from "@/server/document-worker";
 import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { decryptDocument, envelopeOf } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
-import { validateSupportedDocumentStructure } from "@/server/documents/validation";
+import { classifyDocumentStructure } from "@/server/documents/validation";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { progressive40Mpx, writePaddedImageFile } from "../support/image-fixtures";
@@ -42,10 +42,11 @@ vi.mock("@/server/documents/scanner", async (importOriginal) => ({
 }));
 
 // #1571: the recovery worker's open check is spied on (still real) to see the
-// file it is handed.
+// file it is handed. Scan recovery and mail-in holding call classifyDocumentStructure,
+// so a stop in the sandbox is told apart from a refusal (D-S1).
 vi.mock("@/server/documents/validation", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/documents/validation")>();
-  return { ...actual, validateSupportedDocumentStructure: vi.fn(actual.validateSupportedDocumentStructure) };
+  return { ...actual, classifyDocumentStructure: vi.fn(actual.classifyDocumentStructure) };
 });
 
 const MIB = 1_048_576;
@@ -203,7 +204,7 @@ describe("the recovery worker decrypts into a quarantine file and verifies it be
         seen.mode = (await stat(path)).mode & 0o777;
         return { status: "clean" };
       });
-      vi.mocked(validateSupportedDocumentStructure).mockClear();
+      vi.mocked(classifyDocumentStructure).mockClear();
       const unseals = vi.spyOn(LocalDocumentStorage.prototype, "unsealToQuarantine");
       const seals = vi.spyOn(LocalDocumentStorage.prototype, "sealQuarantine");
       await makeScanJobDue(documentId);
@@ -220,8 +221,8 @@ describe("the recovery worker decrypts into a quarantine file and verifies it be
       expect(unseals.mock.calls[0]![1]).toBe(documentId);
       expect(unseals.mock.calls[0]![2]).toEqual({ ciphertextSize: stage.ciphertextSize, plaintextSize: bytes.length });
 
-      expect(vi.mocked(validateSupportedDocumentStructure)).toHaveBeenCalledTimes(1);
-      const [checked, mediaType, options] = vi.mocked(validateSupportedDocumentStructure).mock.calls[0]!;
+      expect(vi.mocked(classifyDocumentStructure)).toHaveBeenCalledTimes(1);
+      const [checked, mediaType, options] = vi.mocked(classifyDocumentStructure).mock.calls[0]!;
       expect(mediaType).toBe("application/pdf");
       expect(options).toEqual({ path: seen.path, sizeBytes: bytes.length });
       expect((checked as Buffer).byteLength === 0 || (checked as Buffer).every((byte) => byte === 0), "the check's copy is wiped").toBe(true);
@@ -260,13 +261,13 @@ describe("the recovery worker decrypts into a quarantine file and verifies it be
       await writeFile(stagingFile(stage.storageKey), stored);
       vi.mocked(scanFileWithClamAv).mockReset();
       vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
-      vi.mocked(validateSupportedDocumentStructure).mockClear();
+      vi.mocked(classifyDocumentStructure).mockClear();
       await makeScanJobDue(documentId);
 
       await runDocumentMaintenanceCycle();
 
       await expectRejectedAsInvalidStage(documentId, stage.storageKey);
-      expect(vi.mocked(validateSupportedDocumentStructure)).not.toHaveBeenCalled();
+      expect(vi.mocked(classifyDocumentStructure)).not.toHaveBeenCalled();
     });
   }, 300_000);
 
@@ -281,7 +282,7 @@ describe("the recovery worker decrypts into a quarantine file and verifies it be
       await getDb().update(documents).set({ contentSha256: sha256(Buffer.from("not this document")) }).where(eq(documents.id, documentId));
       vi.mocked(scanFileWithClamAv).mockReset();
       vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
-      vi.mocked(validateSupportedDocumentStructure).mockClear();
+      vi.mocked(classifyDocumentStructure).mockClear();
       const unseals = vi.spyOn(LocalDocumentStorage.prototype, "unsealToQuarantine");
       await makeScanJobDue(documentId);
 
@@ -290,7 +291,7 @@ describe("the recovery worker decrypts into a quarantine file and verifies it be
       expect(unseals, "the tag passed: the unseal itself succeeded").toHaveBeenCalledTimes(1);
       await expect(unseals.mock.results[0]!.value).resolves.toMatchObject({ contentSha256: sha256(bytes) });
       await expectRejectedAsInvalidStage(documentId, stage.storageKey);
-      expect(vi.mocked(validateSupportedDocumentStructure)).not.toHaveBeenCalled();
+      expect(vi.mocked(classifyDocumentStructure)).not.toHaveBeenCalled();
     });
   }, 300_000);
 
@@ -338,8 +339,8 @@ describe("the recovery worker decrypts into a quarantine file and verifies it be
   }, 300_000);
 });
 
-describe("a file the open check refuses leaves nothing, and the check's buffer is wiped (#1567)", () => {
-  it("leaves no object, no staging file, no quarantine file and no metadata, and zeroes the buffer it read", async () => {
+describe("a file the open check refuses leaves nothing, and the check's buffer is released (#1567)", () => {
+  it("leaves no object, no staging file, no quarantine file and no metadata, and releases the buffer it read", async () => {
     const fixture = await createIntegrationFixture("doc-upload-stream-refused");
     const documentId = randomUUID();
     const refused = Buffer.from("%PDF-1.7\ntruncated, nothing a reader can open");
@@ -353,11 +354,12 @@ describe("a file the open check refuses leaves nothing, and the check's buffer i
     expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
     expect(reads).toHaveBeenCalledTimes(1);
     const buffer = await reads.mock.results[0]!.value as Buffer;
-    expect(buffer.length).toBe(refused.length);
-    expect(buffer.every((byte) => byte === 0)).toBe(true);
+    // Released, not only zeroed (A-Q1, A-Q4): a detached buffer has no length and holds no plaintext.
+    expect(buffer.length, "the check's buffer is detached").toBe(0);
+    expect(buffer.buffer.byteLength).toBe(0);
   }, 60_000);
 
-  it("zeroes the buffer the check read on an accepted upload too, and reads the quarantine file once through readQuarantine", async () => {
+  it("releases the buffer the check read on an accepted upload too, and reads the quarantine file once through readQuarantine", async () => {
     const fixture = await createIntegrationFixture("doc-upload-stream-wiped");
     const bytes = syntheticPdf("wiped after the check");
     const reads = vi.spyOn(LocalDocumentStorage.prototype, "readQuarantine");
@@ -366,8 +368,8 @@ describe("a file the open check refuses leaves nothing, and the check's buffer i
 
     expect(reads).toHaveBeenCalledTimes(1);
     const buffer = await reads.mock.results[0]!.value as Buffer;
-    expect(buffer.length).toBe(bytes.length);
-    expect(buffer.every((byte) => byte === 0)).toBe(true);
+    expect(buffer.length, "the check's buffer is detached").toBe(0);
+    expect(buffer.buffer.byteLength).toBe(0);
   }, 60_000);
 
   it("lets go of the buffer the check read before the seal starts, so the encrypt stage never runs beside it", async () => {

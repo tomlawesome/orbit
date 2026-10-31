@@ -111,7 +111,7 @@ describe("the PDF structure sandbox", () => {
       ["a NUL byte before the object and a bare %%EOF", () => hostilePdf("\0", "%%EOF")],
       ["a form feed before the object and a startxref that is not a number", () => hostilePdf("\f", "startxref\nabc\n%%EOF")],
       ["a signed startxref pointing at a form-feed-prefixed object", hostilePdfWithSignedStartxref],
-    ])("refuses %s as unsupported_structure while this thread keeps running", async (_name, build) => {
+    ])("stops on %s and answers structure_check_unavailable, never supported_structure, while this thread keeps running", async (_name, build) => {
       const bytes = build();
       let ticks = 0;
       const timer = setInterval(() => {
@@ -119,15 +119,20 @@ describe("the PDF structure sandbox", () => {
       }, 10);
       const started = Date.now();
 
-      let result: string;
+      let captured: Awaited<ReturnType<typeof withCapturedLogs<string>>>;
       try {
-        result = await classifyDocumentStructure(bytes, "application/pdf");
+        captured = await withCapturedLogs(() => classifyDocumentStructure(bytes, "application/pdf"));
       } finally {
         clearInterval(timer);
       }
       const elapsedMs = Date.now() - started;
 
-      expect(result).toBe("unsupported_structure");
+      // The child is stopped on memory every time, which is no verdict (D-S1): the
+      // file is neither accepted nor refused, and never reported as supported.
+      expect(captured.result).not.toBe("supported_structure");
+      expect(captured.result).toBe("structure_check_unavailable");
+      expect(captured.calls).toBeGreaterThan(0);
+      expect(captured.logged).toMatch(/memory/i);
       expect(elapsedMs).toBeLessThan(3000);
       // A blocked main thread would manage a handful of ticks, not most of them.
       expect(ticks).toBeGreaterThanOrEqual(Math.floor(elapsedMs / 10) * 0.6);

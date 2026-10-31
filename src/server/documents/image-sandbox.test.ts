@@ -598,9 +598,13 @@ describe("a sandbox stop is no verdict; a decoder's refusal is one (D-S1)", () =
   ])("answers structure_check_unavailable for a %s quarantine file that cannot be opened", async (_name, mediaType) => {
     const missing = { path: join(directory, `no-such-quarantine-file.${mediaType === "image/png" ? "png" : "jpg"}`), sizeBytes: 100 };
 
-    await expect(classifyDocumentStructure(Buffer.alloc(0), mediaType, missing)).resolves.toBe("structure_check_unavailable");
+    // A real image header, so the header check passes and the sandbox is what runs
+    // (an empty buffer is refused by the header check before any child starts).
+    const header = mediaType === "image/png" ? syntheticPng() : syntheticJpeg();
 
-    await expect(inspectImageInSandbox(Buffer.alloc(0), mediaType, { width: 1, height: 1 }, missing)).resolves.toBe("structure_check_unavailable");
+    await expect(classifyDocumentStructure(header, mediaType, missing)).resolves.toBe("structure_check_unavailable");
+
+    await expect(inspectImageInSandbox(header, mediaType, { width: 1, height: 1 }, missing)).resolves.toBe("structure_check_unavailable");
     expect(pdfStructureSandboxInFlightForTests()).toBe(0);
   }, TEST_TIMEOUT_MS);
 
@@ -679,7 +683,7 @@ describe("the sandbox stop record names the job that stopped (D-F2, W-F1)", () =
   it("says it could not open the file to check, with the error code, as processing_interrupted, and not a crash, for an image file that does not exist", async () => {
     const missing = { path: join(directory, "no-such-quarantine-image.jpg"), sizeBytes: 100 };
 
-    const { records } = await withLogRecords(() => classifyDocumentStructure(Buffer.alloc(0), "image/jpeg", missing));
+    const { records } = await withLogRecords(() => classifyDocumentStructure(syntheticJpeg(), "image/jpeg", missing));
 
     const inspection = records.filter((record) => record.fields.event === "document.inspection");
     expect(inspection).toHaveLength(1);
