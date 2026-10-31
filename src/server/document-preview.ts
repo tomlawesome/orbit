@@ -12,9 +12,9 @@ import { renderDocumentPagePreview, type DocumentPagePreview } from "@/server/do
  * rendering never writes plaintext to disk, so no copy outlives the request.
  *
  * This module is deliberately separate from `document-repository`: it is the
- * only server module that reaches the native canvas backend, and keeping that
- * import off the repository keeps it off every other route that reads
- * documents.
+ * one that reaches the renderer, which loads the native canvas backend only
+ * inside sandbox children (#1572), and keeping that import off the repository
+ * keeps the renderer off every other route that reads documents.
  */
 export async function readDocumentPagePreview(
   userId: string,

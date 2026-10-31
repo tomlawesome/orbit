@@ -139,10 +139,12 @@ moment, however many downloads are in flight and whatever their size (#1571).
    identifying content from bytes; the server holds one copy of the file for
    the open check, and encrypts it from the quarantine file in pieces,
    verifying its digest as it goes (#1567).
-3. Validate the complete supported structure before scanning. Clean scanning
-   continues synchronously and encrypts with a per-document DEK before
-   returning `201` and `available`; explicit scan-disabled operation records
-   `skipped`.
+3. Scan the quarantine file with ClamAV first ([ADR-0033](adr/0033-document-safety-standard-patterns.md));
+   explicit scan-disabled operation records `skipped` instead. Only on a clean
+   or `skipped` result does the structure check read the quarantine file, once,
+   and nothing opens the file before that. A file that passes is then encrypted
+   from quarantine, streamed, with a per-document DEK before returning `201` and
+   `available`.
 4. Malware, invalid structure, and the scanner-reported `scanner` error are
    terminal fail-closed outcomes. Only adapter `unavailable`, `timeout`, and
    `protocol` errors encrypt the validated bytes for the separate opaque
