@@ -10,8 +10,8 @@
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import { sectionColourOf } from "$lib/option-colour.js";
   import { pressKeepsChooser } from "./drawer-modes.svelte.js";
-  import { createDrawerActs } from "./drawer-acts.svelte.js";
-  import { archiveCommand, completeCommand, statusCommand } from "$lib/data/commands.js";
+  import { completeToday, createDrawerActs } from "./drawer-acts.svelte.js";
+  import { archiveCommand, statusCommand } from "$lib/data/commands.js";
   import { createHeldCompletion, droppedCompletionWords, isRefused } from "$lib/data/held-completion.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf, manifestRowOf } from "$lib/data/chart.js";
   import { dayMonth, initials as initialsOf, money, MONTHS, plural } from "$lib/format.js";
@@ -319,9 +319,10 @@
     if (!raw || !view?.primary || busy) return;
     busy = true;
     problem = null;
-    const completedDate = view.today;
     try {
-      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), { completedDate }));
+      const done = await completeToday({ raw, primary: view.primary, today: view.today });
+      problem = done.problem;
+      if (!done.done) return;
       sheetOpen = false;
       wake(`${target.title} completed`);
       await onchanged?.();

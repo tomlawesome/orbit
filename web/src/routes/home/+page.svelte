@@ -15,8 +15,8 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { applyCommand, approveWithOperation, dismissReceipt, householdElsewhereFor, readHome, readHomeIn, readItem, requestToJoin, signOut, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
-  import { archiveCommand, completeCommand, statusCommand } from "$lib/data/commands.js";
+  import { applyCommand, approveWithOperation, householdElsewhereFor, readHome, readHomeIn, readItem, requestToJoin, signOut, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
+  import { archiveCommand, statusCommand } from "$lib/data/commands.js";
   import { createHeldCompletion, droppedCompletionWords, isRefused } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
@@ -33,7 +33,8 @@
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import { pressKeepsChooser } from "./drawer-modes.svelte.js";
-  import { createDrawerActs } from "./drawer-acts.svelte.js";
+  import { createReceiptActs } from "../inbox/acts.js";
+  import { completeToday, createDrawerActs } from "./drawer-acts.svelte.js";
   import { WIDE_QUERY, cardWidthOf, pairOf, trackOf } from "./preview-pair.js";
   import { isPocket } from "$lib/pocket/media.js";
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
@@ -617,8 +618,8 @@
      (held-completion.js). */
   /** @type {string | null} */
   let footProblem = $state(null);
-  /** The open item as a command addresses it. @returns {any} */
-  const commandItem = () => (detail?.householdId && !detail.suggestion ? detail : null);
+  /** The item of `id` (the open one when none is given) as a command addresses it. @param {string | null | undefined} [id] @returns {any} */
+  const commandItem = (id = detail?.id) => (detail?.householdId && !detail.suggestion && detail.id === id ? detail : null);
   async function rereadAll() {
     view = await readHome();
     await rereadDetail();
@@ -673,7 +674,7 @@
     },
     focus: (_id, selector) => focusInDrawer(selector),
     open: () => expanded,
-    itemOf: () => commandItem(),
+    itemOf: (id) => commandItem(id),
     amend: (suggestion, item, sectionId) => amendReceipt(suggestion, item, sectionId),
     leave: () => collapseRow(),
     attached: (file, title) => `${file} attached to ${title}`,
@@ -872,26 +873,15 @@
       armed = { id: suggestion.id, act };
       return;
     }
-    busyReceipt = suggestion.id;
-    try {
-      if (act === "approve") {
-        const result = await approveWithOperation(suggestion, operationIds, asView(view).primary);
-        if ("partial" in result) {
-          /* The item exists but its documents didn't make it: the SAME
-             operation id retries the SAME body — never a second item. */
-          mailProblem = result.message;
-          return;
-        }
-      } else {
-        await dismissReceipt(suggestion.receiptId);
-      }
-      armed = { id: null, act: null };
-      view = await readHome();
-    } catch (error) {
-      mailProblem = wordsOf(error);
-    } finally {
-      busyReceipt = null;
-    }
+    /* approve and dismiss are the inbox's one act (inbox/acts.js); arming is this screen's */
+    await createReceiptActs({
+      view: () => /** @type {any} */ (asView(view)),
+      operationIds,
+      reload: async () => { view = await readHome(); },
+      say: (_id, words) => { mailProblem = words; },
+      busy: (id) => { busyReceipt = id ? suggestion.id : null; },
+      landed: () => { armed = { id: null, act: null }; },
+    }).decide({ id: suggestion.receiptId }, act);
   }
 
   /**
@@ -1007,16 +997,11 @@
   async function fireCompleteAct(target) {
     stripProblem = null;
     if (!completeArm.tap()) return; // first tap only arms it
-    const raw = rawItems.get(target.id);
-    if (!raw || !view?.primary) return;
-    try {
-      const completedDate = asView(view).today;
-      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), { completedDate }));
-      stripOpen = false;
-      view = await readHome();
-    } catch (error) {
-      stripProblem = wordsOf(error, "couldn't complete it — try again");
-    }
+    const { done, problem } = await completeToday({ raw: rawItems.get(target.id), primary: view?.primary, today: asView(view).today });
+    stripProblem = problem;
+    if (!done) return;
+    stripOpen = false;
+    try { view = await readHome(); } catch (error) { stripProblem = wordsOf(error, "couldn't complete it — try again"); }
   }
 
   /** @param {string} name */

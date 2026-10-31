@@ -81,6 +81,23 @@ import { attachIdFor, forget as forgetAttachId } from "./attach-id.js";
 import { DrawerModes } from "./drawer-modes.svelte.js";
 import { readSearchDocuments } from "./pocket-search.js";
 
+/**
+ * Completes an item today (the strip's and the phone's quick complete),
+ * through the one command. Never throws: a refusal is answered as `problem`
+ * in the engine's words. Sends nothing without the raw item and a household.
+ * @param {{ raw: any, primary: string | null | undefined, today: string }} how
+ * @returns {Promise<{ done: boolean, problem: string | null }>}
+ */
+export async function completeToday({ raw, primary, today }) {
+  if (!raw || !primary) return { done: false, problem: null };
+  try {
+    await applyCommand(completeCommand({ ...raw, householdId: primary }, { completedDate: today }));
+    return { done: true, problem: null };
+  } catch (error) {
+    return { done: false, problem: wordsOf(error, "couldn't complete it — try again") };
+  }
+}
+
 /** A paper removed or restored: its item's papers, not home's view. @type {Change} */
 const PAPERS = { view: false, papers: true };
 
