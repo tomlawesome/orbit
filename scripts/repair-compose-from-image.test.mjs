@@ -473,6 +473,74 @@ describe("repair.sh keeps today's manual step when the image cannot be read (#14
   });
 });
 
+// #1584 D-F1: the "READ-ONLY BY CONSTRUCTION" header is the allowlist of what diagnosis may ask
+// the Docker daemon for. It once said every `docker` call was an inspect-class read; the
+// diagnosis also runs two throwaway containers (the Compose-file read here, and
+// `configure.sh --check`'s engine). A reader trusting the old text (a verb-restricted socket
+// proxy, an audit of what runs on a production daemon) was told something false. These tests
+// hold the paragraph and the code to each other.
+describe("repair.sh's read-only contract says what diagnosis actually runs (#1584)", () => {
+  // From the heading line to the next heading (`# Database credential handling`), comment
+  // markers removed and whitespace folded, so wrapping does not matter.
+  const contract = (() => {
+    const all = repairScriptSource.split("\n");
+    const start = all.findIndex((line) => /^#\s*READ-ONLY BY CONSTRUCTION/.test(line));
+    expect(start, "repair.sh no longer has the READ-ONLY BY CONSTRUCTION heading").toBeGreaterThan(-1);
+    const end = all.findIndex((line, index) => index > start && /^#\s*Database credential handling\s*$/.test(line));
+    expect(end, "repair.sh no longer has the Database credential handling heading after it").toBeGreaterThan(start);
+    return all
+      .slice(start, end)
+      .map((line) => line.replace(/^#\s?/, ""))
+      .join(" ")
+      .replace(/\s+/g, " ");
+  })();
+
+  it("names the throwaway container that reads the Compose file out of the image", () => {
+    expect(contract).toContain("docker run --rm --pull never --network none --entrypoint cat");
+  });
+
+  it("names the configuration check, which runs the engine in a container", () => {
+    expect(contract).toContain("configure.sh --check");
+  });
+
+  it("says what a Docker endpoint that refuses `run` costs", () => {
+    const sentences = contract.split(/(?<=[.:;])\s+/);
+    const costed =
+      contract.includes("stays managed-file-missing") ||
+      sentences.some((sentence) => /compose/i.test(sentence) && /manual/i.test(sentence));
+    expect(costed, "no sentence ties the Compose file and a manual step to a refused run").toBe(true);
+  });
+
+  it("no longer claims that every docker invocation is an inspect-class read", () => {
+    expect(contract).not.toMatch(/Every\s+`?docker`?\s+invocation is one of/);
+  });
+});
+
+// The behavioural half of the same contract. This fixture has no scripts/configure.sh, so
+// Step 5 is skipped and the only container run is the Compose-file read. The pieces of the
+// paragraph that stay true: that read is a `--rm`, `--pull never`, `--network none` cat, and
+// diagnosis never creates, copies out of, removes, starts, stops, pulls or composes up anything.
+// (T2.3: the refused-run behaviour the paragraph promises is the two cases above, "keeps
+// today's manual step when the image cannot be read".)
+describe.each([["--check"], ["--plan"]])("repair.sh %s reads the Compose file only through the throwaway cat run (#1584)", (mode) => {
+  it("every container run is a --rm --pull never --network none cat of the Compose file, and no mutating verb is used", () => {
+    const targetDir = makeDeployment({ compose: IMAGE_COMPOSE });
+
+    const result = runRepair(targetDir, [mode]);
+
+    const argvs = lines(result.dockerLog);
+    const runs = argvs.filter((argv) => /^run(\s|$)/.test(argv));
+    expect(runs.length, "diagnosis did not read the image's Compose file").toBeGreaterThanOrEqual(1);
+    for (const argv of runs) {
+      for (const part of ["--rm", "--pull never", "--network none", "--entrypoint cat"]) {
+        expect(argv, `docker run lacks ${part}`).toContain(part);
+      }
+      expect(argv.endsWith(`${PINNED_IMAGE} ${DEPLOY_ROOT}/docker-compose.yml`), `unexpected run: ${argv}`).toBe(true);
+    }
+    expect(argvs.filter((argv) => /^(create|cp|rm|start|stop|pull|exec)(\s|$)|^compose\b.*\bup\b/.test(argv))).toEqual([]);
+  });
+});
+
 describe("docs/administrator-operations.md describes what Repair does with the Compose file (#1484)", () => {
   // Paragraphs (blank-line separated blocks, list items included) that talk
   // about Repair and the Compose file together.

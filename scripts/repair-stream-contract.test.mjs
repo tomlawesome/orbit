@@ -126,4 +126,24 @@ describe("repair stream v0 contract", () => {
       expect(documented[action]?.backup, `backup for ${action}`).toBe(backup);
     }
   });
+
+  // #1584 D-F2/O-F7: the PLAN MODE paragraph once said "the same 26 reason classes" while
+  // class_order held 28 (and other documents said 21 and 25). A stated count must equal the
+  // array, and the paragraph must point the reader at the array it is derived from.
+  it("the PLAN MODE paragraph states no reason-class count that class_order contradicts, and names class_order", () => {
+    const lines = repairSource.split("\n");
+    const start = lines.findIndex((line) => line.includes("PLAN MODE (--plan)"));
+    expect(start, "repair.sh no longer has the PLAN MODE (--plan) heading").toBeGreaterThan(-1);
+    const end = lines.findIndex((line, index) => index > start && /^#\s*Severity gate/.test(line));
+    expect(end, "repair.sh no longer has the Severity gate heading after PLAN MODE").toBeGreaterThan(start);
+    const paragraph = lines
+      .slice(start, end)
+      .map((line) => line.replace(/^#\s?/, ""))
+      .join(" ")
+      .replace(/\s+/g, " ");
+
+    const stated = paragraph.match(/(\d+) reason classes/);
+    if (stated) expect(Number(stated[1])).toBe(bashArray("class_order").length);
+    expect(paragraph).toContain("class_order");
+  });
 });
