@@ -56,3 +56,10 @@ targetRules = ["ai-tool-credit"]
 paths = [
   '''^design/owner-decisions\.md$''',
 ]
+
+[[allowlists]]
+description = "the owner-decisions record names which model made a design call (the fable: route), as provenance for the owner to review, not credit for the work; caught by the credit-line rules added in agent-infra b6cf5f0 (owner decision 8a, 2026-10-31, #1589)"
+targetRules = ["ai-attribution", "ai-tool-credit"]
+paths = [
+  '''^design/owner-decisions\.md$''',
+]
