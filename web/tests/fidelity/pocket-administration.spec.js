@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { openRow, settle } from "./pocket-states.js";
+import { SIGNED_IN, openRow, settle } from "./pocket-states.js";
 
 /* Same app the fidelity gate photographs (playwright.config.js webServer). */
 const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
@@ -165,6 +165,41 @@ test("invite someone is a sheet, and never shows a link", async ({ page }) => {
   await expect(sheet.locator("output")).toHaveText("8 days");
   await expect(sheet).toContainText("The link is never shown here.");
   await expect(sheet.locator("a[href*='setup']")).toHaveCount(0);
+});
+
+/*
+ * A text field is 16px or more at the standard text size, so iOS Safari does
+ * not zoom on focus (#1180), and it still scales with the larger steps (the
+ * floor is max(16px, 1rem), not a pin): 1.25 x 16 = 20px at extra-large.
+ */
+/** @param {import("@playwright/test").Page} page @param {string} selector @param {string} size */
+async function fieldSizesAt(page, selector, size) {
+  await page.evaluate((step) => { document.documentElement.dataset.textSize = step; }, size);
+  return page.locator(selector).evaluateAll((fields) => fields.map((field) => parseFloat(getComputedStyle(field).fontSize)));
+}
+
+test("every shared text field is 16px at standard text size, 20px at extra-large", async ({ page }) => {
+  await open(page);
+  await page.getByRole("button", { name: "invite someone" }).click();
+  await expect(page.getByRole("dialog", { name: "Invite someone" })).toBeVisible();
+  const standard = await fieldSizesAt(page, ".p-input", "standard");
+  expect(standard.length, "the screen shows .p-input fields").toBeGreaterThan(0);
+  expect(standard.filter((px) => !(px >= 16)), `sizes at standard: ${standard}`).toEqual([]);
+  const extra = await fieldSizesAt(page, ".p-input", "extra-large");
+  expect(extra.filter((px) => !(px >= 20)), `sizes at extra-large: ${extra}`).toEqual([]);
+});
+
+test("settings' password field is 16px at standard text size, 20px at extra-large", async ({ page }) => {
+  const sheet = SIGNED_IN.find((state) => state.route === "/settings" && state.state === "change-password-sheet");
+  if (!sheet) throw new Error("pocket-states.js has no settings change-password-sheet state");
+  await sheet.reach(page);
+  const field = "#st-current, #st-new";
+  const standard = await fieldSizesAt(page, field, "standard");
+  expect(standard.length, "the sheet shows a password field").toBeGreaterThan(0);
+  expect(standard.filter((px) => !(px >= 16)), `sizes at standard: ${standard}`).toEqual([]);
+  expect((await fieldSizesAt(page, ".p-input", "standard")).filter((px) => !(px >= 16))).toEqual([]);
+  const extra = await fieldSizesAt(page, field, "extra-large");
+  expect(extra.filter((px) => !(px >= 20)), `sizes at extra-large: ${extra}`).toEqual([]);
 });
 
 /* The panel is tightest at 360: three acts must still sit wholly on the row
