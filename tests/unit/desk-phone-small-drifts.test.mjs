@@ -140,21 +140,25 @@ describe("archive card: the step-up return notice (#1344, web-12)", () => {
 });
 
 describe("settings: toggleEmailReminders' saving guard (#1344, web-13)", () => {
-  const body = () => blockAfter(route("settings/+page.svelte"), "async function toggleEmailReminders()");
+  // #1353: both layouts toggle through sign-in-methods.svelte.js's toggleEmailReminders.
+  const body = () => blockAfter(route("settings/sign-in-methods.svelte.js"), "export async function toggleEmailReminders(reminders, { card, shown, landed, wake = quiet })");
 
-  it("the desk has an emailSaving flag, as the phone does", () => {
-    expect(route("settings/+page.svelte")).toMatch(/let\s+emailSaving\s*=\s*\$state\(/);
+  it("the desk sends its toggle through the shared one, with a card of its own, as the phone does", () => {
+    const src = route("settings/+page.svelte");
+    expect(src).toMatch(/const\s+reminderCard\s*=\s*\$state\(card\(\)\)/);
+    expect(src).toMatch(/\btoggleEmailReminders\(/);
+    expect(route("settings/pocket.svelte")).toMatch(/\btoggleEmailReminders\(/);
   });
 
-  it("the desk ignores a second toggle while the first is being saved", () => {
+  it("a second toggle is ignored while the first is being saved", () => {
     // phone: `if (!view || emailSaving) return;`
-    expect(body()).toMatch(/if\s*\([^)]*\bemailSaving\b[^)]*\)\s*return/);
+    expect(body()).toMatch(/if\s*\([^)]*\bcard\.busy\b[^)]*\)\s*return/);
   });
 
   it("the flag is raised for the write and lowered afterwards whether it worked or not", () => {
     const text = body();
-    expect(text).toMatch(/emailSaving\s*=\s*true/);
-    expect(text).toMatch(/finally\s*\{[^}]*emailSaving\s*=\s*false/);
+    expect(text).toMatch(/card\.busy\s*=\s*true/);
+    expect(text).toMatch(/finally\s*\{[^}]*card\.busy\s*=\s*false/);
   });
 });
 

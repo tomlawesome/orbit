@@ -1,7 +1,7 @@
 
 import { wordsOf } from "$lib/data/workspace.js";
 import { THEME_TABLE } from "$lib/theme.js";
-import { dayMonthYear } from "$lib/format.js";
+import { clockOf, dayMonth, dayMonthYear, localZone } from "$lib/format.js";
 
 /*
  * What settings' desk cards and its phone layout (pocket.svelte, #1125) both
@@ -91,4 +91,30 @@ export function methodWords(error) {
     return "not started — Orbit could not hand you to your identity provider";
   }
   return wordsOf(error, "not changed — Orbit could not reach your sign-in methods");
+}
+
+/**
+ * When a reminder was sent, as the sent list says it (#1003): the day and
+ * the time, in UTC under fixtures so the gate photographs one answer. The
+ * desk joins them with ` · `, the phone with a space (`between`).
+ * @param {string} iso @param {boolean} fixtures @param {string} between
+ */
+export function sentWhenOf(iso, fixtures, between) {
+  const zone = fixtures ? "UTC" : localZone();
+  return `${dayMonth(iso, zone)}${between}${clockOf(iso, zone)}`;
+}
+
+/**
+ * What a browser-alerts refusal means in words, from the code alerts.js
+ * throws (so no layout matches on a message). The desk writes an administrator's
+ * with a straight apostrophe, the phone with a curly one (`curly`).
+ * @param {unknown} error @param {{ curly?: boolean }} [options]
+ */
+export function alertsWords(error, { curly = false } = {}) {
+  const reason = /** @type {{ code?: string }} */ (error)?.code;
+  return reason === "permission_denied"
+    ? "your browser is refusing alerts. allow notifications for Orbit, then try again"
+    : reason === "unconfigured"
+      ? `not switched on — this Orbit has no push keys yet, which is your administrator${curly ? "’" : "'"}s to set`
+      : "not switched on — Orbit could not reach your alert settings";
 }

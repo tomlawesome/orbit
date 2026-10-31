@@ -1,9 +1,10 @@
 /*
- * What changing a sign-in method does, held once for the desk's "You" card
- * and the phone's callout (#1353, web-12). The layouts differ in how they
- * ask and how they answer, not in what is sent, so each act takes:
+ * What settings does, held once for the desk's cards and the phone's rows
+ * (#1353, web-12): changing a sign-in method, the two reminder switches, and
+ * the sign-outs. The layouts differ in how they ask and how they answer, not
+ * in what is sent, so each act takes:
  *   card     `{ busy, problem }`, held as `$state` by the layout;
- *   landed   what the layout closes once the change is taken;
+ *   landed   what the layout closes or sets once the change is taken;
  *   say      the desk's line under the card, given the outcome;
  *   wake     the phone's line at the foot of the screen, given the same;
  *   keep     where the re-read methods go.
@@ -12,8 +13,11 @@
 
 import {
   readSignInMethods, removeLocalPassword, startProviderLink, startStepUp, unlinkProviderIdentity, writeLocalPassword,
+  writeReminders,
 } from "$lib/data/workspace.js";
-import { intentOf, methodWords, stepUpReturnOf } from "./helm.js";
+import { disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
+import { alertsWords, intentOf, methodWords, stepUpReturnOf } from "./helm.js";
+import { signOutOfDevice, signOutOfEveryDevice } from "./sign-out.js";
 
 /** @typedef {{ busy: boolean, problem: string | null }} Card */
 /** @typedef {Awaited<ReturnType<typeof readSignInMethods>>} Methods */
@@ -74,5 +78,107 @@ export async function changeMethod(action, { hasPassword, currentPassword, newPa
     card.problem = methodWords(error);
   } finally {
     card.busy = false;
+  }
+}
+
+/**
+ * The email reminders switch (#468). Optimistic: a switch that waits for a
+ * round trip reads as dead, and the revert is what keeps it honest. The two
+ * warning offsets are handed straight back, as there is no editor for them.
+ * @param {Parameters<typeof writeReminders>[0]} reminders what the screen holds now (the offsets are handed back as they are)
+ * @param {{ card: Card, shown: (enabled: boolean) => void, landed: (saved: any) => void, wake?: (words: string) => unknown }} on
+ *   `shown` draws the switch (the guess, and the revert); `landed` takes the server's answer
+ */
+export async function toggleEmailReminders(reminders, { card, shown, landed, wake = quiet }) {
+  if (card.busy) return;
+  const next = !reminders.emailEnabled;
+  shown(next);
+  card.busy = true;
+  card.problem = null;
+  try {
+    const saved = await writeReminders({
+      emailEnabled: next,
+      firstWarningDays: reminders.firstWarningDays,
+      finalWarningDays: reminders.finalWarningDays,
+    });
+    /* The server's answer wins over the guess, sentences included. */
+    landed(saved);
+    wake(`saved · email reminders ${saved.emailEnabled ? "on" : "off"}`);
+  } catch {
+    shown(reminders.emailEnabled);
+    card.problem = "not saved — Orbit could not reach your reminder settings";
+  } finally {
+    card.busy = false;
+  }
+}
+
+/**
+ * The browser alerts switch (#763), for this device alone. Not optimistic:
+ * switching on opens the browser's own prompt, and the switch must not claim
+ * to be on while that is still being answered.
+ * @param {boolean} isOn whether alerts are on now
+ * @param {{ card: Card, set: (on: boolean) => void, wake?: (words: string) => unknown, curly?: boolean }} on
+ */
+export async function toggleBrowserAlerts(isOn, { card, set, wake = quiet, curly = false }) {
+  if (card.busy) return;
+  card.busy = true;
+  card.problem = null;
+  try {
+    if (isOn) await disableAlerts();
+    else await enableAlerts();
+    set(!isOn);
+    wake(`saved · browser alerts ${isOn ? "off" : "on"} on this device`);
+  } catch (error) {
+    /* #1151 F9: reconcile against the server the same way the screen's own
+       read does. currentSubscription() only reports whether the browser still
+       holds a subscription object, which stays true even after the server has
+       refused it (e.g. it belongs to another account on a shared device). */
+    set(Boolean(await syncAlerts()));
+    card.problem = alertsWords(error, { curly });
+  } finally {
+    card.busy = false;
+  }
+}
+
+/**
+ * One flag per screen, kept once this device has left: a second press then
+ * sends nothing, and after this session has ended any request would answer
+ * 401 and sign the reader straight back in through the provider (#1439).
+ */
+export const leaving = () => ({ out: false });
+
+/**
+ * Signs one device out (./sign-out.js). This device's own session plays the
+ * goodbye; another device's just drops its row.
+ * @param {{ id: string, current: boolean, device: string }} row
+ * @param {{ leaving: { out: boolean }, descendFrom: ((redirectTo: string | null) => unknown) | undefined, begun?: () => void, dropped: () => void, failed: () => void, wake?: (words: string) => unknown }} on
+ */
+export async function signOutDevice(row, { leaving, descendFrom, begun = quiet, dropped, failed, wake = quiet }) {
+  if (leaving.out) return;
+  leaving.out = true;
+  begun();
+  try {
+    if (await signOutOfDevice(row, descendFrom)) return;
+    dropped();
+    wake(`signed out of ${row.device}`);
+  } catch {
+    failed();
+  }
+  leaving.out = false;
+}
+
+/**
+ * Signs out of every device, this one included, and leaves with the goodbye.
+ * @param {{ leaving: { out: boolean }, descendFrom: ((redirectTo: string | null) => unknown) | undefined, begun?: () => void, failed: () => void }} on
+ */
+export async function signOutAll({ leaving, descendFrom, begun = quiet, failed }) {
+  if (leaving.out) return;
+  leaving.out = true;
+  begun();
+  try {
+    await signOutOfEveryDevice(descendFrom);
+  } catch {
+    failed();
+    leaving.out = false;
   }
 }
