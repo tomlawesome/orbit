@@ -85,13 +85,13 @@ function onOlderKey(column: AnyPgColumn, keys: RotationKeys): SQL {
   return sql`(${column} <> ${keys.currentKeyId} and ${column} <> ${keys.nextKeyId} and ${column} ~ ${DOCUMENT_KEY_ID_SHAPE})`;
 }
 
-/** Held rows this rotation moves: not yet on the next key, and not skipped on an older one (#1392). */
-function heldToRotate(column: AnyPgColumn, keys: RotationKeys): SQL | undefined {
+/** Held rows this rotation moves: not yet on the next key, and not skipped on an older one (#1392). Exported for its unit test. */
+export function heldToRotate(column: AnyPgColumn, keys: RotationKeys): SQL | undefined {
   return and(ne(column, keys.nextKeyId), not(onOlderKey(column, keys)));
 }
 
-/** A row the rotation selected must be on the current key; any other key id fails closed. */
-function requireCurrentKey(table: string, rowKeyId: string, keys: RotationKeys): void {
+/** A row the rotation selected must be on the current key; any other key id fails closed. Exported for its unit test. */
+export function requireCurrentKey(table: string, rowKeyId: string, keys: RotationKeys): void {
   if (rowKeyId !== keys.currentKeyId) {
     throw new Error(`${table} row is wrapped under neither the current nor the next key`);
   }
