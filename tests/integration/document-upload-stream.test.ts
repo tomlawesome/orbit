@@ -14,7 +14,7 @@
  */
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { copyFile, mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +31,7 @@ import { decryptDocument, envelopeOf } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { progressive40Mpx, writePaddedImageFile } from "../support/image-fixtures";
 import { paddedPdfOfSize, writePaddedPdfFile } from "../support/large-pdf";
 import { syntheticPdf } from "../support/synthetic-documents";
 
@@ -291,5 +292,68 @@ describe("one upload in a warmed process raises its peak memory by less than the
     const downloaded = await readDocumentDownload(fixture.users.member.id, measured.result.id);
     expect(downloaded.bytes.length).toBe(size);
     expect(downloaded.bytes.equals(paddedPdfOfSize(size))).toBe(true);
+  }, 600_000);
+
+  // #1572: an image is decoded in the sandbox child, not in the server. In the
+  // server's own process a 40 Mpx progressive JPEG (0.23 MiB on the wire) grew
+  // it by 153 MiB warm and 294 MiB cold, so the same two bounds as above are
+  // meaningful for an image padded to the limit: the pixels are in the child.
+  // The padded file is the PDF case's twin; the header fence reads only the
+  // front, and the decoder stops at the EOI marker.
+  let paddedProgressive: Promise<{ measured: Measured; fixture: Fixture; size: number }> | undefined;
+
+  function measurePaddedProgressive(): Promise<{ measured: Measured; fixture: Fixture; size: number }> {
+    paddedProgressive ??= (async () => {
+      const size = getDocumentConfig().maxBytes;
+      const file = join(scratch, "limit-progressive.jpg");
+      await writePaddedImageFile(file, progressive40Mpx(), size);
+      expect((await stat(file)).size).toBe(size);
+      const fixture = await createIntegrationFixture("doc-upload-stream-memory-image");
+      return { measured: await measure(fixture, file), fixture, size };
+    })();
+    return paddedProgressive;
+  }
+
+  it("holds under ceil(size / 3) * 4 bytes for a second upload of a progressive 40 Mpx JPEG padded to the size limit, under that plus one copy for the first, and the image is stored whole", async () => {
+    const { measured, fixture, size } = await measurePaddedProgressive();
+
+    expect(measured.result).toMatchObject({ lifecycle: "available", sizeBytes: size });
+    const growthKiB = measured.afterKiB - measured.beforeKiB;
+    const boundKiB = (Math.ceil(size / 3) * 4) / 1024;
+    const firstGrowthKiB = measured.first.afterKiB - measured.first.beforeKiB;
+    console.info(`#1572 padded progressive JPEG upload memory: warm ${(growthKiB / 1024).toFixed(1)} MiB, first ${(firstGrowthKiB / 1024).toFixed(1)} MiB, bound ${(boundKiB / 1024).toFixed(1)} MiB`);
+    expect(
+      growthKiB,
+      `image upload (warm): peak RSS grew ${(growthKiB / 1024).toFixed(0)} MiB; bound is ${(boundKiB / 1024).toFixed(1)} MiB (the document's base64 size); the decode belongs in the sandbox child`,
+    ).toBeLessThan(boundKiB);
+    expect(
+      firstGrowthKiB,
+      `image upload (first after start): peak RSS grew ${(firstGrowthKiB / 1024).toFixed(0)} MiB; bound is ${((boundKiB + size / 1024) / 1024).toFixed(1)} MiB (the base64 size plus one copy)`,
+    ).toBeLessThan(boundKiB + size / 1024);
+    const downloaded = await readDocumentDownload(fixture.users.member.id, measured.result.id);
+    expect(downloaded.bytes.length).toBe(size);
+    expect(downloaded.bytes.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+    expect(downloaded.bytes.subarray(0, progressive40Mpx().length).equals(progressive40Mpx())).toBe(true);
+  }, 600_000);
+
+  // Reported, not pinned: a 0.23 MiB file is cheap to hold, so the figures say
+  // how much the decode itself costs the server. Sanity rule: if either
+  // exceeds the padded case's warm figure, pixels are still decoded in the
+  // server (the padded warm figure is the file's copies, not a decode).
+  it("reports the unpadded progressive 40 Mpx JPEG's first and warm growth, and neither exceeds the padded case's warm growth", async () => {
+    const { measured: padded } = await measurePaddedProgressive();
+    const file = join(scratch, "unpadded-progressive.jpg");
+    await copyFile(fileURLToPath(new URL("../fixtures/images/progressive-40mpx.jpg", import.meta.url)), file);
+    const fixture = await createIntegrationFixture("doc-upload-stream-memory-image-small");
+
+    const measured = await measure(fixture, file);
+
+    expect(measured.result).toMatchObject({ lifecycle: "available", sizeBytes: (await stat(file)).size });
+    const paddedWarmKiB = padded.afterKiB - padded.beforeKiB;
+    const warmKiB = measured.afterKiB - measured.beforeKiB;
+    const firstKiB = measured.first.afterKiB - measured.first.beforeKiB;
+    console.info(`#1572 unpadded progressive JPEG upload memory: first ${(firstKiB / 1024).toFixed(1)} MiB, warm ${(warmKiB / 1024).toFixed(1)} MiB (padded case warm ${(paddedWarmKiB / 1024).toFixed(1)} MiB)`);
+    expect(firstKiB, `unpadded first upload grew ${(firstKiB / 1024).toFixed(0)} MiB, more than the padded case's warm ${(paddedWarmKiB / 1024).toFixed(0)} MiB: pixels are still in the server`).toBeLessThanOrEqual(paddedWarmKiB);
+    expect(warmKiB, `unpadded warm upload grew ${(warmKiB / 1024).toFixed(0)} MiB, more than the padded case's warm ${(paddedWarmKiB / 1024).toFixed(0)} MiB: pixels are still in the server`).toBeLessThanOrEqual(paddedWarmKiB);
   }, 600_000);
 });

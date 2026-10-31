@@ -6,12 +6,14 @@ import { deflateSync } from "node:zlib";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { log } from "@/lib/logger";
+import { AT_CAP_EDGE, progressive40Mpx } from "../../../tests/support/image-fixtures";
 import { useScratchTemporaryDirectory, type ScratchDirectory } from "../../../tests/support/scratch-directory";
 import { syntheticPdf } from "../../../tests/support/synthetic-documents";
 import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../../../tests/support/generated-pdf-documents";
 import { syntheticUserPasswordPdf } from "../../../tests/support/encrypted-pdf-documents";
 import {
   lastPdfSandboxChildPidForTests,
+  pdfStructureSandboxInFlightForTests,
   setPdfSandboxDataLimitHeadroomForTests,
   setPdfStructureSandboxLimitsForTests,
 } from "./pdf-structure-sandbox";
@@ -21,6 +23,20 @@ import {
   renderDocumentPagePreview,
   setDocumentPreviewRenderBudgetForTests,
 } from "./preview";
+
+// Counts the child processes the sandbox starts (#1572): a preview is one child
+// run, with the gate inside, not a check followed by a draw. Everything passes through.
+const spawned = vi.hoisted(() => ({ count: 0 }));
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    spawn: (...args: unknown[]) => {
+      spawned.count += 1;
+      return (actual.spawn as (...all: unknown[]) => ReturnType<typeof actual.spawn>)(...args);
+    },
+  };
+});
 
 /**
  * Page-one preview rendering (#476).
@@ -516,6 +532,93 @@ describe("renderDocumentPagePreview", () => {
     const preview = await renderDocumentPagePreview(rasterFixture("image/png", 320, 200), "image/png");
 
     expect(preview).toMatchObject({ width: 320, height: 200 });
+  });
+
+  describe("an image is drawn in one sandbox child run, with the gate inside (#1572)", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+      setPdfStructureSandboxLimitsForTests(undefined);
+      setDocumentPreviewRenderBudgetForTests(undefined);
+    });
+
+    it.each([
+      ["a JPEG", () => rasterFixture("image/jpeg", 1_600, 2_000), "image/jpeg"],
+      ["a PNG", () => rasterFixture("image/png", 2_400, 1_200), "image/png"],
+      ["a PDF, as before", () => syntheticPdf("Preview fixture"), "application/pdf"],
+    ] as const)("starts exactly one child for a preview of %s", async (_name, build, mediaType) => {
+      const bytes = build();
+      const before = spawned.count;
+      const pidBefore = lastPdfSandboxChildPidForTests();
+
+      await renderDocumentPagePreview(bytes, mediaType);
+
+      expect(spawned.count - before, "children started by one preview").toBe(1);
+      expect(lastPdfSandboxChildPidForTests()).not.toBe(pidBefore);
+      expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+    }, 30_000);
+
+    it("starts no child for an image the header fence refuses, and answers unsupported", async () => {
+      const overCap = rasterFixture("image/png", 40, 40);
+      overCap.writeUInt32BE(10_000, 16);
+      overCap.writeUInt32BE(10_000, 20);
+      const before = spawned.count;
+
+      await expect(renderDocumentPagePreview(overCap, "image/png"))
+        .rejects.toMatchObject({ code: "document_preview_unsupported", status: 415 });
+
+      expect(spawned.count - before).toBe(0);
+    });
+
+    it("answers page not found for page 2 of a good image, and still refuses an over-cap one as unsupported without a child", async () => {
+      await expect(renderDocumentPagePreview(rasterFixture("image/png", 40, 40), "image/png", 2))
+        .rejects.toMatchObject({ code: "document_preview_page_not_found", status: 404 });
+
+      const overCap = rasterFixture("image/png", 40, 40);
+      overCap.writeUInt32BE(10_000, 16);
+      overCap.writeUInt32BE(10_000, 20);
+      const before = spawned.count;
+      await expect(renderDocumentPagePreview(overCap, "image/png", 2))
+        .rejects.toMatchObject({ code: "document_preview_unsupported", status: 415 });
+      expect(spawned.count - before).toBe(0);
+    }, 30_000);
+
+    it("answers document_preview_failed, logged as processing_interrupted and saying memory, when the child hits its ceiling", async () => {
+      const read = captureLogs();
+      const warn = vi.spyOn(log, "warn");
+      // A 60 s budget and a 64 MiB ceiling: a stop inside the test timeout can only be memory or a crash, and the log says which.
+      setDocumentPreviewRenderBudgetForTests(60_000);
+      setSandboxLimits({ renderMemoryMb: 64 });
+      const bytes = progressive40Mpx();
+      const pidBefore = lastPdfSandboxChildPidForTests();
+
+      await expect(renderDocumentPagePreview(bytes, "image/jpeg"))
+        .rejects.toMatchObject({ code: "document_preview_failed", status: 422 });
+
+      expect(lastPdfSandboxChildPidForTests(), "the decode ran in a child").not.toBe(pidBefore);
+      expect(warn).toHaveBeenCalledWith(expect.objectContaining({
+        event: "document.preview",
+        reason: "processing_interrupted",
+      }));
+      const { logged } = read();
+      expect(logged).toMatch(/memory/i);
+      expect(logged).not.toMatch(/timeout|timed.?out/i);
+      expect(logged).not.toMatch(/crash/i);
+      // Nothing of the file: no byte dump, no size.
+      expect(logged.length).toBeLessThan(2_000);
+      expect(logged).not.toContain(String(bytes.length));
+      expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+      await expectChildGone(pidBefore);
+    }, 30_000);
+
+    it("draws the progressive 40 Mpx JPEG down to the preview bound, as a JPEG", async () => {
+      setDocumentPreviewRenderBudgetForTests(60_000);
+
+      const preview = await renderDocumentPagePreview(progressive40Mpx(), "image/jpeg");
+
+      expect(preview).toMatchObject({ mediaType: "image/jpeg", width: DOCUMENT_PREVIEW_MAX_EDGE, height: DOCUMENT_PREVIEW_MAX_EDGE, pageCount: 1 });
+      expect(AT_CAP_EDGE).toBeGreaterThan(DOCUMENT_PREVIEW_MAX_EDGE);
+      expect(preview.bytes.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+    }, 60_000);
   });
 
   it("answers a bounded unsupported code for bytes that are not a supported document", async () => {
