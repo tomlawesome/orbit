@@ -397,6 +397,10 @@ describe("a file the open check refuses leaves nothing, and the check's buffer i
     LocalDocumentStorage.prototype.sealQuarantine = function (this: LocalDocumentStorage, ...args: Parameters<typeof originalSeal>) {
       seals += 1;
       readBeforeSeal = heldBuffer !== undefined;
+      // The module mock's spy keeps its arguments, and the upload hands the check its buffer: clear it
+      // so only the upload's own references are measured (vi.restoreAllMocks does not clear a vi.fn
+      // made inside vi.mock).
+      vi.mocked(classifyDocumentStructure).mockClear();
       collect();
       collect();
       bufferCleared = heldBuffer?.deref() === undefined;
