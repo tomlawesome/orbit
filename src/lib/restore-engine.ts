@@ -516,14 +516,24 @@ export function noKeyImportMarkerPath(documentKekFile: string): string {
   return `${documentKekFile}.import-no-key`;
 }
 
-/** Removes the key-less import marker and syncs its directory, so the removal is as durable as its creation. Best effort: a marker left behind is cleared by recovery or the next import. */
-export function clearNoKeyImportMarker(markerFile: string): void {
-  rmSafely(markerFile);
+/**
+ * Removes the key-less import marker and syncs its directory, so the removal is
+ * as durable as its creation. Returns false when the marker is still there;
+ * createCheckpoint refuses on that, every other caller is clearing a spent
+ * marker and carries on.
+ */
+export function clearNoKeyImportMarker(markerFile: string): boolean {
+  try {
+    rmSync(markerFile, { force: true });
+  } catch {
+    return false;
+  }
   try {
     fsyncPath(dirname(markerFile));
   } catch {
     // The marker is already gone from the namespace; only its durability is in doubt.
   }
+  return true;
 }
 
 /**
@@ -1287,11 +1297,20 @@ export class RestoreRun {
     // The journal now durably references this checkpoint directory by its
     // restoreId — it is no longer an orphan (O2-R10).
     rmSafely(join(this.checkpointDirectory, CHECKPOINT_PREPARING_MARKER));
+    // Set before the marker is cleared, so a refusal there rolls back from
+    // this checkpoint and removes the journal rather than orphaning it.
+    this.checkpointVerified = true;
+
     // #1536 A-R1: the journal now records "no previous key", so a rollback
     // removes the imported key; the marker's job is done.
-    if (this.noKeyImportMarkerFile) clearNoKeyImportMarker(this.noKeyImportMarkerFile);
-
-    this.checkpointVerified = true;
+    if (this.noKeyImportMarkerFile && !clearNoKeyImportMarker(this.noKeyImportMarkerFile)) {
+      // Left beside the key this run installs, the marker would tell the next
+      // import that key is an interrupted run's and remove it.
+      refuse(
+        "checkpoint-key-invalid",
+        `checkpoint/key failed; the key-less import marker at ${this.noKeyImportMarkerFile} could not be removed; remove it by hand and run the import again.`,
+      );
+    }
   }
 
   private copyCheckpointKey(): void {

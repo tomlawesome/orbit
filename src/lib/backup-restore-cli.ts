@@ -914,7 +914,6 @@ function importRecoveryBundleUnlocked(options: RunImportRecoveryBundleOptions): 
     ? () => {}
     : acquireBackupRestoreLock(options.backupDirectory, { operation: "import", ownsApp: true });
   try {
-    if (!options.preflightOnly) removeInterruptedKeylessImportKey(options.liveDocumentKekFile);
     const workDir = mkdtempSync(join(tmpdir(), "orbit-recovery-import-"));
     try {
       const extractedDir = join(workDir, "extracted");
@@ -958,7 +957,7 @@ function importRecoveryBundleUnlocked(options: RunImportRecoveryBundleOptions): 
 }
 
 /**
- * #1536 A-R1: with the lock held and no journal, an intent marker beside the
+ * #1536 A-R1: with the lock held, Orbit stopped and no journal, an intent marker beside the
  * live key means a key-less import (#1420) was killed after it began writing
  * its recovered key and before its checkpoint recorded "no previous key". The
  * marker holds the sha256 of the key that run was about to write (write-ahead
@@ -1077,6 +1076,15 @@ function swapKeyAndRestore(
   // reading documents under the old one.
   if (!options.adapter.stopApp()) {
     refuse("app-stop-failed", "The Orbit application could not be stopped; the document KEK was not changed.");
+  }
+  // Orbit is stopped and every check and prompt has passed: only now is a key
+  // an interrupted key-less import left behind removed, so a refusal, a wrong
+  // passphrase or a "no" before this point leaves the deployment as it found it.
+  try {
+    removeInterruptedKeylessImportKey(options.liveDocumentKekFile);
+  } catch (error) {
+    options.adapter.startApp();
+    throw error;
   }
   // #1420: decided once, here, and passed on: with no live key file there is
   // nothing to set aside, and a rollback removes the key this import writes.
