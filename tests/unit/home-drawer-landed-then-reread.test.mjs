@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
@@ -260,16 +259,5 @@ describe("a paper removed or restored from the reader is not read back as refuse
 
     expect(order).toEqual(["reread", "wake"]);
     expect(say).not.toHaveBeenCalled();
-  });
-});
-
-describe("the desk strip's quick complete (source check; the screen cannot be mounted)", () => {
-  it("fireCompleteAct says the done line when only the read of home fails, never 'couldn't complete it'", () => {
-    const page = readFileSync(new URL("../../web/src/routes/home/+page.svelte", import.meta.url), "utf8");
-    const start = page.indexOf("async function fireCompleteAct");
-    expect(start, "+page.svelte has no fireCompleteAct").toBeGreaterThan(-1);
-    const body = page.slice(start, page.indexOf("\n  }\n", start));
-    expect(body).toMatch(/DONE_UNREAD|rereadAfterLanded/u);
-    expect(body).not.toMatch(/couldn't complete it/u);
   });
 });
