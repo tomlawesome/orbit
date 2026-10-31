@@ -2281,6 +2281,45 @@ runImportRecoveryBundle({
       expect(adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toBe(reportsFor(UPDATED_KEY, 22).crypto);
     });
 
+    // #1536 A-R1: the intent marker exists while the key is live and no checkpoint
+    // does, and neither a completed run nor a run that fails first leaves it.
+    it("a key-less import marks its key while it is live, and leaves no marker behind once it completes or fails", () => {
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+      const marker = (liveDocumentKekFile: string): string => `${liveDocumentKekFile}.import-no-key`;
+
+      const done = missingKeyTarget("marker-ok");
+      let markedAtConfirm = false;
+      runImportRecoveryBundle({
+        recoveryBundlePath,
+        passphrase,
+        liveDocumentKekFile: done.liveDocumentKekFile,
+        backupDirectory: done.backupDirectory,
+        adapter: done.adapter,
+        importConfirmed: true,
+        confirmRestore: () => {
+          markedAtConfirm = existsSync(marker(done.liveDocumentKekFile)) && existsSync(done.liveDocumentKekFile);
+          return true;
+        },
+      });
+      expect(markedAtConfirm, "the key was live before the marker was").toBe(true);
+      expect(existsSync(marker(done.liveDocumentKekFile))).toBe(false);
+
+      const failed = missingKeyTarget("marker-fail");
+      expect(() =>
+        runImportRecoveryBundle({
+          recoveryBundlePath,
+          passphrase,
+          liveDocumentKekFile: failed.liveDocumentKekFile,
+          backupDirectory: failed.backupDirectory,
+          adapter: failed.adapter,
+          importConfirmed: true,
+          confirmRestore: () => false,
+        }),
+      ).toThrow();
+      expect(existsSync(failed.liveDocumentKekFile)).toBe(false);
+      expect(existsSync(marker(failed.liveDocumentKekFile))).toBe(false);
+    });
+
     it("declining the import confirmation changes nothing: still no key, app never stopped", () => {
       const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
       const { liveDocumentKekFile, rollbackFile, backupDirectory, adapter } = missingKeyTarget("declined");
