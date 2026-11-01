@@ -10,7 +10,8 @@
 #
 #   carry-previous-release.sh --prepare
 #       BEFORE the image push. Looks the predecessor up, fetches its pair,
-#       verifies each fetched pair against cosign.pub
+#       verifies each fetched pair against cosign.pub, then against each
+#       retired key in cosign-retired/ beside it
 #       (scripts/ci/verify-release-manifest.sh) and stages them. Any failure
 #       fails the job before anything is published (#1607 review item 4).
 #
@@ -39,7 +40,30 @@
 # is read (#1607 review item 3): only a 404 on a by-job artifact file means
 # "that file is absent". A 401, a 403, a 5xx, a redirect, a listing that is
 # not JSON, a 404 on a listing or a curl transport error always fails,
-# naming the status and the URL (never the token).
+# naming the status and the URL (never the token). Every call carries
+# --max-filesize, so a runaway answer ends the call (curl exit 63) and fails.
+#
+# Three ways a stuck release recovers without a hand-started pipeline or a CI
+# variable: an ordinary push, a job retry, or waiting (#1607 note 48548).
+#
+#   Key rotation. A retired signing key is kept, public half only, beside
+#   cosign.pub as cosign-retired/<YYYY-MM-DD>.pub (the directory next to the key
+#   in use). A pair is verified against cosign.pub first, then each retired key in
+#   name order; the first pass wins and the log names the file. None passing
+#   fails naming every file tried.
+#
+#   Expired artifacts. record_image and sign_evidence keep their artifacts
+#   (expire_in: never), but a predecessor built before that has expiry dates. A
+#   404 on its manifest or signature, when the job listing gives an
+#   artifacts_expire_at, says the artifacts expired. The recovery is a committed,
+#   reviewed line in scripts/ci/carry-accepted-gap (format in that file): --prepare
+#   honours it only when the predecessor is that job on that ref and the failure
+#   was a 404 on its pair or a verification failure, and then treats the ref as
+#   a first release. An API error or a missing sign_evidence is never accepted.
+#
+#   Busy sign_evidence. The predecessor pipeline's newest sign_evidence job still
+#   in flight is polled (ORBIT_CARRY_POLL_SECONDS apart, default 30) for at most
+#   20 listings, then the carry fails saying so: wait and run this job again.
 #
 # The one pass-through is a ref's very first release: the whole job listing
 # (every page, up to the page cap) holds no successful record_image job on the
@@ -59,6 +83,12 @@
 #   CI_JOB_TOKEN       Sent as a JOB-TOKEN header read from a mode-600 temp
 #                      file (curl -H @file), so it is never in argv or the
 #                      log.
+# Optional:
+#   COSIGN_PUBLIC_KEY          The key in use, default cosign.pub in the
+#                              repository root; cosign-retired/ is read from
+#                              its directory.
+#   ORBIT_CARRY_POLL_SECONDS   Seconds between polls of a busy sign_evidence
+#                              job, default 30 (tests set 0).
 #
 # Needs curl and jq, plus what the verifier needs: openssl, and curl to fetch
 # the pinned cosign (scripts/ci/ensure-cosign.sh) unless ORBIT_COSIGN is set.
@@ -76,7 +106,10 @@ else
   echo "usage: $0 --prepare | <published-image-digest>" >&2
   exit 2
 fi
-verifier="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/verify-release-manifest.sh"
+script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+verifier="${script_dir}/verify-release-manifest.sh"
+# The committed break-glass file, always beside this script.
+gap_file="${script_dir}/carry-accepted-gap"
 
 dest=".orbit-supply-chain/previous"
 # Where --prepare leaves what the digest call needs. The name is fixed so the
@@ -88,6 +121,16 @@ sig_name="orbit-release-manifest.json.sig"
 # The job listing is walked 100 jobs a page, newest first, for at most 20 pages
 # (2000 jobs). Reaching the cap with no match fails, never reads as a first release.
 max_listing_pages=20
+# Size caps for curl --max-filesize, so a runaway answer ends the call rather
+# than filling the disk. An artifact is a manifest or a signature, a few KB, so
+# 1 MiB is far above any real one; a job listing page is up to 100 jobs of a few
+# KB each, so it gets more room.
+max_artifact_size="1M"
+max_listing_size="16M"
+# A sign_evidence job still in flight is polled at most 20 times (listings of
+# the pipeline's jobs), ORBIT_CARRY_POLL_SECONDS apart.
+max_evidence_polls=20
+poll_seconds="${ORBIT_CARRY_POLL_SECONDS:-30}"
 
 header_file=""
 keep_stage=""
@@ -146,6 +189,9 @@ fi
 for var in CI_API_V4_URL CI_PROJECT_ID CI_COMMIT_REF_NAME CI_JOB_ID CI_JOB_TOKEN; do
   [ -n "${!var:-}" ] || fail "$var is not set"
 done
+case "$poll_seconds" in
+  '' | *[!0-9]*) fail "ORBIT_CARRY_POLL_SECONDS must be a whole number of seconds, not '${poll_seconds}'" ;;
+esac
 
 # The token goes to curl through a header file made outside the working
 # directory, readable only by us, and removed on exit (trap above).
@@ -161,8 +207,9 @@ stage_abs="$(pwd -P)/$stage"
 ref="$(jq -rn --arg ref "$CI_COMMIT_REF_NAME" '$ref | @uri')"
 api="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}"
 
-# api_get <url> <body file> <header file>: one GET. Sets api_status to the HTTP
-# status; a curl transport error (no status) fails here, naming the URL.
+# api_get <url> <body file> <header file> <size limit>: one GET. Sets api_status
+# to the HTTP status; a curl transport error (no status) fails here, naming the
+# URL.
 api_get() {
   local rc=0
   # No --location: these URLs answer directly, and curl would send the
@@ -170,10 +217,15 @@ api_get() {
   # its single exit 22 would hide which status came back.
   api_status="$(curl --silent --show-error \
     --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 30 \
+    --max-filesize "$4" \
     -H "@${header_file}" \
     --dump-header "$3" --output "$2" --write-out '%{http_code}' \
     "$1")" || rc=$?
-  [ "$rc" -eq 0 ] || fail "GET $1 failed with a curl transport error (curl exit status ${rc}), so the answer is unknown"
+  case "$rc" in
+    0) ;;
+    63) fail "GET $1 answered more than the ${4} size limit (curl exit status 63), so the answer is not read" ;;
+    *) fail "GET $1 failed with a curl transport error (curl exit status ${rc}), so the answer is unknown" ;;
+  esac
 }
 
 # fail_status <url>: the API answered something other than what was needed.
@@ -185,30 +237,58 @@ fail_status() {
   fail "GET $1 answered HTTP ${api_status}${hint}"
 }
 
-# find_job <list url without paging> <job name> <ref or ""> <job id to skip or "">
+# list_page <list url> <page>: reads one page of a job listing (100 jobs) into
+# $stage/page.json and sets next_page to the number of the page after it, or to
+# "" on the last one.
+list_page() {
+  local sep="?" url
+  case "$1" in *\?*) sep="&" ;; esac
+  url="${1}${sep}per_page=100&page=$2"
+  api_get "$url" "$stage/page.json" "$stage/page.headers" "$max_listing_size"
+  [ "$api_status" = "200" ] || fail_status "$url"
+  jq -e 'type == "array"' "$stage/page.json" > /dev/null 2>&1 ||
+    fail "GET $url did not answer a JSON array of jobs"
+  next_page="$(tr -d '\r' < "$stage/page.headers" | awk -F': *' 'tolower($1) == "x-next-page" && $2 ~ /^[0-9]+$/ { n = $2 } END { print n }')"
+}
+
+# find_job <list url> <job name> <ref or ""> <job id to skip or "">
 # Walks the listing (X-Next-Page, newest first) and sets found_job to the first
 # successful job of that name (on that ref, other than that job id) as JSON, or
 # to "" when every page was read and there is none. Fails if the page cap is
 # reached first.
 find_job() {
-  local page=1 url next
+  local page=1
   found_job=""
   while :; do
-    url="$1&per_page=100&page=${page}"
-    api_get "$url" "$stage/page.json" "$stage/page.headers"
-    [ "$api_status" = "200" ] || fail_status "$url"
-    jq -e 'type == "array"' "$stage/page.json" > /dev/null 2>&1 ||
-      fail "GET $url did not answer a JSON array of jobs"
+    list_page "$1" "$page"
     # The ref filter is undocumented, so the ref is checked again here.
     found_job="$(jq -c --arg name "$2" --arg ref "$3" --arg skip "$4" \
       'first(.[] | select(.name == $name and .status == "success" and ($ref == "" or .ref == $ref) and (.id | tostring) != $skip)) // empty' \
       "$stage/page.json")"
     [ -z "$found_job" ] || return 0
-    next="$(tr -d '\r' < "$stage/page.headers" | awk -F': *' 'tolower($1) == "x-next-page" && $2 ~ /^[0-9]+$/ { n = $2 } END { print n }')"
-    [ -n "$next" ] || return 0
+    [ -n "$next_page" ] || return 0
     [ "$page" -lt "$max_listing_pages" ] ||
       fail "reached the page cap (${max_listing_pages} pages of 100 jobs) listing ${1} without finding a ${2} job, so this cannot be called a first release"
-    page="$next"
+    page="$next_page"
+  done
+}
+
+# find_newest_job <list url> <job name>: sets found_job to the job of that name
+# with the highest id, whatever its status, or to "" when no page has one. The
+# order of a pipeline's job list is not relied on, so every page is read.
+find_newest_job() {
+  local page=1 here
+  found_job=""
+  while :; do
+    list_page "$1" "$page"
+    here="$(jq -c --arg name "$2" '[.[] | select(.name == $name)] | max_by(.id) // empty' "$stage/page.json")"
+    if [ -n "$here" ]; then
+      found_job="$(jq -cn --argjson a "${found_job:-null}" --argjson b "$here" '[$a, $b] | map(select(. != null)) | max_by(.id)')"
+    fi
+    [ -n "$next_page" ] || return 0
+    [ "$page" -lt "$max_listing_pages" ] ||
+      fail "reached the page cap (${max_listing_pages} pages of 100 jobs) listing ${1}, so the newest ${2} job is unknown"
+    page="$next_page"
   done
 }
 
@@ -216,7 +296,7 @@ find_job() {
 # returns 0 once fetched and 1 when the file is absent (404); any other answer fails.
 fetch_artifact() {
   local url="${api}/jobs/$1/artifacts/.orbit-supply-chain/$2"
-  api_get "$url" "$3" "$stage/artifact.headers"
+  api_get "$url" "$3" "$stage/artifact.headers" "$max_artifact_size"
   case "$api_status" in
     200) return 0 ;;
     404)
@@ -227,13 +307,105 @@ fetch_artifact() {
   esac
 }
 
-# verify_pair <staged dir> <what>: against cosign.pub. The verifier cds to the
-# repository root, so it gets absolute paths. It never needs the job token, so
-# it never gets it.
-verify_pair() {
-  env -u CI_JOB_TOKEN bash "$verifier" "$stage_abs/$1/$manifest_name" "$stage_abs/$1/$sig_name" ||
-    fail "the ${2} manifest does not verify against cosign.pub (its manifest and signature may come from different builds)"
+# The break-glass file, scripts/ci/carry-accepted-gap: lines of
+# "<ref> <record_image job id> <reason>", # comments and blank lines allowed.
+# A malformed line fails --prepare naming it, before anything is fetched.
+gap_refs=()
+gap_jobs=()
+gap_reasons=()
+load_gap_file() {
+  local line trimmed g_ref g_job g_reason n=0
+  [ -f "$gap_file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    line="${line%$'\r'}"
+    trimmed="${line#"${line%%[![:space:]]*}"}"
+    case "$trimmed" in '' | '#'*) continue ;; esac
+    g_ref="" g_job="" g_reason=""
+    read -r g_ref g_job g_reason <<< "$trimmed" || true
+    if [ -z "$g_reason" ] || ! [[ "$g_job" =~ ^[0-9]+$ ]]; then
+      fail "scripts/ci/carry-accepted-gap line ${n} is malformed (want '<ref> <record_image job id> <reason>'): ${line}"
+    fi
+    gap_refs+=("$g_ref")
+    gap_jobs+=("$g_job")
+    gap_reasons+=("$g_reason")
+  done < "$gap_file"
 }
+
+# predecessor_failure <cause>: the predecessor's pair is gone (a 404) or does not
+# verify. Passes only for a committed carry-accepted-gap line naming this ref and
+# this record_image job: the carry then stages a first-release marker, so nothing
+# is carried and the digest call saves nothing. Every other line is logged as
+# stale and ignored. With no matching line, this is a failure like any other.
+# API errors and a missing sign_evidence never come through here.
+predecessor_failure() {
+  local i reason="" matched=""
+  if [ "${#gap_refs[@]}" -gt 0 ]; then
+    for i in "${!gap_refs[@]}"; do
+      if [ "${gap_refs[$i]}" = "$CI_COMMIT_REF_NAME" ] && [ "${gap_jobs[$i]}" = "$rec_job" ]; then
+        if [ -z "$matched" ]; then
+          matched=1
+          reason="${gap_reasons[$i]}"
+        fi
+      else
+        echo "carry-previous-release: ignoring stale line in carry-accepted-gap (${gap_refs[$i]} ${gap_jobs[$i]}): the build before this one on ${CI_COMMIT_REF_NAME} is record_image job ${rec_job}" >&2
+      fi
+    done
+  fi
+  [ -n "$matched" ] || fail "$1"
+  rm -rf -- "$stage/predecessor" "$stage/carried"
+  : > "$stage/first-release"
+  keep_stage=1
+  echo "carry-previous-release: gap accepted for record_image job ${rec_job} on ${CI_COMMIT_REF_NAME} (${reason}): ${1}; nothing carried"
+  exit 0
+}
+
+# absent_artifact <job kind> <job id> <file name> <artifacts_expire_at or "">:
+# the predecessor's file answered 404. A job listing that gave an expiry date
+# says why, and the way out.
+absent_artifact() {
+  local msg="job $1 $2 has no $3 artifact (HTTP 404 at ${api}/jobs/$2/artifacts/.orbit-supply-chain/$3)"
+  if [ -n "$4" ]; then
+    msg="${msg}: the job's artifacts had expiry $4 and have expired, so the build before this one is lost; to release anyway, add the line '${CI_COMMIT_REF_NAME} ${rec_job} <reason>' to scripts/ci/carry-accepted-gap, reviewed and pushed (docs/releasing.md)"
+  fi
+  predecessor_failure "$msg"
+}
+
+# The key in use, and the retired public keys beside it (cosign-retired/*.pub),
+# kept so builds signed before a rotation still verify. Name order.
+trust_key="${COSIGN_PUBLIC_KEY:-$(CDPATH='' cd -- "${script_dir}/../.." && pwd -P)/cosign.pub}"
+trust_keys=("$trust_key")
+trust_labels=("$(basename -- "$trust_key")")
+if [ -d "$(dirname -- "$trust_key")/cosign-retired" ]; then
+  while IFS= read -r retired; do
+    trust_keys+=("$retired")
+    trust_labels+=("cosign-retired/$(basename -- "$retired")")
+  done < <(find "$(dirname -- "$trust_key")/cosign-retired" -maxdepth 1 -type f -name '*.pub' | LC_ALL=C sort)
+fi
+
+# verify_pair <staged dir> <what>: against the key in use, then each retired
+# key, through the shared verifier; the first pass wins and the log names the
+# file. The verifier cds to the repository root, so it gets absolute paths. It
+# never needs the job token, so it never gets it. No key passing is a
+# predecessor_failure naming every file tried.
+verify_pair() {
+  local i tried=""
+  for i in "${!trust_keys[@]}"; do
+    if env -u CI_JOB_TOKEN COSIGN_PUBLIC_KEY="${trust_keys[$i]}" bash "$verifier" \
+      "$stage_abs/$1/$manifest_name" "$stage_abs/$1/$sig_name" > "$stage/verify.out" 2>&1; then
+      echo "carry-previous-release: the ${2} manifest verified against ${trust_labels[$i]}"
+      return 0
+    fi
+    sed "s|^|carry-previous-release: ${trust_labels[$i]}: |" "$stage/verify.out" >&2
+    tried="${tried:+${tried}, }${trust_labels[$i]}"
+  done
+  if [ "${#trust_keys[@]}" -eq 1 ]; then
+    predecessor_failure "the ${2} manifest does not verify against ${tried} (its manifest and signature may come from different builds)"
+  fi
+  predecessor_failure "the ${2} manifest does not verify against any trusted key (tried ${tried}; its manifest and signature may come from different builds)"
+}
+
+load_gap_file
 
 find_job "${api}/jobs?scope%5B%5D=success&ref=${ref}" record_image "$CI_COMMIT_REF_NAME" "$CI_JOB_ID"
 if [ -z "$found_job" ]; then
@@ -249,19 +421,41 @@ case "$ids" in
 esac
 rec_job="${ids% *}"
 rec_pipeline="${ids#* }"
+rec_expires="$(printf '%s' "$found_job" | jq -r '.artifacts_expire_at // empty')"
 
-# The signature belongs to the sign_evidence job of the same pipeline.
-find_job "${api}/pipelines/${rec_pipeline}/jobs?scope%5B%5D=success" sign_evidence "" ""
-[ -n "$found_job" ] ||
-  fail "pipeline ${rec_pipeline} (record_image job ${rec_job}, the build before this one on ${CI_COMMIT_REF_NAME}) has no successful sign_evidence job: retry its sign_evidence job, then run this job again"
+# The signature belongs to the sign_evidence job of the same pipeline: the
+# newest one (highest id), whatever its status, so one still in flight is seen.
+# In flight is waited for, a bounded number of polls; failed or canceled is not.
+polls=0
+while :; do
+  find_newest_job "${api}/pipelines/${rec_pipeline}/jobs" sign_evidence
+  polls=$((polls + 1))
+  where="pipeline ${rec_pipeline} (record_image job ${rec_job}, the build before this one on ${CI_COMMIT_REF_NAME})"
+  [ -n "$found_job" ] ||
+    fail "${where} has no successful sign_evidence job: retry its sign_evidence job, then run this job again"
+  sign_status="$(printf '%s' "$found_job" | jq -r '.status // ""')"
+  case "$sign_status" in
+    success) break ;;
+    created | pending | running | preparing | waiting_for_resource | scheduled)
+      [ "$polls" -lt "$max_evidence_polls" ] ||
+        fail "${where} has a sign_evidence job that is still running (status ${sign_status} after ${polls} polls ${poll_seconds}s apart): wait for it to finish, then run this job again"
+      sleep "$poll_seconds"
+      ;;
+    *)
+      fail "${where} has no successful sign_evidence job (its newest is ${sign_status:-of unknown status}): retry its sign_evidence job, then run this job again"
+      ;;
+  esac
+done
 sign_job="$(printf '%s' "$found_job" | jq -r '.id')"
+sign_expires="$(printf '%s' "$found_job" | jq -r '.artifacts_expire_at // empty')"
+[[ "$sign_job" =~ ^[0-9]+$ ]] || fail "the sign_evidence job found in pipeline ${rec_pipeline} has no readable job id"
 
 fetch_artifact "$rec_job" "$manifest_name" "$stage/predecessor/$manifest_name" ||
-  fail "job record_image ${rec_job} has no ${manifest_name} artifact (HTTP 404 at ${api}/jobs/${rec_job}/artifacts/.orbit-supply-chain/${manifest_name})"
+  absent_artifact record_image "$rec_job" "$manifest_name" "$rec_expires"
 digest_of "$stage/predecessor/$manifest_name" > /dev/null ||
   fail "the fetched manifest has no readable image digest"
 fetch_artifact "$sign_job" "$sig_name" "$stage/predecessor/$sig_name" ||
-  fail "job sign_evidence ${sign_job} has no ${sig_name} artifact (HTTP 404 at ${api}/jobs/${sign_job}/artifacts/.orbit-supply-chain/${sig_name})"
+  absent_artifact sign_evidence "$sign_job" "$sig_name" "$sign_expires"
 verify_pair predecessor "previous build's"
 
 # The predecessor's own carried pair, for a rebuild. Absent (404) means it has none.

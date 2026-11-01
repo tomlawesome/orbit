@@ -215,11 +215,32 @@ rebuilding that image and re-pinning. The pin is the digest from base-image's
 `publish_signing` run (first published 2026-10-10).
 
 **Key rotation:** generate a new pair, replace the two files on the runner
-host, commit the new `cosign.pub`, then re-sign the manifest that `latest`
+host, commit the new `cosign.pub` (and keep the old public key, see the next
+paragraph), then re-sign the manifest that `latest`
 points at with the new key and replace its `.sig` asset. Until that third
 step is done the one-line installer refuses every install and update: the
 `get-orbit.sh` on `main` carries only the committed key, and nothing re-signs
 a published manifest by itself (signing only runs inside a release pipeline).
+Keep the old public key as a retired key, in the same commit as the new
+`cosign.pub`, so no commit exists where the release carry cannot verify its
+predecessor (the build before it was signed with the old key):
+
+```sh
+mkdir -p cosign-retired
+git mv cosign.pub cosign-retired/YYYY-MM-DD.pub   # the day of the rotation
+cp /path/to/new/cosign.pub cosign.pub
+git add cosign.pub
+```
+
+`scripts/ci/carry-previous-release.sh` verifies a predecessor's pair against
+`cosign.pub` first, then against each file in `cosign-retired/` in name order,
+and the log names the file that verified. A retired key is a public key: keep
+it. Delete one only if it is compromised; the next release on each ref then
+fails verification and needs an entry in `scripts/ci/carry-accepted-gap` (see
+"Carrying the previous build's manifest" below). Nothing else reads
+`cosign-retired/`: `get-orbit.sh` and the release checks verify the re-signed
+`latest`, not old builds.
+
 Re-sign on the runner host in three steps, with `vX.Y.Z` the current `latest`
 release. Only `gitlab-signer` can read the key, but it has no login shell and
 no GitHub credential (giving it one would undo the isolation above), so you
@@ -284,6 +305,11 @@ job and its signature from the `sign_evidence` job of the same pipeline, both
 by job id, so the two always belong to one build. On a rebuild of the digest
 being pushed, the predecessor's own `previous/` pair is carried instead.
 
+`record_image` and `sign_evidence` keep their artifacts for ever
+(`expire_in: never`, a few KB per release), so the next release can always
+read them. A stuck preview or hotfix release recovers by an ordinary push, a
+job retry or waiting, never by a hand-started pipeline or a CI variable.
+
 A ref's first release is recognised automatically: when the whole job list
 holds no successful `record_image` job on the ref, the carry logs `first
 release, nothing carried`, saves nothing and passes. No variable or setting is
@@ -292,18 +318,43 @@ fails instead, and is never read as a first release.
 
 When it fails, the message names the cause:
 
-- The predecessor's pipeline has no successful `sign_evidence` job: retry that
-  pipeline's `sign_evidence` job, then run the failed job again. The carry does
-  not fall back to an older build.
+- The predecessor's pipeline has a `sign_evidence` job (the newest one counts)
+  that is still running, pending or otherwise in flight: the carry polls
+  every 30 seconds (`ORBIT_CARRY_POLL_SECONDS`) for 20 polls, then fails
+  saying it is still running. Wait for that job to finish, then run the failed
+  job again.
+- The newest `sign_evidence` job of the predecessor's pipeline failed or was
+  canceled: retry that job, then run the failed job again. The carry does not
+  fall back to an older build.
+- The predecessor's pipeline has no `sign_evidence` job at all: retry that
+  pipeline's `sign_evidence` job if it can be, then run the failed job again;
+  the carry does not fall back to an older build.
+- The predecessor's manifest or signature answered 404 and the message says the
+  job's artifacts had an expiry date and have expired (a build made before
+  `expire_in: never`): the build before this one is lost. Add a line to
+  `scripts/ci/carry-accepted-gap`, commit it through the normal review and push:
+  `<ref> <record_image job id> <reason>`, for example
+  `preview 123456 artifacts of the pre-#1607 build expired`. The failure message
+  names the ref and job id. The carry honours the line only when the
+  predecessor it found is that job on that ref, and the failure was a 404 on its
+  pair or a verification failure; it then logs `gap accepted for record_image
+  job N on <ref> (<reason>)`, carries nothing and treats the ref as a first
+  release. A line for another job or ref is logged as stale and ignored, a
+  malformed line fails the job naming it, and an API error or a missing
+  `sign_evidence` job is never accepted. Remove the entry once the next release
+  on the ref has landed. The owner may also press Keep on the artifacts of the
+  one predecessor built before this change, which makes the entry unnecessary.
 - HTTP 401 or 403 on an API call: check that the job token's allowlist
   includes this project with read jobs.
 - Any other HTTP status (a 5xx, or a 404 on a job list), a job list that is
   not JSON or a transport error: the carry could not ask, which is not the
   same as nothing being there. The message names the status and URL. Run the
   job again once the API answers.
-- The manifest and signature do not verify against `cosign.pub`, or a
-  manifest has no readable image digest: the predecessor's artifacts are bad
-  and need the owner.
+- The manifest and signature verify against neither `cosign.pub` nor any key in
+  `cosign-retired/` (the message names every file tried), or a manifest has no
+  readable image digest: the predecessor's artifacts are bad and need the owner;
+  the recovery is the `scripts/ci/carry-accepted-gap` entry above, for a
+  verification failure too.
 - A re-run of an already-published digest whose build carried no `previous/`
   pair fails after the push.
 

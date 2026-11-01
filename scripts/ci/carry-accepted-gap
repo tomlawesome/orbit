@@ -1,0 +1,25 @@
+# Break-glass entries for scripts/ci/carry-previous-release.sh (#1607 note 48548).
+#
+# When a ref's previous release can no longer be carried (its artifacts expired,
+# or its signing key was deleted), the next release fails. Add one line here,
+# commit it and have it reviewed like any other change; the push is the recovery.
+#
+# Line format, fields split on spaces; blank lines and lines starting with # are
+# ignored:
+#
+#   <ref> <record_image job id> <reason>
+#
+#   <ref>                 the branch being released (preview, hotfix/x.y)
+#   <record_image job id> the id of the predecessor's record_image job, as the
+#                         failed job's message names it
+#   <reason>              the rest of the line; required, logged on acceptance
+#
+# Rule: --prepare honours a line only when the predecessor it found is that job
+# on that ref, and the failure was a 404 on that build's manifest or signature or
+# a signature that verifies against no trusted key. It then logs
+# "gap accepted for record_image job N on <ref> (<reason>)" and treats the ref as
+# a first release: nothing is carried. A line for another job or ref is logged as
+# stale and ignored; a malformed line fails --prepare naming it. An API error and
+# a missing sign_evidence job are never accepted.
+#
+# Remove the line once the next release on the ref has landed.
