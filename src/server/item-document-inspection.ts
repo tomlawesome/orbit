@@ -60,7 +60,8 @@ export interface ItemDocumentInspectionResult {
   suggestions: ItemDocumentSuggestion[];
   message?: string;
   attachmentDisposition: "attachable" | "rejected";
-  reason: DocumentStructureReason;
+  /** The API's three values. A check that reached no verdict is not one of them: it throws 503 `document_check_unavailable` (#1593). */
+  reason: Exclude<DocumentStructureReason, "structure_check_unavailable">;
 }
 
 const allowedSuggestionFields = new Set<ItemDocumentSuggestionField>(itemDocumentSuggestionFields);
@@ -176,7 +177,19 @@ export async function inspectItemDocument(input: {
     }
     const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
     try {
-      const structureReason = await classifyDocumentStructure(bytes, mediaType);
+      const structureReason = await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
+      if (structureReason === "structure_check_unavailable") {
+        // The sandbox reached no verdict (#1593): a busy host, not a bad file.
+        // The member is told only to try again; the real reason is logged.
+        log.warn({
+          event: "document.inspection",
+          state: "degraded",
+          reason: structureReason,
+          action: "inspect_admin_diagnostics",
+          impact: "document_processing_blocked",
+        });
+        throw new AppError("document_check_unavailable", "The file couldn't be uploaded. Please try again.", 503);
+      }
       if (structureReason !== "supported_structure") {
         log.info({
           event: "document.inspection",
@@ -190,7 +203,7 @@ export async function inspectItemDocument(input: {
           message: structureReason === "password_required" ? passwordRequiredMessage : unsupportedStructureMessage,
           suggestions: [],
           attachmentDisposition: "rejected",
-          reason: structureReason,
+          reason: structureReason === "password_required" ? structureReason : "unsupported_structure",
         };
       }
       log.info({ event: "document.inspection", state: "ready", reason: "supported_structure", action: "none" });

@@ -286,7 +286,9 @@ build and the non-browser journeys. The seven run in full:
   Monday. That pipeline holds only `classify`, `fast`, `build_image` and the
   seven, plus `nightly_report`. It does nothing when `dev` has not moved since the
   last nightly run (`classify` asks `scripts/ci/nightly-browsers.mjs`; the
-  jobs stop on the `nightly_idle` lane), and it yields when a pipeline on
+  jobs stop on the `nightly_idle` lane; a night that yielded or sat idle is
+  not the last run, so the commit is still tested the next night), and it
+  yields when a pipeline on
   `preview` or `main` is running or pending (the `nightly_yield` lane, #1546:
   two heavy pipelines on the one runner double each other's time, and the
   promotion is the one that matters). Other schedules on `dev` do not set the

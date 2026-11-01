@@ -182,6 +182,11 @@
             {#if unreadable(receipt)}
               <div class="twotap" style="margin-top:10px">{unreadable(receipt)}</div>
             {/if}
+            <!-- #1568: a retryable suggestion (an interrupted approval) says
+                 what happened and what to do, in the server's own words. -->
+            {#if receipt.classification === "retry"}
+              <div class="twotap" style="margin-top:10px">{receipt.message}</div>
+            {/if}
             <div class="actions">
               <button class="yes" disabled={busy === receipt.id || locked(receipt)} onclick={(event) => tap(receipt, "approve", event.currentTarget)}>
                 {isArmed(receipt, "approve") ? "tap again to approve" : "Add to orbit"}
@@ -228,6 +233,11 @@
             <div class="body">
               <b>A message from {dayMonth(failure.receivedAt)}</b>
               <span>{unreadable(failure) ?? `${reasonWords(failure.reason)} · ${failure.message}`}</span>
+              <!-- decide()'s line for this entry: a refused remove, or done-but-unread
+                   when only the read after a landed remove failed (inbox/acts.js). -->
+              {#if problem && problemId === failure.id}
+                <div class="mail-problem">{problem}</div>
+              {/if}
             </div>
             {#if failure.canDiscard}
               <button disabled={busy === failure.id} onclick={(event) => tap(failure, "dismiss", event.currentTarget)}>

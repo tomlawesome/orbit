@@ -16,14 +16,19 @@
 // otherwise, the namespace is a hash of the package list, and packages are
 // sorted.
 //
+// The page's finished library list is made here too (#1575): `libraries.json`
+// beside the SBOM, exactly librariesOf(document), so the server reads a ready
+// list instead of grouping the SBOM on its first visit. Same determinism rule.
+//
 // Usage: node scripts/about-sbom.mjs [output] [--root dir]
-//   default output: web/static/about/sbom.spdx.json
+//   default output: web/static/about/sbom.spdx.json (libraries.json beside it)
 
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { librariesOf } from "../web/src/lib/about/group.js";
 import { collectShippedIdentities, discoverInstalledPackages } from "./ci/licence-policy.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -77,6 +82,24 @@ export function spdxDocumentOf(packages, { created = "1970-01-01T00:00:00Z" } = 
   };
 }
 
+/**
+ * Writes the SPDX document to `output` and the page's library list to
+ * `libraries.json` in the same directory, both as 2-space JSON plus a newline.
+ *
+ * @param {Parameters<typeof spdxDocumentOf>[0]} packages
+ * @param {string} output
+ * @param {{ created?: string }} [options]
+ * @returns {import("../web/src/lib/about/group.js").Library[] | null}
+ */
+export function writeAboutFiles(packages, output, options) {
+  const document = spdxDocumentOf(packages, options);
+  const libraries = librariesOf(document);
+  mkdirSync(dirname(output), { recursive: true });
+  writeFileSync(output, `${JSON.stringify(document, null, 2)}\n`);
+  writeFileSync(join(dirname(output), "libraries.json"), `${JSON.stringify(libraries, null, 2)}\n`);
+  return libraries;
+}
+
 function main() {
   const argv = process.argv.slice(2);
   let output = "web/static/about/sbom.spdx.json";
@@ -95,10 +118,8 @@ function main() {
   const created = Number.isFinite(epoch) && epoch > 0
     ? new Date(epoch * 1000).toISOString().replace(/\.\d{3}Z$/, "Z")
     : undefined;
-  const document = spdxDocumentOf(packages, { created });
-  mkdirSync(dirname(output), { recursive: true });
-  writeFileSync(output, `${JSON.stringify(document, null, 2)}\n`);
-  console.log(`about-sbom: ${document.packages.length} shipped package(s) written to ${output}`);
+  const libraries = writeAboutFiles(packages, output, { created });
+  console.log(`about-sbom: ${libraries?.length ?? 0} shipped package(s) written to ${output} (and libraries.json beside it)`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main();

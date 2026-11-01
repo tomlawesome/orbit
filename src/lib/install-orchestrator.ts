@@ -271,26 +271,40 @@ function stageSecretsDirectoryTree(transaction: InstallTransaction, sourceDir: s
 }
 
 /**
- * The persisted image line (guarantees #53-54): the resolved digest at the
+ * The persisted image lines (guarantees #53-54): the resolved digest at the
  * first ORBIT_IMAGE line, every later duplicate dropped, appended when
- * absent; written through the transaction, never in place.
+ * absent; and the same for ORBIT_PREVIOUS_IMAGE when a previous image is
+ * given, every occurrence dropped when it is not. Written through the
+ * transaction, never in place.
  */
-function withResolvedImage(content: string, resolvedReference: string): string {
-  const line = `ORBIT_IMAGE=${resolvedReference}`;
+function withResolvedImage(
+  content: string,
+  resolvedReference: string,
+  // The image orbit-app runs now, kept beside the new one so the next run can tell a committed update that stopped before compose up from a foreign deployment.
+  previousImage: string | undefined,
+): string {
+  const replacements: [prefix: string, line: string | undefined][] = [
+    ["ORBIT_IMAGE=", `ORBIT_IMAGE=${resolvedReference}`],
+    ["ORBIT_PREVIOUS_IMAGE=", previousImage === undefined ? undefined : `ORBIT_PREVIOUS_IMAGE=${previousImage}`],
+  ];
   const lines = content.split("\n");
   const trailingNewline = content.endsWith("\n");
   if (trailingNewline) lines.pop();
-  let written = false;
+  const written = new Set<string>();
   const rewritten: string[] = [];
   for (const existing of lines) {
-    if (existing.startsWith("ORBIT_IMAGE=")) {
-      if (!written) rewritten.push(line);
-      written = true;
-    } else {
+    const replacement = replacements.find(([prefix]) => existing.startsWith(prefix));
+    if (replacement === undefined) {
       rewritten.push(existing);
+      continue;
     }
+    const [prefix, line] = replacement;
+    if (line !== undefined && !written.has(prefix)) rewritten.push(line);
+    written.add(prefix);
   }
-  if (!written) rewritten.push(line);
+  for (const [prefix, line] of replacements) {
+    if (line !== undefined && !written.has(prefix)) rewritten.push(line);
+  }
   return `${rewritten.join("\n")}\n`;
 }
 
@@ -418,10 +432,12 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       volumeState,
       readPostgresPasswordFacts(context.targetDir),
       hostFactsVolumeAdapter(context.facts),
+      [context.facts.targetFolder, context.facts.targetFolderLogical].filter((folder): folder is string => folder !== undefined),
     );
   } catch (error) {
     if (!(error instanceof DatabaseVolumeSafetyRefusal) && !(error instanceof ComposeProjectNameRefusal)) throw error;
-    return fail("host", "host", error.message);
+    // #1570: a refusal whose cause no retry can change carries its own next action.
+    return fail("host", "host", error.message, undefined, error instanceof DatabaseVolumeSafetyRefusal ? error.action : undefined);
   }
 
   // The existing optional-service profile (guarantee #23), then the wizard
@@ -819,7 +835,15 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
 
       // The resolved digest, persisted through the transaction (#53-54).
       try {
-        transaction.writeStagedFile(ENVIRONMENT_FILE, withResolvedImage(readFileSync(environmentFile, "utf8"), context.resolvedReference), 0o600);
+        transaction.writeStagedFile(
+          ENVIRONMENT_FILE,
+          withResolvedImage(
+            readFileSync(environmentFile, "utf8"),
+            context.resolvedReference,
+            volumeState.databaseVolumeSeen ? volumeState.attachedAppImage : undefined,
+          ),
+          0o600,
+        );
         transaction.commitMove(ENVIRONMENT_FILE, "file");
       } catch (error) {
         if (!(error instanceof Error)) throw error;

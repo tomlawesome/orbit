@@ -109,7 +109,8 @@ const SCRIPT_FILES = {
   "scripts/ci/setup-runner.sh": "#!/bin/sh\necho runner\n",
   "scripts/ci/start-acceptance-stack.sh": "#!/bin/sh\nexec scripts/ci/lib/wait.sh \"$@\"\n",
   "scripts/ci/lib/wait.sh": "#!/bin/sh\necho waiting\n",
-  "scripts/ci/lib/probe.mjs": "console.log('probe');\n",
+  // The first line names a script in prose only (D-F12): a comment is not a call.
+  "scripts/ci/lib/probe.mjs": "// see scripts/ci/lib/mentioned.mjs for the probe's contract\nconsole.log('probe');\n",
 };
 
 // A readFile stub backed by an object map; a path outside the map throws, as a
@@ -394,6 +395,7 @@ describe("the per-job definition axis", () => {
     entry("scripts/ci/lib/wait.sh", "a7"),
     entry("scripts/ci/lib/probe.mjs", "a8"),
     entry("scripts/ci/unrelated.sh", "a9"),
+    entry("scripts/ci/lib/mentioned.mjs", "b1"),
   ];
 
   const withSha = (tree, path, sha) => tree.map((file) => (file.path === path ? entry(path, sha) : file));
@@ -522,6 +524,16 @@ describe("the per-job definition axis", () => {
     // per-job text is what counts, so nothing moves.
     const before = keys(FIXTURE);
     expectMoved(before, keys(FIXTURE, withSha(baseTree, ".gitlab-ci.yml", "zz")), []);
+  });
+
+  // D-F12 (F5): probe.mjs is a leaf smoke's YAML names, and its first line
+  // mentions mentioned.mjs in a comment only.
+  it("moves no key when a script named only in a comment of a reached script moves", () => {
+    const before = keys(FIXTURE);
+    expectMoved(before, keys(FIXTURE, withSha(baseTree, "scripts/ci/lib/mentioned.mjs", "zz")), []);
+    // A script the walk really reaches (exec'd by start-acceptance-stack.sh) still moves smoke.
+    const real = keys(FIXTURE, withSha(baseTree, "scripts/ci/lib/wait.sh", "zz"));
+    expect(source(real, "smoke"), "smoke ignored a script a reached script calls").not.toBe(source(before, "smoke"));
   });
 
   describe("without options", () => {
@@ -859,5 +871,203 @@ describe("a scripts/ci path at the end of a sentence", () => {
     expect(definition.scripts).toEqual(["scripts/ci/common-setup.sh", "scripts/ci/x.sh"]);
     expect(definition.references).toContain("scripts/ci/x.sh");
     expect(definition.references).not.toContain("scripts/ci/x.sh.");
+  });
+});
+
+// D-F12 (#1584): the walk reads the code lines of a followed file, not its
+// comments. A path in prose is not a call.
+describe("definitionScripts: comment lines are prose", () => {
+  const sorted = (paths) => [...paths].sort();
+
+  it("does not follow a path named only in a comment line", () => {
+    const files = {
+      "scripts/ci/a.sh": "#!/bin/sh\n# see scripts/ci/prose-sh.sh\nexec scripts/ci/real.sh\n",
+      "scripts/ci/real.sh": "node scripts/ci/tool.mjs\n",
+      "scripts/ci/tool.mjs": [
+        "// scripts/ci/prose-slash.mjs",
+        "/* scripts/ci/prose-block.mjs */",
+        " * scripts/ci/prose-star.mjs",
+        "console.log(1);",
+        "",
+      ].join("\n"),
+      "compose/overlay.yml": '# scripts/ci/prose-yaml.sh\nservices:\n  app:\n    command: ["scripts/ci/z.sh"]\n',
+      "scripts/ci/z.sh": "echo z\n",
+    };
+    const result = definitionScripts(["scripts/ci/a.sh", "compose/overlay.yml"], reader(files));
+    expect(result).toEqual(sorted(["scripts/ci/a.sh", "scripts/ci/real.sh", "scripts/ci/tool.mjs", "scripts/ci/z.sh"]));
+    expect(result.filter((path) => path.includes("prose-"))).toEqual([]);
+  });
+
+  it("follows a path on a code line, with or without a trailing comment", () => {
+    const files = {
+      "scripts/ci/start.sh": [
+        "node scripts/ci/x.mjs # why",
+        "source scripts/ci/y.sh",
+        "case $1 in",
+        "  *) scripts/ci/arm.sh ;;",
+        "esac",
+        "/* a block comment",
+        "   that ends here */",
+        "*/ scripts/ci/after.sh",
+        "",
+      ].join("\n"),
+    };
+    const result = definitionScripts(["scripts/ci/start.sh"], reader(files));
+    for (const name of ["x.mjs", "y.sh", "arm.sh", "after.sh"]) {
+      expect(result, `${name} is on a code line`).toContain(`scripts/ci/${name}`);
+    }
+  });
+
+  it("keeps a shellcheck source directive", () => {
+    const files = {
+      "scripts/ci/g.sh": [
+        "# shellcheck source=scripts/ci/env.sh",
+        '. "${dir}/env.sh"',
+        "# scripts/ci/other.sh does the rest",
+        "",
+      ].join("\n"),
+    };
+    expect(definitionScripts(["scripts/ci/g.sh"], reader(files))).toContain("scripts/ci/env.sh");
+  });
+
+  it("drops a plain comment beside a shellcheck source directive", () => {
+    const files = {
+      "scripts/ci/g.sh": [
+        "# shellcheck source=scripts/ci/env.sh",
+        '. "${dir}/env.sh"',
+        "# scripts/ci/other.sh does the rest",
+        "",
+      ].join("\n"),
+    };
+    expect(definitionScripts(["scripts/ci/g.sh"], reader(files))).not.toContain("scripts/ci/other.sh");
+  });
+});
+
+// A token is a file name only when the text after it does not run on into a
+// directory, a glob or a template. The stems below are what a regex that stops
+// at the last name character leaves behind (`scripts/ci/lib/` as
+// `scripts/ci/lib`, `scripts/ci/verify-*.sh` as `scripts/ci/verify-`).
+describe("a directory, a glob or a template is not a script", () => {
+  const sorted = (paths) => [...paths].sort();
+
+  it("follows no directory or glob out of a script", () => {
+    const files = {
+      "scripts/ci/a.sh": 'ls scripts/ci/lib/ && for f in scripts/ci/verify-*.sh; do "$f"; done && scripts/ci/real.sh\n',
+      "scripts/ci/real.sh": "echo real\n",
+    };
+    const result = definitionScripts(["scripts/ci/a.sh"], reader(files));
+    expect(result).not.toContain("scripts/ci/lib");
+    expect(result).not.toContain("scripts/ci/verify-");
+    expect(result).toEqual(["scripts/ci/a.sh", "scripts/ci/real.sh"]);
+  });
+
+  it("records neither a directory nor a glob from the pipeline text", () => {
+    const yaml = [
+      "stages:",
+      "  - test",
+      "",
+      "fast:",
+      "  stage: test",
+      "  rules:",
+      "    - changes:",
+      "        - scripts/ci/lib/**",
+      "  script:",
+      "    - ls scripts/ci/lib/",
+      "    - scripts/ci/verify-*.sh",
+      "    - scripts/ci/real.sh",
+      "",
+    ].join("\n");
+    // `scripts` and `references` are both what the walk starts from.
+    const { scripts, references } = jobDefinition(yaml, "fast");
+    expect(scripts).toEqual(["scripts/ci/real.sh"]);
+    expect(references.filter((path) => path.startsWith("scripts/ci/"))).toEqual(["scripts/ci/real.sh"]);
+  });
+
+  it("records no stem of a template, a brace list or a pattern", () => {
+    const files = {
+      "scripts/ci/a.sh": [
+        'scripts/ci/verify-${kind}.sh "$1"',
+        "scripts/ci/verify-{a,b}.sh",
+        "scripts/ci/verify-?.sh",
+        "scripts/ci/verify-[ab].sh",
+        'echo "scripts/ci/tool.${ext}"',
+        "scripts/ci/real.sh",
+        "",
+      ].join("\n"),
+      "scripts/ci/real.sh": "echo real\n",
+    };
+    const result = definitionScripts(["scripts/ci/a.sh"], reader(files));
+    expect(result).not.toContain("scripts/ci/verify-");
+    expect(result).not.toContain("scripts/ci/tool");
+    expect(result).toEqual(["scripts/ci/a.sh", "scripts/ci/real.sh"]);
+  });
+
+  it("keeps a whole path whatever follows it, and a directory segment inside a path", () => {
+    const files = {
+      "scripts/ci/a.sh": [
+        "echo see scripts/ci/dot.sh.",
+        'run "scripts/ci/quoted.sh"',
+        "scripts/ci/semi.sh; scripts/ci/comma.sh, (scripts/ci/paren.sh) scripts/ci/colon.sh: scripts/ci/pipe.sh | cat",
+        'x="${V:-${root}/scripts/ci/brace.sh}"',
+        "scripts/ci/lib/deep.sh",
+        "scripts/ci/lib/.hidden.sh",
+        "run scripts/ci/eol.sh",
+      ].join("\n"),
+    };
+    const wanted = [
+      "dot.sh",
+      "quoted.sh",
+      "semi.sh",
+      "comma.sh",
+      "paren.sh",
+      "colon.sh",
+      "pipe.sh",
+      "brace.sh",
+      "lib/deep.sh",
+      "lib/.hidden.sh",
+      "eol.sh",
+    ].map((name) => `scripts/ci/${name}`);
+    const result = definitionScripts(["scripts/ci/a.sh"], reader(files));
+    expect(result).toEqual(sorted(["scripts/ci/a.sh", ...wanted]));
+    expect(result).not.toContain("scripts/ci/dot.sh.");
+  });
+
+  describe("in a job's key", () => {
+    const entry = (path, sha) => ({ type: "blob", path, sha });
+    const DENY = [".gitlab-ci.yml", "scripts/ci/**"];
+    const config = {
+      ...readConfig(),
+      definition: ["scripts/ci/job-inputs.json", "scripts/ci/reuse-gate.sh"],
+      jobs: { fast: { deny: DENY }, smoke: { deny: DENY }, acceptance: { deny: DENY } },
+    };
+    const JOBS = ["fast", "smoke", "acceptance"];
+    const tree = [
+      entry(".gitlab-ci.yml", "a0"),
+      entry("scripts/ci/job-inputs.json", "a2"),
+      entry("scripts/ci/reuse-gate.sh", "a3"),
+      entry("scripts/ci/common-setup.sh", "a4"),
+      entry("scripts/ci/setup-runner.sh", "a5"),
+      entry("scripts/ci/start-acceptance-stack.sh", "a6"),
+      entry("scripts/ci/lib/wait.sh", "a7"),
+      entry("scripts/ci/lib/probe.mjs", "a8"),
+    ];
+    // smoke reaches lib/wait.sh through start-acceptance-stack.sh.
+    const files = {
+      ...SCRIPT_FILES,
+      "scripts/ci/lib/wait.sh": "ls scripts/ci/lib/\nfor f in scripts/ci/verify-*.sh; do :; done\n",
+    };
+    const keys = (entries) => computeKeys(config, entries, { ciText: FIXTURE, readFile: reader(files) });
+
+    it("does not move when a blob named like the directory or the glob stem arrives", () => {
+      const before = keys(tree);
+      const after = keys([...tree, entry("scripts/ci/lib", "c1"), entry("scripts/ci/verify-", "c2")]);
+      for (const job of JOBS) expect(after.get(job).source, `${job} moved`).toBe(before.get(job).source);
+    });
+
+    it("does move smoke when a script it really reaches changes (the walk reaches it)", () => {
+      const before = keys(tree);
+      const after = keys(tree.map((file) => (file.path === "scripts/ci/lib/wait.sh" ? entry(file.path, "d7") : file)));
+      expect(after.get("smoke").source).not.toBe(before.get("smoke").source);
+    });
   });
 });

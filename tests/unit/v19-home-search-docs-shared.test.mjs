@@ -33,7 +33,7 @@ describe("#1151 W1-Q8: one shared loadSearchDocuments helper", () => {
     expect(POCKET).toMatch(/\bacts\.loadSearchDocuments\(lit\)/u);
     const start = ACTS.indexOf("async function loadSearchDocuments(");
     const fn = ACTS.slice(start, start + 900);
-    expect(fn).toMatch(/await readSearchDocuments\(\s*\n\s*carrying, readItemDocuments, householdId, \(\) => searchDocumentsFor !== household,\s*\n\s*\);/u);
+    expect(fn).toMatch(/await readSearchDocuments\(\s*\n\s*carrying, readItemDocuments, householdId, \(\) => searchDocumentsFor !== household,[^\n]*\n\s*\);/u);
     expect(fn).not.toMatch(/Promise\.all/u);
     expect(fn).not.toMatch(/async function worker\(\)/u);
   });

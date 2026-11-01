@@ -5,24 +5,24 @@
  * The order is the fail-closed one ADR-0010 fixes and must not be rearranged.
  * The claim takes a ten-minute lease and a fresh lease token; every later
  * write re-checks that token and the document generation. The staged
- * ciphertext is decrypted under the `scanner_recovery` purpose, written to
- * quarantine, scanned, and the quarantine copy discarded before anything
- * else. Only a `clean` result reaches the structure check (ADR-0033: nothing
+ * ciphertext is decrypted under the `scanner_recovery` purpose into a
+ * quarantine file, its tag verified before the scanner reads it, and scanned.
+ * Only a `clean` result reaches the structure check (ADR-0033: nothing
  * opened the staged bytes before this scan), and only a file that passes it
- * reaches encryption, a ciphertext write and the publish transaction; a
- * retryable outage reschedules the job, and every other outcome ends the
- * recovery terminally with the stage purged.
+ * is sealed from that file and reaches the publish transaction; a
+ * retryable outage of the scanner or of the open check reschedules the job,
+ * and every other outcome ends the recovery terminally with the stage purged.
  */
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
-import { openDocumentStorage } from "@/server/documents/storage";
-import { decryptDocument, encryptDocument, envelopeOf } from "@/server/documents/crypto";
+import { openDocumentStorage, releaseBuffer } from "@/server/documents/storage";
+import { createDocumentSealer, createDocumentUnsealer, DocumentIntegrityError, envelopeOf } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
-import { validateSupportedDocumentStructure, type SupportedDocumentMediaType } from "@/server/documents/validation";
+import { classifyDocumentStructure, type DocumentStructureReason, type SupportedDocumentMediaType } from "@/server/documents/validation";
 import {
   isScannerRecoveryExpired,
   scannerRecoveryDelayMs,
@@ -154,6 +154,25 @@ export async function failScannerRecoveryJob(job: ClaimedScanJob, failureCode: s
   });
 }
 
+/**
+ * The structure check's one copy of the file, kept in this frame only: it is
+ * zeroed and freed when the check answers, so the seal that follows never runs
+ * with it held (as the upload's own check does).
+ */
+async function checkRecoveredStructure(
+  storage: ReturnType<typeof openDocumentStorage>,
+  quarantinePath: string,
+  sizeBytes: number,
+  mediaType: SupportedDocumentMediaType,
+): Promise<DocumentStructureReason> {
+  const bytes = await storage.readQuarantine(quarantinePath, DOCUMENT_MAX_BYTES_CEILING);
+  try {
+    return await classifyDocumentStructure(bytes, mediaType, { path: quarantinePath, sizeBytes });
+  } finally {
+    releaseBuffer(bytes);
+  }
+}
+
 export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<void> {
   const config = getDocumentConfig();
   const storage = openDocumentStorage(config);
@@ -171,32 +190,37 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
     return;
   }
 
-  let ciphertext: Buffer | undefined;
-  let plaintext: Buffer | undefined;
   let quarantinePath: string | undefined;
   let finalStorageKey: string | undefined;
   let availabilityFinalized = false;
   try {
-    // Staged under whatever limit applied when it was uploaded, so it is read
-    // against the hard ceiling: lowering the limit (#1285) must not strand it.
-    ciphertext = await storage.readStagingCiphertext(record.stagingStorageKey, DOCUMENT_MAX_BYTES_CEILING);
     // Picks by the staged object's own key_id (#954): held staging objects
     // outlive a poll cycle (up to `scanRecoveryRetentionHours`), long enough
     // to span a rotation window.
     const stagingKek = keyEncryptionKeyFor(config, record.keyId);
     if (!stagingKek) throw new StagingKeyNotHeldError();
-    plaintext = decryptDocument(ciphertext!, {
+    const context = {
       documentId: job.documentId,
       householdId: record.householdId,
       itemId: record.itemId,
       mediaType: record.mediaType,
       plaintextSize: record.sizeBytes,
-      purpose: "scanner_recovery",
-    }, envelopeOf(record), stagingKek);
-    quarantinePath = await storage.writeQuarantineBytes(job.documentId, plaintext);
+    };
+    const unsealer = createDocumentUnsealer({ ...context, purpose: "scanner_recovery" }, envelopeOf(record), stagingKek);
+    // The tag is verified before this returns a path, so the scanner never
+    // reads unauthenticated bytes.
+    const recovered = await storage.unsealToQuarantine(
+      { kind: "staging", storageKey: record.stagingStorageKey },
+      job.documentId,
+      { ciphertextSize: record.ciphertextSize, plaintextSize: record.sizeBytes },
+      unsealer,
+    );
+    quarantinePath = recovered.quarantinePath;
+    if (recovered.contentSha256 !== record.contentSha256) {
+      await purgeScannerStage(job, record, "staging_object_invalid");
+      return;
+    }
     const outcome = classifyScan(await scanFileWithClamAv(quarantinePath, config.clamAv), documentScanCodes);
-    await storage.discardQuarantine(quarantinePath);
-    quarantinePath = undefined;
     if (outcome.status !== "clean") {
       if (outcome.retryable) {
         await failScannerRecoveryJob(job, outcome.code);
@@ -208,7 +232,15 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
     // ADR-0033: a staged upload was held before anything opened it, so the
     // renderer's structure check runs here, after the recovery scan passed,
     // exactly where the upload path would have run it.
-    if (!await validateSupportedDocumentStructure(plaintext, record.mediaType as SupportedDocumentMediaType)) {
+    const structure = await checkRecoveredStructure(storage, quarantinePath, record.sizeBytes, record.mediaType as SupportedDocumentMediaType);
+    if (structure === "structure_check_unavailable") {
+      // No verdict, so no purge: the staged copy is the member's only one. The
+      // job is retried under its attempt cap and the stage's recovery expiry,
+      // as a scanner outage is; expiry remains the terminal end.
+      await failScannerRecoveryJob(job, "structure_check_unavailable");
+      return;
+    }
+    if (structure !== "supported_structure") {
       await purgeScannerStage(job, record, "unsupported_structure");
       return;
     }
@@ -216,14 +248,13 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
     // The next key while a rotation is in progress (#955): the staged object
     // this republishes may have been wrapped under either key.
     const wrap = wrappingKey(config);
-    const encrypted = encryptDocument(plaintext, {
-      documentId: job.documentId,
-      householdId: record.householdId,
-      itemId: record.itemId,
-      mediaType: record.mediaType,
-      plaintextSize: record.sizeBytes,
-    }, wrap.keyEncryptionKey, wrap.keyId);
-    await storage.writeCiphertext(finalStorageKey, encrypted.ciphertext);
+    const sealer = createDocumentSealer(context, wrap.keyEncryptionKey, wrap.keyId);
+    const encrypted = await storage.sealQuarantine(
+      quarantinePath,
+      { sizeBytes: record.sizeBytes, contentSha256: record.contentSha256 },
+      sealer,
+      { kind: "object", storageKey: finalStorageKey },
+    );
     const now = new Date();
     const finalized = await getDb().transaction(async (transaction) => {
       await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${job.documentId}`}, 0))`);
@@ -252,7 +283,7 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
         updatedAt: now,
       }).where(and(eq(documents.id, job.documentId), eq(documents.lifecycle, "scanning"))).returning({ id: documents.id });
       if (!changed) return false;
-      await transaction.insert(documentCrypto).values({ documentId: job.documentId, storageKey: finalStorageKey!, ciphertextSize: encrypted.ciphertext.length, ...encrypted.envelope });
+      await transaction.insert(documentCrypto).values({ documentId: job.documentId, storageKey: finalStorageKey!, ciphertextSize: encrypted.ciphertextSize, ...encrypted.envelope });
       await transaction.update(documentStagingObjects).set({ status: "purge_pending", purgeFailureCode: null, updatedAt: now })
         .where(and(eq(documentStagingObjects.documentId, job.documentId), eq(documentStagingObjects.storageKey, record.stagingStorageKey), eq(documentStagingObjects.status, "pending")));
       await completeJob(transaction, holdsJobLease(job), { now });
@@ -294,14 +325,12 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
       await failScannerRecoveryJob(job, "key_unavailable");
       return;
     }
-    if (error instanceof Error && /authentication|invalid|unsupported|size|enoent|no such file/i.test(error.message)) {
+    if (error instanceof DocumentIntegrityError || error instanceof Error && /authentication|invalid|unsupported|size|enoent|no such file/i.test(error.message)) {
       await purgeScannerStage(job, record, "staging_object_invalid");
       return;
     }
     await failScannerRecoveryJob(job, "scanner_failed");
   } finally {
-    ciphertext?.fill(0);
-    plaintext?.fill(0);
     if (quarantinePath) await storage.discardQuarantine(quarantinePath).catch(() => undefined);
   }
 }

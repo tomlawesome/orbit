@@ -7,6 +7,16 @@ import {
 } from "../../../tests/support/generated-pdf-documents";
 import { syntheticPdf } from "../../../tests/support/synthetic-documents";
 import {
+  classicTable,
+  hiddenXrefObject,
+  linearizedHidingOversizedSection,
+  linearizedWithSmallSections,
+  pdfWithClassicXref,
+  pdfWithXrefStream,
+  smallPdfWithFirstObject,
+  BASE,
+} from "../../../tests/support/pdf-budget-shapes";
+import {
   pdfStructureSandboxInFlightForTests,
   setPdfStructureInspectorForTests,
   setPdfStructureSandboxLimitsForTests,
@@ -39,36 +49,15 @@ describe("bounded PDF inspection", () => {
     expect(pdfStructureSandboxInFlightForTests()).toBe(0);
   });
 
-  it("maps an expired sandbox wall-clock budget to unsupported_structure and leaves no worker running", async () => {
+  it("maps an expired sandbox wall-clock budget to structure_check_unavailable and leaves no worker running", async () => {
     setPdfStructureSandboxLimitsForTests({ wallMs: 1 });
 
     await expect(classifyDocumentStructure(syntheticPdf(), "application/pdf"))
-      .resolves.toBe("unsupported_structure");
+      .resolves.toBe("structure_check_unavailable");
     expect(pdfStructureSandboxInFlightForTests()).toBe(0);
   });
 
   describe("declared cross-reference entry count", () => {
-    function pdfWithXrefStream(dictionaryTail: string): Buffer {
-      let value = "%PDF-1.7\n";
-      value += "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
-      value += "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n";
-      value += "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n";
-      const xrefOffset = Buffer.byteLength(value);
-      const entries = "11111111111111111111";
-      value += `4 0 obj\n<< /Type /XRef /Root 1 0 R /Length ${entries.length} /W [1 2 1] ${dictionaryTail} >>\nstream\n`;
-      value += `${entries}\nendstream\nendobj\n`;
-      value += `startxref\n${xrefOffset}\n%%EOF\n`;
-      return Buffer.from(value);
-    }
-
-    function pdfWithClassicXref(subsectionHeaders: string[]): Buffer {
-      let value = "%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
-      const xrefOffset = Buffer.byteLength(value);
-      value += `xref\n${subsectionHeaders.join("\n")}\n0000000000 65535 f \n`;
-      value += `trailer\n<< /Size 3000000 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-      return Buffer.from(value);
-    }
-
     it("rejects a cross-reference stream whose /Index declares 2,000,000,000 entries without calling the parser", async () => {
       mockParserReachable();
       const bytes = pdfWithXrefStream("/Size 5 /Index [0 2000000000]");
@@ -103,53 +92,6 @@ describe("bounded PDF inspection", () => {
   });
 
   describe("linearized files, whose parser starts at the first-page cross-reference", () => {
-    const pad = (value: number): string => String(value).padStart(10, "0");
-    const TINY_XREF = "xref\n0 1\n0000000000 65535 f \n";
-
-    function linearizationObject(total: number): string {
-      return `1 0 obj << /Linearized 1 /L ${pad(total)} /H [0000000100 0000000020] /O 2 /E 100 /N 1 /T 0000000200 >>\nendobj\n`;
-    }
-
-    // Builds the file with a placeholder length, measures it, then rebuilds with the real /L.
-    function withMeasuredLength(build: (total: number) => string): Buffer {
-      const total = Buffer.byteLength(build(0));
-      const value = build(total);
-      expect(Buffer.byteLength(value)).toBe(total);
-      return Buffer.from(value);
-    }
-
-    function linearizedHidingOversizedSection(): Buffer {
-      return withMeasuredLength((total) => {
-        let value = "%PDF-1.7\n" + linearizationObject(total);
-        value += "4 0 obj << /Type /XRef /W [0 0 0] /Index [0 2000000000] /Size 2000000000 /Root 1 0 R /Length 0 >>\n";
-        value += "stream\n\nendstream\nendobj\n";
-        const tinyOffset = Buffer.byteLength(value);
-        value += `${TINY_XREF}trailer\n<< /Size 1 /Root 1 0 R >>\nstartxref\n${tinyOffset}\n%%EOF\n`;
-        return value;
-      });
-    }
-
-    function linearizedWithSmallSections(): Buffer {
-      return withMeasuredLength((total) => {
-        let value = "%PDF-1.7\n" + linearizationObject(total);
-        const firstPageOffset = Buffer.byteLength(value);
-        // Fixed-width /Prev keeps the length stable; the main section follows the first-page one.
-        const firstPage = (prev: number): string =>
-          `${TINY_XREF}trailer\n<< /Size 1 /Root 1 0 R /Prev ${pad(prev)} >>\nstartxref\n0\n%%EOF\n`;
-        const mainOffset = firstPageOffset + Buffer.byteLength(firstPage(0));
-        value += firstPage(mainOffset);
-        value += `${TINY_XREF}trailer\n<< /Size 1 /Root 1 0 R >>\nstartxref\n${firstPageOffset}\n%%EOF\n`;
-        return value;
-      });
-    }
-
-    function smallPdfWithFirstObject(firstObject: string): Buffer {
-      let value = `%PDF-1.7\n${firstObject}`;
-      const xrefOffset = Buffer.byteLength(value);
-      value += `${TINY_XREF}trailer\n<< /Size 1 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-      return Buffer.from(value);
-    }
-
     it("rejects a linearized file hiding an oversized cross-reference stream after the first endobj without calling the parser", async () => {
       mockParserReachable();
 
@@ -203,23 +145,6 @@ describe("bounded PDF inspection", () => {
   });
 
   describe("the parser's recovery scan and sections it cannot read", () => {
-    const BASE = "%PDF-1.7\n"
-      + "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
-      + "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
-      + "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n";
-
-    function hiddenXrefObject(index: string): string {
-      return `4 0 obj << /Type /XRef /W [0 0 0] /Index ${index} /Size 3 /Length 0 >>\nstream\n\nendstream\nendobj\n`;
-    }
-
-    function classicTable(headerLine: string, extraObject = ""): Buffer {
-      let value = BASE + extraObject;
-      const xrefOffset = Buffer.byteLength(value);
-      value += `xref\n${headerLine}\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n`;
-      value += `trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-      return Buffer.from(value);
-    }
-
     async function expectRefused(bytes: Buffer): Promise<void> {
       mockParserReachable();
       await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");

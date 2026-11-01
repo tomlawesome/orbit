@@ -97,7 +97,7 @@
      win where the card stands inside a field */
   .pick-filter.pick-filter{box-sizing:border-box;width:100%;min-height:48px;margin:4px 0 8px;padding:0 14px;border-radius:12px;
     border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);color:var(--ink);
-    font:var(--p-type-body)/1.2 var(--ui)}
+    font:var(--p-type-input)/1.2 var(--ui)}
   .pick-filter:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
   .pick-filter::placeholder{color:var(--ink-quiet)}
   .pick-options{display:flex;flex-direction:column}

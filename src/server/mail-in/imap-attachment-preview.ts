@@ -15,7 +15,8 @@ function inboxReceiptNotFound(): AppError {
 /**
  * A picture of one page (page one unless asked otherwise, #1300) of an
  * attachment still staged inside a waiting mail receipt (#1155) — decrypted
- * under the same holding context acceptance uses, rendered by the same
+ * under the same holding context acceptance uses, straight into that one
+ * buffer (#1571), rendered by the same
  * `renderDocumentPagePreview` an accepted
  * document's preview uses, and answered only to the recipient the mail is
  * addressed to. No `documents` row is read or created; acceptance is

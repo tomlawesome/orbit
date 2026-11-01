@@ -61,11 +61,16 @@ interface VolumeFacts {
   containers: string | null;
 }
 
-function facts(options: { basename?: string; volumes?: VolumeFacts[]; projects?: Array<[string, string | null]>; images?: Array<[string, string | null]> } = {}): HostFacts {
+function facts(options: { basename?: string; targetFolder?: string; targetFolderLogical?: string; workingDirs?: Array<[string, string | null]>; volumes?: VolumeFacts[]; projects?: Array<[string, string | null]>; images?: Array<[string, string | null]> } = {}): HostFacts {
   const volumes = options.volumes ?? [];
   return parseHostFacts(
     JSON.stringify({
       targetBasename: b64(options.basename ?? "household"),
+      ...(options.targetFolder === undefined ? {} : { targetFolder: b64(options.targetFolder) }),
+      ...(options.targetFolderLogical === undefined ? {} : { targetFolderLogical: b64(options.targetFolderLogical) }),
+      ...(options.workingDirs === undefined
+        ? {}
+        : { workingDirs: options.workingDirs.map(([label, physical]) => ({ label: b64(label), exists: physical !== null, physical: physical === null ? null : b64(physical) })) }),
       cosignUsable: false,
       imageVersion: "v1.2.3",
       imageRevision: "b".repeat(40),
@@ -330,6 +335,173 @@ describe("runInstall: database volume safety from the shell's facts (#13-18, F3)
     });
     expect(outcome).toMatchObject({ status: "failed", message: "Could not verify the existing Orbit database volume ownership; refusing to start Compose." });
     expect(snapshot(target)).toEqual(before);
+  });
+
+  // #1570: an update refused because the volume's ownership was not proven says
+  // which proof failed and what to do, and its next action is not "retry".
+  const DB_LINE = `${"c".repeat(12)}|orbit|orbit-db`;
+  const APP_LINE = `${"d".repeat(12)}|orbit|orbit-app`;
+  const SECOND_DB_LINE = `${"e".repeat(12)}|orbit|orbit-db`;
+  const SECOND_APP_LINE = `${"f".repeat(12)}|orbit|orbit-app`;
+  const OTHER_IMAGE = `ghcr.io/tomlawesome/orbit@sha256:${"7".repeat(64)}`;
+
+  function ownershipFacts(options: { dbLines?: string; projectLines?: string; image?: string }): HostFacts {
+    return facts({
+      volumes: [{ name: "orbit_orbit-db-data", labels: "orbit|orbit-db-data", containers: options.dbLines ?? DB_LINE }],
+      projects: [["orbit", options.projectLines ?? `${DB_LINE}\n${APP_LINE}`]],
+      images: [["d".repeat(12), options.image ?? OLD_REFERENCE]],
+    });
+  }
+
+  it.each([
+    ["a container that is not the database mounts the volume", ownershipFacts({ dbLines: `${"c".repeat(12)}|orbit|some-other-service` }), /some-other-service/],
+    ["no orbit-db container uses the volume", ownershipFacts({ dbLines: "" }), /orbit-db/],
+    ["two orbit-db containers use the volume", ownershipFacts({ dbLines: `${DB_LINE}\n${SECOND_DB_LINE}` }), /orbit-db/],
+    ["the project has no orbit-app container", ownershipFacts({ projectLines: DB_LINE }), /orbit-app/],
+    ["the project has two orbit-app containers", ownershipFacts({ projectLines: `${DB_LINE}\n${APP_LINE}\n${SECOND_APP_LINE}` }), /orbit-app/],
+    ["the app container runs another image than ORBIT_IMAGE", ownershipFacts({ image: OTHER_IMAGE }), /ORBIT_IMAGE/],
+  ])("an update refuses with its own message and a next action that is not retry when %s (#1570)", async (_name, hostFacts, fact) => {
+    const target = recognised();
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: hostFacts });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
+    if (outcome.status === "failed") {
+      expect(outcome.message).toMatch(fact);
+      expect(outcome.message).not.toContain("Could not prove that the existing Orbit database volume belongs to this Orbit deployment");
+      expect(outcome.action).not.toBe("retry");
+    }
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  // A plain `docker run` container on the volume has no Compose labels at all
+  // (`<id>|||`): it is a foreign container, named by its id.
+  it("an update refuses, naming a label-less container by its id, when a plain docker run container mounts the volume (#1570)", async () => {
+    const target = recognised();
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: ownershipFacts({ dbLines: `${"e".repeat(12)}|||` }) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host", reason: "docker-host", action: "abort" });
+    if (outcome.status === "failed") {
+      expect(outcome.message).toContain("eeeeeeeeeeee");
+      expect(outcome.message).not.toContain('""');
+    }
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  // The containers' working_dir label rides on the container lines; the
+  // folders the update runs in ride on the facts (physical, and logical).
+  function folderFacts(label: string, folders: { targetFolder: string; targetFolderLogical?: string; workingDirs?: Array<[string, string | null]> }): HostFacts {
+    return facts({
+      ...folders,
+      volumes: [{ name: "orbit_orbit-db-data", labels: "orbit|orbit-db-data", containers: `${DB_LINE}|${label}` }],
+      projects: [["orbit", `${DB_LINE}|${label}\n${APP_LINE}|${label}`]],
+      images: [["d".repeat(12), OLD_REFERENCE]],
+    });
+  }
+
+  it("an update refuses, naming the other folder and sending the operator there, when the containers belong to another folder (#1570)", async () => {
+    const target = recognised();
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: folderFacts("/srv/old-orbit", { targetFolder: "/srv/orbit" }) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
+    if (outcome.status === "failed") {
+      expect(outcome.message).toContain("/srv/old-orbit");
+      expect(outcome.message).toMatch(/run the update (?:there|in)/i);
+      expect(outcome.message).not.toMatch(/docker[ -]compose/i);
+      expect(outcome.action).not.toBe("retry");
+    }
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it.each([
+    ["the logical path while the physical one differs", "/srv/orbit"],
+    ["the physical path", "/mnt/data/orbit"],
+    ["the logical path with a trailing slash", "/srv/orbit/"],
+  ])("an update in a symlinked folder is proven when the label is %s (#1570)", async (_name, label) => {
+    const { outcome } = await run(recognised(), { facts: folderFacts(label, { targetFolder: "/mnt/data/orbit", targetFolderLogical: "/srv/orbit" }) });
+    expect(outcome.status).toBe("ok");
+  });
+
+  it("an update in a symlinked folder is refused as another folder when the label matches neither path (#1570)", async () => {
+    const { outcome } = await run(recognised(), { facts: folderFacts("/srv/old-orbit", { targetFolder: "/mnt/data/orbit", targetFolderLogical: "/srv/orbit" }) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
+    if (outcome.status === "failed") {
+      expect(outcome.message).toContain("/srv/old-orbit");
+      expect(outcome.action).not.toBe("retry");
+    }
+  });
+
+  it("an update with a fully matching volume is still proven (#1570)", async () => {
+    const { outcome } = await run(recognised(), { facts: ownershipFacts({}) });
+    expect(outcome.status).toBe("ok");
+  });
+
+  // #1570 (review): the shell reports, per working_dir label, whether the folder
+  // exists and its physical path (workingDirs); a moved folder is not another one.
+  it("an update from a moved folder is proven when the label names a folder that no longer exists (#1570)", async () => {
+    const target = recognised();
+    const { outcome } = await run(target, {
+      facts: folderFacts("/srv/before-the-move", { targetFolder: "/srv/orbit", targetFolderLogical: "/srv/orbit", workingDirs: [["/srv/before-the-move", null]] }),
+    });
+    expect(outcome.status).toBe("ok");
+  });
+
+  it("an update from a moved folder still refuses on another proof (#1570)", async () => {
+    const target = recognised();
+    const before = snapshot(target);
+    const hostFacts = facts({
+      targetFolder: "/srv/orbit",
+      targetFolderLogical: "/srv/orbit",
+      workingDirs: [["/srv/before-the-move", null]],
+      volumes: [{ name: "orbit_orbit-db-data", labels: "orbit|orbit-db-data", containers: `${DB_LINE}|/srv/before-the-move` }],
+      projects: [["orbit", `${DB_LINE}|/srv/before-the-move\n${APP_LINE}|/srv/before-the-move`]],
+      images: [["d".repeat(12), OTHER_IMAGE]],
+    });
+    const { outcome } = await run(target, { facts: hostFacts });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
+    if (outcome.status === "failed") {
+      expect(outcome.message).toMatch(/ORBIT_IMAGE/);
+      expect(outcome.message).not.toContain("/srv/before-the-move");
+      expect(outcome.message).not.toMatch(/recreat/i);
+      expect(outcome.message).not.toMatch(/docker[ -]compose/i);
+      expect(outcome.action).not.toBe("retry");
+    }
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("an update through another symlink to the same folder is proven when the label's physical path is the folder's (#1570)", async () => {
+    const { outcome } = await run(recognised(), {
+      facts: folderFacts("/home/owner/orbit-link", {
+        targetFolder: "/mnt/data/orbit",
+        targetFolderLogical: "/srv/orbit",
+        workingDirs: [["/home/owner/orbit-link", "/mnt/data/orbit"]],
+      }),
+    });
+    expect(outcome.status).toBe("ok");
+  });
+
+  it("an update refuses, naming the folder, when the label names a folder that exists elsewhere (#1570)", async () => {
+    const target = recognised();
+    const before = snapshot(target);
+    const { outcome } = await run(target, {
+      facts: folderFacts("/srv/old-orbit", { targetFolder: "/mnt/data/orbit", targetFolderLogical: "/srv/orbit", workingDirs: [["/srv/old-orbit", "/srv/old-orbit"]] }),
+    });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
+    if (outcome.status === "failed") {
+      expect(outcome.message).toContain("/srv/old-orbit");
+      expect(outcome.message).not.toMatch(/docker[ -]compose/i);
+      expect(outcome.action).not.toBe("retry");
+    }
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("an image-mismatch refusal says what to compare and never claims that stopping the container recreates it (#1570)", async () => {
+    const { outcome } = await run(recognised(), { facts: ownershipFacts({ image: OTHER_IMAGE }) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
+    if (outcome.status === "failed") {
+      expect(outcome.message).toMatch(/compare[^.]*image[^.]*ORBIT_IMAGE[^.]*\.env-orbit/i);
+      expect(outcome.message).not.toMatch(/recreat/i);
+      expect(outcome.message).not.toMatch(/docker[ -]compose/i);
+    }
   });
 });
 
@@ -1137,5 +1309,172 @@ describe("runInstall: the launcher's configuration goes through the install tran
       expect(outcome).toMatchObject({ status: "failed", reason: "configuration-failure", action: "retry" });
       expect(readdirSync(target)).toEqual([]);
     });
+  });
+});
+
+// An update that committed (the saved image names the new build) and then
+// stopped before the containers were replaced leaves orbit-app on the old
+// image. Its retry is proven on the image recorded beside the saved one.
+describe("runInstall: the retry after a committed update, and the image the update records", () => {
+  /** Rewrite the target's saved image, as an update that committed leaves it. */
+  function savedImage(target: string, reference: string): void {
+    const environment = join(target, ".env-orbit");
+    const rewritten = readFileSync(environment, "utf8")
+      .split("\n")
+      .map((line) => (line.startsWith("ORBIT_IMAGE=") ? `ORBIT_IMAGE=${reference}` : line))
+      .join("\n");
+    writeFileSync(environment, rewritten, { mode: 0o600 });
+  }
+  const linesOf = (target: string, key: string) =>
+    readFileSync(join(target, ".env-orbit"), "utf8")
+      .split("\n")
+      .filter((line) => line.startsWith(`${key}=`));
+
+  it("proceeds when the app still runs the previous image the last committed update recorded, and keeps one line per key", async () => {
+    const target = recognised([`ORBIT_PREVIOUS_IMAGE=${OLD_REFERENCE}`]);
+    savedImage(target, REFERENCE);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+
+    expect(outcome).toMatchObject({ status: "ok", databaseVolume: "orbit_orbit-db-data" });
+    expect(linesOf(target, "ORBIT_IMAGE")).toEqual([`ORBIT_IMAGE=${REFERENCE}`]);
+    expect(linesOf(target, "ORBIT_PREVIOUS_IMAGE")).toEqual([`ORBIT_PREVIOUS_IMAGE=${OLD_REFERENCE}`]);
+  });
+
+  it("still refuses the same facts when nothing recorded the previous image, changing nothing", async () => {
+    const target = recognised();
+    savedImage(target, REFERENCE);
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "host", action: "abort" });
+    if (outcome.status === "failed") {
+      expect(outcome.message).toContain("ORBIT_IMAGE");
+      expect(outcome.message).toContain(".env-orbit");
+      expect(outcome.message).toMatch(/start (?:the|this) deployment again/i);
+    }
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  // The message gives no hand edit because the edit is refused: the migration
+  // stamps the digest it validated the file for beside ORBIT_IMAGE, and the
+  // provenance check wants the two to agree.
+  it("refuses a file whose saved image was set back by hand after an update, at the configuration preflight", async () => {
+    const target = recognised();
+    const first = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(first.outcome.status).toBe("ok");
+
+    savedImage(target, OLD_REFERENCE);
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+
+    expect(outcome).toMatchObject({
+      status: "failed",
+      phase: "configuration",
+      message: "Configuration preflight failed; restoring the previous deployment.",
+    });
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  // The neighbour's image is evidence about the neighbour: a second stack
+  // still on the image this deployment replaced must not make every update
+  // ambiguous until it catches up.
+  it("proceeds beside another project's volume whose app still runs the previous image the record names", async () => {
+    const target = recognised([`ORBIT_PREVIOUS_IMAGE=${OLD_REFERENCE}`]);
+    savedImage(target, REFERENCE);
+    const otherProject = "orbit-e2e-local-4242";
+    const hostFacts = facts({
+      volumes: [
+        { name: `${otherProject}_orbit-db-data`, labels: `${otherProject}|orbit-db-data`, containers: `${"a".repeat(12)}|${otherProject}|orbit-db` },
+        { name: "orbit_orbit-db-data", labels: "orbit|orbit-db-data", containers: `${"c".repeat(12)}|orbit|orbit-db` },
+      ],
+      projects: [
+        [otherProject, `${"a".repeat(12)}|${otherProject}|orbit-db\n${"b".repeat(12)}|${otherProject}|orbit-app`],
+        ["orbit", `${"c".repeat(12)}|orbit|orbit-db\n${"d".repeat(12)}|orbit|orbit-app`],
+      ],
+      images: [
+        ["b".repeat(12), OLD_REFERENCE],
+        ["d".repeat(12), OLD_REFERENCE],
+      ],
+    });
+    const { outcome } = await run(target, { facts: hostFacts });
+
+    expect(outcome).toMatchObject({ status: "ok", databaseVolume: "orbit_orbit-db-data" });
+  });
+
+  it("records the running image beside the new one when an update completes, ending the file with a newline", async () => {
+    const target = recognised();
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+
+    expect(outcome).toMatchObject({ status: "ok" });
+    expect(linesOf(target, "ORBIT_IMAGE")).toEqual([`ORBIT_IMAGE=${REFERENCE}`]);
+    expect(linesOf(target, "ORBIT_PREVIOUS_IMAGE")).toEqual([`ORBIT_PREVIOUS_IMAGE=${OLD_REFERENCE}`]);
+    expect(readFileSync(join(target, ".env-orbit"), "utf8").endsWith("\n")).toBe(true);
+  });
+
+  it("records the image the app was running, not the old saved value, when the retry follows a committed update", async () => {
+    const running = `ghcr.io/tomlawesome/orbit@sha256:${"5".repeat(64)}`;
+    const target = recognised([`ORBIT_PREVIOUS_IMAGE=${running}`]);
+    savedImage(target, REFERENCE);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", running) });
+
+    expect(outcome).toMatchObject({ status: "ok" });
+    expect(linesOf(target, "ORBIT_PREVIOUS_IMAGE")).toEqual([`ORBIT_PREVIOUS_IMAGE=${running}`]);
+  });
+
+  it("refuses, and rolls back, a file that records the previous image twice, as it does for the saved image (#50, #53)", async () => {
+    const target = recognised([`ORBIT_PREVIOUS_IMAGE=${OLD_REFERENCE}`, `ORBIT_PREVIOUS_IMAGE=${OLD_REFERENCE}`]);
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+
+    expect(outcome).toMatchObject({ status: "failed", message: "Configuration preflight failed; restoring the previous deployment." });
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("writes no record on a fresh install", async () => {
+    const target = preprovisioned();
+    const { outcome } = await run(target);
+
+    expect(outcome).toMatchObject({ status: "ok" });
+    expect(linesOf(target, "ORBIT_PREVIOUS_IMAGE")).toEqual([]);
+  });
+
+  it("removes a stale record when the update attached to no volume", async () => {
+    const target = recognised([`ORBIT_PREVIOUS_IMAGE=${OLD_REFERENCE}`]);
+    const { outcome } = await run(target, { facts: facts() });
+
+    expect(outcome).toMatchObject({ status: "ok" });
+    expect(linesOf(target, "ORBIT_PREVIOUS_IMAGE")).toEqual([]);
+    expect(linesOf(target, "ORBIT_IMAGE")).toEqual([`ORBIT_IMAGE=${REFERENCE}`]);
+  });
+
+  it("accepts ORBIT_PREVIOUS_IMAGE as an Orbit setting in the configuration preflight", async () => {
+    const target = recognised([`ORBIT_PREVIOUS_IMAGE=${OLD_REFERENCE}`]);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+
+    expect(outcome).toMatchObject({ status: "ok" });
+  });
+});
+
+// A deployment taken down keeps its volume and loses its containers; the
+// refusal names the way back in words, through the engine as well.
+describe("runInstall: an update refused after the containers were taken down (the way back)", () => {
+  const DB_ONLY = `${"c".repeat(12)}|orbit|orbit-db`;
+
+  it.each([
+    ["no orbit-db container uses the volume", { volumes: [{ name: "orbit_orbit-db-data", labels: "orbit|orbit-db-data", containers: "" }], projects: [["orbit", ""]] }],
+    ["the project has no orbit-app container", { volumes: [{ name: "orbit_orbit-db-data", labels: "orbit|orbit-db-data", containers: DB_ONLY }], projects: [["orbit", DB_ONLY]] }],
+  ] as const)("names the way back, as an abort without a Compose command, when %s", async (_name, hostFacts) => {
+    const target = recognised();
+    const before = snapshot(target);
+    const { outcome } = await run(target, {
+      facts: facts({ volumes: hostFacts.volumes.map((volume) => ({ ...volume })), projects: hostFacts.projects.map(([name, containers]) => [name, containers]) }),
+    });
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "host", action: "abort" });
+    if (outcome.status === "failed") {
+      expect(outcome.message).toMatch(/start (?:the|this) deployment again/i);
+      expect(outcome.message).not.toMatch(/docker[ -]compose/i);
+    }
+    expect(snapshot(target)).toEqual(before);
   });
 });

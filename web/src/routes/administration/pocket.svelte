@@ -4,7 +4,6 @@
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import { wake } from "$lib/pocket/wake.js";
-  import { hardDeleteHousehold, setUserDisabled, wordsOf } from "$lib/data/workspace.js";
   import { deletionNameMatches } from "$lib/data/household.js";
   import { ago, dayMonth, initials, plural } from "$lib/format.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
@@ -17,8 +16,8 @@
     openFor, plainly, sendWords, shortDay, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict, versionLine,
   } from "./words.js";
   import {
-    card, commandMail, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
-    runMailTest, retryJob, setContact, setUploadLimit,
+    card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
+    runMailTest, retryJob, setContact, setDisabled, setUploadLimit,
   } from "./acts.svelte.js";
 
   /*
@@ -249,18 +248,7 @@
   ];
 
   /** @param {Person} person @param {boolean} off */
-  async function disable(person, off) {
-    peopleCard.problem = null;
-    try {
-      await setUserDisabled(person.id, off);
-      if (off) wake(`${person.displayName} is disabled · they can’t sign in`, { undo: () => disable(person, false) });
-      else wake(`${person.displayName} can sign in again`);
-      await reread();
-    } catch (error) {
-      peopleCard.problem = wordsOf(error);
-      wake(peopleCard.problem, { failure: true });
-    }
-  }
+  const disable = (person, off) => setDisabled(person, off, { card: peopleCard, reread, wake });
 
   /* ── systems ──────────────────────────────────────────────────────────── */
   let systemOpen = $state(false);
@@ -285,7 +273,7 @@
     if (systemCard.busy) return;
     if (!systemName.trim()) { systemCard.problem = "name the system first"; return; }
     await makeSystem(systemName.trim(), owner, systemPassword, {
-      card: systemCard, actorHasPassword, reread,
+      card: systemCard, actorHasPassword, reread, wake,
       landed: () => {
         const named = systemName.trim();
         systemOpen = false;
@@ -319,17 +307,14 @@
     const row = doomed;
     if (!row) return;
     doomProblem = null;
-    try {
-      await hardDeleteHousehold(row.id, typedName);
-      doomOpen = false;
-      gone = [...gone, { id: row.id, text: `deleted · ${row.name} is gone for good · its members keep their accounts` }];
-      await reread();
-    } catch (error) {
-      doomProblem = `not deleted — ${wordsOf(error)}`;
-    }
+    await deleteSystemNow(row, typedName, {
+      gone, reread, wake,
+      landed: () => (doomOpen = false),
+      refused: (words) => (doomProblem = `not deleted — ${words}`),
+    });
   }
-  /** Rows replaced by their said-line after a hard delete. @type {{ id: string, text: string }[]} */
-  let gone = $state([]);
+  /** Rows replaced by their said-line after a hard delete, keyed by the system's id. */
+  let gone = $state(/** @type {Record<string, string>} */ ({}));
   /** @param {{ id: string, name: string, deleteAfter: string }} row @returns {import('$lib/pocket/row.js').RowAct[]} */
   const clockActs = (row) => [
     { label: "delete now", name: `Delete ${row.name} now, for good`, danger: true,
@@ -360,12 +345,11 @@
     uploadLimitCard.problem = null;
     uploadLimitOpen = true;
   }
-  /* The sheet closes once the command lands. A failed re-read after it is
-     said in the refusal's own words here, where the desk says "done"
-     (./acts.svelte.js, DONE_UNREAD). */
+  /* The sheet closes once the command lands; a failed re-read after it is
+     woken as done-but-unread, as every act here does ($lib/data/landed.js). */
   /** @param {{ action: "set", megabytes: number } | { action: "default" }} partial */
   const sendUploadLimit = (partial) => setUploadLimit(view?.uploadLimit, partial, {
-    card: uploadLimitCard, reread, wake, unread: (error) => wordsOf(error),
+    card: uploadLimitCard, reread, wake,
     landed: () => (uploadLimitOpen = false),
   });
 
@@ -423,7 +407,7 @@
   const graceStep = (by) => (graceDays = Math.min(90, Math.max(0, graceDays + by)));
 
   /* ── document jobs (#1071) ───────────────────────────────────────────── */
-  /** @type {Record<string, { status: string, at: string }>} */
+  /** @type {import("./words.js").Retried} */
   let retried = $state({});
   const jobs = $derived(jobsOf(view?.operations?.documentJobs ?? [], retried));
   const jobCounts = $derived(jobCountsOf(jobs));
@@ -633,14 +617,14 @@
           <p class="p-error ad-inset ad-lastline" role="alert">owners not shown — Orbit could not reach every system’s members{stillNoAnswer ? " (tried again, still no answer)" : ""}
             <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
         {/if}
-        {#each gone as line (line.id)}
-          <p class="ad-said ok" role="status">{line.text}</p>
+        {#each Object.entries(gone) as [id, text] (id)}
+          <p class="ad-said ok" role="status">{text}</p>
         {/each}
         <!-- ON THE CLOCK (§2.11, §19): the system's own row carries the state;
              `restore` stays on show because it is the point of the row, and
              `delete now` sits in the row's opened panel (§1.1). Never on the
              household page. -->
-        {#each recoverable.filter((row) => !gone.some((line) => line.id === row.id)) as row (row.id)}
+        {#each recoverable.filter((row) => !gone[row.id]) as row (row.id)}
           <!-- Round 3 §3.9: the state and the days at rest; the date sits in
                the panel beside `delete now`. -->
           {#snippet clockDetail()}<div class="p-kv"><span>gone for good</span><b>{dayMonth(row.deleteAfter)}</b></div>{/snippet}

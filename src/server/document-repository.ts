@@ -11,16 +11,17 @@ import {
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { asOperationalReason, log } from "@/lib/logger";
-import { decryptDocument, encryptDocument, envelopeOf } from "@/server/documents/crypto";
-import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
+import { createDocumentSealer, createDocumentUnsealer, DocumentIntegrityError, envelopeOf } from "@/server/documents/crypto";
+import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
-import { openDocumentStorage } from "@/server/documents/storage";
+import { type LocalDocumentStorage, openDocumentStorage, type ReceivedDocument, releaseBuffer } from "@/server/documents/storage";
 import {
   detectDocumentMediaType,
   normalizedDocumentFilename,
   classifyDocumentStructure,
   type DocumentStructureReason,
+  type SupportedDocumentMediaType,
 } from "@/server/documents/validation";
 import { canAccessHouseholdDocuments, canManageDocumentDeletion } from "@/server/documents/authorization";
 import { scannerRecoveryDelayMs } from "@/server/documents/staging";
@@ -379,6 +380,29 @@ async function reserveDocumentMetadata(input: {
   });
 }
 
+/**
+ * The open check's one read of the quarantine file (#1567). The buffer lives
+ * only in this function's frame: it is zeroed and freed when the check
+ * answers, so the encrypt stage that follows never runs with it still held.
+ * Kept in the upload's own frame, a suspended async function keeps it
+ * reachable across the later awaits.
+ */
+async function checkQuarantinedStructure(
+  storage: LocalDocumentStorage,
+  received: ReceivedDocument,
+  mediaType: SupportedDocumentMediaType,
+  maxBytes: number,
+): Promise<DocumentStructureReason> {
+  const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
+  try {
+    return await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
+  } finally {
+    // Zeroed and freed the moment the check answers, as the recovery and
+    // mail-in checks do, so the seal never runs beside it (#1151 F13).
+    releaseBuffer(bytes);
+  }
+}
+
 export async function uploadItemDocument(input: {
   userId: string;
   householdId: string;
@@ -410,8 +434,6 @@ export async function uploadItemDocument(input: {
   let storageKey: string | undefined;
   let stagingKey: string | undefined;
   let metadataReserved = false;
-  /** The scanned, structure-checked plaintext, held from the check to the encrypt stage; zeroed on every exit. */
-  let validatedBytes: Buffer | undefined;
   try {
     // Check idempotency scope and content before parsing the retry body. A
     // reused identity must deterministically return 409 even when the new
@@ -497,9 +519,11 @@ export async function uploadItemDocument(input: {
     // the quarantine copy over its own socket; only a clean file (or, with
     // scanning `disabled`, any file) is read into memory and handed to the
     // renderer's structure check. A file it refuses is refused before any
-    // durable metadata exists, as it always was. The one read here serves
-    // both that check and the encrypt stage, and happens after the scan, so
-    // no plaintext is held in memory across the scan's wait (A2-Q1).
+    // durable metadata exists, as it always was. The one read here serves the
+    // check and nothing else: its buffer is zeroed the moment the check
+    // answers, and the encrypt stage reads the quarantine file again in
+    // pieces, verifying its digest (#1567). The read happens after the scan,
+    // so no plaintext is held in memory across the scan's wait (A2-Q1).
     let scan: ScanClassification<typeof documentScanCodes[keyof typeof documentScanCodes]> | undefined;
     let scanMs = 0;
     if (config.scanMode === "required") {
@@ -509,21 +533,26 @@ export async function uploadItemDocument(input: {
       scanMs = Math.max(0, Date.now() - scanStartedAt);
     }
     if (!scan || scan.status === "clean") {
-      const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
-      let structure: DocumentStructureReason = "unsupported_structure";
-      try {
-        structure = await classifyDocumentStructure(bytes, mediaType);
-      } finally {
-        // A buffer this block is about to discard has nowhere else left to be
-        // wiped, so it is zeroed here (#1151 F13).
-        if (structure !== "supported_structure") bytes.fill(0);
-      }
+      const structure = await checkQuarantinedStructure(storage, received, mediaType, maxBytes);
       if (structure === "password_required") {
         throw new AppError(
           "document_password_required",
           "This document needs a password to open. Choose a copy without a password.",
           422,
         );
+      }
+      if (structure === "structure_check_unavailable") {
+        // The sandbox reached no verdict (#1593): a busy host, not a bad file.
+        // The member is told only to try again; the real reason is for the
+        // administrator's log. Nothing is stored, as for any refusal.
+        log.warn({
+          event: "document.inspection",
+          state: "degraded",
+          reason: "structure_check_unavailable",
+          action: "inspect_admin_diagnostics",
+          impact: "document_upload_blocked",
+        });
+        throw new AppError("document_check_unavailable", "The file couldn't be uploaded. Please try again.", 503);
       }
       if (structure !== "supported_structure") {
         throw new AppError(
@@ -532,7 +561,6 @@ export async function uploadItemDocument(input: {
           422,
         );
       }
-      validatedBytes = bytes;
     }
     await reserveDocumentMetadata({
       documentId,
@@ -572,91 +600,91 @@ export async function uploadItemDocument(input: {
           durationMs: scanMs,
         });
         if (scan.retryable) {
-          const plaintext = await storage.readQuarantine(received.quarantinePath, maxBytes);
+          // The next key while a rotation is in progress (#955).
+          const stagingWrap = wrappingKey(config);
+          const stagingSealer = createDocumentSealer({
+            documentId,
+            householdId: input.householdId,
+            itemId: input.itemId,
+            mediaType,
+            plaintextSize: received.sizeBytes,
+            purpose: "scanner_recovery",
+          }, stagingWrap.keyEncryptionKey, stagingWrap.keyId);
+          // Encrypted from the quarantine file in pieces, its digest verified.
+          const stagingObjectKey = storage.createStorageKey();
+          const staged = await storage.sealQuarantine(
+            received.quarantinePath,
+            { sizeBytes: received.sizeBytes, contentSha256: received.contentSha256 },
+            stagingSealer,
+            { kind: "staging", storageKey: stagingObjectKey },
+          );
+          stagingKey = stagingObjectKey;
+          const now = new Date();
+          const recoveryExpiresAt = new Date(now.getTime() + config.scanRecoveryRetentionHours * 60 * 60 * 1_000);
+          const nextAttemptAt = new Date(now.getTime() + scannerRecoveryDelayMs(1));
           try {
-            // The next key while a rotation is in progress (#955).
-            const stagingWrap = wrappingKey(config);
-            const staged = encryptDocument(plaintext, {
-              documentId,
-              householdId: input.householdId,
-              itemId: input.itemId,
-              mediaType,
-              plaintextSize: received.sizeBytes,
-              purpose: "scanner_recovery",
-            }, stagingWrap.keyEncryptionKey, stagingWrap.keyId);
-            stagingKey = storage.createStorageKey();
-            await storage.writeStagingCiphertext(stagingKey, staged.ciphertext);
-            const now = new Date();
-            const recoveryExpiresAt = new Date(now.getTime() + config.scanRecoveryRetentionHours * 60 * 60 * 1_000);
-            const nextAttemptAt = new Date(now.getTime() + scannerRecoveryDelayMs(1));
-            try {
-              await getDb().transaction(async (transaction) => {
-                await transaction.insert(documentStagingObjects).values({
-                  documentId,
-                  storageKey: stagingKey!,
-                  purpose: "scanner_recovery",
-                  ciphertextSize: staged.ciphertext.length,
-                  ...staged.envelope,
-                  status: "pending",
-                  recoveryExpiresAt,
-                });
-                await transaction.insert(documentJobs).values({
-                  documentId,
-                  kind: "scan",
-                  generation: 1,
-                  status: "pending",
-                  attempts: 0,
-                  nextAttemptAt,
-                  lastError: failureCode,
-                });
-                await transaction.update(documents).set({
-                  lifecycle: "scanning",
-                  scanStatus: "error",
-                  failureCode,
-                  updatedAt: now,
-                }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "scanning")));
-                await transaction.insert(auditLog).values({
-                  householdId: input.householdId,
-                  actorUserId: input.userId,
-                  entityType: "document",
-                  entityId: documentId,
-                  action: "document_scan_recoverable",
-                  changes: { itemId: input.itemId, reason: failureCode },
-                });
+            await getDb().transaction(async (transaction) => {
+              await transaction.insert(documentStagingObjects).values({
+                documentId,
+                storageKey: stagingKey!,
+                purpose: "scanner_recovery",
+                ciphertextSize: staged.ciphertextSize,
+                ...staged.envelope,
+                status: "pending",
+                recoveryExpiresAt,
               });
-            } catch (error) {
-              await storage.deleteStagingCiphertext(stagingKey).catch(() => undefined);
-              stagingKey = undefined;
-              throw error;
-            } finally {
-              staged.ciphertext.fill(0);
-            }
-            log.warn({
-              event: "document.scan",
-              state: "retrying",
-              reason: asOperationalReason(failureCode),
-              action: "retry",
-              impact: "document_upload_blocked",
-              durationMs: scanMs,
+              await transaction.insert(documentJobs).values({
+                documentId,
+                kind: "scan",
+                generation: 1,
+                status: "pending",
+                attempts: 0,
+                nextAttemptAt,
+                lastError: failureCode,
+              });
+              await transaction.update(documents).set({
+                lifecycle: "scanning",
+                scanStatus: "error",
+                failureCode,
+                updatedAt: now,
+              }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "scanning")));
+              await transaction.insert(auditLog).values({
+                householdId: input.householdId,
+                actorUserId: input.userId,
+                entityType: "document",
+                entityId: documentId,
+                action: "document_scan_recoverable",
+                changes: { itemId: input.itemId, reason: failureCode },
+              });
             });
-            return toSummary({
-              id: documentId,
-              itemId: rowItemId,
-              displayName,
-              mediaType,
-              sizeBytes: received.sizeBytes,
-              lifecycle: "scanning",
-              scanStatus: "error",
-              availableAt: null,
-              deleteAfter: null,
-              failureCode,
-              recoverable: true,
-              recoveryExpiresAt,
-              recoveryStatus: "retrying",
-            }, config.scanMode);
-          } finally {
-            plaintext.fill(0);
+          } catch (error) {
+            await storage.deleteStagingCiphertext(stagingKey).catch(() => undefined);
+            stagingKey = undefined;
+            throw error;
           }
+          log.warn({
+            event: "document.scan",
+            state: "retrying",
+            reason: asOperationalReason(failureCode),
+            action: "retry",
+            impact: "document_upload_blocked",
+            durationMs: scanMs,
+          });
+          return toSummary({
+            id: documentId,
+            itemId: rowItemId,
+            displayName,
+            mediaType,
+            sizeBytes: received.sizeBytes,
+            lifecycle: "scanning",
+            scanStatus: "error",
+            availableAt: null,
+            deleteAfter: null,
+            failureCode,
+            recoverable: true,
+            recoveryExpiresAt,
+            recoveryStatus: "retrying",
+          }, config.scanMode);
         }
 
         await getDb().update(documents).set({
@@ -702,31 +730,31 @@ export async function uploadItemDocument(input: {
     }
     log.info({ event: "document.lifecycle", state: "starting", action: "none" });
 
-    const plaintext = validatedBytes!;
-    validatedBytes = undefined;
-    let encrypted: ReturnType<typeof encryptDocument>;
     // The next key while a rotation is in progress (#955).
     const publishWrap = wrappingKey(config);
-    try {
-      encrypted = encryptDocument(plaintext, {
-        documentId,
-        householdId: input.householdId,
-        itemId: input.itemId,
-        mediaType,
-        plaintextSize: received.sizeBytes,
-      }, publishWrap.keyEncryptionKey, publishWrap.keyId);
-    } finally {
-      plaintext.fill(0);
-    }
-    storageKey = storage.createStorageKey();
-    await storage.writeCiphertext(storageKey, encrypted.ciphertext);
+    const publishSealer = createDocumentSealer({
+      documentId,
+      householdId: input.householdId,
+      itemId: input.itemId,
+      mediaType,
+      plaintextSize: received.sizeBytes,
+    }, publishWrap.keyEncryptionKey, publishWrap.keyId);
+    // Encrypted from the quarantine file in pieces, its digest verified.
+    const objectKey = storage.createStorageKey();
+    const encrypted = await storage.sealQuarantine(
+      received.quarantinePath,
+      { sizeBytes: received.sizeBytes, contentSha256: received.contentSha256 },
+      publishSealer,
+      { kind: "object", storageKey: objectKey },
+    );
+    storageKey = objectKey;
 
     const now = new Date();
     await getDb().transaction(async (transaction) => {
       await transaction.insert(documentCrypto).values({
         documentId,
         storageKey: storageKey!,
-        ciphertextSize: encrypted.ciphertext.length,
+        ciphertextSize: encrypted.ciphertextSize,
         ...encrypted.envelope,
       });
       // Asserted, not assumed: a slow encrypt can run past the maintenance
@@ -805,7 +833,6 @@ export async function uploadItemDocument(input: {
     }
     throw error;
   } finally {
-    validatedBytes?.fill(0);
     received.leadingBytes.fill(0);
     await storage.discardQuarantine(received.quarantinePath).catch(() => undefined);
   }
@@ -815,17 +842,12 @@ export async function uploadItemDocument(input: {
 export type DocumentContentAuditAction = "document_downloaded" | "document_previewed";
 
 /**
- * Decrypts a document's plaintext for an authorized reader.
- *
- * Every caller that needs plaintext goes through here so that authorization,
- * readiness and audit stay one path; only the recorded action varies, so a
- * page-one preview (#476) is never logged as a whole-document download.
+ * What a plaintext read needs, once authorization and readiness have passed:
+ * the document's record, its crypto row, the key-encryption key for that row,
+ * its envelope, and the encryption context its unsealer is built over. Shared
+ * by the whole-buffer read and the streamed download so both stay one path.
  */
-export async function readDocumentDownload(
-  userId: string,
-  documentId: string,
-  auditAction: DocumentContentAuditAction = "document_downloaded",
-): Promise<{ bytes: Buffer; displayName: string; mediaType: string }> {
+async function resolveDocumentContent(userId: string, documentId: string) {
   const record = await requireDocumentAccess(userId, documentId);
   const config = getDocumentConfig();
   if (!record.itemId || !isDocumentContentReady(record, config.scanMode, "download")) {
@@ -841,30 +863,89 @@ export async function readDocumentDownload(
   if (!documentKek) {
     throw new AppError("document_key_unavailable", "Document encryption keys require administrator attention", 503);
   }
-  let ciphertext: Buffer;
-  try {
-    // A stored document was accepted under whatever limit applied then, so it
-    // is read against the hard ceiling: lowering the limit (#1285) must never
-    // make an existing document unreadable.
-    ciphertext = await openDocumentStorage().readCiphertext(crypto.storageKey, DOCUMENT_MAX_BYTES_CEILING + 64);
-  } catch {
-    throw new AppError("document_unavailable", "That document cannot currently be opened", 503);
-  }
   const envelope = envelopeOf(crypto);
+  const context = {
+    documentId,
+    householdId: record.householdId,
+    itemId: sealedItemIdOf(record)!,
+    mediaType: record.mediaType,
+    plaintextSize: record.sizeBytes,
+  };
+  return { record, crypto, documentKek, envelope, context };
+}
+
+/**
+ * A failed tag, a key or envelope that does not open, or an object not the
+ * length that was sealed is an integrity failure; a missing or unreadable
+ * object is the document being unavailable.
+ */
+function documentReadError(error: unknown): AppError {
+  if (error instanceof DocumentIntegrityError) {
+    return new AppError("document_integrity_failed", "That document failed its integrity check", 503);
+  }
+  return new AppError("document_unavailable", "That document cannot currently be opened", 503);
+}
+
+/**
+ * Decrypts a document's plaintext for an authorized reader.
+ *
+ * Every caller that needs plaintext goes through here so that authorization,
+ * readiness and audit stay one path; only the recorded action varies, so a
+ * page-one preview (#476) is never logged as a whole-document download.
+ * The stored object is decrypted straight into one buffer, and that buffer is
+ * returned only once the tag has verified (#1571).
+ */
+export async function readDocumentDownload(
+  userId: string,
+  documentId: string,
+  auditAction: DocumentContentAuditAction = "document_downloaded",
+): Promise<{ bytes: Buffer; displayName: string; mediaType: string }> {
+  const { record, crypto, documentKek, envelope, context } = await resolveDocumentContent(userId, documentId);
   let bytes: Buffer;
   try {
-    bytes = decryptDocument(ciphertext, {
-      documentId,
-      householdId: record.householdId,
-      itemId: sealedItemIdOf(record)!,
-      mediaType: record.mediaType,
-      plaintextSize: record.sizeBytes,
-    }, envelope, documentKek);
-  } catch {
-    throw new AppError("document_integrity_failed", "That document failed its integrity check", 503);
+    bytes = await openDocumentStorage().unsealIntoBuffer(
+      crypto.storageKey,
+      { ciphertextSize: crypto.ciphertextSize, plaintextSize: record.sizeBytes },
+      createDocumentUnsealer(context, envelope, documentKek),
+    );
+  } catch (error) {
+    throw documentReadError(error);
   }
   await recordDocumentAudit(record.householdId, documentId, userId, auditAction, { itemId: record.itemId });
   return { bytes, displayName: record.displayName, mediaType: record.mediaType };
+}
+
+/**
+ * Opens a document's plaintext as a stream for an authorized reader (#1571).
+ *
+ * The tag is verified in one pass over the stored ciphertext before this
+ * returns; the body then decrypts the same object again in pieces, so the
+ * plaintext is never held whole. A tampered object fails here with
+ * `document_integrity_failed`, before any body exists. The download is audited
+ * after that first pass, before the body is returned.
+ */
+export async function openDocumentDownload(
+  userId: string,
+  documentId: string,
+): Promise<{ body: ReadableStream<Uint8Array>; sizeBytes: number; displayName: string; mediaType: string }> {
+  const { record, crypto, documentKek, envelope, context } = await resolveDocumentContent(userId, documentId);
+  let body: ReadableStream<Uint8Array>;
+  try {
+    body = await openDocumentStorage().streamVerifiedPlaintext(
+      crypto.storageKey,
+      { ciphertextSize: crypto.ciphertextSize },
+      () => createDocumentUnsealer(context, envelope, documentKek),
+    );
+  } catch (error) {
+    throw documentReadError(error);
+  }
+  try {
+    await recordDocumentAudit(record.householdId, documentId, userId, "document_downloaded", { itemId: record.itemId });
+  } catch (error) {
+    await body.cancel().catch(() => undefined);
+    throw error;
+  }
+  return { body, sizeBytes: record.sizeBytes, displayName: record.displayName, mediaType: record.mediaType };
 }
 
 export async function requestDocumentDeletion(userId: string, documentId: string): Promise<DocumentSummary> {

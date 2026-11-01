@@ -1,4 +1,4 @@
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -16,6 +16,7 @@ import {
   syncCheckpointArtifacts,
   validateCheckpointIntegrity,
   writeRestoreJournal,
+  writeSecretFileDurably,
 } from "./restore-engine";
 
 // Unit coverage for issue #296 slice 3's journal durability, checkpoint
@@ -427,5 +428,44 @@ describe("CORRESPONDENCE_QUERIES", () => {
     expect(Object.keys(CORRESPONDENCE_QUERIES).sort()).toEqual(
       ["attachments", "crypto", "documentStaging", "staging", "transientCount", "visible"].sort(),
     );
+  });
+});
+
+describe("writeSecretFileDurably", () => {
+  it("T1.1: publishes the content at mode 0600 and leaves no temp file", () => {
+    expect(writeSecretFileDurably).toBeTypeOf("function");
+    const target = join(sandbox, "fresh-dir", "secret");
+    mkdirSync(join(sandbox, "fresh-dir"), { mode: 0o700 });
+
+    writeSecretFileDurably(target, "abc\n");
+
+    expect(readFileSync(target, "utf8")).toBe("abc\n");
+    expect(statSync(target).mode & 0o777).toBe(0o600);
+    expect(existsSync(`${target}.tmp`)).toBe(false);
+  });
+
+  it("T1.2: refuses a directory at the path, leaves it unchanged and removes its temp file", () => {
+    expect(writeSecretFileDurably).toBeTypeOf("function");
+    const target = join(sandbox, "a-directory");
+    mkdirSync(target);
+    writeFileSync(join(target, "kept"), "kept\n");
+
+    expect(() => writeSecretFileDurably(target, "abc\n")).toThrow();
+
+    expect(lstatSync(target).isDirectory()).toBe(true);
+    expect(readFileSync(join(target, "kept"), "utf8")).toBe("kept\n");
+    expect(existsSync(`${target}.tmp`)).toBe(false);
+  });
+
+  it("T1.3: replaces an existing file whole, at mode 0600, with no temp file left", () => {
+    expect(writeSecretFileDurably).toBeTypeOf("function");
+    const target = join(sandbox, "existing-secret");
+    writeFileSync(target, "old\n", { mode: 0o644 });
+
+    writeSecretFileDurably(target, "new\n");
+
+    expect(readFileSync(target, "utf8")).toBe("new\n");
+    expect(statSync(target).mode & 0o777).toBe(0o600);
+    expect(existsSync(`${target}.tmp`)).toBe(false);
   });
 });

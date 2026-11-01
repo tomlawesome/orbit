@@ -137,13 +137,35 @@ describe("ORBIT_MEMORY_LIMIT is documented where the other limits are (#1429)", 
 });
 
 describe("the measured archive memory peak is stated everywhere, and the stale figure is gone (#1537)", () => {
-  it("the compose mem_limit comment states 700 MB, not a 1 GB import peak", () => {
+  // The five comment lines directly above the orbit-app mem_limit.
+  const memLimitComment = () => {
     const lines = serviceBlock("orbit-app").split("\n");
     const index = lines.findIndex((line) => line.includes("mem_limit: ${ORBIT_MEMORY_LIMIT:-2g}"));
     expect(index).toBeGreaterThan(0);
-    const comment = lines.slice(Math.max(0, index - 5), index).join("\n");
+    return lines.slice(Math.max(0, index - 5), index).join("\n");
+  };
+
+  it("the compose mem_limit comment states the floor the readiness check warns below and the 700 MB behind it (#1584 L-Q5)", () => {
+    const comment = memLimitComment();
     expect(comment).toContain("700 MB");
+    expect(comment).toMatch(/1 GB or more/u);
+    expect(comment).toMatch(/warn/iu);
+    expect(comment).not.toMatch(/above about 700 MB/u);
     expect(comment).not.toMatch(/about 1 GB, the peak/iu);
+  });
+
+  it("the compose comment names the same floor the readiness check warns below (#1584 L-Q5)", () => {
+    const source = read("src/lib/config-contract.ts");
+    const floor = source.match(/MEMORY_LIMIT_IMPORT_FLOOR_BYTES = ([0-9* ]+);/u);
+    expect(floor, "config-contract.ts no longer declares MEMORY_LIMIT_IMPORT_FLOOR_BYTES as plain arithmetic").not.toBeNull();
+    // Evaluated only when it is digits, spaces and `*` (so `1024 ** 3` and `2 * 1024 ** 3` both work).
+    expect(floor[1]).toMatch(/^[0-9* ]+$/u);
+    const bytes = Function(`"use strict"; return (${floor[1]});`)();
+
+    const stated = memLimitComment().match(/(\d+) GB or more/u);
+    expect(stated, "the compose comment does not state a floor as 'N GB or more'").not.toBeNull();
+    expect(Number(stated[1]) * 1024 ** 3).toBe(bytes);
+    expect(source).toContain(`below about ${stated[1]} GB`);
   });
 
   it.each([

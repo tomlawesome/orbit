@@ -382,7 +382,7 @@ export function safeAttachmentFailure(error: unknown): string {
     "mime_type_mismatch", "document_type_unsupported", "malware_detected", "scanner_disabled",
     "scanner_unavailable", "scanner_timeout", "scanner_protocol", "scanner_failed",
     "message_too_large", "attachment_download_failed",
-    "staging_lease_lost", "staging_purge_failed",
+    "staging_lease_lost", "staging_purge_failed", "structure_check_unavailable",
   ]).has(code) ? code : "attachment_processing_failed";
 }
 

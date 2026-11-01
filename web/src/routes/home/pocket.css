@@ -215,7 +215,7 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
 /* The search field rides at the top of its sheet, 16px so iOS does not zoom. */
 .pk-field{flex:1;min-width:0;box-sizing:border-box;min-height:var(--p-hit);padding:0 4px;margin:0;
   background:none;border:0;border-bottom:1px solid var(--line);border-radius:0;outline:none;-webkit-appearance:none;
-  appearance:none;font:var(--p-type-body)/1.2 var(--mono);color:var(--ink)}
+  appearance:none;font:var(--p-type-input)/1.2 var(--mono);color:var(--ink)}
 .pk-field::placeholder{color:var(--ink-quiet)}
 /* The app's own focus outline stays (#848: every text field shows keyboard
    focus); the underline turns accent as well. */

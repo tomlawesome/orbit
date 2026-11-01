@@ -184,6 +184,15 @@ later installs ignore it. A run removes only its own copy of your original
 files once they are put back, and its own dated folder when that leaves it
 empty. You can leave it there.
 
+### If an update stops
+
+An update that stops after it has written its files is not undone: run the
+update again and it carries on from there. If it stopped before the
+containers were replaced and was made by an installer older than this
+release, the next run may refuse because the running build differs from
+`ORBIT_IMAGE`. Then start the deployment again from its folder, and run the
+update again.
+
 ## Logged and unattended runs
 
 The options in this section belong to `install.sh`, the installer script

@@ -41,7 +41,9 @@ of categories:
 - documents: the existing controlled codes such as `key_unavailable` and
   `purge_failed`, plus `scanner_unavailable`, `scanner_timeout`,
   `scanner_protocol`, `scanner_failed`, `staging_object_invalid`,
-  `scan_recovery_expired`, and `stage_purge_failed`.
+  `scan_recovery_expired`, `stage_purge_failed`, and
+  `structure_check_unavailable` (the open check's sandbox reached no verdict;
+  the staged copy is kept and the job retried).
 
 Raw notification errors recorded in the past stay internal and are never
 returned.
@@ -405,6 +407,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `APP_URL` | Orbit | The address people use in the browser; also used for cookies and request checks. Use HTTPS except on loopback. | `https://orbit.example.com` |
 | `ORBIT_AUTH_OIDC` | Orbit | `true` turns on sign-in through an identity provider and makes the `OIDC_*` settings required. While `false`, those settings may stay filled in and are ignored. | `false` |
 | `ORBIT_IMAGE` | Compose | Exact `registry/repository@sha256:...` identity for pulled deployments. Repository build scripts supply a revision-specific local tag instead. | `ghcr.io/tomlawesome/orbit@sha256:<64 lowercase hexadecimal characters>` |
+| `ORBIT_PREVIOUS_IMAGE` | Installer | The build the containers were running when the installer last updated this file; lets an update that stopped part-way be run again. Written by the installer; never edit it. | `ghcr.io/tomlawesome/orbit@sha256:<64 lowercase hexadecimal characters>` |
 | `COMPOSE_PROJECT_NAME` | Compose | The Compose project name the installer recorded. Written by the installer; do not edit it after installation. | `orbit` |
 | `ORBIT_CONFIG_APPLIED_VERSION` / `ORBIT_CONFIG_APPLIED_DIGEST` | Installer | The version and build fingerprint that last checked this file. Written by the installer; never edit them. | `v0.3.0` / `sha256:<64 lowercase hexadecimal characters>` |
 | `ORBIT_CONFIG_SCHEMA_VERSION` | Installer | The layout version of `.env-orbit` itself. Written by the installer. | `1` |

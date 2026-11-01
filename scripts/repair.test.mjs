@@ -1692,6 +1692,109 @@ describe("scripts/repair.sh --check", () => {
     expect(result.status).not.toBe(4);
   });
 
+  // The #1316 (B) wrapper: only the image .env-orbit names (FIXTURE_IMAGE_DIGEST)
+  // is local, every other `docker image inspect` fails like an image never
+  // pulled, and everything else goes to the engine shim. The wrapper logs every
+  // argv, repair.sh's and configure.sh's alike, to wrappedLogPath.
+  function fixtureImageOnlyDocker() {
+    const scratch = scratchDir();
+    const argvLogPath = join(scratch, "docker-argv.log");
+    const wrappedLogPath = join(scratch, "wrapped-docker-argv.log");
+    const engineDir = mkdtempSync(join(tmpdir(), "orbit-repair-engine-"));
+    scratchDirs.push(engineDir);
+    const engineDockerPath = writeEngineDockerShim(engineDir, { imagePresent: true, pullSucceeds: true });
+    const innerPath = join(scratch, "docker-inner");
+    writeFileSync(innerPath, dockerShimScript({ engineDockerPath, argvLogPath }));
+    chmodSync(innerPath, 0o755);
+    const dockerScript = [
+      "#!/usr/bin/env bash",
+      `printf '%s\\n' "$*" >> '${wrappedLogPath}'`,
+      'if [ "$1" = image ] && [ "$2" = inspect ]; then',
+      `  case "$*" in *'${FIXTURE_IMAGE_DIGEST}'*) ;; *) exit 1 ;; esac`,
+      "fi",
+      `exec '${innerPath}' "$@"`,
+      "",
+    ].join("\n");
+    return { dockerScript, argvLogPath, wrappedLogPath };
+  }
+
+  function wrappedDockerLog(wrappedLogPath) {
+    return existsSync(wrappedLogPath) ? readFileSync(wrappedLogPath, "utf8") : "";
+  }
+
+  function writeOrbitImagePin(targetDir, content) {
+    const pinPath = join(targetDir, ".orbit-image");
+    writeFileSync(pinPath, content, { mode: 0o600 });
+    chmodSync(pinPath, 0o600);
+  }
+
+  // A launcher config tree pins its image in .orbit-image, which configure.sh
+  // resolves before the exported ORBIT_IMAGE and .env-orbit and then pulls when
+  // the digest is absent. The presence check must read the same pin first, or
+  // `repair.sh --check` reaches that pull.
+  it("checks the .orbit-image pin, not .env-orbit's image, so an absent pinned digest is docker-unavailable and never pulled", () => {
+    const targetDir = makeFixture();
+    writeOrbitImagePin(targetDir, `ghcr.io/tomlawesome/orbit@sha256:${"f".repeat(64)}\n`);
+    const { dockerScript, argvLogPath, wrappedLogPath } = fixtureImageOnlyDocker();
+
+    const result = runRepairWithFakeDocker(targetDir, ["--check"], { dockerScript, argvLogPath });
+
+    expect(wrappedDockerLog(wrappedLogPath)).not.toMatch(/^pull(\s|$)/m);
+    expect(result.stdout).toContain("finding class=docker-unavailable target=configuration severity=info");
+    expect(result.stdout).not.toContain("configuration-invalid");
+    expect(result.stdout).not.toContain("configuration-incomplete");
+    expect(result.status).not.toBe(4);
+  });
+
+  it("lets the .orbit-image pin win over an absent exported ORBIT_IMAGE: the check runs on the present pin and nothing is pulled", () => {
+    const targetDir = makeFixture();
+    writeOrbitImagePin(targetDir, `${FIXTURE_IMAGE}\n`);
+    const { dockerScript, argvLogPath, wrappedLogPath } = fixtureImageOnlyDocker();
+
+    const result = runRepairWithFakeDocker(targetDir, ["--check"], {
+      dockerScript,
+      argvLogPath,
+      env: { ORBIT_IMAGE: `ghcr.io/tomlawesome/orbit@sha256:${"e".repeat(64)}` },
+    });
+
+    expect(wrappedDockerLog(wrappedLogPath)).not.toMatch(/^pull(\s|$)/m);
+    expect(result.stdout).not.toContain("finding class=docker-unavailable target=configuration");
+    expect(result.stdout).not.toContain("configuration-invalid");
+    expect(result.stdout).not.toContain("configuration-incomplete");
+  });
+
+  // The refusal half: configure.sh rejects a linked or invalid pin before it
+  // touches Docker, so that is a configuration finding, not a missing image.
+  it("records configuration-invalid (fail), not docker-unavailable, and never pulls when .orbit-image is a link", () => {
+    const targetDir = makeFixture();
+    const realPin = join(scratchDir(), "real-orbit-image");
+    writeFileSync(realPin, `${FIXTURE_IMAGE}\n`, { mode: 0o600 });
+    symlinkSync(realPin, join(targetDir, ".orbit-image"));
+    const argvLogPath = join(scratchDir(), "docker-argv.log");
+
+    // Every image is present, so the guard passes and configure.sh itself refuses the pin.
+    const result = runRepairWithFakeDocker(targetDir, ["--check"], { argvLogPath });
+
+    const argvLog = existsSync(argvLogPath) ? readFileSync(argvLogPath, "utf8") : "";
+    expect(argvLog).not.toMatch(/^pull(\s|$)/m);
+    expect(result.stdout).toContain("finding class=configuration-invalid target=configuration severity=fail");
+    expect(result.stdout).not.toContain("finding class=docker-unavailable target=configuration");
+  });
+
+  it("records configuration-invalid (fail), not docker-unavailable, and never pulls when .orbit-image pins a tag", () => {
+    const targetDir = makeFixture();
+    writeOrbitImagePin(targetDir, "ghcr.io/tomlawesome/orbit:v0.3.0\n");
+    const argvLogPath = join(scratchDir(), "docker-argv.log");
+
+    // Every image is present, so the guard passes and configure.sh itself refuses the pin.
+    const result = runRepairWithFakeDocker(targetDir, ["--check"], { argvLogPath });
+
+    const argvLog = existsSync(argvLogPath) ? readFileSync(argvLogPath, "utf8") : "";
+    expect(argvLog).not.toMatch(/^pull(\s|$)/m);
+    expect(result.stdout).toContain("finding class=configuration-invalid target=configuration severity=fail");
+    expect(result.stdout).not.toContain("finding class=docker-unavailable target=configuration");
+  });
+
   it("groups findings by the fixed class order regardless of discovery order", () => {
     const targetDir = makeFixture();
     // Triggers, in filesystem-discovery order: secret-missing (step 3) before

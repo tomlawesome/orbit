@@ -10,8 +10,9 @@
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import { sectionColourOf } from "$lib/option-colour.js";
   import { pressKeepsChooser } from "./drawer-modes.svelte.js";
-  import { createDrawerActs } from "./drawer-acts.svelte.js";
-  import { archiveCommand, completeCommand, statusCommand } from "$lib/data/commands.js";
+  import { completeToday, createDrawerActs } from "./drawer-acts.svelte.js";
+  import { rereadAfterLanded } from "$lib/data/landed.js";
+  import { archiveCommand, statusCommand } from "$lib/data/commands.js";
   import { createHeldCompletion, droppedCompletionWords, isRefused } from "$lib/data/held-completion.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf, manifestRowOf } from "$lib/data/chart.js";
   import { dayMonth, initials as initialsOf, money, MONTHS, plural } from "$lib/format.js";
@@ -63,13 +64,16 @@
    * →`, and a second tap on its hollow body, put its row's own lines into
    * editing, as the desk's drawer does (#1319, owner 2026-10-08): the review
    * sheet that used to rise here is gone.
+   *
+   * `onchanged` reads home again and rejects when home could not be read
+   * again; the host has said so itself (#1584).
    * @typedef {{
    *   view?: import('$lib/data/workspace.js').HomeView | null,
    *   arrive?: boolean,
-   *   onapprove?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
-   *   ondismiss?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
+   *   onapprove?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<{ done: boolean, problem: string | null }>,
+   *   ondismiss?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<{ done: boolean, problem: string | null }>,
    *   onamend?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion,
-   *     item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<string | { partial: true, message: string } | null>,
+   *     item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<string | { partial: true, message: string } | { replayed: true, message: string } | null>,
    *   onchanged?: () => Promise<unknown>,
    *   onsignedout?: (redirectTo: string | null) => unknown,
    *   onmenu?: () => unknown,
@@ -241,9 +245,14 @@
     busy = true;
     delete rowProblem[target.id];
     try {
-      const failed = await handler(target);
-      /* false: the row stays open with the refusal under it (Row.svelte run) */
-      if (failed) { rowProblem[target.id] = failed; return false; }
+      const { done, problem } = await handler(target);
+      /* The line is said whatever the answer: a refusal's words, or the
+         done-but-unread line when only the read after a landed decision
+         failed (inbox/acts.js). Only a refusal is answered false, which
+         keeps the row open as refused (Row.svelte run); a landed decision
+         is woken as done, line or no line. */
+      if (problem) rowProblem[target.id] = problem;
+      if (!done) return false;
       wake(act === "approve" ? `${target.title} added to your orbit` : `${target.title} dismissed`);
     } finally {
       busy = false;
@@ -283,9 +292,9 @@
      item that leaves the list keeps its asked row. */
   const acts = createDrawerActs({
     view: () => view,
-    reread: async ({ view: home = true, papers = false }) => {
+    reread: async ({ view: home = true, papers = false }, item) => {
       if (home) await onchanged?.();
-      if (papers) await rereadPapers();
+      if (papers) await rereadPapers(item);
     },
     say: (id, words, about = "item") => {
       if (about === "partial") { wake(/** @type {string} */ (words), { failure: true }); return; }
@@ -303,8 +312,10 @@
      (drawer-acts.svelte.js); the open row's item is read whatever its
      status, so a retired or expired item still shows its papers. */
   const loadSearchDocuments = () => acts.loadSearchDocuments(lit);
-  /** The papers again, after one was attached, removed or restored. */
-  const rereadPapers = () => acts.rereadSearchDocuments(lit);
+  /** The papers again, after one was attached, removed or restored; rejects
+      when `item`'s own papers could not be read (drawer-acts.svelte.js).
+      @param {string | null} [item] */
+  const rereadPapers = (item = null) => acts.rereadSearchDocuments(lit, item);
 
   const results = $derived(
     searchPocket(query, { items: rows, attention: groups?.attention ?? [], documents: acts.searchDocuments }),
@@ -319,14 +330,15 @@
     if (!raw || !view?.primary || busy) return;
     busy = true;
     problem = null;
-    const completedDate = view.today;
     try {
-      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), { completedDate }));
+      const done = await completeToday({ raw, primary: view.primary, today: view.today });
+      problem = done.problem;
+      if (!done.done) return;
       sheetOpen = false;
       wake(`${target.title} completed`);
-      await onchanged?.();
-    } catch (error) {
-      problem = wordsOf(error, "couldn't complete it — try again");
+      /* Completed, and the sheet is shut: a failed read after it is said in
+         the wake as done-but-unread (landed.js), never on the sheet's line. */
+      await rereadAfterLanded(async () => { await onchanged?.(); }, wake);
     } finally {
       busy = false;
     }
@@ -501,7 +513,8 @@
     apply: applyCommand,
     /* nothing is held here: only an earlier visit's stash is finished */
     holdMs: 0,
-    onsent: () => onchanged?.(),
+    /* a failed read after a landed replay is the banner's to say, not a failed completion */
+    onsent: () => onchanged?.().catch(() => {}),
     onfailed: (error, command) => {
       /* Not recorded and now dropped: name the item rather than echo the
          engine's "refresh and try again", which cannot bring it back. */
@@ -511,6 +524,9 @@
   });
   /* Runs once, on mount: nothing it reads is reactive state. */
   $effect(() => {
+    /* Only the dialect CSS is showing replays the stash; the desk's onMount
+       takes the other side of the same query, so it is sent once. */
+    if (!isPocket()) return;
     held.retryStashed((error) => error instanceof WorkspaceError && error.code === "version_conflict");
   });
 

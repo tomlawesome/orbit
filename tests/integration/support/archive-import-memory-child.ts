@@ -5,7 +5,8 @@
  * through tsx, so the test runner's memory (and the seeding of the documents)
  * never counts.
  *
- * Arguments: <preview|import> <userId> <householdId> <archiveFile>.
+ * Arguments: <preview|import> <userId> <householdId> <archiveFile>
+ * [<warmUpUserId> <warmUpHouseholdId>] (import only).
  * The archive file is the exported file as it comes from the download.
  *
  * #1566: the baseline is taken BEFORE anything of the file is read (garbage
@@ -14,47 +15,45 @@
  * route hands it the upload's file part. So the figure counts everything the
  * operation holds of the archive, the request body included; #1521's child
  * parsed the file first and so never counted it.
+ * With a warm-up target, the import runs twice, into the warm-up household
+ * first; the second import is the pinned figure (see memory-child-support).
  * Prints one line: `MEMORY_RESULT {"beforeKiB":..,"afterKiB":..,"result":..}`.
  */
-import { createReadStream, readFileSync, writeFileSync } from "node:fs";
-import { Readable } from "node:stream";
-import { runInNewContext } from "node:vm";
-import { setFlagsFromString } from "node:v8";
 import { closeDatabase } from "@/db";
-import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
-import { setKeyStateForTests } from "@/server/key-state";
 import { importPortableArchive, previewPortableImport } from "@/server/portable-archive-repository";
+import { baselinePeakKiB, fileAsWebStream, peakKiB, prepareKeyState, printMemoryResult } from "./memory-child-support";
 
-const [mode, userId, householdId, archiveFile] = process.argv.slice(2);
-if ((mode !== "preview" && mode !== "import") || !userId || !householdId || !archiveFile) {
-  throw new Error("usage: archive-import-memory-child <preview|import> <userId> <householdId> <archiveFile>");
+const [mode, userId, householdId, archiveFile, warmUpUserId, warmUpHouseholdId] = process.argv.slice(2);
+if (
+  (mode !== "preview" && mode !== "import")
+  || !userId || !householdId || !archiveFile
+  || (warmUpUserId === undefined) !== (warmUpHouseholdId === undefined)
+  || (mode === "preview" && warmUpUserId !== undefined)
+) {
+  throw new Error("usage: archive-import-memory-child <preview|import> <userId> <householdId> <archiveFile> [<warmUpUserId> <warmUpHouseholdId>] (the warm-up pair is for import only)");
 }
 
-resetDocumentConfigForTests();
-setKeyStateForTests({ verdict: "usable", heldKeyId: getDocumentConfig().keyId });
-
-/** Peak resident memory (KiB) since the last reset, from the kernel. */
-function peakKiB(): number {
-  const match = /VmHWM:\s+(\d+)/u.exec(readFileSync("/proc/self/status", "utf8"));
-  if (!match) throw new Error("VmHWM is not readable");
-  return Number(match[1]);
-}
+prepareKeyState();
 
 async function main(): Promise<void> {
-  setFlagsFromString("--expose-gc");
-  const collect = runInNewContext("gc") as () => void;
   const passphrase = "correct-horse-battery-staple";
-  collect();
-  writeFileSync("/proc/self/clear_refs", "5");
-  const beforeKiB = peakKiB();
-  let archive: ReadableStream<Uint8Array> | undefined = Readable.toWeb(createReadStream(archiveFile)) as unknown as ReadableStream<Uint8Array>;
+  let beforeKiB = baselinePeakKiB();
+  let first: { beforeKiB: number; afterKiB: number } | undefined;
+  if (warmUpUserId !== undefined && warmUpHouseholdId !== undefined) {
+    let warmUp: ReadableStream<Uint8Array> | undefined = fileAsWebStream(archiveFile);
+    await importPortableArchive({ userId: warmUpUserId, householdId: warmUpHouseholdId, archive: warmUp, passphrase, conflictItemIds: [] });
+    first = { beforeKiB, afterKiB: peakKiB() };
+    warmUp = undefined;
+    beforeKiB = baselinePeakKiB();
+  }
+  let archive: ReadableStream<Uint8Array> | undefined = fileAsWebStream(archiveFile);
   const result = mode === "preview"
     ? await previewPortableImport(userId, householdId, archive, passphrase)
     : await importPortableArchive({ userId, householdId, archive, passphrase, conflictItemIds: [] });
   const afterKiB = peakKiB();
   archive = undefined;
   await closeDatabase();
-  console.log(`MEMORY_RESULT ${JSON.stringify({ beforeKiB, afterKiB, result })}`);
+  printMemoryResult(beforeKiB, afterKiB, result, first);
 }
 
 main().catch((error: unknown) => {

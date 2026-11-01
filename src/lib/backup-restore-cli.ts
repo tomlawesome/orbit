@@ -38,6 +38,7 @@ import {
   decryptDocumentKek,
   encryptDocumentKek,
   extractTar,
+  isValidDocumentKekHex,
   publishBundleAtomically,
   requireMatchingPassphrase,
   requireRegularNonSymlinkFile,
@@ -70,6 +71,7 @@ import {
   recoverRestore,
   refuseIfDocumentKekRotationOpen,
   removeOrphanedCheckpoint,
+  writeSecretFileDurably,
 } from "./restore-engine";
 
 // Orchestration tying slices 1-3 (src/lib/recovery-bundle.ts's bundle-format
@@ -912,7 +914,6 @@ function importRecoveryBundleUnlocked(options: RunImportRecoveryBundleOptions): 
     ? () => {}
     : acquireBackupRestoreLock(options.backupDirectory, { operation: "import", ownsApp: true });
   try {
-    if (!options.preflightOnly) removeInterruptedKeylessImportKey(options.liveDocumentKekFile);
     const workDir = mkdtempSync(join(tmpdir(), "orbit-recovery-import-"));
     try {
       const extractedDir = join(workDir, "extracted");
@@ -956,23 +957,31 @@ function importRecoveryBundleUnlocked(options: RunImportRecoveryBundleOptions): 
 }
 
 /**
- * #1536 A-R1: with the lock held and no journal, an intent marker beside the
+ * #1536 A-R1: with the lock held, Orbit stopped and no journal, an intent marker beside the
  * live key means a key-less import (#1420) was killed after it began writing
  * its recovered key and before its checkpoint recorded "no previous key". The
  * marker holds the sha256 of the key that run was about to write (write-ahead
  * intent): the live key is removed only when it is that key. A different key
  * is the operator's (put back by hand after the kill) and is kept; only the
- * marker goes. The key is removed before the marker, so a failure here leaves
- * the marker to try again.
+ * marker goes. A file there that is not a key at all (empty, or cut short by a
+ * kill or power loss) is removed as that run's too. The key is removed before
+ * the marker, so a failure here leaves the marker to try again.
  */
 function removeInterruptedKeylessImportKey(liveDocumentKekFile: string): void {
   const markerFile = noKeyImportMarkerPath(liveDocumentKekFile);
   if (!existsSync(markerFile) && !isSymlinkPath(markerFile)) return;
   if (!isAbsentPath(liveDocumentKekFile)) {
     const intended = readNoKeyImportMarkerDigest(markerFile);
+    const content = readKeyFileContent(liveDocumentKekFile);
     if (intended !== undefined && intended === sha256OfFile(liveDocumentKekFile)) {
       rmSync(liveDocumentKekFile, { force: true });
       fsyncPath(dirname(liveDocumentKekFile));
+    } else if (content !== undefined && !isValidDocumentKekHex(content)) {
+      // A marker beside a file that is not a key (empty, or cut short) can only
+      // be the interrupted import's write; a key nobody can use is not kept.
+      rmSync(liveDocumentKekFile, { force: true });
+      fsyncPath(dirname(liveDocumentKekFile));
+      process.stderr.write(`Orbit recovery import: the key file at ${liveDocumentKekFile} was left incomplete by an interrupted import; it was removed.\n`);
     } else {
       process.stderr.write(`Orbit recovery import: the key at ${liveDocumentKekFile} is not the one an interrupted import wrote; it was kept.\n`);
     }
@@ -1002,17 +1011,24 @@ function sha256OfFile(path: string): string | undefined {
   }
 }
 
+/** A key file's text with trailing CR/LF removed, or undefined when it cannot be read as a regular file. */
+function readKeyFileContent(path: string): string | undefined {
+  try {
+    if (isSymlinkPath(path)) return undefined;
+    return readFileSync(path, "utf8").replace(/[\r\n]+$/, "");
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Durably records, before the recovered key is written, that this run is
  * installing a key where there was none, and which key (its sha256, never the
- * key): write the marker, fsync it, fsync its directory (the shape of
- * writeRestoreJournal's temp-then-publish durability).
+ * key): published by rename, fsynced with its directory.
  */
 function writeNoKeyImportMarker(markerFile: string, keyFileContent: string): void {
   const digest = createHash("sha256").update(keyFileContent).digest("hex");
-  writeSecretFile(markerFile, `${NO_KEY_IMPORT_MARKER_PREFIX}${digest}\n`, SECURE_FILE_MODE);
-  fsyncPath(markerFile);
-  fsyncPath(dirname(markerFile));
+  writeSecretFileDurably(markerFile, `${NO_KEY_IMPORT_MARKER_PREFIX}${digest}\n`, SECURE_FILE_MODE);
 }
 
 /**
@@ -1061,6 +1077,15 @@ function swapKeyAndRestore(
   if (!options.adapter.stopApp()) {
     refuse("app-stop-failed", "The Orbit application could not be stopped; the document KEK was not changed.");
   }
+  // Orbit is stopped and every check and prompt has passed: only now is a key
+  // an interrupted key-less import left behind removed, so a refusal, a wrong
+  // passphrase or a "no" before this point leaves the deployment as it found it.
+  try {
+    removeInterruptedKeylessImportKey(options.liveDocumentKekFile);
+  } catch (error) {
+    options.adapter.startApp();
+    throw error;
+  }
   // #1420: decided once, here, and passed on: with no live key file there is
   // nothing to set aside, and a rollback removes the key this import writes.
   const noPreviousKek = isAbsentPath(options.liveDocumentKekFile);
@@ -1069,7 +1094,8 @@ function swapKeyAndRestore(
   try {
     if (!noPreviousKek) renameSecretFileAcrossDevices(options.liveDocumentKekFile, previousKekPath);
     else writeNoKeyImportMarker(markerFile, `${recoveredKekHex}\n`);
-    writeSecretFile(options.liveDocumentKekFile, `${recoveredKekHex}\n`, SECURE_FILE_MODE);
+    // Published by rename: a kill or power cut here leaves no key file, never an empty one the marker cannot account for.
+    writeSecretFileDurably(options.liveDocumentKekFile, `${recoveredKekHex}\n`, SECURE_FILE_MODE);
 
     runRestore({
       backupTarPath: innerBundlePath,
