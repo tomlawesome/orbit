@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:net";
 import {
   chmodSync,
   copyFileSync,
@@ -16,7 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -331,6 +332,12 @@ case "$1" in
         [[ -z "\${DOCKER_STUB_UP_FAIL:-}" ]] || exit 1
         exit 0 ;;
       *" logs "*) echo "stub compose logs for project"; exit 0 ;;
+      *" down "*)
+        if [[ -n "\${DOCKER_STUB_DOWN_FAIL:-}" ]]; then
+          echo "stub-compose-down-error: network has active endpoints" >&2
+          exit 1
+        fi
+        exit 0 ;;
     esac
     exit 0 ;;
 esac
@@ -758,6 +765,162 @@ describe("the environment the script hands to Playwright (#1077)", () => {
 });
 
 /*
+ * The quarantine run (agent-infra#30) after a passing gate. CI caps it:
+ * `timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine` in
+ * .gitlab-ci.yml. A local run had no cap, so one hung quarantined test held
+ * the whole local run (and its stack) indefinitely. These tests put a stub
+ * `timeout` first on PATH, which logs what it was asked to cap and, on request,
+ * reports that the command ran out of time (exit 124, as coreutils does),
+ * so nothing waits eight real minutes.
+ */
+describe("the quarantine run has a time cap, as in CI", () => {
+  const ciCap = (() => {
+    const line = readFileSync(ciConfigPath, "utf8")
+      .split("\n")
+      .find((l) => /\btimeout\b.*test-frontend\.sh --quarantine/.test(l));
+    const m = line?.match(/\btimeout\s+(?:-k\s+\S+\s+)?(\d+)([smh]?)\s/);
+    const factor = { "": 1, s: 1, m: 60, h: 3600 }[m?.[2] ?? ""];
+    return { token: m ? `${m[1]}${m[2]}` : undefined, amount: Number(m?.[1]), unit: m?.[2], seconds: Number(m?.[1]) * factor };
+  })();
+
+  const toSeconds = (token) => {
+    const m = /^(\d+(?:\.\d+)?)([smhd]?)$/.exec(token ?? "");
+    return m ? Number(m[1]) * { "": 1, s: 1, m: 60, h: 3600, d: 86400 }[m[2]] : NaN;
+  };
+
+  function stubTimeout(fx) {
+    const log = join(fx.dir, "timeout-calls.log");
+    const stub = join(fx.dir, "stub-bin/timeout");
+    writeFileSync(
+      stub,
+      `#!/usr/bin/env bash
+echo "$*" >> "${log}"
+while [[ "\${1:-}" == -* ]]; do
+  case "$1" in -k | -s | --kill-after | --signal) shift 2 ;; *) shift ;; esac
+done
+shift # the duration
+if [[ -n "\${TIMEOUT_STUB_EXPIRE:-}" ]]; then
+  for arg in "$@"; do [[ "$arg" != --pass-with-no-tests ]] || exit 124; done
+fi
+exec "$@"
+`,
+    );
+    chmodSync(stub, 0o755);
+    return log;
+  }
+
+  /** The duration a logged `timeout ...` call was given: the first non-option word. */
+  function durationOf(call) {
+    const words = call.split(/\s+/);
+    for (let i = 0; i < words.length; i++) {
+      if (/^(-k|-s|--kill-after|--signal)$/.test(words[i])) i++;
+      else if (!words[i].startsWith("-")) return words[i];
+    }
+    return undefined;
+  }
+
+  const quarantineCalls = (log) =>
+    (existsSync(log) ? readFileSync(log, "utf8") : "")
+      .split("\n")
+      .filter((l) => l.includes("--pass-with-no-tests"));
+
+  it("reads CI's cap from .gitlab-ci.yml (control)", () => {
+    expect(ciCap.token, "no capped quarantine line in .gitlab-ci.yml").toBeDefined();
+    expect(ciCap.seconds).toBeGreaterThan(0);
+  });
+
+  it("runs the quarantined tests under a timeout equal to CI's", async () => {
+    const fx = makeFixture();
+    const log = stubTimeout(fx);
+    const result = await runToEnd(fx, chromium);
+    expect(result.status, result.stderr).toBe(0);
+    const calls = quarantineCalls(log);
+    expect(calls, "the quarantine run was not run under `timeout`").toHaveLength(1);
+    expect(toSeconds(durationOf(calls[0])), calls[0]).toBe(ciCap.seconds);
+  });
+
+  it("stops a quarantine run past the cap, names the cap, and still does not fail the run", async () => {
+    const fx = makeFixture();
+    stubTimeout(fx);
+    const result = await runToEnd(fx, chromium, { TIMEOUT_STUB_EXPIRE: "1" });
+    expect(result.status, result.stderr).toBe(0);
+    const unit = { "": "s|secs?|seconds?", s: "s|secs?|seconds?", m: "m|mins?|minutes?", h: "h|hours?" }[ciCap.unit];
+    const named = new RegExp(`\\b${ciCap.amount} ?(${unit})\\b`);
+    expect(result.stderr + result.stdout).toMatch(named);
+  });
+});
+
+/*
+ * test-frontend.sh gives the quarantine run its own HTML report folder
+ * (PLAYWRIGHT_HTML_OUTPUT_DIR). The local script set none, so every local run
+ * wrote the report to Playwright's default folder, which another run in the
+ * same checkout, or the quarantine run after the gate, then cleared.
+ */
+describe("each run has its own Playwright HTML report folder", () => {
+  function recordReportFolders(fx) {
+    const log = join(fx.dir, "report-folders.jsonl");
+    writeFileSync(
+      join(fx.dir, "node_modules/@playwright/test/cli.js"),
+      `require("fs").appendFileSync(process.env.PW_ENV_LOG, JSON.stringify({ mode: process.env.ORBIT_E2E_QUARANTINE, dir: process.env.PLAYWRIGHT_HTML_OUTPUT_DIR }) + "\\n");\n`,
+    );
+    return log;
+  }
+
+  const foldersOf = (fx, log) =>
+    Object.fromEntries(
+      readFileSync(log, "utf8")
+        .split("\n")
+        .filter((l) => l.length > 0)
+        .map((l) => JSON.parse(l))
+        .map(({ mode, dir }) => [mode, dir === undefined || dir === "" ? dir : resolve(fx.dir, dir)]),
+    );
+
+  it("sets PLAYWRIGHT_HTML_OUTPUT_DIR for the gate and the quarantine run, away from the default folder", async () => {
+    const fx = makeFixture();
+    const log = recordReportFolders(fx);
+    const result = await runToEnd(fx, chromium, { PW_ENV_LOG: log });
+    expect(result.status, result.stderr).toBe(0);
+    const folders = foldersOf(fx, log);
+    expect(Object.keys(folders).sort()).toEqual(["exclude", "only"]);
+    for (const [mode, dir] of Object.entries(folders)) {
+      expect(dir, `${mode} run: PLAYWRIGHT_HTML_OUTPUT_DIR is unset`).toBeTruthy();
+      expect(dir, `${mode} run: the report would land in Playwright's default folder`).not.toBe(
+        join(fx.dir, "playwright-report"),
+      );
+    }
+  });
+
+  it("uses a different folder for each run", async () => {
+    const fx = makeFixture();
+    const log = recordReportFolders(fx);
+    const first = await runToEnd(fx, chromium, { PW_ENV_LOG: log });
+    expect(first.status, first.stderr).toBe(0);
+    const firstFolders = foldersOf(fx, log);
+    rmSync(log);
+    const second = await runToEnd(fx, chromium, {
+      PW_ENV_LOG: log,
+      COMPOSE_PROJECT_NAME: `${fx.project}-again`,
+    });
+    expect(second.status, second.stderr).toBe(0);
+    const secondFolders = foldersOf(fx, log);
+    expect(firstFolders.exclude, "the first run set no report folder").toBeTruthy();
+    expect(secondFolders.exclude, "the second run set no report folder").toBeTruthy();
+    expect(secondFolders.exclude).not.toBe(firstFolders.exclude);
+  });
+
+  it("keeps the quarantine run's report out of the gate's folder", async () => {
+    const fx = makeFixture();
+    const log = recordReportFolders(fx);
+    const result = await runToEnd(fx, chromium, { PW_ENV_LOG: log });
+    expect(result.status, result.stderr).toBe(0);
+    const folders = foldersOf(fx, log);
+    expect(folders.exclude, "the gate run set no report folder").toBeTruthy();
+    expect(folders.only, "the quarantine run set no report folder").toBeTruthy();
+    expect(folders.only).not.toBe(folders.exclude);
+  });
+});
+
+/*
  * The quarantine list guard: the script runs `node scripts/check-quarantine.mjs`
  * before its gate run, so an unlisted @quarantine tag (which would drop a test
  * from every merge gate) stops a local run too. When the check fails the script
@@ -1160,5 +1323,207 @@ describe("the WebKit docker run in a worktree with the shared node_modules (#155
     ]);
     expect(result.status, result.stderr).toBe(0);
     expect(dockerCalls(fx).filter((l) => /^run /.test(l))).toHaveLength(0);
+  });
+
+  /*
+   * test-backend.sh and test-e2e-local.sh each decide whether the checkout can
+   * use pnpm or must go around it, from how node_modules and web/node_modules
+   * are laid out (a real directory or a symlink into the main checkout), and
+   * they decided differently when the root one is a real directory and web's
+   * is a symlink: test-backend went direct, test-e2e-local ran pnpm install.
+   * The same layout must get the same decision from both. The decision is
+   * whether the script ran pnpm (test-backend: any pnpm call; test-e2e-local:
+   * pnpm install), observed through a stub pnpm that logs its calls.
+   */
+  describe("test-backend.sh and test-e2e-local.sh decide alike about node_modules layouts", () => {
+    const layouts = [
+      { name: "root real, web symlinked", rootLink: false, webLink: true },
+      { name: "root symlinked, web real", rootLink: true, webLink: false },
+      { name: "both real", rootLink: false, webLink: false },
+      { name: "both symlinked", rootLink: true, webLink: true },
+    ];
+    const backendScript = fileURLToPath(new URL("./test-backend.sh", import.meta.url));
+    const LOGGING_PNPM = '#!/bin/sh\necho "$*" >> "$PNPM_LOG"\nexit 0\n';
+
+    /** test-backend.sh in a throwaway repository laid out as asked: did it call pnpm at all? */
+    function backendUsesPnpm({ rootLink, webLink }) {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "backend-layout-")));
+      fixtures.push(root);
+      const repo = join(root, "repo");
+      const stubs = join(root, "stubs");
+      const log = join(root, "pnpm.log");
+      mkdirSync(join(repo, "scripts"), { recursive: true });
+      mkdirSync(join(repo, "web"), { recursive: true });
+      mkdirSync(stubs);
+      copyFileSync(backendScript, join(repo, "scripts/test-backend.sh"));
+      writeFileSync(join(repo, "pnpm-lock.yaml"), "");
+      for (const args of [
+        ["init", "--quiet"],
+        ["add", "pnpm-lock.yaml"],
+        ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "--quiet", "--no-verify", "-m", "init"],
+      ]) {
+        const r = spawnSync("git", args, { cwd: repo, encoding: "utf8" });
+        expect(r.status, r.stderr).toBe(0);
+      }
+      writeFileSync(join(stubs, "node"), "#!/bin/sh\nexit 0\n");
+      writeFileSync(join(stubs, "pnpm"), LOGGING_PNPM);
+      chmodSync(join(stubs, "node"), 0o755);
+      chmodSync(join(stubs, "pnpm"), 0o755);
+      for (const [rel, link] of [["node_modules", rootLink], ["web/node_modules", webLink]]) {
+        const target = link ? join(root, "shared", rel) : join(repo, rel);
+        mkdirSync(target, { recursive: true });
+        if (link) symlinkSync(target, join(repo, rel));
+      }
+      const r = failOnProcessDeadline(
+        spawnSync("bash", [join(repo, "scripts/test-backend.sh")], {
+          cwd: repo,
+          encoding: "utf8",
+          env: { PATH: stubs + ":/usr/bin:/bin", HOME: process.env.HOME, PNPM_LOG: log },
+          ...processGuard(),
+        }),
+        { label: "test-backend.sh layout" },
+      );
+      expect(r.status, r.stderr).toBe(0);
+      return existsSync(log);
+    }
+
+    /** test-e2e-local.sh in a worktree fixture laid out as asked: did it run pnpm install? */
+    async function e2eUsesPnpm({ rootLink, webLink }) {
+      const fx = makeWorktreeFixture({ shared: false });
+      const pnpmStub = join(fx.mainDir, "stub-bin/pnpm");
+      writeFileSync(pnpmStub, LOGGING_PNPM);
+      chmodSync(pnpmStub, 0o755);
+      const log = join(fx.dir, "pnpm.log");
+      const node = join(fx.dir, "node_modules");
+      const web = join(fx.dir, "web/node_modules");
+      if (rootLink) {
+        rmSync(node, { recursive: true, force: true });
+        symlinkSync(join(fx.mainDir, "node_modules"), node);
+      }
+      mkdirSync(join(fx.dir, "web"), { recursive: true });
+      rmSync(web, { recursive: true, force: true });
+      if (webLink) symlinkSync(join(fx.mainDir, "web/node_modules"), web);
+      else mkdirSync(web);
+      expect(lstatSync(node).isSymbolicLink()).toBe(rootLink);
+      expect(lstatSync(web).isSymbolicLink()).toBe(webLink);
+      writeFileSync(fx.dockerLog + ".up", ""); // the stub's stack is already up
+      const result = await runToEnd(fx, ["--reuse", fx.project, "--spec", "tests/e2e/x.spec.ts", ...chromium], {
+        PNPM_LOG: log,
+      });
+      // Going direct on a root node_modules that is a real directory ends in
+      // the dependency step's own refusal (no shared install to run against);
+      // that still counts as "did not run pnpm install". Anything else
+      // failing is a broken fixture, not a decision.
+      if (result.status !== 0) expect(result.stderr).toContain("refusing: this worktree has no usable dependencies");
+      return existsSync(log) && readFileSync(log, "utf8").split("\n").some((l) => /^install\b/.test(l));
+    }
+
+    for (const layout of layouts) {
+      it(layout.name + ": both scripts make the same decision", async () => {
+        const backend = backendUsesPnpm(layout);
+        const e2e = await e2eUsesPnpm(layout);
+        expect(
+          e2e,
+          "test-backend.sh " + (backend ? "uses pnpm" : "goes direct") + ", test-e2e-local.sh " + (e2e ? "runs pnpm install" : "goes direct"),
+        ).toBe(backend);
+      });
+    }
+  });
+});
+
+/*
+ * #1423: the EXIT trap used to send `compose down`'s output, errors included,
+ * to /dev/null, so a teardown that failed said only that it "needed more
+ * than compose down". Its error text must reach the person running the script.
+ */
+describe("a failed `compose down` in the exit trap is visible (#1423)", () => {
+  it("shows the error text `compose down` printed", async () => {
+    const fx = makeFixture();
+    const result = await runToEnd(fx, chromium, { DOCKER_STUB_DOWN_FAIL: "1" });
+    expect(downCalls(fx)).toHaveLength(1);
+    expect(result.stderr + result.stdout).toContain("stub-compose-down-error: network has active endpoints");
+  });
+
+  it("shows nothing of the kind when `compose down` succeeds", async () => {
+    const fx = makeFixture();
+    const result = await runToEnd(fx, chromium);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr + result.stdout).not.toContain("stub-compose-down-error");
+  });
+});
+
+/*
+ * #1445: the WebKit run forwards 127.0.0.1:4443 to the sign-in provider's
+ * random host port (CI's issuer URL is fixed at https://orbit-oidc:4443/). If
+ * something already holds 4443 (the test bed used to), the forward's claim
+ * failed late and obscurely. The script now checks first, and stops with a
+ * message naming the port. These tests hold 4443 themselves with a listener on
+ * 127.0.0.1; they never touch a process they did not start, and fail with a
+ * message saying so if the port is already taken on this host.
+ */
+describe("the WebKit run checks port 4443 before forwarding it (#1445)", () => {
+  function holdPort4443() {
+    return new Promise((resolve, reject) => {
+      const server = createServer((socket) => socket.destroy());
+      server.once("error", (error) =>
+        reject(
+          new Error(
+            `127.0.0.1:4443 is already held on this host (${error.code}); this test must hold it itself and will not stop another process. Free the port and rerun.`,
+          ),
+        ),
+      );
+      server.listen(4443, "127.0.0.1", () => resolve(server));
+    });
+  }
+  const release = (server) => new Promise((resolve) => server.close(resolve));
+  const webkitSpec = ["--spec", "tests/e2e/x.spec.ts", ...webkit];
+  const dockerRuns = (fx) => dockerCalls(fx).filter((l) => /^run /.test(l));
+
+  it("stops with a non-zero exit and a message naming 4443 when the port is taken, and starts no WebKit container", async () => {
+    const fx = makeFixture();
+    writeFileSync(`${fx.dockerLog}.up`, ""); // the stub's stack is already up
+    const server = await holdPort4443();
+    try {
+      const result = await runToEnd(fx, ["--reuse", fx.project, ...webkitSpec]);
+      expect(result.status).not.toBe(0);
+      expect(result.status).not.toBeNull();
+      expect(result.stderr).toContain("4443");
+      expect(dockerRuns(fx)).toEqual([]);
+    } finally {
+      await release(server);
+    }
+  });
+
+  it("stops the same way for a run that starts its own stack, and still tears that stack down", async () => {
+    const fx = makeFixture();
+    const server = await holdPort4443();
+    try {
+      const result = await runToEnd(fx, webkitSpec);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("4443");
+      expect(dockerRuns(fx)).toEqual([]);
+      expect(downCalls(fx)).toHaveLength(1);
+    } finally {
+      await release(server);
+    }
+  });
+
+  it("runs the WebKit container as before when 4443 is free", async () => {
+    const fx = makeFixture();
+    writeFileSync(`${fx.dockerLog}.up`, ""); // the stub's stack is already up
+    const result = await runToEnd(fx, ["--reuse", fx.project, ...webkitSpec]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(dockerRuns(fx)).not.toHaveLength(0);
+  });
+
+  it("does not mind 4443 being taken for a run with no WebKit forward", async () => {
+    const fx = makeFixture();
+    const server = await holdPort4443();
+    try {
+      const result = await runToEnd(fx, chromium);
+      expect(result.status, result.stderr).toBe(0);
+    } finally {
+      await release(server);
+    }
   });
 });
