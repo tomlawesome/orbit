@@ -9,16 +9,35 @@ import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "..
 
 /*
  * scripts/ci/carry-previous-release.sh (#1480) saves the previous build's
- * signed release manifest, from the GitLab job-artifacts API, under
+ * signed release manifest, from the GitLab jobs API, under
  * .orbit-supply-chain/previous/ so a later consumer can find it with no job
  * ID. It must never leave a silent gap (#1607 D-F1-1, D-F2-1, D-F5): anything
  * it cannot fetch or trust is a loud failure, a non-zero exit with nothing
- * written and a message naming its cause. curl is stubbed
- * on PATH; the stub serves bodies from a map keyed by URL path plus query
- * (the part after CI_API_V4_URL), honours --output/-o and stdout, and exits
- * 22 for an unknown URL, which is curl's code for an HTTP error under --fail.
+ * written and a message naming its cause.
  *
- * Before saving, the script runs scripts/ci/verify-release-manifest.sh on the
+ * The interface under test (#1607 review items 1-4):
+ *  - the predecessor is the newest job named record_image, status success, on
+ *    CI_COMMIT_REF_NAME (GET /projects/:id/jobs?scope[]=success&ref=<ref>&
+ *    per_page=100, filtered again on the client, CI_JOB_ID excluded, X-Next-Page
+ *    followed to a page cap), not the newest pipeline;
+ *  - its manifest, the signature from the sign_evidence job of the same
+ *    pipeline, and its own previous/ pair are fetched by job id;
+ *  - `carry-previous-release.sh --prepare` runs BEFORE the image push: the
+ *    lookup, the fetches, the verification against cosign.pub and the staging.
+ *    Any failure fails the job before the push. Nothing is saved under previous/.
+ *  - `carry-previous-release.sh <published digest>` runs after the push: it
+ *    picks the predecessor pair (or the carried pair when the predecessor's
+ *    digest is the published one) and moves it into previous/;
+ *  - every API call's HTTP status is read: only a 404 on a by-job artifact
+ *    file means "absent"; any other status, a non-JSON listing or a transport
+ *    error fails, naming the status and URL, never the token.
+ *
+ * curl is stubbed on PATH by CURL_STUB below: it serves routes (status code,
+ * headers, body, or a transport error) from a JSON file, and honours
+ * --output, --write-out (%{http_code}, %header{name}), --dump-header,
+ * --include and --fail the way curl does.
+ *
+ * Before saving, the script runs scripts/ci/verify-release-manifest.sh on each
  * staged pair (the manifest must verify against cosign.pub). That verifier is
  * the real one, not edited: its cosign check is stubbed through ORBIT_COSIGN
  * (a script that accepts, or rejects per STUB_COSIGN_REJECT /
@@ -29,13 +48,21 @@ import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "..
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const script = new URL("./carry-previous-release.sh", import.meta.url).pathname;
+const repoRoot = new URL("../../", import.meta.url).pathname;
 
 const API = "https://gitlab.example.test/api/v4";
 const PROJECT = "42";
 const TOKEN = "glcbt-TEST-TOKEN-NOT-REAL";
 const CURRENT = `sha256:${"1".repeat(64)}`;
 const OLDER = `sha256:${"2".repeat(64)}`;
+const THIRD = `sha256:${"3".repeat(64)}`;
 const SIG_BYTES = "STUB-SIG-AAAA+/==";
+// The job running the carry: the listing can contain it, and it is never the predecessor.
+const OWN_JOB = 9001;
+// The usual predecessor: its record_image job, the sign_evidence job of the same pipeline, and that pipeline.
+const REC = 501;
+const SIGN = 502;
+const PIPE = 7001;
 
 // A throwaway key pair, so a "good" pair carries a signature the real
 // verifier's openssl check accepts. Made once per test file.
@@ -75,113 +102,254 @@ const COSIGN_STUB = [
   "",
 ].join("\n");
 
-const CURL_STUB = [
-  "#!/usr/bin/env bash",
-  "set -uo pipefail",
-  'printf \'curl\' >> "$STUB_LOG"',
-  'for a in "$@"; do printf \'\\x1f%s\' "$a" >> "$STUB_LOG"; done',
-  "printf '\\x1e' >> \"$STUB_LOG\"",
-  "output=",
-  "url=",
-  "header_ok=",
-  'while [ "$#" -gt 0 ]; do',
-  '  case "$1" in',
-  '    -o|--output) output="$2"; shift 2 ;;',
-  '    --output=*) output="${1#--output=}"; shift ;;',
-  "    -H|--header) h=\"$2\"; shift 2 ;;",
-  '    --header=*) h="${1#--header=}"; shift ;;',
-  '    http://*|https://*) url="$1"; shift ;;',
-  "    *) shift ;;",
-  "  esac",
-  '  # The token travels in a header file (curl -H @file), never in argv,',
-  '  # so it cannot show in a process listing.',
-  '  if [ -n "${h:-}" ]; then case "$h" in @?*) grep -qxF "JOB-TOKEN: $CI_JOB_TOKEN" "${h#@}" 2>/dev/null && header_ok=1 ;; esac; h=; fi',
-  "done",
-  '[ -n "$url" ] || exit 2',
-  '# No token header means GitLab answers 401 and --fail turns it into 22.',
-  '[ -n "$header_ok" ] || exit 22',
-  'key="${url#"$CI_API_V4_URL"}"',
-  'name="$(printf %s "$key" | base64 -w0 | tr "/+" "__")"',
-  'body="$STUB_MAP_DIR/$name"',
-  '[ -f "$body" ] || exit 22',
-  '# Count requests per URL; from the second one on, serve "<name>.2" if it exists',
-  '# (another pipeline finished in between and "latest" now means a different build).',
-  'cnt="$STUB_MAP_DIR/$name.count"',
-  'n="$(cat "$cnt" 2>/dev/null || echo 0)"; n=$((n + 1)); printf %s "$n" > "$cnt"',
-  'if [ "$n" -ge 2 ] && [ -f "$body.2" ]; then body="$body.2"; fi',
-  'if [ -n "$output" ]; then cat "$body" > "$output"; else cat "$body"; fi',
-  "exit 0",
-  "",
-].join("\n");
+// The curl stub: a CommonJS program run by node, behind a one-line bash `curl`
+// on PATH. Kept as a string (not a function's toString) so no transform of
+// this file can change it.
+const CURL_STUB_JS = String.raw`
+const fs = require("node:fs");
+const argv = process.argv.slice(2);
+const env = process.env;
+fs.appendFileSync(env.STUB_LOG, "curl" + argv.map(function (a) { return "\x1f" + a; }).join("") + "\x1e");
 
-const assetPath = (ref, file, job) =>
-  `/projects/${PROJECT}/jobs/artifacts/${ref}/raw/.orbit-supply-chain/${file}?job=${job}`;
-const mapName = (key) => Buffer.from(key).toString("base64").replace(/[/+]/g, "_");
+let output = "";
+let url = "";
+let headerOk = false;
+let writeOut = "";
+let dumpHeader = "";
+let include = false;
+let fail = false;
+let failBody = false;
+// The token travels in a header file (curl -H @file), never in argv, so it
+// cannot show in a process listing.
+function takeHeader(h) {
+  if (h.charAt(0) !== "@") return;
+  try {
+    if (fs.readFileSync(h.slice(1), "utf8").split("\n").indexOf("JOB-TOKEN: " + env.CI_JOB_TOKEN) >= 0) headerOk = true;
+  } catch (e) {}
+}
+const takesValue = ["--retry", "--retry-delay", "--retry-max-time", "--connect-timeout", "--max-time", "-m", "--proto", "-X", "--request", "-A", "--user-agent", "--max-redirs"];
+for (let i = 0; i < argv.length; i++) {
+  let a = argv[i];
+  let inline = null;
+  const eq = a.slice(0, 2) === "--" ? a.indexOf("=") : -1;
+  if (eq > 0) { inline = a.slice(eq + 1); a = a.slice(0, eq); }
+  const val = function () { return inline !== null ? inline : argv[++i]; };
+  if (a === "-o" || a === "--output") output = val();
+  else if (a === "-H" || a === "--header") takeHeader(val());
+  else if (a === "-w" || a === "--write-out") writeOut = val();
+  else if (a === "-D" || a === "--dump-header") dumpHeader = val();
+  else if (a === "--url") url = val();
+  else if (a === "-i" || a === "--include") include = true;
+  else if (a === "--fail") fail = true;
+  else if (a === "--fail-with-body") { fail = true; failBody = true; }
+  else if (takesValue.indexOf(a) >= 0) val();
+  else if (/^https?:\/\//.test(a)) url = a;
+  else if (/^-[A-Za-z]+$/.test(a)) {
+    // Combined short flags such as -fsS or -sSfo file.
+    for (const c of a.slice(1)) {
+      if (c === "f") fail = true;
+      else if (c === "i") include = true;
+      else if (c === "o") output = argv[++i];
+      else if (c === "H") takeHeader(argv[++i]);
+      else if (c === "w") writeOut = argv[++i];
+      else if (c === "D") dumpHeader = argv[++i];
+    }
+  }
+}
+if (!url) process.exit(2);
+
+function out(text) { fs.writeSync(1, text); }
+function done(status, headers, code) {
+  if (writeOut) {
+    out(writeOut
+      .replace(/%\{http_code\}/g, String(status).padStart(3, "0"))
+      .replace(/%header\{([^}]*)\}/g, function (_m, name) {
+        for (const k of Object.keys(headers)) if (k.toLowerCase() === name.toLowerCase()) return String(headers[k]);
+        return "";
+      })
+      .replace(/%\{[^}]*\}/g, "")
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\r"));
+  }
+  process.exit(code);
+}
+
+const api = new URL(env.CI_API_V4_URL);
+const u = new URL(url);
+const requests = fs.readFileSync(env.STUB_LOG, "utf8").split("\x1e").length - 1;
+const listing = "/projects/" + env.CI_PROJECT_ID + "/jobs";
+let route;
+if (u.origin !== api.origin || u.pathname.indexOf(api.pathname) !== 0) {
+  route = { transport: 6 };
+} else if (requests > 300) {
+  route = { status: 500, body: '{"message":"stub: runaway requests"}' };
+} else if (!headerOk) {
+  // No token header means GitLab answers 401.
+  route = { status: 401, body: '{"message":"401 Unauthorized"}' };
+} else {
+  const cfg = JSON.parse(fs.readFileSync(env.STUB_CONFIG, "utf8"));
+  const path = u.pathname.slice(api.pathname.length);
+  const page = u.searchParams.get("page") || "1";
+  route = cfg.routes[path === listing ? listing + "#page=" + page : path];
+  if (!route && path === listing && cfg.endless) {
+    route = { headers: { "X-Next-Page": String(Number(page) + 1) }, body: JSON.stringify(cfg.endless) };
+  }
+  if (!route) route = { status: 404, body: '{"message":"404 Not Found"}' };
+}
+
+const status = route.status || 200;
+const headers = Object.assign({ "Content-Type": "application/json" }, route.headers || {});
+if (route.transport) {
+  process.stderr.write("curl: (" + route.transport + ") Failed to connect to the host\n");
+  done(0, {}, route.transport);
+}
+if (fail && status >= 400 && !failBody) {
+  process.stderr.write("curl: (22) The requested URL returned error: " + status + "\n");
+  done(status, headers, 22);
+}
+const headText = "HTTP/1.1 " + status + " X\r\n" + Object.keys(headers).map(function (k) { return k + ": " + headers[k] + "\r\n"; }).join("") + "\r\n";
+if (dumpHeader) {
+  if (dumpHeader === "-") out(headText);
+  else fs.writeFileSync(dumpHeader, headText);
+}
+const payload = (include ? headText : "") + (route.body === undefined ? "" : route.body);
+if (output && output !== "-") fs.writeFileSync(output, payload);
+else out(payload);
+done(status, headers, fail && status >= 400 ? 22 : 0);
+`;
+const curlStubFile = join(keyDir, "curl-stub.cjs");
+writeFileSync(curlStubFile, CURL_STUB_JS);
+const CURL_WRAPPER = `#!/usr/bin/env bash\nexec "${process.execPath}" "${curlStubFile}" "$@"\n`;
+
+/*
+ * Routes, keyed by path under CI_API_V4_URL (no query):
+ *   { status = 200, headers, body, transport }  -- transport N is curl exit N
+ * The job listing, GET /projects/:id/jobs, is keyed per page: "<path>#page=N".
+ * Anything unknown answers 404. `endless` (a jobs array) serves every listing
+ * page without a route, each pointing at the next, to prove a page cap.
+ * After 300 requests the stub answers 500 so a runaway loop ends.
+ */
+const listingKey = (page = 1) => `/projects/${PROJECT}/jobs#page=${page}`;
+const pipelineKey = (pipeline) => `/projects/${PROJECT}/pipelines/${pipeline}/jobs`;
+const artifactKey = (jobId, file) => `/projects/${PROJECT}/jobs/${jobId}/artifacts/.orbit-supply-chain/${file}`;
+const jsonBody = (value) => ({ body: JSON.stringify(value) });
+const job = (id, name, { pipeline = 6000 + id, ref = "main", status = "success" } = {}) => ({
+  id,
+  name,
+  status,
+  ref,
+  stage: "publish",
+  pipeline: { id: pipeline, project_id: Number(PROJECT), ref, status: "success" },
+});
+// A listing of pages, newest job first. Each page is a jobs array or a route
+// object (a failing page). All but the last carry X-Next-Page, as GitLab does.
+const listing = (...pages) =>
+  Object.fromEntries(
+    pages.map((page, i) => [
+      listingKey(i + 1),
+      { headers: { "X-Next-Page": i < pages.length - 1 ? String(i + 2) : "" }, ...(Array.isArray(page) ? jsonBody(page) : page) },
+    ]),
+  );
+const without = (routes, key) => Object.fromEntries(Object.entries(routes).filter(([k]) => k !== key));
 
 const manifest = (digest) =>
   `{\n  "image": {"repository": "registry.example/ai/orbit", "digest": "${digest}"},\n  "version": "1.4.0"\n}`;
 
+const FILES = { manifest: "orbit-release-manifest.json", sig: "orbit-release-manifest.json.sig" };
+const MANIFEST = FILES.manifest;
+const SIG = FILES.sig;
+// A manifest and its genuine signature (what the real verifier's openssl check accepts).
+const pair = (digest) => {
+  const body = manifest(digest);
+  return { body, sig: signManifest(body) };
+};
+
 /*
- * routes: { "<path?query>": body } -- anything else is a 404 (curl exit 22).
- * laterRoutes: { "<path?query>": body } -- served from the second request to
- * that URL on, instead of the routes body.
- * The default ref is "main"; the slash test passes its own.
- * Each run gets its own empty TMPDIR, so leftovers are visible.
- * Verification defaults to accepting; pass env { STUB_COSIGN_REJECT: "1" } to
- * make the stubbed cosign reject every pair, or STUB_COSIGN_REJECT_MATCH to
- * reject only a manifest containing that text. verifications() lists the pairs
- * the verifier was asked about, in order.
+ * What the API serves when the newest successful record_image job on main
+ * (REC, in pipeline PIPE) recorded `own` (a { body, sig } pair) and carried
+ * `carried` (a pair, or nothing); the same pipeline's sign_evidence job is
+ * SIGN and holds the signature of `own`. `jobs` replaces the listing's first page.
  */
-function run({ args = [CURRENT], routes = {}, laterRoutes = {}, ref = "main", env = {} } = {}) {
+const world = (own, carried, { recId = REC, signId = SIGN, pipeline = PIPE, jobs } = {}) => ({
+  ...listing(jobs ?? [job(recId, "record_image", { pipeline })]),
+  [pipelineKey(pipeline)]: jsonBody([
+    job(signId + 1, "build_image", { pipeline }),
+    job(signId, "sign_evidence", { pipeline }),
+    job(recId, "record_image", { pipeline }),
+  ]),
+  [artifactKey(recId, MANIFEST)]: { body: own.body },
+  [artifactKey(signId, SIG)]: { body: own.sig },
+  ...(carried
+    ? {
+        [artifactKey(recId, `previous/${MANIFEST}`)]: { body: carried.body },
+        [artifactKey(recId, `previous/${SIG}`)]: { body: carried.sig },
+      }
+    : {}),
+});
+
+/*
+ * One scripted environment: every call of the script in it shares the work
+ * directory (so a --prepare is followed by the final call in the same place),
+ * the curl log and the cosign log.
+ * ref defaults to "main". Each environment gets its own empty TMPDIR, so
+ * leftovers are visible. Verification defaults to accepting; env
+ * { STUB_COSIGN_REJECT: "1" } rejects every pair, STUB_COSIGN_REJECT_MATCH
+ * rejects only a manifest containing that text. verifications() lists the
+ * pairs the verifier was asked about, in order.
+ */
+function start({ routes = {}, endless, ref = "main", env = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "carry-previous-"));
   const bin = join(dir, "bin");
-  const mapDir = join(dir, "map");
   const work = join(dir, "work");
   const tmp = join(dir, "tmp");
   const cosignDir = join(dir, "cosign");
-  for (const d of [bin, mapDir, work, tmp, cosignDir]) mkdirSync(d);
+  for (const d of [bin, work, tmp, cosignDir]) mkdirSync(d);
   const cosignStub = join(dir, "cosign-stub.sh");
   writeFileSync(cosignStub, COSIGN_STUB);
   chmodSync(cosignStub, 0o755);
-  writeFileSync(join(bin, "curl"), CURL_STUB);
+  writeFileSync(join(bin, "curl"), CURL_WRAPPER);
   chmodSync(join(bin, "curl"), 0o755);
   const logFile = join(dir, "calls.log");
   writeFileSync(logFile, "");
-  for (const [key, body] of Object.entries(routes)) writeFileSync(join(mapDir, mapName(key)), body);
-  for (const [key, body] of Object.entries(laterRoutes)) writeFileSync(join(mapDir, `${mapName(key)}.2`), body);
+  const configFile = join(dir, "routes.json");
+  writeFileSync(configFile, JSON.stringify({ routes, endless }));
 
-  const result = failOnProcessDeadline(
-    spawnSync("bash", [script, ...args], {
-      cwd: work,
-      encoding: "utf8",
-      env: {
-        PATH: `${bin}:${process.env.PATH}`,
-        CI_API_V4_URL: API,
-        CI_PROJECT_ID: PROJECT,
-        CI_COMMIT_REF_NAME: ref,
-        CI_JOB_TOKEN: TOKEN,
-        TMPDIR: tmp,
-        STUB_LOG: logFile,
-        STUB_MAP_DIR: mapDir,
-        STUB_COSIGN_DIR: cosignDir,
-        ORBIT_COSIGN: cosignStub,
-        COSIGN_PUBLIC_KEY: PUBLIC_KEY,
-        ...env,
-      },
-      ...processGuard(),
-    }),
-    { label: "carry-previous-release" },
-  );
+  const invoke = (args) =>
+    failOnProcessDeadline(
+      spawnSync("bash", [script, ...args], {
+        cwd: work,
+        encoding: "utf8",
+        env: {
+          PATH: `${bin}:${process.env.PATH}`,
+          CI_API_V4_URL: API,
+          CI_PROJECT_ID: PROJECT,
+          CI_COMMIT_REF_NAME: ref,
+          CI_JOB_ID: String(OWN_JOB),
+          CI_JOB_TOKEN: TOKEN,
+          TMPDIR: tmp,
+          STUB_LOG: logFile,
+          STUB_CONFIG: configFile,
+          STUB_COSIGN_DIR: cosignDir,
+          ORBIT_COSIGN: cosignStub,
+          COSIGN_PUBLIC_KEY: PUBLIC_KEY,
+          ...env,
+        },
+        ...processGuard(),
+      }),
+      { label: "carry-previous-release" },
+    );
   const calls = () =>
     readFileSync(logFile, "utf8")
       .split("\x1e")
       .filter(Boolean)
       .map((call) => call.split("\x1f").filter(Boolean).slice(1));
-  const requestedKeys = () =>
-    calls()
-      .flatMap((argv) => argv.filter((arg) => arg.startsWith(API)))
-      .map((url) => url.slice(API.length));
+  const requestedUrls = () => calls().flatMap((argv) => argv.filter((arg) => arg.startsWith(API)));
+  const requestedKeys = () => requestedUrls().map((url) => url.slice(API.length));
+  // The request paths without their query string.
+  const requestedPaths = () => requestedKeys().map((key) => key.split("?")[0]);
+  const listingUrls = () => requestedUrls().filter((url) => url.split("?")[0] === `${API}/projects/${PROJECT}/jobs`);
   const previousDir = join(work, ".orbit-supply-chain", "previous");
+  const hasPrevious = () => existsSync(previousDir);
   const previousFiles = () => (existsSync(previousDir) ? readdirSync(previousDir).sort() : []);
   const previous = (name) => readFileSync(join(previousDir, name));
   const supplyChainDir = join(work, ".orbit-supply-chain");
@@ -196,207 +364,450 @@ function run({ args = [CURRENT], routes = {}, laterRoutes = {}, ref = "main", en
         manifest: readFileSync(join(cosignDir, `${n}.manifest`)),
         sig: readFileSync(join(cosignDir, `${n}.sig`)),
       }));
-  return { result, calls, requestedKeys, previousFiles, previous, work, supplyChainEntries, tmpEntries, verifications };
+  return {
+    invoke,
+    calls,
+    requestedUrls,
+    requestedKeys,
+    requestedPaths,
+    listingUrls,
+    hasPrevious,
+    previousFiles,
+    previous,
+    work,
+    supplyChainEntries,
+    tmpEntries,
+    verifications,
+  };
 }
 
-const MANIFEST = "orbit-release-manifest.json";
-const SIG = "orbit-release-manifest.json.sig";
-// A manifest and its genuine signature (what the real verifier's openssl check accepts).
-const pair = (digest) => {
-  const body = manifest(digest);
-  return { body, sig: signManifest(body) };
-};
+// One call of the script (default: --prepare).
+function run({ args = ["--prepare"], ...options } = {}) {
+  const session = start(options);
+  return { ...session, result: session.invoke(args) };
+}
+
+/*
+ * The job's two calls in order: `--prepare` before the push, then the
+ * published digest after it (only if --prepare succeeded, as the job stops
+ * otherwise). `result` is the last call made, the one that failed on a failure.
+ */
+function carry(options = {}, digest = CURRENT) {
+  const session = start(options);
+  const prepare = session.invoke(["--prepare"]);
+  const final = prepare.status === 0 ? session.invoke([digest]) : null;
+  return { ...session, prepare, final, result: final ?? prepare };
+}
+
 const expectNoToken = (result) => {
   expect(result.stdout).not.toContain(TOKEN);
   expect(result.stderr).not.toContain(TOKEN);
 };
+// The token goes in a header file (curl -H @file): never in curl's argv.
+const expectTokenOnlyInHeaderFile = (r) => {
+  expect(r.calls().length).toBeGreaterThan(0);
+  for (const argv of r.calls()) {
+    expect(argv.join("\n")).not.toContain(TOKEN);
+    expect(argv.some((arg) => arg.startsWith("@"))).toBe(true);
+  }
+};
+const output = (result) => `${result.stdout}${result.stderr}`;
 // A missing or mismatched predecessor is an error that names its cause, never
 // a silent skip: non-zero exit, a message matching cause (a regexp for the check
 // that must be the one that refused; the fixtures carry genuine signatures, so
 // the signature check cannot refuse in its place), and nothing under previous/.
-const expectLoudFailure = ({ result, previousFiles }, cause) => {
+const expectLoudFailure = ({ result, previousFiles, hasPrevious }, cause) => {
   expect(result.status).not.toBe(0);
   expect(result.status).not.toBeNull();
-  expect(`${result.stdout}${result.stderr}`).toMatch(cause);
+  expect(output(result)).toMatch(cause);
+  expect(hasPrevious()).toBe(false);
   expect(previousFiles()).toEqual([]);
 };
+// --prepare is what failed (so the job stops before the push), cleanly: no
+// previous/, no staging directory, no header file left behind, no token printed.
+const expectPrepareFailure = (r, cause) => {
+  expect(r.prepare.status).not.toBe(0);
+  expect(r.prepare.status).not.toBeNull();
+  expect(r.final).toBeNull();
+  expectLoudFailure(r, cause);
+  expect(r.supplyChainEntries()).toEqual([]);
+  expect(r.tmpEntries()).toEqual([]);
+  expectNoToken(r.result);
+};
+// A failure after the push, at the final call: nothing under previous/, token never printed.
+const expectFinalFailure = (r, cause) => {
+  expect(r.prepare.status).toBe(0);
+  expect(r.final).not.toBeNull();
+  expectLoudFailure(r, cause);
+  expect(r.tmpEntries()).toEqual([]);
+  expectNoToken(r.result);
+};
+const savedPair = (r) => ({ body: r.previous(MANIFEST).toString(), sig: r.previous(SIG).toString() });
+const FIRST_RELEASE = (ref = "main") => `no successful record_image job on ${ref}: first release, nothing carried`;
+// A first release: the lookup found no predecessor, so --prepare logs it and
+// exits 0, nothing is fetched or verified, and previous/ is never created, even
+// by the final call (the job still has to pass).
+const expectFirstRelease = (r, ref = "main") => {
+  expect(r.prepare.status).toBe(0);
+  expect(output(r.prepare)).toContain(FIRST_RELEASE(ref));
+  expect(r.final).not.toBeNull();
+  expect(r.final.status).toBe(0);
+  expect(r.hasPrevious()).toBe(false);
+  expect(r.previousFiles()).toEqual([]);
+  expect(r.requestedPaths().filter((path) => path.includes("/artifacts/"))).toEqual([]);
+  expect(r.verifications()).toEqual([]);
+  expect(r.tmpEntries()).toEqual([]);
+  expectNoToken(r.prepare);
+  expectNoToken(r.final);
+};
+
+// The ways one API call can fail, with what the message must name.
+const HTTP_FAILURES = [
+  ["401", { status: 401, body: '{"message":"401 Unauthorized"}' }, /401/],
+  ["403", { status: 403, body: '{"message":"403 Forbidden"}' }, /403/],
+  ["500", { status: 500, body: '{"message":"500 Internal Server Error"}' }, /500/],
+  ["a transport error", { transport: 7 }, /transport|curl|000|\(7\)|exit (status |code )?7|connect/i],
+];
 
 describe("carry-previous-release.sh", () => {
-  it("normal case: writes the fetched manifest and signature byte-for-byte and names the fetched digest", () => {
-    const { body: manifestBody, sig } = pair(OLDER);
-    const r = run({
-      routes: {
-        [assetPath("main", MANIFEST, "record_image")]: manifestBody,
-        [assetPath("main", SIG, "sign_evidence")]: sig,
-      },
-    });
-    expect(r.result.status).toBe(0);
-    expect(r.result.stdout).toContain(OLDER);
+  it("normal case: --prepare then the digest saves the predecessor's manifest and signature byte-for-byte", () => {
+    const own = pair(OLDER);
+    const r = carry({ routes: world(own) });
+    expect(r.prepare.status).toBe(0);
+    expect(r.final.status).toBe(0);
     expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
-    expect(r.previous(MANIFEST).equals(Buffer.from(manifestBody))).toBe(true);
-    expect(r.previous(SIG).equals(Buffer.from(sig))).toBe(true);
-    expectNoToken(r.result);
-    // No staging dir left beside previous/.
-    expect(r.supplyChainEntries()).toEqual(["previous"]);
+    expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
+    expect(r.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
+    expectNoToken(r.prepare);
+    expectNoToken(r.final);
+    expect(r.tmpEntries()).toEqual([]);
   });
 
-  it("requests the manifest from job record_image and the signature from job sign_evidence, with the JOB-TOKEN header from a file, not argv", () => {
-    const { body, sig } = pair(OLDER);
-    const r = run({
-      routes: {
-        [assetPath("main", MANIFEST, "record_image")]: body,
-        [assetPath("main", SIG, "sign_evidence")]: sig,
-      },
-    });
+  it("looks the predecessor up by job: lists successful jobs on the ref, then fetches the manifest from the record_image job, the signature from the same pipeline's sign_evidence job and the record_image job's own previous/ pair, all by job id, with the JOB-TOKEN header from a file, not argv", () => {
+    const r = carry({ routes: world(pair(OLDER)) });
     expect(r.result.status).toBe(0);
-    const keys = r.requestedKeys();
-    expect(keys).toContain(assetPath("main", MANIFEST, "record_image"));
-    expect(keys).toContain(assetPath("main", SIG, "sign_evidence"));
-    // A normal build has no reason to look at its own carried pair.
-    expect(keys.filter((key) => key.includes("/previous/"))).toEqual([]);
-    // The token goes in a header file (curl -H @file): never in curl's argv.
-    for (const argv of r.calls()) {
-      expect(argv.join("\n")).not.toContain(TOKEN);
-      expect(argv.some((arg) => arg.startsWith("@"))).toBe(true);
-    }
+    const urls = r.listingUrls();
+    expect(urls.length).toBeGreaterThanOrEqual(1);
+    const first = new URL(urls[0]).searchParams;
+    expect(first.getAll("scope[]")).toEqual(["success"]);
+    expect(first.get("ref")).toBe("main");
+    expect(first.get("per_page")).toBe("100");
+    // The signature comes from the sign_evidence job found in the predecessor's own pipeline.
+    const pipelineUrl = r.requestedUrls().find((url) => url.split("?")[0] === `${API}${pipelineKey(PIPE)}`);
+    expect(pipelineUrl).toBeDefined();
+    expect(new URL(pipelineUrl).searchParams.getAll("scope[]")).toEqual(["success"]);
+    const paths = r.requestedPaths();
+    expect(paths).toContain(artifactKey(REC, MANIFEST));
+    expect(paths).toContain(artifactKey(SIGN, SIG));
+    // The predecessor's own carried pair is looked for too (absent here: a 404).
+    expect(paths).toContain(artifactKey(REC, `previous/${MANIFEST}`));
+    expect(paths).toContain(artifactKey(REC, `previous/${SIG}`));
+    // Never the latest-artifacts-by-ref shape, nor a job name in the query.
+    expect(r.requestedKeys().filter((key) => key.includes("/jobs/artifacts/") || key.includes("job="))).toEqual([]);
+    expectTokenOnlyInHeaderFile(r);
     // ...and the header file is deleted when the script ends: the script's TMPDIR is empty.
     expect(r.tmpEntries()).toEqual([]);
   });
 
-  it("pairs one build: downloads the manifest, the signature, then the manifest again, and accepts the pair when both manifest copies are identical", () => {
-    const { body: manifestBody, sig } = pair(OLDER);
-    const r = run({
-      routes: {
-        [assetPath("main", MANIFEST, "record_image")]: manifestBody,
-        [assetPath("main", SIG, "sign_evidence")]: sig,
-      },
-    });
+  it("fetches the predecessor's manifest once: manifest and signature come from one build by job id, so there is no second download to compare", () => {
+    const r = carry({ routes: world(pair(OLDER)) });
     expect(r.result.status).toBe(0);
-    const keys = r.requestedKeys();
-    expect(keys).toEqual([
-      assetPath("main", MANIFEST, "record_image"),
-      assetPath("main", SIG, "sign_evidence"),
-      assetPath("main", MANIFEST, "record_image"),
-    ]);
-    expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
-    expect(r.previous(MANIFEST).equals(Buffer.from(manifestBody))).toBe(true);
-    expect(r.previous(SIG).equals(Buffer.from(sig))).toBe(true);
-    expect(r.tmpEntries()).toEqual([]);
+    expect(r.requestedPaths().filter((path) => path === artifactKey(REC, MANIFEST))).toHaveLength(1);
+    expect(r.requestedPaths().filter((path) => path === artifactKey(SIGN, SIG))).toHaveLength(1);
   });
 
-  it("manifest changes between the two downloads (another pipeline finished): fails loud naming the change, nothing under previous/, no staging or temp leftovers", () => {
-    // The signature is genuine for the first manifest: only the second-download
-    // comparison can refuse this pair.
-    const { body: first, sig } = pair(OLDER);
-    const second = manifest(`sha256:${"3".repeat(64)}`);
-    const r = run({
-      routes: {
-        [assetPath("main", MANIFEST, "record_image")]: first,
-        [assetPath("main", SIG, "sign_evidence")]: sig,
-      },
-      laterRoutes: { [assetPath("main", MANIFEST, "record_image")]: second },
-    });
-    expectLoudFailure(r, /changed|different build|mismatch|not match/i);
-    expect(r.verifications()).toEqual([]);
-    expect(r.requestedKeys().filter((key) => key === assetPath("main", MANIFEST, "record_image"))).toHaveLength(2);
-    expect(r.supplyChainEntries().filter((entry) => entry !== "previous")).toEqual([]);
-    expect(r.tmpEntries()).toEqual([]);
-    expectNoToken(r.result);
-  });
-
-  it("URL-encodes the slash in a branch name", () => {
-    const { body, sig } = pair(OLDER);
-    const r = run({
+  it("URL-encodes the slash in a branch name in the listing, and matches jobs on the decoded ref", () => {
+    const own = pair(OLDER);
+    const r = carry({
       ref: "hotfix/x",
-      routes: {
-        [assetPath("hotfix%2Fx", MANIFEST, "record_image")]: body,
-        [assetPath("hotfix%2Fx", SIG, "sign_evidence")]: sig,
-      },
+      routes: world(own, undefined, {
+        jobs: [job(601, "record_image", { ref: "hotfix/y", pipeline: 7101 }), job(REC, "record_image", { ref: "hotfix/x", pipeline: PIPE })],
+      }),
     });
     expect(r.result.status).toBe(0);
-    expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
-    const keys = r.requestedKeys();
-    expect(keys).toContain(assetPath("hotfix%2Fx", MANIFEST, "record_image"));
-    expect(keys.some((key) => key.includes("hotfix/x"))).toBe(false);
+    expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
+    const urls = r.listingUrls();
+    expect(urls.length).toBeGreaterThanOrEqual(1);
+    expect(new URL(urls[0]).search).toContain("ref=hotfix%2Fx");
+    expect(urls[0]).not.toContain("hotfix/x");
   });
 
-  it("rebuild: when the fetched digest is the current one, carries that build's own previous pair, both from record_image", () => {
-    const { body: carriedManifest, sig: carriedSig } = pair(OLDER);
-    const own = pair(CURRENT);
-    const r = run({
-      routes: {
-        [assetPath("main", MANIFEST, "record_image")]: own.body,
-        [assetPath("main", SIG, "sign_evidence")]: own.sig,
-        [assetPath("main", `previous/${MANIFEST}`, "record_image")]: carriedManifest,
-        [assetPath("main", `previous/${SIG}`, "record_image")]: carriedSig,
-      },
-    });
+  it("a predecessor whose digest is not the published one is picked even when it carries a pair of its own", () => {
+    const own = pair(OLDER);
+    const r = carry({ routes: world(own, pair(THIRD)) }, CURRENT);
     expect(r.result.status).toBe(0);
-    expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
-    expect(r.previous(MANIFEST).equals(Buffer.from(carriedManifest))).toBe(true);
-    expect(r.previous(SIG).equals(Buffer.from(carriedSig))).toBe(true);
-    const keys = r.requestedKeys();
-    expect(keys).toContain(assetPath("main", `previous/${MANIFEST}`, "record_image"));
-    expect(keys).toContain(assetPath("main", `previous/${SIG}`, "record_image"));
-    expectNoToken(r.result);
+    expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
+    expect(r.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
   });
 
-  it("rebuild without a carried pair: fails loud naming the missing carried manifest and the digest, nothing written", () => {
-    const own = pair(CURRENT);
-    const r = run({
-      routes: {
-        [assetPath("main", MANIFEST, "record_image")]: own.body,
-        [assetPath("main", SIG, "sign_evidence")]: own.sig,
-      },
+  describe("--prepare and the digest call (#1607 item 4)", () => {
+    it("--prepare alone does the lookup, fetches and verifies the pair against cosign.pub, and saves nothing under previous/", () => {
+      const own = pair(OLDER);
+      const r = run({ routes: world(own) });
+      expect(r.result.status).toBe(0);
+      expect(r.hasPrevious()).toBe(false);
+      expect(r.previousFiles()).toEqual([]);
+      expect(r.requestedPaths()).toContain(artifactKey(REC, MANIFEST));
+      const seen = r.verifications();
+      expect(seen).toHaveLength(1);
+      expect(seen[0].manifest.equals(Buffer.from(own.body))).toBe(true);
+      expect(seen[0].sig.equals(Buffer.from(own.sig))).toBe(true);
+      expect(r.tmpEntries()).toEqual([]);
+      expectNoToken(r.result);
     });
-    expectLoudFailure(r, /carried manifest|previous\//i);
-    expect(`${r.result.stdout}${r.result.stderr}`).toContain(CURRENT);
-    expect(r.verifications()).toEqual([]);
-  });
 
-  it("rebuild with a carried manifest but no carried signature: fails loud naming the signature, nothing written", () => {
-    const own = pair(CURRENT);
-    const carried = pair(OLDER);
-    const r = run({
-      routes: {
-        [assetPath("main", MANIFEST, "record_image")]: own.body,
-        [assetPath("main", SIG, "sign_evidence")]: own.sig,
-        [assetPath("main", `previous/${MANIFEST}`, "record_image")]: carried.body,
-      },
+    it("the digest call without a --prepare before it fails, saying nothing was staged, and saves nothing", () => {
+      const r = run({ args: [CURRENT], routes: world(pair(OLDER)) });
+      expectLoudFailure(r, /stag|prepare/i);
+      expectNoToken(r.result);
     });
-    expectLoudFailure(r, /carried signature|signature/i);
-    expect(r.verifications()).toEqual([]);
-  });
 
-  it("rebuild whose carried manifest is also the current digest: fails loud naming the digest, nothing written", () => {
-    // The carried pair is genuine, so only the carried-is-current check can refuse it.
-    const own = pair(CURRENT);
-    const carried = pair(CURRENT);
-    const r = run({
-      routes: {
-        [assetPath("main", MANIFEST, "record_image")]: own.body,
-        [assetPath("main", SIG, "sign_evidence")]: own.sig,
-        [assetPath("main", `previous/${MANIFEST}`, "record_image")]: carried.body,
-        [assetPath("main", `previous/${SIG}`, "record_image")]: carried.sig,
-      },
+    it("the digest call saves the pick in one rename: previous/ appears complete, with exactly the two files", () => {
+      const own = pair(OLDER);
+      const r = carry({ routes: world(own) });
+      expect(r.prepare.status).toBe(0);
+      expect(r.final.status).toBe(0);
+      expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
     });
-    expectLoudFailure(r, /current digest/i);
-    expect(r.verifications()).toEqual([]);
   });
 
-  it("manifest fetch fails (404): fails loud naming record_image, nothing written", () => {
-    const r = run({ routes: { [assetPath("main", SIG, "sign_evidence")]: SIG_BYTES } });
-    expectLoudFailure(r, /record_image/);
-    expectNoToken(r.result);
+  describe("finding the predecessor by record_image job (#1607 item 2)", () => {
+    it("a web or schedule pipeline (no record_image) newer than the predecessor does not hide it", () => {
+      const own = pair(OLDER);
+      const r = carry({
+        routes: world(own, undefined, {
+          jobs: [
+            job(701, "lint", { pipeline: 7201 }),
+            job(702, "unit", { pipeline: 7201 }),
+            job(703, "sign_evidence", { pipeline: 7201 }),
+            job(REC, "record_image", { pipeline: PIPE }),
+          ],
+        }),
+      });
+      expect(r.result.status).toBe(0);
+      expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
+      expect(r.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
+      // Nothing was fetched from the newer pipeline.
+      expect(r.requestedKeys().filter((key) => key.includes("7201") || key.includes("/jobs/70"))).toEqual([]);
+    });
+
+    it("a predecessor on page 2 is found, following X-Next-Page", () => {
+      const own = pair(OLDER);
+      const r = carry({
+        routes: {
+          ...world(own),
+          ...listing([job(701, "lint", { pipeline: 7201 }), job(702, "unit", { pipeline: 7201 })], [job(REC, "record_image", { pipeline: PIPE })]),
+        },
+      });
+      expect(r.result.status).toBe(0);
+      expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
+      const urls = r.listingUrls();
+      expect(urls).toHaveLength(2);
+      expect(new URL(urls[1]).searchParams.get("page")).toBe("2");
+      expect(new URL(urls[1]).searchParams.get("per_page")).toBe("100");
+    });
+
+    it("the newest record_image job wins over an older one", () => {
+      const newer = pair(OLDER);
+      const r = carry({
+        routes: world(newer, undefined, {
+          recId: 601,
+          signId: 602,
+          pipeline: 7101,
+          jobs: [job(601, "record_image", { pipeline: 7101 }), job(REC, "record_image", { pipeline: PIPE })],
+        }),
+      });
+      expect(r.result.status).toBe(0);
+      expect(r.previous(MANIFEST).equals(Buffer.from(newer.body))).toBe(true);
+      expect(r.requestedKeys().filter((key) => key.includes(`/jobs/${REC}/`) && !key.includes("/previous/"))).toEqual([]);
+      expect(r.requestedKeys().filter((key) => key.includes(`/pipelines/${PIPE}/`))).toEqual([]);
+    });
+
+    it("a record_image job of another ref in the listing (ref is an undocumented filter) is skipped", () => {
+      const own = pair(OLDER);
+      const r = carry({
+        routes: world(own, undefined, {
+          jobs: [job(601, "record_image", { ref: "other", pipeline: 7101 }), job(REC, "record_image", { pipeline: PIPE })],
+        }),
+      });
+      expect(r.result.status).toBe(0);
+      expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
+      expect(r.requestedKeys().filter((key) => key.includes("7101") || key.includes("/jobs/601/"))).toEqual([]);
+    });
+
+    it("CI_JOB_ID's own job is never picked, even when it is the newest record_image job listed", () => {
+      const own = pair(OLDER);
+      const r = carry({
+        env: { CI_JOB_ID: "601" },
+        routes: world(own, undefined, {
+          jobs: [job(601, "record_image", { pipeline: 7101 }), job(REC, "record_image", { pipeline: PIPE })],
+        }),
+      });
+      expect(r.result.status).toBe(0);
+      expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
+      expect(r.requestedKeys().filter((key) => key.includes("7101") || key.includes("/jobs/601/"))).toEqual([]);
+    });
+
+    describe("first release: no successful record_image job on the ref in the whole listing", () => {
+      it.each([
+        ["an empty listing", () => listing([])],
+        ["a listing of other jobs only", () => listing([job(701, "lint", { pipeline: 7201 }), job(702, "sign_evidence", { pipeline: 7201 })])],
+        ["only a record_image job of another ref", () => listing([job(601, "record_image", { ref: "other", pipeline: 7101 })])],
+        ["only the running job itself", () => listing([job(OWN_JOB, "record_image", { pipeline: 7301 })])],
+      ])("%s: logs the first-release line, saves nothing and exits 0", (_label, routes) => {
+        expectFirstRelease(carry({ routes: routes() }));
+      });
+
+      it("every page is read before it is called a first release", () => {
+        const r = carry({ routes: listing([job(701, "lint", { pipeline: 7201 })], [job(702, "unit", { pipeline: 7201 })], []) });
+        expectFirstRelease(r);
+        expect(r.listingUrls()).toHaveLength(3);
+      });
+
+      it("names the ref in the line", () => {
+        expectFirstRelease(carry({ ref: "hotfix/x", routes: listing([]) }), "hotfix/x");
+      });
+    });
+
+    it("the page cap reached with no match fails, saying the cap was reached, and is never read as a first release", () => {
+      const r = carry({ endless: [job(701, "lint", { pipeline: 7201 }), job(702, "unit", { pipeline: 7201 })] });
+      expectPrepareFailure(r, /cap|limit/i);
+      expect(output(r.prepare)).not.toContain("first release, nothing carried");
+      // It stopped by itself, at a fixed cap, not at the stub's runaway guard.
+      const pages = r.listingUrls().length;
+      expect(pages).toBeGreaterThan(1);
+      expect(pages).toBeLessThan(300);
+    });
+
+    it("a predecessor whose pipeline has no successful sign_evidence fails, naming that pipeline and telling to retry its sign_evidence job, and does not fall back to an older build", () => {
+      const r = carry({
+        routes: {
+          // An older build that would verify.
+          ...world(pair(THIRD), undefined, { recId: 401, signId: 402, pipeline: 7000, jobs: [] }),
+          ...world(pair(OLDER), undefined, {
+            jobs: [job(REC, "record_image", { pipeline: PIPE }), job(401, "record_image", { pipeline: 7000 })],
+          }),
+          // The predecessor pipeline's successful jobs, with no sign_evidence among them.
+          [pipelineKey(PIPE)]: jsonBody([job(503, "build_image", { pipeline: PIPE }), job(REC, "record_image", { pipeline: PIPE })]),
+        },
+      });
+      expectPrepareFailure(r, /sign_evidence/);
+      expect(output(r.prepare)).toContain(String(PIPE));
+      expect(output(r.prepare)).toMatch(/retry/i);
+      expect(r.requestedKeys().filter((key) => key.includes("/jobs/401/") || key.includes("/pipelines/7000/"))).toEqual([]);
+    });
   });
 
-  it("signature fetch fails after the manifest succeeded: fails loud naming sign_evidence, and no manifest left behind", () => {
-    const r = run({ routes: { [assetPath("main", MANIFEST, "record_image")]: manifest(OLDER) } });
-    expectLoudFailure(r, /sign_evidence/);
-    expect(existsSync(join(r.work, ".orbit-supply-chain", "previous", MANIFEST))).toBe(false);
-    // No leftover staging dir either, and the header file is gone.
-    expect(r.supplyChainEntries().filter((entry) => entry !== "previous")).toEqual([]);
-    expect(r.tmpEntries()).toEqual([]);
+  describe("telling \"not found\" from \"could not ask\" (#1607 item 3)", () => {
+    const LISTING_URL = `${API}/projects/${PROJECT}/jobs`;
+
+    describe.each([
+      ["the job listing", () => `${LISTING_URL}`, (response) => ({ ...world(pair(OLDER)), [listingKey(1)]: response })],
+      [
+        "the second page of the job listing",
+        () => `${LISTING_URL}`,
+        (response) => ({
+          ...world(pair(OLDER)),
+          ...listing([job(701, "lint", { pipeline: 7201 })], response),
+        }),
+      ],
+      [
+        "the predecessor pipeline's job listing",
+        () => `${API}${pipelineKey(PIPE)}`,
+        (response) => ({ ...world(pair(OLDER)), [pipelineKey(PIPE)]: response }),
+      ],
+    ])("%s", (_where, url, routesWith) => {
+      it.each(HTTP_FAILURES)("answering %s fails, naming the status and the URL, never the token", (_label, response, status) => {
+        const r = carry({ routes: routesWith(response) });
+        expectPrepareFailure(r, status);
+        expect(output(r.prepare)).toContain(url());
+      });
+
+      it("answering 404 fails, naming the status and the URL: a 404 here is not \"absent\"", () => {
+        const r = carry({ routes: routesWith({ status: 404, body: '{"message":"404 Not Found"}' }) });
+        expectPrepareFailure(r, /404/);
+        expect(output(r.prepare)).toContain(url());
+        // Not mistaken for a first release.
+        expect(output(r.prepare)).not.toContain("first release, nothing carried");
+      });
+    });
+
+    it.each([
+      ["not JSON", "<html>bad gateway</html>"],
+      ["empty", ""],
+    ])("a job listing that is %s fails, naming the URL, and is not a first release", (_label, body) => {
+      const r = carry({ routes: { ...world(pair(OLDER)), [listingKey(1)]: { body } } });
+      expectPrepareFailure(r, /json/i);
+      expect(output(r.prepare)).toContain(LISTING_URL);
+      expect(output(r.prepare)).not.toContain("first release, nothing carried");
+    });
+
+    describe.each([
+      ["the predecessor's manifest", artifactKey(REC, MANIFEST)],
+      ["the signature", artifactKey(SIGN, SIG)],
+      ["the carried manifest", artifactKey(REC, `previous/${MANIFEST}`)],
+      ["the carried signature", artifactKey(REC, `previous/${SIG}`)],
+    ])("fetching %s", (_what, key) => {
+      it.each(HTTP_FAILURES)("answering %s fails, naming the status and the URL, nothing written", (_label, response, status) => {
+        const r = carry({ routes: { ...world(pair(OLDER), pair(THIRD)), [key]: response } });
+        expectPrepareFailure(r, status);
+        expect(output(r.prepare)).toContain(`${API}${key}`);
+      });
+    });
+
+    it("a 404 on the predecessor's manifest fails loud naming record_image and the job, nothing written", () => {
+      const r = carry({ routes: without(world(pair(OLDER)), artifactKey(REC, MANIFEST)) });
+      expectPrepareFailure(r, /record_image/);
+      expect(output(r.prepare)).toContain(String(REC));
+      expect(output(r.prepare)).not.toContain("first release, nothing carried");
+    });
+
+    it("a 404 on the signature fails loud naming sign_evidence, and no manifest is left behind", () => {
+      const r = carry({ routes: without(world(pair(OLDER)), artifactKey(SIGN, SIG)) });
+      expectPrepareFailure(r, /sign_evidence/);
+      expect(existsSync(join(r.work, ".orbit-supply-chain", "previous", MANIFEST))).toBe(false);
+    });
+
+    it("a 404 on the carried pair means that file is absent, not a failure of --prepare", () => {
+      const r = run({ routes: world(pair(OLDER)) });
+      expect(r.result.status).toBe(0);
+      expect(r.hasPrevious()).toBe(false);
+    });
+  });
+
+  describe("rebuild: the published digest is the predecessor's", () => {
+    it("the digest call carries the predecessor's own previous/ pair, fetched by the predecessor's job id", () => {
+      const carried = pair(OLDER);
+      const own = pair(CURRENT);
+      const r = carry({ routes: world(own, carried) }, CURRENT);
+      expect(r.result.status).toBe(0);
+      expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
+      expect(r.previous(MANIFEST).equals(Buffer.from(carried.body))).toBe(true);
+      expect(r.previous(SIG).equals(Buffer.from(carried.sig))).toBe(true);
+      const paths = r.requestedPaths();
+      expect(paths).toContain(artifactKey(REC, `previous/${MANIFEST}`));
+      expect(paths).toContain(artifactKey(REC, `previous/${SIG}`));
+      expect(r.requestedKeys().filter((key) => key.includes("/jobs/artifacts/") || key.includes("job="))).toEqual([]);
+      expectNoToken(r.final);
+    });
+
+    it("without a carried pair: --prepare passes, the digest call fails naming the digest and the missing carried pair, nothing written", () => {
+      const r = carry({ routes: world(pair(CURRENT)) }, CURRENT);
+      expectFinalFailure(r, /carried|previous\//i);
+      expect(output(r.final)).toContain(CURRENT);
+    });
+
+    it("with a carried manifest but no carried signature: fails loud naming the signature, nothing written", () => {
+      const r = carry({ routes: without(world(pair(CURRENT), pair(OLDER)), artifactKey(REC, `previous/${SIG}`)) }, CURRENT);
+      expectLoudFailure(r, /signature/i);
+    });
+
+    it("whose carried manifest is also the published digest: fails naming the digest, nothing written", () => {
+      // The carried pair is genuine, so only the carried-is-published check can refuse it.
+      const r = carry({ routes: world(pair(CURRENT), pair(CURRENT)) }, CURRENT);
+      expectFinalFailure(r, /published digest|current digest|itself/i);
+      expect(output(r.final)).toContain(CURRENT);
+    });
   });
 
   it.each([
@@ -406,29 +817,20 @@ describe("carry-previous-release.sh", () => {
     ["image without a digest", JSON.stringify({ image: { repository: "r" } })],
     ["digest that is not a string", JSON.stringify({ image: { repository: "r", digest: 12345 } })],
   ])("fetched manifest is %s: fails loud naming the digest, nothing written", (_label, body) => {
-    const r = run({
-      routes: {
-        [assetPath("main", MANIFEST, "record_image")]: body,
-        [assetPath("main", SIG, "sign_evidence")]: signManifest(body),
-      },
-    });
+    const r = carry({ routes: world({ body, sig: signManifest(body) }) });
     expectLoudFailure(r, /digest/i);
-    expect(r.verifications()).toEqual([]);
+    expect(r.hasPrevious()).toBe(false);
   });
 
   it("never prints the job token, on success or on failure", () => {
-    const { body, sig } = pair(OLDER);
-    const ok = run({
-      routes: {
-        [assetPath("main", MANIFEST, "record_image")]: body,
-        [assetPath("main", SIG, "sign_evidence")]: sig,
-      },
-    });
+    const ok = carry({ routes: world(pair(OLDER)) });
     expect(ok.result.status).toBe(0);
-    expectNoToken(ok.result);
-    const failed = run({});
+    expectNoToken(ok.prepare);
+    expectNoToken(ok.final);
+    const failed = carry({ routes: { ...world(pair(OLDER)), [listingKey(1)]: { status: 401, body: '{"message":"401 Unauthorized"}' } } });
     expect(failed.result.status).not.toBe(0);
     expectNoToken(failed.result);
+    expectTokenOnlyInHeaderFile(failed);
   });
 
   it("without arguments exits 2 with a usage message on stderr and fetches nothing", () => {
@@ -447,23 +849,10 @@ describe("carry-previous-release.sh", () => {
   });
 
   describe("verification against cosign.pub (#1480)", () => {
-    const expectCleanFailure = (r, cause) => {
-      expectLoudFailure(r, cause);
-      expect(r.supplyChainEntries()).toEqual([]);
-      expect(r.tmpEntries()).toEqual([]);
-      expectNoToken(r.result);
-    };
-
-    it("(a) the verifier rejects the staged pair: fails loud saying the manifest does not verify, previous/ absent, no leftovers, token never printed", () => {
+    it("(a) the verifier rejects the staged pair: --prepare fails loud saying the manifest does not verify, previous/ absent, no leftovers, token never printed", () => {
       const { body, sig } = pair(OLDER);
-      const r = run({
-        env: { STUB_COSIGN_REJECT: "1" },
-        routes: {
-          [assetPath("main", MANIFEST, "record_image")]: body,
-          [assetPath("main", SIG, "sign_evidence")]: sig,
-        },
-      });
-      expectCleanFailure(r, /does not verify/i);
+      const r = carry({ env: { STUB_COSIGN_REJECT: "1" }, routes: world({ body, sig }) });
+      expectPrepareFailure(r, /does not verify/i);
       // The verifier really ran on the pair the script fetched.
       const seen = r.verifications();
       expect(seen).toHaveLength(1);
@@ -471,71 +860,49 @@ describe("carry-previous-release.sh", () => {
       expect(seen[0].sig.equals(Buffer.from(sig))).toBe(true);
     });
 
-    it("(a) a signature that is not a real signature over the manifest (even if cosign were fooled) fails loud, nothing written", () => {
-      const r = run({
-        routes: {
-          [assetPath("main", MANIFEST, "record_image")]: manifest(OLDER),
-          [assetPath("main", SIG, "sign_evidence")]: SIG_BYTES,
-        },
-      });
-      expectCleanFailure(r, /does not verify/i);
+    it("(a) a signature that is not a real signature over the manifest (even if cosign were fooled) fails --prepare loud, nothing written", () => {
+      const r = carry({ routes: world({ body: manifest(OLDER), sig: SIG_BYTES }) });
+      expectPrepareFailure(r, /does not verify/i);
     });
 
     it("(b) the verifier accepts: the pair is saved byte-for-byte, and the verifier saw exactly that pair", () => {
       const { body, sig } = pair(OLDER);
-      const r = run({
-        routes: {
-          [assetPath("main", MANIFEST, "record_image")]: body,
-          [assetPath("main", SIG, "sign_evidence")]: sig,
-        },
-      });
+      const r = carry({ routes: world({ body, sig }) });
       expect(r.result.status).toBe(0);
-      expect(r.result.stdout).toContain(OLDER);
-      expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
+        expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
       expect(r.previous(MANIFEST).equals(Buffer.from(body))).toBe(true);
       expect(r.previous(SIG).equals(Buffer.from(sig))).toBe(true);
       const seen = r.verifications();
       expect(seen).toHaveLength(1);
       expect(seen[0].manifest.equals(Buffer.from(body))).toBe(true);
       expect(seen[0].sig.equals(Buffer.from(sig))).toBe(true);
-      expect(r.supplyChainEntries()).toEqual(["previous"]);
       expect(r.tmpEntries()).toEqual([]);
-      expectNoToken(r.result);
+      expectNoToken(r.final);
     });
 
-    it("(c) rebuild: the carried pair goes through verification too, and a rejecting verifier fails loud", () => {
+    it("(c) the predecessor's carried pair is verified in --prepare too, and a rejecting verifier fails --prepare loud", () => {
       const own = pair(CURRENT);
       const carried = pair(OLDER);
-      const r = run({
-        // Reject only the carried pair, so the current build's own pair cannot be what fails.
+      const r = carry({
+        // Reject only the carried pair, so the predecessor's own pair cannot be what fails.
         env: { STUB_COSIGN_REJECT_MATCH: OLDER },
-        routes: {
-          [assetPath("main", MANIFEST, "record_image")]: own.body,
-          [assetPath("main", SIG, "sign_evidence")]: own.sig,
-          [assetPath("main", `previous/${MANIFEST}`, "record_image")]: carried.body,
-          [assetPath("main", `previous/${SIG}`, "record_image")]: carried.sig,
-        },
+        routes: world(own, carried),
       });
-      expectCleanFailure(r, /does not verify/i);
+      expectPrepareFailure(r, /does not verify/i);
       expect(r.verifications().some((v) => v.manifest.equals(Buffer.from(carried.body)))).toBe(true);
     });
 
-    it("(c) rebuild: an accepted carried pair is saved byte-for-byte after being verified", () => {
+    it("(c) rebuild: an accepted carried pair is saved byte-for-byte after both pairs were verified", () => {
       const own = pair(CURRENT);
       const carried = pair(OLDER);
-      const r = run({
-        routes: {
-          [assetPath("main", MANIFEST, "record_image")]: own.body,
-          [assetPath("main", SIG, "sign_evidence")]: own.sig,
-          [assetPath("main", `previous/${MANIFEST}`, "record_image")]: carried.body,
-          [assetPath("main", `previous/${SIG}`, "record_image")]: carried.sig,
-        },
-      });
+      const r = carry({ routes: world(own, carried) });
       expect(r.result.status).toBe(0);
       expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
       expect(r.previous(MANIFEST).equals(Buffer.from(carried.body))).toBe(true);
       expect(r.previous(SIG).equals(Buffer.from(carried.sig))).toBe(true);
-      expect(r.verifications().some((v) => v.manifest.equals(Buffer.from(carried.body)))).toBe(true);
+      const seen = r.verifications();
+      expect(seen.some((v) => v.manifest.equals(Buffer.from(carried.body)))).toBe(true);
+      expect(seen.some((v) => v.manifest.equals(Buffer.from(own.body)))).toBe(true);
     });
 
     const HEX = "a1b2c3d4".repeat(8);
@@ -549,87 +916,36 @@ describe("carry-previous-release.sh", () => {
       ["a trailing newline and a fake line", `sha256:${HEX}\n[fake]`],
       ["a trailing escape sequence", `sha256:${HEX}\u001b[31m`],
     ])("(d) fetched digest with %s: fails loud, nothing written", (_label, digest) => {
-      const { body, sig } = pair(digest);
-      const r = run({
-        routes: {
-          [assetPath("main", MANIFEST, "record_image")]: body,
-          [assetPath("main", SIG, "sign_evidence")]: sig,
-        },
-      });
-      expectCleanFailure(r, /digest/i);
+      const r = carry({ routes: world(pair(digest)) });
+      expectLoudFailure(r, /digest/i);
+      expect(r.tmpEntries()).toEqual([]);
+      expectNoToken(r.result);
     });
 
     it("(d) rebuild: a carried manifest whose digest is malformed fails loud, nothing written", () => {
-      const own = pair(CURRENT);
-      const carried = pair(`SHA256:${HEX}`);
-      const r = run({
-        routes: {
-          [assetPath("main", MANIFEST, "record_image")]: own.body,
-          [assetPath("main", SIG, "sign_evidence")]: own.sig,
-          [assetPath("main", `previous/${MANIFEST}`, "record_image")]: carried.body,
-          [assetPath("main", `previous/${SIG}`, "record_image")]: carried.sig,
-        },
-      });
-      expectCleanFailure(r, /digest/i);
-    });
-
-    it("(e) the normal-case request sequence is still manifest, signature, manifest, with nothing fetched from previous/", () => {
-      const { body, sig } = pair(OLDER);
-      const r = run({
-        routes: {
-          [assetPath("main", MANIFEST, "record_image")]: body,
-          [assetPath("main", SIG, "sign_evidence")]: sig,
-        },
-      });
-      expect(r.result.status).toBe(0);
-      expect(r.requestedKeys()).toEqual([
-        assetPath("main", MANIFEST, "record_image"),
-        assetPath("main", SIG, "sign_evidence"),
-        assetPath("main", MANIFEST, "record_image"),
-      ]);
+      const r = carry({ routes: world(pair(CURRENT), pair(`SHA256:${HEX}`)) });
+      expectLoudFailure(r, /digest/i);
+      expectNoToken(r.result);
     });
   });
+
   /*
-   * #1607 D-F1-1, D-F2-1, D-F5. The agreed target is a fail-loud, idempotent carry:
+   * #1607 D-F1-1, D-F2-1. The agreed target is a fail-loud, idempotent carry:
    * a missing or mismatched predecessor is an error that names its cause; re-running
    * the carry (or the validation that feeds it) gives the same result; the manifest
-   * and the signature saved together always come from the same build.
-   * What these cannot cover: the very first release on a ref has no predecessor,
-   * and with only the by-ref lookup the script cannot tell it from a lookup that
-   * found nothing. It must still not pass silently: the 404 cases below fail loud,
-   * and how a first release is declared is for the build to provide.
+   * and the signature saved together always come from the same build, which a job id
+   * now guarantees (D-F5, a first release, is "finding the predecessor" above).
    */
   describe("fail loud and idempotent (#1607)", () => {
-    const THIRD = `sha256:${"3".repeat(64)}`;
-    // What the by-ref lookup serves when the latest successful build recorded `own`
-    // and carried `carried` (a { body, sig } pair, or nothing).
-    const served = (own, carried) => ({
-      [assetPath("main", MANIFEST, "record_image")]: own.body,
-      [assetPath("main", SIG, "sign_evidence")]: own.sig,
-      ...(carried
-        ? {
-            [assetPath("main", `previous/${MANIFEST}`, "record_image")]: carried.body,
-            [assetPath("main", `previous/${SIG}`, "record_image")]: carried.sig,
-          }
-        : {}),
-    });
-    const savedPair = (r) => ({ body: r.previous(MANIFEST).toString(), sig: r.previous(SIG).toString() });
-    const expectCleanFailure = (r, cause) => {
-      expectLoudFailure(r, cause);
-      expect(r.supplyChainEntries().filter((entry) => entry !== "previous")).toEqual([]);
-      expect(r.tmpEntries()).toEqual([]);
-      expectNoToken(r.result);
-    };
-
     describe("D-F1-1: validation re-run by hand on preview after a failed push", () => {
       it("a re-run of the same digest carries the same predecessor, however often it is re-run, and the next build then finds this build", () => {
         const older = pair(OLDER);
         const own = pair(CURRENT);
-        const first = run({ routes: served(older) });
+        const first = carry({ routes: world(older) });
         expect(first.result.status).toBe(0);
-        // The re-run: the latest successful build now recorded CURRENT and carried what `first` saved.
-        const rerun1 = run({ routes: served(own, savedPair(first)) });
-        const rerun2 = run({ routes: served(own, savedPair(first)) });
+        // The re-run: the newest successful record_image job now recorded CURRENT and carried what `first` saved.
+        const rerun1 = carry({ routes: world(own, savedPair(first)) }, CURRENT);
+        const rerun2 = carry({ routes: world(own, savedPair(first)) }, CURRENT);
         for (const r of [rerun1, rerun2]) {
           expect(r.result.status).toBe(0);
           expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
@@ -637,23 +953,23 @@ describe("carry-previous-release.sh", () => {
           expect(r.previous(SIG).equals(Buffer.from(older.sig))).toBe(true);
         }
         // The next build, a new digest, finds the re-run's own manifest, not nothing.
-        const next = run({ args: [THIRD], routes: served(own, savedPair(first)) });
+        const next = carry({ routes: world(own, savedPair(first)) }, THIRD);
         expect(next.result.status).toBe(0);
         expect(next.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
         expect(next.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
       });
 
-      it("a re-run whose latest build never carried a pair fails loud, naming the digest and the missing carried pair", () => {
+      it("a re-run whose predecessor never carried a pair fails loud, naming the digest and the missing carried pair, the same way each time", () => {
         const own = pair(CURRENT);
-        const first = run({ routes: served(own) });
-        const second = run({ routes: served(own) });
+        const first = carry({ routes: world(own) }, CURRENT);
+        const second = carry({ routes: world(own) }, CURRENT);
         for (const r of [first, second]) {
-          expectCleanFailure(r, /carried|previous\//i);
-          expect(`${r.result.stdout}${r.result.stderr}`).toContain(CURRENT);
+          expectFinalFailure(r, /carried|previous\//i);
+          expect(output(r.final)).toContain(CURRENT);
         }
         // Idempotent: the same inputs give the same refusal.
-        expect(second.result.status).toBe(first.result.status);
-        expect(`${second.result.stdout}${second.result.stderr}`).toBe(`${first.result.stdout}${first.result.stderr}`);
+        expect(second.final.status).toBe(first.final.status);
+        expect(output(second.final)).toBe(output(first.final));
       });
     });
 
@@ -661,34 +977,27 @@ describe("carry-previous-release.sh", () => {
       const MIX_CAUSE = /does not verify|not match|mismatch|different build/i;
       const signatureOfAnotherBuild = signManifest(manifest(THIRD));
 
-      it("rebuild: a carried manifest with the carried signature of another build fails loud, nothing written", () => {
-        const r = run({ routes: served(pair(CURRENT), { body: manifest(OLDER), sig: signatureOfAnotherBuild }) });
-        expectCleanFailure(r, MIX_CAUSE);
+      it("rebuild: a carried manifest with the carried signature of another build fails --prepare loud, nothing written", () => {
+        const r = carry({ routes: world(pair(CURRENT), { body: manifest(OLDER), sig: signatureOfAnotherBuild }) }, CURRENT);
+        expectPrepareFailure(r, MIX_CAUSE);
       });
 
-      it("normal build: the same manifest twice but a signature of another build fails loud, nothing written", () => {
-        const r = run({
-          routes: {
-            [assetPath("main", MANIFEST, "record_image")]: manifest(OLDER),
-            [assetPath("main", SIG, "sign_evidence")]: signatureOfAnotherBuild,
-          },
-        });
-        expectCleanFailure(r, MIX_CAUSE);
+      it("normal build: a manifest with a signature of another build fails --prepare loud, nothing written", () => {
+        const r = carry({ routes: world({ body: manifest(OLDER), sig: signatureOfAnotherBuild }) });
+        expectPrepareFailure(r, MIX_CAUSE);
       });
 
       it("a mismatch is refused the same way on every re-run", () => {
-        const options = () => ({
-          routes: served(pair(CURRENT), { body: manifest(OLDER), sig: signatureOfAnotherBuild }),
-        });
-        const first = run(options());
-        const second = run(options());
-        expectCleanFailure(first, MIX_CAUSE);
-        expectCleanFailure(second, MIX_CAUSE);
+        const options = () => ({ routes: world(pair(CURRENT), { body: manifest(OLDER), sig: signatureOfAnotherBuild }) });
+        const first = carry(options(), CURRENT);
+        const second = carry(options(), CURRENT);
+        expectPrepareFailure(first, MIX_CAUSE);
+        expectPrepareFailure(second, MIX_CAUSE);
         expect(second.result.status).toBe(first.result.status);
       });
 
       it("whatever is saved is one build's manifest with that same build's signature", () => {
-        const r = run({ routes: served(pair(OLDER)) });
+        const r = carry({ routes: world(pair(OLDER)) });
         expect(r.result.status).toBe(0);
         // The saved signature verifies the saved manifest, with the real key.
         const sigFile = join(keyDir, "saved.sig");
@@ -699,115 +1008,67 @@ describe("carry-previous-release.sh", () => {
         expect(verified.toString()).toMatch(/Verified OK/);
       });
     });
+  });
+});
 
-    describe("D-F5: a schedule- or web-started pipeline succeeded on preview, then the next publish", () => {
-      it("finds the latest successful build recorded no manifest: fails loud naming record_image, nothing written", () => {
-        // A schedule- or web-started pipeline runs no record_image, so the by-ref lookup answers 404.
-        expectCleanFailure(run({}), /record_image/);
-      });
+/*
+ * The publish job's order (#1607 item 4): --prepare must run, and be able to
+ * fail the job, before anything is pushed; the final carry comes after the push
+ * because the registry digest exists only then. A static read of
+ * .gitlab-ci.yml's record_image script (no YAML library in the repo, so the
+ * job's block is cut out by its indentation and comment lines dropped).
+ */
+describe("record_image in .gitlab-ci.yml runs the carry around the push (#1607 item 4)", () => {
+  const ci = readFileSync(join(repoRoot, ".gitlab-ci.yml"), "utf8").split("\n");
+  const startLine = ci.findIndex((line) => line === "record_image:");
+  const endLine = ci.findIndex((line, i) => i > startLine && /^[A-Za-z_.]/.test(line));
+  const block = ci.slice(startLine, endLine === -1 ? undefined : endLine).filter((line) => !/^\s*#/.test(line));
+  const text = block.join("\n");
+  const indexOf = (needle) => text.indexOf(needle);
+  const PREPARE = "carry-previous-release.sh --prepare";
+  const FINAL = 'carry-previous-release.sh "$published_digest"';
+  // The image push step is the one that sets published_digest (after the registry returns it).
+  const PUSH = "published_digest=";
 
-      it("finds a manifest but no signature from that build: fails loud naming sign_evidence, nothing written", () => {
-        const r = run({ routes: { [assetPath("main", MANIFEST, "record_image")]: pair(OLDER).body } });
-        expectCleanFailure(r, /sign_evidence/);
-      });
-    });
+  it("finds the record_image job", () => {
+    expect(startLine).toBeGreaterThanOrEqual(0);
+    expect(text).toContain("script:");
+  });
 
-    /*
-     * D-F5, the first release of a ref has no predecessor to find. Failing loud stays the
-     * default; ORBIT_CARRY_NO_PREDECESSOR="<reason>" is the explicit, logged way through
-     * for the cases where no predecessor was found. It never hides a fault in a
-     * predecessor that was found. Set but empty counts as unset.
-     */
-    describe("ORBIT_CARRY_NO_PREDECESSOR: a first release passes only by a named override (D-F5)", () => {
-      const VAR = "ORBIT_CARRY_NO_PREDECESSOR";
-      const REASON = "first release on main, nothing to carry";
-      const override = { [VAR]: REASON };
-      const expectOverridden = (r) => {
-        expect(r.result.status).toBe(0);
-        const out = `${r.result.stdout}${r.result.stderr}`;
-        // The line names the override and its reason.
-        expect(out).toContain(VAR);
-        expect(out).toContain(REASON);
-        expect(r.previousFiles()).toEqual([]);
-        expect(r.supplyChainEntries().filter((entry) => entry !== "previous")).toEqual([]);
-        expect(r.tmpEntries()).toEqual([]);
-        expectNoToken(r.result);
-      };
-      const mismatched = signManifest(manifest(THIRD));
+  it("calls carry-previous-release.sh --prepare, once, before the image push step", () => {
+    expect(text.split(PREPARE).length - 1).toBe(1);
+    expect(indexOf(PUSH)).toBeGreaterThan(0);
+    expect(indexOf(PREPARE)).toBeGreaterThan(0);
+    expect(indexOf(PREPARE)).toBeLessThan(indexOf(PUSH));
+    expect(indexOf(PREPARE)).toBeLessThan(indexOf("publish-image.sh"));
+  });
 
-      it.each([
-        ["no manifest from the latest build (404)", () => ({})],
-        ["a manifest but no signature (404)", () => ({ [assetPath("main", MANIFEST, "record_image")]: pair(OLDER).body })],
-        ["a rebuild with no carried manifest", () => served(pair(CURRENT))],
-        [
-          "a rebuild with a carried manifest but no carried signature",
-          () => ({
-            ...served(pair(CURRENT)),
-            [assetPath("main", `previous/${MANIFEST}`, "record_image")]: pair(OLDER).body,
-          }),
-        ],
-      ])("with a reason set, %s exits 0 and prints the override and its reason", (_label, routes) => {
-        expectOverridden(run({ routes: routes(), env: override }));
-      });
+  it("calls carry-previous-release.sh \"$published_digest\" after the push, once", () => {
+    expect(text.split(FINAL).length - 1).toBe(1);
+    // --prepare is there too, so "after it" means something.
+    expect(indexOf(PREPARE)).toBeGreaterThan(0);
+    expect(indexOf(FINAL)).toBeGreaterThan(indexOf(PUSH));
+    expect(indexOf(FINAL)).toBeGreaterThan(indexOf(PREPARE));
+  });
 
-      it.each([
-        ["unset", {}],
-        ["set but empty", { [VAR]: "" }],
-      ])("%s, a missing predecessor still fails loud", (_label, env) => {
-        const r = run({ env });
-        expectCleanFailure(r, /record_image/);
-      });
+  it("--prepare failing leaves no push: nothing on its line swallows the exit status, and it is a step of its own before the push", () => {
+    const line = block.find((l) => l.includes(PREPARE));
+    expect(line).toBeDefined();
+    expect(line).not.toMatch(/\|\||;|&\s*$|\|\s*true/);
+    const finalLine = block.find((l) => l.includes(FINAL));
+    expect(finalLine).toBeDefined();
+    expect(finalLine).not.toMatch(/\|\||;|&\s*$|\|\s*true/);
+    // Every script item before the one that pushes ends with --prepare passing (GitLab stops the job at the first failing item).
+    expect(block.indexOf(line)).toBeLessThan(block.findIndex((l) => l.includes(PUSH)));
+  });
+});
 
-      it("a predecessor that is found is carried as usual with the override set", () => {
-        const older = pair(OLDER);
-        const r = run({ routes: served(older), env: override });
-        expect(r.result.status).toBe(0);
-        expect(r.previous(MANIFEST).equals(Buffer.from(older.body))).toBe(true);
-        expect(r.previous(SIG).equals(Buffer.from(older.sig))).toBe(true);
-      });
-
-      it.each([
-        [
-          "a manifest and a signature of different builds",
-          () => ({ routes: served({ body: manifest(OLDER), sig: mismatched }) }),
-          /does not verify|not match|mismatch|different build/i,
-        ],
-        [
-          "a rebuild's carried manifest with another build's signature",
-          () => ({ routes: served(pair(CURRENT), { body: manifest(OLDER), sig: mismatched }) }),
-          /does not verify|not match|mismatch|different build/i,
-        ],
-        [
-          "a manifest that changed between the two downloads",
-          () => {
-            const first = pair(OLDER);
-            return {
-              routes: served(first),
-              laterRoutes: { [assetPath("main", MANIFEST, "record_image")]: manifest(THIRD) },
-            };
-          },
-          /changed|different build|mismatch|not match/i,
-        ],
-        [
-          "a failed verification",
-          () => ({ routes: served(pair(OLDER)), env: { STUB_COSIGN_REJECT: "1" } }),
-          /does not verify/i,
-        ],
-        [
-          "a malformed digest",
-          () => ({ routes: served(pair(`SHA256:${"a1b2c3d4".repeat(8)}`)) }),
-          /digest/i,
-        ],
-        [
-          "a carried manifest naming the current digest",
-          () => ({ routes: served(pair(CURRENT), pair(CURRENT)) }),
-          /current digest/i,
-        ],
-      ])("with a reason set, %s still fails and the override is not what ends the run", (_label, options, cause) => {
-        const { env = {}, ...rest } = options();
-        const r = run({ ...rest, env: { ...env, ...override } });
-        expectCleanFailure(r, cause);
-      });
-    });
+describe("the ORBIT_CARRY_NO_PREDECESSOR override is gone (#1607 item 2)", () => {
+  it.each([
+    ["scripts/ci/carry-previous-release.sh"],
+    [".gitlab-ci.yml"],
+    ["docs/releasing.md"],
+  ])("%s does not mention it", (file) => {
+    expect(readFileSync(join(repoRoot, file), "utf8")).not.toContain("ORBIT_CARRY_NO_PREDECESSOR");
   });
 });
