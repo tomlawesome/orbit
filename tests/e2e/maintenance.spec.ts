@@ -1,4 +1,3 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 
 import { sessionHeaders } from "./support/households";
@@ -23,8 +22,6 @@ resetDatabaseBetweenSpecFiles();
 test.describe.configure({ mode: "serial" });
 
 const STARTED = "We are moving Orbit to new storage. Documents and mail are paused while everything copies across.";
-const HALFWAY = "The copy is about halfway. Still on track for the time below.";
-const VERIFYING = "Verifying the copied documents before we reopen.";
 
 async function signInAs(page: Page, account: string) {
   await answerPushWithoutAService(page);
@@ -154,56 +151,12 @@ test("the administrator passes; an ordinary member is shown the screen", async (
   }
 });
 
-test("one entry reads well on its own: no arrow, no drawer", async ({ page }) => {
-  await page.goto("/home");
-  await expect(page.getByRole("heading", { name: "maintenance — back soon" })).toBeVisible();
-  await expect(page.getByText(STARTED)).toBeVisible();
-  await expect(page.getByText("back by")).toBeVisible();
-  await expect(page.locator("details")).toHaveCount(0);
-});
-
-test("newest first, and the earlier entries open from the keyboard", async ({ page }) => {
-  await command(adminPage, { action: "publish_update", message: HALFWAY });
-  await command(adminPage, { action: "publish_update", message: VERIFYING });
-
-  await page.goto("/home");
-  await expect(page.getByText(VERIFYING)).toBeVisible();
-  await expect(page.getByText(STARTED)).toBeHidden();
-
-  const arrow = page.getByRole("group").locator("summary");
-  await expect(arrow).toHaveAccessibleName("Earlier updates");
-  await arrow.focus();
-  await page.keyboard.press("Enter");
-  await expect(page.getByText(HALFWAY)).toBeVisible();
-  await expect(page.getByText(STARTED)).toBeVisible();
-
-  const bodies = await page.locator(".body").allTextContents();
-  expect(bodies).toEqual([VERIFYING, HALFWAY, STARTED]);
-});
-
-test("the screen has no automated WCAG A or AA violations, drawer open", async ({ page }) => {
-  await page.goto("/home");
-  await page.locator("summary").click();
-  await expect(page.getByText(STARTED)).toBeVisible();
-
-  const results = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-    .analyze();
-
-  expect(results.violations).toEqual([]);
-});
-
-test("the screen fits the mobile viewport, drawer open", async ({ page, isMobile }) => {
-  test.skip(!isMobile, "Mobile viewport check");
-  await page.goto("/home");
-  await page.locator("summary").click();
-  await expect(page.getByText(STARTED)).toBeVisible();
-  const viewport = await page.evaluate(() => ({
-    clientWidth: document.documentElement.clientWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-  }));
-  expect(viewport.scrollWidth).toBe(viewport.clientWidth);
-});
+/*
+ * What the screen shows (one entry with no drawer, newest first with the
+ * earlier ones opening from the keyboard, axe, the phone's width) moved to the
+ * rig (ADR-0039, #1610): web/tests/rig/maintenance.spec.js, against the fixture
+ * window. What is left here is the window itself, end to end.
+ */
 
 test("ending the window reopens the instance at the same URL", async ({ request }) => {
   await command(adminPage, { action: "end", message: "Back." });
