@@ -342,8 +342,10 @@ When it fails, the message names the cause:
   never signed, so it is not a release, and the carry logs `record_image job N
   was never signed (sign_evidence <status>): not a release, carrying the build
   before it` and carries job N's own `previous/` pair in its place, verified like
-  any predecessor pair. If job N has no `previous/` pair, nothing before it was
-  ever signed and the carry logs a first release, carrying nothing. A line in
+  any predecessor pair. If job N has no `previous/` pair and its own manifest is
+  still there, nothing before it was ever signed and the carry logs a first
+  release, carrying nothing; if its own manifest is gone too, the carry treats
+  it as a missing build, as below. A line in
   `carry-accepted-gap` for job N excuses the pair that stands in for it, never
   an API error or a `sign_evidence` job still in flight (which is waited for).
 - The predecessor's pipeline has no `sign_evidence` job at all: retry that

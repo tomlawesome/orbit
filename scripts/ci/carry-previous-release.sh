@@ -33,8 +33,10 @@
 # (failed, canceled, skipped), the carry logs "record_image job N was never
 # signed (sign_evidence <status>): not a release, carrying the build before it"
 # and ships job N's own previous/ pair in its place, fetched by job N's id and
-# verified. Job N with no previous/ pair means nothing before it was ever signed:
-# a first release. In flight still waits.
+# verified. Job N with no previous/ pair and its own manifest still there means
+# nothing before it was ever signed: a first release. N's own manifest gone too
+# is a missing build (the absent-artifact path), not a first release. In flight
+# still waits.
 #
 # On a rebuild of the same image (the predecessor's manifest names the digest
 # being recorded) the predecessor's own previous/ pair, fetched by the same
