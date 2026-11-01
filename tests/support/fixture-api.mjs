@@ -1,8 +1,12 @@
 /*
  * A fetch stand-in that answers the way a fixtures instance (ORBIT_FIXTURES=1)
  * does, for page mounts in happy-dom. The bodies are the ones the fixtures
- * instance serves: web/src/lib/data/fixtures/*.js, read here directly rather
- * than invented, so a page mounted in Vitest sees the data the rig's pages see.
+ * instance serves. Where a route's `fixture` handler takes its body from
+ * web/src/lib/data/fixtures/*.js, it is imported here; where the handler holds
+ * the body inline (join-requests, upload-limit, mailbox, contact, and the
+ * workspace envelope) it is retyped here, and
+ * tests/unit/fixture-api-matches-routes.test.mjs pins that each one still equals
+ * what the route's own handler answers, so the two cannot drift apart unseen.
  *
  *   const api = fixtureApi({ "GET /api/join-requests": () => ({ requests: [] }) });
  *   vi.stubGlobal("fetch", api.fetch);
@@ -15,7 +19,7 @@
 import { ADMIN_USERS_FIXTURE } from "../../web/src/lib/data/fixtures/admin.js";
 import { INVITATIONS_FIXTURE, MEMBERS_FIXTURE } from "../../web/src/lib/data/fixtures/household.js";
 import { INBOX_FIXTURE } from "../../web/src/lib/data/fixtures/inbox.js";
-import { SESSION_FIXTURE, WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
+import { SESSION_FIXTURE, WORKSPACE_FIXTURE, WORKSPACE_FIXTURE_TODAY } from "../../web/src/lib/data/fixtures/workspace.js";
 
 /** @param {unknown} body @param {number} [status] */
 export const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -37,7 +41,7 @@ export function fixtureApi(overrides = {}) {
   /** @type {Record<string, (call: any) => unknown>} */
   const routes = {
     "GET /api/auth/session": () => structuredClone(SESSION_FIXTURE),
-    "GET /api/workspace": () => ({ workspace: structuredClone(WORKSPACE_FIXTURE) }),
+    "GET /api/workspace": () => ({ workspace: structuredClone(WORKSPACE_FIXTURE), fixtureToday: WORKSPACE_FIXTURE_TODAY }),
     "GET /api/join-requests": () => ({ requests: structuredClone(FIXTURE_JOIN_REQUESTS) }),
     "GET /api/imap-inbox": () => structuredClone(INBOX_FIXTURE),
     /* administration: what the fixtures instance answers; the rest (rotation,
@@ -48,7 +52,7 @@ export function fixtureApi(overrides = {}) {
     "GET /api/admin/contact": () => ({ contact: { address: null, version: 1, updatedAt: null } }),
     "GET /api/admin/upload-limit": () => ({ uploadLimit: {
       maxBytes: 50 * 1_048_576, defaultBytes: 50 * 1_048_576, overrideBytes: null,
-      minBytes: 1 * 1_048_576, ceilingBytes: 200 * 1_048_576, /* the bounds are the engine's; no card here reads them */
+      minBytes: 1 * 1_048_576, ceilingBytes: 100 * 1_048_576, /* the bounds are the engine's; no card here reads them */
       version: 1, updatedAt: null } }),
     ...overrides,
   };
