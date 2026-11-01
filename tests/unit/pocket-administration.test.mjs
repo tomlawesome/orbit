@@ -18,10 +18,11 @@ import { subscribeWake } from "$lib/pocket/wake.js";
  *   · a failed document job says why, and offers retry, with no interaction
  *   · alerts stand first; the jump strip is plain links, not tabs
  *
- * Proved lower down, so not repeated on the page (#1584 web-admin-1): a
- * disable, or a delete-now, whose re-read fails after the command landed still
- * says it is done, keeps its undo and never says "not deleted"
- * (administration-landed-then-reread.test.mjs, "disable and hard delete").
+ * A command that landed and only the re-read after it failed (#1584 web-admin-1)
+ * is run on the page: the workspace read fails once the first load is in, and
+ * the page must say done, keep its undo, and never say "not deleted". The act
+ * itself is also proved at the act level (administration-landed-then-reread.test.mjs,
+ * "disable and hard delete"), which uses stand-ins for the card and the system.
  */
 
 vi.mock("$lib/backdrops/station.js", () => ({ mountStation: () => () => {} }));
@@ -49,10 +50,13 @@ describe("administration on a phone, mounted", () => {
    * @param {{ alerts?: boolean, overrides?: Parameters<typeof fixtureApi>[0] }} [options]
    */
   async function mountAdmin({ alerts = false, overrides = {} } = {}) {
+    /** Set once the page has loaded: from then on the workspace read fails, as an aborted request does. */
+    const reread = { fails: false };
     const api = fixtureApi({
       "GET /api/admin/operations": () => ({ operations: { documentJobs: JOBS, documentJobCounts: {} } }),
       /* the one thing the fixtures instance cannot say: a system on the clock */
       "GET /api/workspace": async () => {
+        if (reread.fails) throw new TypeError("Failed to fetch");
         const { WORKSPACE_FIXTURE, WORKSPACE_FIXTURE_TODAY } = await import("$lib/data/fixtures/workspace.js");
         const workspace = structuredClone(WORKSPACE_FIXTURE);
         /** @type {any} */ (workspace).recoverableHouseholds = [{ id: "hh-gone-1", name: "Aunt May’s Cottage", deleteAfter: ahead(13) }];
@@ -69,16 +73,21 @@ describe("administration on a phone, mounted", () => {
     }));
     /** @type {string[]} */
     const wakes = [];
+    /** @type {import("$lib/pocket/wake.js").WakeEntry[]} */
+    const entries = [];
     /* subscribing replays the wake standing now (a previous test's, held 4 s): not this one's */
     let replay = true;
-    stopWatching = subscribeWake((entry) => { if (replay) { replay = false; return; } if (entry) wakes.push(entry.message); });
+    stopWatching = subscribeWake((entry) => {
+      if (replay) { replay = false; return; }
+      if (entry) { wakes.push(entry.message); entries.push(entry); }
+    });
     await loader.mount(PAGE, { data: { fixtures: true } });
     const { flushSync } = await runtime();
     /** Lets promises and timers at zero run, then draws what they changed. */
     const settle = async () => { await new Promise((done) => setTimeout(done, 0)); flushSync(); };
     await vi.waitFor(() => expect(document.querySelector(".ad-pocket [data-ad=people] .p-row")).not.toBeNull());
     await settle();
-    return { api, wakes, settle };
+    return { api, wakes, entries, reread, settle };
   }
 
   const $ = (/** @type {string} */ selector, /** @type {ParentNode} */ scope = document) =>
@@ -156,6 +165,60 @@ describe("administration on a phone, mounted", () => {
     await settle();
     expect($$("button", sheet).some((el) => el.disabled && /delete for good/.test(el.textContent ?? ""))).toBe(false);
     expect($("button.arm", sheet)).not.toBeNull();
+  });
+
+  /*
+   * #1584 web-admin-1: the command lands and only the re-read after it fails.
+   * The act is done and must be said so, never as a refusal.
+   */
+  it("a disable whose re-read fails still says disabled, keeps its undo, and says done on the card", async () => {
+    const { entries, reread, settle } = await mountAdmin();
+    reread.fails = true;
+    const emma = row("[data-ad=people]", "Emma Harlow");
+    await open(emma, settle);
+    click(control("Disable Emma Harlow", emma));
+    await settle();
+    click(control("tap again to disable Emma Harlow", emma));
+    await vi.waitFor(() => expect($("[data-ad=people] .p-error")).not.toBeNull());
+    const card = text($("[data-ad=people] .p-error"));
+    expect(card).toContain("done —");
+    expect(card).toContain("reload");
+    const said = entries.find((entry) => entry.message.includes("Emma Harlow is disabled"));
+    expect(said, "the wake says it is disabled").toBeDefined();
+    expect(typeof said?.undo, "and keeps its undo").toBe("function");
+    expect(entries.filter((entry) => entry.failure)).toHaveLength(0);
+  });
+
+  it("a delete-now whose re-read fails closes the sheet, replaces the row and says done", async () => {
+    const { entries, reread, settle } = await mountAdmin({
+      overrides: { "POST /api/households/hh-gone-1/lifecycle": () => ({ ok: true }) },
+    });
+    reread.fails = true;
+    const clock = row("[data-ad=systems]", "Aunt May");
+    await open(clock, settle);
+    click(control("Delete Aunt May’s Cottage now, for good", clock));
+    await settle();
+    click(control("tap again to delete Aunt May’s Cottage now, for good", clock));
+    await settle();
+    const sheet = /** @type {HTMLElement} */ (dialog("Delete Aunt May’s Cottage now"));
+    const typed = labelled(sheet, /type the system’s name exactly/i);
+    typed.value = "Aunt May’s Cottage";
+    typed.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+    /* the sheet's button is an ArmButton: the first tap arms it, the second fires */
+    click($("button.arm", sheet));
+    await settle();
+    expect($("button.arm", sheet).classList.contains("armed")).toBe(true);
+    click($("button.arm", sheet));
+
+    await vi.waitFor(() => expect($("[data-ad=systems] .ad-said.ok")).not.toBeNull());
+    expect(dialog("Delete Aunt May’s Cottage now")?.closest(".p-sheet-layer.open") ?? null).toBeNull();
+    const said = text($("[data-ad=systems] .ad-said.ok"));
+    expect(said).toContain("Aunt May’s Cottage is gone for good");
+    expect(said).toContain("reload");
+    expect(control("Restore Aunt May’s Cottage")).toBeNull();
+    expect(entries.some((entry) => entry.message.includes("done —"))).toBe(true);
+    expect(document.body.textContent).not.toContain("not deleted");
   });
 
   it("a failed document job says why and offers retry, with no interaction", async () => {
