@@ -359,3 +359,11 @@ timeout on this one case rather than a global raise.
 ## home-suggestion-drawer.spec.js:156 "the staged paper opens the preview beside the drawer" (fidelity)
 
 - 2026-10-31 · a2f11fd5 (`chore/1352-home-inbox-twins`) · local fidelity run from a worktree, other sessions' builds on the host · the preview card wore "open still" without `snap`, then the preview server on 4173 was gone and the next three tests got `ERR_CONNECTION_REFUSED`; the spec alone passed 7 of 7, then 21 of 21 at `--repeat-each=3`. Why the server stopped is not known. First sighting.
+
+## v19-arrival.spec.ts:160 "the newcomer's arrival: the climb, the labelled sky, the real count, the question" — desktop-webkit
+
+- 2026-11-01 · 6299c4fa (`deps/1565-sveltekit-3`, #1565; the SvelteKit 3 upgrade, not touching the arrival journey) · browser e2e run on this branch · failed, then passed on a rerun of unchanged code. First sighting.
+
+## archive-slot.spec.ts:171 "while one archive upload is in progress a second is refused at once, and goes through after it ends" — mobile-webkit
+
+- 2026-11-01 · 6299c4fa (`deps/1565-sveltekit-3`, #1565; the SvelteKit 3 upgrade) · browser e2e run on this branch · failed, then passed on a rerun of unchanged code. First sighting.
