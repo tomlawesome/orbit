@@ -23,6 +23,12 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  * stays here needs a browser: the address and Back, Escape, where the row and
  * the preview card stand, and real focus with the chooser card. At the desk
  * the gate itself judges at.
+ *
+ * The unit file mounts the drawer through a copy of the home page's glue
+ * (tests/unit/support/SuggestionDrawerHost.svelte), so it cannot see the
+ * page's own arming, receipt keying and re-read go wrong. The last run here
+ * drives the REAL /home page through Add, Dismiss and an amended add, for
+ * that glue alone (#1613 review).
  */
 test.use({ viewport: { width: 1600, height: 1000 }, reducedMotion: "reduce" });
 
@@ -110,4 +116,95 @@ test("review & amend: focus lands on the title, the due calendar opens beside an
   await drawer.getByRole("button", { name: "cancel" }).click();
   await drawer.getByRole("button", { name: "discard changes?" }).click();
   await expect(drawer.getByRole("button", { name: "review & amend →" })).toBeFocused();
+});
+
+/**
+ * Answers what a decision sends, and takes the receipt out of the inbox read
+ * once it has landed, as the relay would. Reads fall through to the fixture.
+ * @param {import("@playwright/test").Page} page
+ */
+async function answerDecisions(page) {
+  /** @type {{ approvals: any[], discards: string[], gone: boolean }} */
+  const seen = { approvals: [], discards: [], gone: false };
+  await page.route("**/api/imap-inbox/r-*", async (route) => {
+    const request = route.request();
+    const id = new URL(request.url()).pathname.split("/").pop() ?? "";
+    if (request.method() === "DELETE") {
+      seen.discards.push(id);
+      seen.gone = true;
+      return route.fulfill({ json: { ok: true } });
+    }
+    if (request.method() === "PUT") return route.fulfill({ json: { ok: true } });
+    return route.fulfill({
+      json: {
+        receipt: { id, draftVersion: 3, proposal: { title: "Home insurance renewal" } },
+        sections: [{ id: "s-home" }, { id: "s-dates" }],
+        attachments: [{ id: "a-1" }],
+      },
+    });
+  });
+  await page.route("**/api/reviewed-intake/approve", async (route) => {
+    seen.approvals.push(route.request().postDataJSON());
+    seen.gone = true;
+    await route.fulfill({ json: { outcome: "approved", itemId: "i-new" } });
+  });
+  await page.route(/\/api\/imap-inbox(\?.*)?$/, async (route) => {
+    const read = await route.fetch();
+    const body = await read.json();
+    if (seen.gone) body.receipts = body.receipts.filter((/** @type {{ id: string }} */ one) => one.id !== "r-insurance");
+    await route.fulfill({ response: read, json: body });
+  });
+  return seen;
+}
+
+/* The real home page's glue for a suggestion (home/+page.svelte): the first
+   press arms, the second sends; the decided receipt's row leaves on the re-read;
+   an amended add's wake is the suggestion's own title. The unit file proves
+   what each sends; this proves the page wires them, so it asserts the page's
+   own states and the end state, one run for Add, Dismiss and an amended add. */
+test("the real home page: Add and Dismiss arm then send and the row leaves; an amended add says so", async ({ page }) => {
+  const seen = await answerDecisions(page);
+  const row = page.locator(ROW, { hasText: "Home insurance renewal" });
+  const drawer = page.locator(DRAWER);
+  await openHome(page);
+
+  /* Add: one press only arms. */
+  await row.click();
+  await drawer.getByRole("button", { name: "Add to orbit" }).click();
+  await expect(drawer.getByRole("button", { name: "tap again to approve" })).toBeVisible();
+  expect(seen.approvals).toHaveLength(0);
+  await drawer.getByRole("button", { name: "tap again to approve" }).click();
+  await expect.poll(() => seen.approvals.length).toBe(1);
+  expect(seen.approvals[0]).toMatchObject({ action: "create_separate", source: { receiptId: "r-insurance" } });
+  await expect(row).toHaveCount(0);
+  await expect(drawer).toHaveCount(0);
+  await expect(page.getByRole("alert")).toHaveText("");
+
+  /* Dismiss, on the receipt back in the inbox (a clean address: the last one carried ?item=). */
+  seen.gone = false;
+  await openHome(page);
+  await row.click();
+  await drawer.getByRole("button", { name: "Dismiss" }).click();
+  await expect(drawer.getByRole("button", { name: "tap again to dismiss" })).toBeVisible();
+  expect(seen.discards).toHaveLength(0);
+  await drawer.getByRole("button", { name: "tap again to dismiss" }).click();
+  await expect.poll(() => seen.discards).toEqual(["r-insurance"]);
+  await expect(row).toHaveCount(0);
+  await expect(drawer).toHaveCount(0);
+  await expect(page.getByRole("alert")).toHaveText("");
+
+  /* An amended add: the drawer goes, the row leaves, and the wake names the amended title. */
+  seen.gone = false;
+  await openHome(page);
+  await row.click();
+  await drawer.getByRole("button", { name: "review & amend →" }).click();
+  await page.locator('[id="r-insurance"] [data-ed="title"]').fill("Home insurance, corrected");
+  await drawer.getByRole("button", { name: "add to orbit", exact: true }).click();
+  await expect.poll(() => seen.approvals.length).toBe(2);
+  expect(seen.approvals[1]).toMatchObject({ item: { title: "Home insurance, corrected" } });
+  await expect(drawer).toHaveCount(0);
+  await expect(row).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "added to your orbit" }))
+    .toHaveText("added to your orbit · Home insurance, corrected");
+  await expect(page.getByRole("alert")).toHaveText("");
 });

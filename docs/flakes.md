@@ -361,3 +361,7 @@ timeout on this one case rather than a global raise.
 ## home-suggestion-drawer.spec.js:156 "the staged paper opens the preview beside the drawer" (fidelity)
 
 - 2026-10-31 · a2f11fd5 (`chore/1352-home-inbox-twins`) · local fidelity run from a worktree, other sessions' builds on the host · the preview card wore "open still" without `snap`, then the preview server on 4173 was gone and the next three tests got `ERR_CONNECTION_REFUSED`; the spec alone passed 7 of 7, then 21 of 21 at `--repeat-each=3`. Why the server stopped is not known. First sighting.
+
+## src/server/boot.test.ts:256 "validates, reports auth, checks and migrates before workers"
+
+- 2026-11-01 · 7b9d415d (tests/unit and fidelity only) · local full vitest run, load average 42-72 · timed out at the 5 s default, and the next test (:277) then saw doubled boot steps from the timed-out test's leftovers; the file alone passed 41/41 twice. Wall-clock-under-load shape. First sighting.
