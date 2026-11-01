@@ -22,4 +22,10 @@ export const variables = defineEnvVars({
   ORBIT_ARCHIVE_BODY_DEADLINE_MS: { schema: optional },
   /** The VAPID public key a browser needs before it can subscribe. */
   VAPID_PUBLIC_KEY: { schema: optional },
+  /** The port the server listens on; the start-up warm-up dials it (#1575). */
+  PORT: { schema: optional },
+  /** The address the server listens on; the warm-up dials loopback for a wildcard. */
+  HOST: { schema: optional },
+  /** A Unix socket path the server listens on instead of a port; no warm-up then. */
+  SOCKET_PATH: { schema: optional },
 });
