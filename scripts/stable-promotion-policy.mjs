@@ -2,12 +2,14 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { ORBIT_DIGEST_PATTERN } from "./release-metadata-patterns.mjs";
+
 function requireEvidence(value, message) {
   if (value !== true) throw new Error(message);
 }
 
 function validateCandidateIdentity(candidate) {
-  if (!/^sha256:[0-9a-f]{64}$/u.test(candidate.digest ?? "")) {
+  if (!ORBIT_DIGEST_PATTERN.test(candidate.digest ?? "")) {
     throw new Error("Stable promotion requires a valid immutable preview digest.");
   }
   if (!/^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u.test(candidate.version ?? "")) {
