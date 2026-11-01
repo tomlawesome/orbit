@@ -17,6 +17,8 @@
  * drawn against.
  */
 
+import { WORKSPACE_VERSION } from "orbit/lib/workspace";
+
 export const SESSION_FIXTURE = {
   authenticated: true,
   csrfToken: "fixture-csrf-token",
@@ -51,45 +53,45 @@ const HARLOW_SECTIONS = [
 const HARLOW_ITEMS = [
   {
     id: "i-gutter", title: "Gutter clearing", sectionId: "s-home", status: "active",
-    subtype: "service", scheduleKind: "service", kind: "service", provider: null, reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service",
     costMinor: 15000, currency: "GBP", dueDate: "2026-07-28",
-    recurrenceMonths: 12, reminderDays: [14, 3], notes: null,
-    snoozedUntil: null, version: 3, updatedAt: "2026-07-01T09:00:00.000Z",
+    recurrenceMonths: 12, reminderDays: [14, 3],
+    version: 3, updatedAt: "2026-07-01T09:00:00.000Z",
   },
   {
     id: "i-mot", title: "Car MOT — Volvo V60", sectionId: "s-vehicles", status: "active",
-    subtype: "inspection", scheduleKind: "service", kind: "inspection", provider: null, reference: null,
+    subtype: "inspection", scheduleKind: "service", kind: "inspection",
     costMinor: 5485, currency: "GBP", dueDate: "2026-08-29", documentCount: 2,
-    recurrenceMonths: 12, reminderDays: [21, 7], notes: null,
-    snoozedUntil: null, version: 5, updatedAt: "2026-06-12T10:30:00.000Z",
+    recurrenceMonths: 12, reminderDays: [21, 7],
+    version: 5, updatedAt: "2026-06-12T10:30:00.000Z",
   },
   {
     id: "i-boiler", title: "Boiler service", sectionId: "s-home", status: "active",
-    subtype: "service", scheduleKind: "service", kind: "service", provider: "British Gas", reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service", provider: "British Gas",
     costMinor: 12000, currency: "GBP", dueDate: "2026-09-04",
-    recurrenceMonths: 12, reminderDays: [14], notes: null,
-    snoozedUntil: null, version: 2, updatedAt: "2026-05-20T16:00:00.000Z",
+    recurrenceMonths: 12, reminderDays: [14],
+    version: 2, updatedAt: "2026-05-20T16:00:00.000Z",
   },
   {
     id: "i-chimney", title: "Chimney sweep", sectionId: "s-home", status: "active",
-    subtype: "service", scheduleKind: "service", kind: "service", provider: null, reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service",
     costMinor: 9000, currency: "GBP", dueDate: "2026-10-13",
-    recurrenceMonths: 12, reminderDays: [14], notes: null,
-    snoozedUntil: null, version: 1, updatedAt: "2026-04-02T11:00:00.000Z",
+    recurrenceMonths: 12, reminderDays: [14],
+    version: 1, updatedAt: "2026-04-02T11:00:00.000Z",
   },
   {
     id: "i-smoke", title: "Smoke alarm batteries", sectionId: "s-devices", status: "active",
-    subtype: "service", scheduleKind: "service", kind: "service", provider: null, reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service",
     costMinor: 1200, currency: "GBP", dueDate: "2026-12-13",
-    recurrenceMonths: 6, reminderDays: [7], notes: null,
-    snoozedUntil: null, version: 4, updatedAt: "2026-06-13T08:00:00.000Z",
+    recurrenceMonths: 6, reminderDays: [7],
+    version: 4, updatedAt: "2026-06-13T08:00:00.000Z",
   },
   {
     id: "i-svc", title: "Car full service", sectionId: "s-vehicles", status: "active",
-    subtype: "service", scheduleKind: "service", kind: "service", provider: null, reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service",
     costMinor: 30000, currency: "GBP", dueDate: "2027-01-21", documentCount: 2,
-    recurrenceMonths: 12, reminderDays: [21], notes: null,
-    snoozedUntil: null, version: 2, updatedAt: "2026-06-12T10:35:00.000Z",
+    recurrenceMonths: 12, reminderDays: [21],
+    version: 2, updatedAt: "2026-06-12T10:35:00.000Z",
   },
   /* #1460: the dearest body the size curve draws (50,000 pounds a year, its
      ceiling). It carries a document, so it rides the pocket dial, and falls
@@ -97,10 +99,10 @@ const HARLOW_ITEMS = [
      moves Harlow Home's room layout slightly, as do the smaller halos. */
   {
     id: "i-roof", title: "Roof replacement", sectionId: "s-home", status: "active",
-    subtype: "service", scheduleKind: "service", kind: "service", provider: null, reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service",
     costMinor: 5000000, currency: "GBP", dueDate: "2026-11-21", documentCount: 1,
-    recurrenceMonths: 12, reminderDays: [30], notes: null,
-    snoozedUntil: null, version: 1, updatedAt: "2026-06-14T09:00:00.000Z",
+    recurrenceMonths: 12, reminderDays: [30],
+    version: 1, updatedAt: "2026-06-14T09:00:00.000Z",
   },
 ];
 
@@ -115,22 +117,27 @@ function distantItems(prefix, specs) {
   return specs.map(([title, sectionId, dueDate, costMinor, extra], index) => ({
     id: `${prefix}-${index}`, title, sectionId,
     status: "active", subtype: "service", scheduleKind: "service", kind: "service",
-    provider: null, reference: null, costMinor, currency: "GBP",
+    costMinor, currency: "GBP",
     costIsEstimate: true,
-    dueDate, recurrenceMonths: 12, reminderDays: [14], notes: null,
-    snoozedUntil: null, version: 1, updatedAt: "2026-06-01T00:00:00.000Z",
+    dueDate, recurrenceMonths: 12, reminderDays: [14],
+    version: 1, updatedAt: "2026-06-01T00:00:00.000Z",
     ...(extra ?? {}),
   }));
 }
 
+/** Not an API field, so not in WORKSPACE_FIXTURE: pins chart arithmetic to
+ * the mockups' own date so the fidelity gate is deterministic. The fixture
+ * routes send it beside the workspace in the answer's envelope, the seam
+ * (readWorkspace) puts it back on the workspace it hands the screens, and it
+ * ignores it on live data, which never has one (#1357). */
+export const WORKSPACE_FIXTURE_TODAY = "2026-08-13";
+
+/* Exactly what the engine would send: contract.test checks it against
+   workspaceSchema (#1357). Suggestions are no field of it: the suggestion row
+   and its dial ring derive from the review inbox's own receipts
+   (fixtures/inbox.js via /api/imap-inbox, #454). */
 export const WORKSPACE_FIXTURE = {
-  /* Not an API field: pins chart arithmetic to the mockups' own date so the
-     fidelity gate is deterministic. The seam ignores it on live data. */
-  fixtureToday: "2026-08-13",
-  /* #454 closed: the suggestion row and its dial ring now derive from the
-     review inbox's own receipts (fixtures/inbox.js via /api/imap-inbox) —
-     one truth for home and the inbox screen alike. */
-  suggestions: [],
+  version: WORKSPACE_VERSION,
   activeHouseholdId: "hh-harlow-1",
   householdLanding: "active",
   households: [
@@ -176,7 +183,7 @@ export const WORKSPACE_FIXTURE = {
       items: distantItems("i-narrow", [
         ["Hull blacking", "s-boat", "2026-12-11", 55000],
         ["Boat Safety Scheme examination", "s-cert", "2026-09-27", 18000,
-          { subtype: "inspection", scheduleKind: "inspection", kind: "inspection", costIsEstimate: false }],
+          { subtype: "inspection", scheduleKind: "service", kind: "inspection", costIsEstimate: false }],
       ]),
       activities: [],
     },
