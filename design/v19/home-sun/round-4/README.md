@@ -64,7 +64,7 @@ with seven items that leaves one normal, so "most normal" could not be met
 ## The directions
 
 ### G, log tuner (`g-log-tuner.html`): #1464, #1462, #1461 together, interactive
-The desk sky with a control panel beside it, not over it. Slider for the knee
+The desk sky with a control panel beside it, not over it. Slider for the close-up
 tau (7 to 90 days), slider for the horizon D (180 to 1095 days), a switch
 "linear (today) / log", a switch "due date / my warning date" (warning date =
 due date minus 30 days for every item in the mock-up, labelled so), and a
