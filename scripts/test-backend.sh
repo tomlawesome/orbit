@@ -127,7 +127,12 @@ if [[ "$use_pnpm" == true ]]; then
     pnpm --filter orbit-web build
   fi
   node scripts/check-v19-types.mjs
-  if [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
+  if [[ -n "${ORBIT_TEST_CHANGED_BASE:-}" ]]; then
+    # A merge request (#1414): only the tests that import a changed file, and
+    # never coverage -- a partial run cannot measure the floors, so neither the
+    # coverage run nor the floor check happens, whatever ORBIT_TEST_COVERAGE says.
+    pnpm exec vitest run --changed "$ORBIT_TEST_CHANGED_BASE"
+  elif [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
     pnpm test:coverage
     node scripts/ci/coverage-floor-check.mjs
   else
@@ -154,7 +159,10 @@ elif command -v node >/dev/null 2>&1 && [[ -d node_modules ]]; then
       && node ../scripts/web-build-stamp.mjs write)
   fi
   node scripts/check-v19-types.mjs
-  if [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
+  if [[ -n "${ORBIT_TEST_CHANGED_BASE:-}" ]]; then
+    # See the pnpm branch above (#1414).
+    node node_modules/vitest/vitest.mjs run --changed "$ORBIT_TEST_CHANGED_BASE"
+  elif [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
     node node_modules/vitest/vitest.mjs run --coverage
     node scripts/ci/coverage-floor-check.mjs
   else

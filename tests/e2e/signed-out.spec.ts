@@ -21,7 +21,16 @@ resetDatabaseBetweenSpecFiles();
  * replacements are the gate cases below.
  */
 
-test("signed-out visitors get 401 from every workspace API route", async ({ request }) => {
+test("signed-out visitors get 401 from every workspace API route", async ({ baseURL, request }) => {
+  /* #1565: SvelteKit 3 refuses a write whose `Origin` is not the server's own
+     with 403 before any handler runs, so a write with no `Origin` never reaches
+     the sign-in check this case protects. A browser always sends `Origin` on a
+     write and Playwright's API context does not; the writes below send the
+     app's own, taken from `baseURL` so no host or port is written down (#741),
+     which is what a signed-out browser would send. The no-`Origin` write has
+     its own case below. */
+  expect(baseURL, "the suite has no baseURL to send as the request origin").toBeTruthy();
+  const origin = new URL(baseURL as string).origin;
   const workspaceResponse = await request.get("/api/workspace");
   expect(workspaceResponse.status()).toBe(401);
   const documentId = "00000000-0000-4000-8000-000000000001";
@@ -30,14 +39,29 @@ test("signed-out visitors get 401 from every workspace API route", async ({ requ
   const documentListPath = `/api/households/${householdId}/items/${itemId}/documents`;
   for (const response of await Promise.all([
     request.get(documentListPath),
-    request.post(documentListPath, { data: "%PDF-1.7" }),
+    request.post(documentListPath, { data: "%PDF-1.7", headers: { origin } }),
     request.get(`/api/documents/${documentId}/download`),
-    request.delete(`/api/documents/${documentId}`),
-    request.post(`/api/documents/${documentId}/restore`),
+    request.delete(`/api/documents/${documentId}`, { headers: { origin } }),
+    request.post(`/api/documents/${documentId}/restore`, { headers: { origin } }),
     request.get("/api/admin/documents/health"),
     request.get("/api/admin/documents/rotation"),
   ])) {
     expect(response.status()).toBe(401);
+  }
+});
+
+test("a signed-out write with no Origin header is refused 403 by the same-origin check, before the sign-in check", async ({ request }) => {
+  /* #1565: the other half of the case above. A browser never omits `Origin` on
+     a write, so this is a non-browser caller, and SvelteKit 3 refuses it before
+     `requireSession` is reached. */
+  const documentId = "00000000-0000-4000-8000-000000000001";
+  const householdId = "00000000-0000-4000-8000-000000000002";
+  const itemId = "00000000-0000-4000-8000-000000000003";
+  for (const response of await Promise.all([
+    request.post(`/api/households/${householdId}/items/${itemId}/documents`, { data: "%PDF-1.7" }),
+    request.delete(`/api/documents/${documentId}`),
+  ])) {
+    expect(response.status()).toBe(403);
   }
 });
 

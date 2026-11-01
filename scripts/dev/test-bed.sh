@@ -11,7 +11,7 @@
 #   docker run -d --name orbit-<issue>-review -p <port>:80 \
 #     -v <dir>:/usr/share/nginx/html:ro nginx:alpine
 # Hand over clickable https://<DEMO_HOST>:3443/<route> links, plus the one-time
-# self-signed certificate warning on :3443 and :4443. A screenshot or fidelity
+# self-signed certificate warning on :3443 and :4444. A screenshot or fidelity
 # baseline is supporting evidence, not the review: sign-off is on the running
 # code (owner, 2026-09-05, #474). Mockups and review screenshots open in the
 # app's default theme (DEFAULT_THEME in web/src/lib/theme.js: after dark, never
@@ -26,11 +26,20 @@
 #   bash scripts/dev/test-bed.sh down [--include-ollama]      remove everything, test data included
 #
 # Options: --host ADDR   the LAN address of this machine (or set DEMO_HOST);
-#                        `run` reads it from the running app container if not given
+#                        `run` reads it from the running app container if not given.
+#                        A LAN address or a host name works; localhost, 127.0.0.1
+#                        and ::1 are refused: the app container must reach the
+#                        identity provider at this address, and inside it
+#                        loopback is the container itself
 #          --project P   Compose project name (default: orbit, which is what
 #                        scripts/backup.sh and scripts/restore.sh address)
 #
-# .env-orbit (made by scripts/configure.sh) is read, never changed. A bed that
+# .env-orbit (made by scripts/configure.sh) is read, never changed. `up` creates
+# the bed's test-only secret files in .orbit-secrets when they are missing (the
+# certificate also when it expires within a day), and
+# leaves existing ones alone: smtp-password (random) and the GreenMail
+# certificate files greenmail-key.pem, greenmail-ca.pem and greenmail.p12
+# (scripts/dev-greenmail-cert.sh). A bed that
 # fails to come up is torn down completely after its logs are saved. `down`
 # removes every container (profile ones too), volume, network and the image
 # `up --build` tagged, then checks by Compose label that nothing is left. The
@@ -40,7 +49,10 @@
 # alone, which has no image or demo address, so `run` exports ORBIT_IMAGE (read
 # from the running orbit-app container), DEMO_HOST, ORBIT_BIND_ADDRESS,
 # ORBIT_PORT and COMPOSE_PROJECT_NAME for CMD, then execs it unchanged.
-# Only one bed can run at a time: docker-compose.yml fixes container names.
+# Only one bed can run at a time: it publishes fixed host ports (3443, 3001,
+# 4444 and the mail sidecar's). The default project, orbit, is what backup.sh
+# and restore.sh address, so it shares names with a main-checkout stack; to run
+# next to another Orbit stack, pass --project <name>.
 set -Eeuo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -237,6 +249,27 @@ validate_common() {
 require_host() {
   [[ -n "$host" ]] || die "give this machine's LAN address with --host ADDR (or set DEMO_HOST)."
   [[ "$host" =~ ^[A-Za-z0-9.:-]+$ ]] || die "--host must be an address or host name (got: $host)"
+  case "$host" in
+    127.0.0.1 | ::1 | localhost)
+      die "--host $host is a loopback address: the bed's identity provider must be reachable from inside the app container, where that address is the container itself. Give this machine's LAN address." ;;
+  esac
+}
+
+# The bed's test-only secrets (#1507): Compose refuses to start without them,
+# and configure.sh does not make them. Only what is missing; .env-orbit is
+# never touched.
+make_secrets() {
+  mkdir -p .orbit-secrets
+  if [[ ! -f .orbit-secrets/smtp-password ]]; then
+    (umask 077; openssl rand -hex 32 >.orbit-secrets/smtp-password) \
+      || die "could not make .orbit-secrets/smtp-password."
+  fi
+  # dev-greenmail-cert.sh signs for 30 days; an expired or nearly expired CA
+  # is regenerated the same as a missing one, as test-e2e-local.sh does (#1236).
+  if [[ ! -f .orbit-secrets/greenmail-key.pem || ! -f .orbit-secrets/greenmail-ca.pem || ! -f .orbit-secrets/greenmail.p12 ]] \
+    || ! openssl x509 -in .orbit-secrets/greenmail-ca.pem -noout -checkend 86400 >/dev/null 2>&1; then
+    bash scripts/dev-greenmail-cert.sh >/dev/null || die "could not make the GreenMail certificate files."
+  fi
 }
 
 # The bed's HTTPS front needs a throwaway certificate for the host (never
@@ -275,12 +308,13 @@ cmd_up() {
     docker image inspect "$image" >/dev/null 2>&1 || abort_up "the build did not produce $image"
   fi
   make_cert
+  make_secrets
   compose up -d --wait || abort_up "the stack did not become healthy"
   trap - INT TERM
 
   printf '\nTest bed is up (project %s).\n' "$project"
   printf '  App:                https://%s:3443/\n' "$host"
-  printf '  Identity provider:  https://%s:4443/\n' "$host"
+  printf '  Identity provider:  https://%s:4444/\n' "$host"
   printf 'The browser warns once on each address (temporary certificate): choose to proceed.\n'
   if [[ "$project" != "$default_project" ]]; then
     printf 'backup.sh / restore.sh need: COMPOSE_PROJECT_NAME=%s bash scripts/backup.sh ...\n' "$project"

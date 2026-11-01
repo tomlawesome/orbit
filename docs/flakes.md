@@ -263,13 +263,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-20 · 0469e455 · pipeline 2774 / fast (job 37576), same run as the sighting above · timed out at the 5 s default. Wall-clock-under-load shape. First sighting.
 
-## settings-text-size-tab-stop.test.mjs:128 "settings, phone layout: the text size tab stop starts on the applied step > with standard applied, the one tab stop is the ticked tile" — #1617
-
-- 2026-10-22 · 2b120e89 (nothing near settings since the green bea1293c run) · local `scripts/test-backend.sh`, same 919 s run as preview.test.ts:760's second sighting · timed out at the 5 s default; the file alone passed at once. Wall-clock-under-load shape. First sighting.
-- 2026-10-30 · da507a67 (`fix/v033-fifth-batch`; its only settings change removes the unused `st-tabs` class) · local `scripts/test-backend.sh` from a worktree, 610 s run · timed out at the 5 s default; the file alone passed 3 of 3 (about 3 s each). Same wall-clock-under-load shape. Second sighting.
-- 2026-10-30 · ee51542d (#1396's build on `fix/1396-approve-retry`; nothing near settings or text size) · local `scripts/test-backend.sh` unit tests in shard 1, worktree `1396-approve-retry`, other agents' Docker stacks running on the shared host · timed out at 5 s; passed alone in 1.7 s and on the shard's rerun. Wall-clock-under-load shape, as #869's sightings above. Third sighting (recorded under a second heading for the same test, folded in here).
-- 2026-11-01 · 6ec96e88 (`deps/1565-sveltekit-3` with dev merged in; nothing near settings) · local `pnpm test`, 549 s run · timed out at the 5 s default; the file alone passed 3 of 3. Fourth sighting; #1617 filed.
-
 ## build_image: Corepack could not download the pnpm binary from registry.npmjs.org
 
 - 2026-10-22 · 39134f33 (!1081) · pipeline 2875 / `build_image` job 38351 · `Could not download the pnpm 12.4.1 binary: Could not reach https://registry.npmjs.org/@pnpm/exe.linux-x64-musl/12.4.1: timed out after 30s` in the `web-deploy.sh` step, a minute after the `deps` stage of the same build, on the same base image, had fetched pnpm 12.4.1 fine. Retried. First sighting.
@@ -359,3 +352,19 @@ timeout on this one case rather than a global raise.
 ## home-suggestion-drawer.spec.js:156 "the staged paper opens the preview beside the drawer" (fidelity)
 
 - 2026-10-31 · a2f11fd5 (`chore/1352-home-inbox-twins`) · local fidelity run from a worktree, other sessions' builds on the host · the preview card wore "open still" without `snap`, then the preview server on 4173 was gone and the next three tests got `ERR_CONNECTION_REFUSED`; the spec alone passed 7 of 7, then 21 of 21 at `--repeat-each=3`. Why the server stopped is not known. First sighting.
+
+## v19-arrival.spec.ts:160 "the newcomer's arrival: the climb, the labelled sky, the real count, the question" — desktop-webkit
+
+- 2026-11-01 · 6299c4fa (`deps/1565-sveltekit-3`, #1565; the SvelteKit 3 upgrade, not touching the arrival journey) · browser e2e run on this branch · failed, then passed on a rerun of unchanged code. First sighting.
+
+## archive-slot.spec.ts:171 "while one archive upload is in progress a second is refused at once, and goes through after it ends" — mobile-webkit
+
+- 2026-11-01 · 6299c4fa (`deps/1565-sveltekit-3`, #1565; the SvelteKit 3 upgrade) · browser e2e run on this branch · failed, then passed on a rerun of unchanged code. First sighting.
+
+## test-e2e-local.test.mjs:626 "an explicit COMPOSE_PROJECT_NAME that names existing resources is refused > looks for both containers and volumes by the project label before compose up"
+
+- 2026-11-01 · 51aa93dd (`fix/local-test-tools`, nothing uncommitted; the change touches `scripts/test-e2e-local.sh`'s report folders and dependency step, not its port choice) · local `pnpm test`, the full suite on this shared host · the script exited 1 with `port <n> (GreenMail SMTP (TEST_SMTP_PORT)) is already in use -- likely a real Orbit deployment on this host`, so `expect(result.status).toBe(0)` failed. The file alone passed on an immediate rerun (79 of 79 apart from the #1526 hooks test, which fails for its own reason). A port the fixture's run picked was taken by something else running at the same moment. First sighting.
+
+## validation-index-equivalence.test.ts "3 MiB of q, then endobj with no gap (a word byte before it)"
+
+- 2026-11-01 · 2ce41874 (`fix/local-test-tools`, local test scripts only; nothing near document validation) · pipeline 3319 / `fast` retry job 43177 · timed out at the 5 s default while the shared host was busy; the same job's first run (43145) passed it. Wall-clock-under-load shape. First sighting.

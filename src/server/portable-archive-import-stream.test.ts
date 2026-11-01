@@ -6,7 +6,7 @@ import { join, relative } from "node:path";
 import { AppError } from "@/lib/app-error";
 import { decryptPortableArchive, encryptPortableArchive, PortableArchiveSealer } from "@/server/portable-archive";
 import { MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
-import { PayloadScratch } from "@/server/portable-archive-payload";
+import { MAX_PAYLOAD_OTHER_BYTES, MAX_PAYLOAD_VALUES, PayloadScratch } from "@/server/portable-archive-payload";
 import { KDF_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
 import { archiveForm, archiveStream, chunkedStream, encodeForm } from "../../tests/integration/support/portable-archive-upload";
 
@@ -720,3 +720,171 @@ describe("everything outside the ciphertext is capped, so a stuffed envelope is 
     expect(stuffed.stats.pulledBytes, "bytes of the file pulled before the refusal").toBeLessThan(stuffed.offset + 1 * MIB);
   }, 120_000);
 });
+
+// ---------------------------------------------------------------------------
+// #1607 X-R1 (and b1 O-R7): the payload reader holds every non-document JSON
+// value of a verified payload in memory, so tiny values, or many long
+// strings, exhaust memory long before the 256 MiB archive cap. Two budgets
+// stop it as the reader reads: MAX_PAYLOAD_VALUES (2,000,000 values) and
+// MAX_PAYLOAD_OTHER_BYTES (64 MiB of JSON outside located document text).
+
+/**
+ * The archive file for a payload given as lazily produced parts, sealed as the
+ * export's `feed` does: each part is pushed to a `PortableArchiveSealer` as the
+ * stream is pulled, so no test holds a large plaintext or a large file.
+ */
+function sealedStream(parts: Iterable<Buffer | string>): ReadableStream<Uint8Array> {
+  const iterator = parts[Symbol.iterator]();
+  const written: Buffer[] = [];
+  const sealer = new PortableArchiveSealer(passphrase, async (chunk) => { written.push(Buffer.from(chunk)); });
+  let finished = false;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      while (written.length === 0 && !finished) {
+        const next = iterator.next();
+        if (next.done) {
+          await sealer.finish();
+          finished = true;
+        } else {
+          await sealer.push(typeof next.value === "string" ? Buffer.from(next.value) : next.value);
+        }
+      }
+      const chunk = written.shift();
+      if (chunk) controller.enqueue(new Uint8Array(chunk));
+      else controller.close();
+    },
+  }, { highWaterMark: 0 });
+}
+
+/** The payload's real header: everything the schema needs, nothing in it, and the object left open for more keys. */
+const BUDGET_HEAD = `{"format":"orbit-portable-archive","version":1,"household":{"name":"Budget home"},"sections":[],"items":[],"documents":[]`;
+
+/** `count` zeros as the elements of an array that is already open, in pieces; the caller's next part closes the array. */
+function* zeros(count: number): Generator<string> {
+  const PIECE = 100_000;
+  yield "0";
+  for (let written = 1; written < count; written += PIECE) yield ",0".repeat(Math.min(PIECE, count - written));
+}
+
+describe("a verified payload packed with tiny values is refused as it is read, not after (#1607 X-R1)", () => {
+  it("refuses 2,000,001 values in a key the schema would have dropped, as archive_invalid, leaving no file", async () => {
+    // Catches: no value count in the reader. Today the extra key is read in full, zod strips it, and the preview succeeds.
+    seedEmptyHousehold();
+    const watcher = observe();
+
+    const error = await run(() => previewPortableImport(userId, householdId, sealedStream((function* () {
+      yield `${BUDGET_HEAD},"padding":[`;
+      yield* zeros(2_000_001);
+      yield "]}";
+    })()), passphrase));
+    const result = watcher.stop();
+
+    expect(error, "the preview must be refused").toBeInstanceOf(AppError);
+    expect(error).toMatchObject({ code: "archive_invalid", status: 422 });
+    expect(result.remaining, "no scratch file left").toEqual([]);
+  });
+});
+
+describe("a verified payload packed with long strings is refused as it is read (#1607 X-R1, b1 O-R7)", () => {
+  it("refuses 65 MiB of non-document JSON (65 strings of 1 MiB) as archive_invalid, leaving no file", async () => {
+    // Catches: PAYLOAD_POLICY.maxOtherBytes = Infinity. Today all 65 strings are held and the preview succeeds.
+    seedEmptyHousehold();
+    const watcher = observe();
+    const megabyte = "A".repeat(MIB);
+
+    const error = await run(() => previewPortableImport(userId, householdId, sealedStream((function* () {
+      yield `${BUDGET_HEAD},"padding":[`;
+      for (let index = 0; index < 65; index++) yield `${index === 0 ? "" : ","}"${megabyte}"`;
+      yield "]}";
+    })()), passphrase));
+    const result = watcher.stop();
+
+    expect(error, "the preview must be refused").toBeInstanceOf(AppError);
+    expect(error).toMatchObject({ code: "archive_invalid", status: 422 });
+    expect(result.remaining, "no scratch file left").toEqual([]);
+  });
+});
+
+describe("the budgets do not touch what Orbit legitimately writes (#1607 X-R1)", () => {
+  it("a located document past the byte budget (54 MiB, 72 MiB of base64) still previews: documents do not count", async () => {
+    // Catches: an exclusion done wrong, where located document text counts against MAX_PAYLOAD_OTHER_BYTES.
+    seedEmptyHousehold();
+    const documentId = randomUUID();
+    const { documentBytes: _omitted, ...head } = smallPayload(Buffer.alloc(0));
+    const watcher = observe();
+
+    const preview = await previewPortableImport(userId, householdId, sealedStream((function* () {
+      yield `${JSON.stringify({ ...head, documents: [{ ...head.documents[0], id: documentId }] }).slice(0, -1)},"documentBytes":[{"id":"${documentId}","contentBase64":"`;
+      const piece = Buffer.alloc(3 * 65_536, 0x61);
+      const encoded = piece.toString("base64");
+      for (let bytes = 0; bytes < 54 * MIB; bytes += piece.length) yield encoded;
+      yield `"}]}`;
+    })()), passphrase);
+    const result = watcher.stop();
+
+    expect(preview).toMatchObject(smallPreview);
+    expect(result.remaining, "no scratch file left").toEqual([]);
+  });
+
+  it("the reference archive (12 sections, 500 items at maximum field lengths, 10 documents, 120 due events and 3 reminder rules each) is under half of each budget and previews", async () => {
+    // Catches: a schema that grows, or budgets set so tight that a household at its limits cannot be restored.
+    const reference = referenceArchive();
+    const text = JSON.stringify(reference);
+    const values = countJsonValues(reference);
+    expect(MAX_PAYLOAD_VALUES, "MAX_PAYLOAD_VALUES is exported from portable-archive-payload.ts").toBeTypeOf("number");
+    expect(MAX_PAYLOAD_OTHER_BYTES, "MAX_PAYLOAD_OTHER_BYTES is exported from portable-archive-payload.ts").toBeTypeOf("number");
+    expect(MAX_PAYLOAD_VALUES).toBe(2_000_000);
+    expect(MAX_PAYLOAD_OTHER_BYTES).toBe(64 * MIB);
+    expect(values, `reference archive holds ${values} JSON values`).toBeLessThan(MAX_PAYLOAD_VALUES / 2);
+    expect(Buffer.byteLength(text), `reference archive is ${Buffer.byteLength(text)} bytes of JSON`).toBeLessThan(MAX_PAYLOAD_OTHER_BYTES / 2);
+
+    seedEmptyHousehold();
+    const pieces: string[] = [];
+    for (let offset = 0; offset < text.length; offset += MIB) pieces.push(text.slice(offset, offset + MIB));
+
+    const preview = await previewPortableImport(userId, householdId, sealedStream(pieces), passphrase);
+
+    expect(preview).toMatchObject({ householdName: "Reference home", sections: 12, items: 500, documents: 5_000, conflicts: [] });
+  });
+});
+
+/** Every object, array and scalar in `value`: what the reader's one-per-`value()` counter counts. */
+function countJsonValues(value: unknown): number {
+  if (Array.isArray(value)) return 1 + value.reduce((sum: number, element) => sum + countJsonValues(element), 0);
+  if (value !== null && typeof value === "object") return 1 + Object.values(value).reduce((sum: number, member) => sum + countJsonValues(member), 0);
+  return 1;
+}
+
+/**
+ * The largest legitimate archive the product's own caps allow: 12 sections,
+ * 500 items with every optional field at its maximum length, 10 documents per
+ * item, 120 due events per item (ten years of monthly history) and 3 reminder
+ * rules per item, each in the shape the export writes.
+ */
+function referenceArchive() {
+  const uuid = () => randomUUID();
+  const sections = Array.from({ length: 12 }, (_, index) => ({
+    id: index === 0 ? sectionId : uuid(), slug: `s${index}`.padEnd(100, "s"), name: "N".repeat(30), icon: "service", accent: "blue",
+    position: index, visible: true, archivedAt: "2030-12-31T23:59:59.999Z",
+  }));
+  const items = Array.from({ length: 500 }, (_, index) => ({
+    id: uuid(), sectionId: sections[index % 12].id, title: `T${index}`.padEnd(100, "t"), subtype: "u".repeat(80), provider: "p".repeat(100),
+    reference: `${index}`.padEnd(80, "r"), costMinor: 100_000_000, currency: "GBP",
+    startDate: "2030-01-01", expiryDate: "2030-12-31", renewalDate: "2030-11-30", serviceDate: "2030-06-15", recurrenceMonths: 120, snoozedUntil: "2030-02-01",
+    notes: "n".repeat(2_000), externalDocumentUrl: `https://example.invalid/${"d".repeat(2_000)}`, status: "active", version: 1,
+  }));
+  const documents = items.flatMap((item) => Array.from({ length: 10 }, (_, index) => ({
+    id: uuid(), itemId: item.id, displayName: `${index}-${"f".repeat(240)}.pdf`, mediaType: "application/pdf", sizeBytes: 10 * MIB,
+    contentSha256: "a".repeat(64), lifecycle: "available", scanStatus: "clean", failureCode: null, deleteAfter: null, deletedAt: null,
+    availableAt: "2030-12-31T23:59:59.999Z", version: 1,
+  })));
+  const dueEvents = items.flatMap((item) => Array.from({ length: 120 }, (_, index) => ({
+    id: uuid(), itemId: item.id, kind: "renewal", dueDate: "2030-12-31", completedAt: "2030-12-31T23:59:59.999Z", completionKey: uuid(), nextEventId: index < 119 ? uuid() : null,
+  })));
+  const reminderRules = items.flatMap((item) => [7, 30, 90].map((daysBefore) => ({ id: uuid(), itemId: item.id, daysBefore, emailEnabled: true, pushEnabled: true })));
+  return {
+    format: "orbit-portable-archive", version: 1, exportedAt: "2030-12-31T23:59:59.999Z",
+    household: { id: householdId, name: "Reference home", timezone: "Europe/London", defaultCurrency: "GBP" },
+    sections, items, dueEvents, reminderRules, documents,
+  };
+}

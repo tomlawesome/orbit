@@ -21,6 +21,12 @@
 #                    arguments, in the gate and the quarantine run alike
 #                    (e.g. `-- --repeat-each=10` to show a rewrite is stable).
 #
+#   After a passing gate the quarantined tests run, capped at the time CI caps
+#   them (read from .gitlab-ci.yml); a run past the cap is stopped, says so, and
+#   does not fail this run. Each run writes its Playwright HTML reports to its
+#   own playwright-report/e2e-local-<time>-<pid>/ folder, the gate's in gate/
+#   and the quarantine run's in quarantine/ (#1607).
+#
 #   --ci-cap        Apply compose/docker-compose.ci-cap.yml — the cpu/memory
 #                    cap CI's acceptance stack always runs under — so local
 #                    timing and worker-count measurements transfer to CI
@@ -172,8 +178,8 @@
 #   3. Worktree, no shared node_modules to check, or dependencies differ:
 #      refuse, naming the trap, rather than install here or trust an
 #      unverified workaround.
-#   4. Worktree with its own real node_modules directory: installs as case
-#      1 does -- the preinstall guard admits it, and nothing it writes can
+#   4. Worktree with its own real node_modules directory and no symlinked
+#      web/node_modules (#1607): installs as case 1 does -- the preinstall guard admits it, and nothing it writes can
 #      reach the main checkout.
 #
 # #858: the two remaining pnpm calls -- install-test-browser.sh's browser
@@ -475,7 +481,12 @@ cleanup() {
   # `--profile '*'` is every profile, so the processing parser (orbit-tika) is
   # part of the project whatever COMPOSE_PROFILES says.
   local down_ok=1
-  compose --profile '*' down --volumes --remove-orphans --rmi local > /dev/null 2>&1 || down_ok=0
+  # Its output is shown only when it fails, so a failed teardown says why (#1423).
+  local down_output
+  down_output="$(compose --profile '*' down --volumes --remove-orphans --rmi local 2>&1)" || {
+    down_ok=0
+    printf '%s\n' "$down_output" >&2
+  }
   if [[ "$orbit_image_built" == 1 ]]; then
     docker image rm "$orbit_image" > /dev/null 2>&1 || true
   fi
@@ -778,13 +789,23 @@ fi
 # --- Dependencies -------------------------------------------------------------
 
 # A worktree that owns its node_modules outright -- a real directory, not a
-# symlink -- is the case the preinstall guard (#784, #858) already proves
-# safe: an install there writes only inside the worktree, through pnpm's
-# shared store. It gets the main checkout's treatment; only a worktree that
-# reaches into the main checkout's install is held to the checks below.
+# symlink, and no symlinked web/node_modules either -- is the case the
+# preinstall guard (#784, #858) already proves safe: an install there writes
+# only inside the worktree, through pnpm's shared store. It gets the main
+# checkout's treatment; only a worktree that reaches into the main checkout's
+# install is held to the checks below.
+#
+# A symlink at EITHER level counts as reaching in (#1607): with a real root
+# node_modules and a web/node_modules symlinked into the main checkout, an
+# install writes through that link and rewires the main checkout, the #876
+# hazard. scripts/test-backend.sh already took that side (any symlinked
+# node_modules, root or web, goes around pnpm, #1557); the two scripts now make
+# the same decision for every layout. The main checkout is not asked.
 shared_node_modules=0
-if [[ "$in_worktree" == 0 || ( -d "$repo_dir/node_modules" && ! -L "$repo_dir/node_modules" ) ]]; then
+if [[ "$in_worktree" == 0 || ( -d "$repo_dir/node_modules" && ! -L "$repo_dir/node_modules" && ! -L "$repo_dir/web/node_modules" ) ]]; then
   pnpm install --frozen-lockfile
+elif [[ -d "$repo_dir/node_modules" && ! -L "$repo_dir/node_modules" ]]; then
+  fail "refusing: this worktree has no usable dependencies to run against -- its node_modules is a real directory but web/node_modules is a symlink, so an install here would write through it into the main checkout's web/node_modules (docs/testing.md, Local traps, worktree install, #784/#876/#1607). Make both real directories (a worktree install) or both the main checkout's shared install, or run this script from the main Orbit checkout."
 else
   # #876: do not install from here (see the header comment for why). Check
   # instead whether the main checkout's shared node_modules already has what
@@ -930,6 +951,40 @@ playwright_cmd=(node node_modules/@playwright/test/cli.js test --config tests/e2
 # the "unclaimed" project, which the gate's own claim has already made untrue.
 quarantine_args=(--pass-with-no-tests --output test-results/quarantine)
 
+# CI caps the quarantine run: `timeout -k 30s 8m bash scripts/test-frontend.sh
+# --quarantine` in .gitlab-ci.yml. A local run had no cap, so one hung
+# quarantined test held the whole run, and its stack, indefinitely (#1607). Read
+# CI's own figures from that line (read only here) so the local cap cannot drift
+# from CI's, and cap the run through coreutils `timeout`. The read happens when
+# the quarantine run is about to start. If the line, or `timeout`, is not there
+# the quarantine run is skipped with a message, never run uncapped on a guess:
+# it only reports, so the gate's result is unaffected.
+quarantine_cap_re='timeout[[:space:]]+(-k[[:space:]]+([^[:space:]]+)[[:space:]]+)?([0-9]+[smh]?)[[:space:]]+bash[[:space:]]+scripts/test-frontend\.sh[[:space:]]+--quarantine'
+quarantine_cap=""
+quarantine_timeout=()
+read_quarantine_cap() { # sets quarantine_cap and quarantine_timeout; non-zero when it cannot
+  local cap_line="" kill_after=""
+  # grep -m1 and an explicit fallback, not `| head` and not a bare failing grep
+  # (scripts/acceptance-sigpipe-safety.test.mjs, #809).
+  cap_line="$(grep -m1 -E 'timeout .*scripts/test-frontend\.sh --quarantine' .gitlab-ci.yml 2> /dev/null)" || cap_line=""
+  [[ "$cap_line" =~ $quarantine_cap_re ]] || return 1
+  quarantine_cap="${BASH_REMATCH[3]}"
+  kill_after="${BASH_REMATCH[2]}"
+  command -v timeout > /dev/null 2>&1 || return 1
+  quarantine_timeout=(timeout ${kill_after:+-k "$kill_after"} "$quarantine_cap")
+}
+
+# Each run gets its own HTML report folder (#1607), and so does each of its two
+# Playwright runs that write an HTML report (CI set, or --reporter=html; a
+# plain local run uses the list reporter and writes none): the HTML reporter
+# clears its folder when it starts, so a
+# shared default folder lets the quarantine run delete the gate's report, and
+# lets a second run in this checkout delete the first's. The folder sits under
+# the ignored playwright-report/ and is absolute, so the run inside the
+# Playwright image (this checkout mounted at its own path) writes to the same
+# place. Playwright's PLAYWRIGHT_HTML_OUTPUT_DIR wins over the config's folder.
+report_root="${repo_dir}/playwright-report/e2e-local-$(date +%Y%m%dT%H%M%S)-$$"
+
 # #1235: WebKit cannot launch on this host -- its system packages need root
 # -- so a run that includes a WebKit project happens inside the Playwright
 # image CI runs it in, on the host network with this checkout bind-mounted
@@ -958,6 +1013,9 @@ quarantine_args=(--pass-with-no-tests --output test-results/quarantine)
 #   - Only `node` runs on the mounted tree: never `pnpm install` in here, which
 #     rewrites the host's node_modules (environment skill, 2026-08-24).
 # in_image was decided above, before the browser download.
+# suite_prefix is a command (the quarantine run's timeout) the next run_suite
+# wraps around the whole run, the docker run included.
+suite_prefix=()
 run_suite() { # run_suite STATUS_VAR EXTRA_ENV... -- EXTRA_PLAYWRIGHT_ARGS...
   local status_var="$1" extra_env=() extra_args=() kv
   shift
@@ -974,7 +1032,7 @@ run_suite() { # run_suite STATUS_VAR EXTRA_ENV... -- EXTRA_PLAYWRIGHT_ARGS...
       [[ ! -d "${main_checkout_dir}/web/node_modules" ]] \
         || shared_mounts+=(-v "${main_checkout_dir}/web/node_modules:${main_checkout_dir}/web/node_modules:ro")
     fi
-    docker run --rm --label "orbit-e2e-run=${project_name}" --network host --ipc=host --add-host orbit-oidc:127.0.0.1 \
+    "${suite_prefix[@]}" docker run --rm --label "orbit-e2e-run=${project_name}" --network host --ipc=host --add-host orbit-oidc:127.0.0.1 \
       -v "${repo_dir}:${repo_dir}" "${shared_mounts[@]}" -w "$repo_dir" \
       -v "${docker_cli}:/usr/local/bin/docker:ro" \
       -v "$(dirname -- "$compose_plugin"):/usr/local/lib/docker/cli-plugins:ro" \
@@ -982,7 +1040,7 @@ run_suite() { # run_suite STATUS_VAR EXTRA_ENV... -- EXTRA_PLAYWRIGHT_ARGS...
       "${run_env[@]}" "$playwright_image" \
       sh -c "${oidc_forward} exec \"\$@\"" sh "${playwright_cmd[@]}" "${extra_args[@]}" || printf -v "$status_var" '%s' "$?"
   else
-    env "${suite_env[@]}" "${extra_env[@]}" "${playwright_cmd[@]}" "${extra_args[@]}" || printf -v "$status_var" '%s' "$?"
+    "${suite_prefix[@]}" env "${suite_env[@]}" "${extra_env[@]}" "${playwright_cmd[@]}" "${extra_args[@]}" || printf -v "$status_var" '%s' "$?"
   fi
 }
 
@@ -1008,18 +1066,57 @@ if [[ "$in_image" == 1 ]]; then
   oidc_forward=""
   if [[ "$profile" == "oidc" ]]; then
     image_env+=(-e TEST_OIDC_PORT=4443)
+    # The forward below claims 127.0.0.1:4443; say so now if something holds it (#1445).
+    # Asked through `ss`, a command on PATH, so the unit tests can stand in for
+    # it: a bash /dev/tcp probe always reached the real host, and any other run
+    # holding 4443 there failed every test of this path (#1622). `ss` also sees a
+    # listener on every address, not only 127.0.0.1. Without `ss`, the /dev/tcp
+    # probe is the fallback.
+    port_held=0
+    if command -v ss > /dev/null 2>&1; then
+      [[ -z "$(ss -H -ltn 'sport = :4443' 2> /dev/null)" ]] || port_held=1
+    elif (exec 3<>/dev/tcp/127.0.0.1/4443) 2> /dev/null; then
+      port_held=1
+    fi
+    if [[ "$port_held" == 1 ]]; then
+      holder=""
+      if command -v ss > /dev/null 2>&1; then
+        holder="$(ss -H -ltnp 'sport = :4443' 2> /dev/null | sed -n '1s/.*users:(\(.*\))$/\1/p')"
+      fi
+      fail "port 4443 on 127.0.0.1 is already in use${holder:+ (held by ${holder})}; the WebKit run forwards it to the sign-in provider. Free it and rerun."
+    fi
     oidc_forward="node -e 'const n=require(\"net\");n.createServer(s=>{const c=n.connect(${TEST_OIDC_PORT},\"127.0.0.1\");s.pipe(c).pipe(s);s.on(\"error\",()=>c.destroy());c.on(\"error\",()=>s.destroy())}).listen(4443,\"127.0.0.1\")' & sleep 1;"
   fi
   log "running Playwright inside ${playwright_image} (WebKit needs it; #1235)"
 fi
-run_suite suite_status ORBIT_E2E_QUARANTINE=exclude -- "${playwright_passthrough[@]}"
+run_suite suite_status ORBIT_E2E_QUARANTINE=exclude PLAYWRIGHT_HTML_OUTPUT_DIR="${report_root}/gate" -- "${playwright_passthrough[@]}"
 
 if [[ "$suite_status" == 0 ]]; then
   log "running the quarantined tests (@quarantine, agent-infra#30): reported, never failing this run"
   quarantine_status=0
-  run_suite quarantine_status ORBIT_E2E_QUARANTINE=only -- "${quarantine_args[@]}" "${playwright_passthrough[@]}"
-  [[ "$quarantine_status" == 0 ]] ||
-    log "a quarantined test failed (non-blocking; see the issue named in the test; traces in test-results/quarantine)"
+  if read_quarantine_cap; then
+    suite_prefix=("${quarantine_timeout[@]}")
+    run_suite quarantine_status ORBIT_E2E_QUARANTINE=only PLAYWRIGHT_HTML_OUTPUT_DIR="${report_root}/quarantine" -- "${quarantine_args[@]}" "${playwright_passthrough[@]}"
+    suite_prefix=()
+    # 124 is timeout's own "ran out of time"; 137 is the run killed after the
+    # -k grace period. Either way it is reported, never failing this run, as in CI.
+    case "$quarantine_status" in
+      0) ;;
+      124 | 137)
+        log "the quarantined tests ran past ${quarantine_cap}, CI's cap on them, and were stopped (non-blocking; this run is not failed)"
+        ;;
+      *)
+        log "a quarantined test failed (non-blocking; see the issue named in the test; traces in test-results/quarantine)"
+        ;;
+    esac
+    # Only an HTML reporter writes these: the stack config uses it when CI is
+    # set or when --reporter=html is passed; a plain local run lists instead.
+    if [ -d "${report_root}/gate" ] || [ -d "${report_root}/quarantine" ]; then
+      log "Playwright reports: ${report_root}/gate and ${report_root}/quarantine"
+    fi
+  else
+    log "skipping the quarantined tests: could not read CI's cap on them from .gitlab-ci.yml (a \`timeout [-k D] DURATION bash scripts/test-frontend.sh --quarantine\` line) or coreutils \`timeout\` is missing, and they are never run uncapped"
+  fi
 else
   log "the gate failed, so the quarantined tests were not run (CI skips them the same way)"
 fi

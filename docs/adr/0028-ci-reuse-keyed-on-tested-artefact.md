@@ -117,7 +117,7 @@ vulnerability database, which no input list can see (#1370).
 Evidence stays a job artefact, `ci-evidence/<job>.json`, written as the
 job's last script line, now recording the composite key, the content ID, and
 the pipeline and job ids. It lives with the job that did the work and
-expires with it (14 days).
+expires with it (14 days; 7 days since #1608).
 
 The lookup moves to where the fact is known. `classify` decides the
 source-keyed jobs as today. `build_image`, once it has the content ID, runs
@@ -144,7 +144,8 @@ commit is the wrong identity).
 
 - **Age.** Evidence from a job that finished more than seven days ago is not
   reused (`finished_at` from the API), matching ADR-0020's publication rule.
-  Artefact expiry at 14 days is the backstop.
+  Artefact expiry at 14 days is the backstop. (Since #1608 the jobs that
+  write evidence keep it 7 days, so expiry and the age rule coincide.)
 - **The delivery branch is the guard.** Delivery pipelines never reuse, so
   a flaky pass can at most carry one merge request to `dev`, where the full
   run catches it and the fix reruns for real. The age limit bounds how long

@@ -162,6 +162,13 @@ describe("the shim derives the two private headers from ORIGIN (#1565)", () => {
     ["IPv6 in brackets", "http://[::1]:3000", "http", "[::1]:3000"],
     ["the lowest port", "http://orbit.example:1", "http", "orbit.example:1"],
     ["the highest port", "http://orbit.example:65535", "http", "orbit.example:65535"],
+    /* The authority is the WHATWG URL parser's own normal form, which is what a
+       browser sends as Origin and what kit builds its own origin from. */
+    ["a port with a leading zero", "http://127.0.0.1:08443", "http", "127.0.0.1:8443"],
+    ["an upper-case scheme and host", "HTTP://Orbit.Example:8080", "http", "orbit.example:8080"],
+    ["the default https port", "https://orbit.example:443", "https", "orbit.example"],
+    ["the default http port", "http://orbit.example:80", "http", "orbit.example"],
+    ["a trailing slash", "https://orbit.example/", "https", "orbit.example"],
   ])("%s: %s", async (_name, origin, scheme, authority) => {
     const run = start({ origin });
     const { port, seen } = await run.ready;
@@ -208,14 +215,13 @@ describe("a missing or unusable ORIGIN injects nothing and warns once (#1565)", 
     ["a port above 65535", "http://orbit.example:65536"],
     ["a five-digit port far above 65535", "http://orbit.example:99999"],
     ["port 0", "http://orbit.example:0"],
-    /* A port is its canonical decimal form or it is malformed. A browser's
-       Origin header never carries a leading zero (the URL parser reads
-       "08080" as 8080 and sends ":8080"), so an authority injected as
-       "orbit.example:08080" could never equal it: every cross-origin-safe POST
-       would be refused by kit with a 403, and nothing would say why. Refusing
-       the value at start, with the warning, is the louder failure. */
-    ["a port with a leading zero", "http://orbit.example:08080"],
-    ["a port of only zeros", "http://orbit.example:00000"],
+    ["a port of only zeros (port 0)", "http://orbit.example:00000"],
+    ["credentials", "http://u:p@orbit.example"],
+    ["a username alone", "http://u@orbit.example"],
+    ["a path", "https://orbit.example/path"],
+    ["a query", "https://orbit.example/?q"],
+    ["a fragment", "https://orbit.example/#f"],
+    ["not a url", "not a url"],
   ])("%s", async (_name, origin) => {
     const run = start({ origin });
     const { port, seen } = await run.ready;
