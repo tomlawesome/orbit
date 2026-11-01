@@ -1,4 +1,6 @@
-import { defineConfig } from "@playwright/test";
+import os from "node:os";
+
+import { defineConfig, devices } from "@playwright/test";
 
 /**
  * The visual gate. Deliberately separate from the repo-root Playwright config,
@@ -6,6 +8,12 @@ import { defineConfig } from "@playwright/test";
  */
 const APP_PORT = process.env.FIDELITY_PORT ?? "4173";
 const MOCKUP_PORT = process.env.FIDELITY_MOCKUP_PORT ?? "5174";
+/* The rig's workers (ADR-0039 section 1): half the CPUs, never fewer than two.
+   ORBIT_RIG_WORKERS overrides it on a host that is busy or has room. */
+const RIG_WORKERS = Number(process.env.ORBIT_RIG_WORKERS) || Math.max(2, Math.floor(os.cpus().length / 2));
+/* Every rig project shares these: its own folder, tests that never touch one
+   another's state, so they run in parallel. */
+const rig = { testDir: "./tests/rig", fullyParallel: true, workers: RIG_WORKERS };
 
 export default defineConfig({
   testDir: "./tests/fidelity",
@@ -88,6 +96,23 @@ export default defineConfig({
       testMatch: ["**/tour-pocket-webkit.spec.js", "**/pocket-belong-drawer.spec.js"],
       use: { browserName: "webkit", isMobile: true, hasTouch: true, deviceScaleFactor: 2,
         viewport: { width: 390, height: 844 } } },
+    /* The rig (#1614, ADR-0039): the cheapest runner that proves a front-end
+       behaviour in a real browser -- the fixture app these servers stand up,
+       no database, no identity provider, no mail -- in the five browsers and
+       sizes the front end is judged on. Its specs live in web/tests/rig/.
+       Unlike the projects above it compares no pixels and times nothing, so
+       it runs tests in parallel (ORBIT_RIG_WORKERS) rather than one at a time.
+       Chromium desktop and the phone are the default (`pnpm --filter orbit-web
+       rig`); Firefox and WebKit are their own commands, because WebKit's
+       system libraries are not on every host (see pocket-webkit). The phones
+       are the devices tests/e2e/playwright.config.ts uses (Pixel 7 and
+       iPhone 15), so a rig phone and a stack-suite phone are the same
+       phone. The desktops take the 1600x1000 viewport above. */
+    { name: "rig-desktop", ...rig, use: { browserName: "chromium" } },
+    { name: "rig-phone", ...rig, use: { ...devices["Pixel 7"], browserName: "chromium" } },
+    { name: "rig-firefox", ...rig, use: { browserName: "firefox" } },
+    { name: "rig-webkit-desktop", ...rig, use: { browserName: "webkit" } },
+    { name: "rig-webkit-phone", ...rig, use: { ...devices["iPhone 15"], browserName: "webkit" } },
   ],
   use: {
     /*

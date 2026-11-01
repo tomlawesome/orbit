@@ -110,7 +110,7 @@ rig or handing a check to the owner. It lists each script; the rules that matter
   desktop project: today `pnpm --filter orbit-web exec playwright test
   --project=fidelity --grep-invert @quarantine` (the `fidelity` package script
   also runs the 11-minute tap-floor measurement, which is nightly work);
-  the `rig-chromium` project once #1614 lands. Add the phone project for
+  the `rig-desktop` project (`pnpm --filter orbit-web rig` runs it with the phone project). Add the phone project for
   phone work and the WebKit project for WebKit work. The stack suite
   (`scripts/test-e2e-local.sh`) runs locally only when the change touches
   sign-in, documents and uploads, mail, archive or the server, and then the

@@ -6,6 +6,22 @@ boundary is checked against real services.
 
 ## Commands
 
+Three runners, and a check lives in the cheapest one that proves it
+([ADR-0039](adr/0039-three-test-runners-cheapest-that-proves-it.md)):
+
+- **Vitest** (`pnpm test`, below) proves logic and server behaviour with no
+  browser and no Docker.
+- **The rig** proves front-end behaviour in a real browser against the fixture
+  app, with no database, identity provider or mail: `pnpm --filter orbit-web rig`
+  (Chromium desktop and phone), `rig:firefox`, `rig:webkit` (desktop and phone)
+  and `rig:all` (all five). Its specs are in `web/tests/rig/`; the visual gate
+  (`fidelity`) and its WebKit twin (`fidelity:webkit`) share its config.
+- **The stack** proves the real thing end to end, with the database, sign-in
+  and mail: `scripts/test-frontend.sh` against a running instance, or
+  `scripts/test-e2e-local.sh` with a disposable stack. It runs Chromium; WebKit
+  only the sign-in sliver in `tests/e2e/webkit-sliver-specs.txt`; Firefox not
+  at all (`ORBIT_E2E_ENGINES=firefox` says so and exits 0).
+
 - `pnpm test` runs the fast unit and domain suite. It does not need Docker.
 - `pnpm test:integration` starts one throwaway PostgreSQL 18 Alpine container
   on a random loopback port, applies every migration, runs the PostgreSQL and
@@ -326,6 +342,7 @@ Each script's own header holds its full usage.
 | `scripts/test-all.sh` | `test-backend.sh`, then `test-frontend.sh` (Playwright against a running instance; `ORBIT_SKIP_E2E=true` skips it). |
 | `scripts/test-backend.sh` | Static analysis and the fast Vitest suite. |
 | `scripts/test-frontend.sh` | Playwright against a running instance. It leaves out tests tagged `@quarantine` (flaky at three sightings, agent-infra#30), which `--quarantine` runs on their own: CI's browser jobs, `fidelity` and `fidelity_webkit` run their quarantined tests after the gate; a failure there marks the job "passed with warnings" (exit 3, the only failure it allows; #1447), and a run so marked is not reused. In a file that runs in serial order, the tests after a quarantined one usually use its state, so they are tagged too and move with it. |
+| `pnpm --filter orbit-web rig` | The rig (#1614, ADR-0039): browser specs in `web/tests/rig/` against the fixture app, in parallel (`ORBIT_RIG_WORKERS`, default half the CPUs, at least two). `rig` is Chromium desktop and phone; `rig:firefox` and `rig:webkit` (desktop and phone) are their own commands, as WebKit needs the CI Playwright image on this host; `rig:all` runs all five. |
 | `pnpm --filter orbit-web fidelity` | The v19 visual gate: stands up the adapter-node build and the mockup host, compares every screen in `SCREENS` against the committed baselines. In CI it runs pinned to the Playwright image the baselines were proven against; run it locally the same way if a diff disagrees. |
 | `scripts/test-integration.mjs` | Integration suite against a real database. |
 | `scripts/test-e2e-local.sh` | Local stack with disposable OIDC and GreenMail sidecars, then Playwright. `--profile local-only` swaps them for an Orbit with no identity provider and runs the short list in `tests/e2e/local-only-specs.txt`, which is what CI's `smoke_local_only` runs too (#916). `--reuse PROJECT` skips the build and `compose up` and runs Playwright against a stack a prior `--keep` run left up, identified by Compose's project/service labels and health-checked first; it never tears that stack down (#947). `--ci-cap` adds the cpu/memory overlay CI's acceptance stack runs under, so a local timing measurement transfers; off by default because an uncapped stack is the faster loop (#1080). **WebKit runs on this host only inside the CI Playwright image** (`mcr.microsoft.com/playwright:v1.63.0-noble`, already pulled): the host lacks WebKit's system packages, and that is not a reason to leave the check to a pipeline. The script does this itself for any run that includes a WebKit project (#1235); `--project desktop-webkit --spec <file>` with `--reuse` runs one file in WebKit alone. A change to a WebKit-affected e2e test is run locally on both WebKit projects before it is pushed; the pipeline is the second check, not the first (owner, 2026-10-06). |
