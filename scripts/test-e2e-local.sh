@@ -21,6 +21,10 @@
 #                    arguments, in the gate and the quarantine run alike
 #                    (e.g. `-- --repeat-each=10` to show a rewrite is stable).
 #
+#   After a passing gate the quarantined tests run, capped at the time CI caps
+#   them (read from .gitlab-ci.yml); a run past the cap is stopped, says so, and
+#   does not fail this run.
+#
 #   --ci-cap        Apply compose/docker-compose.ci-cap.yml — the cpu/memory
 #                    cap CI's acceptance stack always runs under — so local
 #                    timing and worker-count measurements transfer to CI
@@ -935,6 +939,25 @@ playwright_cmd=(node node_modules/@playwright/test/cli.js test --config tests/e2
 # the "unclaimed" project, which the gate's own claim has already made untrue.
 quarantine_args=(--pass-with-no-tests --output test-results/quarantine)
 
+# CI caps the quarantine run: `timeout -k 30s 8m bash scripts/test-frontend.sh
+# --quarantine` in .gitlab-ci.yml. A local run had no cap, so one hung
+# quarantined test held the whole run, and its stack, indefinitely (#1607). Read
+# CI's own figures from that line (read only here) so the local cap cannot drift
+# from CI's, and cap the run through coreutils `timeout`. Nothing is run
+# uncapped on a guess: an unreadable line refuses before the stack is used.
+quarantine_cap_re='timeout[[:space:]]+(-k[[:space:]]+([^[:space:]]+)[[:space:]]+)?([0-9]+[smh]?)[[:space:]]+bash[[:space:]]+scripts/test-frontend\.sh[[:space:]]+--quarantine'
+# grep -m1 and an explicit fallback, not `| head` and not a bare failing grep
+# (scripts/acceptance-sigpipe-safety.test.mjs, #809).
+quarantine_cap_line="$(grep -m1 -E 'timeout .*scripts/test-frontend\.sh --quarantine' .gitlab-ci.yml)" || quarantine_cap_line=""
+if [[ "$quarantine_cap_line" =~ $quarantine_cap_re ]]; then
+  quarantine_cap="${BASH_REMATCH[3]}"
+  quarantine_kill_after="${BASH_REMATCH[2]}"
+else
+  fail "could not read CI's cap on the quarantine run from .gitlab-ci.yml (a \`timeout [-k D] DURATION bash scripts/test-frontend.sh --quarantine\` line); the local quarantine run is never left uncapped."
+fi
+command -v timeout > /dev/null 2>&1 || fail "coreutils \`timeout\` was not found; the quarantine run needs it to apply CI's ${quarantine_cap} cap."
+quarantine_timeout=(timeout ${quarantine_kill_after:+-k "$quarantine_kill_after"} "$quarantine_cap")
+
 # #1235: WebKit cannot launch on this host -- its system packages need root
 # -- so a run that includes a WebKit project happens inside the Playwright
 # image CI runs it in, on the host network with this checkout bind-mounted
@@ -963,6 +986,9 @@ quarantine_args=(--pass-with-no-tests --output test-results/quarantine)
 #   - Only `node` runs on the mounted tree: never `pnpm install` in here, which
 #     rewrites the host's node_modules (environment skill, 2026-08-24).
 # in_image was decided above, before the browser download.
+# suite_prefix is a command (the quarantine run's timeout) the next run_suite
+# wraps around the whole run, the docker run included.
+suite_prefix=()
 run_suite() { # run_suite STATUS_VAR EXTRA_ENV... -- EXTRA_PLAYWRIGHT_ARGS...
   local status_var="$1" extra_env=() extra_args=() kv
   shift
@@ -979,7 +1005,7 @@ run_suite() { # run_suite STATUS_VAR EXTRA_ENV... -- EXTRA_PLAYWRIGHT_ARGS...
       [[ ! -d "${main_checkout_dir}/web/node_modules" ]] \
         || shared_mounts+=(-v "${main_checkout_dir}/web/node_modules:${main_checkout_dir}/web/node_modules:ro")
     fi
-    docker run --rm --label "orbit-e2e-run=${project_name}" --network host --ipc=host --add-host orbit-oidc:127.0.0.1 \
+    "${suite_prefix[@]}" docker run --rm --label "orbit-e2e-run=${project_name}" --network host --ipc=host --add-host orbit-oidc:127.0.0.1 \
       -v "${repo_dir}:${repo_dir}" "${shared_mounts[@]}" -w "$repo_dir" \
       -v "${docker_cli}:/usr/local/bin/docker:ro" \
       -v "$(dirname -- "$compose_plugin"):/usr/local/lib/docker/cli-plugins:ro" \
@@ -987,7 +1013,7 @@ run_suite() { # run_suite STATUS_VAR EXTRA_ENV... -- EXTRA_PLAYWRIGHT_ARGS...
       "${run_env[@]}" "$playwright_image" \
       sh -c "${oidc_forward} exec \"\$@\"" sh "${playwright_cmd[@]}" "${extra_args[@]}" || printf -v "$status_var" '%s' "$?"
   else
-    env "${suite_env[@]}" "${extra_env[@]}" "${playwright_cmd[@]}" "${extra_args[@]}" || printf -v "$status_var" '%s' "$?"
+    "${suite_prefix[@]}" env "${suite_env[@]}" "${extra_env[@]}" "${playwright_cmd[@]}" "${extra_args[@]}" || printf -v "$status_var" '%s' "$?"
   fi
 }
 
@@ -1030,9 +1056,20 @@ run_suite suite_status ORBIT_E2E_QUARANTINE=exclude -- "${playwright_passthrough
 if [[ "$suite_status" == 0 ]]; then
   log "running the quarantined tests (@quarantine, agent-infra#30): reported, never failing this run"
   quarantine_status=0
+  suite_prefix=("${quarantine_timeout[@]}")
   run_suite quarantine_status ORBIT_E2E_QUARANTINE=only -- "${quarantine_args[@]}" "${playwright_passthrough[@]}"
-  [[ "$quarantine_status" == 0 ]] ||
-    log "a quarantined test failed (non-blocking; see the issue named in the test; traces in test-results/quarantine)"
+  suite_prefix=()
+  # 124 is timeout's own "ran out of time"; 137 is the run killed after the
+  # -k grace period. Either way it is reported, never failing this run, as in CI.
+  case "$quarantine_status" in
+    0) ;;
+    124 | 137)
+      log "the quarantined tests ran past ${quarantine_cap}, CI's cap on them, and were stopped (non-blocking; this run is not failed)"
+      ;;
+    *)
+      log "a quarantined test failed (non-blocking; see the issue named in the test; traces in test-results/quarantine)"
+      ;;
+  esac
 else
   log "the gate failed, so the quarantined tests were not run (CI skips them the same way)"
 fi
