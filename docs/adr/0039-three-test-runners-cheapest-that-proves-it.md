@@ -27,7 +27,7 @@ nightly 3302):
   gate (#1080). Read file by file, the lowest layer that proves each test is:
   **34 need the stack**, 204 need only a browser, 43 need only the database
   or the API, 10 need neither.
-- `web/tests/fidelity`: 30 files, 741 runs (508 are the 44 px tap-floor
+- `web/tests/fidelity`: 30 files, 741 runs (500 are the 44 px tap-floor
   measurement). They already run without the stack: the built web app with
   `ORBIT_FIXTURES=1` answers its own API from fixtures (#451), on a runner with
   no Docker. 66 runs need no browser at all; only `screens.spec.js` compares
@@ -115,7 +115,7 @@ with selection by what changed (Vitest `--changed`, Playwright
      rule test in `fast` that every pocket control takes its size from the
      kit's `--p-hit` token. An agent whose change might affect a tap runs
      `pocket-measure` for the affected screens before handing back (owner,
-     2026-11-01). The full 508-box measurement (about 11 minutes) runs
+     2026-11-01). The full 500-box measurement (about 11 minutes) runs
      nightly only and never gates: every finding is a Low at best, never a
      required fix, so it raises an issue instead (owner, 2026-11-01); the
      `nightly_report` job does the filing (#1616).

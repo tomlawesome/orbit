@@ -18,7 +18,7 @@ const { GET: readWorkspace } = await loadRoute("workspace");
 const { POST: applyWorkspaceCommand } = await loadRoute("workspace/commands");
 const { GET: listMembers, POST: addMember } = await loadRoute("households/[householdId]/members");
 const { POST: lifecycle } = await loadRoute("households/[householdId]/lifecycle");
-const { GET: listDocuments } = await loadRoute("households/[householdId]/items/[itemId]/documents");
+const { GET: listDocuments, POST: uploadDocument } = await loadRoute("households/[householdId]/items/[itemId]/documents");
 const { DELETE: deleteDocument } = await loadRoute("documents/[documentId]");
 const { GET: downloadDocument } = await loadRoute("documents/[documentId]/download");
 const { POST: restoreDocument } = await loadRoute("documents/[documentId]/restore");
@@ -97,6 +97,27 @@ describe("persisted identity and session transitions", () => {
     await expectError(expired, 401, "session_required", "A valid session is required");
     const [persisted] = await getDb().select({ id: sessions.id }).from(sessions).where(eq(sessions.id, expiredSession.sessionId));
     expect(persisted).toBeUndefined();
+  });
+
+  it("answers a signed-out caller 401 on every document route, whether or not the thing exists", async () => {
+    // Moved from tests/e2e/signed-out.spec.ts (#1612). Ids that name nothing: the
+    // refusal must come before any lookup, so it cannot tell a stranger what exists.
+    const documentId = "00000000-0000-4000-8000-000000000001";
+    const householdId = "00000000-0000-4000-8000-000000000002";
+    const itemId = "00000000-0000-4000-8000-000000000003";
+    const base = "http://127.0.0.1:3000/api";
+    const calls: Array<[string, Promise<Response>]> = [
+      ["list", callRoute(listDocuments, { url: `${base}/households/${householdId}/items/${itemId}/documents`, params: itemDocumentsContext(householdId, itemId) })],
+      ["upload", callRoute(uploadDocument, { url: `${base}/households/${householdId}/items/${itemId}/documents`, method: "POST", body: "%PDF-1.7", params: itemDocumentsContext(householdId, itemId) })],
+      ["download", callRoute(downloadDocument, { url: `${base}/documents/${documentId}/download`, params: documentContext(documentId) })],
+      ["delete", callRoute(deleteDocument, { url: `${base}/documents/${documentId}`, method: "DELETE", params: documentContext(documentId) })],
+      ["restore", callRoute(restoreDocument, { url: `${base}/documents/${documentId}/restore`, method: "POST", params: documentContext(documentId) })],
+    ];
+    for (const [name, pending] of calls) {
+      const response = await pending;
+      expect({ name, status: response.status }).toEqual({ name, status: 401 });
+      expect(await json(response)).toEqual({ error: { code: "session_required", message: "A valid session is required" } });
+    }
   });
 
   it("rejects a disabled user using a cookie issued before disable", async () => {

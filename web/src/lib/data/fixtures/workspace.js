@@ -17,8 +17,6 @@
  * drawn against.
  */
 
-import { WORKSPACE_VERSION } from "orbit/lib/workspace";
-
 export const SESSION_FIXTURE = {
   authenticated: true,
   csrfToken: "fixture-csrf-token",
@@ -137,7 +135,10 @@ export const WORKSPACE_FIXTURE_TODAY = "2026-08-13";
    and its dial ring derive from the review inbox's own receipts
    (fixtures/inbox.js via /api/imap-inbox, #454). */
 export const WORKSPACE_FIXTURE = {
-  version: WORKSPACE_VERSION,
+  /* The engine's WORKSPACE_VERSION (src/lib/workspace.ts). Written out, not
+     imported: browser code may not import the engine (ADR-0034), and
+     workspaceSchema's z.literal makes the contract test fail if they part. */
+  version: 1,
   activeHouseholdId: "hh-harlow-1",
   householdLanding: "active",
   households: [
