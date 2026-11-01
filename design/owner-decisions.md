@@ -1787,3 +1787,14 @@ On #1382, offered one rule, today's two, or a touch test: **16a**.
 - No user-agent or device sniffing, and no pointer test: Orbit has two
   layouts, so width alone says which fits.
 - Recorded in an ADR when built.
+
+## 46. One place for mail settings (owner, 2026-11-01)
+
+Setting up mail on a live install: **"And why are there two places to set
+email settings. It should be one."** Overrules ADR-0017's "SMTP stays as it
+is" (2026-08-13).
+
+- Outgoing mail moves onto the administration screen beside the mailbox,
+  defaulting to the same account, its password encrypted like the
+  mailbox's. `SMTP_*` settings are imported once on upgrade and then
+  retired, as `IMAP_*` were. #1629.
