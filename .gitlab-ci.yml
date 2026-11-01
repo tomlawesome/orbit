@@ -3170,15 +3170,18 @@ acceptance:
         bash scripts/ci/validate-compose.sh
     # Minutes of a live Tika stack, so it is skipped when nothing it covers
     # moved. On a merge request the script compares the whole change, from
-    # $CI_MERGE_REQUEST_DIFF_BASE_SHA to HEAD (#1607), and on a push HEAD^ to
-    # HEAD. It reports "required" when it cannot compare, which is also what a
+    # $CI_MERGE_REQUEST_DIFF_BASE_SHA to HEAD (#1607), and on a push from
+    # $CI_COMMIT_BEFORE_SHA to HEAD, every pushed commit (#1607). It reports "required" when it cannot compare, which is also what a
     # clone too shallow to hold the base gets -- fail-safe either way.
     # This job takes the project's default clone depth, which can stop short of
-    # the merge base, so fetch just that commit; if the fetch fails the script
-    # still answers "required".
+    # the merge base or the pre-push tip, so fetch just that commit; if the
+    # fetch fails the script still answers "required". An all-zero or empty
+    # before-SHA (a new branch) has nothing to fetch.
     - |
       if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
         git fetch --quiet --depth=1 origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA" || echo "base commit not fetched; the scope check will require the processor check"
+      elif [ -n "${CI_COMMIT_BEFORE_SHA:-}" ] && ! printf '%s' "$CI_COMMIT_BEFORE_SHA" | grep -Eq '^0+$'; then
+        git fetch --quiet --depth=1 origin "$CI_COMMIT_BEFORE_SHA" || echo "before commit not fetched; the scope check will require the processor check"
       fi
     - bash scripts/ci/detect-processor-scope.sh
     - |

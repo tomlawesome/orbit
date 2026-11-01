@@ -29,10 +29,17 @@ cd "${repo_root}"
 if [[ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]]; then
   compare_from="${CI_MERGE_REQUEST_DIFF_BASE_SHA}"
 else
-  compare_from="HEAD^"
+  # An all-zero before-SHA (a new branch), an unset or empty one, and one this
+  # clone lacks all leave the base unknown, which the check below reads as
+  # required.
+  compare_from="${CI_COMMIT_BEFORE_SHA:-}"
+  if [[ "${compare_from}" =~ ^0+$ ]]; then
+    compare_from=""
+  fi
 fi
 
-if git rev-parse --verify --quiet "${compare_from}^{commit}" >/dev/null &&
+if [[ -n "${compare_from}" ]] &&
+   git rev-parse --verify --quiet "${compare_from}^{commit}" >/dev/null &&
    git diff --quiet "${compare_from}..HEAD" -- \
      config/tika-config.json \
      docker-compose.yml \
