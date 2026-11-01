@@ -112,7 +112,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
       border:1px solid var(--line-soft);border-radius:6px;padding:6px 8px}
 /* The accent border marks the focused field, and the browser's own ring is
    deliberately LEFT ON rather than traded for it: this screen is walked by
-   v19-keyboard.spec.ts, which requires an outline or a shadow at every stop,
+   web/tests/rig/v19-keyboard.spec.js, which requires an outline or a shadow at every stop,
    and a border colour is neither. */
 .helm-page .challenge input:focus-visible{border-color:var(--accent)}
 .helm-page .challenge .challengenote,

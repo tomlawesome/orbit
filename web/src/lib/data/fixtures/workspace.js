@@ -17,8 +17,6 @@
  * drawn against.
  */
 
-import { WORKSPACE_VERSION } from "orbit/lib/workspace";
-
 export const SESSION_FIXTURE = {
   authenticated: true,
   csrfToken: "fixture-csrf-token",
@@ -137,7 +135,10 @@ export const WORKSPACE_FIXTURE_TODAY = "2026-08-13";
    and its dial ring derive from the review inbox's own receipts
    (fixtures/inbox.js via /api/imap-inbox, #454). */
 export const WORKSPACE_FIXTURE = {
-  version: WORKSPACE_VERSION,
+  /* The engine's WORKSPACE_VERSION (src/lib/workspace.ts). Written out, not
+     imported: browser code may not import the engine (ADR-0034), and
+     workspaceSchema's z.literal makes the contract test fail if they part. */
+  version: 1,
   activeHouseholdId: "hh-harlow-1",
   householdLanding: "active",
   households: [
@@ -199,6 +200,31 @@ export const WORKSPACE_FIXTURE = {
     },
   ],
 };
+
+/**
+ * An archived item and its one paper, for the rig's archived-drawer check
+ * (#1609): opened by its address, `/home?item=i-archived`. Not in
+ * WORKSPACE_FIXTURE: the unarchived sample is what every pixel screen, the
+ * inbox's papers and the sections' counts are measured against. A browser that
+ * asks for the `archived-item` scene (web/src/lib/server/fixture-scenes.js)
+ * has them added to Harlow Home.
+ */
+export const ARCHIVED_ITEM_FIXTURE = {
+  id: "i-archived", title: "Washing machine warranty", sectionId: "s-devices", status: "archived",
+  subtype: "document", kind: "document", currency: "GBP", documentCount: 1,
+  version: 2, updatedAt: "2026-05-02T09:00:00.000Z",
+};
+
+/** The archived item's paper, in the DocumentSummary shape DOCUMENTS_FIXTURE holds. */
+export const ARCHIVED_DOCUMENTS_FIXTURE = [
+  {
+    id: "d-archived-proving", itemId: "i-archived", displayName: "archived-proving.pdf",
+    mediaType: "application/pdf", sizeBytes: 61440, lifecycle: "stored",
+    scanStatus: "clean", availableAt: "2026-05-02T09:00:00.000Z",
+    deleteAfter: null, ready: true, failureCode: null, recoverable: false,
+    recoveryExpiresAt: null, recoveryStatus: null,
+  },
+];
 
 /**
  * Per-item documents, in the DocumentSummary shape

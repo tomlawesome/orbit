@@ -1,7 +1,11 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect as baseExpect, test } from "@playwright/test";
 
-import { APP, onPhone, settle, signedIn } from "./a11y-support.js";
+import { APP, onPhone, RIG_EXPECT_MS, RIG_TEST_MS, settle, signedIn } from "./a11y-support.js";
+
+/* The rig's waits (a11y-support.js RIG_EXPECT_MS, RIG_TEST_MS): the stack's explicit long waits are gone with its sign-in, but the host is shared. */
+const expect = baseExpect.configure({ timeout: RIG_EXPECT_MS });
+test.describe.configure({ timeout: RIG_TEST_MS });
 
 /*
  * #496, moved to the rig (ADR-0039, #1609): a full axe sweep across every
@@ -42,7 +46,7 @@ async function axeCheck(page, state) {
   expect(results.violations, state).toEqual([]);
 }
 
-/** The household page's own address under the fixtures. */
+/** The household page, as the fixtures know it. */
 const HOUSEHOLD = "/household/hh-harlow-1";
 
 test.describe("the signed-in v19 sweep", () => {
@@ -166,20 +170,19 @@ test.describe("the signed-in v19 sweep", () => {
 
   for (const route of PLAIN_ROUTES) {
     test(`${route.path} has no automated WCAG A/AA violations`, async ({ page }, testInfo) => {
-      /* The fixture states for these two routes wait for pocket-only elements
-         (administration waits on `.ad-pocket`, create on `#pocket-entry`, both
-         hidden on a desk), so a desk loads the route's address and the phone
-         takes the state. */
+      /* The phone's `rest` states for these two routes wait for pocket-only
+         elements (administration `.ad-pocket`, create `#pocket-entry`, both
+         hidden on a desk), so a desk takes the states both dialects reach. */
       const desk = !onPhone(testInfo);
-      if (desk && (route.path === "/administration" || route.path === "/create")) await page.goto(`${APP}${route.path}`, { waitUntil: "load" });
-      else await signedIn(route.path, "rest")(page);
+      const shared = route.path === "/administration" || route.path === "/create";
+      await signedIn(route.path, desk && shared ? "any-dialect" : "rest")(page);
       await route.ready(page, onPhone(testInfo));
       await axeCheck(page);
     });
   }
 
   test("/household/[id] has no automated WCAG A/AA violations", async ({ page }) => {
-    await page.goto(`${APP}${HOUSEHOLD}`, { waitUntil: "load" });
+    await signedIn(HOUSEHOLD, "any-dialect")(page);
     await expect(page.getByRole("heading", { name: "Harlow Home" })).toBeVisible();
     /* #1122: on a phone the household's cards rise in; measure them drawn, not
        through the entrance's fading opacity. */

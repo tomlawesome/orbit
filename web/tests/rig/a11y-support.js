@@ -9,9 +9,21 @@
  * write, and the reads that follow it.
  */
 
-import { APP, DOOR_STATES, SIGNED_IN, settle } from "../fidelity/pocket-states.js";
+import { APP, DOOR_STATES, RIG_STATES, SIGNED_IN, settle } from "../fidelity/pocket-states.js";
+import { ownWorkspace, rescheduleLikeTheEngine, snoozeLikeTheEngine, upsertLikeTheEngine } from "./workspace-writes.js";
 
 export { APP, settle };
+
+/**
+ * The rig's waits for the three long-walking specs (axe sweep, keyboard,
+ * keyboard-pocket). The stack suite gave 7, 17 and 16 of their waits 10 to 60
+ * seconds, for sign-in and seeding; the fixture app needs none of that, but the
+ * rig shares a busy host, so an assertion gets 15 s (Playwright's default is 5)
+ * and a test 60 s (the default is 30). Applied per file with
+ * `expect.configure` and `test.describe.configure`; no assertion is changed.
+ */
+export const RIG_EXPECT_MS = 15_000;
+export const RIG_TEST_MS = 60_000;
 
 /** @typedef {import("@playwright/test").Page} Page */
 /** @typedef {import("@playwright/test").TestInfo} TestInfo */
@@ -27,13 +39,14 @@ export const onPhone = (testInfo) => testInfo.project.name.endsWith("phone");
  * The fixture state `route`/`state` of pocket-states.js, as a function that
  * reaches it. These states were written for the phone, but a route's reach
  * that only loads the address and waits for the screen to settle is the same
- * on a desk; the ones that wait for a pocket-only element say so there.
+ * on a desk; the ones that wait for a pocket-only element say so there, and
+ * RIG_STATES holds the states of the screens both dialects reach ("any-dialect").
  * @param {string} route
  * @param {string} state
  * @returns {(page: Page) => Promise<void>}
  */
 export function signedIn(route, state) {
-  const found = SIGNED_IN.find((one) => one.route === route && one.state === state);
+  const found = [...SIGNED_IN, ...RIG_STATES].find((one) => one.route === route && one.state === state);
   if (!found) throw new Error(`pocket-states.js has no signed-in state ${route} / ${state}`);
   return found.reach;
 }
@@ -52,9 +65,6 @@ export function door(slug, state) {
   return found.reach;
 }
 
-/** The workspace command a write carried, minus its dry-run question. */
-const COMMANDS = "**/api/workspace/commands";
-
 /**
  * Answers this test's own workspace writes and remembers them, so a save is
  * seen to land: the fixture server persists nothing, so a screen that re-reads
@@ -62,59 +72,21 @@ const COMMANDS = "**/api/workspace/commands";
  * (ADR-0034: the form's question "would this save go through?") are left to
  * the fixture server, which answers them with the engine's own parse.
  *
- * `item.upsert` puts the item in its household's list (a new one appended, an
- * existing one replaced), `item.snooze` sets `snoozedUntil`, `item.reschedule`
- * sets `dueDate`; any other command is recorded and answered with the workspace
- * as it stands. `sent` is every real write, in order.
+ * The one write helper of the rig (workspace-writes.js) with the accessibility
+ * specs' three writes: `item.upsert` puts the item in its household's list (a
+ * new one appended, an existing one replaced) and is forwarded to the fixture
+ * server too, `item.snooze` sets `snoozedUntil`, `item.reschedule` sets
+ * `dueDate`; any other command is recorded and answered with the workspace as the writes so far left it.
+ * `sent` is every real write, in order.
  *
  * @param {Page} page
  * @returns {Promise<{ sent: { type: string, [key: string]: any }[] }>}
  */
 export async function rememberWrites(page) {
-  /** @type {{ type: string, [key: string]: any }[]} */
-  const sent = [];
-  /** @type {Map<string, Record<string, any>>} item id -> what the writes made of it */
-  const changes = new Map();
-  /** @type {any[]} */
-  const added = [];
-
-  /** @param {any} workspace */
-  const applied = (workspace) => {
-    for (const household of workspace.households ?? []) {
-      household.items = (household.items ?? []).map((/** @type {any} */ item) => ({ ...item, ...changes.get(item.id) }));
-      for (const one of added) {
-        if (one.householdId === household.id && !household.items.some((/** @type {any} */ item) => item.id === one.item.id)) {
-          household.items.push(one.item);
-        }
-      }
-    }
-    return workspace;
-  };
-
-  await page.route(`**/api/workspace`, async (route) => {
-    const response = await route.fetch();
-    const body = await response.json();
-    applied(body.workspace);
-    await route.fulfill({ response, json: body });
+  const writes = await ownWorkspace(page, {
+    "item.upsert": upsertLikeTheEngine,
+    "item.snooze": snoozeLikeTheEngine,
+    "item.reschedule": rescheduleLikeTheEngine,
   });
-  await page.route(COMMANDS, async (route) => {
-    const command = route.request().postDataJSON();
-    if (command?.dryRun === true) return route.fallback();
-    sent.push(command);
-    if (command.type === "item.upsert") {
-      changes.delete(command.item.id);
-      const present = added.findIndex((one) => one.item.id === command.item.id);
-      if (present >= 0) added.splice(present, 1);
-      added.push({ householdId: command.householdId, item: { status: "active", version: 1, kind: command.kind ?? null, ...command.item } });
-      changes.set(command.item.id, { ...command.item, kind: command.kind ?? null });
-    } else if (command.type === "item.snooze") {
-      changes.set(command.itemId, { ...changes.get(command.itemId), snoozedUntil: command.snoozedUntil });
-    } else if (command.type === "item.reschedule") {
-      changes.set(command.itemId, { ...changes.get(command.itemId), dueDate: command.dueDate });
-    }
-    const response = await page.request.get(`${APP}/api/workspace`);
-    const body = await response.json();
-    await route.fulfill({ json: { ...body, workspace: applied(body.workspace) } });
-  });
-  return { sent };
+  return { sent: writes.commands };
 }

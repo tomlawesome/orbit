@@ -100,6 +100,32 @@ describe("GET /api/auth/availability", () => {
     expect(body.claimed).toBe(true);
   });
 
+  /*
+   * Moved from tests/e2e/signed-out.spec.ts (#1612). What a signed-out stranger
+   * is told (ADR-0023 §1): whether there is a provider at all, never which. A new
+   * key is a new thing a stranger is told, so the key set is asserted, and a
+   * configured provider's issuer, client and endpoints appear nowhere in the body.
+   */
+  it("names no provider, issuer, client or address of one when a provider is configured (ADR-0023 §1)", async () => {
+    mocks.getBootPhase.mockReturnValue("running");
+    mocks.getAuthConfig.mockReturnValue({
+      oidc: { issuer: "https://idp.example/realm", clientId: "orbit-client-id", clientSecret: "placeholder-secret" },
+    });
+    mocks.hasAnyLocalCredential.mockResolvedValue(true);
+    mocks.secondFactorConfigured.mockReturnValue(true);
+
+    const { GET } = await import("../../web/src/routes/api/auth/availability/+server.js");
+    const body = await (await GET()).json();
+
+    expect(Object.keys(body).sort()).toEqual(["claimed", "configured", "contactAddress", "encryptionKey", "methods", "phase"]);
+    expect(Object.keys(body.methods).sort()).toEqual(["local", "localAccounts", "oidc", "secondFactor"]);
+    expect(body.methods.oidc).toBe(true);
+    const text = JSON.stringify(body);
+    for (const leak of ["idp.example", "orbit-client-id", "placeholder-secret", "://"]) {
+      expect(text, `the answer names ${leak}`).not.toContain(leak);
+    }
+  });
+
   it("reports methods.localAccounts from hasAnyLocalCredential, and false when that read fails (M7 slice 12)", async () => {
     mocks.getBootPhase.mockReturnValue("running");
     mocks.hasAnyLocalCredential.mockResolvedValue(true);

@@ -72,7 +72,7 @@ test.beforeAll(async ({ request }) => {
  * a screen this administrator cannot reach yet -- they have no household, and
  * hooks.server.js sends a household-less session to the arrival -- and
  * creating one to press a button would be testing the arrival. The button
- * itself is walked in v19-screen-reader.spec.ts.
+ * itself is walked in web/tests/rig/v19-screen-reader.spec.js.
  */
 async function signOut(page: Page): Promise<void> {
   const status = await page.evaluate(async () => {

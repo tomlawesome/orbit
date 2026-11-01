@@ -12,13 +12,13 @@ import { APP, door, onPhone } from "./a11y-support.js";
  * one-entry state at `?entries=one`. The fixture's words are the stack
  * version's own, so the assertions read the same.
  *
- * What stays on the stack, in tests/e2e/maintenance.spec.ts, because it is the
- * window itself end to end (or a status code and a header, which belong to the
- * integration project, #1612): the 503 at the URL asked, never cached, with
- * Retry-After and no ETag; the arrival closed to a stranger; /login and
- * /logout staying open; /maintenance answering 503; the API's own envelope;
- * the administrator passing while a member is shown the screen; and ending
- * the window reopening the instance at the same URL.
+ * What the server answers while a window is open (the 503 at the URL asked,
+ * no-store, Retry-After, the arrival closed, /login and /logout open, the
+ * administrator passing, a member shown the screen) is in
+ * tests/unit/hooks-server-maintenance-screens.test.mjs (#1612); the API's
+ * envelope in tests/integration/maintenance-guard.test.ts. What stays on the
+ * stack, in tests/e2e/maintenance.spec.ts, is the window itself end to end:
+ * ending it reopens the instance at the same URL.
  */
 test.use({ baseURL: APP });
 

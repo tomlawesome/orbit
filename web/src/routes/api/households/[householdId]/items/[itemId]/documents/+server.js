@@ -10,8 +10,8 @@ import {
   recordDirectReviewedUploadPending,
 } from "orbit/server/reviewed-intake";
 
-import { DOCUMENTS_FIXTURE, PROVING_DOCUMENTS_FIXTURE } from "$lib/data/fixtures/workspace.js";
 import { read, write } from "$lib/server/api.js";
+import { documentsOf } from "$lib/server/fixture-scenes.js";
 
 export const GET = read(
   async (event, session) => {
@@ -22,12 +22,7 @@ export const GET = read(
   },
   {
     fixture: (event) => json(
-      {
-        documents: [
-          ...(DOCUMENTS_FIXTURE[/** @type {string} */ (event.params.itemId)] ?? []),
-          ...(PROVING_DOCUMENTS_FIXTURE[/** @type {string} */ (event.params.itemId)] ?? []),
-        ],
-      },
+      { documents: documentsOf(/** @type {string} */ (event.params.itemId), event.cookies) },
       { headers: { "cache-control": "no-store" } },
     ),
   },

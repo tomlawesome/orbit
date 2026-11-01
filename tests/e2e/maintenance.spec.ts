@@ -85,78 +85,17 @@ test.afterAll(async () => {
   await admin.close();
 });
 
-test("a signed-out reader gets the maintenance screen at the URL they asked for", async ({ request }) => {
-  // Decision 2: the page, status 503, never cached, and when to come back.
-  // At /home rather than redirected to /maintenance, so a reload after the
-  // window closes lands them where they were.
-  const response = await request.get("/home", { maxRedirects: 0 });
-  expect(response.status()).toBe(503);
-  const headers = response.headers();
-  expect(headers["cache-control"]).toBe("no-store");
-  expect(Number(headers["retry-after"])).toBeGreaterThan(0);
-  expect(headers["etag"]).toBeUndefined();
-  const body = await response.text();
-  expect(body).toContain("maintenance — back soon");
-  expect(body).toContain(STARTED);
-});
-
-test("the arrival is closed too: a stranger is not an administrator", async ({ request }) => {
-  const response = await request.get("/", { maxRedirects: 0 });
-  expect(response.status()).toBe(503);
-});
-
-for (const path of ["/login", "/logout"]) {
-  test(`${path} stays open during a window`, async ({ request }) => {
-    // Decision 3: the door and the way out, so an administrator can get in
-    // to end the window and anyone can leave cleanly.
-    const response = await request.get(path, { maxRedirects: 0 });
-    expect(response.status()).toBe(200);
-  });
-}
-
-test("/maintenance itself answers 503 with the same screen", async ({ request }) => {
-  const response = await request.get("/maintenance", { maxRedirects: 0 });
-  expect(response.status()).toBe(503);
-  expect(response.headers()["cache-control"]).toBe("no-store");
-  expect(await response.text()).toContain(STARTED);
-});
-
-test("the API keeps its own guard and its own envelope", async ({ request }) => {
-  // The screen gate does not reach into /api/*; the read wrapper's own
-  // maintenance check answers there, as JSON, before any session question.
-  const response = await request.get("/api/workspace");
-  expect(response.status()).toBe(503);
-  expect(response.headers()["content-type"]).toContain("application/json");
-});
-
-test("the administrator passes; an ordinary member is shown the screen", async ({ browser }) => {
-  const passed = await adminPage.request.get("/home", { maxRedirects: 0 });
-  /* Not always a flat 200: #840 sends a reader with no household of their
-     own on to the arrival at `/` (303) rather than /home directly, and this
-     administrator has created nothing in this file. Either way is "passing"
-     -- the maintenance screen (503) is what a blocked reader gets instead,
-     and that is the one status this proves the administrator does not see. */
-  expect(passed.status()).not.toBe(503);
-
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
-  try {
-    const page = await context.newPage();
-    // The sign-in itself is exempt; what it lands on afterwards is not.
-    await signInAs(page, workerAccount("member"));
-    await expect(page.getByRole("heading", { name: "maintenance — back soon" })).toBeVisible();
-    const response = await page.request.get("/home", { maxRedirects: 0 });
-    expect(response.status()).toBe(503);
-  } finally {
-    await context.close();
-  }
-});
-
-/*
- * What the screen shows (one entry with no drawer, newest first with the
- * earlier ones opening from the keyboard, axe, the phone's width) moved to the
- * rig (ADR-0039, #1610): web/tests/rig/maintenance.spec.js, against the fixture
- * window. What is left here is the window itself, end to end.
- */
+/* What the screen shows (one entry with no drawer, newest first with the
+   earlier ones opening from the keyboard, axe, the phone's width) moved to the
+   rig (ADR-0039, #1610): web/tests/rig/maintenance.spec.js, against the fixture
+   window. What the server answers while the window is open -- the screen at the
+   asked-for URL with 503 and no-store, the arrival closed, /login and /logout
+   open, /maintenance itself, the administrator passing, a member shown the
+   screen -- moved to tests/unit/hooks-server-maintenance-screens.test.mjs
+   (#1612); the API's 503 envelope is proved in
+   tests/integration/maintenance-guard.test.ts. What is left here is the window
+   itself, end to end: ending it through the admin command against the real
+   server. */
 
 test("ending the window reopens the instance at the same URL", async ({ request }) => {
   await command(adminPage, { action: "end", message: "Back." });

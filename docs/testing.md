@@ -179,13 +179,13 @@ deliberately representative, not device certification:
 
 | Contract | Automated evidence |
 | --- | --- |
-| WCAG A/AA | `v19-axe-sweep.spec.ts` runs Axe over every signed-in route in both layouts; `signed-out.spec.ts` covers the sign-in door. |
-| Keyboard and focus | `v19-keyboard.spec.ts` and `v19-keyboard-pocket.spec.ts` drive the core journeys, sign-in through sign-out, by keyboard alone on desktop and mobile. |
-| Screen reader | `v19-screen-reader.spec.ts` reads back what the browser's accessibility engine would announce on every core-journey screen, and writes the raw ARIA tree to `test-results/aria/<route>.txt` for a person to read. |
+| WCAG A/AA | `web/tests/rig/v19-axe-sweep.spec.js` runs Axe over every signed-in route in both layouts; `signed-out.spec.ts` covers the sign-in door. |
+| Keyboard and focus | `web/tests/rig/v19-keyboard.spec.js` and `web/tests/rig/v19-keyboard-pocket.spec.js` drive the core journeys by keyboard alone on desktop and mobile; the real sign-in and sign-out are walked by the stack's own sign-in specs. |
+| Screen reader | `web/tests/rig/v19-screen-reader.spec.js` reads back what the browser's accessibility engine would announce on every core-journey screen, and writes the raw ARIA tree to `web/test-results/playwright/aria/<route>--<project>.txt` for a person to read. |
 | Charts | `v19-chart-accessibility.spec.ts` checks the home dial is a labelled group with a named link per body, and that nothing focusable inside it is unnamed. |
 | Reduced motion | `web/tests/rig/v19-reduced-motion.spec.js` checks that `prefers-reduced-motion` and no-JS both fall back to the plain list. |
 | Responsive layout | `v19-layout-and-themes.spec.ts` opens every signed-in screen at 1440×900, 820×1180 and 412×915 (desktop project) and checks the page never scrolls sideways, every visible control sits inside the screen and is not cut off, and Axe finds nothing at that size. |
-| Colour and theme packs | The same spec runs Axe over every screen in every theme pack other than the default (which `v19-axe-sweep.spec.ts` covers), in both layouts, after confirming the pack is the one drawn. Text size is not checked: Orbit stores the setting but no v19 screen applies it yet. |
+| Colour and theme packs | The same spec runs Axe over every screen in every theme pack other than the default (which `web/tests/rig/v19-axe-sweep.spec.js` covers), in both layouts, after confirming the pack is the one drawn. Text size is not checked: Orbit stores the setting but no v19 screen applies it yet. |
 | Feedback and recovery | `v19-feedback-recovery.spec.ts` makes things fail on purpose: a save on `/create` with no connection, a mail suggestion whose approval fails (item view and `/inbox`), a household deletion request that fails, and a document picked on `/create`. Each checks the message reaches a screen reader, focus is not dropped, and the same act works by keyboard once the fault is gone. |
 
 Where one of these checks has found a real fault in Orbit, the test is
@@ -501,6 +501,47 @@ session (#995). Nothing in `tmp/` is built, shipped or imported.
 ### The 44px tap floor
 
 Every tappable thing on the phone layout is at least 44x44px. The size is the
-token `--p-hit` in `web/src/lib/pocket/tokens.css`; the gate is
-`web/tests/fidelity/pocket-measure.spec.js` (`MIN_HIT`, #1120), which runs in
-the `fidelity` job (see [the quality strategy](quality-strategy.md)).
+token `--p-hit` in `web/src/lib/pocket/tokens.css`. It is checked where the
+code that sets a tap size changes, cheapest first (ADR-0039 §6, #1616):
+
+1. **Static, in `fast`.** `tests/unit/pocket-tap-floor.test.mjs` (the reading
+   is in `pocket-tap-floor-lib.mjs`) reads the kit, `tokens.css`, every
+   pocket page's own CSS and markup, and every `.svelte` file those pages
+   import, followed transitively within `web/src` (relative and `$lib/`
+   imports; most pocket controls live in those components, not the page
+   shells). It fails with file and line when a rule that reaches a tappable
+   element sets a literal size under 44px (write `var(--p-hit)`), when such a
+   rule sets a size through a custom property it cannot resolve ("size not
+   resolvable": use a literal or a token), when a tappable element has no
+   rule giving it a `min-height` or `height` of 44px, or when `--p-hit` is not
+   44px or is redeclared. It runs with `pnpm test`. It catches the common
+   cause and does not replace the geometry: a control sized by its content,
+   by padding, by an SVG circle or by a rule drawn in another component is
+   listed in `UNREADABLE` in the lib, with its reason and its exact count, and
+   left to the measurement; a desk-only small rule that the phone overrides is
+   listed in `SMALL_RULE_OVERRIDDEN`. Both lists match by file, tag and class
+   (or selector), not by element: a new control with the same tag and class in
+   the same file is covered without a new entry. That drift is accepted; the
+   geometry run covers it.
+2. **One screen, while building.** Whoever changes code that can move a tap on
+   a phone screen runs the measurement for the affected screens before the
+   hand-back (about a minute for one screen) and says which screens and the
+   exit code:
+   `POCKET_SCREEN=/inbox pnpm --filter orbit-web exec playwright test --project=pocket-measure`
+   (under the browser lock; the first run builds the app, which takes longer
+   than Playwright's server wait: run `pnpm --filter orbit-web build` first).
+   `POCKET_SCREEN` is a comma-separated list of routes as `SIGNED_IN` in
+   `web/tests/fidelity/pocket-states.js` writes them (`/home`, `/settings/mail`,
+   `/household/hh-harlow-1`), each matched whole. It keeps that route's states
+   at all four sizes and its extra-large text run, and leaves out the door
+   family and the error page's graphic; reach those with `--grep` on the
+   title. A route that names no screen fails and lists the ones that exist.
+3. **Everything, nightly only.** `web/tests/fidelity/pocket-measure.spec.js`
+   (`MIN_HIT`, #1120) is the geometry proof: about 500 boxes, about 11
+   minutes. Today it runs inside `fidelity` on every web merge request. The
+   decided end state (owner, 2026-11-01; see [the quality
+   strategy](quality-strategy.md)) is that it runs nightly and never gates a
+   merge request or a promotion, and a miss is a Low (a cosmetic defect, fixed
+   when convenient): the nightly files an issue naming the screens instead of
+   failing the pipeline. Moving it there is the CI follow-up (#1616): a
+   nightly job with `allow_failure` and a `nightly_report` Low.

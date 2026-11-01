@@ -9,11 +9,14 @@ resetDatabaseBetweenSpecFiles();
 /**
  * #1439: settings' own sign-outs -- the "this device" row and "sign out of
  * every device" -- play the same goodbye as the menu's sign-out and leave
- * through the identity provider (#1316 9a), as sign-out-descent.spec.ts
- * (from /settings) and sign-out-provider-return.spec.ts check for the menu:
- * the dusk arrives, the address becomes /logout, the provider is sent one
- * end-session request carrying a hint it signed, and the browser comes back
- * to /logout with "Sign back in". Nothing on the way asks for /login, which
+ * through the identity provider (#1316 9a), as the menu's does
+ * (sign-out-descent.spec.ts, from /settings). The provider half of the menu's
+ * sign-out, once sign-out-provider-return.spec.ts, moved to
+ * tests/integration/auth-session-contracts.test.ts (#1612, "answers a JSON
+ * sign-out with the provider's end-session address"). Here: the dusk arrives,
+ * the address becomes /logout, the provider is sent one end-session request
+ * carrying a hint it signed, and the browser comes back to /logout with "Sign
+ * back in". Nothing on the way asks for /login, which
  * would walk straight back in through the provider's single sign-on.
  *
  * Revoking ANOTHER device's row only drops that row: the page stays at

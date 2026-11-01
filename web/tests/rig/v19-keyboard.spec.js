@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect as baseExpect, test } from "@playwright/test";
 
 import {
   auditLightDismiss,
@@ -11,7 +11,11 @@ import {
   tabTo,
   uncheckedRadiosOf,
 } from "../../../tests/e2e/support/keyboard";
-import { APP, onPhone, rememberWrites, signedIn } from "./a11y-support.js";
+import { APP, door, onPhone, rememberWrites, RIG_EXPECT_MS, RIG_TEST_MS, signedIn } from "./a11y-support.js";
+
+/* The rig's waits (a11y-support.js RIG_EXPECT_MS, RIG_TEST_MS): the stack's explicit long waits are gone with its sign-in, but the host is shared. */
+const expect = baseExpect.configure({ timeout: RIG_EXPECT_MS });
+test.describe.configure({ timeout: RIG_TEST_MS });
 
 /** @typedef {import("@playwright/test").Locator} Locator */
 /** @typedef {import("@playwright/test").Page} Page */
@@ -25,11 +29,13 @@ import { APP, onPhone, rememberWrites, signedIn } from "./a11y-support.js";
  * DESK ONLY (the `rig-desktop` project and the other desk engines). The pocket
  * screens are walked by v19-keyboard-pocket.spec.js.
  *
- * What stays on the stack, in tests/e2e/v19-keyboard.spec.ts: the arrival
- * ("the sign-in door opens by Tab and Enter alone", a real sign-in through the
- * identity provider) and "sign out" (the session really ends and the provider
- * sends the browser back to /logout). The fixture app has neither a provider
- * nor a session to end.
+ * The arrival ("the sign-in door opens by Tab and Enter alone") and "sign out"
+ * ran against the stack's real identity provider and a real session. Here the
+ * keyboard half is what is proven: the door's button is reached and works by
+ * keys and hands the browser to /api/auth/login; the sign-out control is
+ * reached and works by keys, sends the logout request and lands on /logout
+ * with the session gone. The provider's own identity list and its end-session
+ * trip are not the keyboard's; the stack's other sign-in specs cover them.
  *
  * Each test starts from the fixture app's own Harlow Home (the five-household
  * fixture workspace) and installs the keyboard audit before the page loads.
@@ -154,6 +160,29 @@ async function openSettingsFromHome(page) {
 /* ────────────────────────────────────────────────────────────────────────
  * The journeys. One `test(...)` per screen state.
  * ──────────────────────────────────────────────────────────────────────── */
+
+test("arrive: the sign-in door opens by Tab and Enter alone", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await installKeyboardAudit(page);
+  /* The hand-off goes to the provider through /api/auth/login: answer it, and
+     see which address the press asked for. */
+  const handedOff = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/auth/login");
+  await page.route("**/api/auth/login**", (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>identity provider</title>" }));
+  await door("door", "rest")(page);
+  await expect(page).toHaveURL(`${APP}/`);
+
+  await tabTo(page, { selector: "#gate" }, { screen: "sign-in" });
+  const gate = await currentFocus(page);
+  expect(gate?.focusVisible, "sign-in: the Sign in button has no visible focus indicator").toBe(true);
+  await page.keyboard.press("Enter");
+
+  /* SignIn.svelte's press() hands off to /api/auth/login after its own flight
+     beat, asking to come back to where the reader was. */
+  const request = await handedOff;
+  expect(new URL(request.url()).searchParams.get("returnTo"), "sign-in: the press asks to return to the door's own address").toBe("/");
+  await page.waitForURL((url) => !url.pathname.startsWith("/login") && url.pathname !== "/", { timeout: 10_000 });
+});
 
 test("home: every control is reachable, focus is visible, and Tab is not trapped", async ({ page }) => {
   await arriveAtHome(page);
@@ -402,6 +431,34 @@ test("inbox: reachable via the account panel, and keyboard-navigable", async ({ 
   await auditTabOrder(page, "inbox");
 });
 
+test("sign out: the one-press control ends the session by keyboard alone", async ({ page }) => {
+  /* The fixture server has no session to revoke: this test answers the revoke
+     and, once it has, the session read that follows, as the engine would. */
+  let revoked = 0;
+  await page.route("**/api/auth/logout", (route) => {
+    revoked += 1;
+    return route.fulfill({ json: { redirectTo: null } });
+  });
+  await page.route("**/api/auth/session", (route) =>
+    revoked ? route.fulfill({ status: 401, json: { error: "unauthenticated" } }) : route.fallback());
+  await arriveAtHome(page);
+  await tabTo(page, { selector: "button.orb" }, { screen: "home" });
+  await page.keyboard.press("Enter");
+  await tabTo(page, { selector: ".signout" }, { screen: "home account panel" });
+  const signOut = await currentFocus(page);
+  expect(signOut?.focusVisible, "home: the sign-out control has no visible focus indicator").toBe(true);
+  await page.keyboard.press("Enter"); // revokes the session, then plays the descent (one press: owner, 2026-10-06)
+
+  await expect(page).toHaveURL(/\/logout$/, { timeout: 30_000 });
+  await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible();
+  expect(revoked, "sign out: the logout request was never sent").toBe(1);
+  const session = await page.evaluate(async () => {
+    const response = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
+    return /** @type {{ authenticated?: boolean }} */ (await response.json());
+  });
+  expect(session.authenticated, "sign out: the session is still authenticated after the sign-out control fired").toBeFalsy();
+});
+
 /* ────────────────────────────────────────────────────────────────────────
  * SIGN-IN METHODS AND ADMIN-CREATED LOCAL USERS (#915).
  *
@@ -447,7 +504,7 @@ test("settings: the sign-in-methods challenge arms by keyboard and is reachable"
 test("administration: the local-user controls are reachable and announced", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await installKeyboardAudit(page);
-  await page.goto(`${APP}/administration`, { waitUntil: "load" });
+  await signedIn("/administration", "any-dialect")(page);
   await expect(page.locator(".card").first()).toBeVisible();
 
   /* Every field in the row is a labelled control, which is what lets a screen

@@ -19,7 +19,7 @@ fixing the cause deletes the heading in the same commit.
 - 2026-09-09 · 11a68e8 (+ #911's uncommitted setup-mail work, none of it near documents) · local `pnpm test:integration` · the bounded reason came back `crypto_metadata_missing` where the test expects `storage_object_missing`. The same file passed on the run immediately before, on the same code, and the run's other 39 files were green both times — so reconciliation appears to reach the two missing-piece checks in a different order under load.
 - 2026-09-10 · 257d263 (+ #961's uncommitted `modelExtraction` health work, none of it near reconciliation) · local `pnpm test:integration` · failed on one run and passed on the run before it on the same code, and two later runs on the branch point without the change were green here as well. Only the four `@node-rs/argon2` files failed on every run.
 
-## v19-keyboard.spec.ts:432 "settings: reached via the account panel"
+## web/tests/rig/v19-keyboard.spec.js "settings: reached via the account panel" (was tests/e2e/v19-keyboard.spec.ts:432, moved by #1609; the sightings below are from there)
 
 - 2026-09-08 · af13319 · local `scripts/test-e2e-local.sh`, kept stack, 10 repeat runs · failed 2 of 10. The settings sessions list renders one "sign out of <device>" button per session and is unbounded, so on a stack reused across runs (168 sessions by the tenth) `auditTabOrder`'s 60-stop cap is exhausted, and `readSessions()` resolving after `.cards` lets rows arrive after the visibility snapshot. Likely fix shape: the `.cand` exclusion the household test already uses.
 - 2026-09-20 · c463c2f · pipeline 1335 / smoke (job 17734, !958, mockups and docs only — no `web/` change) · the same test, now at `:437`, desktop-chromium. Passed on the retried job 17753 on the same commit. Second sighting.
@@ -62,7 +62,7 @@ skill).
 
 - 2026-09-18 · `fix/m9-surface-bugs` · local `pnpm run test` (whole unit suite, 270 files in parallel) · both timed out at 5000 ms in the full run, then passed together in isolation (32/32, ~4.5 s for both files) on unchanged code. The full run was under heavy load (import phase 239 s, tests 833 s), so this reads as scheduler starvation rather than anything in either test — neither file changed on this branch. First sighting of each; no issue yet (an issue on the third, per the testing-and-ci skill).
 
-## v19-keyboard.spec.ts:568 "administration: the local-user controls are reachable and announced"
+## web/tests/rig/v19-keyboard.spec.js "administration: the local-user controls are reachable and announced" (was tests/e2e/v19-keyboard.spec.ts:568, moved by #1609)
 
 - 2026-09-19 · d0d5b47 (+ #1062's uncommitted end-cap focus-ring work, none of it near administration) · local `scripts/test-e2e-local.sh --spec tests/e2e/v19-keyboard.spec.ts --project desktop-chromium` · the "send a new setup link" button was not found at all: `expect(locator).toHaveAttribute` on `.person` filtered to the row that is not "· you", timing out at 5s with "element(s) not found". The other 22 tests in the run passed. The same test passed on the same code in CI — pipeline 1281 / smoke (job 16738), `✓ 111 [desktop-chromium] ... (3.1s)` — where the run's only two failures were the belt end-caps #1062 was fixing. So the row either had no second person or had not rendered when the assertion looked, rather than the control being missing. First sighting; no issue yet (an issue on the third, per the testing-and-ci skill).
 
@@ -93,7 +93,7 @@ timeout on this one case rather than a global raise.
 
 - 2026-09-23 · 079bd351 (#1080) · local `scripts/test-e2e-local.sh --ci-cap`, `ORBIT_E2E_WORKERS=4`, mobile-chromium · `page.waitForURL: Navigation failed because page crashed!` inside `settleArrival` (`tests/e2e/support/arrival.ts:29`). The browser process died, not an assertion: the host was carrying four chromium workers, the capped stack and other projects' containers, with 2.2Gi free of 23Gi and 10.6Gi of swap in use when the run started. Green at two workers in the run before. First sighting; an issue on the third.
 
-## v19-keyboard-pocket.spec.ts:570 "inbox (pocket): fully reachable by keyboard" — mobile-chromium
+## web/tests/rig/v19-keyboard-pocket.spec.js "inbox (pocket): fully reachable by keyboard" — rig-phone (was tests/e2e/v19-keyboard-pocket.spec.ts:570 on mobile-chromium, moved by #1609)
 
 - 2026-09-27 · 7b812e69 (+ #1149's uncommitted home-dial Escape work, none of it near the inbox) · local `scripts/test-e2e-local.sh`, both projects, keyboard-pocket and mail-review specs together · `auditTabOrder` reported `Tab reached a control the screen does not show as visible: a "open the relay →"` — the empty queue's relay card (`.pki-quiet`, inbox/pocket.svelte) was on screen (the test's own `toBeVisible` wait had passed) but its pill was left out of the visible-controls snapshot, so the audit took it for an invisible stop. The same spec on the same code was green in the run before (one project, 18 of 19 passing) and in the run after (23 passed, 14 skipped). First sighting; the next one should record the pill's computed opacity at snapshot time, since the audit's `isReallyVisible` reads it.
 - 2026-09-27 · 2bc73418 · local `scripts/test-e2e-local.sh`, full suite, mobile-chromium · the same `a "open the relay →"` report, on a branch that does not touch the inbox. Opacity not captured. Attempted fix in the same commit as this line: the spec now waits for `.pk-inbox`'s entrance animations to finish before the audit, as the household (pocket) test already does; delete this heading once CI has run it green a few times.
@@ -102,7 +102,7 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-03 · 58dec64f (!1017) · pipeline 2005, jobs 30264 (`smoke_webkit_mobile`) and 30265 (`smoke_local_only`) · both jobs' `step_script` sections ended at the identical second, `section_end:1791018971:step_script` at 09:16:11Z, and both then failed with `exit code 137` a few seconds into `after_script`. 30265 was still mid-pull of a 489MB image layer with no error logged first; 30264 was 15 tests from the end of its own run. Neither job's own log explains the kill -- a job container cannot see the host's OOM killer -- and `after_script`'s own "Cannot connect to the Docker daemon" is the same non-diagnostic noise already recorded under the `v19-first-run-door.spec.ts:250` heading above (#1096's own note), not evidence of cause here. The same pipeline's `smoke_webkit` (30263) had already finished 55s earlier, on its own `maxFailures` cutoff, with several previously-green tests failing or flaky (below) -- consistent with the host already under load before whatever killed the other two, though not proof of it. First sighting of two jobs dying together like this; a one-off host event, not a code suspect, so no issue yet.
 
-## sign-in-methods.spec.ts:129, :162 and v19-axe-sweep.spec.ts:372, /settings never draws its cards — desktop-webkit (#1195)
+## sign-in-methods.spec.ts:129, :162 and web/tests/rig/v19-axe-sweep.spec.js (was tests/e2e/v19-axe-sweep.spec.ts:372, moved by #1609), /settings never draws its cards — desktop-webkit (#1195)
 
 - 2026-10-03 · 58dec64f (!1017) · pipeline 2005 / smoke_webkit (job 30263) · three in one run, all the `.cards`-never-renders shape #1195 already names: `:129` "the helm lists the sign-in methods an account actually has" and `:162` "a reader changes their password from the helm, inline" each timed out in `openSettings` (`expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 })`, line 121) on both their attempts; `v19-axe-sweep.spec.ts:372`'s `/settings` case instead hung inside axe's own `.analyze()` for the full 60000ms test timeout on attempt 1, then hit "Target page, context or browser has been closed" on retry -- a hang rather than the quick element-not-found the other two show, but on the one screen #1195 already says draws broken. `:129` and `v19-axe-sweep.spec.ts:372`'s `/settings` case both already carry `test.fail(test.info().project.name === "desktop-webkit", ...)` from 00e44355, yet both are in this job's own failed-test list rather than reported as expected failures; `:162` carries no such marker at all. Not established here why the existing markers did not keep these out of the failure count, or whether #1195 is the whole explanation for the axe hang rather than a contributing one -- both worth the next sighting's attention. Not treated as a fresh flake needing its own issue: the cause is already #1195's.
 
@@ -187,7 +187,7 @@ timeout on this one case rather than a global raise.
 - 2026-10-09 · 3d6d7c20 (#1349) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
 - Third sighting: filed as #1365 (unattended-install case times out under host load).
 
-## v19-keyboard-pocket.spec.ts:411 "item page (pocket): actions and the back link work by keyboard" — mobile-webkit
+## web/tests/rig/v19-keyboard-pocket.spec.js "item page (pocket): actions and the back link work by keyboard" — mobile-webkit (was tests/e2e/v19-keyboard-pocket.spec.ts:411, moved by #1609)
 
 - 2026-10-09 · 1e0299ab (!1050) · pipeline 2313 / smoke_webkit_mobile (job 33924) · `Tab never reached the requested control within 60 presses`; after the reschedule save, focus went to `body` past the pills. Failed on both attempts. Passed in jobs 33895 and 33901 on the same commit, in 33925, and locally. The /item page is retired by #1319 (merged in 51d9a8ef), so this spec goes with it. First sighting.
 
@@ -195,7 +195,7 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-10 · b929a182 (#1329) · local scripts/test-backend.sh under parallel load · 5 s timeout on the dynamic import in "burnsInOf, the phone's"; passed alone and on rerun
 
-## v19-screen-reader.spec.ts:347 "/administration" — mobile-chromium
+## web/tests/rig/v19-screen-reader.spec.js "/administration" — mobile-chromium (was tests/e2e/v19-screen-reader.spec.ts:347, moved by #1609)
 
 - 2026-10-10 · d80cf61b (!1054) · pipeline 2392 / smoke (job 34442) · failed after 15.8 s on the first attempt; the job was cut off by the 30-minute limit before the retry or any error text. Passed locally on mobile-chromium, and 1.1 s on pipeline 2382.
 
@@ -203,7 +203,7 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-10 · 65e369b5 (!1057) · local `scripts/test-e2e-local.sh --ci-cap --reuse`, 6 runs of the spec · failed once in 9.2 s with `apiRequestContext.get: socket hang up`; passed on the other five. First sighting.
 
-## v19-keyboard-pocket.spec.ts:438 "item drawer (pocket): opened from the dial by keyboard, is fully reachable" — mobile-webkit, mobile-chromium — #1381 — quarantined 2026-10-16 (agent-infra#30)
+## web/tests/rig/v19-keyboard-pocket.spec.js "item drawer (pocket): opened from the dial by keyboard, is fully reachable" — mobile-webkit, mobile-chromium (was tests/e2e/v19-keyboard-pocket.spec.ts:438, moved by #1609) — #1381 — quarantined 2026-10-16 (agent-infra#30)
 
 - 2026-10-10 · 327d32c1 (!1057; app code identical to 65e369b5, whose pipeline 2430 passed this job) · pipeline 2440 / smoke_webkit_mobile (job 34934) · `auditTabOrder`: `Tab reached a control the screen does not show as visible` for the drawer's Snooze, Complete, Attach, Retire, Edit and Copy link buttons, on the first attempt and the in-job retry.
 - 2026-10-10 · 327d32c1 (!1057) · pipeline 2440 / smoke_webkit_mobile (job 35081, the first re-run) · the same audit message on the first attempt; passed on the in-job retry.
@@ -250,7 +250,7 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit (job 36491), desktop-webkit · failed its first attempt (9.8 s), passed on the in-job retry. No error text printed: the job was cut off at its 30-minute timeout before the report. First sighting.
 
-## v19-screen-reader.spec.ts:312 "/household/[id]" — desktop-webkit
+## web/tests/rig/v19-screen-reader.spec.js "/household/[id]" — desktop-webkit (was tests/e2e/v19-screen-reader.spec.ts:312, moved by #1609)
 
 - 2026-10-15 · 1c636dbd (!1069, v0.3 security batch with follow-ups) · pipeline 2643 / smoke_webkit (job 36491), desktop-webkit · failed its first attempt (1.8 s); the live log shows the in-job retry passing (3.1 s). No error text printed: the job was cut off at its 30-minute timeout before the report. First sighting.
 
@@ -288,7 +288,7 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-22 · 39134f33 (!1081) · pipeline 2875 / `smoke_firefox` job 38354 · "#1253: the page is still showing over the dusk", 10 s predicate timeout; passed on Playwright's retry in the same run. First sighting for this variant and browser.
 
-## v19-axe-sweep.spec.ts:388 "the signed-in v19 sweep › /settings/mail has no automated WCAG A/AA violations" on desktop-firefox
+## web/tests/rig/v19-axe-sweep.spec.js "the signed-in v19 sweep › /settings/mail has no automated WCAG A/AA violations" on desktop-firefox (was tests/e2e/v19-axe-sweep.spec.ts:388, moved by #1609)
 
 - 2026-10-22 · 39134f33 (!1081) · pipeline 2875 / `smoke_firefox` job 38354 · failed its first attempt, passed on Playwright's retry in the same run. The same screen as the layout-and-themes axe flake above, from the sweep spec. First sighting.
 
@@ -361,6 +361,31 @@ timeout on this one case rather than a global raise.
 ## home-suggestion-drawer.spec.js:156 "the staged paper opens the preview beside the drawer" (fidelity)
 
 - 2026-10-31 · a2f11fd5 (`chore/1352-home-inbox-twins`) · local fidelity run from a worktree, other sessions' builds on the host · the preview card wore "open still" without `snap`, then the preview server on 4173 was gone and the next three tests got `ERR_CONNECTION_REFUSED`; the spec alone passed 7 of 7, then 21 of 21 at `--repeat-each=3`. Why the server stopped is not known. First sighting.
+
+## src/server/boot.test.ts:256 "validates, reports auth, checks and migrates before workers"
+
+- 2026-11-01 · 7b9d415d (tests/unit and fidelity only) · local full vitest run, load average 42-72 · timed out at the 5 s default, and the next test (:277) then saw doubled boot steps from the timed-out test's leftovers; the file alone passed 41/41 twice. Wall-clock-under-load shape. First sighting.
+
+## web/tests/rig/v19-axe-sweep.spec.js "/administration has no automated WCAG A/AA violations" — rig-phone
+
+- 2026-11-01 · 4d1a8f2c (#1609) · local `playwright test --project=rig-desktop --project=rig-phone`, busy shared host · color-contrast violation on `#ad-uploads`, seen once in the first rig run of the moved spec and in none of the later ones on the same code. First sighting; no issue yet.
+
+## tests/e2e/v19-home-drawer.spec.ts "an attach whose record read fails says the done line and keeps its id, so a re-pick stores one copy" (desktop; first seen as the rig copy, which #1609 took back to the stack)
+
+- 2026-11-01 · b48f96a0 + #1609 batch 1 specs · local rig run, both rig projects, loaded host · hit the 30s test timeout (the failing line was `page.unroute` after the browser closed); alone it passed twice at 1.7s and 1.9s. First sighting.
+
+## v19-create.spec.js "the phone's create form shows page one and fills the fields the read found" (rig-phone)
+
+- 2026-11-01 · b48f96a0 + #1609 batch 1 specs · local rig run, both rig projects, loaded host · the reading card stayed at "orbit is reading the pages it was given" for 20s, no page one; alone it passed twice at about 1s. Second sighting in the one batch (an earlier run of the same specs showed it once as well).
+
+## tests/e2e/v19-home-drawer.spec.ts "an attach whose read of home fails says the done line and keeps its id, so a re-pick stores one copy" (phone; first seen as the rig copy, which #1609 took back to the stack)
+
+- 2026-11-01 · ead52a87 + #1609 batch 1 merge · local rig run, both rig projects, shared host · `papersOf` (the test's own papers route) threw "apiResponse.json: Response has been disposed": a read still in flight when the page closed. The next run of the same code passed. First sighting.
+
+## web/tests/rig/v19-screen-reader.spec.js "sign-out screen" (rig-phone)
+
+- 2026-11-01 · ead52a87 + #1609 batch 1 merge · local rig run, both rig projects, shared host · after the pocket sheet's "sign out" press the page stayed on `/settings` for the 5s `toHaveURL(/\/logout$/)`; the next run of the same code passed. First sighting.
+- 2026-11-01 · 4d888d9f (#1609 batch 1 fixes) · local rig run, full suite, loaded host · same symptom with the wait at 30s (a 90s try was cut off by the test's own 30s limit, so it proved nothing beyond 30s): the page stays on `/settings` with the goodbye drawn (`dusk` shown) and never reaches `/logout`. Under `--repeat-each=24 --workers=12` about half the runs hang; with 4 workers 6 of 6 passed. So it is load, not the wait length; a suspected race in the app's leave descent, not yet traced (#1637). Second sighting.
 
 ## v19-mail-review-unread.spec.js (rig) "home desk: a landed approve whose re-read fails shows the done line on the row, buttons at rest" and "inbox: a landed remove of a failed message whose re-read fails is done, not 'not removed'"
 

@@ -236,70 +236,10 @@ test("an unclaimed instance offers a claim card and nothing else", async ({ page
   }
 });
 
-test("without the code nobody reaches the provider or creates a user", async ({ baseURL, request }) => {
-  /* THE ONE THAT MATTERS MOST (ADR-0022 §2). The provider sign-in is what
-     creates the first administrator, so anyone who can start it can seize the
-     instance. Unclaimed and without the claim cookie, it does not start. */
-  const providerStart = await request.get("/api/auth/login?returnTo=%2F", { maxRedirects: 0 });
-  expect(providerStart.status()).toBe(403);
-  expect(await refusal(providerStart)).toBe("bootstrap_required");
-  /* No redirect was prepared either: nothing about the provider leaks out of
-     a refusal, not even where it lives. */
-  expect(providerStart.headers()["location"]).toBeUndefined();
-
-  /* The other door to the same room: creating the first administrator
-     directly. A complete, entirely valid body, so what refuses it is the
-     missing claim and nothing about the request. */
-  const created = await request.post("/api/auth/bootstrap/local", { headers: sameOrigin(baseURL), data: WOULD_BE_ADMIN });
-  expect(created.status()).toBe(403);
-  expect(await refusal(created)).toBe("bootstrap_required");
-
-  /* And guessing costs a guess. Every refusal is the one generic answer, so a
-     caller learns whether they had the code and not one thing more. */
-  const guessed = await request.post("/api/auth/bootstrap/claim", { headers: sameOrigin(baseURL), data: { claim: WRONG_CODE } });
-  expect(guessed.status()).toBe(403);
-  expect(await refusal(guessed)).toBe("bootstrap_invalid");
-
-  /* Nothing happened. Not "no session was issued" -- no user exists. */
-  const after = await availability(request);
-  expect(after.claimed).toBe(false);
-  expect(after.methods.localAccounts).toBe(false);
-});
-
-test("a claim cookie past its five minutes buys nothing", async ({ baseURL, request }) => {
-  /* A live cookie first, and it has to be ACCEPTED. That is what makes the
-     expired one below evidence: both are minted the same way, from the same
-     stack secret, so if this half were wrong the other half would be refused
-     for the wrong reason and this test would pass on a forgery. An empty body
-     stops the accepted request at the field check -- 400, not 403 -- which
-     proves the cookie authorised it without creating anybody. */
-  const live = await request.post("/api/auth/bootstrap/local", {
-    headers: sameOrigin(baseURL, claimCookieHeader(await mintClaimCookie(0))),
-    data: {},
-  });
-  expect(live.status(), "a live claim cookie was refused: the proof is not being minted correctly").toBe(400);
-  expect(await refusal(live)).toBe("invalid_request");
-
-  /* Now the same cookie, six minutes old. ADR-0022 §2 gives it five, on the
-     reasoning that the operator has just clicked the link and is at the
-     keyboard. */
-  const staleCookie = claimCookieHeader(await mintClaimCookie(CLAIM_TTL_SECONDS + 60));
-  const stale = sameOrigin(baseURL, staleCookie);
-
-  const created = await request.post("/api/auth/bootstrap/local", { headers: stale, data: WOULD_BE_ADMIN });
-  expect(created.status()).toBe(403);
-  expect(await refusal(created)).toBe("bootstrap_required");
-
-  /* Expired is not a state of its own: it is refused with the same code, and
-     on the same routes, as never having claimed at all. */
-  const providerStart = await request.get("/api/auth/login?returnTo=%2F", { headers: staleCookie, maxRedirects: 0 });
-  expect(providerStart.status()).toBe(403);
-  expect(await refusal(providerStart)).toBe("bootstrap_required");
-
-  const after = await availability(request);
-  expect(after.claimed).toBe(false);
-  expect(after.methods.localAccounts).toBe(false);
-});
+/* #1612: "without the code nobody reaches the provider or creates a user" and
+   "a claim cookie past its five minutes buys nothing" moved to
+   tests/integration/bootstrap.test.ts (ADR-0039): they are status codes at the
+   engine's routes, which need no browser and no stack. */
 
 test("the code the container printed never leaves its own log", async ({ baseURL, request }) => {
   const log = stackLog();

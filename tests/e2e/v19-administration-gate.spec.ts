@@ -14,8 +14,10 @@ resetDatabaseBetweenSpecFiles();
 /**
  * Administration is for the instance administrator (#1440). An ordinary member
  * is not offered it in the account menu (the desk's card or the phone's
- * hatch), is not served the page (404, before any render), and is refused the
- * instance-wide reads behind it (403). The administrator keeps all of it.
+ * hatch); the administrator keeps all of it. That the member is not served the
+ * page (404, before any render) and is refused the instance-wide reads behind
+ * it (403) moved lower (#1612, ADR-0039): tests/unit/administration-page-gate.test.mjs
+ * and the "GET /api/%s (#1440)" cases of tests/integration/authorization-matrix.test.ts.
  * Run once per Playwright project (desktop-chromium, mobile-chromium).
  */
 
@@ -69,7 +71,7 @@ async function signInAs(page: Page, account: string) {
   await settleArrival(page);
 }
 
-test("an ordinary member is not offered Administration, is refused the page and its reads", async ({ page, browser, isMobile }) => {
+test("an ordinary member is not offered Administration in the settings account menu", async ({ page, browser, isMobile }) => {
   test.setTimeout(120_000);
   await claimInstanceAsAdministrator(browser);
   await signInAs(page, workerAccount("member"));
@@ -81,15 +83,6 @@ test("an ordinary member is not offered Administration, is refused the page and 
   /* The menu is open and drawn (About is every member's), then the absence means something. */
   await expect(menu.getByRole("link", { name: "About" })).toBeVisible();
   await expect(menu.getByRole("link", { name: "Administration" })).toHaveCount(0);
-
-  const response = await page.goto("/administration");
-  expect(response?.status()).toBe(404);
-  await expect(page).not.toHaveTitle("Orbit — administration");
-  await expect(page.getByRole("heading", { level: 1, name: "Administration" })).toHaveCount(0);
-  await expect(page.getByText("collection domain")).toHaveCount(0);
-
-  const mailbox = await page.request.get("/api/admin/mailbox");
-  expect(mailbox.status()).toBe(403);
 });
 
 test("the instance administrator is offered Administration and the page renders", async ({ page, isMobile }) => {

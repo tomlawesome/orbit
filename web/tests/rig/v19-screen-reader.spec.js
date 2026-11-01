@@ -197,7 +197,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
   });
 
   test("/household/[id]", async ({ page }, testInfo) => {
-    await page.goto(`${APP}/household/hh-harlow-1`, { waitUntil: "load" });
+    await signedIn("/household/hh-harlow-1", "any-dialect")(page);
     await expect(page.getByRole("heading", { name: "Harlow Home" })).toBeVisible();
     await walkScreen(page, testInfo, "household-id");
   });
@@ -229,7 +229,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
   });
 
   test("/administration", async ({ page }, testInfo) => {
-    await page.goto(`${APP}/administration`, { waitUntil: "load" });
+    await signedIn("/administration", "any-dialect")(page);
     await expect(page.getByRole("heading", { name: "Administration" })).toBeVisible();
     await walkScreen(page, testInfo, "administration");
     await expect(page.locator(".station-backdrop")).toHaveAttribute("aria-hidden", "true");
@@ -305,9 +305,9 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
    */
   test("sign-out screen", async ({ page }, testInfo) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
-    let revoked = false;
+    let revoked = 0;
     await page.route("**/api/auth/logout", (route) => {
-      revoked = true;
+      revoked += 1;
       return route.fulfill({ json: { redirectTo: null } });
     });
     await page.route("**/api/auth/session", (route) =>
@@ -324,8 +324,12 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
       await page.locator("button.orb").click();
       await page.locator(".account .signout").click();
     }
-    await expect(page).toHaveURL(/\/logout$/);
+    /* the descent plays before /logout (the stack suite allowed 30 s; the recorded flake was this wait,
+       #1637). The test's own limit sits above the wait so a hang fails here, on the wait. */
+    test.setTimeout(60_000);
+    await expect(page).toHaveURL(/\/logout$/, { timeout: 30_000 });
     await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible();
+    expect(revoked, "the sign-out control sent the logout request, once").toBe(1);
 
     await walkScreen(page, testInfo, "sign-out");
     await expect(page.locator(".signin-stage")).toHaveAttribute("aria-hidden", "true");

@@ -4,6 +4,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { getDb } from "@/db";
 import { auditLog, externalIdentities, instanceAuthority, userPreferences, users } from "@/db/schema";
 import {
+  CLAIM_COOKIE_TTL_SECONDS,
+  CLAIM_PROOF_AUDIENCE,
   generateClaim,
   hasActiveClaim,
   printClaimNotice,
@@ -11,6 +13,7 @@ import {
 } from "@/lib/auth/bootstrap";
 import { provisionIdentity } from "@/lib/auth/provision";
 import type { VerifiedIdentity } from "@/lib/auth/oidc";
+import { sealProof } from "@/lib/auth/crypto";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { accountAddressColumns, cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute } from "./support/request-event";
@@ -26,6 +29,7 @@ resetAuthConfigForTests();
 
 const { GET: startLogin } = await loadRoute("auth/login");
 const { POST: claimInstance } = await loadRoute("auth/bootstrap/claim");
+const { POST: createFirstAdministrator } = await loadRoute("auth/bootstrap/local");
 const { GET: readAvailability } = await loadRoute("auth/availability");
 
 const ISSUER = "https://oidc.invalid.example";
@@ -55,6 +59,45 @@ async function claimRequest(claim: string, cookie?: string): Promise<Response> {
     },
     body: JSON.stringify({ claim }),
   });
+}
+
+/** The first administrator a stranger would create, had the claim let them. */
+const WOULD_BE_ADMIN = {
+  email: "intruder@bootstrap.invalid",
+  displayName: "Uninvited",
+  password: "bootstrap-never-created-this",
+};
+
+async function createFirstAdministratorRequest(body: unknown, cookie?: string): Promise<Response> {
+  return callRoute(createFirstAdministrator, {
+    url: `${ORIGIN}/api/auth/bootstrap/local`,
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      origin: ORIGIN,
+      "sec-fetch-site": "same-origin",
+      ...(cookie ? { cookie } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * A claim cookie as the claim route would have minted it, sealed by the
+ * application's own `sealProof` with the clock moved back `ageSeconds`: 0 is
+ * one issued this instant, 360 one issued six minutes ago, a minute past its
+ * five (ADR-0022 §2). Six rather than five and a bit, because `openProof`
+ * allows five seconds of clock tolerance.
+ */
+async function claimCookieAged(ageSeconds: number): Promise<string> {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(Date.now() - ageSeconds * 1000);
+    const sealed = await sealProof({ claim: true }, CLAIM_PROOF_AUDIENCE, CLAIM_COOKIE_TTL_SECONDS, getAuthConfig());
+    return `orbit-claim=${sealed}`;
+  } finally {
+    vi.useRealTimers();
+  }
 }
 
 async function errorCode(response: Response): Promise<string> {
@@ -110,6 +153,8 @@ describe("an unclaimed instance (ADR-0022)", () => {
     const response = await callRoute(startLogin, { url: `${ORIGIN}/api/auth/login` });
     expect(response.status).toBe(403);
     expect(await errorCode(response)).toBe("bootstrap_required");
+    // Nothing about the provider leaks out of a refusal, not even where it lives.
+    expect(response.headers.get("location")).toBeNull();
     expect(await countUsers()).toBe(before);
 
     // The engine refuses the same thing from underneath the route, so a
@@ -175,6 +220,33 @@ describe("an unclaimed instance (ADR-0022)", () => {
     });
     expect(response.status).toBe(403);
     expect(await errorCode(response)).toBe("bootstrap_required");
+  });
+
+  it("buys nothing with a claim cookie past its five minutes, at either door", async () => {
+    /* A live cookie first, and it has to be ACCEPTED. That is what makes the
+       expired one below evidence: both are minted the same way, so if this
+       half were wrong the other half would be refused for the wrong reason.
+       An empty body stops the accepted request at the field check -- 400, not
+       403 -- which proves the cookie authorised it without creating anybody. */
+    const live = await createFirstAdministratorRequest({}, await claimCookieAged(0));
+    expect(live.status, "a live claim cookie was refused: the proof is not being minted correctly").toBe(400);
+    expect(await errorCode(live)).toBe("invalid_request");
+
+    const before = await countUsers();
+    const stale = await claimCookieAged(CLAIM_COOKIE_TTL_SECONDS + 60);
+
+    const created = await createFirstAdministratorRequest(WOULD_BE_ADMIN, stale);
+    expect(created.status).toBe(403);
+    expect(await errorCode(created)).toBe("bootstrap_required");
+
+    // Expired is not a state of its own: the provider door refuses it with the same code as never having claimed.
+    const providerStart = await callRoute(startLogin, { url: `${ORIGIN}/api/auth/login`, headers: { cookie: stale } });
+    expect(providerStart.status).toBe(403);
+    expect(await errorCode(providerStart)).toBe("bootstrap_required");
+    expect(providerStart.headers.get("location")).toBeNull();
+
+    expect(await countUsers()).toBe(before);
+    expect(await getDb().select({ id: instanceAuthority.primaryUserId }).from(instanceAuthority)).toEqual([]);
   });
 
   it("reports itself unclaimed to the signed-out door, and claimed once seated", async () => {

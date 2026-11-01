@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
-import { createPageBuilder } from "./happy-page-mount-lib.mjs";
+import { createPageLoader } from "../support/svelte-page.mjs";
 
 /*
  * #1440: the desk account menu offered "Administration" to every reader. It
@@ -27,7 +27,7 @@ vi.mock("$lib/tour/watch.js", () => ({ watchTour: () => () => {} }));
 vi.mock("orbit/server/documents/tika", () => ({ documentReadingEnabled: () => false }));
 
 /** @type {any} */ (globalThis).__orbitPage = { url: new URL("http://localhost/settings"), params: {}, data: {}, state: {} };
-const page = createPageBuilder("desk-menu", {
+const page = createPageLoader("desk-menu", {
   stubs: {
     "$app/state": "export const page = globalThis.__orbitPage;\n",
     "lib/flight/Leave.svelte": "export default function Leave() {}\n",
@@ -35,8 +35,8 @@ const page = createPageBuilder("desk-menu", {
     "lib/pocket/Sheet.svelte": "export default function Sheet() {}\n",
   },
 });
-afterEach(() => page.unmountAll());
-afterAll(() => { page.dispose(); delete (/** @type {any} */ (globalThis)).__orbitPage; });
+afterEach(() => page.unmount());
+afterAll(() => { page.teardown(); delete (/** @type {any} */ (globalThis)).__orbitPage; });
 
 /**
  * The desk menu of Chrome.svelte on the page named by `current`, the layout's `isAdmin` as given.

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
-import { createPageBuilder } from "./happy-page-mount-lib.mjs";
+import { createPageLoader } from "../support/svelte-page.mjs";
 
 /*
  * #1405: the screen a member sees when Orbit holds no usable encryption key.
@@ -22,15 +22,15 @@ import { createPageBuilder } from "./happy-page-mount-lib.mjs";
 
 vi.stubEnv("ORBIT_FIXTURES", "1");
 
-const page = createPageBuilder("maintenance-key", {
-  url: "http://localhost/maintenance?kind=key",
+const page = createPageLoader("maintenance-key", {
+  page: { url: "http://localhost/maintenance?kind=key" },
   stubs: {
     "lib/Grain.svelte": "export default function Grain() {}\n",
     "./sky.js": "export const mountTotalitySky = () => () => {};\n",
   },
 });
-afterEach(() => page.unmountAll());
-afterAll(() => { page.dispose(); vi.unstubAllEnvs(); });
+afterEach(() => page.unmount());
+afterAll(() => { page.teardown(); vi.unstubAllEnvs(); });
 
 /** @param {string} text */
 const straight = (text) => text.replace(/[‘’]/gu, "'").replace(/\s+/gu, " ").trim();
