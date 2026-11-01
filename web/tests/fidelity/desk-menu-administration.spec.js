@@ -11,8 +11,10 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  * nobody is an administrator: the menu must still offer the ordinary entries
  * and must not offer Administration.
  *
- * /home draws its own menu (a <nav> inside #account) rather than Chrome's, so
- * it is checked beside /settings and /inbox, for the member and for the
+ * /settings and /inbox draw Chrome's menu: which entries it lists is markup,
+ * proven in tests/unit/desk-menu-administration.test.mjs (ADR-0039, #1613).
+ * /home draws its own menu (a <nav> inside #account) in a page that cannot be
+ * mounted outside a browser, so it stays here, for the member and for the
  * administrator.
  */
 const DESK = { width: 1600, height: 1000 };
@@ -43,7 +45,7 @@ async function openDeskMenu(page) {
   return page.locator("#account nav");
 }
 
-for (const route of ["/settings", "/inbox", "/home"]) {
+for (const route of ["/home"]) {
   test(`the desk account menu on ${route} offers no Administration to a non-administrator`, async ({ page }) => {
     await page.setViewportSize(DESK);
     await page.goto(`${APP}${route}`, { waitUntil: "load" });
