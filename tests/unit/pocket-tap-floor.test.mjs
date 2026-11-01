@@ -37,6 +37,17 @@ describe("the pocket keeps the 44px tap floor (static read of the kit and the po
     ]) expect(files).toContain(wanted);
   });
 
+  it("reads the components the pocket pages render, followed through their imports", () => {
+    const files = pocketFiles();
+    for (const wanted of [
+      "routes/household/[id]/PocketArchive.svelte", "routes/household/[id]/PickSheet.svelte", /* a relative import */
+      "lib/Mark.svelte", "lib/HouseholdClosed.svelte", /* a $lib/ import */
+    ]) expect(files).toContain(wanted);
+    /* The desk screens are not the pocket's: nothing imports them from a pocket page. */
+    expect(files).not.toContain("routes/household/[id]/+page.svelte");
+    expect(files).not.toContain("routes/household/[id]/DeskArchive.svelte");
+  });
+
   it("--p-hit is 44px", () => {
     expect(tokensOf(sources).get("--p-hit")).toBe(`${FLOOR}px`);
   });
@@ -44,6 +55,20 @@ describe("the pocket keeps the 44px tap floor (static read of the kit and the po
   it("no pocket control is sized under the floor, and every one has a rule that sizes it", () => {
     const problems = tapFloorProblems(sources);
     expect(problems, problems.join("\n")).toEqual([]);
+  });
+
+  it("catches a 30px literal on a control in a component a pocket page imports", () => {
+    const path = "routes/household/[id]/PocketArchive.svelte";
+    const mutated = sources.map((s) => (s.path === path ? { path, text: s.text.replace("<style>", "<style>\n  .act-accent{min-height:30px}") } : s));
+    expect(mutated.find((s) => s.path === path)?.text).toContain("min-height:30px");
+    expect(tapFloorProblems(mutated)).toEqual([expect.stringMatching(/^routes\/household\/\[id\]\/PocketArchive\.svelte:\d+: \.act-accent sets min-height:30px/u)]);
+  });
+
+  it("reports a size set through a local custom property it cannot resolve", () => {
+    const path = "routes/settings/pocket.svelte";
+    const mutated = sources.map((s) => (s.path === path
+      ? { path, text: s.text.replace("<style>", "<style>\n  .st-watch{--ww:20px;width:var(--ww);min-height:var(--p-hit)}") } : s));
+    expect(tapFloorProblems(mutated)).toEqual([expect.stringMatching(/^routes\/settings\/pocket\.svelte:\d+: \.st-watch sets width:var\(--ww\): size not resolvable/u)]);
   });
 
   it("every listed exception still names something real", () => {
@@ -102,6 +127,13 @@ describe("the static tap-floor check, on small sources", () => {
     "min-height:max(var(--p-hit), 3rem)", "height:auto", "width:calc(100% - 8px)", "min-height:3rem",
   ])("accepts %s", (decl) => {
     expect(run(page('<button class="p-pill go">Go</button>', `.go{${decl}}`))).toEqual([]);
+  });
+
+  it("fails a size it cannot resolve (an unknown custom property), but not a percentage or auto", () => {
+    const problems = run(page('<button class="p-pill go">Go</button>', ".go{--w:20px;width:var(--w)}"));
+    expect(problems).toEqual([expect.stringMatching(/^routes\/demo\/pocket\.svelte:3: \.go sets width:var\(--w\): size not resolvable/u)]);
+    expect(run(page('<button class="p-pill go">Go</button>', ".go{min-width:var(--w, 30px)}"))).toHaveLength(1);
+    expect(run(page('<button class="p-pill go">Go</button>', ".go{width:var(--p-hit);height:auto;min-width:50%}"))).toEqual([]);
   });
 
   it("fails a small size inside a media query or a state rule too", () => {
