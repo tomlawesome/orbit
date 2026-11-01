@@ -2501,8 +2501,7 @@ export async function readRelay() {
   );
   const relay = body.relay ?? {};
   return {
-    /* No address is a real answer, not a gap: mail-in may be off, and an
-       instance admin has no private mailbox at all. */
+    /* No address is a real answer, not a gap: mail-in may be off. */
     address: relay.address ?? NO_ADDRESS,
     status: relay.listening ?? UNAVAILABLE_RELAY.status,
     lastReceived:
