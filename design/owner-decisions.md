@@ -1815,3 +1815,19 @@ is" (2026-08-13).
   means and what to do, in plain words (owner, same day: "for our setup
   tests to try and figure out what the exact error is, and communicate
   that clearly to the user").
+
+## 47. An administrator is a member too: the relay is theirs as well (owner, 2026-11-01)
+
+Seen on a live install, where the owner's own administrator account had no
+relay: **"Yeah that's a critical bug. Most installs will have one admin and
+one user, in reality."** and **"The admin will be one of the key actual
+users."** Overrules the rule, kept since mail-in's first slices, that an
+instance administrator has no private mailbox.
+
+- An administrator gets a relay address, a sending-address check and a
+  review queue exactly like any member. Reviewing and filing still need a
+  real household membership, as for everyone.
+- Being an administrator gives no sight of anyone else's mail: each queue
+  stays its owner's alone.
+- Critical: on most installs the one administrator is the main user, so
+  without this nobody can use mail-in. #1632.
