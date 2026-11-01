@@ -1031,9 +1031,14 @@ export const DOOR_STATES = [
   { name: "/ (an invited reader's landing, local-only)", slug: "arrival", state: "invited-landing-local-only",
     /* The pocket-measure gate walks every door state. The arrival's own frame
        has never been measured against the pocket floors (no other arrival state
-       is in this list), and it draws text under them: the "create" star, the
-       sky's system labels (9.5px) and the "systems discovered" count (11.5px).
-       Recorded as it measures, not fixed here: that is the arrival's design. */
+       is in this list), and it draws text under them. Measured 2026-11-01 with
+       this mark removed, at 390, 360, 390x664 and 360x640 alike: the "create"
+       star's label at 10px, the sky's system labels ("GRAN'S FLAT", "HARLOW
+       HOME") at 9.5px, and the "systems" count and its line "systems discovered
+       in this universe" at 11.5px. Recorded as it measures, not fixed here: that
+       is the arrival's design, and it is reported to the owner, not filed. The
+       state stays in the gate as an expected failure, so the day the arrival is
+       fixed this test goes green and the mark has to come off. */
     defect: { "*": "the arrival's frame was never measured: star and sky labels under the pocket text floors" },
     reach: async (page) => {
     await doorAnswers(page, { availability: LOCAL_DOOR, signedOut: false });
