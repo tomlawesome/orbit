@@ -56,6 +56,10 @@ set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "${repo_root}"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_root}/scripts/release-metadata-patterns.sh"
+# shellcheck source=scripts/ci/lib-digest.sh
+source "${repo_root}/scripts/ci/lib-digest.sh"
 
 fail() { printf 'publish-channel: %s\n' "$1" >&2; exit 1; }
 
@@ -82,7 +86,7 @@ digest="$(node -e '
   const doc = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
   process.stdout.write(typeof doc.imageDigest === "string" ? doc.imageDigest : "");
 ' -- "$evidence_file")"
-[[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+[[ "$digest" =~ $ORBIT_DIGEST_PATTERN ]] ||
   fail "the evidence file names no immutable manifest digest (got ${digest:-<nothing>})"
 
 pinned="${CI_REGISTRY_IMAGE}@${digest}"
@@ -144,8 +148,7 @@ docker buildx imagetools create --prefer-index=false --tag "$channel_reference" 
 # scripts/ci/promote-stable.sh, for the same mawk and SIGPIPE reasons.
 resolved="$(
   docker buildx imagetools inspect "$channel_reference" 2> /dev/null |
-    awk '$1 == "Digest:" && length($2) == 71 && $2 ~ /^sha256:[0-9a-f]+$/ && !found { digest = $2; found = 1 }
-         END { if (found) print digest }'
+    first_inspect_digest "$ORBIT_DIGEST_AWK_PATTERN"
 )"
 [[ "$resolved" == "$digest" ]] ||
   fail "${channel_reference} did not retain the validated digest (resolves to ${resolved:-<nothing>}, expected ${digest})"

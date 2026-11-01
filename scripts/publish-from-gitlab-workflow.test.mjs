@@ -166,7 +166,8 @@ describe("gitlab-await-tested-image.sh", () => {
     expect(awaitScript).toContain('[[ "$recorded_commit" == "$ORBIT_COMMIT" ]]');
     expect(awaitScript).toContain('[[ "$recorded_ref" == "$ORBIT_REF" ]]');
     expect(awaitScript).toContain('[[ "$recorded_pipeline" == "$pipeline_id" ]]');
-    expect(awaitScript).toContain('[[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]');
+    // The shared name is anchored (^sha256:<64 hex>$) in release-metadata-patterns.sh (#1363).
+    expect(awaitScript).toContain('[[ "$digest" =~ $ORBIT_DIGEST_PATTERN ]]');
     expect(awaitScript).toContain('[[ "$source_reference" == "${GITLAB_REGISTRY}/"*"@${digest}" ]]');
     expect(awaitScript).toContain("7 * 24 * 3600");
   });
@@ -396,6 +397,7 @@ describe("gitlab-record-tested-image.sh", () => {
     mkdirSync(join(root, "scripts", "ci"), { recursive: true });
     const script = join(root, "scripts", "ci", "gitlab-record-tested-image.sh");
     copyFileSync(new URL("./ci/gitlab-record-tested-image.sh", import.meta.url), script);
+    copyFileSync(new URL("./release-metadata-patterns.sh", import.meta.url), join(root, "scripts", "release-metadata-patterns.sh"));
     const result = spawnSync("bash", [script, ...args], { cwd: root, env, encoding: "utf8" });
     return { ...result, output: join(root, ".orbit-supply-chain", "gitlab-tested-image.json") };
   };

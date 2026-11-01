@@ -50,6 +50,9 @@ set -Eeuo pipefail
 
 fail() { printf 'gitlab-await-tested-image: %s\n' "$1" >&2; exit 1; }
 
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../release-metadata-patterns.sh"
+
 : "${GITLAB_API_URL:?the GitLab API URL is required}"
 : "${GITLAB_PROJECT_ID:?the GitLab project id is required}"
 : "${GITLAB_READ_TOKEN:?a read-only GitLab token is required}"
@@ -186,7 +189,7 @@ recorded_at="$(field recordedAt)"
 [[ "$recorded_commit" == "$ORBIT_COMMIT" ]] || fail "evidence is for commit ${recorded_commit:-<missing>}, not ${ORBIT_COMMIT}"
 [[ "$recorded_ref" == "$ORBIT_REF" ]] || fail "evidence is for ref ${recorded_ref:-<missing>}, not ${ORBIT_REF}"
 [[ "$recorded_pipeline" == "$pipeline_id" ]] || fail "evidence names pipeline ${recorded_pipeline:-<missing>}, not ${pipeline_id}"
-[[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "evidence digest is not an immutable manifest digest: ${digest:-<missing>}"
+[[ "$digest" =~ $ORBIT_DIGEST_PATTERN ]] || fail "evidence digest is not an immutable manifest digest: ${digest:-<missing>}"
 [[ "$source_reference" == "${GITLAB_REGISTRY}/"*"@${digest}" ]] ||
   fail "evidence image reference ${source_reference:-<missing>} is not ${GITLAB_REGISTRY}/...@${digest}"
 [[ "$recorded_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] ||

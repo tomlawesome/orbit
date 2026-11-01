@@ -53,6 +53,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { ORBIT_DIGEST_PATTERN, ORBIT_DIGEST_TOKEN_PATTERN } from "./release-metadata-patterns.mjs";
 import { validateSupplyChainPolicy } from "./supply-chain-policy.mjs";
 
 const REPO_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
@@ -62,7 +63,6 @@ const DEFAULT_POLICY_PATH = ".github/supply-chain-policy.json";
 // its own pipeline rather than from re-resolving a registry tag here.
 export const BASE_IMAGE_TAG_PREFIX = "ghcr.io/tomlawesome/orbit-base-image";
 
-const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
 const HEX = "0123456789abcdef";
 
 // Long enough for a slow registry, short enough that a wedged call fails the
@@ -89,7 +89,7 @@ function escapeForRegExp(value) {
 }
 
 function pinPattern(tag) {
-  return new RegExp(`${escapeForRegExp(tag)}@sha256:[0-9a-f]{64}`, "u");
+  return new RegExp(`${escapeForRegExp(tag)}@${ORBIT_DIGEST_TOKEN_PATTERN.source}`, "u");
 }
 
 function digestOf(reference) {
@@ -114,7 +114,7 @@ export function sidecarEntries(policy, only) {
  * memory, to prove the check fires on a stale pin rather than assuming it.
  */
 export function rotateDigest(digest) {
-  if (!DIGEST_PATTERN.test(digest)) {
+  if (!ORBIT_DIGEST_PATTERN.test(digest)) {
     throw new Error(`Cannot rotate '${digest}': it is not a sha256 digest.`);
   }
   const head = digest.slice(0, -8);

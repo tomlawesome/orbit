@@ -54,6 +54,8 @@
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_root}/scripts/release-metadata-patterns.sh"
 branch="preview"
 channel="preview"
 keep_mode=0
@@ -260,7 +262,7 @@ JSON
 # --- the run ---------------------------------------------------------------
 
 expected_digest="$(registry_digest)"
-[[ "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+[[ "$expected_digest" =~ $ORBIT_DIGEST_PATTERN ]] ||
   fail "the registry did not return a digest for ${registry}/${repository}:${channel}"
 note "registry serves ${channel} as ${expected_digest}"
 # Captured before any --red corruption below: #1151 O1-F2's manifest (built

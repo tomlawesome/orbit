@@ -86,6 +86,8 @@
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_root}/scripts/release-metadata-patterns.sh"
 negative_only=0 red_mode=0 keep_mode=0 lifecycle_mode=0
 for arg in "$@"; do
   case "$arg" in
@@ -644,7 +646,7 @@ prepare_image() {
   # (#1238). Not `| head -1` either (issue #809): head exiting early would
   # SIGPIPE grep into a 141. sed reads to the end and prints the first.
   digest="$(docker inspect --format '{{index .RepoDigests}}' "127.0.0.1:$registry_port/$repository:latest" |
-    grep -oE 'sha256:[0-9a-f]{64}' | sed -n '1p')"
+    grep -oE "$ORBIT_DIGEST_TOKEN_PATTERN" | sed -n '1p')"
   [[ -n "$digest" ]] || fail "could not capture the pushed digest"
   pushed_digest="$digest"
 
