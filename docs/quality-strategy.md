@@ -42,7 +42,7 @@ remove the boundary the test claims to prove.
 | Adapter contract | Prove bounded behaviour at replaceable external boundaries | OIDC, ClamAV, Tika, SMTP, IMAP, Web Push, local storage | before enabling that adapter |
 | Browser/accessibility | Prove critical user journeys and rendered privacy | OIDC sign-in, households, items, documents, admin, mobile, keyboard, axe | exact production image |
 | Container/operational | Prove runtime identity, migrations, health, secrets, restart, backup/restore and degraded dependencies | Compose topology and scripts | exact production image |
-| Representative manual | Prove operator and provider realities that cannot be safely automated | real OIDC, update, SMTP/push where enabled, protected-preview deployment and restore | preview feedback or release acceptance |
+| Representative manual | Prove operator and provider realities that cannot be safely automated | update, SMTP/push where enabled, protected-preview deployment and restore | preview feedback or release acceptance |
 
 Unit tests may mock I/O. Integration tests use real PostgreSQL and isolated
 temporary storage. Contract tests may use disposable protocol implementations,

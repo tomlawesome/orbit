@@ -93,7 +93,8 @@ needs.
 ### 3. Build: `build_launcher`, GitHub mirror, verified by commit, two platforms
 
 - New job `build_launcher` (stage `acceptance`, runs on every ref the compat
-  job runs on). It clones `https://github.com/tomlawesome/orbit-launcher.git`
+  job runs on; since #1608 it runs on `preview` and `hotfix/*`, and
+  `build_launcher_branch`, the same build, on the compat job's other refs). It clones `https://github.com/tomlawesome/orbit-launcher.git`
   as the compat job does today, checks out `pin.tag`, and refuses unless
   `git rev-parse HEAD` equals `pin.commit`. The commit check is what makes
   the source trustworthy, so the public mirror is fine and needs no token or

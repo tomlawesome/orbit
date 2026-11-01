@@ -1299,7 +1299,7 @@ fast:
       # there is nothing to serve.
       - web/build/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: on_success
 
 # The other half: the suites that need a real `docker` binary, on the
@@ -1351,7 +1351,7 @@ fast_docker:
     name: orbit-fast-docker
     paths:
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: on_success
 
 # Blocking, like the old workflow's job: Orbit pins its own base image, so a stale
@@ -2608,7 +2608,7 @@ smoke:
     paths:
       - playwright-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # #1183: the same suite on Firefox -- desktop-firefox and maintenance-firefox
@@ -2724,7 +2724,7 @@ smoke_firefox:
     paths:
       - playwright-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # #1192: WebKit has no Chromium `--host-resolver-rules` switch and no
@@ -2871,7 +2871,7 @@ smoke_webkit:
     paths:
       - playwright-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # #1192: the phone half of smoke_webkit above -- see its comment for why
@@ -2987,7 +2987,7 @@ smoke_webkit_mobile:
     paths:
       - playwright-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # The second acceptance profile (#916, M7): `smoke` above against an Orbit
@@ -3081,7 +3081,7 @@ smoke_local_only:
     paths:
       - playwright-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # The rest of the retired GitHub container validation steps, in their
@@ -3352,14 +3352,30 @@ repair_journeys:
 # that is the preview -> main promotion this job exists to gate -- exactly as
 # the retired GitHub workflow always ran on a pull request into `main`.
 #
-# Shared with build_launcher below (ADR-0031 #3: "runs on every ref the
-# compat job runs on"), because launcher_install_compat now `needs:` its
-# artifact (ADR-0031 #2) -- if the two rule sets could ever disagree, compat
-# could run on a ref build_launcher did not.
-.launcher_compat_rules: &launcher_compat_rules
+# Shared with the launcher builds below (ADR-0031 #3: "runs on every ref the
+# compat job runs on"), because launcher_install_compat now `needs:` their
+# archives (ADR-0031 #2) -- if the rule sets could ever disagree, compat
+# could run on a ref no build did.
+#
+# Split in two for #1608 (owner decision 91a): build_launcher's archives are
+# kept 90 days on the release branches and 14 days everywhere else, and a job
+# declares one expire_in. build_launcher runs on the release rules and keeps
+# its name, because gitlab-await-tested-image.sh and orbit-launcher's update
+# leg look its archives up by that name; build_launcher_branch runs on the
+# branch rules. launcher_install_compat runs on both lists, in this order, so
+# it still runs on exactly the refs one of the two builds does. GitLab
+# flattens a rules list nested by alias.
+.launcher_release_rules: &launcher_release_rules
   - *not_on_main_push
   - *not_scheduled
-  - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+  - if: $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+
+.launcher_branch_rules: &launcher_branch_rules
+  - *not_on_main_push
+  - *not_scheduled
+  - if: $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    when: never
+  - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "main"
   - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
   - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     changes:
@@ -3388,6 +3404,10 @@ repair_journeys:
   - when: manual
     allow_failure: true
 
+.launcher_compat_rules: &launcher_compat_rules
+  - *launcher_release_rules
+  - *launcher_branch_rules
+
 # ADR-0031 #3 (implementation slice 2): builds orbit-launcher from
 # launcher/pin.json's pinned tag and hands the two platform archives to
 # record_image, which folds their sha256 into the signed release manifest
@@ -3396,14 +3416,13 @@ repair_journeys:
 # (ADR-0031 #2). No .privileged_runner: this job only clones git and runs
 # `go build`, never a Docker daemon, so it runs on the shared lane the same
 # way `fast` does.
-build_launcher:
+.build_launcher:
   stage: acceptance
   image:
     name: $GOLANG_IMAGE
     pull_policy: if-not-present
   timeout: 10m
   needs: *needs_gated
-  rules: *launcher_compat_rules
   allow_failure: false
   script:
     - *reach_helpers
@@ -3414,8 +3433,22 @@ build_launcher:
     paths:
       - .orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz
       - .orbit-launcher-artifacts/orbit-launcher_linux_arm64.tar.gz
-    expire_in: 90 days
+    # build_launcher_branch keeps this; build_launcher raises it (#1608).
+    expire_in: 14 days
     when: on_success
+
+# The release branches' build: 90 days (#1608).
+build_launcher:
+  extends: .build_launcher
+  rules: *launcher_release_rules
+  artifacts:
+    expire_in: 90 days
+
+# Every other ref's build: 14 days, from .build_launcher (#1608). Same
+# script and lane check as build_launcher.
+build_launcher_branch:
+  extends: .build_launcher
+  rules: *launcher_branch_rules
 
 launcher_install_compat:
   stage: acceptance
@@ -3447,8 +3480,13 @@ launcher_install_compat:
     - job: fast_docker
       artifacts: false
       optional: true
+    # Exactly one of the two runs on any ref this job runs on (#1608).
     - job: build_launcher
       artifacts: true
+      optional: true
+    - job: build_launcher_branch
+      artifacts: true
+      optional: true
   variables:
     GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
     IMAGE_NAME: tomlawesome/orbit
@@ -3468,11 +3506,11 @@ launcher_install_compat:
   # main promotion gate -- still run unconditionally, same as the script's
   # own special case for a merge request into `main` did.
   #
-  # Shared with build_launcher (ADR-0031 #3: "runs on every ref the compat
-  # job runs on") via the .launcher_compat_rules anchor defined just above
-  # it, rather than duplicated here: launcher_install_compat now `needs:`
-  # build_launcher's artifact (ADR-0031 #2), so if the two rule sets could
-  # ever disagree, compat could run on a ref build_launcher did not.
+  # The two launcher builds' rules joined (ADR-0031 #3: "runs on every ref
+  # the compat job runs on"), through the .launcher_compat_rules anchor
+  # rather than duplicated here: launcher_install_compat now `needs:` the
+  # archives (ADR-0031 #2), so if the rule sets could ever disagree, compat
+  # could run on a ref no build did.
   rules: *launcher_compat_rules
   allow_failure: false
   script:
@@ -4776,8 +4814,9 @@ nightly_report:
     pull_policy: if-not-present
   timeout: 10m
   interruptible: false
-  # Reads the night's jobs with ORBIT_REUSE_TOKEN, which is scoped to this
-  # environment (the first nightly, 3069, got 401 without it).
+  # Every call the report step makes, the reads of the night's jobs as well as
+  # the filing, uses SIDECAR_ISSUE_TOKEN (scripts/ci/nightly-browsers.mjs,
+  # `report`); a 401 names it (#1588).
   environment:
     name: ci-read-tokens
     action: prepare

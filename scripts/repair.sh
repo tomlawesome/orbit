@@ -1980,14 +1980,27 @@ drop_compose_missing_finding() {
 # Sets $compose_drift_detail to the differing lines between the folder's
 # docker-compose.yml and the image's copy in $compose_image_tmp: at most 20,
 # each cut to 200 bytes, '<' for the folder's file and '>' for the image's.
-# A line that looks like it carries a credential (a keyword, or a URL with
-# user details before an '@') is hidden, not shown: an operator may have put
-# one inline, and this text reaches a terminal or log.
+# Deny by default (#1607): this text reaches a terminal or log, and an
+# operator may have put a credential inline under any name, so a keyword list
+# cannot be complete. Each line becomes the first of these that fits:
+#   1. a comment: '# (comment hidden)';
+#   2. an allow-listed structural key (image, restart, ...) or a bare
+#      block-opening key: shown in full, its value is never a secret;
+#   3. 'KEY: v' or 'KEY=v' (optionally '- ' and quotes): the key, then
+#      '(value hidden)'. 'KEY=' needs a non-'=' character after it so a bare
+#      base64 item ('- c2Vj==') is not mistaken for a key;
+#   4. anything else: '(line hidden)'.
+# Accepted residual: a bare secret shaped exactly word=rest cannot be told
+# from an environment assignment and shows its first word.
 describe_compose_drift() {
   local all
   all="$(diff -- "$compose_file" "$compose_image_tmp" 2>/dev/null | grep -E '^[<>] ' | cut -c1-200 |
-    sed -E -e '/(password|secret|token|passphrase|api[_-]?key|private[_-]?key)/I s/^(.).*/\1 (line hidden: it looks like a credential)/' \
-      -e '/:\/\/[^/@[:space:]]+@/ s/^(.).*/\1 (line hidden: it looks like a credential)/' || true)"
+    sed -E -e 's/^([<>] [[:space:]]*)#.*/\1# (comment hidden)/' -e t \
+      -e '/^[<>] [[:space:]]*(image|restart|mem_limit|container_name|pull_policy|read_only|init|user|cpus|name|profiles|stop_grace_period):/ b' \
+      -e '/^[<>] [[:space:]]*[A-Za-z_][A-Za-z0-9_.-]*:[[:space:]]*$/ b' \
+      -e 's/^([<>] [[:space:]]*(- )?"?[A-Za-z_][A-Za-z0-9_.-]*"?:)([[:space:]]|$).*/\1 (value hidden)/' -e t \
+      -e 's/^([<>] [[:space:]]*(- )?"?[A-Za-z_][A-Za-z0-9_]*=)[^=].*/\1 (value hidden)/' -e t \
+      -e 's/^(.).*/\1 (line hidden)/' || true)"
   compose_drift_detail="$(printf '%s\n' "$all" | head -n 20)"
   if [[ "$(printf '%s\n' "$all" | wc -l)" -gt 20 ]]; then
     compose_drift_detail+=$'\n(more differences not shown)'
