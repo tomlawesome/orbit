@@ -4,7 +4,7 @@ import { appErrorResponse } from "orbit/lib/app-error";
 import { parseWorkspaceCommand } from "orbit/lib/workspace";
 import { applyWorkspaceCommand, checkWorkspaceCommand } from "orbit/server/workspace-repository";
 
-import { WORKSPACE_FIXTURE } from "$lib/data/fixtures/workspace.js";
+import { WORKSPACE_FIXTURE, WORKSPACE_FIXTURE_TODAY } from "$lib/data/fixtures/workspace.js";
 import { write } from "$lib/server/api.js";
 
 const NO_STORE = { "cache-control": "no-store" };
@@ -49,7 +49,7 @@ export const POST = write(async (event, session) => {
 }, {
   fixture: async (event) => {
     const body = await event.request.json().catch(() => null);
-    if (!dryRunOf(body)) return json({ workspace: WORKSPACE_FIXTURE }, { headers: NO_STORE });
+    if (!dryRunOf(body)) return json({ workspace: WORKSPACE_FIXTURE, fixtureToday: WORKSPACE_FIXTURE_TODAY }, { headers: NO_STORE });
     return verdict(async () => {
       parseWorkspaceCommand(withoutDryRun(body));
     });
