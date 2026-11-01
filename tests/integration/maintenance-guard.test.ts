@@ -63,6 +63,7 @@ function reminderWrite(session: IntegrationSession, url = REMINDERS_URL): Promis
 async function expectMaintenanceBlocked(response: Response): Promise<void> {
   expect(response.status).toBe(503);
   expect(response.headers.get("Cache-Control")).toBe("no-store");
+  expect(response.headers.get("Content-Type")).toContain("application/json");
   await expect(response.json()).resolves.toEqual({ error: "maintenance_active" });
 }
 
