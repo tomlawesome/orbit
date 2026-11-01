@@ -21,7 +21,7 @@ Quoted from the brief. They are the same in all three files.
   drawn in inline SVG from the Harlow Home items. Same items, positions and
   sizes in every file.
 - Distance is logarithmic. For an item d days ahead,
-  `radius = 62 + (166 - 62) * ln(1 + d/tau) / ln(1 + D/tau)`, knee tau = 30
+  `radius = 62 + (166 - 62) * ln(1 + d/tau) / ln(1 + D/tau)`, close-up (τ) = 30
   days and horizon D = 730 days as the starting values; beyond D the planet
   sits on the rim.
 - Overdue items (d < 0) fall inward on the mirror curve toward the event
@@ -61,6 +61,8 @@ no importance field. Three high, two low and one not set is the brief's split;
 with seven items that leaves one normal, so "most normal" could not be met
 (see the decisions below). Overdue by due date: only Gutter clearing.
 
+G's panel has a "Demo items" switch (household only / plus far-off extras), off by default; the extras are invented for the scale question only, because seven items none beyond two years cannot show how far-off items crowd the rim. They are, in days from today and yearly cost: Window cleaner -3 d £180, Bike service -20 d £60, TV licence 2 d £170, Water softener salt 4 d £90, Home insurance 12 d £640, Car insurance 18 d £720, Gas safety certificate 45 d £95, Smoke alarm replacement 60 d £40, EICR electrical check 120 d £180, Driving licence (Sam) 200 d £14, Passport (Alex) 280 d £88, Boiler warranty 420 d £0, Roof guarantee 540 d £0, Mortgage fix ends 800 d £0, Passport (Sam) 1100 d £88, Will review 1500 d £250.
+
 ## The directions
 
 ### G, log tuner (`g-log-tuner.html`): #1464, #1462, #1461 together, interactive
@@ -83,7 +85,9 @@ when the warning date drives the position, so a planet inside its warning
 window is not painted as overdue.
 
 Deep links for reproducing a state: `?tau=14&labels=all`, `?mode=linear`,
-`?driver=warn`, `?D=365`, `?scene=phone`.
+`?driver=warn`, `?D=365`, `?scene=phone`, `?extras=on` (the demo items; with them
+on, planets that would touch are also nudged apart by angle, smallest shift first;
+`shots/g-desk-extras-tau10-d365.png`).
 
 ### H, importance as weight (`h-importance-weights.html`): #1463
 One hue family. High = the after-dark accent at full strength with a 2 px

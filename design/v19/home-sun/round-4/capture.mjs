@@ -22,6 +22,7 @@ const scenes = [
 const extras = [
   ['g-desk-warning-all', 'g-log-tuner.html',           'driver=warn&labels=all',    'desk', false],
   ['h-desk-reduced',     'h-importance-weights.html',  '',                          'desk', true],
+  ['g-desk-extras-tau10-d365', 'g-log-tuner.html',     'extras=on&tau=10&D=365&labels=near', 'desk', false],
 ];
 
 const size = { desk: { width: 1600, height: 1000 }, phone: { width: 390, height: 844 } };
