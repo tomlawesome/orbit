@@ -55,7 +55,7 @@ describe("the pocket keeps the 44px tap floor (static read of the kit and the po
   });
 
   /*
-   * Open findings of #1616, not fixed here (a size change is a product change):
+   * Open finding #1621, not fixed here (a size change is a product change):
    * the Calendar's "today" button is a 30px-high control in the phone's date
    * chooser (ChooserCard, home/pocket.svelte), and no pocket rule resizes it.
    * The first test lets only these through, so any other control still fails
@@ -72,7 +72,7 @@ describe("the pocket keeps the 44px tap floor (static read of the kit and the po
     expect(tapFloorProblems(sources).filter(open), "an open finding no longer reproduces: drop it from OPEN").toHaveLength(OPEN.length);
   });
 
-  it.fails("no pocket control is sized under the floor, with no open findings (#1616: Calendar today button, 30px)", () => {
+  it.fails("no pocket control is sized under the floor, with no open findings (#1621: Calendar today button, 30px)", () => {
     const problems = tapFloorProblems(sources);
     expect(problems, problems.join("\n")).toEqual([]);
   });
