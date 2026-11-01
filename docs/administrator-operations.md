@@ -519,9 +519,14 @@ To configure inbound mail:
    ```sh
    docker compose --env-file .env-orbit \
      -f docker-compose.yml -f docker-compose.mail.yml config --quiet
-   COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml \
-     bash scripts/deploy-container.sh --pull
+   docker compose --env-file .env-orbit \
+     -f docker-compose.yml -f docker-compose.mail.yml up -d
    ```
+
+   A plain `docker compose up -d`, or an Orbit update, starts without the
+   overlay (Orbit refuses settings it does not know in `.env-orbit`, so the
+   overlay cannot be recorded there). Run the `up -d` command above again
+   after each one.
 
 2. Sign in as an instance administrator, open **Administration → Mail
    machinery**, and enter the mailbox: host, port, account address, folder,
@@ -826,8 +831,10 @@ restart the exact deployed image:
    ```
 3. Restart the deployment:
    ```sh
-   bash scripts/deploy-container.sh --pull
+   docker compose --env-file .env-orbit up -d
    ```
+   If you run the mail overlay, add its `-f` flags as in the inbound mail
+   steps above.
 4. Confirm the container log says `encryption.key state=ready` with the key
    id you expected, that the locked page has gone, and on the administration
    screen that no "Encrypted details are locked" card remains. Nothing needs
@@ -884,9 +891,12 @@ rotation is undone).
    ```sh
    docker compose --env-file .env-orbit \
      -f docker-compose.yml -f docker-compose.kek-rotation.yml config --quiet
-   COMPOSE_FILE=docker-compose.yml:docker-compose.kek-rotation.yml \
-     bash scripts/deploy-container.sh --pull
+   docker compose --env-file .env-orbit \
+     -f docker-compose.yml -f docker-compose.kek-rotation.yml up -d
    ```
+   A plain `docker compose up -d`, or an Orbit update, starts without the
+   overlay, so run that `up -d` command again after each one until the
+   rotation is finished.
    After this restart Orbit holds both keys. Every existing row is still on
    the current key and reads exactly as before; a row the worker moves to the
    next key reads too. From this restart anything newly written (an uploaded
@@ -940,7 +950,7 @@ rotation is undone).
    the next key the current one and drop the overlay:
    ```sh
    mv .orbit-secrets/document-kek-next .orbit-secrets/document-kek
-   bash scripts/deploy-container.sh --pull
+   docker compose --env-file .env-orbit up -d
    ```
    Treat this step as a confirmation. Everything before it can be undone.
    This move overwrites the outgoing key, and after it that key is gone: no
@@ -1050,7 +1060,7 @@ tells you which one you are in:
   which no longer matches the database and would reintroduce the exact
   mismatch the rotation was fixing. Instead restart the deployment yourself:
   ```sh
-  bash scripts/deploy-container.sh --pull
+  docker compose --env-file .env-orbit up -d
   ```
   then re-run diagnosis to confirm it is healthy. repair.sh's own stderr
   output says which of these two states you are in; it never leaves you to
