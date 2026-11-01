@@ -34,6 +34,19 @@ const READ_PIECE_BYTES = 64 * 1024;
 const BASE64_PIECE_CHARACTERS = 4 * 65_536;
 /** Far deeper than any archive Orbit writes (4); bounds the reader's recursion. */
 const MAX_DEPTH = 64;
+/**
+ * Most JSON values (objects, arrays and scalars, located text included) the
+ * reader accepts. Parser resource limit, fail closed (X-R1). The reference
+ * archive (500 items, 120 due events each, 10 documents each) holds about
+ * 0.6 M, so this leaves headroom; at the cap the reader holds about 128 MiB.
+ */
+export const MAX_PAYLOAD_VALUES = 2_000_000;
+/**
+ * Most bytes of payload JSON outside located or sunk document text. The
+ * reference archive needs about 16 MiB of it. Bounds every string and the
+ * sum of many medium ones (O-R7).
+ */
+export const MAX_PAYLOAD_OTHER_BYTES = 64 * 1024 * 1024;
 
 /** Where a document's base64 sits in the payload file, and how many bytes it decodes to. */
 export class Base64Text {
@@ -44,6 +57,9 @@ export class Base64Text {
 export class PayloadSyntaxError extends Error {
   constructor() { super("The archive payload is not well-formed"); }
 }
+
+/** The payload is well-formed but past a reader budget (values or non-document bytes). */
+export class PayloadLimitError extends PayloadSyntaxError {}
 
 /** Bytes read in order: `read` fills `buffer` from its start as far as it can, and returns 0 at the end. */
 export interface ByteSource {
@@ -231,7 +247,7 @@ interface ReadPolicy {
   locates(place: string): boolean;
   /** A sink for a string at `place`, given the object it is a member of as read so far; null to keep the string. */
   sink(place: string, holder: Record<string, unknown> | null): Promise<Base64Sink> | null;
-  /** The most bytes read outside sunk strings, or Infinity. */
+  /** The most bytes read outside located or sunk text. */
   readonly maxOtherBytes: number;
 }
 
@@ -246,7 +262,7 @@ const PAYLOAD_POLICY: ReadPolicy = {
   element: (parent) => (parent === "documentBytes" ? "documentEntry" : "other"),
   locates: (place) => place === "contentBase64",
   sink: () => null,
-  maxOtherBytes: Infinity,
+  maxOtherBytes: MAX_PAYLOAD_OTHER_BYTES,
 };
 
 function isSpace(byte: number): boolean {
@@ -268,8 +284,10 @@ class PayloadReader {
   private start = 0;
   private end = 0;
   private index = 0;
-  /** Characters handed to sinks so far, which `maxOtherBytes` does not count. */
-  private sunk = 0;
+  /** Characters of located or sunk text so far, which `maxOtherBytes` does not count. */
+  private excluded = 0;
+  /** Values read so far, held to `MAX_PAYLOAD_VALUES`. */
+  private values = 0;
 
   constructor(private readonly source: ByteSource, private readonly policy: ReadPolicy) {}
 
@@ -282,7 +300,7 @@ class PayloadReader {
   /** Moves the window on once it is used up; false at the end of the source. */
   private async refill(): Promise<boolean> {
     this.start += this.end;
-    if (this.start - this.sunk > this.policy.maxOtherBytes) throw new PayloadSyntaxError();
+    if (this.start - this.excluded > this.policy.maxOtherBytes) throw new PayloadLimitError();
     this.index = 0;
     this.end = await this.source.read(this.buffer);
     return this.end > 0;
@@ -299,6 +317,7 @@ class PayloadReader {
   }
 
   private async value(depth: number, place: string, holder: Record<string, unknown> | null): Promise<unknown> {
+    if (++this.values > MAX_PAYLOAD_VALUES) throw new PayloadLimitError();
     const byte = await this.skipSpace();
     if (byte === OPEN_BRACE) return this.object(depth + 1, place);
     if (byte === OPEN_BRACKET) return this.array(depth + 1, place);
@@ -407,6 +426,7 @@ class PayloadReader {
     for (;;) {
       if (this.index >= this.end) {
         if (sink && this.index > segment) await this.handOn(sink, segment, this.index);
+        else if (!sink) this.excluded += this.index - segment;
         if (!(await this.refill())) throw new PayloadSyntaxError();
         segment = 0;
       }
@@ -422,12 +442,13 @@ class PayloadReader {
       if (this.index - 1 > segment) await this.handOn(sink, segment, this.index - 1);
       return sink.end();
     }
+    this.excluded += this.index - 1 - segment;
     const length = this.start + this.index - 1 - offset;
     return new Base64Text(offset, length, Math.floor(((length - padding) * 3) / 4));
   }
 
   private async handOn(sink: Base64Sink, from: number, to: number): Promise<void> {
-    this.sunk += to - from;
+    this.excluded += to - from;
     await sink.write(this.buffer.subarray(from, to));
   }
 }
