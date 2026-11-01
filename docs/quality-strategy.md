@@ -350,8 +350,9 @@ promotion and nightly) once that run measures under 10 minutes. Until then
 #1412 stands as written. The stack browser jobs run only at promotion and
 nightly, on Chromium desktop and phone plus a WebKit sliver of the sign-in
 journeys (entry, local sign-in, first-run door). Firefox and WebKit otherwise
-run the rig at promotion and nightly (answer 2a). Since ADR-0039 `fidelity` is
-the rig, not only the screens gate.
+run the rig at promotion and nightly (answer 2a). The `fidelity` job's runner
+carries the rig's journeys (`web/tests/rig/`) as well as the screens gate once
+the rig projects land (#1614).
 
 ### What runs where (ADR-0039)
 
