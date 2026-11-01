@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -233,5 +233,104 @@ describe("detect-processor-scope.sh on a push to dev", () => {
   it("requires the check when CI_COMMIT_BEFORE_SHA is empty", () => {
     weakenedEarlyPush();
     expect(push("")).toBe("true");
+  });
+});
+
+/*
+ * The stanza the `acceptance` job runs just before detect-processor-scope.sh
+ * (commits 20e259c3 and 9caae1cd, #1607): the job takes the project's default
+ * clone depth, which can stop short of the merge base or the pre-push tip, so
+ * it fetches that one commit. The script alone is tested above against a full
+ * history; this covers the job's own wiring, which nothing else did. It is read
+ * out of .gitlab-ci.yml (no YAML library in the repository) and run for real in
+ * bash against a `git` that records its arguments.
+ */
+describe("the acceptance job's fetch of the comparison base", () => {
+  const ci = readFileSync(new URL("../../.gitlab-ci.yml", import.meta.url), "utf8").split("\n");
+  const jobStart = ci.findIndex((line) => line === "acceptance:");
+  const jobEnd = ci.findIndex((line, i) => i > jobStart && /^[A-Za-z_.]/.test(line));
+  const job = ci.slice(jobStart, jobEnd === -1 ? undefined : jobEnd).filter((line) => !/^\s*#/.test(line));
+
+  // The script item (`    - |` block) holding the `git fetch`, de-indented, as GitLab hands it to the shell.
+  const stanza = () => {
+    const at = job.findIndex((line) => line.includes("git fetch"));
+    expect(at, "the acceptance job has a git fetch").toBeGreaterThan(0);
+    let from = at;
+    while (from > 0 && !/^ {4}- /.test(job[from])) from -= 1;
+    let to = at;
+    while (to + 1 < job.length && !/^ {4}- /.test(job[to + 1]) && !/^ {0,3}\S/.test(job[to + 1])) to += 1;
+    return job
+      .slice(from + 1, to + 1)
+      .map((line) => line.replace(/^ {6}/, ""))
+      .join("\n");
+  };
+
+  // Runs the stanza with a `git` that logs its arguments one call a line and exits `gitExit`.
+  function runStanza(env, gitExit = 0) {
+    const bin = mkdtempSync(join(tmpdir(), "orbit-scope-git-"));
+    const log = join(bin, "calls.log");
+    writeFileSync(join(bin, "git"), `#!/bin/bash\nprintf '%s\\n' "$*" >> "${log}"\nexit ${gitExit}\n`);
+    chmodSync(join(bin, "git"), 0o755);
+    const result = run("bash", ["-c", stanza()], { PATH: `${bin}:${process.env.PATH}`, ...env });
+    let calls = [];
+    try {
+      calls = readFileSync(log, "utf8").split("\n").filter(Boolean);
+    } catch {
+      // git was never called
+    }
+    return { result, calls };
+  }
+
+  const BASE = "a".repeat(40);
+  const BEFORE = "b".repeat(40);
+
+  it("exists in the acceptance job, before detect-processor-scope.sh", () => {
+    const text = job.join("\n");
+    expect(text).toContain("git fetch");
+    expect(text.indexOf("git fetch")).toBeLessThan(text.indexOf("scripts/ci/detect-processor-scope.sh"));
+  });
+
+  it("on a merge request fetches CI_MERGE_REQUEST_DIFF_BASE_SHA, one commit deep, from origin", () => {
+    const { result, calls } = runStanza({ CI_MERGE_REQUEST_DIFF_BASE_SHA: BASE });
+    expect(result.status, result.stderr).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatch(new RegExp(`^fetch .*--depth=1 origin ${BASE}$`));
+  });
+
+  it("on a push fetches CI_COMMIT_BEFORE_SHA, one commit deep, from origin", () => {
+    const { result, calls } = runStanza({ CI_COMMIT_BEFORE_SHA: BEFORE });
+    expect(result.status, result.stderr).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatch(new RegExp(`^fetch .*--depth=1 origin ${BEFORE}$`));
+  });
+
+  it("on a merge request, the merge-request base wins over a before-SHA", () => {
+    const { calls } = runStanza({ CI_MERGE_REQUEST_DIFF_BASE_SHA: BASE, CI_COMMIT_BEFORE_SHA: BEFORE });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain(BASE);
+  });
+
+  it.each([
+    ["no SHA at all", {}],
+    ["an empty before-SHA", { CI_COMMIT_BEFORE_SHA: "" }],
+    ["an empty merge-request base and an empty before-SHA", { CI_MERGE_REQUEST_DIFF_BASE_SHA: "", CI_COMMIT_BEFORE_SHA: "" }],
+    ["an all-zero before-SHA (a new branch)", { CI_COMMIT_BEFORE_SHA: ZERO_SHA }],
+    ["a short all-zero before-SHA", { CI_COMMIT_BEFORE_SHA: "00000000" }],
+  ])("skips the fetch for %s", (_what, env) => {
+    const { result, calls } = runStanza(env);
+    expect(result.status, result.stderr).toBe(0);
+    expect(calls).toEqual([]);
+  });
+
+  it.each([
+    ["merge request", { CI_MERGE_REQUEST_DIFF_BASE_SHA: BASE }],
+    ["push", { CI_COMMIT_BEFORE_SHA: BEFORE }],
+  ])("a failed fetch on a %s is not swallowed: the stanza fails, or says so, and no `|| true` hides it", (_what, env) => {
+    const { result } = runStanza(env, 1);
+    // The ruled design is to say so and let detect-processor-scope.sh answer "required", never to go quiet.
+    expect(result.status !== 0 || /not fetched/i.test(`${result.stdout}${result.stderr}`)).toBe(true);
+    for (const line of stanza().split("\n").filter((l) => l.includes("git fetch"))) {
+      expect(line).not.toMatch(/\|\|\s*(true|:)(\s|$)/);
+    }
   });
 });

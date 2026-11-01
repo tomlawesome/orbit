@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -119,6 +119,7 @@ let dumpHeader = "";
 let include = false;
 let fail = false;
 let failBody = false;
+let maxFilesize = null;
 // The token travels in a header file (curl -H @file), never in argv, so it
 // cannot show in a process listing.
 function takeHeader(h) {
@@ -139,6 +140,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === "-w" || a === "--write-out") writeOut = val();
   else if (a === "-D" || a === "--dump-header") dumpHeader = val();
   else if (a === "--url") url = val();
+  else if (a === "--max-filesize") maxFilesize = val();
   else if (a === "-i" || a === "--include") include = true;
   else if (a === "--fail") fail = true;
   else if (a === "--fail-with-body") { fail = true; failBody = true; }
@@ -190,7 +192,22 @@ if (u.origin !== api.origin || u.pathname.indexOf(api.pathname) !== 0) {
   const cfg = JSON.parse(fs.readFileSync(env.STUB_CONFIG, "utf8"));
   const path = u.pathname.slice(api.pathname.length);
   const page = u.searchParams.get("page") || "1";
-  route = cfg.routes[path === listing ? listing + "#page=" + page : path];
+  const key = path === listing ? listing + "#page=" + page : path;
+  route = cfg.routes[key];
+  if (route && Array.isArray(route.sequence)) {
+    // A route served as a sequence of responses: the nth request for the same
+    // key (this one is already in the log) gets the nth entry, the last one
+    // repeating once the sequence is spent.
+    const seen = fs.readFileSync(env.STUB_LOG, "utf8").split("\x1e").filter(Boolean).filter(function (rec) {
+      return rec.split("\x1f").some(function (arg) {
+        if (arg.indexOf(env.CI_API_V4_URL) !== 0) return false;
+        const other = new URL(arg);
+        const otherPath = other.pathname.slice(api.pathname.length);
+        return (otherPath === listing ? listing + "#page=" + (other.searchParams.get("page") || "1") : otherPath) === key;
+      });
+    }).length;
+    route = route.sequence[Math.min(seen, route.sequence.length) - 1];
+  }
   if (!route && path === listing && cfg.endless) {
     route = { headers: { "X-Next-Page": String(Number(page) + 1) }, body: JSON.stringify(cfg.endless) };
   }
@@ -199,6 +216,15 @@ if (u.origin !== api.origin || u.pathname.indexOf(api.pathname) !== 0) {
 
 const status = route.status || 200;
 const headers = Object.assign({ "Content-Type": "application/json" }, route.headers || {});
+// --max-filesize N[KMG]: an answer larger than the limit ends curl with exit 63.
+// A route marked oversize is larger than any limit, so a test need not know it.
+let limit = null;
+const sizeArg = maxFilesize === null ? null : /^(\d+)([KkMmGg]?)$/.exec(maxFilesize);
+if (sizeArg) limit = Number(sizeArg[1]) * ({ "": 1, k: 1024, m: 1048576, g: 1073741824 })[sizeArg[2].toLowerCase()];
+if (limit !== null && !route.transport && (route.oversize || Buffer.byteLength(route.body === undefined ? "" : route.body) > limit)) {
+  process.stderr.write("curl: (63) Maximum file size exceeded\n");
+  done(status, headers, 63);
+}
 if (route.transport) {
   process.stderr.write("curl: (" + route.transport + ") Failed to connect to the host\n");
   done(0, {}, route.transport);
@@ -225,7 +251,9 @@ const CURL_WRAPPER = `#!/usr/bin/env bash\nexec "${process.execPath}" "${curlStu
  * Routes, keyed by path under CI_API_V4_URL (no query):
  *   { status = 200, headers, body, transport }  -- transport N is curl exit N
  * The job listing, GET /projects/:id/jobs, is keyed per page: "<path>#page=N".
- * Anything unknown answers 404. `endless` (a jobs array) serves every listing
+ * A route may be { sequence: [route, ...] }: the nth request for it gets the nth
+ * entry, the last repeating. { oversize: true } is an answer larger than any
+ * --max-filesize (curl exit 63). Anything unknown answers 404. `endless` (a jobs array) serves every listing
  * page without a route, each pointing at the next, to prove a page cap.
  * After 300 requests the stub answers 500 so a runaway loop ends.
  */
@@ -291,13 +319,13 @@ const world = (own, carried, { recId = REC, signId = SIGN, pipeline = PIPE, jobs
  * One scripted environment: every call of the script in it shares the work
  * directory (so a --prepare is followed by the final call in the same place),
  * the curl log and the cosign log.
- * ref defaults to "main". Each environment gets its own empty TMPDIR, so
+ * ref defaults to "main"; gap is the text of scripts/ci/carry-accepted-gap, when the case has one. Each environment gets its own empty TMPDIR, so
  * leftovers are visible. Verification defaults to accepting; env
  * { STUB_COSIGN_REJECT: "1" } rejects every pair, STUB_COSIGN_REJECT_MATCH
  * rejects only a manifest containing that text. verifications() lists the
  * pairs the verifier was asked about, in order.
  */
-function start({ routes = {}, endless, ref = "main", env = {} } = {}) {
+function start({ routes = {}, endless, ref = "main", env = {}, gap } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "carry-previous-"));
   const bin = join(dir, "bin");
   const work = join(dir, "work");
@@ -314,9 +342,22 @@ function start({ routes = {}, endless, ref = "main", env = {} } = {}) {
   const configFile = join(dir, "routes.json");
   writeFileSync(configFile, JSON.stringify({ routes, endless }));
 
+  // A committed break-glass file (scripts/ci/carry-accepted-gap) lives in the
+  // repository, so a case that has one runs the carry from a copy of scripts/ci
+  // inside the work directory: the file is then found whether the carry looks
+  // beside itself or in the working directory.
+  let scriptPath = script;
+  if (gap !== undefined) {
+    const copyDir = join(work, "scripts", "ci");
+    mkdirSync(copyDir, { recursive: true });
+    for (const name of ["carry-previous-release.sh", "verify-release-manifest.sh"]) copyFileSync(join(repoRoot, "scripts", "ci", name), join(copyDir, name));
+    writeFileSync(join(copyDir, "carry-accepted-gap"), gap);
+    scriptPath = join(copyDir, "carry-previous-release.sh");
+  }
+
   const invoke = (args) =>
     failOnProcessDeadline(
-      spawnSync("bash", [script, ...args], {
+      spawnSync("bash", [scriptPath, ...args], {
         cwd: work,
         encoding: "utf8",
         env: {
@@ -483,7 +524,7 @@ describe("carry-previous-release.sh", () => {
     expect(r.tmpEntries()).toEqual([]);
   });
 
-  it("looks the predecessor up by job: lists successful jobs on the ref, then fetches the manifest from the record_image job, the signature from the same pipeline's sign_evidence job and the record_image job's own previous/ pair, all by job id, with the JOB-TOKEN header from a file, not argv", () => {
+  it("looks the predecessor up by job: lists successful jobs on the ref, then lists that pipeline's jobs, and fetches the manifest from the record_image job, the signature from the same pipeline's sign_evidence job and the record_image job's own previous/ pair, all by job id, with the JOB-TOKEN header from a file, not argv", () => {
     const r = carry({ routes: world(pair(OLDER)) });
     expect(r.result.status).toBe(0);
     const urls = r.listingUrls();
@@ -495,7 +536,8 @@ describe("carry-previous-release.sh", () => {
     // The signature comes from the sign_evidence job found in the predecessor's own pipeline.
     const pipelineUrl = r.requestedUrls().find((url) => url.split("?")[0] === `${API}${pipelineKey(PIPE)}`);
     expect(pipelineUrl).toBeDefined();
-    expect(new URL(pipelineUrl).searchParams.getAll("scope[]")).toEqual(["success"]);
+    // Listed with no scope filter, so a sign_evidence still in flight is seen (#1607 note 48548, item 3).
+    expect(new URL(pipelineUrl).searchParams.getAll("scope[]")).toEqual([]);
     const paths = r.requestedPaths();
     expect(paths).toContain(artifactKey(REC, MANIFEST));
     expect(paths).toContain(artifactKey(SIGN, SIG));
@@ -1070,5 +1112,269 @@ describe("the ORBIT_CARRY_NO_PREDECESSOR override is gone (#1607 item 2)", () =>
     ["docs/releasing.md"],
   ])("%s does not mention it", (file) => {
     expect(readFileSync(join(repoRoot, file), "utf8")).not.toContain("ORBIT_CARRY_NO_PREDECESSOR");
+  });
+});
+
+/*
+ * The three deadlocks of #1607 note 48548 (the ruling on the review of
+ * fix/1607-check-gaps), and the Low about --max-filesize. The rule behind all
+ * three: a stuck preview or hotfix release recovers by an ordinary push, a job
+ * retry or waiting, never by a hand-started pipeline or a CI variable.
+ */
+
+// More throwaway keys, made at run time like the first one. Nothing here is
+// committed; the private halves live in the temp directory only.
+const makeKey = (name) => {
+  const privateKey = join(keyDir, `${name}.pem`);
+  const publicKey = join(keyDir, `${name}.pub`);
+  openssl(["ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", privateKey]);
+  openssl(["ec", "-in", privateKey, "-pubout", "-out", publicKey]);
+  return { privateKey, publicKey };
+};
+const RETIRED_KEY = makeKey("retired");
+const STRANGER_KEY = makeKey("stranger");
+const pairSignedBy = (key, digest) => {
+  const body = manifest(digest);
+  return { body, sig: openssl(["dgst", "-sha256", "-sign", key.privateKey], Buffer.from(body)).toString("base64") };
+};
+const RETIRED_NAME = "2026-01-15.pub";
+
+// A trust root as the repository has it: cosign.pub (the test key, so pairs from pair() verify)
+// and, when asked, cosign-retired/<date>.pub beside it. The carry finds the directory next to
+// COSIGN_PUBLIC_KEY, so no other setting is needed.
+const trustRoot = (retired) => {
+  const dir = mkdtempSync(join(tmpdir(), "carry-previous-root-"));
+  copyFileSync(PUBLIC_KEY, join(dir, "cosign.pub"));
+  if (retired.length > 0) {
+    mkdirSync(join(dir, "cosign-retired"));
+    for (const [name, file] of retired) copyFileSync(file, join(dir, "cosign-retired", name));
+  }
+  return { COSIGN_PUBLIC_KEY: join(dir, "cosign.pub") };
+};
+
+describe("key rotation: retired public keys verify old builds (#1607 note 48548, item 1)", () => {
+  it("a pair signed by a retired key in cosign-retired/ beside cosign.pub passes --prepare, the log names that file, and the pair is carried", () => {
+    const own = pairSignedBy(RETIRED_KEY, OLDER);
+    const r = carry({ routes: world(own), env: trustRoot([[RETIRED_NAME, RETIRED_KEY.publicKey]]) });
+    expect(r.prepare.status).toBe(0);
+    expect(output(r.prepare)).toContain(RETIRED_NAME);
+    expect(r.final.status).toBe(0);
+    expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
+    expect(r.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
+    expectNoToken(r.prepare);
+    expectNoToken(r.final);
+  });
+
+  it("a pair signed by neither cosign.pub nor a retired key fails --prepare, naming both files", () => {
+    const r = carry({
+      routes: world(pairSignedBy(STRANGER_KEY, OLDER)),
+      env: trustRoot([[RETIRED_NAME, RETIRED_KEY.publicKey]]),
+    });
+    expectPrepareFailure(r, /cosign\.pub/);
+    expect(output(r.prepare)).toContain(RETIRED_NAME);
+  });
+
+  describe("with no cosign-retired/ directory, behaving exactly as before", () => {
+    it("a pair signed by cosign.pub passes and is carried", () => {
+      const own = pair(OLDER);
+      const r = carry({ routes: world(own), env: trustRoot([]) });
+      expect(r.result.status).toBe(0);
+      expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
+    });
+
+    it("a pair signed by any other key fails, naming cosign.pub and no retired file", () => {
+      const r = carry({ routes: world(pairSignedBy(RETIRED_KEY, OLDER)), env: trustRoot([]) });
+      expectPrepareFailure(r, /does not verify against cosign\.pub/);
+      expect(output(r.prepare)).not.toContain("cosign-retired");
+    });
+  });
+});
+
+describe("artifact expiry: records are retained, and a lost predecessor has a recorded break-glass (#1607 note 48548, item 2)", () => {
+  // The same by-indentation cut as the record_image checks above: a job's block
+  // from its key to the next top-level key, comment lines dropped.
+  const ci = readFileSync(join(repoRoot, ".gitlab-ci.yml"), "utf8").split("\n");
+  const jobText = (name) => {
+    const start = ci.findIndex((line) => line === `${name}:`);
+    expect(start, `job ${name} exists`).toBeGreaterThanOrEqual(0);
+    const end = ci.findIndex((line, i) => i > start && /^[A-Za-z_.]/.test(line));
+    return ci
+      .slice(start, end === -1 ? undefined : end)
+      .filter((line) => !/^\s*#/.test(line))
+      .join("\n");
+  };
+
+  it.each(["record_image", "sign_evidence"])("%s keeps its artifacts: expire_in is never, and is declared once", (name) => {
+    const lines = jobText(name)
+      .split("\n")
+      .filter((line) => /^\s+expire_in:/.test(line));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^\s+expire_in:\s*["']?never["']?\s*$/);
+  });
+
+  describe("a 404 on the predecessor's pair when the job has expired", () => {
+    const EXPIRY = "2026-08-30T10:11:12.345Z";
+    const expiringWorld = (own) => ({
+      ...world(own),
+      ...listing([{ ...job(REC, "record_image", { pipeline: PIPE }), artifacts_expire_at: EXPIRY }]),
+      [pipelineKey(PIPE)]: jsonBody([
+        job(SIGN + 1, "build_image", { pipeline: PIPE }),
+        { ...job(SIGN, "sign_evidence", { pipeline: PIPE }), artifacts_expire_at: EXPIRY },
+        { ...job(REC, "record_image", { pipeline: PIPE }), artifacts_expire_at: EXPIRY },
+      ]),
+    });
+
+    it.each([
+      ["manifest", artifactKey(REC, MANIFEST)],
+      ["signature", artifactKey(SIGN, SIG)],
+    ])("on the %s names the expiry date and says the artifacts have expired, and names the break-glass file", (_what, key) => {
+      const r = carry({ routes: without(expiringWorld(pair(OLDER)), key) });
+      expectPrepareFailure(r, /expired/i);
+      expect(output(r.prepare)).toContain("2026-08-30");
+      expect(output(r.prepare)).toContain("carry-accepted-gap");
+    });
+  });
+
+  describe("scripts/ci/carry-accepted-gap, the committed break-glass file", () => {
+    const REASON = "key rotated, the predecessor's artifacts expired";
+    const noManifest = (own = pair(OLDER)) => without(world(own), artifactKey(REC, MANIFEST));
+    const noSignature = (own = pair(OLDER)) => without(world(own), artifactKey(SIGN, SIG));
+    const wrongSignature = () => world({ body: manifest(OLDER), sig: signManifest(manifest(THIRD)) });
+    const STALE = /stale/i;
+    const ACCEPTED = /gap accepted/i;
+
+    it.each([
+      ["a 404 on its manifest", noManifest],
+      ["a 404 on its signature", noSignature],
+      ["a verification failure", wrongSignature],
+    ])("a matching line passes --prepare after %s: logs the acceptance, carries nothing, and the digest call saves nothing", (_failure, routes) => {
+      const gap = ["# the break-glass entries", "", `main ${REC} ${REASON}`, ""].join("\n");
+      const r = carry({ routes: routes(), gap });
+      expect(r.prepare.status).toBe(0);
+      expect(output(r.prepare)).toContain(`gap accepted for record_image job ${REC} on main (${REASON})`);
+      expect(r.final).not.toBeNull();
+      expect(r.final.status).toBe(0);
+      expect(r.hasPrevious()).toBe(false);
+      expect(r.previousFiles()).toEqual([]);
+      expect(r.tmpEntries()).toEqual([]);
+      expectNoToken(r.prepare);
+      expectNoToken(r.final);
+    });
+
+    it.each([
+      ["another job id", `main ${REC + 1} ${REASON}`, STALE],
+      ["another ref", `release/9 ${REC} ${REASON}`, STALE],
+    ])("a line for %s is logged as stale and ignored: the 404 still fails --prepare", (_what, line, logged) => {
+      const r = carry({ routes: noManifest(), gap: `${line}\n` });
+      expectPrepareFailure(r, /record_image/);
+      expect(output(r.prepare)).toMatch(logged);
+      expect(output(r.prepare)).not.toMatch(ACCEPTED);
+    });
+
+    it.each([
+      ["a 500 on the manifest", () => ({ ...world(pair(OLDER)), [artifactKey(REC, MANIFEST)]: { status: 500, body: '{"message":"500"}' } }), /500/],
+      ["a 500 on the signature", () => ({ ...world(pair(OLDER)), [artifactKey(SIGN, SIG)]: { status: 500, body: '{"message":"500"}' } }), /500/],
+      [
+        "a missing sign_evidence",
+        () => ({
+          ...world(pair(OLDER)),
+          [pipelineKey(PIPE)]: jsonBody([job(503, "build_image", { pipeline: PIPE }), job(REC, "record_image", { pipeline: PIPE })]),
+        }),
+        /sign_evidence/,
+      ],
+    ])("a matching line does not excuse %s: --prepare still fails", (_what, routes, cause) => {
+      const r = carry({ routes: routes(), gap: `main ${REC} ${REASON}\n` });
+      expectPrepareFailure(r, cause);
+      expect(output(r.prepare)).not.toMatch(ACCEPTED);
+    });
+
+    // "Naming it": the offending line's text, or its line number (the note does not say which).
+    it.each([
+      ["a job id that is not a number", "main abc not-a-job-id", "not-a-job-id"],
+      ["a line with one field", "lonelyfield", "lonelyfield"],
+    ])("a malformed line (%s) fails --prepare, naming it, even beside a matching line", (_what, bad, token) => {
+      const gap = [`main ${REC} ${REASON}`, bad, ""].join("\n");
+      const r = carry({ routes: noManifest(), gap });
+      expectPrepareFailure(r, new RegExp(`${token}|line 2`));
+      expect(output(r.prepare)).not.toMatch(ACCEPTED);
+    });
+  });
+});
+
+describe("sign_evidence still running: a bounded wait on an in-flight dependency (#1607 note 48548, item 3)", () => {
+  const IN_FLIGHT = ["created", "pending", "running", "preparing", "waiting_for_resource", "scheduled"];
+  const evidenceJobs = (status) => [
+    job(SIGN + 1, "build_image", { pipeline: PIPE }),
+    job(SIGN, "sign_evidence", { pipeline: PIPE, status }),
+    job(REC, "record_image", { pipeline: PIPE }),
+  ];
+  const pipelineRequests = (r) => r.requestedUrls().filter((url) => url.split("?")[0] === `${API}${pipelineKey(PIPE)}`);
+  const polling = { ORBIT_CARRY_POLL_SECONDS: "0" };
+
+  it.each(IN_FLIGHT)("a sign_evidence that is %s and then succeeds: the carry waits, then carries normally", (status) => {
+    const own = pair(OLDER);
+    const routes = {
+      ...world(own),
+      [pipelineKey(PIPE)]: { sequence: [jsonBody(evidenceJobs(status)), jsonBody(evidenceJobs(status)), jsonBody(evidenceJobs("success"))] },
+    };
+    const r = carry({ routes, env: polling });
+    expect(r.prepare.status).toBe(0);
+    expect(r.final.status).toBe(0);
+    expect(pipelineRequests(r)).toHaveLength(3);
+    for (const url of pipelineRequests(r)) expect(new URL(url).searchParams.getAll("scope[]")).toEqual([]);
+    expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
+    expect(r.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
+  });
+
+  it.each(IN_FLIGHT)("a sign_evidence that stays %s past the poll cap fails, saying it is still running and to run this job again", (status) => {
+    const routes = { ...world(pair(OLDER)), [pipelineKey(PIPE)]: jsonBody(evidenceJobs(status)) };
+    const r = carry({ routes, env: polling });
+    expectPrepareFailure(r, /still running/i);
+    expect(output(r.prepare)).toMatch(/run this job again/i);
+    expect(output(r.prepare)).toContain(String(PIPE));
+    // 20 polls: the note says "for 20 polls"; whether the first look counts as one is not stated, so 20 or 21 requests.
+    expect(pipelineRequests(r).length).toBeGreaterThanOrEqual(20);
+    expect(pipelineRequests(r).length).toBeLessThanOrEqual(21);
+  });
+
+  it.each(["failed", "canceled"])("a sign_evidence that is %s is not waited for: fails at once, saying to retry its sign_evidence job", (status) => {
+    const routes = { ...world(pair(OLDER)), [pipelineKey(PIPE)]: jsonBody(evidenceJobs(status)) };
+    const r = carry({ routes, env: polling });
+    expectPrepareFailure(r, /retry its sign_evidence job, then run this job again/);
+    expect(output(r.prepare)).not.toMatch(/still running/i);
+    expect(output(r.prepare)).toContain(String(PIPE));
+    expect(pipelineRequests(r)).toHaveLength(1);
+  });
+});
+
+describe("--max-filesize on every curl call (#1607 note 48548, Lows)", () => {
+  const limitOf = (argv) => {
+    const at = argv.findIndex((arg) => arg === "--max-filesize" || arg.startsWith("--max-filesize="));
+    if (at < 0) return null;
+    return argv[at].includes("=") ? argv[at].split("=")[1] : argv[at + 1];
+  };
+
+  it("every curl call of a full rebuild carry (listings, manifest, signature, carried pair) passes a positive --max-filesize", () => {
+    const r = carry({ routes: world(pair(CURRENT), pair(OLDER)) }, CURRENT);
+    expect(r.result.status).toBe(0);
+    expect(r.calls().length).toBeGreaterThanOrEqual(6);
+    for (const argv of r.calls()) {
+      const limit = limitOf(argv);
+      expect(limit, `--max-filesize in: curl ${argv.filter((arg) => arg.startsWith(API)).join(" ")}`).not.toBeNull();
+      expect(limit).toMatch(/^[1-9][0-9]*[KkMmGg]?$/);
+    }
+  });
+
+  it.each([
+    ["the job listing", listingKey(1)],
+    ["the pipeline's job listing", pipelineKey(PIPE)],
+    ["the predecessor's manifest", artifactKey(REC, MANIFEST)],
+    ["the signature", artifactKey(SIGN, SIG)],
+    ["the carried manifest", artifactKey(REC, `previous/${MANIFEST}`)],
+  ])("an answer larger than the limit (curl exit 63) for %s fails the carry, naming the URL", (_what, key) => {
+    const routes = world(pair(OLDER), pair(THIRD));
+    const r = carry({ routes: { ...routes, [key]: { ...routes[key], oversize: true } } });
+    expectPrepareFailure(r, /63|file size|too (large|big)/i);
+    expect(output(r.prepare)).toContain(`${API}${key.split("#")[0]}`);
   });
 });
