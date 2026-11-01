@@ -3947,8 +3947,9 @@ record_image:
     paths:
       - .orbit-supply-chain/gitlab-tested-image.json
       - .orbit-supply-chain/orbit-release-manifest.json
-      # #1480: absent only on a ref's first release, which the carry
-      # recognises itself (#1607); GitLab only warns about a missing path.
+      # #1480: absent on a ref's first release, after an accepted gap, and after
+      # a never-signed predecessor that carried nothing (docs/releasing.md); the
+      # carry recognises each itself (#1607); GitLab only warns about a missing path.
       - .orbit-supply-chain/previous/
     # Never expires (#1607 note 48548): the next release on this ref reads this
     # job's manifest and `previous/` by job id (scripts/ci/carry-previous-release.sh),

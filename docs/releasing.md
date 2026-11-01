@@ -235,9 +235,11 @@ git add cosign.pub
 `scripts/ci/carry-previous-release.sh` verifies a predecessor's pair against
 `cosign.pub` first, then against each file in `cosign-retired/` in name order,
 and the log names the file that verified. A retired key is a public key: keep
-it. Delete one only if it is compromised; the next release on each ref then
-fails verification and needs an entry in `scripts/ci/carry-accepted-gap` (see
-"Carrying the previous build's manifest" below). Nothing else reads
+it. Delete one only if it is compromised. A deleted key blocks only the next
+release's own predecessor pair, which then fails verification and needs an entry
+in `scripts/ci/carry-accepted-gap` (see "Carrying the previous build's manifest"
+below). A carried pair signed by it never blocks a push: it is judged only when a
+rebuild picks it, and a new commit is never a rebuild. Nothing else reads
 `cosign-retired/`: `get-orbit.sh` and the release checks verify the re-signed
 `latest`, not old builds.
 
@@ -293,7 +295,9 @@ live update test can find the previous preview build by branch.
 `scripts/ci/carry-previous-release.sh` does it in two calls. `--prepare` runs
 before the image is pushed: it finds the predecessor, fetches its manifest and
 signature, verifies them against `cosign.pub` and stages them, so a failure
-stops the job before anything is published. The second call, with the pushed
+stops the job before anything is published. It verifies the predecessor's own
+carried `previous/` pair too, but only records the verdict: that pair is judged
+when it is used (see the rebuild entry below). The second call, with the pushed
 digest, moves the staged pair into `previous/` in one rename. It is fail-loud
 and idempotent: a missing or mismatched predecessor fails `record_image` with
 a message naming the cause, and nothing is written under `previous/`.
@@ -302,8 +306,12 @@ The predecessor is the newest successful `record_image` job on the ref, found
 from the project's job list, so a pipeline that ran no `record_image` (a
 schedule, a run started by hand) never hides it. Its manifest comes from that
 job and its signature from the `sign_evidence` job of the same pipeline, both
-by job id, so the two always belong to one build. On a rebuild of the digest
-being pushed, the predecessor's own `previous/` pair is carried instead.
+by job id, so the two always belong to one build. A build whose signing finally
+failed (its newest `sign_evidence` job failed, was canceled or skipped) is never
+signed and so not a release: the carry skips it and carries the build before it,
+the `previous/` pair of that job, fetched by its job id and verified. On a
+rebuild of the digest being pushed, the predecessor's own `previous/` pair is
+carried instead.
 
 `record_image` and `sign_evidence` keep their artifacts for ever
 (`expire_in: never`, a few KB per release), so the next release can always
@@ -324,9 +332,15 @@ When it fails, the message names the cause:
   to 60; anything else fails the job naming the variable) for 20 polls, then
   fails saying it is still running. Wait for that job to finish, then run the failed
   job again.
-- The newest `sign_evidence` job of the predecessor's pipeline failed or was
-  canceled: retry that job, then run the failed job again. The carry does not
-  fall back to an older build.
+- The newest `sign_evidence` job of the predecessor's pipeline failed, was
+  canceled or was skipped: this is not a failure. That `record_image` job was
+  never signed, so it is not a release, and the carry logs `record_image job N
+  was never signed (sign_evidence <status>): not a release, carrying the build
+  before it` and carries job N's own `previous/` pair in its place, verified like
+  any predecessor pair. If job N has no `previous/` pair, nothing before it was
+  ever signed and the carry logs a first release, carrying nothing. A line in
+  `carry-accepted-gap` for job N excuses the pair that stands in for it, never
+  an API error or a `sign_evidence` job still in flight (which is waited for).
 - The predecessor's pipeline has no `sign_evidence` job at all: retry that
   pipeline's `sign_evidence` job if it can be, then run the failed job again;
   the carry does not fall back to an older build.
@@ -342,9 +356,9 @@ When it fails, the message names the cause:
   predecessor's own pair: a 404 on it, or a verifier that ran and rejected its
   signature. It then logs `gap accepted for record_image job N on <ref>
   (<reason>)`, carries nothing and treats the ref as a first release. A line
-  never excuses a failing carried `previous/` pair (that pair fails even with a
-  matching line), a tooling failure (see below), an API error or a missing
-  `sign_evidence` job. A line for another job or ref is logged as stale and
+  never excuses the carried `previous/` pair (it is not needed: that pair is
+  judged only on a rebuild, and a push escapes it), a tooling failure (see
+  below), an API error or a missing `sign_evidence` job. A line for another job or ref is logged as stale and
   ignored, and a malformed line fails the job naming it. Remove the entry once
   the next release on the ref has landed. The owner may also press Keep on the
   artifacts of the one predecessor built before this change, which makes the
@@ -363,9 +377,15 @@ When it fails, the message names the cause:
 - Any other HTTP status (a redirect, or a 404 on a job list) or a job list that
   is not JSON: never retried, the carry fails at once naming the status and
   URL. The carry could not ask, which is not the same as nothing being there.
-- An empty signature file (the predecessor's or the carried one) fails as its
-  own error before the verifier runs, naming the file. It is never a verdict,
-  so no `carry-accepted-gap` line excuses it.
+- An empty signature file (the predecessor's) fails as its own error before the
+  verifier runs, naming the file. It is never a verdict, so no
+  `carry-accepted-gap` line excuses it. An empty carried signature is a bad
+  carried pair (see the rebuild entry below).
+- A job list page whose `X-Page` is missing or is not the page asked for, or
+  whose `X-Total-Pages` is greater than `X-Page` with no `X-Next-Page`: the
+  carry fails saying `pagination headers missing, so the end of the list cannot
+  be known: not a first release`. A dropped header is never read as the end of
+  the list. Run the job again.
 - An answer larger than the limit (1 MiB for an artifact, 16 MiB for a job
   list page): the carry reads at most limit + 1 bytes, whether or not the server
   declared a length, and fails naming the URL and the limit.
@@ -373,10 +393,9 @@ When it fails, the message names the cause:
   `cosign-retired/` (the message names every file tried), or a manifest has no
   readable image digest: the predecessor's artifacts are bad and need the owner;
   the recovery is the `scripts/ci/carry-accepted-gap` entry above, for a
-  verification failure of the predecessor's own pair. The same failure on the
-  predecessor's carried `previous/` pair (the message says "carried") is never
-  excused by a line: the build that carried it published a pair that no longer
-  verifies, and that needs the owner.
+  verification failure of the predecessor's own pair (or of the pair standing in
+  for a never-signed one). The same failure on the predecessor's carried
+  `previous/` pair never fails a push: it is only recorded.
 - A tooling failure, which the message says is "not a verdict" and which names
   the tool: `cosign` could not be downloaded (`scripts/ci/ensure-cosign.sh`
   failed), `cosign` exited with a status other than 0 or 1 (for example 2, or
@@ -387,6 +406,12 @@ When it fails, the message names the cause:
   excuses it. Fix the tool and run the job again.
 - A re-run of an already-published digest whose build carried no `previous/`
   pair fails after the push.
+- A rebuild (a retry of `record_image` for an already recorded commit) picks the
+  predecessor's carried `previous/` pair, and that pair is bad (it does not
+  verify, a half pair, a malformed digest or an empty signature): the job fails
+  after the push, naming the cause and saying `push a new commit; a retry of this
+  commit cannot carry`. A new commit is never a rebuild, so an ordinary push
+  recovers; no gap line is needed or honoured.
 
 ## Stable promotion (on GitLab)
 

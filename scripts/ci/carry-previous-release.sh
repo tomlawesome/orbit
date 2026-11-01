@@ -13,7 +13,9 @@
 #       verifies each fetched pair against cosign.pub, then against each
 #       retired key in cosign-retired/ beside it
 #       (scripts/ci/verify-release-manifest.sh) and stages them. Any failure
-#       fails the job before anything is published (#1607 review item 4).
+#       of the predecessor's own pair fails the job before anything is
+#       published (#1607 review item 4). The predecessor's own carried pair is
+#       verified too, but only its verdict is recorded (see below).
 #
 #   carry-previous-release.sh <published-image-digest>
 #       AFTER the push, once the registry's digest exists. Picks the staged
@@ -26,12 +28,29 @@
 # (#1607 review item 2). Its manifest comes from that job, its signature from
 # the sign_evidence job of the same pipeline, both fetched by job id, so the
 # two always belong to one build and no second download is needed to prove it.
+# A build whose signing finally failed is not a release (#1607 note 48805, item
+# 2): when the newest sign_evidence job of that pipeline is final and not success
+# (failed, canceled, skipped), the carry logs "record_image job N was never
+# signed (sign_evidence <status>): not a release, carrying the build before it"
+# and ships job N's own previous/ pair in its place, fetched by job N's id and
+# verified. Job N with no previous/ pair means nothing before it was ever signed:
+# a first release. In flight still waits.
 #
 # On a rebuild of the same image (the predecessor's manifest names the digest
 # being recorded) the predecessor's own previous/ pair, fetched by the same
 # job id, is carried forward instead, so previous/ never points at itself.
 # --prepare always looks for that pair (a 404 means the predecessor has none);
 # the digest call fails if a rebuild finds none.
+#
+# The carried pair is judged at the point of use (#1607 note 48805, item 1).
+# --prepare verifies it but records the verdict in $stage/carried-verdict ("ok",
+# or the failure text: a half pair, a malformed digest, an empty signature and a
+# verifier rejection are all verdicts) and passes. A tooling failure on it still
+# fails --prepare. The digest call reads the verdict only when it picks the
+# carried pair, that is on a rebuild: anything but "ok" then fails after the
+# push, naming the verdict and "push a new commit; a retry of this commit cannot
+# carry". A new commit is never a rebuild, so a push always escapes it, and no
+# gap line is needed or honoured for it.
 #
 # A fail-loud, idempotent carry (#1607 D-F1-1, D-F2-1, D-F5). Anything it
 # cannot find or trust is an error that names its cause: it prints
@@ -71,16 +90,22 @@
 #   gone (deleted or never kept). The recovery is a committed, reviewed line in
 #   scripts/ci/carry-accepted-gap (format in that file): --prepare honours it only
 #   when the predecessor is that job on that ref and the failure was a 404 on its
-#   own pair or its own pair being rejected by the verifier, and then treats the
-#   ref as a first release. Never accepted: an API error, a missing sign_evidence,
-#   a failing carried previous/ pair, an empty signature file, or a tooling
-#   failure (cosign cannot be downloaded or exits with anything but 0 or 1,
+#   own pair (or on the pair standing in for a never-signed one) or that pair being
+#   rejected by the verifier, and then treats the ref as a first release. Never
+#   accepted: an API error, an in-flight job, a missing sign_evidence, a failing
+#   carried previous/ pair (a verdict, judged only by a rebuild), an empty
+#   signature file, or a tooling failure (cosign cannot be downloaded or exits with anything but 0 or 1,
 #   openssl is missing, the verifier fails before cosign runs): only the
 #   verifier running and rejecting the signature is "does not verify".
 #
 #   Busy sign_evidence. The predecessor pipeline's newest sign_evidence job still
 #   in flight is polled (ORBIT_CARRY_POLL_SECONDS apart, default 30) for at most
 #   20 listings, then the carry fails saying so: wait and run this job again.
+#
+#   Pagination. Every job list page must carry X-Page equal to the page asked
+#   for, and X-Total-Pages, when sent, greater than X-Page needs an X-Next-Page;
+#   otherwise the end of the list cannot be known and the carry fails ("not a
+#   first release") instead of reading a dropped header as the last page.
 #
 # The one pass-through is a ref's very first release: the whole job listing
 # (every page, up to the page cap) holds no successful record_image job on the
@@ -196,7 +221,14 @@ if [ "$mode" = "final" ]; then
     fail "the staged predecessor manifest has no readable image digest"
   if [ "$predecessor_digest" = "$current_digest" ]; then
     # Rebuild of the image being recorded: the previous build is whatever that
-    # build itself carried.
+    # build itself carried. This is the one place the carried pair is judged
+    # (#1607 note 48805): --prepare only recorded its verdict. Not "ok" fails here,
+    # after the push; a new commit is never a rebuild, so a push escapes it.
+    if [ -f "$stage/carried-verdict" ]; then
+      carried_verdict="$(cat "$stage/carried-verdict")"
+      [ "$carried_verdict" = "ok" ] ||
+        fail "rebuild of the published digest ${current_digest}, and the pair the build being rebuilt carried is bad (${carried_verdict}): push a new commit; a retry of this commit cannot carry"
+    fi
     if [ ! -f "$stage/carried/$manifest_name" ] || [ ! -f "$stage/carried/$sig_name" ]; then
       fail "rebuild of the published digest ${current_digest}, and the build being rebuilt has no carried pair (previous/$manifest_name and previous/$sig_name), so there is nothing to carry"
     fi
@@ -312,9 +344,18 @@ fail_status() {
   fail "GET $1 answered HTTP ${api_status}${hint}"
 }
 
+# page_header <header name, lower case>: the value of the last such header in
+# $stage/page.headers (empty when absent).
+page_header() {
+  tr -d '\r' < "$stage/page.headers" | awk -F': *' -v want="$1" 'tolower($1) == want { v = $2 } END { print v }'
+}
+
 # list_page <list url> <page>: reads one page of a job listing (100 jobs) into
 # $stage/page.json and sets next_page to the number of the page after it, or to
-# "" on the last one.
+# "" on the last one. The end of the list is cross-checked, never taken on trust
+# (#1607 note 48805): X-Page must be the page asked for, and X-Total-Pages, when
+# sent, must not say more pages follow while X-Next-Page says none. Otherwise a
+# proxy that drops headers would read as "no more pages", so as a first release.
 list_page() {
   local sep="?" url
   case "$1" in *\?*) sep="&" ;; esac
@@ -323,7 +364,22 @@ list_page() {
   [ "$api_status" = "200" ] || fail_status "$url"
   jq -e 'type == "array"' "$stage/page.json" > /dev/null 2>&1 ||
     fail "GET $url did not answer a JSON array of jobs"
-  next_page="$(tr -d '\r' < "$stage/page.headers" | awk -F': *' 'tolower($1) == "x-next-page" && $2 ~ /^[0-9]+$/ { n = $2 } END { print n }')"
+  local x_page x_total
+  next_page="$(page_header x-next-page)"
+  case "$next_page" in *[!0-9]*) next_page="" ;; esac
+  x_page="$(page_header x-page)"
+  x_total="$(page_header x-total-pages)"
+  [ "$x_page" = "$2" ] ||
+    fail "GET $url: pagination headers missing, so the end of the list cannot be known: not a first release (X-Page is '${x_page}', page ${2} was asked for)"
+  if [ -n "$x_total" ]; then
+    case "$x_total" in
+      *[!0-9]*) fail "GET $url: pagination headers missing, so the end of the list cannot be known: not a first release (X-Total-Pages is '${x_total}', not a number)" ;;
+    esac
+    [ "${#x_total}" -le 9 ] || fail "GET $url: pagination headers missing, so the end of the list cannot be known: not a first release (X-Total-Pages is '${x_total}', not a usable number)"
+    if [ "$((10#$x_total))" -gt "$2" ] && [ -z "$next_page" ]; then
+      fail "GET $url: pagination headers missing, so the end of the list cannot be known: not a first release (X-Total-Pages is ${x_total} but page ${2} has no X-Next-Page)"
+    fi
+  fi
 }
 
 # find_job <list url> <job name> <ref or ""> <job id to skip or "">
@@ -479,7 +535,7 @@ resolve_cosign() {
   rm -f -- "$stage/ensure-cosign.err"
 }
 
-# verify_pair <staged dir> <what> <excusable or strict>: against the key in use,
+# verify_pair <staged dir> <what> <excusable or verdict>: against the key in use,
 # then each retired key, through the shared verifier; the first pass wins and
 # the log names the file. The verifier cds to the repository root, so it gets
 # absolute paths. It never needs the job token, so it never gets it.
@@ -491,16 +547,24 @@ resolve_cosign() {
 # 127, a signal) is cosign failing as a tool. A missing openssl or base64 after
 # a cosign pass is a tool failure too. A tool failure always fails, naming the
 # tool; no gap line excuses it, and neither does a verifier exit with no cosign
-# status at all (it failed before cosign ran). A verdict on a pair that is "excusable" (the
-# predecessor's own) is a predecessor_failure naming every file tried; on a
-# "strict" one (the carried pair) it is a plain failure.
+# status at all (it failed before cosign ran). A verdict on a pair that is "excusable" (a
+# predecessor's pair, or the one standing in for a never-signed one) is a
+# predecessor_failure naming every file tried. On a "verdict" one (the carried
+# pair) it is recorded, never raised: carried_pair_verdict is set to "ok" or to
+# the failure text and the call returns 0 (#1607 note 48805, item 1).
 verify_pair() {
   local i tried="" cosign_rc what_failed
   # An empty signature is wrong with the pair, found here before the verifier
-  # runs: its own failure, never a verdict, so no gap line excuses it (#1607
-  # note 48797).
-  [ -s "$stage/$1/$sig_name" ] ||
-    fail "the ${2} signature file ${sig_name} is empty, so the ${2} manifest cannot be verified"
+  # runs: for a predecessor's pair its own failure, never a verdict, so no gap
+  # line excuses it (#1607 note 48797); for the carried pair a verdict.
+  if [ ! -s "$stage/$1/$sig_name" ]; then
+    what_failed="the ${2} signature file ${sig_name} is empty, so the ${2} manifest cannot be verified"
+    if [ "$3" = "verdict" ]; then
+      carried_pair_verdict="$what_failed"
+      return 0
+    fi
+    fail "$what_failed"
+  fi
   resolve_cosign
   for i in "${!trust_keys[@]}"; do
     [ -f "${trust_keys[$i]}" ] ||
@@ -519,6 +583,7 @@ WRAPPER
       bash "$verifier" "$stage_abs/$1/$manifest_name" "$stage_abs/$1/$sig_name" > "$stage/verify.out" 2>&1; then
       rm -f -- "$stage/cosign-wrapper.sh" "$stage/cosign-status"
       echo "carry-previous-release: the ${2} manifest verified against ${trust_labels[$i]}"
+      carried_pair_verdict="ok"
       return 0
     fi
     sed "s|^|carry-previous-release: ${trust_labels[$i]}: |" "$stage/verify.out" >&2
@@ -550,7 +615,7 @@ WRAPPER
   if [ "$3" = "excusable" ]; then
     predecessor_failure "$what_failed"
   fi
-  fail "$what_failed"
+  carried_pair_verdict="$what_failed"
 }
 
 load_gap_file
@@ -573,7 +638,12 @@ rec_expires="$(printf '%s' "$found_job" | jq -r '.artifacts_expire_at // empty')
 
 # The signature belongs to the sign_evidence job of the same pipeline: the
 # newest one (highest id), whatever its status, so one still in flight is seen.
-# In flight is waited for, a bounded number of polls; failed or canceled is not.
+# In flight is waited for, a bounded number of polls. A final failure (failed,
+# canceled, skipped) means the build was never signed, so it is not a release:
+# the carry ships the build before it (#1607 note 48805, item 2). An absent job
+# is still a failure to retry.
+carried_pair_verdict=""
+never_signed=""
 polls=0
 while :; do
   find_newest_job "${api}/pipelines/${rec_pipeline}/jobs" sign_evidence
@@ -584,6 +654,10 @@ while :; do
   sign_status="$(printf '%s' "$found_job" | jq -r '.status // ""')"
   case "$sign_status" in
     success) break ;;
+    failed | canceled | skipped)
+      never_signed="$sign_status"
+      break
+      ;;
     created | pending | running | preparing | waiting_for_resource | scheduled)
       [ "$polls" -lt "$max_evidence_polls" ] ||
         fail "${where} has a sign_evidence job that is still running (status ${sign_status} after ${polls} polls ${poll_seconds}s apart): wait for it to finish, then run this job again"
@@ -594,31 +668,67 @@ while :; do
       ;;
   esac
 done
-sign_job="$(printf '%s' "$found_job" | jq -r '.id')"
-sign_expires="$(printf '%s' "$found_job" | jq -r '.artifacts_expire_at // empty')"
-[[ "$sign_job" =~ ^[0-9]+$ ]] || fail "the sign_evidence job found in pipeline ${rec_pipeline} has no readable job id"
 
-fetch_artifact "$rec_job" "$manifest_name" "$stage/predecessor/$manifest_name" ||
-  absent_artifact record_image "$rec_job" "$manifest_name" "$rec_expires"
-digest_of "$stage/predecessor/$manifest_name" > /dev/null ||
-  fail "the fetched manifest has no readable image digest"
-fetch_artifact "$sign_job" "$sig_name" "$stage/predecessor/$sig_name" ||
-  absent_artifact sign_evidence "$sign_job" "$sig_name" "$sign_expires"
-verify_pair predecessor "previous build's" excusable
+if [ -n "$never_signed" ]; then
+  # Job N (the record_image job found) was never signed, so it is not a release:
+  # last known good. Its own previous/ pair is the build before it, fetched by
+  # job N's id and verified like any predecessor pair; the pair that stands in
+  # for N is excused by a gap line for N like N's own pair would have been. N with
+  # no previous/ pair means nothing before it was ever signed: a first release.
+  echo "carry-previous-release: record_image job ${rec_job} was never signed (sign_evidence ${never_signed}): not a release, carrying the build before it"
+  have_manifest=""
+  have_sig=""
+  fetch_artifact "$rec_job" "previous/$manifest_name" "$stage/predecessor/$manifest_name" && have_manifest=1
+  fetch_artifact "$rec_job" "previous/$sig_name" "$stage/predecessor/$sig_name" && have_sig=1
+  if [ -z "$have_manifest" ] && [ -z "$have_sig" ]; then
+    rm -rf -- "$stage/predecessor" "$stage/carried"
+    : > "$stage/first-release"
+    keep_stage=1
+    echo "carry-previous-release: record_image job ${rec_job} has no previous/ pair, so nothing before it was ever signed: first release, nothing carried on ${CI_COMMIT_REF_NAME}"
+    exit 0
+  fi
+  [ -n "$have_manifest" ] || absent_artifact record_image "$rec_job" "previous/$manifest_name" "$rec_expires"
+  [ -n "$have_sig" ] || absent_artifact record_image "$rec_job" "previous/$sig_name" "$rec_expires"
+  digest_of "$stage/predecessor/$manifest_name" > /dev/null ||
+    fail "the previous/ manifest of the never-signed job ${rec_job} has no readable image digest"
+  verify_pair predecessor "build before the never-signed one's" excusable
+else
+  sign_job="$(printf '%s' "$found_job" | jq -r '.id')"
+  sign_expires="$(printf '%s' "$found_job" | jq -r '.artifacts_expire_at // empty')"
+  [[ "$sign_job" =~ ^[0-9]+$ ]] || fail "the sign_evidence job found in pipeline ${rec_pipeline} has no readable job id"
 
-# The predecessor's own carried pair, for a rebuild. Absent (404) means it has none.
-have_manifest=""
-have_sig=""
-fetch_artifact "$rec_job" "previous/$manifest_name" "$stage/carried/$manifest_name" && have_manifest=1
-fetch_artifact "$rec_job" "previous/$sig_name" "$stage/carried/$sig_name" && have_sig=1
-if [ -n "$have_manifest" ] && [ -z "$have_sig" ]; then
-  fail "job record_image ${rec_job} carried a manifest (previous/$manifest_name) but no carried signature (previous/$sig_name)"
-elif [ -z "$have_manifest" ] && [ -n "$have_sig" ]; then
-  fail "job record_image ${rec_job} carried a signature (previous/$sig_name) but no carried manifest (previous/$manifest_name)"
-elif [ -n "$have_manifest" ]; then
-  digest_of "$stage/carried/$manifest_name" > /dev/null ||
-    fail "the carried manifest has no readable image digest"
-  verify_pair carried "carried" strict
+  fetch_artifact "$rec_job" "$manifest_name" "$stage/predecessor/$manifest_name" ||
+    absent_artifact record_image "$rec_job" "$manifest_name" "$rec_expires"
+  digest_of "$stage/predecessor/$manifest_name" > /dev/null ||
+    fail "the fetched manifest has no readable image digest"
+  fetch_artifact "$sign_job" "$sig_name" "$stage/predecessor/$sig_name" ||
+    absent_artifact sign_evidence "$sign_job" "$sig_name" "$sign_expires"
+  verify_pair predecessor "previous build's" excusable
+
+  # The predecessor's own carried pair, for a rebuild. Absent (404) means it has
+  # none. It is judged here but never failed on (#1607 note 48805, item 1): the
+  # verdict goes to the stage, and only the digest call, when a rebuild picks this
+  # pair, reads it. A normal build never uses it, and a push is never a rebuild.
+  have_manifest=""
+  have_sig=""
+  fetch_artifact "$rec_job" "previous/$manifest_name" "$stage/carried/$manifest_name" && have_manifest=1
+  fetch_artifact "$rec_job" "previous/$sig_name" "$stage/carried/$sig_name" && have_sig=1
+  if [ -n "$have_manifest" ] && [ -z "$have_sig" ]; then
+    carried_pair_verdict="job record_image ${rec_job} carried a manifest (previous/$manifest_name) but no carried signature (previous/$sig_name)"
+  elif [ -z "$have_manifest" ] && [ -n "$have_sig" ]; then
+    carried_pair_verdict="job record_image ${rec_job} carried a signature (previous/$sig_name) but no carried manifest (previous/$manifest_name)"
+  elif [ -n "$have_manifest" ]; then
+    if digest_of "$stage/carried/$manifest_name" > /dev/null; then
+      verify_pair carried "carried" verdict
+    else
+      carried_pair_verdict="the carried manifest has no readable image digest"
+    fi
+  fi
+  if [ -n "$have_manifest$have_sig" ]; then
+    printf '%s\n' "$carried_pair_verdict" > "$stage/carried-verdict"
+    [ "$carried_pair_verdict" = "ok" ] ||
+      echo "carry-previous-release: the carried pair of record_image job ${rec_job} is bad (${carried_pair_verdict}); recorded, and judged only if a rebuild picks it" >&2
+  fi
 fi
 
 : > "$stage/staged"
