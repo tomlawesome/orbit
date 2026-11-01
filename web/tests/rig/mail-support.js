@@ -8,7 +8,13 @@
  * the fixture server persists nothing, so an inbox that is read again after an
  * approval would otherwise still list the mail. Same idea as `rememberWrites`
  * in a11y-support.js, for the inbox's own routes.
+ *
+ * Every route handler runs inside `guardedRoute` (workspace-writes.js): a read
+ * or an answer still in flight when the page closes ends the route, not the
+ * test.
  */
+
+import { guardedRoute } from "./workspace-writes.js";
 
 /** @typedef {import("@playwright/test").Page} Page */
 
@@ -69,18 +75,29 @@ export async function rememberMailDecisions(page, { answer } = {}) {
   /** @type {Map<string, string>} receipt id -> the household it was assigned to */
   const assigned = new Map();
 
-  await page.route("**/api/imap-inbox", async (route) => {
-    const response = await route.fetch();
+  /* The inbox as this page sees it: the fixture's own answer, less what landed,
+     with the households it was assigned to. The list route and the review
+     route both read it here, so a review of a receipt that landed finds none
+     (the real server answers 404) and is never answered from the fixture's
+     unfiltered list. A read the page's end cuts off is the end of the test
+     (guardedRoute), not a failure of it. */
+  /** @param {import("@playwright/test").Route} route */
+  const inboxAsPageSees = async (route) => {
+    const response = await route.fetch({ url: new URL("/api/imap-inbox", route.request().url()).href });
     const body = await response.json();
     body.receipts = body.receipts
       .filter((/** @type {{ id: string }} */ one) => !landed.has(one.id))
       .map((/** @type {{ id: string }} */ one) => ({ ...one, ...(assigned.has(one.id) ? { householdId: assigned.get(one.id) } : {}) }));
-    await route.fulfill({ response, json: body });
-  });
+    return { response, body };
+  };
+  await page.route("**/api/imap-inbox", guardedRoute(async (route) => {
+    const { response, body } = await inboxAsPageSees(route);
+    return route.fulfill({ response, json: body });
+  }));
   /** @param {import("@playwright/test").Route} route @param {string} id @param {string | null} householdId */
   const answerReview = async (route, id, householdId) => {
-    const listed = await page.request.get(new URL("/api/imap-inbox", route.request().url()).href);
-    const receipt = (await listed.json()).receipts.find((/** @type {{ id: string }} */ one) => one.id === id);
+    const { body } = await inboxAsPageSees(route);
+    const receipt = body.receipts.find((/** @type {{ id: string }} */ one) => one.id === id);
     if (!receipt) return route.fulfill({ status: 404, json: { error: { code: "inbox_receipt_not_found", message: "That incoming document is not available" } } });
     const { attachments = [], ...rest } = receipt;
     return route.fulfill({
@@ -92,7 +109,7 @@ export async function rememberMailDecisions(page, { answer } = {}) {
       },
     });
   };
-  await page.route("**/api/imap-inbox/**", (route) => {
+  await page.route("**/api/imap-inbox/**", guardedRoute(async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
     if (/\/attachments\//.test(url.pathname)) return route.fallback();
@@ -106,14 +123,14 @@ export async function rememberMailDecisions(page, { answer } = {}) {
     removals.push(id);
     landed.add(id);
     return route.fulfill({ json: { ok: true } });
-  });
-  await page.route("**/api/reviewed-intake/approve", (route) => {
+  }));
+  await page.route("**/api/reviewed-intake/approve", guardedRoute(async (route) => {
     const body = route.request().postDataJSON();
     approvals.push(body);
     const scripted = answer?.(approvals.length, body);
     if (scripted) return route.fulfill({ status: scripted.status ?? 200, json: scripted.json });
     landed.add(body.source?.receiptId);
     return route.fulfill({ json: { outcome: "approved", itemId: "i-mailed-renewal" } });
-  });
+  }));
   return { approvals, removals, landed, assigned };
 }
