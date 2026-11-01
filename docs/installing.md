@@ -42,15 +42,19 @@ If the document limit is raised later, raise the proxy setting to match.
 
 Orbit sends its own Content-Security-Policy with every page, which tells the
 browser where a page may load scripts, images and other content from. If your
-proxy also sends one, the browser enforces both, so the proxy's policy must
-allow at least what Orbit's allows: scripts, styles, fonts, images (including
-`data:` and `blob:` images), connections and workers from Orbit's own address
-only. A stricter proxy policy breaks pages. Do not make the proxy remove
+proxy also sends one, the browser enforces both, and every page goes blank
+unless the proxy's policy allows everything Orbit's does. That includes inline
+scripts Orbit marks with a fresh nonce on each page, which a proxy cannot list
+in advance. So the simplest rule is: send no policy of your own, or one with no
+`script-src` (and no `default-src`) restriction. Do not make the proxy remove
 Orbit's header.
 
 Orbit also refuses to be shown inside another site's frame: every response
-carries `X-Frame-Options: DENY`, and every page's policy says
-`frame-ancestors 'none'`. A proxy need not add either.
+carries `X-Frame-Options: DENY`, and the policy on every page the server draws
+says `frame-ancestors 'none'`. The three sign-in pages built ahead of time
+(`/login`, `/logout`, `/auth/error`) carry their policy in the page itself,
+where `frame-ancestors` has no effect, so the `X-Frame-Options` header covers
+them. A proxy need not add either.
 
 ## Install
 
