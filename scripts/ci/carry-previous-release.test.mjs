@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -79,6 +79,13 @@ openssl(["ec", "-in", PRIVATE_KEY, "-pubout", "-out", PUBLIC_KEY]);
 // cosign sign-blob's output: base64 of the DER ECDSA signature over the file.
 const signManifest = (body) => openssl(["dgst", "-sha256", "-sign", PRIVATE_KEY], Buffer.from(body)).toString("base64");
 
+// The commands the carry and the verifier use (and the usual coreutils beside them), linked into a bare PATH by start({ without }).
+const TOOL_NAMES = [
+  "bash", "env", "jq", "openssl", "cosign", "base64", "sha256sum", "mktemp", "rm", "mkdir", "mv", "cp", "ln", "chmod", "cat", "tr", "awk", "sed", "grep",
+  "find", "sort", "basename", "dirname", "head", "tail", "wc", "tee", "cut", "dd", "od", "sleep", "date", "touch", "ls", "stat", "readlink", "realpath",
+  "expr", "xargs", "cmp", "diff", "id", "uname", "true", "false", "test", "[",
+];
+
 const COSIGN_STUB = [
   "#!/usr/bin/env bash",
   "set -uo pipefail",
@@ -94,6 +101,8 @@ const COSIGN_STUB = [
   'n="$(cat "$STUB_COSIGN_DIR/count" 2>/dev/null || echo 0)"; n=$((n + 1)); printf %s "$n" > "$STUB_COSIGN_DIR/count"',
   'cp "$manifest" "$STUB_COSIGN_DIR/$n.manifest"',
   'cp "$sig" "$STUB_COSIGN_DIR/$n.sig"',
+  // A tool failure is not a verdict: cosign could not run (STUB_COSIGN_TOOL_FAIL), as against rejecting the signature.
+  'if [ -n "${STUB_COSIGN_TOOL_FAIL:-}" ]; then echo "stub cosign: cannot run: the trust root could not be fetched" >&2; exit 2; fi',
   'if [ -n "${STUB_COSIGN_REJECT:-}" ]; then echo "stub cosign: invalid signature" >&2; exit 1; fi',
   'if [ -n "${STUB_COSIGN_REJECT_MATCH:-}" ] && grep -qF -- "$STUB_COSIGN_REJECT_MATCH" "$manifest"; then',
   '  echo "stub cosign: invalid signature" >&2; exit 1',
@@ -160,7 +169,24 @@ for (let i = 0; i < argv.length; i++) {
 }
 if (!url) process.exit(2);
 
-function out(text) { fs.writeSync(1, text); }
+// A reader that closes early (head -c) ends the write the way it ends curl's: exit 23.
+function writeFailed() {
+  process.stderr.write("curl: (23) Failure writing output to destination\n");
+  process.exit(23);
+}
+function out(text) {
+  const buf = Buffer.from(text);
+  let off = 0;
+  while (off < buf.length) {
+    try {
+      off += fs.writeSync(1, buf, off);
+    } catch (e) {
+      if (e.code === "EAGAIN") continue;
+      if (e.code === "EPIPE") writeFailed();
+      throw e;
+    }
+  }
+}
 function done(status, headers, code) {
   if (writeOut) {
     out(writeOut
@@ -215,13 +241,14 @@ if (u.origin !== api.origin || u.pathname.indexOf(api.pathname) !== 0) {
 }
 
 const status = route.status || 200;
-const headers = Object.assign({ "Content-Type": "application/json" }, route.headers || {});
+const headers = Object.assign({ "Content-Type": "application/json" }, route.chunked ? { "Transfer-Encoding": "chunked" } : {}, route.headers || {});
 // --max-filesize N[KMG]: an answer larger than the limit ends curl with exit 63.
 // A route marked oversize is larger than any limit, so a test need not know it.
 let limit = null;
 const sizeArg = maxFilesize === null ? null : /^(\d+)([KkMmGg]?)$/.exec(maxFilesize);
 if (sizeArg) limit = Number(sizeArg[1]) * ({ "": 1, k: 1024, m: 1048576, g: 1073741824 })[sizeArg[2].toLowerCase()];
-if (limit !== null && !route.transport && (route.oversize || Buffer.byteLength(route.body === undefined ? "" : route.body) > limit)) {
+// A chunked route has no declared size, so --max-filesize cannot see it (as with curl): the body is sent whole.
+if (limit !== null && !route.transport && !route.chunked && (route.oversize || Buffer.byteLength(route.body === undefined ? "" : route.body) > limit)) {
   process.stderr.write("curl: (63) Maximum file size exceeded\n");
   done(status, headers, 63);
 }
@@ -239,8 +266,14 @@ if (dumpHeader) {
   else fs.writeFileSync(dumpHeader, headText);
 }
 const payload = (include ? headText : "") + (route.body === undefined ? "" : route.body);
-if (output && output !== "-") fs.writeFileSync(output, payload);
-else out(payload);
+if (output && output !== "-") {
+  try {
+    fs.writeFileSync(output, payload);
+  } catch (e) {
+    if (e.code === "EPIPE") writeFailed();
+    throw e;
+  }
+} else out(payload);
 done(status, headers, fail && status >= 400 ? 22 : 0);
 `;
 const curlStubFile = join(keyDir, "curl-stub.cjs");
@@ -253,7 +286,9 @@ const CURL_WRAPPER = `#!/usr/bin/env bash\nexec "${process.execPath}" "${curlStu
  * The job listing, GET /projects/:id/jobs, is keyed per page: "<path>#page=N".
  * A route may be { sequence: [route, ...] }: the nth request for it gets the nth
  * entry, the last repeating. { oversize: true } is an answer larger than any
- * --max-filesize (curl exit 63). Anything unknown answers 404. `endless` (a jobs array) serves every listing
+ * --max-filesize (curl exit 63). { chunked: true } is an answer with no
+ * length header (Transfer-Encoding: chunked), which --max-filesize cannot see:
+ * the body is sent whole, however large. Anything unknown answers 404. `endless` (a jobs array) serves every listing
  * page without a route, each pointing at the next, to prove a page cap.
  * After 300 requests the stub answers 500 so a runaway loop ends.
  */
@@ -325,7 +360,7 @@ const world = (own, carried, { recId = REC, signId = SIGN, pipeline = PIPE, jobs
  * rejects only a manifest containing that text. verifications() lists the
  * pairs the verifier was asked about, in order.
  */
-function start({ routes = {}, endless, ref = "main", env = {}, gap } = {}) {
+function start({ routes = {}, endless, ref = "main", env = {}, gap, without: missingTools = [] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "carry-previous-"));
   const bin = join(dir, "bin");
   const work = join(dir, "work");
@@ -355,13 +390,27 @@ function start({ routes = {}, endless, ref = "main", env = {}, gap } = {}) {
     scriptPath = join(copyDir, "carry-previous-release.sh");
   }
 
+  // without: ["openssl"] runs the carry with PATH holding only the stub curl and
+  // symlinks to the usual tools (TOOL_NAMES), minus those named: a tool that is
+  // really missing, as against one that rejects.
+  let toolPath = process.env.PATH;
+  if (missingTools.length > 0) {
+    const tools = join(dir, "tools");
+    mkdirSync(tools);
+    for (const name of TOOL_NAMES) {
+      const found = spawnSync("bash", ["-c", `command -v ${name}`], { encoding: "utf8", ...processGuard() }).stdout.trim();
+      if (found.startsWith("/") && !missingTools.includes(name)) symlinkSync(found, join(tools, name));
+    }
+    toolPath = tools;
+  }
+
   const invoke = (args) =>
     failOnProcessDeadline(
       spawnSync("bash", [scriptPath, ...args], {
         cwd: work,
         encoding: "utf8",
         env: {
-          PATH: `${bin}:${process.env.PATH}`,
+          PATH: `${bin}:${toolPath}`,
           CI_API_V4_URL: API,
           CI_PROJECT_ID: PROJECT,
           CI_COMMIT_REF_NAME: ref,
@@ -1376,5 +1425,204 @@ describe("--max-filesize on every curl call (#1607 note 48548, Lows)", () => {
     const r = carry({ routes: { ...routes, [key]: { ...routes[key], oversize: true } } });
     expectPrepareFailure(r, /63|file size|too (large|big)/i);
     expect(output(r.prepare)).toContain(`${API}${key.split("#")[0]}`);
+  });
+});
+
+/*
+ * #1607 note 48718, the five Lows from the inline review of a7cf6709:
+ *  1. a gap line excuses only the predecessor's own pair (a 404 on it, or a
+ *     failure to verify it), never the carried previous/ pair;
+ *  2. "does not verify" (the verifier ran and rejected the signature) is told
+ *     apart from a tooling failure (cosign cannot be downloaded or run, openssl
+ *     is missing): a tooling failure always fails, names the tool, and no gap
+ *     line excuses it;
+ *  3. a chunked answer (no length header, so --max-filesize cannot see it) is
+ *     bounded by the bytes actually read;
+ *  4. a 404 with artifacts_expire_at null says the artifacts are gone and points
+ *     at scripts/ci/carry-accepted-gap, as the expired case does;
+ *  5. ADR-0031 carries a dated note that record_image and sign_evidence keep
+ *     artifacts with no expiry; ORBIT_CARRY_POLL_SECONDS is capped at 60 and a
+ *     non-number is rejected.
+ */
+describe("a gap line excuses only the predecessor's own pair (#1607 note 48718, Low 1)", () => {
+  const REASON = "key rotated, the predecessor's artifacts expired";
+  const gap = `main ${REC} ${REASON}\n`;
+  const ACCEPTED = /gap accepted/i;
+
+  it.each([
+    ["the verifier rejects it", () => ({ env: { STUB_COSIGN_REJECT_MATCH: OLDER }, routes: world(pair(CURRENT), pair(OLDER)) })],
+    [
+      "its signature is not a signature over it",
+      () => ({ routes: world(pair(CURRENT), { body: manifest(OLDER), sig: signManifest(manifest(THIRD)) }) }),
+    ],
+  ])("a carried pair that fails verification (%s) fails --prepare with a matching gap line", (_how, options) => {
+    const r = carry({ ...options(), gap });
+    expectPrepareFailure(r, /carried/i);
+    expect(output(r.prepare)).toMatch(/does not verify/i);
+    expect(output(r.prepare)).not.toMatch(ACCEPTED);
+    // The predecessor's own pair verified; it was the carried one that failed.
+    expect(r.verifications().length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("a verifier rejection is told apart from a tooling failure (#1607 note 48718, Low 2)", () => {
+  const REASON = "key rotated, the predecessor's artifacts expired";
+  const gap = `main ${REC} ${REASON}\n`;
+  const ACCEPTED = /gap accepted/i;
+  const cosignCache = join(keyDir, "cosign-cache");
+  mkdirSync(cosignCache, { recursive: true });
+
+  it("a verifier that rejects the signature, with a matching gap line, is excused: a first release, nothing carried", () => {
+    const r = carry({ routes: world(pair(OLDER)), env: { STUB_COSIGN_REJECT: "1" }, gap });
+    expect(r.prepare.status).toBe(0);
+    expect(output(r.prepare)).toMatch(ACCEPTED);
+    expect(r.final.status).toBe(0);
+    expect(r.hasPrevious()).toBe(false);
+    expect(r.verifications().length).toBeGreaterThanOrEqual(1);
+  });
+
+  // Each case: how the tool fails, the tool the message must name, and proof
+  // that the scenario is the one meant (the failing step really was reached).
+  const TOOL_FAILURES = [
+    [
+      "cosign cannot be downloaded",
+      { env: { ORBIT_COSIGN: "", ORBIT_COSIGN_DIR: cosignCache }, without: ["cosign"] },
+      /cosign/i,
+      (r) => expect(r.calls().some((argv) => argv.some((arg) => arg.includes("sigstore/cosign")))).toBe(true),
+    ],
+    [
+      "openssl is missing",
+      { without: ["openssl"] },
+      /openssl/i,
+      // cosign accepted; it is openssl that could not run.
+      (r) => expect(r.verifications().length).toBeGreaterThanOrEqual(1),
+    ],
+    ["cosign fails as a tool, with no verdict", { env: { STUB_COSIGN_TOOL_FAIL: "1" } }, /cosign/i, (r) => expect(r.verifications().length).toBeGreaterThanOrEqual(1)],
+  ];
+
+  it.each(TOOL_FAILURES.flatMap(([what, options, tool, proof]) => [true, false].map((withGap) => [what, withGap, options, tool, proof])))(
+    "%s (matching gap line: %s): --prepare fails naming the tool, never as 'does not verify', and the gap line does not excuse it",
+    (_what, withGap, options, tool, proof) => {
+      const r = carry({ routes: world(pair(OLDER)), ...options, env: { ...options.env }, ...(withGap ? { gap } : {}) });
+      expectPrepareFailure(r, tool);
+      expect(output(r.prepare)).not.toMatch(/does not verify/i);
+      expect(output(r.prepare)).not.toMatch(ACCEPTED);
+      proof(r);
+    },
+  );
+});
+
+describe("a chunked answer is bounded by the bytes read (#1607 note 48718, Low 3)", () => {
+  const LIMIT = 1024 * 1024;
+  // Valid content padded to an exact size, so the size is the only thing wrong with it.
+  const padded = (text, size, fill = " ") => text + fill.repeat(size - Buffer.byteLength(text));
+  const bigPair = (digest, size) => {
+    const body = padded(manifest(digest), size);
+    return { body, sig: signManifest(body) };
+  };
+  // A route with no length header: the stub sends it whole, whatever --max-filesize says.
+  const chunked = (body) => ({ chunked: true, body });
+  const limitMessage = /size limit|limit|more than|too (large|big)|exceed/i;
+
+  it("a manifest of one byte over the limit, sent with no length header, fails the carry, naming the URL", () => {
+    const own = bigPair(OLDER, LIMIT + 1);
+    const routes = { ...world(own), [artifactKey(REC, MANIFEST)]: chunked(own.body) };
+    const r = carry({ routes });
+    expectPrepareFailure(r, limitMessage);
+    expect(output(r.prepare)).toContain(`${API}${artifactKey(REC, MANIFEST)}`);
+  });
+
+  it("a signature over the limit, sent with no length header, fails the carry, naming the URL", () => {
+    const own = pair(OLDER);
+    const routes = { ...world(own), [artifactKey(SIGN, SIG)]: chunked(padded(own.sig, LIMIT + 1, "\n")) };
+    const r = carry({ routes });
+    expectPrepareFailure(r, limitMessage);
+    expect(output(r.prepare)).toContain(`${API}${artifactKey(SIGN, SIG)}`);
+  });
+
+  it("a carried manifest over the limit, sent with no length header, fails the carry, naming the URL", () => {
+    const carried = bigPair(THIRD, LIMIT + 1);
+    const routes = { ...world(pair(OLDER), carried), [artifactKey(REC, `previous/${MANIFEST}`)]: chunked(carried.body) };
+    const r = carry({ routes });
+    expectPrepareFailure(r, limitMessage);
+    expect(output(r.prepare)).toContain(`${API}${artifactKey(REC, `previous/${MANIFEST}`)}`);
+  });
+
+  it("a chunked manifest of exactly the limit is read whole and carried byte-for-byte (the cap is limit + 1, not limit)", () => {
+    const own = bigPair(OLDER, LIMIT);
+    expect(Buffer.byteLength(own.body)).toBe(LIMIT);
+    const routes = { ...world(own), [artifactKey(REC, MANIFEST)]: chunked(own.body) };
+    const r = carry({ routes });
+    expect(r.prepare.status).toBe(0);
+    expect(r.final.status).toBe(0);
+    expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
+    expect(r.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
+  });
+});
+
+describe("a 404 with artifacts_expire_at null says the artifacts are gone (#1607 note 48718, Low 4)", () => {
+  const goneWorld = (own) => ({
+    ...world(own),
+    ...listing([{ ...job(REC, "record_image", { pipeline: PIPE }), artifacts_expire_at: null }]),
+    [pipelineKey(PIPE)]: jsonBody([
+      job(SIGN + 1, "build_image", { pipeline: PIPE }),
+      { ...job(SIGN, "sign_evidence", { pipeline: PIPE }), artifacts_expire_at: null },
+      { ...job(REC, "record_image", { pipeline: PIPE }), artifacts_expire_at: null },
+    ]),
+  });
+
+  it.each([
+    ["manifest", artifactKey(REC, MANIFEST)],
+    ["signature", artifactKey(SIGN, SIG)],
+  ])("on the %s: says the artifacts are gone (deleted or never kept) and names scripts/ci/carry-accepted-gap and the line to add", (_what, key) => {
+    const r = carry({ routes: without(goneWorld(pair(OLDER)), key) });
+    expectPrepareFailure(r, /gone|deleted|never kept/i);
+    expect(output(r.prepare)).toContain("carry-accepted-gap");
+    expect(output(r.prepare)).toContain(`main ${REC} `);
+  });
+});
+
+describe("ORBIT_CARRY_POLL_SECONDS is capped at 60 and must be a number (#1607 note 48718)", () => {
+  it.each(["61", "100", "3600"])("%s is rejected, not clamped: --prepare fails naming the variable and the cap", (value) => {
+    const r = carry({ routes: world(pair(OLDER)), env: { ORBIT_CARRY_POLL_SECONDS: value } });
+    expectPrepareFailure(r, /ORBIT_CARRY_POLL_SECONDS/);
+    expect(output(r.prepare)).toMatch(/60/);
+  });
+
+  it.each(["abc", "1.5", "-5", "10s", "0x10"])("'%s' is not a number: --prepare fails naming the variable", (value) => {
+    const r = carry({ routes: world(pair(OLDER)), env: { ORBIT_CARRY_POLL_SECONDS: value } });
+    expectPrepareFailure(r, /ORBIT_CARRY_POLL_SECONDS/);
+  });
+
+  it.each(["0", "60"])("%s is within the cap and carries normally", (value) => {
+    const own = pair(OLDER);
+    const r = carry({ routes: world(own), env: { ORBIT_CARRY_POLL_SECONDS: value } });
+    expect(r.prepare.status).toBe(0);
+    expect(r.final.status).toBe(0);
+    expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
+  });
+});
+
+describe("ADR-0031 records that the artifacts have no expiry (#1607 note 48718, Low 5)", () => {
+  // The ADR is hard-wrapped and uses backticks for names: compare on one line of plain words.
+  const adr = readFileSync(join(repoRoot, "docs", "adr", "0031-signed-launcher-shipped-with-orbit.md"), "utf8")
+    .replace(/`/g, "")
+    .replace(/\s+/g, " ");
+  const NOTE = "record_image and sign_evidence keep artifacts with no expiry";
+
+  it("has the note in at least two places", () => {
+    expect(adr.split(NOTE).length - 1).toBeGreaterThanOrEqual(2);
+  });
+
+  it.each([
+    ["§3 Build, beside 'Artifacts kept 90 days'", "Artifacts kept 90 days, like record_image's."],
+    ["the implementation slices, beside the .sig '90 days'", "wired into sign_evidence, artifact .sig 90 days"],
+  ])("%s: a dated 'since #1607' note follows the original text, which stays", (_where, anchor) => {
+    const at = adr.indexOf(anchor);
+    expect(at, `the original text '${anchor}' stays (a note, not a rewrite)`).toBeGreaterThanOrEqual(0);
+    const after = adr.slice(at + anchor.length, at + anchor.length + 400);
+    expect(after).toContain(NOTE);
+    expect(after).toMatch(/since #1607/);
+    expect(after).toMatch(/\d{4}-\d{2}-\d{2}/);
   });
 });
