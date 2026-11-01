@@ -140,8 +140,8 @@ const MAILBOX = {
 
 /**
  * Administration with a system on the clock, two jobs and every alert, as
- * pocket-administration.spec.js stands it up; with `mailbox`, a configured
- * mailbox as well.
+ * the mounted page's tests stand it up (tests/unit/pocket-administration.test.mjs,
+ * its mountAdmin); with `mailbox`, a configured mailbox as well.
  * @param {Page} page
  * @param {{ mailbox?: boolean }} [options]
  */
