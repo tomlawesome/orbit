@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en" data-theme="afterdark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Home sky: the notice</title>
+<style>
+@font-face{font-family:'Inter Variable';font-weight:100 900;font-display:block;src:url(fonts/inter-latin-wght-normal.woff2) format('woff2')}
+@font-face{font-family:'JetBrains Mono Variable';font-weight:100 800;font-display:block;src:url(fonts/jetbrains-mono-latin-wght-normal.woff2) format('woff2')}
+*{box-sizing:border-box}
+/* After dark, from web/src/lib/packs.css [data-theme=afterdark]. The three ink
+   tiers the brief names: ink-2 = --ink-mid, ink-3 = --ink-faint; ink-4 is the
+   pack's pre-lift faint tone (#4a5468), used only for fills and outlines. */
+:root{
+  --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+  --line:#1c2434; --line-soft:#151b28;
+  --ink:#e7e9ee; --ink-2:#9fa6b2; --ink-3:#717c8e; --ink-4:#4a5468;
+  --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+  --sun:#dbe9ff; --sun-core:#ffffff;
+  --ember:#ff6a3d; --slate:#7b8da6;
+  --mono:'JetBrains Mono Variable',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --ui:'Inter Variable',Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--ui)}
+body{min-height:100vh}
+h1,h2,p{margin:0}
+.tag{font:11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+
+/* scenes: desk by default, phone under 700px or with ?scene=phone */
+.scene-phone{display:none}
+body[data-scene=phone] .scene-desk{display:none}
+body[data-scene=phone] .scene-phone{display:block}
+@media (max-width:700px){.scene-desk{display:none}.scene-phone{display:block}}
+
+/* desk */
+.desk-head{max-width:1180px;margin:0 auto;padding:22px 24px 0;display:flex;align-items:baseline;gap:18px}
+.desk-head h1{font:600 20px var(--ui);color:var(--ink)}
+.desk-head p{color:var(--ink-2);font-size:13px}
+.desk-head .tag{margin-left:auto}
+.desk-body{max-width:1180px;margin:0 auto;padding:0 24px;display:flex;gap:36px;align-items:flex-start}
+.stage{position:relative;flex:none}
+.stage svg{display:block;overflow:visible}
+.desk-foot{max-width:1180px;margin:0 auto;padding:0 24px 24px}
+
+/* sky */
+.pl{cursor:default}
+.hit{fill:transparent;cursor:pointer}
+.callout{position:absolute;z-index:8;pointer-events:none;opacity:0;transition:opacity .12s;
+  background:rgba(12,17,30,.96);border:1px solid var(--line);border-radius:10px;padding:9px 13px;
+  font:13.5px var(--ui);color:var(--ink);white-space:nowrap}
+.callout.show{opacity:1}
+.callout .line{position:absolute;top:50%;width:26px;height:1px;background:var(--accent);opacity:.85}
+.callout.side-right .line{left:-27px}
+.callout.side-left .line{right:-27px}
+.callout b{display:block;font-weight:600;font-size:13.5px}
+.callout small{display:block;font:11.5px var(--mono);color:var(--ink-2)}
+.callout .chip{display:none;margin-top:7px;font:11px var(--mono);color:var(--accent);
+  border:1px solid var(--line);border-radius:99px;padding:3px 10px}
+.callout.has-docs .chip{display:inline-block}
+.callout .imp{display:block;margin-top:7px;font:11.5px var(--mono);color:var(--ink-2)}
+.callout .imp i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:-0.5px}
+
+/* legend (H, I) */
+.legend{font:13px var(--ui);color:var(--ink-2)}
+.legend .rule{color:var(--ink)}
+.legend .key{display:flex;gap:20px;margin-top:10px;font:12px var(--mono);color:var(--ink-2)}
+.legend .key span{display:inline-flex;align-items:center;gap:8px}
+.legend .key svg{display:block}
+
+/* phone */
+.phone{width:390px;margin:0 auto;padding:14px 16px 24px;min-height:100vh}
+.phone .bar{display:flex;align-items:baseline;justify-content:space-between;height:44px}
+.phone .bar b{font:600 18px var(--ui)}
+.phone .bar span{font:11px var(--mono);color:var(--ink-3);letter-spacing:.12em;text-transform:uppercase}
+.phone .stage{margin:30px -16px 0}
+.phone .legend{margin-top:14px;line-height:1.5}
+.phone .legend .key{flex-wrap:wrap;gap:8px 18px}
+.phone .note{margin-top:16px;color:var(--ink-3);font-size:12px;line-height:1.5}
+
+/* importance pulse (H, I) */
+.pulse{transform-box:fill-box;transform-origin:center;animation:pulse 2s ease-out infinite}
+@keyframes pulse{0%{transform:scale(1);opacity:.9}100%{transform:scale(2.3);opacity:0}}
+.dash{display:none}
+@media (prefers-reduced-motion:reduce){
+  .pulse{display:none}
+  .dash{display:inline}
+}
+
+
+/* ---- round 5 · J, the notice ------------------------------------------- */
+html,body{overflow:hidden;height:100%}
+body{min-height:0}
+/* the sky behind: desk centred on the screen, phone as round 4's column */
+body[data-scene=desk] #world{position:fixed;inset:0;display:grid;place-items:center}
+body[data-scene=desk] #world .phone-bar{display:none}
+body[data-scene=desk] #sky{transform:scale(1.2)}
+body[data-scene=phone] #world{width:390px;height:100%;margin:0 auto;padding:14px 16px 0}
+body[data-scene=phone] #sky{margin:30px -16px 0}
+.phone-bar{display:flex;align-items:baseline;justify-content:space-between;height:44px}
+.phone-bar b{font:600 18px var(--ui)}
+.phone-bar span{font:11px var(--mono);color:var(--ink-3);letter-spacing:.12em;text-transform:uppercase}
+
+/* the scrim: a standard dialog scrim, the sky left at about 55% */
+.scrim{position:fixed;inset:0;z-index:10;background:rgba(4,7,16,.45);transition:opacity .16s ease,visibility .16s}
+.layer{position:fixed;inset:0;z-index:11;display:flex;transition:opacity .16s ease,visibility .16s}
+body.gone .scrim,body.gone .layer{opacity:0;visibility:hidden;pointer-events:none}
+@media (prefers-reduced-motion:reduce){.scrim,.layer{transition:none}}
+
+/* the card: the first-household ring card's glass (web/src/lib/ringcard.css
+   .ringglass and .card), as a rectangle. Ink is the card's own, fixed. */
+.card{--ink:#f0f4fb;--ink-mid:#c0cade;--ink-faint:#9aa6bf;
+  --line:rgba(240,244,251,.26);--line-soft:rgba(240,244,251,.14);
+  position:relative;display:flex;flex-direction:column;overflow:hidden;color:var(--ink);
+  background:rgba(6,10,22,.56);
+  -webkit-backdrop-filter:blur(20px) saturate(1.1) brightness(.74);
+  backdrop-filter:blur(20px) saturate(1.1) brightness(.74);
+  border:1px solid var(--line-soft);
+  box-shadow:0 40px 120px -50px rgba(0,0,0,.8),0 0 90px -40px rgba(216,180,90,.18) inset}
+.grab{display:none}
+.scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.eyebrow{margin:0;font:600 11px/1.4 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+h2.title{margin:6px 0 0;font:600 20px/1.3 var(--ui);color:var(--ink);outline:none}
+h3.eyebrow{margin:0 0 14px}
+ul.notes{list-style:none;margin:20px 0 0;padding:0;display:grid;gap:14px}
+.notes li{display:grid;grid-template-columns:7px 1fr;column-gap:12px;font-size:14px;line-height:1.5;color:var(--ink-mid)}
+.notes li::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);margin-top:calc(.75em - 3.5px)}
+.notes b{font-weight:600;color:var(--ink)}
+.divider{border:0;border-top:1px solid var(--line-soft);margin:22px 0 18px}
+.admin[hidden]{display:none}
+.admin ul.notes{margin-top:0}
+
+/* the foot: one primary button, one quiet link, nothing else. The button is the
+   sign-in door's `.card .act`; the link is the door's `.quietline`. */
+.foot{flex:none;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.act{appearance:none;margin:0;font:600 .75rem var(--ui);color:#04060e;background:#d8b45a;
+  border:0;border-radius:99px;padding:11px 30px;cursor:pointer;letter-spacing:.04em;line-height:normal;
+  box-shadow:0 0 28px rgba(216,180,90,.22);transition:filter .35s ease}
+.act:hover{filter:brightness(1.08)}
+.act:focus-visible{outline:2px solid #f0f4fb;outline-offset:3px}
+.quiet{font:.75rem var(--mono);color:#8f9bb5;letter-spacing:.05em;padding:6px 4px;
+  text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px;
+  text-decoration-color:rgba(216,180,90,.5);transition:color .3s ease}
+.quiet:hover{color:#f0f4fb}
+.quiet:focus-visible{outline:2px solid #d8b45a;outline-offset:3px;border-radius:4px}
+
+/* desk: a centred card */
+body[data-scene=desk] .layer{align-items:center;justify-content:center;padding:24px}
+body[data-scene=desk] .card{width:100%;max-width:460px;max-height:calc(100vh - 48px);border-radius:16px}
+body[data-scene=desk] .scroll{padding:28px 28px 0}
+body[data-scene=desk] .foot{padding:22px 28px 28px}
+
+/* phone: a bottom sheet, the app's own (Sheet.svelte: 18px top corners, a
+   36 x 4 handle in a 24px strip, scrim over the sky, foot stays in view) */
+body[data-scene=phone] .layer{align-items:flex-end;justify-content:center}
+body[data-scene=phone] .card{width:100%;max-width:390px;max-height:80vh;max-height:80dvh;
+  border-radius:18px 18px 0 0;border-bottom:0;
+  box-shadow:0 -18px 44px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.06),0 0 90px -40px rgba(216,180,90,.18) inset}
+body[data-scene=phone] .grab{display:flex;flex:none;height:24px;justify-content:center;padding-top:8px}
+body[data-scene=phone] .grab span{width:36px;height:4px;border-radius:2px;background:var(--line)}
+body[data-scene=phone] .scroll{padding:6px 22px 4px}
+body[data-scene=phone] .notes li{font-size:15px}
+body[data-scene=phone] .foot{flex-direction:column;align-items:stretch;gap:2px;
+  padding:12px 22px calc(14px + env(safe-area-inset-bottom));border-top:1px solid var(--line-soft);
+  background:rgba(6,10,22,.4)}
+body[data-scene=phone] .act{min-height:48px;width:100%}
+body[data-scene=phone] .quiet{display:flex;align-items:center;justify-content:center;min-height:44px}
+body[data-scene=desk] .quiet{margin-left:-4px}
+/* the phone sheet scrolls: a short fade at the foot says there is more */
+.scroll[data-more=true]{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 28px),transparent)}
+
+</style>
+</head>
+<body data-scene="desk" data-who="member">
+<main id="world">
+  <div class="phone-bar"><b>Harlow Home</b><span>sky</span></div>
+  <div id="sky" class="stage"></div>
+</main>
+<div class="scrim" aria-hidden="true"></div>
+<div class="layer">
+  <section class="card" id="card" role="dialog" aria-modal="true" aria-labelledby="wn-title">
+    <div class="grab" aria-hidden="true"><span></span></div>
+    <div class="scroll">
+      <p class="eyebrow">What’s new · Orbit 0.3.4</p>
+      <h2 class="title" id="wn-title" tabindex="-1">New in this release</h2>
+      <ul class="notes">
+        <li><span><b>Planets wear your section’s colour.</b> Each section has a colour you choose; its items show it on the sky.</span></li>
+        <li><span><b>Size is cost or importance.</b> Pick which one planet size shows, in Settings.</span></li>
+        <li><span><b>Items now have an importance.</b> Your existing items say “not set” until you give them one.</span></li>
+        <li><span><b>Names up close.</b> Planets due within 30 days show their name. Change the days in Settings.</span></li>
+      </ul>
+      <div class="admin" id="admin" hidden>
+        <hr class="divider">
+        <h3 class="eyebrow">For administrators</h3>
+        <ul class="notes">
+          <li><span><b>The first-run tour is off.</b> New members land straight on the sky.</span></li>
+          <li><span><b>Notes like this one.</b> Every release can carry a note for members and one for administrators; people see each once.</span></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot">
+      <a class="quiet" href="#" id="notes-link">All release notes</a>
+      <button class="act" type="button" id="gotit">Got it</button>
+    </div>
+  </section>
+</div>
+
+<script>
+/* Shared by g, h and i (build.py pastes this into each file). One data story,
+   one geometry, one label placer: the three files differ only in what they
+   paint and what they let you touch. */
+const SKY = (() => {
+  const TODAY = '2026-08-13';           // the fixture's pinned date (workspace.js fixtureToday)
+  const U = { RIM: 166, ZERO: 62, CLEAR: 24, SUN_R: 7 };
+  const TAU_O = 7, OVERDUE_SPAN = 60;   // the overdue mirror curve
+  const SCENES = {
+    desk:  { S: 1.684, W: 780, H: 640, CX: 390, CY: 320, size: [3.5, 13], font: 12, name: 10 },
+    phone: { S: 0.942, W: 390, H: 372, CX: 195, CY: 186, size: [5, 12],   font: 12, name: 14 / 0.942 },
+  };
+
+  /* Harlow Home, as fixtures/workspace.js has it. importance is the mock-up's
+     own field (H, I): three high, one normal, two low, one not set. */
+  const ITEMS = [
+    { id: 'gutter',  title: 'Gutter clearing',       due: '2026-07-28', cost: 15000,   rec: 12, docs: 0, imp: 'high' },
+    { id: 'mot',     title: 'Car MOT — Volvo V60', due: '2026-08-29', cost: 5485,    rec: 12, docs: 2, imp: 'high' },
+    { id: 'boiler',  title: 'Boiler service',        due: '2026-09-04', cost: 12000,   rec: 12, docs: 0, imp: 'normal' },
+    { id: 'chimney', title: 'Chimney sweep',         due: '2026-10-13', cost: 9000,    rec: 12, docs: 0, imp: 'low' },
+    { id: 'roof',    title: 'Roof replacement',      due: '2026-11-21', cost: 5000000, rec: 12, docs: 1, imp: 'high' },
+    { id: 'smoke',   title: 'Smoke alarm batteries', due: '2026-12-13', cost: 1200,    rec: 6,  docs: 0, imp: 'low' },
+    { id: 'svc',     title: 'Car full service',      due: '2027-01-21', cost: 30000,   rec: 12, docs: 2, imp: null },
+  ];
+  const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+  ITEMS.forEach((it) => { it.days = daysBetween(TODAY, it.due); });
+
+  const bandOf = (d) => (d < 0 ? 'overdue' : d <= 30 ? 'due-soon' : d <= 90 ? 'upcoming' : 'ok');
+  const BAND_VAR = { overdue: '--overdue', 'due-soon': '--warm', upcoming: '--upcoming', ok: '--ok' };
+  const tminus = (d) => (d < 0 ? `T+${-d}d` : `T−${d}d`);
+  const money = (minor) => new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(minor / 100);
+
+  /* chart.js bodySize: power curve, GBP 50/yr to GBP 50,000/yr */
+  const sizeU = (it, [rMin, rMax]) => {
+    const yearly = (it.cost / 100) * (it.rec > 0 ? 12 / it.rec : 1);
+    const k = Math.log(rMax / rMin) / Math.log(1000);
+    return Math.round(Math.min(rMax, Math.max(rMin, rMin * Math.pow(yearly / 50, k))) * 10) / 10;
+  };
+
+  /* Distance in dial units. linear = today's dialPlacement; log = the lane design. */
+  const radiusU = (d, p) => {
+    if (p.mode === 'linear') {
+      return d >= 0 ? Math.min(U.ZERO + 0.242 * d, U.RIM) : Math.max(U.CLEAR, U.ZERO - 0.625 * -d);
+    }
+    if (d >= 0) {
+      const f = Math.min(1, Math.log(1 + d / p.tau) / Math.log(1 + p.D / p.tau));
+      return U.ZERO + (U.RIM - U.ZERO) * f;
+    }
+    const f = Math.log(1 + -d / TAU_O) / Math.log(1 + OVERDUE_SPAN / TAU_O);
+    return Math.max(U.CLEAR, U.ZERO - (U.ZERO - U.CLEAR) * f);
+  };
+  /* Bearing is today's law: one degree a day from twelve o'clock, clamped. */
+  const bearing = (d) => (Math.max(-90, Math.min(d, 430)) - 90) * Math.PI / 180;
+
+  const canvas = document.createElement('canvas').getContext('2d');
+  const measure = (text, px) => {
+    canvas.font = `400 ${px}px "Inter Variable"`;
+    return canvas.measureText(text).width;
+  };
+
+  const hit = (r, c, pad) => {       // rect r against circle c
+    const nx = Math.max(r.x0, Math.min(c.x, r.x1)), ny = Math.max(r.y0, Math.min(c.y, r.y1));
+    return Math.hypot(nx - c.x, ny - c.y) < c.r + pad;
+  };
+  const overlap = (a, b, pad) => a.x0 < b.x1 + pad && a.x1 > b.x0 - pad && a.y0 < b.y1 + pad && a.y1 > b.y0 - pad;
+
+  /* Labels: set just outside the planet on its radial line, away from the sun.
+     Inner planets place first; a label that would collide shifts along its own
+     ring by the smallest angle that clears, and a shift longer than the label's
+     own height gets a hairline leader. */
+  function placeLabels(wanted, planets, fixed, sc) {
+    const h = 14, gap = 4, placed = [], out = [];
+    const discs = planets.map((p) => ({ x: p.x, y: p.y, r: p.pr + 1.5 }));
+    const inBounds = (r) => r.x0 >= 4 && r.x1 <= sc.W - 4 && r.y0 >= 4 && r.y1 <= sc.H - 4;
+    const clear = (r) => inBounds(r)
+      && !placed.some((q) => overlap(r, q, 3))
+      && !fixed.some((q) => overlap(r, q, 3))
+      && !discs.some((c) => hit(r, c, 2));
+    [...wanted].sort((a, b) => a.rpx - b.rpx).forEach((p) => {
+      const w = measure(p.title, sc.font) + 2;
+      const at = (th, extra) => {
+        const ring = p.rpx + p.pr + gap + extra, ux = Math.cos(th), uy = Math.sin(th);
+        const ax = sc.CX + ring * ux, ay = sc.CY + ring * uy, cx = ax + ux * w / 2, cy = ay + uy * h / 2;
+        return { ring, r: { x0: cx - w / 2, y0: cy - h / 2, x1: cx + w / 2, y1: cy + h / 2 }, cx, cy };
+      };
+      let best = null;
+      const ownClear = (r) => !hit(r, { x: p.x, y: p.y, r: p.pr + 1.5 }, 2);
+      for (let k = 0; k <= 140 && !best; k++) {
+        for (const sgn of (k === 0 ? [0] : [1, -1])) {
+          const th = p.theta + sgn * k * Math.PI / 180;
+          /* push outward only as far as clears the planet's own disc */
+          let c = at(th, 0);
+          for (let e = 1; e <= 30 && !ownClear(c.r); e++) c = at(th, e);
+          if (clear(c.r)) { best = { ...c, deg: sgn * k }; break; }
+        }
+      }
+      if (!best) { best = { ...at(p.theta, 0), deg: 0, crowded: true }; }
+      placed.push(best.r);
+      const moved = Math.abs(best.deg) * Math.PI / 180 * best.ring;
+      let leader = null;
+      const gapPx = (() => { const r = best.r; const nx = Math.max(r.x0, Math.min(p.x, r.x1)), ny = Math.max(r.y0, Math.min(p.y, r.y1)); return Math.hypot(nx - p.x, ny - p.y) - p.pr; })();
+      if (moved > h && gapPx > 7) {
+        const r = best.r;
+        const nx = Math.max(r.x0, Math.min(p.x, r.x1)), ny = Math.max(r.y0, Math.min(p.y, r.y1));
+        const d = Math.hypot(nx - p.x, ny - p.y) || 1;
+        leader = { x1: p.x + (nx - p.x) / d * (p.pr + 1), y1: p.y + (ny - p.y) / d * (p.pr + 1), x2: nx, y2: ny };
+      }
+      out.push({ id: p.id, title: p.title, x: best.cx, y: best.cy, leader, crowded: Boolean(best.crowded) });
+    });
+    return out;
+  }
+
+  const fx = (n) => Math.round(n * 10) / 10;
+
+  /* opts: scene, mode, tau, D, driver ('due'|'warn'), labels ('off'|'near'|'all'),
+     rings (bool), paint(item, geo) -> svg, pin (item id | null) */
+  function render(host, opts) {
+    const sc = SCENES[opts.scene], S = sc.S;
+    opts.name = opts.name || 'Harlow Home';
+    const p = { mode: opts.mode, tau: opts.tau, D: opts.D };
+    const shift = opts.driver === 'warn' ? 30 : 0;
+    const geo = ITEMS.map((it) => {
+      const d = it.days - shift;
+      const ru = radiusU(d, p), th = bearing(d), rpx = ru * S;
+      const sz = sizeU(it, sc.size);
+      return { it, d, ru, theta: th, rpx, x: sc.CX + Math.cos(th) * rpx, y: sc.CY + Math.sin(th) * rpx, pr: sz * S, sz };
+    });
+    const near = radiusU(30, p) * S;           // "near only": inside the 30-day ring
+    const wanted = geo.filter((g) => opts.labels === 'all' || (opts.labels === 'near' && g.rpx < near - 0.01))
+      .filter((g) => g.it.id !== opts.pin)
+      .map((g) => ({ id: g.it.id, title: g.it.title, rpx: g.rpx, pr: g.pr + (opts.pad || 0), theta: g.theta, x: g.x, y: g.y }));
+
+    /* things a label must keep off: the sun's name, the ring captions */
+    const fixed = [];
+    const nameY = sc.CY + 22 * S, nameW = measure(opts.name, sc.name * S);
+    fixed.push({ x0: sc.CX - nameW / 2, x1: sc.CX + nameW / 2, y0: nameY - sc.name * S * 0.8, y1: nameY + sc.name * S * 0.25 });
+    const caps = [];
+    if (opts.rings) {
+      const spokes = [[7, 205], [30, 185], [90, 165], [365, 145]];
+      spokes.forEach(([day, deg]) => {
+        const r = radiusU(day, p) * S, a = deg * Math.PI / 180;
+        caps.push({ text: `${day}d`, x: sc.CX + Math.cos(a) * r, y: sc.CY + Math.sin(a) * r, r });
+      });
+    }
+    caps.forEach((c) => fixed.push({ x0: c.x - 14, x1: c.x + 14, y0: c.y - 7, y1: c.y + 7 }));
+    const labels = placeLabels(wanted, geo.map((g) => ({ x: g.x, y: g.y, pr: g.pr + (opts.pad || 0) })), fixed, sc);
+
+    const c = (u) => fx(u * S);
+    let svg = `<svg width="${sc.W}" height="${sc.H}" viewBox="0 0 ${sc.W} ${sc.H}" role="img" aria-label="Harlow Home sky: ${ITEMS.length} planets">`;
+    svg += `<defs><radialGradient id="sunglow-${opts.scene}"><stop offset="0" stop-color="#dbe9ff" stop-opacity=".55"/><stop offset=".35" stop-color="#dbe9ff" stop-opacity=".16"/><stop offset="1" stop-color="#dbe9ff" stop-opacity="0"/></radialGradient></defs>`;
+    /* the dial's furniture */
+    svg += `<circle cx="${sc.CX}" cy="${sc.CY}" r="${c(U.ZERO)}" fill="rgba(248,113,113,.05)"/>`;
+    svg += `<circle cx="${sc.CX}" cy="${sc.CY}" r="${c(U.RIM)}" fill="none" stroke="#2a3550" stroke-width="1.5"/>`;
+    svg += `<circle cx="${sc.CX}" cy="${sc.CY}" r="${c(U.ZERO)}" fill="none" stroke="var(--overdue)" stroke-opacity=".3" stroke-dasharray="3 5"/>`;
+    svg += `<circle cx="${sc.CX}" cy="${sc.CY}" r="${c(U.CLEAR)}" fill="none" stroke="var(--overdue)" stroke-opacity=".5" stroke-dasharray="2 3"/>`;
+    svg += `<path d="M${sc.CX} ${sc.CY - c(U.RIM) - 3 * S} l${5.5 * S} ${-9 * S} h${-11 * S} Z" fill="var(--accent)"/>`;
+    if (opts.rings) {
+      [7, 30, 90, 365].forEach((day) => {
+        svg += `<circle cx="${sc.CX}" cy="${sc.CY}" r="${fx(radiusU(day, p) * S)}" fill="none" stroke="var(--ink-2)" stroke-opacity=".24" stroke-width=".75"/>`;
+      });
+      caps.forEach((cp) => {
+        svg += `<text x="${fx(cp.x)}" y="${fx(cp.y)}" dy=".35em" text-anchor="middle" font-size="10" font-family="var(--mono)" fill="var(--ink-3)" stroke="var(--bg)" stroke-width="3" paint-order="stroke" stroke-linejoin="round">${cp.text}</text>`;
+      });
+    }
+    /* event-horizon and today captions, tiny, below the sun on their own spokes */
+    const cap = (txt, deg, ru) => {
+      const a = deg * Math.PI / 180;
+      return `<text x="${fx(sc.CX + Math.cos(a) * ru * S)}" y="${fx(sc.CY + Math.sin(a) * ru * S)}" dy=".35em" text-anchor="middle" font-size="10" font-family="var(--mono)" fill="var(--ink-3)" stroke="var(--bg)" stroke-width="3" paint-order="stroke" stroke-linejoin="round">${txt}</text>`;
+    };
+    if (opts.scene === 'desk') {
+      svg += cap('event horizon', 90, U.CLEAR + 6.8);
+      svg += cap('today', 122, U.ZERO);
+    }
+    /* sun */
+    svg += `<circle cx="${sc.CX}" cy="${sc.CY}" r="${c(22)}" fill="url(#sunglow-${opts.scene})"/>`;
+    svg += `<circle cx="${sc.CX}" cy="${sc.CY}" r="${c(U.SUN_R)}" fill="var(--sun)"/><circle cx="${sc.CX}" cy="${sc.CY}" r="${c(U.SUN_R * 0.55)}" fill="var(--sun-core)"/>`;
+    svg += `<text x="${sc.CX}" y="${fx(nameY)}" text-anchor="middle" font-size="${fx(sc.name * S)}" fill="var(--ink-2)" stroke="var(--bg)" stroke-width="3" paint-order="stroke" stroke-linejoin="round" font-family="var(--ui)">${opts.name}</text>`;
+    /* planets, largest first so a small one never hides under a big one */
+    [...geo].sort((a, b) => b.sz - a.sz).forEach((g) => {
+      svg += `<g class="pl" data-pl="${g.it.id}">${opts.paint(g.it, { x: fx(g.x), y: fx(g.y), r: fx(g.pr), d: g.d })}</g>`;
+    });
+    labels.forEach((l) => {
+      if (l.leader) svg += `<line x1="${fx(l.leader.x1)}" y1="${fx(l.leader.y1)}" x2="${fx(l.leader.x2)}" y2="${fx(l.leader.y2)}" stroke="var(--ink-3)" stroke-width="1" stroke-opacity=".8"/>`;
+      svg += `<text data-label="${l.id}" x="${fx(l.x)}" y="${fx(l.y)}" dy=".35em" text-anchor="middle" font-size="${sc.font}" font-family="var(--ui)" fill="var(--ink-2)" stroke="var(--bg)" stroke-width="3" paint-order="stroke" stroke-linejoin="round">${l.title}</text>`;
+    });
+    if (opts.hover) {
+      geo.forEach((g) => { svg += `<circle class="hit" data-hit="${g.it.id}" cx="${fx(g.x)}" cy="${fx(g.y)}" r="${fx(Math.max(g.pr + 3, 11))}"/>`; });
+    }
+    svg += `</svg>`;
+    host.innerHTML = svg;
+    host.__geo = geo;
+    host.__labels = labels;
+    host.__sc = sc;
+    host.dataset.crowded = labels.filter((l) => l.crowded).map((l) => l.id).join(',');
+    return { geo, labels };
+  }
+
+  /* The callout: today's (title, time · cost, documents chip) plus a fourth
+     line, set beside the planet on the side away from the sun's axis. */
+  function callout(stage, host, id, lines) {
+    let el = stage.querySelector('.callout');
+    if (!el) { el = document.createElement('div'); el.className = 'callout'; stage.appendChild(el); }
+    if (!id) { el.classList.remove('show'); return; }
+    const g = host.__geo.find((q) => q.it.id === id), sc = host.__sc;
+    const right = g.x >= sc.CX;
+    el.innerHTML = `<span class="line"></span><b>${g.it.title}</b><small>${tminus(g.it.days)} · ${money(g.it.cost)}</small>`
+      + `<span class="chip">◆ ${g.it.docs} ${g.it.docs === 1 ? 'document' : 'documents'}</span>${lines(g.it)}`;
+    el.classList.toggle('has-docs', g.it.docs > 0);
+    el.classList.toggle('side-right', right);
+    el.classList.toggle('side-left', !right);
+    const off = g.pr + 34;
+    el.style.left = right ? `${g.x + off}px` : '';
+    el.style.right = right ? '' : `${sc.W - (g.x - off)}px`;
+    el.style.top = `${g.y - el.offsetHeight / 2}px`;
+    el.classList.add('show');
+  }
+
+  return { ITEMS, SCENES, U, radiusU, bearing, sizeU, render, callout, tminus, money, bandOf, BAND_VAR, fx, TODAY };
+})();
+
+/* the highlight dot every dial body wears from r >= 4 (home +page.svelte bodyMark) */
+const shine = (x, y, r) => (r >= 4 ? `<circle cx="${x - 0.2 * r}" cy="${y + 0.25 * r}" r="${(0.33 * r).toFixed(1)}" fill="rgba(255,255,255,.38)"/>` : '');
+
+const Q = new URLSearchParams(window.__q || location.search);
+const sceneQ = Q.get('scene');
+const SCENE = sceneQ === 'phone' ? 'phone' : sceneQ === 'desk' ? 'desk' : (innerWidth <= 700 ? 'phone' : 'desk');
+const WHO = Q.get('who') === 'admin' ? 'admin' : 'member';
+
+/* every planet in the plain accent: the section colour is not yet set (#1618) */
+const paintPlain = (it, g) =>
+  `<circle cx="${g.x}" cy="${g.y}" r="${g.r}" fill="var(--accent)" stroke="var(--bg)" stroke-width="2"/>${shine(g.x, g.y, g.r)}`;
+
+function drawSky() {
+  /* log scale: close-up 14 days, horizon 365 days; names for planets due within 30 days */
+  SKY.render(document.getElementById('sky'), {
+    scene: SCENE, mode: 'log', tau: 14, D: 365, driver: 'due', labels: 'near', rings: false, paint: paintPlain,
+  });
+}
+
+const card = document.getElementById('card');
+const title = document.getElementById('wn-title');
+function dismiss() { document.body.classList.add('gone'); document.body.dataset.dismissed = 'true'; }
+document.getElementById('gotit').addEventListener('click', dismiss);
+document.getElementById('notes-link').addEventListener('click', (e) => e.preventDefault());
+document.addEventListener('keydown', (e) => {
+  if (document.body.classList.contains('gone')) return;
+  if (e.key === 'Escape') { e.preventDefault(); dismiss(); return; }
+  if (e.key === 'Tab') {            /* keep focus inside the dialog */
+    const f = [title, ...card.querySelectorAll('a[href],button')];
+    const i = f.indexOf(document.activeElement);
+    const next = e.shiftKey ? (i <= 0 ? f.length - 1 : i - 1) : (i === f.length - 1 ? 0 : i + 1);
+    e.preventDefault(); f[next].focus();
+  }
+});
+
+/* a scrolling body (the phone sheet, a short desk window) fades at the foot while there is more below */
+const scroller = card.querySelector('.scroll');
+function hint() { scroller.dataset.more = String(scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 2); }
+scroller.addEventListener('scroll', hint);
+addEventListener('resize', hint);
+
+(async () => {
+  await Promise.all([document.fonts.load('400 12px "Inter Variable"'), document.fonts.load('600 12px "Inter Variable"'), document.fonts.load('400 12px "JetBrains Mono Variable"')]);
+  document.body.dataset.scene = SCENE;
+  document.body.dataset.who = WHO;
+  document.getElementById('admin').hidden = WHO !== 'admin';
+  drawSky();
+  hint();
+  title.focus({ preventScroll: true });
+  window.__ready = true;
+})();
+
+</script>
+</body>
+</html>
