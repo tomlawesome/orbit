@@ -20,10 +20,12 @@
  * no other schedule starts one. The other schedules on `dev` (Renovate, base
  * image re-pin, door import) are skipped by that test.
  *
- * Credentials. Reading the pipelines API and classify's log uses
- * ORBIT_REUSE_TOKEN alone (read_api,
- * unprotected), as the reuse lookup does; nothing else is tried. Filing needs
- * SIDECAR_ISSUE_TOKEN (an `api` project token) and fails clearly without it. The token travels in a header and is never printed.
+ * Credentials. Deciding whether dev moved (the pipelines API and classify's
+ * log) uses ORBIT_REUSE_TOKEN alone (read_api, unprotected), as the reuse
+ * lookup does; nothing else is tried. The report -- reading the night's jobs,
+ * traces, issues and milestones, and filing -- uses SIDECAR_ISSUE_TOKEN (an
+ * `api` project token) and fails clearly without it, naming it on a 401
+ * (#1588). A token travels in a header and is never printed.
  */
 import { pathToFileURL } from "node:url";
 
@@ -40,7 +42,7 @@ const REQUEST_TIMEOUT_MS = 20_000;
 /* Pipelines that never ran the browsers, or were abandoned, say nothing. */
 const IGNORED_STATUSES = new Set(["canceled", "cancelled", "skipped", "manual", "scheduled"]);
 
-async function request(url, { token, fetchImpl, method = "GET", body, raw = false }) {
+async function request(url, { token, tokenName, fetchImpl, method = "GET", body, raw = false }) {
   const headers = { "PRIVATE-TOKEN": token };
   if (body !== undefined) headers["content-type"] = "application/json";
   const response = await fetchImpl(url, {
@@ -50,7 +52,9 @@ async function request(url, { token, fetchImpl, method = "GET", body, raw = fals
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) {
-    const error = new Error(`${method} ${url.replace(/\?.*$/u, "")} answered ${response.status}`);
+    // A 401 means GitLab refused the token itself (#1588): name the variable, never its value.
+    const refused = response.status === 401 && tokenName ? `; GitLab refused ${tokenName}, so check it has not expired or been revoked` : "";
+    const error = new Error(`${method} ${url.replace(/\?.*$/u, "")} answered ${response.status}${refused}`);
     error.status = response.status;
     throw error;
   }
@@ -230,7 +234,7 @@ export function issueBody({ pipelineUrl, sha, failed }) {
 }
 
 export async function report({ base, projectId, pipelineId, pipelineUrl, sha, token, fetchImpl = fetch, log = () => {} }) {
-  const options = { token, fetchImpl };
+  const options = { token, tokenName: "SIDECAR_ISSUE_TOKEN", fetchImpl };
   const api = project(base, projectId);
 
   const jobs = await request(`${api}/pipelines/${pipelineId}/jobs?${query({ "scope[]": "failed", per_page: "100" })}`, options);

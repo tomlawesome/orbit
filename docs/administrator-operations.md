@@ -1075,11 +1075,10 @@ to be on this host already.
   `--execute --safe-only` runs after you confirm it, and `--plan` lists it as
   `restore-compose-file`. `.env-orbit` is never touched.
 - **Different from the image's copy:** if the file exists but differs, Repair
-  reports it as `compose-file-drift` and prints the lines that differ (`<` is
-  your file, `>` is the image's). It never overwrites or replaces the file,
-  because the difference may be a deliberate edit. Lines that look like they
-  carry a password, secret or token, or a web address with a user name and
-  password in it, are hidden in that report. The report is
+  reports it as `compose-file-drift` and names the lines that differ (`<` is
+  your file, `>` is the image's); a value is shown only for the image and a
+  few structural keys, every other value is hidden. It never overwrites or
+  replaces the file, because the difference may be a deliberate edit. The report is
   information only; it does not make the deployment count as unhealthy. If you
   want the image's version back, copy it out of the image yourself.
 - **Identical:** nothing is reported and nothing is written.

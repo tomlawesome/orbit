@@ -76,18 +76,36 @@ Milestone: [v0.3.2](https://gitlab.tomlawson.io/ai/orbit/-/milestones/32)
 Milestone: [v0.3.3](https://gitlab.tomlawson.io/ai/orbit/-/milestones/33)
 
 Done before the sky so its screens are rewritten once: #1352 (home and
-inbox), #1354 (household, archive card and create), #1353, #1355, #1356,
-#1346 (the engine sends the item's kind), #1347.
+inbox), #1354 (household, archive card and create), #1353, #1346 (the engine
+sends the item's kind), #1347. #1355 and #1356 moved to v0.3.4, into the sky
+build; #1354 moved to v0.3.6.
 
 ## v0.3.4 — The sky
 
 Milestone: [v0.3.4](https://gitlab.tomlawson.io/ai/orbit/-/milestones/34)
 
-The alpha-feedback redesign, decided in one design round with the owner:
-#1463 (importance: three levels, required, shown as colour), #1466
-(households set their own categories), #1462 (the warning date can drive
-distance from the sun), #1464 (log scale for distance), #1461 (optional
-permanent labels), #1468 (themed dropdowns), #1391 (the section limit).
+Re-planned on 2026-10-31 into lanes, so issues that touch the same code are
+worked together and that code is loaded once. The milestone description holds
+the lane lists; this is the order and the reason.
+
+- **Testing first** (owner, 2026-10-31, answer 11a): #1517 (testing review)
+  is decided (ADR-0039): which checks move to cheaper tests, how runs go in
+  parallel, and how to run only what a change affects. Its build follows
+  (#1609 to #1616),
+  then the flaky tests judged under #1416 (the shared flaky-test system).
+- **The sky and the tour:** one design round with the owner, then one build.
+  #1463 (importance: three levels, shown as colour), #1466 (households set
+  their own categories), #1462 (the warning date can drive distance), #1464
+  (log scale for distance), #1461 (optional permanent labels), #1468 (themed
+  dropdowns), #1382 (layout by device), and the tour on phones and desktop,
+  #1254, #1516, #1581. #1355 and #1356 (shared page and sky code) go in the
+  same build, since it rewrites those files anyway.
+- **Security and dependencies:** #1565 (SvelteKit 3) with #1411 (page
+  Content-Security-Policy), which touch the same hooks; #1592, #1206 and
+  #1370 (scanners and the licence gate). #794, #1489 and #1541 wait on
+  upstream rebuilds and are only re-checked.
+- **Cheap work:** local test tools, the audit Low and Note lists, and
+  housekeeping (#1529 last; #1539 is done).
 
 ## v0.3.5 — Running Orbit
 
@@ -96,7 +114,7 @@ Milestone: [v0.3.5](https://gitlab.tomlawson.io/ai/orbit/-/milestones/35)
 #1458 (a readable, organised operator log), #1419 (hold documents when the
 scanner is down, and tell administrators), #1421 (alert emails to
 administrators), #1387 (a maintenance command for the launcher), #1398 (mail
-approval all or nothing), #1411 (Content-Security-Policy), #1326 (the engine
+approval all or nothing), #1326 (the engine
 serves its own API) with #1364, #1350, #1351 and #1330 (consistency review).
 Decisions: #1453 (the second release signature), #802 (hardware needs).
 
@@ -107,14 +125,15 @@ Milestone: [v0.3.6](https://gitlab.tomlawson.io/ai/orbit/-/milestones/36)
 #1434, #1436, #1446 (PDF cost and timeouts), #1433 (stored previews), #1390
 (exports of any size), #1437 (duplicate uploads), #1312 (Outlook and Hotmail
 mailboxes), #1053 (where a sign-in came from), #1386 (retired entries), #1388
-(a mail size limit), #1470 (optional single-household mode).
+(a mail size limit), #1470 (optional single-household mode), #1391 (the
+section limit, moved from v0.3.4 on 2026-10-31).
 
 ## v0.3.7 — Look and accessibility
 
 Milestone: [v0.3.7](https://gitlab.tomlawson.io/ai/orbit/-/milestones/37)
 
 #1253, #1268, #1311 (the flight on sign-in, sign-out, 404 and maintenance),
-#1382 (layout by device), #1299, #1314, #1385, #1430 (flight fixes), #1182,
+#1299, #1314, #1385, #1430 (flight fixes), #1182,
 #1384, #1395 (accessibility and error fixes), #496 (the final accessibility
 check), #1103 (rename orbit-base-image).
 
