@@ -279,6 +279,9 @@ describe("an instance administrator's relay, queue and review (#1632)", () => {
     await expect(getImapReview(admin.id, mine.receiptId, fixture.household.id)).rejects.toThrow();
 
     await joinHousehold();
+    /* As in the app: the receipt is placed in a household first, then read
+       for review against that household. */
+    await expect(assignImapReceiptHousehold(admin.id, mine.receiptId, fixture.household.id)).resolves.toEqual({ receiptId: mine.receiptId });
     const review = await getImapReview(admin.id, mine.receiptId, fixture.household.id);
     expect(review.receipt.id).toBe(mine.receiptId);
     expect(review.receipt.proposal).toMatchObject({ title: "Admin receipt" });
