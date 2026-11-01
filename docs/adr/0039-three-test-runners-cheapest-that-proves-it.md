@@ -107,11 +107,12 @@ with selection by what changed (Vitest `--changed`, Playwright
    - Merge requests into `dev` that touch `web/` run the rig on Chromium
      desktop and phone once it measures under 10 minutes (owner answer 1a;
      until then it stays nightly and promotion only, #1412 as written). That
-     run holds the journeys, the pixel screens and the 44 px tap-floor
-     measurement (`pocket-measure`, about 11 minutes on four workers): the
-     tap check belongs at the point of coding (owner, 2026-11-01), so a web
-     merge request takes about 25 minutes rather than today's 12–15, and the
-     under-10-minutes condition applies to the run without the measurement.
+     run holds the journeys and the pixel screens. The 44 px tap floor is
+     checked where the code changes (owner, 2026-11-01): a static rule check
+     in `fast` that every pocket control takes its size from the kit's
+     `--p-hit` token, and `pocket-measure` run for the one screen in hand by
+     whoever changes it; the full 508-box measurement (about 11 minutes)
+     stays at promotion and nightly as the net, off merge requests.
    - No per-screen selection for the browser jobs (#1413 closes): at
      promotion the full run is the point, and on a merge request the rig is
      cheap enough to run whole.

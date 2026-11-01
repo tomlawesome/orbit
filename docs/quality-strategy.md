@@ -344,9 +344,11 @@ merge request. It is caught that night, or at promotion, against whatever else
 has landed since.
 
 Amended by ADR-0039 (owner answer 1a, 2026-11-01): a merge request into `dev`
-that touches `web/` runs the rig on Chromium desktop and phone (the journeys,
-the pixel screens and the `pocket-measure` tap-floor measurement: the tap
-check belongs at the point of coding, owner, 2026-11-01) once that run measures under 10 minutes. Until then
+that touches `web/` runs the rig on Chromium desktop and phone (the journeys
+and the pixel screens; the 44 px tap floor is checked where the code
+changes: a static `--p-hit` rule check in `fast` and `pocket-measure` for
+the one screen in hand, with the full measurement at promotion and nightly,
+owner, 2026-11-01) once that run measures under 10 minutes. Until then
 #1412 stands as written. The stack browser jobs run only at promotion and
 nightly, on Chromium desktop and phone plus a WebKit sliver of the sign-in
 journeys (entry, local sign-in, first-run door). Firefox and WebKit otherwise
