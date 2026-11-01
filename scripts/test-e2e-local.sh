@@ -975,7 +975,9 @@ read_quarantine_cap() { # sets quarantine_cap and quarantine_timeout; non-zero w
 }
 
 # Each run gets its own HTML report folder (#1607), and so does each of its two
-# Playwright runs: the HTML reporter clears its folder when it starts, so a
+# Playwright runs that write an HTML report (CI set, or --reporter=html; a
+# plain local run uses the list reporter and writes none): the HTML reporter
+# clears its folder when it starts, so a
 # shared default folder lets the quarantine run delete the gate's report, and
 # lets a second run in this checkout delete the first's. The folder sits under
 # the ignored playwright-report/ and is absolute, so the run inside the
@@ -1096,7 +1098,11 @@ if [[ "$suite_status" == 0 ]]; then
         log "a quarantined test failed (non-blocking; see the issue named in the test; traces in test-results/quarantine)"
         ;;
     esac
-    log "Playwright reports: ${report_root}/gate and ${report_root}/quarantine"
+    # Only an HTML reporter writes these: the stack config uses it when CI is
+    # set or when --reporter=html is passed; a plain local run lists instead.
+    if [ -d "${report_root}/gate" ] || [ -d "${report_root}/quarantine" ]; then
+      log "Playwright reports: ${report_root}/gate and ${report_root}/quarantine"
+    fi
   else
     log "skipping the quarantined tests: could not read CI's cap on them from .gitlab-ci.yml (a \`timeout [-k D] DURATION bash scripts/test-frontend.sh --quarantine\` line) or coreutils \`timeout\` is missing, and they are never run uncapped"
   fi
