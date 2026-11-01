@@ -84,8 +84,9 @@ with selection by what changed (Vitest `--changed`, Playwright
    in a lower layer is deleted and named in the commit.
 
 4. **Browsers by runner, not by habit.** The rig runs on Chromium desktop and
-   phone at every run, and on Firefox and WebKit (desktop and phone) at
-   promotion and nightly. The stack runs on Chromium desktop and phone, plus a
+   phone whenever it runs (on merge requests only once it is under 10
+   minutes, §6), and on Firefox and WebKit (desktop and phone) at promotion
+   and nightly. The stack runs on Chromium desktop and phone, plus a
    WebKit sliver of the sign-in journeys (entry, local sign-in, first-run
    door), because cookie and redirect behaviour differs by browser and the
    rest of the stack journeys are server behaviour that does not.
@@ -103,18 +104,21 @@ with selection by what changed (Vitest `--changed`, Playwright
      integration projects, without coverage; lint and type check as now.
    - Push to `dev`: the full Vitest run with the coverage ratchet, so a merge
      still cannot lower a floor.
-   - Promotion and nightly: everything, every browser, as now (#1412).
+   - Promotion and nightly: everything, every browser, as now (#1412),
+     except the full tap-floor measurement, which is nightly only (below).
    - Merge requests into `dev` that touch `web/` run the rig on Chromium
      desktop and phone once it measures under 10 minutes (owner answer 1a;
      until then it stays nightly and promotion only, #1412 as written). That
-     run holds the journeys and the pixel screens. The 44 px tap floor is
-     checked where the code changes (owner, 2026-11-01): a static rule check
-     in `fast` that every pocket control takes its size from the kit's
-     `--p-hit` token, and `pocket-measure` run for the one screen in hand by
-     whoever changes it. The full 508-box measurement (about 11 minutes) runs
-     nightly only and never gates: a miss is a Low at best, so a failure
-     files an issue through the nightly report rather than turning a
-     pipeline red (owner, 2026-11-01).
+     run holds the journeys and the pixel screens (decided with 1a,
+     overrulable). The 44 px tap floor is checked where the code changes,
+     ideally by a static fast test (owner, 2026-11-01): the check chosen is a
+     rule test in `fast` that every pocket control takes its size from the
+     kit's `--p-hit` token. An agent whose change might affect a tap runs
+     `pocket-measure` for the affected screens before handing back (owner,
+     2026-11-01). The full 508-box measurement (about 11 minutes) runs
+     nightly only and never gates: every finding is a Low at best, never a
+     required fix, so it raises an issue instead (owner, 2026-11-01); the
+     `nightly_report` job does the filing (#1616).
    - No per-screen selection for the browser jobs (#1413 closes): at
      promotion the full run is the point, and on a merge request the rig is
      cheap enough to run whole.
@@ -127,8 +131,8 @@ with selection by what changed (Vitest `--changed`, Playwright
    - The stack suite runs locally only when the change touches sign-in,
      uploads and documents, mail, archive or the server; then the touched
      specs, not the suite.
-   - Proof that a test is stable is `--repeat-each=3` on the one project that
-     flaked. The full matrix is for promotion.
+   - Proof that a test is stable is `--repeat-each=3` on the projects that
+     flaked (owner, 2026-10-25). The full matrix is for promotion.
 
 ## Consequences
 

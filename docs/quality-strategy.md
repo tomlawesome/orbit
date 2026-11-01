@@ -50,8 +50,10 @@ but must not add production authentication bypasses.
 
 ### Three runners (ADR-0039)
 
-Since ADR-0039 (owner answers on #1517, 2026-11-01) the tests run on three
-runners and no fourth:
+ADR-0039 (owner answers on #1517, 2026-11-01) sets the target: three runners
+and no fourth. It is not live yet: the rig's journey folder, its browser
+projects and the CI jobs land under #1614 and #1615, and until they do the
+layers above describe what runs. The target:
 
 - **Vitest**: node, or happy-dom for page markup and behaviour modules; the
   `integration` project adds real PostgreSQL. No browser.
@@ -343,26 +345,39 @@ The cost: a change that breaks only a browser check is no longer caught on its
 merge request. It is caught that night, or at promotion, against whatever else
 has landed since.
 
-Amended by ADR-0039 (owner answer 1a, 2026-11-01): a merge request into `dev`
-that touches `web/` runs the rig on Chromium desktop and phone (the journeys
-and the pixel screens; the 44 px tap floor is checked where the code
-changes: a static `--p-hit` rule check in `fast` and `pocket-measure` for
-the one screen in hand, with the full measurement nightly only and non-blocking,
-a miss filing an issue as a Low, owner, 2026-11-01) once that run measures under 10 minutes. Until then
-#1412 stands as written. The stack browser jobs run only at promotion and
-nightly, on Chromium desktop and phone plus a WebKit sliver of the sign-in
-journeys (entry, local sign-in, first-run door). Firefox and WebKit otherwise
-run the rig at promotion and nightly (answer 2a). The `fidelity` job's runner
-carries the rig's journeys (`web/tests/rig/`) as well as the screens gate once
-the rig projects land (#1614).
+Amended by ADR-0039 (owner answer 1a, 2026-11-01), as the target until
+#1614 and #1615 land:
+
+- A merge request into `dev` that touches `web/` runs the rig on Chromium
+  desktop and phone, once that run measures under 10 minutes. Until then
+  #1412 stands as written. The run holds the journeys and the pixel screens
+  (decided with 1a, overrulable).
+- The 44 px tap floor is checked where the code changes (owner, 2026-11-01).
+  A fast static test in `fast` checks that every phone control takes its
+  size from `--p-hit`, the one CSS token that holds the 44 px. Whoever
+  changes a phone screen runs `pocket-measure` for the affected screens
+  before handing back. The full 508-box measurement runs nightly only and
+  never blocks: a miss is a Low (a cosmetic defect, fixed when convenient),
+  so the nightly files an issue instead of failing (owner, 2026-11-01; #1616).
+- The stack browser jobs run only at promotion and nightly, on Chromium
+  desktop and phone plus a WebKit sliver of the sign-in journeys (entry,
+  local sign-in, first-run door). Firefox and WebKit otherwise run the rig
+  at promotion and nightly (answer 2a).
+- The rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`; #1615) replace
+  the `fidelity` jobs and carry the journeys (`web/tests/rig/`, #1614) as
+  well as the screens gate.
 
 ### What runs where (ADR-0039)
+
+The target once #1614, #1615 and #1616 land; the sections above say what runs
+today.
 
 | Event | Runs |
 | --- | --- |
 | Merge request into `dev` | `vitest run --changed <merge base>` for the default and integration projects, without coverage; lint and type check; the rig on Chromium desktop and phone once it measures under 10 minutes (web changes; once built, see #1517's issue list) |
 | Push to `dev` | the full Vitest run with the coverage ratchet; integration in full; the non-browser stack jobs as today |
-| Promotion (push to `preview`) and nightly | everything: the full Vitest run, the rig on all five browser/device projects, the stack on Chromium desktop and phone plus the WebKit sign-in sliver |
+| Promotion (push to `preview`) | everything but the tap-floor measurement: the full Vitest run, the rig on all five browser/device projects, the stack on Chromium desktop and phone plus the WebKit sign-in sliver |
+| Nightly | the same, plus the full tap-floor measurement (`pocket-measure`), which never fails the pipeline: a miss files an issue as a Low |
 
 The rig runs `fullyParallel` with workers sized to its runner, because it
 shares no state. The stack suite keeps two workers and the reset gate; #949's
