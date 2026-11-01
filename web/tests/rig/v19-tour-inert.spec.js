@@ -30,6 +30,8 @@ import { APP, onPhone, signedIn } from "./a11y-support.js";
  * through its own review hook), so nothing is signed into, seeded or reset.
  * The stack version let the film run; this holds it, which is the same
  * veil, catch pane and transport, and keeps a press from racing a chapter.
+ * So "the tour is up" in the titles means the veil, the catch pane and the
+ * transport are on, with the film held at its first chapter, not running.
  */
 test.use({ baseURL: APP, reducedMotion: "reduce" });
 
@@ -93,16 +95,16 @@ async function withTourPlaying(page, phone, body) {
   await body({ orb, menu, about: menu.getByRole("link", { name: "About" }), transport });
 }
 
-test("a pointer press on the menu opener does nothing while the tour plays", async ({ page }, testInfo) => {
+test("a pointer press on the menu opener does nothing while the tour is up", async ({ page }, testInfo) => {
   await withTourPlaying(page, onPhone(testInfo), async ({ orb, about }) => {
     /* force skips Playwright's wait for the opener to be hittable (what burnt
        120 s in the report); the press goes to whatever is on top at that spot. */
     await pressAndLetThePageTakeItIn(page, "click", () => orb.click({ force: true, timeout: SETTLE }));
-    await expect(about, "#1473: the menu opened while the tour plays").toBeHidden({ timeout: SHORT });
+    await expect(about, "#1473: the menu opened while the tour is up").toBeHidden({ timeout: SHORT });
   });
 });
 
-test("a touch on the menu opener does nothing while the tour plays", async ({ page }, testInfo) => {
+test("a touch on the menu opener does nothing while the tour is up", async ({ page }, testInfo) => {
   test.skip(!onPhone(testInfo), "the finger is the pocket's pointer; the desk is covered by the press above");
   await withTourPlaying(page, true, async ({ orb, about }) => {
     const box = await orb.boundingBox();
@@ -111,23 +113,23 @@ test("a touch on the menu opener does nothing while the tour plays", async ({ pa
        click is ever made from it, and the capturing listener still sees the
        touchend before the pane does. */
     await pressAndLetThePageTakeItIn(page, "touchend", () => page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2));
-    await expect(about, "#1473: the menu opened by touch while the tour plays").toBeHidden({ timeout: SHORT });
+    await expect(about, "#1473: the menu opened by touch while the tour is up").toBeHidden({ timeout: SHORT });
   });
 });
 
-test("the menu opener cannot be operated by keyboard while the tour plays", async ({ page }, testInfo) => {
+test("the menu opener cannot be operated by keyboard while the tour is up", async ({ page }, testInfo) => {
   await withTourPlaying(page, onPhone(testInfo), async ({ orb, about }) => {
     /* An inert control cannot take focus, so Enter on it does nothing either. */
     await orb.evaluate((el) => el.focus());
     await pressAndLetThePageTakeItIn(page, "keydown", () => page.keyboard.press("Enter"));
-    await expect(about, "#1473: the menu opened by keyboard while the tour plays").toBeHidden({ timeout: SHORT });
+    await expect(about, "#1473: the menu opened by keyboard while the tour is up").toBeHidden({ timeout: SHORT });
   });
 });
 
-test("the menu opener sits in an inert part of the page while the tour plays", async ({ page }, testInfo) => {
+test("the menu opener sits in an inert part of the page while the tour is up", async ({ page }, testInfo) => {
   await withTourPlaying(page, onPhone(testInfo), async ({ orb }) => {
     /* The standard modal pattern: the opener is inert itself or inside an inert ancestor. */
-    expect(await orb.evaluate((el) => !!el.closest("[inert]")), "#1473: the menu opener is not inert while the tour plays").toBe(true);
+    expect(await orb.evaluate((el) => !!el.closest("[inert]")), "#1473: the menu opener is not inert while the tour is up").toBe(true);
   });
 });
 
@@ -135,11 +137,16 @@ test("after the tour is skipped the menu opens and About reaches /about", async 
   await withTourPlaying(page, onPhone(testInfo), async ({ orb, menu, about, transport }) => {
     /* Skip, through the pill's own button. Skipping records the tour as taken:
        this test's own write, answered as the server answers it. */
-    await page.route("**/api/settings/tour", (route) =>
-      route.request().method() === "PUT"
-        ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ tour: { tourSeenAt: "2026-11-01T09:00:00.000Z" } }) })
-        : route.fallback());
+    /** @type {unknown[]} */
+    const recorded = [];
+    await page.route("**/api/settings/tour", (route) => {
+      if (route.request().method() !== "PUT") return route.fallback();
+      recorded.push(route.request().postDataJSON());
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ tour: { tourSeenAt: "2026-11-01T09:00:00.000Z" } }) });
+    });
     await transport.locator(".skp").click({ timeout: SHORT });
+    await expect.poll(() => recorded.length, { message: "skipping records the tour as taken", timeout: SETTLE }).toBe(1);
+    expect(recorded[0], "the record names a time it was taken").toMatchObject({ tourSeenAt: expect.any(String) });
     await expect(page.locator("#orbit-tour-veil")).toBeHidden({ timeout: SHORT });
     await expect(page.locator("#orbit-tour-catch")).toHaveCount(0, { timeout: 10_000 });
 

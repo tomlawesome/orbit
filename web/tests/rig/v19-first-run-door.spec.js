@@ -164,7 +164,9 @@ test("the setup screen asks for the password twice and refuses a spent link", as
   await page.fill("#idagain", "orbit-e2e-placeholder-secret");
   await expect(page.locator("#idbtn")).toBeEnabled();
   /* This test's own write, refused as the server refuses a token it cannot
-     use. */
+     use. The refusal is mocked, so what is proved is the page's mapping of
+     `setup_token_invalid` to Orbit's own words, not that the server refuses a
+     spent token (that is the setup route's own test). */
   await page.route("**/api/auth/local/setup", (route) =>
     route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: { code: "setup_token_invalid" } }) }));
   await page.locator("#idbtn").click();

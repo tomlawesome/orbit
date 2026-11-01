@@ -258,14 +258,10 @@ test.describe("no JavaScript", () => {
       await noJsPage.goto(`${APP}/home`);
 
       // The plain manifest list (`.manifest .corridor`, +page.svelte) is
-      // built from `corridor`, a $derived off `view`. `view` starts as
-      // `$state(null)` and is only ever assigned inside `onMount()` or event
-      // handlers -- both JS-only, and there is no `+page.js`/universal load
-      // for /home that would fetch it any other way (+page.server.js returns
-      // only the fixture flag). So without JS, `view` stays null forever,
-      // `corridor` stays null, and `{#if corridor && !view?.emptySky}` never
-      // renders the `.corridor` div at all: the manifest is empty, not plain.
-      // Left failing rather than weakened.
+      // built from `corridor`, a $derived off `view`, and `view` starts from
+      // the server's own read of the workspace (+page.server.js, #842), so
+      // the first render already has the manifest and a reader with no
+      // JavaScript gets the list rather than an empty page.
       await expect(noJsPage.locator(".manifest .corridor .item", { hasText: "Chimney sweep" })).toHaveCount(1);
       await expect(noJsPage.locator(".manifest .corridor .item", { hasText: "Roof replacement" })).toHaveCount(1);
       await expect(noJsPage.locator(".manifest .corridor .today")).toContainText("TODAY");
