@@ -360,6 +360,15 @@ esac
   pnpm: `#!/usr/bin/env bash
 exit 0
 `,
+  // The script asks `ss -H -ltn 'sport = :4443'` whether 127.0.0.1:4443 is held
+  // (#1445, #1622): any output means held. The stub answers from SS_STUB_HELD
+  // alone, never from the real host, so what else runs here cannot matter.
+  ss: `#!/usr/bin/env bash
+if [[ -n "\${SS_STUB_HELD:-}" && "$*" == *:4443* ]]; then
+  echo 'LISTEN 0 511 127.0.0.1:4443 0.0.0.0:* users:(("held-by-stub",pid=4242,fd=3))'
+fi
+exit 0
+`,
 };
 
 const ciConfigPath = fileURLToPath(new URL("../.gitlab-ci.yml", import.meta.url));
@@ -1457,55 +1466,34 @@ describe("a failed `compose down` in the exit trap is visible (#1423)", () => {
  * random host port (CI's issuer URL is fixed at https://orbit-oidc:4443/). If
  * something already holds 4443 (the test bed used to), the forward's claim
  * failed late and obscurely. The script now checks first, and stops with a
- * message naming the port. These tests hold 4443 themselves with a listener on
- * 127.0.0.1; they never touch a process they did not start, and fail with a
- * message saying so if the port is already taken on this host.
+ * message naming the port.
+ *
+ * #1622: the tests never look at the real host's port. The fixture puts a stub
+ * `ss` on PATH (see STUBS) that reports 4443 as held only when the test sets
+ * SS_STUB_HELD, so a real WebKit run holding 4443 on this host changes nothing.
  */
 describe("the WebKit run checks port 4443 before forwarding it (#1445)", () => {
-  function holdPort4443() {
-    return new Promise((resolve, reject) => {
-      const server = createServer((socket) => socket.destroy());
-      server.once("error", (error) =>
-        reject(
-          new Error(
-            `127.0.0.1:4443 is already held on this host (${error.code}); this test must hold it itself and will not stop another process. Free the port and rerun.`,
-          ),
-        ),
-      );
-      server.listen(4443, "127.0.0.1", () => resolve(server));
-    });
-  }
-  const release = (server) => new Promise((resolve) => server.close(resolve));
   const webkitSpec = ["--spec", "tests/e2e/x.spec.ts", ...webkit];
   const dockerRuns = (fx) => dockerCalls(fx).filter((l) => /^run /.test(l));
+  const held = { SS_STUB_HELD: "1" };
 
   it("stops with a non-zero exit and a message naming 4443 when the port is taken, and starts no WebKit container", async () => {
     const fx = makeFixture();
     writeFileSync(`${fx.dockerLog}.up`, ""); // the stub's stack is already up
-    const server = await holdPort4443();
-    try {
-      const result = await runToEnd(fx, ["--reuse", fx.project, ...webkitSpec]);
-      expect(result.status).not.toBe(0);
-      expect(result.status).not.toBeNull();
-      expect(result.stderr).toContain("4443");
-      expect(dockerRuns(fx)).toEqual([]);
-    } finally {
-      await release(server);
-    }
+    const result = await runToEnd(fx, ["--reuse", fx.project, ...webkitSpec], held);
+    expect(result.status).not.toBe(0);
+    expect(result.status).not.toBeNull();
+    expect(result.stderr).toContain("4443");
+    expect(dockerRuns(fx)).toEqual([]);
   });
 
   it("stops the same way for a run that starts its own stack, and still tears that stack down", async () => {
     const fx = makeFixture();
-    const server = await holdPort4443();
-    try {
-      const result = await runToEnd(fx, webkitSpec);
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("4443");
-      expect(dockerRuns(fx)).toEqual([]);
-      expect(downCalls(fx)).toHaveLength(1);
-    } finally {
-      await release(server);
-    }
+    const result = await runToEnd(fx, webkitSpec, held);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("4443");
+    expect(dockerRuns(fx)).toEqual([]);
+    expect(downCalls(fx)).toHaveLength(1);
   });
 
   it("runs the WebKit container as before when 4443 is free", async () => {
@@ -1518,12 +1506,72 @@ describe("the WebKit run checks port 4443 before forwarding it (#1445)", () => {
 
   it("does not mind 4443 being taken for a run with no WebKit forward", async () => {
     const fx = makeFixture();
-    const server = await holdPort4443();
-    try {
-      const result = await runToEnd(fx, chromium);
-      expect(result.status, result.stderr).toBe(0);
-    } finally {
-      await release(server);
-    }
+    const result = await runToEnd(fx, chromium, held);
+    expect(result.status, result.stderr).toBe(0);
+  });
+});
+
+/*
+ * #1622: with a real process holding 127.0.0.1:4443, the WebKit-path cases
+ * that have nothing to do with ports (#1513: image name, arguments after `--`)
+ * run exactly as they do with the port free. This holds the port itself when it
+ * can; if another process already holds it (a real WebKit run on this shared
+ * host), that is the very condition under test and the block carries on. It
+ * only ever closes a listener it opened itself.
+ */
+describe("WebKit-path cases pass while a real process holds 127.0.0.1:4443 (#1622)", () => {
+  let ours;
+  beforeAll(async () => {
+    ours = await new Promise((resolveHold) => {
+      const server = createServer((socket) => socket.destroy());
+      server.once("error", () => resolveHold(undefined)); // held by someone else: carry on
+      server.listen(4443, "127.0.0.1", () => resolveHold(server));
+    });
+  });
+  afterAll(async () => {
+    if (ours) await new Promise((resolveClose) => ours.close(resolveClose));
+  });
+
+  const webkitRun = async (extraArgs, extraEnv) => {
+    const fx = makeFixture();
+    writeFileSync(`${fx.dockerLog}.up`, ""); // the stub's stack is already up
+    const result = await runToEnd(
+      fx,
+      ["--reuse", fx.project, "--spec", "tests/e2e/x.spec.ts", ...webkit, ...extraArgs],
+      extraEnv,
+    );
+    return { result, runs: dockerCalls(fx).filter((l) => /^run /.test(l)), calls: dockerCalls(fx) };
+  };
+
+  it("hands docker the public Playwright image when the cache variable is unset", async () => {
+    const { result, runs, calls } = await webkitRun([], {});
+    expect(result.status, result.stderr).toBe(0);
+    expect(runs).not.toHaveLength(0);
+    const images = calls.flatMap((l) => l.split(/\s+/)).filter((t) => t.includes("playwright:"));
+    expect(images).not.toHaveLength(0);
+    for (const image of images) expect(image).toBe(expandImage("mcr.microsoft.com"));
+  });
+
+  it("hands docker the cache host's Playwright image when the variable is set", async () => {
+    const host = "cache.example.invalid/mcr";
+    const { result, calls } = await webkitRun([], { CI_IMAGE_CACHE_MCR: host });
+    expect(result.status, result.stderr).toBe(0);
+    const images = calls.flatMap((l) => l.split(/\s+/)).filter((t) => t.includes("playwright:"));
+    expect(images).not.toHaveLength(0);
+    for (const image of images) expect(image).toBe(expandImage(host));
+  });
+
+  it("appends arguments after -- to the command inside the image", async () => {
+    const { result, runs } = await webkitRun(["--", "--repeat-each=10", "--workers=1"], {});
+    expect(result.status, result.stderr).toBe(0);
+    expect(runs).not.toHaveLength(0);
+    for (const line of runs) expect(line).toMatch(/--repeat-each=10 --workers=1['"]?$/);
+  });
+
+  it("adds nothing to the command inside the image when there is no --", async () => {
+    const { result, runs } = await webkitRun([], {});
+    expect(result.status, result.stderr).toBe(0);
+    expect(runs).not.toHaveLength(0);
+    for (const line of runs) expect(line).not.toContain("--repeat-each");
   });
 });
