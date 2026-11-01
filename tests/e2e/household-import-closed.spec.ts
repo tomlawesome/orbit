@@ -31,9 +31,6 @@ resetDatabaseBetweenSpecFiles();
  * screen is a screen people see, and the pocket has its own dialect.
  */
 
-const CLOSED_CODE = "household_import_in_progress";
-const CLOSED_MESSAGE = "This household's owner is bringing in an archive. Come back when it's finished.";
-
 /** The stack's own database container, reached the way support/database.ts does. */
 function databaseContainer(): string {
   const project = process.env.COMPOSE_PROJECT_NAME;
@@ -128,15 +125,10 @@ test("a. the member's home says the household is closed for a moment and shows n
   await expect(memberPage.getByText("Your other households are open as usual.")).toHaveCount(0);
 });
 
-test("b. the household's API refuses the member with 409 and the plain words, no retry-after", async () => {
-  const target = household!;
-  const response = await memberPage.request.get(`/api/households/${target.id}/members`);
-  expect(response.status()).toBe(409);
-  const body = (await response.json()) as { error: { code: string; message: string } };
-  expect(body.error.code).toBe(CLOSED_CODE);
-  expect(body.error.message).toBe(CLOSED_MESSAGE);
-  expect(response.headers()["retry-after"]).toBeUndefined();
-});
+/* #1612: the household's API answers (409 and the plain words, no retry-after;
+   the importer's 200; the 200 once the start record is closed) moved to
+   tests/integration/household-access-gate.test.ts (ADR-0039). Only the screens
+   are read here. */
 
 test("c. the household's own screen shows the same heading and a back-to-home link that fits the phone", async ({ isMobile }) => {
   const target = household!;
@@ -157,10 +149,8 @@ test("c. the household's own screen shows the same heading and a back-to-home li
   }
 });
 
-test("d. the importer is not shut out: the administrator's API answers 200 and their home still shows the item", async () => {
+test("d. the importer is not shut out: their home still shows the item", async () => {
   const target = household!;
-  const response = await adminPage.request.get(`/api/households/${target.id}/members`);
-  expect(response.status()).toBe(200);
   await adminPage.goto("/home");
   await expect(adminPage.getByText(target.itemTitle!).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 });
@@ -169,8 +159,6 @@ test("e. when the start record is closed the household opens again for the membe
   const target = household!;
   runSql(`update portable_archive_imports set finished_at = now(), outcome = 'rolled_back' where household_id = '${target.id}' and finished_at is null;`);
 
-  const response = await memberPage.request.get(`/api/households/${target.id}/members`);
-  expect(response.status()).toBe(200);
   await memberPage.goto("/home");
   await expect(memberPage.getByText(target.itemTitle!).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
   await expect(memberPage.getByRole("heading", { name: `${target.name} is closed for a moment` })).toHaveCount(0);
