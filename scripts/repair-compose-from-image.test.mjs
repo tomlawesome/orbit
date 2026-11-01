@@ -602,10 +602,12 @@ describe("docs/administrator-operations.md describes what Repair does with the C
   });
 });
 
-// Review findings for #1484: the drift report must show what differs without
-// printing anything that looks like a credential, and must stay short.
+// Review findings for #1484, rewritten for #1607 O-R1: the drift report is
+// deny-by-default. Each differing line is a comment (hidden whole), a line on
+// an allow-listed key (shown in full), a keyed line (key named, value hidden),
+// or anything else (hidden whole). It must also stay short. Values are fake.
 describe("repair.sh --check drift report hides credentials and stays short (#1484 review)", () => {
-  const HIDDEN = "(line hidden: it looks like a credential)";
+  const HIDDEN = "(value hidden)";
 
   // The image's compose file with extra lines added to the deployment folder's copy.
   function composeWithExtra(extra) {
@@ -619,14 +621,19 @@ describe("repair.sh --check drift report hides credentials and stays short (#148
     return runRepair(targetDir, ["--check"]);
   }
 
-  it("never prints a DB_PASSWORD value, and says the line is hidden", () => {
+  // The listing's own lines: the ones the diff marks with `<`.
+  const listed = (result) => lines(result.combined).filter((l) => l.startsWith("<"));
+  const wholeLineHidden = (l) => /^<\s*\(line hidden\)\s*$/.test(l);
+  const commentHidden = (l) => /^<\s+# \(comment hidden\)\s*$/.test(l);
+
+  it("never prints a DB_PASSWORD value, and says the value is hidden", () => {
     const result = check(["      DB_PASSWORD: hunter2-not-real"]);
 
     expect(composeFindings(result.stdout).length, `no Compose-file finding.\n${result.combined}`).toBeGreaterThan(0);
     expect(result.stdout).not.toContain("hunter2-not-real");
     expect(result.stderr).not.toContain("hunter2-not-real");
-    const hidden = lines(result.combined).find((l) => l.includes(HIDDEN));
-    expect(hidden, `no hidden-line text in:\n${result.combined}`).toBeDefined();
+    const hidden = lines(result.combined).find((l) => l.includes(`DB_PASSWORD: ${HIDDEN}`));
+    expect(hidden, `no 'DB_PASSWORD: ${HIDDEN}' text in:\n${result.combined}`).toBeDefined();
     expect(hidden).toContain("<");
   });
 
@@ -638,12 +645,13 @@ describe("repair.sh --check drift report hides credentials and stays short (#148
     ["api-key", "      x-api-key: zz-apikeyhyphen-value-not-real"],
     ["private_key", "      PRIVATE_KEY: zz-privatekey-value-not-real"],
     ["upper-case keyword", "      MY_SECRET: ZZ-UPPER-VALUE-NOT-REAL"],
-  ])("hides a %s line (case-insensitive)", (_label, line) => {
+  ])("names the key and hides the value, keyword or not (%s)", (_label, line) => {
+    const key = line.trim().split(":")[0];
     const value = line.split(": ")[1];
     const result = check([line]);
 
     expect(result.combined).not.toContain(value);
-    expect(result.combined).toContain(HIDDEN);
+    expect(result.combined).toContain(`${key}: ${HIDDEN}`);
   });
 
   it("hides a URL carrying credentials even when the line has no keyword", () => {
@@ -651,18 +659,27 @@ describe("repair.sh --check drift report hides credentials and stays short (#148
 
     expect(composeFindings(result.stdout).length, `no Compose-file finding.\n${result.combined}`).toBeGreaterThan(0);
     expect(result.combined).not.toContain("s3cr3t-not-real");
+    expect(result.combined).not.toContain("orbit:");
+    expect(result.combined).toContain(`DATABASE_URL: ${HIDDEN}`);
   });
 
-  it("shows a harmless differing line as it is", () => {
+  it("names a harmless environment line by its key only", () => {
     const result = check(["      LOG_LEVEL: harmless-not-real"]);
 
-    expect(result.combined).toContain("harmless-not-real");
+    expect(result.combined).toContain(`LOG_LEVEL: ${HIDDEN}`);
+    expect(result.combined).not.toContain("harmless-not-real");
+  });
+
+  it("shows an allow-listed structural line in full", () => {
+    const result = check(["    mem_limit: 3g-not-real"]);
+
+    expect(result.combined).toContain("    mem_limit: 3g-not-real");
     expect(result.combined).not.toContain(HIDDEN);
-    expect(result.combined).not.toContain("(more differences not shown)");
+    expect(result.combined).not.toContain("(line hidden)");
   });
 
   it("shows exactly 20 differing lines and says more were not shown when there are more than 20", () => {
-    const extra = Array.from({ length: 30 }, (_, i) => `    # extra-line-${String(i + 1).padStart(2, "0")}`);
+    const extra = Array.from({ length: 30 }, (_, i) => `    image: example.invalid/extra-line-${String(i + 1).padStart(2, "0")}`);
     const result = check(extra);
 
     const shown = lines(result.combined).filter((l) => /extra-line-\d+/.test(l));
@@ -671,7 +688,7 @@ describe("repair.sh --check drift report hides credentials and stays short (#148
   });
 
   it("shows all 20 lines and no 'more' note when there are exactly 20", () => {
-    const extra = Array.from({ length: 20 }, (_, i) => `    # extra-line-${String(i + 1).padStart(2, "0")}`);
+    const extra = Array.from({ length: 20 }, (_, i) => `    image: example.invalid/extra-line-${String(i + 1).padStart(2, "0")}`);
     const result = check(extra);
 
     const shown = lines(result.combined).filter((l) => /extra-line-\d+/.test(l));
@@ -680,10 +697,139 @@ describe("repair.sh --check drift report hides credentials and stays short (#148
   });
 
   it("cuts a long differing line to 200 bytes", () => {
-    const result = check([`    # ${"q".repeat(400)}`]);
+    const result = check([`    image: example.invalid/${"q".repeat(400)}`]);
 
     expect(result.combined).toContain("q".repeat(150));
     expect(result.combined).not.toContain("q".repeat(201));
+  });
+
+  // New for #1607 O-R1.
+
+  it("names SMTP_PASS, DOCUMENT_KEK and AUTH_BEARER and prints none of their values (the finding)", () => {
+    const result = check([
+      "      SMTP_PASS: fake-smtp-pass-1607",
+      "      DOCUMENT_KEK: fake-kek-value-1607",
+      "      - AUTH_BEARER=fake-bearer-1607",
+    ]);
+
+    expect(composeFindings(result.stdout).length, `no Compose-file finding.\n${result.combined}`).toBeGreaterThan(0);
+    for (const value of ["fake-smtp-pass-1607", "fake-kek-value-1607", "fake-bearer-1607"]) {
+      expect(result.combined, `${value} was printed`).not.toContain(value);
+    }
+    expect(result.combined).toContain(`SMTP_PASS: ${HIDDEN}`);
+    expect(result.combined).toContain(`DOCUMENT_KEK: ${HIDDEN}`);
+    expect(result.combined).toContain(`- AUTH_BEARER= ${HIDDEN}`);
+  });
+
+  it("hides bare base64 items, an empty KEY= and a bare item whole, never showing a prefix of them", () => {
+    const result = check([
+      "      - c2VjcmV0LXZhbHVlLTE2MDc=",
+      "      - c2Vj==",
+      "      - EMPTY_KEY=",
+      "      - bare-item-1607",
+    ]);
+
+    expect(composeFindings(result.stdout).length, `no Compose-file finding.\n${result.combined}`).toBeGreaterThan(0);
+    for (const fragment of ["bare-item-1607", "c2VjcmV0", "c2Vj", "EMPTY_KEY"]) {
+      expect(result.combined, `${fragment} was printed`).not.toContain(fragment);
+    }
+    expect(listed(result).filter(wholeLineHidden), `want 4 '(line hidden)' lines in:\n${result.combined}`).toHaveLength(4);
+  });
+
+  it("hides a comment whole and labels it as a comment", () => {
+    const result = check(["    # note fake-comment-secret-1607"]);
+
+    expect(composeFindings(result.stdout).length, `no Compose-file finding.\n${result.combined}`).toBeGreaterThan(0);
+    expect(result.combined).not.toContain("fake-comment-secret-1607");
+    expect(listed(result).some(commentHidden), `no '# (comment hidden)' line in:\n${result.combined}`).toBe(true);
+  });
+
+  it("hides a comment whole even when it looks like an allow-listed key", () => {
+    // The comment shape is tested first: `# image: ...` is a comment, not an image line.
+    const result = check(["    # image: fake-comment-image-1607"]);
+
+    expect(result.combined).not.toContain("fake-comment-image-1607");
+    expect(listed(result).some(commentHidden), `no '# (comment hidden)' line in:\n${result.combined}`).toBe(true);
+  });
+
+  it("hides a volume line whole: its host path is not a key", () => {
+    const result = check(["      - /srv/fake-1607:/data"]);
+
+    expect(composeFindings(result.stdout).length, `no Compose-file finding.\n${result.combined}`).toBeGreaterThan(0);
+    expect(result.combined).not.toContain("fake-1607");
+    expect(listed(result).some(wholeLineHidden), `no '(line hidden)' line in:\n${result.combined}`).toBe(true);
+  });
+
+  it("hides a quoted port item whole", () => {
+    const result = check(['      - "18080:18081"']);
+
+    expect(result.combined).not.toContain("18080");
+    expect(listed(result).some(wholeLineHidden), `no '(line hidden)' line in:\n${result.combined}`).toBe(true);
+  });
+
+  it("hides a list item URL with user details whole: https: is followed by a slash, not a space", () => {
+    const result = check(["      - https://fakeuser-1607:fakepass-1607@fake-host.invalid/path"]);
+
+    expect(result.combined).not.toContain("fakeuser-1607");
+    expect(result.combined).not.toContain("fakepass-1607");
+    expect(listed(result).some(wholeLineHidden), `no '(line hidden)' line in:\n${result.combined}`).toBe(true);
+  });
+
+  it("names a quoted key and hides its value", () => {
+    const result = check(['      "QUOTED_KEY_1607": fake-quoted-value-1607']);
+
+    expect(result.combined).not.toContain("fake-quoted-value-1607");
+    expect(result.combined).toContain("QUOTED_KEY_1607");
+    expect(result.combined).toContain(HIDDEN);
+  });
+
+  it("shows a bare block-opening key in full", () => {
+    const result = check(["    fake_block_1607:"]);
+
+    expect(listed(result).some((l) => l.includes("    fake_block_1607:") && !l.includes("hidden")), `no full block key in:\n${result.combined}`).toBe(true);
+    expect(result.combined).not.toContain(HIDDEN);
+    expect(result.combined).not.toContain("(line hidden)");
+  });
+
+  it.each([
+    "image",
+    "restart",
+    "mem_limit",
+    "container_name",
+    "pull_policy",
+    "read_only",
+    "init",
+    "user",
+    "cpus",
+    "name",
+    "profiles",
+    "stop_grace_period",
+  ])("shows a line on the allow-listed key %s in full", (key) => {
+    const line = `    ${key}: fake-allowed-value-1607`;
+    const result = check([line]);
+
+    expect(listed(result).some((l) => l.includes(line)), `no full '${line}' line in:\n${result.combined}`).toBe(true);
+    expect(result.combined).not.toContain(HIDDEN);
+    expect(result.combined).not.toContain("(line hidden)");
+  });
+
+  it("hides the value of a key that only starts with an allow-listed name", () => {
+    // The allow-list matches the whole key: `imagefake` is not `image`.
+    const result = check(["    imagefake: fake-near-miss-1607", "    userx: fake-near-miss-1608"]);
+
+    expect(result.combined).not.toContain("fake-near-miss-1607");
+    expect(result.combined).not.toContain("fake-near-miss-1608");
+    expect(result.combined).toContain(`imagefake: ${HIDDEN}`);
+    expect(result.combined).toContain(`userx: ${HIDDEN}`);
+  });
+
+  it("counts hidden lines toward the 20-line cap", () => {
+    const extra = Array.from({ length: 30 }, (_, i) => `    # note-${String(i + 1).padStart(2, "0")}`);
+    const result = check(extra);
+
+    expect(listed(result).filter(commentHidden)).toHaveLength(20);
+    expect(result.combined).not.toMatch(/note-\d+/);
+    expect(result.combined).toContain("(more differences not shown)");
   });
 });
 
