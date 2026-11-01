@@ -360,7 +360,7 @@ const world = (own, carried, { recId = REC, signId = SIGN, pipeline = PIPE, jobs
  * rejects only a manifest containing that text. verifications() lists the
  * pairs the verifier was asked about, in order.
  */
-function start({ routes = {}, endless, ref = "main", env = {}, gap, without: missingTools = [] } = {}) {
+function start({ routes = {}, endless, ref = "main", env = {}, gap, shims = {}, without: missingTools = [] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "carry-previous-"));
   const bin = join(dir, "bin");
   const work = join(dir, "work");
@@ -372,6 +372,11 @@ function start({ routes = {}, endless, ref = "main", env = {}, gap, without: mis
   chmodSync(cosignStub, 0o755);
   writeFileSync(join(bin, "curl"), CURL_WRAPPER);
   chmodSync(join(bin, "curl"), 0o755);
+  // shims: { name: script text } are commands put ahead of the real ones on PATH.
+  for (const [name, text] of Object.entries(shims)) {
+    writeFileSync(join(bin, name), text);
+    chmodSync(join(bin, name), 0o755);
+  }
   const logFile = join(dir, "calls.log");
   writeFileSync(logFile, "");
   const configFile = join(dir, "routes.json");
@@ -422,6 +427,8 @@ function start({ routes = {}, endless, ref = "main", env = {}, gap, without: mis
           STUB_COSIGN_DIR: cosignDir,
           ORBIT_COSIGN: cosignStub,
           COSIGN_PUBLIC_KEY: PUBLIC_KEY,
+          // No pause between attempts of a retried call (#1607 note 48797), unless a case sets it.
+          ORBIT_CARRY_RETRY_SECONDS: "0",
           ...env,
         },
         ...processGuard(),
@@ -437,6 +444,13 @@ function start({ routes = {}, endless, ref = "main", env = {}, gap, without: mis
   const requestedKeys = () => requestedUrls().map((url) => url.slice(API.length));
   // The request paths without their query string.
   const requestedPaths = () => requestedKeys().map((key) => key.split("?")[0]);
+  // How many times a route (its key, as in the routes table) was asked for: "not retried" is exactly one.
+  const routeKey = (url) => {
+    const u = new URL(url);
+    const path = u.pathname.slice(new URL(API).pathname.length);
+    return path === `/projects/${PROJECT}/jobs` ? `${path}#page=${u.searchParams.get("page") || "1"}` : path;
+  };
+  const routeCalls = (key) => requestedUrls().filter((url) => routeKey(url) === key).length;
   const listingUrls = () => requestedUrls().filter((url) => url.split("?")[0] === `${API}/projects/${PROJECT}/jobs`);
   const previousDir = join(work, ".orbit-supply-chain", "previous");
   const hasPrevious = () => existsSync(previousDir);
@@ -460,6 +474,7 @@ function start({ routes = {}, endless, ref = "main", env = {}, gap, without: mis
     requestedUrls,
     requestedKeys,
     requestedPaths,
+    routeCalls,
     listingUrls,
     hasPrevious,
     previousFiles,
@@ -1624,5 +1639,293 @@ describe("ADR-0031 records that the artifacts have no expiry (#1607 note 48718, 
     expect(after).toContain(NOTE);
     expect(after).toMatch(/since #1607/);
     expect(after).toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+});
+
+/*
+ * The carry retries in the script, one fresh buffer per attempt (#1607 note
+ * 48797). curl's own --retry cannot rewind stdout, so a 5xx followed by a 200
+ * gave the failed body, the good one and the status in one stream. The script
+ * now makes at most 3 attempts per call (1 plus 2 retries), each into a fresh,
+ * emptied buffer through the same byte cap, and retries only a transport error
+ * (a curl exit other than 0 or the cap's own 63) or an HTTP 408, 429 or 5xx,
+ * pausing ORBIT_CARRY_RETRY_SECONDS (default 2, digits only, at most 30)
+ * between attempts. Any other status, or the byte cap, is final at once; only
+ * the last attempt's body and status are used. After the last attempt the
+ * failure names the status or the curl exit, the URL and "after 3 attempts".
+ *
+ * The curl stub serves { sequence: [...] } routes (the nth request gets the nth
+ * entry) and ignores --retry, so a retry in these tests can only be the
+ * script's own loop; r.routeCalls(key) counts the calls a route got.
+ */
+describe("the carry retries in the script with a fresh buffer each attempt (#1607 note 48797)", () => {
+  const retrying = { ORBIT_CARRY_RETRY_SECONDS: "0" };
+  const LIMIT = 1024 * 1024;
+  // A busy answer longer than any good body it precedes, so a buffer that is not emptied shows.
+  const busy = (status = 503) => ({ status, body: `<html>${"the gateway is busy, ".repeat(400)}</html>` });
+  const own = pair(OLDER);
+  const carried = pair(THIRD);
+  const fullWorld = world(own, carried);
+  // Every call the carry makes, by route key: the retry applies to all of them.
+  const TARGETS = [
+    ["the job listing", listingKey(1)],
+    ["the predecessor pipeline's job listing", pipelineKey(PIPE)],
+    ["the predecessor's manifest", artifactKey(REC, MANIFEST)],
+    ["the signature", artifactKey(SIGN, SIG)],
+    ["the carried manifest", artifactKey(REC, `previous/${MANIFEST}`)],
+    ["the carried signature", artifactKey(REC, `previous/${SIG}`)],
+  ];
+  const sequence = (key, ...answers) => ({ ...fullWorld, [key]: { sequence: answers } });
+  const good = (key) => fullWorld[key];
+  // The carry went through with the clean answers: both pairs were verified as served, the predecessor's is saved byte for byte.
+  const expectCleanCarry = (r) => {
+    expect(r.prepare.status).toBe(0);
+    expect(r.final.status).toBe(0);
+    expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
+    expect(r.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
+    const verified = r.verifications();
+    expect(verified).toHaveLength(2);
+    expect(verified[0].manifest.equals(Buffer.from(own.body))).toBe(true);
+    expect(verified[0].sig.equals(Buffer.from(own.sig))).toBe(true);
+    expect(verified[1].manifest.equals(Buffer.from(carried.body))).toBe(true);
+    expect(verified[1].sig.equals(Buffer.from(carried.sig))).toBe(true);
+  };
+
+  describe.each(TARGETS)("%s", (_what, key) => {
+    it("a 503 then a 200: the carry uses the clean second answer", () => {
+      const r = carry({ routes: sequence(key, busy(), good(key)), env: retrying });
+      expectCleanCarry(r);
+      expect(r.routeCalls(key)).toBe(2);
+    });
+
+    it("a transport error (curl exit 7) then a 200: retried the same way", () => {
+      const r = carry({ routes: sequence(key, { transport: 7 }, good(key)), env: retrying });
+      expectCleanCarry(r);
+      expect(r.routeCalls(key)).toBe(2);
+    });
+
+    it("three failures in a row (503, 503, 503) fail, naming 503, the URL and 'after 3 attempts', with no fourth attempt", () => {
+      const r = carry({ routes: sequence(key, busy(), busy(), busy(), good(key)), env: retrying });
+      expectPrepareFailure(r, /after 3 attempts/);
+      expect(output(r.prepare)).toMatch(/503/);
+      expect(output(r.prepare)).toContain(`${API}${key.split("#")[0]}`);
+      expect(r.routeCalls(key)).toBe(3);
+    });
+
+    it("three transport errors in a row fail, naming the curl exit, the URL and 'after 3 attempts'", () => {
+      const r = carry({ routes: sequence(key, { transport: 7 }, { transport: 7 }, { transport: 7 }, good(key)), env: retrying });
+      expectPrepareFailure(r, /after 3 attempts/);
+      expect(output(r.prepare)).toMatch(/curl exit status 7/);
+      expect(output(r.prepare)).toContain(`${API}${key.split("#")[0]}`);
+      expect(r.routeCalls(key)).toBe(3);
+    });
+  });
+
+  it("the answer of the last attempt is the one used: two failures of different kinds, then a 200, is the third attempt", () => {
+    const key = artifactKey(REC, MANIFEST);
+    const r = carry({ routes: sequence(key, busy(502), { transport: 7 }, good(key)), env: retrying });
+    expectCleanCarry(r);
+    expect(r.routeCalls(key)).toBe(3);
+  });
+
+  it("the last attempt's status is the one named: 503, 503, then a 404 on a by-job file is 'absent' (a gap), not 'after 3 attempts' of 503", () => {
+    const key = artifactKey(SIGN, SIG);
+    const r = carry({ routes: sequence(key, busy(), busy(), { status: 404, body: '{"message":"404 Not Found"}' }), env: retrying });
+    expectPrepareFailure(r, /404/);
+    expect(output(r.prepare)).not.toMatch(/after 3 attempts/);
+    expect(r.routeCalls(key)).toBe(3);
+  });
+
+  it.each([408, 429, 500, 502, 504])("an HTTP %i is retried like a 503", (status) => {
+    const key = artifactKey(REC, MANIFEST);
+    const r = carry({ routes: sequence(key, busy(status), good(key)), env: retrying });
+    expectCleanCarry(r);
+    expect(r.routeCalls(key)).toBe(2);
+  });
+
+  it.each([6, 28, 35, 52, 56])("a transport error with curl exit %i is retried", (exit) => {
+    const key = artifactKey(SIGN, SIG);
+    const r = carry({ routes: sequence(key, { transport: exit }, good(key)), env: retrying });
+    expectCleanCarry(r);
+    expect(r.routeCalls(key)).toBe(2);
+  });
+
+  describe("an answer that is final at once is never retried: exactly one call", () => {
+    const listingKeys = TARGETS.slice(0, 2);
+    const artifactKeys = TARGETS.slice(2);
+
+    describe.each(listingKeys)("%s", (_what, key) => {
+      it.each([400, 401, 403, 404, 302])("an HTTP %i fails at once, naming the status", (status) => {
+        const r = carry({ routes: sequence(key, { status, body: `{"message":"${status}"}` }, good(key)), env: retrying });
+        expectPrepareFailure(r, new RegExp(String(status)));
+        expect(output(r.prepare)).not.toMatch(/after \d+ attempts/);
+        expect(r.routeCalls(key)).toBe(1);
+      });
+    });
+
+    describe.each(artifactKeys)("%s", (_what, key) => {
+      it.each([401, 403])("an HTTP %i fails at once, naming the status", (status) => {
+        const r = carry({ routes: sequence(key, { status, body: `{"message":"${status}"}` }, good(key)), env: retrying });
+        expectPrepareFailure(r, new RegExp(String(status)));
+        expect(output(r.prepare)).not.toMatch(/after \d+ attempts/);
+        expect(r.routeCalls(key)).toBe(1);
+      });
+    });
+
+    it.each(artifactKeys.slice(0, 2))("a 404 on %s is 'absent' at once, never retried", (_what, key) => {
+      const r = carry({ routes: sequence(key, { status: 404, body: '{"message":"404 Not Found"}' }, good(key)), env: retrying });
+      expectPrepareFailure(r, /404/);
+      expect(r.routeCalls(key)).toBe(1);
+    });
+
+    it("a 404 on a carried file is 'absent' at once, never retried: the carry goes on without a carried pair", () => {
+      const key = artifactKey(REC, `previous/${MANIFEST}`);
+      const r = carry({ routes: sequence(key, { status: 404, body: '{"message":"404 Not Found"}' }, good(key)), env: retrying });
+      // The carried signature exists with no carried manifest: its own failure, after exactly one call for the manifest.
+      expectPrepareFailure(r, /carried a signature/);
+      expect(r.routeCalls(key)).toBe(1);
+    });
+
+    it("a body over --max-filesize (curl exit 63) fails at once as over the limit, never retried", () => {
+      const key = artifactKey(REC, MANIFEST);
+      const r = carry({ routes: sequence(key, { oversize: true }, good(key)), env: retrying });
+      expectPrepareFailure(r, /size limit/i);
+      expect(output(r.prepare)).toContain(`${API}${key}`);
+      expect(output(r.prepare)).not.toMatch(/after \d+ attempts/);
+      expect(r.routeCalls(key)).toBe(1);
+    });
+
+    it("a job listing over --max-filesize fails at once as over the limit, never retried", () => {
+      const key = listingKey(1);
+      const r = carry({ routes: sequence(key, { oversize: true }, good(key)), env: retrying });
+      expectPrepareFailure(r, /size limit/i);
+      expect(output(r.prepare)).not.toMatch(/after \d+ attempts/);
+      expect(r.routeCalls(key)).toBe(1);
+    });
+
+    it("a chunked body over the byte cap (no length header) fails at once as over the limit, never retried", () => {
+      const key = artifactKey(REC, MANIFEST);
+      const text = manifest(OLDER);
+      const r = carry({ routes: sequence(key, { chunked: true, body: text + " ".repeat(LIMIT + 1 - Buffer.byteLength(text)) }, good(key)), env: retrying });
+      expectPrepareFailure(r, /size limit/i);
+      expect(output(r.prepare)).toContain(`${API}${key}`);
+      expect(output(r.prepare)).not.toMatch(/after \d+ attempts/);
+      expect(r.routeCalls(key)).toBe(1);
+    });
+
+    it("a chunked signature over the byte cap fails at once as over the limit, never retried", () => {
+      const key = artifactKey(SIGN, SIG);
+      const r = carry({ routes: sequence(key, { chunked: true, body: own.sig + "\n".repeat(LIMIT + 1 - Buffer.byteLength(own.sig)) }, good(key)), env: retrying });
+      expectPrepareFailure(r, /size limit/i);
+      expect(output(r.prepare)).not.toMatch(/after \d+ attempts/);
+      expect(r.routeCalls(key)).toBe(1);
+    });
+  });
+
+  describe("the pause between attempts is ORBIT_CARRY_RETRY_SECONDS", () => {
+    const timedPrepare = (answers, seconds) => {
+      const key = artifactKey(REC, MANIFEST);
+      const s = start({ routes: sequence(key, ...answers.map((a) => (a === "good" ? good(key) : a))), env: { ORBIT_CARRY_RETRY_SECONDS: seconds } });
+      const began = performance.now();
+      const result = s.invoke(["--prepare"]);
+      return { result, ms: performance.now() - began, calls: s.routeCalls(key) };
+    };
+
+    it("one retry waits the number of seconds set (1): the second attempt is not made at once", () => {
+      const { result, ms, calls } = timedPrepare([busy(), "good"], "1");
+      expect(result.status).toBe(0);
+      expect(calls).toBe(2);
+      expect(ms).toBeGreaterThanOrEqual(900);
+    });
+
+    it("two retries wait twice, between each pair of attempts and not after the last", () => {
+      const { result, ms, calls } = timedPrepare([busy(), busy(), "good"], "1");
+      expect(result.status).toBe(0);
+      expect(calls).toBe(3);
+      expect(ms).toBeGreaterThanOrEqual(1900);
+    });
+  });
+
+  describe("ORBIT_CARRY_RETRY_SECONDS is digits only and at most 30", () => {
+    it.each(["31", "100", "3600", "99999999999"])("%s is rejected, not clamped: --prepare fails naming the variable and the cap", (value) => {
+      const r = carry({ routes: world(pair(OLDER)), env: { ORBIT_CARRY_RETRY_SECONDS: value } });
+      expectPrepareFailure(r, /ORBIT_CARRY_RETRY_SECONDS/);
+      expect(output(r.prepare)).toMatch(/30/);
+    });
+
+    it.each(["abc", "1.5", "-5", "10s", "0x10"])("'%s' is not a whole number: --prepare fails naming the variable", (value) => {
+      const r = carry({ routes: world(pair(OLDER)), env: { ORBIT_CARRY_RETRY_SECONDS: value } });
+      expectPrepareFailure(r, /ORBIT_CARRY_RETRY_SECONDS/);
+    });
+
+    it.each(["0", "2", "30"])("%s is within the cap and carries normally", (value) => {
+      const r = carry({ routes: world(own), env: { ORBIT_CARRY_RETRY_SECONDS: value } });
+      expect(r.prepare.status).toBe(0);
+      expect(r.final.status).toBe(0);
+      expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
+    });
+  });
+
+  it("curl is not asked to retry: no --retry on any call the carry makes", () => {
+    const r = carry({ routes: world(own), env: retrying });
+    expect(r.calls().length).toBeGreaterThan(0);
+    for (const argv of r.calls()) expect(argv.filter((arg) => arg.startsWith("--retry"))).toEqual([]);
+  });
+
+  it("the carry script has no --retry in its code (comments aside)", () => {
+    const code = readFileSync(script, "utf8")
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("#"))
+      .join("\n");
+    expect(code).not.toMatch(/--retry/);
+  });
+});
+
+describe("an empty signature and a verifier that fails without a verdict (#1607 note 48797, Lows)", () => {
+  const gap = `main ${REC} key rotated, the predecessor's artifacts expired\n`;
+  const ACCEPTED = /gap accepted/i;
+
+  // An empty signature is the carry's own failure, found before the verifier runs.
+  it.each([
+    ["the predecessor's signature", () => ({ ...world(pair(OLDER)), [artifactKey(SIGN, SIG)]: { body: "" } }), 0],
+    ["the carried signature", () => ({ ...world(pair(OLDER), pair(THIRD)), [artifactKey(REC, `previous/${SIG}`)]: { body: "" } }), 1],
+  ])("%s empty fails as its own error, never a verdict, with or without a matching gap line", (_what, routes, verified) => {
+    for (const withGap of [false, true]) {
+      const r = carry({ routes: routes(), ...(withGap ? { gap } : {}) });
+      expectPrepareFailure(r, /empty/i);
+      expect(output(r.prepare)).toContain(SIG);
+      expect(output(r.prepare)).not.toMatch(/does not verify/i);
+      expect(output(r.prepare)).not.toMatch(ACCEPTED);
+      // The verifier never ran on it: no line of it in the output; cosign saw only the pairs before it.
+      expect(output(r.prepare)).not.toContain("verify-release-manifest");
+      expect(r.verifications()).toHaveLength(verified);
+    }
+  });
+
+  // A "full TMPDIR": the verifier's own mktemp (it runs without the job token) fails, so it exits 1 before cosign
+  // runs and no cosign status is written. That is a tool failure, never "does not verify", and no gap line excuses it.
+  const FULL_TMPDIR = {
+    mktemp: `#!/usr/bin/env bash\nif [ -z "\${CI_JOB_TOKEN:-}" ]; then echo "mktemp: failed to create file: No space left on device" >&2; exit 1; fi\nexec "${spawnSync("bash", ["-c", "command -v mktemp"], { encoding: "utf8", ...processGuard() }).stdout.trim()}" "$@"\n`,
+  };
+
+  it.each([false, true])("a verifier exit 1 with no cosign status (matching gap line: %s) fails as a tool failure, not excused", (withGap) => {
+    const r = carry({ routes: world(pair(OLDER)), shims: FULL_TMPDIR, ...(withGap ? { gap } : {}) });
+    expectPrepareFailure(r, /tooling failure, not a verdict/i);
+    expect(output(r.prepare)).not.toMatch(/does not verify/i);
+    expect(output(r.prepare)).not.toMatch(ACCEPTED);
+    // cosign never ran: the verifier failed before it.
+    expect(r.verifications()).toEqual([]);
+  });
+});
+
+describe("scripts/ci/carry-accepted-gap says what a line never excuses (#1607 note 48797, Low)", () => {
+  it("its header says a line never excuses a carried previous/ pair or a tooling failure", () => {
+    const header = readFileSync(join(repoRoot, "scripts", "ci", "carry-accepted-gap"), "utf8")
+      .split("\n")
+      .filter((line) => line.trim().startsWith("#"))
+      .map((line) => line.replace(/^\s*#\s?/, ""))
+      .join(" ")
+      .replace(/\s+/g, " ");
+    expect(header).toMatch(/never[^.]*carried previous\/ pair[^.]*tooling failure/i);
   });
 });
