@@ -177,3 +177,96 @@ describe("the built app behind the start-up shim (#1565)", () => {
     expect((await post(path, { origin: origin.replace("http://", "https://") })).status).toBe(403);
   });
 });
+
+/* ------------------------------------- X-Frame-Options: DENY, whatever ORIGIN is */
+
+/* The shim sets one constant response header, `X-Frame-Options: DENY`, on every
+   response. It is not derived from ORIGIN, so it must be there when ORIGIN is
+   unset or unusable too (the shim then injects no origin headers at all). */
+type Started = { process: ChildProcess; port: number; output: () => string };
+const extraRuns: Started[] = [];
+const extraDirectories: string[] = [];
+
+async function startWithOrigin(originValue: string | undefined): Promise<Started> {
+  const extraPort = await freePort();
+  const extraDocuments = mkdtempSync(join(tmpdir(), "orbit-shim-test-documents-"));
+  extraDirectories.push(extraDocuments);
+  const extraCopy = join(buildDirectory, `orbit-shim-test-${randomUUID().slice(0, 8)}.mjs`);
+  copyFileSync(shimSource, extraCopy);
+  extraDirectories.push(extraCopy);
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    APP_URL: `http://127.0.0.1:${extraPort}`,
+    HOST: "127.0.0.1",
+    PORT: String(extraPort),
+    DOCUMENTS_ROOT: extraDocuments,
+    DOCUMENTS_QUARANTINE_ROOT: join(extraDocuments, "quarantine"),
+    DOCUMENT_KEK: "00".repeat(32),
+    DOCUMENT_SCAN_MODE: "disabled",
+    ORBIT_CONFIG_SCHEMA_VERSION: "1",
+  };
+  delete environment.ORIGIN;
+  if (originValue !== undefined) environment.ORIGIN = originValue;
+  for (const name of ["PROTOCOL_HEADER", "HOST_HEADER", "ADDRESS_HEADER", "ORBIT_FIXTURES", "SOCKET_PATH", "LISTEN_PID", "LISTEN_FDS"]) {
+    delete environment[name];
+  }
+  const spawned = spawn(process.execPath, [extraCopy], { cwd: join(repo, "web"), env: environment, stdio: ["ignore", "pipe", "pipe"] });
+  let collected = "";
+  spawned.stdout?.on("data", (chunk) => (collected += chunk));
+  spawned.stderr?.on("data", (chunk) => (collected += chunk));
+  const run: Started = { process: spawned, port: extraPort, output: () => collected };
+  extraRuns.push(run);
+
+  const deadline = Date.now() + STARTUP_DEADLINE_MS;
+  while (Date.now() < deadline) {
+    if (spawned.exitCode !== null) throw new Error(`the app exited with ${spawned.exitCode} before it answered; output:\n${collected}`);
+    const answered = await new Promise<boolean>((resolve) => {
+      const request = http.get({ host: "127.0.0.1", port: extraPort, path: "/api/health" }, (response) => {
+        response.resume();
+        resolve(true);
+      });
+      request.on("error", () => resolve(false));
+    });
+    if (answered) return run;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`the app did not answer within ${STARTUP_DEADLINE_MS} ms; output:\n${collected}`);
+}
+
+function headersOf(targetPort: number, path: string): Promise<http.IncomingHttpHeaders> {
+  return new Promise((resolve, reject) => {
+    const request = http.get({ host: "127.0.0.1", port: targetPort, path, headers: { accept: "text/html" }, agent: false }, (response) => {
+      response.resume();
+      response.on("end", () => resolve(response.headers));
+    });
+    request.on("error", reject);
+  });
+}
+
+afterAll(async () => {
+  for (const run of extraRuns) {
+    if (run.process.exitCode === null) {
+      const exited = new Promise((resolve) => run.process.once("exit", resolve));
+      run.process.kill("SIGKILL");
+      await exited;
+    }
+  }
+  for (const entry of extraDirectories) rmSync(entry, { recursive: true, force: true });
+});
+
+describe("the shim sets X-Frame-Options: DENY whatever ORIGIN is (#1411)", () => {
+  it("with ORIGIN set (the default run): a page and an API route", async () => {
+    expect((await headersOf(port, "/login"))["x-frame-options"]).toBe("DENY");
+    expect((await headersOf(port, "/api/health"))["x-frame-options"]).toBe("DENY");
+  });
+
+  it.each([
+    ["unset", undefined],
+    ["malformed", "not an origin"],
+  ])("with ORIGIN %s: a prerendered page, a server-rendered page and an API route", async (_name, originValue) => {
+    const run = await startWithOrigin(originValue);
+    for (const path of ["/login", "/", "/api/health"]) {
+      expect((await headersOf(run.port, path))["x-frame-options"], `${path} with ORIGIN ${_name}`).toBe("DENY");
+    }
+  }, STARTUP_DEADLINE_MS + 5_000);
+});

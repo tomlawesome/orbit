@@ -139,7 +139,7 @@ function start({ origin, env = {} }) {
           let body = "";
           response.setEncoding("utf8");
           response.on("data", (chunk) => (body += chunk));
-          response.on("end", () => resolve(JSON.parse(body)));
+          response.on("end", () => resolve({ ...JSON.parse(body), xFrameOptions: response.headers["x-frame-options"] ?? null }));
         });
         request.on("error", reject);
         request.end();
@@ -225,6 +225,29 @@ describe("a missing or unusable ORIGIN injects nothing and warns once (#1565)", 
     });
     const { seen } = await run.ready;
     expect(seen).toEqual({ PROTOCOL_HEADER: "x-operator-proto", HOST_HEADER: "x-operator-host" });
+  });
+});
+
+describe("the shim sets X-Frame-Options: DENY on every response, whatever ORIGIN is (#1411)", () => {
+  it.each([
+    ["a good ORIGIN", "https://orbit.example"],
+    ["ORIGIN unset", undefined],
+    ["ORIGIN empty", ""],
+    ["a malformed ORIGIN", "http://orbit.example/app"],
+  ])("%s", async (_name, origin) => {
+    const run = start({ origin });
+    const { port } = await run.ready;
+
+    /* The fixture adapter's own listener never sets the header, so it can only
+       come from a listener the shim prepended. It is the same on each request. */
+    expect((await run.request(port)).xFrameOptions).toBe("DENY");
+    expect((await run.request(port, { [PROTO_HEADER]: "http" })).xFrameOptions).toBe("DENY");
+  });
+
+  it("the header does not change the ORIGIN warning: still one line naming ORIGIN", async () => {
+    const run = start({ origin: "ftp://orbit.example" });
+    await run.ready;
+    expect(originWarnings(run.output())).toHaveLength(1);
   });
 });
 

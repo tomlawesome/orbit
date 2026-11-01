@@ -315,6 +315,32 @@ describe("a +server response carries no page policy (#1411)", () => {
   });
 });
 
+/* ------------------------------------- X-Frame-Options: DENY on every response */
+
+/* The adapter's static layer answers the prerendered pages ahead of kit, so
+   kit's `frame-ancestors 'none'` (a <meta> tag there, which browsers ignore)
+   cannot stop framing them. The shim sets one constant header on every
+   response instead. */
+describe("every response carries X-Frame-Options: DENY (#1411)", () => {
+  it("/login, a prerendered page served by the adapter's static layer", async () => {
+    const answer = await page("/login");
+    expect(answer.status).toBe(200);
+    expect(answer.headers["x-frame-options"]).toBe("DENY");
+  });
+
+  it("/, a server-rendered page", async () => {
+    const answer = await page("/");
+    expect(answer.status).toBe(200);
+    expect(answer.headers["x-frame-options"]).toBe("DENY");
+  });
+
+  it("/api/health, a +server response", async () => {
+    const answer = await get("/api/health");
+    expect(answer.status).toBe(200);
+    expect(answer.headers["x-frame-options"]).toBe("DENY");
+  });
+});
+
 /* ------------------------------------------------------ U34.4: drain and keep-alive */
 
 describe("kit's own CSRF 403 leaves the connection usable (#1411, U34.4 of #1565)", () => {
