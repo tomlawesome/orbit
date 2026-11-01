@@ -1664,20 +1664,26 @@ days/365 days should be the default."**
 - The two numbers are constants in v0.3.4. Whether they become a household
   setting is not decided.
 
-## 38. What planet colour means is a per-user choice; the default is weight (owner, 2026-11-01)
+## 38. Planet size is a per-user choice, cost or importance; the "weight" palette retires (owner, 2026-11-01)
 
-Shown the two round-4 palettes, importance as hue
-(`design/v19/home-sun/round-4/i-importance-hues.html`) and importance as
-weight (`h-importance-weights.html`), the owner asked: **"why can't these
-just remain user selectable?"**
+Shown the two round-4 palettes, the owner first asked why both could not
+stay user-selectable, then: **"I think importance as size is best
+actually"**, **"Let users decide what the size shows then, cost or
+importance"**, **"Weight is not a good approach. Stick to size and colour.
+Size is either cost or importance."** On what happens to the other
+quantity: **"just don't show the cost if the user selects importance for
+size, and visa versa."**
 
-- Both palettes ship. A per-user setting chooses which one the sky uses;
-  nothing is lost by switching, it is only colour.
-- The default is the weight palette: planet hue keeps meaning how soon an
-  item is due, as today, and importance shows as heavier, brighter planets.
-  Lane call (2026-11-01), recorded on #1463 for the owner to overrule.
-- Importance itself stays as decided on #1463 (7a): three levels, existing
-  items read "importance not set" until someone sets it.
+- One per-user setting: planet size shows cost (the sky's first law,
+  decision 1) or importance (three sizes). The other is not drawn on the
+  sky at all; the item card and drawer still print both.
+- The default is cost, so nothing changes on upgrade. Lane call, recorded
+  on #1463 for the owner to overrule.
+- Neither round-4 palette ships: no "weight" (faded or ringed planets), no
+  importance hue. What colour means is a separate decision (the owner:
+  "Colour is the type"; which type is being settled on #1463).
+- Importance itself stays as decided (7a): three levels, existing items
+  read "importance not set".
 
 ## 39. Planet names show up to a per-user number of days (owner, 2026-11-01)
 
