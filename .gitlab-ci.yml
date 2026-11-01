@@ -3403,7 +3403,10 @@ build_launcher:
     paths:
       - .orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz
       - .orbit-launcher-artifacts/orbit-launcher_linux_arm64.tar.gz
-    expire_in: 90 days
+    # 14 days on every ref (#1608, owner decision 91a). A release reads the
+    # archives from record_image instead, which keeps a copy for 90 days
+    # beside the manifest that hashes them.
+    expire_in: 14 days
     when: on_success
 
 launcher_install_compat:
@@ -3890,6 +3893,13 @@ record_image:
       # #1480: absent on a branch's first build; GitLab only warns about a
       # missing path.
       - .orbit-supply-chain/previous/
+      # build_launcher's two archives, which this job received through its
+      # needs: and hashed into the manifest above. They are kept here because
+      # build_launcher's own copy expires after 14 days (#1608), and a release
+      # tag can come later than that; gitlab-await-tested-image.sh reads them
+      # from this job.
+      - .orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz
+      - .orbit-launcher-artifacts/orbit-launcher_linux_arm64.tar.gz
     expire_in: 90 days
     when: on_success
 

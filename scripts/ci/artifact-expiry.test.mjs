@@ -9,8 +9,11 @@ import { describe, expect, it } from "vitest";
  *   - `fast`, `fast_docker` and the smoke jobs keep their artifacts for exactly
  *     7 days (scripts/ci/reuse-lookup.mjs reuses evidence up to 7 days old, so
  *     not shorter).
- *   - `build_launcher`'s archives expire after 14 days, except on `main` and
- *     `preview`, which keep them 90 days.
+ *   - `build_launcher`'s archives expire after 14 days, except on `main`,
+ *     `preview` and `hotfix/*`, which keep them 90 days. Hotfix was added at
+ *     build time: a hotfix tag is released from its hotfix pipeline exactly as
+ *     a preview tag is (.github/workflows/release-on-tag.yml), so 14 days there
+ *     could leave a late hotfix tag with nothing to publish.
  *
  * A job declares one `expire_in`, so the launcher change may be two variants of
  * the job chosen by `rules`, or a second job that keeps the archives on the
@@ -362,7 +365,7 @@ describe("#1608 build_launcher artifacts", () => {
     }
   });
 
-  it.each(["dev", "hotfix", "an unprotected branch pipeline started by hand", "a merge request from a working branch into dev"])(
+  it.each(["dev", "an unprotected branch pipeline started by hand", "a merge request from a working branch into dev"])(
     "expires the archives after 14 days on %s",
     (context) => {
       const { running, days } = effective(contexts[context]);
@@ -371,9 +374,9 @@ describe("#1608 build_launcher artifacts", () => {
     },
   );
 
-  it("keeps the archives 90 days on preview", () => {
-    const { running, days } = effective(contexts.preview);
-    expect(running.length, "no job publishes the archives on preview").toBeGreaterThan(0);
+  it.each(["preview", "hotfix"])("keeps the archives 90 days on %s", (context) => {
+    const { running, days } = effective(contexts[context]);
+    expect(running.length, `no job publishes the archives on ${context}`).toBeGreaterThan(0);
     expect(days).toBe(90);
   });
 

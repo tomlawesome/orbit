@@ -136,12 +136,10 @@ sbom_job="$(job_id supply_chain_image)"
 [[ -n "$sign_job" ]] || fail "pipeline ${pipeline_id} has no successful sign_evidence job"
 [[ -n "$sbom_job" ]] || fail "pipeline ${pipeline_id} has no successful supply_chain_image job"
 
+# The launcher archives come from record_image, which keeps a copy of
+# build_launcher's for 90 days beside the manifest that hashes them;
+# build_launcher's own copy expires after 14 days (#1608).
 fetch_launcher_assets="${ORBIT_FETCH_LAUNCHER_ASSETS:-}"
-launcher_job=""
-if [[ "$fetch_launcher_assets" == "1" ]]; then
-  launcher_job="$(job_id build_launcher)"
-  [[ -n "$launcher_job" ]] || fail "pipeline ${pipeline_id} has no successful build_launcher job"
-fi
 
 mkdir -p "$evidence_dir"
 evidence="${evidence_dir}/gitlab-tested-image.json"
@@ -164,10 +162,10 @@ if [[ "$fetch_launcher_assets" == "1" ]]; then
     fail "record_image job ${publish_job} kept no orbit-release-manifest.json artifact"
   api --output "$release_manifest_sig" "${project}/jobs/${sign_job}/artifacts/.orbit-supply-chain/orbit-release-manifest.json.sig" ||
     fail "sign_evidence job ${sign_job} kept no orbit-release-manifest.json.sig artifact"
-  api --output "$launcher_amd64_archive" "${project}/jobs/${launcher_job}/artifacts/.orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz" ||
-    fail "build_launcher job ${launcher_job} kept no orbit-launcher_linux_amd64.tar.gz artifact"
-  api --output "$launcher_arm64_archive" "${project}/jobs/${launcher_job}/artifacts/.orbit-launcher-artifacts/orbit-launcher_linux_arm64.tar.gz" ||
-    fail "build_launcher job ${launcher_job} kept no orbit-launcher_linux_arm64.tar.gz artifact"
+  api --output "$launcher_amd64_archive" "${project}/jobs/${publish_job}/artifacts/.orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz" ||
+    fail "record_image job ${publish_job} kept no orbit-launcher_linux_amd64.tar.gz artifact"
+  api --output "$launcher_arm64_archive" "${project}/jobs/${publish_job}/artifacts/.orbit-launcher-artifacts/orbit-launcher_linux_arm64.tar.gz" ||
+    fail "record_image job ${publish_job} kept no orbit-launcher_linux_arm64.tar.gz artifact"
 fi
 
 # Every field the publisher will act on, checked against what this run knows
