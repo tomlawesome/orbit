@@ -1705,3 +1705,22 @@ On #1466, the owner chose 6a over editable item types.
   It asks how the item repeats, which is all the type ever decided.
 - Grouping is by section, which households already name and order
   themselves. No new category object.
+
+## 41. Planet colour is the item's section colour; types are gone (owner, 2026-11-01)
+
+Verbatim: **"Size: Either cost or importance, it only shows one or the
+other, no labels for importance or cost when it switches one way or
+another. It's a simple choice from the user. Colour - the user selects the
+colour for a section, the planet is the section colour for that item.
+'Types' are gone."**
+
+- Each section has a colour the user picks; every planet wears its
+  section's colour. The urgency tones (green, blue, amber, red by days
+  left) leave the sky; distance, the rings and the event horizon say how
+  soon.
+- Size shows cost or importance, one per-user switch, nothing drawn or
+  labelled for the other, and no legend or caption when it changes.
+- Item types (service, renewal, inspection) are removed as a concept, not
+  only hidden from the form (#1466, 6a). The item asks how it repeats.
+- Amends decision 1 (size = cost becomes a choice) and the colour law of
+  decision 3; decision 38 stands for size.
