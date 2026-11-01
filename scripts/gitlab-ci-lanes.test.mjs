@@ -758,6 +758,20 @@ describe("browser jobs by event (#1412)", () => {
     }
   });
 
+  it("runs the same short gate on the merge request into a hotfix branch (owner decision 48, #1636)", () => {
+    const hotfixMergeRequest = {
+      CI_PIPELINE_SOURCE: "merge_request_event",
+      CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "hotfix/x",
+      CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "fix/y",
+    };
+    for (const name of [...BROWSER_JOBS.filter((job) => job !== "smoke_local_only"), "acceptance", "repair_journeys"]) {
+      expect(jobVerdict(name, hotfixMergeRequest), name).toBe("never");
+    }
+    for (const name of ["classify", "fast", "integration", "build_image", "supply_chain_image", "smoke_local_only", "build_launcher", "launcher_install_compat"]) {
+      expect(jobVerdict(name, hotfixMergeRequest), name).toBe("run");
+    }
+  });
+
   it("starts the same jobs on the dev -> preview merge request as on a merge request into dev (#1546)", () => {
     const everyJob = jobs.filter(([, block]) => /^ {2}stage: /mu.test(block)).map(([name]) => name);
     for (const name of everyJob) {

@@ -187,15 +187,17 @@ workflow:
   if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
   when: never
 
-# A push to `hotfix/*` runs a short gate (owner decision 48, #1636): the fast,
-# policy, integration, image, image-scan and local-smoke jobs only, plus the
-# launcher build and install check and the publish jobs. Put after
+# A hotfix runs a short gate (owner decision 48, #1636), on the push to
+# `hotfix/*` and on the merge request into it alike: the fast, policy,
+# integration, image, image-scan and local-smoke jobs only, plus the launcher
+# build and install check and, on the push, the publish jobs. Put after
 # `*not_scheduled` in the eight browser and acceptance jobs it stops (`smoke`,
 # `smoke_firefox`, `smoke_webkit`, `smoke_webkit_mobile`, `fidelity`,
 # `fidelity_webkit`, `acceptance`, `repair_journeys`); `record_image` needs
-# them as optional. The merge request into a hotfix branch is unaffected.
-.not_on_hotfix_push: &not_on_hotfix_push
-  if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
+# them as optional. One variable is set per event, so the two tests never
+# both match, and neither matches a schedule or a push elsewhere.
+.not_on_hotfix: &not_on_hotfix
+  if: $CI_COMMIT_BRANCH =~ /^hotfix\// || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^hotfix\//
   when: never
 
 default:
@@ -1107,7 +1109,7 @@ classify:
       # The browser checks read their own axes, not `orbit_full_gate`, so the
       # events that gate run them here (#1186): a push to `preview`, `main` or
       # `hotfix/*`, and the merge request into `preview` or `main`. On a
-      # `hotfix/*` push the flag changes nothing: `*not_on_hotfix_push` stops
+      # `hotfix/*` push the flag changes nothing: `*not_on_hotfix` stops
       # every job that reads it, and `smoke_local_only` never did (#1636). Without
       # this a promotion whose diff never touched `web/` skipped `fidelity`
       # and both browser suites -- the full gate in every job but those. Not
@@ -1921,7 +1923,7 @@ fidelity:
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
-    - *not_on_hotfix_push
+    - *not_on_hotfix
     - *no_browsers_on_dev
     - *no_browsers_on_preview_mr
     - when: on_success
@@ -2006,7 +2008,7 @@ fidelity_webkit:
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
-    - *not_on_hotfix_push
+    - *not_on_hotfix
     - *no_browsers_on_dev
     - *no_browsers_on_preview_mr
     - when: on_success
@@ -2538,7 +2540,7 @@ smoke:
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
-    - *not_on_hotfix_push
+    - *not_on_hotfix
     - *no_browsers_on_dev
     - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -2657,7 +2659,7 @@ smoke_firefox:
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
-    - *not_on_hotfix_push
+    - *not_on_hotfix
     - *no_browsers_on_dev
     - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -2804,7 +2806,7 @@ smoke_webkit:
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
-    - *not_on_hotfix_push
+    - *not_on_hotfix
     - *no_browsers_on_dev
     - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -2921,7 +2923,7 @@ smoke_webkit_mobile:
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
-    - *not_on_hotfix_push
+    - *not_on_hotfix
     - *no_browsers_on_dev
     - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -3150,7 +3152,7 @@ acceptance:
   rules:
     - *not_on_main_push
     - *not_scheduled
-    - *not_on_hotfix_push
+    - *not_on_hotfix
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
     - when: manual
@@ -3306,7 +3308,7 @@ repair_journeys:
   rules:
     - *not_on_main_push
     - *not_scheduled
-    - *not_on_hotfix_push
+    - *not_on_hotfix
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
     - when: manual
@@ -3804,7 +3806,7 @@ record_image:
     - job: build_image
       artifacts: true
     # Owner decision 48 (#1636): a `hotfix/*` push skips the eight browser and
-    # acceptance jobs marked `optional: true` below (`*not_on_hotfix_push`).
+    # acceptance jobs marked `optional: true` below (`*not_on_hotfix`).
     # GitLab refuses a pipeline whose job needs a job its rules excluded,
     # unless the need is optional; on a `preview` push all eight still run
     # and still gate this job.

@@ -70,9 +70,10 @@ The rest of this document says what each step checks and why.
 - After digest-based acceptance, merge `preview` into `main`.
 - A `hotfix/*` branch starts from `main`, publishes and accepts a patch
   preview, merges to `main`, and is then merged back into `dev` and
-  `preview`. Its push runs a short gate (owner decision 48, #1636): the fast,
-  policy, integration, image, image-scan, local-smoke and launcher jobs and
-  the publish jobs, and skips `smoke`, `smoke_firefox`, `smoke_webkit`,
+  `preview`. Its push, and the merge request into it, run a short gate
+  (owner decision 48, #1636): the fast, policy, integration, image,
+  image-scan, local-smoke and launcher jobs and, on the push, the publish
+  jobs; both skip `smoke`, `smoke_firefox`, `smoke_webkit`,
   `smoke_webkit_mobile`, `fidelity`, `fidelity_webkit`, `acceptance` and
   `repair_journeys`.
 - No back-merge of `preview` into `dev` after an ordinary promotion: the
