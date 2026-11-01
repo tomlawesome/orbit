@@ -36,6 +36,8 @@
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_root}/scripts/release-metadata-patterns.sh"
 
 # Journeys proven live by this script, in the order they run. The order is
 # load-bearing: cancelled-repair refuses the very drift that credential-drift
@@ -268,7 +270,7 @@ install_deployment() {
       grep -m1 -F "127.0.0.1:$registry_port/$repository@"
   )"
   pushed_digest="${pushed_digest#*@}"
-  [[ "$pushed_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+  [[ "$pushed_digest" =~ $ORBIT_DIGEST_PATTERN ]] ||
     fail "could not read the digest the local registry gave $local_tag"
   local release_manifest="$workdir/orbit-release-manifest.json"
   bash "$repo_root/scripts/ci/write-test-manifest.sh" \

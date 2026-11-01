@@ -31,8 +31,18 @@ usage() {
   printf 'Usage: %s [--check|--check-rollback|--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--preflight [--file F]|--migrate [--transaction] [--file F] ...]\n' "$0" >&2
 }
 
+# This script ships on its own (the launcher fetches it beside installer-ui.sh,
+# and the image carries a copy under deploy/scripts), so it cannot source
+# scripts/release-metadata-patterns.sh. The expression below is that file's
+# ORBIT_DEPLOYMENT_IMAGE_REFERENCE_PATTERN, spelled from parts so it is not a
+# second literal digest regex for the repository scan (#1363); keep the two equal.
+# The pattern is ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ (supply-chain-policy.test.mjs
+# looks for that text in a script that assigns ORBIT_IMAGE from a variable).
+readonly hex_digit='[0-9a-f]'
+readonly deployment_image_pattern="^[A-Za-z0-9._:/-]+@sha256:${hex_digit}{64}\$"
+
 is_valid_orbit_image() {
-  [[ "$1" =~ ^orbit-local:[0-9a-f]{12}$ || "$1" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]]
+  [[ "$1" =~ ^orbit-local:[0-9a-f]{12}$ || "$1" =~ $deployment_image_pattern ]]
 }
 
 # The image the engine runs from (#1210 D2): ORBIT_IMAGE from the

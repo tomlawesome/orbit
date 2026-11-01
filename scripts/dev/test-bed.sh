@@ -57,6 +57,8 @@ set -Eeuo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_dir"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_dir}/scripts/release-metadata-patterns.sh"
 
 readonly env_file=".env-orbit"
 readonly project_label="com.docker.compose.project"
@@ -288,7 +290,7 @@ cmd_up() {
     [[ -z "$image" ]] || die "give --image or --build, not both."
   else
     [[ -n "$image" ]] || die "give --image <registry digest> or --build."
-    [[ "$image" =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] \
+    [[ "$image" =~ $ORBIT_IMAGE_REFERENCE_PATTERN ]] \
       || die "--image must be a registry digest (name@sha256:<64 hex>), not a tag that can move (got: $image)"
   fi
   require_host

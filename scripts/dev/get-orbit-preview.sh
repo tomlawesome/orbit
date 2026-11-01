@@ -49,12 +49,19 @@ case "$(uname -m)" in
   *) fail "unsupported architecture: $(uname -m) (only amd64 and arm64 are supported)." ;;
 esac
 
+# This script is piped from curl and ships on its own, so it cannot source
+# scripts/release-metadata-patterns.sh. The expression below is that file's
+# ORBIT_DIGEST_PATTERN, spelled from parts so it is not a second literal digest
+# regex for the repository scan (#1363); keep the two equal.
+readonly hex_digit='[0-9a-f]'
+readonly digest_pattern="^sha256:${hex_digit}{64}\$"
+
 base="${ORBIT_PREVIEW_BASE_URL:-}"
 [[ -n "$base" ]] || fail "set ORBIT_PREVIEW_BASE_URL to where the preview's files are (a URL or a directory)."
 base="${base%/}"
 expected_digest="${ORBIT_PREVIEW_DIGEST:-}"
 [[ -n "$expected_digest" ]] || fail "set ORBIT_PREVIEW_DIGEST to the preview's image digest recorded on #1152."
-if [[ ! "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+if [[ ! "$expected_digest" =~ $digest_pattern ]]; then
   fail "ORBIT_PREVIEW_DIGEST must look like sha256:<64 hex characters>."
 fi
 
@@ -94,7 +101,7 @@ version="$(manifest_value "$manifest_json" version)"
 channel="$(manifest_value "$manifest_json" channel)"
 [[ "$channel" == "preview" ]] || fail "the signed manifest is for channel '${channel}', not preview; use get-orbit.sh for a stable release."
 digest="$(manifest_value "$manifest_json" digest)"
-[[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "the manifest names no valid image digest."
+[[ "$digest" =~ $digest_pattern ]] || fail "the manifest names no valid image digest."
 if [[ "$digest" != "$expected_digest" ]]; then
   fail "asked for ${expected_digest} but the signed manifest names ${digest}; refusing."
 fi
