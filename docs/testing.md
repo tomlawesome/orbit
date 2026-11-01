@@ -180,7 +180,7 @@ deliberately representative, not device certification:
 | Contract | Automated evidence |
 | --- | --- |
 | WCAG A/AA | `web/tests/rig/v19-axe-sweep.spec.js` runs Axe over every signed-in route in both layouts; `signed-out.spec.ts` covers the sign-in door. |
-| Keyboard and focus | `web/tests/rig/v19-keyboard.spec.js` and `web/tests/rig/v19-keyboard-pocket.spec.js` drive the core journeys by keyboard alone on desktop and mobile; the real sign-in and sign-out stay on the stack in `tests/e2e/v19-keyboard.spec.ts`. |
+| Keyboard and focus | `web/tests/rig/v19-keyboard.spec.js` and `web/tests/rig/v19-keyboard-pocket.spec.js` drive the core journeys by keyboard alone on desktop and mobile; the real sign-in and sign-out are walked by the stack's own sign-in specs. |
 | Screen reader | `web/tests/rig/v19-screen-reader.spec.js` reads back what the browser's accessibility engine would announce on every core-journey screen, and writes the raw ARIA tree to `test-results/aria/<route>.txt` for a person to read. |
 | Charts | `v19-chart-accessibility.spec.ts` checks the home dial is a labelled group with a named link per body, and that nothing focusable inside it is unnamed. |
 | Reduced motion | `v19-reduced-motion.spec.ts` checks that `prefers-reduced-motion` and no-JS both fall back to the plain list. |

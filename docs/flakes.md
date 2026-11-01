@@ -366,7 +366,7 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-01 · 4d1a8f2c (#1609) · local `playwright test --project=rig-desktop --project=rig-phone`, busy shared host · color-contrast violation on `#ad-uploads`, seen once in the first rig run of the moved spec and in none of the later ones on the same code. First sighting; no issue yet.
 
-## v19-home-drawer.spec.js "an attach whose record read fails says the done line and keeps its id, so a re-pick sends the same one" (rig-desktop)
+## tests/e2e/v19-home-drawer.spec.ts "an attach whose record read fails says the done line and keeps its id, so a re-pick stores one copy" (desktop; first seen as the rig copy, which #1609 took back to the stack)
 
 - 2026-11-01 · b48f96a0 + #1609 batch 1 specs · local rig run, both rig projects, loaded host · hit the 30s test timeout (the failing line was `page.unroute` after the browser closed); alone it passed twice at 1.7s and 1.9s. First sighting.
 
@@ -374,7 +374,7 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-01 · b48f96a0 + #1609 batch 1 specs · local rig run, both rig projects, loaded host · the reading card stayed at "orbit is reading the pages it was given" for 20s, no page one; alone it passed twice at about 1s. Second sighting in the one batch (an earlier run of the same specs showed it once as well).
 
-## v19-home-drawer.spec.js "an attach whose read of home fails says the done line and keeps its id, so a re-pick sends the same one" (rig-phone)
+## tests/e2e/v19-home-drawer.spec.ts "an attach whose read of home fails says the done line and keeps its id, so a re-pick stores one copy" (phone; first seen as the rig copy, which #1609 took back to the stack)
 
 - 2026-11-01 · ead52a87 + #1609 batch 1 merge · local rig run, both rig projects, shared host · `papersOf` (the test's own papers route) threw "apiResponse.json: Response has been disposed": a read still in flight when the page closed. The next run of the same code passed. First sighting.
 

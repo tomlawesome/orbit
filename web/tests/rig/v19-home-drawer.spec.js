@@ -1,5 +1,3 @@
-import { writeFileSync } from "node:fs";
-
 import { expect, test } from "@playwright/test";
 
 import { APP, useFixtureScenes } from "../fidelity/pocket-states.js";
@@ -30,6 +28,13 @@ import { completeLikeTheEngine, ownWorkspace, snoozeLikeTheEngine, upsertLikeThe
  * shows after a write answers its own writes (workspace-writes.js): the command
  * that was sent is what is asserted of the engine, and the screen is judged
  * on what it makes of the answer.
+ *
+ * What stays in tests/e2e/v19-home-drawer.spec.ts, as it was (#1517's survey
+ * labels BS, U and I; #1609): the removal whose undo the server refuses (the
+ * paper reads back as pending deletion), the three attaches whose read fails
+ * (the server holds one copy), the sheet's quick complete that lands while the
+ * read of home fails, and the pencil over a changed completion, on the desk and
+ * the phone.
  *
  * Two tests need a fixture scene (useFixtureScenes, pocket-states.js; a
  * browser asks for it before the page loads, nothing is added to the sample
@@ -81,42 +86,6 @@ async function openAt(page, id) {
 /** The calendar's day 15 of next month, the fixture's today being 2026-08-13: always ahead of it. */
 const NEXT_MONTH_15 = /^\w+ 15 September 2026/;
 
-/** #1316 W1-R3: from the open preview, read the paper, remove it (the pill's two taps), make the server refuse the restore, and press the wake's undo. Returns once the undo is pressed.
- * @param {import("@playwright/test").Page} page @param {import("@playwright/test").Locator} readButton @param {string} name */
-async function removeThenFailTheUndo(page, readButton, name) {
-  await readButton.click();
-  const reader = page.getByRole("dialog", { name: `${name}, ${MOT.title}` });
-  await expect(reader).toBeVisible();
-  await reader.getByRole("button", { name: `Remove ${name}` }).click();
-  await reader.getByRole("button", { name: `tap again to remove ${name}` }).click();
-
-  /* the paper goes and the wake offers it back */
-  await expect(page.getByRole("status").filter({ hasText: `${name} removed` })).toHaveText(`${name} removed`);
-  await expect(reader).toBeHidden();
-
-  /* the server refuses the restore, whatever the reason */
-  await page.route(`**/api/documents/${MOT.paper.id}/restore`, (route) =>
-    route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "restore failed" }) }));
-  await page.getByRole("button", { name: "undo", exact: true }).click();
-}
-
-/** The removal the page asks of the fixture app, which has no such route: answered as the engine does, the paper pending deletion from then on.
- * @param {import("@playwright/test").Page} page */
-async function removalsAnswered(page) {
-  let removed = false;
-  await page.route(`**/api/documents/${MOT.paper.id}`, (route) => {
-    if (route.request().method() !== "DELETE") return route.fallback();
-    removed = true;
-    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ document: { ...MOT.paper, lifecycle: "pending_deletion" } }) });
-  });
-  const listing = `**/api/households/${HARLOW}/items/${MOT.id}/documents`;
-  await page.route(listing, async (route) => {
-    if (route.request().method() !== "GET" || !removed) return route.fallback();
-    const documents = (await papersOf(page, MOT.id)).map((one) => (one.id === MOT.paper.id ? { ...one, lifecycle: "pending_deletion" } : one));
-    return route.fulfill({ json: { documents }, headers: { "cache-control": "no-store" } });
-  });
-}
-
 /** #1316 W1-R6: hold the item's save (`type` is the command, "item.upsert" for an edit, "item.complete" for a completion) until `release()` answers it with a refusal. Dry runs (`dryRun: true`) go through untouched. `held()` counts the real saves caught.
  * @param {import("@playwright/test").Page} page @param {"item.upsert" | "item.complete"} type */
 async function holdTheSave(page, type) {
@@ -142,10 +111,6 @@ async function escapeTwice(page) {
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
 }
-
-/* #1584 web-home-2 / web-home-1: the done line a landed command says when only
-   the read of home (or of the item's papers) after it fails (landed.js). */
-const DONE_LINE = /^done — .*reload/;
 
 /** The item's documents route: GET lists them, POST attaches one. @param {string} id */
 const documentsPathOf = (id) => `/api/households/${HARLOW}/items/${id}/documents`;
@@ -192,17 +157,6 @@ async function papersAnswered(page, itemId) {
   });
   return uploads;
 }
-
-/** A file to pick BY PATH: a buffer payload gets a fresh lastModified on each pick, which would mint a new id for a reason unrelated to the fix (attach-id.js keys on name, size and lastModified).
- * @param {import("@playwright/test").TestInfo} testInfo */
-function pdfOnDisk(testInfo) {
-  const path = testInfo.outputPath("chromium-synthetic.pdf");
-  writeFileSync(path, Buffer.from("%PDF-1.4\n%%EOF\n"));
-  return path;
-}
-
-/** The wake's polite line and its failure line (Wake.svelte). @param {import("@playwright/test").Page} page */
-const wakeStatus = (page) => page.locator('.p-wake-host [role="status"]');
 
 /** #1316 W1-S1: open the item's row from the list, press the pencil and type onto its title, so the rows hold a change.
  * @param {import("@playwright/test").Page} page @param {{ id: string, title: string }} item */
@@ -569,114 +523,6 @@ test.describe("on the desk", () => {
       await expect(notes).toHaveText(typed.after);
     });
   });
-
-  /* #1316 W1-S2 (owner, 2026-10-11, option a): the pencil over a completion
-     that holds changes goes through the discard guard. The first press keeps
-     the completion rows with the typed note and cost and arms the cancel pill
-     as "discard changes?"; a second press inside the hold opens the edit rows.
-     It used to open the edit rows at once and the typing was gone. */
-  test("the pencil over a completion holding a note and a cost asks first; a second press opens the edit rows", async ({ page }) => {
-    await openAt(page, BOILER.id);
-    const drawer = drawerOf(page, BOILER.id);
-    await expect(drawer).toBeVisible({ timeout: SETTLE });
-    await drawer.getByRole("group", { name: `Actions for ${BOILER.title}` })
-      .getByRole("button", { name: `Complete ${BOILER.title}` }).click();
-    const completing = drawer.getByRole("group", { name: `Completing ${BOILER.title}` });
-    await expect(completing.getByRole("button")).toHaveText(["record", "cancel"]);
-    const notes = drawer.getByRole("textbox", { name: "notes" });
-    const cost = drawer.getByRole("textbox", { name: "cost" });
-    const typed = await notesThen(notes, "Bring the log book.");
-    await notes.click();
-    await page.keyboard.press("End");
-    await page.keyboard.type(" Bring the log book.");
-    await expect(notes).toHaveText(typed.after);
-    await cost.click();
-    await page.keyboard.press("ControlOrMeta+a");
-    await page.keyboard.type("42.50");
-    await expect(cost).toHaveText("42.50");
-
-    const editing = drawer.getByRole("group", { name: `Editing ${BOILER.title}` });
-    await drawer.getByRole("button", { name: "Edit this item" }).click();
-    await expect(completing.getByRole("button", { name: "discard changes?" })).toBeVisible();
-    await expect(completing).toBeVisible();
-    await expect(editing).toHaveCount(0);
-    await expect(notes).toHaveText(typed.after);
-    await expect(cost).toHaveText("42.50");
-
-    await drawer.getByRole("button", { name: "Edit this item" }).click();
-    await expect(editing).toBeVisible();
-    await expect(completing).toHaveCount(0);
-    await expect(page.locator(`[id="${BOILER.id}"]`).getByRole("textbox", { name: "title" })).toBeVisible();
-  });
-
-  test.describe(() => {
-    test.use(KEEP_THE_WORKER_OFF_ON_WEBKIT);
-
-    /* #1316 W1-R3: undo is a promise; when the server refuses it the reader is
-       told in the wake, not left with a silent nothing. The paper stays
-       removed (the drawer may still list it, saying "removed"). */
-    test("undoing a removal the server refuses says so in a wake, and the paper stays removed", async ({ page }) => {
-      const name = MOT.paper.displayName;
-      await removalsAnswered(page);
-      await openAt(page, MOT.id);
-      const drawer = drawerOf(page, MOT.id);
-      await expect(drawer).toBeVisible({ timeout: SETTLE });
-      await drawer.getByRole("button", { name: `Open ${name}` }).click();
-      const card = page.getByRole("dialog", { name: new RegExp(`^${name}`) });
-      const readButton = card.getByRole("button", { name: `Read ${name}` });
-      await expect(readButton).toBeEnabled({ timeout: SETTLE });
-
-      await removeThenFailTheUndo(page, readButton, name);
-
-      await expect(page.getByRole("alert").filter({ hasText: new RegExp(`couldn['’]t restore ${name} — try again`) }))
-        .toBeVisible();
-      /* never listed as a live paper again: the item's list, read again, says it is pending deletion */
-      await expect(drawer.getByRole("button", { name: `Open ${name}` }).filter({ hasNotText: /removed/ }))
-        .toHaveCount(0);
-    });
-  });
-
-  test.describe(() => {
-    test.use(KEEP_THE_WORKER_OFF_ON_WEBKIT);
-
-    /* #1584 web-home-2, the desk: the drawer's record read after an attach
-       swallowed its own failure, so the act read as refreshed and the id was
-       forgotten; a re-pick then stored a second copy. Only the item's
-       documents GET fails here (home's own read goes through), the upload
-       POST lands. The pick is by PATH (pdfOnDisk). That the server then holds
-       one copy of a file posted twice under one id is the engine's, not the
-       browser's: the browser's half is that the second pick re-sends the
-       first one's id. */
-    test("an attach whose record read fails says the done line and keeps its id, so a re-pick sends the same one", async ({ page }, testInfo) => {
-      const uploads = await papersAnswered(page, BOILER.id);
-      const file = pdfOnDisk(testInfo);
-      await openAt(page, BOILER.id);
-      const drawer = drawerOf(page, BOILER.id);
-      await expect(drawer).toBeVisible({ timeout: SETTLE });
-
-      const documentsRead = (/** @type {URL} */ url) => url.pathname === documentsPathOf(BOILER.id);
-      await page.route(documentsRead, (route) =>
-        route.request().method() === "GET" ? route.abort("connectionfailed") : route.fallback());
-      try {
-        await drawer.locator('input[type="file"]').setInputFiles(file);
-        /* soft, so the run goes on to show what the re-pick does as well */
-        await expect.soft(drawer.locator('.ivproblem[role="alert"]'), "the drawer's act line says done").toHaveText(DONE_LINE, { timeout: 8_000 });
-        await expect.soft(wakeStatus(page), "the wake says the same line").toHaveText(DONE_LINE, { timeout: 8_000 });
-        await expect.soft(wakeStatus(page), "and never 'attached'").not.toHaveText(/attached/, { timeout: 3_000 });
-        /* the record is still shown, and says nothing but the done line */
-        await expect.soft(drawer.getByRole("group", { name: `Actions for ${BOILER.title}` }), "the record is still shown").toBeVisible({ timeout: 3_000 });
-        await expect.soft(drawer.locator(".ivproblem")).toHaveCount(1, { timeout: 3_000 });
-      } finally {
-        await page.unroute(documentsRead);
-      }
-
-      /* short: a record the failed read replaced with its error has no picker left to use */
-      await drawer.locator('input[type="file"]').setInputFiles(file, { timeout: 10_000 });
-      await expect(wakeStatus(page)).toHaveText(`chromium-synthetic.pdf attached to ${BOILER.title}`, { timeout: SETTLE });
-      expect(uploads, "two picks, two uploads").toHaveLength(2);
-      expect(uploads[1], "the re-pick re-sends the first pick's id").toBe(uploads[0]);
-    });
-  });
 });
 
 test.describe("on the phone", () => {
@@ -828,168 +674,6 @@ test.describe("on the phone", () => {
       await expect(row.getByRole("alert")).toBeVisible({ timeout: 10_000 });
       await expect(completing).toBeVisible();
       await expect(notes).toHaveText(typed.after);
-    });
-  });
-
-  /* #1316 W1-S2: the same on the phone's sheet. */
-  test("the pencil over a completion holding a note and a cost asks first; a second press opens the edit rows", async ({ page }) => {
-    await openAt(page, BOILER.id);
-    const row = rowOf(page, BOILER.id);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
-    await row.getByRole("group", { name: `Actions for ${BOILER.title}` })
-      .getByRole("button", { name: `Complete ${BOILER.title}` }).tap();
-    const completing = row.getByRole("group", { name: `Completing ${BOILER.title}` });
-    await expect(completing.getByRole("button")).toHaveText(["record", "cancel"]);
-    const notes = row.getByRole("textbox", { name: "notes" });
-    const cost = row.getByRole("textbox", { name: "cost" });
-    const typed = await notesThen(notes, "Bring the log book.");
-    await notes.tap();
-    await page.keyboard.press("End");
-    await page.keyboard.type(" Bring the log book.");
-    await expect(notes).toHaveText(typed.after);
-    await cost.tap();
-    await page.keyboard.press("ControlOrMeta+a");
-    await page.keyboard.type("42.50");
-    await expect(cost).toHaveText("42.50");
-
-    const editing = row.getByRole("group", { name: `Editing ${BOILER.title}` });
-    await row.getByRole("button", { name: "Edit this item" }).tap();
-    await expect(completing.getByRole("button", { name: "discard changes?" })).toBeVisible();
-    await expect(completing).toBeVisible();
-    await expect(editing).toHaveCount(0);
-    await expect(notes).toHaveText(typed.after);
-    await expect(cost).toHaveText("42.50");
-
-    await row.getByRole("button", { name: "Edit this item" }).tap();
-    await expect(editing).toBeVisible();
-    await expect(completing).toHaveCount(0);
-    await expect(row.getByRole("textbox", { name: "title" })).toBeVisible();
-  });
-
-  test.describe(() => {
-    test.use(KEEP_THE_WORKER_OFF_ON_WEBKIT);
-
-    /* #1316 W1-R3 / W1-R9: the same on the phone's sheet. */
-    test("undoing a removal the server refuses says so in a wake, and the paper stays removed", async ({ page }) => {
-      const name = MOT.paper.displayName;
-      await removalsAnswered(page);
-      await openAt(page, MOT.id);
-      const row = rowOf(page, MOT.id);
-      await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
-      await row.getByRole("button", { name: `Open ${name}` }).tap();
-      const sheet = page.getByRole("dialog", { name: new RegExp(`^${name}`) });
-      const readButton = sheet.getByRole("button", { name: `Read ${name}` });
-      await expect(readButton).toBeEnabled({ timeout: SETTLE });
-
-      await removeThenFailTheUndo(page, readButton, name);
-
-      await expect(page.getByRole("alert").filter({ hasText: new RegExp(`couldn['’]t restore ${name} — try again`) }))
-        .toBeVisible();
-      await expect(row.getByRole("button", { name: `Open ${name}` }).filter({ hasNotText: /removed/ }))
-        .toHaveCount(0);
-    });
-  });
-
-  test.describe(() => {
-    test.use(KEEP_THE_WORKER_OFF_ON_WEBKIT);
-
-    /* #1584 web-home-2, the phone: the desk host's `onchanged` swallowed its
-       failed read of home, so the attach read as refreshed and the id was
-       forgotten; a re-pick stored a second copy. Path picks, as the desk's;
-       the browser's half is that the re-pick re-sends the first pick's id. */
-    test("an attach whose read of home fails says the done line and keeps its id, so a re-pick sends the same one", async ({ page }, testInfo) => {
-      const uploads = await papersAnswered(page, BOILER.id);
-      const file = pdfOnDisk(testInfo);
-      await openAt(page, BOILER.id);
-      const row = rowOf(page, BOILER.id);
-      await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
-
-      /* the home read only: /api/workspace/commands is another path */
-      const homeRead = (/** @type {URL} */ url) => url.pathname === "/api/workspace";
-      await page.route(homeRead, (route) => route.abort("connectionfailed"));
-      try {
-        await row.locator('input[type="file"]').setInputFiles(file);
-        /* soft, so the run goes on to show what the re-pick does as well */
-        await expect.soft(row.locator("p.p-error"), "the row's own line says done").toHaveText(DONE_LINE, { timeout: 10_000 });
-        await expect.soft(wakeStatus(page), "the wake says the same line").toHaveText(DONE_LINE, { timeout: 10_000 });
-        await expect(row).toHaveAttribute("data-open", "");
-      } finally {
-        await page.unroute(homeRead);
-      }
-
-      await row.locator('input[type="file"]').setInputFiles(file);
-      await expect(wakeStatus(page)).toHaveText("chromium-synthetic.pdf attached", { timeout: SETTLE });
-      expect(uploads, "two picks, two uploads").toHaveLength(2);
-      expect(uploads[1], "the re-pick re-sends the first pick's id").toBe(uploads[0]);
-    });
-
-    /* #1584 fix review r2-web-home-1, the phone: the host's read of home
-       goes through, but the item's own documents GET fails. The phone's
-       papers read is additive (a search over every carrying item), so it
-       swallowed that failure: the attach read as refreshed, its id was
-       forgotten, the drawer showed no paper, and a re-pick stored a second
-       copy. Only the documents GET is aborted; the upload POST and home's
-       read go through. The pick is by PATH, as above. */
-    test("an attach whose papers read fails says the done line and keeps its id, so a re-pick sends the same one", async ({ page }, testInfo) => {
-      const uploads = await papersAnswered(page, BOILER.id);
-      const file = pdfOnDisk(testInfo);
-      await openAt(page, BOILER.id);
-      const row = rowOf(page, BOILER.id);
-      await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
-      const paperButton = row.getByRole("button", { name: "Open chromium-synthetic.pdf" });
-
-      const documentsRead = (/** @type {URL} */ url) => url.pathname === documentsPathOf(BOILER.id);
-      await page.route(documentsRead, (route) =>
-        route.request().method() === "GET" ? route.abort("connectionfailed") : route.fallback());
-      try {
-        await row.locator('input[type="file"]').setInputFiles(file);
-        /* soft, so the run goes on to show what the re-pick does as well */
-        await expect.soft(row.locator("p.p-error"), "the row's own line says done").toHaveText(DONE_LINE, { timeout: 10_000 });
-        /* the phone wakes "attached" first, so that is not asserted away */
-        await expect.soft(wakeStatus(page), "the wake says the done line").toHaveText(DONE_LINE, { timeout: 10_000 });
-        await expect.soft(row, "the row stays open").toHaveAttribute("data-open", "");
-        await expect.soft(row, "the papers are not left 'reading'").not.toContainText(/reading/i, { timeout: 3_000 });
-        await expect.soft(paperButton, "the paper is unread, so not shown").toHaveCount(0);
-      } finally {
-        await page.unroute(documentsRead);
-      }
-
-      await row.locator('input[type="file"]').setInputFiles(file);
-      await expect(wakeStatus(page)).toHaveText("chromium-synthetic.pdf attached", { timeout: SETTLE });
-      await expect.soft(paperButton, "the papers read landed, and shows one paper").toHaveCount(1, { timeout: SETTLE });
-      expect.soft(uploads, "two picks, two uploads").toHaveLength(2);
-      expect.soft(uploads[1], "the re-pick re-sends the first pick's id").toBe(uploads[0]);
-    });
-
-    /* #1584 web-home-2 (guards Change 1 against the W-F2 regression it could
-       cause): the search sheet's own quick complete. Once the host's read
-       rejects, a complete that treated that rejection as the command failing
-       would say "couldn't complete it" for an item that is done. */
-    test("the sheet's quick complete that lands while the read of home fails says the done line, never 'couldn't complete it'", async ({ page }) => {
-      const writes = await ownWorkspace(page, { "item.complete": completeLikeTheEngine });
-      await page.goto(`${APP}/home`, { waitUntil: "load" });
-      await expect(page.locator("body[data-home-ready]")).toBeAttached();
-      await page.locator(".msearch").click();
-      await page.locator(".p-sheet-layer.open .pk-field").fill(MOT.title);
-      const act = page.locator(".p-sheet-layer.open .pk-act");
-      await expect(act).toContainText(`complete “${MOT.title}”`);
-      await act.click();
-      await expect(act).toContainText("tap again to complete");
-
-      const homeRead = (/** @type {URL} */ url) => url.pathname === "/api/workspace";
-      await page.route(homeRead, (route) => route.abort("connectionfailed"));
-      try {
-        await act.click();
-        await expect(wakeStatus(page)).toHaveText(DONE_LINE, { timeout: 15_000 });
-        await expect(page.locator('.p-wake-host [role="alert"]')).toHaveText("");
-        await expect(page.getByText(/couldn.t complete it/)).toHaveCount(0);
-      } finally {
-        await page.unroute(homeRead);
-      }
-
-      /* the command landed; only the screen was stale */
-      expect(writes.sent("item.complete").map((one) => one.itemId)).toEqual([MOT.id]);
-      expect((await writes.itemOf(MOT.id))?.item.dueDate).not.toBe("2026-08-29");
     });
   });
 });

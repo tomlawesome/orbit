@@ -23,8 +23,9 @@ import { ownWorkspace, upsertLikeTheEngine } from "./workspace-writes.js";
  *     the commands and stage requests it sent where the stack suite read the
  *     engine back.
  *
- * What stays in tests/e2e: the real save, the real attach and the real photo
- * (the engine's half; see the commit message of #1609).
+ * What stays in tests/e2e: the real save, the real attach, the real photo and
+ * the desk's first-document walk, whose front page is drawn and scanned by the
+ * engine (the engine's half; see the commit message of #1609).
  *
  * The all-or-nothing create (a stage that fails sends no item, a retry re-sends
  * the same ids, removing a refused file lets Add save without it) is proved in
@@ -272,58 +273,6 @@ test("add to orbit lands an undated item on its row under the no-date rule", asy
 test.describe("on the desk", () => {
   test.beforeEach(() => {
     test.skip(onPhone(), "the desk's #dropzone and lane; the phone's reading card is below (#1279)");
-  });
-
-  /*
-   * #1245, the section-14 walk (design/v19/create-v3.html's `doc` -> `snap`):
-   * the moment a document is picked the lanes split and "Reading your document"
-   * breathes; page one lands on the top sheet as soon as it is drawn, while the
-   * read is still running; the read settles on its own, without the page ever
-   * having waited for it.
-   */
-  test("picking a document shows its front page while the read runs alongside", async ({ page }) => {
-    // The lane says "reading" until both requests of a pick have answered: the
-    // preview draws page one (the heading becomes "Page one"), the inspection
-    // settles the read (`data-reading` goes). Either can win a race with the
-    // assertions, so hold both, look at the lane while it is still reading, then
-    // let them through.
-    const release = await holdPreviewAndRead(page);
-    try {
-      await gotoCreate(page);
-      const readcard = page.locator("#readcard");
-      await page.locator('#card input[type="file"]').setInputFiles(pdf());
-
-      // The lanes split and the lane says what it is doing, straight away.
-      await expect(page.locator("body")).toHaveClass(/\bdoc\b/);
-      await expect(readcard).toBeVisible();
-      await expect(readcard).toHaveAttribute("data-reading", "true");
-      await expect(page.locator("#read-head")).toHaveText("Reading your document");
-      await expect(page.locator("body")).not.toHaveClass(/\bsnap\b/);
-      release();
-
-      // Page one lands, a real picture drawn from the file, and the heading says so.
-      await expect(page.locator("body")).toHaveClass(/\bsnap\b/, { timeout: SETTLE });
-      await expect(page.locator("#read-head")).toHaveText("Page one");
-      const sheet = page.locator("#sheet-page");
-      await expect(sheet).toBeVisible();
-      await expect(sheet).toHaveAttribute("alt", `Page one of ${DOCUMENT}`);
-      await expect.poll(() => sheet.evaluate((img) => /** @type {HTMLImageElement} */ (img).naturalWidth)).toBeGreaterThan(0);
-      await expect(page.locator("#rc-file")).toContainText(DOCUMENT);
-      /* the fixture app scanned nothing (its preview says scanned:false), so the lane does not say "scanned clean" */
-      await expect(page.locator("#rc-scan")).toBeHidden();
-
-      // The read settles on its own, whatever it found, and never undoes the page.
-      await expect(readcard).not.toHaveAttribute("data-reading", "true", { timeout: SETTLE });
-      await expect(page.locator("body")).toHaveClass(/\bsnap\b/);
-      await expect(page.locator("#rc-capline")).not.toHaveText("orbit is reading the pages it was given");
-
-      // "not this one" takes the file out again and closes the lane.
-      await page.locator("#rc-drop").click();
-      await expect(page.locator("body")).not.toHaveClass(/\bdoc\b/);
-      await expect(page.locator("body")).not.toHaveClass(/\bsnap\b/);
-    } finally {
-      release();
-    }
   });
 
   /*
