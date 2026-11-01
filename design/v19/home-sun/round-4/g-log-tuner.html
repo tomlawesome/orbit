@@ -134,6 +134,10 @@ body[data-scene=phone] .scene-phone{display:block}
         <div class="seg"><label><input type="radio" name="labels" value="off">off</label><label><input type="radio" name="labels" value="near" checked>near only</label><label><input type="radio" name="labels" value="all">all</label></div>
         <p class="hint">Near only = planets inside the 30-day ring.</p>
       </fieldset>
+      <fieldset><legend>Demo items</legend>
+        <div class="seg"><label><input type="radio" name="extras" value="off" checked>household only</label><label><input type="radio" name="extras" value="on">plus far-off extras</label></div>
+        <p class="hint">The 16 extras are invented, to judge the scale only: 2 overdue and 14 ahead, out to 1500 days. They are not in the Harlow fixture.</p>
+      </fieldset>
       <table class="read" aria-live="polite"><thead><tr><th colspan="3" class="sum" id="sum"></th></tr><tr><th>mark</th><th>ring radius</th><th></th></tr></thead><tbody id="readout"></tbody></table>
     </aside>
   </div>
@@ -142,7 +146,7 @@ body[data-scene=phone] .scene-phone{display:block}
   <div class="phone">
     <div class="bar"><b>Harlow Home</b><span>sky</span></div>
     <div class="stage" id="pstage"><div id="psky"></div></div>
-    <p class="note">Log scale at the starting values (knee 30 d, horizon 730 d), driven by the due date. Labels: near only. The controls are desk-only.</p>
+    <p class="note">Log scale at the starting values (close-up 30 d, horizon 730 d), driven by the due date. Labels: near only. The controls are desk-only.</p>
   </div>
 </section>
 
@@ -170,8 +174,33 @@ const SKY = (() => {
     { id: 'smoke',   title: 'Smoke alarm batteries', due: '2026-12-13', cost: 1200,    rec: 6,  docs: 0, imp: 'low' },
     { id: 'svc',     title: 'Car full service',      due: '2027-01-21', cost: 30000,   rec: 12, docs: 2, imp: null },
   ];
+  /* Invented items for the scale question only (G's "Demo items" switch): days from
+     the fixture's today, yearly cost in pounds. Not in the fixture; household
+     items are never changed by them. */
+  const EXTRA_ROWS = [
+    ['window',   'Window cleaner',            -3,   180],
+    ['bike',     'Bike service',              -20,  60],
+    ['tv',       'TV licence',                2,    170],
+    ['salt',     'Water softener salt',       4,    90],
+    ['home-ins', 'Home insurance',            12,   640],
+    ['car-ins',  'Car insurance',             18,   720],
+    ['gas',      'Gas safety certificate',    45,   95],
+    ['alarm',    'Smoke alarm replacement',   60,   40],
+    ['eicr',     'EICR electrical check',     120,  180],
+    ['lic-sam',  'Driving licence — Sam',     200,  14],
+    ['pass-alex','Passport — Alex',           280,  88],
+    ['b-warr',   'Boiler warranty',           420,  0],
+    ['r-guar',   'Roof guarantee',            540,  0],
+    ['mortgage', 'Mortgage fix ends',         800,  0],
+    ['pass-sam', 'Passport — Sam',            1100, 88],
+    ['will',     'Will review',               1500, 250],
+  ];
+  const EXTRAS = EXTRA_ROWS.map(([id, title, days, pounds]) => ({
+    id, title, due: new Date(Date.parse(TODAY) + days * 864e5).toISOString().slice(0, 10),
+    cost: pounds * 100, rec: 12, docs: 0, imp: null, extra: true,
+  }));
   const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
-  ITEMS.forEach((it) => { it.days = daysBetween(TODAY, it.due); });
+  [...ITEMS, ...EXTRAS].forEach((it) => { it.days = daysBetween(TODAY, it.due); });
 
   const bandOf = (d) => (d < 0 ? 'overdue' : d <= 30 ? 'due-soon' : d <= 90 ? 'upcoming' : 'ok');
   const BAND_VAR = { overdue: '--overdue', 'due-soon': '--warm', upcoming: '--upcoming', ok: '--ok' };
@@ -267,11 +296,38 @@ const SKY = (() => {
     opts.name = opts.name || 'Harlow Home';
     const p = { mode: opts.mode, tau: opts.tau, D: opts.D };
     const shift = opts.driver === 'warn' ? 30 : 0;
-    const geo = ITEMS.map((it) => {
+    const items = opts.extras ? ITEMS.concat(EXTRAS) : ITEMS;
+    const geo = items.map((it) => {
       const d = it.days - shift;
       const ru = radiusU(d, p), th = bearing(d), rpx = ru * S;
       const sz = sizeU(it, sc.size);
-      return { it, d, ru, theta: th, rpx, x: sc.CX + Math.cos(th) * rpx, y: sc.CY + Math.sin(th) * rpx, pr: sz * S, sz };
+      return { it, d, ru, theta: th, rpx, x: sc.CX + Math.cos(th) * rpx, y: sc.CY + Math.sin(th) * rpx, pr: sz * S, sz, rim: d >= 0 && ru >= U.RIM - 1e-6 };
+    });
+    /* Items on the rim: the bearing clamp stacks them on one angle, so spread them
+       along the rim. The first seated keeps its own bearing; each later one takes the
+       smallest angle shift (either side) that clears every planet already placed. */
+    /* With the demo extras on, every planet gets the same treatment (the extras
+       crowd the near bearings too): household items seat first, inner before outer,
+       and only a planet that would touch one already seated is moved. Household
+       only, just the rim items are spread. */
+    const all = Boolean(opts.extras);
+    const movers = geo.filter((g) => (all ? true : g.rim))
+      .sort((a, b) => (a.it.extra ? 1 : 0) - (b.it.extra ? 1 : 0) || a.ru - b.ru || a.d - b.d);
+    const seated = geo.filter((g) => !movers.includes(g));
+    movers.forEach((g) => {
+      const free = (th) => {
+        const x = sc.CX + Math.cos(th) * g.rpx, y = sc.CY + Math.sin(th) * g.rpx;
+        return seated.every((o) => Math.hypot(o.x - x, o.y - y) >= o.pr + g.pr + 3) ? { x, y } : null;
+      };
+      for (let k = 0; k <= 1440; k++) {
+        let hit = null;
+        for (const sgn of (k === 0 ? [0] : [1, -1])) {
+          const th = g.theta + sgn * k * 0.25 * Math.PI / 180, f = free(th);
+          if (f) { hit = { th, ...f }; break; }
+        }
+        if (hit) { g.theta = hit.th; g.x = hit.x; g.y = hit.y; break; }
+      }
+      seated.push(g);
     });
     const near = radiusU(30, p) * S;           // "near only": inside the 30-day ring
     const wanted = geo.filter((g) => opts.labels === 'all' || (opts.labels === 'near' && g.rpx < near - 0.01))
@@ -294,7 +350,7 @@ const SKY = (() => {
     const labels = placeLabels(wanted, geo.map((g) => ({ x: g.x, y: g.y, pr: g.pr + (opts.pad || 0) })), fixed, sc);
 
     const c = (u) => fx(u * S);
-    let svg = `<svg width="${sc.W}" height="${sc.H}" viewBox="0 0 ${sc.W} ${sc.H}" role="img" aria-label="Harlow Home sky: ${ITEMS.length} planets">`;
+    let svg = `<svg width="${sc.W}" height="${sc.H}" viewBox="0 0 ${sc.W} ${sc.H}" role="img" aria-label="Harlow Home sky: ${items.length} planets">`;
     svg += `<defs><radialGradient id="sunglow-${opts.scene}"><stop offset="0" stop-color="#dbe9ff" stop-opacity=".55"/><stop offset=".35" stop-color="#dbe9ff" stop-opacity=".16"/><stop offset="1" stop-color="#dbe9ff" stop-opacity="0"/></radialGradient></defs>`;
     /* the dial's furniture */
     svg += `<circle cx="${sc.CX}" cy="${sc.CY}" r="${c(U.ZERO)}" fill="rgba(248,113,113,.05)"/>`;
@@ -363,7 +419,7 @@ const SKY = (() => {
     el.classList.add('show');
   }
 
-  return { ITEMS, SCENES, U, radiusU, bearing, sizeU, render, callout, tminus, money, bandOf, BAND_VAR, fx, TODAY };
+  return { ITEMS, EXTRAS, SCENES, U, radiusU, bearing, sizeU, render, callout, tminus, money, bandOf, BAND_VAR, fx, TODAY };
 })();
 
 /* the highlight dot every dial body wears from r >= 4 (home +page.svelte bodyMark) */
@@ -373,6 +429,7 @@ const q = new URLSearchParams(location.search);
 const st = {
   mode: q.get('mode') || 'log', tau: +(q.get('tau') || 30), D: +(q.get('D') || 730),
   driver: q.get('driver') || 'due', labels: q.get('labels') || 'near',
+  extras: ['on', '1'].includes(q.get('extras')) ? 'on' : 'off',
 };
 const paintG = (it, g) => {
   const col = `var(${SKY.BAND_VAR[SKY.bandOf(it.days)]})`;
@@ -380,7 +437,7 @@ const paintG = (it, g) => {
 };
 const gsky = document.getElementById('gsky');
 function drawDesk() {
-  SKY.render(gsky, { scene: 'desk', mode: st.mode, tau: st.tau, D: st.D, driver: st.driver, labels: st.labels, rings: true, paint: paintG });
+  const { geo } = SKY.render(gsky, { scene: 'desk', mode: st.mode, tau: st.tau, D: st.D, driver: st.driver, labels: st.labels, extras: st.extras === 'on', rings: true, paint: paintG });
   document.getElementById('o-tau').textContent = st.tau + ' days';
   document.getElementById('o-D').textContent = st.D + ' days';
   document.getElementById('tau').value = st.tau;
@@ -394,13 +451,14 @@ function drawDesk() {
     : `\u03c4 ${st.tau} d \u00b7 D ${st.D} d \u00b7 rim beyond D`;
   const p = { mode: st.mode, tau: st.tau, D: st.D };
   document.getElementById('readout').innerHTML = [7, 30, 90, 365].map((d) =>
-    `<tr><td>${d}-day ring</td><td>r ${SKY.radiusU(d, p).toFixed(1)}</td><td>${(SKY.radiusU(d, p) * SKY.SCENES.desk.S).toFixed(0)} px</td></tr>`).join('');
-  for (const [name, val] of [['mode', st.mode], ['driver', st.driver], ['labels', st.labels]]) {
+    `<tr><td>${d}-day ring</td><td>r ${SKY.radiusU(d, p).toFixed(1)}</td><td>${(SKY.radiusU(d, p) * SKY.SCENES.desk.S).toFixed(0)} px</td></tr>`).join('')
+    + `<tr><td colspan="2">on the rim</td><td>${geo.filter((g) => g.rim).length} of ${geo.length}</td></tr>`;
+  for (const [name, val] of [['mode', st.mode], ['driver', st.driver], ['labels', st.labels], ['extras', st.extras]]) {
     for (const r of document.querySelectorAll(`input[name=${name}]`)) r.checked = r.value === val;
   }
   document.body.dataset.crowded = gsky.dataset.crowded;
 }
-for (const name of ['mode', 'driver', 'labels']) {
+for (const name of ['mode', 'driver', 'labels', 'extras']) {
   for (const r of document.querySelectorAll(`input[name=${name}]`)) r.addEventListener('change', () => { st[name] = r.value; drawDesk(); });
 }
 document.getElementById('tau').addEventListener('input', (e) => { st.tau = +e.target.value; drawDesk(); });
