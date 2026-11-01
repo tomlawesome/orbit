@@ -1831,3 +1831,28 @@ instance administrator has no private mailbox.
   stays its owner's alone.
 - Critical: on most installs the one administrator is the main user, so
   without this nobody can use mail-in. #1632.
+
+## 48. A hotfix train runs no browser or stack checks (owner, 2026-11-01)
+
+On the first hotfix (#1632): **"hotfix should have zero browser checks, it
+should have fast checks, functional review, and possibly some other very
+quick checks"**, and of the acceptance stage, **"I don't think most of this
+needs to run?"** Amends the rule that a `hotfix/*` push runs the same gate
+as a `preview` push (docs/releasing.md; CI `browser_gate`, #1186).
+
+- A push to `hotfix/*` runs: classify, the fast stage, the policy stage,
+  the integration suite, the image build, the image supply-chain scan,
+  the local-only smoke (Chromium, three minutes: proof the image starts
+  and signs in; owner: "Maybe the local smoke?"), then record, sign and
+  publish. Nothing else. About 30 minutes on the last train's timings.
+- Also runs: the launcher archive build (publishing needs it) and the
+  launcher install check, which shares that job's rules and finishes
+  beside the integration suite at no extra time (decided in the build,
+  2026-11-01, so the owner can overrule).
+- Skipped on that push: the four full smoke suites, both visual gates, the
+  install acceptance stack and the repair journeys. The merge request into the hotfix branch and the ordinary
+  `preview` train are unchanged.
+- Why: a hotfix is one small change on a release the full gate already
+  passed; the browser and stack jobs took 28 to 38 minutes each on the
+  last train and prove the whole app again, not the change. The owner's
+  acceptance of the patch preview on a live install is the browser check.
