@@ -1,6 +1,6 @@
 # Orbit roadmap: promises against delivery
 
-> **Current.** Checked against the code on `dev` (3379d6cb), 2026-10-07; the rows v0.3.1's issues touched re-checked against v0.3.1 (77ffcabb), 2026-10-23.
+> **Current.** Checked against the code on `dev` (3379d6cb), 2026-10-07; the rows v0.3.1's issues touched re-checked against v0.3.1 (77ffcabb), 2026-10-23; the rows v0.3.2's and v0.3.3's issues touched re-checked against v0.3.3 (77ddc612), 2026-11-01.
 
 This page lists everything Orbit has promised and says whether it has been
 kept. One row is one promise; a promise made in several places is one row that
@@ -83,12 +83,12 @@ closed.
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
 | RM-018 | Create, edit, search and schedule household items | charter V1-ITEM-01; site: "The rhythm" | v1.0 | delivered | #16, #40, #455; #1467: the quick-add type buttons open Add with that type; #1472: one press on the north star opens the drawer when scrolled (b396198b) |
-| RM-019 | Complete an item and its next date is worked out; one-offs simply end | site: "The rhythm" | v0.3 | delivered | #455 |
+| RM-019 | Complete an item and its next date is worked out; one-offs simply end | site: "The rhythm" | v0.3 | delivered | #455; the rule is `nextDueDate` in `src/lib/next-due-date.ts` (ADR-0034, tested in `src/lib/next-due-date.test.ts`); #1347: the unused second copies of the date maths were deleted (012ad353) |
 | RM-020 | Reschedule or snooze an item when life gets in the way | site: "The rhythm"; charter V1-ITEM-01 | v0.3 | delivered | #455 |
 | RM-021 | Archive and restore items | charter V1-ITEM-01 | v0.3 | delivered | #455 |
 | RM-022 | A history of what was done and when, for every item | charter V1-ITEM-01; site: "Around your household" | v1.0 | partial | history is stored and sent to the screens (#40) but no screen lists it |
 | RM-023 | Each item keeps cost, how often it comes round (including 2 years or any 1-120 months) and its reminders (for example 4 weeks and 1 week before) | site: "The rhythm"; decision #1058 | M14 | delivered | #1058, #1069 |
-| RM-024 | Item kinds service, renewal, inspection, document and suggestion; a section must be picked, with no default | decision #1058 | M14 | delivered | #1069 |
+| RM-024 | Item kinds service, renewal, inspection, document and suggestion; a section must be picked, with no default | decision #1058 | M14 | delivered | #1069; #1346: the engine sends each item's kind, the browser reads it and no longer infers it, and a kind sent by a client is refused (e24e20fa, 0de5c9df; `tests/integration/workspace-item-kind.test.ts`, `src/lib/item-kind.test.ts`) |
 | RM-025 | Sections stay an attribute printed on each row but leave navigation | charter V1-ITEM-02; owner-decisions §10 | v0.3 | delivered | #413 |
 | RM-026 | Add, rename, reorder and recolour your own sections | site: "Around your household" | unscheduled | partial | add, rename, hide, reorder exist; colour follows the chosen mark, no recolour |
 | RM-027 | Display choices stay consistent across sessions: five colourways, light or dark, four text sizes | charter V1-ITEM-02; site: "Around your household" | v0.3.1 | delivered | five packs shipped (#486); #1180: text size chosen in Settings, applied before first paint, and pack and size stored on the account (a0f3b007) |
@@ -108,11 +108,11 @@ closed.
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-039 | Attach a document to an item: upload, scan, encrypt, download, delete and restore without exposing it to another household or public storage | charter V1-DOC-01; ORB-FUT-003; site: "Around your household" | v1.0 | delivered | #17, #42, 925ba6d6 |
-| RM-040 | Documents encrypted at rest with per-document keys wrapped by a key-encryption key, and a key rotation that loses nothing | ORB-FUT-003; site: "The system"; decision #954 | M8 | delivered | #932, #954, da892a9d |
-| RM-041 | Downloads are authenticated, authorisation is rechecked, no public URLs, safe headers | ORB-FUT-003 | v1.0 | delivered | #42; the file is buffered, not streamed |
-| RM-042 | File type decided by inspecting the bytes; opaque storage keys | ORB-FUT-003 | v1.0 | delivered | #42, ADR-0033 |
-| RM-043 | Documents wait in quarantine until scanned, and a scanner outage recovers without re-upload | ORB-FUT-003 | v1.1 | delivered | #123, #168 |
+| RM-039 | Attach a document to an item: upload, scan, encrypt, download, delete and restore without exposing it to another household or public storage | charter V1-DOC-01; ORB-FUT-003; site: "Around your household" | v1.0 | delivered | #17, #42, 925ba6d6; #1567: an upload holds the file once and encrypts from the quarantine file in pieces (346459b0; `tests/integration/document-upload-stream.test.ts`); #1593: when the open check could not run, the member is told to try again, not to choose another file (92b39194) |
+| RM-040 | Documents encrypted at rest with per-document keys wrapped by a key-encryption key, and a key rotation that loses nothing | ORB-FUT-003; site: "The system"; decision #954 | M8 | delivered | #932, #954, da892a9d; #1392: a rotation finishes past held mail attachments and scanner-recovery objects wrapped under an older key, skipping and reporting them (5aae65b4; `tests/integration/document-kek-rotation-old-keys.test.ts`) |
+| RM-041 | Downloads are authenticated, authorisation is rechecked, no public URLs, safe headers | ORB-FUT-003 | v1.0 | delivered | #42; #1571: a download is verified in one pass over the stored object, audited, then decrypted into the response in pieces, so no plaintext is released before the tag verifies and the file is no longer buffered (92106e44; `tests/integration/document-lifecycle.test.ts`, `src/server/documents/storage-unseal.test.ts`) |
+| RM-042 | File type decided by inspecting the bytes; opaque storage keys | ORB-FUT-003 | v1.0 | delivered | #42, ADR-0033; #1397: a PDF may carry up to 256 cross-reference sections (8a07698a; `src/server/documents/validation.test.ts`); #1572: the image decoder runs in the sandbox child (ADR-0038; `src/server/documents/image-sandbox.test.ts`); #1590: the PDF end search is native, not a step per byte (35cc2381) |
+| RM-043 | Documents wait in quarantine until scanned, and a scanner outage recovers without re-upload | ORB-FUT-003 | v1.1 | delivered | #123, #168; #1571: scanner recovery decrypts a staged object to a quarantine file and releases it only after the tag verifies; a staged object failing its check never reaches the scanner (92106e44; `src/server/document-worker-characterization.test.ts`) |
 | RM-044 | Malware scanning is optional: on by default, a recommendation when off, never forced | ORB-FUT-003; site: "The system" | M16 | partial | DOCUMENT_SCAN_MODE=disabled works but the ClamAV container always runs (#1170) |
 | RM-045 | Per-file and per-instance limits, with an upload limit the administrator can set | ORB-FUT-003 | v0.3 | delivered | #1285: administrator-set upload limit in Administration |
 | RM-046 | Orphan cleanup and storage reconciliation | ORB-FUT-003 | v1.0 | delivered | #42 |
@@ -121,7 +121,7 @@ closed.
 | RM-049 | Optional S3-compatible object storage | ORB-FUT-003 | unscheduled | dropped | owner 2026-10-07: no S3 storage; local storage only (the charter already lists it as a non-goal) |
 | RM-050 | Upload from a phone's file picker or camera | ORB-FUT-003; ORB-FUT-007 | v1.0 | partial | picker accepts PDF and images; no capture setting |
 | RM-051 | Mobile capture with preview, rotate, remove, retry and progress that survives bad connectivity | ORB-FUT-007 | unscheduled | not started | no issue |
-| RM-052 | Open a document's preview and a reader with page turning over the belt | owner-decisions §18; decision #1059 | M14 | delivered | #1059 |
+| RM-052 | Open a document's preview and a reader with page turning over the belt | owner-decisions §18; decision #1059 | M14 | delivered | #1059; #1571: a preview decrypts into one memory buffer, never to disk (92106e44; `src/server/document-preview.test.ts`); #1559: a failed page turn shows the failure, not the new page number over the old picture (3cf5d77e; `tests/e2e/v19-document-preview.spec.ts`) |
 
 ### Reading documents
 
@@ -139,7 +139,7 @@ closed.
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-060 | Forward a bill or policy to Orbit; it reads the attachment and asks before anything is added | charter V1-DOC-03; ORB-FUT-001; site: "The relay" | v1.0 | partial | #22, #57, #58, #59, #60; proof against a real mailbox open (#1255); #1459: with TIKA_URL unset, mail-in skips reading |
+| RM-060 | Forward a bill or policy to Orbit; it reads the attachment and asks before anything is added | charter V1-DOC-03; ORB-FUT-001; site: "The relay" | v1.0 | partial | #22, #57, #58, #59, #60; proof against a real mailbox open (#1255); #1459: with TIKA_URL unset, mail-in skips reading; #1396, #1568: an approval cut off part-way is retried with the same stored request, says it was interrupted, and a replay after the receipt is discarded is refused (da6c3d36, 36d2477b, 53ad72ea; `tests/integration/reviewed-intake-route-retry.test.ts`) |
 | RM-061 | Every user has their own relay address, which they can rotate and pause | decision #336; owner-decisions §7; site: "The relay" | M4 | delivered | #336, #744, #746 |
 | RM-062 | Mail-in pulls from one mailbox and never opens a port; container mail settings are for sending only | owner-decisions §7 | M4 | delivered | #742, #743, #747 |
 | RM-063 | Support Mailcow, Gmail and Outlook, with OAuth2 for Outlook and Hotmail | owner-decisions §7 | v0.4 | partial | password IMAP works; OAuth2 is a stored setting only, no flow; #1312 (owner 2026-10-07: build it in v0.4) |
@@ -151,13 +151,13 @@ closed.
 | RM-069 | The administrator sets outbound SMTP: host, port, TLS, own credentials, sender name, From, reply-to, with a connection and delivery test | ORB-FUT-001 | v1.0 | partial | #60; set by file or environment, connection test only, no sender name or reply-to |
 | RM-070 | Orbit emails ingestion receipts, review prompts, duplicate warnings and reminders | ORB-FUT-001 | v1.0 | partial | receipts, review prompts and reminders work; no duplicate warning |
 | RM-071 | An inbox in three lanes (Filed, For your review, Failed) with a Still reading lane | owner-decisions §14; site: "The relay" | v0.3 | delivered | #463 |
-| RM-072 | A suggestion opens as a drawer on home and rides the item belt, accepted in two taps | owner-decisions §27, §29 | M14 | delivered | #1145 |
+| RM-072 | A suggestion opens as a drawer on home and rides the item belt, accepted in two taps | owner-decisions §27, §29 | M14 | delivered | #1145; #1396: the review sheet sends the server's reported request back verbatim on a retry (`tests/unit/review-sheet-pending-approval.test.mjs`) |
 
 ### Reminders and notifications
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-073 | Due dates and reminder preferences are deterministic across calendar and daylight-saving changes | charter V1-REM-01 | v1.0 | delivered | #41 |
+| RM-073 | Due dates and reminder preferences are deterministic across calendar and daylight-saving changes | charter V1-REM-01 | v1.0 | delivered | #41; scheduling across DST is tested in `src/server/notification-worker.test.ts`; #1347: unused date helpers with no caller were deleted from `src/lib/domain.ts` (012ad353) |
 | RM-074 | Delivery is scheduled once, retried a bounded number of times, diagnosable without private content, and optional | charter V1-REM-02 | v1.0 | delivered | #41 |
 | RM-075 | Per-user email reminders with switches and per-item warning days | site: "The system"; charter foundations | v0.3 | delivered | #479, #763 |
 | RM-076 | Browser push notifications to your phone | site: "Around your household"; charter foundations | M16 | delivered | #763 |
@@ -169,18 +169,18 @@ closed.
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-080 | One pasteable command installs a prebuilt image by digest, without Git or prompts, and fails closed | ORB-FUT-012; charter V1-REL-01; site: "Get into Orbit" | v1.1 | delivered | #117, 4cd22c34; #1455, #1485: a failed start shows Docker's own error, bounded; #1456: a failed fresh install rolls back all-or-nothing so a retry works |
-| RM-081 | Update by running the installer again with settings carried over; migrations applied safely; fresh install and upgrade both proven | charter V1-OPS-03; site: "The system" | v0.4 | partial | migration tests exist; the update path has no test (#725, #680) |
+| RM-080 | One pasteable command installs a prebuilt image by digest, without Git or prompts, and fails closed | ORB-FUT-012; charter V1-REL-01; site: "Get into Orbit" | v1.1 | delivered | #117, 4cd22c34; #1455, #1485: a failed start shows Docker's own error, bounded; #1456: a failed fresh install rolls back all-or-nothing so a retry works; #1504: a fresh install run without a terminal installs the `standard` or `processing` profile the launcher asks for through `ORBIT_INSTALL_PROFILE`, forwarded by name only (9f3e28d5; `scripts/install.bootstrap.test.mjs`); #1519: the launcher's guided configuration is written through the install transaction, so a refused or rolled-back install leaves none of it behind (3725d041; `src/lib/launcher-config-tree.test.ts`); #1481: a stale `install.sh` citation in `docs/installer-guarantees.md` now fails the fast suite (6b124143) |
+| RM-081 | Update by running the installer again with settings carried over; migrations applied safely; fresh install and upgrade both proven | charter V1-OPS-03; site: "The system" | v0.4 | partial | migration tests exist; #1518: an update stopped after its files are written rolls forward, is never cut part-way through `compose up`, and ends as a failure of that step (34acfe0a; `scripts/install.update-interrupts.test.mjs`); #1570: the refusal to start over a database volume it cannot prove says which proof failed and what to do (7829671d; `src/lib/database-volume-safety.test.ts`); no update from a prior released version is run (#725, #680); proving an update keeps household data is #1601 (with ai/orbit-launcher#324) |
 | RM-082 | Install without secrets in Git, environment output, logs or process arguments | charter V1-OPS-01 | v1.0 | delivered | #180 |
 | RM-083 | Health and administrator views separate configuration, dependency, provider, queue and storage failures without leaking secrets | charter V1-OPS-02 | v1.0 | delivered | #95; #1443: a failed read on every administration card says so and offers try again (cbcbb9de) |
-| RM-084 | Backup and restore keep the database and encrypted documents, detect corruption and a wrong key, and say the recovery key is separate | charter V1-OPS-04 | v1.0 | partial | #28, b8859295; the backup CLI never run against a real stack (#1199, #1211) |
+| RM-084 | Backup and restore keep the database and encrypted documents, detect corruption and a wrong key, and say the recovery key is separate | charter V1-OPS-04 | v1.0 | partial | #28, b8859295; #1420: a recovery bundle imports even when the live document key file is gone, and a rollback removes the key it wrote (b2de0af1; `test_import_with_missing_key` in `scripts/test-backup-restore.sh`); #1512: restore refuses a wrong key by the manifest's key fingerprint and HMAC before decrypting; the archive itself is unauthenticated CBC, so the parity test (bbd55e9e) requires only that openssl and TypeScript agree; the drill runs on a throwaway stack (#1273) but never shows a real document decrypting after a restore or import (#1199) |
 | RM-085 | Backups run on a schedule | charter quality attributes | unscheduled | dropped | owner 2026-10-07: operators run their own backups; the docs tell them to schedule backup.sh |
 | RM-086 | Real restore exercises | charter quality attributes | M16 | partial | #1273: local --own-stack drill, and the CI drill; no drill an operator runs against their own deployment |
-| RM-087 | Deterministic update and rollback guidance | charter quality attributes | unscheduled | partial | orbit check --rollback exists; no standalone rollback guide |
+| RM-087 | Deterministic update and rollback guidance | charter quality attributes | unscheduled | partial | orbit check --rollback exists; #1518: "If an update stops" in `docs/installing.md` says to run the update again; no standalone rollback guide |
 | RM-088 | Three containers on PostgreSQL 18, optional parser, scanner and model | charter supported deployment; site: "The system" | M5 | delivered | #686; the site still says PostgreSQL 17 |
 | RM-089 | Orbit never needs the Docker socket | feature-register conventions | v1.0 | delivered | compose files hold none |
 | RM-090 | Maintenance mode shows a rolling timeline of timed updates | decision #580 | M0 | delivered | #585, #526 |
-| RM-091 | A signed launcher installs Orbit from a terminal app | site: "Yours all the way down" | M12 | partial | #1107; end-to-end proof still open (#1154); launcher pinned at v0.4.2 (#1495, #1202, 20e2ac8b); previews carry the previous signed manifest for the update check (#1480, 7782060e) |
+| RM-091 | A signed launcher installs Orbit from a terminal app | site: "Yours all the way down" | M12 | partial | #1107; end-to-end proof still open (#1154); launcher pinned at v0.4.3 (#1560, a1999224; `launcher_install_compat` runs it as an unprivileged user, as v0.4.3 refuses root); previews carry the previous signed manifest for the update check (#1480, 7782060e) |
 | RM-092 | Open source under AGPL-3.0-or-later, no paywall, no account with us | site: "Yours all the way down" | v0.3 | delivered | 30a23545 |
 
 ### Administration
@@ -216,18 +216,18 @@ closed.
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-107 | Export and import a household with its documents, owner-only (import narrowed to owners 2026-10-14, #1316), checked before import, atomic and audited; while an import runs the household is closed to everyone but the importer (#1316, owner 2026-10-14) | ORB-FUT-006; owner-decisions §21 | M14 | delivered | #1002, #1049, a0f4308d; #1290 (body limit sized to the archive cap) |
+| RM-107 | Export and import a household with its documents, owner-only (import narrowed to owners 2026-10-14, #1316), checked before import, atomic and audited; while an import runs the household is closed to everyone but the importer (#1316, owner 2026-10-14) | ORB-FUT-006; owner-decisions §21 | M14 | delivered | #1002, #1049, a0f4308d; #1290 (body limit sized to the archive cap); #1506, #1521: export, check and import stream through a scratch file instead of holding the archive whole (73c7d52e, a0389ed5; `src/server/portable-archive-import-stream.test.ts`); #1524: a tag shorter than 16 bytes is refused before anything decrypted is used (a0389ed5); #1566, #1594: the browser's archive upload is no longer refused 403 (d581c3bf; `scripts/container-entrypoint.test.mjs`); measured peaks are in `docs/administrator-operations.md` |
 | RM-108 | A human-readable export and a per-document hash manifest | ORB-FUT-006 | unscheduled | not started | only the machine archive exists; no issue |
 
 ### Delivery and release
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-109 | CI tests the exact image that may be published, by digest, and promotion never rebuilds | charter V1-REL-01 | v1.0 | delivered | #21, #34, #61 |
+| RM-109 | CI tests the exact image that may be published, by digest, and promotion never rebuilds | charter V1-REL-01 | v1.0 | delivered | #21, #34, #61; #1482: `promote_stable` reads the digest main's commit was published as and refuses unless `:preview` is the same (6c8146a5; `scripts/promote-stable.test.mjs`); #1564: it exists only on main (6e8be026); #1544: the nightly gate is dropped, the promotion pipeline is the full browser proof (f59b973e; `scripts/gitlab-ci-lanes.test.mjs`) |
 | RM-110 | Validation evidence is signed and bound to the digest, separate from publication | decision #573 | M5 | delivered | #661 |
 | RM-111 | Validation runs on the self-hosted GitLab; releases mirror to GitHub and GHCR | ORB-FUT-008 | M5 | delivered | #801 |
-| RM-112 | Orbit's base image is controlled and upstream fixes reach releases | decision #650 | M5 | delivered | #650, #1081; #1478: the repin reads the publish artifact from main (9ff54d17); #1483: repin and check accept a single-manifest tag (6f679c54) |
-| RM-113 | A stable release is accepted by digest on a test bed: update, sign-in, records, documents, backup, restore, restart | charter release acceptance | v0.3 | not started | #1152, #1153, #885 |
+| RM-112 | Orbit's base image is controlled and upstream fixes reach releases | decision #650 | M5 | delivered | #650, #1081; #1478: the repin reads the publish artifact from main (9ff54d17); #1483: repin and check accept a single-manifest tag (6f679c54); #1101: CI builds pull the base image by digest from the GitLab registry (9378f964) |
+| RM-113 | A stable release is accepted by digest on a test bed: update, backup, restore, restart; sign-in, records and documents by the `preview` browser jobs on the same image | charter release acceptance | v0.3 | not started | #1152, #1153, #885; #1599: the hand sign-in check dropped |
 
 ## Mismatches
 
