@@ -381,3 +381,4 @@ timeout on this one case rather than a global raise.
 ## web/tests/rig/v19-screen-reader.spec.js "sign-out screen" (rig-phone)
 
 - 2026-11-01 · ead52a87 + #1609 batch 1 merge · local rig run, both rig projects, shared host · after the pocket sheet's "sign out" press the page stayed on `/settings` for the 5s `toHaveURL(/\/logout$/)`; the next run of the same code passed. First sighting.
+- 2026-11-01 · 4d888d9f (#1609 batch 1 fixes) · local rig run, full suite, loaded host · same symptom with the wait raised to 30s and then 90s: the page stays on `/settings` with the goodbye drawn (`dusk` shown) and never reaches `/logout`. Under `--repeat-each=24 --workers=12` about half the runs hang; with 4 workers 6 of 6 passed. So it is load, not the wait length; a suspected race in the app's leave descent, not yet traced. Second sighting.
