@@ -3882,9 +3882,12 @@ record_image:
       cat .orbit-supply-chain/orbit-release-manifest.json
     # #1480: save the build before this one (its manifest and signature) as
     # .orbit-supply-chain/previous/, read by branch from the latest-artifacts
-    # API, kept only if it verifies against cosign.pub. Never fails the
-    # publish: the verifier fetches the pinned cosign itself, as in
-    # publish_channel, and any failure there is "no predecessor". The
+    # API, kept only if it verifies against cosign.pub. A fail-loud,
+    # idempotent carry (#1607): a missing or mismatched predecessor fails
+    # this job with a message naming its cause (the script's exit status is
+    # the job's, nothing here swallows it). A ref's very first release passes
+    # only with ORBIT_CARRY_NO_PREDECESSOR=<reason> set for that pipeline
+    # run, never as a standing project variable (docs/releasing.md). The
     # launcher's update test finds the previous build by branch alone, with
     # no job IDs to expire.
     # $published_digest is still set: GitLab runs every script item in one
@@ -3895,7 +3898,8 @@ record_image:
     paths:
       - .orbit-supply-chain/gitlab-tested-image.json
       - .orbit-supply-chain/orbit-release-manifest.json
-      # #1480: absent on a branch's first build; GitLab only warns about a
+      # #1480: absent only on a ref's first release, which passes with
+      # ORBIT_CARRY_NO_PREDECESSOR set (#1607); GitLab only warns about a
       # missing path.
       - .orbit-supply-chain/previous/
     expire_in: 90 days

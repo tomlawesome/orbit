@@ -264,6 +264,39 @@ The keyless `.sigstore.json` countersignature covers the manifest, not the
 verifying, so any digest not yet published must go through validation again
 after a rotation.
 
+### Carrying the previous build's manifest (#1480, #1607)
+
+`record_image` also saves the build before this one, its signed release
+manifest and signature, as `.orbit-supply-chain/previous/`, so the launcher's
+live update test can find the previous preview build by branch.
+`scripts/ci/carry-previous-release.sh` does it, and it is fail-loud and
+idempotent: a missing or mismatched predecessor fails `record_image` with a
+message naming the cause, and nothing is written. A manifest and signature
+that do not verify together, a latest build that changed while they were
+fetched, and a re-run of an already-published digest whose build carried no
+`previous/` pair all fail the same way. Re-running gives the same result.
+
+The latest successful pipeline on the ref must have run `record_image` and
+`sign_evidence`. A pipeline started by a schedule or by hand runs neither, so
+if one succeeded on `preview`, the next push fails here until a normal push
+pipeline has succeeded on that ref.
+
+**`ORBIT_CARRY_NO_PREDECESSOR`.** A ref's very first release has no
+predecessor, and the script cannot tell that from a lookup that found
+nothing. Set `ORBIT_CARRY_NO_PREDECESSOR` to a short reason (for example
+`first release on hotfix/x`) and the carry logs the variable and the reason,
+saves nothing and passes. Rules:
+
+- Set it only for a ref's very first release, when you know there is nothing
+  to carry.
+- Set it for that one pipeline run (run the pipeline with the variable, for
+  example from Run pipeline), never as a standing CI/CD project variable. A
+  standing variable would turn every later missing predecessor into a silent
+  pass again.
+- It covers only "nothing found" (no manifest, no signature, no carried
+  pair). A predecessor that was found and is bad (mismatch, changed build,
+  malformed digest, failed verification) fails with it set.
+
 ## Stable promotion (on GitLab)
 
 Promotion is a manual GitLab CI job, `promote_stable` in `.gitlab-ci.yml`. It

@@ -24,11 +24,23 @@
 # like the branch can answer the by-ref lookup, so the fetch alone proves
 # nothing.
 #
-# This step never fails the publish: anything it cannot fetch or trust (first
-# build on a branch, a network failure, a malformed manifest, a missing
-# signature, a pair that does not verify) prints "no predecessor on this
-# ref" with the reason, writes nothing and exits 0. Only a usage error exits
-# non-zero (2).
+# A fail-loud, idempotent carry (#1607 D-F1-1, D-F2-1, D-F5). A missing or
+# mismatched predecessor is an error that names its cause, never a silent
+# skip: the script prints "carry-previous-release: FAILED: <cause>" on stderr,
+# writes nothing under previous/ and exits 1 (a usage error exits 2). So the
+# publish job fails with it. Running it again on the same inputs gives the
+# same result, and the manifest and signature it saves always come from one
+# build: they are fetched as a pair, the manifest is fetched again to prove
+# the latest build did not change in between, and the pair must verify.
+#
+# The one pass-through is a ref's very first release, which has no
+# predecessor and cannot be told from a lookup that found nothing. It passes
+# only when ORBIT_CARRY_NO_PREDECESSOR is set to a non-empty reason, set for
+# that pipeline run (docs/releasing.md); the run logs the variable and the
+# reason, saves nothing and exits 0. The override covers only "nothing was
+# found" (a manifest or signature that could not be fetched). A predecessor
+# that was found and is bad (a mismatch, a changed build, a malformed digest,
+# a failed verification) still fails with the override set.
 #
 # Usage:
 #   scripts/ci/carry-previous-release.sh <current-image-digest>
@@ -40,6 +52,9 @@
 #   CI_JOB_TOKEN       Sent as a JOB-TOKEN header read from a mode-600 temp
 #                      file (curl -H @file), so it is never in argv or the
 #                      log.
+# Input (environment, set per pipeline run, optional):
+#   ORBIT_CARRY_NO_PREDECESSOR  A non-empty reason, for a ref's very first
+#                      release only. Unset or empty means fail loud.
 #
 # Needs curl and jq, plus what the verifier needs: openssl, and curl to fetch
 # the pinned cosign (scripts/ci/ensure-cosign.sh) unless ORBIT_COSIGN is set.
@@ -65,15 +80,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
-no_predecessor() {
-  echo "carry-previous-release: no predecessor on this ref: $1"
-  exit 0
+# fail <cause>: the carry cannot be trusted or finished. Names the cause,
+# exits 1 (the cleanup trap removes the staging dir and the header file).
+fail() {
+  echo "carry-previous-release: FAILED: $1" >&2
+  exit 1
 }
 
-# Everything below needs the environment; a CI misconfiguration is still "no
-# predecessor", not a failed publish.
+# not_found <cause>: no predecessor was found. Fails loud unless the pipeline
+# run declared a first release with ORBIT_CARRY_NO_PREDECESSOR=<reason>; then
+# it logs the variable and the reason and passes, saving nothing. Never used
+# for a predecessor that was found and is bad: that is always fail.
+not_found() {
+  local reason
+  reason="$(printf '%s' "${ORBIT_CARRY_NO_PREDECESSOR:-}" | tr -d '[:cntrl:]')"
+  if [ -n "$reason" ]; then
+    echo "carry-previous-release: ORBIT_CARRY_NO_PREDECESSOR is set (reason: ${reason}); passing with no predecessor, nothing saved under ${dest}/. Not found: $1"
+    exit 0
+  fi
+  fail "no predecessor on ${CI_COMMIT_REF_NAME:-this ref}: $1. If this is the ref's very first release, set ORBIT_CARRY_NO_PREDECESSOR to a reason for this pipeline run (docs/releasing.md); otherwise fix the cause and re-run."
+}
+
+# Everything below needs the environment; a CI misconfiguration is a failure.
 for var in CI_API_V4_URL CI_PROJECT_ID CI_COMMIT_REF_NAME CI_JOB_TOKEN; do
-  [ -n "${!var:-}" ] || no_predecessor "$var is not set"
+  [ -n "${!var:-}" ] || fail "$var is not set"
 done
 
 # The token goes to curl through a header file made outside the working
@@ -109,30 +139,38 @@ digest_of() {
   jq -er '.image.digest | select(type == "string" and test("\\Asha256:[0-9a-f]{64}\\z"))' "$1" 2> /dev/null
 }
 
+# changed_check <first manifest file>: the latest build must still be the one whose
+# manifest was fetched first, else a later download may belong to another
+# build.
+changed_check() {
+  fetch "$manifest_name" record_image "$stage/recheck.json" ||
+    fail "could not fetch the manifest again from job record_image, so the manifest and signature cannot be shown to come from one build"
+  cmp -s "$1" "$stage/recheck.json" ||
+    fail "the latest build on ${CI_COMMIT_REF_NAME} changed while fetching (a different build's manifest answered the second download), so the manifest and signature may not match"
+}
+
 fetch "$manifest_name" record_image "$stage/fetched.json" ||
-  no_predecessor "could not fetch the manifest from job record_image"
+  not_found "the latest successful pipeline on ${CI_COMMIT_REF_NAME} has no manifest from job record_image (a pipeline started by a schedule or by hand runs no record_image, or this is the ref's first release)"
 fetched_digest="$(digest_of "$stage/fetched.json")" ||
-  no_predecessor "the fetched manifest has no readable image digest"
+  fail "the fetched manifest has no readable image digest"
 
 if [ "$fetched_digest" = "$current_digest" ]; then
   # Rebuild of the image being recorded: the previous build is whatever that
   # build itself carried.
   fetch "previous/$manifest_name" record_image "$stage/$manifest_name" ||
-    no_predecessor "rebuild of ${current_digest} and no carried manifest"
+    not_found "rebuild of ${current_digest} and the build being rebuilt has no carried manifest (previous/$manifest_name from job record_image)"
   fetch "previous/$sig_name" record_image "$stage/$sig_name" ||
-    no_predecessor "rebuild of ${current_digest} and no carried signature"
+    not_found "rebuild of ${current_digest} and the build being rebuilt has a carried manifest but no carried signature (previous/$sig_name from job record_image)"
+  changed_check "$stage/fetched.json"
   fetched_digest="$(digest_of "$stage/$manifest_name")" ||
-    no_predecessor "the carried manifest has no readable image digest"
+    fail "the carried manifest has no readable image digest"
   [ "$fetched_digest" != "$current_digest" ] ||
-    no_predecessor "the carried manifest names the current digest too"
+    fail "the carried manifest names the current digest ${current_digest} too, so previous/ would point at itself"
 else
-  mv -- "$stage/fetched.json" "$stage/$manifest_name"
+  cp -- "$stage/fetched.json" "$stage/$manifest_name"
   fetch "$sig_name" sign_evidence "$stage/$sig_name" ||
-    no_predecessor "could not fetch the signature from job sign_evidence"
-  fetch "$manifest_name" record_image "$stage/recheck.json" ||
-    no_predecessor "could not fetch the manifest again from job record_image"
-  cmp -s "$stage/$manifest_name" "$stage/recheck.json" ||
-    no_predecessor "the latest build changed while fetching; its manifest and signature may not match"
+    not_found "the latest build on ${CI_COMMIT_REF_NAME} has a manifest but no signature from job sign_evidence"
+  changed_check "$stage/$manifest_name"
 fi
 rm -f -- "$stage/fetched.json" "$stage/recheck.json"
 
@@ -140,7 +178,7 @@ rm -f -- "$stage/fetched.json" "$stage/recheck.json"
 # never needs the job token, so it never gets it.
 stage_abs="$(pwd -P)/$stage"
 env -u CI_JOB_TOKEN bash "$verifier" "$stage_abs/$manifest_name" "$stage_abs/$sig_name" ||
-  no_predecessor "the previous build's manifest does not verify against cosign.pub"
+  fail "the previous build's manifest does not verify against cosign.pub (its manifest and signature may come from different builds)"
 
 # Both files are good: move them into place in one rename.
 rm -rf -- "$dest"
