@@ -3935,8 +3935,9 @@ record_image:
     # into .orbit-supply-chain/previous/ in one rename, using the digest the
     # registry returned, which exists only after the push. --prepare did the
     # lookup, fetch and verification before the push (above), so this step
-    # fails only on a rebuild that found no carried pair, or one that names
-    # the published digest too; the script's exit status is the job's, nothing
+    # fails only on a rebuild that found no carried pair, one whose carried
+    # pair has a bad verdict (or none recorded), or one that names the
+    # published digest too; the script's exit status is the job's, nothing
     # here swallows it. A ref's first release was recognised by --prepare and
     # passes here with nothing saved. $published_digest is still set: GitLab
     # runs every script item in one shell, as the write-release-manifest step

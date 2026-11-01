@@ -224,11 +224,16 @@ if [ "$mode" = "final" ]; then
     # build itself carried. This is the one place the carried pair is judged
     # (#1607 note 48805): --prepare only recorded its verdict. Not "ok" fails here,
     # after the push; a new commit is never a rebuild, so a push escapes it.
+    # Carried files staged but no verdict is not "ok": fail closed, as a bad verdict.
     if [ -f "$stage/carried-verdict" ]; then
       carried_verdict="$(cat "$stage/carried-verdict")"
-      [ "$carried_verdict" = "ok" ] ||
-        fail "rebuild of the published digest ${current_digest}, and the pair the build being rebuilt carried is bad (${carried_verdict}): push a new commit; a retry of this commit cannot carry"
+    elif [ -f "$stage/carried/$manifest_name" ] || [ -f "$stage/carried/$sig_name" ]; then
+      carried_verdict="no verdict was recorded for it"
+    else
+      carried_verdict="ok"
     fi
+    [ "$carried_verdict" = "ok" ] ||
+      fail "rebuild of the published digest ${current_digest}, and the pair the build being rebuilt carried is bad (${carried_verdict}): push a new commit; a retry of this commit cannot carry"
     if [ ! -f "$stage/carried/$manifest_name" ] || [ ! -f "$stage/carried/$sig_name" ]; then
       fail "rebuild of the published digest ${current_digest}, and the build being rebuilt has no carried pair (previous/$manifest_name and previous/$sig_name), so there is nothing to carry"
     fi
@@ -674,13 +679,20 @@ if [ -n "$never_signed" ]; then
   # last known good. Its own previous/ pair is the build before it, fetched by
   # job N's id and verified like any predecessor pair; the pair that stands in
   # for N is excused by a gap line for N like N's own pair would have been. N with
-  # no previous/ pair means nothing before it was ever signed: a first release.
+  # no previous/ pair and its own manifest present means nothing before it was ever
+  # signed: a first release. N's own manifest gone too is a gap, not a first release.
   echo "carry-previous-release: record_image job ${rec_job} was never signed (sign_evidence ${never_signed}): not a release, carrying the build before it"
   have_manifest=""
   have_sig=""
   fetch_artifact "$rec_job" "previous/$manifest_name" "$stage/predecessor/$manifest_name" && have_manifest=1
   fetch_artifact "$rec_job" "previous/$sig_name" "$stage/predecessor/$sig_name" && have_sig=1
   if [ -z "$have_manifest" ] && [ -z "$have_sig" ]; then
+    # No previous/ pair reads as a first release only if N's own artifacts are
+    # there: N's own manifest, fetched by N's id. A 404 on it means they are gone,
+    # so the pair's absence proves nothing: the absent-artifact path for job N.
+    fetch_artifact "$rec_job" "$manifest_name" "$stage/own-manifest" ||
+      absent_artifact record_image "$rec_job" "$manifest_name" "$rec_expires"
+    rm -f -- "$stage/own-manifest"
     rm -rf -- "$stage/predecessor" "$stage/carried"
     : > "$stage/first-release"
     keep_stage=1

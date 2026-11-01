@@ -322,7 +322,12 @@ A ref's first release is recognised automatically: when the whole job list
 holds no successful `record_image` job on the ref, the carry logs `first
 release, nothing carried`, saves nothing and passes. No variable or setting is
 needed. A job list too long to search (the page cap is reached with no match)
-fails instead, and is never read as a first release.
+fails instead, and is never read as a first release. The same holds when the
+newest `record_image` job was never signed (its `sign_evidence` failed, was
+canceled or skipped): the carry takes the build before it, and reads it as a
+first release only if that job has no `previous/` pair and its own manifest is
+still there. If its manifest is gone too, that is a missing build, not a first
+release.
 
 When it fails, the message names the cause:
 
