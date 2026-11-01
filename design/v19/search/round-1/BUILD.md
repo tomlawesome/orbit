@@ -175,7 +175,7 @@ ever render below the field's own bottom edge; the e2e check in §4 pins it.
 
 Change:
 
-- `tests/e2e/v19-explore-search.spec.ts` — it locates `#palette` and reads
+- `web/tests/rig/v19-explore-search.spec.js` (moved from `tests/e2e/`, ADR-0039) — it locates `#palette` and reads
   `b` elements. Point it at the new ids: `#strip` (the SVG's wrapper),
   `#strip-note` for the no-match sentence, and the screen-reader list
   `#explore-results` for titles (`li` text). Keep every assertion's intent:
@@ -191,7 +191,7 @@ Change:
   ticks for a fixed `today` (13 Aug 2026 → SEP 19d … AUG 353d); tier
   assignment for two marks 11px apart (second goes below) and three within
   12px (third unlabelled); flip when `x + W > 812`; unscheduled at 790.
-- `tests/e2e/v19-axe-sweep.spec.ts` and `v19-screen-reader.spec.ts` run as
+- `web/tests/rig/v19-axe-sweep.spec.js` and `v19-screen-reader.spec.js` (moved from `tests/e2e/`, ADR-0039) run as
   they are; they must stay green with the strip open. The SVG is
   `aria-hidden="true"`; `#explore` has `role="combobox"`,
   `aria-expanded`, `aria-controls="explore-results"`,

@@ -181,7 +181,7 @@ deliberately representative, not device certification:
 | --- | --- |
 | WCAG A/AA | `web/tests/rig/v19-axe-sweep.spec.js` runs Axe over every signed-in route in both layouts; `signed-out.spec.ts` covers the sign-in door. |
 | Keyboard and focus | `web/tests/rig/v19-keyboard.spec.js` and `web/tests/rig/v19-keyboard-pocket.spec.js` drive the core journeys by keyboard alone on desktop and mobile; the real sign-in and sign-out are walked by the stack's own sign-in specs. |
-| Screen reader | `web/tests/rig/v19-screen-reader.spec.js` reads back what the browser's accessibility engine would announce on every core-journey screen, and writes the raw ARIA tree to `test-results/aria/<route>.txt` for a person to read. |
+| Screen reader | `web/tests/rig/v19-screen-reader.spec.js` reads back what the browser's accessibility engine would announce on every core-journey screen, and writes the raw ARIA tree to `web/test-results/playwright/aria/<route>--<project>.txt` for a person to read. |
 | Charts | `v19-chart-accessibility.spec.ts` checks the home dial is a labelled group with a named link per body, and that nothing focusable inside it is unnamed. |
 | Reduced motion | `v19-reduced-motion.spec.ts` checks that `prefers-reduced-motion` and no-JS both fall back to the plain list. |
 | Responsive layout | `v19-layout-and-themes.spec.ts` opens every signed-in screen at 1440×900, 820×1180 and 412×915 (desktop project) and checks the page never scrolls sideways, every visible control sits inside the screen and is not cut off, and Axe finds nothing at that size. |
