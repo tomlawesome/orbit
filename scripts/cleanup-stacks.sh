@@ -9,7 +9,12 @@
 #                                                   (nothing running); a project
 #                                                   with a running container is
 #                                                   skipped, since another
-#                                                   session may be using it
+#                                                   session may be using it, and
+#                                                   so is a stopped project named
+#                                                   exactly "orbit" (the real
+#                                                   install): remove that one on
+#                                                   purpose with --project orbit
+#                                                   --remove (#1607)
 #   bash scripts/cleanup-stacks.sh --project NAME   limit to one orbit* project;
 #                                                   with --remove, removes it
 #                                                   even if it is running
@@ -39,7 +44,7 @@ OLLAMA_SERVICE='orbit-ollama'
 IMAGE_REPOS='orbit-local orbit-vapid-bootstrap orbit-acceptance-local'
 
 usage() {
-  sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 remove=false
@@ -135,10 +140,20 @@ running_containers() {
   printf '%s' "$out"
 }
 
-# Plain --remove leaves a running project alone; naming it with --project, or
-# --all, is the explicit go-ahead.
+# The project named exactly "orbit" is the real install's Compose project (#1607):
+# it can be stopped for an upgrade or a reboot, and is not a test-run leftover.
+is_install_project() { [ "$1" = orbit ]; }
+
+# Plain --remove leaves a running project alone, and the stopped install project
+# too; naming it with --project, or --all, is the explicit go-ahead.
 selected_for_removal() {
-  [ "$all_projects" = true ] || [ -n "$only_project" ] || [ -z "$(running_containers "$1")" ]
+  if [ "$all_projects" = true ] || [ -n "$only_project" ]; then
+    return 0
+  fi
+  if is_install_project "$1"; then
+    return 1
+  fi
+  [ -z "$(running_containers "$1")" ]
 }
 
 # Sets $images to one row per locally built image:
@@ -330,6 +345,11 @@ fi
 echo "Removing:"
 for project in $projects; do
   if ! selected_for_removal "$project"; then
+    if [ -z "$(running_containers "$project")" ]; then
+      echo "  $project skipped: the real install's project name, even stopped -- to remove it on purpose, run with --project $project --remove"
+      skipped=$((skipped + 1))
+      continue
+    fi
     echo "  $project skipped: running ($(running_containers "$project")) -- remove it with --project $project --remove, or --all"
     skipped=$((skipped + 1))
   fi
