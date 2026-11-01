@@ -201,6 +201,32 @@ describe("cleanup-stacks.sh", () => {
     expect(r.stdout).not.toContain("orbit-gone skipped");
   });
 
+  // The project named exactly `orbit` is the real install's Compose project.
+  // Only running projects were skipped, so a stopped one (the install is down
+  // for an upgrade or a reboot) was torn down with the test-run leftovers.
+  it("plain --remove never removes a stopped project named exactly orbit, and says how to remove it on purpose", () => {
+    const psRows = [
+      "orbit|c6|orbit-postgres|Exited (0) 1 hour ago|postgres:18-alpine|orbit-db|orbit_default",
+      "orbit-stale|c10|orbit-stale-app-1|Exited (0) 3 hours ago|orbit-app|orbit-app|orbit-stale_default",
+    ];
+    const r = run(["--remove"], { psRows });
+    expect(r.status).toBe(0);
+    // the other stopped project still goes (control: the sweep itself works)
+    expect(r.removed.containers).toContain("c10");
+    expect(r.removed.containers, "the real install's container was removed").not.toContain("c6");
+    expect(r.stdout).toContain("Project: orbit (stale)");
+    expect(r.stdout).not.toContain("Removed container orbit-postgres");
+    expect(r.stdout).toContain("--project orbit --remove");
+  });
+
+  it("--project orbit --remove still removes the stopped orbit project when asked for on purpose", () => {
+    const r = run(["--project", "orbit", "--remove"], {
+      psRows: ["orbit|c6|orbit-postgres|Exited (0) 1 hour ago|postgres:18-alpine|orbit-db|orbit_default"],
+    });
+    expect(r.status).toBe(0);
+    expect(r.removed.containers).toEqual(["c6"]);
+  });
+
   it("a project whose only running container is the kept orbit-ollama counts as stale", () => {
     const r = run(["--remove"], {
       psRows: [
