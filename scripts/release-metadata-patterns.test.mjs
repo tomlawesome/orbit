@@ -126,6 +126,107 @@ describe("release metadata patterns are defined once per language (#1363)", () =
   });
 });
 
+/* The three patterns the table above does not cover (#1363), run through the .sh values. */
+const upperHex = HEX.toUpperCase();
+const bashOnly = (name, rows) => {
+  describe(name, () => {
+    for (const [label, value, expected] of rows) {
+      it(`bash ${expected ? "accepts" : "refuses"} ${label}`, () => {
+        expect(shellMatches(name, value)).toBe(expected);
+      });
+    }
+  });
+};
+
+describe("the deployment, suffix and awk digest patterns (#1363)", () => {
+  bashOnly("ORBIT_DEPLOYMENT_IMAGE_REFERENCE_PATTERN", [
+    ["a ghcr.io reference", `ghcr.io/owner/orbit@${digest}`, true],
+    ["a registry with a port and a tag", `registry.example:5000/orbit:v1@${digest}`, true],
+    ["a reference with a space", `ghcr.io/owner/or bit@${digest}`, false],
+    ["a reference with ! before the @", `ghcr.io/owner/or!bit@${digest}`, false],
+    ["a reference with $ before the @", `ghcr.io/owner/or$bit@${digest}`, false],
+    ["upper-case hex", `ghcr.io/owner/orbit@sha256:${upperHex}`, false],
+    ["63 hex", `ghcr.io/owner/orbit@sha256:${HEX.slice(1)}`, false],
+    ["65 hex", `ghcr.io/owner/orbit@sha256:${HEX}0`, false],
+    ["a trailing newline", `ghcr.io/owner/orbit@${digest}\n`, false],
+    ["nothing before the @", `@${digest}`, false],
+  ]);
+
+  bashOnly("ORBIT_DIGEST_SUFFIX_PATTERN", [
+    ["a reference ending in a digest", `ghcr.io/owner/orbit:v1@${digest}`, true],
+    ["anything at all before the @", `any thing! $at all@${digest}`, true],
+    ["nothing before the @", `@${digest}`, true],
+    ["a bare digest with no @", digest, false],
+    ["a trailing newline", `ghcr.io/owner/orbit@${digest}\n`, false],
+    ["trailing text", `ghcr.io/owner/orbit@${digest}x`, false],
+    ["upper-case hex", `ghcr.io/owner/orbit@sha256:${upperHex}`, false],
+    ["63 hex", `ghcr.io/owner/orbit@sha256:${HEX.slice(1)}`, false],
+    ["65 hex", `ghcr.io/owner/orbit@sha256:${HEX}0`, false],
+  ]);
+
+  /*
+   * ORBIT_DIGEST_AWK_PATTERN is only meaningful together with
+   * `length($2) == 71`, so it is driven through first_inspect_digest in
+   * scripts/ci/lib-digest.sh, which holds exactly that awk program. The
+   * interpreter is mawk when it is installed (the node image's awk, which has
+   * no {64} interval), else awk.
+   */
+  const awkCommand = spawnSync("bash", ["-c", "command -v mawk"], { encoding: "utf8" }).status === 0 ? "mawk" : "awk";
+  const awkFinds = (value) => {
+    const result = spawnSync(
+      "bash",
+      [
+        "-c",
+        `awk() { ${awkCommand} "$@"; }; source "$SHELL_FILE" && source "$DIGEST_LIB" && printf 'Digest: %s\\n' "$VALUE" | first_inspect_digest "$ORBIT_DIGEST_AWK_PATTERN"`,
+      ],
+      { encoding: "utf8", env: { ...process.env, SHELL_FILE: shellFile, DIGEST_LIB: digestLib, VALUE: value } },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    return result.stdout.trim() === value;
+  };
+
+  describe(`ORBIT_DIGEST_AWK_PATTERN with length($2) == 71 (run with ${awkCommand})`, () => {
+    it("accepts a 64-hex digest", () => {
+      expect(awkFinds(digest)).toBe(true);
+    });
+    it("refuses 63 hex", () => {
+      expect(awkFinds(`sha256:${HEX.slice(1)}`)).toBe(false);
+    });
+    it("refuses 65 hex", () => {
+      expect(awkFinds(`sha256:${HEX}0`)).toBe(false);
+    });
+    it("refuses upper-case hex", () => {
+      expect(awkFinds(`sha256:${upperHex}`)).toBe(false);
+    });
+  });
+});
+
+describe("sourcing the patterns file more than once (#1363)", () => {
+  const snapshot = "declare -p $(compgen -v | grep '^ORBIT_.*PATTERN$' | sort)";
+
+  it("a second source in one shell succeeds and leaves every value unchanged", () => {
+    const result = spawnSync(
+      "bash",
+      ["-c", `source "$SHELL_FILE" && ${snapshot} && echo ---- && source "$SHELL_FILE" && ${snapshot}`],
+      { encoding: "utf8", env: { ...process.env, SHELL_FILE: shellFile } },
+    );
+    expect(result.status, `second source failed:\n${result.stderr}`).toBe(0);
+    const [before, after] = result.stdout.split("----\n");
+    expect(before).toContain("ORBIT_DIGEST_PATTERN");
+    expect(after).toBe(before);
+  });
+
+  it("a second source succeeds under set -Eeuo pipefail, as the CI scripts run it", () => {
+    const result = spawnSync("bash", ["-c", 'set -Eeuo pipefail; source "$SHELL_FILE"; source "$SHELL_FILE"; echo ok'], {
+      encoding: "utf8",
+      env: { ...process.env, SHELL_FILE: shellFile },
+    });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("ok\n");
+  });
+});
+
 /* Files that may keep their own literal digest regex (#1363). Paths are relative to scripts/. */
 const LITERAL_DIGEST_ALLOW_LIST = new Set([
   "install.sh", // keeps its own patterns: it ships standalone to the owner's host
@@ -176,6 +277,23 @@ describe("no script keeps its own sha256 digest regex (#1363)", () => {
       }
     }
     expect(offenders, `literal digest regex outside the allow-list:\n${offenders.join("\n")}`).toEqual([]);
+  });
+
+  it("no .github/workflows/*.yml holds a literal sha256:[0-9a-f] pattern either", () => {
+    // The workflows run outside scripts/ but on a checkout of this repository,
+    // so they can source scripts/release-metadata-patterns.sh like any CI script.
+    const workflowsDir = join(scriptsDir, "..", ".github", "workflows");
+    const files = readdirSync(workflowsDir).filter((entry) => /\.ya?ml$/u.test(entry));
+    expect(files.length, "workflow files found").toBeGreaterThan(0);
+    const offenders = [];
+    for (const entry of files) {
+      for (const { line, text } of codeLines(join(workflowsDir, entry))) {
+        if (LITERAL_DIGEST.test(text)) {
+          offenders.push(`.github/workflows/${entry}:${line}: ${text.trim().slice(0, 100)}`);
+        }
+      }
+    }
+    expect(offenders, `literal digest regex in a workflow:\n${offenders.join("\n")}`).toEqual([]);
   });
 
   it("the allow-list names only files that exist", () => {
