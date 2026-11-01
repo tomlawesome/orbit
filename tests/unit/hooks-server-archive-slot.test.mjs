@@ -40,6 +40,8 @@ const administrator = { user: { id: "admin-1", isInstanceAdmin: true }, activeHo
 
 /** @type {typeof import("../../web/src/lib/server/archive-slot.js")} */
 let slot;
+/** kit's own `redirect`, which throws a Redirect; kit is web's dependency, not the root's, so by its path under web/. */
+let redirect;
 /** @type {import("@sveltejs/kit").Handle} */
 let handle;
 
@@ -159,6 +161,7 @@ describe("hooks.server handle and the one-archive-at-a-time slot (#1316)", () =>
   beforeAll(async () => {
     ({ handle } = await import("../../web/src/hooks.server.js"));
     slot = await import("../../web/src/lib/server/archive-slot.js");
+    ({ redirect } = await import("../../web/node_modules/@sveltejs/kit/src/exports/index.js"));
   }, COLD_IMPORT_TIMEOUT_MS);
 
   beforeEach(() => {
@@ -313,6 +316,32 @@ describe("hooks.server handle and the one-archive-at-a-time slot (#1316)", () =>
       expect(slot.archiveSlotHeld()).toBe(false);
       await expectSlotFree();
     });
+
+    /* #1411 (U34.6, #1565's hooks Lows): a route that ENDS by throwing, without
+       having read the body. A redirect is how a page or form route answers (kit's
+       `redirect()` throws); an Error is a route that fell over. The upload is
+       still read away and thrown out within a second, as it is for a response
+       that was returned, and the slot is free after. */
+    const THROWERS = [
+      ["a thrown redirect", () => { redirect(303, "/home"); }],
+      ["a thrown error", () => { throw new Error("the route fell over before it read anything"); }],
+    ];
+
+    it.each(THROWERS.flatMap(([name, thrower]) => ["/api/admin/contact", PREVIEW].map((route) => [name, route, thrower])))(
+      "%s on %s, body unread: the whole upload is read away and thrown out",
+      async (_name, route, thrower) => {
+        const total = bytesFor(route);
+        const { body, stats } = countingUpload(total);
+        const resolve = vi.fn(async () => { thrower(); });
+
+        const outcome = await handle({ event: eventFor(route, { body }), resolve }).then(() => null, (error) => ({ error }));
+
+        expect(resolve).toHaveBeenCalledTimes(1);
+        expect(outcome, "the throw reaches the caller (kit turns it into the response)").not.toBeNull();
+        await drainedWithinASecond(stats, total);
+        expect(slot.archiveSlotHeld()).toBe(false);
+      },
+    );
 
     it.each(["/api/admin/contact", PREVIEW])("%s: a route that reads the body itself gets no error and its own response back", async (route) => {
       const total = bytesFor(route);
