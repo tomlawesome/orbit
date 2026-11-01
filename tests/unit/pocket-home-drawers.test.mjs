@@ -219,6 +219,8 @@ describe("home's drawers on a phone, mounted", () => {
     expect($$('[role="dialog"]').some((el) => el.textContent?.includes("Review & amend"))).toBe(false);
     const title = $('[data-ed="title"]', catch_);
     expect(text(title)).toBe("Home insurance renewal");
+    /* and focus follows them: the title is where the reader's next key lands (focusInRow) */
+    expect(document.activeElement).toBe(title);
     expect(text($('[data-ed="provider"]', catch_))).toBe("Harbour Mutual");
     /* The two decisions give way to add and cancel; review & amend goes. */
     expect(control("Add Home insurance renewal to your orbit", catch_)).toBeNull();
@@ -258,6 +260,8 @@ describe("home's drawers on a phone, mounted", () => {
     expect(catch_.querySelector('[data-ed="provider"]')).toBeNull();
     expect(text($$(".p-kv", catch_).find((el) => el.textContent?.includes("provider")) ?? catch_)).toContain("Harbour Mutual");
     expect(control("review & amend →", catch_)).not.toBeNull();
+    /* focus returns to the button that started the amend, not to the body */
+    expect(document.activeElement).toBe(control("review & amend →", catch_));
     expect(seen.approvals).toHaveLength(0);
   });
 
