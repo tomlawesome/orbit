@@ -365,3 +365,7 @@ timeout on this one case rather than a global raise.
 ## test-e2e-local.test.mjs:626 "an explicit COMPOSE_PROJECT_NAME that names existing resources is refused > looks for both containers and volumes by the project label before compose up"
 
 - 2026-11-01 · 51aa93dd (`fix/local-test-tools`, nothing uncommitted; the change touches `scripts/test-e2e-local.sh`'s report folders and dependency step, not its port choice) · local `pnpm test`, the full suite on this shared host · the script exited 1 with `port <n> (GreenMail SMTP (TEST_SMTP_PORT)) is already in use -- likely a real Orbit deployment on this host`, so `expect(result.status).toBe(0)` failed. The file alone passed on an immediate rerun (79 of 79 apart from the #1526 hooks test, which fails for its own reason). A port the fixture's run picked was taken by something else running at the same moment. First sighting.
+
+## validation-index-equivalence.test.ts "3 MiB of q, then endobj with no gap (a word byte before it)"
+
+- 2026-11-01 · 2ce41874 (`fix/local-test-tools`, local test scripts only; nothing near document validation) · pipeline 3319 / `fast` retry job 43177 · timed out at the 5 s default while the shared host was busy; the same job's first run (43145) passed it. Wall-clock-under-load shape. First sighting.
