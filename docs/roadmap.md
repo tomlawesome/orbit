@@ -227,7 +227,7 @@ closed.
 | RM-110 | Validation evidence is signed and bound to the digest, separate from publication | decision #573 | M5 | delivered | #661 |
 | RM-111 | Validation runs on the self-hosted GitLab; releases mirror to GitHub and GHCR | ORB-FUT-008 | M5 | delivered | #801 |
 | RM-112 | Orbit's base image is controlled and upstream fixes reach releases | decision #650 | M5 | delivered | #650, #1081; #1478: the repin reads the publish artifact from main (9ff54d17); #1483: repin and check accept a single-manifest tag (6f679c54) |
-| RM-113 | A stable release is accepted by digest on a test bed: update, sign-in, records, documents, backup, restore, restart | charter release acceptance | v0.3 | not started | #1152, #1153, #885 |
+| RM-113 | A stable release is accepted by digest on a test bed: update, backup, restore, restart; sign-in, records and documents by the `preview` browser jobs on the same image | charter release acceptance | v0.3 | not started | #1152, #1153, #885; #1599: the hand sign-in check dropped |
 
 ## Mismatches
 
