@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect as baseExpect, test } from "@playwright/test";
 
 import {
   auditLightDismiss,
@@ -10,7 +10,11 @@ import {
   tabTo,
   uncheckedRadiosOf,
 } from "../../../tests/e2e/support/keyboard";
-import { APP, onPhone, rememberWrites, settle, signedIn } from "./a11y-support.js";
+import { APP, onPhone, rememberWrites, RIG_EXPECT_MS, RIG_TEST_MS, settle, signedIn } from "./a11y-support.js";
+
+/* The rig's waits (a11y-support.js RIG_EXPECT_MS, RIG_TEST_MS): the stack's explicit long waits are gone with its sign-in, but the host is shared. */
+const expect = baseExpect.configure({ timeout: RIG_EXPECT_MS });
+test.describe.configure({ timeout: RIG_TEST_MS });
 
 /** @typedef {import("@playwright/test").Locator} Locator */
 /** @typedef {import("@playwright/test").Page} Page */

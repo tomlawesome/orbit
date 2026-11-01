@@ -14,6 +14,17 @@ import { ownWorkspace, rescheduleLikeTheEngine, snoozeLikeTheEngine, upsertLikeT
 
 export { APP, settle };
 
+/**
+ * The rig's waits for the three long-walking specs (axe sweep, keyboard,
+ * keyboard-pocket). The stack suite gave 7, 17 and 16 of their waits 10 to 60
+ * seconds, for sign-in and seeding; the fixture app needs none of that, but the
+ * rig shares a busy host, so an assertion gets 15 s (Playwright's default is 5)
+ * and a test 60 s (the default is 30). Applied per file with
+ * `expect.configure` and `test.describe.configure`; no assertion is changed.
+ */
+export const RIG_EXPECT_MS = 15_000;
+export const RIG_TEST_MS = 60_000;
+
 /** @typedef {import("@playwright/test").Page} Page */
 /** @typedef {import("@playwright/test").TestInfo} TestInfo */
 
