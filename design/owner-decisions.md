@@ -1807,3 +1807,6 @@ is" (2026-08-13).
   links to common provider's own knowledgebase articles (we won't write
   guidance ourselves though, for specific providers)"). Links kept in one
   data file, checked nightly.
+- Each test sits on the step it proves, with its result beside it, and a
+  step's Next waits for its test to pass (owner, same day: "show the
+  relevant 'test it work buttons' along the way, at the right points").
