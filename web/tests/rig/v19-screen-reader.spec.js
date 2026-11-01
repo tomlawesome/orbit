@@ -324,7 +324,9 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
       await page.locator("button.orb").click();
       await page.locator(".account .signout").click();
     }
-    /* the descent plays before /logout (the stack suite allowed 30 s; the recorded flake was this wait) */
+    /* the descent plays before /logout (the stack suite allowed 30 s; the recorded flake was this wait,
+       #1637). The test's own limit sits above the wait so a hang fails here, on the wait. */
+    test.setTimeout(60_000);
     await expect(page).toHaveURL(/\/logout$/, { timeout: 30_000 });
     await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible();
     expect(revoked, "the sign-out control sent the logout request, once").toBe(1);
