@@ -10,20 +10,34 @@
 
 const PROTOCOL_HEADER = "x-orbit-forwarded-proto";
 const HOST_HEADER = "x-orbit-forwarded-host";
-// scheme://host[:port], IPv6 in brackets, no path, query or fragment. A port
-// is 1-65535 in its canonical decimal form (no leading zero); anything else is
-// malformed and injects nothing.
-const PORT = "(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])";
-const PLAIN_ORIGIN = new RegExp(`^(https?)://(\\[[0-9A-Fa-f:.]+\\]|[A-Za-z0-9._-]+)(?::${PORT})?$`, "u");
+// An http(s) origin and nothing else: no credentials, path, query or
+// fragment. It is read with the URL parser, and the parser's own host is what
+// gets injected, because the browser's Origin and kit's own origin both come
+// from that same normalisation: `:08443` is `:8443`, a default port is
+// dropped, the scheme and host are lower case (#1565 review, note 48989).
+function plainOrigin(value) {
+  if (value === undefined) return null;
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  if (url.username || url.password || url.search || url.hash) return null;
+  if (url.pathname !== "/" && url.pathname !== "") return null;
+  if (value.includes("?") || value.includes("#")) return null;
+  if (url.port === "0") return null;
+  return { scheme: url.protocol.slice(0, -1), authority: url.host };
+}
 
 const origin = process.env.ORIGIN;
-const match = origin === undefined ? null : PLAIN_ORIGIN.exec(origin);
+const match = plainOrigin(origin);
 let scheme;
 let authority;
 
 if (match) {
-  scheme = match[1].toLowerCase();
-  authority = origin.slice(match[1].length + 3);
+  ({ scheme, authority } = match);
   process.env.PROTOCOL_HEADER = PROTOCOL_HEADER;
   process.env.HOST_HEADER = HOST_HEADER;
 } else {
