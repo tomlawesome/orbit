@@ -737,15 +737,38 @@ describe("browser jobs by event (#1412)", () => {
     }
   });
 
-  it("starts every browser job at promotion: the preview push, hotfix pushes and the merge request into main (#1546)", () => {
+  it("starts every browser job at promotion: the preview push and the merge request into main (#1546)", () => {
     for (const environment of [
       events.previewPush,
-      { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "hotfix/x" },
       { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
     ]) {
       for (const name of BROWSER_JOBS) {
         expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(environment)}`).toBe("run");
       }
+    }
+  });
+
+  it("runs the short gate on a hotfix push: local smoke only, no other browser or acceptance job (owner decision 48, #1636)", () => {
+    const hotfixPush = { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "hotfix/x" };
+    for (const name of [...BROWSER_JOBS.filter((job) => job !== "smoke_local_only"), "acceptance", "repair_journeys"]) {
+      expect(jobVerdict(name, hotfixPush), name).toBe("never");
+    }
+    for (const name of ["classify", "fast", "integration", "build_image", "supply_chain_image", "smoke_local_only", "build_launcher", "launcher_install_compat", "record_image", "sign_evidence", "publish_channel"]) {
+      expect(jobVerdict(name, hotfixPush), name).toBe("run");
+    }
+  });
+
+  it("runs the same short gate on the merge request into a hotfix branch (owner decision 48, #1636)", () => {
+    const hotfixMergeRequest = {
+      CI_PIPELINE_SOURCE: "merge_request_event",
+      CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "hotfix/x",
+      CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "fix/y",
+    };
+    for (const name of [...BROWSER_JOBS.filter((job) => job !== "smoke_local_only"), "acceptance", "repair_journeys"]) {
+      expect(jobVerdict(name, hotfixMergeRequest), name).toBe("never");
+    }
+    for (const name of ["classify", "fast", "integration", "build_image", "supply_chain_image", "smoke_local_only", "build_launcher", "launcher_install_compat"]) {
+      expect(jobVerdict(name, hotfixMergeRequest), name).toBe("run");
     }
   });
 

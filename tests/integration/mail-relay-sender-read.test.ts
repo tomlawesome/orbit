@@ -147,11 +147,16 @@ describe("GET /api/settings/mail-relay reports the sender check (decision 7c)", 
     });
   });
 
-  it("is null for an instance administrator", async () => {
+  it("is the seeded, unchecked account address for an instance administrator (#1632)", async () => {
     await turnMailInOn();
     const session = await fixture.session("admin");
 
-    expect(await readOverHttp(session)).toBeNull();
+    expect(await readOverHttp(session)).toEqual({
+      address: fixture.users.admin.email,
+      verified: false,
+      verificationPending: false,
+      expiresAt: null,
+    });
   });
 
   it("is null when mail-in is off", async () => {
@@ -175,7 +180,12 @@ describe("GET /api/settings/mail-relay reports the sender check (decision 7c)", 
     expect((await readRelaySettings(member)).sender).toMatchObject({ verificationPending: true, expiresAt: lapses.toISOString() });
     await markChecked(fixture.users.member.id);
     expect((await readRelaySettings(member)).sender).toMatchObject({ verified: true, verificationPending: false });
-    expect((await readRelaySettings({ id: fixture.users.admin.id, isInstanceAdmin: true })).sender).toBeNull();
+    expect((await readRelaySettings({ id: fixture.users.admin.id, isInstanceAdmin: true })).sender).toEqual({
+      address: fixture.users.admin.email,
+      verified: false,
+      verificationPending: false,
+      expiresAt: null,
+    });
   });
 });
 

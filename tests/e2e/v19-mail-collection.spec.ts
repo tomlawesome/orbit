@@ -111,10 +111,10 @@ async function signInAsMember(page: Page) {
   }
 }
 
-// Admins have an empty relay inbox by design, so the administrator takes the
-// instance in a throwaway context and the member below is an ordinary user
-// with a real inbox. Since ADR-0022 nobody is promoted by signing in: the
-// instance is claimed with the code from the stack's own log, and the mailbox
+// The administrator claims the instance and configures the mailbox, and the
+// member below exercises the inbox, so the administrator takes the instance in
+// a throwaway context and the member is an ordinary user. Since ADR-0022
+// nobody is promoted by signing in: the instance is claimed with the code from the stack's own log, and the mailbox
 // is configured on the administrator's own signed-in page.
 async function establishInstanceAdmin(browser: Browser) {
   await claimInstanceAsAdministrator(browser, {

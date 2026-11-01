@@ -145,11 +145,11 @@ function orderedAttachments(rows: Array<{ id: string; displayName: string; media
   }));
 }
 
-/** Exported for `imap-attachment-preview.ts` (#1155), which needs the same
- * signed-in/instance-admin gate `getImapReview` applies before it goes on to
- * its own receipt-scoped read. */
-export async function privateMailboxUser(userId: string): Promise<{ id: string; isInstanceAdmin: boolean }> {
-  const [user] = await getDb().select({ id: users.id, isInstanceAdmin: users.isInstanceAdmin }).from(users)
+/** Exported for `imap-attachment-preview.ts` (#1155). Answers "active user, or
+ * 403" and nothing more: a queue is reached by the user id that owns it, and a
+ * role adds no reach either way (#1632). */
+export async function privateMailboxUser(userId: string): Promise<{ id: string }> {
+  const [user] = await getDb().select({ id: users.id }).from(users)
     .where(and(eq(users.id, userId), isNull(users.disabledAt))).limit(1);
   if (!user) throw new AppError("account_disabled", "This Orbit account cannot read reviewed intake", 403);
   return user;
@@ -177,8 +177,7 @@ async function hasHouseholdMembership(userId: string, householdId: string): Prom
  * assigned attachment rows for good.
  */
 export async function listImapInbox(userId: string) {
-  const activeUser = await privateMailboxUser(userId);
-  if (activeUser.isInstanceAdmin) return { receipts: [], households: [], filed: [] as MailFiledItem[] };
+  await privateMailboxUser(userId);
   // The owner's inbox read applies the approval's reclaim rule as the review
   // read does: an `approving` receipt is in the "still reading" lane, which
   // never opens the card, so nothing else would reach an abandoned one.
@@ -312,8 +311,7 @@ export async function listImapInbox(userId: string) {
 
 /** Reads one owned draft only after the selected household has been authorized. */
 export async function getImapReview(userId: string, receiptId: string, householdId: string) {
-  const user = await privateMailboxUser(userId);
-  if (user.isInstanceAdmin) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
+  await privateMailboxUser(userId);
   if (!(await hasHouseholdMembership(userId, householdId))) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   // A malformed id must fail the same bounded way an unknown one does,
   // rather than reach the uuid column as text and 500 (#383).
@@ -426,8 +424,7 @@ function pendingApprovalOf(
 
 /** Discards a private draft and purges unassigned holding ciphertext idempotently. */
 export async function discardImapReviewItem(userId: string, receiptId: string): Promise<void> {
-  const activeUser = await privateMailboxUser(userId);
-  if (activeUser.isInstanceAdmin) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
+  await privateMailboxUser(userId);
   // A malformed id must fail the same bounded way an unknown one does,
   // rather than reach the uuid column as text and 500 (#383).
   if (!validUuid(receiptId)) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
@@ -727,8 +724,7 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
 }
 
 export async function assignImapReceiptHousehold(userId: string, receiptId: string, householdId: string): Promise<{ receiptId: string }> {
-  const activeUser = await privateMailboxUser(userId);
-  if (activeUser.isInstanceAdmin) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
+  await privateMailboxUser(userId);
   // A malformed id must fail the same bounded way an unknown one does,
   // rather than reach the uuid column as text and 500 (#383).
   if (!validUuid(receiptId)) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
