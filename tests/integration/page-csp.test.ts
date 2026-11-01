@@ -220,28 +220,34 @@ describe("a server-rendered page carries the policy in a header, with a nonce (#
     expectOtherDirectives(directives, false);
   });
 
-  it("script-src is 'self' and kit's nonce (and the pre-paint hash): never 'unsafe-inline' or 'unsafe-eval'", async () => {
-    const header = String((await page("/")).headers["content-security-policy"]);
+  it("script-src is 'self', kit's nonce and the pre-paint script's hash: never 'unsafe-inline' or 'unsafe-eval'", async () => {
+    const answer = await page("/");
+    const header = String(answer.headers["content-security-policy"]);
     const scriptSrc = parsePolicy(header)["script-src"] ?? [];
     expect(scriptSrc).toContain("'self'");
     expect(scriptSrc.filter((source) => /^'nonce-[A-Za-z0-9+/_=-]{16,}'$/u.test(source))).toHaveLength(1);
     expect(scriptSrc).not.toContain("'unsafe-inline'");
     expect(scriptSrc).not.toContain("'unsafe-eval'");
+    /* app.html's script takes no nonce (kit refuses to prerender one): its hash covers it here too. */
+    const prePaint = scriptsOf(answer.body).filter((script) => script.text.includes('localStorage.getItem("orbit-theme")'));
+    expect(prePaint, "the pre-paint script is in the page").toHaveLength(1);
+    expect(scriptSrc, "the pre-paint script's hash is not in script-src").toContain(hashSource(prePaint[0].text));
     expect(scriptSrc.filter((source) => !/^'(self|nonce-[^']*|sha256-[A-Za-z0-9+/=]+)'$/u.test(source))).toEqual([]);
   });
 
-  it("every script of the page, app.html's pre-paint script included, carries that nonce", async () => {
+  it("every script of kit's own carries that nonce (app.html's pre-paint script is covered by its hash instead)", async () => {
     const answer = await page("/");
     const header = String(answer.headers["content-security-policy"]);
     const nonce = /'nonce-([^']+)'/u.exec(header)?.[1];
     expect(nonce, "no nonce in the header").toBeTypeOf("string");
 
+    const isPrePaint = (script: Script) => script.text.includes('localStorage.getItem("orbit-theme")');
     const scripts = scriptsOf(answer.body);
-    const prePaint = scripts.filter((script) => script.text.includes('localStorage.getItem("orbit-theme")'));
-    expect(prePaint, "the pre-paint script is in the page").toHaveLength(1);
-    expect(scripts.length).toBeGreaterThanOrEqual(2);
-    for (const script of scripts) {
-      expect(nonceOf(script), `a script has no nonce, or another one: <script${script.attributes}>`).toBe(nonce);
+    expect(scripts.filter(isPrePaint), "the pre-paint script is in the page").toHaveLength(1);
+    const kits = scripts.filter((script) => !isPrePaint(script));
+    expect(kits.length, "kit's own bootstrap script is in the page").toBeGreaterThanOrEqual(1);
+    for (const script of kits) {
+      expect(nonceOf(script), `a script of kit's has no nonce, or another one: <script${script.attributes}>`).toBe(nonce);
     }
     expect(answer.body).not.toContain("%sveltekit.nonce%");
   });

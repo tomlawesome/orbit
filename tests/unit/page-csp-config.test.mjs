@@ -16,10 +16,11 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
  *     'unsafe-eval' in script-src (styles keep 'unsafe-inline': about 140
  *     style= attributes, 80 style: directives, and markup built in JS);
  *   - mode "auto";
- *   - web/src/app.html's pre-paint script carries kit's nonce placeholder, so a
- *     server-rendered page's own inline script is allowed by the nonce;
- *   - the prerendered pages cannot take a nonce, so that script's sha256 is in
- *     script-src, and it is the sha256 of THE SCRIPT'S TEXT IN app.html, so an
+ *   - web/src/app.html's pre-paint script carries NO nonce placeholder: kit 3
+ *     refuses to prerender a page whose app.html has %sveltekit.nonce% in it
+ *     (render.js:77-79), and /login would fail to build. Its sha256 is in
+ *     script-src instead, which covers it on server-rendered and prerendered
+ *     pages alike, and it is the sha256 of THE SCRIPT'S TEXT IN app.html, so an
  *     edit to the script can never leave a stale hash behind.
  *
  * How the config is read: web/vite.config.js is imported for real, with
@@ -124,10 +125,11 @@ describe("the page Content-Security-Policy in web/vite.config.js (#1411)", () =>
     expect(sources.filter((source) => source !== "self")).toHaveLength(1);
   });
 
-  it("app.html has exactly one inline script, and it carries kit's nonce placeholder", () => {
+  it("app.html has exactly one inline script, and it carries no nonce placeholder (kit 3 refuses to prerender one)", () => {
     const scripts = inlineScripts();
     expect(scripts).toHaveLength(1);
-    expect(scripts[0].attributes).toMatch(/\bnonce\s*=\s*"%sveltekit\.nonce%"/u);
+    expect(scripts[0].attributes).not.toMatch(/nonce/u);
+    expect(readFileSync(APP_HTML, "utf8")).not.toContain("%sveltekit.nonce%");
   });
 
   it("the configured hash is the sha256 of the pre-paint script's own text in app.html", () => {
