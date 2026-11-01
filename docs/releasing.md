@@ -351,10 +351,21 @@ When it fails, the message names the cause:
   entry unnecessary.
 - HTTP 401 or 403 on an API call: check that the job token's allowlist
   includes this project with read jobs.
-- Any other HTTP status (a 5xx, or a 404 on a job list), a job list that is
-  not JSON or a transport error: the carry could not ask, which is not the
-  same as nothing being there. The message names the status and URL. Run the
-  job again once the API answers.
+- A transport error (a curl exit other than 0 and the size cap's own 63) or an
+  HTTP 408, 429 or 5xx on an API call: the carry makes at most 3 attempts,
+  `ORBIT_CARRY_RETRY_SECONDS` apart (a whole number of seconds from 0 to 30,
+  default 2; anything else fails the job naming the variable). Each attempt
+  reads into a fresh buffer, never curl's own `--retry`, so a failed attempt's
+  body can never be mixed into the next answer, and only the last attempt's body
+  and status are used. When the attempts run out, the message names the status
+  or curl exit, the URL and `after 3 attempts`. Run the job again once the API
+  answers.
+- Any other HTTP status (a redirect, or a 404 on a job list) or a job list that
+  is not JSON: never retried, the carry fails at once naming the status and
+  URL. The carry could not ask, which is not the same as nothing being there.
+- An empty signature file (the predecessor's or the carried one) fails as its
+  own error before the verifier runs, naming the file. It is never a verdict,
+  so no `carry-accepted-gap` line excuses it.
 - An answer larger than the limit (1 MiB for an artifact, 16 MiB for a job
   list page): the carry reads at most limit + 1 bytes, whether or not the server
   declared a length, and fails naming the URL and the limit.
@@ -369,7 +380,8 @@ When it fails, the message names the cause:
 - A tooling failure, which the message says is "not a verdict" and which names
   the tool: `cosign` could not be downloaded (`scripts/ci/ensure-cosign.sh`
   failed), `cosign` exited with a status other than 0 or 1 (for example 2, or
-  127 for a missing command), or `openssl` or `base64` is not installed. Only a
+  127 for a missing command), `openssl` or `base64` is not installed, or the
+  verifier failed before `cosign` ran (a full `TMPDIR`: its `mktemp` fails). Only a
   verifier that ran and rejected the signature counts as "does not verify";
   a tool that could not run says nothing about the signature, so no gap line
   excuses it. Fix the tool and run the job again.

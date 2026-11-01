@@ -45,6 +45,16 @@
 # and the bytes actually read are capped too (limit + 1, through head -c), so an
 # answer with no length header is bounded as well (#1607 note 48718).
 #
+# Retries are the script's own, never curl's --retry (#1607 note 48797): curl
+# cannot rewind stdout, so a 5xx followed by a 200 would join both bodies. Each
+# call makes at most 3 attempts, every one into a fresh, emptied buffer through
+# the same byte cap; only the last attempt's body and status are used. Only a
+# transport error (a curl exit other than 0, other than the cap's own failure
+# and curl 63) or an HTTP 408, 429 or 5xx is tried again, ORBIT_CARRY_RETRY_SECONDS
+# apart; any other status, or the byte cap being reached, is final at once. When
+# the attempts run out the failure names the status or curl exit, the URL and
+# "after 3 attempts".
+#
 # Three ways a stuck release recovers without a hand-started pipeline or a CI
 # variable: an ordinary push, a job retry, or waiting (#1607 note 48548).
 #
@@ -63,8 +73,9 @@
 #   when the predecessor is that job on that ref and the failure was a 404 on its
 #   own pair or its own pair being rejected by the verifier, and then treats the
 #   ref as a first release. Never accepted: an API error, a missing sign_evidence,
-#   a failing carried previous/ pair, or a tooling failure (cosign cannot be
-#   downloaded or exits with anything but 0 or 1, openssl is missing): only the
+#   a failing carried previous/ pair, an empty signature file, or a tooling
+#   failure (cosign cannot be downloaded or exits with anything but 0 or 1,
+#   openssl is missing, the verifier fails before cosign runs): only the
 #   verifier running and rejecting the signature is "does not verify".
 #
 #   Busy sign_evidence. The predecessor pipeline's newest sign_evidence job still
@@ -96,6 +107,9 @@
 #   ORBIT_CARRY_POLL_SECONDS   Seconds between polls of a busy sign_evidence
 #                              job, a whole number from 0 to 60, default 30
 #                              (tests set 0); anything else fails.
+#   ORBIT_CARRY_RETRY_SECONDS  Seconds between the attempts of one API call, a
+#                              whole number from 0 to 30, default 2 (tests set
+#                              0); anything else fails.
 #
 # Needs curl and jq, plus what the verifier needs: openssl, and curl to fetch
 # the pinned cosign (scripts/ci/ensure-cosign.sh) unless ORBIT_COSIGN is set.
@@ -143,6 +157,10 @@ max_listing_bytes=$((16 * 1024 * 1024))
 # the pipeline's jobs), ORBIT_CARRY_POLL_SECONDS apart.
 max_evidence_polls=20
 poll_seconds="${ORBIT_CARRY_POLL_SECONDS:-30}"
+# Each API call is attempted at most this many times (1 plus 2 retries), with
+# ORBIT_CARRY_RETRY_SECONDS between attempts.
+max_attempts=3
+retry_seconds="${ORBIT_CARRY_RETRY_SECONDS:-2}"
 
 header_file=""
 keep_stage=""
@@ -209,6 +227,12 @@ esac
 if [ "${#poll_seconds}" -gt 9 ] || [ "$((10#$poll_seconds))" -gt 60 ]; then
   fail "ORBIT_CARRY_POLL_SECONDS must be at most 60 seconds, not '${poll_seconds}'"
 fi
+case "$retry_seconds" in
+  '' | *[!0-9]*) fail "ORBIT_CARRY_RETRY_SECONDS must be a whole number of seconds, not '${retry_seconds}'" ;;
+esac
+if [ "${#retry_seconds}" -gt 9 ] || [ "$((10#$retry_seconds))" -gt 30 ]; then
+  fail "ORBIT_CARRY_RETRY_SECONDS must be at most 30 seconds, not '${retry_seconds}'"
+fi
 
 # The token goes to curl through a header file made outside the working
 # directory, readable only by us, and removed on exit (trap above).
@@ -225,36 +249,56 @@ ref="$(jq -rn --arg ref "$CI_COMMIT_REF_NAME" '$ref | @uri')"
 api="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}"
 
 # api_get <url> <body file> <header file> <size limit> <limit in bytes>: one
-# GET. Sets api_status to the HTTP status; a curl transport error (no status)
-# fails here, naming the URL. The body goes through a pipe that is closed once
-# limit + 1 bytes have arrived, so an answer with no length header (which
-# --max-filesize cannot see) is bounded by the bytes actually read: more than the
-# limit fails, naming the URL and the limit. curl's --write-out status follows
-# the body on the same pipe, so the cap is the limit plus its three digits.
+# GET, attempted at most max_attempts times (#1607 note 48797). Sets api_status
+# to the HTTP status of the last attempt. Each attempt writes into a fresh,
+# emptied buffer, so a failed attempt's body never reaches the next one. A
+# transport error (a curl exit other than 0 or 63) or an HTTP 408, 429 or 5xx
+# is tried again after retry_seconds; once the attempts run out it fails naming
+# the status or the curl exit, the URL and "after 3 attempts". Any other status
+# is final. The body goes through a pipe that is closed once limit + 1 bytes
+# have arrived, so an answer with no length header (which --max-filesize cannot
+# see) is bounded by the bytes actually read: more than the limit fails at once,
+# naming the URL and the limit, as does curl exit 63. curl's --write-out status
+# follows the body on the same pipe, so the cap is the limit plus its three
+# digits.
 api_get() {
-  local raw="$stage/api.raw" size cap=$(($5 + 4)) statuses=(0 0)
-  # No --location: these URLs answer directly, and curl would send the
-  # JOB-TOKEN header on to whatever host a redirect named. No --fail either:
-  # its single exit 22 would hide which status came back.
-  curl --silent --show-error \
-    --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 30 \
-    --max-filesize "$4" \
-    -H "@${header_file}" \
-    --dump-header "$3" --output - --write-out '%{http_code}' \
-    "$1" | head -c "$cap" > "$raw" || statuses=("${PIPESTATUS[@]}")
-  size="$(wc -c < "$raw")"
-  # A reader that closed early (curl exit 23 or a broken pipe) means more than
-  # the cap was on its way; the bytes that arrived say so on their own.
-  [ "$size" -le $(($5 + 3)) ] ||
-    fail "GET $1 answered more than the ${4} size limit (${5} bytes) with no length header, so the answer is not read"
-  case "${statuses[0]}" in
-    0) ;;
-    63) fail "GET $1 answered more than the ${4} size limit (curl exit status 63), so the answer is not read" ;;
-    *) fail "GET $1 failed with a curl transport error (curl exit status ${statuses[0]}), so the answer is unknown" ;;
-  esac
-  [ "${statuses[1]}" = "0" ] || fail "GET $1 could not be saved (exit status ${statuses[1]})"
-  [ "$size" -ge 3 ] || fail "GET $1 failed with a curl transport error (no HTTP status came back), so the answer is unknown"
-  api_status="$(tail -c 3 "$raw")"
+  local raw="$stage/api.raw" size cap=$(($5 + 4)) statuses attempt=0 why
+  while :; do
+    attempt=$((attempt + 1))
+    statuses=(0 0)
+    rm -f -- "$raw"
+    # No --location: these URLs answer directly, and curl would send the
+    # JOB-TOKEN header on to whatever host a redirect named. No --fail either:
+    # its single exit 22 would hide which status came back. No --retry: curl
+    # cannot rewind the pipe, so the script retries into a fresh buffer.
+    curl --silent --show-error \
+      --connect-timeout 10 --max-time 30 \
+      --max-filesize "$4" \
+      -H "@${header_file}" \
+      --dump-header "$3" --output - --write-out '%{http_code}' \
+      "$1" | head -c "$cap" > "$raw" || statuses=("${PIPESTATUS[@]}")
+    size="$(wc -c < "$raw")"
+    # A reader that closed early (curl exit 23 or a broken pipe) means more than
+    # the cap was on its way; the bytes that arrived say so on their own.
+    [ "$size" -le $(($5 + 3)) ] ||
+      fail "GET $1 answered more than the ${4} size limit (${5} bytes) with no length header, so the answer is not read"
+    [ "${statuses[0]}" != "63" ] ||
+      fail "GET $1 answered more than the ${4} size limit (curl exit status 63), so the answer is not read"
+    [ "${statuses[1]}" = "0" ] || fail "GET $1 could not be saved (exit status ${statuses[1]})"
+    why=""
+    if [ "${statuses[0]}" != "0" ]; then
+      why="failed with a curl transport error (curl exit status ${statuses[0]}), so the answer is unknown"
+    else
+      [ "$size" -ge 3 ] || fail "GET $1 failed with a curl transport error (no HTTP status came back), so the answer is unknown"
+      api_status="$(tail -c 3 "$raw")"
+      case "$api_status" in
+        408 | 429 | 5[0-9][0-9]) why="answered HTTP ${api_status}" ;;
+      esac
+    fi
+    [ -n "$why" ] || break
+    [ "$attempt" -lt "$max_attempts" ] || fail "GET $1 ${why} after ${max_attempts} attempts"
+    sleep "$retry_seconds"
+  done
   head -c $((size - 3)) "$raw" > "$2"
   rm -f -- "$raw"
 }
@@ -446,11 +490,17 @@ resolve_cosign() {
 # that rejected) and 1 (cosign's own rejection) are verdicts, anything else (2,
 # 127, a signal) is cosign failing as a tool. A missing openssl or base64 after
 # a cosign pass is a tool failure too. A tool failure always fails, naming the
-# tool; no gap line excuses it. A verdict on a pair that is "excusable" (the
+# tool; no gap line excuses it, and neither does a verifier exit with no cosign
+# status at all (it failed before cosign ran). A verdict on a pair that is "excusable" (the
 # predecessor's own) is a predecessor_failure naming every file tried; on a
 # "strict" one (the carried pair) it is a plain failure.
 verify_pair() {
   local i tried="" cosign_rc what_failed
+  # An empty signature is wrong with the pair, found here before the verifier
+  # runs: its own failure, never a verdict, so no gap line excuses it (#1607
+  # note 48797).
+  [ -s "$stage/$1/$sig_name" ] ||
+    fail "the ${2} signature file ${sig_name} is empty, so the ${2} manifest cannot be verified"
   resolve_cosign
   for i in "${!trust_keys[@]}"; do
     [ -f "${trust_keys[$i]}" ] ||
@@ -472,13 +522,16 @@ WRAPPER
       return 0
     fi
     sed "s|^|carry-previous-release: ${trust_labels[$i]}: |" "$stage/verify.out" >&2
-    # No status: cosign never ran, because the verifier refused the pair first
-    # (an empty signature): the pair is what is wrong.
+    # No status: cosign never ran. The pair was checked above (files present,
+    # signature not empty) and the key and cosign resolved, so what is left is a
+    # tool failing before cosign (the verifier's mktemp on a full TMPDIR): never
+    # a verdict.
     cosign_rc=""
     [ ! -f "$stage/cosign-status" ] || cosign_rc="$(cat "$stage/cosign-status")"
     rm -f -- "$stage/cosign-wrapper.sh" "$stage/cosign-status"
     case "$cosign_rc" in
-      '' | 0 | 1) ;;
+      '') fail "tooling failure, not a verdict: the verifier failed before cosign ran (no cosign status) on the ${2} manifest against ${trust_labels[$i]}, so nothing was verified; fix that (a full TMPDIR?) and run this job again" ;;
+      0 | 1) ;;
       *) fail "tooling failure, not a verdict: cosign exited with status ${cosign_rc} (not a verdict) verifying the ${2} manifest against ${trust_labels[$i]}; fix cosign and run this job again" ;;
     esac
     if [ "$cosign_rc" = "0" ]; then
