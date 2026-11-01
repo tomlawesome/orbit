@@ -78,6 +78,8 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "${repo_root}"
 # shellcheck source=scripts/release-metadata-patterns.sh
 source "${repo_root}/scripts/release-metadata-patterns.sh"
+# An empty pattern matches every string, so the digest checks below would accept anything.
+: "${ORBIT_DIGEST_PATTERN:?ORBIT_DIGEST_PATTERN is empty or unset: the shared digest pattern from scripts/release-metadata-patterns.sh is required}"
 
 # Must match scripts/ci/attest-tested-image.sh; a test asserts they agree.
 readonly PREDICATE_TYPE="https://tomlawson.io/attestations/orbit-validation/v1"
@@ -140,6 +142,8 @@ fi
 
 # cosign has proven the signatures; node judges what the verified statements
 # say. It exits with the refusal codes above, which set -e propagates.
+# Never hand node an empty ORBIT_DIGEST_SOURCE: new RegExp("") matches everything.
+: "${ORBIT_DIGEST_PATTERN:?ORBIT_DIGEST_SOURCE would be empty: ORBIT_DIGEST_PATTERN is empty or unset}"
 ORBIT_PREDICATE_TYPE="$PREDICATE_TYPE" \
 ORBIT_POLICY_VERSION_RESOLVED="$policy_version" \
 ORBIT_DIGEST_SOURCE="$ORBIT_DIGEST_PATTERN" \
@@ -149,6 +153,10 @@ node -e '
 
   const [verifiedPath] = process.argv.slice(1);
   // The shared digest pattern (scripts/release-metadata-patterns.sh), handed over as text.
+  if (!process.env.ORBIT_DIGEST_SOURCE) {
+    process.stderr.write("verify-validation-evidence: ORBIT_DIGEST_SOURCE is empty; refusing to match digests against an empty pattern\n");
+    process.exit(2);
+  }
   const digestPattern = new RegExp(process.env.ORBIT_DIGEST_SOURCE, "u");
   const expected = {
     digest: process.env.ORBIT_DIGEST,

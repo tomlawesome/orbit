@@ -21,6 +21,13 @@
 # configure.sh, get-orbit-preview.sh keep their own copies): this is a
 # repository file, and it stays tiny so it can be COPYed into a build stage
 # that has no other host script available.
+# Sourcing this file a second time in one shell (a script that sources a
+# helper which sources it again) must leave the values as they are: they are
+# read-only after the first source, so redefining them would fail.
+if [[ "$(declare -p ORBIT_VERSION_PATTERN 2>/dev/null)" == "declare -r "* ]]; then
+  return 0
+fi
+
 readonly ORBIT_VERSION_PATTERN='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 readonly ORBIT_REVISION_PATTERN='^[0-9a-f]{40}$'
 readonly ORBIT_CHANNEL_PATTERN='^(ci|preview|dev)$'
