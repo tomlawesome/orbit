@@ -1774,3 +1774,16 @@ experience."**
 - No hover tooltips: a label the eye can see, or an aria-label.
 - The inventory and the standard per job are on #1624; #1468 is the first
   slice (the native pickers). A guard test keeps strays from returning.
+
+## 45. One layout switch for the whole app: 840 px wide, 480 px tall (owner, 2026-11-01)
+
+On #1382, offered one rule, today's two, or a touch test: **16a**.
+
+- The phone layout when the window is under 840 px wide or under 480 px
+  tall; the desk layout otherwise. Material's window size classes, which
+  Apple's size classes match.
+- Door, goodbye, home and every page use the same pair of values. The
+  door's 600 px (decision 3c, #1371) and the app's 900 px both go.
+- No user-agent or device sniffing, and no pointer test: Orbit has two
+  layouts, so width alone says which fits.
+- Recorded in an ADR when built.
