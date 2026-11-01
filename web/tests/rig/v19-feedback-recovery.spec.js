@@ -27,7 +27,7 @@ import { INTERNAL_ERROR, SUGGESTION, rememberMailDecisions } from "./mail-suppor
  * the create form's attach, #1245; its pocket "was not kept" check went when
  * the pocket started keeping documents, owner's 11a), and, because v19 has no
  * equivalent to drive, the old lifecycle's member-management toasts and
- * disabled-account page (auth-error.spec.ts covers the v19 error page itself).
+ * disabled-account page (web/tests/rig/auth-error.spec.js covers the v19 error page itself).
  *
  * Every failure journey is two tests, so one defect cannot hide the other check
  * behind it:

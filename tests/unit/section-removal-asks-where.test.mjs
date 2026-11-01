@@ -205,7 +205,7 @@ describe("the phone's save bar counts a section sent elsewhere as one removal", 
 /* ── the words ────────────────────────────────────────────────────────────
    The notes name no pure function for the heading or the status line, so the
    strings are held to their source: wherever the screens draw them. The
-   rendered text is walked in tests/e2e/v19-household-where-entries.spec.ts. */
+   rendered text is walked in web/tests/rig/v19-household-where-entries.spec.js. */
 const root = new URL("../../web/src/", import.meta.url);
 /** @param {URL} dir @returns {string[]} */
 function sourcesUnder(dir) {

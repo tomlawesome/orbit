@@ -13,7 +13,7 @@ import { SETTLE } from "./settle";
  * #1178: the signed-in fixtures v19-axe-sweep.spec.ts grew (#496), lifted
  * out for the two specs that restore what authenticated-accessibility.spec.ts
  * covered before the Next.js removal (8a315e18): v19-layout-and-themes.spec.ts
- * and v19-feedback-recovery.spec.ts. Same shape and same reasons as the
+ * and web/tests/rig/v19-feedback-recovery.spec.js (since moved to the rig). Same shape and same reasons as the
  * sweep's own copies, which are left where they are: each test signs in
  * fresh, seeds what it needs, and removes it in `finally`.
  */
