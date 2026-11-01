@@ -19,12 +19,13 @@ import { APP, onPhone } from "./a11y-support.js";
  * sandboxed renderer and comes out as a page in the card. This file carries
  * the same journey's screen behaviour from the fixture app.
  *
- * Deleted with a lower test named (not ported): the drawn picture's own width
- * says which page the server drew, a check of the real renderer, which
- * tests/integration/document-lifecycle.test.ts:1497 ("draws the page asked
- * for and carries the page count") proves with the same numbered PDF. Here the
- * picture's accessible name ("Page 2 of ...") and the request the browser
- * sent carry which page was asked for.
+ * Which page the server drew: the real renderer's own check (the drawn
+ * picture's width, per page of a numbered PDF) is proved by
+ * tests/integration/document-lifecycle.test.ts:1497 ("draws the page asked for
+ * and carries the page count"). Here the fixture draws "(page N of 3)" into
+ * the picture it serves, and each picture is read back and must say the page
+ * the label and request say (`drawnAsPage`), so a stale picture under a new
+ * label fails.
  *
  * FIXTURE STATES THIS FILE NEEDS THAT DO NOT EXIST YET (the tests fail until
  * they do; nothing here fakes them):
@@ -66,6 +67,20 @@ async function shownText(locator) {
 const drawn = (picture) =>
   expect.poll(() => picture.evaluate((/** @type {HTMLImageElement} */ img) => (img.complete ? img.naturalWidth : 0)), { timeout: SETTLE })
     .toBeGreaterThan(0);
+
+/** The picture is drawn, and it is the page asked for. A picture of the wrong
+ *  page under the right label also has a width, so width proves nothing about
+ *  which page it is: the fixture draws a several-page paper's name and "(page N
+ *  of 3)" into the picture it serves (api/documents/[documentId]/preview,
+ *  #1610), so the picture's own bytes are read back (the page holds them as a
+ *  blob: address, which is a read of the page's memory, not a request) and must
+ *  say page N.
+ * @param {Locator} picture @param {number} n */
+async function drawnAsPage(picture, n) {
+  await drawn(picture);
+  const drawing = await picture.evaluate(async (/** @type {HTMLImageElement} */ img) => (await fetch(img.currentSrc)).text());
+  expect(drawing, `the picture drawn is page ${n}`).toContain(`${THREE_PAGE_PAPER.file} (page ${n} of 3)`);
+}
 
 /** #1319: an item's home drawer, opened by its address -- the desk's view
  *  under its row, the phone's open row.
@@ -212,7 +227,7 @@ test("the reader turns a multi-page document to its last page and back, by arrow
     await expect(foot).toHaveText(`page ${n} of 3`, { timeout: SETTLE });
     await expect(foot).toHaveAttribute("aria-live", "polite");
     await expect(picture).toHaveAccessibleName(`Page ${n} of ${THREE_PAGE_PAPER.file}`, { timeout: SETTLE });
-    await drawn(picture);
+    await drawnAsPage(picture, n);
     await expect(previous).toHaveCount(n > 1 ? 1 : 0);
     await expect(next).toHaveCount(n < 3 ? 1 : 0);
   };
@@ -288,7 +303,7 @@ test("the preview's pager turns a multi-page document in place, and the reader o
     await expect(number).toHaveText(`page ${n} of 3`);
     await expect(number).toHaveAttribute("aria-live", "polite");
     await expect(picture).toHaveAttribute("alt", `Page ${n === 1 ? "one" : n} of ${THREE_PAGE_PAPER.file}`, { timeout: SETTLE });
-    await drawn(picture);
+    await drawnAsPage(picture, n);
     await expect(previous).toHaveCount(n > 1 ? 1 : 0);
     await expect(next).toHaveCount(n < 3 ? 1 : 0);
   };
@@ -381,7 +396,7 @@ test("each page turn in the reader asks the server for that page's picture once"
   const shown = async (n) => {
     await expect(reader.locator(".rd-name .rd-of")).toHaveText(`· page ${n} of 3`, { timeout: SETTLE });
     await expect(picture).toHaveAccessibleName(`Page ${n} of ${THREE_PAGE_PAPER.file}`, { timeout: SETTLE });
-    await drawn(picture);
+    await drawnAsPage(picture, n);
   };
   await shown(1);
 
@@ -410,7 +425,7 @@ test("opening the reader on the page the card shows asks for no page again, and 
 
   /* The card on page 1, drawn: opening the reader here must not ask again. */
   const cardPicture = pageButton.locator("img");
-  await drawn(cardPicture);
+  await drawnAsPage(cardPicture, 1);
 
   /* Both starting pages are checked: page 1 as it opens, then page 2 after the
      card's own pager has turned to it. */
@@ -420,14 +435,14 @@ test("opening the reader on the page the card shows asks for no page again, and 
   const readerShows = async (n) => {
     await expect(reader.locator(".rd-name .rd-of")).toHaveText(`· page ${n} of 3`, { timeout: SETTLE });
     await expect(readerPicture).toHaveAccessibleName(`Page ${n} of ${THREE_PAGE_PAPER.file}`, { timeout: SETTLE });
-    await drawn(readerPicture);
+    await drawnAsPage(readerPicture, n);
   };
 
   for (const n of [1, 2]) {
     if (n === 2) {
       await previewOf(page, THREE_PAGE_PAPER.file).getByRole("button", { name: "Next page" }).click();
       await expect(cardPicture).toHaveAttribute("alt", `Page 2 of ${THREE_PAGE_PAPER.file}`, { timeout: SETTLE });
-      await drawn(cardPicture);
+      await drawnAsPage(cardPicture, 2);
     }
     const before = asked.total();
     await pageButton.click();
@@ -467,7 +482,7 @@ test.describe("a failed page turn", () => {
     const { reader } = await openReader(page, THREE_PAGE_PAPER);
     const picture = reader.getByRole("img", { name: new RegExp(THREE_PAGE_PAPER.file.replace(/[.]/g, "\\.")) });
     await expect(picture).toHaveAccessibleName(`Page 1 of ${THREE_PAGE_PAPER.file}`, { timeout: SETTLE });
-    await drawn(picture);
+    await drawnAsPage(picture, 1);
 
     await failPageTwo(page);
     await reader.getByRole("button", { name: "Next page" }).click();
@@ -497,7 +512,7 @@ test.describe("a failed page turn", () => {
     /* The card's first page names its picture "Page one"; later ones "Page 2". */
     const firstPicture = card.getByRole("img", { name: new RegExp(`^Page (1|one) of ${escaped}$`) });
     await expect(firstPicture).toBeVisible({ timeout: SETTLE });
-    await drawn(firstPicture);
+    await drawnAsPage(firstPicture, 1);
     await expect.poll(() => shownText(number)).toBe("1 of 3");
 
     await failPageTwo(page);
