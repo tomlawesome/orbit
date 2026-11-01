@@ -9,7 +9,7 @@
  * write, and the reads that follow it.
  */
 
-import { APP, DOOR_STATES, SIGNED_IN, settle } from "../fidelity/pocket-states.js";
+import { APP, DOOR_STATES, RIG_STATES, SIGNED_IN, settle } from "../fidelity/pocket-states.js";
 
 export { APP, settle };
 
@@ -27,13 +27,14 @@ export const onPhone = (testInfo) => testInfo.project.name.endsWith("phone");
  * The fixture state `route`/`state` of pocket-states.js, as a function that
  * reaches it. These states were written for the phone, but a route's reach
  * that only loads the address and waits for the screen to settle is the same
- * on a desk; the ones that wait for a pocket-only element say so there.
+ * on a desk; the ones that wait for a pocket-only element say so there, and
+ * RIG_STATES holds the states of the screens both dialects reach ("any-dialect").
  * @param {string} route
  * @param {string} state
  * @returns {(page: Page) => Promise<void>}
  */
 export function signedIn(route, state) {
-  const found = SIGNED_IN.find((one) => one.route === route && one.state === state);
+  const found = [...SIGNED_IN, ...RIG_STATES].find((one) => one.route === route && one.state === state);
   if (!found) throw new Error(`pocket-states.js has no signed-in state ${route} / ${state}`);
   return found.reach;
 }
@@ -92,15 +93,25 @@ export async function rememberWrites(page) {
   };
 
   await page.route(`**/api/workspace`, async (route) => {
-    const response = await route.fetch();
-    const body = await response.json();
-    applied(body.workspace);
-    await route.fulfill({ response, json: body });
+    /* A read still in flight when the test ends finds its page gone. */
+    try {
+      const response = await route.fetch();
+      const body = await response.json();
+      applied(body.workspace);
+      await route.fulfill({ response, json: body });
+    } catch (error) {
+      if (!page.isClosed() && !/disposed|closed|Target page/i.test(String(error))) throw error;
+    }
   });
   await page.route(COMMANDS, async (route) => {
     const command = route.request().postDataJSON();
     if (command?.dryRun === true) return route.fallback();
     sent.push(command);
+    /* The fixture server sees the write too: a browser that asked for the
+       `keep-saves` scene (pocket-states.js, useFixtureScenes) has the item held
+       there, so a load that runs on the server (home's, after a create) finds
+       it. The answer below is still this test's own. */
+    if (command.type === "item.upsert") await route.fetch();
     if (command.type === "item.upsert") {
       changes.delete(command.item.id);
       const present = added.findIndex((one) => one.item.id === command.item.id);

@@ -89,6 +89,14 @@ const WORKSPACE_GAPS: KnownGap[] = [
 const CONTRACTS: Record<string, Contract> = {
   /* GET /api/workspace answers { workspace }, parsed here as workspaceSchema. */
   "workspace.WORKSPACE_FIXTURE": parsesWith(workspaceSchema, WORKSPACE_GAPS),
+  /* The archived scene's item (#1609) sits in Harlow Home beside the sample's own, as a browser that asks for the scene is sent it. */
+  "workspace.ARCHIVED_ITEM_FIXTURE": {
+    check: (value) => {
+      const sample = modules.workspace.WORKSPACE_FIXTURE as { households: { items: unknown[] }[] };
+      const [harlow, ...others] = sample.households;
+      return parsesWith(workspaceSchema, WORKSPACE_GAPS).check({ ...sample, households: [{ ...harlow, items: [...harlow.items, value] }, ...others] });
+    },
+  },
   "workspace.WORKSPACE_FIXTURE_TODAY": noSchema("not an API field: the chart's date pin, sent beside the workspace by the fixture routes (#1357)"),
   "arrival.NEWCOMER_ARRIVAL_FIXTURE": parsesWith(workspaceSchema),
   "arrival.ARRIVAL_FIXTURES": parsesEachWith(workspaceSchema),
@@ -111,6 +119,7 @@ const CONTRACTS: Record<string, Contract> = {
 
   /* Routes whose answer is a TypeScript interface only. */
   "workspace.DOCUMENTS_FIXTURE": noSchema("DocumentSummary (src/server/document-repository.ts) has no zod schema"),
+  "workspace.ARCHIVED_DOCUMENTS_FIXTURE": noSchema("DocumentSummary (src/server/document-repository.ts) has no zod schema"),
   "about.ABOUT_FIXTURE": noSchema("AboutFacts (src/server/about.ts) has no zod schema"),
   "about.LIBRARIES_FIXTURE": noSchema("readLibraries result has no zod schema"),
   "admin.ADMIN_USERS_FIXTURE": noSchema("GET /api/admin/users has no response schema"),

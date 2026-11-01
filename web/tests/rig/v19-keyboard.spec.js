@@ -447,7 +447,7 @@ test("settings: the sign-in-methods challenge arms by keyboard and is reachable"
 test("administration: the local-user controls are reachable and announced", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await installKeyboardAudit(page);
-  await page.goto(`${APP}/administration`, { waitUntil: "load" });
+  await signedIn("/administration", "any-dialect")(page);
   await expect(page.locator(".card").first()).toBeVisible();
 
   /* Every field in the row is a labelled control, which is what lets a screen

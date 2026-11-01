@@ -4,6 +4,7 @@ import { readWorkspace } from "orbit/server/workspace-repository";
 
 import { WORKSPACE_FIXTURE, WORKSPACE_FIXTURE_TODAY } from "$lib/data/fixtures/workspace.js";
 import { read } from "$lib/server/api.js";
+import { withScenes } from "$lib/server/fixture-scenes.js";
 
 /**
  * The workspace a signed-in reader sees — everything home draws (#451).
@@ -18,5 +19,5 @@ export const GET = read(
     const workspace = await readWorkspace(session.user.id, session.id, session.activeHouseholdId);
     return json({ workspace }, { headers: { "cache-control": "no-store" } });
   },
-  { fixture: () => json({ workspace: WORKSPACE_FIXTURE, fixtureToday: WORKSPACE_FIXTURE_TODAY }, { headers: { "cache-control": "no-store" } }) },
+  { fixture: ({ cookies }) => json({ workspace: withScenes(WORKSPACE_FIXTURE, cookies), fixtureToday: WORKSPACE_FIXTURE_TODAY }, { headers: { "cache-control": "no-store" } }) },
 );

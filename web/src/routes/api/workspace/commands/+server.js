@@ -6,6 +6,7 @@ import { applyWorkspaceCommand, checkWorkspaceCommand } from "orbit/server/works
 
 import { WORKSPACE_FIXTURE, WORKSPACE_FIXTURE_TODAY } from "$lib/data/fixtures/workspace.js";
 import { write } from "$lib/server/api.js";
+import { keepSave, withScenes } from "$lib/server/fixture-scenes.js";
 
 const NO_STORE = { "cache-control": "no-store" };
 
@@ -33,7 +34,9 @@ const NO_STORE = { "cache-control": "no-store" };
  * document routes do, #1245). A real command persists nothing and returns the
  * fixture workspace. A dry run still parses the command, so the gate sees the
  * engine's own refusals; what only a stored household can say (a snooze
- * against its today, a version) is left to the live engine.
+ * against its today, a version) is left to the live engine. A browser that
+ * asks by cookie (fixture-scenes.js, #1609) has its item saves held: its
+ * own cookie carries them, so no state is shared between tests.
  */
 export const POST = write(async (event, session) => {
   const body = await event.request.json();
@@ -49,7 +52,11 @@ export const POST = write(async (event, session) => {
 }, {
   fixture: async (event) => {
     const body = await event.request.json().catch(() => null);
-    if (!dryRunOf(body)) return json({ workspace: WORKSPACE_FIXTURE, fixtureToday: WORKSPACE_FIXTURE_TODAY }, { headers: NO_STORE });
+    if (!dryRunOf(body)) {
+      /* A browser that asked for `keep-saves` (fixture-scenes.js) has its item saves held. */
+      keepSave(event.cookies, body);
+      return json({ workspace: withScenes(WORKSPACE_FIXTURE, event.cookies), fixtureToday: WORKSPACE_FIXTURE_TODAY }, { headers: NO_STORE });
+    }
     return verdict(async () => {
       parseWorkspaceCommand(withoutDryRun(body));
     });

@@ -4,7 +4,6 @@ import {
   auditLightDismiss,
   auditTabOrder,
   currentFocus,
-  gotoCreate,
   homeIsLive,
   installKeyboardAudit,
   proveRadioGroupByArrows,
@@ -128,7 +127,9 @@ const POCKET_FORM = "#pocket-entry";
  */
 async function fillPocketCreateForm(page, name) {
   const screen = "create form (pocket)";
-  await gotoCreate(page);
+  /* The state that keeps this browser's saves on the fixture server, so the
+     save below lands on an address home can open. */
+  await signedIn("/create", "saves-kept")(page);
   const form = page.getByRole("form", { name: "New entry" });
   await expect(form).toBeVisible();
 
@@ -238,11 +239,10 @@ test("create (pocket): fillable and submittable by keyboard alone", async ({ pag
   await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/);
   const id = new URL(page.url()).searchParams.get("item");
   const row = page.locator(`.pocket .pk-below [data-row-key="${id}"]`);
-  /* Fails on the rig as it stands: home's load runs on the server, and the
-     fixture server persists nothing, so it never holds the new item when the
-     address arrives; the row is drawn once the client re-reads the workspace
-     (rememberWrites), but pocket.svelte has by then given up opening it. Needs
-     a fixture state where the saved item is already in the workspace. */
+  /* Home's load runs on the server, which holds the item only because the
+     `/create` / `saves-kept` state asked the fixture server to keep this
+     browser's saves; without that the address arrives at a workspace that
+     lacks it and pocket.svelte gives up opening the row. */
   await expect(row).toHaveAttribute("data-open", "");
   await expect(row).toContainText(name);
   expect(writes.sent.find((one) => one.type === "item.upsert")?.item.title).toBe(name);
@@ -367,7 +367,7 @@ test("household page (pocket): fully reachable by keyboard", async ({ page }) =>
   /* sectionActs (household/[id]/pocket.svelte) omits "move down" for a section
      with nothing after it, so a second section is needed for the first row's move
      act to exist at all (#1122 follow-up); Harlow Home has five. */
-  await page.goto(`${APP}/household/hh-harlow-1`);
+  await signedIn("/household/hh-harlow-1", "any-dialect")(page);
   await expect(page.getByRole("heading", { level: 1, name: "Harlow Home" })).toBeVisible();
   /* The pocket's cards rise in over their first ~800ms; audit them drawn. */
   await settle(page);
@@ -404,7 +404,7 @@ test("household page (pocket): fully reachable by keyboard", async ({ page }) =>
 
 test("household page (pocket): the back link works by keyboard", async ({ page }) => {
   await installKeyboardAudit(page);
-  await page.goto(`${APP}/household/hh-harlow-1`);
+  await signedIn("/household/hh-harlow-1", "any-dialect")(page);
   await expect(page.getByRole("heading", { level: 1, name: "Harlow Home" })).toBeVisible();
   /* On a phone Chrome.svelte's way back is the kit's top chrome. */
   await tabTo(page, { selector: TOP_BACK }, { screen: "household page (pocket)" });

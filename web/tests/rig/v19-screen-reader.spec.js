@@ -197,7 +197,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
   });
 
   test("/household/[id]", async ({ page }, testInfo) => {
-    await page.goto(`${APP}/household/hh-harlow-1`, { waitUntil: "load" });
+    await signedIn("/household/hh-harlow-1", "any-dialect")(page);
     await expect(page.getByRole("heading", { name: "Harlow Home" })).toBeVisible();
     await walkScreen(page, testInfo, "household-id");
   });
@@ -229,7 +229,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
   });
 
   test("/administration", async ({ page }, testInfo) => {
-    await page.goto(`${APP}/administration`, { waitUntil: "load" });
+    await signedIn("/administration", "any-dialect")(page);
     await expect(page.getByRole("heading", { name: "Administration" })).toBeVisible();
     await walkScreen(page, testInfo, "administration");
     await expect(page.locator(".station-backdrop")).toHaveAttribute("aria-hidden", "true");
