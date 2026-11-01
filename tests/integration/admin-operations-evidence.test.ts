@@ -115,9 +115,11 @@ describe("administrator operations evidence", () => {
     expect((await getDb().select({ id: auditLog.id }).from(auditLog)).length).toBe(auditBeforeDeniedMutations);
   });
 
-  it("keeps the relay test's last answer on the server, so the screen shows the same pill after a reload (#1071)", async () => {
+  it("keeps the relay test's last answer (result and time) on the server across reads, so a reload can show it again (#1071)", async () => {
     // Moved from tests/e2e/v19-administration.spec.ts (#1612): the browser half was
-    // only "reload and read it again"; the memory is the server's own.
+    // only "reload and read it again"; the memory is the server's own. This asserts
+    // the stored `result` and `at`; the pill word and reason drawn from them are
+    // tests/unit/administration-mail-test-words.test.mjs.
     const fixture = await createIntegrationFixture("admin-evidence-relay-memory");
     const admin = await fixture.session("admin");
     const operationsUrl = "http://127.0.0.1:3000/api/admin/operations";

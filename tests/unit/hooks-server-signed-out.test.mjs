@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { sessionCookieName } from "orbit/lib/auth/cookies";
 
 /*
  * The signed-out boundary for screens (#789), moved from
@@ -105,6 +106,57 @@ describe("hooks.server handle: the signed-out boundary (#789)", () => {
     /* the cookie was looked at, not skipped: the lookup is what said no */
     expect(mocks.readSession).toHaveBeenCalledTimes(2);
   }, COLD_IMPORT_TIMEOUT_MS);
+
+  /* What the two tests above and below cannot show, because they mock
+     readSession to null: that the hook hands the lookup the request's own
+     cookies and the auth config, so the cookie the browser sent is the one
+     that gets read, under the name the config chooses. The stand-in below
+     reads the cookie as the real readSession does (src/lib/auth/session.ts:
+     `cookies.get(sessionCookieName(config))`) and knows one good token. */
+  describe("hands the session lookup the request's cookies and the auth config", () => {
+    const GOOD = "a-good-session-token";
+    const session = { user: { id: "u1", isInstanceAdmin: false }, activeHouseholdId: "h1" };
+
+    beforeEach(() => {
+      mocks.readSession.mockImplementation(async (cookies, config) =>
+        cookies.get(sessionCookieName(config)) === GOOD ? session : null);
+    });
+
+    it("calls readSession with event.cookies and getAuthConfig()'s answer", async () => {
+      const config = { secureCookies: false };
+      mocks.getAuthConfig.mockReturnValue(config);
+      const event = eventFor("/settings", "/settings", { "orbit-session": "not-a-real-session" });
+
+      expectRedirect(await handleRoute(event), "/login?returnTo=%2Fsettings");
+
+      expect(mocks.readSession).toHaveBeenCalledTimes(1);
+      const [cookies, passedConfig] = mocks.readSession.mock.calls[0];
+      expect(cookies).toBe(event.cookies);
+      expect(passedConfig).toBe(config);
+      expect(event.cookies.get).toHaveBeenCalledWith("orbit-session");
+    }, COLD_IMPORT_TIMEOUT_MS);
+
+    it("lets a good cookie under the configured name through", async () => {
+      mocks.getAuthConfig.mockReturnValue({ secureCookies: false });
+      const { response, resolve, thrown } = await handleRoute(eventFor("/settings", "/settings", { "orbit-session": GOOD }));
+
+      expect(thrown).toBeUndefined();
+      expect(response.status).toBe(200);
+      expect(resolve).toHaveBeenCalledTimes(1);
+    }, COLD_IMPORT_TIMEOUT_MS);
+
+    it("honours the cookie name: the good token under the other profile's name is no session", async () => {
+      mocks.getAuthConfig.mockReturnValue({ secureCookies: true });
+
+      expectRedirect(
+        await handleRoute(eventFor("/settings", "/settings", { "orbit-session": GOOD })),
+        "/login?returnTo=%2Fsettings",
+      );
+      const { response, thrown } = await handleRoute(eventFor("/settings", "/settings", { "__Host-orbit-session": GOOD }));
+      expect(thrown).toBeUndefined();
+      expect(response.status).toBe(200);
+    }, COLD_IMPORT_TIMEOUT_MS);
+  });
 
   it("answers a session lookup that fails (unreachable database, unconfigured provider) the same way", async () => {
     mocks.readSession.mockRejectedValue(new Error("database away"));
