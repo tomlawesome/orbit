@@ -955,20 +955,24 @@ quarantine_args=(--pass-with-no-tests --output test-results/quarantine)
 # --quarantine` in .gitlab-ci.yml. A local run had no cap, so one hung
 # quarantined test held the whole run, and its stack, indefinitely (#1607). Read
 # CI's own figures from that line (read only here) so the local cap cannot drift
-# from CI's, and cap the run through coreutils `timeout`. Nothing is run
-# uncapped on a guess: an unreadable line refuses before the stack is used.
+# from CI's, and cap the run through coreutils `timeout`. The read happens when
+# the quarantine run is about to start. If the line, or `timeout`, is not there
+# the quarantine run is skipped with a message, never run uncapped on a guess:
+# it only reports, so the gate's result is unaffected.
 quarantine_cap_re='timeout[[:space:]]+(-k[[:space:]]+([^[:space:]]+)[[:space:]]+)?([0-9]+[smh]?)[[:space:]]+bash[[:space:]]+scripts/test-frontend\.sh[[:space:]]+--quarantine'
-# grep -m1 and an explicit fallback, not `| head` and not a bare failing grep
-# (scripts/acceptance-sigpipe-safety.test.mjs, #809).
-quarantine_cap_line="$(grep -m1 -E 'timeout .*scripts/test-frontend\.sh --quarantine' .gitlab-ci.yml)" || quarantine_cap_line=""
-if [[ "$quarantine_cap_line" =~ $quarantine_cap_re ]]; then
+quarantine_cap=""
+quarantine_timeout=()
+read_quarantine_cap() { # sets quarantine_cap and quarantine_timeout; non-zero when it cannot
+  local cap_line="" kill_after=""
+  # grep -m1 and an explicit fallback, not `| head` and not a bare failing grep
+  # (scripts/acceptance-sigpipe-safety.test.mjs, #809).
+  cap_line="$(grep -m1 -E 'timeout .*scripts/test-frontend\.sh --quarantine' .gitlab-ci.yml 2> /dev/null)" || cap_line=""
+  [[ "$cap_line" =~ $quarantine_cap_re ]] || return 1
   quarantine_cap="${BASH_REMATCH[3]}"
-  quarantine_kill_after="${BASH_REMATCH[2]}"
-else
-  fail "could not read CI's cap on the quarantine run from .gitlab-ci.yml (a \`timeout [-k D] DURATION bash scripts/test-frontend.sh --quarantine\` line); the local quarantine run is never left uncapped."
-fi
-command -v timeout > /dev/null 2>&1 || fail "coreutils \`timeout\` was not found; the quarantine run needs it to apply CI's ${quarantine_cap} cap."
-quarantine_timeout=(timeout ${quarantine_kill_after:+-k "$quarantine_kill_after"} "$quarantine_cap")
+  kill_after="${BASH_REMATCH[2]}"
+  command -v timeout > /dev/null 2>&1 || return 1
+  quarantine_timeout=(timeout ${kill_after:+-k "$kill_after"} "$quarantine_cap")
+}
 
 # Each run gets its own HTML report folder (#1607), and so does each of its two
 # Playwright runs: the HTML reporter clears its folder when it starts, so a
@@ -1077,21 +1081,25 @@ run_suite suite_status ORBIT_E2E_QUARANTINE=exclude PLAYWRIGHT_HTML_OUTPUT_DIR="
 if [[ "$suite_status" == 0 ]]; then
   log "running the quarantined tests (@quarantine, agent-infra#30): reported, never failing this run"
   quarantine_status=0
-  suite_prefix=("${quarantine_timeout[@]}")
-  run_suite quarantine_status ORBIT_E2E_QUARANTINE=only PLAYWRIGHT_HTML_OUTPUT_DIR="${report_root}/quarantine" -- "${quarantine_args[@]}" "${playwright_passthrough[@]}"
-  suite_prefix=()
-  # 124 is timeout's own "ran out of time"; 137 is the run killed after the
-  # -k grace period. Either way it is reported, never failing this run, as in CI.
-  case "$quarantine_status" in
-    0) ;;
-    124 | 137)
-      log "the quarantined tests ran past ${quarantine_cap}, CI's cap on them, and were stopped (non-blocking; this run is not failed)"
-      ;;
-    *)
-      log "a quarantined test failed (non-blocking; see the issue named in the test; traces in test-results/quarantine)"
-      ;;
-  esac
-  log "Playwright reports: ${report_root}/gate and ${report_root}/quarantine"
+  if read_quarantine_cap; then
+    suite_prefix=("${quarantine_timeout[@]}")
+    run_suite quarantine_status ORBIT_E2E_QUARANTINE=only PLAYWRIGHT_HTML_OUTPUT_DIR="${report_root}/quarantine" -- "${quarantine_args[@]}" "${playwright_passthrough[@]}"
+    suite_prefix=()
+    # 124 is timeout's own "ran out of time"; 137 is the run killed after the
+    # -k grace period. Either way it is reported, never failing this run, as in CI.
+    case "$quarantine_status" in
+      0) ;;
+      124 | 137)
+        log "the quarantined tests ran past ${quarantine_cap}, CI's cap on them, and were stopped (non-blocking; this run is not failed)"
+        ;;
+      *)
+        log "a quarantined test failed (non-blocking; see the issue named in the test; traces in test-results/quarantine)"
+        ;;
+    esac
+    log "Playwright reports: ${report_root}/gate and ${report_root}/quarantine"
+  else
+    log "skipping the quarantined tests: could not read CI's cap on them from .gitlab-ci.yml (a \`timeout [-k D] DURATION bash scripts/test-frontend.sh --quarantine\` line) or coreutils \`timeout\` is missing, and they are never run uncapped"
+  fi
 else
   log "the gate failed, so the quarantined tests were not run (CI skips them the same way)"
 fi
