@@ -7,7 +7,7 @@
  *
  *   classify      node scripts/ci/reuse-lookup.mjs .orbit-reuse/reuse.env
  *                 the jobs keyed on the source alone -- fast, fast_docker,
- *                 fidelity, integration, sidecar_images.
+ *                 fidelity, integration.
  *   build_image   node scripts/ci/reuse-lookup.mjs .orbit-reuse/reuse.env \
  *                   --artefact image --out .orbit-reuse/image.env
  *                 the six jobs keyed on the image, whose key exists only once

@@ -109,7 +109,8 @@ Reading of ruling 4 (build once): `fast` builds the web app once and hands
 `web-builder` stage, a cache hit whenever `web/**` is unchanged, so the
 published image stays reproducible from the Dockerfile alone.
 
-`sidecar_images` keeps its fixed input list: its inputs are the pins.
+`sidecar_images` is never reused: its answer moves with the daily
+vulnerability database, which no input list can see (#1370).
 
 ### 2. Where the evidence lives and how a later pipeline finds it
 
@@ -194,7 +195,9 @@ push is untouched.
   lockfile pins; a Dockerfile fetching unpinned content would be the one way
   the artefact axis could go stale, and is forbidden. The Trivy database
   moves daily: on a merge request `supply_chain_image` may stand on a scan
-  up to seven days old; `dev` rescans on merge.
+  up to seven days old; `dev` rescans on merge. `sidecar_images` is the
+  exception: it is never reused, so its scan always uses the database of
+  that UTC day (#1370).
 - **Proof before trust.** Slice 2 is accepted only when two builds of the
   same tree on different commits give the same content ID, and a one-file
   change under `src/` gives a different one.
@@ -251,7 +254,7 @@ as today") becomes per job. A job's definition hash covers:
 `.gitlab-ci.yml` and `scripts/ci/**` (`pipelineOwned`) leave the checkout
 axis of every job marked `definitionCoversPipeline` (the stack, image,
 scanner and front-end jobs), so for them a CI edit reaches the key only
-through this axis. `fast`, `fast_docker` and `names_guard` are not marked:
+through this axis. `fast` and `fast_docker` are not marked:
 their suites read the whole pipeline file and every ci script
 (`scripts/gitlab-ci-*.test.mjs`, the no-real-names scan), so those paths
 stay in their checkout axis and any CI edit still reruns them, as before.
