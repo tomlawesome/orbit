@@ -160,6 +160,8 @@ describe("the shim derives the two private headers from ORIGIN (#1565)", () => {
     ["a port", "https://orbit.example:8443", "https", "orbit.example:8443"],
     ["a host and no port", "http://orbit.example", "http", "orbit.example"],
     ["IPv6 in brackets", "http://[::1]:3000", "http", "[::1]:3000"],
+    ["the lowest port", "http://orbit.example:1", "http", "orbit.example:1"],
+    ["the highest port", "http://orbit.example:65535", "http", "orbit.example:65535"],
   ])("%s: %s", async (_name, origin, scheme, authority) => {
     const run = start({ origin });
     const { port, seen } = await run.ready;
@@ -203,6 +205,17 @@ describe("a missing or unusable ORIGIN injects nothing and warns once (#1565)", 
     ["a scheme that is not http or https", "ftp://orbit.example"],
     ["an origin with a path", "http://orbit.example/app"],
     ["a scheme with no host", "http://"],
+    ["a port above 65535", "http://orbit.example:65536"],
+    ["a five-digit port far above 65535", "http://orbit.example:99999"],
+    ["port 0", "http://orbit.example:0"],
+    /* A port is its canonical decimal form or it is malformed. A browser's
+       Origin header never carries a leading zero (the URL parser reads
+       "08080" as 8080 and sends ":8080"), so an authority injected as
+       "orbit.example:08080" could never equal it: every cross-origin-safe POST
+       would be refused by kit with a 403, and nothing would say why. Refusing
+       the value at start, with the warning, is the louder failure. */
+    ["a port with a leading zero", "http://orbit.example:08080"],
+    ["a port of only zeros", "http://orbit.example:00000"],
   ])("%s", async (_name, origin) => {
     const run = start({ origin });
     const { port, seen } = await run.ready;
