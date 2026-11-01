@@ -11,8 +11,9 @@ import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "..
  * scripts/ci/carry-previous-release.sh (#1480) saves the previous build's
  * signed release manifest, from the GitLab job-artifacts API, under
  * .orbit-supply-chain/previous/ so a later consumer can find it with no job
- * ID. It must never fail the pipeline: anything it cannot fetch or trust is
- * the "no predecessor" outcome, exit 0 with nothing written. curl is stubbed
+ * ID. It must never leave a silent gap (#1607 D-F1-1, D-F2-1, D-F5): anything
+ * it cannot fetch or trust is a loud failure, a non-zero exit with nothing
+ * written and a message naming its cause. curl is stubbed
  * on PATH; the stub serves bodies from a map keyed by URL path plus query
  * (the part after CI_API_V4_URL), honours --output/-o and stdout, and exits
  * 22 for an unknown URL, which is curl's code for an HTTP error under --fail.
@@ -209,13 +210,14 @@ const expectNoToken = (result) => {
   expect(result.stdout).not.toContain(TOKEN);
   expect(result.stderr).not.toContain(TOKEN);
 };
-// cause: a regexp for the check that must be the one that refused. The fixtures
-// carry genuine signatures, so a case that expects one check to refuse cannot be
-// satisfied by the signature check refusing instead.
-const expectNoPredecessor = ({ result, previousFiles }, cause) => {
-  expect(result.status).toBe(0);
-  expect(`${result.stdout}${result.stderr}`).toContain("no predecessor on this ref");
-  if (cause) expect(`${result.stdout}${result.stderr}`).toMatch(cause);
+// A missing or mismatched predecessor is an error that names its cause, never
+// a silent skip: non-zero exit, a message matching cause (a regexp for the check
+// that must be the one that refused; the fixtures carry genuine signatures, so
+// the signature check cannot refuse in its place), and nothing under previous/.
+const expectLoudFailure = ({ result, previousFiles }, cause) => {
+  expect(result.status).not.toBe(0);
+  expect(result.status).not.toBeNull();
+  expect(`${result.stdout}${result.stderr}`).toMatch(cause);
   expect(previousFiles()).toEqual([]);
 };
 
@@ -282,7 +284,7 @@ describe("carry-previous-release.sh", () => {
     expect(r.tmpEntries()).toEqual([]);
   });
 
-  it("manifest changes between the two downloads (another pipeline finished): no predecessor, nothing under previous/, no staging or temp leftovers, exit 0", () => {
+  it("manifest changes between the two downloads (another pipeline finished): fails loud naming the change, nothing under previous/, no staging or temp leftovers", () => {
     // The signature is genuine for the first manifest: only the second-download
     // comparison can refuse this pair.
     const { body: first, sig } = pair(OLDER);
@@ -294,7 +296,7 @@ describe("carry-previous-release.sh", () => {
       },
       laterRoutes: { [assetPath("main", MANIFEST, "record_image")]: second },
     });
-    expectNoPredecessor(r, /changed while fetching/);
+    expectLoudFailure(r, /changed|different build|mismatch|not match/i);
     expect(r.verifications()).toEqual([]);
     expect(r.requestedKeys().filter((key) => key === assetPath("main", MANIFEST, "record_image"))).toHaveLength(2);
     expect(r.supplyChainEntries().filter((entry) => entry !== "previous")).toEqual([]);
@@ -339,7 +341,7 @@ describe("carry-previous-release.sh", () => {
     expectNoToken(r.result);
   });
 
-  it("rebuild without a carried pair: no predecessor, nothing written, exit 0", () => {
+  it("rebuild without a carried pair: fails loud naming the missing carried manifest and the digest, nothing written", () => {
     const own = pair(CURRENT);
     const r = run({
       routes: {
@@ -347,11 +349,12 @@ describe("carry-previous-release.sh", () => {
         [assetPath("main", SIG, "sign_evidence")]: own.sig,
       },
     });
-    expectNoPredecessor(r, /no carried manifest/);
+    expectLoudFailure(r, /carried manifest|previous\//i);
+    expect(`${r.result.stdout}${r.result.stderr}`).toContain(CURRENT);
     expect(r.verifications()).toEqual([]);
   });
 
-  it("rebuild with a carried manifest but no carried signature: nothing written", () => {
+  it("rebuild with a carried manifest but no carried signature: fails loud naming the signature, nothing written", () => {
     const own = pair(CURRENT);
     const carried = pair(OLDER);
     const r = run({
@@ -361,11 +364,11 @@ describe("carry-previous-release.sh", () => {
         [assetPath("main", `previous/${MANIFEST}`, "record_image")]: carried.body,
       },
     });
-    expectNoPredecessor(r, /no carried signature/);
+    expectLoudFailure(r, /carried signature|signature/i);
     expect(r.verifications()).toEqual([]);
   });
 
-  it("rebuild whose carried manifest is also the current digest: no predecessor, nothing written", () => {
+  it("rebuild whose carried manifest is also the current digest: fails loud naming the digest, nothing written", () => {
     // The carried pair is genuine, so only the carried-is-current check can refuse it.
     const own = pair(CURRENT);
     const carried = pair(CURRENT);
@@ -377,19 +380,19 @@ describe("carry-previous-release.sh", () => {
         [assetPath("main", `previous/${SIG}`, "record_image")]: carried.sig,
       },
     });
-    expectNoPredecessor(r, /names the current digest too/);
+    expectLoudFailure(r, /current digest/i);
     expect(r.verifications()).toEqual([]);
   });
 
-  it("manifest fetch fails (404): no predecessor, nothing written, exit 0", () => {
+  it("manifest fetch fails (404): fails loud naming record_image, nothing written", () => {
     const r = run({ routes: { [assetPath("main", SIG, "sign_evidence")]: SIG_BYTES } });
-    expectNoPredecessor(r);
+    expectLoudFailure(r, /record_image/);
     expectNoToken(r.result);
   });
 
-  it("signature fetch fails after the manifest succeeded: no predecessor, and no manifest left behind", () => {
+  it("signature fetch fails after the manifest succeeded: fails loud naming sign_evidence, and no manifest left behind", () => {
     const r = run({ routes: { [assetPath("main", MANIFEST, "record_image")]: manifest(OLDER) } });
-    expectNoPredecessor(r);
+    expectLoudFailure(r, /sign_evidence/);
     expect(existsSync(join(r.work, ".orbit-supply-chain", "previous", MANIFEST))).toBe(false);
     // No leftover staging dir either, and the header file is gone.
     expect(r.supplyChainEntries().filter((entry) => entry !== "previous")).toEqual([]);
@@ -402,14 +405,14 @@ describe("carry-previous-release.sh", () => {
     ["JSON with no image", JSON.stringify({ version: "1.4.0" })],
     ["image without a digest", JSON.stringify({ image: { repository: "r" } })],
     ["digest that is not a string", JSON.stringify({ image: { repository: "r", digest: 12345 } })],
-  ])("fetched manifest is %s: no predecessor, nothing written, exit 0", (_label, body) => {
+  ])("fetched manifest is %s: fails loud naming the digest, nothing written", (_label, body) => {
     const r = run({
       routes: {
         [assetPath("main", MANIFEST, "record_image")]: body,
         [assetPath("main", SIG, "sign_evidence")]: signManifest(body),
       },
     });
-    expectNoPredecessor(r, /no readable image digest/);
+    expectLoudFailure(r, /digest/i);
     expect(r.verifications()).toEqual([]);
   });
 
@@ -424,7 +427,7 @@ describe("carry-previous-release.sh", () => {
     expect(ok.result.status).toBe(0);
     expectNoToken(ok.result);
     const failed = run({});
-    expect(failed.result.status).toBe(0);
+    expect(failed.result.status).not.toBe(0);
     expectNoToken(failed.result);
   });
 
@@ -444,14 +447,14 @@ describe("carry-previous-release.sh", () => {
   });
 
   describe("verification against cosign.pub (#1480)", () => {
-    const expectCleanNoPredecessor = (r) => {
-      expectNoPredecessor(r);
+    const expectCleanFailure = (r, cause) => {
+      expectLoudFailure(r, cause);
       expect(r.supplyChainEntries()).toEqual([]);
       expect(r.tmpEntries()).toEqual([]);
       expectNoToken(r.result);
     };
 
-    it("(a) the verifier rejects the staged pair: exit 0, no predecessor saying the manifest does not verify, previous/ absent, no leftovers, token never printed", () => {
+    it("(a) the verifier rejects the staged pair: fails loud saying the manifest does not verify, previous/ absent, no leftovers, token never printed", () => {
       const { body, sig } = pair(OLDER);
       const r = run({
         env: { STUB_COSIGN_REJECT: "1" },
@@ -460,8 +463,7 @@ describe("carry-previous-release.sh", () => {
           [assetPath("main", SIG, "sign_evidence")]: sig,
         },
       });
-      expectCleanNoPredecessor(r);
-      expect(`${r.result.stdout}${r.result.stderr}`).toMatch(/does not verify/i);
+      expectCleanFailure(r, /does not verify/i);
       // The verifier really ran on the pair the script fetched.
       const seen = r.verifications();
       expect(seen).toHaveLength(1);
@@ -469,15 +471,14 @@ describe("carry-previous-release.sh", () => {
       expect(seen[0].sig.equals(Buffer.from(sig))).toBe(true);
     });
 
-    it("(a) a signature that is not a real signature over the manifest (even if cosign were fooled) is no predecessor, nothing written", () => {
+    it("(a) a signature that is not a real signature over the manifest (even if cosign were fooled) fails loud, nothing written", () => {
       const r = run({
         routes: {
           [assetPath("main", MANIFEST, "record_image")]: manifest(OLDER),
           [assetPath("main", SIG, "sign_evidence")]: SIG_BYTES,
         },
       });
-      expectCleanNoPredecessor(r);
-      expect(`${r.result.stdout}${r.result.stderr}`).toMatch(/does not verify/i);
+      expectCleanFailure(r, /does not verify/i);
     });
 
     it("(b) the verifier accepts: the pair is saved byte-for-byte, and the verifier saw exactly that pair", () => {
@@ -502,7 +503,7 @@ describe("carry-previous-release.sh", () => {
       expectNoToken(r.result);
     });
 
-    it("(c) rebuild: the carried pair goes through verification too, and a rejecting verifier is no predecessor", () => {
+    it("(c) rebuild: the carried pair goes through verification too, and a rejecting verifier fails loud", () => {
       const own = pair(CURRENT);
       const carried = pair(OLDER);
       const r = run({
@@ -515,8 +516,7 @@ describe("carry-previous-release.sh", () => {
           [assetPath("main", `previous/${SIG}`, "record_image")]: carried.sig,
         },
       });
-      expectCleanNoPredecessor(r);
-      expect(`${r.result.stdout}${r.result.stderr}`).toMatch(/does not verify/i);
+      expectCleanFailure(r, /does not verify/i);
       expect(r.verifications().some((v) => v.manifest.equals(Buffer.from(carried.body)))).toBe(true);
     });
 
@@ -548,7 +548,7 @@ describe("carry-previous-release.sh", () => {
       ["no prefix", HEX],
       ["a trailing newline and a fake line", `sha256:${HEX}\n[fake]`],
       ["a trailing escape sequence", `sha256:${HEX}\u001b[31m`],
-    ])("(d) fetched digest with %s: no predecessor, nothing written", (_label, digest) => {
+    ])("(d) fetched digest with %s: fails loud, nothing written", (_label, digest) => {
       const { body, sig } = pair(digest);
       const r = run({
         routes: {
@@ -556,10 +556,10 @@ describe("carry-previous-release.sh", () => {
           [assetPath("main", SIG, "sign_evidence")]: sig,
         },
       });
-      expectCleanNoPredecessor(r);
+      expectCleanFailure(r, /digest/i);
     });
 
-    it("(d) rebuild: a carried manifest whose digest is malformed is no predecessor, nothing written", () => {
+    it("(d) rebuild: a carried manifest whose digest is malformed fails loud, nothing written", () => {
       const own = pair(CURRENT);
       const carried = pair(`SHA256:${HEX}`);
       const r = run({
@@ -570,7 +570,7 @@ describe("carry-previous-release.sh", () => {
           [assetPath("main", `previous/${SIG}`, "record_image")]: carried.sig,
         },
       });
-      expectCleanNoPredecessor(r);
+      expectCleanFailure(r, /digest/i);
     });
 
     it("(e) the normal-case request sequence is still manifest, signature, manifest, with nothing fetched from previous/", () => {
@@ -587,6 +587,129 @@ describe("carry-previous-release.sh", () => {
         assetPath("main", SIG, "sign_evidence"),
         assetPath("main", MANIFEST, "record_image"),
       ]);
+    });
+  });
+  /*
+   * #1607 D-F1-1, D-F2-1, D-F5. The agreed target is a fail-loud, idempotent carry:
+   * a missing or mismatched predecessor is an error that names its cause; re-running
+   * the carry (or the validation that feeds it) gives the same result; the manifest
+   * and the signature saved together always come from the same build.
+   * What these cannot cover: the very first release on a ref has no predecessor,
+   * and with only the by-ref lookup the script cannot tell it from a lookup that
+   * found nothing. It must still not pass silently: the 404 cases below fail loud,
+   * and how a first release is declared is for the build to provide.
+   */
+  describe("fail loud and idempotent (#1607)", () => {
+    const THIRD = `sha256:${"3".repeat(64)}`;
+    // What the by-ref lookup serves when the latest successful build recorded `own`
+    // and carried `carried` (a { body, sig } pair, or nothing).
+    const served = (own, carried) => ({
+      [assetPath("main", MANIFEST, "record_image")]: own.body,
+      [assetPath("main", SIG, "sign_evidence")]: own.sig,
+      ...(carried
+        ? {
+            [assetPath("main", `previous/${MANIFEST}`, "record_image")]: carried.body,
+            [assetPath("main", `previous/${SIG}`, "record_image")]: carried.sig,
+          }
+        : {}),
+    });
+    const savedPair = (r) => ({ body: r.previous(MANIFEST).toString(), sig: r.previous(SIG).toString() });
+    const expectCleanFailure = (r, cause) => {
+      expectLoudFailure(r, cause);
+      expect(r.supplyChainEntries().filter((entry) => entry !== "previous")).toEqual([]);
+      expect(r.tmpEntries()).toEqual([]);
+      expectNoToken(r.result);
+    };
+
+    describe("D-F1-1: validation re-run by hand on preview after a failed push", () => {
+      it("a re-run of the same digest carries the same predecessor, however often it is re-run, and the next build then finds this build", () => {
+        const older = pair(OLDER);
+        const own = pair(CURRENT);
+        const first = run({ routes: served(older) });
+        expect(first.result.status).toBe(0);
+        // The re-run: the latest successful build now recorded CURRENT and carried what `first` saved.
+        const rerun1 = run({ routes: served(own, savedPair(first)) });
+        const rerun2 = run({ routes: served(own, savedPair(first)) });
+        for (const r of [rerun1, rerun2]) {
+          expect(r.result.status).toBe(0);
+          expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
+          expect(r.previous(MANIFEST).equals(Buffer.from(older.body))).toBe(true);
+          expect(r.previous(SIG).equals(Buffer.from(older.sig))).toBe(true);
+        }
+        // The next build, a new digest, finds the re-run's own manifest, not nothing.
+        const next = run({ args: [THIRD], routes: served(own, savedPair(first)) });
+        expect(next.result.status).toBe(0);
+        expect(next.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
+        expect(next.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
+      });
+
+      it("a re-run whose latest build never carried a pair fails loud, naming the digest and the missing carried pair", () => {
+        const own = pair(CURRENT);
+        const first = run({ routes: served(own) });
+        const second = run({ routes: served(own) });
+        for (const r of [first, second]) {
+          expectCleanFailure(r, /carried|previous\//i);
+          expect(`${r.result.stdout}${r.result.stderr}`).toContain(CURRENT);
+        }
+        // Idempotent: the same inputs give the same refusal.
+        expect(second.result.status).toBe(first.result.status);
+        expect(`${second.result.stdout}${second.result.stderr}`).toBe(`${first.result.stdout}${first.result.stderr}`);
+      });
+    });
+
+    describe("D-F2-1: a re-run build mixing a manifest and a signature from different builds", () => {
+      const MIX_CAUSE = /does not verify|not match|mismatch|different build/i;
+      const signatureOfAnotherBuild = signManifest(manifest(THIRD));
+
+      it("rebuild: a carried manifest with the carried signature of another build fails loud, nothing written", () => {
+        const r = run({ routes: served(pair(CURRENT), { body: manifest(OLDER), sig: signatureOfAnotherBuild }) });
+        expectCleanFailure(r, MIX_CAUSE);
+      });
+
+      it("normal build: the same manifest twice but a signature of another build fails loud, nothing written", () => {
+        const r = run({
+          routes: {
+            [assetPath("main", MANIFEST, "record_image")]: manifest(OLDER),
+            [assetPath("main", SIG, "sign_evidence")]: signatureOfAnotherBuild,
+          },
+        });
+        expectCleanFailure(r, MIX_CAUSE);
+      });
+
+      it("a mismatch is refused the same way on every re-run", () => {
+        const options = () => ({
+          routes: served(pair(CURRENT), { body: manifest(OLDER), sig: signatureOfAnotherBuild }),
+        });
+        const first = run(options());
+        const second = run(options());
+        expectCleanFailure(first, MIX_CAUSE);
+        expectCleanFailure(second, MIX_CAUSE);
+        expect(second.result.status).toBe(first.result.status);
+      });
+
+      it("whatever is saved is one build's manifest with that same build's signature", () => {
+        const r = run({ routes: served(pair(OLDER)) });
+        expect(r.result.status).toBe(0);
+        // The saved signature verifies the saved manifest, with the real key.
+        const sigFile = join(keyDir, "saved.sig");
+        const manifestFile = join(keyDir, "saved.json");
+        writeFileSync(sigFile, Buffer.from(r.previous(SIG).toString(), "base64"));
+        writeFileSync(manifestFile, r.previous(MANIFEST));
+        const verified = openssl(["dgst", "-sha256", "-verify", PUBLIC_KEY, "-signature", sigFile, manifestFile]);
+        expect(verified.toString()).toMatch(/Verified OK/);
+      });
+    });
+
+    describe("D-F5: a schedule- or web-started pipeline succeeded on preview, then the next publish", () => {
+      it("finds the latest successful build recorded no manifest: fails loud naming record_image, nothing written", () => {
+        // A schedule- or web-started pipeline runs no record_image, so the by-ref lookup answers 404.
+        expectCleanFailure(run({}), /record_image/);
+      });
+
+      it("finds a manifest but no signature from that build: fails loud naming sign_evidence, nothing written", () => {
+        const r = run({ routes: { [assetPath("main", MANIFEST, "record_image")]: pair(OLDER).body } });
+        expectCleanFailure(r, /sign_evidence/);
+      });
     });
   });
 });
