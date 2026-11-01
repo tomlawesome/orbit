@@ -186,8 +186,9 @@ copy of the round was shared with a third-party tester the same day.
   word: "Weight is not a good approach. Stick to size and colour. Size is
   either cost or importance." Planet size becomes a per-user choice, cost
   (default) or importance; the one not chosen is not drawn on the sky.
-  What colour means ("Colour is the type") is being settled on #1463.
-  Owner decision 38.
+  Colour is the item's section colour, which the user picks per section;
+  urgency tones leave the sky. No legend when size switches. Owner
+  decisions 38 and 41.
 - **Planet labels:** not three states but a per-user number of days: a
   planet due in that many days or fewer shows its name, later ones hide
   it; the slider's top end means every name, zero means none. #1461.
