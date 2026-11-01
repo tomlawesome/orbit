@@ -187,6 +187,17 @@ workflow:
   if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
   when: never
 
+# A push to `hotfix/*` runs a short gate (owner decision 48, #1636): the fast,
+# policy, integration, image, image-scan and local-smoke jobs only, plus the
+# launcher build and install check and the publish jobs. Put after
+# `*not_scheduled` in the eight browser and acceptance jobs it stops (`smoke`,
+# `smoke_firefox`, `smoke_webkit`, `smoke_webkit_mobile`, `fidelity`,
+# `fidelity_webkit`, `acceptance`, `repair_journeys`); `record_image` needs
+# them as optional. The merge request into a hotfix branch is unaffected.
+.not_on_hotfix_push: &not_on_hotfix_push
+  if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
+  when: never
+
 default:
   interruptible: true
   # Runner lanes (#830). The runners this project sees (owner, #1546,
@@ -424,8 +435,9 @@ variables:
   # sanity check against accidental drift -- runs instead. No browser job runs
   # on `dev` at all, push or merge request, apart from the nightly run and a
   # merge request labelled `ci: acceptance` (#1412, #1514,
-  # `.no_browsers_on_dev`). `preview`, `main` and `hotfix/*` are unaffected:
-  # pushing there still runs everything.
+  # `.no_browsers_on_dev`). `preview` and `main` are unaffected: pushing there
+  # still runs everything; a `hotfix/*` push runs every job its rules admit,
+  # which no longer includes the browser and acceptance jobs (#1636).
   orbit_on_delivery_branch() {
     case "${CI_COMMIT_BRANCH:-}" in
       preview | main | hotfix/*) return 0 ;;
@@ -1094,7 +1106,9 @@ classify:
 
       # The browser checks read their own axes, not `orbit_full_gate`, so the
       # events that gate run them here (#1186): a push to `preview`, `main` or
-      # `hotfix/*`, and the merge request into `preview` or `main`. Without
+      # `hotfix/*`, and the merge request into `preview` or `main`. On a
+      # `hotfix/*` push only `smoke_local_only` reads them, since
+      # `*not_on_hotfix_push` stops the other browser jobs (#1636). Without
       # this a promotion whose diff never touched `web/` skipped `fidelity`
       # and both browser suites -- the full gate in every job but those. Not
       # `dev`: no browser job runs there (#1412, `.no_browsers_on_dev`). Keep
@@ -1907,6 +1921,7 @@ fidelity:
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
+    - *not_on_hotfix_push
     - *no_browsers_on_dev
     - *no_browsers_on_preview_mr
     - when: on_success
@@ -1991,6 +2006,7 @@ fidelity_webkit:
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
+    - *not_on_hotfix_push
     - *no_browsers_on_dev
     - *no_browsers_on_preview_mr
     - when: on_success
@@ -2522,10 +2538,11 @@ smoke:
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
+    - *not_on_hotfix_push
     - *no_browsers_on_dev
     - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
     # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
     # the job's exit code list for this rule, so a failed suite in a manually
     # started job showed as a warning. Left unset, the job-level list decides.
@@ -2640,10 +2657,11 @@ smoke_firefox:
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
+    - *not_on_hotfix_push
     - *no_browsers_on_dev
     - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
     # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
     # the job's exit code list for this rule, so a failed suite in a manually
     # started job showed as a warning. Left unset, the job-level list decides.
@@ -2786,10 +2804,11 @@ smoke_webkit:
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
+    - *not_on_hotfix_push
     - *no_browsers_on_dev
     - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
     # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
     # the job's exit code list for this rule, so a failed suite in a manually
     # started job showed as a warning. Left unset, the job-level list decides.
@@ -2902,10 +2921,11 @@ smoke_webkit_mobile:
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
+    - *not_on_hotfix_push
     - *no_browsers_on_dev
     - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
     # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
     # the job's exit code list for this rule, so a failed suite in a manually
     # started job showed as a warning. Left unset, the job-level list decides.
@@ -3130,8 +3150,9 @@ acceptance:
   rules:
     - *not_on_main_push
     - *not_scheduled
+    - *not_on_hotfix_push
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
     - when: manual
       allow_failure: true
   script:
@@ -3285,8 +3306,9 @@ repair_journeys:
   rules:
     - *not_on_main_push
     - *not_scheduled
+    - *not_on_hotfix_push
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
     - when: manual
       allow_failure: true
   script:
@@ -3781,28 +3803,38 @@ record_image:
   needs:
     - job: build_image
       artifacts: true
+    # Owner decision 48 (#1636): a `hotfix/*` push skips the eight browser and
+    # acceptance jobs marked `optional: true` below (`*not_on_hotfix_push`).
+    # GitLab refuses a pipeline whose job needs a job its rules excluded,
+    # unless the need is optional; on a `preview` push all eight still run
+    # and still gate this job.
     - job: smoke
+      optional: true
     # #1183: Firefox gated publication while it ran inside smoke; it still does.
     - job: smoke_firefox
+      optional: true
     # #1192: WebKit, desktop and phone, gates publication the same way.
     - job: smoke_webkit
+      optional: true
     - job: smoke_webkit_mobile
+      optional: true
     - job: acceptance
+      optional: true
     - job: supply_chain_image
     - job: repair_journeys
+      optional: true
     - job: supply_chain_source
     - job: fast
     - job: fast_docker
     - job: base_image
     - job: integration
-    # D1-S1 (#1151): these four run on the same preview/hotfix push that
-    # triggers this job (fidelity and fidelity_webkit share the same
-    # `rules:` -- *not_scheduled + on_success; smoke_local_only and
-    # launcher_install_compat both match their branch rule before falling
-    # through to `when: manual`), so none is `optional: true` -- a push here
-    # would never create a pipeline missing one of them.
+    # D1-S1 (#1151): smoke_local_only and launcher_install_compat run on every
+    # preview/hotfix push that triggers this job, so neither is optional; a
+    # hotfix push skips fidelity and fidelity_webkit (decision 48, #1636).
     - job: fidelity
+      optional: true
     - job: fidelity_webkit
+      optional: true
     - job: smoke_local_only
     - job: launcher_install_compat
     # ADR-0031 #1/#3: the two launcher archives the release-manifest step
